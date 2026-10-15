@@ -48,6 +48,8 @@ import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+// Regel 10 — a leaf that imports only the schema, so no module cycle.
+import { closeStampSessionsInTx } from "../../timereport/repository/stamp-close.js";
 // Materialbrist vid rapportering — a leaf like count-guard, called inside
 // the report transactions after the draws are booked.
 import {
@@ -76,7 +78,7 @@ export interface ConsumedMaterialLine {
 }
 
 // Where a reporting event came from (mo_reports.source).
-export type ReportSource = "terminal" | "card" | "purchase_receipt";
+export type ReportSource = "terminal" | "card" | "purchase_receipt" | "auto_close";
 
 export type UndoReportResult =
   | {
@@ -218,6 +220,39 @@ async function insertReport(
     );
   }
   return report!;
+}
+
+// Regel 10: an operation (or the whole order) turning done stamps out
+// everyone still stamped in on it, inside the same transaction — the stamp
+// leaf writes the time reports, the report log gets one time-only row per
+// closed stamp so each can be undone from the TO card on its own.
+async function autoCloseStamps(
+  tx: Tx,
+  scope: { operationIds: string[] } | { orderId: string },
+  manufacturingOrderId: string,
+  createdBy: string | null
+) {
+  const closed = await closeStampSessionsInTx(tx, {
+    ...scope,
+    at: new Date(),
+    createdBy,
+    note: "orderId" in scope ? "Automatisk utstämpling: ordern klar" : "Automatisk utstämpling: operationen klar",
+  });
+  for (const stamp of closed) {
+    await insertReport(
+      tx,
+      {
+        manufacturingOrderId,
+        moOperationId: stamp.moOperationId,
+        kind: "operation",
+        source: "auto_close",
+        timeReportId: stamp.timeReportId,
+        employeeId: stamp.employeeId,
+        createdBy,
+      },
+      []
+    );
+  }
 }
 
 // Normalization for the routing operation's optional texts (Kommentar and
@@ -444,6 +479,8 @@ async function reportOperationQuantitiesInTx(
   // stock now that it is booked — a throw rolls the whole report back.
   await assertMaterialAvailable(tx, [...consumed, ...(goods?.consumed ?? [])], input.materialShortage ?? NO_MATERIAL_SHORTAGE_CHECK);
 
+  const markedDone = operation.status === "pending" && shouldMarkDone;
+
   // Logged with exactly what this report booked, so Ångra can reverse it.
   await insertReport(
     tx,
@@ -455,7 +492,7 @@ async function reportOperationQuantitiesInTx(
       source: input.source,
       quantityOk: String(input.quantityOk),
       quantityScrapped: String(input.quantityScrapped),
-      markedDone: operation.status === "pending" && shouldMarkDone,
+      markedDone,
       quantityReceived: String(goods?.delta ?? 0),
       receiptLocationId: goods?.locationId ?? null,
       completedOrder: completed,
@@ -468,6 +505,14 @@ async function reportOperationQuantitiesInTx(
   );
   if (scrapId) {
     await tx.update(moOperationScrap).set({ moReportId: reportId }).where(eq(moOperationScrap.id, scrapId));
+  }
+
+  // Regel 10: nobody may keep reporting on an operation (or order) that
+  // just turned done — the dry run rolls this back with everything else.
+  if (completed) {
+    await autoCloseStamps(tx, { orderId: order.id }, order.id, input.createdBy);
+  } else if (markedDone) {
+    await autoCloseStamps(tx, { operationIds: [operationId] }, order.id, input.createdBy);
   }
 
   if (goods === null || goods.delta === 0) {
@@ -1644,6 +1689,7 @@ export function createManufacturingRepository(db: Db) {
           .set({ status: "done", updatedAt: new Date() })
           .where(eq(manufacturingOrders.id, moId))
           .returning();
+        await autoCloseStamps(tx, { orderId: moId }, moId, input.createdBy);
 
         await insertReport(
           tx,

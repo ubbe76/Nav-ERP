@@ -326,7 +326,7 @@ export const moOperationScrap = pgTable("mo_operation_scrap", {
 // mo_report_materials, the stamp's time report), so Ångra rapportering can
 // reverse precisely that event. An undone row stays as history.
 export const moReportKindEnum = pgEnum("mo_report_kind", ["operation", "completion", "material"]);
-export const moReportSourceEnum = pgEnum("mo_report_source", ["terminal", "card", "purchase_receipt", "migration"]);
+export const moReportSourceEnum = pgEnum("mo_report_source", ["terminal", "card", "purchase_receipt", "migration", "auto_close"]);
 
 export const moReports = pgTable(
   "mo_reports",

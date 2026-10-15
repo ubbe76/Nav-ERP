@@ -26,6 +26,7 @@ function reportLabel(r: MOReport): string {
   }
   if (r.kind === "completion") return "Slutför order";
   if (r.kind === "material") return "Materialuttag";
+  if (r.source === "auto_close") return "Automatisk utstämpling";
   if (r.source === "terminal") return "Utstämpling";
   if (r.source === "purchase_receipt") return `Inleverans ${r.purchaseOrderNumber ?? "IO"}`;
   return "Slutför operation";

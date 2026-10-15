@@ -1,0 +1,1 @@
+ALTER TYPE "public"."mo_report_source" ADD VALUE 'auto_close';

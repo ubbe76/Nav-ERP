@@ -1704,7 +1704,7 @@ export interface ScrapEntry {
 export interface MOReport {
   id: string;
   kind: "operation" | "completion" | "material";
-  source: "terminal" | "card" | "purchase_receipt" | "migration";
+  source: "terminal" | "card" | "purchase_receipt" | "migration" | "auto_close";
   moOperationId: string | null;
   sequenceNo: number | null;
   workCenterName: string | null;

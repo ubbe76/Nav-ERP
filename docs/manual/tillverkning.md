@@ -213,7 +213,7 @@ I **Lagerplats för materialuttag** är standardvalet **"Artikelns lagerplats"**
 
 ### Rapporteringar och Ångra
 
-Sektionen **Rapporteringar** på detaljsidan listar allt som rapporterats på ordern, senaste först: **Utstämpling** (varje utstämpling i terminalen, även en utan antal), **Slutför operation**, **Inleverans IO-…** (en lego-operation som avrapporterats av inköpsorderns inleverans), **Materialuttag** (**Förbruka** för hand) och **Slutför order**. Varje rad visar operation, **OK**, **Kasserat**, **Inlevererat**, stämplingens **Timmar**, vem som rapporterade och vilket material som drogs.
+Sektionen **Rapporteringar** på detaljsidan listar allt som rapporterats på ordern, senaste först: **Utstämpling** (varje utstämpling i terminalen, även en utan antal), **Slutför operation**, **Inleverans IO-…** (en lego-operation som avrapporterats av inköpsorderns inleverans), **Materialuttag** (**Förbruka** för hand), **Slutför order** och **Automatisk utstämpling** — tiden för någon som stämplades ut när operationen eller ordern blev klar (se [Pågående arbete](#pagaende-arbete)); den kan ångras som en vanlig utstämpling. Varje rad visar operation, **OK**, **Kasserat**, **Inlevererat**, stämplingens **Timmar**, vem som rapporterade och vilket material som drogs.
 
 **Ångra** backar exakt det den raden bokförde, i ett svep — Nav visar först vad som kommer att hända:
 
@@ -364,6 +364,8 @@ Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har 
 
 - **Instämplade på arbete** listar varje öppen stämpling: **Anställd**, **TO** (länk till tillverkningsordern), **Operation**, **Artikel**, **Sedan** (starttid, med datum om det inte är idag), **Tid** (arbetad tid, utan pauser) och **Antal** (planerat / klart / kvar). Äldst stämpling står överst. Har den anställde gått hem och lämnat arbetet öppet märks raden **Pausad** och tiden räknar inte vidare.
 - **På plats utan arbete** listar de som är närvaroregistrerade men inte instämplade på någon operation, med **Sedan** och **Tid** på plats.
+
+När en operation blir klar — någon kryssar **Operationen är klar** vid utstämplingen, **Slutför operation** på tillverkningsordern eller inleveransen av en legorad — stämplas alla andra som är instämplade på operationen ut automatiskt, med antal 0. Blir hela ordern klar (inleveransen från sista operationen eller **Slutför order**) gäller det alla operationer på ordern. En pausad stämpling stämplas ut vid tiden då pausen började, övriga vid klarmarkeringen. Det gör att den som kommer tillbaka efter frånvaro inte kan rapportera på en operation som redan är klar.
 
 ### Stämpla ut
 

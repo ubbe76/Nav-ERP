@@ -841,6 +841,13 @@
       "when": 1792057488733,
       "tag": "0119_api_client_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792080669433,
+      "tag": "0120_auto_close_report_source",
+      "breakpoints": true
     }
   ]
 }
