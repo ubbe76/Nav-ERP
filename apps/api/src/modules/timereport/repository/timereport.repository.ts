@@ -180,11 +180,13 @@ export function createTimeReportRepository(db: Db) {
         .orderBy(desc(stampSessions.startedAt));
     },
 
+    // Conditional: a stamp closed in between (regel 10 stamping it out when
+    // the operation turned done) is not closed twice — null tells the caller.
     async closeStampSession(id: string, stoppedAt: Date, timeReportId: string) {
       const [row] = await db
         .update(stampSessions)
         .set({ stoppedAt, timeReportId })
-        .where(eq(stampSessions.id, id))
+        .where(and(eq(stampSessions.id, id), isNull(stampSessions.stoppedAt)))
         .returning();
       return row ?? null;
     },

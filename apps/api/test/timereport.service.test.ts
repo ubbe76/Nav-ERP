@@ -147,6 +147,27 @@ describe("time report service", () => {
     const reports = await timeReportService.listTimeReportsByManufacturingOrder(order.id);
     expect(reports).toHaveLength(2);
   });
+
+  it("refuses a stamp-out whose session was closed underneath it and keeps exactly one time report", async () => {
+    const { user, operation } = await makeReleasedMoWithOperation();
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-RACE", name: "Race", active: true });
+    const session = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id);
+    // Simulates regel 10 closing the stamp between doStampOut's read and its close.
+    const realClose = timeReportRepository.closeStampSession;
+    timeReportRepository.closeStampSession = async (id, stoppedAt, timeReportId) => {
+      await db.execute(sql`UPDATE stamp_sessions SET stopped_at = now() WHERE id = ${id}`);
+      return realClose(id, stoppedAt, timeReportId);
+    };
+    try {
+      await expect(timeReportService.stampOut(session.id, stampOutSchema.parse({}), user.id)).rejects.toBeInstanceOf(
+        StampSessionAlreadyStoppedError
+      );
+    } finally {
+      timeReportRepository.closeStampSession = realClose;
+    }
+    const reports = [...(await db.execute(sql`SELECT id FROM time_reports WHERE employee_id = ${employee.id}`))];
+    expect(reports).toHaveLength(0);
+  });
 });
 
 describe("stamp sessions (stämpelterminal)", () => {

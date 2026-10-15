@@ -10,6 +10,7 @@ import type {
   UpdateTimeReportInput,
 } from "@navet/shared";
 import type { TimeReportRepository } from "../repository/timereport.repository.js";
+import { localDateOf, stampedHours } from "../repository/stamp-close.js";
 import type { ManufacturingService } from "../../manufacturing/service/manufacturing.service.js";
 import {
   InvalidStatusTransitionError,
@@ -107,16 +108,12 @@ export class WeekScheduleNotFoundError extends Error {
   }
 }
 
-// Today in the server's local timezone as YYYY-MM-DD (sv-SE formats ISO-style)
-// — a stamp-out just before midnight should land on the day the work was done.
+// Today in the server's local timezone as YYYY-MM-DD — a stamp-out just
+// before midnight should land on the day the work was done. localDateOf
+// (same idiom, any instant) lives in the stamp-close leaf so the automatic
+// stamp-out dates its time reports exactly like the terminal does.
 function localToday() {
-  return new Date().toLocaleDateString("sv-SE");
-}
-
-// Same local-date idiom, for an arbitrary instant — used to resolve which
-// payroll period a session's started_at/stopped_at falls into.
-function localDateOf(date: Date) {
-  return date.toLocaleDateString("sv-SE");
+  return localDateOf(new Date());
 }
 
 export function createTimeReportService(
@@ -156,22 +153,19 @@ export function createTimeReportService(
     const stoppedAt = new Date();
     // Paused time (away from work, e.g. gone home overnight) is excluded
     // from the reported hours; an ongoing pause counts up to stoppedAt.
-    const ongoingPauseMs = session.pausedAt ? stoppedAt.getTime() - session.pausedAt.getTime() : 0;
-    const pausedMs = Number(session.pausedSeconds) * 1000 + Math.max(ongoingPauseMs, 0);
-    const elapsedHours = (stoppedAt.getTime() - session.startedAt.getTime() - pausedMs) / 3_600_000;
-    const hours = Math.max(0.01, Math.round(elapsedHours * 100) / 100);
+    const hours = stampedHours(session, stoppedAt);
 
     const report = await repo.createTimeReport(
-      {
-        employeeId: session.employeeId,
-        moOperationId: session.moOperationId,
-        date: localToday(),
-        hours,
-        note: input.note,
-      },
+      { employeeId: session.employeeId, moOperationId: session.moOperationId, date: localToday(), hours, note: input.note },
       createdBy
     );
     const closed = await repo.closeStampSession(sessionId, stoppedAt, report.id);
+    if (!closed) {
+      // Stamped out underneath us (the operation turned done and regel 10
+      // closed every stamp on it) — that close already reported the time.
+      await repo.deleteTimeReport(report.id);
+      throw new StampSessionAlreadyStoppedError();
+    }
 
     if (hasQuantities || markDone) {
       const totalHours = markDone ? await repo.sumReportedHoursForOperation(session.moOperationId) : undefined;
@@ -201,7 +195,7 @@ export function createTimeReportService(
       });
     }
 
-    return { session: closed!, timeReport: report };
+    return { session: closed, timeReport: report };
   }
 
   return {
