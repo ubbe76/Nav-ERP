@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, ne, or } from "drizzle-orm";
 import {
   articleGroups,
   articles,
@@ -48,15 +48,20 @@ export async function findDemoBlockers(executor: Db | Tx): Promise<DemoBlocker[]
   return blockers;
 }
 
-// Find-or-create by code: a register entry someone already made is reused.
+// Find-or-create: a register entry someone already made is reused. Article
+// groups are unique on the name as well as the code, so either one matching
+// means "already there" (inserting would hit the name constraint); production
+// groups are unique on the code only.
 async function codeIds(
   tx: Tx,
   table: typeof articleGroups | typeof productionGroups,
-  entries: { code: string; name: string }[]
+  entries: { code: string; name: string }[],
+  matchName: boolean
 ): Promise<Map<string, string>> {
   const ids = new Map<string, string>();
   for (const entry of entries) {
-    const [existing] = await tx.select({ id: table.id }).from(table).where(eq(table.code, entry.code));
+    const match = matchName ? or(eq(table.code, entry.code), eq(table.name, entry.name)) : eq(table.code, entry.code);
+    const [existing] = await tx.select({ id: table.id }).from(table).where(match).limit(1);
     const id = existing?.id ?? (await tx.insert(table).values(entry).returning({ id: table.id }))[0]!.id;
     ids.set(entry.code, id);
   }
@@ -68,10 +73,15 @@ async function unitIds(tx: Tx): Promise<Map<string, string>> {
     { code: "st", name: "Styck" },
     { code: "m", name: "Meter" },
   ];
-  const rows = await tx.select({ id: units.id, code: units.code }).from(units).where(inArray(units.code, wanted.map((u) => u.code)));
-  const ids = new Map(rows.map((r) => [r.code, r.id]));
+  const ids = new Map<string, string>();
   for (const unit of wanted) {
-    if (!ids.has(unit.code)) ids.set(unit.code, (await tx.insert(units).values(unit).returning({ id: units.id }))[0]!.id);
+    // Unique on both code and name — either one matching is the unit.
+    const [existing] = await tx
+      .select({ id: units.id })
+      .from(units)
+      .where(or(eq(units.code, unit.code), eq(units.name, unit.name)))
+      .limit(1);
+    ids.set(unit.code, existing?.id ?? (await tx.insert(units).values(unit).returning({ id: units.id }))[0]!.id);
   }
   return ids;
 }
@@ -100,12 +110,17 @@ async function locationIds(tx: Tx): Promise<Record<DemoLocation, string>> {
 // Writes the whole company inside the caller's transaction, in dependency
 // order. The caller has locked and checked that the four registers are empty.
 export async function writeDemoData(tx: Tx, data: DemoData, userId: string | null): Promise<DemoDataCounts> {
-  const groupIds = await codeIds(tx, articleGroups, data.articleGroups);
-  const prodGroupIds = await codeIds(tx, productionGroups, data.productionGroups);
+  const groupIds = await codeIds(tx, articleGroups, data.articleGroups, true);
+  const prodGroupIds = await codeIds(tx, productionGroups, data.productionGroups, false);
   const unitIdByCode = await unitIds(tx);
   const locations = await locationIds(tx);
 
-  const [term] = await tx.select({ id: paymentTerms.id }).from(paymentTerms).where(eq(paymentTerms.code, data.paymentTerm.code));
+  // Unique on both code and name, like the article groups.
+  const [term] = await tx
+    .select({ id: paymentTerms.id })
+    .from(paymentTerms)
+    .where(or(eq(paymentTerms.code, data.paymentTerm.code), eq(paymentTerms.name, data.paymentTerm.name)))
+    .limit(1);
   const paymentTermId = term?.id ?? (await tx.insert(paymentTerms).values(data.paymentTerm).returning({ id: paymentTerms.id }))[0]!.id;
 
   const workCenterIds = new Map<string, string>();

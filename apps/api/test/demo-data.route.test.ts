@@ -97,6 +97,15 @@ describe("exempeldata — rutterna", () => {
     expect(await db.select().from(articleGroups)).toHaveLength(DEMO_DATA.articleGroups.length);
   });
 
+  it("reuses base data that has the same name under another code", async () => {
+    await db.insert(paymentTerms).values({ code: "N30", name: "30 dagar netto" });
+    await db.insert(articleGroups).values({ code: "110", name: "Råvaror" });
+    expect((await post()).statusCode).toBe(201);
+    expect(await db.select().from(paymentTerms)).toHaveLength(1);
+    const groups = await db.select().from(articleGroups);
+    expect(groups.filter((g) => g.name === "Råvaror").map((g) => g.code)).toEqual(["110"]);
+  });
+
   it("never puts its locations under the *** fallback warehouse", async () => {
     // A fresh installation's only warehouse is the fallback one.
     await getOrCreateFallbackLocation(db);

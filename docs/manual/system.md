@@ -103,7 +103,7 @@ Serien **Kundnummer** (startar på 1001, utan prefix) används av kundregistret:
 
 Alla artiklar har standardpris, så kalkylen och marginalen ger rimliga siffror direkt. Inga ordrar skapas — lägg en kundorder på ett arbetsbord, skapa en tillverkningsorder eller kör behovsberäkningen för att prova flödena.
 
-Exempeldata kan bara skapas på en tom installation: så fort det finns artiklar, kunder, leverantörer eller resurser är knappen avstängd och sidan säger vilket register som inte är tomt. Betalningsvillkor, artikelgrupper och lagerplatser som redan finns med samma namn återanvänds. Exempeldatan kan inte tas bort automatiskt — vill du börja om från en tom databas installerar du om.
+Exempeldata kan bara skapas på en tom installation: så fort det finns artiklar, kunder, leverantörer eller resurser är knappen avstängd och sidan säger vilket register som inte är tomt. Betalningsvillkor, artikelgrupper och enheter som redan finns med samma kod eller samma namn återanvänds, liksom produktionsgrupper med samma kod och lagerplatser med samma namn. Exempeldatan kan inte tas bort automatiskt — vill du börja om från en tom databas installerar du om.
 
 ## Integrationer
 
