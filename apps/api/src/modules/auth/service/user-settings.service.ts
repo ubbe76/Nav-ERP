@@ -2,6 +2,7 @@ import { DEFAULT_LIST_PAGE_SIZE, LIST_PAGE_SIZE_OPTIONS, type UpdateUserSettings
 import type { UserSettingsRepository } from "../repository/user-settings.repository.js";
 
 const LIST_PAGE_SIZE_KEY = "list_page_size";
+const HIDE_ONBOARDING_KEY = "hide_onboarding";
 
 const LIST_PAGE_SIZE_VALUES: readonly number[] = LIST_PAGE_SIZE_OPTIONS;
 
@@ -20,7 +21,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
     const raw = byKey.get(LIST_PAGE_SIZE_KEY);
     const parsed = raw === undefined ? NaN : Number(raw);
     const listPageSize = isValidListPageSize(parsed) ? parsed : DEFAULT_LIST_PAGE_SIZE;
-    return { listPageSize };
+    return { listPageSize, hideOnboarding: byKey.get(HIDE_ONBOARDING_KEY) === "true" };
   }
 
   return {
@@ -29,6 +30,9 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
     async updateSettings(userId: string, input: UpdateUserSettingsInput): Promise<UserSettings> {
       if (input.listPageSize !== undefined) {
         await repo.upsert(userId, LIST_PAGE_SIZE_KEY, String(input.listPageSize));
+      }
+      if (input.hideOnboarding !== undefined) {
+        await repo.upsert(userId, HIDE_ONBOARDING_KEY, String(input.hideOnboarding));
       }
       return getSettings(userId);
     },

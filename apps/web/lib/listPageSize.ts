@@ -5,6 +5,7 @@ import { LIST_PAGE_SIZE } from "./listQuery";
 
 interface UserSettingsResponse {
   listPageSize: number;
+  hideOnboarding?: boolean;
 }
 
 // Server-side only (Server Components): the current user's "Rader per sida"

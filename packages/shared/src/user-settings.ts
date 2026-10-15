@@ -20,6 +20,8 @@ const listPageSizeSchema = z.union(
 // GET /me/settings — always returns every known key, defaults filled in.
 export const userSettingsSchema = z.object({
   listPageSize: listPageSizeSchema,
+  // System → Kom igång: this administrator hid the checklist on Översikten.
+  hideOnboarding: z.boolean(),
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 

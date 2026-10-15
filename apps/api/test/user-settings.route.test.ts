@@ -90,7 +90,7 @@ describe("GET /me/settings", () => {
 
     const res = await app.inject({ url: "/me/settings", headers: { cookie } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ listPageSize: 50 });
+    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false });
     await app.close();
   });
 });
@@ -114,10 +114,10 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 100 },
     });
     expect(patchRes.statusCode).toBe(200);
-    expect(patchRes.json()).toEqual({ listPageSize: 100 });
+    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false });
 
     const getRes = await app.inject({ url: "/me/settings", headers: { cookie } });
-    expect(getRes.json()).toEqual({ listPageSize: 100 });
+    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false });
 
     // Upsert, not insert-only: a second PATCH overwrites the first value
     // rather than erroring on the composite PK.
@@ -128,7 +128,7 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 25 },
     });
     expect(secondPatch.statusCode).toBe(200);
-    expect(secondPatch.json()).toEqual({ listPageSize: 25 });
+    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false });
     await app.close();
   });
 
@@ -160,6 +160,18 @@ describe("PATCH /me/settings", () => {
     await app.close();
   });
 
+  it("stores hideOnboarding per user", async () => {
+    const app = buildApp();
+    const cookieA = await registerAndLogin(app);
+    const cookieB = await registerAndLogin(app);
+
+    const patch = await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie: cookieA }, payload: { hideOnboarding: true } });
+    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true });
+    const other = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
+    expect(other.json().hideOnboarding).toBe(false);
+    await app.close();
+  });
+
   it("keeps each user's setting isolated from another user's", async () => {
     const app = buildApp();
     const cookieA = await registerAndLogin(app);
@@ -173,7 +185,7 @@ describe("PATCH /me/settings", () => {
     });
 
     const resB = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
-    expect(resB.json()).toEqual({ listPageSize: 50 });
+    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false });
     await app.close();
   });
 });
