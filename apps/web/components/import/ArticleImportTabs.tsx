@@ -15,7 +15,7 @@ import styles from "./ArticleImportTabs.module.css";
 const ALL_FILES_TAB = {
   tab: "Alla filer",
   title: "Importera alla artikelfiler",
-  meta: "Alla Monitor-exporter på en gång — filerna känns igen på sina rubriker",
+  meta: "Alla exportfiler på en gång — filerna känns igen på sina rubriker",
   chapter: "artiklar" as const,
   anchor: "importera-alla-filer",
 };

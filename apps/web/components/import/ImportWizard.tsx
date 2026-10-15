@@ -183,7 +183,7 @@ export function ImportWizard({
       {step === "Fil" && (
         <div className={styles.stepBody}>
           <p>
-            Välj CSV- eller Excel-filen (.xlsx) som exporterats från Monitor G5. Första raden ska
+            Välj CSV- eller Excel-filen (.xlsx). Första raden ska
             innehålla kolumnrubriker; filen läses in direkt när den valts. Max 10 000 rader. Av en
             arbetsbok läses bara det första bladet.
           </p>

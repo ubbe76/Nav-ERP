@@ -39,11 +39,11 @@ const TABS: TabConfig[] = [
     tab: "Produktionsgrupper",
     entity: "productionGroups",
     title: "Importera produktionsgrupper",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5 — Produktionsgruppslista (Kostnader)",
+    meta: "CSV eller Excel (.xlsx) — en rad per resurs med avdelning",
     anchor: "importera-resurser",
     fields: PRODUCTION_GROUP_IMPORT_FIELDS,
     notice:
-      "Monitors Avdelning är Navs produktionsgrupp. Kör Kostnader-filen — den innehåller både avdelningens kod (Avdelning) och namn (Benämning). Filen har en rad per resurs; varje avdelning importeras en gång.",
+      "En avdelning i filen blir en produktionsgrupp i Nav. Filen ska innehålla både avdelningens kod (Avdelning) och namn (Benämning). Har filen en rad per resurs importeras varje avdelning en gång.",
     skipExistingHint:
       "Produktionsgrupper som redan finns (samma kod) uppdateras inte — de lämnas som de är och listas som överhoppade. Utan kryss uppdateras namnet med filens värde.",
   },
@@ -51,11 +51,11 @@ const TABS: TabConfig[] = [
     tab: "Resurser",
     entity: "workCenters",
     title: "Importera resurser",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5 — Produktionsgruppslista (Kostnader och Lista)",
+    meta: "CSV eller Excel (.xlsx) — en rad per resurs",
     anchor: "importera-resurser",
     fields: WORK_CENTER_IMPORT_FIELDS,
     notice:
-      "Monitors Produktionsgrupp är Navs resurs (tresiffrigt nummer). Kör Kostnader-filen först (nummer, namn, typ, avdelning, timkostnad, kalkylpris) — bara raden Ordinarie per resurs importeras, Undantag-raderna hoppas över — och därefter Lista-filen (förvald ställtid, operationsbenämning) med kryssrutan avmarkerad. Avdelningar som saknas skapas som produktionsgrupper.",
+      "En resurs i Nav har ett tresiffrigt nummer. Kör först filen med kostnaderna (nummer, namn, typ, avdelning, timkostnad, kalkylpris) — har den en kolumn Kostnadsrad importeras bara raden Ordinarie per resurs och Undantag-raderna hoppas över — och därefter filen med förvald ställtid och operationsbenämning, med kryssrutan avmarkerad. Avdelningar som saknas skapas som produktionsgrupper.",
     skipExistingHint:
       "Resurser som redan finns (samma nummer) uppdateras inte — de lämnas som de är och listas som överhoppade. Utan kryss uppdateras de med filens ifyllda värden; tomma celler skriver aldrig över.",
   },
@@ -63,7 +63,7 @@ const TABS: TabConfig[] = [
     tab: "Legoresurser",
     entity: "legoWorkCenters",
     title: "Importera legoresurser",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5 — Produktionsgruppslista (Lego)",
+    meta: "CSV eller Excel (.xlsx) — en rad per legoresurs",
     anchor: "importera-resurser",
     fields: LEGO_WORK_CENTER_IMPORT_FIELDS,
     notice:

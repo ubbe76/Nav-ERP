@@ -30,19 +30,19 @@ const TABS: TabConfig[] = [
     tab: "Kunder",
     entity: "customers",
     title: "Importera kunder",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5",
+    meta: "CSV eller Excel (.xlsx)",
     anchor: "importera-kunder",
     fields: CUSTOMER_IMPORT_FIELDS,
     notice:
-      "Monitors kundexport består av flera filer. Kör den här fliken en gång per fil, i ordningen Lista → Postadress → Fakturaadress: Lista-körningen skapar kunderna (matchning på kundnummer) med namn, organisationsnummer och VAT-nummer — och villkor, speditör, prislista och rabatt om de kolumnerna finns med i filen. Postadress-körningen ersätter sedan kortnamnet med det juridiska namnet och fyller i adressen, och Fakturaadress-körningen fakturaadressen. Kontakter och leveransadresser importeras efteråt på sina egna flikar.",
+      "Består kundexporten av flera filer, kör den här fliken en gång per fil, i ordningen Lista → Postadress → Fakturaadress: Lista-körningen skapar kunderna (matchning på kundnummer) med namn, organisationsnummer och VAT-nummer — och villkor, speditör, prislista och rabatt om de kolumnerna finns med i filen. Postadress-körningen ersätter sedan kortnamnet med det juridiska namnet och fyller i adressen, och Fakturaadress-körningen fakturaadressen. Kontakter och leveransadresser importeras efteråt på sina egna flikar.",
     skipExistingHint:
-      "Kunder som redan finns i registret uppdateras inte — de lämnas precis som de är och listas som överhoppade i resultatet. Utan kryss uppdateras de med filens värden. Kör kundfliken flera gånger (en gång per Monitor-fil) med kryssrutan avmarkerad, annars skrivs Postadress- och Fakturaadress-filernas fält aldrig in.",
+      "Kunder som redan finns i registret uppdateras inte — de lämnas precis som de är och listas som överhoppade i resultatet. Utan kryss uppdateras de med filens värden. Kör kundfliken flera gånger (en gång per fil) med kryssrutan avmarkerad, annars skrivs Postadress- och Fakturaadress-filernas fält aldrig in.",
   },
   {
     tab: "Kontakter",
     entity: "customerContacts",
     title: "Importera kontakter",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5 — Referenser",
+    meta: "CSV eller Excel (.xlsx) — en rad per kontakt",
     anchor: "importera-kunder",
     fields: CUSTOMER_CONTACT_IMPORT_FIELDS,
     notice:
@@ -54,7 +54,7 @@ const TABS: TabConfig[] = [
     tab: "Leveransadresser",
     entity: "customerDeliveryAddresses",
     title: "Importera leveransadresser",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5 — Leveransadress",
+    meta: "CSV eller Excel (.xlsx) — en rad per leveransadress",
     anchor: "importera-kunder",
     fields: CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS,
     notice:

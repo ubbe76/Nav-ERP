@@ -35,19 +35,19 @@ const TABS: TabConfig[] = [
     tab: "Leverantörer",
     entity: "suppliers",
     title: "Importera leverantörer",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5",
+    meta: "CSV eller Excel (.xlsx)",
     anchor: "importera-leverantorer",
     fields: SUPPLIER_IMPORT_FIELDS,
     notice:
-      "Monitors leverantörsexport består av flera filer. Kör den här fliken en gång per fil, i ordningen Lista → Postadress: Lista-körningen skapar leverantörerna (matchning på leverantörsnummer) med namn, organisationsnummer, VAT-nummer och vårt kundnummer, och Postadress-körningen ersätter sedan kortnamnet med det juridiska namnet och fyller i adressen. Kontakter och leveransadresser importeras efteråt på sina egna flikar.",
+      "Består leverantörsexporten av flera filer, kör den här fliken en gång per fil, i ordningen Lista → Postadress: Lista-körningen skapar leverantörerna (matchning på leverantörsnummer) med namn, organisationsnummer, VAT-nummer och vårt kundnummer, och Postadress-körningen ersätter sedan kortnamnet med det juridiska namnet och fyller i adressen. Kontakter och leveransadresser importeras efteråt på sina egna flikar.",
     skipExistingHint:
-      "Leverantörer som redan finns i registret uppdateras inte — de lämnas precis som de är och listas som överhoppade i resultatet. Utan kryss uppdateras de med filens värden. Kör leverantörsfliken flera gånger (en gång per Monitor-fil) med kryssrutan avmarkerad, annars skrivs Postadress-filens fält aldrig in.",
+      "Leverantörer som redan finns i registret uppdateras inte — de lämnas precis som de är och listas som överhoppade i resultatet. Utan kryss uppdateras de med filens värden. Kör leverantörsfliken flera gånger (en gång per fil) med kryssrutan avmarkerad, annars skrivs Postadress-filens fält aldrig in.",
   },
   {
     tab: "Kontakter",
     entity: "supplierContacts",
     title: "Importera kontakter",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5 — Referenser",
+    meta: "CSV eller Excel (.xlsx) — en rad per kontakt",
     anchor: "importera-leverantorer",
     fields: SUPPLIER_CONTACT_IMPORT_FIELDS,
     notice:
@@ -59,7 +59,7 @@ const TABS: TabConfig[] = [
     tab: "Leveransadresser",
     entity: "supplierDeliveryAddresses",
     title: "Importera leveransadresser",
-    meta: "CSV eller Excel (.xlsx) från Monitor G5 — Leveransadress",
+    meta: "CSV eller Excel (.xlsx) — en rad per leveransadress",
     anchor: "importera-leverantorer",
     fields: SUPPLIER_DELIVERY_ADDRESS_IMPORT_FIELDS,
     notice:

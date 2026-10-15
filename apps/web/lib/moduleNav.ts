@@ -73,7 +73,7 @@ export const ARTIKLAR_SECTIONS: ModuleNavSection[] = [
       {
         href: "/artiklar/import",
         title: "Importera artiklar",
-        description: "Läs in artiklar från en CSV-fil, t.ex. en export ur Monitor G5.",
+        description: "Läs in artiklar, strukturer, operationer och priser från CSV- eller Excel-filer.",
         roles: ["admin"],
       },
     ],

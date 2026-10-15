@@ -266,7 +266,7 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
       {step === "Filer" && (
         <div className={wizardStyles.stepBody}>
           <p>
-            Välj alla Monitor-exporter på en gång — artikellistan och dess delexporter (planering, extra
+            Välj alla exportfiler på en gång — artikellistan och dess delexporter (planering, extra
             benämning, enheter), operationslistan, materiallistan och prislistorna. Varje fil känns igen
             på sina kolumnrubriker; en fil som inte känns igen hoppas över (eller ges en typ för hand i
             nästa steg). Filerna importeras i beroendeordning: artiklar → enheter → operationer →
