@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typkontroll och bygge
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Node 20 — the same major as the production images (apps/*/Dockerfile).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Bygg databaspaketet
+        run: npm run build --workspace packages/db
+
+      # The api's build script type-checks (tsc --noEmit) before bundling.
+      - name: Typkontrollera och bygg API:t
+        run: npm run build --workspace apps/api
+
+      # Run from apps/web: from the repo root tsc would check the wrong project.
+      - name: Typkontrollera webben
+        working-directory: apps/web
+        run: ../../node_modules/.bin/tsc --noEmit -p tsconfig.json
+
+      - name: Bygg webben
+        run: npm run build --workspace apps/web
+
+  test:
+    name: API-tester
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # The suite TRUNCATEs every table it touches and refuses a database whose
+      # name lacks "test" (apps/api/test/assert-test-database.ts).
+      DATABASE_URL: postgresql://erp:erp_dev_password@localhost:5433/erp_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Same settings as the postgres-test service in docker-compose.yml: data
+      # in RAM, durability off — every test truncates, and the syncs are what
+      # make the suite slow. A plain `docker run`, because a GitHub service
+      # container cannot pass server flags.
+      - name: Starta testdatabasen
+        run: |
+          docker run -d --name postgres-test -p 5433:5432 \
+            -e POSTGRES_USER=erp -e POSTGRES_PASSWORD=erp_dev_password -e POSTGRES_DB=erp_test \
+            --tmpfs /var/lib/postgresql/data:size=2g \
+            postgres:16-alpine \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
+          # The image runs a temporary server while it initialises and then
+          # restarts, so wait for the init to finish before trusting pg_isready.
+          for i in $(seq 1 60); do
+            if docker logs postgres-test 2>&1 | grep -q "PostgreSQL init process complete" \
+              && docker exec postgres-test pg_isready -U erp -d erp_test; then exit 0; fi
+            sleep 2
+          done
+          docker logs postgres-test
+          exit 1
+
+      - name: Kör API-testerna
+        run: npm run test --workspace apps/api

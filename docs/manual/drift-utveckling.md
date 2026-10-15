@@ -32,6 +32,8 @@ docker compose --profile test up -d postgres-test
 
 Containern töms när den startas om, och testkörningen sköter schemat själv, så nya migrationer behöver aldrig köras för hand. Kör bara en testkörning åt gången.
 
+GitHub kör samma tester automatiskt vid varje ändring som skickas till projektet, tillsammans med en typkontroll och ett bygge av API:t och webben.
+
 För att skydda mot misstag avbryts hela körningen om databasnamnet inte innehåller "test", med felmeddelandet *"Testerna TRUNCATE:ar databasen de körs mot…"*. Får du det: sätt `DATABASE_URL` till testdatabasen — ändra aldrig spärren för att komma förbi den. `npm run test` använder testdatabasen automatiskt.
 
 Skulle data ändå gå förlorad och användartabellen bli tom, öppnas registreringssidan `/register` igen och första kontot du skapar där blir administratör — med engångskoden ur API:ts logg (se [Komma igång](/hjalp/komma-igang)).

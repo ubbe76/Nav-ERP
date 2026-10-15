@@ -214,6 +214,10 @@ Containern töms vid omstart och testkörningen migrerar den själv innan
 sviten startar, så en ny migration behöver aldrig köras för hand. Kör bara
 en testkörning åt gången mot den.
 
+GitHub kör samma svit automatiskt vid varje push till `main` och på varje
+pull request (`.github/workflows/ci.yml`), tillsammans med typkontroll och
+bygge av API:t och webben.
+
 ## Driftsätta på en annan server (t.ex. en VPS)
 
 Du behöver **inte installera PostgreSQL, Node.js eller något annat i förväg**
