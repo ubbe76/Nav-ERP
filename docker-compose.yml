@@ -71,6 +71,10 @@ services:
       # URL-safe (openssl rand -hex 24 is).
       DATABASE_URL: postgresql://erp:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD måste sättas i .env — se .env.example}@postgres:5432/erp
       NODE_ENV: ${NODE_ENV:-production}
+      # Server-local time is Swedish time: payroll turns schedule clock times
+      # ("07:00") into instants and buckets days with the local zone, so a
+      # container left on UTC would compare schedules 1–2 h off.
+      TZ: Europe/Stockholm
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET måste sättas — generera en lång slumpsträng}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
       # Unset by default — the api derives Secure from NODE_ENV then. Set to
@@ -119,6 +123,8 @@ services:
       # vary by deployment host (same reasoning as api's hardcoded DATABASE_URL).
       INTERNAL_API_URL: http://api:4000
       NODE_ENV: ${NODE_ENV:-production}
+      # Same as api: server-rendered dates in Swedish time.
+      TZ: Europe/Stockholm
     ports:
       - "3000:3000"
     healthcheck:
