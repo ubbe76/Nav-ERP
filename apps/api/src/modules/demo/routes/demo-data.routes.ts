@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { errorBody } from "../../system/service/error-body.js";
 import { DemoDataNotAvailableError, type DemoDataService } from "../service/demo-data.service.js";
+import { LocationUnderStockCountError } from "../../stock/service/stock.errors.js";
 
 export async function demoDataRoutes(app: FastifyInstance, opts: { service: DemoDataService }) {
   const { service } = opts;
@@ -15,6 +16,7 @@ export async function demoDataRoutes(app: FastifyInstance, opts: { service: Demo
       if (err instanceof DemoDataNotAvailableError) {
         return reply.code(409).send({ ...errorBody(err), blockers: err.blockers });
       }
+      if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

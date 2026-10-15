@@ -8,7 +8,15 @@ import type { DemoDataStatus } from "../../../lib/types";
 
 export default async function DemoDataPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
-  const status = await apiGet<DemoDataStatus>("/api/v1/demo-data", cookieHeader);
+  // A failing API must not become Next's error page — same as Nummerserier.
+  const status = await apiGet<DemoDataStatus>("/api/v1/demo-data", cookieHeader).catch(() => null);
+  if (status === null) {
+    return (
+      <AppShell active="System">
+        <p>Kunde inte hämta exempeldatans status. Försök igen om en stund.</p>
+      </AppShell>
+    );
+  }
   return (
     <AppShell active="System">
       <div className={shellStyles.topbar}>

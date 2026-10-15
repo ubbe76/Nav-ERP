@@ -3293,6 +3293,8 @@ export interface AuditLogEntry {
 // entry missing here just falls back to its raw string via
 // auditEntityTypeLabel/auditActionLabel below rather than rendering blank.
 export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
+  system: "System",
+  api_client: "API-klient",
   absence: "Frånvaro",
   year_end_closing: "Bokslut",
   overtime_disposition: "Övertidsdisposition",
@@ -3330,6 +3332,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
 };
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  demo_data_created: "Exempeldata skapad",
   created: "Skapad",
   updated: "Ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",

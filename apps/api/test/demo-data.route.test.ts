@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, inArray, sql } from "drizzle-orm";
-import { db, articleGroups, customers, numberSeries, paymentTerms, stockLocations, stockTransactions, units, users, warehouses } from "@navet/db";
+import { db, articleGroups, customers, numberSeries, paymentTerms, stockCountSessions, stockLocations, stockTransactions, units, users, warehouses } from "@navet/db";
 import { getOrCreateFallbackLocation } from "../src/modules/stock/service/location-resolver.js";
 import bcrypt from "bcryptjs";
 import { buildApp } from "../src/app.js";
@@ -15,8 +15,15 @@ const PASSWORD = "ett-tillräckligt-långt-lösenord";
 let app: ReturnType<typeof buildApp>;
 let cookie: string;
 
+// Warehouses and stock counts are not truncated by TRUNCATE above, so the
+// tests' own ones are removed here — before every test, so a test that failed
+// halfway cannot leave them behind for the next run.
+const TEST_WAREHOUSES = ["Aaa-lager", "A-lager 1", "A-lager 2"];
+
 async function cleanLocations() {
+  await db.delete(stockCountSessions).where(eq(stockCountSessions.countNumber, "INV-DEMO"));
   await db.delete(stockLocations).where(inArray(stockLocations.name, Object.values(DEMO_LOCATIONS)));
+  await db.delete(warehouses).where(inArray(warehouses.name, TEST_WAREHOUSES));
 }
 
 async function loginAdmin() {
@@ -116,6 +123,28 @@ describe("exempeldata — rutterna", () => {
       .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
       .where(inArray(stockLocations.name, Object.values(DEMO_LOCATIONS)));
     expect(rows.map((r) => r.warehouse)).toEqual(["Huvudlager", "Huvudlager"]);
+  });
+
+  it("puts its locations under the first warehouse by name when there are several", async () => {
+    await db.insert(warehouses).values([{ name: "A-lager 2" }, { name: "A-lager 1" }]);
+    expect((await post()).statusCode).toBe(201);
+    const rows = await db
+      .select({ warehouse: warehouses.name })
+      .from(stockLocations)
+      .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+      .where(inArray(stockLocations.name, Object.values(DEMO_LOCATIONS)));
+    expect(rows.map((r) => r.warehouse)).toEqual(["A-lager 1", "A-lager 1"]);
+  });
+
+  it("respects a blocking stock count on a reused location: 409 and nothing written", async () => {
+    await getOrCreateFallbackLocation(db);
+    const [warehouse] = await db.insert(warehouses).values({ name: "Aaa-lager" }).returning({ id: warehouses.id });
+    const [location] = await db.insert(stockLocations).values({ warehouseId: warehouse!.id, name: DEMO_LOCATIONS.raw }).returning({ id: stockLocations.id });
+    await db.insert(stockCountSessions).values({ countNumber: "INV-DEMO", locationId: location!.id, status: "open", blocksTransactions: true });
+    const res = await post();
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe("location-under-stock-count");
+    expect(await db.select().from(stockTransactions)).toHaveLength(0);
   });
 
   it("creates the unit m when it is missing", async () => {

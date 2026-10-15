@@ -7,6 +7,8 @@
 // string — never a hard error — because a new writer landing in another
 // module/branch must never break the CSV.
 export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
+  system: "System",
+  api_client: "API-klient",
   // Payroll/timereport/economy (block A/B, the read side's original writers).
   absence: "Frånvaro",
   overtime_disposition: "Övertidsdisposition",
@@ -43,6 +45,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
 };
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  demo_data_created: "Exempeldata skapad",
   created: "Skapad",
   updated: "Ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",

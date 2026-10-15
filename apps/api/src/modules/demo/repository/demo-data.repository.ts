@@ -1,4 +1,4 @@
-import { and, eq, ne, or } from "drizzle-orm";
+import { and, asc, eq, ne, or } from "drizzle-orm";
 import {
   articleGroups,
   articles,
@@ -25,6 +25,7 @@ import { insertRoutingOperations } from "../../manufacturing/repository/routing-
 import { replacePriceBreaks } from "../../purchase/repository/price-breaks.js";
 import { FALLBACK_LOCATION_NAME, resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { DEMO_LOCATIONS, type DemoData, type DemoLocation } from "../service/demo-data.js";
 
 // The four registers that decide whether the demo company may be created —
@@ -93,6 +94,7 @@ async function locationIds(tx: Tx): Promise<Record<DemoLocation, string>> {
     .select({ id: warehouses.id })
     .from(warehouses)
     .where(and(eq(warehouses.active, true), ne(warehouses.name, FALLBACK_LOCATION_NAME)))
+    .orderBy(asc(warehouses.name), asc(warehouses.id))
     .limit(1);
   const warehouseId = warehouse?.id ?? (await tx.insert(warehouses).values({ name: "Huvudlager" }).returning({ id: warehouses.id }))[0]!.id;
   const result = {} as Record<DemoLocation, string>;
@@ -238,9 +240,13 @@ export async function writeDemoData(tx: Tx, data: DemoData, userId: string | nul
   for (const a of data.articles) {
     if (!a.openingStock) continue;
     const articleId = articleIds.get(a.articleNumber)!;
+    const locationId = await resolveStockLocation(tx, articleId, locations[a.location]);
+    // A reused location may be under a blocking stock count — same guard as
+    // every other stock write.
+    await assertLocationNotUnderCount(tx, locationId);
     await tx.insert(stockTransactions).values({
       articleId,
-      locationId: await resolveStockLocation(tx, articleId, locations[a.location]),
+      locationId,
       quantityDelta: String(a.openingStock),
       unitCost: String(a.standardCost),
       transactionType: "inventory_adjustment",
