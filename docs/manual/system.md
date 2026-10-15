@@ -123,6 +123,28 @@ Exempeldata kan bara skapas på en tom installation: så fort det finns artiklar
 
 **System → Integrationer** hanterar **API-klienter** för externa system, t.ex. en produktkonfigurator som skapar offerter programmatiskt. Skapa en klient så genereras klient-ID och en **hemlighet som bara visas en gång** — kopiera den direkt. Klienten autentiserar med OAuth2 client credentials mot API:t.
 
+### Rättigheter och kund
+
+Varje klient får bara göra det du ger den rätt till. Välj rättigheter med kryssrutorna när du skapar klienten (**+ Ny klient**) eller med **Ändra** i listan:
+
+| Rättighet | Ger klienten |
+|---|---|
+| **Läsa konfiguratorn** | Läsa publicerade mallar och räkna fram pris på ett val |
+| **Läsa priser** | Fråga vad en artikel kostar för en kund (`GET /price-quote`) |
+| **Skapa offert** | Lägga offerter (`POST /quotes`) |
+| **Bekräfta order** | Lägga bekräftade order (`confirm: true`) och bekräfta en offert (`POST /sales-orders/{id}/confirm`) |
+| **Läsa struktur** | Läsa en artikels struktur (`GET /articles/{id}/bom`) |
+
+Tre **förval** fyller i rättigheterna:
+
+- **Hemsida** — Läsa konfiguratorn och Skapa offert. Välj också en **kund**, t.ex. en kund "Webbförfrågningar", så hamnar hemsidans offerter där.
+- **Återförsäljare** — Läsa konfiguratorn, Läsa priser, Skapa offert och Bekräfta order. Välj återförsäljarens egen kund.
+- **Intern** — alla rättigheter och ingen kund, för ett eget system.
+
+En klient som är knuten till en **kund** får bara skapa offert, fråga pris och bekräfta order för den kunden; allt annat nekas. Utan kund får klienten agera för alla kunder. Ändringar gäller direkt, även för token klienten redan har hämtat.
+
+Klienter som skapades före 2026-10-15 har alla rättigheter och ingen kund och markeras **Full åtkomst** i listan — begränsa dem med **Ändra** till det de behöver.
+
 ### Konfigurator-API
 
 Ett externt system (t.ex. en produktkonfigurator på webben) kan läsa artikelmallar och lägga offerter med konfigurerade rader. Alla anrop går mot `/api/v1` och kräver en token.
@@ -206,6 +228,8 @@ POST /api/v1/quotes
 | `row-variant-exists` | 409 | Samma variant ligger redan på ordern |
 | `configurator-variant-number-taken` / `configurator-variant-number-race` | 409 | Variantens artikelnummer är upptaget (nu eller av ett samtidigt anrop) — försök igen |
 | `customer-not-found` | 404 | `customerId` finns inte |
+| `client-scope-missing` | 403 | Klienten saknar rättigheten för anropet (se [Rättigheter och kund](#rattigheter-och-kund)) |
+| `client-customer-mismatch` | 403 | Klienten är knuten till en annan kund än den i anropet |
 
 **Prisets källa.** `price.source` i `evaluate` säger var grundpriset kommer ifrån: `customer_article` (kundpris på artikeln), `customer_group` (kundpris på artikelgruppen), `price_list` (kundens prislista), `customer_discount` (kundens rabatt på grundpriset) eller `article` (artikelns försäljningspris). `null` betyder att mallen saknar grundpris och att inget kundpris finns — då är `unitPrice` också `null` och offertraden måste ange eget `unitPrice`.
 

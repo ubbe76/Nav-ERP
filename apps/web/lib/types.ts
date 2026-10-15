@@ -2178,6 +2178,10 @@ export interface ApiClient {
   name: string;
   active: boolean;
   createdAt: string;
+  // Behörigheter per klient (4.9).
+  scopes: import("./apiClientScopes").ApiClientScope[];
+  customerId: string | null;
+  customer: { id: string; customerNumber: string; name: string } | null;
 }
 
 export interface CompanyInfo {

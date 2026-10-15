@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
-import type { ApiClient } from "../../lib/types";
+import type { ApiClient, Paged } from "../../lib/types";
+import { API_CLIENT_PRESETS } from "../../lib/apiClientScopes";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import { ApiClientAccessFields, type ApiClientAccess, type CustomerOption } from "./ApiClientAccessFields";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
 
 interface CreateApiClientResponse {
@@ -17,10 +20,19 @@ interface CreateApiClientResponse {
 // open until the user explicitly confirms they've copied it via "Klar".
 export function NewApiClientForm({ onSuccess }: { onSuccess: () => void }) {
   const [name, setName] = useState("");
+  // Starts on Hemsida — the least access a configurator needs.
+  const [access, setAccess] = useState<ApiClientAccess>({ scopes: [...API_CLIENT_PRESETS[0]!.scopes], customerId: null });
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [created, setCreated] = useState<CreateApiClientResponse | null>(null);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    apiFetch<Paged<CustomerOption>>("/api/v1/customers?limit=1000")
+      .then((page) => setCustomers(page.rows))
+      .catch(() => setCustomers([]));
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -29,11 +41,11 @@ export function NewApiClientForm({ onSuccess }: { onSuccess: () => void }) {
     try {
       const result = await apiFetch<CreateApiClientResponse>("/api/v1/api-clients", {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, scopes: access.scopes, customerId: access.customerId }),
       });
       setCreated(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa klienten");
+      setError(apiErrorMessage(err, "Kunde inte skapa klienten"));
     } finally {
       setPending(false);
     }
@@ -114,8 +126,10 @@ Content-Type: application/json
         <Input id="name" required value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
 
+      <ApiClientAccessFields value={access} customers={customers} onChange={setAccess} />
+
       <FormActions>
-        <Button type="submit" variant="primary" disabled={pending}>
+        <Button type="submit" variant="primary" disabled={pending || access.scopes.length === 0}>
           {pending ? "Skapar…" : "Skapa klient"}
         </Button>
       </FormActions>

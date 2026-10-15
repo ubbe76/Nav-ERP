@@ -6,6 +6,7 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { ApiClientsTable } from "./ApiClientsTable";
 import { NewApiClientForm } from "./NewApiClientForm";
+import { EditApiClientForm } from "./EditApiClientForm";
 import type { ApiClient } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
@@ -13,6 +14,7 @@ import { HelpLink } from "../ui/HelpLink";
 export function ApiClientsPageClient({ clients }: { clients: ApiClient[] }) {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<ApiClient | null>(null);
 
   return (
     <>
@@ -29,7 +31,7 @@ export function ApiClientsPageClient({ clients }: { clients: ApiClient[] }) {
         </div>
       </div>
 
-      <ApiClientsTable clients={clients} />
+      <ApiClientsTable clients={clients} onEdit={setEditing} />
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Ny API-klient">
         <NewApiClientForm
@@ -38,6 +40,18 @@ export function ApiClientsPageClient({ clients }: { clients: ApiClient[] }) {
             router.refresh();
           }}
         />
+      </Modal>
+      <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing ? `Ändra ${editing.name}` : "Ändra"}>
+        {editing && (
+          <EditApiClientForm
+            key={editing.id}
+            client={editing}
+            onSuccess={() => {
+              setEditing(null);
+              router.refresh();
+            }}
+          />
+        )}
       </Modal>
     </>
   );
