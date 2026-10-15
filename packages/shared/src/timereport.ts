@@ -200,6 +200,9 @@ export function computeDayScheduleNetMinutes(schedule: {
 // Närvarostämpling (kom/gå) — clocking out needs no body.
 export const attendanceInSchema = z.object({
   employeeId: z.string().uuid(),
+  // Regel 8: when the employee went home on the day their still-open
+  // attendance started (the terminal asks after a forgotten Gå hem).
+  forgottenStoppedAt: z.string().datetime({ offset: true }).optional(),
 });
 export type AttendanceInInput = z.infer<typeof attendanceInSchema>;
 

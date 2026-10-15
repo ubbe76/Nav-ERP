@@ -28,6 +28,7 @@ export const ERROR_CODES = {
   PERIOD_NOT_LOCKED: "period-not-locked",
   INVALID_ATTENDANCE_INTERVAL: "invalid-attendance-interval",
   ALREADY_PRESENT: "already-present",
+  ATTENDANCE_OPEN_FROM_EARLIER_DAY: "attendance-open-from-earlier-day",
   INVALID_STOP_TIME: "invalid-stop-time",
   STOP_TIME_NOT_ALLOWED: "stop-time-not-allowed",
   DUPLICATE_ABSENCE: "duplicate-absence",

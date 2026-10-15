@@ -70,6 +70,18 @@ export class AlreadyPresentError extends Error {
   }
 }
 
+// Regel 8: the terminal asks when the employee went home before it opens
+// today's attendance (attendanceIn with forgottenStoppedAt).
+export class AttendanceOpenFromEarlierDayError extends Error {
+  constructor(
+    readonly attendanceSessionId: string,
+    readonly startedAt: Date
+  ) {
+    super("The employee's attendance has been open since an earlier day — say when they went home");
+    this.name = "AttendanceOpenFromEarlierDayError";
+  }
+}
+
 export class AttendanceSessionNotFoundError extends Error {
   constructor(id: string) {
     super(`Attendance session ${id} not found`);
@@ -120,6 +132,12 @@ export class WeekScheduleNotFoundError extends Error {
     super(`Week schedule ${id} not found`);
     this.name = "WeekScheduleNotFoundError";
   }
+}
+
+// Midnight starting today, in the server's local time (same zone as
+// localDateOf).
+function startOfLocalToday() {
+  return new Date(`${localDateOf(new Date())}T00:00:00`);
 }
 
 export function createTimeReportService(
@@ -340,10 +358,30 @@ export function createTimeReportService(
       const employee = await repo.findEmployeeById(input.employeeId);
       if (!employee) throw new EmployeeNotFoundError(input.employeeId);
       if (!employee.active) throw new InactiveEmployeeError();
-      if (await repo.hasOpenAttendanceSession(input.employeeId)) throw new AlreadyPresentError();
+      const open = await repo.findOpenAttendanceSession(input.employeeId);
       // Resume any work paused by the previous going-home — the pause folds
       // into pausedSeconds and is excluded from reported hours.
-      return beginAttendance(input.employeeId, createdBy);
+      if (!open) return beginAttendance(input.employeeId, createdBy);
+
+      const dayStart = startOfLocalToday();
+      if (open.startedAt >= dayStart) throw new AlreadyPresentError();
+      if (!input.forgottenStoppedAt) throw new AttendanceOpenFromEarlierDayError(open.id, open.startedAt);
+
+      // Regel 8: the forgotten Gå hem, then today's attendance.
+      const stop = new Date(input.forgottenStoppedAt);
+      if (stop <= open.startedAt || stop >= dayStart) throw new InvalidAttendanceIntervalError();
+      for (const date of new Set([localDateOf(open.startedAt), localDateOf(stop)])) {
+        if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
+      }
+      const session = await repo.closeForgottenAndBegin(input.employeeId, open.id, stop, new Date(), createdBy);
+      await audit.log({
+        entityType: "attendance_session",
+        entityId: open.id,
+        action: "updated",
+        detail: { employeeId: input.employeeId, before: { stoppedAt: null }, after: { stoppedAt: stop }, forgotten: true },
+        userId: createdBy,
+      });
+      return session;
     },
 
     // Närvarostämpling gå: going home PAUSES any open work stamps — the
@@ -356,9 +394,12 @@ export function createTimeReportService(
 
       // Open work stays stamped in but pauses — the away time is excluded
       // from reported hours, and the work resumes at the next attendance-in.
-      const pausedWorkSessions = await repo.pauseOpenStampSessions(session.employeeId, new Date());
+      // One instant for both, so a later correction of the stop time (regel
+      // 7) finds the pause exactly where the attendance stopped.
+      const at = new Date();
+      const pausedWorkSessions = await repo.pauseOpenStampSessions(session.employeeId, at);
 
-      const closed = await repo.closeAttendanceSession(sessionId, new Date());
+      const closed = await repo.closeAttendanceSession(sessionId, at);
       return { session: closed!, pausedWorkSessions };
     },
 
@@ -393,7 +434,18 @@ export function createTimeReportService(
         if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
       }
 
-      const updated = await repo.updateAttendanceSession(id, { startedAt: newStartedAt, stoppedAt: newStoppedAt });
+      // Regel 7: the correction carries over to the employee's work stamps.
+      const effect =
+        existing.stoppedAt === null && newStoppedAt !== null
+          ? { kind: "pause" as const, employeeId: existing.employeeId, at: newStoppedAt }
+          : existing.stoppedAt !== null && newStoppedAt !== null && newStoppedAt.getTime() !== existing.stoppedAt.getTime()
+            ? { kind: "move" as const, employeeId: existing.employeeId, from: existing.stoppedAt, to: newStoppedAt }
+            : null;
+      const { session: updated, pausedWorkSessions, movedPauses } = await repo.correctAttendanceWithWork(
+        id,
+        { startedAt: newStartedAt, stoppedAt: newStoppedAt },
+        effect
+      );
 
       await audit.log({
         entityType: "attendance_session",
@@ -406,7 +458,7 @@ export function createTimeReportService(
         },
         userId,
       });
-      return updated!;
+      return { ...updated!, pausedWorkSessions, movedPauses };
     },
 
     // Deleting does NOT touch stamp sessions — work stamps are independent

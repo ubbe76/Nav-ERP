@@ -122,4 +122,41 @@ describe("POST /stamp-sessions/:id/stop with a stop time", () => {
     expect(ok.json().timeReport.hours).toBe("1.50");
     expect(new Date(ok.json().session.stoppedAt).getTime()).toBe(stoppedAt.getTime());
   });
+
+  it("regel 8: POST /attendance-sessions answers 409 with the forgotten attendance until forgottenStoppedAt is given", async () => {
+    await setup(); // stamping in clocked the employee in (regel 5)
+    const [attendance] = await timeReportService.listAttendanceSessions(true);
+    const H = 3_600_000;
+    const startedAt = new Date(Date.now() - 26 * H);
+    await db.execute(
+      sql`UPDATE attendance_sessions SET started_at = ${startedAt.toISOString()}::timestamptz WHERE id = ${attendance!.id}`
+    );
+    const terminal = await session("user", ["terminal"]);
+    const url = "/api/v1/attendance-sessions";
+
+    const refused = await app.inject({ method: "POST", url, headers: { cookie: terminal }, payload: { employeeId: attendance!.employeeId } });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({
+      code: "attendance-open-from-earlier-day",
+      attendanceSessionId: attendance!.id,
+      startedAt: startedAt.toISOString(),
+    });
+
+    const bad = await app.inject({
+      method: "POST",
+      url,
+      headers: { cookie: terminal },
+      payload: { employeeId: attendance!.employeeId, forgottenStoppedAt: new Date(startedAt.getTime() - H).toISOString() },
+    });
+    expect([bad.statusCode, bad.json().code]).toEqual([400, "invalid-attendance-interval"]);
+
+    const ok = await app.inject({
+      method: "POST",
+      url,
+      headers: { cookie: terminal },
+      payload: { employeeId: attendance!.employeeId, forgottenStoppedAt: new Date(startedAt.getTime() + H).toISOString() },
+    });
+    expect(ok.statusCode).toBe(201);
+    expect(ok.json().id).not.toBe(attendance!.id);
+  });
 });

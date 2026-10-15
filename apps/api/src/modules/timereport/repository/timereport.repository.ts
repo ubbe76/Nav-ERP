@@ -255,6 +255,15 @@ export function createTimeReportRepository(db: Db) {
       return row !== undefined;
     },
 
+    async findOpenAttendanceSession(employeeId: string) {
+      const [row] = await db
+        .select()
+        .from(attendanceSessions)
+        .where(and(eq(attendanceSessions.employeeId, employeeId), isNull(attendanceSessions.stoppedAt)))
+        .limit(1);
+      return row ?? null;
+    },
+
     async listAttendanceSessions(onlyOpen: boolean) {
       return db
         .select({
@@ -299,14 +308,96 @@ export function createTimeReportRepository(db: Db) {
       return row ?? null;
     },
 
-    // Called with the already-merged final values (see updateTimeReport).
-    async updateAttendanceSession(id: string, patch: { startedAt: Date; stoppedAt: Date | null }) {
-      const [row] = await db
-        .update(attendanceSessions)
-        .set({ startedAt: patch.startedAt, stoppedAt: patch.stoppedAt })
-        .where(eq(attendanceSessions.id, id))
-        .returning();
-      return row ?? null;
+    // Regel 7: a supervisor's attendance correction carries over to the work
+    // stamps, in one transaction. Called with the already-merged final
+    // values. "pause": the attendance was open and now has a stop time —
+    // open, unpaused work that started before it pauses there (work started
+    // after it is today's and is left alone). "move": the stop time moved —
+    // work still paused since the old stop (2 s tolerance: Gå hem used to
+    // stamp the pause and the stop with separate clocks) follows to the new
+    // one. Work resumed since is never touched.
+    async correctAttendanceWithWork(
+      id: string,
+      patch: { startedAt: Date; stoppedAt: Date | null },
+      effect:
+        | { kind: "pause"; employeeId: string; at: Date }
+        | { kind: "move"; employeeId: string; from: Date; to: Date }
+        | null
+    ) {
+      return db.transaction(async (tx) => {
+        const [session] = await tx
+          .update(attendanceSessions)
+          .set({ startedAt: patch.startedAt, stoppedAt: patch.stoppedAt })
+          .where(eq(attendanceSessions.id, id))
+          .returning();
+        let pausedWorkSessions = 0;
+        let movedPauses = 0;
+        if (effect?.kind === "pause") {
+          const rows = await tx
+            .update(stampSessions)
+            .set({ pausedAt: effect.at })
+            .where(
+              and(
+                eq(stampSessions.employeeId, effect.employeeId),
+                isNull(stampSessions.stoppedAt),
+                isNull(stampSessions.pausedAt),
+                lt(stampSessions.startedAt, effect.at)
+              )
+            )
+            .returning({ id: stampSessions.id });
+          pausedWorkSessions = rows.length;
+        } else if (effect?.kind === "move") {
+          const rows = await tx
+            .update(stampSessions)
+            .set({ pausedAt: effect.to })
+            .where(
+              and(
+                eq(stampSessions.employeeId, effect.employeeId),
+                isNull(stampSessions.stoppedAt),
+                sql`abs(extract(epoch from (${stampSessions.pausedAt} - ${effect.from.toISOString()}::timestamptz))) < 2`
+              )
+            )
+            .returning({ id: stampSessions.id });
+          movedPauses = rows.length;
+        }
+        return { session: session ?? null, pausedWorkSessions, movedPauses };
+      });
+    },
+
+    // Regel 8: the forgotten Gå hem and today's attendance-in as one
+    // transaction — close the old attendance at the given time (pausing the
+    // open work that started before it, as Gå hem would have), resume all
+    // paused work now and open today's attendance.
+    async closeForgottenAndBegin(
+      employeeId: string,
+      staleId: string,
+      forgottenStoppedAt: Date,
+      now: Date,
+      createdBy: string
+    ) {
+      return db.transaction(async (tx) => {
+        await tx.update(attendanceSessions).set({ stoppedAt: forgottenStoppedAt }).where(eq(attendanceSessions.id, staleId));
+        await tx
+          .update(stampSessions)
+          .set({ pausedAt: forgottenStoppedAt })
+          .where(
+            and(
+              eq(stampSessions.employeeId, employeeId),
+              isNull(stampSessions.stoppedAt),
+              isNull(stampSessions.pausedAt),
+              lt(stampSessions.startedAt, forgottenStoppedAt)
+            )
+          );
+        await tx
+          .update(stampSessions)
+          .set({
+            pausedSeconds: sql`${stampSessions.pausedSeconds} + extract(epoch from (${now.toISOString()}::timestamptz - ${stampSessions.pausedAt}))`,
+            pausedAt: null,
+          })
+          .where(and(eq(stampSessions.employeeId, employeeId), isNull(stampSessions.stoppedAt), isNotNull(stampSessions.pausedAt)));
+        const [session] = await tx.insert(attendanceSessions).values({ employeeId, createdBy }).returning();
+        return session!;
+      });
     },
 
     // Does not touch stamp_sessions — work stamps are independent of

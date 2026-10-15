@@ -14,6 +14,7 @@ import type { TimeReportService } from "../service/timereport.service.js";
 import {
   AlreadyPresentError,
   AlreadyStampedInError,
+  AttendanceOpenFromEarlierDayError,
   AttendanceSessionAlreadyStoppedError,
   AttendanceSessionNotFoundError,
   DuplicateEmployeeNumberError,
@@ -170,6 +171,13 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
       if (err instanceof InactiveEmployeeError || err instanceof AlreadyPresentError) {
         return reply.code(409).send(errorBody(err));
       }
+      if (err instanceof AttendanceOpenFromEarlierDayError) {
+        return reply
+          .code(409)
+          .send({ ...errorBody(err), attendanceSessionId: err.attendanceSessionId, startedAt: err.startedAt.toISOString() });
+      }
+      if (err instanceof InvalidAttendanceIntervalError) return reply.code(400).send(errorBody(err));
+      if (err instanceof PayrollPeriodLockedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

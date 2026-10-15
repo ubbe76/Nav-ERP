@@ -12,6 +12,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import {
   AlreadyPresentError,
   AlreadyStampedInError,
+  AttendanceOpenFromEarlierDayError,
   AttendanceSessionAlreadyStoppedError,
   AttendanceSessionNotFoundError,
   DuplicateEmployeeNumberError,
@@ -858,5 +859,163 @@ describe("närvaro och sluttid", () => {
     // nothing was written by the refusals
     const open = await timeReportService.listStampSessions(true);
     expect(open.some((s) => s.id === stamp.id)).toBe(true);
+  });
+});
+
+describe("rättad och glömd närvaro", () => {
+  const H = 3_600_000;
+  async function presentWithWork(empNo: string) {
+    const { user, operation } = await makeReleasedMoWithOperation();
+    const employee = await timeReportService.createEmployee({ employeeNumber: empNo, name: empNo, active: true });
+    const attendance = await timeReportService.attendanceIn({ employeeId: employee.id }, user.id);
+    const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id);
+    return { user, operation, employee, attendance, stamp };
+  }
+  async function stampRow(id: string) {
+    const rows = [
+      ...(await db.execute(sql`SELECT paused_at, paused_seconds FROM stamp_sessions WHERE id = ${id}`)),
+    ] as { paused_at: Date | string | null; paused_seconds: string }[];
+    return rows[0]!;
+  }
+  // Same local-time rule as the service (localDateOf = sv-SE date).
+  function startOfLocalToday() {
+    return new Date(`${new Date().toLocaleDateString("sv-SE")}T00:00:00`);
+  }
+
+  it("regel 7: closing an open attendance pauses the employee's open work at the stop time", async () => {
+    const { user, attendance, stamp } = await presentWithWork("E-R7A");
+    const start = new Date(Date.now() - 20 * H);
+    await db.execute(sql`UPDATE attendance_sessions SET started_at = ${start.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
+    await db.execute(sql`UPDATE stamp_sessions SET started_at = ${start.toISOString()}::timestamptz WHERE id = ${stamp.id}`);
+    const stop = new Date(start.getTime() + 9 * H);
+
+    const result = await timeReportService.updateAttendanceSession(attendance.id, { stoppedAt: stop.toISOString() }, user.id);
+
+    expect(result.pausedWorkSessions).toBe(1);
+    expect(new Date((await stampRow(stamp.id)).paused_at!).getTime()).toBe(stop.getTime());
+  });
+
+  it("regel 7: work stamped in after the corrected stop time is not paused", async () => {
+    const { user, attendance, stamp } = await presentWithWork("E-R7B");
+    const start = new Date(Date.now() - 20 * H);
+    await db.execute(sql`UPDATE attendance_sessions SET started_at = ${start.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
+    const stop = new Date(start.getTime() + 9 * H); // the stamp started now(), after stop
+    const result = await timeReportService.updateAttendanceSession(attendance.id, { stoppedAt: stop.toISOString() }, user.id);
+    expect(result.pausedWorkSessions).toBe(0);
+    expect((await stampRow(stamp.id)).paused_at).toBeNull();
+  });
+
+  it("regel 7: moving the stop time moves a pause that began at the old stop (2 s tolerance)", async () => {
+    const { user, attendance, stamp } = await presentWithWork("E-R7C");
+    const start = new Date(Date.now() - 20 * H);
+    const oldStop = new Date(start.getTime() + 10 * H);
+    await db.execute(
+      sql`UPDATE attendance_sessions SET started_at = ${start.toISOString()}::timestamptz, stopped_at = ${oldStop.toISOString()}::timestamptz WHERE id = ${attendance.id}`
+    );
+    // Pause written 300 ms after the attendance stop, like the old attendanceOut.
+    await db.execute(
+      sql`UPDATE stamp_sessions SET started_at = ${start.toISOString()}::timestamptz, paused_at = ${new Date(oldStop.getTime() + 300).toISOString()}::timestamptz WHERE id = ${stamp.id}`
+    );
+    const newStop = new Date(start.getTime() + 8 * H);
+
+    const result = await timeReportService.updateAttendanceSession(attendance.id, { stoppedAt: newStop.toISOString() }, user.id);
+
+    expect(result.movedPauses).toBe(1);
+    expect(new Date((await stampRow(stamp.id)).paused_at!).getTime()).toBe(newStop.getTime());
+  });
+
+  it("regel 7: resumed work is untouched when the stop time moves", async () => {
+    const { user, attendance, stamp } = await presentWithWork("E-R7D");
+    const start = new Date(Date.now() - 20 * H);
+    const oldStop = new Date(start.getTime() + 10 * H);
+    await db.execute(
+      sql`UPDATE attendance_sessions SET started_at = ${start.toISOString()}::timestamptz, stopped_at = ${oldStop.toISOString()}::timestamptz WHERE id = ${attendance.id}`
+    );
+    await db.execute(sql`UPDATE stamp_sessions SET paused_at = NULL, paused_seconds = 3600 WHERE id = ${stamp.id}`);
+    const result = await timeReportService.updateAttendanceSession(
+      attendance.id,
+      { stoppedAt: new Date(start.getTime() + 8 * H).toISOString() },
+      user.id
+    );
+    expect(result.movedPauses).toBe(0);
+    expect((await stampRow(stamp.id)).paused_at).toBeNull();
+  });
+
+  it("Gå hem pauses work at exactly the attendance stop instant", async () => {
+    const { user, attendance, stamp } = await presentWithWork("E-GO");
+    const { session } = await timeReportService.attendanceOut(attendance.id, user.id);
+    expect(new Date((await stampRow(stamp.id)).paused_at!).getTime()).toBe(session.stoppedAt!.getTime());
+  });
+
+  it("regel 8: an attendance left open since an earlier day must be closed first", async () => {
+    const { user, employee, attendance } = await presentWithWork("E-R8A");
+    const yesterday = new Date(Date.now() - 26 * H);
+    await db.execute(sql`UPDATE attendance_sessions SET started_at = ${yesterday.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
+    const err = await timeReportService.attendanceIn({ employeeId: employee.id }, user.id).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AttendanceOpenFromEarlierDayError);
+    expect((err as AttendanceOpenFromEarlierDayError).attendanceSessionId).toBe(attendance.id);
+    expect((err as AttendanceOpenFromEarlierDayError).startedAt.getTime()).toBe(yesterday.getTime());
+  });
+
+  it("regel 8: closes the forgotten attendance (pausing work then) and opens today's (resuming it now)", async () => {
+    const { user, employee, attendance, stamp } = await presentWithWork("E-R8B");
+    // Anchored on the local midnight so the forgotten stop is always on an
+    // earlier day, whatever time of day the suite runs.
+    const yStop = new Date(startOfLocalToday().getTime() - 8 * H);
+    const yStart = new Date(yStop.getTime() - 8 * H);
+    await db.execute(sql`UPDATE attendance_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
+    await db.execute(sql`UPDATE stamp_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${stamp.id}`);
+
+    const before = Date.now();
+    const today = await timeReportService.attendanceIn(
+      { employeeId: employee.id, forgottenStoppedAt: yStop.toISOString() },
+      user.id
+    );
+    const after = Date.now();
+
+    const old = [...(await db.execute(sql`SELECT stopped_at FROM attendance_sessions WHERE id = ${attendance.id}`))] as {
+      stopped_at: Date | string;
+    }[];
+    expect(new Date(old[0]!.stopped_at).getTime()).toBe(yStop.getTime());
+    expect(today.id).not.toBe(attendance.id);
+    expect(today.stoppedAt).toBeNull();
+    const s = await stampRow(stamp.id);
+    expect(s.paused_at).toBeNull();
+    // The pause ran from the forgotten stop to the new attendance-in.
+    expect(Number(s.paused_seconds)).toBeGreaterThanOrEqual((before - yStop.getTime()) / 1000 - 1);
+    expect(Number(s.paused_seconds)).toBeLessThanOrEqual((after - yStop.getTime()) / 1000 + 1);
+    expect((await timeReportService.listAttendanceSessions(true)).filter((a) => a.employeeId === employee.id)).toHaveLength(1);
+  });
+
+  it("regel 8: refuses a forgotten stop time outside (start, start of today) and in a locked period", async () => {
+    const { user, employee, attendance } = await presentWithWork("E-R8C");
+    const yStart = new Date(Date.now() - 26 * H);
+    await db.execute(sql`UPDATE attendance_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
+    await expect(
+      timeReportService.attendanceIn(
+        { employeeId: employee.id, forgottenStoppedAt: new Date(yStart.getTime() - H).toISOString() },
+        user.id
+      )
+    ).rejects.toBeInstanceOf(InvalidAttendanceIntervalError);
+    await expect(
+      timeReportService.attendanceIn({ employeeId: employee.id, forgottenStoppedAt: new Date().toISOString() }, user.id)
+    ).rejects.toBeInstanceOf(InvalidAttendanceIntervalError);
+    dateLocked = true;
+    await expect(
+      timeReportService.attendanceIn(
+        { employeeId: employee.id, forgottenStoppedAt: new Date(yStart.getTime() + H).toISOString() },
+        user.id
+      )
+    ).rejects.toBeInstanceOf(PayrollPeriodLockedError);
+    // nothing was written by the refusals
+    const open = (await timeReportService.listAttendanceSessions(true)).filter((a) => a.employeeId === employee.id);
+    expect(open.map((a) => a.id)).toEqual([attendance.id]);
+  });
+
+  it("regel 8: an attendance opened today still gives AlreadyPresentError", async () => {
+    const { user, employee } = await presentWithWork("E-R8D");
+    await expect(timeReportService.attendanceIn({ employeeId: employee.id }, user.id)).rejects.toBeInstanceOf(
+      AlreadyPresentError
+    );
   });
 });

@@ -49,6 +49,7 @@ import {
 import { PayrollPeriodLockedError } from "../src/modules/payroll/service/period-lock.js";
 import {
   AlreadyPresentError,
+  AttendanceOpenFromEarlierDayError,
   InvalidAttendanceIntervalError,
   InvalidStopTimeError,
   StopTimeNotAllowedError,
@@ -243,6 +244,7 @@ const cases: Array<[Error, string]> = [
   [new PeriodNotLockedError(2026, 1), ERROR_CODES.PERIOD_NOT_LOCKED],
   [new InvalidAttendanceIntervalError(), ERROR_CODES.INVALID_ATTENDANCE_INTERVAL],
   [new AlreadyPresentError(), ERROR_CODES.ALREADY_PRESENT],
+  [new AttendanceOpenFromEarlierDayError("x", new Date()), ERROR_CODES.ATTENDANCE_OPEN_FROM_EARLIER_DAY],
   [new InvalidStopTimeError(), ERROR_CODES.INVALID_STOP_TIME],
   [new StopTimeNotAllowedError(), ERROR_CODES.STOP_TIME_NOT_ALLOWED],
   [new DuplicateAbsenceError(), ERROR_CODES.DUPLICATE_ABSENCE],
