@@ -182,6 +182,10 @@ skriptad installation), sätt `SETUP_CODE` i `.env`. `/register` stänger sig
 själv så fort en användare finns, och fler användare skapas därefter av en
 inloggad admin via `POST /api/v1/auth/users`.
 
+Vill du prova systemet utan egna register: **System → Exempeldata** skapar ett
+påhittat företag med artiklar, struktur och operationer, kunder, leverantörer
+och lagersaldon. Det går bara på en tom installation.
+
 Föredrar du curl framför webbgränssnittet fungerar samma engångsanrop
 direkt mot API:et:
 
