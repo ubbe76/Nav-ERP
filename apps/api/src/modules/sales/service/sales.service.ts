@@ -893,10 +893,14 @@ export function createSalesService(
             configurationPatch = { ...stored, price: evaluated.configuration.price };
           }
         } else {
+          // An empty chain means there is no staffel the new quantity could
+          // have crossed, so the row keeps the price it already has (it was
+          // priced by hand). Only addRow/createQuote refuse an unpriced row.
           const resolution = await resolvePrice({ customerId: order.customerId, articleId: existing.articleId, quantity });
-          if (!resolution?.price) throw new PriceNotFoundError(resolution?.articleNumber ?? existing.articleId);
-          unitPrice = resolution.price.unitPrice;
-          if (discountPercent === undefined) discountPercent = resolution.price.discountPercent;
+          if (resolution?.price) {
+            unitPrice = resolution.price.unitPrice;
+            if (discountPercent === undefined) discountPercent = resolution.price.discountPercent;
+          }
         }
       }
 

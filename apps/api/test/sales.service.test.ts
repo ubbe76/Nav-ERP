@@ -903,6 +903,23 @@ describe("sales service — C3 kundpriser: row pricing", () => {
     ).rejects.toThrow(PriceNotFoundError);
   });
 
+  it("keeps the row's price and discount when a quantity change finds no price in the chain", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const article = await makeArticleNoPrice();
+    // Priced by hand, since the chain is empty.
+    const { order, rows } = await salesService.createQuote(
+      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 75, discountPercent: 5 }] },
+      user.id
+    );
+    // A quantity-only PATCH re-resolves the chain; with no rule at all there is
+    // no staffel to have crossed, so the row's own price stands.
+    const { row } = await salesService.updateRow(order.id, rows[0]!.id, { quantity: 4 });
+    expect(Number(row.quantityOrdered)).toBe(4);
+    expect(Number(row.unitPrice)).toBe(75);
+    expect(Number(row.discountPercent)).toBe(5);
+  });
+
   it("re-resolves on quantity change when unitPrice is omitted", async () => {
     const user = await makeUser();
     const customer = await makeCustomer();
