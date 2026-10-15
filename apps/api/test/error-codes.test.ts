@@ -188,6 +188,8 @@ import {
   SelfDeleteError,
 } from "../src/modules/auth/service/auth.service.js";
 import { LoginThrottledError } from "../src/modules/auth/service/login-throttle.js";
+import { ClientCustomerMismatchError, ClientScopeMissingError } from "../src/modules/auth/middleware/permission.middleware.js";
+import { ApiClientCustomerNotFoundError } from "../src/modules/oauth/service/oauth.service.js";
 import { DemoDataNotAvailableError } from "../src/modules/demo/service/demo-data.service.js";
 import {
   DuplicatePermissionGroupCodeError,
@@ -341,6 +343,9 @@ const cases: Array<[Error, string]> = [
   [new DemoDataNotAvailableError(["customers"]), ERROR_CODES.DEMO_DATA_NOT_AVAILABLE],
   // auth
   [new InvalidCredentialsError(), ERROR_CODES.INVALID_CREDENTIALS],
+  [new ClientScopeMissingError("prices:read"), ERROR_CODES.CLIENT_SCOPE_MISSING],
+  [new ClientCustomerMismatchError(), ERROR_CODES.CLIENT_CUSTOMER_MISMATCH],
+  [new ApiClientCustomerNotFoundError("x"), ERROR_CODES.API_CLIENT_CUSTOMER_NOT_FOUND],
   [new LoginThrottledError(900), ERROR_CODES.LOGIN_THROTTLED],
   [new InvalidSetupCodeError(), ERROR_CODES.INVALID_SETUP_CODE],
   [new RegistrationClosedError(), ERROR_CODES.REGISTRATION_CLOSED],

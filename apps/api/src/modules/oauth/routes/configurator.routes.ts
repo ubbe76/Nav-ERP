@@ -27,6 +27,12 @@ import {
   ConfiguratorVariantTooLongError,
 } from "../../configurator/service/configurator.errors.js";
 import { errorBody } from "../../system/service/error-body.js";
+import {
+  ClientCustomerMismatchError,
+  ClientScopeMissingError,
+  clientCustomerAllowed,
+  clientHasScope,
+} from "../../auth/middleware/permission.middleware.js";
 
 // Registered under app.ts's requireAuthOrClient scope — reachable by both a
 // human session (web UI / manual testing) and a scoped OAuth2 client-credentials
@@ -39,8 +45,14 @@ export async function configuratorRoutes(
 ) {
   const { salesService, articleService, configuratorService } = opts;
 
-  app.post("/quotes", async (req, reply) => {
+  app.post("/quotes", { config: { clientScope: "quotes:create" } }, async (req, reply) => {
     const input = createQuoteSchema.parse(req.body);
+    if (input.confirm && !clientHasScope(req, "orders:confirm")) {
+      return reply.code(403).send(errorBody(new ClientScopeMissingError("orders:confirm")));
+    }
+    if (!clientCustomerAllowed(req, input.customerId)) {
+      return reply.code(403).send(errorBody(new ClientCustomerMismatchError()));
+    }
     // Delprojekt 5: an API client may only order configurations of templates
     // published for the API (Visa i API); a session (the web's Ny kundorder)
     // is not affected. Checked here, before createQuote — the client flag
@@ -100,18 +112,29 @@ export async function configuratorRoutes(
   // (unknown article, resolvePrice's articleId lookup miss) is a 404, an
   // article with no matching price at any chain level is a 200 with
   // price: null (a real answer, just "nothing to charge beyond the base").
-  app.get("/price-quote", async (req, reply) => {
+  app.get("/price-quote", { config: { clientScope: "prices:read" } }, async (req, reply) => {
     const query = priceQuoteQuerySchema.parse(req.query);
+    if (!clientCustomerAllowed(req, query.customerId)) {
+      return reply.code(403).send(errorBody(new ClientCustomerMismatchError()));
+    }
     const result = await salesService.getPriceQuote(query);
     if (!result) return reply.code(404).send({ error: "Article not found" });
     return result;
   });
 
-  app.get<{ Params: { id: string } }>("/articles/:id/bom", async (req) => {
+  app.get<{ Params: { id: string } }>("/articles/:id/bom", { config: { clientScope: "structure:read" } }, async (req) => {
     return articleService.getBom(req.params.id);
   });
 
-  app.post<{ Params: { id: string } }>("/sales-orders/:id/confirm", async (req, reply) => {
+  app.post<{ Params: { id: string } }>("/sales-orders/:id/confirm", { config: { clientScope: "orders:confirm" } }, async (req, reply) => {
+    // A client bound to a customer may only confirm that customer's orders;
+    // an unknown order still answers 404 below.
+    if (req.apiClient?.customerId) {
+      const order = await salesService.getSalesOrder(req.params.id);
+      if (order && !clientCustomerAllowed(req, order.customerId)) {
+        return reply.code(403).send(errorBody(new ClientCustomerMismatchError()));
+      }
+    }
     try {
       return await salesService.confirm(req.params.id, req.user?.id ?? null);
     } catch (err) {

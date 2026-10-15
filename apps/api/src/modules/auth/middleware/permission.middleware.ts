@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
-import { satisfiesRule, type AccessRule, type AccessToken } from "@navet/shared";
+import { satisfiesRule, type AccessRule, type AccessToken, type ApiClientScope } from "@navet/shared";
 import { errorBody } from "../../system/service/error-body.js";
 
 // Behörighetsgrupper — every route under the protected scope resolves to ONE
@@ -18,6 +18,9 @@ declare module "fastify" {
   interface FastifyContextConfig {
     access?: AccessRule | "public";
     moduleAccess?: ModuleAccess;
+    // Behörigheter per OAuth-klient: the scope a client token needs on this
+    // route. Absent = no client may call it (fail closed).
+    clientScope?: ApiClientScope;
   }
 }
 
@@ -26,6 +29,31 @@ export class ForbiddenError extends Error {
     super("Insufficient permissions");
     this.name = "ForbiddenError";
   }
+}
+
+export class ClientScopeMissingError extends Error {
+  constructor(scope: string | undefined) {
+    super(scope ? `The client lacks the scope ${scope}` : "The route is not open to API clients");
+    this.name = "ClientScopeMissingError";
+  }
+}
+
+export class ClientCustomerMismatchError extends Error {
+  constructor() {
+    super("The client is bound to another customer");
+    this.name = "ClientCustomerMismatchError";
+  }
+}
+
+// For routes that take a customer: a client bound to a customer may only act
+// on that customer. Sessions and unbound clients pass.
+export function clientCustomerAllowed(req: FastifyRequest, customerId: string): boolean {
+  const bound = req.apiClient?.customerId ?? null;
+  return bound === null || bound === customerId;
+}
+
+export function clientHasScope(req: FastifyRequest, scope: ApiClientScope): boolean {
+  return !req.apiClient || req.apiClient.scopes.includes(scope);
 }
 
 export function resolveRule(
@@ -39,11 +67,18 @@ export function resolveRule(
 
 export function enforceAccess() {
   return async (req: FastifyRequest, reply: FastifyReply) => {
-    // The configurator scope also admits OAuth clients, which carry their own
-    // scope check and no user; a human session always has req.user here.
-    // Neither (should be unreachable after the auth hooks) is denied.
+    // The configurator scope also admits OAuth clients (no user): a client
+    // needs the route's config.clientScope in its own list — a route without
+    // one is closed to clients. A human session always has req.user here;
+    // neither (unreachable after the auth hooks) is denied.
     if (!req.user) {
-      if (req.apiClient) return;
+      if (req.apiClient) {
+        const scope = req.routeOptions.config.clientScope;
+        if (!scope || !req.apiClient.scopes.includes(scope)) {
+          return reply.code(403).send(errorBody(new ClientScopeMissingError(scope)));
+        }
+        return;
+      }
       return reply.code(403).send(errorBody(new ForbiddenError()));
     }
     const rule = resolveRule(req.routeOptions.config, req.method);

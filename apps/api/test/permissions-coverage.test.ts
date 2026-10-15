@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Fastify, { type FastifyInstance, type RouteOptions } from "fastify";
 import { inArray, sql } from "drizzle-orm";
 import { db, emailLog, employees, permissionGroups } from "@navet/db";
-import { effectivePermissions, satisfiesRule } from "@navet/shared";
+import { API_CLIENT_SCOPES, effectivePermissions, satisfiesRule } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 import { enforceAccess, registerModule, resolveRule } from "../src/modules/auth/middleware/permission.middleware.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -48,6 +48,29 @@ afterAll(async () => {
 function methods(route: RouteOptions): string[] {
   return (Array.isArray(route.method) ? route.method : [route.method]).filter((m) => m !== "HEAD");
 }
+
+// Behörigheter per OAuth-klient (4.9): exactly these routes are open to a
+// client token, each behind one scope; any other route refuses clients.
+const CLIENT_ROUTES = [
+  "GET /api/v1/configurator/templates",
+  "GET /api/v1/configurator/:articleId",
+  "POST /api/v1/configurator/:articleId/evaluate",
+  "POST /api/v1/quotes",
+  "GET /api/v1/price-quote",
+  "GET /api/v1/articles/:id/bom",
+  "POST /api/v1/sales-orders/:id/confirm",
+];
+
+describe("client scopes", () => {
+  it("open exactly the seven client routes, each with a known scope", () => {
+    const known: readonly string[] = API_CLIENT_SCOPES;
+    const scoped = routes
+      .filter((r) => (r.config as { clientScope?: string } | undefined)?.clientScope)
+      .flatMap((r) => methods(r).map((m) => ({ key: `${m} ${r.url}`, scope: (r.config as { clientScope: string }).clientScope })));
+    expect(scoped.map((r) => r.key).sort()).toEqual([...CLIENT_ROUTES].sort());
+    for (const r of scoped) expect(known).toContain(r.scope);
+  });
+});
 
 describe("every API route has an access rule", () => {
   it("finds routes at all", () => {
@@ -165,7 +188,7 @@ describe("enforceAccess", () => {
     mini.addHook("preHandler", async (req) => {
       const header = req.headers["x-test-user"];
       if (typeof header === "string") req.user = JSON.parse(header);
-      if (req.headers["x-test-client"]) req.apiClient = { id: "client" } as never;
+      if (req.headers["x-test-client"]) req.apiClient = { id: "client", scopes: ["prices:read"], customerId: null } as never;
     });
     mini.addHook("preHandler", enforceAccess());
     await registerModule(
@@ -174,6 +197,8 @@ describe("enforceAccess", () => {
         scope.get("/thing", async () => ({ ok: true }));
         scope.post("/thing", async () => ({ ok: true }));
         scope.post("/thing/special", { config: { access: ["lager"] } }, async () => ({ ok: true }));
+        scope.get("/client-thing", { config: { clientScope: "prices:read" } }, async () => ({ ok: true }));
+        scope.get("/client-other", { config: { clientScope: "orders:confirm" } }, async () => ({ ok: true }));
       },
       {},
       { read: ["office"], write: ["artiklar"] }
@@ -214,9 +239,16 @@ describe("enforceAccess", () => {
     await mini.close();
   });
 
-  it("lets an OAuth client (no user) through to its own scope check, but nothing else without a user", async () => {
+  it("lets an OAuth client (no user) through only on routes whose clientScope it holds", async () => {
     const mini = await miniApp();
-    expect((await mini.inject({ method: "POST", url: "/thing", headers: { "x-test-client": "1" } })).statusCode).toBe(200);
+    const client = { "x-test-client": "1" };
+    expect((await mini.inject({ method: "GET", url: "/client-thing", headers: client })).statusCode).toBe(200);
+    const other = await mini.inject({ method: "GET", url: "/client-other", headers: client });
+    expect(other.statusCode).toBe(403);
+    expect(other.json().code).toBe("client-scope-missing");
+    // No clientScope at all = closed to clients (fail closed).
+    expect((await mini.inject({ method: "POST", url: "/thing", headers: client })).json().code).toBe("client-scope-missing");
+    // Neither a user nor a client.
     expect((await mini.inject({ method: "POST", url: "/thing" })).statusCode).toBe(403);
     await mini.close();
   });
