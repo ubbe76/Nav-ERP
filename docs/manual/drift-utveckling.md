@@ -100,6 +100,15 @@ som kontrollerar att `gpg` och `rclone` finns, låter dig välja ett eller flera
 - **Lista och hämta:** `scripts/offsite-restore.sh lista` visar kopiorna; `scripts/offsite-restore.sh hämta <fil> [katalog]` laddar ner, kontrollerar summan och dekrypterar — en `.sql.gz` läses sedan in med `scripts/restore-db.sh` som ovan.
 - **Provåterställning:** `scripts/offsite-restore.sh verifiera` hämtar senaste dagliga kopian, kontrollerar summan, dekrypterar och testar att dumpen är komplett. Körs automatiskt varje månad; resultatet hamnar i `~/backups/nav-erp/offsite.log` (`OK:`/`FEL:`).
 
+## Windows
+
+Systemet kan köras på en Windows-dator med **Docker Desktop** och WSL 2 — samma containrar som på en Linux-server. Windows är inte testat i projektet, så se det som ett alternativ för utvärdering eller en mindre installation. Installationsstegen står i README:n under *Köra på Windows*.
+
+- Lägg repot inne i WSL (t.ex. `~/Nav-ERP` i Ubuntu-terminalen), inte under `C:\`.
+- Backup- och återställningsskripten ovan är bash-skript och körs i WSL-terminalen. Den nattliga dumpen schemaläggs med cron inne i WSL eller med Windows Schemaläggaren (`wsl bash ~/Nav-ERP/scripts/backup-db.sh`).
+- **Ladda ner en kopia på begäran** under **System → Säkerhetskopiering** fungerar som vanligt i webbläsaren.
+- Datorn måste vara igång för att systemet ska nås.
+
 ## Tekniska begränsningar
 
 - **Formulärens rullistor hämtar högst 1000 poster.** Registerlistorna (artiklar, kunder, ordrar …) söker och bläddrar serversidigt och skalar till tusentals poster, och artikelval görs med den sökbara artikelväljaren — men vissa rullistor i formulär (kund- och leverantörsval, ordervalen i Inleverans/Utleverans, orderlistan i stämpelterminalen) hämtar fortfarande hela registret upp till 1000 poster. Växer ett register förbi det behöver rullistan ersättas med en sökbar väljare.

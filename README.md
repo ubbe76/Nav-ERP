@@ -346,6 +346,36 @@ alla interface: **Docker skriver egna iptables-regler som går förbi ufw**,
 så en port som compose-filen publicerar på `0.0.0.0` är nåbar från
 internet även om brandväggen säger att den är stängd.
 
+### Köra på Windows
+
+Stacken är Linux-containrar och går att köra på Windows med
+**Docker Desktop** och dess WSL 2-backend. Windows är inte testat i
+projektet, så se det som ett alternativ för utvärdering eller en mindre
+installation.
+
+1. Installera [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/)
+   med WSL 2 och en Linux-distribution i WSL (t.ex. Ubuntu, `wsl --install`).
+2. Klona repot **inne i WSL** (i Ubuntu-terminalen, t.ex. under
+   `~/Nav-ERP`) — inte under `C:\`. Filsystemet blir mycket snabbare och
+   skripten körs i rätt miljö.
+3. Följ sedan stegen ovan från [1. Klona och konfigurera](#1-klona-och-konfigurera)
+   i WSL-terminalen: `.env`, `docker compose up -d --build`, engångskoden och
+   `http://localhost:3000`.
+
+Att känna till:
+
+- **Backup- och återställningsskripten är bash** (`scripts/*.sh`). Kör dem i
+  WSL-terminalen, inte i PowerShell. Schemalägg den nattliga dumpen med cron
+  inne i WSL, eller med Windows Schemaläggaren som anropar
+  `wsl bash ~/Nav-ERP/scripts/backup-db.sh`.
+- **Radbrytningar:** `.gitattributes` tvingar LF i `.sh`-filerna, så skripten
+  fungerar även om repot klonas med Git för Windows.
+- **Licens:** Docker Desktop är gratis för företag med färre än 250 anställda
+  och under 10 miljoner USD i omsättning; större företag behöver en betald
+  licens. Docker Engine installerad direkt i WSL har inga sådana villkor.
+- Datorn måste vara igång för att systemet ska nås, och portarna är bundna
+  till `127.0.0.1` på samma sätt som på Linux — se [Brandvägg](#4-brandvägg).
+
 ### Uppdatera en befintlig installation
 
 ```bash

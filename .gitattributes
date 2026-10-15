@@ -1,0 +1,4 @@
+# Shell scripts must keep LF line endings even when checked out on Windows
+# (Git for Windows' core.autocrlf would otherwise convert them to CRLF and
+# bash in WSL refuses to run them).
+*.sh text eol=lf
