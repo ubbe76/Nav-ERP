@@ -834,6 +834,13 @@
       "when": 1791958540559,
       "tag": "0118_purchase_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1792057488733,
+      "tag": "0119_api_client_scopes",
+      "breakpoints": true
     }
   ]
 }
