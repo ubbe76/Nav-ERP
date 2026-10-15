@@ -52,6 +52,7 @@ import {
   AttendanceOpenFromEarlierDayError,
   InvalidAttendanceIntervalError,
   InvalidStopTimeError,
+  StampSessionAlreadyStoppedError,
   StopTimeNotAllowedError,
 } from "../src/modules/timereport/service/timereport.service.js";
 
@@ -246,6 +247,7 @@ const cases: Array<[Error, string]> = [
   [new AlreadyPresentError(), ERROR_CODES.ALREADY_PRESENT],
   [new AttendanceOpenFromEarlierDayError("x", new Date()), ERROR_CODES.ATTENDANCE_OPEN_FROM_EARLIER_DAY],
   [new InvalidStopTimeError(), ERROR_CODES.INVALID_STOP_TIME],
+  [new StampSessionAlreadyStoppedError(), ERROR_CODES.STAMP_SESSION_ALREADY_STOPPED],
   [new StopTimeNotAllowedError(), ERROR_CODES.STOP_TIME_NOT_ALLOWED],
   [new DuplicateAbsenceError(), ERROR_CODES.DUPLICATE_ABSENCE],
   [new DuplicatePayrollCodeError("code", "X"), ERROR_CODES.DUPLICATE_PAYROLL_CODE],

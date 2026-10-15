@@ -62,6 +62,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "already-present": "Medarbetaren är redan instämplad",
   "attendance-open-from-earlier-day": "Närvaron har stått öppen sedan en tidigare dag — ange när du gick hem.",
   "invalid-stop-time": "Sluttiden måste vara efter instämplingen och inte i framtiden.",
+  "stamp-session-already-stopped":
+    "Stämplingen är redan utstämplad — operationen kan ha blivit klar. Rapportera antalet på tillverkningsordern.",
   "stop-time-not-allowed": "Bara arbetsledare och administratörer kan ange sluttid.",
   "duplicate-absence": "Frånvaro med samma kod finns redan på det datumet",
   "duplicate-payroll-code": "Koden eller namnet finns redan",

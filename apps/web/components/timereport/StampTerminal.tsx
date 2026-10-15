@@ -27,7 +27,7 @@ type Step =
   | { name: "pickOperation"; employee: EmployeeDirectoryEntry; order: ManufacturingOrder; operations: MOOperation[] }
   | { name: "stampOut"; employee: EmployeeDirectoryEntry; session: StampSession }
   | { name: "atf"; employee: EmployeeDirectoryEntry; atf: AtfStatus; scheduledMinutes: number | null }
-  | { name: "forgotten"; employee: EmployeeDirectoryEntry; startedAt: string };
+  | { name: "forgotten"; employee: EmployeeDirectoryEntry; attendanceId: string; startedAt: string };
 
 const IDLE_RESET_MS = 60_000;
 
@@ -136,6 +136,7 @@ export function StampTerminal({
     setOpenSessions(sessions);
     setOpenAttendance(attendance);
     setOrders(stampableOrders.rows);
+    return { sessions, attendance };
   }, []);
 
   // Badge scanners type the employee number and send Enter — accept hardware
@@ -151,7 +152,8 @@ export function StampTerminal({
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  function confirmEntry() {
+  async function confirmEntry() {
+    if (busy) return;
     const employee = employees.find(
       (e) => e.employeeNumber === entry || e.employeeNumber.replace(/\D/g, "") === entry
     );
@@ -162,9 +164,21 @@ export function StampTerminal({
     }
     setError(null);
     setEntry("");
-    const open = openAttendance.find((a) => a.employeeId === employee.id);
+    // Fresh lists before deciding: stamps closed elsewhere (an operation
+    // turning done stamps everyone out, regel 10) or attendance fixed in
+    // Attestering must not show up stale. On failure the cached lists do.
+    let attendance = openAttendance;
+    setBusy(true);
+    try {
+      attendance = (await refresh()).attendance;
+    } catch {
+      // keep the cached lists
+    } finally {
+      setBusy(false);
+    }
+    const open = attendance.find((a) => a.employeeId === employee.id);
     if (open && stockholmDay(open.startedAt) < stockholmDay(Date.now())) {
-      void openForgotten(employee, open.startedAt);
+      void openForgotten(employee, open.id, open.startedAt);
       return;
     }
     setStep({ name: "home", employee });
@@ -172,7 +186,7 @@ export function StampTerminal({
 
   // Rule 8: the attendance has been open since an earlier day — ask when
   // the person went home, prefilled with that day's scheduled end.
-  async function openForgotten(employee: EmployeeDirectoryEntry, startedAt: string) {
+  async function openForgotten(employee: EmployeeDirectoryEntry, attendanceId: string, startedAt: string) {
     setBusy(true);
     try {
       const day = stockholmDay(startedAt);
@@ -182,7 +196,7 @@ export function StampTerminal({
       const end = calendar[0]?.daySchedule?.endTime;
       setForgottenStop(end ? `${day}T${end.slice(0, 5)}` : "");
       setError(null);
-      setStep({ name: "forgotten", employee, startedAt });
+      setStep({ name: "forgotten", employee, attendanceId, startedAt });
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte hämta schemat."));
     } finally {
@@ -207,7 +221,11 @@ export function StampTerminal({
       setNotice(`Närvaron är rättad och du är instämplad igen, ${employee.name.split(" ")[0]}.`);
       setStep({ name: "home", employee });
     } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte spara tiden."));
+      setError(
+        err instanceof ApiError && err.code === "invalid-attendance-interval"
+          ? "Ange en tid den dagen du glömde stämpla ut — efter att du kom och före midnatt."
+          : apiErrorMessage(err, "Kunde inte spara tiden.")
+      );
     } finally {
       setBusy(false);
     }
@@ -297,8 +315,10 @@ export function StampTerminal({
       setError(null);
     } catch (err) {
       if (err instanceof ApiError && err.code === "attendance-open-from-earlier-day") {
-        const body = err.body as { startedAt?: string } | undefined;
-        if (body?.startedAt) return void openForgotten(employee, body.startedAt);
+        const body = err.body as { attendanceSessionId?: string; startedAt?: string } | undefined;
+        if (body?.attendanceSessionId && body.startedAt) {
+          return void openForgotten(employee, body.attendanceSessionId, body.startedAt);
+        }
       }
       setError(err instanceof Error ? err.message : "Närvarostämplingen misslyckades.");
     } finally {
@@ -308,12 +328,13 @@ export function StampTerminal({
 
   // Gå hem: stops the attendance session; open work stays stamped in but
   // pauses — the away time is excluded from reported hours, and the work
-  // resumes at the next attendance-in.
-  async function goHome(employee: EmployeeDirectoryEntry, attendance: AttendanceSession) {
+  // resumes at the next attendance-in. Also the forgotten view's Gå hem nu:
+  // worked past midnight, so the attendance open since yesterday stops now.
+  async function goHome(employee: EmployeeDirectoryEntry, attendanceId: string) {
     setBusy(true);
     try {
       const result = await apiFetch<{ pausedWorkSessions: number }>(
-        `/api/v1/attendance-sessions/${attendance.id}/stop`,
+        `/api/v1/attendance-sessions/${attendanceId}/stop`,
         { method: "POST" }
       );
       await refresh();
@@ -435,6 +456,21 @@ export function StampTerminal({
       setError(null);
       setStep({ name: "home", employee });
     } catch (err) {
+      if (err instanceof ApiError && err.code === "stamp-session-already-stopped") {
+        // Stamped out elsewhere (regel 10) while this view was open: show
+        // the current stamps instead of the stale one.
+        try {
+          await refresh();
+        } catch {
+          // keep the cached lists
+        }
+        setNote("");
+        setMarkDone(false);
+        setQuantityOk("");
+        setQuantityScrapped("");
+        setScrapReason("");
+        setStep({ name: "home", employee });
+      }
       setError(apiErrorMessage(err, "Utstämplingen misslyckades."));
     } finally {
       setBusy(false);
@@ -509,7 +545,7 @@ export function StampTerminal({
             onStampOut={(session) => setStep({ name: "stampOut", employee: step.employee, session })}
             onNewStamp={() => setStep({ name: "pickOrder", employee: step.employee })}
             onAttendanceIn={() => attendanceIn(step.employee)}
-            onGoHome={(attendance) => goHome(step.employee, attendance)}
+            onGoHome={(attendance) => goHome(step.employee, attendance.id)}
             onAtf={() => openAtf(step.employee)}
             onDone={resetToKeypad}
           />
@@ -581,6 +617,14 @@ export function StampTerminal({
             />
             <button type="button" className={styles.bigAction} disabled={busy} onClick={() => saveForgotten(step.employee)}>
               Spara och stämpla in
+            </button>
+            <button
+              type="button"
+              className={styles.attendanceButton}
+              disabled={busy}
+              onClick={() => goHome(step.employee, step.attendanceId)}
+            >
+              Gå hem nu
             </button>
             <BackRow label="Avbryt" onBack={resetToKeypad} />
           </section>

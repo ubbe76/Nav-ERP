@@ -11,7 +11,7 @@ Knappa in ditt **anställningsnummer** på sifferknappsatsen och tryck Enter/OK.
 - **Stämpla in närvaro** när du kommer — tiden registreras och du visas som närvarande.
 - **Gå hem** när du går för dagen. Är du fortfarande instämplad på arbeten **pausas de** — du är kvar instämplad, men tiden du är borta räknas inte in i rapporterad tid eller efterkalkyler. Arbetena återupptas automatiskt när du stämplar in närvaron nästa gång, och visas som **Pausad** i terminalen under tiden.
 - Stämplar du in på arbete utan att ha stämplat in närvaron stämplas närvaron in samtidigt ("Närvaron stämplades in") — och pausade arbeten återupptas precis som vid **Stämpla in närvaro**.
-- Har du glömt **Gå hem** frågar terminalen nästa gång du knappar in ditt nummer: "Du stämplade aldrig ut tisdag 14 oktober. När gick du hem?" Tiden är förifylld med den dagens schemaslut (tom om du inte hade schema). **Spara och stämpla in** stänger den gamla närvaron vid den tiden — arbetena räknas som pausade därifrån — och stämplar in dig för idag, så arbetena fortsätter nu. **Avbryt** går tillbaka till sifferknappsatsen.
+- Har du glömt **Gå hem** frågar terminalen nästa gång du knappar in ditt nummer: "Du stämplade aldrig ut tisdag 14 oktober. När gick du hem?" Tiden är förifylld med den dagens schemaslut (tom om du inte hade schema). **Spara och stämpla in** stänger den gamla närvaron vid den tiden — arbetena räknas som pausade därifrån — och stämplar in dig för idag, så arbetena fortsätter nu. Har du jobbat över midnatt och går hem nu, tryck **Gå hem nu** i stället. **Avbryt** går tillbaka till sifferknappsatsen.
 
 Närvarostämplingarna är underlaget för framtida löneunderlag och jämförs mot ditt schema (se [Personal & tid](/hjalp/personal-tid)).
 

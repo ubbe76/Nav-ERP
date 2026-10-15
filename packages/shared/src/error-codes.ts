@@ -30,6 +30,7 @@ export const ERROR_CODES = {
   ALREADY_PRESENT: "already-present",
   ATTENDANCE_OPEN_FROM_EARLIER_DAY: "attendance-open-from-earlier-day",
   INVALID_STOP_TIME: "invalid-stop-time",
+  STAMP_SESSION_ALREADY_STOPPED: "stamp-session-already-stopped",
   STOP_TIME_NOT_ALLOWED: "stop-time-not-allowed",
   DUPLICATE_ABSENCE: "duplicate-absence",
   DUPLICATE_PAYROLL_CODE: "duplicate-payroll-code",
