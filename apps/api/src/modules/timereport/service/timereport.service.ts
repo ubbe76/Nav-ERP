@@ -279,8 +279,14 @@ export function createTimeReportService(
       return repo.listTimeReportsByManufacturingOrder(manufacturingOrderId);
     },
 
-    async listStampSessions(onlyOpen: boolean) {
-      return repo.listStampSessions(onlyOpen);
+    // Frånvaro is health data: absentToday only reaches admin/supervisor
+    // (the route decides), everyone else gets rows without the key.
+    async listStampSessions(onlyOpen: boolean, opts: { employeeId?: string; includeAbsence?: boolean } = {}) {
+      const rows = await repo.listStampSessions(onlyOpen, {
+        employeeId: opts.employeeId,
+        absenceDate: opts.includeAbsence ? localDateOf(new Date()) : undefined,
+      });
+      return opts.includeAbsence ? rows : rows.map(({ absentToday: _absent, ...row }) => row);
     },
 
     // Stämpla in: clock an employee in on an MO operation. Stamping in on a

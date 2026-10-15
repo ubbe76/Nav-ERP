@@ -1,5 +1,6 @@
 import { and, count, desc, eq, gt, ilike, isNotNull, isNull, lt, or, sql, getTableColumns } from "drizzle-orm";
 import {
+  absences,
   articles,
   attendanceSessions,
   employees,
@@ -150,7 +151,7 @@ export function createTimeReportRepository(db: Db) {
 
     // Joined view for the terminal: who is stamped in, on which operation of
     // which order/article, since when.
-    async listStampSessions(onlyOpen: boolean) {
+    async listStampSessions(onlyOpen: boolean, opts: { employeeId?: string; absenceDate?: string } = {}) {
       return db
         .select({
           ...getTableColumns(stampSessions),
@@ -169,6 +170,11 @@ export function createTimeReportRepository(db: Db) {
           orderQuantity: manufacturingOrders.quantity,
           operationQuantityCompleted: moOperations.quantityCompleted,
           operationQuantityScrapped: moOperations.quantityScrapped,
+          // Joined query, so the column references render qualified (the
+          // single-table drizzle pitfall does not apply here).
+          absentToday: opts.absenceDate
+            ? sql<boolean>`exists (select 1 from ${absences} where ${absences.employeeId} = ${stampSessions.employeeId} and ${absences.date} = ${opts.absenceDate})`
+            : sql<boolean>`false`,
         })
         .from(stampSessions)
         .innerJoin(employees, eq(employees.id, stampSessions.employeeId))
@@ -176,7 +182,12 @@ export function createTimeReportRepository(db: Db) {
         .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
         .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
         .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
-        .where(onlyOpen ? isNull(stampSessions.stoppedAt) : undefined)
+        .where(
+          and(
+            onlyOpen ? isNull(stampSessions.stoppedAt) : undefined,
+            opts.employeeId ? eq(stampSessions.employeeId, opts.employeeId) : undefined
+          )
+        )
         .orderBy(desc(stampSessions.startedAt));
     },
 

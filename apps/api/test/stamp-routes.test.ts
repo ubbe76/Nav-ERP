@@ -27,7 +27,7 @@ const timeReportService = createTimeReportService(
   { log: async () => {} }
 );
 
-const TRUNCATE = sql`TRUNCATE mo_reports, mo_report_materials, attendance_sessions, stamp_sessions, time_reports, employees, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, bom_components, articles, payroll_periods, audit_log, user_settings, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE absences, absence_types, mo_reports, mo_report_materials, attendance_sessions, stamp_sessions, time_reports, employees, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, bom_components, articles, payroll_periods, audit_log, user_settings, users CASCADE`;
 // Only the groups this file creates — the migration's seeded groups (ALLA,
 // VERKSTAD) belong to other test files.
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'STOP%'`;
@@ -158,5 +158,39 @@ describe("POST /stamp-sessions/:id/stop with a stop time", () => {
     });
     expect(ok.statusCode).toBe(201);
     expect(ok.json().id).not.toBe(attendance!.id);
+  });
+  it("marks absentToday for supervisors only (health data) and filters on employeeId", async () => {
+    const { stamp } = await setup();
+    const other = await timeReportService.createEmployee({ employeeNumber: "108", name: "Annan", active: true });
+    const [operation] = await db.execute(sql`SELECT mo_operation_id FROM stamp_sessions WHERE id = ${stamp.id}`) as unknown as { mo_operation_id: string }[];
+    await timeReportService.stampIn({ employeeId: other.id, moOperationId: operation!.mo_operation_id });
+    const today = new Date().toLocaleDateString("sv-SE");
+    await db.execute(sql`INSERT INTO absence_types (code, name, paxml_code) VALUES ('SJK', 'Sjuk', '1')`);
+    await db.execute(
+      sql`INSERT INTO absences (employee_id, absence_type_id, date, minutes) SELECT ${stamp.employeeId}, id, ${today}::date, 480 FROM absence_types WHERE code = 'SJK'`
+    );
+
+    const supervisor = await session("supervisor", ["tillverkning"]);
+    const res = await app.inject({ method: "GET", url: "/api/v1/stamp-sessions?open=true", headers: { cookie: supervisor } });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json() as { employeeId: string; absentToday?: boolean }[];
+    expect(rows.find((r) => r.employeeId === stamp.employeeId)!.absentToday).toBe(true);
+    expect(rows.find((r) => r.employeeId === other.id)!.absentToday).toBe(false);
+
+    const terminal = await session("user", ["terminal"]);
+    const plain = await app.inject({ method: "GET", url: "/api/v1/stamp-sessions?open=true", headers: { cookie: terminal } });
+    expect(plain.statusCode).toBe(200);
+    expect(plain.json().length).toBe(2);
+    for (const row of plain.json()) expect(row).not.toHaveProperty("absentToday");
+
+    const filtered = await app.inject({
+      method: "GET",
+      url: `/api/v1/stamp-sessions?open=true&employeeId=${other.id}`,
+      headers: { cookie: supervisor },
+    });
+    expect((filtered.json() as { employeeId: string }[]).map((r) => r.employeeId)).toEqual([other.id]);
+
+    const bad = await app.inject({ method: "GET", url: "/api/v1/stamp-sessions?employeeId=abc", headers: { cookie: supervisor } });
+    expect(bad.statusCode).toBe(400);
   });
 });

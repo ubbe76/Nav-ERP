@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import {
   attendanceInSchema,
   createEmployeeSchema,
@@ -108,9 +109,18 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
   });
 
   // Stämplingar — the stamp terminal's endpoints.
-  app.get<{ Querystring: { open?: string } }>("/stamp-sessions", { config: { access: TERMINAL_READ } }, async (req) => {
-    return service.listStampSessions(req.query.open === "true");
-  });
+  app.get<{ Querystring: { open?: string; employeeId?: string } }>(
+    "/stamp-sessions",
+    { config: { access: TERMINAL_READ } },
+    async (req) => {
+      const employeeId = z.string().uuid().optional().parse(req.query.employeeId);
+      const role = req.user!.role;
+      return service.listStampSessions(req.query.open === "true", {
+        employeeId,
+        includeAbsence: role === "admin" || role === "supervisor",
+      });
+    }
+  );
 
   app.post("/stamp-sessions", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {
     const input = stampInSchema.parse(req.body);
