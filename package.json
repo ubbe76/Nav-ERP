@@ -1,0 +1,32 @@
+{
+  "name": "nav-erp",
+  "private": true,
+  "version": "0.1.0-alpha",
+  "license": "GPL-3.0-or-later",
+  "author": "Urban Källefors",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run generate --workspace packages/db",
+    "db:migrate": "npm run migrate --workspace packages/db"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.15",
+    "typescript": "^5.5.4",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "overrides": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}

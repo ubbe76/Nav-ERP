@@ -1,0 +1,132 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp
+      # Read from .env. Postgres only applies it when the volume is first
+      # initialised — changing it later does not change an existing
+      # database's password (see README, "Uppdatera en befintlig installation").
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD måste sättas i .env — se .env.example}
+      POSTGRES_DB: erp
+    # Loopback only: host-side tools (npm run dev:api, db:migrate, backups)
+    # reach it, the network does not. Docker writes its own iptables rules
+    # that bypass ufw, so "0.0.0.0" here would put the database on the
+    # internet regardless of the host firewall.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - erp_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Throwaway database for the API test suite (apps/api: `npm run test`).
+  # Data lives in RAM (tmpfs) and durability is switched off — every test
+  # TRUNCATEs, and on the regular disk-backed instance those syncs made the
+  # suite take hours. Nothing here survives a restart, by design: the test
+  # run's global setup migrates a fresh database. Never point anything but
+  # tests at it. Start with: docker compose --profile test up -d postgres-test
+  postgres-test:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp_dev_password
+      POSTGRES_DB: erp_test
+    # Throwaway data and a fixed password (apps/api's test script defaults
+    # to it), so loopback only, same as the main database.
+    ports:
+      - "127.0.0.1:5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data:size=1g
+    command: >
+      postgres
+      -c fsync=off
+      -c synchronous_commit=off
+      -c full_page_writes=off
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # DATABASE_URL stays hardcoded to the "postgres" service hostname —
+      # that's container-network-internal, not something that varies by
+      # deployment host. The password and JWT_SECRET/WEB_ORIGIN/COOKIE_SECURE
+      # below DO vary per deployment and are read from .env (Compose loads it
+      # automatically). The password goes into a URL unescaped, so it must be
+      # URL-safe (openssl rand -hex 24 is).
+      DATABASE_URL: postgresql://erp:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD måste sättas i .env — se .env.example}@postgres:5432/erp
+      NODE_ENV: ${NODE_ENV:-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET måste sättas — generera en lång slumpsträng}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      # Unset by default — the api derives Secure from NODE_ENV then. Set to
+      # "false" to force a non-Secure cookie on a plain-HTTP LAN deployment.
+      COOKIE_SECURE: ${COOKIE_SECURE:-}
+      # Unset by default: the per-IP login throttle stays off, because every
+      # request reaches the api from the web container and the
+      # X-Forwarded-For it passes on is whatever the client sent. Set it
+      # (Fastify trustProxy; "1" = the proxy's last X-Forwarded-For entry)
+      # only behind a reverse proxy that writes the header itself — see README.
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      # Empty = a random one-time code for /register, printed in the log.
+      SETUP_CODE: ${SETUP_CODE:-}
+    # Loopback only. The browser never talks to the api directly — the web
+    # container proxies /api/v1/* (including the OAuth token endpoint for
+    # integrations) over the Docker network — so only host-side scripts
+    # (scripts/lib/export-sie.sh) need this port.
+    ports:
+      - "127.0.0.1:4000:4000"
+    healthcheck:
+      # 127.0.0.1, not localhost: the api binds IPv4-only ("0.0.0.0"), but
+      # Alpine's /etc/hosts resolves "localhost" to ::1 first too, and
+      # busybox wget doesn't fall back to the IPv4 address — it just fails
+      # with "Connection refused" against a server that is, in fact, up.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # Empty by default — the web app proxies /api/v1/* to the api container
+      # (rewrite in next.config.js), so the browser never needs a separate API
+      # host. Only set NEXT_PUBLIC_API_URL to expose the API on its own host.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+      # Server-side (Server Component) fetches from inside this container —
+      # goes over Docker's internal network, not the public NEXT_PUBLIC_API_URL.
+      # Container-network-internal, so unlike NEXT_PUBLIC_API_URL it does NOT
+      # vary by deployment host (same reasoning as api's hardcoded DATABASE_URL).
+      INTERNAL_API_URL: http://api:4000
+      NODE_ENV: ${NODE_ENV:-production}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      # 127.0.0.1 for the same reason as api's healthcheck above.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  erp_postgres_data:

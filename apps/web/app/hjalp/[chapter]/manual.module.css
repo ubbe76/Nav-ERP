@@ -1,0 +1,125 @@
+.crumb {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.article {
+  max-width: 760px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: 28px 34px 34px;
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--color-text-primary);
+}
+
+.article h1,
+.article h2,
+.article h3 {
+  scroll-margin-top: 24px;
+}
+
+.article h1 {
+  font-family: var(--font-display);
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+
+.article h2 {
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  margin: 28px 0 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-divider);
+}
+
+.article h3 {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 20px 0 6px;
+}
+
+.article p {
+  margin: 0 0 12px;
+}
+
+.article ul,
+.article ol {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+
+.article li {
+  margin-bottom: 4px;
+}
+
+.article code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  background: var(--color-divider);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+.article table {
+  border-collapse: collapse;
+  margin: 0 0 14px;
+  width: 100%;
+  font-size: 13.5px;
+}
+
+.article th,
+.article td {
+  border: 1px solid var(--color-border);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.article th {
+  background: var(--color-divider);
+  font-weight: 600;
+}
+
+.article blockquote {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--accent);
+  background: var(--color-divider);
+  border-radius: 0 8px 8px 0;
+}
+
+.article blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.article strong {
+  font-weight: 600;
+}
+
+.article a {
+  color: var(--accent-fg);
+}
+
+.pager {
+  max-width: 760px;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+
+.pagerLink {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.pagerLink:hover {
+  color: var(--accent-fg);
+}

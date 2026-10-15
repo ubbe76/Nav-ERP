@@ -1,0 +1,1 @@
+ALTER TABLE "cost_calculation_operation_rows" ADD COLUMN "setup_hours" numeric(12, 4);

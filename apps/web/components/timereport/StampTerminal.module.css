@@ -1,0 +1,632 @@
+.terminal {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.headerTitle {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
+.clock {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.exitLink {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+.exitLink:hover {
+  color: var(--color-text-primary);
+}
+
+.error {
+  margin: 16px auto 0;
+  max-width: 560px;
+  width: calc(100% - 44px);
+  padding: 12px 16px;
+  border-radius: var(--radius-control);
+  background: var(--status-stopped-bg);
+  color: var(--status-stopped-text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.notice {
+  margin: 16px auto 0;
+  max-width: 560px;
+  width: calc(100% - 44px);
+  padding: 12px 16px;
+  border-radius: var(--radius-control);
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Närvaro (kom/gå) — a status strip above the work stamps. */
+.attendanceCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 18px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+}
+.attendanceCard[data-present="true"] {
+  border-left: 3px solid var(--status-running);
+}
+
+.attendanceText {
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.attendanceCard[data-present="false"] .attendanceText {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.attendanceButton {
+  min-height: 48px;
+  padding: 0 20px;
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.attendanceButton:hover {
+  background: var(--color-bg);
+}
+.attendanceButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.attendanceButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.attendanceButtonIn {
+  color: var(--btn-primary-text);
+  background: var(--btn-primary-bg);
+  border-color: transparent;
+}
+.attendanceButtonIn:hover {
+  background: var(--btn-primary-bg);
+  filter: brightness(1.05);
+}
+
+.stage {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px 22px 48px;
+}
+
+.keypadStep,
+.listStep {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.prompt {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+  text-align: center;
+}
+
+.promptMeta {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.entry {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.entryPlaceholder {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+/* Touch terminal: every key comfortably over the 48px minimum. */
+.key {
+  height: 72px;
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.key:hover {
+  background: var(--color-bg);
+}
+.key:active {
+  transform: scale(0.98);
+}
+.key:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.keyOk {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border-color: transparent;
+}
+.keyOk:hover {
+  background: var(--btn-primary-bg);
+  filter: brightness(1.05);
+}
+
+.hint {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin: 0;
+}
+
+.choiceList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 16px 18px;
+  min-height: 64px;
+  text-align: left;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.choice:hover {
+  background: var(--color-bg);
+}
+.choice:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.choice:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* pickOrder: one order per line so a long list fits the screen. The name
+   column soaks up the slack and truncates; number columns never wrap. Still
+   48px tall — the touch minimum — where .choice is 64px for two lines. */
+.orderRow {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  min-height: 48px;
+  text-align: left;
+  white-space: nowrap;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.orderRow:hover {
+  background: var(--color-bg);
+}
+.orderRow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.orderRow:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.orderRowNumber {
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.orderRowName {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--color-text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orderRowMeta {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+}
+
+/* pickOrder search field — the terminal's input scale (see .note), full
+   width, touch-height. */
+.search {
+  width: 100%;
+  min-height: 48px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  padding: 10px 14px;
+}
+.search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* An open stamp — the accent edge says "this is running". */
+.choiceOpen {
+  border-left: 3px solid var(--status-running);
+}
+
+.choicePrimary {
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.choiceSecondary {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+}
+
+/* pickOperation: a checkbox to the left of the row instead of a click-to-
+   start button — row click toggles the checkbox, it doesn't start work. */
+.choiceCheckRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  min-height: 64px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.choiceCheckRow[data-checked="true"] {
+  border-left: 3px solid var(--accent);
+}
+
+.choiceCheckbox {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.choiceCheckText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.summary {
+  padding: 16px 18px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summaryLine {
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.summarySecondary {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+}
+
+/* Stamp-out: Planerat / Klart / (Kasserat) / Kvar on the operation so far. */
+.progressTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.progressTile {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  margin: 0;
+}
+
+.progressTile dt {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.progressTile dd {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* The status tokens are theme-independent (light bg + dark text in both
+   themes, like StatusPill) — pair the bg with its own text colour, or the
+   dark theme's light text vanishes on it. */
+.progressTile[data-emphasis="true"] {
+  background: var(--status-running-bg);
+  border-color: transparent;
+}
+
+.progressTile[data-emphasis="true"] dt,
+.progressTile[data-emphasis="true"] dd {
+  color: var(--status-running-text);
+}
+
+/* Packinstruktion — shop-floor info the operator needs before packing the
+   operation's output, so it gets its own accented callout instead of being
+   just another muted secondary line. */
+.packingNote {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--status-running-text);
+  background: var(--status-running-bg);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  margin-top: 4px;
+}
+
+.note {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  padding: 12px 14px;
+  resize: vertical;
+}
+.note:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Per-stint quantity report at stamp-out (Antal OK / Kasserat). */
+.quantityRow {
+  display: grid;
+  /* minmax(0, …) + width 100% on the inputs: a number input's intrinsic
+     width otherwise pushes the two columns past the 560px step width. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.quantityField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.quantityField input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font-family: var(--font-body);
+  font-size: 20px;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  padding: 12px 14px;
+}
+.quantityField input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 0 16px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.toggleBox {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--color-border-control);
+  background: var(--color-bg);
+  flex-shrink: 0;
+}
+.toggle[data-on="true"] .toggleBox {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.toggle[data-on="true"] .toggleBox::after {
+  content: "✓";
+  display: block;
+  color: var(--accent-text);
+  font-size: 15px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.bigAction {
+  min-height: 64px;
+  font-family: var(--font-body);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--btn-primary-text);
+  background: var(--btn-primary-bg);
+  border: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.bigAction:hover {
+  filter: brightness(1.05);
+}
+.bigAction:active {
+  transform: scale(0.99);
+}
+.bigAction:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.bigAction:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.backButton {
+  min-height: 52px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.backButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+}
+.backButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .stage {
+    padding: 20px 14px 32px;
+  }
+  .header {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  .prompt {
+    font-size: 20px;
+  }
+  .key {
+    height: 62px;
+  }
+  /* Narrow screens: TO number + name on the first line, article number,
+     quantity and status on a second — never a horizontal scroll. */
+  .orderRow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    row-gap: 2px;
+  }
+  .orderRowNumber {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .orderRowName {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+  .orderRowMeta {
+    grid-row: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .key:active,
+  .bigAction:active {
+    transform: none;
+  }
+}

@@ -1,0 +1,112 @@
+/* The header band sits above the tab strip and fills the column. */
+.card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(190px, 240px) minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5) var(--space-4);
+  align-items: start;
+  min-width: 0;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.field {
+  min-width: 0;
+}
+
+/* "Variant av 63000 …" under the grid, on a stocked variant's card. */
+.variantOf {
+  margin-top: var(--space-3);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* Same type treatment as the document header card (DocumentHeaderCard.module.css),
+   which in turn matches the table's column headers — so the article card, the
+   order cards and the row grids read as one system. */
+.label {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-bottom: 3px;
+}
+
+.value {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  /* The picker beside it is an input; align the read-only values with its text
+     rather than with the top of its box. */
+  padding-top: 9px;
+}
+
+/* The benämning carries the card's identity now that the big page title is
+   gone, so it is set larger than the other values. */
+.name {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+  padding-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+/* Fantom/Inaktiv — flags that used to be visible only in the Allmänt form. */
+.tag {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-draft-bg);
+  color: var(--status-draft-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.unit {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* Artikelöversikt button + help link, side by side. */
+.help {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+@media (max-width: 1024px) {
+  .grid {
+    grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .card {
+    flex-wrap: wrap;
+  }
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+  .name {
+    font-size: 17px;
+  }
+}

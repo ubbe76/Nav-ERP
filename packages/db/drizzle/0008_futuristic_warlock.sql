@@ -1,0 +1,2 @@
+ALTER TABLE "work_centers" ADD COLUMN "hourly_rate" numeric(10, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "work_centers" ADD COLUMN "overhead_percent" numeric(5, 2) DEFAULT '0' NOT NULL;

@@ -1,0 +1,8 @@
+/* The surface every form/panel in the app sits on. Same tokens the table
+   and the dashboard cards use, so panels read as one family. */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  padding: var(--space-card-padding);
+}

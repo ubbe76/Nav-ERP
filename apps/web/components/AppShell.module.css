@@ -1,0 +1,82 @@
+.themeRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-bottom: 24px;
+}
+
+/* Full-height app shell: the sidebar column runs edge-to-edge from the
+   viewport's top-left (no floating-island padding around it), and the
+   content column carries all the whitespace itself. */
+.frame {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  min-height: 100vh;
+}
+
+.main {
+  padding: 28px 40px 48px;
+  background: var(--color-bg);
+  /* The content column is the 1fr grid item, and a grid item's floor is its
+     min-content width. The row tables (ui/Table) build their grid from fixed px
+     columns — on the sales order card those sum to more than a 1366px viewport
+     leaves — so without this the track grows and the whole page scrolls
+     sideways. Table.module.css already sets overflow-x: auto, but that only
+     zeroes the minimum size of the table's own box, not of this grid item, so
+     the in-card scroller never got the chance to engage. */
+  min-width: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+/* The topbar's button row (links to sub-registers, + Ny …, the help link).
+   It must wrap: on a phone a non-wrapping row is wider than the screen, and
+   iOS Safari then zooms the whole page out to fit it. */
+.topbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 1024px) {
+  .frame {
+    grid-template-columns: 1fr;
+  }
+  .main {
+    padding: 26px 20px 32px;
+    padding-top: 20px; /* the theme row inside .main clears the hamburger */
+  }
+}
+
+@media (max-width: 640px) {
+  .main {
+    padding: 16px 16px 40px;
+  }
+  .title {
+    font-size: 22px;
+  }
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--color-text-primary);
+}
+
+.meta {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}

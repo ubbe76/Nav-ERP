@@ -1,0 +1,248 @@
+.sidebar {
+  width: 236px;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  padding: 24px 16px;
+  /* Sticky full-viewport column: the nav (and its user footer, pinned by
+     margin-top: auto) stays put while the content column scrolls. The
+     ≤1024px media query below overrides this into an off-canvas drawer. */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.menuButton {
+  display: none;
+}
+
+.menuBar {
+  display: block;
+  width: 16px;
+  height: 2px;
+  background: var(--color-text-primary);
+  border-radius: 1px;
+}
+
+.backdrop {
+  display: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+  margin-bottom: 24px;
+}
+
+.wordmarkFull {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.wordmarkCompact {
+  display: none;
+}
+
+.collapseButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.collapseButton:hover {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+
+/* Below tablet width the sidebar becomes an off-canvas drawer, toggled by
+   the hamburger button, instead of a permanent grid column (see
+   AppShell.module.css / page.module.css for the matching .frame collapse). */
+@media (max-width: 1024px) {
+  .menuButton {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 38px;
+    height: 38px;
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 50;
+    border-radius: var(--radius-control-sm);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    cursor: pointer;
+  }
+
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: var(--color-overlay);
+    z-index: 45;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 48;
+    width: 260px;
+    min-height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 200ms ease;
+    box-shadow: var(--shadow-frame);
+  }
+  .sidebar[data-open="true"] {
+    transform: translateX(0);
+  }
+
+  /* The drawer already collapses to nothing off-canvas — the desktop
+     icons-only mode has no meaning here, so its toggle is hidden. */
+  .collapseButton {
+    display: none;
+  }
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control-sm);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.item:hover {
+  background: var(--color-divider);
+}
+.icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.label {
+  white-space: nowrap;
+}
+
+.item[data-active="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.item[data-disabled="true"] {
+  cursor: default;
+  opacity: 0.45;
+}
+.item[data-disabled="true"]:hover {
+  background: none;
+}
+
+/* Icons-only collapsed mode, desktop only: the drawer breakpoint above
+   ignores data-collapsed entirely. The parent grids use `auto 1fr`, so the
+   sidebar's own width is what collapses the column. */
+@media (min-width: 1025px) {
+  .sidebar[data-animated="true"] {
+    transition: width 180ms ease;
+  }
+
+  .sidebar[data-collapsed="true"] {
+    width: 64px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .sidebar[data-collapsed="true"] .header {
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 0;
+  }
+  .sidebar[data-collapsed="true"] .wordmarkFull {
+    display: none;
+  }
+  .sidebar[data-collapsed="true"] .wordmarkCompact {
+    display: flex;
+  }
+
+  .sidebar[data-collapsed="true"] .item {
+    justify-content: center;
+    padding: 10px 0;
+  }
+  .sidebar[data-collapsed="true"] .label {
+    display: none;
+  }
+
+  .sidebar[data-collapsed="true"] .footer {
+    justify-content: center;
+  }
+  .sidebar[data-collapsed="true"] .userText {
+    display: none;
+  }
+}
+
+.footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--color-track);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.userName {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.userRole {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}

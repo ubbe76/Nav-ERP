@@ -1,0 +1,28 @@
+.wordmark {
+  display: block;
+  flex-shrink: 0;
+  width: auto;
+}
+
+/* Colors come from the brand logo files: nav-erp-logo.svg (light) and
+   nav-erp-logo-dark.svg (dark), mapped to the wordmark tokens in tokens.css
+   so the one inlined SVG serves both themes. */
+.symbolRays {
+  stroke: var(--wordmark-symbol);
+}
+
+.symbolCenter {
+  fill: var(--wordmark-symbol-center);
+}
+
+.navText {
+  fill: var(--wordmark-color);
+}
+
+.divider {
+  fill: var(--wordmark-divider);
+}
+
+.erpText {
+  fill: var(--wordmark-erp);
+}

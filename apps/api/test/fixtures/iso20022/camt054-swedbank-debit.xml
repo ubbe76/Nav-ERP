@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Swedbank's MIG 1.0 camt.054.001.02 Debit (not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>SWEDSESSDEBT20241015000001</MsgId><CreDtTm>2024-10-15T18:02:11</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>SWEDSESSDEBT2024101500000100001</Id>
+      <CreDtTm>2024-10-15T18:02:11</CreDtTm>
+      <Acct><Id><Othr><Id>5512348</Id><SchmeNm><Prtry>BGNR</Prtry></SchmeNm></Othr></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <Amt Ccy="SEK">21350.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-15</Dt></BookgDt>
+        <AcctSvcrRef>2024101577260001</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>NTAV</Cd><SubFmlyCd>NTAV</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs>
+              <MsgId>BO-7</MsgId>
+              <AcctSvcrRef>202410157726000100000001</AcctSvcrRef>
+              <PmtInfId>BO-7-20241015</PmtInfId>
+              <EndToEndId>BO-7-1</EndToEndId>
+            </Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">12500.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Cdtr><Nm>Plåtlagret AB</Nm></Cdtr></RltdPties>
+            <RmtInf><Strd><CdtrRefInf><Tp><CdOrPrtry><Cd>SCOR</Cd></CdOrPrtry></Tp><Ref>4605127</Ref></CdtrRefInf></Strd></RmtInf>
+          </TxDtls>
+          <TxDtls>
+            <Refs>
+              <MsgId>BO-7</MsgId>
+              <AcctSvcrRef>202410157726000100000002</AcctSvcrRef>
+              <PmtInfId>BO-7-20241015</PmtInfId>
+              <EndToEndId>BO-7-3</EndToEndId>
+            </Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">8850.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Cdtr><Nm>Exempelhydraulik AB</Nm></Cdtr></RltdPties>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

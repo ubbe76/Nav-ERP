@@ -1,0 +1,19 @@
+/* Same thin fill-bar idiom as Beläggningens .fillTrack/.fillBar
+   (BelaggningPageClient.module.css) — a neutral progress indicator under a
+   number, never the sole carrier of meaning (the number is always printed
+   next to it). --color-track flips with the theme; --status-running is a
+   fixed status color (never redefined per theme in styles/tokens.css), so
+   the bar itself stays legible in both themes without a dark-mode override. */
+.track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-track);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.bar {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--status-running);
+}

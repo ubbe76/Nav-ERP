@@ -1,0 +1,245 @@
+/* Artikelöversikt — the floating panel (ArticleOverviewPanel), the row/
+   toolbar buttons that open it (ArticleOverviewButton) and the shared
+   content (ArticleOverviewContent, also used inline on /artiklar/oversikt). */
+
+/* Floating, non-modal, draggable. z-index 40: above the lists' sticky
+   select bars (1) but below the phone nav drawer and its backdrop (45/48/50
+   in Nav.module.css), so opening the menu still covers it. The default
+   corner is bottom-right; a dragged/stored position is applied inline as
+   left/top (with right/bottom reset to auto). */
+.panel {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  /* Wide enough for the six-column row list without a horizontal scroller
+     (ArticleOverviewContent's COLUMNS sum to ~810 px incl. cell padding). */
+  width: min(880px, calc(100vw - 32px));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-frame);
+  box-shadow: var(--shadow-frame);
+  overflow: hidden;
+}
+
+/* The drag handle. touch-action: none so a touch drag moves the panel
+   instead of scrolling the page underneath. */
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-divider);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  flex-shrink: 0;
+}
+.header:active {
+  cursor: grabbing;
+}
+
+.title {
+  flex: 1;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.headerLink {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.headerLink:hover {
+  color: var(--accent-fg);
+}
+
+.closeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-control-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.closeButton:hover {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+
+.body {
+  padding: 20px;
+  overflow: auto;
+}
+
+/* Icon buttons that open the panel. The row size sits after an article
+   number inside a table cell; the toolbar size matches HelpLink (34 px). */
+.rowButton,
+.toolbarButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.rowButton {
+  width: 26px;
+  height: 26px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.toolbarButton {
+  width: 34px;
+  height: 34px;
+}
+.rowButton:hover,
+.toolbarButton:hover {
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+/* --- content --- */
+
+.pickerRow {
+  max-width: 440px;
+  margin-bottom: var(--space-4);
+}
+
+.label {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-bottom: 3px;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.articleHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.articleLink {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.articleLink:hover {
+  color: var(--accent-fg);
+}
+
+.typeText {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.loading {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.headerFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.value {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.unit {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+.rowLink {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.rowLink:hover {
+  color: var(--accent-fg);
+}
+
+.onHandRow {
+  font-weight: 600;
+}
+
+.supply {
+  color: var(--status-running-text);
+}
+.demand {
+  color: var(--color-text-primary);
+}
+/* A negative running balance is the whole point of the view — make it
+   impossible to miss. */
+.negative {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+/* Phone: a bottom sheet instead of a floating window. The inline left/top is
+   suppressed by the panel component when this query matches. */
+@media (max-width: 640px) {
+  .panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    max-height: 80vh;
+    border-radius: var(--radius-frame) var(--radius-frame) 0 0;
+    border-bottom: none;
+  }
+  .header {
+    cursor: default;
+    touch-action: auto;
+    padding: 12px 16px;
+  }
+  .body {
+    padding: 16px;
+  }
+}
+
+.fileLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}

@@ -1,0 +1,131 @@
+/* The vertical rhythm every form in the app shares: fields stacked with one
+   gap, side-by-side fields in a grid that collapses on phones, and a button
+   row at the bottom. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.row3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.row4 {
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+
+/* Postnummer | Postort | Land — tracks sized to the sm/xs input caps in
+   Field.module.css so the short fields fill their column and Postort gets
+   whatever is left. */
+.rowPostal {
+  grid-template-columns: 14ch 1fr 11ch;
+}
+
+/* A repeated document line (order/inquiry rows). The article picker needs the
+   full width to be usable, so it gets its own line with the remove button and
+   the short numeric fields share a .row underneath. All six on one line never
+   fits: 100+80+120+90+32px of fixed tracks plus gaps is wider than the 496px a
+   modal body gives even on desktop, which starved the picker to ~24px. */
+.lineRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Article + remove. `auto` lets the button take its own width, `end` bottom-
+   aligns it against the input rather than the label. */
+.lineRowTop {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+/* Two lines tall, the rows need a boundary of their own — the parent's gap
+   alone reads as one long form. */
+.lineRow + .lineRow {
+  border-top: 1px solid var(--color-divider);
+  padding-top: var(--space-3);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+}
+
+.error {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--status-stopped-text);
+  background: var(--status-stopped-bg);
+  border-radius: var(--radius-control-sm);
+  padding: 9px 12px;
+}
+
+/* Same chip, amber — for things the user must read but that aren't failures
+   (a secret shown once, an irreversible next step). */
+.notice {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--status-delayed-text);
+  background: var(--status-delayed-bg);
+  border-radius: var(--radius-control-sm);
+  padding: 9px 12px;
+}
+
+/* For errors that stand alone in the page flow rather than inside a form. */
+.errorAbove {
+  margin-top: var(--space-4);
+}
+.errorBelow {
+  margin-bottom: var(--space-4);
+}
+
+/* Per-row validation messages sit inside inline content (a table cell), where
+   a block-level chip would be invalid markup. */
+.errorInline {
+  display: inline-block;
+}
+
+.hint {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* A hint that explains the field right above it — pulled up into the stack's
+   gap so it reads as part of that field rather than as its own row. */
+.hintAttached {
+  margin-top: -10px;
+}
+
+.saved {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--status-running-text);
+}
+
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  /* A line row's numeric fields are short enough to sit two by two on a phone;
+     fully stacked, one order line would be five full-width fields tall. Two
+     class names beat the single-class .row/.row4 above regardless of source
+     order, so this needs no !important. */
+  .lineRow > .row {
+    grid-template-columns: 1fr 1fr;
+  }
+}

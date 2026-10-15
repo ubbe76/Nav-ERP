@@ -1,0 +1,6 @@
+ALTER TABLE "fixed_assets" ADD COLUMN "opening_depreciation" numeric(14, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "fixed_assets" ADD COLUMN "opening_depreciation_through_month" date;--> statement-breakpoint
+ALTER TABLE "fixed_assets" ADD CONSTRAINT "fixed_asset_opening_nonnegative" CHECK ("fixed_assets"."opening_depreciation" >= 0);--> statement-breakpoint
+ALTER TABLE "fixed_assets" ADD CONSTRAINT "fixed_asset_opening_consistent" CHECK (("fixed_assets"."opening_depreciation" = 0 AND "fixed_assets"."opening_depreciation_through_month" IS NULL) OR ("fixed_assets"."opening_depreciation" > 0 AND "fixed_assets"."opening_depreciation_through_month" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "fixed_assets" ADD CONSTRAINT "fixed_asset_opening_month_first_day" CHECK ("fixed_assets"."opening_depreciation_through_month" IS NULL OR extract(day from "fixed_assets"."opening_depreciation_through_month") = 1);--> statement-breakpoint
+ALTER TABLE "fixed_assets" ADD CONSTRAINT "fixed_asset_opening_within_base" CHECK ("fixed_assets"."opening_depreciation" <= "fixed_assets"."acquisition_cost" - "fixed_assets"."residual_value");

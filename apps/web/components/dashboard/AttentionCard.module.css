@@ -1,0 +1,87 @@
+.row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--color-divider);
+  text-decoration: none;
+}
+.row:last-of-type {
+  border-bottom: none;
+}
+
+.marker {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.marker[data-tone="delayed"] {
+  background: var(--status-delayed);
+}
+.marker[data-tone="stopped"] {
+  background: var(--status-stopped);
+}
+
+.texts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.primary {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.secondary {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.chevron {
+  font-size: 16px;
+  color: var(--color-text-muted);
+  transition: transform 120ms ease;
+}
+a.row:hover .chevron {
+  transform: translateX(2px);
+}
+/* A row the user can't open renders as plain text (GatedLink): no chevron. */
+span.row .chevron {
+  visibility: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+  a.row:hover .chevron {
+    transform: none;
+  }
+}
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.empty,
+.more {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.more {
+  padding-top: 10px;
+  color: var(--color-text-muted);
+}

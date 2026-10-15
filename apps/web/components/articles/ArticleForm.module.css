@@ -1,0 +1,51 @@
+/* Grouped Allmänt-tab layout: named sections whose fields flow in a
+   two-column grid that collapses to one column on narrow screens. The gap
+   under the SectionHeading is the heading's own margin. */
+.section {
+  display: flex;
+  flex-direction: column;
+}
+
+.section + .section {
+  margin-top: var(--space-6);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 20px;
+  align-items: start;
+}
+
+/* A section holding a single field: one column at form width, so the field
+   doesn't read as half of an empty two-column row. */
+.gridSingle {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 440px;
+}
+
+.spanAll {
+  grid-column: 1 / -1;
+}
+
+/* Each save button belongs to the block above it, so the blocks are split by
+   a rule instead of running together into one long column of fields. */
+.block + .block {
+  margin-top: 28px;
+  padding-top: 28px;
+  border-top: 1px solid var(--color-divider);
+}
+
+/* Two toggles sharing one grid cell, aligned with the labelled fields
+   beside them. */
+.toggles {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

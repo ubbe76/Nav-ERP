@@ -1,0 +1,1 @@
+ALTER TABLE "routing_operations" ADD COLUMN "costing_only" boolean DEFAULT false NOT NULL;

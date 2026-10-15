@@ -1,0 +1,76 @@
+.rowLink {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.rowLink:hover {
+  color: var(--accent-fg);
+}
+
+/* Status buttons in the Åtgärder column and in the bulk bar — wrap rather
+   than overflow when the column or a narrow screen can't fit them side by
+   side. */
+.rowActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Bar under the table while rows are selected: count on the left, the bulk
+   buttons on the right, stacking on narrow screens. */
+.bulkBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  margin-top: 12px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+}
+
+.listMessage {
+  margin-bottom: 12px;
+}
+
+/* Mobile stack only: "Välj alla" + the bulk buttons above the list, sticky
+   so they stay reachable while scrolling through the stacked cards. The
+   table's header row (with the select-all checkbox) and .bulkBar are the
+   desktop equivalents. */
+.selectBar {
+  display: none;
+}
+
+.selectAllLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .selectBar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    position: sticky;
+    /* Below the fixed hamburger (Nav.module.css: 38px at top/left 20px),
+       which would otherwise cover the checkbox once the page has scrolled. */
+    top: 66px;
+    z-index: 1;
+    padding: 10px 0;
+    margin-bottom: 8px;
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+    font-family: var(--font-body);
+    font-size: 13.5px;
+  }
+  .selectBar .rowActions {
+    justify-content: flex-start;
+  }
+  .bulkBar {
+    display: none;
+  }
+}

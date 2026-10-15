@@ -1,0 +1,1 @@
+ALTER TABLE "suppliers" ADD COLUMN "our_customer_number" varchar(50);

@@ -1,0 +1,9 @@
+# Keeps `COPY . .` in the Dockerfiles from dragging the host's installed
+# node_modules and stale local build output into the build context — those
+# are rebuilt fresh inside each image stage instead.
+node_modules
+**/node_modules
+.next
+**/dist
+.git
+.claude

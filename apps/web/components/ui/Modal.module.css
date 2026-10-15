@@ -1,0 +1,100 @@
+/* The native <dialog> element is display:none by default via the browser's
+   UA stylesheet (dialog:not([open])); author CSS beats UA CSS regardless of
+   specificity, so an unconditional `display` here would defeat that and
+   leave the dialog's content permanently visible, inline in the page, even
+   when closed. Scoping every layout property to [open] keeps the built-in
+   hidden-when-closed behavior intact. */
+.dialog[open] {
+  width: min(560px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Dialogs built around a wide table (the freight rates): room for every
+   column instead of a horizontal scroll that hides the action column. */
+.dialog.wide[open] {
+  width: min(1100px, 92vw);
+}
+
+.dialog {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-frame);
+  padding: 0;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-frame);
+  overflow: hidden;
+}
+
+.dialog::backdrop {
+  background: var(--color-overlay);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px var(--space-card-padding) 18px;
+  border-bottom: 1px solid var(--color-divider);
+  flex-shrink: 0;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.closeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-control-sm);
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.closeButton:hover {
+  background: var(--color-divider);
+  color: var(--color-text-primary);
+}
+
+.body {
+  padding: var(--space-card-padding);
+  overflow-y: auto;
+}
+
+@media (max-width: 640px) {
+  .dialog,
+  .dialog.wide[open] {
+    width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    max-width: 100vw;
+    border-radius: 0;
+    border: none;
+  }
+  .header {
+    padding: 18px 20px 16px;
+  }
+  .body {
+    padding: 20px;
+  }
+}
+
+/* After the phone rule above so it wins there: a short question stays a
+   centered card instead of a full-screen sheet. */
+.dialog.compact[open] {
+  width: min(440px, 92vw);
+  height: fit-content;
+  max-height: 88vh;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-frame);
+}

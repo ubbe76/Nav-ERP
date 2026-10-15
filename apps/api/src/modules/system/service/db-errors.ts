@@ -1,0 +1,64 @@
+// Postgres unique-constraint (23505) detection, shared by every service that
+// catches a DB write to map a constraint violation onto a domain-specific
+// duplicate error. Drizzle wraps the postgres-js error, so the 23505 code
+// sits on the error itself OR on its `cause` depending on the driver path —
+// hence the two-level check. Guarded (null/non-object check before touching
+// `code`/`cause`) so a thrown non-Error value never crashes the catch block.
+//
+// Lives in system/service: this module is the repo's established home for
+// cross-module leaf helpers with no dependency on any repository or service
+// (see number-series.ts's getNextOrderNumber, posting-settings.ts's
+// readPostingSettings, ocr.ts's computeOcrNumber/validateOcrNumber) — there
+// is no src/lib, so leaves that many modules need live here instead.
+//
+// Optional constraintName (bankfiler): only that index counts — same
+// `constraint_name` lookup as isForeignKeyViolation below.
+export function isUniqueViolation(err: unknown, constraintName?: string): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, cause } = err as { code?: string; cause?: unknown };
+  const causeObj = typeof cause === "object" && cause !== null ? (cause as { code?: string; constraint_name?: string }) : undefined;
+  if (code !== "23505" && causeObj?.code !== "23505") return false;
+  if (constraintName === undefined) return true;
+  const directConstraint = (err as { constraint_name?: string }).constraint_name;
+  return directConstraint === constraintName || causeObj?.constraint_name === constraintName;
+}
+
+// Postgres foreign-key-violation (23503) detection — same two-level
+// code/cause check as isUniqueViolation above, for services that catch a
+// blocked DELETE (an onDelete: "restrict" FK) to map it onto a
+// domain-specific "still referenced" error (e.g. E3's
+// RowHasManufacturingOrdersError on a sales order row).
+//
+// Optional constraintName: a single DELETE can be guarded by more than one
+// restrict FK from different tables (e.g. sales_order_rows is referenced by
+// manufacturing_orders, delivery_rows AND invoice_rows) — without checking
+// which constraint actually fired, a catch that only expects one of them
+// would silently mislabel a violation from a different table as the wrong
+// domain error. postgres.js exposes the constraint name Postgres reports
+// (`constraint_name`) on the same object/cause pair as `code`.
+export function isForeignKeyViolation(err: unknown, constraintName?: string): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, cause } = err as { code?: string; cause?: unknown };
+  const causeObj =
+    typeof cause === "object" && cause !== null
+      ? (cause as { code?: string; constraint_name?: string })
+      : undefined;
+  const isFk = code === "23503" || causeObj?.code === "23503";
+  if (!isFk) return false;
+  if (constraintName === undefined) return true;
+  const directConstraint = (err as { constraint_name?: string }).constraint_name;
+  return directConstraint === constraintName || causeObj?.constraint_name === constraintName;
+}
+
+// The bookkeeping lock triggers (migration 0095) refuse any change to booked
+// räkenskapsinformation with SQLSTATE NV001 — same two-level code/cause
+// check as above. The application never attempts such a write, so this only
+// fires on a bug; the global error handler maps it to 409 rather than 500.
+export function isBookkeepingLockViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, cause } = err as { code?: string; cause?: unknown };
+  return (
+    code === "NV001" ||
+    (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "NV001")
+  );
+}

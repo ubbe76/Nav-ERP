@@ -1,0 +1,237 @@
+/* Hand-rolled CSS grid — ui/Table.tsx's static column list doesn't fit a
+   week count that varies with the "Veckor" filter (4/8/13/26), and cells
+   need multi-line content (hours, percent, fill bar) plus an expansion row
+   that spans every column. The whole matrix (header, group headers, resource
+   rows, expansion rows, Summa rows) is one flat grid — expansion/summary/
+   group-header rows just span every column via gridColumn: "1 / -1". */
+
+.scroller {
+  overflow: auto;
+  /* Contain the horizontal scroll to the matrix — the page body must not
+     scroll sideways. A bounded height gives it a vertical scrollport too,
+     which is what makes .headerCell/.headerLabel's position:sticky actually
+     freeze while scrolling rows (a sticky element needs an ancestor that
+     scrolls in that axis — overflow-x alone never provided one). 220px
+     roughly clears the app topbar + page title/meta + filter toolbar above
+     this component. */
+  max-width: 100%;
+  max-height: calc(100vh - 220px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.grid {
+  display: grid;
+  min-width: max-content;
+}
+
+.headerCell {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 10px 12px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.headerLabel {
+  composes: headerCell;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  text-align: left;
+}
+
+.groupHeader {
+  grid-column: 1 / -1;
+  position: sticky;
+  left: 0;
+  padding: 12px 12px 6px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+  width: fit-content;
+  min-width: 100%;
+}
+
+.resourceLabel {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-divider);
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+}
+
+.resourceMuted {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: help;
+}
+
+.factorBadge {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.cell {
+  border-top: 1px solid var(--color-divider);
+  border-left: 1px solid var(--color-divider);
+  padding: 8px 10px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: default;
+}
+
+.cell[data-clickable="true"] {
+  cursor: pointer;
+}
+
+.cell[data-clickable="true"]:hover {
+  background: var(--color-bg);
+}
+
+/* The expanded cell — data-active is only ever set on a clickable cell, so
+   there's no risk of an inert cell picking up the outline. */
+.cell[data-active="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Toned cells pair --status-*-bg with its -text token, like StatusPill. */
+.cell[data-tone="warn"] {
+  background: var(--status-delayed-bg);
+}
+
+.cell[data-tone="alert"] {
+  background: var(--status-stopped-bg);
+}
+
+.cellHours {
+  font-family: var(--font-display);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cellPercent {
+  font-size: 11px;
+  text-align: right;
+  color: var(--color-text-secondary);
+}
+
+.cell[data-tone="warn"] .cellHours,
+.cell[data-tone="warn"] .cellPercent {
+  color: var(--status-delayed-text);
+}
+
+.cell[data-tone="alert"] .cellHours,
+.cell[data-tone="alert"] .cellPercent {
+  color: var(--status-stopped-text);
+}
+
+.fillTrack {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-track);
+  overflow: hidden;
+}
+
+.fillBar {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--status-running);
+}
+
+.cell[data-tone="warn"] .fillTrack,
+.cell[data-tone="alert"] .fillTrack {
+  /* --color-track blends into the tint — use the overlay meant for it. */
+  background: var(--color-track-on-tint);
+}
+
+.cell[data-tone="warn"] .fillBar {
+  background: var(--status-delayed);
+}
+
+.cell[data-tone="alert"] .fillBar {
+  background: var(--status-stopped);
+}
+
+/* Summa (subtotal) row — applied per-cell via data-summa, since the grid is
+   flat (no per-row wrapper element to hang a descendant selector off).
+   Excludes toned cells: data-tone and data-summa both target .cell with
+   equal specificity, so without the :not()s the summa background — coming
+   later in the file — would always win and a >85%/>100% subtotal would
+   silently lose its warn/alert color. */
+.resourceLabel[data-summa="true"],
+.cell[data-summa="true"] {
+  font-weight: 600;
+}
+
+.resourceLabel[data-summa="true"],
+.cell[data-summa="true"]:not([data-tone="warn"]):not([data-tone="alert"]) {
+  background: var(--color-bg);
+}
+
+.expansion {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-bg);
+  padding: 12px 16px;
+}
+
+.expansionTitle {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.orderRow {
+  display: grid;
+  grid-template-columns: 110px 1fr 90px 90px 110px 90px;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 13px;
+  border-top: 1px solid var(--color-divider);
+}
+
+.orderRow:first-child {
+  border-top: none;
+}
+
+.rowLink {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.rowLink:hover {
+  color: var(--accent-fg);
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}

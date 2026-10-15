@@ -1,0 +1,113 @@
+/* Column flow rather than a grid: a grid row is as tall as its tallest card,
+   so a one-link card left dead space under itself until the card beside it
+   ended. Here the next card starts where the previous one stopped, and the
+   browser balances the column heights — which matters on /hjalp, where the
+   sections are built from the manual chapters and shift as chapters are
+   added. Reading order is unchanged: down the left column, then the right. */
+.grid {
+  columns: 2;
+  column-gap: var(--space-card-grid-gap);
+}
+
+.group {
+  /* Multi-column has no row-gap, and a card must never be split across the
+     column break. inline-block keeps the bottom margin from straddling that
+     break — when it does, the leftover margin lands at the top of the next
+     column and pushes it down. React renders the sections without whitespace
+     between them, so inline-block adds no gaps of its own. */
+  display: inline-block;
+  width: 100%;
+  vertical-align: top;
+  -webkit-column-break-inside: avoid;
+  break-inside: avoid;
+  margin-bottom: var(--space-card-grid-gap);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+.groupTitle {
+  margin: 0;
+  padding: 14px 18px 10px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: block;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--color-divider);
+  text-decoration: none;
+  transition: background 120ms ease;
+}
+.row:hover {
+  background: var(--color-divider);
+}
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Icon column left of title + description (rows without an icon stay block). */
+.rowWithIcon {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.icon {
+  display: flex;
+  padding-top: 1px;
+  color: var(--color-text-muted);
+  transition: color 120ms ease;
+}
+.row:hover .icon,
+.row:focus-visible .icon {
+  color: var(--accent-fg);
+}
+
+.text {
+  min-width: 0;
+}
+
+.rowTitle {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  margin-bottom: 2px;
+}
+
+.rowDescription {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row,
+  .icon {
+    transition: none;
+  }
+}
+
+@media (max-width: 1024px) {
+  .grid {
+    columns: 1;
+  }
+}

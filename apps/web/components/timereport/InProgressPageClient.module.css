@@ -1,0 +1,17 @@
+.muted {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.elapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

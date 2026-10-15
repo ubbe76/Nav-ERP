@@ -1,0 +1,1 @@
+ALTER TABLE "shipments" ADD COLUMN "sender_address_line2" varchar(255);

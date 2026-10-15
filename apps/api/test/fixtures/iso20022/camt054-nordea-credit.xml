@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Nordea's Corporate Access Account Reporting camt.054.001.02 Credit Notification v1.9 (not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>NDEA2024100900042</MsgId><CreDtTm>2024-10-09T21:00:00</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>NDEA2024100900042-1</Id>
+      <CreDtTm>2024-10-09T21:00:00</CreDtTm>
+      <Acct><Id><IBAN>SE4550000000058398257466</IBAN></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <NtryRef>1</NtryRef>
+        <Amt Ccy="SEK">10000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <ValDt><Dt>2024-10-09</Dt></ValDt>
+        <AcctSvcrRef>NDEA-E-77810</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><AcctSvcrRef>NDEA-T-77810-1</AcctSvcrRef></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">10000.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>AB Fönsterbolaget</Nm></Dbtr></RltdPties>
+            <RmtInf><Strd><CdtrRefInf><Tp><CdOrPrtry><Cd>SCOR</Cd></CdOrPrtry></Tp><Ref>501262</Ref></CdtrRefInf></Strd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Handelsbanken's "Credit Notification camt.054 version 2" v1.1.4 and the BgMax conversion guide (not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>HB20241009CRED0001</MsgId><CreDtTm>2024-10-09T06:10:00</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>HB20241009CRED0001-1</Id>
+      <CreDtTm>2024-10-09T06:10:00</CreDtTm>
+      <Acct><Id><IBAN>SE4550000000058398257466</IBAN></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <NtryRef>1</NtryRef>
+        <Amt Ccy="SEK">10500.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <Btch><NbOfTxs>2</NbOfTxs><TtlAmt Ccy="SEK">10500.00</TtlAmt><CdtDbtInd>CRDT</CdtDbtInd></Btch>
+          <TxDtls>
+            <Refs><ClrSysRef>393380174532</ClrSysRef></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">10000.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>AB Fönsterbolaget</Nm></Dbtr></RltdPties>
+            <RmtInf><Strd><CdtrRefInf><Tp><CdOrPrtry><Cd>SCOR</Cd></CdOrPrtry></Tp><Ref>501262</Ref></CdtrRefInf></Strd></RmtInf>
+          </TxDtls>
+          <TxDtls>
+            <Refs><ClrSysRef>393380174533</ClrSysRef></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">500.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>Nisse Plåt AB</Nm></Dbtr></RltdPties>
+            <RmtInf><Strd><RfrdDocInf><Tp><CdOrPrtry><Cd>CINV</Cd></CdOrPrtry></Tp><Nb>1234</Nb></RfrdDocInf></Strd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

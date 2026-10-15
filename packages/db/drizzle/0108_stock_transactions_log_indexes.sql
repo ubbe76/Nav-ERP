@@ -1,0 +1,2 @@
+CREATE INDEX "idx_stock_transactions_created_at" ON "stock_transactions" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX "idx_stock_transactions_reference_id" ON "stock_transactions" USING btree ("reference_id");

@@ -1,0 +1,7 @@
+/* Tid/enhet field: the numeric input plus the min/st | st/h SegmentedToggle
+   (ui/SegmentedToggle.tsx). */
+.runTimeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

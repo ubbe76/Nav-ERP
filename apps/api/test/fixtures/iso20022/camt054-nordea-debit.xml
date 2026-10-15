@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Nordea's Corporate Access Payables camt.054.001.02 Debit Notification v1.6 (not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>NDEA2024101500007</MsgId><CreDtTm>2024-10-15T21:00:00</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>NDEA2024101500007-1</Id>
+      <CreDtTm>2024-10-15T21:00:00</CreDtTm>
+      <Acct><Id><IBAN>SE4550000000058398257466</IBAN></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <NtryRef>1</NtryRef>
+        <Amt Ccy="SEK">12500.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-15</Dt></BookgDt>
+        <ValDt><Dt>2024-10-15</Dt></ValDt>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><MsgId>BO-7</MsgId><AcctSvcrRef>NDEA-D-5512</AcctSvcrRef><PmtInfId>BO-7-20241015</PmtInfId><EndToEndId>BO-7-1</EndToEndId></Refs>
+            <AmtDtls><InstdAmt><Amt Ccy="SEK">12500.00</Amt></InstdAmt></AmtDtls>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

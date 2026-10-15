@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Swedbank's MIG 1.0 camt.054.001.02 Debit, return report (not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>SWEDSESSDEBT20241017000001</MsgId><CreDtTm>2024-10-17T18:00:00</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>SWEDSESSDEBT2024101700000100001</Id>
+      <CreDtTm>2024-10-17T18:00:00</CreDtTm>
+      <Acct><Id><Othr><Id>5512348</Id><SchmeNm><Prtry>BGNR</Prtry></SchmeNm></Othr></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <Amt Ccy="SEK">8850.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <RvslInd>true</RvslInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-17</Dt></BookgDt>
+        <AcctSvcrRef>2024101788360001</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>NTAV</Cd><SubFmlyCd>NTAV</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs>
+              <MsgId>BO-7</MsgId>
+              <AcctSvcrRef>202410178836000100000001</AcctSvcrRef>
+              <PmtInfId>BO-7-20241015</PmtInfId>
+              <EndToEndId>BO-7-3</EndToEndId>
+            </Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">8850.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Cdtr><Nm>Exempelhydraulik AB</Nm></Cdtr></RltdPties>
+            <RtrInf><Rsn><Cd>AC01</Cd></Rsn></RtrInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

@@ -1,0 +1,137 @@
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-3);
+}
+
+.fieldErrors {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--status-stopped-text);
+}
+
+.status {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.valid {
+  color: var(--status-done-text);
+}
+
+.invalid {
+  color: var(--status-stopped-text);
+}
+
+.prices {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px var(--space-4);
+  max-width: 28rem;
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.prices dt,
+.prices dd {
+  margin: 0;
+}
+
+.prices dd {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.total {
+  font-weight: 600;
+  border-top: 1px solid var(--color-divider);
+  padding-top: 4px;
+}
+
+.key {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.empty {
+  margin: 0;
+}
+
+.subheading {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 4px var(--space-3) 4px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-swatch);
+  background: var(--status-draft-bg);
+  color: var(--status-draft-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.stale {
+  opacity: 0.55;
+}
+
+.configurationLines {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

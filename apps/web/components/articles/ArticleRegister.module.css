@@ -1,0 +1,55 @@
+/* Inline editing in the article register. Colours are semantic tokens only. */
+.control {
+  width: 100%;
+  min-width: 0;
+}
+.control input,
+.control select {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+/* A cell that differs from the saved value: accent ring around the field. */
+.control[data-draft="true"] input,
+.control[data-draft="true"] select {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.nameCell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+.phantom {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 12px 20px;
+  background: var(--color-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  box-shadow: var(--shadow-popover);
+}
+.barCount {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-right: auto;
+}
+@media (max-width: 640px) {
+  .barCount {
+    flex-basis: 100%;
+  }
+}

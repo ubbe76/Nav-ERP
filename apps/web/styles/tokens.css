@@ -1,0 +1,277 @@
+/* Theme contract
+   ==============
+   Every COLOUR (and colour-bearing shadow/overlay) is a theme token: it is
+   declared in EVERY [data-theme] block below, never in the shared :root
+   block, and components reference only these semantic tokens — no raw
+   hex/rgb and no --neutral-* primitives. A new theme is therefore one new
+   :root[data-theme="<id>"] block defining the full set, plus an entry in
+   lib/themes.ts. theme-tokens.test.ts (apps/api/test) enforces both rules.
+
+   Background tokens come with their text pair (--status-*-bg/-text,
+   --accent/--accent-text, …): put text on a tinted background with its
+   pair, or with the theme's own text tokens — both are legible in every
+   theme. */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-elevated: #ffffff;
+  --color-input-surface: #ffffff;
+  --color-border: #e7eaef;
+  --color-border-control: #dce0e7;
+  --color-divider: #f1f3f6;
+  --color-text-primary: #1c2026;
+  --color-text-secondary: #5c6470;
+  /* Form labels and ghost buttons — a step stronger than secondary. */
+  --color-text-label: #444b55;
+  --color-text-muted: #68707c;
+  --color-track: #f1f3f6;
+  /* A progress track drawn on top of a --status-*-bg tint. */
+  --color-track-on-tint: rgba(0, 0, 0, 0.14);
+  /* Checked state for toggles and checkboxes. Theme-specific: it has to read
+     as "on" against --color-track AND keep the knob/checkmark legible, so it
+     goes dark on light backgrounds and light on dark ones. */
+  --color-control-on: #1c2026;
+  /* Knob and checkmark drawn on --color-control-on / --color-track. */
+  --color-control-knob: #ffffff;
+  /* Modal/drawer backdrop. */
+  --color-overlay: rgba(15, 17, 21, 0.45);
+
+  /* Status colors — machine/order state only, never decorative. The plain
+     token is for dots, bars and strokes only — never text; -text is the
+     status text colour (on -bg AND on the theme's surfaces), -bg the tinted
+     surface. */
+  --status-running: #4a9e77;
+  --status-running-bg: #e9f4ee;
+  --status-running-text: #2b7552;
+  --status-delayed: #c79a3a;
+  --status-delayed-bg: #f7efdc;
+  --status-delayed-text: #8a6516;
+  --status-stopped: #c25b52;
+  --status-stopped-bg: #f7e7e5;
+  --status-stopped-text: #a5443c;
+  --status-done: #5e7bb0;
+  --status-done-bg: #edf1f7;
+  --status-done-text: #46587c;
+  --status-draft-bg: #f1f3f6;
+  --status-draft-text: #5c6470;
+
+  /* Accent — green (chosen). --accent is the FILL and stroke (primary
+     buttons, active nav, tabs, focus rings) and carries --accent-text on top;
+     --accent-fg is the accent as a TEXT colour (links, section headings via
+     --color-heading-accent). They coincide here but split in dark, where a
+     fill dark enough for white text is too dark to read as text. The logo's
+     greens are separate brand tokens (--wordmark-*) and don't follow this
+     accent. Darkened from #4a9e77 (3.3:1 under white text) to clear AA. */
+  --accent: #337a58;
+  --accent-fg: var(--accent);
+  --accent-text: #ffffff;
+  --btn-primary-bg: var(--accent);
+  --btn-primary-text: var(--accent-text);
+  --btn-danger-border: #eac9c5;
+
+  /* Section headings (SectionHeading.tsx) — the accent text green, so a
+     heading reads as the same green as the primary buttons and the active
+     nav. */
+  --color-heading-accent: var(--accent-fg);
+
+  --shadow-frame: 0 24px 60px -30px rgba(20, 23, 28, 0.28);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.25);
+
+  /* Brand logo colors (from Design/logo/nav-erp-logo.svg) */
+  --wordmark-color: #22312a;
+  --wordmark-divider: #2e9e6b;
+  --wordmark-erp: #6e7d74;
+  --wordmark-symbol: #2e9e6b;
+  --wordmark-symbol-center: #1f7a50;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #15171b;
+  --color-surface: #1b1e24;
+  --color-elevated: #22262e;
+  --color-input-surface: #20242b;
+  --color-border: #2a2e37;
+  --color-border-control: #2e333c;
+  --color-divider: #2a2e37;
+  --color-text-primary: #edeef1;
+  --color-text-secondary: #a8aeb8;
+  --color-text-label: #c4c9d1;
+  --color-text-muted: #8f96a1;
+  --color-track: #2a2f38;
+  --color-track-on-tint: rgba(255, 255, 255, 0.16);
+  --color-control-on: #5c6470;
+  --color-control-knob: #ffffff;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+
+  /* Tints darkened onto the surface, text and strokes lightened. */
+  --status-running: #4fb284;
+  --status-running-bg: #1b3127;
+  --status-running-text: #7dd3a8;
+  --status-delayed: #d6a84a;
+  --status-delayed-bg: #352c19;
+  --status-delayed-text: #e6c172;
+  --status-stopped: #dd6f64;
+  --status-stopped-bg: #3a2120;
+  --status-stopped-text: #f09a91;
+  --status-done: #7b97cf;
+  --status-done-bg: #1f293b;
+  --status-done-text: #a9bde3;
+  --status-draft-bg: #2a2f38;
+  --status-draft-text: #a8aeb8;
+
+  --accent: #337a58;
+  /* Lightened — the fill green is too dark to read as text on a dark surface. */
+  --accent-fg: #48c58c;
+  --accent-text: #ffffff;
+  --btn-primary-bg: var(--accent);
+  --btn-primary-text: var(--accent-text);
+  --btn-danger-border: #5a2f2b;
+
+  --color-heading-accent: var(--accent-fg);
+
+  --shadow-frame: 0 24px 60px -30px rgba(0, 0, 0, 0.6);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.5);
+
+  /* Brand logo colors (from Design/logo/nav-erp-logo-dark.svg) */
+  --wordmark-color: #f1eee7;
+  --wordmark-divider: #48c58c;
+  --wordmark-erp: #a7b3aa;
+  --wordmark-symbol: #48c58c;
+  --wordmark-symbol-center: #8fd8b4;
+}
+
+/* Dracula (https://draculatheme.com) — the official spec palette, used under
+   the MIT License (licenses/Dracula-MIT.txt, © 2023 Dracula Theme):
+   background #282a36, current line #44475a, foreground #f8f8f2, comment
+   #6272a4, purple #bd93f9, pink #ff79c6, green #50fa7b, orange #ffb86c,
+   red #ff5555, cyan #8be9fd. Like the Dracula prompt, the purple accent
+   carries DARK text. Comment is lightened for muted text to clear AA. */
+:root[data-theme="dracula"] {
+  color-scheme: dark;
+
+  --color-bg: #21222c;
+  --color-surface: #282a36;
+  --color-elevated: #303241;
+  --color-input-surface: #2d2f3d;
+  --color-border: #3b3e4f;
+  --color-border-control: #44475a;
+  --color-divider: #343746;
+  --color-text-primary: #f8f8f2;
+  --color-text-secondary: #c3c6d8;
+  --color-text-label: #e2e3ec;
+  --color-text-muted: #9aa3cc;
+  --color-track: #44475a;
+  --color-track-on-tint: rgba(248, 248, 242, 0.18);
+  --color-control-on: #7c59bd;
+  --color-control-knob: #f8f8f2;
+  --color-overlay: rgba(14, 15, 20, 0.65);
+
+  --status-running: #50fa7b;
+  --status-running-bg: #2e4b41;
+  --status-running-text: #50fa7b;
+  --status-delayed: #ffb86c;
+  --status-delayed-bg: #4a413f;
+  --status-delayed-text: #ffb86c;
+  --status-stopped: #ff5555;
+  --status-stopped-bg: #4a313b;
+  --status-stopped-text: #ff8a8a;
+  --status-done: #8be9fd;
+  --status-done-bg: #384956;
+  --status-done-text: #8be9fd;
+  --status-draft-bg: #44475a;
+  --status-draft-text: #e2e3ec;
+
+  --accent: #bd93f9;
+  --accent-fg: #bd93f9;
+  --accent-text: #21222c;
+  --btn-primary-bg: var(--accent);
+  --btn-primary-text: var(--accent-text);
+  --btn-danger-border: #6b3240;
+
+  /* Pink — Dracula's signature, kept for the section headings. */
+  --color-heading-accent: #ff79c6;
+
+  --shadow-frame: 0 24px 60px -30px rgba(0, 0, 0, 0.7);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.5);
+
+  /* The logo keeps its brand greens (as in the dark theme); only the
+     wordmark text follows Dracula's foreground. */
+  --wordmark-color: #f8f8f2;
+  --wordmark-divider: #48c58c;
+  --wordmark-erp: #a7b3aa;
+  --wordmark-symbol: #48c58c;
+  --wordmark-symbol-center: #8fd8b4;
+}
+
+/* Theme-independent tokens. The neutral scale is a palette PRIMITIVE for
+   writing theme blocks — components never reference it directly (it doesn't
+   flip with the theme). */
+:root {
+  --neutral-00: #ffffff;
+  --neutral-50: #f1f3f6;
+  --neutral-100: #e7eaef;
+  --neutral-200: #c7cdd6;
+  --neutral-400: #9aa3b0;
+  --neutral-500: #5c6470;
+  --neutral-700: #444b55;
+  --neutral-800: #2e333b;
+  --neutral-900: #1c2026;
+
+  /* Radius */
+  --radius-card: 16px;
+  --radius-frame: 18px;
+  --radius-kpi-card: 14px;
+  --radius-control: 10px;
+  --radius-control-sm: 9px;
+  --radius-swatch: 8px;
+  --radius-pill: 999px;
+
+  /* Breakpoints — CSS custom properties can't be used inside @media
+     conditions, so these are documentation only. Every @media query in this
+     codebase repeats one of these two literal values: mobile ≤640px,
+     tablet/sidebar-collapse ≤1024px. Keep new breakpoints consistent with
+     these two rather than introducing new ones ad hoc. */
+
+  /* Spacing scale — prefer these over ad-hoc inline pixel margins in new/touched code. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+  --space-8: 48px;
+
+  /* Spacing */
+  --space-section-gap: 96px;
+  --space-card-grid-gap: 20px;
+  --space-dashboard-grid-gap: 14px;
+  --space-card-padding: 32px;
+  --space-dashboard-card-padding: 20px;
+  --space-btn-padding: 10px 18px;
+  --space-btn-padding-sm: 7px 13px;
+  --space-input-padding: 11px 13px;
+}
+
+/* --font-space-grotesk / --font-figtree are set on <body> by next/font's className.
+   Aliasing --font-display/--font-body at :root would reference them before they
+   exist there, making the alias invalid-at-computed-value-time (and thus inherited
+   as invalid) — so the aliases must be declared on the same element (body). */
+body {
+  --font-display: var(--font-space-grotesk), "Space Grotesk", sans-serif;
+  --font-body: var(--font-figtree), "Figtree", sans-serif;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}

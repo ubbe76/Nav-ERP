@@ -1,0 +1,15 @@
+/* Stacked (≤640px) a Table cell is a flex row: label + control. Without
+   this a select's floor is its longest option ("2990 · Övriga upplupna
+   kostnader …"), which pushed the row — and the page — past a phone's width.
+   In the desktop grid the cell is a block and these are inert. */
+.control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The step cards' button rows: two or three long Swedish labels ("Bokför
+   periodiseringar", "Inga periodiseringar") do not fit side by side on a
+   phone, and an unwrapped flex row overflows the card and the page. */
+.actions {
+  flex-wrap: wrap;
+}

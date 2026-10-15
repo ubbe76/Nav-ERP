@@ -1,0 +1,481 @@
+import { describe, expect, it } from "vitest";
+import {
+  computeCapacity,
+  remainingOperationMinutes,
+  resolveResourceWeekHours,
+  type CapacityInput,
+  type CapacityOperationRow,
+  type CapacityResult,
+  type CapacityWorkCenter,
+} from "../src/modules/planning/service/capacity-calc.js";
+
+// Pure calculation tests — no database, no TRUNCATE. This file is the
+// authoritative spec for beläggningen (E2).
+
+// Wednesday 2026-08-19 → ISO week 34 (Mon 2026-08-17 … Sun 2026-08-23).
+const TODAY = "2026-08-19";
+
+function wc(overrides: Partial<CapacityWorkCenter> & { workCenterId: string }): CapacityWorkCenter {
+  return {
+    code: "100",
+    name: `Resurs ${overrides.workCenterId}`,
+    type: "machine",
+    productionGroupId: null,
+    weekScheduleId: null,
+    capacityFactor: 1,
+    active: true,
+    ...overrides,
+  };
+}
+
+function op(overrides: Partial<CapacityOperationRow>): CapacityOperationRow {
+  return {
+    moOperationId: `op-${Math.abs(JSON.stringify(overrides).length)}-${overrides.sequenceNo ?? 10}`,
+    manufacturingOrderId: "mo-1",
+    orderNumber: "PO-1",
+    articleNumber: "ART-1",
+    articleName: "Artikel",
+    workCenterId: "wc-1",
+    orderQuantity: 10,
+    dueDate: null,
+    sequenceNo: 10,
+    setupTime: 0,
+    runTimePerUnit: 6,
+    operationStatus: "pending",
+    quantityCompleted: null,
+    quantityScrapped: 0,
+    ...overrides,
+  };
+}
+
+// A plain 40 h week: Mon–Fri on a 480-minute day schedule.
+const STD_WEEK = {
+  weekScheduleDays: [1, 2, 3, 4, 5].map((weekday) => ({
+    weekScheduleId: "ws-40",
+    weekday,
+    dayScheduleId: "ds-480",
+  })),
+  daySchedules: [{ id: "ds-480", netMinutes: 480 }],
+};
+
+function calcInput(partial: Partial<CapacityInput>): CapacityInput {
+  return {
+    workCenters: [],
+    productionGroups: [],
+    operations: [],
+    weekScheduleDays: [],
+    daySchedules: [],
+    holidays: [],
+    ...partial,
+  };
+}
+
+function resourceRow(result: CapacityResult, workCenterId: string) {
+  for (const group of result.groups) {
+    const row = group.resources.find((r) => r.workCenterId === workCenterId);
+    if (row) return row;
+  }
+  throw new Error(`no resource row for ${workCenterId}`);
+}
+
+describe("remainingOperationMinutes", () => {
+  it("counts setup + run × quantity for an untouched pending operation", () => {
+    expect(remainingOperationMinutes(op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10 }))).toBe(90);
+  });
+
+  it("drops setup and counts only the remaining quantity once work has started", () => {
+    expect(
+      remainingOperationMinutes(op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10, quantityCompleted: 4 }))
+    ).toBe(36);
+  });
+
+  it("keeps setup when nothing at all has been reported (explicit zero, no scrap)", () => {
+    expect(
+      remainingOperationMinutes(op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10, quantityCompleted: 0 }))
+    ).toBe(90);
+  });
+
+  it("drops setup after a scrap-only report — the machine is already set up", () => {
+    // reportOperationQuantities writes quantityCompleted "0" on a scrap-only
+    // report; 3 scrapped units mean work HAS started even though OK is zero.
+    expect(
+      remainingOperationMinutes(
+        op({ setupTime: 60, runTimePerUnit: 5, orderQuantity: 10, quantityCompleted: 0, quantityScrapped: 3 })
+      )
+    ).toBe(50); // 5 × 10 remaining, no setup
+  });
+
+  it("clamps an over-reported operation to zero", () => {
+    expect(
+      remainingOperationMinutes(op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10, quantityCompleted: 12 }))
+    ).toBe(0);
+  });
+
+  it("returns zero for a done operation even with quantity remaining", () => {
+    expect(
+      remainingOperationMinutes(
+        op({ setupTime: 30, runTimePerUnit: 6, orderQuantity: 10, quantityCompleted: 2, operationStatus: "done" })
+      )
+    ).toBe(0);
+  });
+});
+
+describe("resolveResourceWeekHours", () => {
+  const base = {
+    weekScheduleId: "ws-40",
+    capacityFactor: 1,
+    isoYear: 2026,
+    isoWeek: 34,
+    ...STD_WEEK,
+    holidays: [] as { date: string; dayScheduleId: string | null }[],
+  };
+
+  it("sums a five-day 480-minute week to 40 hours", () => {
+    expect(resolveResourceWeekHours(base)).toBe(40);
+  });
+
+  it("multiplies by the capacity factor", () => {
+    expect(resolveResourceWeekHours({ ...base, capacityFactor: 2 })).toBe(80);
+  });
+
+  it("a full-off holiday (röd dag) removes that day", () => {
+    // Wednesday 2026-08-19 inside week 34.
+    expect(resolveResourceWeekHours({ ...base, holidays: [{ date: "2026-08-19", dayScheduleId: null }] })).toBe(32);
+  });
+
+  it("a half-day holiday uses the holiday's own day schedule", () => {
+    expect(
+      resolveResourceWeekHours({
+        ...base,
+        daySchedules: [...STD_WEEK.daySchedules, { id: "ds-240", netMinutes: 240 }],
+        holidays: [{ date: "2026-08-19", dayScheduleId: "ds-240" }],
+      })
+    ).toBe(36);
+  });
+
+  it("a half-day holiday on a day the schedule has off adds NOTHING — holidays only reduce", () => {
+    // Saturday 2026-08-22 is not in the Mon–Fri schedule; a registered
+    // half-day holiday there must not conjure capacity out of nothing.
+    expect(
+      resolveResourceWeekHours({
+        ...base,
+        daySchedules: [...STD_WEEK.daySchedules, { id: "ds-240", netMinutes: 240 }],
+        holidays: [{ date: "2026-08-22", dayScheduleId: "ds-240" }],
+      })
+    ).toBe(40);
+  });
+
+  it("a weekday missing from the week schedule contributes zero", () => {
+    const monToThu = STD_WEEK.weekScheduleDays.filter((d) => d.weekday <= 4);
+    expect(resolveResourceWeekHours({ ...base, weekScheduleDays: monToThu })).toBe(32);
+  });
+
+  it("an empty week schedule yields zero", () => {
+    expect(resolveResourceWeekHours({ ...base, weekScheduleDays: [] })).toBe(0);
+  });
+});
+
+describe("computeCapacity — week columns", () => {
+  it("generates the current ISO week plus the following ones with Monday/Sunday bounds", () => {
+    const result = computeCapacity(calcInput({}), { today: TODAY, weeks: 3 });
+    expect(result.weeks).toEqual([
+      { isoYear: 2026, isoWeek: 34, monday: "2026-08-17", sunday: "2026-08-23" },
+      { isoYear: 2026, isoWeek: 35, monday: "2026-08-24", sunday: "2026-08-30" },
+      { isoYear: 2026, isoWeek: 36, monday: "2026-08-31", sunday: "2026-09-06" },
+    ]);
+  });
+
+  it("crosses the year boundary with correct iso years (v.53 2026 → v.1 2027)", () => {
+    const result = computeCapacity(calcInput({}), { today: "2026-12-28", weeks: 2 });
+    expect(result.weeks).toEqual([
+      { isoYear: 2026, isoWeek: 53, monday: "2026-12-28", sunday: "2027-01-03" },
+      { isoYear: 2027, isoWeek: 1, monday: "2027-01-04", sunday: "2027-01-10" },
+    ]);
+  });
+});
+
+describe("computeCapacity — load bucketing", () => {
+  it("puts load in the due date's week, rolls past-due into the current week and flags overdue", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1" })],
+        operations: [
+          op({ manufacturingOrderId: "mo-a", orderNumber: "PO-A", dueDate: "2026-08-27", runTimePerUnit: 6 }), // v.35
+          op({ manufacturingOrderId: "mo-b", orderNumber: "PO-B", dueDate: "2026-08-10", runTimePerUnit: 12 }), // v.33 — past
+        ],
+      }),
+      { today: TODAY, weeks: 3 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.weeks[1]!.loadHours).toBe(1); // 6 min × 10 / 60
+    expect(row.weeks[0]!.loadHours).toBe(2); // 12 min × 10 / 60, rolled forward
+    expect(row.weeks[0]!.orders).toEqual([
+      expect.objectContaining({ orderNumber: "PO-B", overdue: true, remainingHours: 2, dueDate: "2026-08-10" }),
+    ]);
+    expect(row.weeks[1]!.orders[0]).toMatchObject({ orderNumber: "PO-A", overdue: false });
+  });
+
+  it("marks a due date earlier THIS week as overdue at day granularity", () => {
+    // Today is Wednesday 2026-08-19; due Monday 2026-08-17 is in the current
+    // week's bucket but already passed — Försenad, per the manual's promise.
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1" })],
+        operations: [
+          op({ orderNumber: "PO-MON", dueDate: "2026-08-17" }),
+          op({ manufacturingOrderId: "mo-2", orderNumber: "PO-FRI", dueDate: "2026-08-21" }),
+        ],
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    const orders = resourceRow(result, "wc-1").weeks[0]!.orders;
+    expect(orders.find((o) => o.orderNumber === "PO-MON")!.overdue).toBe(true);
+    expect(orders.find((o) => o.orderNumber === "PO-FRI")!.overdue).toBe(false);
+  });
+
+  it("puts undated load in the undated bucket and beyond-horizon load in later", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1" })],
+        operations: [
+          op({ manufacturingOrderId: "mo-u", orderNumber: "PO-U", dueDate: null }),
+          op({ manufacturingOrderId: "mo-l", orderNumber: "PO-L", dueDate: "2026-10-15" }),
+        ],
+      }),
+      { today: TODAY, weeks: 2 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.undated.loadHours).toBe(1);
+    expect(row.undated.availableHours).toBeNull();
+    expect(row.later.loadHours).toBe(1);
+    expect(row.later.orders[0]!.orderNumber).toBe("PO-L");
+  });
+
+  it("excludes done operations and drops zero-remaining order lines", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1" })],
+        operations: [
+          op({ orderNumber: "PO-DONE", dueDate: "2026-08-19", operationStatus: "done" }),
+          op({ orderNumber: "PO-OVER", dueDate: "2026-08-19", quantityCompleted: 15 }),
+        ],
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.weeks[0]!.loadHours).toBe(0);
+    expect(row.weeks[0]!.orders).toEqual([]);
+  });
+});
+
+describe("computeCapacity — capacity and percent", () => {
+  it("computes available hours from the schedule and rounds the percent", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40" })],
+        ...STD_WEEK,
+        operations: [op({ dueDate: "2026-08-19", runTimePerUnit: 27, orderQuantity: 10 })], // 270 min = 4.5 h... use 45h
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.hasSchedule).toBe(true);
+    expect(row.weeks[0]!.availableHours).toBe(40);
+    expect(row.weeks[0]!.loadHours).toBe(4.5);
+    expect(row.weeks[0]!.loadPercent).toBe(11); // 4.5/40 = 11.25 → 11
+  });
+
+  it("gives 113 % for 45 h load on 40 h capacity", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40" })],
+        ...STD_WEEK,
+        operations: [op({ dueDate: "2026-08-19", runTimePerUnit: 270, orderQuantity: 10 })], // 2700 min = 45 h
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    expect(resourceRow(result, "wc-1").weeks[0]!.loadPercent).toBe(113);
+  });
+
+  it("a resource without a schedule shows load but null capacity/percent", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1" })],
+        operations: [op({ dueDate: "2026-08-19" })],
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.hasSchedule).toBe(false);
+    expect(row.weeks[0]!.loadHours).toBe(1);
+    expect(row.weeks[0]!.availableHours).toBeNull();
+    expect(row.weeks[0]!.loadPercent).toBeNull();
+  });
+
+  it("a zero-capacity week (empty schedule) yields percent null, not division by zero", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-empty" })],
+        daySchedules: STD_WEEK.daySchedules,
+        weekScheduleDays: [], // schedule exists but has no days
+        operations: [op({ dueDate: "2026-08-19" })],
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.weeks[0]!.availableHours).toBe(0);
+    expect(row.weeks[0]!.loadPercent).toBeNull();
+  });
+
+  it("applies the capacity factor per week", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40", capacityFactor: 2 })],
+        ...STD_WEEK,
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    expect(resourceRow(result, "wc-1").weeks[0]!.availableHours).toBe(80);
+  });
+
+  it("holidays reduce the specific week's capacity", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-1", weekScheduleId: "ws-40" })],
+        ...STD_WEEK,
+        holidays: [{ date: "2026-08-19", dayScheduleId: null }], // Wednesday of week 34
+      }),
+      { today: TODAY, weeks: 2 }
+    );
+    const row = resourceRow(result, "wc-1");
+    expect(row.weeks[0]!.availableHours).toBe(32);
+    expect(row.weeks[1]!.availableHours).toBe(40);
+  });
+});
+
+describe("computeCapacity — groups, inclusion and sorting", () => {
+  it("groups resources under production groups with subtotals; capacity only from scheduled members", () => {
+    const result = computeCapacity(
+      calcInput({
+        productionGroups: [{ productionGroupId: "pg-1", code: "10", name: "Svets" }],
+        workCenters: [
+          wc({ workCenterId: "wc-1", code: "101", productionGroupId: "pg-1", weekScheduleId: "ws-40" }),
+          wc({ workCenterId: "wc-2", code: "102", productionGroupId: "pg-1" }),
+        ],
+        ...STD_WEEK,
+        operations: [
+          op({ workCenterId: "wc-1", dueDate: "2026-08-19", runTimePerUnit: 60 }), // 10 h
+          op({ workCenterId: "wc-2", dueDate: "2026-08-19", runTimePerUnit: 30 }), // 5 h
+        ],
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    const group = result.groups.find((g) => g.productionGroupId === "pg-1")!;
+    expect(group.code).toBe("10");
+    expect(group.weekTotals[0]!.loadHours).toBe(15);
+    expect(group.weekTotals[0]!.availableHours).toBe(40); // only wc-1 has a schedule
+    expect(group.weekTotals[0]!.orders).toEqual([]);
+  });
+
+  it("a group where no member has a schedule gets null subtotal capacity", () => {
+    const result = computeCapacity(
+      calcInput({
+        productionGroups: [{ productionGroupId: "pg-1", code: "10", name: "Svets" }],
+        workCenters: [wc({ workCenterId: "wc-1", productionGroupId: "pg-1" })],
+        operations: [op({ dueDate: "2026-08-19" })],
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    expect(result.groups[0]!.weekTotals[0]!.availableHours).toBeNull();
+  });
+
+  it("includes inactive resources only when they carry load; ungrouped resources come last", () => {
+    const result = computeCapacity(
+      calcInput({
+        productionGroups: [{ productionGroupId: "pg-1", code: "10", name: "Svets" }],
+        workCenters: [
+          wc({ workCenterId: "wc-grouped", code: "101", productionGroupId: "pg-1" }),
+          wc({ workCenterId: "wc-inactive-loaded", code: "200", active: false }),
+          wc({ workCenterId: "wc-inactive-idle", code: "201", active: false }),
+          wc({ workCenterId: "wc-ungrouped", code: "300" }),
+        ],
+        operations: [op({ workCenterId: "wc-inactive-loaded", dueDate: "2026-08-19" })],
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    expect(result.groups.map((g) => g.name)).toEqual(["Svets", "Ogrupperade resurser"]);
+    const ungrouped = result.groups[1]!;
+    expect(ungrouped.productionGroupId).toBeNull();
+    expect(ungrouped.resources.map((r) => r.workCenterId)).toEqual([
+      "wc-inactive-loaded",
+      "wc-ungrouped",
+    ]);
+    expect(ungrouped.resources.find((r) => r.workCenterId === "wc-inactive-idle")).toBeUndefined();
+  });
+
+  it("sorts groups and resources by code and cell orders by order number + sequence", () => {
+    const result = computeCapacity(
+      calcInput({
+        productionGroups: [
+          { productionGroupId: "pg-b", code: "20", name: "B" },
+          { productionGroupId: "pg-a", code: "10", name: "A" },
+        ],
+        workCenters: [
+          wc({ workCenterId: "wc-2", code: "102", productionGroupId: "pg-a" }),
+          wc({ workCenterId: "wc-1", code: "101", productionGroupId: "pg-a" }),
+          wc({ workCenterId: "wc-3", code: "201", productionGroupId: "pg-b" }),
+        ],
+        operations: [
+          op({ workCenterId: "wc-1", manufacturingOrderId: "mo-2", orderNumber: "PO-2", sequenceNo: 10, dueDate: "2026-08-19" }),
+          op({ workCenterId: "wc-1", manufacturingOrderId: "mo-1", orderNumber: "PO-1", sequenceNo: 20, dueDate: "2026-08-19" }),
+          op({ workCenterId: "wc-1", manufacturingOrderId: "mo-1", orderNumber: "PO-1", sequenceNo: 10, dueDate: "2026-08-19" }),
+        ],
+      }),
+      { today: TODAY, weeks: 1 }
+    );
+    expect(result.groups.map((g) => g.code)).toEqual(["10", "20"]); // no ungrouped block when none exist
+    expect(result.groups[0]!.resources.map((r) => r.code)).toEqual(["101", "102"]);
+    const orders = result.groups[0]!.resources[0]!.weeks[0]!.orders;
+    expect(orders.map((o) => `${o.orderNumber}:${o.sequenceNo}`)).toEqual(["PO-1:10", "PO-1:20", "PO-2:10"]);
+  });
+});
+
+// --- Etapp G: legoresurser (subcontract) are excluded from beläggningen ---
+
+describe("subcontract exclusion", () => {
+  it("shows no row for a subcontract resource and loads none of its operations", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [
+          wc({ workCenterId: "wc-1", code: "100" }),
+          wc({ workCenterId: "wc-lego", code: "900", type: "subcontract" }),
+        ],
+        operations: [
+          op({ workCenterId: "wc-1", dueDate: TODAY, runTimePerUnit: 6 }),
+          // A lego operation on the same MO must not inflate any cell.
+          op({ workCenterId: "wc-lego", dueDate: TODAY, runTimePerUnit: 60, sequenceNo: 20 }),
+        ],
+      }),
+      { today: TODAY, weeks: 2 }
+    );
+
+    const ids = result.groups.flatMap((g) => g.resources.map((r) => r.workCenterId));
+    expect(ids).toContain("wc-1");
+    expect(ids).not.toContain("wc-lego");
+    // Only the machine operation's 10 × 6 min = 1 h loads the week.
+    expect(resourceRow(result, "wc-1").weeks[0]?.loadHours).toBe(1);
+    const totals = result.groups.map((g) => g.weekTotals[0]?.loadHours ?? 0);
+    expect(Math.max(...totals)).toBe(1);
+  });
+
+  it("excludes a subcontract resource even when it carries load and is active", () => {
+    const result = computeCapacity(
+      calcInput({
+        workCenters: [wc({ workCenterId: "wc-lego", code: "900", type: "subcontract", active: true })],
+        operations: [op({ workCenterId: "wc-lego", dueDate: TODAY })],
+      }),
+      { today: TODAY, weeks: 2 }
+    );
+    expect(result.groups).toHaveLength(0);
+  });
+});

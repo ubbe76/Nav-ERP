@@ -1,0 +1,1 @@
+ALTER TABLE "shipments" ADD COLUMN "cancel_started_at" timestamp with time zone;

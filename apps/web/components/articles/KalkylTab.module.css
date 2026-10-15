@@ -1,0 +1,7 @@
+.panels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 20px;
+}

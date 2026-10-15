@@ -1,0 +1,156 @@
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+}
+.steps li {
+  padding: 5px 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+}
+.steps li[data-active="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.steps li[data-done="true"] {
+  opacity: 0.65;
+}
+
+.stepBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 860px;
+}
+
+.mappingTable {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+  overflow: hidden;
+}
+.mappingHead,
+.mappingRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 220px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+}
+.mappingHead {
+  border-bottom: 1px solid var(--color-divider);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mappingRow + .mappingRow {
+  border-top: 1px solid var(--color-divider);
+}
+.mappingHeader {
+  font-weight: 600;
+}
+.mappingSample {
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.defaultsRow {
+  max-width: 340px;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+.summary [data-tone="error"] {
+  color: var(--status-stopped-text);
+}
+.summary [data-tone="warning"] {
+  color: var(--status-delayed-text);
+}
+.summary [data-tone="skip"] {
+  color: var(--color-text-secondary);
+}
+
+.previewTable {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+  overflow-x: auto;
+}
+.previewHead,
+.previewRow {
+  display: grid;
+  grid-template-columns: 60px 110px 180px 1fr;
+  gap: 12px;
+  padding: 7px 12px;
+  min-width: 560px;
+}
+.previewHead {
+  border-bottom: 1px solid var(--color-divider);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.previewRow + .previewRow {
+  border-top: 1px solid var(--color-divider);
+}
+.previewRow[data-error="true"] {
+  background: var(--status-stopped-bg);
+}
+.previewRow[data-warning="true"] {
+  background: var(--status-delayed-bg);
+}
+/* Skipped rows are the expected outcome of the option, not a problem — a flat
+   dim instead of a colour that reads as a warning. */
+.previewRow[data-skip="true"] {
+  color: var(--color-text-secondary);
+}
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.errorText {
+  color: var(--status-stopped-text);
+}
+.warningText {
+  color: var(--status-delayed-text);
+}
+.skipText {
+  color: var(--color-text-secondary);
+}
+
+.resultHeadline {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.optionRow {
+  max-width: 520px;
+}
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.skippedHeadline {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 6px 0 0;
+}

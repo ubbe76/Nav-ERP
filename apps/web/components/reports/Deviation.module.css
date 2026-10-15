@@ -1,0 +1,27 @@
+/* Garnish only — the sign is always printed in the number itself
+   (formatSignedPercent), this just tints it. Plain text on the card's normal
+   background, so the fixed *-text tokens (not the *-bg ones) are the right
+   half of the pair here — same standalone use as CostSpecification's
+   .fallback. */
+.over {
+  color: var(--status-stopped-text);
+}
+
+.under {
+  color: var(--status-running-text);
+}
+
+/* "flernivå" next to the article on a row whose pre-calculation resolved
+   sub-assemblies recursively — its TVK holds each sub-assembly's own
+   manufacturing cost while the post-calculation holds the receipt price, so a
+   large deviation on such a row may be a difference in method, not in
+   production. Mirrors CostSpecification's .tag. */
+.tag {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--color-track);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}

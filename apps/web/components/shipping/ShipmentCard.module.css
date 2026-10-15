@@ -1,0 +1,176 @@
+/* Försändelsekortet — layout only; the panels sit on the shared Card surface
+   and the fields use the shared Form/Field components. */
+
+/* Status pill + customer on the left, the booking actions pushed right. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.toolbarSpacer {
+  flex: 1;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.messages:empty {
+  display: none;
+}
+
+/* Mottagare on the left; följesedlar, upphämtning and frakt stacked on the
+   right so everything a booking needs is visible without scrolling past a
+   full-width address form. Stacks on narrow screens. minmax(0, …) lets the
+   columns shrink below their content's min-content width — a wide table in
+   a column would otherwise push the grid out of the page. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+  margin-bottom: var(--space-5);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Every panel fills its column; the Card's 32px padding is more than a
+   half-width panel needs, so it is tightened like DocumentHeaderCard does.
+   Doubled on purpose to beat ui/Card's own `.card` padding regardless of
+   stylesheet order. */
+.panel.panel {
+  padding: 20px 24px 24px;
+}
+
+@media (max-width: 640px) {
+  .panel.panel {
+    padding: 16px;
+  }
+}
+
+/* The forms sit inside a <fieldset> (one `disabled` for every field while a
+   request runs), which is not a flex item of the Form's stack — so the stack
+   rhythm is repeated inside it. min-width: 0 on the fieldset itself (inline)
+   matters: a fieldset's default min-width is min-content, which would push a
+   half-width panel wider than its column. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.addDelivery {
+  margin-top: var(--space-4);
+}
+
+.priceForm {
+  margin-top: var(--space-4);
+}
+
+.events {
+  margin-top: var(--space-4);
+}
+
+/* Read mode (bokad/levererad/avbruten): label/value pairs instead of a form
+   of locked inputs. Same label treatment as the Field labels. */
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.facts dt {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-label);
+  padding-top: 1px;
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.facts a {
+  color: var(--accent-fg);
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+/* Multi-line address in read mode. */
+.address {
+  white-space: pre-line;
+}
+
+/* Följesedlar as a compact list: number (PDF) · order, remove on the right. */
+.deliveries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.delivery {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.delivery a {
+  color: var(--accent-fg);
+}
+
+.deliveryRemove {
+  margin-left: auto;
+}
+
+/* The pickup warning: a sentence in the stopped colour, not a chip, because
+   it explains the field it follows. */
+.warning {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--status-stopped-text);
+}
+
+.exception {
+  color: var(--status-stopped-text);
+}
+
+.trackingText {
+  font-family: var(--font-body);
+  font-size: 14px;
+  margin: 0 0 var(--space-3);
+}
+
+.back {
+  margin-top: var(--space-5);
+}

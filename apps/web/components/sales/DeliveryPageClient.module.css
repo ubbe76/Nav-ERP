@@ -1,0 +1,57 @@
+/* Same affordance as the identifier column on the order lists: a table cell
+   that opens a detail view (here: picks the order and preselects it — see
+   costing/CostCalculationList.module.css for the shared button-reset shape).
+   Mirrors purchase/GoodsReceiptPageClient.module.css. */
+.rowLink {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowLink:hover {
+  color: var(--accent-fg);
+}
+
+.rowLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.openOrders {
+  margin-bottom: 20px;
+}
+
+/* Two-line option row (order/kund, then date/status/restrader) — .option
+   in SearchPicker.module.css is a row flexbox, so both lines are wrapped in
+   this single column flex item rather than being direct children of it. */
+.optionRows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.optionTitle {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.optionMeta {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

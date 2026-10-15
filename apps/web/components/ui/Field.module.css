@@ -1,0 +1,118 @@
+.field {
+  display: flex;
+  flex-direction: column;
+}
+
+.label {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-label);
+  margin-bottom: 7px;
+}
+
+.input,
+.select {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  background: var(--color-input-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  padding: var(--space-input-padding);
+  width: 100%;
+}
+
+.input:focus,
+.select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.selectWrap {
+  position: relative;
+}
+
+/* Content-narrow sizing for short/numeric fields (weights, prices, codes).
+   width: 100% above stays the base so a sized field never exceeds its
+   column; ch is font-relative so it scales with font size. */
+.sizeXs {
+  max-width: 11ch;
+}
+.sizeSm {
+  max-width: 14ch;
+}
+.sizeMd {
+  max-width: 22ch;
+}
+
+.select {
+  appearance: none;
+  padding-right: 32px;
+}
+
+.chevron {
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border-control);
+  appearance: none;
+  cursor: pointer;
+  position: relative;
+}
+.checkbox:checked {
+  background: var(--color-control-on);
+  border-color: var(--color-control-on);
+}
+.checkbox:checked::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-control-knob);
+  font-size: 12px;
+}
+
+.toggle {
+  display: inline-flex;
+  cursor: pointer;
+}
+.toggle input {
+  display: none;
+}
+.track {
+  width: 38px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--color-track);
+  position: relative;
+  transition: background 150ms ease;
+}
+.track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-control-knob);
+  transition: transform 150ms ease;
+}
+.track[data-checked="true"] {
+  background: var(--color-control-on);
+}
+.track[data-checked="true"]::after {
+  transform: translateX(16px);
+}

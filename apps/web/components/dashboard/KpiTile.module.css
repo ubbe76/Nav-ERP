@@ -1,0 +1,105 @@
+/* KPI row: four standalone tiles. Unlike FlowStrip (one card of connected
+   stations) each tile is its own card — a module dashboard has no
+   material-flow story to tell. */
+.row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-dashboard-grid-gap);
+  margin-bottom: var(--space-dashboard-grid-gap);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  padding: 18px 20px 16px;
+  text-decoration: none;
+  transition: background 120ms ease;
+}
+
+a.tile:hover {
+  background: var(--color-bg);
+}
+
+.tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.label {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
+/* Proportional figures on purpose — tabular-nums makes display-size numbers
+   look loose (same reasoning as FlowStrip's value). */
+.value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--color-text-primary);
+}
+
+.unit {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--color-text-muted);
+}
+
+.signal {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.signal[data-tone="neutral"] {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.signal[data-tone="ok"] {
+  color: var(--status-running-text);
+}
+.signal[data-tone="warn"] {
+  color: var(--status-delayed-text);
+}
+.signal[data-tone="alert"] {
+  color: var(--status-stopped-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile {
+    transition: none;
+  }
+}
+
+@media (max-width: 1024px) {
+  .row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tile {
+    padding: 14px 16px 13px;
+  }
+  .value {
+    font-size: 28px;
+  }
+}
+
+@media (max-width: 640px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Handelsbanken's "Debit Notification camt.054 version 2" v1.0.7 (not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>HB20241015DEBT0001</MsgId><CreDtTm>2024-10-15T20:00:00</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>HB20241015DEBT0001-1</Id>
+      <CreDtTm>2024-10-15T20:00:00</CreDtTm>
+      <Acct><Id><IBAN>SE4550000000058398257466</IBAN></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <NtryRef>1</NtryRef>
+        <Amt Ccy="SEK">12500.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-15</Dt></BookgDt>
+        <AcctSvcrRef>HB-2024101500017</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><MsgId>BO-7</MsgId><PmtInfId>BO-7-20241015</PmtInfId><InstrId>BO-7-1</InstrId><EndToEndId>BO-7-1</EndToEndId></Refs>
+            <AmtDtls><InstdAmt><Amt Ccy="SEK">12500.00</Amt></InstdAmt></AmtDtls>
+            <RltdPties><Cdtr><Nm>Plåtlagret AB</Nm></Cdtr></RltdPties>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

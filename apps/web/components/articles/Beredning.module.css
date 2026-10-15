@@ -1,0 +1,309 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.treePanel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The grouped beredning view: operations as group headers with their linked
+   components nested underneath. Same surface-card look as ui/Table, but its
+   own grid — Table has no concept of group rows. Operation and component
+   rows share the column tracks so the numbers line up; operations use the
+   two time columns, components the quantity column. */
+.prep {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  overflow-x: auto;
+}
+.prep > :last-child {
+  border-bottom: none;
+}
+
+.prepHeader,
+.opRow,
+.compRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) 110px 110px 100px 150px;
+  gap: 12px;
+  align-items: center;
+}
+
+.prepHeader {
+  padding: 12px 20px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.prepHeaderCell {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+.prepHeaderCell[data-align="right"] {
+  text-align: right;
+}
+
+.opRow {
+  background: var(--color-track);
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.compRow {
+  padding: 7px 20px;
+  border-bottom: 1px solid var(--color-divider);
+}
+/* Indent components under their operation. */
+.compRow > .prepCell:first-child {
+  padding-left: 18px;
+}
+
+.prepCell {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  min-width: 0;
+}
+.prepCell[data-align="right"] {
+  text-align: right;
+}
+
+.opName {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+}
+
+.opMain {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.opLabel {
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opResource {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.kalkylBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-done-bg);
+  color: var(--status-done-text);
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.opComment {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+}
+
+.compName {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.compNumber {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compBenaming {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actionsCell {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* The slim "+ Komponent" row that follows each operation's components. */
+.addCompRow {
+  padding: 2px 20px 6px 26px;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+/* "Ej kopplat material" — group header for components without an operation. */
+.groupRow {
+  padding: 9px 20px;
+  background: var(--color-track);
+  border-bottom: 1px solid var(--color-divider);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.prepEmpty {
+  padding: 36px 20px;
+  text-align: center;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+}
+
+.headingActions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+/* Below phone width the grid becomes a stack of labeled rows, same pattern
+   as ui/Table's mobile mode. Cells without a data-label (spacers) collapse. */
+@media (max-width: 640px) {
+  .prepHeader {
+    display: none;
+  }
+
+  .opRow,
+  .compRow {
+    display: block;
+    padding: 12px 16px;
+  }
+  .compRow > .prepCell:first-child {
+    padding-left: 0;
+  }
+
+  .prepCell {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 2px 0;
+  }
+  .prepCell[data-label]::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+  }
+  .prepCell:empty {
+    display: none;
+  }
+
+  .opMain {
+    flex-wrap: wrap;
+  }
+
+  .actionsCell {
+    justify-content: flex-start;
+    padding-top: 6px;
+  }
+
+  .addCompRow {
+    padding: 4px 16px 8px;
+  }
+}
+
+.activeArticle {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-bottom: 16px;
+}
+
+.treeNode {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+}
+.treeNode:hover {
+  background: var(--color-track);
+}
+.treeNode[data-active="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.treeNumber {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.treeName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.treeQty {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.treeNode[data-active="true"] .treeQty {
+  color: var(--accent-text);
+  opacity: 0.85;
+}
+
+.loading {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+}
+
+/* Tid/enhet cell on an operation row: the value plus the per-row min/st | st/h
+   switch (ui/SegmentedToggle.tsx, small size). */
+.timeCell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}

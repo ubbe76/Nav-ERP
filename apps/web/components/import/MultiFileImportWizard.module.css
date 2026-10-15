@@ -1,0 +1,80 @@
+/* The multi-file import ("Alla filer"): one card per dropped file in the
+   Kolumner/Förhandsgranska/Resultat steps, and the plain list in Filer. */
+.fileList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+  overflow: hidden;
+}
+.fileRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+}
+.fileRow + .fileRow {
+  border-top: 1px solid var(--color-divider);
+}
+.fileRow[data-unknown="true"] .fileMeta {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.fileName {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fileMeta {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.fileCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-surface);
+}
+.fileCard[data-unknown="true"] {
+  border-style: dashed;
+}
+.fileCard[data-error="true"] {
+  border-color: var(--status-stopped);
+}
+.fileCard[data-blocked="true"] {
+  opacity: 0.75;
+}
+.fileCardHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.mappingDetails > summary,
+.previewDetails > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  padding: 4px 0;
+}
+.mappingDetails[open] > summary,
+.previewDetails[open] > summary {
+  margin-bottom: 10px;
+}
+
+@media (max-width: 640px) {
+  .fileRow,
+  .fileCardHeader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

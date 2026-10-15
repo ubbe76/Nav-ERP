@@ -1,0 +1,115 @@
+.card {
+  max-width: 640px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: var(--space-dashboard-card-padding);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.row + .row {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.numberInput {
+  width: 90px;
+  padding: 8px 10px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+.numberInput:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.numberInput:disabled {
+  opacity: 0.6;
+}
+
+.saved {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--accent-fg);
+}
+
+.texts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.description {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.switch {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-track);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.switch[data-on="true"] {
+  background: var(--accent);
+}
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.switch:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-knob);
+  transition: transform 150ms ease;
+}
+.switch[data-on="true"] .knob {
+  transform: translateX(20px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .knob {
+    transition: none;
+  }
+}
+
+.error {
+  margin: 12px 0 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--status-stopped-text);
+}

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."stock_transaction_type" ADD VALUE 'stock_transfer';

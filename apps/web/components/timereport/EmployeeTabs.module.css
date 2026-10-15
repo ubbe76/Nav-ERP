@@ -1,0 +1,72 @@
+.tabStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 20px;
+}
+
+@media (max-width: 640px) {
+  .tabStrip {
+    gap: 2px;
+  }
+  .tab {
+    padding: 8px 10px;
+  }
+}
+
+.tab {
+  padding: 10px 16px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: var(--color-text-primary);
+}
+.tab[data-active="true"] {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.checkList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius-control-sm);
+  cursor: pointer;
+}
+.checkRow:hover {
+  background: var(--color-divider);
+}
+.checkRow[data-inactive="true"] {
+  opacity: 0.6;
+}
+
+.checkPrimary {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+/* A short note appended after a value inside a line of text — inline, so it
+   can't be the block-level FormHint. */
+.inlineNote {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

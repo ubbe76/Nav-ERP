@@ -1,0 +1,486 @@
+import type {
+  CostingMaterialSource,
+  CostingSupplierPriceTier,
+  CreateCompanyCarrierInput,
+  ManufacturingMaterialShortage,
+  UpdateCompanyCarrierInput,
+  UpdateCompanyInfoInput,
+  UpdateNumberSeriesInput,
+  UpdateSystemSettingsInput,
+} from "@navet/shared";
+import { round2 } from "@navet/shared";
+import type { SystemRepository } from "../repository/system.repository.js";
+import { createDatabaseBackup } from "./backup.js";
+import {
+  codeSetting,
+  decodePostingSettings,
+  PAYMENT_TOLERANCE_KEY,
+  POSTING_ACCOUNTS_PAYABLE_KEY,
+  POSTING_ACCOUNTS_RECEIVABLE_KEY,
+  POSTING_BANK_KEY,
+  POSTING_DEFAULT_COST_KEY,
+  POSTING_PAYMENT_WRITEOFF_KEY,
+  POSTING_REMINDER_FEE_ACCOUNT_KEY,
+  POSTING_REVENUE_0_KEY,
+  POSTING_REVENUE_12_KEY,
+  POSTING_REVENUE_25_KEY,
+  POSTING_REVENUE_6_KEY,
+  POSTING_VAT_IN_KEY,
+  POSTING_VAT_OUT_12_KEY,
+  POSTING_VAT_OUT_25_KEY,
+  POSTING_VAT_OUT_6_KEY,
+  POSTING_VAT_SETTLEMENT_KEY,
+  POSTING_INVENTORY_KEY,
+  POSTING_INVENTORY_CHANGE_KEY,
+  REMINDER_FEE_KEY,
+} from "./posting-settings.js";
+import { isUniqueViolation } from "./db-errors.js";
+// G1: append-only audit trail. system_settings/company_info are singletons —
+// entityId is null (no natural per-row id); number_series/company_carrier
+// use their own readable key/code. updateSettings NEVER logs values — only
+// the changed key names — and smtp_password is treated exactly like every
+// other key here (no special case needed: since only keys are logged, its
+// value never even reaches the detail object).
+import type { AuditWriter } from "../repository/audit.repository.js";
+
+// Percent settings are stored as plain strings — an absent or unparsable key
+// means "no markup" rather than NaN leaking into a calculation.
+function percentSetting(value: string | null): number {
+  if (value === null) return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+// Same fallback as the DB client — the api container sets DATABASE_URL to the
+// postgres service host.
+const DATABASE_URL_FALLBACK = "postgresql://erp:erp_dev_password@localhost:5432/erp";
+
+const ALLOW_MULTIPLE_STAMPS_KEY = "allow_multiple_stamps";
+const SHOW_REVISIONS_ON_DOCUMENTS_KEY = "show_revisions_on_documents";
+const SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY = "show_order_revision_on_documents";
+const ATF_MINUTES_PER_WEEK_KEY = "atf_minutes_per_week";
+const PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY = "payroll_overtime_threshold_minutes";
+const PAXML_CODE_WORKED_KEY = "paxml_code_worked";
+const PAXML_CODE_OVERTIME_KEY = "paxml_code_overtime";
+const PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY = "paxml_code_overtime_off_schedule";
+const PAXML_CODE_OVERTIME_COMP_KEY = "paxml_code_overtime_comp";
+const PAXML_CODE_OVERTIME_OFF_SCHEDULE_COMP_KEY = "paxml_code_overtime_off_schedule_comp";
+const PAXML_CODE_ATF_KEY = "paxml_code_atf";
+const SMTP_HOST_KEY = "smtp_host";
+const SMTP_PORT_KEY = "smtp_port";
+const SMTP_SECURE_KEY = "smtp_secure";
+const SMTP_USER_KEY = "smtp_user";
+const SMTP_PASSWORD_KEY = "smtp_password";
+const SMTP_FROM_NAME_KEY = "smtp_from_name";
+const SMTP_FROM_EMAIL_KEY = "smtp_from_email";
+const COSTING_MATERIAL_SOURCE_KEY = "costing_material_source";
+
+// system_settings holds free text, so an unknown or absent value has to resolve
+// to something. "standard" is the safe default — it is what the calculation did
+// before the setting existed.
+function decodeMaterialSource(raw: string | null | undefined): CostingMaterialSource {
+  return raw === "supplier" || raw === "actual" ? raw : "standard";
+}
+// Stafflade leverantörspriser in the calculation: "base" keeps the pre-staffel
+// behaviour (grundpriset), so an absent setting changes nothing.
+const COSTING_SUPPLIER_PRICE_TIER_KEY = "costing_supplier_price_tier";
+function decodeSupplierPriceTier(raw: string | null | undefined): CostingSupplierPriceTier {
+  return raw === "tiered" ? "tiered" : "base";
+}
+const COSTING_MO_PERCENT_KEY = "costing_mo_percent";
+const COSTING_LO_PERCENT_KEY = "costing_lo_percent";
+const COSTING_AFFO_PERCENT_KEY = "costing_affo_percent";
+const COSTING_GENERAL_MARKUP_PERCENT_KEY = "costing_general_markup_percent";
+// Tillåten överleverans på inköpsorder. Three states in one text value: key
+// absent ⇒ 0 % (receipts stop at the ordered quantity, exactly as before the
+// setting existed), "" ⇒ null = no limit, otherwise the percent.
+const PURCHASE_OVER_RECEIPT_PERCENT_KEY = "purchase_over_receipt_percent";
+function decodeOverReceiptPercent(raw: string | null): number | null {
+  if (raw === null) return 0;
+  if (raw === "") return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+// Materialbrist vid rapportering. "none" = no check, which is what every
+// report did before the setting existed — so an absent or unknown value
+// changes nothing at deploy (same decode shape as decodeSupplierPriceTier).
+const MANUFACTURING_MATERIAL_SHORTAGE_KEY = "manufacturing_material_shortage";
+function decodeMaterialShortage(raw: string | null | undefined): ManufacturingMaterialShortage {
+  return raw === "warn" || raw === "block" ? raw : "none";
+}
+
+// The 14 posting accounts + 2 kundreskontra amounts (Ekonomi →
+// automatkontering) live in ./posting-settings.js, which owns their key
+// constants and BAS-standard/kundreskontra defaults — imported above rather
+// than duplicated here.
+
+// Raw SMTP config for the mail service — includes the password, so it must
+// never be returned from a route. getSettings() is the maskable view.
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  password: string;
+  fromName: string;
+  fromEmail: string;
+}
+
+export class NumberSeriesNotFoundError extends Error {
+  constructor(key: string) {
+    super(`Number series "${key}" not found`);
+    this.name = "NumberSeriesNotFoundError";
+  }
+}
+
+export class CarrierNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Carrier ${id} not found`);
+    this.name = "CarrierNotFoundError";
+  }
+}
+
+export class CompanyCarrierNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Company carrier ${id} not found`);
+    this.name = "CompanyCarrierNotFoundError";
+  }
+}
+
+export class DuplicateCompanyCarrierError extends Error {
+  constructor() {
+    super("This carrier is already in the company's carrier list");
+    this.name = "DuplicateCompanyCarrierError";
+  }
+}
+
+// system.service.ts is constructed in ~30 unrelated test files across every
+// module (it's the settings reader almost everything depends on) — most of
+// them have no reason to wire up a real AuditWriter just to call
+// updateSettings/addCompanyCarrier once in passing. `audit` therefore
+// defaults to a no-op rather than being a hard requirement like it is on
+// manufacturing/stock-count/auth (whose test surface is much narrower);
+// app.ts always passes the real auditRepository.
+const NOOP_AUDIT: AuditWriter = { async log() {} };
+
+export function createSystemService(repo: SystemRepository, audit: AuditWriter = NOOP_AUDIT) {
+  // Typed view over the system_settings key–value rows. Absent keys fall
+  // back to Monitor-like defaults: one stamp at a time, ATF off (0 min),
+  // costing unchanged (standard cost, no markups). ONE query
+  // (repo.getAllSettings()) instead of ~30 separate getSetting() round trips —
+  // every field below decodes from the same in-memory map, including the
+  // posting/kundreskontra slice via posting-settings.js's decodePostingSettings
+  // (the single source of truth for those keys' defaults).
+  async function getSettings() {
+    const rows = await repo.getAllSettings();
+    const byKey = new Map(rows.map((row) => [row.key, row.value] as const));
+    const get = (key: string) => byKey.get(key) ?? null;
+
+    return {
+      allowMultipleStamps: get(ALLOW_MULTIPLE_STAMPS_KEY) === "true",
+      showRevisionsOnDocuments: get(SHOW_REVISIONS_ON_DOCUMENTS_KEY) === "true",
+      // Unlike the other toggles this one defaults ON when never set.
+      showOrderRevisionOnDocuments: get(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY) !== "false",
+      atfMinutesPerWeek: get(ATF_MINUTES_PER_WEEK_KEY) === null ? 0 : Number(get(ATF_MINUTES_PER_WEEK_KEY)),
+      payrollOvertimeThresholdMinutes:
+        get(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY) === null ? 0 : Number(get(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY)),
+      paxmlCodeWorked: codeSetting(get(PAXML_CODE_WORKED_KEY), "TID"),
+      paxmlCodeOvertime: codeSetting(get(PAXML_CODE_OVERTIME_KEY), "ÖT1"),
+      paxmlCodeOvertimeOffSchedule: codeSetting(get(PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY), "ÖT2"),
+      paxmlCodeOvertimeComp: codeSetting(get(PAXML_CODE_OVERTIME_COMP_KEY), "ÖK1"),
+      paxmlCodeOvertimeOffScheduleComp: codeSetting(get(PAXML_CODE_OVERTIME_OFF_SCHEDULE_COMP_KEY), "ÖK2"),
+      paxmlCodeAtf: codeSetting(get(PAXML_CODE_ATF_KEY), "ATF"),
+      smtpHost: get(SMTP_HOST_KEY) ?? "",
+      smtpPort: get(SMTP_PORT_KEY) === null ? 587 : Number(get(SMTP_PORT_KEY)),
+      smtpSecure: get(SMTP_SECURE_KEY) === "true",
+      smtpUser: get(SMTP_USER_KEY) ?? "",
+      // Write-only: the stored password never leaves the API.
+      smtpPasswordSet: get(SMTP_PASSWORD_KEY) !== null && get(SMTP_PASSWORD_KEY) !== "",
+      smtpFromName: get(SMTP_FROM_NAME_KEY) ?? "",
+      smtpFromEmail: get(SMTP_FROM_EMAIL_KEY) ?? "",
+      // Costing (System → Kalkyler) — see updateSystemSettingsSchema for the
+      // markup chain. Defaults keep the calculation exactly as it was.
+      // A real decode, not a two-way ternary: the previous
+      // `=== "supplier" ? … : "standard"` shape would have swallowed every new
+      // member of the enum, storing the setting and then never reading it back.
+      costingMaterialSource: decodeMaterialSource(get(COSTING_MATERIAL_SOURCE_KEY)),
+      costingSupplierPriceTier: decodeSupplierPriceTier(get(COSTING_SUPPLIER_PRICE_TIER_KEY)),
+      costingMoPercent: percentSetting(get(COSTING_MO_PERCENT_KEY)),
+      costingLoPercent: percentSetting(get(COSTING_LO_PERCENT_KEY)),
+      costingAffoPercent: percentSetting(get(COSTING_AFFO_PERCENT_KEY)),
+      costingGeneralMarkupPercent: percentSetting(get(COSTING_GENERAL_MARKUP_PERCENT_KEY)),
+      purchaseOverReceiptPercent: decodeOverReceiptPercent(get(PURCHASE_OVER_RECEIPT_PERCENT_KEY)),
+      manufacturingMaterialShortage: decodeMaterialShortage(get(MANUFACTURING_MATERIAL_SHORTAGE_KEY)),
+      // Automatic accounting (Ekonomi → automatkontering) — the 14 posting
+      // accounts + the 2 kundreskontra amounts, decoded by the leaf that owns
+      // their keys/defaults (posting-settings.js).
+      ...decodePostingSettings(get),
+    };
+  }
+
+  return {
+    async getCompanyInfo() {
+      return repo.getCompanyInfo();
+    },
+
+    async updateCompanyInfo(input: UpdateCompanyInfoInput, userId: string | null = null) {
+      // Company info isn't secret (it's printed on outgoing documents), but
+      // the detail still stays to changed field NAMES rather than full
+      // before/after values — a singleton settings blob, same shape as
+      // updateSettings' changed-keys log below, not a row edit.
+      const changedFields = (Object.keys(input) as (keyof UpdateCompanyInfoInput)[]).filter(
+        (key) => input[key] !== undefined
+      );
+      const row = await repo.updateCompanyInfo(input);
+      if (changedFields.length > 0) {
+        await audit.log({ entityType: "company_info", entityId: null, action: "updated", detail: { changedFields }, userId });
+      }
+      return row;
+    },
+
+    async getLogo() {
+      return repo.getLogo();
+    },
+
+    async updateLogo(logo: Buffer, contentType: string, userId: string | null = null) {
+      await repo.updateLogo(logo, contentType);
+      await audit.log({
+        entityType: "company_info",
+        entityId: null,
+        action: "logo_updated",
+        detail: { contentType, sizeBytes: logo.length },
+        userId,
+      });
+    },
+
+    async listNumberSeries() {
+      return repo.listNumberSeries();
+    },
+
+    async updateNumberSeries(key: string, input: UpdateNumberSeriesInput, userId: string | null = null) {
+      const existing = await repo.getNumberSeries(key);
+      if (!existing) throw new NumberSeriesNotFoundError(key);
+      const row = await repo.updateNumberSeries(key, input);
+      if (!row) throw new NumberSeriesNotFoundError(key);
+      await audit.log({
+        entityType: "number_series",
+        entityId: key,
+        action: "updated",
+        detail: {
+          before: { prefix: existing.prefix, nextNumber: existing.nextNumber, digits: existing.digits },
+          after: { prefix: row.prefix, nextNumber: row.nextNumber, digits: row.digits },
+        },
+        userId,
+      });
+      return row;
+    },
+
+    getSettings,
+
+    // A complete gzipped pg_dump of the whole database, streamed to the
+    // download. Admin-only at the route.
+    createBackup() {
+      return createDatabaseBackup(process.env.DATABASE_URL ?? DATABASE_URL_FALLBACK, new Date());
+    },
+
+    // --- Company carrier accounts (Företagsinformation → Speditörer) ---
+
+    async listCompanyCarriers() {
+      return repo.listCompanyCarriers();
+    },
+
+    async addCompanyCarrier(input: CreateCompanyCarrierInput, userId: string | null = null) {
+      const carrier = await repo.getCarrierById(input.carrierId);
+      if (!carrier) throw new CarrierNotFoundError(input.carrierId);
+      let row;
+      try {
+        row = await repo.createCompanyCarrier(input);
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new DuplicateCompanyCarrierError();
+        throw err;
+      }
+      await audit.log({
+        entityType: "company_carrier",
+        entityId: carrier.code,
+        action: "created",
+        detail: { customerNumber: input.customerNumber },
+        userId,
+      });
+      return row;
+    },
+
+    async updateCompanyCarrier(id: string, input: UpdateCompanyCarrierInput, userId: string | null = null) {
+      const existing = await repo.findCompanyCarrier(id);
+      if (!existing) throw new CompanyCarrierNotFoundError(id);
+      const row = await repo.updateCompanyCarrier(id, input.customerNumber);
+      if (!row) throw new CompanyCarrierNotFoundError(id);
+      const carrier = await repo.getCarrierById(existing.carrierId);
+      await audit.log({
+        entityType: "company_carrier",
+        entityId: carrier?.code ?? id,
+        action: "updated",
+        detail: { before: { customerNumber: existing.customerNumber }, after: { customerNumber: row.customerNumber } },
+        userId,
+      });
+      return row;
+    },
+
+    async removeCompanyCarrier(id: string, userId: string | null = null) {
+      const existing = await repo.findCompanyCarrier(id);
+      if (!existing) throw new CompanyCarrierNotFoundError(id);
+      const row = await repo.deleteCompanyCarrier(id);
+      if (!row) throw new CompanyCarrierNotFoundError(id);
+      const carrier = await repo.getCarrierById(existing.carrierId);
+      await audit.log({
+        entityType: "company_carrier",
+        entityId: carrier?.code ?? id,
+        action: "deleted",
+        userId,
+      });
+    },
+
+    // For document rendering (purchase service) — the company's number at a
+    // carrier, or null.
+    async getCompanyCarrierNumber(carrierId: string) {
+      return repo.getCompanyCarrierNumber(carrierId);
+    },
+
+    // Raw SMTP config for the mail service. Returns null until a host is
+    // configured, so callers can answer "SMTP är inte konfigurerat".
+    async getSmtpConfig(): Promise<SmtpConfig | null> {
+      const [host, port, secure, user, password, fromName, fromEmail] = await Promise.all([
+        repo.getSetting(SMTP_HOST_KEY),
+        repo.getSetting(SMTP_PORT_KEY),
+        repo.getSetting(SMTP_SECURE_KEY),
+        repo.getSetting(SMTP_USER_KEY),
+        repo.getSetting(SMTP_PASSWORD_KEY),
+        repo.getSetting(SMTP_FROM_NAME_KEY),
+        repo.getSetting(SMTP_FROM_EMAIL_KEY),
+      ]);
+      if (!host) return null;
+      return {
+        host,
+        port: port === null ? 587 : Number(port),
+        secure: secure === "true",
+        user: user ?? "",
+        password: password ?? "",
+        fromName: fromName ?? "",
+        fromEmail: fromEmail ?? "",
+      };
+    },
+
+    async updateSettings(input: UpdateSystemSettingsInput, userId: string | null = null) {
+      // G1 masking: `set` records only the KEY that changed, never the
+      // value — so smtp_password (and everything else here) never has a
+      // value anywhere near the audit detail. This mirrors the DB storage
+      // key rather than the request field name, since that's the actual
+      // durable identity of the setting.
+      const changedKeys: string[] = [];
+      const set = async (key: string, value: string) => {
+        changedKeys.push(key);
+        await repo.setSetting(key, value);
+      };
+
+      if (input.allowMultipleStamps !== undefined) {
+        await set(ALLOW_MULTIPLE_STAMPS_KEY, String(input.allowMultipleStamps));
+      }
+      if (input.showRevisionsOnDocuments !== undefined) {
+        await set(SHOW_REVISIONS_ON_DOCUMENTS_KEY, String(input.showRevisionsOnDocuments));
+      }
+      if (input.showOrderRevisionOnDocuments !== undefined) {
+        await set(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY, String(input.showOrderRevisionOnDocuments));
+      }
+      if (input.atfMinutesPerWeek !== undefined) {
+        await set(ATF_MINUTES_PER_WEEK_KEY, String(input.atfMinutesPerWeek));
+      }
+      if (input.payrollOvertimeThresholdMinutes !== undefined) {
+        await set(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY, String(input.payrollOvertimeThresholdMinutes));
+      }
+      if (input.paxmlCodeWorked !== undefined) await set(PAXML_CODE_WORKED_KEY, input.paxmlCodeWorked);
+      if (input.paxmlCodeOvertime !== undefined) await set(PAXML_CODE_OVERTIME_KEY, input.paxmlCodeOvertime);
+      if (input.paxmlCodeOvertimeOffSchedule !== undefined) {
+        await set(PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY, input.paxmlCodeOvertimeOffSchedule);
+      }
+      if (input.paxmlCodeOvertimeComp !== undefined) {
+        await set(PAXML_CODE_OVERTIME_COMP_KEY, input.paxmlCodeOvertimeComp);
+      }
+      if (input.paxmlCodeOvertimeOffScheduleComp !== undefined) {
+        await set(PAXML_CODE_OVERTIME_OFF_SCHEDULE_COMP_KEY, input.paxmlCodeOvertimeOffScheduleComp);
+      }
+      if (input.paxmlCodeAtf !== undefined) await set(PAXML_CODE_ATF_KEY, input.paxmlCodeAtf);
+      if (input.smtpHost !== undefined) await set(SMTP_HOST_KEY, input.smtpHost);
+      if (input.smtpPort !== undefined) await set(SMTP_PORT_KEY, String(input.smtpPort));
+      if (input.smtpSecure !== undefined) await set(SMTP_SECURE_KEY, String(input.smtpSecure));
+      if (input.smtpUser !== undefined) await set(SMTP_USER_KEY, input.smtpUser);
+      // Empty string means "leave the stored password as-is" — the settings
+      // form always posts the field but never sees the current value.
+      if (input.smtpPassword !== undefined && input.smtpPassword !== "") {
+        await set(SMTP_PASSWORD_KEY, input.smtpPassword);
+      }
+      if (input.smtpFromName !== undefined) await set(SMTP_FROM_NAME_KEY, input.smtpFromName);
+      if (input.smtpFromEmail !== undefined) await set(SMTP_FROM_EMAIL_KEY, input.smtpFromEmail);
+      if (input.costingMaterialSource !== undefined) {
+        await set(COSTING_MATERIAL_SOURCE_KEY, input.costingMaterialSource);
+      }
+      if (input.costingSupplierPriceTier !== undefined) {
+        await set(COSTING_SUPPLIER_PRICE_TIER_KEY, input.costingSupplierPriceTier);
+      }
+      if (input.costingMoPercent !== undefined) await set(COSTING_MO_PERCENT_KEY, String(input.costingMoPercent));
+      if (input.costingLoPercent !== undefined) await set(COSTING_LO_PERCENT_KEY, String(input.costingLoPercent));
+      if (input.costingAffoPercent !== undefined) await set(COSTING_AFFO_PERCENT_KEY, String(input.costingAffoPercent));
+      if (input.costingGeneralMarkupPercent !== undefined) {
+        await set(COSTING_GENERAL_MARKUP_PERCENT_KEY, String(input.costingGeneralMarkupPercent));
+      }
+      if (input.purchaseOverReceiptPercent !== undefined) {
+        await set(
+          PURCHASE_OVER_RECEIPT_PERCENT_KEY,
+          input.purchaseOverReceiptPercent === null ? "" : String(input.purchaseOverReceiptPercent)
+        );
+      }
+      if (input.manufacturingMaterialShortage !== undefined) {
+        await set(MANUFACTURING_MATERIAL_SHORTAGE_KEY, input.manufacturingMaterialShortage);
+      }
+      if (input.postingAccountsReceivable !== undefined) {
+        await set(POSTING_ACCOUNTS_RECEIVABLE_KEY, input.postingAccountsReceivable);
+      }
+      if (input.postingVatOut25 !== undefined) await set(POSTING_VAT_OUT_25_KEY, input.postingVatOut25);
+      if (input.postingVatOut12 !== undefined) await set(POSTING_VAT_OUT_12_KEY, input.postingVatOut12);
+      if (input.postingVatOut6 !== undefined) await set(POSTING_VAT_OUT_6_KEY, input.postingVatOut6);
+      if (input.postingRevenue25 !== undefined) await set(POSTING_REVENUE_25_KEY, input.postingRevenue25);
+      if (input.postingRevenue12 !== undefined) await set(POSTING_REVENUE_12_KEY, input.postingRevenue12);
+      if (input.postingRevenue6 !== undefined) await set(POSTING_REVENUE_6_KEY, input.postingRevenue6);
+      if (input.postingRevenue0 !== undefined) await set(POSTING_REVENUE_0_KEY, input.postingRevenue0);
+      if (input.postingAccountsPayable !== undefined) {
+        await set(POSTING_ACCOUNTS_PAYABLE_KEY, input.postingAccountsPayable);
+      }
+      if (input.postingVatIn !== undefined) await set(POSTING_VAT_IN_KEY, input.postingVatIn);
+      if (input.postingDefaultCost !== undefined) await set(POSTING_DEFAULT_COST_KEY, input.postingDefaultCost);
+      // Kundreskontra (B3).
+      if (input.postingBank !== undefined) await set(POSTING_BANK_KEY, input.postingBank);
+      if (input.postingReminderFeeAccount !== undefined) {
+        await set(POSTING_REMINDER_FEE_ACCOUNT_KEY, input.postingReminderFeeAccount);
+      }
+      if (input.postingPaymentWriteOff !== undefined) {
+        await set(POSTING_PAYMENT_WRITEOFF_KEY, input.postingPaymentWriteOff);
+      }
+      // Momsrapport (B5).
+      if (input.postingVatSettlement !== undefined) {
+        await set(POSTING_VAT_SETTLEMENT_KEY, input.postingVatSettlement);
+      }
+      // Årsbokslut (steg 2).
+      if (input.postingInventory !== undefined) await set(POSTING_INVENTORY_KEY, input.postingInventory);
+      if (input.postingInventoryChange !== undefined) await set(POSTING_INVENTORY_CHANGE_KEY, input.postingInventoryChange);
+      if (input.paymentTolerance !== undefined) {
+        await set(PAYMENT_TOLERANCE_KEY, String(round2(input.paymentTolerance)));
+      }
+      if (input.reminderFee !== undefined) await set(REMINDER_FEE_KEY, String(round2(input.reminderFee)));
+
+      if (changedKeys.length > 0) {
+        await audit.log({ entityType: "system_settings", entityId: null, action: "updated", detail: { changedKeys }, userId });
+      }
+      return getSettings();
+    },
+  };
+}
+
+export type SystemService = ReturnType<typeof createSystemService>;

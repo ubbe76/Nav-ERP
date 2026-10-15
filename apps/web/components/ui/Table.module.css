@@ -1,0 +1,192 @@
+/* The grid sits on its own surface card (same tokens as KpiCard) so data
+   lists read as first-class panels next to the KPI/form cards, instead of
+   floating directly on the page background.
+
+   The table is a single CSS grid: header, data rows and footer are
+   `display: contents` wrappers whose cells are the grid items. That way
+   every row resolves its columns against the same tracks and the header
+   always lines up with the data — one grid per row let `fr` tracks be
+   floored by each row's own min-content (a long article name, a status
+   pill) and the columns drifted. Row styling (padding, dividers, hover)
+   therefore lives on the cells; the wrappers only group them for keys,
+   hover and the mobile stack. */
+.table {
+  width: 100%;
+  overflow-x: auto;
+  display: grid;
+  /* grid-template-columns is set inline by Table.tsx */
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+}
+
+.headerRow,
+.row,
+.footerRow {
+  display: contents;
+}
+
+/* Spacing: 12px between columns as right padding on every cell, 20px at the
+   table edges on the first/last cell. Table.tsx widens fixed px tracks by
+   the same amounts so callers' widths stay content widths. */
+.headerCell {
+  padding: 10px 12px 7px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+.headerCell[data-align="right"] {
+  text-align: right;
+}
+
+.cell {
+  padding: 9px 12px 9px 0;
+  border-bottom: 1px solid var(--color-divider);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  transition: background 120ms ease;
+}
+.cell[data-align="right"] {
+  text-align: right;
+}
+.row:last-child > .cell {
+  border-bottom: none;
+}
+
+.headerRow > .headerCell:first-child,
+.row > .cell:first-child,
+.footerRow > .cell:first-child {
+  padding-left: 20px;
+}
+.headerRow > .headerCell:last-child,
+.row > .cell:last-child,
+.footerRow > .cell:last-child {
+  padding-right: 20px;
+}
+
+/* hover-capable devices only — prevents the highlight sticking to the last
+   tapped row on touch screens */
+@media (hover: hover) {
+  .row:hover > .cell {
+    background: var(--color-divider);
+  }
+}
+
+/* Keyboard-marked row (moved with the arrow keys from a search field): the
+   hover background plus an accent frame — a stronger tint would push the
+   muted text under WCAG AA, so the frame carries the emphasis. The row
+   wrapper is display: contents, so the frame is drawn per cell. */
+.row[data-highlighted] > .cell {
+  background: var(--color-divider);
+  box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+.row[data-highlighted] > .cell:first-child {
+  box-shadow: inset 4px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+.row[data-highlighted] > .cell:last-child {
+  box-shadow: inset -2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+
+/* Summary row (order total) — sits below the last row, outside the hover
+   treatment so it doesn't read as another data row. */
+.footerRow > .cell {
+  padding-top: 14px;
+  padding-bottom: 14px;
+  border-top: 1px solid var(--color-border);
+  border-bottom: none;
+  font-weight: 600;
+}
+
+.empty {
+  grid-column: 1 / -1;
+  padding: 36px 20px;
+  text-align: center;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+}
+
+/* Below phone width the grid becomes a stack of labeled cards: the table
+   stops being a grid, each row is a block and its cells stack inside it. */
+@media (max-width: 640px) {
+  .table {
+    display: block;
+  }
+
+  .headerRow {
+    display: none;
+  }
+
+  .row,
+  .footerRow {
+    display: block;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--color-divider);
+  }
+  .row:last-child {
+    border-bottom: none;
+  }
+  .footerRow {
+    border-top: 1px solid var(--color-border);
+    border-bottom: none;
+  }
+
+  /* Stacked, the summary row's unlabelled filler columns would each become an
+     empty line — drop them and keep only the cells that carry content. The
+     column headings are dropped too: "Á-PRIS Summa" reads wrong, and the
+     summary label carries its own meaning. */
+  .footerRow .cell:empty {
+    display: none;
+  }
+  .footerRow .cell::before {
+    content: none;
+  }
+  .cell,
+  .row > .cell:first-child,
+  .row > .cell:last-child,
+  .footerRow > .cell,
+  .footerRow > .cell:first-child,
+  .footerRow > .cell:last-child {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 0;
+    border: none;
+  }
+  .cell[data-align="right"] {
+    text-align: right;
+  }
+  .cell::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+  }
+
+  /* Same as the footer rule for data rows: a cell that renders nothing (an
+     action column with no action, the Artikelöversikt's "Lagersaldo idag"
+     row) would otherwise print its heading with an empty value beside it.
+     Placed after the display:flex block above so it wins for the
+     first/last-child selectors too. */
+  .row > .cell:empty {
+    display: none;
+  }
+}
+
+/* Stacked rows are blocks again, so the hover tint goes on the row itself. */
+@media (max-width: 640px) and (hover: hover) {
+  .row:hover > .cell {
+    background: transparent;
+  }
+  .row:hover {
+    background: var(--color-divider);
+  }
+}

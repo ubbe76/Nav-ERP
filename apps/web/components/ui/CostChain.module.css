@@ -1,0 +1,76 @@
+.chain {
+  margin-top: 6px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 3px 0;
+}
+
+/* Two-amount layout (Totalt / Per st). The container is the grid and the
+   amount columns are max-content-sized, so a long label never gets floored
+   by fixed tracks in a narrow panel (the repo's px-grid trap) and a large
+   amount never overflows its column. Each row spans the container's tracks
+   via subgrid, keeping the row div as the box the subtotal/result rules
+   draw on. */
+.chainSplit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  column-gap: 14px;
+}
+
+.rowSplit {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  padding: 3px 0;
+}
+
+.header {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  padding: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+
+.headerAmount {
+  text-align: right;
+}
+
+.amount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* A markup line — muted, so the direct costs read as the backbone. */
+.markup {
+  color: var(--color-text-secondary);
+}
+
+/* TVK and SVK: subtotals ruled off from the lines above them. */
+.subtotal {
+  margin-top: 3px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+  font-weight: 600;
+}
+
+/* The sales price — the line the whole calculation produces. */
+.result {
+  margin-top: 3px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+  font-weight: 600;
+  color: var(--accent-fg);
+}

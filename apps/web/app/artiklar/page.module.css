@@ -1,0 +1,7 @@
+.rowLink {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.rowLink:hover {
+  color: var(--accent-fg);
+}

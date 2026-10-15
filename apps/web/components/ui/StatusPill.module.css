@@ -1,0 +1,81 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+}
+
+.compact {
+  padding: 4px 11px;
+  font-size: 12px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.compact .dot {
+  width: 6px;
+  height: 6px;
+}
+
+.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.running {
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
+}
+.inline.running {
+  color: var(--status-running-text);
+  background: transparent;
+}
+
+.delayed {
+  background: var(--status-delayed-bg);
+  color: var(--status-delayed-text);
+}
+.inline.delayed {
+  color: var(--status-delayed-text);
+  background: transparent;
+}
+
+.stopped {
+  background: var(--status-stopped-bg);
+  color: var(--status-stopped-text);
+}
+.inline.stopped {
+  color: var(--status-stopped-text);
+  background: transparent;
+}
+
+.done {
+  background: var(--status-done-bg);
+  color: var(--status-done-text);
+}
+.inline.done {
+  color: var(--status-done-text);
+  background: transparent;
+}
+
+.draft {
+  background: var(--status-draft-bg);
+  color: var(--status-draft-text);
+}
+.inline.draft {
+  color: var(--status-draft-text);
+  background: transparent;
+}

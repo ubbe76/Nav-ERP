@@ -1,0 +1,48 @@
+/* Settings + run button under the candidate table (desktop). */
+.actionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 16px;
+}
+
+/* Mobile stack only (≤640px, see Table.module.css): the table's header row —
+   and the select-all checkbox in it — is hidden, and the run button under
+   the stacked cards is out of reach. This sticky bar above the list carries
+   "Välj alla", the selection summary, the Utfärda direkt toggle and the run
+   button instead. Same pattern as the TO list and the behovsberäkning. */
+.selectBar {
+  display: none;
+}
+
+.selectAllLabel,
+.toggleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.selectAllLabel {
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .selectBar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    position: sticky;
+    /* Below the fixed hamburger (Nav.module.css: 38px at top/left 20px). */
+    top: 66px;
+    z-index: 1;
+    padding: 10px 0;
+    margin-bottom: 8px;
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+    font-family: var(--font-body);
+    font-size: 13.5px;
+  }
+}

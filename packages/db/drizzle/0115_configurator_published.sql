@@ -1,0 +1,1 @@
+ALTER TABLE "configurator_templates" ADD COLUMN "published" boolean DEFAULT false NOT NULL;

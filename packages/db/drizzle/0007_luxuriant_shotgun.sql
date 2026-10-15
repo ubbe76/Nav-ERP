@@ -1,0 +1,1 @@
+ALTER TABLE "articles" ADD COLUMN "standard_cost" numeric(14, 4);

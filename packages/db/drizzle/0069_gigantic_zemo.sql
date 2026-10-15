@@ -1,0 +1,3 @@
+ALTER TABLE "manufacturing_orders" ADD COLUMN "sales_order_row_id" uuid;--> statement-breakpoint
+ALTER TABLE "manufacturing_orders" ADD CONSTRAINT "manufacturing_orders_sales_order_row_id_sales_order_rows_id_fk" FOREIGN KEY ("sales_order_row_id") REFERENCES "public"."sales_order_rows"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "idx_manufacturing_orders_sales_order_row" ON "manufacturing_orders" USING btree ("sales_order_row_id");

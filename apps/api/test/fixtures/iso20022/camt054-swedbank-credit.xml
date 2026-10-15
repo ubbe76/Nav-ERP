@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Swedbank's MIG 1.0 camt.054.001.02 Credit and its published examples (not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr>
+      <MsgId>SWEDSESSCRED20241009000001</MsgId>
+      <CreDtTm>2024-10-09T15:33:03</CreDtTm>
+    </GrpHdr>
+    <Ntfctn>
+      <Id>SWEDSESSCRED2024100900000100001</Id>
+      <CreDtTm>2024-10-09T15:33:03</CreDtTm>
+      <Acct>
+        <Id><Othr><Id>821491234567890</Id><SchmeNm><Cd>BBAN</Cd></SchmeNm></Othr></Id>
+        <Ccy>SEK</Ccy>
+      </Acct>
+      <Ntry>
+        <Amt Ccy="SEK">26180.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <AcctSvcrRef>2024100984020001</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>NTAV</Cd><SubFmlyCd>NTAV</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><AcctSvcrRef>202410098402000100000001</AcctSvcrRef></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">10000.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>AB FONSTERBOLAGET</Nm></Dbtr></RltdPties>
+            <RmtInf><Strd>
+              <RfrdDocInf><Tp><CdOrPrtry><Cd>CINV</Cd></CdOrPrtry></Tp><Nb>501262</Nb></RfrdDocInf>
+              <RfrdDocAmt><RmtdAmt Ccy="SEK">10000.00</RmtdAmt></RfrdDocAmt>
+            </Strd></RmtInf>
+          </TxDtls>
+          <TxDtls>
+            <Refs><AcctSvcrRef>202410098402000100000002</AcctSvcrRef></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">9930.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>RORFIRMAN I EXEMPELBY AB</Nm></Dbtr></RltdPties>
+            <RmtInf><Strd>
+              <RfrdDocInf><Tp><CdOrPrtry><Cd>CINV</Cd></CdOrPrtry></Tp><Nb>501569</Nb></RfrdDocInf>
+            </Strd></RmtInf>
+          </TxDtls>
+          <TxDtls>
+            <Refs><AcctSvcrRef>202410098402000100000003</AcctSvcrRef></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">6250.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>BYGG O KAKEL ALVBY</Nm></Dbtr></RltdPties>
+            <RmtInf><Ustrd>Faktura september</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="SEK">6500.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <AcctSvcrRef>2024100984020002</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>NTAV</Cd><SubFmlyCd>NTAV</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><AcctSvcrRef>202410098402000200000001</AcctSvcrRef></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">6500.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>ALFA VERKSTAD AB</Nm></Dbtr></RltdPties>
+            <RmtInf>
+              <Strd>
+                <RfrdDocInf><Tp><CdOrPrtry><Cd>CINV</Cd></CdOrPrtry></Tp><Nb>503060</Nb></RfrdDocInf>
+                <RfrdDocAmt><RmtdAmt Ccy="SEK">7000.00</RmtdAmt></RfrdDocAmt>
+              </Strd>
+              <Strd>
+                <RfrdDocInf><Tp><CdOrPrtry><Cd>CREN</Cd></CdOrPrtry></Tp><Nb>503169</Nb></RfrdDocInf>
+                <RfrdDocAmt><CdtNoteAmt Ccy="SEK">500.00</CdtNoteAmt></RfrdDocAmt>
+              </Strd>
+            </RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="SEK">1200.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">1200.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>KALLES BYGG</Nm></Dbtr></RltdPties>
+            <RmtInf><Ustrd>Betalning 5040</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="SEK">300.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>PDNG</Sts>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>
