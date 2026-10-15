@@ -91,6 +91,20 @@ export class InvalidAttendanceIntervalError extends Error {
   }
 }
 
+export class InvalidStopTimeError extends Error {
+  constructor() {
+    super("Stop time must be after the stamp's start and not in the future");
+    this.name = "InvalidStopTimeError";
+  }
+}
+
+export class StopTimeNotAllowedError extends Error {
+  constructor() {
+    super("Only a supervisor or admin can set the stop time");
+    this.name = "StopTimeNotAllowedError";
+  }
+}
+
 export class TimeReportNotFoundError extends Error {
   constructor(id: string) {
     super(`Time report ${id} not found`);
@@ -108,20 +122,19 @@ export class WeekScheduleNotFoundError extends Error {
   }
 }
 
-// Today in the server's local timezone as YYYY-MM-DD — a stamp-out just
-// before midnight should land on the day the work was done. localDateOf
-// (same idiom, any instant) lives in the stamp-close leaf so the automatic
-// stamp-out dates its time reports exactly like the terminal does.
-function localToday() {
-  return localDateOf(new Date());
-}
-
 export function createTimeReportService(
   repo: TimeReportRepository,
   manufacturing: ManufacturingService,
   periodLocks: PeriodLockChecker,
   audit: AuditWriter
 ) {
+  // Regel 5 shares this with attendanceIn: resume work paused by the
+  // previous Gå hem, then open the attendance.
+  async function beginAttendance(employeeId: string, createdBy: string) {
+    await repo.resumeStampSessions(employeeId, new Date());
+    return repo.createAttendanceSession(employeeId, createdBy);
+  }
+
   // Stämpla ut: closes the session, materializes the time report and
   // reports the stint's quantities on the operation. (Going home no longer
   // comes through here — attendanceOut pauses open work stamps instead.)
@@ -129,6 +142,18 @@ export function createTimeReportService(
     const session = await repo.findStampSessionById(sessionId);
     if (!session) throw new StampSessionNotFoundError(sessionId);
     if (session.stoppedAt) throw new StampSessionAlreadyStoppedError();
+
+    // Regel 6: a supervisor can say when the stint actually ended. Without
+    // one the stint ends now and the report lands on today, as before.
+    const now = new Date();
+    const stoppedAt = input.stoppedAt ? new Date(input.stoppedAt) : now;
+    if (input.stoppedAt) {
+      // One minute of slack for clock skew between browser and server.
+      if (stoppedAt <= session.startedAt || stoppedAt.getTime() > now.getTime() + 60_000) {
+        throw new InvalidStopTimeError();
+      }
+      if (await periodLocks.isDateLocked(localDateOf(stoppedAt))) throw new PayrollPeriodLockedError(localDateOf(stoppedAt));
+    }
 
     // Every stamp-out reports the stint's quantities (OK + scrapped, both
     // possibly 0). Scrapped units also draw the operation's linked material.
@@ -150,13 +175,15 @@ export function createTimeReportService(
       );
     }
 
-    const stoppedAt = new Date();
     // Paused time (away from work, e.g. gone home overnight) is excluded
     // from the reported hours; an ongoing pause counts up to stoppedAt.
     const hours = stampedHours(session, stoppedAt);
 
+    // Dated on the stop time's local day (localDateOf, shared with the
+    // automatic stamp-out) — a stint stopped just before midnight lands on
+    // the day the work was done.
     const report = await repo.createTimeReport(
-      { employeeId: session.employeeId, moOperationId: session.moOperationId, date: localToday(), hours, note: input.note },
+      { employeeId: session.employeeId, moOperationId: session.moOperationId, date: localDateOf(stoppedAt), hours, note: input.note },
       createdBy
     );
     const closed = await repo.closeStampSession(sessionId, stoppedAt, report.id);
@@ -218,8 +245,9 @@ export function createTimeReportService(
     },
 
     // Manually entered time report. Stamp-outs go through doStampOut instead
-    // and always land on today's date, which can never sit inside a locked
-    // period (a period is only lockable once its last day has passed).
+    // and land on the stop time's day: today (which can never sit inside a
+    // locked period — a period is only lockable once its last day has
+    // passed) or a supervisor's stop time, checked there.
     async createTimeReport(input: CreateTimeReportInput, createdBy: string) {
       if (await periodLocks.isDateLocked(input.date)) throw new PayrollPeriodLockedError(input.date);
       return repo.createTimeReport(input, createdBy);
@@ -269,7 +297,16 @@ export function createTimeReportService(
         await manufacturing.start(order.id);
       }
 
-      return repo.createStampSession(input.employeeId, input.moOperationId, createdBy);
+      // Regel 5: stamping in on work means the employee is here — without
+      // an open attendance the stamp clocks them in too (and resumes work
+      // paused by the previous Gå hem, exactly like Kom).
+      let attendanceStarted = false;
+      if (!(await repo.hasOpenAttendanceSession(input.employeeId))) {
+        await beginAttendance(input.employeeId, createdBy);
+        attendanceStarted = true;
+      }
+      const session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy);
+      return { ...session, attendanceStarted };
     },
 
     // Stämpla ut: close the session, materialize a time report from the
@@ -306,8 +343,7 @@ export function createTimeReportService(
       if (await repo.hasOpenAttendanceSession(input.employeeId)) throw new AlreadyPresentError();
       // Resume any work paused by the previous going-home — the pause folds
       // into pausedSeconds and is excluded from reported hours.
-      await repo.resumeStampSessions(input.employeeId, new Date());
-      return repo.createAttendanceSession(input.employeeId, createdBy);
+      return beginAttendance(input.employeeId, createdBy);
     },
 
     // Närvarostämpling gå: going home PAUSES any open work stamps — the

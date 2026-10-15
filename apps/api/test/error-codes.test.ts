@@ -47,7 +47,12 @@ import {
   UnfinishedAttendanceError,
 } from "../src/modules/payroll/service/payroll.service.js";
 import { PayrollPeriodLockedError } from "../src/modules/payroll/service/period-lock.js";
-import { AlreadyPresentError, InvalidAttendanceIntervalError } from "../src/modules/timereport/service/timereport.service.js";
+import {
+  AlreadyPresentError,
+  InvalidAttendanceIntervalError,
+  InvalidStopTimeError,
+  StopTimeNotAllowedError,
+} from "../src/modules/timereport/service/timereport.service.js";
 
 import {
   AccountNotFoundError,
@@ -238,6 +243,8 @@ const cases: Array<[Error, string]> = [
   [new PeriodNotLockedError(2026, 1), ERROR_CODES.PERIOD_NOT_LOCKED],
   [new InvalidAttendanceIntervalError(), ERROR_CODES.INVALID_ATTENDANCE_INTERVAL],
   [new AlreadyPresentError(), ERROR_CODES.ALREADY_PRESENT],
+  [new InvalidStopTimeError(), ERROR_CODES.INVALID_STOP_TIME],
+  [new StopTimeNotAllowedError(), ERROR_CODES.STOP_TIME_NOT_ALLOWED],
   [new DuplicateAbsenceError(), ERROR_CODES.DUPLICATE_ABSENCE],
   [new DuplicatePayrollCodeError("code", "X"), ERROR_CODES.DUPLICATE_PAYROLL_CODE],
   [new InvalidObWindowError("bad window"), ERROR_CODES.INVALID_OB_WINDOW],

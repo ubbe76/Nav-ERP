@@ -60,6 +60,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "period-not-locked": "Perioden är inte låst.",
   "invalid-attendance-interval": "Sluttiden måste vara efter starttiden",
   "already-present": "Medarbetaren är redan instämplad",
+  "invalid-stop-time": "Sluttiden måste vara efter instämplingen och inte i framtiden.",
+  "stop-time-not-allowed": "Bara arbetsledare och administratörer kan ange sluttid.",
   "duplicate-absence": "Frånvaro med samma kod finns redan på det datumet",
   "duplicate-payroll-code": "Koden eller namnet finns redan",
   "invalid-ob-window": "Sluttiden måste vara efter starttiden",

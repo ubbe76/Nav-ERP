@@ -18,6 +18,7 @@ import {
   EmployeeNotFoundError,
   InactiveEmployeeError,
   InvalidAttendanceIntervalError,
+  InvalidStopTimeError,
   StampSessionAlreadyStoppedError,
   TimeReportNotFoundError,
   createTimeReportService,
@@ -772,5 +773,90 @@ describe("supervisor corrections — attendance sessions and time reports", () =
     await expect(
       timeReportService.updateTimeReport(report.id, { date: "2026-08-02" }, user.id)
     ).rejects.toBeInstanceOf(PayrollPeriodLockedError);
+  });
+});
+
+describe("närvaro och sluttid", () => {
+  it("regel 5: stamping in without attendance clocks the employee in and resumes paused work", async () => {
+    const { user, operationA, operationB } = await makeReleasedMoWithTwoOperations();
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-R5", name: "Fem", active: true });
+    const first = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operationA.id }, user.id);
+    expect(first.attendanceStarted).toBe(true);
+    const [attendance] = await timeReportService.listAttendanceSessions(true);
+    await timeReportService.attendanceOut(attendance!.id, user.id); // pauses operation A
+
+    const second = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operationB.id }, user.id);
+
+    expect(second.attendanceStarted).toBe(true);
+    const open = await timeReportService.listStampSessions(true);
+    expect(open.filter((s) => s.employeeId === employee.id).every((s) => s.pausedAt === null)).toBe(true);
+    expect((await timeReportService.listAttendanceSessions(true)).filter((a) => a.employeeId === employee.id)).toHaveLength(1);
+  });
+
+  it("regel 5: an employee already present gets no second attendance", async () => {
+    const { user, operation } = await makeReleasedMoWithOperation();
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-R5B", name: "Närvarande", active: true });
+    await timeReportService.attendanceIn({ employeeId: employee.id }, user.id);
+    const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id);
+    expect(stamp.attendanceStarted).toBe(false);
+  });
+
+  it("regel 6: a supervisor stop time ends the stint there and dates the report on that day", async () => {
+    const { user, operation } = await makeReleasedMoWithOperation();
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-R6", name: "Sex", active: true });
+    const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id);
+    const start = new Date(Date.now() - 30 * 3_600_000);
+    await db.execute(sql`UPDATE stamp_sessions SET started_at = ${start.toISOString()}::timestamptz WHERE id = ${stamp.id}`);
+    const stoppedAt = new Date(start.getTime() + 7.5 * 3_600_000);
+
+    const { timeReport, session } = await timeReportService.stampOut(
+      stamp.id,
+      stampOutSchema.parse({ stoppedAt: stoppedAt.toISOString() }),
+      user.id
+    );
+
+    expect(timeReport.hours).toBe("7.50");
+    expect(timeReport.date).toBe(stoppedAt.toLocaleDateString("sv-SE"));
+    expect(session.stoppedAt!.getTime()).toBe(stoppedAt.getTime());
+  });
+
+  it("regel 6: a paused stamp stopped at its pause start reports the same hours as without a stop time", async () => {
+    const { user, operation } = await makeReleasedMoWithOperation();
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-R6P", name: "Paus", active: true });
+    const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id);
+    const start = new Date(Date.now() - 26 * 3_600_000);
+    const pausedAt = new Date(start.getTime() + 8 * 3_600_000);
+    await db.execute(
+      sql`UPDATE stamp_sessions SET started_at = ${start.toISOString()}::timestamptz, paused_at = ${pausedAt.toISOString()}::timestamptz WHERE id = ${stamp.id}`
+    );
+    const { timeReport } = await timeReportService.stampOut(
+      stamp.id,
+      stampOutSchema.parse({ stoppedAt: pausedAt.toISOString() }),
+      user.id
+    );
+    expect(timeReport.hours).toBe("8.00");
+  });
+
+  it("regel 6: refuses a stop time before the start, in the future or in a locked period", async () => {
+    const { user, operation } = await makeReleasedMoWithOperation();
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-R6X", name: "Fel", active: true });
+    const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id);
+    const before = new Date(Date.now() - 3_600_000).toISOString();
+    await db.execute(sql`UPDATE stamp_sessions SET started_at = now() WHERE id = ${stamp.id}`);
+    await expect(
+      timeReportService.stampOut(stamp.id, stampOutSchema.parse({ stoppedAt: before }), user.id)
+    ).rejects.toBeInstanceOf(InvalidStopTimeError);
+    const future = new Date(Date.now() + 10 * 60_000).toISOString();
+    await expect(
+      timeReportService.stampOut(stamp.id, stampOutSchema.parse({ stoppedAt: future }), user.id)
+    ).rejects.toBeInstanceOf(InvalidStopTimeError);
+    await db.execute(sql`UPDATE stamp_sessions SET started_at = now() - interval '2 hours' WHERE id = ${stamp.id}`);
+    dateLocked = true;
+    await expect(
+      timeReportService.stampOut(stamp.id, stampOutSchema.parse({ stoppedAt: new Date(Date.now() - 60_000).toISOString() }), user.id)
+    ).rejects.toBeInstanceOf(PayrollPeriodLockedError);
+    // nothing was written by the refusals
+    const open = await timeReportService.listStampSessions(true);
+    expect(open.some((s) => s.id === stamp.id)).toBe(true);
   });
 });

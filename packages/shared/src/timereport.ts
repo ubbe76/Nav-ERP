@@ -254,6 +254,10 @@ export const stampOutSchema = z
     // Materialbrist: report anyway after a 409 material-shortage in mode
     // "warn" — see materialShortageOverrideSchema in manufacturing.ts.
     allowMaterialShortage: materialShortageOverrideSchema,
+    // Supervisor stamp-out on Pågående arbete: when the stint actually
+    // ended (regel 6). Admin/supervisor only — the route refuses it for
+    // everyone else; the terminal never sends it.
+    stoppedAt: z.string().datetime({ offset: true }).optional(),
   })
   .refine((data) => data.quantityScrapped === 0 || (data.scrapReason ?? "").length > 0, {
     message: "Ange en kassationsorsak när kasserat antal är större än 0",

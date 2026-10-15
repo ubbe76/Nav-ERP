@@ -20,8 +20,10 @@ import {
   EmployeeNotFoundError,
   InactiveEmployeeError,
   InvalidAttendanceIntervalError,
+  InvalidStopTimeError,
   StampSessionAlreadyStoppedError,
   StampSessionNotFoundError,
+  StopTimeNotAllowedError,
   TimeReportNotFoundError,
   WeekScheduleNotFoundError,
 } from "../service/timereport.service.js";
@@ -131,10 +133,17 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
 
   app.post<{ Params: { id: string } }>("/stamp-sessions/:id/stop", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {
     const input = stampOutSchema.parse(req.body ?? {});
+    // Regel 6: only a supervisor on Pågående arbete may say when the stint
+    // ended — the terminal (shop-floor profile) always stops it now.
+    if (input.stoppedAt !== undefined && req.user!.role !== "admin" && req.user!.role !== "supervisor") {
+      return reply.code(403).send(errorBody(new StopTimeNotAllowedError()));
+    }
     try {
       return await service.stampOut(req.params.id, input, req.user!.id);
     } catch (err) {
       if (err instanceof StampSessionNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof InvalidStopTimeError) return reply.code(400).send(errorBody(err));
+      if (err instanceof PayrollPeriodLockedError) return reply.code(409).send(errorBody(err));
       if (err instanceof StampSessionAlreadyStoppedError || err instanceof InvalidStatusTransitionError) {
         return reply.code(409).send(errorBody(err));
       }
