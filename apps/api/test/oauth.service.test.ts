@@ -1,3 +1,4 @@
+import { API_CLIENT_SCOPES } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
@@ -28,7 +29,7 @@ async function makeUser() {
 describe("oauth service — client creation", () => {
   it("creates an API client and returns the plaintext secret once", async () => {
     const user = await makeUser();
-    const { client, clientSecret } = await oauthService.createApiClient({ name: "Diskbänkskonfigurator" }, user.id);
+    const { client, clientSecret } = await oauthService.createApiClient({ name: "Diskbänkskonfigurator", scopes: [...API_CLIENT_SCOPES] }, user.id);
 
     expect(client.name).toBe("Diskbänkskonfigurator");
     expect(clientSecret.length).toBeGreaterThan(20);
@@ -38,7 +39,7 @@ describe("oauth service — client creation", () => {
 describe("oauth service — token issuance", () => {
   it("issues a bearer token for valid client credentials", async () => {
     const user = await makeUser();
-    const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator" }, user.id);
+    const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator", scopes: [...API_CLIENT_SCOPES] }, user.id);
 
     const token = await oauthService.issueToken(client.id, clientSecret);
 
@@ -49,7 +50,7 @@ describe("oauth service — token issuance", () => {
 
   it("rejects an incorrect client secret", async () => {
     const user = await makeUser();
-    const { client } = await oauthService.createApiClient({ name: "Konfigurator" }, user.id);
+    const { client } = await oauthService.createApiClient({ name: "Konfigurator", scopes: [...API_CLIENT_SCOPES] }, user.id);
 
     await expect(oauthService.issueToken(client.id, "wrong-secret")).rejects.toThrow(InvalidClientCredentialsError);
   });
@@ -64,7 +65,7 @@ describe("oauth service — token issuance", () => {
 describe("oauth service — token verification", () => {
   it("resolves a valid token back to the client", async () => {
     const user = await makeUser();
-    const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator" }, user.id);
+    const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator", scopes: [...API_CLIENT_SCOPES] }, user.id);
     const { accessToken } = await oauthService.issueToken(client.id, clientSecret);
 
     const resolved = await oauthService.verifyClientToken(accessToken);

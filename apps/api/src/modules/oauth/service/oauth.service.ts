@@ -1,12 +1,19 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import type { CreateApiClientInput } from "@navet/shared";
+import { API_CLIENT_SCOPES, type ApiClientScope, type CreateApiClientInput, type UpdateApiClientInput } from "@navet/shared";
 import type { OAuthRepository } from "../repository/oauth.repository.js";
 
 const CLIENT_TOKEN_EXPIRES_IN = "1h";
 const CLIENT_TOKEN_EXPIRES_IN_SECONDS = 60 * 60;
 const SALT_ROUNDS = 12;
+
+export class ApiClientCustomerNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Customer ${id} not found`);
+    this.name = "ApiClientCustomerNotFoundError";
+  }
+}
 
 export class InvalidClientCredentialsError extends Error {
   constructor() {
@@ -32,25 +39,77 @@ export interface PublicApiClient {
   name: string;
   active: boolean;
   createdAt: Date;
+  // Behörigheter per klient (4.9) — read on every request via verifyClientToken.
+  scopes: ApiClientScope[];
+  customerId: string | null;
+  customer: { id: string; customerNumber: string; name: string } | null;
 }
 
-function toPublicApiClient(row: { id: string; name: string; active: boolean; createdAt: Date }): PublicApiClient {
-  return { id: row.id, name: row.name, active: row.active, createdAt: row.createdAt };
+type ApiClientRow = {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt: Date;
+  scopes: string[];
+  customerId: string | null;
+};
+
+const KNOWN_SCOPES: readonly string[] = API_CLIENT_SCOPES;
+
+function toPublicApiClient(
+  row: ApiClientRow,
+  customer: PublicApiClient["customer"] = null
+): PublicApiClient {
+  return {
+    id: row.id,
+    name: row.name,
+    active: row.active,
+    createdAt: row.createdAt,
+    // An unknown key (a since-removed scope) grants nothing.
+    scopes: row.scopes.filter((s): s is ApiClientScope => KNOWN_SCOPES.includes(s)),
+    customerId: row.customerId,
+    customer,
+  };
 }
 
 export function createOAuthService(repo: OAuthRepository, jwtSecret: string) {
   return {
     // Returns the plaintext secret ONCE — only the bcrypt hash is stored.
     async createApiClient(input: CreateApiClientInput, createdBy: string) {
+      const customerId = input.customerId ?? null;
+      if (customerId && !(await repo.customerExists(customerId))) throw new ApiClientCustomerNotFoundError(customerId);
       const clientSecret = crypto.randomBytes(32).toString("hex");
       const clientSecretHash = await bcrypt.hash(clientSecret, SALT_ROUNDS);
-      const row = await repo.createApiClient({ name: input.name, clientSecretHash }, createdBy);
+      const row = await repo.createApiClient({ name: input.name, clientSecretHash, scopes: input.scopes, customerId }, createdBy);
       return { client: toPublicApiClient(row), clientSecret };
     },
 
+    async updateApiClient(id: string, input: UpdateApiClientInput, userId: string | null) {
+      if (input.customerId && !(await repo.customerExists(input.customerId))) {
+        throw new ApiClientCustomerNotFoundError(input.customerId);
+      }
+      const row = await repo.updateApiClient(
+        id,
+        {
+          ...(input.scopes !== undefined ? { scopes: input.scopes } : {}),
+          ...(input.customerId !== undefined ? { customerId: input.customerId } : {}),
+        },
+        userId
+      );
+      if (!row) throw new ApiClientNotFoundError(id);
+      return toPublicApiClient(row);
+    },
+
     async listApiClients() {
-      const rows = await repo.listApiClients();
-      return rows.map(toPublicApiClient);
+      const rows = await repo.listApiClientsWithCustomer();
+      return rows.map((r) =>
+        toPublicApiClient(
+          r.client,
+          r.client.customerId && r.customerNumber && r.customerName
+            ? { id: r.client.customerId, customerNumber: r.customerNumber, name: r.customerName }
+            : null
+        )
+      );
     },
 
     async revokeApiClient(id: string) {

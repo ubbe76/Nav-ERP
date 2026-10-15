@@ -1,3 +1,4 @@
+import { API_CLIENT_SCOPES } from "@navet/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, invoiceRows, invoices, salesOrderRows } from "@navet/db";
@@ -289,7 +290,7 @@ describe("configured rows — cost and margin", () => {
     const app = buildApp();
     try {
       const oauthService = createOAuthService(createOAuthRepository(db), "unused");
-      const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator" }, user.id);
+      const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator", scopes: [...API_CLIENT_SCOPES] }, user.id);
       const token = await app.inject({ method: "POST", url: "/api/v1/oauth/token", payload: { clientId: client.id, clientSecret } });
       expect(token.statusCode).toBe(200);
       const { accessToken } = token.json() as { accessToken: string };

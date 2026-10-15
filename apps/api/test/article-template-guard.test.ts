@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
-import { listArticlesQuerySchema } from "@navet/shared";
+import { API_CLIENT_SCOPES, listArticlesQuerySchema } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 import {
   ArticleIsTemplateError,
@@ -355,7 +355,7 @@ describe("routes map ArticleIsTemplateError to 409 article-is-template", () => {
 
   it("oauth POST /quotes refuses template", async () => {
     const user = await makeUser();
-    const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator" }, user.id);
+    const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator", scopes: [...API_CLIENT_SCOPES] }, user.id);
     const token = await app.inject({ method: "POST", url: "/api/v1/oauth/token", payload: { clientId: client.id, clientSecret } });
     expect(token.statusCode).toBe(200);
     const { accessToken } = token.json() as { accessToken: string };
@@ -411,7 +411,7 @@ describe("routes map ArticleIsTemplateError to 409 article-is-template", () => {
     // OAuth (the external configurator) goes through the same route — but
     // only for a template published for the API (delprojekt 5).
     const user = await makeUser();
-    const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator" }, user.id);
+    const { client, clientSecret } = await oauthService.createApiClient({ name: "Konfigurator", scopes: [...API_CLIENT_SCOPES] }, user.id);
     const token = await app.inject({ method: "POST", url: "/api/v1/oauth/token", payload: { clientId: client.id, clientSecret } });
     const { accessToken } = token.json() as { accessToken: string };
     const unpublished = await app.inject({

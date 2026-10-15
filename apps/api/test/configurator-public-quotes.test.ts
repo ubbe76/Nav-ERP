@@ -1,3 +1,4 @@
+import { API_CLIENT_SCOPES } from "@navet/shared";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { articles, configuratorVariants, db, salesOrderRows, salesOrders, units } from "@navet/db";
@@ -147,7 +148,7 @@ describe("POST /quotes — the publishing check for API clients", () => {
     const user = await authService.createUser({ email, password: "correcthorse", name: "Offert", role: "admin", permissionGroupId: null });
     const login = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password: "correcthorse" } });
     const session = { cookie: `session=${login.cookies.find((c) => c.name === "session")!.value}` };
-    const { client, clientSecret } = await oauthService.createApiClient({ name: "Hemsidan" }, user.id);
+    const { client, clientSecret } = await oauthService.createApiClient({ name: "Hemsidan", scopes: [...API_CLIENT_SCOPES] }, user.id);
     const token = await app.inject({ method: "POST", url: "/api/v1/oauth/token", payload: { clientId: client.id, clientSecret } });
     expect(token.statusCode).toBe(200);
     const clientHeaders = { authorization: `Bearer ${(token.json() as { accessToken: string }).accessToken}` };
