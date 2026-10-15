@@ -126,6 +126,7 @@ function PeriodDetail({
   const [absenceTypes, setAbsenceTypes] = useState<AbsenceType[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   // The session being corrected. The `initial*` values are the same strings
   // the inputs were opened with, so saveSession can send only what actually
   // changed (and tell "cleared the Sluttid" apart from "never had one").
@@ -165,6 +166,7 @@ function PeriodDetail({
   // Every mutation reloads the modal's own data and the server-rendered
   // summary behind it, so neither can show a stale number.
   async function afterMutation() {
+    // (notice is cleared by each mutation before it runs)
     await load();
     router.refresh();
   }
@@ -192,6 +194,7 @@ function PeriodDetail({
   async function saveSession() {
     if (!editing) return;
     setError(null);
+    setNotice(null);
 
     // Only changed fields are sent: the inputs are minute-resolution, so
     // resending an untouched startedAt would silently truncate the stored
@@ -232,11 +235,19 @@ function PeriodDetail({
 
     setPending(true);
     try {
-      await apiFetch(`/api/v1/attendance-sessions/${editing.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      });
+      const result = await apiFetch<{ pausedWorkSessions?: number; movedPauses?: number }>(
+        `/api/v1/attendance-sessions/${editing.id}`,
+        { method: "PATCH", body: JSON.stringify(body) }
+      );
       await afterMutation();
+      const stop = body.stoppedAt ? toClock(body.stoppedAt) : "";
+      if ((result.pausedWorkSessions ?? 0) > 0) {
+        setNotice(
+          `${result.pausedWorkSessions === 1 ? "1 arbete pausades" : `${result.pausedWorkSessions} arbeten pausades`} kl. ${stop}.`
+        );
+      } else if ((result.movedPauses ?? 0) > 0) {
+        setNotice(`Pausen flyttades på ${result.movedPauses === 1 ? "1 arbete" : `${result.movedPauses} arbeten`}.`);
+      }
     } catch (err) {
       setError(correctionErrorMessage(err, "Kunde inte spara närvarostämplingen"));
     } finally {
@@ -246,6 +257,7 @@ function PeriodDetail({
 
   async function setDisposition(date: string, disposition: OvertimeCompensation) {
     setError(null);
+    setNotice(null);
     setPending(true);
     try {
       await apiFetch(`/api/v1/employees/${employeeId}/overtime-disposition/${date}`, {
@@ -262,6 +274,7 @@ function PeriodDetail({
 
   async function clearDisposition(date: string) {
     setError(null);
+    setNotice(null);
     setPending(true);
     try {
       await apiFetch(`/api/v1/employees/${employeeId}/overtime-disposition/${date}`, { method: "DELETE" });
@@ -276,6 +289,7 @@ function PeriodDetail({
   async function deleteSession(id: string) {
     if (!(await confirmDelete("Tar bort närvarostämplingen. Fortsätt?"))) return;
     setError(null);
+    setNotice(null);
     setPending(true);
     try {
       await apiFetch(`/api/v1/attendance-sessions/${id}`, { method: "DELETE" });
@@ -289,6 +303,7 @@ function PeriodDetail({
 
   async function deleteAbsence(id: string) {
     setError(null);
+    setNotice(null);
     setPending(true);
     try {
       await apiFetch(`/api/v1/absences/${id}`, { method: "DELETE" });
@@ -303,6 +318,7 @@ function PeriodDetail({
   async function addAbsence(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice(null);
     if (absenceTypeId === "") {
       setError("Välj en frånvarokod");
       return;
@@ -348,6 +364,7 @@ function PeriodDetail({
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <FormError>{error}</FormError>
+      {notice && <FormHint>{notice}</FormHint>}
 
       <div>
         <div style={{ display: "grid", gridTemplateColumns: HOUR_COLUMNS, gap: 8 }}>

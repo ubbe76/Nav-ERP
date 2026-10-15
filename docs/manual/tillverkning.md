@@ -362,14 +362,14 @@ Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har 
 
 **Tillverkning → Pågående arbete** visar i realtid vem som jobbar med vad. Sidan uppdateras automatiskt var 30:e sekund och tiderna räknar sekund för sekund. Rubriken visar antalet, t.ex. "3 instämplade · 1 på plats utan arbete".
 
-- **Instämplade på arbete** listar varje öppen stämpling: **Anställd**, **TO** (länk till tillverkningsordern), **Operation**, **Artikel**, **Sedan** (starttid, med datum om det inte är idag), **Tid** (arbetad tid, utan pauser) och **Antal** (planerat / klart / kvar). Äldst stämpling står överst. Har den anställde gått hem och lämnat arbetet öppet märks raden **Pausad** och tiden räknar inte vidare.
+- **Instämplade på arbete** listar varje öppen stämpling: **Anställd**, **TO** (länk till tillverkningsordern), **Operation**, **Artikel**, **Sedan** (starttid, med datum om det inte är idag), **Tid** (arbetad tid, utan pauser) och **Antal** (planerat / klart / kvar). Äldst stämpling står överst. Har den anställde gått hem och lämnat arbetet öppet märks raden **Pausad** och tiden räknar inte vidare. Har den anställde frånvaro registrerad idag märks raden även **Frånvarande** (bara för administratörer och arbetsledare). Arbetet får ligga kvar pausat; det återupptas när personen stämplar in närvaron igen.
 - **På plats utan arbete** listar de som är närvaroregistrerade men inte instämplade på någon operation, med **Sedan** och **Tid** på plats.
 
 När en operation blir klar — någon kryssar **Operationen är klar** vid utstämplingen, **Slutför operation** på tillverkningsordern eller inleveransen av en legorad — stämplas alla andra som är instämplade på operationen ut automatiskt, med antal 0. Blir hela ordern klar (inleveransen från sista operationen eller **Slutför order**) gäller det alla operationer på ordern. En pausad stämpling stämplas ut vid tiden då pausen började, övriga vid klarmarkeringen. Det gör att den som kommer tillbaka efter frånvaro inte kan rapportera på en operation som redan är klar.
 
 ### Stämpla ut
 
-Administratörer och arbetsledare har en knapp **Stämpla ut** på varje rad, för att stämpla ut någon som glömt det. Dialogen visar Planerat / Klart / Kvar och frågar efter **Antal OK**, **Kasserat**, **Kassationsorsak** (krävs när kasserat är större än 0), **Operationen är klar** och **Notering**. Effekten är densamma som när den anställde stämplar ut i [stämpelterminalen](/hjalp/terminal): en tidrapport skapas, material som är kopplat till operationen förbrukas och kassationer loggas.
+Administratörer och arbetsledare har en knapp **Stämpla ut** på varje rad, för att stämpla ut någon som glömt det. **Sluttid** är förifylld med när arbetet pausades (om den anställde har gått hem) eller med nu; ändra den till när arbetet faktiskt slutade. Tiden som rapporteras visas under fältet, och tidrapporten dateras på sluttidens dag. En sluttid i en låst löneperiod går inte att spara. Dialogen visar Planerat / Klart / Kvar och frågar efter **Antal OK**, **Kasserat**, **Kassationsorsak** (krävs när kasserat är större än 0), **Operationen är klar** och **Notering**. Effekten är densamma som när den anställde stämplar ut i [stämpelterminalen](/hjalp/terminal): en tidrapport skapas, material som är kopplat till operationen förbrukas och kassationer loggas.
 
 ## Tidrapporter
 

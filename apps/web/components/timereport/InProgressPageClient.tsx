@@ -14,6 +14,7 @@ import { Table } from "../ui/Table";
 import { useRole } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { toDateTimeLocalValue } from "../../lib/date";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { formatElapsed, formatQuantity, operationProgress } from "../../lib/stampSessions";
 import type { AttendanceSession, StampSession } from "../../lib/types";
@@ -95,7 +96,7 @@ export function InProgressPageClient({
           { key: "operation", label: "Operation", width: "minmax(140px, 1fr)" },
           { key: "article", label: "Artikel", width: "minmax(140px, 1.2fr)" },
           { key: "since", label: "Sedan", width: "110px" },
-          { key: "elapsed", label: "Tid", width: "130px" },
+          { key: "elapsed", label: "Tid", width: "minmax(130px, 1fr)" },
           { key: "quantity", label: "Antal", width: "minmax(180px, 1.2fr)" },
           { key: "action", label: "", width: canStampOut ? "110px" : "0px" },
         ]}
@@ -122,6 +123,7 @@ export function InProgressPageClient({
                 <span className={styles.elapsed}>
                   <span className="num">{mounted ? formatElapsed(s, now) : ""}</span>
                   {s.pausedAt && <StatusPill status="stopped" label="Pausad" compact />}
+                  {s.absentToday && <StatusPill status="delayed" label="Frånvarande" compact />}
                 </span>
               );
             case "quantity": {
@@ -199,6 +201,10 @@ function StampOutForm({
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const [stopAt, setStopAt] = useState(() =>
+    toDateTimeLocalValue(session.pausedAt ?? new Date().toISOString())
+  );
+  const stopMs = Date.parse(stopAt);
   const [quantityOk, setQuantityOk] = useState("");
   const [quantityScrapped, setQuantityScrapped] = useState("");
   const [scrapReason, setScrapReason] = useState("");
@@ -211,6 +217,10 @@ function StampOutForm({
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    if (Number.isNaN(stopMs)) {
+      setError("Ange sluttid");
+      return;
+    }
     const scrapped = Number(quantityScrapped) || 0;
     if (scrapped > 0 && !scrapReason.trim()) {
       setError("Ange en kassationsorsak när kasserat antal är större än 0");
@@ -222,6 +232,7 @@ function StampOutForm({
         apiFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
           method: "POST",
           body: JSON.stringify({
+            stoppedAt: new Date(stopAt).toISOString(),
             quantityOk: Number(quantityOk) || 0,
             quantityScrapped: scrapped,
             scrapReason: scrapReason.trim() || undefined,
@@ -247,6 +258,18 @@ function StampOutForm({
       <FormHint>
         Planerat {formatQuantity(p.planned)} · Klart {formatQuantity(p.ok)}
         {p.scrapped > 0 && <> · Kasserat {formatQuantity(p.scrapped)}</>} · Kvar {formatQuantity(p.remaining)}
+      </FormHint>
+      <Field label="Sluttid" htmlFor="so-stop">
+        <Input
+          id="so-stop"
+          type="datetime-local"
+          value={stopAt}
+          min={toDateTimeLocalValue(session.startedAt)}
+          onChange={(e) => setStopAt(e.target.value)}
+        />
+      </Field>
+      <FormHint>
+        Tid som rapporteras: <span className="num">{Number.isNaN(stopMs) ? "–" : formatElapsed(session, stopMs)}</span>
       </FormHint>
       <Field label="Antal OK" htmlFor="so-ok">
         <Input id="so-ok" type="number" min="0" step="any" value={quantityOk} onChange={(e) => setQuantityOk(e.target.value)} />

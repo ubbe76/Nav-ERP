@@ -94,6 +94,7 @@ export function EmployeeTabs({
       {activeTab === "Frånvaro" && (
         <FranvaroTab
           employeeId={employee.id}
+          employeeName={employee.name}
           absenceTypes={absenceTypes}
           initialAbsences={initialAbsences}
           userRole={userRole}

@@ -32,6 +32,8 @@ Kortet **Registrera frånvaro** har fälten **Frånvarokod** (en av frånvarokod
 
 Kortet **Registrerad frånvaro** listar registrerade poster med datum, namn och antal timmar; en **Ta bort**-knapp tar bort en post.
 
+Har den anställde öppna arbeten visas det överst på fliken, med en länk till **Pågående arbete**.
+
 Hela personalkortet — inklusive Frånvaro-fliken och listan **Registrerad frånvaro** — kräver rollen arbetsledare eller administratör; övriga användare ser varken sidan eller listan, eftersom frånvaro räknas som hälsodata. Låsta löneperioder blockerar både registrering och borttag av frånvaro i den perioden.
 
 ## Attestering
@@ -56,7 +58,7 @@ Statusen visas som en av tre:
 
 **Detaljer** öppnar dagvyn för en anställd, med en rad per dag (**Datum**, **Schema**, **Arbetat**, **Frånvaro**, **ÖT** och **Ofördelat**). Under varje dag listas dagens närvarostämplingar med klockslag och dagens frånvaroposter.
 
-- **Ändra** på en närvarostämpling visar start- och sluttid som redigerbara fält; **Spara** skriver den korrigerade tiden. Sluttiden måste vara efter starttiden. Töms sluttiden öppnas stämplingen igen — den räknas då som en pågående närvaro och visas som **Öppen närvaro**, vilket blockerar attesteringen tills den avslutas.
+- **Ändra** på en närvarostämpling visar start- och sluttid som redigerbara fält; **Spara** skriver den korrigerade tiden. Sluttiden måste vara efter starttiden. Töms sluttiden öppnas stämplingen igen — den räknas då som en pågående närvaro och visas som **Öppen närvaro**, vilket blockerar attesteringen tills den avslutas. Stänger du en öppen närvaro, eller flyttar sluttiden, följer den anställdes arbeten med: öppna arbeten pausas vid sluttiden (som om personen hade tryckt **Gå hem** då) och ett arbete som fortfarande är pausat sedan den gamla sluttiden får pausen flyttad. Kvittensen visar hur många arbeten som berördes.
 - **Ta bort** raderar en felaktig närvarostämpling eller frånvaropost (borttag av stämpling bekräftas i en dialog).
 - Kortet **Registrera frånvaro** längst ned har samma fält som personalkortet — **Frånvarokod**, **Datum**, **Timmar** och **Anteckning**. Datum och Timmar är förifyllda med den första dagen som har ofördelad tid och antalet ofördelade timmar, så en hel dags frånvaro registreras med ett klick på **Registrera**.
 

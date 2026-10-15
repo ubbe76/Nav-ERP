@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -8,12 +8,14 @@ import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import type { Absence, AbsenceType, ResolvedCalendarDay, UserRole } from "../../lib/types";
+import { GatedLink } from "../ui/GatedLink";
+import type { Absence, AbsenceType, ResolvedCalendarDay, StampSession, UserRole } from "../../lib/types";
 import { formatHours } from "./SchedulesPageClient";
 import styles from "./EmployeeTabs.module.css";
 
 interface FranvaroTabProps {
   employeeId: string;
+  employeeName: string;
   absenceTypes: AbsenceType[];
   initialAbsences: Absence[];
   userRole: UserRole;
@@ -32,7 +34,7 @@ function absenceErrorMessage(err: unknown, fallback: string): string {
   return apiErrorMessage(err, fallback);
 }
 
-export function FranvaroTab({ employeeId, absenceTypes, initialAbsences: absences, userRole }: FranvaroTabProps) {
+export function FranvaroTab({ employeeId, employeeName, absenceTypes, initialAbsences: absences, userRole }: FranvaroTabProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -41,6 +43,14 @@ export function FranvaroTab({ employeeId, absenceTypes, initialAbsences: absence
   const [date, setDate] = useState(new Date().toLocaleDateString("sv-SE"));
   const [hours, setHours] = useState("");
   const [note, setNote] = useState("");
+
+  const [openStamps, setOpenStamps] = useState<StampSession[]>([]);
+  useEffect(() => {
+    apiFetch<StampSession[]>(`/api/v1/stamp-sessions?open=true&employeeId=${employeeId}`)
+      .then(setOpenStamps)
+      .catch(() => setOpenStamps([]));
+  }, [employeeId]);
+  const pausedCount = openStamps.filter((s) => s.pausedAt !== null).length;
 
   const canManage = userRole !== "user";
 
@@ -113,6 +123,16 @@ export function FranvaroTab({ employeeId, absenceTypes, initialAbsences: absence
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <FormError>{error}</FormError>
+
+      {openStamps.length > 0 && (
+        <Card>
+          <FormHint>
+            {employeeName} har {openStamps.length === 1 ? "1 öppet arbete" : `${openStamps.length} öppna arbeten`}
+            {pausedCount > 0 && ` (${pausedCount} ${pausedCount === 1 ? "pausat" : "pausade"})`}.{" "}
+            <GatedLink href="/tillverkning/pagaende">Pågående arbete</GatedLink>
+          </FormHint>
+        </Card>
+      )}
 
       {canManage ? (
         <Card>

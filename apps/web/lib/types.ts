@@ -1997,6 +1997,9 @@ export interface StampSession {
   orderQuantity: string;
   operationQuantityCompleted: string | null;
   operationQuantityScrapped: string;
+  // Admin/supervisor only (frånvaro is health data): the employee has
+  // absence registered today. Absent from the payload for everyone else.
+  absentToday?: boolean;
 }
 
 export interface SystemSettings {
