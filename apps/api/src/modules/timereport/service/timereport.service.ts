@@ -134,12 +134,6 @@ export class WeekScheduleNotFoundError extends Error {
   }
 }
 
-// Midnight starting today, in the server's local time (same zone as
-// localDateOf).
-function startOfLocalToday() {
-  return new Date(`${localDateOf(new Date())}T00:00:00`);
-}
-
 export function createTimeReportService(
   repo: TimeReportRepository,
   manufacturing: ManufacturingService,
@@ -369,13 +363,14 @@ export function createTimeReportService(
       // into pausedSeconds and is excluded from reported hours.
       if (!open) return beginAttendance(input.employeeId, createdBy);
 
-      const dayStart = startOfLocalToday();
-      if (open.startedAt >= dayStart) throw new AlreadyPresentError();
+      // Stockholm days (localDateOf) — the container's own zone may be UTC.
+      const today = localDateOf(new Date());
+      if (localDateOf(open.startedAt) >= today) throw new AlreadyPresentError();
       if (!input.forgottenStoppedAt) throw new AttendanceOpenFromEarlierDayError(open.id, open.startedAt);
 
       // Regel 8: the forgotten Gå hem, then today's attendance.
       const stop = new Date(input.forgottenStoppedAt);
-      if (stop <= open.startedAt || stop >= dayStart) throw new InvalidAttendanceIntervalError();
+      if (stop <= open.startedAt || localDateOf(stop) >= today) throw new InvalidAttendanceIntervalError();
       for (const date of new Set([localDateOf(open.startedAt), localDateOf(stop)])) {
         if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
       }
@@ -429,6 +424,11 @@ export function createTimeReportService(
         input.stoppedAt === undefined ? existing.stoppedAt : input.stoppedAt === null ? null : new Date(input.stoppedAt);
 
       if (newStoppedAt !== null && newStoppedAt <= newStartedAt) {
+        throw new InvalidAttendanceIntervalError();
+      }
+      // A stop time can't lie in the future (one minute of slack for clock
+      // skew, as regel 6): it would pause work that is still going on.
+      if (newStoppedAt !== null && newStoppedAt.getTime() > Date.now() + 60_000) {
         throw new InvalidAttendanceIntervalError();
       }
 

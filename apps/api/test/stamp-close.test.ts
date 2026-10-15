@@ -47,6 +47,21 @@ describe("effectiveStopTime", () => {
   });
 });
 
+describe("localDateOf", () => {
+  it("gives the Stockholm day even when the process runs UTC", () => {
+    const saved = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      // 00:30 CEST / CET — the UTC day is still the day before.
+      expect(localDateOf(new Date("2026-10-14T22:30:00Z"))).toBe("2026-10-15");
+      expect(localDateOf(new Date("2026-01-14T23:30:00Z"))).toBe("2026-01-15");
+    } finally {
+      if (saved === undefined) delete process.env.TZ;
+      else process.env.TZ = saved;
+    }
+  });
+});
+
 const articleService = createArticleService(createArticleRepository(db));
 const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
 const authRepo = createAuthRepository(db);

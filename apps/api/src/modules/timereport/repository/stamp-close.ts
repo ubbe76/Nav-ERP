@@ -26,9 +26,13 @@ export function effectiveStopTime(session: { pausedAt: Date | null }, at: Date):
   return session.pausedAt ?? at;
 }
 
-// YYYY-MM-DD in the server's local timezone (sv-SE formats ISO-style).
+// sv-SE formats ISO-style (YYYY-MM-DD).
+const stockholmDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" });
+
+// The Stockholm day of an instant, YYYY-MM-DD — the API container may run
+// UTC, so the zone is explicit rather than the server's local time.
 export function localDateOf(instant: Date): string {
-  return instant.toLocaleDateString("sv-SE");
+  return stockholmDate.format(instant);
 }
 
 // Same rule as payroll's createPeriodLockChecker (the calendar month's row

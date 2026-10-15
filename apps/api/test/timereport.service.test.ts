@@ -26,6 +26,7 @@ import {
 } from "../src/modules/timereport/service/timereport.service.js";
 import { InvalidStatusTransitionError } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { PayrollPeriodLockedError } from "../src/modules/payroll/service/period-lock.js";
+import { localDateOf } from "../src/modules/timereport/repository/stamp-close.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
@@ -666,7 +667,7 @@ describe("supervisor corrections — attendance sessions and time reports", () =
     const employee = await makeEmployee();
     const opened = await timeReportService.attendanceIn({ employeeId: employee.id }, user.id);
     const { session: closed } = await timeReportService.attendanceOut(opened.id, user.id);
-    const today = new Date().toLocaleDateString("sv-SE");
+    const today = localDateOf(new Date());
 
     // New startedAt would land on a locked date; the old date is open.
     lockedDates.add("2026-01-15");
@@ -806,7 +807,8 @@ describe("närvaro och sluttid", () => {
     const { user, operation } = await makeReleasedMoWithOperation();
     const employee = await timeReportService.createEmployee({ employeeNumber: "E-R6", name: "Sex", active: true });
     const stamp = await timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id);
-    const start = new Date(Date.now() - 30 * 3_600_000);
+    // 50 h back so the stop (start + 7.5 h) is always on an earlier day.
+    const start = new Date(Date.now() - 50 * 3_600_000);
     await db.execute(sql`UPDATE stamp_sessions SET started_at = ${start.toISOString()}::timestamptz WHERE id = ${stamp.id}`);
     const stoppedAt = new Date(start.getTime() + 7.5 * 3_600_000);
 
@@ -817,7 +819,8 @@ describe("närvaro och sluttid", () => {
     );
 
     expect(timeReport.hours).toBe("7.50");
-    expect(timeReport.date).toBe(stoppedAt.toLocaleDateString("sv-SE"));
+    expect(timeReport.date).toBe(localDateOf(stoppedAt));
+    expect(timeReport.date < localDateOf(new Date())).toBe(true);
     expect(session.stoppedAt!.getTime()).toBe(stoppedAt.getTime());
   });
 
@@ -877,9 +880,16 @@ describe("rättad och glömd närvaro", () => {
     ] as { paused_at: Date | string | null; paused_seconds: string }[];
     return rows[0]!;
   }
-  // Same local-time rule as the service (localDateOf = sv-SE date).
-  function startOfLocalToday() {
-    return new Date(`${new Date().toLocaleDateString("sv-SE")}T00:00:00`);
+  // Midnight starting today's Stockholm day (the service's localDateOf),
+  // whatever zone the test process runs in: CET or CEST, whichever offset
+  // puts the instant exactly on the day boundary.
+  function startOfStockholmToday() {
+    const today = localDateOf(new Date());
+    for (const offset of ["+01:00", "+02:00"]) {
+      const midnight = new Date(`${today}T00:00:00${offset}`);
+      if (localDateOf(midnight) === today && localDateOf(new Date(midnight.getTime() - 1)) !== today) return midnight;
+    }
+    throw new Error("no Stockholm midnight found");
   }
 
   it("regel 7: closing an open attendance pauses the employee's open work at the stop time", async () => {
@@ -941,6 +951,47 @@ describe("rättad och glömd närvaro", () => {
     expect((await stampRow(stamp.id)).paused_at).toBeNull();
   });
 
+  it("regel 7: moving the stop time before a stamp's start pauses it at its start, never earlier", async () => {
+    const { user, attendance, stamp } = await presentWithWork("E-R7E");
+    const start = new Date(Date.now() - 20 * H);
+    const oldStop = new Date(start.getTime() + 10 * H);
+    const stampStart = new Date(start.getTime() + 9 * H);
+    await db.execute(
+      sql`UPDATE attendance_sessions SET started_at = ${start.toISOString()}::timestamptz, stopped_at = ${oldStop.toISOString()}::timestamptz WHERE id = ${attendance.id}`
+    );
+    // Stamped in an hour before the old stop and paused at it (Gå hem).
+    await db.execute(
+      sql`UPDATE stamp_sessions SET started_at = ${stampStart.toISOString()}::timestamptz, paused_at = ${oldStop.toISOString()}::timestamptz WHERE id = ${stamp.id}`
+    );
+    const newStop = new Date(start.getTime() + 8 * H); // before the stamp began
+
+    const result = await timeReportService.updateAttendanceSession(attendance.id, { stoppedAt: newStop.toISOString() }, user.id);
+
+    expect(result.movedPauses).toBe(1);
+    expect(new Date((await stampRow(stamp.id)).paused_at!).getTime()).toBe(stampStart.getTime());
+  });
+
+  it("refuses a corrected stop time in the future", async () => {
+    const { user, attendance } = await presentWithWork("E-FUT");
+    const start = new Date(Date.now() - 2 * H);
+    await db.execute(sql`UPDATE attendance_sessions SET started_at = ${start.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
+    await expect(
+      timeReportService.updateAttendanceSession(
+        attendance.id,
+        { stoppedAt: new Date(Date.now() + 10 * 60_000).toISOString() },
+        user.id
+      )
+    ).rejects.toBeInstanceOf(InvalidAttendanceIntervalError);
+    // nothing written; a stop time just now is fine (clock-skew slack)
+    expect((await timeReportService.listAttendanceSessions(true)).some((a) => a.id === attendance.id)).toBe(true);
+    const ok = await timeReportService.updateAttendanceSession(
+      attendance.id,
+      { stoppedAt: new Date(Date.now() + 30_000).toISOString() },
+      user.id
+    );
+    expect(ok.stoppedAt).not.toBeNull();
+  });
+
   it("Gå hem pauses work at exactly the attendance stop instant", async () => {
     const { user, attendance, stamp } = await presentWithWork("E-GO");
     const { session } = await timeReportService.attendanceOut(attendance.id, user.id);
@@ -959,9 +1010,9 @@ describe("rättad och glömd närvaro", () => {
 
   it("regel 8: closes the forgotten attendance (pausing work then) and opens today's (resuming it now)", async () => {
     const { user, employee, attendance, stamp } = await presentWithWork("E-R8B");
-    // Anchored on the local midnight so the forgotten stop is always on an
+    // Anchored on the Stockholm midnight so the forgotten stop is always on an
     // earlier day, whatever time of day the suite runs.
-    const yStop = new Date(startOfLocalToday().getTime() - 8 * H);
+    const yStop = new Date(startOfStockholmToday().getTime() - 8 * H);
     const yStart = new Date(yStop.getTime() - 8 * H);
     await db.execute(sql`UPDATE attendance_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
     await db.execute(sql`UPDATE stamp_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${stamp.id}`);
@@ -989,7 +1040,7 @@ describe("rättad och glömd närvaro", () => {
 
   it("regel 8: a second forgotten-close is refused and leaves the work's pause untouched", async () => {
     const { user, employee, attendance, stamp } = await presentWithWork("E-R8E");
-    const yStop = new Date(startOfLocalToday().getTime() - 8 * H);
+    const yStop = new Date(startOfStockholmToday().getTime() - 8 * H);
     const yStart = new Date(yStop.getTime() - 8 * H);
     await db.execute(sql`UPDATE attendance_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
     await db.execute(sql`UPDATE stamp_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${stamp.id}`);

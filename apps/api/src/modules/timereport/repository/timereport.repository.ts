@@ -360,7 +360,9 @@ export function createTimeReportRepository(db: Db) {
         } else if (effect?.kind === "move") {
           const rows = await tx
             .update(stampSessions)
-            .set({ pausedAt: effect.to })
+            // Never before the stamp's own start: a stamp begun after the
+            // new stop time pauses where it started (no negative stint).
+            .set({ pausedAt: sql`greatest(${effect.to.toISOString()}::timestamptz, ${stampSessions.startedAt})` })
             .where(
               and(
                 eq(stampSessions.employeeId, effect.employeeId),

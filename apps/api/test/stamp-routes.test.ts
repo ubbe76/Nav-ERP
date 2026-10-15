@@ -11,6 +11,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
+import { localDateOf } from "../src/modules/timereport/repository/stamp-close.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 
 // Regel 6 at the route: a stop time (Sluttid) on Stämpla ut is a
@@ -164,7 +165,7 @@ describe("POST /stamp-sessions/:id/stop with a stop time", () => {
     const other = await timeReportService.createEmployee({ employeeNumber: "108", name: "Annan", active: true });
     const [operation] = await db.execute(sql`SELECT mo_operation_id FROM stamp_sessions WHERE id = ${stamp.id}`) as unknown as { mo_operation_id: string }[];
     await timeReportService.stampIn({ employeeId: other.id, moOperationId: operation!.mo_operation_id });
-    const today = new Date().toLocaleDateString("sv-SE");
+    const today = localDateOf(new Date());
     await db.execute(sql`INSERT INTO absence_types (code, name, paxml_code) VALUES ('SJK', 'Sjuk', '1')`);
     await db.execute(
       sql`INSERT INTO absences (employee_id, absence_type_id, date, minutes) SELECT ${stamp.employeeId}, id, ${today}::date, 480 FROM absence_types WHERE code = 'SJK'`
