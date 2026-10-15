@@ -6,7 +6,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import type { ApiClient, Paged } from "../../lib/types";
 import { Button } from "../ui/Button";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
-import { ApiClientAccessFields, type ApiClientAccess, type CustomerOption } from "./ApiClientAccessFields";
+import { ApiClientAccessFields, missingRequiredCustomer, type ApiClientAccess, type CustomerOption } from "./ApiClientAccessFields";
 
 // Ändra on Integrationer: rights and customer of an existing client. Applies
 // at once, also to tokens the client already holds.
@@ -44,7 +44,7 @@ export function EditApiClientForm({ client, onSuccess }: { client: ApiClient; on
       <ApiClientAccessFields value={access} customers={customers} onChange={setAccess} />
       <FormHint attached>Ändringen gäller direkt, även för token klienten redan har hämtat.</FormHint>
       <FormActions>
-        <Button type="submit" variant="primary" disabled={pending || access.scopes.length === 0}>
+        <Button type="submit" variant="primary" disabled={pending || access.scopes.length === 0 || missingRequiredCustomer(access)}>
           {pending ? "Sparar…" : "Spara"}
         </Button>
       </FormActions>

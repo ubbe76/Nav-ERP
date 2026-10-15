@@ -16,6 +16,17 @@ export interface CustomerOption {
   name: string;
 }
 
+// The preset a set of rights matches exactly, if any.
+function matchingPreset(scopes: ApiClientScope[]) {
+  return API_CLIENT_PRESETS.find((p) => p.scopes.length === scopes.length && p.scopes.every((s) => scopes.includes(s)));
+}
+
+// Hemsida and Återförsäljare are meant for one customer — saving them without
+// one would give a public client every customer.
+export function missingRequiredCustomer(value: ApiClientAccess): boolean {
+  return value.customerId === null && Boolean(matchingPreset(value.scopes)?.needsCustomer);
+}
+
 // What an API client may do: presets, one checkbox per right and the customer
 // it acts for. Shared by Ny API-klient and Ändra.
 export function ApiClientAccessFields({
@@ -34,9 +45,7 @@ export function ApiClientAccessFields({
     else next.delete(scope);
     onChange({ ...value, scopes: API_CLIENT_SCOPES.filter((s) => next.has(s)) });
   };
-  const preset = API_CLIENT_PRESETS.find(
-    (p) => p.scopes.length === value.scopes.length && p.scopes.every((s) => selected.has(s))
-  );
+  const preset = matchingPreset(value.scopes);
 
   return (
     <>
@@ -84,9 +93,9 @@ export function ApiClientAccessFields({
       </Field>
       <FormHint attached>
         {value.customerId
-          ? "Klienten får bara skapa offert, fråga pris och bekräfta order för den här kunden."
+          ? "Klienten får bara skapa offert, fråga pris (även i konfiguratorn) och bekräfta order för den här kunden."
           : preset?.needsCustomer
-            ? "Välj kunden klienten ska agera för."
+            ? "Välj kunden klienten ska agera för — förvalet kräver en kund."
             : "Utan kund får klienten agera för alla kunder."}
       </FormHint>
     </>

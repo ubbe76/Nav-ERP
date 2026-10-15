@@ -7,7 +7,7 @@ import { apiFetch } from "../../lib/api";
 import type { ApiClient, Paged } from "../../lib/types";
 import { API_CLIENT_PRESETS } from "../../lib/apiClientScopes";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { ApiClientAccessFields, type ApiClientAccess, type CustomerOption } from "./ApiClientAccessFields";
+import { ApiClientAccessFields, missingRequiredCustomer, type ApiClientAccess, type CustomerOption } from "./ApiClientAccessFields";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
 
 interface CreateApiClientResponse {
@@ -129,7 +129,7 @@ Content-Type: application/json
       <ApiClientAccessFields value={access} customers={customers} onChange={setAccess} />
 
       <FormActions>
-        <Button type="submit" variant="primary" disabled={pending || access.scopes.length === 0}>
+        <Button type="submit" variant="primary" disabled={pending || access.scopes.length === 0 || missingRequiredCustomer(access)}>
           {pending ? "Skapar…" : "Skapa klient"}
         </Button>
       </FormActions>

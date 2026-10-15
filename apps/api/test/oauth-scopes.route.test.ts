@@ -34,6 +34,8 @@ beforeEach(async () => {
   admin = cookieOf(await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email: "admin@example.com", password: PASSWORD } }));
   [{ id: ownCustomer }] = await db.insert(customers).values({ customerNumber: "K-1", name: "Egen kund" }).returning({ id: customers.id });
   [{ id: otherCustomer }] = await db.insert(customers).values({ customerNumber: "K-2", name: "Annan kund" }).returning({ id: customers.id });
+  // Other test files may have removed the seeded unit — make sure it exists.
+  await db.insert(units).values({ code: "st", name: "Styck" }).onConflictDoNothing();
   const [st] = await db.select({ id: units.id }).from(units).where(eq(units.code, "st"));
   [{ id: articleId }] = await db.insert(articles).values({ articleNumber: "A-1", name: "Artikel", type: "purchased", unitId: st!.id, salesPrice: "100" }).returning({ id: articles.id });
 });
@@ -101,6 +103,36 @@ describe("knuten kund", () => {
     const [row] = await db.select().from(salesOrders).where(eq(salesOrders.id, other.id));
     expect(row!.status).toBe("quote");
     expect((await call("POST", `/sales-orders/${NO_ID}/confirm`, bound.auth)).statusCode).toBe(404);
+  });
+});
+
+describe("prisuträkningen i konfiguratorn", () => {
+  // A customerId in evaluate is a price lookup: it needs prices:read, and a
+  // bound client may only name its own customer. Without a customer the
+  // answer is the template's own price (configurator:read is enough).
+  const evaluate = (auth: Record<string, string>, body: unknown) =>
+    call("POST", `/configurator/${NO_ID}/evaluate`, auth, body);
+
+  it("refuses another customer's prices to a bound client", async () => {
+    const website = await clientToken(["configurator:read", "quotes:create", "prices:read"], ownCustomer);
+    const res = await evaluate(website.auth, { selection: {}, customerId: otherCustomer });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("client-customer-mismatch");
+  });
+
+  it("needs prices:read to price for a customer", async () => {
+    const website = await clientToken(["configurator:read", "quotes:create"], ownCustomer);
+    const res = await evaluate(website.auth, { selection: {}, customerId: ownCustomer });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("client-scope-missing");
+  });
+
+  it("lets the check through with prices:read for the own customer, and without a customer at all", async () => {
+    const reseller = await clientToken(["configurator:read", "prices:read"], ownCustomer);
+    // NO_ID is no template: getting past the check means the template lookup answers.
+    expect((await evaluate(reseller.auth, { selection: {}, customerId: ownCustomer })).json().code).toBe("configurator-template-not-found");
+    const website = await clientToken(["configurator:read"], ownCustomer);
+    expect((await evaluate(website.auth, { selection: {} })).json().code).toBe("configurator-template-not-found");
   });
 });
 

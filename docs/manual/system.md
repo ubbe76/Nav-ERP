@@ -130,7 +130,7 @@ Varje klient får bara göra det du ger den rätt till. Välj rättigheter med k
 | Rättighet | Ger klienten |
 |---|---|
 | **Läsa konfiguratorn** | Läsa publicerade mallar och räkna fram pris på ett val |
-| **Läsa priser** | Fråga vad en artikel kostar för en kund (`GET /price-quote`) |
+| **Läsa priser** | Fråga vad en artikel kostar för en kund (`GET /price-quote`), och räkna fram en konfiguration med kundens pris (`customerId` i `…/evaluate`) — utan den rättigheten räknar konfiguratorn bara mallens eget pris |
 | **Skapa offert** | Lägga offerter (`POST /quotes`) |
 | **Bekräfta order** | Lägga bekräftade order (`confirm: true`) och bekräfta en offert (`POST /sales-orders/{id}/confirm`) |
 | **Läsa struktur** | Läsa en artikels struktur (`GET /articles/{id}/bom`) |
@@ -141,7 +141,7 @@ Tre **förval** fyller i rättigheterna:
 - **Återförsäljare** — Läsa konfiguratorn, Läsa priser, Skapa offert och Bekräfta order. Välj återförsäljarens egen kund.
 - **Intern** — alla rättigheter och ingen kund, för ett eget system.
 
-En klient som är knuten till en **kund** får bara skapa offert, fråga pris och bekräfta order för den kunden; allt annat nekas. Utan kund får klienten agera för alla kunder. Ändringar gäller direkt, även för token klienten redan har hämtat.
+En klient som är knuten till en **kund** får bara skapa offert, fråga pris (även i konfiguratorn) och bekräfta order för den kunden; allt annat nekas. **Hemsida** och **Återförsäljare** går inte att spara utan kund. Utan kund får klienten agera för alla kunder. Ändringar gäller direkt, även för token klienten redan har hämtat.
 
 Klienter som skapades före 2026-10-15 har alla rättigheter och ingen kund och markeras **Full åtkomst** i listan — begränsa dem med **Ändra** till det de behöver.
 
