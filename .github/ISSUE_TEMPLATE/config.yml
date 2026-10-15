@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Säkerhetsbrist
+    url: https://github.com/ubbe76/Nav-ERP/security/advisories/new
+    about: Rapportera säkerhetsbrister privat här — aldrig i ett öppet ärende.
+  - name: Användarmanualen
+    url: https://naverp.se/hjalp/
+    about: Hur rutinerna fungerar, steg för steg.

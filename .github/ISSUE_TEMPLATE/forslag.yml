@@ -1,0 +1,35 @@
+name: Förslag
+description: En idé om något som saknas eller kan bli bättre.
+title: "Förslag: "
+labels: ["förslag"]
+body:
+  - type: markdown
+    attributes:
+      value: Tack! Beskriv gärna problemet du vill lösa — det är ofta mer användbart än en färdig lösning.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Vad är problemet?
+      description: Vad försöker du göra, och vad står i vägen?
+    validations:
+      required: true
+  - type: textarea
+    id: forslag
+    attributes:
+      label: Hur skulle du vilja att det fungerade?
+    validations:
+      required: true
+  - type: textarea
+    id: idag
+    attributes:
+      label: Hur gör du i dag?
+      description: Hur löser du det nu — i Nav|ERP, i ett annat system eller för hand?
+    validations:
+      required: false
+  - type: checkboxes
+    id: data
+    attributes:
+      label: Uppgifter
+      options:
+        - label: Jag har inte klistrat in lösenord, nycklar, personnummer eller riktiga kund- och leverantörsuppgifter.
+          required: true

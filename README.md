@@ -594,6 +594,17 @@ görs i ett annat program utifrån SIE4-exporten. Se
 [`docs/architecture.md`](docs/architecture.md#8-byggordning--faser) för
 full byggordning och [`TODO.md`](TODO.md) för det som återstår.
 
+## Återkoppling och bidrag
+
+Nav|ERP är en alfaversion, och återkoppling från dig som provar är det som
+hjälper mest:
+
+- **Fel och förslag:** öppna ett [ärende](https://github.com/ubbe76/Nav-ERP/issues/new/choose)
+  med mallen Felrapport eller Förslag.
+- **Säkerhetsbrister:** rapportera privat enligt [SECURITY.md](SECURITY.md) —
+  aldrig i ett öppet ärende.
+- **Kod:** pull requests är välkomna, se [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Licens
 
 Copyright © 2026 Urban Källefors

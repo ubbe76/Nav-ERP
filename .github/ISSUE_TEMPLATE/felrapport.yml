@@ -1,0 +1,67 @@
+name: Felrapport
+description: Något fungerar inte som det ska.
+title: "Fel: "
+labels: ["fel"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tack för att du rapporterar! Nav|ERP är en alfaversion, så fel är väntade — och varje rapport hjälper.
+
+        **Säkerhetsbrister** rapporteras inte här utan privat, se [SECURITY.md](https://github.com/ubbe76/Nav-ERP/blob/main/SECURITY.md).
+  - type: textarea
+    id: vad
+    attributes:
+      label: Vad hände?
+      description: Beskriv felet. Felmeddelanden och skärmbilder hjälper.
+    validations:
+      required: true
+  - type: textarea
+    id: forvantat
+    attributes:
+      label: Vad borde ha hänt?
+    validations:
+      required: true
+  - type: textarea
+    id: steg
+    attributes:
+      label: Hur gör man för att få fram felet?
+      placeholder: |
+        1. Gå till …
+        2. Tryck på …
+        3. …
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Versionen (t.ex. 0.1.0-alpha) eller commiten du kör (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: dropdown
+    id: drift
+    attributes:
+      label: Hur kör du Nav|ERP?
+      options:
+        - Docker Compose på en server
+        - Docker Compose på min egen dator
+        - Lokal utveckling (npm run dev)
+        - Annat
+    validations:
+      required: true
+  - type: textarea
+    id: logg
+    attributes:
+      label: Loggutdrag
+      description: Gärna det relevanta ur `docker compose logs api` eller webbläsarens konsol.
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: data
+    attributes:
+      label: Uppgifter
+      options:
+        - label: Jag har inte klistrat in lösenord, nycklar, personnummer eller riktiga kund- och leverantörsuppgifter.
+          required: true
