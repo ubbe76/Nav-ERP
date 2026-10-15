@@ -138,6 +138,7 @@ export const ERROR_CODES = {
   INVALID_CREDENTIALS: "invalid-credentials",
   CLIENT_SCOPE_MISSING: "client-scope-missing",
   CLIENT_CUSTOMER_MISMATCH: "client-customer-mismatch",
+  CLIENT_PRICE_NOT_ALLOWED: "client-price-not-allowed",
   API_CLIENT_CUSTOMER_NOT_FOUND: "api-client-customer-not-found",
   LOGIN_THROTTLED: "login-throttled",
   INVALID_SETUP_CODE: "invalid-setup-code",

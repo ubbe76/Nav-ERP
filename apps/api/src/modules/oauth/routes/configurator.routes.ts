@@ -29,6 +29,7 @@ import {
 import { errorBody } from "../../system/service/error-body.js";
 import {
   ClientCustomerMismatchError,
+  ClientPriceNotAllowedError,
   ClientScopeMissingError,
   clientCustomerAllowed,
   clientHasScope,
@@ -52,6 +53,13 @@ export async function configuratorRoutes(
     }
     if (!clientCustomerAllowed(req, input.customerId)) {
       return reply.code(403).send(errorBody(new ClientCustomerMismatchError()));
+    }
+    // A client bound to a customer never sets the price: Nav prices every row
+    // from the customer's price chain (customer price, price list, discount,
+    // the configurator's own price for configured rows). An unbound internal
+    // client may still send its prices.
+    if (req.apiClient?.customerId && input.rows.some((r) => r.unitPrice !== undefined || r.discountPercent !== undefined)) {
+      return reply.code(403).send(errorBody(new ClientPriceNotAllowedError()));
     }
     // Delprojekt 5: an API client may only order configurations of templates
     // published for the API (Visa i API); a session (the web's Ny kundorder)

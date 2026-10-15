@@ -45,6 +45,13 @@ export class ClientCustomerMismatchError extends Error {
   }
 }
 
+export class ClientPriceNotAllowedError extends Error {
+  constructor() {
+    super("A client bound to a customer cannot set prices — leave unitPrice and discountPercent out");
+    this.name = "ClientPriceNotAllowedError";
+  }
+}
+
 // For routes that take a customer: a client bound to a customer may only act
 // on that customer. Sessions and unbound clients pass.
 export function clientCustomerAllowed(req: FastifyRequest, customerId: string): boolean {

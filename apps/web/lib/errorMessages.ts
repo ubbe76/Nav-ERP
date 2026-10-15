@@ -185,6 +185,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "invalid-credentials": "Fel e-postadress eller lösenord.",
   "client-scope-missing": "API-klienten saknar behörighet för det här anropet.",
   "client-customer-mismatch": "API-klienten är knuten till en annan kund.",
+  "client-price-not-allowed": "En API-klient som är knuten till en kund kan inte sätta egna priser.",
   "api-client-customer-not-found": "Kunden finns inte.",
   "invalid-setup-code":
     "Fel eller saknad engångskod. Koden skrivs i API:ts logg när det startar — kör docker compose logs api på servern.",

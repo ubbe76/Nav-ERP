@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, articles, customers, salesOrders, units } from "@navet/db";
+import { db, articles, customers, salesOrderRows, salesOrders, units } from "@navet/db";
 import { API_CLIENT_SCOPES, type ApiClientScope } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 
@@ -103,6 +103,38 @@ describe("knuten kund", () => {
     const [row] = await db.select().from(salesOrders).where(eq(salesOrders.id, other.id));
     expect(row!.status).toBe("quote");
     expect((await call("POST", `/sales-orders/${NO_ID}/confirm`, bound.auth)).statusCode).toBe(404);
+  });
+});
+
+describe("pris från klienten", () => {
+  // A client bound to a customer never sets the price: Nav prices the row
+  // from the customer's price chain. An unbound (internal) client may.
+  const pricedQuote = (customerId: string, row: Record<string, unknown>) => ({ customerId, rows: [{ articleId, quantity: 2, ...row }] });
+
+  it("refuses a bound client's own unit price or discount and writes nothing", async () => {
+    const reseller = await clientToken(["quotes:create", "orders:confirm"], ownCustomer);
+    for (const row of [{ unitPrice: 0.01 }, { discountPercent: 90 }]) {
+      const res = await call("POST", "/quotes", reseller.auth, { ...pricedQuote(ownCustomer, row), confirm: true });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().code).toBe("client-price-not-allowed");
+    }
+    expect(await db.select().from(salesOrders)).toHaveLength(0);
+  });
+
+  it("prices a bound client's row from the price chain", async () => {
+    const reseller = await clientToken(["quotes:create"], ownCustomer);
+    const res = await call("POST", "/quotes", reseller.auth, pricedQuote(ownCustomer, {}));
+    expect(res.statusCode).toBe(201);
+    const [row] = await db.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, res.json().order.id));
+    expect(Number(row!.unitPrice)).toBe(100);
+  });
+
+  it("still lets an internal (unbound) client set the price", async () => {
+    const internal = await clientToken([...API_CLIENT_SCOPES]);
+    const res = await call("POST", "/quotes", internal.auth, pricedQuote(ownCustomer, { unitPrice: 50 }));
+    expect(res.statusCode).toBe(201);
+    const [row] = await db.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, res.json().order.id));
+    expect(Number(row!.unitPrice)).toBe(50);
   });
 });
 

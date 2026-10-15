@@ -141,7 +141,7 @@ Tre **förval** fyller i rättigheterna:
 - **Återförsäljare** — Läsa konfiguratorn, Läsa priser, Skapa offert och Bekräfta order. Välj återförsäljarens egen kund.
 - **Intern** — alla rättigheter och ingen kund, för ett eget system.
 
-En klient som är knuten till en **kund** får bara skapa offert, fråga pris (även i konfiguratorn) och bekräfta order för den kunden; allt annat nekas. **Hemsida** och **Återförsäljare** går inte att spara utan kund. Utan kund får klienten agera för alla kunder. Ändringar gäller direkt, även för token klienten redan har hämtat.
+En klient som är knuten till en **kund** får bara skapa offert, fråga pris (även i konfiguratorn) och bekräfta order för den kunden; allt annat nekas. Den får heller **aldrig sätta priset själv**: Nav räknar à-pris och rabatt för varje rad ur kundens priskedja (kundpris, prislista, rabatt och, för konfigurerade rader, konfiguratorns pris), och en rad med `unitPrice` eller `discountPercent` avvisas. En intern klient utan kund får skicka egna priser. **Hemsida** och **Återförsäljare** går inte att spara utan kund. Utan kund får klienten agera för alla kunder. Ändringar gäller direkt, även för token klienten redan har hämtat.
 
 Klienter som skapades före 2026-10-15 har alla rättigheter och ingen kund och markeras **Full åtkomst** i listan — begränsa dem med **Ändra** till det de behöver.
 
@@ -230,6 +230,7 @@ POST /api/v1/quotes
 | `customer-not-found` | 404 | `customerId` finns inte |
 | `client-scope-missing` | 403 | Klienten saknar rättigheten för anropet (se [Rättigheter och kund](#rattigheter-och-kund)) |
 | `client-customer-mismatch` | 403 | Klienten är knuten till en annan kund än den i anropet |
+| `client-price-not-allowed` | 403 | En klient knuten till en kund skickade `unitPrice` eller `discountPercent` — utelämna dem, Nav räknar priset |
 
 **Prisets källa.** `price.source` i `evaluate` säger var grundpriset kommer ifrån: `customer_article` (kundpris på artikeln), `customer_group` (kundpris på artikelgruppen), `price_list` (kundens prislista), `customer_discount` (kundens rabatt på grundpriset) eller `article` (artikelns försäljningspris). `null` betyder att mallen saknar grundpris och att inget kundpris finns — då är `unitPrice` också `null` och offertraden måste ange eget `unitPrice`.
 
