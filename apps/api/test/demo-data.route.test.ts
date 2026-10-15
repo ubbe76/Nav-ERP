@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, inArray, sql } from "drizzle-orm";
-import { db, articleGroups, customers, numberSeries, paymentTerms, stockLocations, stockTransactions, units, users } from "@navet/db";
+import { db, articleGroups, customers, numberSeries, paymentTerms, stockLocations, stockTransactions, units, users, warehouses } from "@navet/db";
+import { getOrCreateFallbackLocation } from "../src/modules/stock/service/location-resolver.js";
 import bcrypt from "bcryptjs";
 import { buildApp } from "../src/app.js";
 import { DEMO_DATA, DEMO_LOCATIONS } from "../src/modules/demo/service/demo-data.js";
@@ -94,6 +95,18 @@ describe("exempeldata — rutterna", () => {
     expect((await post()).statusCode).toBe(201);
     expect(await db.select().from(paymentTerms)).toHaveLength(1);
     expect(await db.select().from(articleGroups)).toHaveLength(DEMO_DATA.articleGroups.length);
+  });
+
+  it("never puts its locations under the *** fallback warehouse", async () => {
+    // A fresh installation's only warehouse is the fallback one.
+    await getOrCreateFallbackLocation(db);
+    expect((await post()).statusCode).toBe(201);
+    const rows = await db
+      .select({ warehouse: warehouses.name })
+      .from(stockLocations)
+      .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+      .where(inArray(stockLocations.name, Object.values(DEMO_LOCATIONS)));
+    expect(rows.map((r) => r.warehouse)).toEqual(["Huvudlager", "Huvudlager"]);
   });
 
   it("creates the unit m when it is missing", async () => {

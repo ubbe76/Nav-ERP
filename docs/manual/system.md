@@ -92,6 +92,19 @@ Prefix, **nästa nummer** och antal siffror (nollutfyllnad) kan ändras per seri
 
 Serien **Kundnummer** (startar på 1001, utan prefix) används av kundregistret: en ny kund utan manuellt ifyllt kundnummer får nästa nummer härifrån. Serien **Leverantörsnummer** (startar på 5001, utan prefix) fungerar likadant för leverantörsregistret: en ny leverantör utan manuellt ifyllt leverantörsnummer får nästa nummer härifrån. Manuellt satta nummer stäms inte av mot respektive serie — sätter du t.ex. 1050 eller 5050 för hand kan serien så småningom hinna ikapp numret. Den stegar då automatiskt vidare till nästa lediga nummer i stället för att krocka, förbi upp till fem tagna nummer i rad. Är sex eller fler tagna i en obruten följd behöver du justera seriens **nästa nummer** för hand här.
 
+## Exempeldata
+
+**System → Exempeldata** skapar ett påhittat företag att prova systemet med: en tillverkare av rostfri storköksinredning. Knappen **Skapa exempeldata** lägger in
+
+- fem resurser (Laserskärning, Kantpressning, Svetsning, Slipning, Montering) i produktionsgrupperna Plåtverkstad och Montering,
+- tre leverantörer med leverantörskatalog och ett staffelpris, och fyra kunder — en med leveransadress och en med kontaktperson,
+- råvaror och köpkomponenter med lagersaldo i lagerplatserna Råvarulager och Komponentlager,
+- halvfabrikaten Bänkskiva, Underrede och Hyllplan och fantomartikeln Benpaket med struktur och operationer, och tre arbetsbord med försäljningspris.
+
+Alla artiklar har standardpris, så kalkylen och marginalen ger rimliga siffror direkt. Inga ordrar skapas — lägg en kundorder på ett arbetsbord, skapa en tillverkningsorder eller kör behovsberäkningen för att prova flödena.
+
+Exempeldata kan bara skapas på en tom installation: så fort det finns artiklar, kunder, leverantörer eller resurser är knappen avstängd och sidan säger vilket register som inte är tomt. Betalningsvillkor, artikelgrupper och lagerplatser som redan finns med samma namn återanvänds. Exempeldatan kan inte tas bort automatiskt — vill du börja om från en tom databas installerar du om.
+
 ## Integrationer
 
 **System → Integrationer** hanterar **API-klienter** för externa system, t.ex. en produktkonfigurator som skapar offerter programmatiskt. Skapa en klient så genereras klient-ID och en **hemlighet som bara visas en gång** — kopiera den direkt. Klienten autentiserar med OAuth2 client credentials mot API:t.

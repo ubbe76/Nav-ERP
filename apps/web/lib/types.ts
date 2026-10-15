@@ -3885,3 +3885,15 @@ export interface IncomingEntryView {
   payment: { id: string; paymentNumber: string } | null;
   ignoreReason: string | null;
 }
+
+// System → Exempeldata (GET/POST /api/v1/demo-data).
+export type DemoDataBlocker = "articles" | "customers" | "suppliers" | "workCenters";
+
+export interface DemoDataStatus {
+  available: boolean;
+  blockers: DemoDataBlocker[];
+}
+
+export interface DemoDataCreated {
+  created: { articles: number; workCenters: number; customers: number; suppliers: number; stockTransactions: number };
+}

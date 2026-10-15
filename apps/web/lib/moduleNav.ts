@@ -589,6 +589,11 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
         title: "Nummerserier",
         description: "Prefix, nästa nummer och antal siffror för inköps-, kund- och tillverkningsorder.",
       },
+      {
+        href: "/system/exempeldata",
+        title: "Exempeldata",
+        description: "Skapa ett påhittat företag med artiklar, struktur, kunder och leverantörer att prova systemet med.",
+      },
     ],
   },
   {

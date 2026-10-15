@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import {
   articleGroups,
   articles,
@@ -23,7 +23,7 @@ import { insertArticle } from "../../article/repository/article.repository.js";
 import { insertBomRows } from "../../article/repository/bom-write.js";
 import { insertRoutingOperations } from "../../manufacturing/repository/routing-write.js";
 import { replacePriceBreaks } from "../../purchase/repository/price-breaks.js";
-import { resolveStockLocation } from "../../stock/service/location-resolver.js";
+import { FALLBACK_LOCATION_NAME, resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { DEMO_LOCATIONS, type DemoData, type DemoLocation } from "../service/demo-data.js";
 
@@ -77,7 +77,13 @@ async function unitIds(tx: Tx): Promise<Map<string, string>> {
 }
 
 async function locationIds(tx: Tx): Promise<Record<DemoLocation, string>> {
-  const [warehouse] = await tx.select({ id: warehouses.id }).from(warehouses).where(eq(warehouses.active, true)).limit(1);
+  // Never the "***" fallback warehouse — on a fresh installation it is the
+  // only one, and the demo locations would read "*** — Råvarulager".
+  const [warehouse] = await tx
+    .select({ id: warehouses.id })
+    .from(warehouses)
+    .where(and(eq(warehouses.active, true), ne(warehouses.name, FALLBACK_LOCATION_NAME)))
+    .limit(1);
   const warehouseId = warehouse?.id ?? (await tx.insert(warehouses).values({ name: "Huvudlager" }).returning({ id: warehouses.id }))[0]!.id;
   const result = {} as Record<DemoLocation, string>;
   for (const [key, name] of Object.entries(DEMO_LOCATIONS) as [DemoLocation, string][]) {
