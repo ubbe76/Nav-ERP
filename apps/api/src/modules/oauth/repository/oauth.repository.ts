@@ -25,13 +25,13 @@ export function createOAuthRepository(db: Db) {
       return row ?? null;
     },
 
-    async listApiClients() {
-      return db.select().from(apiClients);
-    },
-
-    async customerExists(id: string) {
-      const [row] = await db.select({ id: customers.id }).from(customers).where(eq(customers.id, id));
-      return Boolean(row);
+    // The bound customer as the admin page shows it; null = no such customer.
+    async customerSummary(id: string) {
+      const [row] = await db
+        .select({ id: customers.id, customerNumber: customers.customerNumber, name: customers.name })
+        .from(customers)
+        .where(eq(customers.id, id));
+      return row ?? null;
     },
 
     // List/lookup with the bound customer's number and name for the admin page.
@@ -50,9 +50,10 @@ export function createOAuthRepository(db: Db) {
         const [after] = await tx.update(apiClients).set(values).where(eq(apiClients.id, id)).returning();
         await tx.insert(auditLog).values({
           entityType: "api_client",
-          entityId: before.name,
+          entityId: before.id,
           action: "updated",
           detail: {
+            name: before.name,
             before: { scopes: before.scopes, customerId: before.customerId },
             after: { scopes: after!.scopes, customerId: after!.customerId },
           },

@@ -27,7 +27,11 @@ describe("API-klienternas administration", () => {
   it("creates a client with scopes and a customer, and lists them", async () => {
     const res = await create({ name: "Hemsidan", scopes: ["configurator:read", "quotes:create"], customerId });
     expect(res.statusCode).toBe(201);
-    expect(res.json().client).toMatchObject({ scopes: ["configurator:read", "quotes:create"], customerId });
+    expect(res.json().client).toMatchObject({
+      scopes: ["configurator:read", "quotes:create"],
+      customerId,
+      customer: { id: customerId, customerNumber: "K-WEB", name: "Webbförfrågningar" },
+    });
     const list = (await app.inject({ method: "GET", url: "/api/v1/api-clients", headers: { cookie } })).json();
     expect(list[0]).toMatchObject({ name: "Hemsidan", customer: { customerNumber: "K-WEB", name: "Webbförfrågningar" } });
   });
@@ -44,11 +48,18 @@ describe("API-klienternas administration", () => {
     const id = (await create({ name: "Partner", scopes: ["configurator:read"] })).json().client.id;
     const res = await patch(id, { scopes: ["configurator:read", "prices:read"], customerId });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ scopes: ["configurator:read", "prices:read"], customerId });
+    expect(res.json()).toMatchObject({
+      scopes: ["configurator:read", "prices:read"],
+      customerId,
+      customer: { customerNumber: "K-WEB", name: "Webbförfrågningar" },
+    });
     expect((await patch(id, { customerId: null })).json().customerId).toBeNull();
     expect((await patch(id, { scopes: [] })).statusCode).toBe(400);
     const logged = await db.select().from(auditLog).where(and(eq(auditLog.entityType, "api_client"), eq(auditLog.action, "updated")));
     expect(logged).toHaveLength(2);
+    // Keyed by the client's id (names need not be unique), the name in the detail.
+    expect(logged.every((row) => row.entityId === id)).toBe(true);
+    expect(logged[0]!.detail).toMatchObject({ name: "Partner" });
     expect((await patch("00000000-0000-4000-8000-000000000000", { scopes: ["configurator:read"] })).statusCode).toBe(404);
   });
 

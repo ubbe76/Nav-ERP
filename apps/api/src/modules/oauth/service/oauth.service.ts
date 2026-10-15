@@ -77,15 +77,16 @@ export function createOAuthService(repo: OAuthRepository, jwtSecret: string) {
     // Returns the plaintext secret ONCE — only the bcrypt hash is stored.
     async createApiClient(input: CreateApiClientInput, createdBy: string) {
       const customerId = input.customerId ?? null;
-      if (customerId && !(await repo.customerExists(customerId))) throw new ApiClientCustomerNotFoundError(customerId);
+      const customer = customerId ? await repo.customerSummary(customerId) : null;
+      if (customerId && !customer) throw new ApiClientCustomerNotFoundError(customerId);
       const clientSecret = crypto.randomBytes(32).toString("hex");
       const clientSecretHash = await bcrypt.hash(clientSecret, SALT_ROUNDS);
       const row = await repo.createApiClient({ name: input.name, clientSecretHash, scopes: input.scopes, customerId }, createdBy);
-      return { client: toPublicApiClient(row), clientSecret };
+      return { client: toPublicApiClient(row, customer), clientSecret };
     },
 
     async updateApiClient(id: string, input: UpdateApiClientInput, userId: string | null) {
-      if (input.customerId && !(await repo.customerExists(input.customerId))) {
+      if (input.customerId && !(await repo.customerSummary(input.customerId))) {
         throw new ApiClientCustomerNotFoundError(input.customerId);
       }
       const row = await repo.updateApiClient(
@@ -97,7 +98,7 @@ export function createOAuthService(repo: OAuthRepository, jwtSecret: string) {
         userId
       );
       if (!row) throw new ApiClientNotFoundError(id);
-      return toPublicApiClient(row);
+      return toPublicApiClient(row, row.customerId ? await repo.customerSummary(row.customerId) : null);
     },
 
     async listApiClients() {
