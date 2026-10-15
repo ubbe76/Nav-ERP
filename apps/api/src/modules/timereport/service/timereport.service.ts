@@ -374,6 +374,9 @@ export function createTimeReportService(
         if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
       }
       const session = await repo.closeForgottenAndBegin(input.employeeId, open.id, stop, new Date(), createdBy);
+      // Someone else closed it in between (double tap, retry) — they also
+      // opened today's attendance.
+      if (!session) throw new AlreadyPresentError();
       await audit.log({
         entityType: "attendance_session",
         entityId: open.id,

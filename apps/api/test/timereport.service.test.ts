@@ -987,6 +987,31 @@ describe("rättad och glömd närvaro", () => {
     expect((await timeReportService.listAttendanceSessions(true)).filter((a) => a.employeeId === employee.id)).toHaveLength(1);
   });
 
+  it("regel 8: a second forgotten-close is refused and leaves the work's pause untouched", async () => {
+    const { user, employee, attendance, stamp } = await presentWithWork("E-R8E");
+    const yStop = new Date(startOfLocalToday().getTime() - 8 * H);
+    const yStart = new Date(yStop.getTime() - 8 * H);
+    await db.execute(sql`UPDATE attendance_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${attendance.id}`);
+    await db.execute(sql`UPDATE stamp_sessions SET started_at = ${yStart.toISOString()}::timestamptz WHERE id = ${stamp.id}`);
+    const input = { employeeId: employee.id, forgottenStoppedAt: yStop.toISOString() };
+
+    await timeReportService.attendanceIn(input, user.id);
+    const afterFirst = Number((await stampRow(stamp.id)).paused_seconds);
+
+    // Retry through the service ...
+    await expect(timeReportService.attendanceIn(input, user.id)).rejects.toBeInstanceOf(AlreadyPresentError);
+    // ... and a stale call that passed the service checks before the first
+    // one committed (the race the close's still-open guard stops).
+    expect(
+      await timeReportRepository.closeForgottenAndBegin(employee.id, attendance.id, yStop, new Date(), user.id)
+    ).toBeNull();
+
+    const s = await stampRow(stamp.id);
+    expect(s.paused_at).toBeNull();
+    expect(Number(s.paused_seconds)).toBe(afterFirst);
+    expect((await timeReportService.listAttendanceSessions(true)).filter((a) => a.employeeId === employee.id)).toHaveLength(1);
+  });
+
   it("regel 8: refuses a forgotten stop time outside (start, start of today) and in a locked period", async () => {
     const { user, employee, attendance } = await presentWithWork("E-R8C");
     const yStart = new Date(Date.now() - 26 * H);

@@ -367,7 +367,11 @@ export function createTimeReportRepository(db: Db) {
     // Regel 8: the forgotten Gå hem and today's attendance-in as one
     // transaction — close the old attendance at the given time (pausing the
     // open work that started before it, as Gå hem would have), resume all
-    // paused work now and open today's attendance.
+    // paused work now and open today's attendance. The close only takes a
+    // still-open attendance: a second, stale call (double tap, retry, two
+    // terminals) gets null before any stamp is touched — otherwise it would
+    // pause and resume the same work again and add the night to
+    // paused_seconds twice.
     async closeForgottenAndBegin(
       employeeId: string,
       staleId: string,
@@ -376,7 +380,12 @@ export function createTimeReportRepository(db: Db) {
       createdBy: string
     ) {
       return db.transaction(async (tx) => {
-        await tx.update(attendanceSessions).set({ stoppedAt: forgottenStoppedAt }).where(eq(attendanceSessions.id, staleId));
+        const closed = await tx
+          .update(attendanceSessions)
+          .set({ stoppedAt: forgottenStoppedAt })
+          .where(and(eq(attendanceSessions.id, staleId), isNull(attendanceSessions.stoppedAt)))
+          .returning({ id: attendanceSessions.id });
+        if (closed.length === 0) return null;
         await tx
           .update(stampSessions)
           .set({ pausedAt: forgottenStoppedAt })
