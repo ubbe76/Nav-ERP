@@ -13,3 +13,11 @@ const STOCKHOLM_DATE_TIME = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe
 // which also makes server and browser render different text) nor the browser's.
 export const formatStockholmDate = (iso: string | null): string => (iso ? STOCKHOLM_DATE.format(new Date(iso)) : "–");
 export const formatStockholmDateTime = (iso: string | null): string => (iso ? STOCKHOLM_DATE_TIME.format(new Date(iso)) : "–");
+
+// ISO instant -> "YYYY-MM-DDTHH:MM" for <input type="datetime-local">, in the
+// browser's local time (the input has no timezone of its own).
+export function toDateTimeLocalValue(iso: string): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const date = new Date(iso);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

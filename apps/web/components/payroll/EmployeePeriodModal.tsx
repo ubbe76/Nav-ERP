@@ -10,6 +10,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { toDateTimeLocalValue } from "../../lib/date";
 import {
   MONTH_NAMES_SV,
   OVERTIME_COMPENSATION_LABELS,
@@ -22,18 +23,6 @@ import {
   type PeriodEmployeeSummary,
 } from "../../lib/types";
 import { formatHours } from "../timereport/SchedulesPageClient";
-
-// --- Local date/time helpers (small on purpose — only this modal converts
-// between ISO instants and the <input type="datetime-local"> format) ---
-
-// ISO instant → "YYYY-MM-DDTHH:MM" in the browser's local time.
-function toLocalInputValue(iso: string): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  const date = new Date(iso);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
-    date.getMinutes()
-  )}`;
-}
 
 function toClock(iso: string): string {
   return new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
@@ -473,8 +462,8 @@ function PeriodDetail({
                           variant="ghost"
                           size="small"
                           onClick={() => {
-                            const startedAt = toLocalInputValue(session.startedAt);
-                            const stoppedAt = session.stoppedAt ? toLocalInputValue(session.stoppedAt) : "";
+                            const startedAt = toDateTimeLocalValue(session.startedAt);
+                            const stoppedAt = session.stoppedAt ? toDateTimeLocalValue(session.stoppedAt) : "";
                             setEditing({
                               id: session.id,
                               startedAt,

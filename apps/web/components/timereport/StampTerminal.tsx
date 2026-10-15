@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Wordmark } from "../ui/Wordmark";
-import { apiFetch } from "../../lib/api";
+import { ApiError, apiFetch } from "../../lib/api";
+import { toDateTimeLocalValue } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import type {
@@ -25,9 +26,15 @@ type Step =
   | { name: "pickOrder"; employee: EmployeeDirectoryEntry }
   | { name: "pickOperation"; employee: EmployeeDirectoryEntry; order: ManufacturingOrder; operations: MOOperation[] }
   | { name: "stampOut"; employee: EmployeeDirectoryEntry; session: StampSession }
-  | { name: "atf"; employee: EmployeeDirectoryEntry; atf: AtfStatus; scheduledMinutes: number | null };
+  | { name: "atf"; employee: EmployeeDirectoryEntry; atf: AtfStatus; scheduledMinutes: number | null }
+  | { name: "forgotten"; employee: EmployeeDirectoryEntry; startedAt: string };
 
 const IDLE_RESET_MS = 60_000;
+
+// Stockholm calendar day (YYYY-MM-DD), same as dayKey in InProgressPageClient.
+function stockholmDay(iso: string | number) {
+  return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
+}
 
 // Order picker search: every whitespace-separated term must match somewhere
 // on the order — TO number, article number/name, or a stampable operation's
@@ -86,6 +93,7 @@ export function StampTerminal({
   const [quantityScrapped, setQuantityScrapped] = useState("");
   const [scrapReason, setScrapReason] = useState("");
   const [atfHours, setAtfHours] = useState("");
+  const [forgottenStop, setForgottenStop] = useState("");
   const [now, setNow] = useState(() => Date.now());
 
   // Live clock + elapsed tickers.
@@ -104,6 +112,7 @@ export function StampTerminal({
     setNote("");
     setMarkDone(false);
     setAtfHours("");
+    setForgottenStop("");
     setSelectedOperationIds(new Set());
     setOrderFilter("");
   }, []);
@@ -153,7 +162,55 @@ export function StampTerminal({
     }
     setError(null);
     setEntry("");
+    const open = openAttendance.find((a) => a.employeeId === employee.id);
+    if (open && stockholmDay(open.startedAt) < stockholmDay(Date.now())) {
+      void openForgotten(employee, open.startedAt);
+      return;
+    }
     setStep({ name: "home", employee });
+  }
+
+  // Rule 8: the attendance has been open since an earlier day — ask when
+  // the person went home, prefilled with that day's scheduled end.
+  async function openForgotten(employee: EmployeeDirectoryEntry, startedAt: string) {
+    setBusy(true);
+    try {
+      const day = stockholmDay(startedAt);
+      const calendar = await apiFetch<ResolvedCalendarDay[]>(
+        `/api/v1/employees/${employee.id}/schedule-calendar?from=${day}&to=${day}`
+      );
+      const end = calendar[0]?.daySchedule?.endTime;
+      setForgottenStop(end ? `${day}T${end.slice(0, 5)}` : "");
+      setError(null);
+      setStep({ name: "forgotten", employee, startedAt });
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte hämta schemat."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveForgotten(employee: EmployeeDirectoryEntry) {
+    const stop = new Date(forgottenStop);
+    if (forgottenStop === "" || Number.isNaN(stop.getTime())) {
+      setError("Ange när du gick hem.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await apiFetch("/api/v1/attendance-sessions", {
+        method: "POST",
+        body: JSON.stringify({ employeeId: employee.id, forgottenStoppedAt: stop.toISOString() }),
+      });
+      await refresh();
+      setError(null);
+      setNotice(`Närvaron är rättad och du är instämplad igen, ${employee.name.split(" ")[0]}.`);
+      setStep({ name: "home", employee });
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte spara tiden."));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function openOperationPicker(employee: EmployeeDirectoryEntry, order: ManufacturingOrder) {
@@ -195,13 +252,15 @@ export function StampTerminal({
     if (operations.length === 0) return;
     setBusy(true);
     const failed: MOOperation[] = [];
+    let attendanceStarted = false;
     try {
       for (const operation of operations) {
         try {
-          await apiFetch("/api/v1/stamp-sessions", {
+          const res = await apiFetch<{ attendanceStarted?: boolean }>("/api/v1/stamp-sessions", {
             method: "POST",
             body: JSON.stringify({ employeeId: employee.id, moOperationId: operation.id }),
           });
+          if (res?.attendanceStarted === true) attendanceStarted = true;
         } catch {
           failed.push(operation);
         }
@@ -211,6 +270,7 @@ export function StampTerminal({
         setSelectedOperationIds(new Set());
         setOrderFilter("");
         setError(null);
+        if (attendanceStarted) setNotice("Närvaron stämplades in.");
         setStep({ name: "home", employee });
       } else {
         setSelectedOperationIds(new Set(failed.map((op) => op.id)));
@@ -236,6 +296,10 @@ export function StampTerminal({
       await refresh();
       setError(null);
     } catch (err) {
+      if (err instanceof ApiError && err.code === "attendance-open-from-earlier-day") {
+        const body = err.body as { startedAt?: string } | undefined;
+        if (body?.startedAt) return void openForgotten(employee, body.startedAt);
+      }
       setError(err instanceof Error ? err.message : "Närvarostämplingen misslyckades.");
     } finally {
       setBusy(false);
@@ -491,6 +555,34 @@ export function StampTerminal({
               Ta ut ATF
             </button>
             <BackRow onBack={() => setStep({ name: "home", employee: step.employee })} />
+          </section>
+        )}
+
+        {step.name === "forgotten" && (
+          <section className={styles.listStep} aria-label="Glömd utstämpling">
+            <div className={styles.prompt}>
+              Du stämplade aldrig ut{" "}
+              {new Date(step.startedAt).toLocaleDateString("sv-SE", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                timeZone: "Europe/Stockholm",
+              })}
+              . När gick du hem?
+            </div>
+            <input
+              type="datetime-local"
+              className={styles.note}
+              value={forgottenStop}
+              min={toDateTimeLocalValue(step.startedAt)}
+              max={`${stockholmDay(step.startedAt)}T23:59`}
+              onChange={(e) => setForgottenStop(e.target.value)}
+              aria-label="När du gick hem"
+            />
+            <button type="button" className={styles.bigAction} disabled={busy} onClick={() => saveForgotten(step.employee)}>
+              Spara och stämpla in
+            </button>
+            <BackRow label="Avbryt" onBack={resetToKeypad} />
           </section>
         )}
 
