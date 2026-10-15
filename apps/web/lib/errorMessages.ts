@@ -10,6 +10,19 @@
 // there rather than silently breaking the mapping this file relies on.
 import type { ApiError } from "./api";
 
+// Which registers keep System → Exempeldata from running, in prose.
+export const DEMO_BLOCKER_LABELS: Record<string, string> = {
+  articles: "artiklar",
+  customers: "kunder",
+  suppliers: "leverantörer",
+  workCenters: "resurser",
+};
+
+export function demoBlockersText(blockers: string[]): string {
+  const words = blockers.map((b) => DEMO_BLOCKER_LABELS[b] ?? b);
+  return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} och ${words.at(-1)}`;
+}
+
 type MessageEntry = string | ((err: ApiError) => string);
 
 // For codes whose API message is already Swedish AND names the specific rule
@@ -161,6 +174,12 @@ const MESSAGES: Record<string, MessageEntry> = {
   "duplicate-inquiry-row": "Artikeln finns redan på förfrågan — lägg operationen på en egen förfrågan.",
   // system
   "series-exhausted": "Nummerserien är full — kontrollera nummerserien under System.",
+  "demo-data-not-available": (err) => {
+    const blockers = (err.body as { blockers?: string[] } | undefined)?.blockers ?? [];
+    return blockers.length
+      ? `Exempeldata kan bara skapas på en tom installation — det finns redan ${demoBlockersText(blockers)}.`
+      : "Exempeldata kan bara skapas på en tom installation.";
+  },
   // auth
   forbidden: "Du saknar behörighet för den här åtgärden.",
   "invalid-credentials": "Fel e-postadress eller lösenord.",

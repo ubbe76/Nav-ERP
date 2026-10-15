@@ -188,6 +188,7 @@ import {
   SelfDeleteError,
 } from "../src/modules/auth/service/auth.service.js";
 import { LoginThrottledError } from "../src/modules/auth/service/login-throttle.js";
+import { DemoDataNotAvailableError } from "../src/modules/demo/service/demo-data.service.js";
 import {
   DuplicatePermissionGroupCodeError,
   PermissionGroupInUseError,
@@ -337,6 +338,7 @@ const cases: Array<[Error, string]> = [
   [new CostingOnlyOperationLinkError(), ERROR_CODES.COSTING_ONLY_OPERATION_LINK],
   [new DuplicateBomComponentError(), ERROR_CODES.DUPLICATE_BOM_COMPONENT],
   [new SeriesExhaustedError("customer"), ERROR_CODES.SERIES_EXHAUSTED],
+  [new DemoDataNotAvailableError(["customers"]), ERROR_CODES.DEMO_DATA_NOT_AVAILABLE],
   // auth
   [new InvalidCredentialsError(), ERROR_CODES.INVALID_CREDENTIALS],
   [new LoginThrottledError(900), ERROR_CODES.LOGIN_THROTTLED],

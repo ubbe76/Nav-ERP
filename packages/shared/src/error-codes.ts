@@ -133,6 +133,7 @@ export const ERROR_CODES = {
   DUPLICATE_INQUIRY_ROW: "duplicate-inquiry-row",
   // system
   SERIES_EXHAUSTED: "series-exhausted",
+  DEMO_DATA_NOT_AVAILABLE: "demo-data-not-available",
   // auth
   INVALID_CREDENTIALS: "invalid-credentials",
   LOGIN_THROTTLED: "login-throttled",
