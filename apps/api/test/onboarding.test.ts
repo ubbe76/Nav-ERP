@@ -71,4 +71,14 @@ describe("Kom igång — buildOnboarding", () => {
     expect(linksOf({ ...EMPTY_ONBOARDING_FACTS, hasArticles: true }, "articles")).not.toContain("/system/exempeldata");
     expect(linksOf(EMPTY_ONBOARDING_FACTS, "company")).not.toContain("/system/exempeldata");
   });
+
+  it("offers Skapa exempeldata only while all four registers are empty, since it refuses otherwise", () => {
+    const linksOf = (facts: OnboardingFacts, key: string) =>
+      buildOnboarding(facts).groups.flatMap((g) => g.steps).find((s) => s.key === key)!.links.map((l) => l.href);
+    for (const filledRegister of [{ hasCustomers: true }, { hasSuppliers: true }, { hasWorkCenters: true }]) {
+      const facts = { ...EMPTY_ONBOARDING_FACTS, ...filledRegister };
+      expect(linksOf(facts, "articles")).not.toContain("/system/exempeldata");
+    }
+    expect(linksOf({ ...EMPTY_ONBOARDING_FACTS, hasArticles: true }, "partners")).not.toContain("/system/exempeldata");
+  });
 });

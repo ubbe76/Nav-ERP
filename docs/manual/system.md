@@ -14,7 +14,7 @@
 - **Räkenskapsår och kontoplan** — när det finns ett räkenskapsår och konton (kontoplanen kan förifyllas med BAS).
 - **E-post** — när en SMTP-server är inställd.
 
-**Dölj checklistan** på Översikten gömmer den för dig (andra administratörer ser den fortfarande). Under System → Kom igång tar **Visa på Översikten** fram den igen. När alla steg är klara försvinner den av sig själv.
+**Dölj checklistan** på Översikten gömmer den för dig (andra administratörer ser den fortfarande). Under System → Kom igång tar **Visa på Översikten** fram den igen, och **Dölj på Översikten** gömmer den därifrån. När alla steg är klara försvinner den av sig själv.
 
 ## Användare
 

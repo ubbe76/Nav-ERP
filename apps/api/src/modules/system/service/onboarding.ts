@@ -69,8 +69,8 @@ export interface OnboardingView {
 
 const filled = (value: string | null) => (value ?? "").trim() !== "";
 
-// Shown on a register step until the register has data — the quick way to try
-// the system without one's own registers.
+// Shown on an unfinished register step while every register is empty — the
+// quick way to try the system without one's own registers.
 const DEMO_LINK: OnboardingLink = { href: "/system/exempeldata", label: "Skapa exempeldata" };
 
 interface StepDefinition {
@@ -168,6 +168,9 @@ const STEPS: StepDefinition[] = [
 ];
 
 export function buildOnboarding(facts: OnboardingFacts): OnboardingView {
+  // Skapa exempeldata refuses as soon as any of the four registers has data,
+  // so the link is only offered on a completely empty installation.
+  const demoAvailable = !facts.hasArticles && !facts.hasCustomers && !facts.hasSuppliers && !facts.hasWorkCenters;
   const groups: OnboardingView["groups"] = [];
   for (const def of STEPS) {
     const done = def.done(facts);
@@ -176,7 +179,7 @@ export function buildOnboarding(facts: OnboardingFacts): OnboardingView {
       title: def.title,
       description: def.description,
       done,
-      links: def.register && !done ? [DEMO_LINK, ...def.links] : def.links,
+      links: def.register && !done && demoAvailable ? [DEMO_LINK, ...def.links] : def.links,
     };
     const group = groups.find((g) => g.title === def.group);
     if (group) group.steps.push(step);

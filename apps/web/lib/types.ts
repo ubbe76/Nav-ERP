@@ -3322,6 +3322,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
   created: "Skapad",
   updated: "Ändrad",
+  onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",
   set: "Satt",
   cleared: "Rensad",

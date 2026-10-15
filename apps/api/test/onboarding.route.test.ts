@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { db, accounts, auditLog, companyInfo, fiscalYears, stockLocations, systemSettings } from "@navet/db";
+import { db, auditLog, companyInfo, stockLocations, systemSettings } from "@navet/db";
 import { buildApp } from "../src/app.js";
 import { DEMO_LOCATIONS } from "../src/modules/demo/service/demo-data.js";
 
@@ -74,14 +74,24 @@ describe("Kom igång — rutterna", () => {
     await db.update(companyInfo).set({ name: "Exempel AB", orgNumber: "556677-8899" });
     await app.inject({ method: "POST", url: "/api/v1/demo-data", headers: { cookie } });
     await app.inject({ method: "POST", url: "/api/v1/delivery-terms/generate-combiterms", headers: { cookie } });
-    await db.insert(fiscalYears).values({ label: "2026", startDate: "2026-01-01", endDate: "2026-12-31" });
-    await db.insert(accounts).values({ number: "1930", name: "Företagskonto" });
+    // Through the real writers: Räkenskapsår and Förifyll BAS.
+    expect((await app.inject({ method: "POST", url: "/api/v1/fiscal-years", headers: { cookie }, payload: { label: "2026", startDate: "2026-01-01", endDate: "2026-12-31" } })).statusCode).toBe(201);
+    expect((await app.inject({ method: "POST", url: "/api/v1/accounts/generate-bas", headers: { cookie } })).statusCode).toBeLessThan(300);
     await db.insert(systemSettings).values({ key: "smtp_host", value: "smtp.example.com" });
     expect(await doneKeys()).toEqual(["company", "articles", "partners", "workCenters", "terms", "accounting", "email"]);
   });
 
   it("counts only active users as the second user", async () => {
     await addUser("inaktiv@example.com", "user", false);
+    expect(await doneKeys()).toEqual([]);
+    // A deleted user does not count either (soft delete).
+    const deleted = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/users",
+      headers: { cookie },
+      payload: { email: "borttagen@example.com", password: PASSWORD, name: "Borttagen", role: "user" },
+    });
+    expect((await app.inject({ method: "DELETE", url: `/api/v1/auth/users/${deleted.json().id}`, headers: { cookie } })).statusCode).toBe(204);
     expect(await doneKeys()).toEqual([]);
     await addUser("aktiv@example.com", "user");
     expect(await doneKeys()).toEqual(["users"]);

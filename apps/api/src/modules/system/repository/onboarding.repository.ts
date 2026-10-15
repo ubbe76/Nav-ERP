@@ -32,30 +32,53 @@ type IdTable =
 
 export async function readOnboardingFacts(db: Db): Promise<OnboardingFacts> {
   const exists = async (table: IdTable) => (await db.select({ id: table.id }).from(table).limit(1)).length > 0;
-  const [company] = await db.select({ name: companyInfo.name, orgNumber: companyInfo.orgNumber }).from(companyInfo).limit(1);
-  const [userCount] = await db
-    .select({ n: count() })
-    .from(users)
-    .where(and(eq(users.active, true), isNull(users.deletedAt)));
-  const settings = await db
-    .select()
-    .from(systemSettings)
-    .where(inArray(systemSettings.key, [SMTP_HOST_KEY, NUMBER_SERIES_REVIEWED_KEY]));
+  // Independent queries — run together, this is on every admin's Översikt.
+  const [
+    [company],
+    [userCount],
+    settings,
+    hasArticles,
+    hasCustomers,
+    hasSuppliers,
+    hasWorkCenters,
+    hasPaymentTerms,
+    hasDeliveryTerms,
+    hasFiscalYear,
+    hasAccounts,
+  ] = await Promise.all([
+    db.select({ name: companyInfo.name, orgNumber: companyInfo.orgNumber }).from(companyInfo).limit(1),
+    db
+      .select({ n: count() })
+      .from(users)
+      .where(and(eq(users.active, true), isNull(users.deletedAt))),
+    db
+      .select()
+      .from(systemSettings)
+      .where(inArray(systemSettings.key, [SMTP_HOST_KEY, NUMBER_SERIES_REVIEWED_KEY])),
+    exists(articles),
+    exists(customers),
+    exists(suppliers),
+    exists(workCenters),
+    exists(paymentTerms),
+    exists(deliveryTerms),
+    exists(fiscalYears),
+    exists(accounts),
+  ]);
   const setting = (key: string) => settings.find((s) => s.key === key)?.value ?? null;
 
   return {
     companyName: company?.name ?? "",
     companyOrgNumber: company?.orgNumber ?? null,
     activeUsers: Number(userCount?.n ?? 0),
-    hasArticles: await exists(articles),
-    hasCustomers: await exists(customers),
-    hasSuppliers: await exists(suppliers),
-    hasWorkCenters: await exists(workCenters),
-    hasPaymentTerms: await exists(paymentTerms),
-    hasDeliveryTerms: await exists(deliveryTerms),
+    hasArticles,
+    hasCustomers,
+    hasSuppliers,
+    hasWorkCenters,
+    hasPaymentTerms,
+    hasDeliveryTerms,
     numberSeriesReviewed: setting(NUMBER_SERIES_REVIEWED_KEY) === "true",
-    hasFiscalYear: await exists(fiscalYears),
-    hasAccounts: await exists(accounts),
+    hasFiscalYear,
+    hasAccounts,
     smtpHost: setting(SMTP_HOST_KEY),
   };
 }
