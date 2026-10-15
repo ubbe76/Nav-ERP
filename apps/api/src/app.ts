@@ -134,6 +134,8 @@ import { createAtfService } from "./modules/timereport/service/atf.service.js";
 import { atfRoutes } from "./modules/timereport/routes/atf.routes.js";
 import { createDemoDataService } from "./modules/demo/service/demo-data.service.js";
 import { demoDataRoutes } from "./modules/demo/routes/demo-data.routes.js";
+import { createOnboardingService } from "./modules/system/service/onboarding.service.js";
+import { onboardingRoutes } from "./modules/system/routes/onboarding.routes.js";
 import { isBookkeepingLockViolation } from "./modules/system/service/db-errors.js";
 
 // TRUST_PROXY → Fastify's trustProxy: "true", a hop count ("1") or a
@@ -627,6 +629,8 @@ export function buildApp(database: Db = db) {
         await registerModule(protectedRoutes, auditLogRoutes, { repo: auditRepository }, adminOnly);
         // System → Exempeldata: the made-up demo company, admin only.
         await registerModule(protectedRoutes, demoDataRoutes, { service: createDemoDataService(database) }, adminOnly);
+        // System → Kom igång: the setup checklist on Översikten, admin only.
+        await registerModule(protectedRoutes, onboardingRoutes, { service: createOnboardingService(database) }, adminOnly);
         await registerModule(
           protectedRoutes,
           mailRoutes,
