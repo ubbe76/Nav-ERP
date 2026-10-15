@@ -575,6 +575,11 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
     title: "Företagsdata",
     items: [
       {
+        href: "/system/kom-igang",
+        title: "Kom igång",
+        description: "Checklistan för en ny installation — företag, användare, register, grunddata, ekonomi och e-post.",
+      },
+      {
         href: "/system/foretagsinfo",
         title: "Företagsinformation",
         description: "Företagsuppgifter och logotyp för dokument som inköpsorder och ordererkännande.",

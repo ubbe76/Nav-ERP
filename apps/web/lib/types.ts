@@ -3897,3 +3897,19 @@ export interface DemoDataStatus {
 export interface DemoDataCreated {
   created: { articles: number; workCenters: number; customers: number; suppliers: number; stockTransactions: number };
 }
+
+// System → Kom igång (GET /api/v1/onboarding).
+export interface OnboardingStepView {
+  key: string;
+  title: string;
+  description: string;
+  done: boolean;
+  links: { href: string; label: string }[];
+}
+
+export interface OnboardingView {
+  groups: { title: string; steps: OnboardingStepView[] }[];
+  done: number;
+  total: number;
+  complete: boolean;
+}

@@ -148,6 +148,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/system/behorighetsgrupper": ShieldCheck,
   "/system/integrationer": Plug,
   "/system/frakt": Container,
+  "/system/kom-igang": ListChecks,
   "/system/foretagsinfo": Building2,
   "/system/bank": CreditCard,
   "/system/nummerserier": Hash,

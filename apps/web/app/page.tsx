@@ -11,11 +11,14 @@ import { FlowStrip, type FlowStation } from "../components/dashboard/FlowStrip";
 import { AttentionCard, type AttentionItem } from "../components/dashboard/AttentionCard";
 import { OrdersCard } from "../components/dashboard/OrdersCard";
 import { StockActivityCard } from "../components/dashboard/StockActivityCard";
+import { OnboardingCard } from "../components/onboarding/OnboardingCard";
+import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
 import { getCurrentUser, apiGet } from "../lib/api";
 import { stockholmToday } from "../lib/date";
 import { satisfiesRule } from "../lib/permissions";
 import type {
   ManufacturingOrder,
+  OnboardingView,
   Paged,
   PurchaseOrder,
   SalesOrder,
@@ -64,6 +67,22 @@ export default async function OverviewPage() {
       apiGet<Paged<StockBalance>>("/api/v1/stock/balances?limit=1000", cookieHeader),
       apiGet<Paged<StockTransaction>>("/api/v1/stock/transactions?limit=6", cookieHeader),
     ]);
+  // System → Kom igång: administrators see the setup checklist until it is
+  // complete or hidden. Never lets a failing call take Översikten down, and
+  // other users never call the admin-only route.
+  let onboarding: OnboardingView | null = null;
+  if (user.role === "admin") {
+    try {
+      const [view, settings] = await Promise.all([
+        apiGet<OnboardingView>("/api/v1/onboarding", cookieHeader),
+        apiGet<{ hideOnboarding?: boolean }>("/api/v1/me/settings", cookieHeader),
+      ]);
+      if (!view.complete && !settings.hideOnboarding) onboarding = view;
+    } catch {
+      onboarding = null;
+    }
+  }
+
   const balances = balancesPage.rows;
 
   const today = stockholmToday();
@@ -215,6 +234,8 @@ export default async function OverviewPage() {
           )}
         </div>
 
+        {onboarding && <OnboardingCard initial={onboarding} />}
+
         <FlowStrip stations={stations} />
 
         {/* Three cards do not divide evenly into two columns, so the two that
@@ -231,6 +252,7 @@ export default async function OverviewPage() {
 
         <StockActivityCard transactions={recentTransactions} />
         </PermissionsProvider>
+        <ConfirmDialogHost />
       </main>
     </div>
   );

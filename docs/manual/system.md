@@ -2,6 +2,20 @@
 
 **System** i sidomenyn är endast synlig för administratörer och samlar systemomfattande inställningar.
 
+## Kom igång
+
+**System → Kom igång** är checklistan för en ny installation. Så länge något steg är kvar visas den också överst på **Översikten** för administratörer, med hur många av de nio stegen som är klara. Stegen bockas av av sig själva när uppgifterna finns i systemet:
+
+- **Företagsinformation** — när företagets namn och organisationsnummer är ifyllda.
+- **Användare** — när det finns minst en aktiv användare till.
+- **Artiklar**, **Kunder och leverantörer** och **Resurser** — när registren har innehåll. Till dess finns en länk till **Skapa exempeldata** för den som vill prova med ett påhittat företag.
+- **Betalnings- och leveransvillkor** — när det finns minst ett av varje (leveransvillkoren kan förifyllas med Combiterms under Grunddata).
+- **Nummerserier** — det enda steget du bockar av själv, med **Markera som granskade** när du har kontrollerat prefix och nästa nummer.
+- **Räkenskapsår och kontoplan** — när det finns ett räkenskapsår och konton (kontoplanen kan förifyllas med BAS).
+- **E-post** — när en SMTP-server är inställd.
+
+**Dölj checklistan** på Översikten gömmer den för dig (andra administratörer ser den fortfarande). Under System → Kom igång tar **Visa på Översikten** fram den igen. När alla steg är klara försvinner den av sig själv.
+
 ## Användare
 
 **System → Användare** hanterar inloggningskonton. Det första kontot skapas via `/register` (se [Komma igång](/hjalp/komma-igang)); därefter skapar en administratör nya konton här med namn, e-post, lösenord och roll (**Administratör** eller **Användare**) och **Behörighetsgrupp** (se [Behörighetsgrupper](#behorighetsgrupper)). Endast administratörer ser System-menyn. Listans kolumn **Behörighetsgrupp** visar gruppens namn, **Alla (administratör)** för administratörer och **Ingen åtkomst** för den som saknar grupp.
