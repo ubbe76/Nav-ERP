@@ -2230,7 +2230,10 @@ export type NumberSeriesKey =
   | "customer"
   | "supplier"
   | "fixed_asset"
-  | "payment_batch";
+  | "payment_batch"
+  | "delivery"
+  | "shipment"
+  | "stock_count";
 
 export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
   purchase_order: "Inköpsorder",
@@ -2245,6 +2248,9 @@ export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
   supplier: "Leverantörsnummer",
   fixed_asset: "Anläggning",
   payment_batch: "Betalfil",
+  delivery: "Följesedel",
+  shipment: "Försändelse",
+  stock_count: "Inventering",
 };
 
 export interface NumberSeries {

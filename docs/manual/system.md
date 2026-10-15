@@ -99,6 +99,8 @@ Prova den första betalfilen i bankens testverktyg innan den skarpa betalningen:
 | Betalning | BET- |
 | Utbetalning | UTB- |
 | Inventering | INV- |
+| Anläggning | AN- |
+| Betalfil | BO- |
 | Kundnummer | (inget prefix) |
 | Leverantörsnummer | (inget prefix) |
 
