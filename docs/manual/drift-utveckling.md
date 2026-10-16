@@ -40,11 +40,13 @@ Skulle data ändå gå förlorad och användartabellen bli tom, öppnas registre
 
 ## Backup
 
-Databasen dumpas varje natt av `scripts/backup-db.sh`, som körs via cron:
+Databasen dumpas varje natt av `scripts/backup-db.sh`, som körs via cron. Lägg raden i crontab för servicekontot som kör Nav|ERP (i README:ns installation heter det `naverp`; `crontab -e` som det kontot):
 
 ```
-30 2 * * * /sökväg/till/Nav-ERP/scripts/backup-db.sh >> "$HOME/backups/nav-erp/backup.log" 2>&1
+30 2 * * * /home/naverp/Nav-ERP/scripts/backup-db.sh >> "$HOME/backups/nav-erp/backup.log" 2>&1
 ```
+
+Kör aldrig Nav|ERP:s skript som root, och lägg bara servicekontot i gruppen `docker` — medlemskap i den gruppen är i praktiken root-behörighet på servern.
 
 - Dumparna hamnar i `~/backups/nav-erp/` (i hemkatalogen för användaren som kör skriptet) som `erp-ÅÅÅÅ-MM-DD_TTMM.sql.gz` och sparas i **30 dagar** (äldre rensas automatiskt).
 - Varje körning loggas i `backup.log` med tid, filnamn och storlek — kontrollera den ibland; en misslyckad dump skriver `FEL:` och lämnar ingen halvfärdig fil efter sig.
@@ -82,7 +84,7 @@ Den nattliga dumpen ligger på **samma disk** som databasen och sparas bara 30 d
 | `manad/ÅÅÅÅ-MM/` | månadens första dagliga kopia | 8 år (`MONTHLY_YEARS`) |
 | `arkiv/ÅÅÅÅ/` | räkenskapsårets **SIE 4-fil** + full dump | raderas aldrig |
 
-Varje fil har en `.sha256`-fil bredvid sig. **Sätt upp från grunden** med
+Varje fil har en `.sha256`-fil bredvid sig. **Sätt upp från grunden**, som servicekontot, med
 
 ```bash
 scripts/offsite-backup-setup.sh

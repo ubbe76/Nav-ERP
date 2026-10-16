@@ -230,24 +230,45 @@ tjänsten i `docker-compose.yml` och sparar data i en namngiven volym,
 `erp_postgres_data`, som överlever omstarter). Det enda den nakna servern
 faktiskt behöver är Docker själv.
 
-### 0. Installera Docker (om det inte redan finns)
+### 0. Installera Docker och skapa ett servicekonto
 
 På en färsk Ubuntu/Debian-VPS:
 
 ```bash
 curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER   # logga ut och in igen (eller kör `newgrp docker`)
+sudo adduser --disabled-password --gecos "Nav|ERP" naverp
+sudo usermod -aG docker naverp
 ```
 
 (Andra distributioner: se [Docker Engines officiella installationsguide](https://docs.docker.com/engine/install/).)
 
+**Vilken användare kör Nav|ERP?** Ett eget servicekonto, här `naverp` —
+inte root och inte ditt personliga konto. Kontot äger katalogen med koden,
+`.env` och säkerhetskopiorna, och det är som `naverp` du kör `docker compose`,
+uppdateringar och backupens cron. Administratörer arbetar som kontot med
+`sudo -iu naverp`.
+
+Medlemskap i gruppen `docker` är **i praktiken root-behörighet** på servern:
+den som får styra Docker kan starta en container som når hela värdens
+filsystem. Lägg därför bara servicekontot i gruppen, inga personliga konton.
+Vill du isolera ännu mer finns [rootless Docker](https://docs.docker.com/engine/security/rootless/),
+där även Docker-tjänsten körs utan root — det är inte provat med Nav|ERP.
+
 ### 1. Klona och konfigurera
 
+Som servicekontot:
+
 ```bash
+sudo -iu naverp
 git clone https://github.com/ubbe76/Nav-ERP.git
 cd Nav-ERP
 cp .env.example .env
+chmod 600 .env
 ```
+
+`chmod 600` gör att bara `naverp` kan läsa `.env` — filen innehåller
+databasens lösenord och `JWT_SECRET`, som räcker för att logga in som vem
+som helst.
 
 Ändra sedan i `.env` innan du startar något:
 
@@ -360,7 +381,8 @@ installation.
    skripten körs i rätt miljö.
 3. Följ sedan stegen ovan från [1. Klona och konfigurera](#1-klona-och-konfigurera)
    i WSL-terminalen: `.env`, `docker compose up -d --build`, engångskoden och
-   `http://localhost:3000`.
+   `http://localhost:3000`. På en egen Windows-dator kör du som din
+   WSL-användare — servicekontot från steg 0 behövs inte där.
 
 Att känna till:
 
@@ -436,12 +458,13 @@ företagslogotypen — ligger i Postgres räcker en databasdump för att flytta 
 (`scripts/backup-db.sh`, dumpen hamnar i `~/backups/nav-erp/`). Kopiera
 `.sql.gz`-filen till den nya servern.
 
-**På den nya servern** — installera Docker (se ovan), sätt upp stacken och
-återställ dumpen:
+**På den nya servern** — installera Docker och skapa servicekontot (se
+[steg 0](#0-installera-docker-och-skapa-ett-servicekonto)), sätt upp stacken
+som `naverp` och återställ dumpen:
 
 ```bash
 git clone https://github.com/ubbe76/Nav-ERP.git && cd Nav-ERP
-cp .env.example .env            # sätt POSTGRES_PASSWORD, JWT_SECRET, WEB_ORIGIN
+cp .env.example .env && chmod 600 .env   # sätt POSTGRES_PASSWORD, JWT_SECRET, WEB_ORIGIN
 docker compose up -d --build
 scripts/restore-db.sh erp-2026-07-20_0230.sql.gz
 ```
@@ -458,10 +481,12 @@ användare loggar in igen och konfiguratorns klienttokens hämtas på nytt.
 `restart: unless-stopped` i `docker-compose.yml` startar om containrar som
 kraschar. Volymen `erp_postgres_data` säkerhetskopieras inte i sig — använd
 [`scripts/backup-db.sh`](scripts/backup-db.sh) via cron för nattliga
-`pg_dump`-dumpar (30 dagars historik som standard):
+`pg_dump`-dumpar (30 dagars historik som standard). Lägg raden i
+servicekontots crontab (`crontab -e` som `naverp`), så hamnar dumparna i
+`/home/naverp/backups/nav-erp/`:
 
 ```
-30 2 * * * /sökväg/till/dev/scripts/backup-db.sh >> ~/backups/nav-erp/backup.log 2>&1
+30 2 * * * /home/naverp/Nav-ERP/scripts/backup-db.sh >> /home/naverp/backups/nav-erp/backup.log 2>&1
 ```
 
 Återställ med
