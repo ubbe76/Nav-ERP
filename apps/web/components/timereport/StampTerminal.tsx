@@ -4,18 +4,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Wordmark } from "../ui/Wordmark";
 import { ApiError, apiFetch } from "../../lib/api";
-import { toDateTimeLocalValue } from "../../lib/date";
+import { formatStockholmDate, stockholmToday, toDateTimeLocalValue } from "../../lib/date";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import type {
   AtfStatus,
   AttendanceSession,
   EmployeeDirectoryEntry,
-  ManufacturingOrder,
-  MOOperation,
   ResolvedCalendarDay,
   StampSession,
+  TerminalMaterial,
+  TerminalOperation,
+  TerminalStation,
 } from "../../lib/types";
+import { StatusPill, type Status } from "../ui/StatusPill";
+import { SegmentedToggle } from "../ui/SegmentedToggle";
+import {
+  filterTerminalOperations,
+  readinessLabel,
+  sortTerminalOperations,
+  type TerminalSort,
+} from "../../lib/terminalOperations";
 import { formatElapsed, formatQuantity, operationProgress, type OperationProgress } from "../../lib/stampSessions";
 import { formatHours } from "./SchedulesPageClient";
 import styles from "./StampTerminal.module.css";
@@ -23,8 +32,7 @@ import styles from "./StampTerminal.module.css";
 type Step =
   | { name: "keypad" }
   | { name: "home"; employee: EmployeeDirectoryEntry }
-  | { name: "pickOrder"; employee: EmployeeDirectoryEntry }
-  | { name: "pickOperation"; employee: EmployeeDirectoryEntry; order: ManufacturingOrder; operations: MOOperation[] }
+  | { name: "pickOperations"; employee: EmployeeDirectoryEntry }
   | { name: "stampOut"; employee: EmployeeDirectoryEntry; session: StampSession }
   | { name: "atf"; employee: EmployeeDirectoryEntry; atf: AtfStatus; scheduledMinutes: number | null }
   | { name: "forgotten"; employee: EmployeeDirectoryEntry; attendanceId: string; startedAt: string };
@@ -36,57 +44,30 @@ function stockholmDay(iso: string | number) {
   return new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
 }
 
-// Order picker search: every whitespace-separated term must match somewhere
-// on the order — TO number, article number/name, or a stampable operation's
-// work center (resurs) or production group (produktionsgrupp), by code or
-// name. Done and subcontract operations are skipped, matching what the
-// operation picker shows: the operator searches for work they can still
-// stamp in on, so a resource whose operation is already finished must not
-// bring the order up.
-function matchesOrderFilter(order: ManufacturingOrder, filter: string): boolean {
-  const terms = filter.toLocaleLowerCase("sv-SE").split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return true;
-  const haystack = [
-    order.orderNumber,
-    order.articleNumber,
-    order.articleName,
-    ...(order.operations ?? [])
-      .filter((op) => op.status === "pending" && op.workCenterType !== "subcontract")
-      .flatMap((op) => [op.workCenterCode, op.workCenterName, op.productionGroupCode, op.productionGroupName]),
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join(" ")
-    .toLocaleLowerCase("sv-SE");
-  return terms.every((term) => haystack.includes(term));
-}
-
 export function StampTerminal({
   employees,
   initialOpenSessions,
   initialOpenAttendance,
-  initialOrders,
+  stations,
   allowMultipleStamps,
 }: {
   employees: EmployeeDirectoryEntry[];
   initialOpenSessions: StampSession[];
   initialOpenAttendance: AttendanceSession[];
-  initialOrders: ManufacturingOrder[];
+  stations: TerminalStation[];
   allowMultipleStamps: boolean;
 }) {
   const [step, setStep] = useState<Step>({ name: "keypad" });
   const [entry, setEntry] = useState("");
   const [openSessions, setOpenSessions] = useState(initialOpenSessions);
   const [openAttendance, setOpenAttendance] = useState(initialOpenAttendance);
-  const [orders, setOrders] = useState(initialOrders);
-  // pickOrder: free-text filter over the loaded order list (see matchesOrderFilter).
-  const [orderFilter, setOrderFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   // Friendly confirmation shown on the keypad after e.g. going home.
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [markDone, setMarkDone] = useState(false);
-  // pickOperation: operations checked for the next "Starta valda" batch.
+  // pickOperations: operations checked for the next "Starta valda" batch.
   const [selectedOperationIds, setSelectedOperationIds] = useState<Set<string>>(new Set());
   // Per-stint quantity report: OK units, scrapped units + mandatory reason.
   const [quantityOk, setQuantityOk] = useState("");
@@ -94,6 +75,18 @@ export function StampTerminal({
   const [scrapReason, setScrapReason] = useState("");
   const [atfHours, setAtfHours] = useState("");
   const [forgottenStop, setForgottenStop] = useState("");
+  // pickOperations: the operation list and its station/material/sort/search state.
+  const [stationIds, setStationIds] = useState<string[]>([]);
+  const [materialId, setMaterialId] = useState("");
+  const [sort, setSort] = useState<TerminalSort>("urgent");
+  const [onlyReady, setOnlyReady] = useState(false);
+  const [search, setSearch] = useState("");
+  const [rows, setRows] = useState<TerminalOperation[]>([]);
+  const [materials, setMaterials] = useState<TerminalMaterial[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const listRequest = useRef(0);
   const [now, setNow] = useState(() => Date.now());
 
   // Live clock + elapsed tickers.
@@ -114,7 +107,14 @@ export function StampTerminal({
     setAtfHours("");
     setForgottenStop("");
     setSelectedOperationIds(new Set());
-    setOrderFilter("");
+    setStationIds([]);
+    setMaterialId("");
+    setSort("urgent");
+    setOnlyReady(false);
+    setSearch("");
+    setRows([]);
+    setMaterials([]);
+    setListError(null);
   }, []);
   useEffect(() => {
     if (step.name === "keypad") return;
@@ -123,21 +123,49 @@ export function StampTerminal({
     return () => {
       if (idleTimer.current) clearTimeout(idleTimer.current);
     };
-  }, [step, entry, note, markDone, orderFilter, resetToKeypad]);
+  }, [step, entry, note, markDone, search, stationIds, materialId, sort, onlyReady, selectedOperationIds, resetToKeypad]);
 
   const refresh = useCallback(async () => {
-    const [sessions, attendance, stampableOrders] = await Promise.all([
+    const [sessions, attendance] = await Promise.all([
       apiFetch<StampSession[]>("/api/v1/stamp-sessions?open=true"),
       apiFetch<AttendanceSession[]>("/api/v1/attendance-sessions?open=true"),
-      apiFetch<{ rows: ManufacturingOrder[] }>(
-        "/api/v1/manufacturing-orders?status=released,in_progress&limit=1000&withOperations=true"
-      ),
     ]);
     setOpenSessions(sessions);
     setOpenAttendance(attendance);
-    setOrders(stampableOrders.rows);
     return { sessions, attendance };
   }, []);
+
+  // Load the operation list when the view opens and when station/material
+  // change. A sequence number makes a late response harmless.
+  const inOperationList = step.name === "pickOperations";
+  useEffect(() => {
+    if (!inOperationList) return;
+    const seq = ++listRequest.current;
+    const params = new URLSearchParams();
+    if (stationIds.length > 0) params.set("workCenterIds", stationIds.join(","));
+    if (materialId) params.set("materialArticleId", materialId);
+    const query = params.toString();
+    setListLoading(true);
+    setListError(null);
+    apiFetch<{ rows: TerminalOperation[]; materials: TerminalMaterial[] }>(
+      `/api/v1/terminal/operations${query ? `?${query}` : ""}`
+    )
+      .then((res) => {
+        if (seq !== listRequest.current) return;
+        setRows(res.rows);
+        setMaterials(res.materials);
+        // Drop selections that are no longer listed.
+        const listed = new Set(res.rows.map((r) => r.operationId));
+        setSelectedOperationIds((prev) => new Set([...prev].filter((id) => listed.has(id))));
+      })
+      .catch((err) => {
+        if (seq !== listRequest.current) return;
+        setListError(apiErrorMessage(err, "Kunde inte hämta operationer."));
+      })
+      .finally(() => {
+        if (seq === listRequest.current) setListLoading(false);
+      });
+  }, [inOperationList, stationIds, materialId, reloadKey]);
 
   // Badge scanners type the employee number and send Enter — accept hardware
   // keyboard input on the keypad step.
@@ -231,27 +259,22 @@ export function StampTerminal({
     }
   }
 
-  async function openOperationPicker(employee: EmployeeDirectoryEntry, order: ManufacturingOrder) {
-    setBusy(true);
-    try {
-      const operations = await apiFetch<MOOperation[]>(`/api/v1/manufacturing-orders/${order.id}/operations`);
-      // The endpoint doesn't guarantee routing order. Lego (subcontract)
-      // operations are hidden — they are bought via inköpsorder and reported
-      // automatically at goods receipt, never stamped on the floor.
-      const pending = operations
-        .filter((op) => op.status === "pending" && op.workCenterType !== "subcontract")
-        .sort((a, b) => a.sequenceNo - b.sequenceNo);
-      setSelectedOperationIds(new Set());
-      // The filter deliberately survives here: "Tillbaka" from the operation
-      // picker returns to the list, and the operator expects their search to
-      // still be there when the order turned out to be the wrong one.
-      setStep({ name: "pickOperation", employee, order, operations: pending });
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte hämta operationer.");
-    } finally {
-      setBusy(false);
-    }
+  // Open the operation list: the employee's own default stations (only those
+  // that are real stations — an inactive or lego id is dropped) are
+  // preselected; none left means Alla stationer.
+  function openOperationList(employee: EmployeeDirectoryEntry) {
+    const known = new Set(stations.map((st) => st.id));
+    setStationIds((employee.defaultWorkCenterIds ?? []).filter((id) => known.has(id)));
+    setMaterialId("");
+    setSort("urgent");
+    setOnlyReady(false);
+    setSearch("");
+    setSelectedOperationIds(new Set());
+    setRows([]);
+    setMaterials([]);
+    setListError(null);
+    setError(null);
+    setStep({ name: "pickOperations", employee });
   }
 
   function toggleOperationSelected(operationId: string) {
@@ -266,17 +289,17 @@ export function StampTerminal({
   // "Starta valda": stamps in every checked operation, one POST per
   // operation. A failure on one doesn't roll back the others — those stay
   // stamped in, and the failed ones stay checked so the row can be retried.
-  async function startSelectedOperations(employee: EmployeeDirectoryEntry, operations: MOOperation[]) {
+  async function startSelectedOperations(employee: EmployeeDirectoryEntry, operations: TerminalOperation[]) {
     if (operations.length === 0) return;
     setBusy(true);
-    const failed: MOOperation[] = [];
+    const failed: TerminalOperation[] = [];
     let attendanceStarted = false;
     try {
       for (const operation of operations) {
         try {
           const res = await apiFetch<{ attendanceStarted?: boolean }>("/api/v1/stamp-sessions", {
             method: "POST",
-            body: JSON.stringify({ employeeId: employee.id, moOperationId: operation.id }),
+            body: JSON.stringify({ employeeId: employee.id, moOperationId: operation.operationId }),
           });
           if (res?.attendanceStarted === true) attendanceStarted = true;
         } catch {
@@ -286,13 +309,12 @@ export function StampTerminal({
       await refresh();
       if (failed.length === 0) {
         setSelectedOperationIds(new Set());
-        setOrderFilter("");
         setError(null);
         if (attendanceStarted) setNotice("Närvaron stämplades in.");
         setStep({ name: "home", employee });
       } else {
-        setSelectedOperationIds(new Set(failed.map((op) => op.id)));
-        const names = failed.map((op) => `Op ${op.sequenceNo}`).join(", ");
+        setSelectedOperationIds(new Set(failed.map((op) => op.operationId)));
+        const names = failed.map((op) => `${op.orderNumber} op ${op.sequenceNo}`).join(", ");
         setError(
           failed.length === operations.length
             ? `Instämpling misslyckades: ${names}.`
@@ -478,7 +500,10 @@ export function StampTerminal({
   }
 
   const clock = new Date(now).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
-  const visibleOrders = orders.filter((order) => matchesOrderFilter(order, orderFilter));
+  const visibleRows =
+    step.name === "pickOperations"
+      ? sortTerminalOperations(filterTerminalOperations(rows, { onlyReady, search }), sort)
+      : [];
 
   return (
     <div className={styles.terminal}>
@@ -543,7 +568,7 @@ export function StampTerminal({
             allowMultipleStamps={allowMultipleStamps}
             busy={busy}
             onStampOut={(session) => setStep({ name: "stampOut", employee: step.employee, session })}
-            onNewStamp={() => setStep({ name: "pickOrder", employee: step.employee })}
+            onNewStamp={() => openOperationList(step.employee)}
             onAttendanceIn={() => attendanceIn(step.employee)}
             onGoHome={(attendance) => goHome(step.employee, attendance.id)}
             onAtf={() => openAtf(step.employee)}
@@ -630,114 +655,38 @@ export function StampTerminal({
           </section>
         )}
 
-        {step.name === "pickOrder" && (
-          <section className={styles.listStep} aria-label="Välj order">
-            <div className={styles.prompt}>Välj order att stämpla in på</div>
-            {/* No autoFocus: on a tablet terminal that would pop the on-screen
-                keyboard on every visit; whoever wants to search taps the field. */}
-            <input
-              className={styles.search}
-              type="search"
-              aria-label="Sök order"
-              placeholder="Sök TO-nr, artikel, resurs eller produktionsgrupp"
-              value={orderFilter}
-              onChange={(e) => setOrderFilter(e.target.value)}
-            />
-            {orders.length === 0 ? (
-              <p className={styles.hint}>Inga frisläppta eller pågående ordrar just nu.</p>
-            ) : visibleOrders.length === 0 ? (
-              <p className={styles.hint}>Inga ordrar matchar sökningen.</p>
-            ) : (
-              <div className={styles.choiceList}>
-                {visibleOrders.map((order) => (
-                  <button
-                    key={order.id}
-                    type="button"
-                    className={styles.orderRow}
-                    disabled={busy}
-                    onClick={() => openOperationPicker(step.employee, order)}
-                  >
-                    <span className={`num ${styles.orderRowNumber}`}>{order.orderNumber}</span>
-                    <span className={`num ${styles.orderRowMeta}`}>{order.articleNumber}</span>
-                    <span className={styles.orderRowName}>{order.articleName}</span>
-                    <span className={styles.orderRowMeta}>
-                      <span className="num">{Number(order.quantity).toLocaleString("sv-SE")}</span> st
-                    </span>
-                    <span className={styles.orderRowMeta}>{order.status === "in_progress" ? "Pågår" : "Frisläppt"}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <BackRow
-              onBack={() => {
-                setOrderFilter("");
-                setStep({ name: "home", employee: step.employee });
-              }}
-            />
-          </section>
-        )}
-
-        {step.name === "pickOperation" && (
-          <section className={styles.listStep} aria-label="Välj operation">
-            <div className={styles.prompt}>
-              <span className="num">{step.order.orderNumber}</span> — välj operation
-            </div>
-            {step.operations.length === 0 ? (
-              <p className={styles.hint}>Alla operationer på ordern är redan klara.</p>
-            ) : (
-              <>
-                <div className={styles.choiceList}>
-                  {step.operations.map((op) => (
-                    <label
-                      key={op.id}
-                      className={styles.choiceCheckRow}
-                      data-checked={selectedOperationIds.has(op.id)}
-                    >
-                      <input
-                        type="checkbox"
-                        className={styles.choiceCheckbox}
-                        checked={selectedOperationIds.has(op.id)}
-                        disabled={busy}
-                        onChange={() => toggleOperationSelected(op.id)}
-                      />
-                      {/* The operator's question is "what am I doing?", so the
-                          description leads and the resource follows as its code
-                          plus name on the secondary line. Without a description
-                          the primary line reads exactly as it did before. */}
-                      <span className={styles.choiceCheckText}>
-                        <span className={styles.choicePrimary}>
-                          Op <span className="num">{op.sequenceNo}</span> · {op.description ?? op.workCenterName}
-                        </span>
-                        <span className={styles.choiceSecondary}>
-                          {op.description ? `${op.workCenterCode} · ${op.workCenterName}` : "Markera för att välja"}
-                        </span>
-                        <OperationProgressLine
-                          progress={operationProgress(step.order.quantity, op.quantityCompleted, op.quantityScrapped)}
-                        />
-                        {op.packingInstructions && (
-                          <span className={styles.choiceSecondary}>📦 {op.packingInstructions}</span>
-                        )}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  className={styles.bigAction}
-                  disabled={busy || selectedOperationIds.size === 0}
-                  onClick={() =>
-                    startSelectedOperations(
-                      step.employee,
-                      step.operations.filter((op) => selectedOperationIds.has(op.id))
-                    )
-                  }
-                >
-                  Starta valda
-                </button>
-              </>
-            )}
-            <BackRow onBack={() => setStep({ name: "pickOrder", employee: step.employee })} />
-          </section>
+        {step.name === "pickOperations" && (
+          <OperationListView
+            employee={step.employee}
+            stations={stations}
+            stationIds={stationIds}
+            onStationIds={setStationIds}
+            materials={materials}
+            materialId={materialId}
+            onMaterialId={setMaterialId}
+            sort={sort}
+            onSort={setSort}
+            onlyReady={onlyReady}
+            onOnlyReady={setOnlyReady}
+            search={search}
+            onSearch={setSearch}
+            rows={visibleRows}
+            totalRows={rows.length}
+            loading={listLoading}
+            listError={listError}
+            onRetry={() => setReloadKey((k) => k + 1)}
+            stampedOperationIds={new Set(openSessions.filter((s) => s.employeeId === step.employee.id).map((s) => s.moOperationId))}
+            selected={selectedOperationIds}
+            onToggle={toggleOperationSelected}
+            busy={busy}
+            onStart={() =>
+              startSelectedOperations(
+                step.employee,
+                rows.filter((r) => selectedOperationIds.has(r.operationId))
+              )
+            }
+            onBack={() => setStep({ name: "home", employee: step.employee })}
+          />
         )}
 
         {step.name === "stampOut" && (
@@ -982,5 +931,199 @@ function BackRow({ label = "Tillbaka", onBack }: { label?: string; onBack: () =>
     <button type="button" className={styles.backButton} onClick={onBack}>
       {label}
     </button>
+  );
+}
+
+function OperationListView({
+  stations,
+  stationIds,
+  onStationIds,
+  materials,
+  materialId,
+  onMaterialId,
+  sort,
+  onSort,
+  onlyReady,
+  onOnlyReady,
+  search,
+  onSearch,
+  rows,
+  totalRows,
+  loading,
+  listError,
+  onRetry,
+  stampedOperationIds,
+  selected,
+  onToggle,
+  busy,
+  onStart,
+  onBack,
+}: {
+  employee: EmployeeDirectoryEntry;
+  stations: TerminalStation[];
+  stationIds: string[];
+  onStationIds: (ids: string[]) => void;
+  materials: TerminalMaterial[];
+  materialId: string;
+  onMaterialId: (id: string) => void;
+  sort: TerminalSort;
+  onSort: (sort: TerminalSort) => void;
+  onlyReady: boolean;
+  onOnlyReady: (v: boolean) => void;
+  search: string;
+  onSearch: (v: string) => void;
+  rows: TerminalOperation[];
+  totalRows: number;
+  loading: boolean;
+  listError: string | null;
+  onRetry: () => void;
+  stampedOperationIds: Set<string>;
+  selected: Set<string>;
+  onToggle: (operationId: string) => void;
+  busy: boolean;
+  onStart: () => void;
+  onBack: () => void;
+}) {
+  const today = stockholmToday();
+  const readinessStatus: Record<TerminalOperation["readiness"], Status> = {
+    ready: "done",
+    partial: "delayed",
+    not_ready: "stopped",
+  };
+  function toggleStation(id: string) {
+    onStationIds(stationIds.includes(id) ? stationIds.filter((s) => s !== id) : [...stationIds, id]);
+  }
+  return (
+    <section className={styles.listStep} aria-label="Välj operationer">
+      <div className={styles.prompt}>Välj operationer</div>
+
+      <div className={styles.filterGroup} role="group" aria-label="Station">
+        <span className={styles.filterLabel}>Station</span>
+        <div className={styles.stationButtons}>
+          <button
+            type="button"
+            className={styles.stationButton}
+            data-on={stationIds.length === 0}
+            aria-pressed={stationIds.length === 0}
+            onClick={() => onStationIds([])}
+          >
+            Alla stationer
+          </button>
+          {stations.map((st) => (
+            <button
+              key={st.id}
+              type="button"
+              className={styles.stationButton}
+              data-on={stationIds.includes(st.id)}
+              aria-pressed={stationIds.includes(st.id)}
+              onClick={() => toggleStation(st.id)}
+            >
+              <span className="num">{st.code}</span> · {st.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <label className={styles.filterGroup}>
+        <span className={styles.filterLabel}>Material</span>
+        <select className={styles.select} value={materialId} onChange={(e) => onMaterialId(e.target.value)}>
+          <option value="">Alla material</option>
+          {materials.map((m) => (
+            <option key={m.articleId} value={m.articleId}>
+              {m.articleNumber} {m.articleName}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className={styles.filterRow}>
+        <SegmentedToggle
+          ariaLabel="Sortering"
+          value={sort}
+          onChange={onSort}
+          options={[
+            { value: "urgent", label: "Brådskande" },
+            { value: "material", label: "Material" },
+          ]}
+        />
+        <label className={styles.onlyReady}>
+          <input type="checkbox" checked={onlyReady} onChange={(e) => onOnlyReady(e.target.checked)} />
+          Bara redo
+        </label>
+      </div>
+
+      {/* No autoFocus: on a tablet terminal that would pop the on-screen keyboard. */}
+      <input
+        className={styles.search}
+        type="search"
+        aria-label="Sök"
+        placeholder="Sök TO, artikel, resurs, material"
+        value={search}
+        onChange={(e) => onSearch(e.target.value)}
+      />
+
+      {listError ? (
+        <div className={styles.listError} role="alert">
+          {listError}
+          <button type="button" className={styles.attendanceButton} onClick={onRetry}>
+            Försök igen
+          </button>
+        </div>
+      ) : loading && totalRows === 0 ? (
+        <p className={styles.hint}>Hämtar operationer…</p>
+      ) : rows.length === 0 ? (
+        <p className={styles.hint}>Inga operationer matchar.</p>
+      ) : (
+        <div className={styles.choiceList}>
+          {rows.map((op) => {
+            const stamped = stampedOperationIds.has(op.operationId);
+            const checked = selected.has(op.operationId);
+            const overdue = op.dueDate !== null && op.dueDate.slice(0, 10) < today;
+            return (
+              <label key={op.operationId} className={styles.choiceCheckRow} data-checked={checked} data-disabled={stamped}>
+                <input
+                  type="checkbox"
+                  className={styles.choiceCheckbox}
+                  checked={checked}
+                  disabled={busy || stamped}
+                  onChange={() => onToggle(op.operationId)}
+                />
+                <span className={styles.choiceCheckText}>
+                  <span className={styles.choicePrimary}>
+                    <span className="num">{op.orderNumber}</span> · <span className="num">{op.articleNumber}</span>{" "}
+                    {op.articleName}
+                  </span>
+                  <span className={styles.choiceSecondary}>
+                    Op <span className="num">{op.sequenceNo}</span> · {op.description ?? op.workCenterName} ·{" "}
+                    <span className="num">{op.workCenterCode}</span> · {op.workCenterName}
+                  </span>
+                  <OperationProgressLine progress={operationProgress(op.orderQuantity, op.quantityCompleted, op.quantityScrapped)} />
+                  <span className={styles.rowMeta}>
+                    <StatusPill status={readinessStatus[op.readiness]} label={readinessLabel(op)} compact />
+                    {op.dueDate && (
+                      <span className={styles.dueDate} data-overdue={overdue}>
+                        Färdigdatum <span className="num">{formatStockholmDate(op.dueDate)}</span>
+                      </span>
+                    )}
+                    {stamped && <span className={styles.choiceSecondary}>Du är instämplad</span>}
+                  </span>
+                  {op.materials.length > 0 && (
+                    <span className={styles.choiceSecondary}>
+                      {op.materials.map((m) => `${m.articleNumber} ${m.articleName}`).join(", ")}
+                    </span>
+                  )}
+                  {op.packingInstructions && <span className={styles.choiceSecondary}>📦 {op.packingInstructions}</span>}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
+      <button type="button" className={styles.bigAction} disabled={busy || selected.size === 0} onClick={onStart}>
+        Starta valda
+      </button>
+      <BackRow onBack={onBack} />
+    </section>
   );
 }

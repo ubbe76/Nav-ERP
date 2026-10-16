@@ -7,9 +7,8 @@ import { ConfirmDialogHost } from "../../../components/ui/ConfirmDialogHost";
 import type {
   AttendanceSession,
   EmployeeDirectoryEntry,
-  ManufacturingOrder,
-  Paged,
   StampSession,
+  TerminalStation,
 } from "../../../lib/types";
 
 // Fullscreen stamp terminal (stämpelterminal) for a shared shop-floor device —
@@ -22,18 +21,13 @@ export default async function StampTerminalPage() {
   // proxy.ts already guards the page; this keeps a direct render honest too.
   if (!canOpen(user, "/tillverkning/terminal")) redirect("/ingen-behorighet");
 
-  const [employees, openSessions, openAttendance, orders, settings] = await Promise.all([
+  const [employees, openSessions, openAttendance, stations, settings] = await Promise.all([
     apiGet<EmployeeDirectoryEntry[]>("/api/v1/employees/directory", cookieHeader),
     apiGet<StampSession[]>("/api/v1/stamp-sessions?open=true", cookieHeader),
     apiGet<AttendanceSession[]>("/api/v1/attendance-sessions?open=true", cookieHeader),
-    apiGet<Paged<ManufacturingOrder>>(
-      "/api/v1/manufacturing-orders?status=released,in_progress&limit=1000&withOperations=true",
-      cookieHeader
-    ),
+    apiGet<TerminalStation[]>("/api/v1/terminal/stations", cookieHeader),
     apiGet<{ allowMultipleStamps: boolean }>("/api/v1/settings/terminal", cookieHeader),
   ]);
-
-  const stampableOrders = orders.rows;
 
   // The terminal has no AppShell, so it mounts the app's confirmation dialog
   // itself — otherwise confirmDialog ("Rapportera ändå?" on a material
@@ -45,7 +39,7 @@ export default async function StampTerminalPage() {
         employees={employees.filter((e) => e.active)}
         initialOpenSessions={openSessions}
         initialOpenAttendance={openAttendance}
-        initialOrders={stampableOrders}
+        stations={stations}
         allowMultipleStamps={settings.allowMultipleStamps}
       />
       <ConfirmDialogHost />

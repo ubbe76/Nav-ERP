@@ -259,58 +259,7 @@
   cursor: default;
 }
 
-/* pickOrder: one order per line so a long list fits the screen. The name
-   column soaks up the slack and truncates; number columns never wrap. Still
-   48px tall — the touch minimum — where .choice is 64px for two lines. */
-.orderRow {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  min-height: 48px;
-  text-align: left;
-  white-space: nowrap;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border-control);
-  border-radius: var(--radius-control);
-  cursor: pointer;
-}
-.orderRow:hover {
-  background: var(--color-bg);
-}
-.orderRow:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.orderRow:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.orderRowNumber {
-  font-family: var(--font-body);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.orderRowName {
-  font-family: var(--font-body);
-  font-size: 15px;
-  color: var(--color-text-primary);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.orderRowMeta {
-  font-family: var(--font-body);
-  font-size: 13.5px;
-  color: var(--color-text-secondary);
-}
-
-/* pickOrder search field — the terminal's input scale (see .note), full
+/* Operation list search field — the terminal's input scale (see .note), full
    width, touch-height. */
 .search {
   width: 100%;
@@ -371,11 +320,120 @@
   cursor: pointer;
 }
 
+.choiceCheckRow[data-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .choiceCheckText {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+  min-width: 0;
+}
+
+.filterGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filterLabel {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.stationButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stationButton {
+  min-height: 44px;
+  padding: 8px 14px;
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.stationButton[data-on="true"] {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-text);
+}
+.stationButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.select {
+  width: 100%;
+  min-height: 48px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  padding: 10px 14px;
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+}
+
+.onlyReady {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+.onlyReady input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+}
+
+.dueDate[data-overdue="true"] {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.listError {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  font-family: var(--font-body);
+  font-size: 14.5px;
+  color: var(--status-stopped-text);
+  background: var(--status-stopped-bg);
+  border-radius: var(--radius-control);
 }
 
 .summary {
@@ -604,23 +662,6 @@
   }
   .key {
     height: 62px;
-  }
-  /* Narrow screens: TO number + name on the first line, article number,
-     quantity and status on a second — never a horizontal scroll. */
-  .orderRow {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    row-gap: 2px;
-  }
-  .orderRowNumber {
-    grid-column: 1;
-    grid-row: 1;
-  }
-  .orderRowName {
-    grid-column: 2 / -1;
-    grid-row: 1;
-  }
-  .orderRowMeta {
-    grid-row: 2;
   }
 }
 
