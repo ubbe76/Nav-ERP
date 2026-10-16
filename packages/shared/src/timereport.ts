@@ -51,6 +51,8 @@ export const updateEmployeeSchema = z
     atfMode: z.enum(atfModes).optional(),
     atfMinutesPerWeek: z.number().int().min(0).max(600).nullable().optional(),
     atfStartDate: z.string().date().nullable().optional(),
+    // Förvalda stationer — replaces the whole set; [] clears it.
+    defaultWorkCenterIds: z.array(z.string().uuid()).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>;

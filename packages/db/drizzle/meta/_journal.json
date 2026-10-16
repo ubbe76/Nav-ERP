@@ -848,6 +848,13 @@
       "when": 1792080669433,
       "tag": "0120_auto_close_report_source",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1792140013009,
+      "tag": "0121_employee_work_centers",
+      "breakpoints": true
     }
   ]
 }

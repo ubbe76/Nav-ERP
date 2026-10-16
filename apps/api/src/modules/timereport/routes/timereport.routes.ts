@@ -32,6 +32,7 @@ import {
 import {
   InvalidStatusTransitionError,
   MOOperationNotFoundError,
+  WorkCenterNotFoundError,
 } from "../../manufacturing/service/manufacturing.service.js";
 import { PayrollPeriodLockedError } from "../../payroll/service/period-lock.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
@@ -78,6 +79,9 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
       if (err instanceof EmployeeNotFoundError || err instanceof WeekScheduleNotFoundError) {
         return reply.code(404).send(errorBody(err));
       }
+      // An unknown work center in defaultWorkCenterIds is a bad body, not a
+      // missing resource at the path.
+      if (err instanceof WorkCenterNotFoundError) return reply.code(400).send(errorBody(err));
       if (err instanceof DuplicateEmployeeNumberError) return reply.code(409).send(errorBody(err));
       throw err;
     }

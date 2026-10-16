@@ -1,8 +1,9 @@
-import { and, count, desc, eq, gt, ilike, isNotNull, isNull, lt, or, sql, getTableColumns } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, or, sql, getTableColumns } from "drizzle-orm";
 import {
   absences,
   articles,
   attendanceSessions,
+  employeeWorkCenters,
   employees,
   manufacturingOrders,
   moOperations,
@@ -56,6 +57,35 @@ export function createTimeReportRepository(db: Db) {
       return db
         .select({ id: employees.id, employeeNumber: employees.employeeNumber, name: employees.name, active: employees.active })
         .from(employees);
+    },
+
+    // Förvalda stationer per employee, in one query. Without ids it reads
+    // every employee's set (the directory); employees without a set are
+    // simply absent from the map.
+    async workCenterIdsByEmployee(employeeIds?: string[]) {
+      const result = new Map<string, string[]>();
+      if (employeeIds && employeeIds.length === 0) return result;
+      const rows = await db
+        .select({ employeeId: employeeWorkCenters.employeeId, workCenterId: employeeWorkCenters.workCenterId })
+        .from(employeeWorkCenters)
+        .innerJoin(workCenters, eq(workCenters.id, employeeWorkCenters.workCenterId))
+        .where(employeeIds ? inArray(employeeWorkCenters.employeeId, employeeIds) : undefined)
+        .orderBy(asc(workCenters.code), asc(workCenters.id));
+      for (const row of rows) {
+        const ids = result.get(row.employeeId);
+        if (ids) ids.push(row.workCenterId);
+        else result.set(row.employeeId, [row.workCenterId]);
+      }
+      return result;
+    },
+
+    // The ids among `ids` that are not work centers — validation for
+    // defaultWorkCenterIds on employee PATCH.
+    async missingWorkCenterIds(ids: string[]) {
+      if (ids.length === 0) return [];
+      const found = await db.select({ id: workCenters.id }).from(workCenters).where(inArray(workCenters.id, ids));
+      const existing = new Set(found.map((row) => row.id));
+      return ids.filter((id) => !existing.has(id));
     },
 
     // Existence check for defaultWeekScheduleId validation on employee PATCH.
@@ -233,18 +263,41 @@ export function createTimeReportRepository(db: Db) {
       return row ?? null;
     },
 
+    // The employee's own fields and its Förvalda stationer (replace-the-set,
+    // when defaultWorkCenterIds is given) change in one transaction. The
+    // employee row is locked first — by the UPDATE, or FOR UPDATE when only
+    // the set changes (an empty .set() would throw) — so concurrent PATCHes
+    // of the same employee replace the set one after the other.
     async updateEmployee(id: string, input: UpdateEmployeeInput) {
-      const [row] = await db
-        .update(employees)
-        .set({
-          ...input,
-          wage: input.wage === undefined ? undefined : input.wage === null ? null : String(input.wage),
-          weeklyHours:
-            input.weeklyHours === undefined ? undefined : input.weeklyHours === null ? null : String(input.weeklyHours),
-        })
-        .where(eq(employees.id, id))
-        .returning();
-      return row ?? null;
+      const { defaultWorkCenterIds, ...fields } = input;
+      return db.transaction(async (tx) => {
+        const hasFields = Object.values(fields).some((value) => value !== undefined);
+        const [row] = hasFields
+          ? await tx
+              .update(employees)
+              .set({
+                ...fields,
+                wage: fields.wage === undefined ? undefined : fields.wage === null ? null : String(fields.wage),
+                weeklyHours:
+                  fields.weeklyHours === undefined
+                    ? undefined
+                    : fields.weeklyHours === null
+                      ? null
+                      : String(fields.weeklyHours),
+              })
+              .where(eq(employees.id, id))
+              .returning()
+          : await tx.select().from(employees).where(eq(employees.id, id)).for("update");
+        if (!row) return null;
+        if (defaultWorkCenterIds !== undefined) {
+          await tx.delete(employeeWorkCenters).where(eq(employeeWorkCenters.employeeId, id));
+          const unique = [...new Set(defaultWorkCenterIds)];
+          if (unique.length > 0) {
+            await tx.insert(employeeWorkCenters).values(unique.map((workCenterId) => ({ employeeId: id, workCenterId })));
+          }
+        }
+        return row;
+      });
     },
 
     async createAttendanceSession(employeeId: string, createdBy: string) {

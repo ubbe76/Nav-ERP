@@ -421,7 +421,7 @@ describe("profiles against the real app", () => {
     }
   });
 
-  it("the employee directory carries names and numbers only, sorted on the employee number", async () => {
+  it("the employee directory carries names, numbers and Förvalda stationer only, sorted on the employee number", async () => {
     const c = await sessionFor(["terminal"]);
     const tag = crypto.randomUUID().slice(0, 8);
     const inserted = await db
@@ -436,8 +436,8 @@ describe("profiles against the real app", () => {
       expect(res.statusCode).toBe(200);
       const rows = (res.json() as Record<string, unknown>[]).filter((r) => String(r.employeeNumber).startsWith(tag));
       expect(rows).toEqual([
-        { id: inserted[1]!.id, employeeNumber: `${tag}-9`, name: "Nio", active: false },
-        { id: inserted[0]!.id, employeeNumber: `${tag}-10`, name: "Tio", active: true },
+        { id: inserted[1]!.id, employeeNumber: `${tag}-9`, name: "Nio", active: false, defaultWorkCenterIds: [] },
+        { id: inserted[0]!.id, employeeNumber: `${tag}-10`, name: "Tio", active: true, defaultWorkCenterIds: [] },
       ]);
       // A workshop user never reaches the full record.
       expect(await status(c, "GET", `/employees/${inserted[0]!.id}`)).toBe(403);

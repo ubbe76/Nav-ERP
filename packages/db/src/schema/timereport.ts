@@ -6,6 +6,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   time,
@@ -15,7 +16,7 @@ import {
   varchar,
   boolean,
 } from "drizzle-orm/pg-core";
-import { moOperations } from "./manufacturing";
+import { moOperations, workCenters } from "./manufacturing";
 import { users } from "./auth";
 
 // Anställningsform — determines how `employees.wage` is read (hourly rate vs
@@ -140,6 +141,22 @@ export const employees = pgTable("employees", {
   atfStartDate: date("atf_start_date"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Förvalda stationer: the work centers an employee usually works at — the
+// stamp terminal preselects them when the employee identifies. Everyone may
+// still pick any station; this only sets the starting filter.
+export const employeeWorkCenters = pgTable(
+  "employee_work_centers",
+  {
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    workCenterId: uuid("work_center_id")
+      .notNull()
+      .references(() => workCenters.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.employeeId, table.workCenterId] })]
+);
 
 // ATF-transaktioner: withdrawals and manual adjustments, append-only-style
 // (accrual is derived, so no periodic accrual rows are ever written). Balance

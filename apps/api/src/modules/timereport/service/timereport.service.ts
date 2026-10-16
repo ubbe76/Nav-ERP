@@ -15,11 +15,12 @@ import type { ManufacturingService } from "../../manufacturing/service/manufactu
 import {
   InvalidStatusTransitionError,
   MOOperationNotFoundError,
+  WorkCenterNotFoundError,
 } from "../../manufacturing/service/manufacturing.service.js";
 // Leaf file in the payroll module — no import cycle (see period-lock.ts).
 import { PayrollPeriodLockedError, type PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
-import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 
 export class EmployeeNotFoundError extends Error {
   constructor(id: string) {
@@ -243,16 +244,22 @@ export function createTimeReportService(
     },
 
     async getEmployee(id: string) {
-      return repo.findEmployeeById(id);
+      const row = await repo.findEmployeeById(id);
+      if (!row) return null;
+      const defaults = await repo.workCenterIdsByEmployee([id]);
+      return { ...row, defaultWorkCenterIds: defaults.get(id) ?? [] };
     },
 
     async listEmployees() {
       return repo.listEmployees();
     },
 
-    // Personalkatalog — names and numbers only, for the shop floor.
+    // Personalkatalog — names, numbers and Förvalda stationer only, for the
+    // shop floor.
     async listEmployeeDirectory() {
-      const rows = await repo.listEmployeeDirectory();
+      const [list, defaults] = await Promise.all([repo.listEmployeeDirectory(), repo.workCenterIdsByEmployee()]);
+      // Förvalda stationer ride along so the terminal can preselect them.
+      const rows = list.map((row) => ({ ...row, defaultWorkCenterIds: defaults.get(row.id) ?? [] }));
       return rows.sort((a, b) => a.employeeNumber.localeCompare(b.employeeNumber, "sv", { numeric: true }));
     },
 
@@ -338,14 +345,25 @@ export function createTimeReportService(
       if (input.defaultWeekScheduleId != null && !(await repo.weekScheduleExists(input.defaultWeekScheduleId))) {
         throw new WeekScheduleNotFoundError(input.defaultWeekScheduleId);
       }
+      if (input.defaultWorkCenterIds !== undefined) {
+        const [missing] = await repo.missingWorkCenterIds(input.defaultWorkCenterIds);
+        if (missing !== undefined) throw new WorkCenterNotFoundError(missing);
+      }
+      let row;
       try {
-        const row = await repo.updateEmployee(id, input);
-        if (!row) throw new EmployeeNotFoundError(id);
-        return row;
+        row = await repo.updateEmployee(id, input);
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateEmployeeNumberError(input.employeeNumber ?? "");
+        // A work center deleted between the check above and the insert.
+        if (isForeignKeyViolation(err, "employee_work_centers_work_center_id_work_centers_id_fk")) {
+          const [gone] = await repo.missingWorkCenterIds(input.defaultWorkCenterIds ?? []);
+          throw new WorkCenterNotFoundError(gone ?? "");
+        }
         throw err;
       }
+      if (!row) throw new EmployeeNotFoundError(id);
+      const defaults = await repo.workCenterIdsByEmployee([id]);
+      return { ...row, defaultWorkCenterIds: defaults.get(id) ?? [] };
     },
 
     async listAttendanceSessions(onlyOpen: boolean) {
