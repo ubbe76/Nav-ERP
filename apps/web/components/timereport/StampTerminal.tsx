@@ -154,6 +154,9 @@ export function StampTerminal({
         if (seq !== listRequest.current) return;
         setRows(res.rows);
         setMaterials(res.materials);
+        // The material list follows the station filter: a chosen material
+        // that dropped out would otherwise stay applied with no option shown.
+        if (materialId && !res.materials.some((m) => m.articleId === materialId)) setMaterialId("");
         // Drop selections that are no longer listed.
         const listed = new Set(res.rows.map((r) => r.operationId));
         setSelectedOperationIds((prev) => new Set([...prev].filter((id) => listed.has(id))));
@@ -516,7 +519,7 @@ export function StampTerminal({
         </Link>
       </header>
 
-      {error && (
+      {error && step.name !== "pickOperations" && (
         <div className={styles.error} role="alert">
           {error}
         </div>
@@ -679,6 +682,7 @@ export function StampTerminal({
             selected={selectedOperationIds}
             onToggle={toggleOperationSelected}
             busy={busy}
+            error={error}
             onStart={() =>
               startSelectedOperations(
                 step.employee,
@@ -956,6 +960,7 @@ function OperationListView({
   selected,
   onToggle,
   busy,
+  error,
   onStart,
   onBack,
 }: {
@@ -981,6 +986,7 @@ function OperationListView({
   selected: Set<string>;
   onToggle: (operationId: string) => void;
   busy: boolean;
+  error: string | null;
   onStart: () => void;
   onBack: () => void;
 }) {
@@ -1120,10 +1126,18 @@ function OperationListView({
         </div>
       )}
 
-      <button type="button" className={styles.bigAction} disabled={busy || selected.size === 0} onClick={onStart}>
-        Starta valda
-      </button>
-      <BackRow onBack={onBack} />
+      {/* Sticky so the action and a start failure stay in view below a long list. */}
+      <div className={styles.actionBar}>
+        {error && (
+          <div className={styles.error} role="alert">
+            {error}
+          </div>
+        )}
+        <button type="button" className={styles.bigAction} disabled={busy || selected.size === 0} onClick={onStart}>
+          Starta valda{selected.size > 0 ? ` (${selected.size})` : ""}
+        </button>
+        <BackRow onBack={onBack} />
+      </div>
     </section>
   );
 }
