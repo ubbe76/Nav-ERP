@@ -1012,13 +1012,14 @@ function StationPicker({
 
   return (
     <div className={styles.filterGroup}>
-      <span className={styles.filterLabel}>Station:</span>
+      <span className={styles.filterLabel}>Station</span>
       <button
         ref={triggerRef}
         type="button"
         className={styles.stationTrigger}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-label={`Station: ${stationSummary(stations, stationIds)}`}
         onClick={openPanel}
       >
         <span className={styles.stationSummary}>{stationSummary(stations, stationIds)}</span>
