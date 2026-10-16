@@ -1545,8 +1545,8 @@ export interface ManufacturingOrder {
   dueDate: string | null;
   // Konfigurator 4c: the choices of a made-to-order (beställningsvara) TO; null for a plain TO.
   configuration: ManufacturingOrderConfiguration | null;
-  // Only present when the list was fetched with ?withOperations=true — the
-  // stamp terminal filters orders by resurs/produktionsgrupp client-side.
+  // Only present when the list was fetched with ?withOperations=true
+  // (operation summaries per order, e.g. for integrations).
   operations?: MOOperationSummary[];
   // Only on the create response (a new TO is released at creation): the
   // same shortage warnings Släpp returns.
@@ -1554,7 +1554,7 @@ export interface ManufacturingOrder {
 }
 
 // GET /manufacturing-orders?withOperations=true — a slim per-order view of
-// the operations, enough to search on and to skip done/lego operations.
+// the operations (sequence, status, work center, production group).
 export interface MOOperationSummary {
   id: string;
   sequenceNo: number;
@@ -1752,8 +1752,9 @@ export interface Employee {
   employeeNumber: string;
   name: string;
   active: boolean;
-  // Förvalda stationer (work centers preselected in the terminal)
-  defaultWorkCenterIds: string[];
+  // Förvalda stationer (work centers preselected in the terminal); not returned by
+  // GET /employees or POST /employees, hence optional.
+  defaultWorkCenterIds?: string[];
   // Kontaktuppgifter
   phone: string | null;
   email: string | null;

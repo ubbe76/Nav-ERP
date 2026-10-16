@@ -128,7 +128,7 @@ function AllmantTab({ employee, stations }: { employee: Employee; stations: Term
   // Only stations in the list are shown, so only those are kept and sent back:
   // saved defaults that point at an inactive or lego work center stay hidden.
   const [defaultWorkCenterIds, setDefaultWorkCenterIds] = useState<string[]>(() =>
-    employee.defaultWorkCenterIds.filter((id) => stations.some((s) => s.id === id))
+    (employee.defaultWorkCenterIds ?? []).filter((id) => stations.some((s) => s.id === id))
   );
   const { error, setError, saved, setSaved, pending, setPending } = useSaveState();
 

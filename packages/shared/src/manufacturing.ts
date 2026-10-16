@@ -16,9 +16,8 @@ export type ManufacturingOrderStatus = z.infer<typeof manufacturingOrderStatusSc
 export const listManufacturingOrdersQuerySchema = listQuerySchema.extend({
   status: statusListParam(manufacturingOrderStatusSchema.options),
   // Adds an `operations` summary (sequence, status, work center, production
-  // group) to each row so the stamp terminal can filter the order list by
-  // resurs/produktionsgrupp client-side. An extra batched query, so it's
-  // opt-in. Same "true"/"false" string pattern as withOpenRows in sales.ts.
+  // group) to each row, e.g. for integrations. An extra batched query, so
+  // it's opt-in. Same "true"/"false" string pattern as withOpenRows in sales.ts.
   withOperations: z
     .enum(["true", "false"])
     .transform((value) => value === "true")

@@ -278,8 +278,8 @@ function numericPatch(value: number | null | undefined): string | null | undefin
 }
 
 // Per-order operation summary for GET /manufacturing-orders?withOperations=
-// true — enough for the terminal to search and to hide done/lego operations,
-// not the full operation row. Every requested id gets an entry (possibly []).
+// true — a slim operation view per order (e.g. for integrations), not the
+// full operation row. Every requested id gets an entry (possibly []).
 async function operationSummariesForOrders(db: Db, orderIds: string[]) {
   const summaries = new Map<string, OperationSummary[]>(orderIds.map((id) => [id, []]));
   if (orderIds.length === 0) return summaries;
@@ -1400,9 +1400,8 @@ export function createManufacturingRepository(db: Db) {
       const total = totalRows[0]!.total;
       if (!query.withOperations) return { rows, total };
 
-      // Opt-in (withOperations): the stamp terminal filters by resurs and
-      // produktionsgrupp client-side, so it needs each order's operations.
-      // One batched query for the page, merged in JS — same shape as
+      // Opt-in (withOperations): each order's operation summaries, e.g. for
+      // integrations. One batched query for the page, merged in JS — same shape as
       // coverageForSalesOrderRows — so the plain register list never pays.
       const summaries = await operationSummariesForOrders(db, rows.map((row) => row.id));
       return { rows: rows.map((row) => ({ ...row, operations: summaries.get(row.id) ?? [] })), total };

@@ -37,4 +37,10 @@ describe("computeReadiness", () => {
     const r = computeReadiness(10, [op("a", 10, "12")]);
     expect(r.get("a")).toEqual({ readiness: "ready", available: 0 });
   });
+  it("rounds away float noise in available", () => {
+    const r = computeReadiness(20.3, [op("a", 10, "7.3"), op("b", 20, "2.1")]);
+    expect(r.get("b")).toEqual({ readiness: "partial", available: 5.2 });
+    const first = computeReadiness(20.3, [op("a", 10, "0.1")]);
+    expect(first.get("a")).toEqual({ readiness: "ready", available: 20.2 });
+  });
 });

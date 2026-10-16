@@ -125,6 +125,20 @@ export function StampTerminal({
     };
   }, [step, entry, note, markDone, search, stationIds, materialId, sort, onlyReady, selectedOperationIds, resetToKeypad]);
 
+  // Browsing a long operation list (scroll/touch) counts as activity, so the
+  // operator isn't sent back to the keypad mid-scroll.
+  const listActive = step.name === "pickOperations";
+  useEffect(() => {
+    if (!listActive) return;
+    const bump = () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+      idleTimer.current = setTimeout(resetToKeypad, IDLE_RESET_MS);
+    };
+    const events = ["scroll", "pointerdown", "touchmove", "wheel"] as const;
+    events.forEach((name) => window.addEventListener(name, bump, { passive: true, capture: true }));
+    return () => events.forEach((name) => window.removeEventListener(name, bump, { capture: true }));
+  }, [listActive, resetToKeypad]);
+
   const refresh = useCallback(async () => {
     const [sessions, attendance] = await Promise.all([
       apiFetch<StampSession[]>("/api/v1/stamp-sessions?open=true"),
@@ -1036,7 +1050,7 @@ function OperationListView({
           <option value="">Alla material</option>
           {materials.map((m) => (
             <option key={m.articleId} value={m.articleId}>
-              {m.articleNumber} {m.articleName}
+              {m.articleNumber} · {m.articleName}
             </option>
           ))}
         </select>
@@ -1081,6 +1095,7 @@ function OperationListView({
         <p className={styles.hint}>Inga operationer matchar.</p>
       ) : (
         <div className={styles.choiceList}>
+          {loading && <p className={styles.hint}>Hämtar operationer…</p>}
           {rows.map((op) => {
             const stamped = stampedOperationIds.has(op.operationId);
             const checked = selected.has(op.operationId);
@@ -1109,13 +1124,14 @@ function OperationListView({
                     {op.dueDate && (
                       <span className={styles.dueDate} data-overdue={overdue}>
                         Färdigdatum <span className="num">{formatStockholmDate(op.dueDate)}</span>
+                        {overdue && <span className={styles.visuallyHidden}> Försenad</span>}
                       </span>
                     )}
                     {stamped && <span className={styles.choiceSecondary}>Du är instämplad</span>}
                   </span>
                   {op.materials.length > 0 && (
                     <span className={styles.choiceSecondary}>
-                      {op.materials.map((m) => `${m.articleNumber} ${m.articleName}`).join(", ")}
+                      {op.materials.map((m) => `${m.articleNumber} · ${m.articleName}`).join(", ")}
                     </span>
                   )}
                   {op.packingInstructions && <span className={styles.choiceSecondary}>📦 {op.packingInstructions}</span>}

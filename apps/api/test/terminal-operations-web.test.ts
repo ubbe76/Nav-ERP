@@ -87,6 +87,6 @@ describe("readinessLabel", () => {
     expect(readinessLabel(op({ readiness: "partial", available: "8", orderQuantity: "20", quantityCompleted: null }))).toBe("8 av 20 redo");
     expect(readinessLabel(op({ readiness: "partial", available: "8", orderQuantity: "20", quantityCompleted: "5" }))).toBe("8 av 15 redo");
     expect(readinessLabel(op({ readiness: "partial", available: "0.30000000000000004", orderQuantity: "1000.5", quantityCompleted: "0" }))).toBe("0,3 av 1 000,5 redo");
-    expect(readinessLabel(op({ readiness: "partial", available: "1", orderQuantity: "5", quantityCompleted: "9" }))).toBe("1 av 0 redo");
+    expect(readinessLabel(op({ readiness: "ready", available: "0", orderQuantity: "5", quantityCompleted: "9" }))).toBe("Redo");
   });
 });

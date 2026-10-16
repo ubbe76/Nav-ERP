@@ -28,7 +28,7 @@ Närvarostämplingarna är underlaget för framtida löneunderlag och jämförs 
 4. Märket på raden visar om materialet från föregående steg finns att arbeta med:
    - **Redo** — operationen kan göras för hela det som återstår. Orderns första operation är alltid redo; för övriga räknas föregående operations OK-antal (även när den ligger på en annan station eller är en lego-operation).
    - **8 av 20 redo** — föregående operation har rapporterat så många att du kan göra 8 av de 20 som återstår.
-   - **Inte redo** — föregående operation har ännu inte rapporterat något.
+   - **Inte redo** — föregående operation har ännu inte rapporterat fler OK än den här.
 
    Märket är en upplysning och spärrar aldrig: du kan alltid stämpla in. Kasserade enheter räknas inte som redo.
 5. Kryssa för en eller flera operationer — tryck på raden, inget stämplas in förrän du bekräftar — och tryck **Starta valda** (inaktiv tills minst en är markerad). Du kan välja operationer från flera olika ordrar samtidigt; en anställd kan ha flera samtidiga öppna stämplingar. En operation du redan är instämplad på visas med texten **Du är instämplad** och kan inte väljas. Går någon av stämplingarna inte att genomföra visas vilken/vilka det gäller (`TO-nummer op N`); de som lyckades förblir instämplade och de som misslyckades är fortfarande markerade så du kan försöka igen. Misslyckas hämtningen av listan visas felet med knappen **Försök igen**.
