@@ -27,6 +27,7 @@ import type {
 // Materialbrist vid rapportering: the check itself is a leaf the repository
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
+import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
@@ -363,6 +364,37 @@ const MO_STATUS_LABELS: Record<string, string> = {
 // auditRepository, and manufacturing.service.test.ts wires it for real too.
 const NOOP_AUDIT: AuditWriter = { async log() {} };
 
+// Stämpelterminalens operationslista (GET /terminal/operations). No prices —
+// the terminal is a shop-floor profile.
+export interface TerminalMaterial {
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+}
+export interface TerminalOperation {
+  operationId: string;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleNumber: string;
+  articleName: string;
+  sequenceNo: number;
+  description: string | null;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  orderQuantity: string;
+  quantityCompleted: string | null;
+  quantityScrapped: string;
+  dueDate: string | null;
+  readiness: Readiness;
+  // What can be worked on per the readiness rule (terminal-readiness.ts).
+  available: string;
+  // Linked materials (mo_material_consumptions.mo_operation_id), sorted by
+  // article number.
+  materials: TerminalMaterial[];
+  packingInstructions: string | null;
+}
+
 export function createManufacturingService(
   repo: ManufacturingRepository,
   pdf: DocumentPdfService,
@@ -490,6 +522,61 @@ export function createManufacturingService(
 
     async getWorkCenter(id: string) {
       return repo.findWorkCenterById(id);
+    },
+
+    // Terminalens operationslista — see terminal-readiness.ts for the rule.
+    // The readiness is computed over ALL operations of each order, so a
+    // station filter never hides the previous operation from the rule.
+    async listTerminalOperations(q: {
+      workCenterIds?: string[];
+      materialArticleId?: string;
+    }): Promise<{ rows: TerminalOperation[]; materials: TerminalMaterial[] }> {
+      const { listed, siblings, materials } = await repo.terminalOperationRows(q.workCenterIds);
+      const byOrder = new Map<string, typeof siblings>();
+      for (const s of siblings) byOrder.set(s.manufacturingOrderId, [...(byOrder.get(s.manufacturingOrderId) ?? []), s]);
+      const readiness = new Map<string, ReadinessResult>();
+      for (const row of listed) {
+        if (readiness.has(row.operationId)) continue;
+        for (const [id, r] of computeReadiness(Number(row.orderQuantity), byOrder.get(row.manufacturingOrderId) ?? [])) {
+          readiness.set(id, r);
+        }
+      }
+      const byArticleNumber = (a: TerminalMaterial, b: TerminalMaterial) => a.articleNumber.localeCompare(b.articleNumber, "sv");
+      const materialsByOp = new Map<string, TerminalMaterial[]>();
+      for (const m of materials) {
+        if (!m.moOperationId) continue;
+        materialsByOp.set(m.moOperationId, [
+          ...(materialsByOp.get(m.moOperationId) ?? []),
+          { articleId: m.articleId, articleNumber: m.articleNumber, articleName: m.articleName },
+        ]);
+      }
+      const rows: TerminalOperation[] = listed.map((row) => {
+        const r = readiness.get(row.operationId)!;
+        return {
+          ...row,
+          readiness: r.readiness,
+          available: String(r.available),
+          materials: (materialsByOp.get(row.operationId) ?? []).sort(byArticleNumber),
+        };
+      });
+      // The picker lists the materials BEFORE the material filter, so
+      // choosing one never empties the list of alternatives.
+      const unique = new Map(rows.flatMap((r) => r.materials).map((m) => [m.articleId, m]));
+      return {
+        rows: q.materialArticleId ? rows.filter((r) => r.materials.some((m) => m.articleId === q.materialArticleId)) : rows,
+        materials: [...unique.values()].sort(byArticleNumber),
+      };
+    },
+
+    // Stations for the terminal in natural number order: purely numeric codes
+    // numerically ("90" before "100"), other codes after them alphabetically.
+    async listTerminalStations() {
+      const isNumeric = (code: string) => /^\d+$/.test(code);
+      return (await repo.terminalStations()).sort((a, b) => {
+        if (isNumeric(a.code) && isNumeric(b.code)) return Number(a.code) - Number(b.code);
+        if (isNumeric(a.code) !== isNumeric(b.code)) return isNumeric(a.code) ? -1 : 1;
+        return a.code.localeCompare(b.code, "sv");
+      });
     },
 
     async listWorkCenters(query?: ListWorkCentersQuery) {

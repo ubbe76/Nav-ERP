@@ -16,6 +16,14 @@ describe("computeReadiness", () => {
     const r = computeReadiness(20, [op("a", 10, "8"), op("b", 20, null)]);
     expect(r.get("b")).toEqual({ readiness: "partial", available: 8 });
   });
+  it("partial is capped at Kvar when the previous has over-reported", () => {
+    const r = computeReadiness(20, [op("a", 10, "25"), op("b", 20, "15")]);
+    expect(r.get("b")).toEqual({ readiness: "partial", available: 5 });
+  });
+  it("not ready when the previous has reported fewer than this one", () => {
+    const r = computeReadiness(20, [op("a", 10, "2"), op("b", 20, "5")]);
+    expect(r.get("b")).toEqual({ readiness: "not_ready", available: 0 });
+  });
   it("not ready when the previous has not reported more", () => {
     const r = computeReadiness(20, [op("a", 10, "3"), op("b", 20, "3"), op("c", 30, "3")]);
     expect(r.get("b")).toEqual({ readiness: "not_ready", available: 0 });

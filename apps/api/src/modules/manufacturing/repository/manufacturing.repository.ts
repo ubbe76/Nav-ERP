@@ -868,6 +868,81 @@ export function createManufacturingRepository(db: Db) {
       return row ?? null;
     },
 
+    // Terminal: every stampable operation (released/in-progress order,
+    // pending, not lego), plus ALL operations of those orders for the
+    // readiness rule (the previous operation may sit at another station or
+    // be lego) and the material rows linked to the listed operations.
+    async terminalOperationRows(workCenterIds?: string[]) {
+      const listed = await db
+        .select({
+          operationId: moOperations.id,
+          manufacturingOrderId: manufacturingOrders.id,
+          orderNumber: manufacturingOrders.orderNumber,
+          orderQuantity: manufacturingOrders.quantity,
+          dueDate: manufacturingOrders.dueDate,
+          articleNumber: articles.articleNumber,
+          articleName: articles.name,
+          sequenceNo: moOperations.sequenceNo,
+          description: moOperations.description,
+          workCenterId: workCenters.id,
+          workCenterCode: workCenters.code,
+          workCenterName: workCenters.name,
+          quantityCompleted: moOperations.quantityCompleted,
+          quantityScrapped: moOperations.quantityScrapped,
+          packingInstructions: moOperations.packingInstructions,
+        })
+        .from(moOperations)
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
+        .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
+        .where(
+          and(
+            inArray(manufacturingOrders.status, ["released", "in_progress"]),
+            eq(moOperations.status, "pending"),
+            ne(workCenters.type, "subcontract"),
+            workCenterIds && workCenterIds.length > 0 ? inArray(moOperations.workCenterId, workCenterIds) : undefined
+          )
+        );
+      const orderIds = [...new Set(listed.map((r) => r.manufacturingOrderId))];
+      const operationIds = listed.map((r) => r.operationId);
+      const [siblings, materials] = await Promise.all([
+        orderIds.length === 0
+          ? []
+          : db
+              .select({
+                id: moOperations.id,
+                manufacturingOrderId: moOperations.manufacturingOrderId,
+                sequenceNo: moOperations.sequenceNo,
+                status: moOperations.status,
+                quantityCompleted: moOperations.quantityCompleted,
+              })
+              .from(moOperations)
+              .where(inArray(moOperations.manufacturingOrderId, orderIds)),
+        operationIds.length === 0
+          ? []
+          : db
+              .select({
+                moOperationId: moMaterialConsumptions.moOperationId,
+                articleId: articles.id,
+                articleNumber: articles.articleNumber,
+                articleName: articles.name,
+              })
+              .from(moMaterialConsumptions)
+              .innerJoin(articles, eq(articles.id, moMaterialConsumptions.componentArticleId))
+              .where(inArray(moMaterialConsumptions.moOperationId, operationIds)),
+      ]);
+      return { listed, siblings, materials };
+    },
+
+    // Stations for the terminal: active, non-lego work centers. Sorted by the
+    // service (natural number order).
+    async terminalStations() {
+      return db
+        .select({ id: workCenters.id, code: workCenters.code, name: workCenters.name })
+        .from(workCenters)
+        .where(and(eq(workCenters.active, true), ne(workCenters.type, "subcontract")));
+    },
+
     async listWorkCenters(query?: ListWorkCentersQuery) {
       return db
         .select({

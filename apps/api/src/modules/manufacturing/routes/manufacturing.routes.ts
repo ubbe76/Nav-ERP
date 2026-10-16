@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { articleCardWrite, canSeePrices, MO_READ } from "../../auth/middleware/access-rules.js";
+import { articleCardWrite, canSeePrices, MO_READ, TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import {
   completeManufacturingOrderSchema,
@@ -15,6 +15,7 @@ import {
   listWorkCentersQuerySchema,
   palletCardQuerySchema,
   setProductionGroupWorkCentersSchema,
+  terminalOperationsQuerySchema,
   updateManufacturingOrderSchema,
   updateProductionGroupSchema,
   updateRoutingOperationSchema,
@@ -79,6 +80,13 @@ const MAX_OPERATION_FILE_BYTES = 20 * 1024 * 1024;
 // requireAuth has already run and req.user is guaranteed to be set.
 export async function manufacturingRoutes(app: FastifyInstance, opts: { service: ManufacturingService }) {
   const { service } = opts;
+
+  // Stämpelterminalen: the operation list and the station picker. Terminal
+  // reads, no prices.
+  app.get("/terminal/operations", { config: { access: TERMINAL_READ } }, async (req) =>
+    service.listTerminalOperations(terminalOperationsQuerySchema.parse(req.query))
+  );
+  app.get("/terminal/stations", { config: { access: TERMINAL_READ } }, async () => service.listTerminalStations());
 
   app.get("/work-centers", async (req) => service.listWorkCenters(listWorkCentersQuerySchema.parse(req.query)));
 

@@ -26,6 +26,17 @@ export const listManufacturingOrdersQuerySchema = listQuerySchema.extend({
 });
 export type ListManufacturingOrdersQuery = z.infer<typeof listManufacturingOrdersQuerySchema>;
 
+// Terminalens operationslista: comma-separated station ids, optional material.
+export const terminalOperationsQuerySchema = z.object({
+  workCenterIds: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.split(",").filter(Boolean) : undefined))
+    .pipe(z.array(z.string().uuid()).optional()),
+  materialArticleId: z.string().uuid().optional(),
+});
+export type TerminalOperationsQuery = z.infer<typeof terminalOperationsQuerySchema>;
+
 // Resource number (resursnummer): exactly 3 digits, freely chosen — carries
 // no grouping meaning; resources are grouped via production groups instead.
 export const workCenterCodeSchema = z.string().regex(/^\d{3}$/, "Numret ska vara exakt 3 siffror");
