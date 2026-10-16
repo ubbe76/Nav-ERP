@@ -346,10 +346,113 @@
   color: var(--color-text-secondary);
 }
 
-.stationButtons {
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+}
+.filterBar > .filterGroup {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.stationTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  text-align: left;
+  color: var(--color-text-primary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.stationTrigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.stationSummary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stationBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--color-overlay);
+}
+.stationPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(520px, 100%);
+  max-height: 80vh;
+  padding: 16px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-popover);
+}
+.stationPanel:focus-visible {
+  outline: none;
+}
+.stationPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stationPanelTitle {
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.stationDone {
+  min-height: 48px;
+  padding: 0 24px;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--btn-primary-text);
+  background: var(--btn-primary-bg);
+  border: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.stationDone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.stationShortcuts {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.stationList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.stationList .choiceCheckRow {
+  min-height: 56px;
+  padding: 10px 14px;
 }
 
 .stationButton {
@@ -673,6 +776,18 @@
 }
 
 @media (max-width: 640px) {
+  .filterBar > .filterGroup {
+    flex-basis: 100%;
+  }
+  .stationBackdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .stationPanel {
+    width: 100%;
+    border-radius: var(--radius-control) var(--radius-control) 0 0;
+    border-bottom: none;
+  }
   .stage {
     padding: 20px 14px 32px;
   }

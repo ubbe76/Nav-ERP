@@ -134,7 +134,7 @@ export function StampTerminal({
       if (idleTimer.current) clearTimeout(idleTimer.current);
       idleTimer.current = setTimeout(resetToKeypad, IDLE_RESET_MS);
     };
-    const events = ["scroll", "pointerdown", "touchmove", "wheel"] as const;
+    const events = ["scroll", "pointerdown", "touchmove", "wheel", "keydown"] as const;
     events.forEach((name) => window.addEventListener(name, bump, { passive: true, capture: true }));
     return () => events.forEach((name) => window.removeEventListener(name, bump, { capture: true }));
   }, [listActive, resetToKeypad]);
@@ -952,7 +952,155 @@ function BackRow({ label = "Tillbaka", onBack }: { label?: string; onBack: () =>
   );
 }
 
+// Compact station filter: one button that summarises the choice and opens a
+// panel (centered on desktop, bottom sheet on a phone). The panel edits a
+// draft; Klar applies it in one go (one refetch), Esc/backdrop discard.
+const SEARCH_THRESHOLD = 8;
+
+function stationSummary(stations: TerminalStation[], ids: string[]) {
+  const chosen = stations.filter((st) => ids.includes(st.id));
+  if (chosen.length === 0) return "Alla stationer";
+  const label = (st: TerminalStation) => `${st.code} ${st.name}`;
+  const head = chosen.slice(0, 2).map(label).join(", ");
+  return chosen.length > 2 ? `${head} +${chosen.length - 2}` : head;
+}
+
+function StationPicker({
+  stations,
+  stationIds,
+  defaultStationIds,
+  onApply,
+}: {
+  stations: TerminalStation[];
+  stationIds: string[];
+  defaultStationIds: string[];
+  onApply: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const known = new Set(stations.map((st) => st.id));
+  const mine = defaultStationIds.filter((id) => known.has(id));
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown =
+    words.length === 0
+      ? stations
+      : stations.filter((st) => {
+          const hay = `${st.code} ${st.name}`.toLowerCase();
+          return words.every((w) => hay.includes(w));
+        });
+
+  function openPanel() {
+    setDraft(stationIds);
+    setQuery("");
+    setOpen(true);
+  }
+  function close() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+  function apply() {
+    onApply(draft);
+    close();
+  }
+  useEffect(() => {
+    if (open) panelRef.current?.focus();
+  }, [open]);
+
+  return (
+    <div className={styles.filterGroup}>
+      <span className={styles.filterLabel}>Station:</span>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.stationTrigger}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={openPanel}
+      >
+        <span className={styles.stationSummary}>{stationSummary(stations, stationIds)}</span>
+        <span aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div
+          className={styles.stationBackdrop}
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) close();
+          }}
+        >
+          <div
+            ref={panelRef}
+            className={styles.stationPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Station"
+            tabIndex={-1}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                close();
+              }
+            }}
+          >
+            <div className={styles.stationPanelHead}>
+              <span className={styles.stationPanelTitle}>Station</span>
+              <button type="button" className={styles.stationDone} onClick={apply}>
+                Klar
+              </button>
+            </div>
+            <div className={styles.stationShortcuts}>
+              {mine.length > 0 && (
+                <button type="button" className={styles.stationButton} onClick={() => setDraft(mine)}>
+                  Mina stationer
+                </button>
+              )}
+              <button type="button" className={styles.stationButton} onClick={() => setDraft([])}>
+                Alla stationer
+              </button>
+            </div>
+            {stations.length > SEARCH_THRESHOLD && (
+              <input
+                className={styles.search}
+                type="search"
+                aria-label="Sök station"
+                placeholder="Sök station"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            )}
+            <div className={styles.stationList}>
+              {shown.length === 0 && <p className={styles.hint}>Ingen station matchar.</p>}
+              {shown.map((st) => {
+                const checked = draft.includes(st.id);
+                return (
+                  <label key={st.id} className={styles.choiceCheckRow} data-checked={checked}>
+                    <input
+                      type="checkbox"
+                      className={styles.choiceCheckbox}
+                      checked={checked}
+                      onChange={() =>
+                        setDraft(checked ? draft.filter((x) => x !== st.id) : [...draft, st.id])
+                      }
+                    />
+                    <span className={styles.choicePrimary}>
+                      <span className="num">{st.code}</span> · {st.name}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OperationListView({
+  employee,
   stations,
   stationIds,
   onStationIds,
@@ -1010,51 +1158,29 @@ function OperationListView({
     partial: "delayed",
     not_ready: "stopped",
   };
-  function toggleStation(id: string) {
-    onStationIds(stationIds.includes(id) ? stationIds.filter((s) => s !== id) : [...stationIds, id]);
-  }
   return (
     <section className={styles.listStep} aria-label="Välj operationer">
       <div className={styles.prompt}>Välj operationer</div>
 
-      <div className={styles.filterGroup} role="group" aria-label="Station">
-        <span className={styles.filterLabel}>Station</span>
-        <div className={styles.stationButtons}>
-          <button
-            type="button"
-            className={styles.stationButton}
-            data-on={stationIds.length === 0}
-            aria-pressed={stationIds.length === 0}
-            onClick={() => onStationIds([])}
-          >
-            Alla stationer
-          </button>
-          {stations.map((st) => (
-            <button
-              key={st.id}
-              type="button"
-              className={styles.stationButton}
-              data-on={stationIds.includes(st.id)}
-              aria-pressed={stationIds.includes(st.id)}
-              onClick={() => toggleStation(st.id)}
-            >
-              <span className="num">{st.code}</span> · {st.name}
-            </button>
-          ))}
-        </div>
+      <div className={styles.filterBar}>
+        <StationPicker
+          stations={stations}
+          stationIds={stationIds}
+          defaultStationIds={employee.defaultWorkCenterIds ?? []}
+          onApply={onStationIds}
+        />
+        <label className={styles.filterGroup}>
+          <span className={styles.filterLabel}>Material</span>
+          <select className={styles.select} value={materialId} onChange={(e) => onMaterialId(e.target.value)}>
+            <option value="">Alla material</option>
+            {materials.map((m) => (
+              <option key={m.articleId} value={m.articleId}>
+                {m.articleNumber} · {m.articleName}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
-
-      <label className={styles.filterGroup}>
-        <span className={styles.filterLabel}>Material</span>
-        <select className={styles.select} value={materialId} onChange={(e) => onMaterialId(e.target.value)}>
-          <option value="">Alla material</option>
-          {materials.map((m) => (
-            <option key={m.articleId} value={m.articleId}>
-              {m.articleNumber} · {m.articleName}
-            </option>
-          ))}
-        </select>
-      </label>
 
       <div className={styles.filterRow}>
         <SegmentedToggle
