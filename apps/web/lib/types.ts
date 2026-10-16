@@ -1744,6 +1744,7 @@ export interface EmployeeDirectoryEntry {
   employeeNumber: string;
   name: string;
   active: boolean;
+  defaultWorkCenterIds: string[];
 }
 
 export interface Employee {
@@ -1751,6 +1752,8 @@ export interface Employee {
   employeeNumber: string;
   name: string;
   active: boolean;
+  // Förvalda stationer (work centers preselected in the terminal)
+  defaultWorkCenterIds: string[];
   // Kontaktuppgifter
   phone: string | null;
   email: string | null;
@@ -3929,4 +3932,40 @@ export interface OnboardingView {
   done: number;
   total: number;
   complete: boolean;
+}
+
+// Terminal operation list (GET /terminal/stations, /terminal/operations).
+export interface TerminalStation {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface TerminalMaterial {
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+}
+
+export type TerminalReadiness = "ready" | "partial" | "not_ready";
+
+export interface TerminalOperation {
+  operationId: string;
+  manufacturingOrderId: string;
+  orderNumber: string;
+  articleNumber: string;
+  articleName: string;
+  sequenceNo: number;
+  description: string | null;
+  workCenterId: string;
+  workCenterCode: string;
+  workCenterName: string;
+  orderQuantity: string;
+  quantityCompleted: string | null;
+  quantityScrapped: string;
+  dueDate: string | null;
+  readiness: TerminalReadiness;
+  available: string;
+  materials: TerminalMaterial[];
+  packingInstructions: string | null;
 }

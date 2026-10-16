@@ -6,7 +6,7 @@ Personalregistret, scheman/kalendrar och ATF utgör grunden för närvarohanteri
 
 **Tillverkning → Personal** kräver rollen administratör, eller rollen arbetsledare tillsammans med en behörighetsgrupp som har **Tillverkning** (menyvalet syns inte för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)) — personalkortet visar bland annat frånvaro, som räknas som hälsodata. Sidan listar de anställda; klicka på namnet för att öppna **personalkortet** med fem flikar:
 
-- **Allmänt** — anställningsnummer (används i stämpelterminalen), namn, aktiv, telefon, e-post och adress med postnummer/postort.
+- **Allmänt** — anställningsnummer (används i stämpelterminalen), namn, aktiv, telefon, e-post och adress med postnummer/postort samt **Förvalda stationer** — de resurser den anställde brukar arbeta vid. Stämpelterminalen väljer dem när personen identifierar sig, se [Stämpelterminalen](/hjalp/terminal).
 - **Anställning** — personnummer, anställd från/till, anställningsform (timlön/månadslön), lön och veckoarbetstid.
 - **Schema** — standardschema och kalenderöverstyrningar, se nedan.
 - **Frånvaro** — registrering av frånvaro (sjukfrånvaro, semester m.m.), se kapitlet [Lön & attestering](/hjalp/lon).

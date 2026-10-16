@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
-import { Field, Input, Select, Toggle } from "../ui/Field";
+import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import {
   ATF_MODE_LABELS,
@@ -22,6 +22,7 @@ import {
   type OvertimeCompensation,
   type ResolvedCalendarDay,
   type SystemSettings,
+  type TerminalStation,
   type UserRole,
   type WeekSchedule,
 } from "../../lib/types";
@@ -45,6 +46,7 @@ interface EmployeeTabsProps {
   atf: AtfStatus;
   systemSettings: SystemSettings;
   userRole: UserRole;
+  stations: TerminalStation[];
 }
 
 // Empty input = null in the register (fields are all optional).
@@ -61,6 +63,7 @@ export function EmployeeTabs({
   atf,
   systemSettings,
   userRole,
+  stations,
 }: EmployeeTabsProps) {
   const [activeTab, setActiveTab] = useState<Tab>("Allmänt");
 
@@ -80,7 +83,7 @@ export function EmployeeTabs({
         ))}
       </div>
 
-      {activeTab === "Allmänt" && <AllmantTab employee={employee} />}
+      {activeTab === "Allmänt" && <AllmantTab employee={employee} stations={stations} />}
       {activeTab === "Anställning" && <AnstallningTab employee={employee} />}
       {activeTab === "Schema" && (
         <SchemaTab
@@ -112,7 +115,7 @@ function useSaveState() {
   return { error, setError, saved, setSaved, pending, setPending };
 }
 
-function AllmantTab({ employee }: { employee: Employee }) {
+function AllmantTab({ employee, stations }: { employee: Employee; stations: TerminalStation[] }) {
   const router = useRouter();
   const [employeeNumber, setEmployeeNumber] = useState(employee.employeeNumber);
   const [name, setName] = useState(employee.name);
@@ -122,7 +125,16 @@ function AllmantTab({ employee }: { employee: Employee }) {
   const [address, setAddress] = useState(employee.address ?? "");
   const [postalCode, setPostalCode] = useState(employee.postalCode ?? "");
   const [city, setCity] = useState(employee.city ?? "");
+  // Only stations in the list are shown, so only those are kept and sent back:
+  // saved defaults that point at an inactive or lego work center stay hidden.
+  const [defaultWorkCenterIds, setDefaultWorkCenterIds] = useState<string[]>(() =>
+    employee.defaultWorkCenterIds.filter((id) => stations.some((s) => s.id === id))
+  );
   const { error, setError, saved, setSaved, pending, setPending } = useSaveState();
+
+  function toggleStation(id: string, checked: boolean) {
+    setDefaultWorkCenterIds((prev) => (checked ? [...prev, id] : prev.filter((x) => x !== id)));
+  }
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -136,6 +148,7 @@ function AllmantTab({ employee }: { employee: Employee }) {
           employeeNumber,
           name,
           active,
+          defaultWorkCenterIds,
           phone: orNull(phone),
           email: orNull(email),
           address: orNull(address),
@@ -196,6 +209,23 @@ function AllmantTab({ employee }: { employee: Employee }) {
             <Input id="city" value={city} onChange={(e) => setCity(e.target.value)} />
           </Field>
         </FormRow>
+
+        <Field label="Förvalda stationer">
+          <div className={styles.stationGrid}>
+            {stations.map((station) => (
+              <label key={station.id} className={styles.stationOption}>
+                <Checkbox
+                  checked={defaultWorkCenterIds.includes(station.id)}
+                  onChange={(e) => toggleStation(station.id, e.target.checked)}
+                />
+                <span>
+                  {station.code} · {station.name}
+                </span>
+              </label>
+            ))}
+          </div>
+          <FormHint>Väljs i stämpelterminalen när den anställde identifierar sig. Alla kan byta station i listan.</FormHint>
+        </Field>
 
         <FormActions>
           <Button type="submit" variant="primary" disabled={pending}>

@@ -13,6 +13,7 @@ import type {
   EmployeeScheduleOverrides,
   ResolvedCalendarDay,
   SystemSettings,
+  TerminalStation,
   WeekSchedule,
 } from "../../../../lib/types";
 import shellStyles from "../../../../components/AppShell.module.css";
@@ -58,7 +59,7 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
   // the derived status + the system default rate for the hint. Frånvaro tab
   // gets the active absence-type register and the last three months' bookings.
   const today = stockholmToday();
-  const [weekSchedules, daySchedules, overrides, calendar, absenceTypes, absences, atf, systemSettings] =
+  const [weekSchedules, daySchedules, overrides, calendar, absenceTypes, absences, atf, systemSettings, stations] =
     await Promise.all([
       apiGet<WeekSchedule[]>("/api/v1/week-schedules", cookieHeader),
       apiGet<DaySchedule[]>("/api/v1/day-schedules", cookieHeader),
@@ -74,6 +75,7 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
       ),
       apiGet<AtfStatus>(`/api/v1/employees/${params.id}/atf`, cookieHeader),
       apiGet<SystemSettings>("/api/v1/settings", cookieHeader),
+      apiGet<TerminalStation[]>("/api/v1/terminal/stations", cookieHeader),
     ]);
 
   return (
@@ -97,6 +99,7 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
         atf={atf}
         systemSettings={systemSettings}
         userRole={user?.role ?? "user"}
+        stations={stations}
       />
     </AppShell>
   );
