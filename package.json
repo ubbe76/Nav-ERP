@@ -17,7 +17,7 @@
     "db:migrate": "npm run migrate --workspace packages/db"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "devDependencies": {
     "@types/node": "^20.14.15",

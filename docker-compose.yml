@@ -94,6 +94,17 @@ services:
     # (scripts/lib/export-sie.sh) need this port.
     ports:
       - "127.0.0.1:4000:4000"
+    # Hardening: the api runs as the unprivileged "node" user (Dockerfile),
+    # needs no Linux capabilities and writes nothing to its own filesystem,
+    # so it gets none, can never gain privileges (setuid binaries) and runs
+    # read-only with a small scratch /tmp.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
     healthcheck:
       # 127.0.0.1, not localhost: the api binds IPv4-only ("0.0.0.0"), but
       # Alpine's /etc/hosts resolves "localhost" to ::1 first too, and
@@ -127,6 +138,12 @@ services:
       TZ: Europe/Stockholm
     ports:
       - "3000:3000"
+    # Same hardening as api, minus read_only: next start writes its runtime
+    # cache under .next/cache (owned by "node" in the image).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       # 127.0.0.1 for the same reason as api's healthcheck above.
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/login"]

@@ -1,7 +1,7 @@
 # Stage 1: install every workspace's dependencies (dev included — needed to
 # typecheck and build in the next stage). npm workspaces require all member
 # package.jsons to be present even when only building one of them.
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 
 WORKDIR /app
 
@@ -32,7 +32,7 @@ ENV INTERNAL_API_URL=http://api:4000
 RUN npm run build --workspace apps/web
 
 # Stage 3: runtime image — production dependencies only, plus the build output.
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 
 WORKDIR /app
 
@@ -44,7 +44,9 @@ COPY packages/shared/package.json ./packages/shared/package.json
 
 RUN npm ci --omit=dev
 
-COPY --from=build /app/apps/web/.next ./apps/web/.next
+# Owned by "node" (see USER below): next start writes its runtime cache
+# under .next/cache.
+COPY --from=build --chown=node:node /app/apps/web/.next ./apps/web/.next
 COPY --from=build /app/apps/web/public ./apps/web/public
 COPY --from=build /app/apps/web/next.config.js ./apps/web/next.config.js
 
@@ -53,6 +55,9 @@ COPY --from=build /app/apps/web/next.config.js ./apps/web/next.config.js
 COPY --from=build /app/docs/manual ./docs/manual
 
 ENV NODE_ENV=production
+
+# Run as the image's unprivileged "node" user.
+USER node
 
 EXPOSE 3000
 

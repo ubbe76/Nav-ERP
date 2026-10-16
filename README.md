@@ -7,7 +7,7 @@
   <p>
     <img alt="Licens: GPL-3.0-or-later" src="https://img.shields.io/badge/licens-GPL--3.0--or--later-2e9e6b">
     <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6">
-    <img alt="Node.js ≥ 20" src="https://img.shields.io/badge/Node.js-%E2%89%A5%2020-339933">
+    <img alt="Node.js ≥ 24" src="https://img.shields.io/badge/Node.js-%E2%89%A5%2024-339933">
     <img alt="PostgreSQL 16" src="https://img.shields.io/badge/PostgreSQL-16-336791">
   </p>
 </div>
@@ -102,12 +102,12 @@ bara vill driftsätta/testa det:
   eller PostgreSQL på maskinen alls — allt körs i containrar, inklusive
   databasen. Se [Driftsätta på en annan server](#driftsätta-på-en-annan-server-tex-en-vps)
   nedan.
-- **Lokal utveckling**: Node.js ≥ 20 på värdmaskinen + Docker (för att köra
+- **Lokal utveckling**: Node.js ≥ 24 på värdmaskinen + Docker (för att köra
   Postgres i en container medan `api`/`web` körs direkt med `npm run dev:*`
   för snabbare omstart/felsökning). Det är detta avsnittet nedan beskriver.
 
 ### Förutsättningar (lokal utveckling)
-- Node.js ≥ 20
+- Node.js ≥ 24
 - Docker + Docker Compose
 
 ### Installation
@@ -384,6 +384,22 @@ docker compose up -d --build
 ```
 
 Nya migrationer körs automatiskt när `api` startar — inget separat steg.
+
+**Säkerhetsuppdateringar** av Node.js, Alpine och Postgres kommer inte med
+`apt upgrade` på värden — de finns i basimagerna. Bygg därför om med
+`--pull` med jämna mellanrum (t.ex. en gång i månaden), även när koden inte
+har ändrats:
+
+```bash
+docker compose pull postgres
+docker compose build --pull
+docker compose up -d
+```
+
+`api` och `web` körs som den oprivilegierade användaren `node` i
+containrarna, utan Linux-capabilities och med `no-new-privileges`; `api`
+har dessutom ett skrivskyddat filsystem. Ge bara administratörer
+medlemskap i gruppen `docker` på servern — det är i praktiken root-behörighet.
 
 **Uppgraderar du från en version före 2026-10-14** stod databasens lösenord
 `erp_dev_password` fast i `docker-compose.yml`. Nu läses det från `.env`,
