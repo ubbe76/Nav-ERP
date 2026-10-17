@@ -2,6 +2,7 @@ import type {
   CapacityQuery,
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
+  DeliveryTimeCheckRequest,
   ListRequirementsQuery,
   Paged,
 } from "@navet/shared";
@@ -17,6 +18,15 @@ import {
 } from "./requirements-calc.js";
 import { capacityHorizon, computeCapacity, type CapacityResult } from "./capacity-calc.js";
 import { buildArticleOverview, type ArticleOverview } from "./article-overview.js";
+import {
+  CHECK_HORIZON_WEEKS,
+  checkDeliveryTime,
+  type DeliveryTimeCheckResult,
+  type DtcArticle,
+  type DtcOperation,
+  type DtcRowInput,
+  type DtcWorkCenter,
+} from "./delivery-time-check.js";
 import {
   findFirmDemand,
   holidayLookbackStart,
@@ -38,6 +48,7 @@ import {
 import { resolveSupplierPrice } from "../../purchase/service/supplier-price.js";
 import { configurationLines } from "../../configurator/service/configuration-lines.js";
 import { selectionFromEntries } from "../../configurator/service/variant-identity.js";
+import { addDays } from "../../system/service/delivery-days.js";
 import type { ConfiguredStructureReader } from "../../configurator/service/configurator.service.js";
 
 // Own copy rather than importing the article module's class — planning
@@ -46,6 +57,37 @@ export class ArticleNotFoundError extends Error {
   constructor(id: string) {
     super(`Article ${id} not found`);
     this.name = "ArticleNotFoundError";
+  }
+}
+
+// Leveranstidskontroll's own lookups — planning stays a leaf, so these are
+// its own classes; the derived codes match the sales module's
+// (customer-not-found, sales-order-not-found, configuration-required).
+export class CustomerNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Customer ${id} not found`);
+    this.name = "CustomerNotFoundError";
+  }
+}
+
+export class SalesOrderNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Sales order ${id} not found`);
+    this.name = "SalesOrderNotFoundError";
+  }
+}
+
+export class ConfigurationRequiredError extends Error {
+  constructor(public articleNumber: string) {
+    super(`${articleNumber} är en mall i konfiguratorn — konfigurera den`);
+    this.name = "ConfigurationRequiredError";
+  }
+}
+
+export class ConfigurationNotAllowedError extends Error {
+  constructor(public articleNumber: string) {
+    super(`${articleNumber} är ingen mall i konfiguratorn`);
+    this.name = "ConfigurationNotAllowedError";
   }
 }
 
@@ -339,6 +381,171 @@ export function createPlanningService(
       if (!demand) return null;
       const offDays = new Set(await repo.fullDayHolidaysBetween(holidayLookbackStart(demand.date), demand.date));
       return suggestDueDate(demand, { today, offDays });
+    },
+
+    // Leveranstidskontroll — the earliest ship/delivery date for a set of
+    // rows from stock, open orders, material lead times and free capacity.
+    // Reads only; the pure rules are in delivery-time-check.ts.
+    async checkDeliveryTime(request: DeliveryTimeCheckRequest): Promise<DeliveryTimeCheckResult> {
+      const today = todayFn();
+      let customerId = request.customerId ?? null;
+      type RequestRow = { key: string; articleId: string; quantity: number; selection: ConfiguratorSelection | null };
+      let requestRows: RequestRow[] = (request.rows ?? []).map((r, i) => ({
+        key: String(i),
+        articleId: r.articleId,
+        quantity: r.quantity,
+        selection: r.configuration ? r.configuration.selection : null,
+      }));
+      if (request.salesOrderId) {
+        const order = await repo.deliveryCheckOrder(request.salesOrderId);
+        if (!order) throw new SalesOrderNotFoundError(request.salesOrderId);
+        customerId ??= order.customerId;
+        if (!request.rows) {
+          requestRows = order.rows
+            .filter((r) => r.rest > 0)
+            .map((r) => ({
+              key: r.rowId,
+              articleId: r.articleId,
+              quantity: r.rest,
+              selection: r.configuration ? selectionFromEntries(r.configuration.selection) : null,
+            }));
+        }
+      }
+
+      const rowArticles = new Map(
+        (await repo.deliveryCheckArticles([...new Set(requestRows.map((r) => r.articleId))])).map((a) => [a.articleId, a])
+      );
+      // Configured rows: derived structure, or an existing variant as a
+      // plain article. The check never creates a variant.
+      const dtcRows: DtcRowInput[] = [];
+      for (const r of requestRows) {
+        const a = rowArticles.get(r.articleId);
+        if (!a) throw new ArticleNotFoundError(r.articleId);
+        if (a.configuratorMode === null) {
+          if (r.selection) throw new ConfigurationNotAllowedError(a.articleNumber);
+          dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity });
+          continue;
+        }
+        if (!r.selection) throw new ConfigurationRequiredError(a.articleNumber);
+        if (!deps.configuredStructure) throw new Error("ConfiguredStructureReader not wired");
+        const s = await deps.configuredStructure(r.articleId, r.selection, r.quantity, { withCost: false, allowVariants: true });
+        if (!s.valid) {
+          dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity, error: s.errors[0] ?? "Konfigurationen är inte giltig" });
+          continue;
+        }
+        const variantId = a.configuratorMode === "variants" && s.key ? await repo.findVariantByKey(r.articleId, s.key) : null;
+        if (variantId) {
+          dtcRows.push({ key: r.key, articleId: variantId, quantity: r.quantity });
+          continue;
+        }
+        dtcRows.push({
+          key: r.key,
+          articleId: r.articleId,
+          quantity: r.quantity,
+          structure: {
+            operations: s.operations.map((o) => ({
+              sequenceNo: o.sequenceNo,
+              workCenterId: o.workCenterId,
+              description: o.description,
+              setupTime: Number(o.setupTime),
+              runTimePerUnit: Number(o.runTimePerUnit),
+            })),
+            materials: s.materials.map((m) => ({ articleId: m.componentArticleId, quantity: m.totalQuantity })),
+          },
+        });
+      }
+
+      // The whole tree: every article reachable through the BOM (phantoms
+      // included) from the rows and the configured rows' material.
+      const bomEdges = await repo.loadBomEdges();
+      const childrenOf = new Map<string, string[]>();
+      for (const e of bomEdges) childrenOf.set(e.parentArticleId, [...(childrenOf.get(e.parentArticleId) ?? []), e.componentArticleId]);
+      const treeIds = new Set<string>();
+      const queue = dtcRows.flatMap((r) => (r.structure ? r.structure.materials.map((m) => m.articleId) : [r.articleId]));
+      while (queue.length > 0) {
+        const id = queue.pop()!;
+        if (treeIds.has(id)) continue;
+        treeIds.add(id);
+        queue.push(...(childrenOf.get(id) ?? []));
+      }
+      for (const r of dtcRows) treeIds.add(r.articleId);
+      const ids = [...treeIds];
+
+      const horizonTo = addDays(today, CHECK_HORIZON_WEEKS * 7 + 14);
+      const [treeArticles, routingRows, leadTimes, capacity, suppliers, delivery, customerFields] = await Promise.all([
+        repo.deliveryCheckArticles(ids),
+        repo.routingsForArticles(ids),
+        repo.workCenterLeadTimes(),
+        repo.loadCapacityInput(addDays(today, -7), horizonTo),
+        repo.primarySuppliersForArticles(ids),
+        repo.deliveryContext({ from: addDays(today, -200), to: horizonTo }),
+        customerId ? repo.customerDeliveryFields(customerId) : Promise.resolve(null),
+      ]);
+      if (customerId && !customerFields) throw new CustomerNotFoundError(customerId);
+
+      const articles = new Map<string, DtcArticle>(
+        treeArticles.map((a) => [
+          a.articleId,
+          { articleId: a.articleId, articleNumber: a.articleNumber, name: a.name, type: a.type, rounding: a.rounding },
+        ])
+      );
+      // Overviews (on ship dates) for everything with a pool — not the
+      // configured templates themselves.
+      const overviews = new Map<string, { onHand: number; rows: ArticleOverview["rows"] }>();
+      const configuredTemplates = new Set(dtcRows.filter((r) => r.structure).map((r) => r.articleId));
+      for (const a of treeArticles) {
+        if (a.type === "service" || a.isPhantom || configuredTemplates.has(a.articleId)) continue;
+        const overview = buildArticleOverview(await loadOverviewInput(a.articleId));
+        overviews.set(a.articleId, { onHand: overview.onHand, rows: overview.rows });
+      }
+      const routings = new Map<string, DtcOperation[]>();
+      for (const r of routingRows) {
+        routings.set(r.articleId, [
+          ...(routings.get(r.articleId) ?? []),
+          { sequenceNo: r.sequenceNo, workCenterId: r.workCenterId, description: r.description, setupTime: r.setupTime, runTimePerUnit: r.runTimePerUnit },
+        ]);
+      }
+      const leadTimeOf = new Map(leadTimes.map((l) => [l.workCenterId, l.leadTimeDays]));
+      const workCenters = new Map<string, DtcWorkCenter>(
+        capacity.workCenters.map((w) => [
+          w.workCenterId,
+          {
+            workCenterId: w.workCenterId,
+            code: w.code,
+            name: w.name,
+            type: w.type,
+            weekScheduleId: w.weekScheduleId,
+            capacityFactor: w.capacityFactor,
+            leadTimeDays: leadTimeOf.get(w.workCenterId) ?? null,
+          },
+        ])
+      );
+
+      return checkDeliveryTime({
+        today,
+        offDays: delivery.offDays,
+        articles,
+        overviews,
+        excludeSalesOrderId: request.salesOrderId ?? null,
+        bomEdges,
+        phantomIds: new Set(treeArticles.filter((a) => a.isPhantom).map((a) => a.articleId)),
+        routings,
+        workCenters,
+        schedule: { weekScheduleDays: capacity.weekScheduleDays, daySchedules: capacity.daySchedules, holidays: capacity.holidays },
+        existingOperations: capacity.operations,
+        suppliers: new Map(
+          suppliers.map((s) => [
+            s.articleId,
+            {
+              supplierName: s.supplierName,
+              leadTimeDays: s.leadTimeDays,
+              settings: effectiveDeliverySettings(s.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
+            },
+          ])
+        ),
+        customer: customerFields ? effectiveDeliverySettings(customerFields, "customer", delivery.defaults) : null,
+        rows: dtcRows,
+      });
     },
 
     // Beläggning (E2) — fully derived at read time, like listRequirements.

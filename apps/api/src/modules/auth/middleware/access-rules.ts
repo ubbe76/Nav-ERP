@@ -21,6 +21,8 @@ export const OVERVIEW_READ: AccessRule = ["office", "artikeloversikt"];
 export const DIRECTORY_READ: AccessRule = ["office", "terminal", "tillverkningsorder_las"];
 // Konfigurera på orderraden: sales, planning and the article card all resolve variants.
 export const CONFIGURE_ROW_WRITE: AccessRule = ["forsaljning", "tillverkning", "artiklar"];
+// Leveranstidskontroll: a POST that only reads — sales and planning both run it.
+export const DELIVERY_CHECK: AccessRule = ["forsaljning", "tillverkning"];
 
 // Prices (standard cost, sales price, lego setup/unit prices) are office data.
 // A user without any menu permission — the verkstad profile — reaches a few

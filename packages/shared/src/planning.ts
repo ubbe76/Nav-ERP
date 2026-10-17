@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { orderRowConfigurationInputSchema } from "./configurator.js";
 import { listQuerySchema } from "./list.js";
 
 // Behovsberäkning (MRP light) — query and order-creation schemas. The
@@ -69,3 +70,27 @@ export const dueDateSuggestionQuerySchema = z.object({
   salesOrderRowId: z.string().uuid().optional(),
 });
 export type DueDateSuggestionQuery = z.infer<typeof dueDateSuggestionQuerySchema>;
+
+// Leveranstidskontroll: POST /delivery-time-check. salesOrderId = check an
+// existing order (its own rows are not existing demand; without `rows` the
+// order's open rows are checked). A configured row carries its selection.
+export const deliveryTimeCheckSchema = z
+  .object({
+    customerId: z.string().uuid().optional(),
+    salesOrderId: z.string().uuid().optional(),
+    rows: z
+      .array(
+        z.object({
+          articleId: z.string().uuid(),
+          quantity: z.coerce.number().positive(),
+          configuration: orderRowConfigurationInputSchema.optional(),
+        })
+      )
+      .max(200)
+      .optional(),
+  })
+  .refine((d) => d.salesOrderId !== undefined || (d.rows !== undefined && d.rows.length > 0), {
+    message: "rows or salesOrderId required",
+    path: ["rows"],
+  });
+export type DeliveryTimeCheckRequest = z.infer<typeof deliveryTimeCheckSchema>;

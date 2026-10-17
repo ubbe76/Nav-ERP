@@ -4,6 +4,7 @@ import {
   articleSuppliers,
   bomComponents,
   configuratorTemplates,
+  configuratorVariants,
   customers,
   daySchedules,
   dayScheduleBreaks,
@@ -16,6 +17,7 @@ import {
   productionGroups,
   purchaseOrderRows,
   purchaseOrders,
+  routingOperations,
   salesOrderRows,
   salesOrders,
   stockBalances,
@@ -762,6 +764,104 @@ export function createPlanningRepository(db: Db) {
         })
         .from(bomComponents);
       return rows.map((r) => ({ ...r, quantity: Number(r.quantity) }));
+    },
+
+    // --- Leveranstidskontroll -------------------------------------------
+
+    // The order a check is run for: its customer and open rows (restantal
+    // and configuration). null = no such order.
+    async deliveryCheckOrder(salesOrderId: string) {
+      const [order] = await db
+        .select({ id: salesOrders.id, customerId: salesOrders.customerId, status: salesOrders.status })
+        .from(salesOrders)
+        .where(eq(salesOrders.id, salesOrderId));
+      if (!order) return null;
+      const rows = await db
+        .select({
+          rowId: salesOrderRows.id,
+          articleId: salesOrderRows.articleId,
+          quantityOrdered: salesOrderRows.quantityOrdered,
+          quantityDelivered: salesOrderRows.quantityDelivered,
+          configuration: salesOrderRows.configuration,
+        })
+        .from(salesOrderRows)
+        .where(eq(salesOrderRows.salesOrderId, salesOrderId));
+      return {
+        ...order,
+        rows: rows.map((r) => ({
+          rowId: r.rowId,
+          articleId: r.articleId,
+          rest: Math.max(Number(r.quantityOrdered) - Number(r.quantityDelivered), 0),
+          configuration: r.configuration as OrderRowConfiguration | null,
+        })),
+      };
+    },
+
+    async customerDeliveryFields(customerId: string) {
+      const [row] = await db
+        .select({
+          deliveryWeekdays: customers.deliveryWeekdays,
+          deliveryDayMode: customers.deliveryDayMode,
+          transitDays: customers.transitDays,
+        })
+        .from(customers)
+        .where(eq(customers.id, customerId));
+      return row ?? null;
+    },
+
+    // Articles in the checked tree, with their configurator mode (null = not
+    // a template).
+    async deliveryCheckArticles(articleIds: string[]) {
+      if (articleIds.length === 0) return [];
+      const rows = await db
+        .select({
+          articleId: articles.id,
+          articleNumber: articles.articleNumber,
+          name: articles.name,
+          type: articles.type,
+          isPhantom: articles.isPhantom,
+          rounding: articles.rounding,
+          configuratorMode: configuratorTemplates.mode,
+        })
+        .from(articles)
+        .leftJoin(configuratorTemplates, eq(configuratorTemplates.articleId, articles.id))
+        .where(inArray(articles.id, articleIds));
+      return rows.map((r) => ({ ...r, rounding: r.rounding === null ? null : Number(r.rounding) }));
+    },
+
+    // Worked operations only — Kalkyl (costing-only) operations never reach
+    // a TO, so they take no capacity.
+    async routingsForArticles(articleIds: string[]) {
+      if (articleIds.length === 0) return [];
+      const rows = await db
+        .select({
+          articleId: routingOperations.articleId,
+          sequenceNo: routingOperations.sequenceNo,
+          workCenterId: routingOperations.workCenterId,
+          description: routingOperations.description,
+          setupTime: routingOperations.setupTime,
+          runTimePerUnit: routingOperations.runTimePerUnit,
+        })
+        .from(routingOperations)
+        .where(and(inArray(routingOperations.articleId, articleIds), eq(routingOperations.costingOnly, false)));
+      return rows.map((r) => ({ ...r, setupTime: Number(r.setupTime), runTimePerUnit: Number(r.runTimePerUnit) }));
+    },
+
+    // Legoresurser's lead time in days (Monitor's Lego export).
+    async workCenterLeadTimes() {
+      const rows = await db
+        .select({ workCenterId: workCenters.id, leadTimeDays: workCenters.leadTimeDays })
+        .from(workCenters);
+      return rows.map((r) => ({ workCenterId: r.workCenterId, leadTimeDays: r.leadTimeDays === null ? null : Number(r.leadTimeDays) }));
+    },
+
+    // The variant already made for (template, configuration key), if any.
+    async findVariantByKey(templateArticleId: string, configKey: string): Promise<string | null> {
+      const [row] = await db
+        .select({ articleId: configuratorVariants.articleId })
+        .from(configuratorVariants)
+        .where(and(eq(configuratorVariants.templateArticleId, templateArticleId), eq(configuratorVariants.configKey, configKey)));
+      return row?.articleId ?? null;
     },
   };
 }

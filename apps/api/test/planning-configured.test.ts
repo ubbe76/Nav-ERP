@@ -1,11 +1,12 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { db } from "@navet/db";
+import { articles, db } from "@navet/db";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
-import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
+import { ConfigurationRequiredError, createPlanningService } from "../src/modules/planning/service/planning.service.js";
 import { previousWorkingDay } from "../src/modules/planning/service/due-date-suggestion.js";
 import { CONFIGURED_MFG_TRUNCATE, confirmedRow, FULL, mfg, resetCostingSettings } from "./helpers/configured-manufacturing.js";
 import {
+  buildVariants,
   configurator,
   makeCustomer,
   makeLocation,
@@ -272,5 +273,37 @@ describe("behovsberäkning — beställningsvara", () => {
     expect(byOrder.rows.some((r) => r.proposalKind === "configured")).toBe(true);
     const byChoice = await planning.listRequirements({ showAll: true, limit: 50, offset: 0, search: "lås b" } as never);
     expect(byChoice.rows.map((r) => r.proposalKind)).toEqual(["configured"]);
+  });
+});
+
+describe("leveranstidskontroll — configured rows", () => {
+  it("a beställningsvara row is planned on its derived route (Kalkyl operations left out)", async () => {
+    const { order } = await confirmedRow(2);
+    const result = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    const r = result.rows[0]!;
+    expect(r.readyDate).not.toBeNull();
+    expect(r.chain.filter((s) => s.kind === "operation").map((s) => (s as { sequenceNo: number }).sequenceNo)).toEqual([10, 20]);
+    expect(result.shipDate).not.toBeNull();
+  });
+
+  it("an invalid configuration gives the row no date; a template without one is refused", async () => {
+    const { s } = await confirmedRow(1);
+    const result = await planning.checkDeliveryTime({ rows: [{ articleId: s.article.id, quantity: 1, configuration: { selection: {} } }] });
+    expect(result.rows[0]!.readyDate).toBeNull();
+    expect(result.rows[0]!.notes.length).toBeGreaterThan(0);
+    await expect(planning.checkDeliveryTime({ rows: [{ articleId: s.article.id, quantity: 1 }] })).rejects.toBeInstanceOf(
+      ConfigurationRequiredError
+    );
+  });
+
+  it("a variant that does not exist yet is derived, never created", async () => {
+    const { template } = await buildVariants();
+    const countArticles = async () => (await db.select({ id: articles.id }).from(articles)).length;
+    const before = await countArticles();
+    const result = await planning.checkDeliveryTime({
+      rows: [{ articleId: template.id, quantity: 1, configuration: { selection: { LOCK: "A", BREDD: 800 } } }],
+    });
+    expect(result.rows[0]!.readyDate).not.toBeNull();
+    expect(await countArticles()).toBe(before);
   });
 });

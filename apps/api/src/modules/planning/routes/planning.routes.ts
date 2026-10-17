@@ -2,14 +2,22 @@ import type { FastifyInstance } from "fastify";
 import {
   capacityQuerySchema,
   createPlanningOrdersSchema,
+  deliveryTimeCheckSchema,
   dueDateSuggestionQuerySchema,
   listRequirementsQuerySchema,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { requirementsExportColumns } from "../service/export-columns.js";
-import { ArticleNotFoundError, type PlanningService } from "../service/planning.service.js";
+import {
+  ArticleNotFoundError,
+  ConfigurationNotAllowedError,
+  ConfigurationRequiredError,
+  CustomerNotFoundError,
+  SalesOrderNotFoundError,
+  type PlanningService,
+} from "../service/planning.service.js";
 import { errorBody } from "../../system/service/error-body.js";
-import { OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
+import { DELIVERY_CHECK, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
 
 export async function planningRoutes(app: FastifyInstance, opts: { service: PlanningService }) {
   const { service } = opts;
@@ -49,6 +57,26 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return { suggestion: await service.suggestManufacturingDueDate(req.params.id, query) };
     } catch (err) {
       if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Leveranstidskontroll — reads only (nothing is booked), a POST because
+  // the rows travel in the body.
+  app.post("/delivery-time-check", { config: { access: DELIVERY_CHECK } }, async (req, reply) => {
+    const input = deliveryTimeCheckSchema.parse(req.body);
+    try {
+      return await service.checkDeliveryTime(input);
+    } catch (err) {
+      if (
+        err instanceof ArticleNotFoundError ||
+        err instanceof CustomerNotFoundError ||
+        err instanceof SalesOrderNotFoundError
+      ) {
+        return reply.code(404).send(errorBody(err));
+      }
+      if (err instanceof ConfigurationRequiredError) return reply.code(409).send(errorBody(err));
+      if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

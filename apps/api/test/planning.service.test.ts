@@ -25,6 +25,10 @@ import { testArticleService, testDocumentPdfService } from "./helpers/services.j
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
 import { ArticleNotFoundError, createPlanningService } from "../src/modules/planning/service/planning.service.js";
 import { insertPlannedManufacturingOrder } from "./helpers/planned-manufacturing-order.js";
+import { createScheduleRepository } from "../src/modules/timereport/repository/schedule.repository.js";
+import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
+import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
+import { CustomerNotFoundError } from "../src/modules/planning/service/planning.service.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -79,7 +83,7 @@ const planningService = createPlanningService(createPlanningRepository(db), {
   requirementsCacheMs: 0,
 });
 
-const TRUNCATE = sql`TRUNCATE holidays, inquiry_rows, inquiries, purchase_order_rows, purchase_orders, article_suppliers, suppliers, sales_order_rows, sales_orders, customers, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, stock_transactions, stock_locations, warehouses, bom_components, articles, article_groups, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE week_schedule_days, week_schedules, day_schedule_breaks, day_schedules, holidays, inquiry_rows, inquiries, purchase_order_rows, purchase_orders, article_suppliers, suppliers, sales_order_rows, sales_orders, customers, mo_material_consumptions, mo_operations, manufacturing_orders, routing_operations, work_centers, stock_transactions, stock_locations, warehouses, bom_components, articles, article_groups, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -881,5 +885,90 @@ describe("planning service — kundorderns behov på avsändningsdagen", () => {
     } finally {
       await db.execute(sql`DELETE FROM system_settings WHERE key = 'customer_transit_days'`);
     }
+  });
+});
+
+// Leveranstidskontroll against the database. Today is pinned to Monday
+// 2030-03-04 so the weeks are deterministic: week 10 = 4–10 March, week 11
+// = 11–17, week 12 = 18–24.
+describe("planning service — leveranstidskontroll", () => {
+  const scheduleService = createScheduleService(createScheduleRepository(db), createTimeReportRepository(db), {
+    isDateLocked: async () => false,
+  });
+  const pinned = createPlanningService(createPlanningRepository(db), {
+    purchase: purchaseService,
+    manufacturing: mfgService,
+    requirementsCacheMs: 0,
+    today: () => "2030-03-04",
+  });
+
+  async function world() {
+    const user = await makeUser();
+    const day = await scheduleService.createDaySchedule({
+      code: "D8",
+      name: "Dagtid 8h",
+      startTime: "07:00",
+      endTime: "15:00",
+      breaks: [],
+      active: true,
+    });
+    const week = await scheduleService.createWeekSchedule({
+      code: "VS40",
+      name: "Veckoschema 40h",
+      days: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, dayScheduleId: day.id })),
+      active: true,
+    });
+    const press = await mfgService.createWorkCenter({ code: "110", name: "Kantpress", weekScheduleId: week.id, active: true });
+    const p = await makeArticle({ articleNumber: "DTC-P" });
+    await makeSupplierWithCatalog("Stål AB", [p.id], 10, 5);
+    const m = await makeArticle({ articleNumber: "DTC-M", type: "manufactured" });
+    await articleService.addBomComponent(m.id, { componentArticleId: p.id, quantity: 2 });
+    await mfgService.createRoutingOperation(m.id, { sequenceNo: 10, workCenterId: press.id, setupTime: 0, runTimePerUnit: 60 });
+    // Someone else's TO: 38 h on the press in week 11.
+    const x = await makeArticle({ articleNumber: "DTC-X", type: "manufactured" });
+    await mfgService.createRoutingOperation(x.id, { sequenceNo: 10, workCenterId: press.id, setupTime: 38 * 60, runTimePerUnit: 0 });
+    await mfgService.createManufacturingOrder({ articleId: x.id, quantity: 1, dueDate: "2030-03-13" }, user.id);
+    // Three in stock, already promised to a KO.
+    await addStock(m.id, 3);
+    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const ko = await salesService.createQuote(
+      { customerId: customer.id, confirm: true, expectedDeliveryDate: "2030-03-20", rows: [{ articleId: m.id, quantity: 3, unitPrice: 100 }] },
+      user.id
+    );
+    return { m, ko, customer };
+  }
+
+  it("material lead time and a busy press decide the date; the KO already owns the stock", async () => {
+    const { m } = await world();
+    const result = await pinned.checkDeliveryTime({ rows: [{ articleId: m.id, quantity: 3 }] });
+    // P: Monday 4 + 5 working days = Monday 11. The press has 2 h left in
+    // week 11 and the last hour goes in week 12 (ready Friday 22).
+    expect(result.rows[0]!.chain.map((s) => s.kind)).toEqual(["purchase", "operation"]);
+    expect(result.rows[0]!.chain[1]).toMatchObject({ fromWeek: "2030-03-11", toWeek: "2030-03-18", date: "2030-03-22" });
+    expect(result).toMatchObject({ shipDate: "2030-03-25", deliveryDate: "2030-03-25" });
+  });
+
+  it("checking the order itself: its own rows are not existing demand", async () => {
+    const { ko } = await world();
+    const result = await pinned.checkDeliveryTime({ salesOrderId: ko.order.id });
+    expect(result.rows[0]!.chain).toEqual([{ kind: "stock", articleNumber: "DTC-M", quantity: 3, date: "2030-03-04" }]);
+    expect(result.shipDate).toBe("2030-03-04");
+  });
+
+  it("the customer's transit days follow the ship date", async () => {
+    const { m } = await world();
+    const customer = await salesService.createCustomer({ name: "Långt bort AB", active: true, deliveryDayMode: "dispatch", transitDays: 2 });
+    const result = await pinned.checkDeliveryTime({ customerId: customer.id, rows: [{ articleId: m.id, quantity: 3 }] });
+    expect(result).toMatchObject({ shipDate: "2030-03-25", deliveryDate: "2030-03-27" });
+  });
+
+  it("unknown article and customer are refused", async () => {
+    await expect(pinned.checkDeliveryTime({ rows: [{ articleId: crypto.randomUUID(), quantity: 1 }] })).rejects.toBeInstanceOf(
+      ArticleNotFoundError
+    );
+    const { m } = await world();
+    await expect(
+      pinned.checkDeliveryTime({ customerId: crypto.randomUUID(), rows: [{ articleId: m.id, quantity: 1 }] })
+    ).rejects.toBeInstanceOf(CustomerNotFoundError);
   });
 });

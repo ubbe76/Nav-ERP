@@ -79,7 +79,7 @@ export type ConfiguredStructure = {
 // What manufacturing (TO creation) and planning (the configured rows' cascade)
 // are handed — bound late in app.ts like VariantPriceReader.
 export type ConfiguredStructureReader = (
-  templateArticleId: string, selection: ConfiguratorSelection, quantity: number, opts?: { withCost?: boolean }
+  templateArticleId: string, selection: ConfiguratorSelection, quantity: number, opts?: { withCost?: boolean; allowVariants?: boolean }
 ) => Promise<ConfiguredStructure>;
 
 // The sales price chain (resolvePrice), injected like StockBalanceReader.
@@ -646,10 +646,14 @@ export function createConfiguratorService(deps: {
   // Reads only — never inside another module's transaction. A local function
   // (not a method) so evaluateRowConfiguration can call it without `this`.
   async function deriveForManufacturing(
-    templateArticleId: string, selection: ConfiguratorSelection, quantity: number, opts: { withCost?: boolean } = {}
+    templateArticleId: string, selection: ConfiguratorSelection, quantity: number, opts: { withCost?: boolean; allowVariants?: boolean } = {}
   ): Promise<ConfiguredStructure> {
     const loaded = await loadDerivationInput(db, templateArticleId);
-    if (loaded.detail.mode !== "to_order") throw new ConfiguratorNotToOrderModeError();
+    // allowVariants: Leveranstidskontrollen reads a not-yet-made variant's
+    // structure the same way (it never creates the variant).
+    if (loaded.detail.mode !== "to_order" && !(opts.allowVariants && loaded.detail.mode === "variants")) {
+      throw new ConfiguratorNotToOrderModeError();
+    }
     const template = toEngineTemplate(loaded.detail);
     const { evaluation, effective } = resolveConfiguration(template, selection, undefined);
     const core = deriveStructure({
