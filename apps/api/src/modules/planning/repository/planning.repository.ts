@@ -37,6 +37,7 @@ import type {
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { CapacityInput } from "../service/capacity-calc.js";
 import type { ArticleOverviewInput } from "../service/article-overview.js";
+import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 
 export interface PlanningArticleInfo {
   articleId: string;
@@ -348,6 +349,11 @@ export function createPlanningRepository(db: Db) {
           customerName: customers.name,
           articleId: salesOrderRows.articleId,
           expectedDeliveryDate: salesOrders.expectedDeliveryDate,
+          customerDelivery: {
+            deliveryWeekdays: customers.deliveryWeekdays,
+            deliveryDayMode: customers.deliveryDayMode,
+            transitDays: customers.transitDays,
+          },
           quantityOrdered: salesOrderRows.quantityOrdered,
           quantityDelivered: salesOrderRows.quantityDelivered,
           configuration: salesOrderRows.configuration,
@@ -428,6 +434,11 @@ export function createPlanningRepository(db: Db) {
               orderStatus: salesOrders.status,
               customerName: customers.name,
               expectedDeliveryDate: salesOrders.expectedDeliveryDate,
+              customerDelivery: {
+                deliveryWeekdays: customers.deliveryWeekdays,
+                deliveryDayMode: customers.deliveryDayMode,
+                transitDays: customers.transitDays,
+              },
               quantityOrdered: salesOrderRows.quantityOrdered,
               quantityDelivered: salesOrderRows.quantityDelivered,
             })
@@ -580,10 +591,16 @@ export function createPlanningRepository(db: Db) {
           orderNumber: salesOrders.orderNumber,
           orderStatus: salesOrders.status,
           expectedDeliveryDate: salesOrders.expectedDeliveryDate,
+          customerDelivery: {
+            deliveryWeekdays: customers.deliveryWeekdays,
+            deliveryDayMode: customers.deliveryDayMode,
+            transitDays: customers.transitDays,
+          },
           configured: sql<boolean>`${salesOrderRows.configuration} is not null`,
         })
         .from(salesOrderRows)
         .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
+        .innerJoin(customers, eq(customers.id, salesOrders.customerId))
         .where(eq(salesOrderRows.id, rowId));
       return row ?? null;
     },
@@ -710,6 +727,12 @@ export function createPlanningRepository(db: Db) {
         .select({ articleId: articles.id, articleNumber: articles.articleNumber })
         .from(articles)
         .where(inArray(articles.id, articleIds));
+    },
+
+    // Fasta leveransdagar: the system defaults + full-day holidays in the
+    // window — the service moves sales order dates to the ship date with it.
+    async deliveryContext(window: { from: string; to: string }) {
+      return loadDeliveryContext(db, window);
     },
 
     // Färdigdatumsförslag: the holiday register's full days off in [from, to]

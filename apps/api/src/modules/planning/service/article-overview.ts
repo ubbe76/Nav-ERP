@@ -18,6 +18,7 @@ import {
   type PurchaseOrderStatus,
   type SalesOrderStatus,
 } from "./requirements-calc.js";
+import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 
 export interface OverviewArticle {
   articleId: string;
@@ -40,7 +41,12 @@ export interface OverviewSalesRow {
   orderNumber: string;
   orderStatus: SalesOrderStatus;
   customerName: string;
+  // The date the row is planned by. The repository loads the order's
+  // delivery date (the day the customer gets the goods); the planning
+  // service moves it to the ship date (fasta leveransdagar) before the
+  // builder runs. The builder itself never looks at customerDelivery.
   expectedDeliveryDate: string | null;
+  customerDelivery?: PartnerDeliveryFields;
   quantityOrdered: number;
   quantityDelivered: number;
 }

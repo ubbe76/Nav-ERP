@@ -48,6 +48,23 @@ function futureWeekday(days: number): string {
 }
 
 describe("behovsberäkning — beställningsvara", () => {
+  it("a configured row is planned by the customer's ship date (fasta leveransdagar)", async () => {
+    const { s, order, row } = await confirmedRow(1);
+    const date = futureWeekday(20); // a Wednesday
+    const monday = previousWorkingDay(previousWorkingDay(date, new Set()), new Set());
+    await db.execute(sql`update sales_orders set expected_delivery_date = ${date} where id = ${order.id}`);
+    await db.execute(
+      sql`update customers set delivery_day_mode = 'dispatch', transit_days = 2 where id = (select customer_id from sales_orders where id = ${order.id})`
+    );
+    expect(await planning.suggestManufacturingDueDate(s.article.id, { salesOrderRowId: row.id })).toMatchObject({
+      demandDate: monday,
+      dueDate: previousWorkingDay(monday, new Set()),
+      source: "sales_order_row",
+    });
+    const cfg = (await list()).find((r) => r.proposalKind === "configured")!;
+    expect(cfg.expectedDeliveryDate).toBe(monday);
+  });
+
   it("an uncovered configured row gives a proposal row and cascades its material", async () => {
     const { s, row } = await confirmedRow(2);
     const rows = await list();

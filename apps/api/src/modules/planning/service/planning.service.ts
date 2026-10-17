@@ -25,6 +25,15 @@ import {
   type FirmDemand,
 } from "./due-date-suggestion.js";
 import { uncoveredConfiguredQuantity } from "./configured-coverage.js";
+import {
+  deliveryHolidayWindow,
+  effectiveDeliverySettings,
+  shipDateFor,
+  // Anchored in Europe/Stockholm — a UTC date would be yesterday's for the
+  // first hours after midnight (summer time).
+  stockholmToday,
+  type PartnerDeliveryFields,
+} from "../../system/service/delivery-days.js";
 import { resolveSupplierPrice } from "../../purchase/service/supplier-price.js";
 import { configurationLines } from "../../configurator/service/configuration-lines.js";
 import { selectionFromEntries } from "../../configurator/service/variant-identity.js";
@@ -79,9 +88,6 @@ export interface ManufacturingOrderCreator {
   ): Promise<{ id: string; orderNumber: string }>;
 }
 
-// Anchored in Europe/Stockholm — a UTC date would be yesterday's for the
-// first hours after midnight (summer time). sv-SE formats as YYYY-MM-DD.
-const stockholmToday = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
 
 export interface CreatedOrdersResult {
   // supplierId travels with the order so the caller can look the supplier's
@@ -120,21 +126,59 @@ export function createPlanningService(
     // 0 = no caching (the integration tests change data between calls).
     requirementsCacheMs?: number;
     now?: () => number;
+    // Today as a Stockholm day; the unit tests pin it.
+    today?: () => string;
   }
 ) {
   const cacheMs = deps.requirementsCacheMs ?? REQUIREMENTS_CACHE_MS;
   const now = deps.now ?? Date.now;
+  const todayFn = deps.today ?? stockholmToday;
   // Shared by every user — the result doesn't depend on who asks. The
   // PROMISE is cached so concurrent requests share one computation; a failed
   // one is dropped so the next request retries.
   let cache: { at: number; rows: Promise<RequirementRow[]> } | null = null;
+
+  // Fasta leveransdagar: a sales order's date is the day the customer gets
+  // the goods; what we must have ready is the SHIP date (transit days and the
+  // customer's dispatch days back). Every place that plans by a KO date goes
+  // through here, so the pure builders keep reading expectedDeliveryDate.
+  // A row without customer fields (test fakes) follows the system defaults.
+  const NO_PARTNER_SETTINGS: PartnerDeliveryFields = { deliveryWeekdays: [], deliveryDayMode: null, transitDays: null };
+  async function toShipDates<T extends { expectedDeliveryDate: string | null; customerDelivery?: PartnerDeliveryFields }>(
+    rows: T[]
+  ): Promise<T[]> {
+    const dates = rows.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : []));
+    if (dates.length === 0) return rows;
+    // Transit days are at most 60 working days.
+    const { defaults, offDays } = await repo.deliveryContext(deliveryHolidayWindow(dates, 60));
+    return rows.map((r) =>
+      r.expectedDeliveryDate
+        ? {
+            ...r,
+            expectedDeliveryDate: shipDateFor(
+              r.expectedDeliveryDate,
+              effectiveDeliverySettings(r.customerDelivery ?? NO_PARTNER_SETTINGS, "customer", defaults),
+              offDays
+            ),
+          }
+        : r
+    );
+  }
+
+  async function loadOverviewInput(articleId: string) {
+    const input = await repo.loadArticleOverviewInput(articleId);
+    if (!input) throw new ArticleNotFoundError(articleId);
+    return { ...input, salesRows: await toShipDates(input.salesRows) };
+  }
 
   // Konfigurator 4c: the configured rows and their cascade are derived here,
   // once per distinct (template, configuration) per run, so the pure calc
   // never calls the configurator. An invalid configuration keeps its row
   // (with the engine's message) but cascades nothing.
   async function loadInputWithConfigured(): Promise<RequirementsInput> {
-    const [input, configured] = await Promise.all([repo.loadRequirementsInput(), repo.loadConfiguredSalesRows()]);
+    const [input, loadedConfigured] = await Promise.all([repo.loadRequirementsInput(), repo.loadConfiguredSalesRows()]);
+    // The proposal row shows the date its TO is planned by.
+    const configured = await toShipDates(loadedConfigured);
     const roundingOf = new Map(input.articles.map((a) => [a.articleId, a.rounding]));
     const needs: ConfiguredRowNeed[] = configured.map((r) => ({
       salesOrderRowId: r.rowId,
@@ -207,22 +251,21 @@ export function createPlanningService(
   // keep the pooled rule.
   async function firmDemandFor(articleId: string, today: string, salesOrderRowId: string | undefined) {
     if (salesOrderRowId) {
-      const row = await repo.salesOrderRowForDueDate(salesOrderRowId);
-      if (row?.configured && row.articleId === articleId) {
-        if (!DEMAND_SALES_STATUSES.has(row.orderStatus) || !row.expectedDeliveryDate) return null;
+      const loaded = await repo.salesOrderRowForDueDate(salesOrderRowId);
+      if (loaded?.configured && loaded.articleId === articleId) {
+        const [row] = await toShipDates([loaded]);
+        if (!DEMAND_SALES_STATUSES.has(row!.orderStatus) || !row!.expectedDeliveryDate) return null;
         const demand: FirmDemand = {
-          date: row.expectedDeliveryDate,
+          date: row!.expectedDeliveryDate,
           source: "sales_order_row",
           documentType: "sales_order",
-          documentId: row.salesOrderId,
-          documentNumber: row.orderNumber,
+          documentId: row!.salesOrderId,
+          documentNumber: row!.orderNumber,
         };
         return demand;
       }
     }
-    const input = await repo.loadArticleOverviewInput(articleId);
-    if (!input) throw new ArticleNotFoundError(articleId);
-    return findFirmDemand(buildArticleOverview(input), { today, salesOrderRowId });
+    return findFirmDemand(buildArticleOverview(await loadOverviewInput(articleId)), { today, salesOrderRowId });
   }
 
   function computedRequirements(refresh: boolean): { at: number; rows: Promise<RequirementRow[]> } {
@@ -275,9 +318,7 @@ export function createPlanningService(
     // Artikelöversikt (planeringsbild) — one article's open rows in date
     // order with a running balance. Derived at read time like the MRP.
     async getArticleOverview(articleId: string): Promise<ArticleOverview> {
-      const input = await repo.loadArticleOverviewInput(articleId);
-      if (!input) throw new ArticleNotFoundError(articleId);
-      return buildArticleOverview(input);
+      return buildArticleOverview(await loadOverviewInput(articleId));
     },
 
     // Färdigdatumsförslag for a new TO on the article — one working day
@@ -288,7 +329,7 @@ export function createPlanningService(
       articleId: string,
       opts: { salesOrderRowId?: string } = {}
     ): Promise<DueDateSuggestion | null> {
-      const today = stockholmToday();
+      const today = todayFn();
       const demand = await firmDemandFor(articleId, today, opts.salesOrderRowId);
       if (!demand) return null;
       const offDays = new Set(await repo.fullDayHolidaysBetween(holidayLookbackStart(demand.date), demand.date));
@@ -299,7 +340,7 @@ export function createPlanningService(
     async getCapacity(query: CapacityQuery): Promise<CapacityResult> {
       // Anchor "today" in Europe/Stockholm — a UTC date would flip the week
       // column on Sunday evenings (winter time). sv-SE formats as YYYY-MM-DD.
-      const today = stockholmToday();
+      const today = todayFn();
       // Same horizon authority as the calc itself — the holiday query bounds
       // can never drift from the week columns.
       const { firstMonday, horizonSunday } = capacityHorizon(today, query.weeks);

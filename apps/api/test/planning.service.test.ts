@@ -827,3 +827,59 @@ describe("planning service — getArticleOverview", () => {
     );
   });
 });
+
+// Fasta leveransdagar: a sales order's date is the day the customer gets the
+// goods — the overview and the färdigdatumsförslag plan by the SHIP date.
+// 2030-03-04 is a Monday, 2030-03-06 a Wednesday.
+describe("planning service — kundorderns behov på avsändningsdagen", () => {
+  async function koWith(articleId: string, userId: string, date: string, customerFields: Record<string, unknown> = {}) {
+    const customer = await salesService.createCustomer({ name: "Kund AB", active: true, ...customerFields });
+    return salesService.createQuote(
+      { customerId: customer.id, confirm: true, expectedDeliveryDate: date, rows: [{ articleId, quantity: 5, unitPrice: 100 }] },
+      userId
+    );
+  }
+  const koRowDate = async (articleId: string) =>
+    (await planningService.getArticleOverview(articleId)).rows.find((r) => r.documentType === "sales_order")?.date;
+
+  it("a customer without settings keeps the delivery date", async () => {
+    const user = await makeUser();
+    const m = await makeArticle({ articleNumber: "SHIP-1", type: "manufactured" });
+    await koWith(m.id, user.id, "2030-03-06");
+    expect(await koRowDate(m.id)).toBe("2030-03-06");
+    expect((await planningService.suggestManufacturingDueDate(m.id))?.dueDate).toBe("2030-03-05");
+  });
+
+  it("transit days move the KO row to the ship date", async () => {
+    const user = await makeUser();
+    const m = await makeArticle({ articleNumber: "SHIP-2", type: "manufactured" });
+    await koWith(m.id, user.id, "2030-03-06", { deliveryDayMode: "dispatch", transitDays: 2 });
+    expect(await koRowDate(m.id)).toBe("2030-03-04");
+    expect(await planningService.suggestManufacturingDueDate(m.id)).toMatchObject({
+      demandDate: "2030-03-04",
+      dueDate: "2030-03-01",
+    });
+  });
+
+  it("the customer's dispatch days pick the last dispatch that arrives in time", async () => {
+    const user = await makeUser();
+    const m = await makeArticle({ articleNumber: "SHIP-3", type: "manufactured" });
+    // Ships Tuesdays, 1 transit day: Tuesday 5 + 1 = Wednesday 6.
+    await koWith(m.id, user.id, "2030-03-08", { deliveryWeekdays: [2], deliveryDayMode: "dispatch", transitDays: 1 });
+    expect(await koRowDate(m.id)).toBe("2030-03-05");
+  });
+
+  it("the default transit shifts a customer without own settings, across the weekend", async () => {
+    const user = await makeUser();
+    const m = await makeArticle({ articleNumber: "SHIP-4", type: "manufactured" });
+    await koWith(m.id, user.id, "2030-03-04");
+    await db.execute(
+      sql`INSERT INTO system_settings (key, value) VALUES ('customer_transit_days', '1') ON CONFLICT (key) DO UPDATE SET value = '1'`
+    );
+    try {
+      expect(await koRowDate(m.id)).toBe("2030-03-01");
+    } finally {
+      await db.execute(sql`DELETE FROM system_settings WHERE key = 'customer_transit_days'`);
+    }
+  });
+});
