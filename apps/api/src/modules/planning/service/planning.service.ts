@@ -18,8 +18,8 @@ import {
 } from "./requirements-calc.js";
 import { capacityHorizon, computeCapacity, type CapacityResult } from "./capacity-calc.js";
 import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput } from "./article-overview.js";
+import { PLAN_HORIZON_WEEKS } from "./capacity-book.js";
 import {
-  CHECK_HORIZON_WEEKS,
   checkDeliveryTime,
   type DeliveryTimeCheckResult,
   type DtcArticle,
@@ -510,7 +510,7 @@ export function createPlanningService(
       for (const r of dtcRows) treeIds.add(r.articleId);
       const ids = [...treeIds];
 
-      const horizonTo = addDays(today, CHECK_HORIZON_WEEKS * 7 + 14);
+      const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
       const [treeArticles, routingRows, leadTimes, capacity, suppliers, delivery, customerFields] = await Promise.all([
         repo.deliveryCheckArticles(ids),
         repo.routingsForArticles(ids),

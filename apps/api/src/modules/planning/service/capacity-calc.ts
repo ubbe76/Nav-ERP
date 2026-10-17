@@ -5,6 +5,7 @@
 // employee-bound resolveEmployeeCalendar) and the group/resource matrix —
 // fully unit-testable without a database (same pattern as requirements-calc).
 import { isoWeekOf, isoWeekRange } from "../../timereport/service/schedule.service.js";
+import { addWorkingDays, isWorkingDay } from "../../system/service/delivery-days.js";
 
 export interface CapacityWorkCenter {
   workCenterId: string;
@@ -19,6 +20,16 @@ export interface CapacityWorkCenter {
   // Kapacitet (timmar per dag) — used when there is no week schedule.
   hoursPerDay: number | null;
   active: boolean;
+  // Legoresurs: working days the supplier takes. Only read when a lego
+  // operation is the last pending one of an MO (its finish decides Sen).
+  leadTimeDays?: number | null;
+}
+
+// One week of an operation's plan: the Monday and the minutes planned there
+// (a `mo_operation_plan_weeks` row). Ascending by Monday, minutes > 0.
+export interface PlannedWeek {
+  monday: string;
+  minutes: number;
 }
 
 // What a resource's daily capacity comes from: its week schedule, else its
@@ -54,6 +65,12 @@ export interface CapacityOperationRow {
   // reportOperationQuantities writes quantityCompleted "0" on scrap-only
   // reports, but the setup is consumed either way once work has started.
   quantityScrapped: number;
+  // The operation's plan (planerad vecka). Optional on purpose: rows without
+  // one — older orders, data loaded before the plan existed — count exactly
+  // as before, in the due date's week. Empty = unplanned too.
+  plannedWeeks?: PlannedWeek[] | null;
+  planLocked?: boolean;
+  plannedAt?: string | null; // ISO timestamp of the run that planned it
 }
 
 export interface WeekScheduleDayRow {
@@ -82,6 +99,7 @@ export interface CapacityInput {
 }
 
 export interface CapacityCellOrder {
+  moOperationId: string;
   manufacturingOrderId: string;
   orderNumber: string;
   articleNumber: string;
@@ -89,7 +107,13 @@ export interface CapacityCellOrder {
   sequenceNo: number;
   dueDate: string | null;
   overdue: boolean;
-  remainingHours: number;
+  remainingHours: number; // the operation's whole remaining time
+  hoursInWeek: number; // its share in this cell — a planned operation spans cells
+  planned: boolean;
+  plannedStartWeek: string | null; // Mondays; null when unplanned
+  plannedEndWeek: string | null;
+  planLocked: boolean;
+  late: boolean; // the MO's Sen — its last pending operation finishes after the due date
 }
 
 export interface CapacityCell {
@@ -129,9 +153,17 @@ export interface CapacityWeek {
   sunday: string;
 }
 
+export interface CapacitySummary {
+  plannedAt: string | null; // the latest plan run (max plannedAt over the operations)
+  overloadedCells: number; // resource × week cells with loadPercent > 100
+  lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string | null; plannedFinish: string | null }[];
+  unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
+}
+
 export interface CapacityResult {
   weeks: CapacityWeek[];
   groups: CapacityGroupBlock[];
+  summary: CapacitySummary;
 }
 
 // Remaining work in MINUTES for one operation. Setup is a one-off: it is
@@ -229,6 +261,117 @@ export function loadBucketMonday(dueDate: string | null, firstMonday: string): s
   return isoWeekRange(isoYear, isoWeek).monday;
 }
 
+// The Monday of the ISO week a date is in.
+export function mondayOf(date: string): string {
+  const { isoYear, isoWeek } = isoWeekOf(date);
+  return isoWeekRange(isoYear, isoWeek).monday;
+}
+
+const EPS = 1e-9;
+
+// How an operation's REMAINING time sits in its plan: the allocation is
+// filled from the back — the work already done is assumed to have happened
+// in the earliest weeks — so 600 min planned v.45: 400 / v.46: 200 with 300
+// left is v.45: 100 / v.46: 200. More remaining than planned (Ångra
+// rapportering) puts the excess in the last week. Weeks before `firstMonday`
+// (the current week) are clamped to it: the work can't happen in the past.
+// Returns ascending weeks with minutes > 0; [] when nothing remains.
+export function remainingByPlannedWeeks(remaining: number, plannedWeeks: PlannedWeek[], firstMonday: string): PlannedWeek[] {
+  if (remaining <= EPS || plannedWeeks.length === 0) return [];
+  const clamped = new Map<string, number>();
+  for (const w of [...plannedWeeks].sort((a, b) => (a.monday < b.monday ? -1 : a.monday > b.monday ? 1 : 0))) {
+    const monday = w.monday < firstMonday ? firstMonday : w.monday;
+    clamped.set(monday, (clamped.get(monday) ?? 0) + w.minutes);
+  }
+  const weeks = [...clamped].map(([monday, minutes]) => ({ monday, minutes }));
+  const planned = weeks.reduce((sum, w) => sum + w.minutes, 0);
+  const excess = Math.max(0, remaining - planned);
+  const out: PlannedWeek[] = [];
+  let rest = remaining;
+  for (let i = weeks.length - 1; i >= 0 && rest > EPS; i--) {
+    const room = weeks[i]!.minutes + (i === weeks.length - 1 ? excess : 0);
+    const minutes = Math.min(room, rest);
+    if (minutes > EPS) out.unshift({ monday: weeks[i]!.monday, minutes });
+    rest -= minutes;
+  }
+  return out;
+}
+
+// The weeks an operation's remaining load counts in — the ONE bucketing rule
+// the matrix, Leveranstidskontrollen and Planera share. Planned: the
+// allocation filled from the back (above). Unplanned: today's rule — one
+// bucket in the due date's week (null = undated).
+export function operationLoadWeeks(
+  op: CapacityOperationRow,
+  firstMonday: string
+): { monday: string | null; minutes: number }[] {
+  const minutes = remainingOperationMinutes(op);
+  if (minutes <= 0) return [];
+  if (op.plannedWeeks && op.plannedWeeks.length > 0) return remainingByPlannedWeeks(minutes, op.plannedWeeks, firstMonday);
+  return [{ monday: loadBucketMonday(op.dueDate, firstMonday), minutes }];
+}
+
+// The last day of week `monday` the resource works (a working day for a
+// resource without a calendar), never before `floor` — the klar-datum of an
+// operation finishing in that week.
+export function weekFinishDay(
+  lookups: ScheduleLookups,
+  offDays: ReadonlySet<string>,
+  calendar: ResourceCalendar | null,
+  monday: string,
+  floor: string
+): string {
+  for (let i = 6; i >= 0; i--) {
+    const day = addDays(monday, i);
+    if (day < floor) break;
+    if (calendar && hasCapacityCalendar(calendar) ? resourceDayMinutes(lookups, calendar, day) > 0 : isWorkingDay(day, offDays)) return day;
+  }
+  return floor;
+}
+
+export interface PlanStatusWorkCenter extends ResourceCalendar {
+  type: "machine" | "personnel" | "subcontract";
+  leadTimeDays?: number | null;
+}
+
+// Sen: an MO's last pending operation (highest sequence number, a lego
+// operation through its lead time) finishes after the due date. The finish
+// is walked through the plan: a planned operation finishes on the last
+// working day of its end week, a lego operation `leadTimeDays` working days
+// after the previous one, both never before today. An MO with a pending
+// operation that lacks a plan (other than lego/0 minutes) is unplanned —
+// then Sen is today's Försenad: the due date has passed.
+export function orderPlanStatus(
+  operations: CapacityOperationRow[],
+  ctx: {
+    today: string;
+    offDays: ReadonlySet<string>;
+    lookups: ScheduleLookups;
+    workCenters: Map<string, PlanStatusWorkCenter>;
+  }
+): { planned: boolean; plannedFinish: string | null; late: boolean } {
+  const firstMonday = mondayOf(ctx.today);
+  const pending = operations.filter((op) => op.operationStatus === "pending").sort((a, b) => a.sequenceNo - b.sequenceNo);
+  const dueDate = operations[0]?.dueDate ?? null;
+  let ready = ctx.today;
+  for (const op of pending) {
+    const wc = ctx.workCenters.get(op.workCenterId) ?? null;
+    if (wc?.type === "subcontract") {
+      ready = addWorkingDays(ready, Math.ceil(wc.leadTimeDays ?? 0), ctx.offDays);
+      continue;
+    }
+    const weeks = operationLoadWeeks(op, firstMonday);
+    if (weeks.length === 0) continue; // nothing left to do
+    if (!op.plannedWeeks || op.plannedWeeks.length === 0) {
+      return { planned: false, plannedFinish: null, late: dueDate != null && dueDate < ctx.today };
+    }
+    const endWeek = weeks[weeks.length - 1]!.monday!;
+    const finish = weekFinishDay(ctx.lookups, ctx.offDays, wc, endWeek, ctx.today);
+    if (finish > ready) ready = finish;
+  }
+  return { planned: true, plannedFinish: ready, late: dueDate != null && ready > dueDate };
+}
+
 // Public convenience wrapper (used directly by the unit tests) — builds the
 // lookups itself; computeCapacity builds them once per run instead.
 export function resolveResourceWeekHours(args: {
@@ -279,8 +422,31 @@ function finishCell(cell: CapacityCell): CapacityCell {
 
 export function computeCapacity(
   input: CapacityInput,
-  options: { today: string; weeks: number }
+  // offDays (full-day holidays) only matter for Sen: a lego operation's lead
+  // time and the finish day of a resource without a calendar.
+  options: { today: string; weeks: number; offDays?: ReadonlySet<string> }
 ): CapacityResult {
+  const offDays = options.offDays ?? new Set<string>();
+  const lookups = buildScheduleLookups(input.weekScheduleDays, input.daySchedules, input.holidays);
+
+  // Sen / planned per MO is walked over ALL its operations — lego included,
+  // since a lego operation last in the route decides the finish — before
+  // the lego operations leave the load below.
+  const operationsByOrder = new Map<string, CapacityOperationRow[]>();
+  for (const op of input.operations) {
+    operationsByOrder.set(op.manufacturingOrderId, [...(operationsByOrder.get(op.manufacturingOrderId) ?? []), op]);
+  }
+  const statusWorkCenters = new Map<string, PlanStatusWorkCenter>(
+    input.workCenters.map((w) => [
+      w.workCenterId,
+      { type: w.type, weekScheduleId: w.weekScheduleId, hoursPerDay: w.hoursPerDay, leadTimeDays: w.leadTimeDays ?? null },
+    ])
+  );
+  const statusByOrder = new Map<string, ReturnType<typeof orderPlanStatus>>();
+  for (const [orderId, ops] of operationsByOrder) {
+    statusByOrder.set(orderId, orderPlanStatus(ops, { today: options.today, offDays, lookups, workCenters: statusWorkCenters }));
+  }
+
   // Legoresurser are excluded from the load entirely: their operations are
   // bought from a supplier (behovsberäkningen proposes the IO), not planned
   // against our own hours — a lego operation must never inflate a week's
@@ -316,36 +482,50 @@ export function computeCapacity(
     return buckets;
   };
 
+  let plannedAt: string | null = null;
   for (const operation of input.operations) {
+    if (operation.plannedAt && (plannedAt == null || operation.plannedAt > plannedAt)) plannedAt = operation.plannedAt;
     const minutes = remainingOperationMinutes(operation);
     if (minutes <= 0) continue;
     const buckets = bucketsFor(operation.workCenterId);
 
-    let cell: CapacityCell;
     // Overdue at DAY granularity — a due date earlier this week is already
     // passed even though it buckets into the current week column.
     const overdue = operation.dueDate != null && operation.dueDate < options.today;
-    const bucketMonday = loadBucketMonday(operation.dueDate, firstMonday);
-    if (bucketMonday == null) {
-      cell = buckets.undated;
-    } else if (bucketMonday > horizonSunday) {
-      cell = buckets.later;
-    } else {
-      cell = buckets.weeks[weeks.findIndex((w) => w.monday === bucketMonday)]!;
-    }
-
+    const planned = !!operation.plannedWeeks && operation.plannedWeeks.length > 0;
+    const plannedMondays = planned ? operation.plannedWeeks!.map((w) => w.monday).sort() : [];
     const hours = round2(minutes / 60);
-    cell.loadHours += minutes / 60;
-    cell.orders.push({
-      manufacturingOrderId: operation.manufacturingOrderId,
-      orderNumber: operation.orderNumber,
-      articleNumber: operation.articleNumber,
-      articleName: operation.articleName,
-      sequenceNo: operation.sequenceNo,
-      dueDate: operation.dueDate,
-      overdue,
-      remainingHours: hours,
-    });
+
+    // A planned operation is spread over its weeks (its load filled from the
+    // back); an unplanned one is one bucket in its due date's week.
+    for (const chunk of operationLoadWeeks(operation, firstMonday)) {
+      let cell: CapacityCell;
+      if (chunk.monday == null) {
+        cell = buckets.undated;
+      } else if (chunk.monday > horizonSunday) {
+        cell = buckets.later;
+      } else {
+        cell = buckets.weeks[weeks.findIndex((w) => w.monday === chunk.monday)]!;
+      }
+      cell.loadHours += chunk.minutes / 60;
+      cell.orders.push({
+        moOperationId: operation.moOperationId,
+        manufacturingOrderId: operation.manufacturingOrderId,
+        orderNumber: operation.orderNumber,
+        articleNumber: operation.articleNumber,
+        articleName: operation.articleName,
+        sequenceNo: operation.sequenceNo,
+        dueDate: operation.dueDate,
+        overdue,
+        remainingHours: hours,
+        hoursInWeek: round2(chunk.minutes / 60),
+        planned,
+        plannedStartWeek: planned ? plannedMondays[0]! : null,
+        plannedEndWeek: planned ? plannedMondays[plannedMondays.length - 1]! : null,
+        planLocked: operation.planLocked ?? false,
+        late: statusByOrder.get(operation.manufacturingOrderId)?.late ?? false,
+      });
+    }
   }
 
   // Resource rows: active always, inactive only when carrying load.
@@ -353,7 +533,6 @@ export function computeCapacity(
     !!b && (b.later.loadHours > 0 || b.undated.loadHours > 0 || b.weeks.some((c) => c.loadHours > 0));
   const included = input.workCenters.filter((w) => w.active || carriesLoad(bucketsByResource.get(w.workCenterId)));
 
-  const lookups = buildScheduleLookups(input.weekScheduleDays, input.daySchedules, input.holidays);
   const resourceRows = new Map<string, CapacityResourceRow>();
   for (const workCenter of included) {
     const buckets = bucketsFor(workCenter.workCenterId);
@@ -423,5 +602,35 @@ export function computeCapacity(
     });
   }
 
-  return { weeks, groups };
+  // The summary: overload per resource cell (the red ones), Sen and
+  // unplanned per MO — only MOs that still carry load. Sorted so two loads
+  // read the same.
+  const byDueThenNumber = (
+    a: { dueDate: string | null; orderNumber: string },
+    b: { dueDate: string | null; orderNumber: string }
+  ) => {
+    if (a.dueDate !== b.dueDate) {
+      if (a.dueDate == null) return 1;
+      if (b.dueDate == null) return -1;
+      return a.dueDate < b.dueDate ? -1 : 1;
+    }
+    return a.orderNumber < b.orderNumber ? -1 : a.orderNumber > b.orderNumber ? 1 : 0;
+  };
+  const overloadedCells = [...resourceRows.values()].reduce(
+    (n, row) => n + row.weeks.filter((c) => c.loadPercent != null && c.loadPercent > 100).length,
+    0
+  );
+  const lateOrders: CapacitySummary["lateOrders"] = [];
+  const unplannedOrders: CapacitySummary["unplannedOrders"] = [];
+  for (const [orderId, ops] of operationsByOrder) {
+    if (!ops.some((op) => remainingOperationMinutes(op) > 0)) continue;
+    const status = statusByOrder.get(orderId)!;
+    const head = { manufacturingOrderId: orderId, orderNumber: ops[0]!.orderNumber, dueDate: ops[0]!.dueDate };
+    if (status.late) lateOrders.push({ ...head, plannedFinish: status.plannedFinish });
+    if (!status.planned) unplannedOrders.push({ manufacturingOrderId: orderId, orderNumber: head.orderNumber });
+  }
+  lateOrders.sort(byDueThenNumber);
+  unplannedOrders.sort((a, b) => (a.orderNumber < b.orderNumber ? -1 : a.orderNumber > b.orderNumber ? 1 : 0));
+
+  return { weeks, groups, summary: { plannedAt, overloadedCells, lateOrders, unplannedOrders } };
 }

@@ -466,6 +466,7 @@ describe("Leveranstidskontroll — made, capacity per week", () => {
         workCenterName: "Kantpress",
         fromWeek: "2026-10-19",
         toWeek: "2026-10-19",
+        weeks: [{ monday: "2026-10-19", minutes: 660 }], // 1 h setup + 10 × 60 min
         date: "2026-10-23",
       },
     ]);
@@ -702,5 +703,169 @@ describe("Leveranstidskontroll — configured rows, customer and errors", () => 
     );
     // Ready Friday 23, ships Monday 26 (a dispatch day), + 2 = Wednesday 28.
     expect(result).toMatchObject({ shipDate: "2026-10-26", deliveryDate: "2026-10-28" });
+  });
+});
+
+// --- Produktionsplanering: the check on the shared capacity book ------------
+// Every test above runs unchanged (rows without plans go through the due
+// date's buckets exactly as before). These add planned existing load, the
+// allocation on the steps and the batches a reservation creates TOs from.
+
+describe("Leveranstidskontroll — planned load, weeks and batches", () => {
+  const made = (ops: DtcOperation[], extra: Partial<DeliveryTimeCheckInput> = {}) =>
+    input({
+      articles: articles(article("m", "manufactured"), article("p")),
+      overviews: new Map([["p", { onHand: 100, rows: [] }]]),
+      bomEdges: [{ parentArticleId: "m", componentArticleId: "p", quantity: 2 }],
+      routings: new Map([["m", ops]]),
+      rows: [row("m", 10)],
+      ...extra,
+    });
+
+  it("existing load that is planned counts in its planned weeks, not its due week", () => {
+    const planned = { ...existing("wc-1", "2026-10-21", 40), plannedWeeks: [{ monday: "2026-10-26", minutes: 2400 }] };
+    const result = checkDeliveryTime(made([op(10, 11)], { existingOperations: [planned] }));
+    // Week 43 is free: the 40 h sit in week 44. Unplanned, the same load
+    // would fill week 43 and push the operation to week 44 (test above).
+    expect(result.rows[0]!.chain[0]).toMatchObject({ fromWeek: "2026-10-19", toWeek: "2026-10-19", date: "2026-10-23" });
+  });
+
+  it("planned existing load is its remaining time filled from the back", () => {
+    // 60 h planned v.43: 40 / v.44: 20 with 30 h reported ⇒ v.43: 10, v.44: 20.
+    const planned: CapacityOperationRow = {
+      ...existing("wc-1", "2026-10-30", 0),
+      setupTime: 0,
+      runTimePerUnit: 60,
+      orderQuantity: 60,
+      quantityCompleted: 30,
+      plannedWeeks: [{ monday: "2026-10-19", minutes: 2400 }, { monday: "2026-10-26", minutes: 1200 }],
+    };
+    const result = checkDeliveryTime(made([op(10, 40)], { existingOperations: [planned] }));
+    expect(result.rows[0]!.chain[0]).toMatchObject({
+      weeks: [{ monday: "2026-10-19", minutes: 1800 }, { monday: "2026-10-26", minutes: 600 }],
+      date: "2026-10-30",
+    });
+  });
+
+  it("an operation step carries its allocation, split over weeks", () => {
+    const result = checkDeliveryTime(made([op(10, 11)], { existingOperations: [existing("wc-1", "2026-10-21", 35)] }));
+    expect(result.rows[0]!.chain[0]).toMatchObject({
+      fromWeek: "2026-10-19",
+      toWeek: "2026-10-26",
+      weeks: [{ monday: "2026-10-19", minutes: 300 }, { monday: "2026-10-26", minutes: 360 }],
+    });
+  });
+
+  it("a row that reaches the horizon shows what was booked on the step and gets no batch", () => {
+    const result = checkDeliveryTime(
+      made([op(10, 1)], { schedule: { weekScheduleDays: [], daySchedules: [], holidays: [] } })
+    );
+    expect(result.rows[0]!.chain[0]).toMatchObject({ kind: "operation", weeks: [] });
+    expect(result.batches).toEqual([]);
+  });
+
+  it("batches: one per made shortage on every level, children before parents, with the operations' allocations", () => {
+    // m needs h (made, short) and p (bought, in stock); h needs p.
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("m", "manufactured"), article("h", "manufactured", 10), article("p")),
+        overviews: new Map([
+          ["h", { onHand: 2, rows: [] }],
+          ["p", { onHand: 100, rows: [] }],
+        ]),
+        bomEdges: [
+          { parentArticleId: "m", componentArticleId: "h", quantity: 1 },
+          { parentArticleId: "m", componentArticleId: "p", quantity: 1 },
+          { parentArticleId: "h", componentArticleId: "p", quantity: 1 },
+        ],
+        routings: new Map([
+          ["h", [op(10, 8)]],
+          ["m", [op(10, 4), op(20, 2)]],
+        ]),
+        rows: [row("m", 5, { key: "row-1" })],
+      })
+    );
+    // h: 3 short, rounded up to 10, Op 10 this week (ready Friday 23).
+    // m: 5, from Friday 23 there are 8 h left of 40 − 8: both operations fit.
+    expect(result.rows[0]!.readyDate).toBe("2026-10-23");
+    expect(result.batches).toEqual([
+      {
+        key: "row-1:2:h:0",
+        rowKey: "row-1",
+        level: 2,
+        articleId: "h",
+        articleNumber: "NR-h",
+        quantity: 10,
+        readyDate: "2026-10-23",
+        operations: [{ sequenceNo: 10, workCenterId: "wc-1", weeks: [{ monday: "2026-10-19", minutes: 480 }] }],
+      },
+      {
+        key: "row-1:1:m:1",
+        rowKey: "row-1",
+        level: 1,
+        articleId: "m",
+        articleNumber: "NR-m",
+        quantity: 5,
+        readyDate: "2026-10-23",
+        operations: [
+          { sequenceNo: 10, workCenterId: "wc-1", weeks: [{ monday: "2026-10-19", minutes: 240 }] },
+          { sequenceNo: 20, workCenterId: "wc-1", weeks: [{ monday: "2026-10-19", minutes: 120 }] },
+        ],
+      },
+    ]);
+  });
+
+  it("batches: lego and 0-minute operations are listed without an allocation; bought and covered rows give none", () => {
+    const legoWc: DtcWorkCenter = { ...wc1, workCenterId: "wc-l", code: "900", type: "subcontract", weekScheduleId: null, leadTimeDays: 2 };
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("m", "manufactured"), article("s", "manufactured"), article("p")),
+        overviews: new Map([
+          ["s", { onHand: 10, rows: [] }],
+          ["p", { onHand: 0, rows: [] }],
+        ]),
+        routings: new Map([["m", [op(10, 2), op(20, 0, "wc-l"), { ...op(30, 0), setupTime: 0 }]]]),
+        workCenters: new Map([["wc-1", wc1], ["wc-l", legoWc]]),
+        suppliers: new Map([["p", supplier(3)]]),
+        rows: [row("m", 1, { key: "a" }), row("s", 1, { key: "b" }), row("p", 1, { key: "c" })],
+      })
+    );
+    expect(result.batches.map((b) => [b.rowKey, b.articleNumber, b.readyDate])).toEqual([["a", "NR-m", "2026-10-27"]]);
+    expect(result.batches[0]!.operations).toEqual([
+      { sequenceNo: 10, workCenterId: "wc-1", weeks: [{ monday: "2026-10-19", minutes: 120 }] },
+      { sequenceNo: 20, workCenterId: "wc-l", weeks: [] },
+      { sequenceNo: 30, workCenterId: "wc-1", weeks: [] },
+    ]);
+  });
+
+  it("batches: a configured row is one batch of its derived structure on level 1", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("t", "manufactured"), article("p")),
+        overviews: new Map([["p", { onHand: 10, rows: [] }]]),
+        rows: [row("t", 2, { key: "cfg", structure: { operations: [op(10, 8)], materials: [{ articleId: "p", quantity: 6 }] } })],
+      })
+    );
+    expect(result.batches).toEqual([
+      expect.objectContaining({
+        rowKey: "cfg",
+        level: 1,
+        articleId: "t",
+        quantity: 2,
+        readyDate: "2026-10-23",
+        operations: [{ sequenceNo: 10, workCenterId: "wc-1", weeks: [{ monday: "2026-10-19", minutes: 480 }] }],
+      }),
+    ]);
+  });
+
+  it("batches: a rounding surplus that covers the next row gives one batch, not two", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("m", "manufactured", 10)),
+        routings: new Map([["m", [{ ...op(10, 20), runTimePerUnit: 60 }]]]),
+        rows: [row("m", 1, { key: "a" }), row("m", 1, { key: "b" })],
+      })
+    );
+    expect(result.batches.map((b) => [b.rowKey, b.quantity])).toEqual([["a", 10]]);
   });
 });

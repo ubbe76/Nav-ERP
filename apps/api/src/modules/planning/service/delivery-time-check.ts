@@ -7,33 +7,29 @@
 //
 // Pure, like capacity-calc.ts and article-overview.ts: the planning service
 // loads flat rows (the overviews are already on ship dates) and this module
-// owns every rule. It books nothing — two checks never see each other.
+// owns every rule. Capacity is placed through the shared capacity book
+// (capacity-book.ts — the same rule Planera uses), but the check itself
+// writes nothing: the batches it returns are what a reservation creates
+// TOs from.
 import { roundUpToMultiple } from "@navet/shared";
 import { explodeOneLevel, type BomEdge } from "./requirements-calc.js";
 import type { ArticleOverviewRow } from "./article-overview.js";
 import {
-  buildScheduleLookups,
-  hasCapacityCalendar,
-  loadBucketMonday,
-  remainingOperationMinutes,
-  resourceDayMinutes,
+  mondayOf,
   type CapacityOperationRow,
   type DayScheduleNetRow,
   type HolidayRow,
+  type PlannedWeek,
   type WeekScheduleDayRow,
 } from "./capacity-calc.js";
+import { createCapacityBook, type PlanWorkCenter } from "./capacity-book.js";
 import {
-  addDays,
   addWorkingDays,
   deliveryFromShipDate,
-  isWorkingDay,
   nextWorkingDayOnOrAfter,
   suggestPurchaseDeliveryDate,
   type DeliverySettings,
 } from "../../system/service/delivery-days.js";
-
-// Capacity is searched this many weeks ahead before a row gives up.
-export const CHECK_HORIZON_WEEKS = 104;
 
 export interface DtcArticle {
   articleId: string;
@@ -53,16 +49,8 @@ export interface DtcOperation {
   runTimePerUnit: number;
 }
 
-export interface DtcWorkCenter {
-  workCenterId: string;
-  code: string;
-  name: string;
-  type: "machine" | "personnel" | "subcontract";
-  weekScheduleId: string | null;
-  hoursPerDay: number | null; // Kapacitet (timmar per dag) — when there is no week schedule
-  capacityFactor: number;
-  leadTimeDays: number | null; // legoresurs: working days the supplier takes
-}
+// The resource as the book sees it (code/name/calendar/factor/lead time).
+export type DtcWorkCenter = PlanWorkCenter;
 
 export interface DtcSupplier {
   supplierName: string;
@@ -98,6 +86,8 @@ export interface DeliveryTimeCheckInput {
   routings: Map<string, DtcOperation[]>;
   workCenters: Map<string, DtcWorkCenter>;
   schedule: { weekScheduleDays: WeekScheduleDayRow[]; daySchedules: DayScheduleNetRow[]; holidays: HolidayRow[] };
+  // The open operations — planned ones (plannedWeeks) count in their
+  // planned weeks, the rest in their due date's week.
   existingOperations: CapacityOperationRow[];
   suppliers: Map<string, DtcSupplier>;
   customer: DeliverySettings | null;
@@ -135,6 +125,7 @@ export type DtcStep =
       workCenterName: string;
       fromWeek: string; // Monday of the first week the operation books
       toWeek: string; // Monday of the week it finishes
+      weeks: PlannedWeek[]; // the allocation (what was booked when the horizon was hit)
       date: string;
     }
   | {
@@ -159,11 +150,29 @@ export interface DtcRowResult {
   notes: string[];
 }
 
+// A shortage the check would make: one TO per batch. Level 1 is the row's
+// own article, 2+ the semi-finished parts below it; children come before
+// their parents (the order a reservation creates the TOs in). Only batches
+// that got a date — a row that hits the horizon has no complete tree.
+export interface DtcBatch {
+  key: string; // unique within the result
+  rowKey: string; // the row (sales order row) it is made for
+  level: number;
+  articleId: string;
+  articleNumber: string;
+  quantity: number; // rounded up to the article's step
+  readyDate: string; // the TO's due date
+  // Every operation of the batch in sequence order: the allocation to
+  // write (lego, 0 minutes ⇒ []).
+  operations: { sequenceNo: number; workCenterId: string; weeks: PlannedWeek[] }[];
+}
+
 export interface DeliveryTimeCheckResult {
   shipDate: string | null;
   deliveryDate: string | null; // = shipDate without a customer
   rows: DtcRowResult[];
   notes: string[];
+  batches: DtcBatch[];
 }
 
 // What a node (an article quantity) resolves to: when it is ready and the
@@ -176,7 +185,6 @@ interface Resolution {
 const EPS = 1e-9;
 const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 const maxDate = (a: string, b: string) => (a > b ? a : b);
-const mondayOf = (date: string) => addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7));
 
 // A row's notes. The repeating kinds — resources without a week schedule,
 // undated supply, articles without a primary supplier, lego resources
@@ -376,54 +384,18 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   const { today, offDays } = input;
   const t0 = nextWorkingDayOnOrAfter(today, offDays);
   const globalNotes = new Set<string>();
-  const lookups = buildScheduleLookups(
-    input.schedule.weekScheduleDays,
-    input.schedule.daySchedules,
-    input.schedule.holidays
-  );
-  const firstMonday = mondayOf(today);
-  const horizonMonday = addDays(firstMonday, CHECK_HORIZON_WEEKS * 7);
+  const batches: DtcBatch[] = [];
 
-  // --- Existing load per resource and week (beläggningsvyns hinkar) -------
-  const existingLoad = new Map<string, Map<string, number>>(); // wc -> monday -> minutes
-  const undatedLoad = new Map<string, number>(); // wc -> minutes
-  for (const op of input.existingOperations) {
-    const minutes = remainingOperationMinutes(op);
-    if (minutes <= 0) continue;
-    const monday = loadBucketMonday(op.dueDate, firstMonday);
-    if (monday == null) {
-      undatedLoad.set(op.workCenterId, (undatedLoad.get(op.workCenterId) ?? 0) + minutes);
-      continue;
-    }
-    const weeks = existingLoad.get(op.workCenterId) ?? new Map<string, number>();
-    weeks.set(monday, (weeks.get(monday) ?? 0) + minutes);
-    existingLoad.set(op.workCenterId, weeks);
-  }
-  const booked = new Map<string, Map<string, number>>(); // this run's own bookings
+  // --- Capacity: the shared book (existing load rolled, this run's own
+  // bookings on top) --------------------------------------------------------
+  const book = createCapacityBook({
+    today,
+    offDays,
+    workCenters: input.workCenters,
+    schedule: input.schedule,
+    existingOperations: input.existingOperations,
+  });
   const usedResources = new Set<string>();
-
-  // Existing load as it will actually be worked: week by week from its
-  // bucket, what does not fit the week's capacity (from today in the current
-  // week) rolls into the next — a backlog never vanishes just because its
-  // week is over-full. Only resources with a capacity calendar are rolled
-  // (the others are unlimited anyway); undated load stays out (noted).
-  const rolledLoadByResource = new Map<string, Map<string, number>>();
-  function rolledLoad(wc: DtcWorkCenter): Map<string, number> {
-    let rolled = rolledLoadByResource.get(wc.workCenterId);
-    if (rolled) return rolled;
-    rolled = new Map();
-    const buckets = existingLoad.get(wc.workCenterId) ?? new Map<string, number>();
-    const lastBucket = [...buckets.keys()].reduce((a, b) => maxDate(a, b), firstMonday);
-    let carry = 0;
-    for (let monday = firstMonday; monday < horizonMonday && (carry > EPS || monday <= lastBucket); monday = addDays(monday, 7)) {
-      const load = (buckets.get(monday) ?? 0) + carry;
-      const capacity = weekCapacityFrom(wc, monday, maxDate(monday, today));
-      rolled.set(monday, Math.min(load, capacity));
-      carry = Math.max(0, load - capacity);
-    }
-    rolledLoadByResource.set(wc.workCenterId, rolled);
-    return rolled;
-  }
 
   // --- Pools: the projected balance per article for this check -------------
   const pools = new Map<string, ArticlePool>();
@@ -463,54 +435,23 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     return pool;
   }
 
-  // --- Capacity booking ----------------------------------------------------
-  // Minutes a resource can still take in week `monday`, counting only days
-  // from `fromDay`: never more than what is left of the whole week (from
-  // today) after the existing load and this run's bookings.
-  function weekCapacityFrom(wc: DtcWorkCenter, monday: string, fromDay: string): number {
-    let minutes = 0;
-    for (let i = 0; i < 7; i++) {
-      const day = addDays(monday, i);
-      if (day < fromDay) continue;
-      minutes += resourceDayMinutes(lookups, wc, day);
-    }
-    return minutes * wc.capacityFactor;
-  }
-  function freeMinutes(wc: DtcWorkCenter, monday: string, fromDay: string): number {
-    const weekFromToday = weekCapacityFrom(wc, monday, maxDate(monday, today));
-    const left = weekFromToday - (rolledLoad(wc).get(monday) ?? 0) - (booked.get(wc.workCenterId)?.get(monday) ?? 0);
-    return Math.max(0, Math.min(weekCapacityFrom(wc, monday, maxDate(fromDay, today)), left));
-  }
-  function book(wc: DtcWorkCenter, monday: string, minutes: number) {
-    const weeks = booked.get(wc.workCenterId) ?? new Map<string, number>();
-    weeks.set(monday, (weeks.get(monday) ?? 0) + minutes);
-    booked.set(wc.workCenterId, weeks);
-  }
-  // The last day of the week the resource works (else a working day), never
-  // before `floor`.
-  function weekFinishDay(wc: DtcWorkCenter | null, monday: string, floor: string): string {
-    for (let i = 6; i >= 0; i--) {
-      const day = addDays(monday, i);
-      if (day < floor) break;
-      if (wc && hasCapacityCalendar(wc) ? resourceDayMinutes(lookups, wc, day) > 0 : isWorkingDay(day, offDays)) return day;
-    }
-    return floor;
-  }
-
-  // Operations in sequence order from `materialReady`. Returns the ready day
-  // and one step per operation — or, when the horizon is exceeded, readyDate
-  // null with the steps that were planned plus one for the operation that
-  // did not fit (its weeks are the ones searched). The bookings the planned
-  // operations made are left in place: the order will be made regardless,
-  // and a later row on the same resource should see that load.
+  // Operations in sequence order from `materialReady`, each placed through
+  // the book. Returns the ready day and one step per operation — or, when
+  // the horizon is exceeded, readyDate null with the steps that were planned
+  // plus one for the operation that did not fit (its weeks are the ones
+  // searched). The bookings the planned operations made are left in place:
+  // the order will be made regardless, and a later row on the same resource
+  // should see that load. `allocations` is the batch's plan (one entry per
+  // operation, in sequence order).
   function scheduleOperations(
     article: DtcArticle,
     operations: DtcOperation[],
     quantity: number,
     materialReady: string,
     notes: RowNotes
-  ): { readyDate: string | null; steps: DtcStep[] } {
+  ): { readyDate: string | null; steps: DtcStep[]; allocations: DtcBatch["operations"] } {
     const steps: DtcStep[] = [];
+    const allocations: DtcBatch["operations"] = [];
     let floor = maxDate(materialReady, t0); // capacity may be used from this day
     let ready = floor;
     for (const op of [...operations].sort((a, b) => a.sequenceNo - b.sequenceNo)) {
@@ -526,59 +467,50 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
       };
       if (wc?.type === "subcontract") {
         if (wc.leadTimeDays == null) notes.legoNoLead.add(code);
-        ready = addWorkingDays(maxDate(ready, floor), Math.ceil(wc.leadTimeDays ?? 0), offDays);
+        ready = book.subcontract(wc, maxDate(ready, floor));
         floor = ready;
         steps.push({ kind: "subcontract", ...base, leadTimeDays: wc.leadTimeDays, date: ready });
+        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [] });
         continue;
       }
       const minutes = op.setupTime + op.runTimePerUnit * quantity;
       if (minutes <= EPS) {
-        steps.push({ kind: "operation", ...base, fromWeek: mondayOf(floor), toWeek: mondayOf(floor), date: ready });
+        steps.push({ kind: "operation", ...base, fromWeek: mondayOf(floor), toWeek: mondayOf(floor), weeks: [], date: ready });
+        allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [] });
         continue;
       }
-      if (!wc || !hasCapacityCalendar(wc)) {
-        notes.unscheduled.add(code);
-        const monday = mondayOf(floor);
-        ready = maxDate(ready, weekFinishDay(null, monday, floor));
-        steps.push({ kind: "operation", ...base, fromWeek: monday, toWeek: monday, date: ready });
-        continue;
+      const placed = book.place(wc ?? null, minutes, { floor });
+      if (placed.horizonExceeded) {
+        steps.push({
+          kind: "operation",
+          ...base,
+          fromWeek: placed.searchedFrom,
+          toWeek: placed.searchedTo,
+          weeks: placed.partial,
+          date: book.weekFinishDay(wc ?? null, placed.searchedTo, floor),
+        });
+        return { readyDate: null, steps, allocations };
       }
-      usedResources.add(wc.workCenterId);
-      let monday = mondayOf(floor);
-      let fromWeek: string | null = null; // the first week it actually books
-      let rest = minutes;
-      let dayFloor = floor;
-      while (rest > EPS) {
-        if (monday >= horizonMonday) {
-          const lastWeek = addDays(horizonMonday, -7);
-          steps.push({ kind: "operation", ...base, fromWeek: fromWeek ?? mondayOf(floor), toWeek: lastWeek, date: weekFinishDay(wc, lastWeek, floor) });
-          return { readyDate: null, steps };
-        }
-        const take = Math.min(rest, freeMinutes(wc, monday, dayFloor));
-        if (take > EPS) {
-          book(wc, monday, take);
-          rest -= take;
-          fromWeek ??= monday;
-        }
-        if (rest > EPS) {
-          monday = addDays(monday, 7);
-          dayFloor = monday;
-        }
-      }
-      ready = maxDate(ready, weekFinishDay(wc, monday, floor));
+      if (placed.unscheduled) notes.unscheduled.add(code);
+      else usedResources.add(wc!.workCenterId);
+      ready = maxDate(ready, placed.readyDate);
       // The next operation may use what is left of the finishing week.
-      floor = maxDate(floor, monday);
-      steps.push({ kind: "operation", ...base, fromWeek: fromWeek ?? monday, toWeek: monday, date: ready });
+      floor = maxDate(floor, placed.toWeek);
+      steps.push({ kind: "operation", ...base, fromWeek: placed.fromWeek, toWeek: placed.toWeek, weeks: placed.weeks, date: ready });
+      allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: placed.weeks });
     }
-    return { readyDate: ready, steps };
+    return { readyDate: ready, steps, allocations };
   }
 
   // A shortage of `quantity` on an article: bought, made or always there.
+  // `path` is the chain of parents being made (cycle guard and the batch's
+  // level: 1 = the row's article, 2+ = a semi-finished part under it).
   function resolveShortage(
     article: DtcArticle,
     quantity: number,
     notes: RowNotes,
     path: Set<string>,
+    rowKey: string,
     structure?: DtcStructure
   ): Resolution {
     if (article.type === "service") return { readyDate: t0, chain: [] };
@@ -620,7 +552,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     for (const [componentId, componentQuantity] of components) {
       const component = input.articles.get(componentId);
       if (!component) continue;
-      const resolved = resolveNeed(component, componentQuantity, notes, nextPath);
+      const resolved = resolveNeed(component, componentQuantity, notes, nextPath, rowKey);
       if (resolved.readyDate === null) return { readyDate: null, chain: resolved.chain };
       if (resolved.readyDate > materialReady) {
         materialReady = resolved.readyDate;
@@ -630,14 +562,30 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     const operations = structure ? structure.operations : (input.routings.get(article.articleId) ?? []);
     if (!structure && components.size === 0 && operations.length === 0) notes.noPreparation.add(article.articleNumber);
     const scheduled = scheduleOperations(article, operations, quantity, materialReady, notes);
-    if (scheduled.readyDate === null) notes.other.add("Kapaciteten räcker inte inom två år");
+    if (scheduled.readyDate === null) {
+      notes.other.add("Kapaciteten räcker inte inom två år");
+    } else {
+      // The components' batches were pushed while resolving them above —
+      // children before this parent.
+      const level = nextPath.size;
+      batches.push({
+        key: `${rowKey}:${level}:${article.articleId}:${batches.length}`,
+        rowKey,
+        level,
+        articleId: article.articleId,
+        articleNumber: article.articleNumber,
+        quantity,
+        readyDate: scheduled.readyDate,
+        operations: scheduled.allocations,
+      });
+    }
     return { readyDate: scheduled.readyDate, chain: [...critical, ...scheduled.steps] };
   }
 
   // A need of `quantity`: first what the projected balance allows, then a
   // shortage. The shortage is rounded up to the article's step and the
   // surplus goes back into the pool on the shortage's ready date.
-  function resolveNeed(article: DtcArticle, quantity: number, notes: RowNotes, path: Set<string>): Resolution {
+  function resolveNeed(article: DtcArticle, quantity: number, notes: RowNotes, path: Set<string>, rowKey: string): Resolution {
     if (article.type === "service") return { readyDate: t0, chain: [] };
     const pool = poolFor(article.articleId);
     const taken = pool.take(quantity, article.articleNumber);
@@ -653,7 +601,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     const rest = round4(quantity - (taken?.quantity ?? 0));
     if (rest <= EPS) return covered;
     const shortage = roundUpToMultiple(rest, article.rounding);
-    const made = resolveShortage(article, shortage, notes, path);
+    const made = resolveShortage(article, shortage, notes, path, rowKey);
     if (made.readyDate !== null && shortage - rest > EPS) {
       pool.add({ date: made.readyDate, delta: round4(shortage - rest), source: { kind: "surplus", chain: made.chain } });
     }
@@ -671,8 +619,8 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
       return { key: row.key, articleId: row.articleId, articleNumber, quantity: row.quantity, readyDate: null, chain: [], notes: rowNoteTexts(notes) };
     }
     const resolved = row.structure
-      ? resolveShortage(article, row.quantity, notes, new Set(), row.structure)
-      : resolveNeed(article, row.quantity, notes, new Set());
+      ? resolveShortage(article, row.quantity, notes, new Set(), row.key, row.structure)
+      : resolveNeed(article, row.quantity, notes, new Set(), row.key);
     return {
       key: row.key,
       articleId: row.articleId,
@@ -685,7 +633,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   });
 
   for (const wcId of usedResources) {
-    const minutes = undatedLoad.get(wcId) ?? 0;
+    const minutes = book.undatedMinutes(wcId);
     if (minutes > EPS) {
       const wc = input.workCenters.get(wcId)!;
       const hours = (Math.round((minutes / 60) * 10) / 10).toLocaleString("sv-SE");
@@ -702,5 +650,5 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   }
   const deliveryDate =
     shipDate === null ? null : input.customer ? deliveryFromShipDate(shipDate, input.customer, offDays) : shipDate;
-  return { shipDate, deliveryDate, rows, notes: [...globalNotes] };
+  return { shipDate, deliveryDate, rows, notes: [...globalNotes], batches };
 }
