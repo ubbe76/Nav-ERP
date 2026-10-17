@@ -41,6 +41,8 @@ services:
     # to it), so loopback only, same as the main database.
     ports:
       - "127.0.0.1:5433:5432"
+    # WAL is capped below: with the default max_wal_size (1 GB) the WAL alone
+    # can fill the tmpfs mid-run and every TRUNCATE fails with disk_full.
     tmpfs:
       - /var/lib/postgresql/data:size=1g
     command: >
@@ -48,6 +50,9 @@ services:
       -c fsync=off
       -c synchronous_commit=off
       -c full_page_writes=off
+      -c wal_level=minimal
+      -c max_wal_senders=0
+      -c max_wal_size=256MB
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U erp -d erp_test"]
       interval: 5s
