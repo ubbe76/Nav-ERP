@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createPlanningService } from "../src/modules/planning/service/planning.service.js";
 import type { PlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
+import type { ArticleOverviewInput } from "../src/modules/planning/service/article-overview.js";
+import type { PartnerDeliveryFields } from "../src/modules/system/service/delivery-days.js";
 
 // Pure unit tests with faked deps — no database. Covers the order-creation
 // failure branches that are impractical to provoke through the real services.
@@ -30,6 +32,16 @@ function makeRepo(overrides: Partial<PlanningRepository> = {}): PlanningReposito
     },
     async articleInfoForIds(articleIds: string[]) {
       return articleIds.map((articleId) => ({ articleId, articleNumber: `NR-${articleId}` }));
+    },
+    // Fasta leveransdagar: the system defaults, no holidays.
+    async deliveryContext() {
+      return {
+        defaults: { supplier: { mode: "arrival", transitDays: 0 }, customer: { mode: "dispatch", transitDays: 0 } },
+        offDays: new Set<string>(),
+      };
+    },
+    async fullDayHolidaysBetween() {
+      return [];
     },
     ...overrides,
   } as PlanningRepository;
@@ -656,5 +668,152 @@ describe("planning service — configured rows: one derivation per configuration
       "Mallen är inte längre en beställningsvara",
     ]);
     expect(rows.find((r) => r.articleId === "c")).toBeUndefined();
+  });
+});
+
+// Fasta leveransdagar on Skapa ordrar's IO dates. Today is pinned to
+// Saturday 2026-10-17 (Monday = the 19th); each article's only demand is one
+// confirmed KO row on the given date, so the raw demand date is that date.
+describe("planning service — leveransdagar on created purchase orders", () => {
+  function overviewInput(articleId: string, demandDate: string | null): ArticleOverviewInput {
+    return {
+      article: {
+        articleId,
+        articleNumber: `NR-${articleId}`,
+        name: articleId,
+        type: "purchased",
+        isPhantom: false,
+        active: true,
+        unitCode: "st",
+        reorderPoint: null,
+        orderQuantity: null,
+        rounding: null,
+      },
+      onHand: 0,
+      salesRows: demandDate
+        ? [
+            {
+              rowId: `row-${articleId}`,
+              salesOrderId: `so-${articleId}`,
+              orderNumber: `KO-${articleId}`,
+              orderStatus: "confirmed",
+              customerName: "Kund AB",
+              expectedDeliveryDate: demandDate,
+              quantityOrdered: 5,
+              quantityDelivered: 0,
+            },
+          ]
+        : [],
+      purchaseRows: [],
+      manufacturingOrders: [],
+      materialRows: [],
+      plannedMos: [],
+      bomEdges: [],
+      phantomIds: [],
+      primarySupplier: null,
+    };
+  }
+
+  async function run(opts: {
+    demands: Record<string, string | null>;
+    leadTimeDays?: number | null;
+    supplierDelivery?: PartnerDeliveryFields;
+  }) {
+    const orders: { expectedDeliveryDate?: string }[] = [];
+    const rows: { articleId: string; expectedDeliveryDate?: string }[] = [];
+    const service = createPlanningService(
+      makeRepo({
+        async loadArticleOverviewInput(articleId: string) {
+          return overviewInput(articleId, opts.demands[articleId] ?? null);
+        },
+        async primarySuppliersForArticles(articleIds: string[]) {
+          return articleIds.map((articleId) => ({
+            articleId,
+            supplierId: "sup-1",
+            supplierName: "Stål AB",
+            price: 10,
+            currency: "SEK",
+            leadTimeDays: opts.leadTimeDays ?? null,
+            priceBreaks: [],
+            supplierDelivery: opts.supplierDelivery,
+          }));
+        },
+      }),
+      {
+        purchase: {
+          async createPurchaseOrder(input: { expectedDeliveryDate?: string }) {
+            orders.push(input);
+            return { id: "po-1", orderNumber: "IO-1" };
+          },
+          async addRow(_orderId: string, input: { articleId: string; expectedDeliveryDate?: string }) {
+            rows.push({ articleId: input.articleId, expectedDeliveryDate: input.expectedDeliveryDate });
+            return {};
+          },
+          async cancel() {},
+        },
+        manufacturing: {
+          async createManufacturingOrder() {
+            throw new Error("not used in this test");
+          },
+          async createFromSalesOrderRow() {
+            throw new Error("not used in this test");
+          },
+        },
+        today: () => "2026-10-17",
+      }
+    );
+    const result = await service.createOrdersFromProposals(
+      { proposals: Object.keys(opts.demands).map((articleId) => ({ articleId, quantity: 5, kind: "purchase" as const })) },
+      "user-1"
+    );
+    return { result, orders, rows };
+  }
+
+  const mondays: PartnerDeliveryFields = { deliveryWeekdays: [1], deliveryDayMode: "arrival", transitDays: null };
+
+  it("a supplier without settings keeps today's rule: the working day before the demand", async () => {
+    const { result, orders } = await run({ demands: { a1: "2026-10-28" } });
+    expect(orders[0]?.expectedDeliveryDate).toBe("2026-10-27");
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("arrival days pull the date back to the last arrival day before the demand", async () => {
+    const { orders } = await run({ demands: { a1: "2026-10-28" }, supplierDelivery: mondays });
+    expect(orders[0]?.expectedDeliveryDate).toBe("2026-10-26");
+  });
+
+  it("a lead time pushing past the demand gives the earliest arrival and a warning", async () => {
+    const { result, orders } = await run({ demands: { a1: "2026-10-21" }, leadTimeDays: 10, supplierDelivery: mondays });
+    expect(orders[0]?.expectedDeliveryDate).toBe("2026-11-02");
+    expect(result.warnings).toEqual([
+      {
+        orderNumber: "IO-1",
+        articleNumber: "NR-a1",
+        demandDate: "2026-10-21",
+        deliveryDate: "2026-11-02",
+        message: "Leveransen (2026-11-02) kommer efter behovet (2026-10-21)",
+      },
+    ]);
+  });
+
+  it("a passed demand warns with the raw demand date", async () => {
+    const { result, orders } = await run({ demands: { a1: "2026-10-10" }, supplierDelivery: mondays });
+    expect(orders[0]?.expectedDeliveryDate).toBe("2026-10-19");
+    expect(result.warnings[0]).toMatchObject({ demandDate: "2026-10-10", deliveryDate: "2026-10-19" });
+  });
+
+  it("the order gets the earliest date and a later row keeps its own", async () => {
+    const { orders, rows } = await run({ demands: { a1: "2026-10-28", a2: "2026-11-04" } });
+    expect(orders[0]?.expectedDeliveryDate).toBe("2026-10-27");
+    expect(rows).toEqual([
+      { articleId: "a1", expectedDeliveryDate: undefined },
+      { articleId: "a2", expectedDeliveryDate: "2026-11-03" },
+    ]);
+  });
+
+  it("a proposal without demand (reorder point) at a supplier without settings gets no date", async () => {
+    const { result, orders } = await run({ demands: { a1: null } });
+    expect(orders[0]?.expectedDeliveryDate).toBeUndefined();
+    expect(result.warnings).toEqual([]);
   });
 });

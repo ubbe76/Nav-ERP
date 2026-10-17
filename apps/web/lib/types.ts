@@ -3159,6 +3159,8 @@ export interface PlanningOrdersResult {
   purchaseOrders: { id: string; orderNumber: string; supplierId: string; supplierName: string; rowCount: number }[];
   manufacturingOrders: { id: string; orderNumber: string; articleNumber: string }[];
   errors: { articleId: string; articleNumber: string; message: string }[];
+  // Fasta leveransdagar: IO rows whose earliest arrival comes after the demand.
+  warnings: { orderNumber: string; articleNumber: string; demandDate: string; deliveryDate: string; message: string }[];
 }
 
 // One förfrågan created by createLegoInquiries (lib/legoInquiries.ts) —

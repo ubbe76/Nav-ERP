@@ -29,6 +29,7 @@ import {
   deliveryHolidayWindow,
   effectiveDeliverySettings,
   shipDateFor,
+  suggestPurchaseDeliveryDate,
   // Anchored in Europe/Stockholm — a UTC date would be yesterday's for the
   // first hours after midnight (summer time).
   stockholmToday,
@@ -95,6 +96,10 @@ export interface CreatedOrdersResult {
   purchaseOrders: { id: string; orderNumber: string; supplierId: string; supplierName: string; rowCount: number }[];
   manufacturingOrders: { id: string; orderNumber: string; articleNumber: string }[];
   errors: { articleId: string; articleNumber: string; message: string }[];
+  // Fasta leveransdagar: an IO row whose earliest possible arrival (lead
+  // time, the supplier's days, transit) comes after the demand. Never stops
+  // the order — always present, empty when nothing is late.
+  warnings: { orderNumber: string; articleNumber: string; demandDate: string; deliveryDate: string; message: string }[];
 }
 
 // Domain errors carry user-readable messages and pass through; anything that
@@ -360,7 +365,7 @@ export function createPlanningService(
       input: CreatePlanningOrdersInput,
       createdBy: string
     ): Promise<CreatedOrdersResult> {
-      const result: CreatedOrdersResult = { purchaseOrders: [], manufacturingOrders: [], errors: [] };
+      const result: CreatedOrdersResult = { purchaseOrders: [], manufacturingOrders: [], errors: [], warnings: [] };
 
       const articleNumbers = new Map(
         (await repo.articleInfoForIds(input.proposals.map((p) => p.articleId))).map((a) => [
@@ -459,18 +464,47 @@ export function createPlanningService(
         bySupplier.set(supplier.supplierId, group);
       }
 
-      for (const [supplierId, group] of bySupplier) {
-        // Önskat leveransdatum, same rule as a TO's färdigdatum: the working
-        // day before each article's first uncovered firm demand. The order
-        // gets the earliest; a row whose own date is later keeps it on the
-        // row (null = follows the order). A failed suggestion is just no
-        // date — it must not stop the order (a real problem fails addRow).
-        const dates = new Map<string, string | null>();
+      // Önskat leveransdatum: the raw demand date per article (the TO
+      // färdigdatum rule's demand — a KO's ship date or a TO's due date),
+      // then the latest arrival before it that the supplier's days allow,
+      // never earlier than the earliest possible arrival with lead time and
+      // transit (late ⇒ a warning). Without settings: the working day before
+      // the demand, exactly as before. A failed suggestion is just no date —
+      // it must not stop the order (a real problem fails addRow).
+      const demandDates = new Map<string, string | null>();
+      for (const group of bySupplier.values()) {
         for (const row of group.rows) {
           const suggestion = await this.suggestManufacturingDueDate(row.articleId).catch(() => null);
-          dates.set(row.articleId, suggestion?.dueDate ?? null);
+          demandDates.set(row.articleId, suggestion?.demandDate ?? null);
         }
-        const orderDate = [...dates.values()].filter((d): d is string => d !== null).sort()[0];
+      }
+      const today = todayFn();
+      const knownDemands = [...demandDates.values()].filter((d): d is string => d !== null);
+      const maxLead = Math.max(0, ...[...supplierByArticle.values()].map((s) => s.leadTimeDays ?? 0));
+      const delivery =
+        bySupplier.size > 0 ? await repo.deliveryContext(deliveryHolidayWindow([today, ...knownDemands], maxLead + 60)) : null;
+
+      for (const [supplierId, group] of bySupplier) {
+        // The order gets the earliest date; a row whose own date is later
+        // keeps it on the row (null = follows the order).
+        const dates = new Map<string, { date: string | null; late: boolean }>();
+        for (const row of group.rows) {
+          const supplier = supplierByArticle.get(row.articleId)!;
+          dates.set(
+            row.articleId,
+            suggestPurchaseDeliveryDate({
+              demandDate: demandDates.get(row.articleId) ?? null,
+              today,
+              leadTimeDays: supplier.leadTimeDays,
+              settings: effectiveDeliverySettings(supplier.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery!.defaults),
+              offDays: delivery!.offDays,
+            })
+          );
+        }
+        const orderDate = [...dates.values()]
+          .map((d) => d.date)
+          .filter((d): d is string => d !== null)
+          .sort()[0];
 
         let order: { id: string; orderNumber: string };
         try {
@@ -484,13 +518,23 @@ export function createPlanningService(
         }
         let rowCount = 0;
         for (const row of group.rows) {
-          const rowDate = dates.get(row.articleId) ?? null;
+          const { date: rowDate, late } = dates.get(row.articleId) ?? { date: null, late: false };
           try {
             await deps.purchase.addRow(order.id, {
               ...row,
               ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
             });
             rowCount += 1;
+            const demandDate = demandDates.get(row.articleId) ?? null;
+            if (late && rowDate && demandDate) {
+              result.warnings.push({
+                orderNumber: order.orderNumber,
+                articleNumber: numberFor(row.articleId),
+                demandDate,
+                deliveryDate: rowDate,
+                message: `Leveransen (${rowDate}) kommer efter behovet (${demandDate})`,
+              });
+            }
           } catch (err) {
             pushError(row.articleId, errorMessage(err));
           }

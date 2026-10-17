@@ -175,6 +175,12 @@ export function createPlanningRepository(db: Db) {
         price: articleSuppliers.price,
         currency: articleSuppliers.currency,
         leadTimeDays: articleSuppliers.leadTimeDays,
+        // Fasta leveransdagar — Skapa ordrar dates the IO rows with them.
+        supplierDelivery: {
+          deliveryWeekdays: suppliers.deliveryWeekdays,
+          deliveryDayMode: suppliers.deliveryDayMode,
+          transitDays: suppliers.transitDays,
+        },
       })
       .from(articleSuppliers)
       .innerJoin(suppliers, eq(suppliers.id, articleSuppliers.supplierId))

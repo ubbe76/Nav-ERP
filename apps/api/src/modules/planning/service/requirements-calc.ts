@@ -10,6 +10,7 @@
 // rounding helper — deliberately the SAME function the order services apply
 // to row quantities, so a proposal and the order it becomes agree.
 import { roundUpToMultiple } from "@navet/shared";
+import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 
 export type SalesOrderStatus =
   | "quote"
@@ -103,6 +104,9 @@ export interface PrimarySupplierInfo {
 // proposal quantity from the staffel — see purchase/service/supplier-price.ts.
 export interface PrimarySupplierWithBreaks extends PrimarySupplierInfo {
   priceBreaks: { fromQuantity: number; price: number }[];
+  // Fasta leveransdagar: the supplier's own fields (absent = follows the
+  // system defaults) — Skapa ordrar's IO dates.
+  supplierDelivery?: PartnerDeliveryFields;
 }
 
 // Lego (subcontract) operation on a released/in_progress MO — an OPERATION
