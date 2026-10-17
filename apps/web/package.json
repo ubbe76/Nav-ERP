@@ -1,6 +1,6 @@
 {
   "name": "@navet/web",
-  "version": "0.2.2-alpha",
+  "version": "0.2.3-alpha",
   "private": true,
   "scripts": {
     "dev": "next dev",
