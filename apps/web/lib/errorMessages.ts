@@ -288,6 +288,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   "purchase-receipt-stock-missing": serverMessage("De inlevererade varorna finns inte kvar på lagerplatsen."),
   "purchase-receipt-manufacturing-order-locked":
     "Tillverkningsordern som legoraden hör till är inte längre öppen — inleveransen kan inte ångras.",
+  // Produktionsplanering (Flytta / Lås upp)
+  "operation-not-found": "Operationen finns inte — ladda om beläggningen.",
+  "operation-not-plannable": serverMessage("Operationen kan inte planeras — den är klar, en legooperation, utan tid eller ordern är inte öppen."),
   "mo-report-time-locked": "Stämplingens tid ligger i en låst löneperiod — rapporteringen kan inte ångras.",
   "manufacturing-order-has-reports": "Ordern har rapporteringar — ångra dem först under Rapporteringar.",
   "manufacturing-order-stamped-in": "Någon är instämplad på ordern — stämpla ut först.",

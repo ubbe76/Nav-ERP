@@ -302,9 +302,55 @@ export const moOperations = pgTable(
     setupPrice: numeric("setup_price", { precision: 12, scale: 2 }),
     unitPrice: numeric("unit_price", { precision: 12, scale: 4 }),
     showNetWeight: boolean("show_net_weight").notNull().default(false),
+    // --- Produktionsplanering: the operation's planned weeks (planerad
+    // vecka). Mirrors of its allocation in mo_operation_plan_weeks — start
+    // = min(week_monday), end = max(week_monday) — kept in step by the ONE
+    // writer, writeOperationPlans in planning.repository.ts. Null = unplanned
+    // (older orders, lego, 0 minutes, beyond the horizon): its load counts in
+    // the due date's week as before. plan_locked = hand-moved (Flytta);
+    // Planera never touches it. planned_at = the run that planned it. ---
+    plannedStartWeek: date("planned_start_week"),
+    plannedEndWeek: date("planned_end_week"),
+    planLocked: boolean("plan_locked").notNull().default(false),
+    plannedAt: timestamp("planned_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique().on(table.manufacturingOrderId, table.sequenceNo)]
+  (table) => [
+    unique().on(table.manufacturingOrderId, table.sequenceNo),
+    // Both weeks or neither, start ≤ end, both Mondays.
+    check(
+      "mo_operations_plan_weeks",
+      sql`(${table.plannedStartWeek} is null) = (${table.plannedEndWeek} is null) and (${table.plannedStartWeek} is null or (${table.plannedStartWeek} <= ${table.plannedEndWeek} and extract(isodow from ${table.plannedStartWeek}) = 1 and extract(isodow from ${table.plannedEndWeek}) = 1))`
+    ),
+    // A lock without a plan is meaningless.
+    check("mo_operations_plan_locked", sql`not ${table.planLocked} or ${table.plannedStartWeek} is not null`),
+    // The terminal's sort and the TO list read by start week.
+    index("idx_mo_operations_planned_start").on(table.plannedStartWeek),
+  ]
+);
+
+// Produktionsplanering: an operation's allocation — the minutes planned per
+// ISO week (identified by its Monday), ascending. The sum at planning time is
+// the operation's remaining time; the matrix fills the remaining time into
+// these weeks from the back (remainingByPlannedWeeks). Only
+// writeOperationPlans writes here (DELETE + INSERT per operation, in the same
+// statement batch that sets the mirror columns above).
+export const moOperationPlanWeeks = pgTable(
+  "mo_operation_plan_weeks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    moOperationId: uuid("mo_operation_id")
+      .notNull()
+      .references(() => moOperations.id, { onDelete: "cascade" }),
+    weekMonday: date("week_monday").notNull(),
+    minutes: numeric("minutes", { precision: 10, scale: 2 }).notNull(),
+  },
+  (table) => [
+    unique("mo_operation_plan_weeks_operation_week").on(table.moOperationId, table.weekMonday),
+    index("idx_mo_operation_plan_weeks_week").on(table.weekMonday),
+    check("mo_operation_plan_weeks_monday", sql`extract(isodow from ${table.weekMonday}) = 1`),
+    check("mo_operation_plan_weeks_minutes", sql`${table.minutes} > 0`),
+  ]
 );
 
 // One row per scrap report on an operation — quantity, mandatory reason and

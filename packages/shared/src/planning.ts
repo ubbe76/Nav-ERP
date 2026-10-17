@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { orderRowConfigurationInputSchema } from "./configurator.js";
 import { listQuerySchema } from "./list.js";
+import { businessDateSchema } from "./business-date.js";
 
 // Behovsberäkning (MRP light) — query and order-creation schemas. The
 // requirements list itself is fully derived (never stored), so there is no
@@ -97,3 +98,18 @@ export const deliveryTimeCheckSchema = z
     path: ["rows"],
   });
 export type DeliveryTimeCheckRequest = z.infer<typeof deliveryTimeCheckSchema>;
+
+// Produktionsplanering: a week is identified by its Monday (YYYY-MM-DD).
+// The date arithmetic is UTC on purpose — the Monday is a calendar date the
+// client took from the API's own `weeks[].monday`, never a local Date.
+export const isMonday = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay() === 1;
+export const planWeekSchema = businessDateSchema.refine(isMonday, { message: "week must be a Monday" });
+
+// POST /planning/operations/:opId/move — Flytta: the operation starts in
+// weekMonday (whole-week capacity, overload allowed) and is locked; with
+// moveFollowing the TO's later unlocked operations are replanned after it.
+export const moveOperationSchema = z.object({
+  weekMonday: planWeekSchema,
+  moveFollowing: z.boolean().default(true),
+});
+export type MoveOperationInput = z.infer<typeof moveOperationSchema>;

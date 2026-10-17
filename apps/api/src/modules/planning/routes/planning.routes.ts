@@ -5,6 +5,7 @@ import {
   deliveryTimeCheckSchema,
   dueDateSuggestionQuerySchema,
   listRequirementsQuerySchema,
+  moveOperationSchema,
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { requirementsExportColumns } from "../service/export-columns.js";
@@ -13,6 +14,8 @@ import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   CustomerNotFoundError,
+  OperationNotFoundError,
+  OperationNotPlannableError,
   SalesOrderNotFoundError,
   SalesOrderNotOpenError,
   type PlanningService,
@@ -88,6 +91,34 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
   app.get("/planning/capacity", async (req) => {
     const query = capacityQuerySchema.parse(req.query);
     return service.getCapacity(query);
+  });
+
+  // Produktionsplanering — the three plan writes, each one transaction under
+  // the production_plan lock. Module default: write = tillverkning.
+  // Planera: every open TO replanned on free capacity, hand-moved weeks kept.
+  app.post("/planning/plan", async (req) => service.planProductionRun(req.user!.id));
+
+  // Flytta: start the operation in a chosen week (locked); the TO's later
+  // unlocked operations follow when moveFollowing is set.
+  app.post<{ Params: { opId: string } }>("/planning/operations/:opId/move", async (req, reply) => {
+    const input = moveOperationSchema.parse(req.body);
+    try {
+      return await service.moveOperation(req.params.opId, input, req.user!.id);
+    } catch (err) {
+      if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Lås upp: the weeks stay until the next Planera. Idempotent.
+  app.post<{ Params: { opId: string } }>("/planning/operations/:opId/unlock", async (req, reply) => {
+    try {
+      return await service.unlockOperation(req.params.opId, req.user!.id);
+    } catch (err) {
+      if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
   });
 
   // Order proposals -> real orders: one draft IO per primary supplier plus

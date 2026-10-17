@@ -28,6 +28,8 @@ import type {
 // runs inside the report transactions; the mode is read here, outside them.
 import { MaterialShortageError, type MaterialShortageCheck } from "./material-shortage.js";
 import { computeReadiness, type Readiness, type ReadinessResult } from "./terminal-readiness.js";
+import type { ManufacturingPlanReader } from "../../planning/service/planning.service.js";
+import type { PlannedWeek } from "../../planning/service/capacity-calc.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
@@ -386,6 +388,10 @@ export interface TerminalOperation {
   quantityCompleted: string | null;
   quantityScrapped: string;
   dueDate: string | null;
+  // Produktionsplanering: the operation's planned weeks (Mondays), null when
+  // unplanned — the terminal sorts on the start week.
+  plannedStartWeek: string | null;
+  plannedEndWeek: string | null;
   readiness: Readiness;
   // What can be worked on per the readiness rule (terminal-readiness.ts).
   available: string;
@@ -419,7 +425,12 @@ export function createManufacturingService(
   periodLocks?: PeriodLockChecker,
   // Materialbrist vid rapportering — optional for the same reason: omitted
   // means mode "none", exactly what every report did before the setting.
-  settings?: MaterialShortageSettingsReader
+  settings?: MaterialShortageSettingsReader,
+  // Produktionsplanering: plans a new TO inside its create transaction and
+  // summarises the plan for the list — bound late in app.ts (the planning
+  // service is built after this one). Omitted: TOs are created unplanned and
+  // the list carries nulls, exactly as before the plan existed.
+  planning?: ManufacturingPlanReader
 ) {
   // The check every drawing report runs with: the configured mode and the
   // caller's override flag (meaningful in "warn" only).
@@ -497,6 +508,97 @@ export function createManufacturingService(
         userId,
       });
     }
+  }
+
+  // What createManufacturingOrder validates and derives BEFORE the create
+  // transaction (a plain committed read, not part of the transaction — same
+  // "validate first" shape as every other guard in this file): the linked
+  // KO row, the article's rounding/template mode and a beställningsvara's
+  // derived structure. Shared by the Tx variant.
+  async function prepareCreate(input: CreateManufacturingOrderInput) {
+    let articleId = input.articleId;
+    let linkedSalesOrderId: string | undefined;
+    let linkedRow: Awaited<ReturnType<SalesOrderLinkReader["findRowForManufacturing"]>> = null;
+
+    if (input.salesOrderRowId) {
+      const row = await salesOrders.findRowForManufacturing(input.salesOrderRowId);
+      if (!row) throw new LinkedRowNotFoundError(input.salesOrderRowId);
+      if (input.articleId && input.articleId !== row.articleId) throw new LinkedRowArticleMismatchError();
+      if (row.articleType !== "manufactured") throw new LinkedRowNotManufacturedError();
+      if (row.orderStatus !== "confirmed" && row.orderStatus !== "in_production") {
+        throw new LinkedOrderStatusError(row.orderStatus);
+      }
+      articleId = row.articleId;
+      linkedSalesOrderId = row.salesOrderId;
+      linkedRow = row;
+    }
+
+    // Avrundning: the TO quantity (always in the base unit) is rounded up
+    // to the article's step — the same roundUpToMultiple behovsberäkningen
+    // applies to its proposals, so a planned TO matches its proposal.
+    // createFromSalesOrderRow delegates here and inherits it.
+    const article = await articleFiles.getArticle(articleId!);
+    // Produktkonfigurator: a template in mode variants never gets a TO —
+    // also for the KO row's Skapa TO on a row that predates the mode.
+    if (article) assertOrderableArticle(article);
+    const quantity = roundUpToMultiple(input.quantity, article?.rounding);
+
+    // Konfigurator 4c: a beställningsvara's TO carries its derived structure
+    // from creation. With a sales order row the ROW owns the choices; without
+    // one (Ny tillverkningsorder) the body does. The derivation runs here,
+    // BEFORE the repo's transaction (never inside another module's tx) —
+    // the tx only re-checks the row's key under the row lock.
+    let configured: Parameters<ManufacturingRepository["createManufacturingOrder"]>[3];
+    if (article?.configuratorMode === "to_order") {
+      if (input.salesOrderRowId && input.configuration) throw new ConfigurationNotAllowedError(article.articleNumber);
+      const rowConfiguration = linkedRow?.configuration ?? null;
+      if (input.salesOrderRowId && !rowConfiguration) throw new ConfigurationRequiredError(article.articleNumber);
+      if (!input.salesOrderRowId && !input.configuration) throw new ConfigurationRequiredError(article.articleNumber);
+      if (!configuredStructure) throw new Error("ConfiguredStructureReader not wired");
+      const selection = rowConfiguration ? selectionFromEntries(rowConfiguration.selection) : input.configuration!.selection;
+      const structure = await configuredStructure(articleId!, selection, quantity);
+      if (!structure.valid || structure.key === null) throw new ConfiguratorInvalidConfigurationError(structure.errors);
+      configured = {
+        configuration: {
+          templateArticleId: articleId!,
+          key: structure.key,
+          // The row's entries are copied as stored (frozen labels, as on the
+          // row's documents); a free TO takes the derivation's own.
+          selection: rowConfiguration ? rowConfiguration.selection : structure.selection,
+          cost: {
+            manufacturingCostPerUnit: structure.cost?.manufacturingCostPerUnit ?? null,
+            calculatedAt: new Date().toISOString(),
+          },
+        },
+        operations: structure.operations,
+        materials: structure.materials,
+        // The key is canonical for the choices, so an unchanged row yields
+        // the same key. A template change that alters the key for the same
+        // choices (a new default, say) is refused the same way — the TO is
+        // never built on other choices than the row's; the user runs Ändra
+        // konfiguration.
+        ...(rowConfiguration && input.salesOrderRowId
+          ? { lockRow: { rowId: input.salesOrderRowId, expectedKey: structure.key, lock: salesOrders.lockRowForManufacturing } }
+          : {}),
+      };
+    } else if (linkedRow?.configuration) {
+      // The row was configured on a beställningsvara whose template has
+      // since left the mode (or lost its template). An ordinary TO would
+      // release on the template's own BOM and silently drop the row's
+      // choices — refuse instead; the user re-plans the row.
+      throw new ConfiguratorNotToOrderModeError();
+    } else if (input.configuration) {
+      throw new ConfigurationNotAllowedError(article?.articleNumber ?? articleId!);
+    }
+
+    return {
+      articleId: articleId!,
+      quantity,
+      linkedSalesOrder: linkedSalesOrderId
+        ? { salesOrderId: linkedSalesOrderId, markInProduction: salesOrders.markInProduction }
+        : undefined,
+      configured,
+    };
   }
 
   return {
@@ -810,90 +912,44 @@ export function createManufacturingService(
     // the repo's create-tx stamps salesOrderRowId and flips the KO to
     // in_production as its last step, atomically with the MO insert.
     async createManufacturingOrder(input: CreateManufacturingOrderInput, createdBy: string | null) {
-      let articleId = input.articleId;
-      let linkedSalesOrderId: string | undefined;
-      let linkedRow: Awaited<ReturnType<SalesOrderLinkReader["findRowForManufacturing"]>> = null;
-
-      if (input.salesOrderRowId) {
-        const row = await salesOrders.findRowForManufacturing(input.salesOrderRowId);
-        if (!row) throw new LinkedRowNotFoundError(input.salesOrderRowId);
-        if (input.articleId && input.articleId !== row.articleId) throw new LinkedRowArticleMismatchError();
-        if (row.articleType !== "manufactured") throw new LinkedRowNotManufacturedError();
-        if (row.orderStatus !== "confirmed" && row.orderStatus !== "in_production") {
-          throw new LinkedOrderStatusError(row.orderStatus);
-        }
-        articleId = row.articleId;
-        linkedSalesOrderId = row.salesOrderId;
-        linkedRow = row;
-      }
-
-      // Avrundning: the TO quantity (always in the base unit) is rounded up
-      // to the article's step — the same roundUpToMultiple behovsberäkningen
-      // applies to its proposals, so a planned TO matches its proposal.
-      // createFromSalesOrderRow delegates here and inherits it.
-      const article = await articleFiles.getArticle(articleId!);
-      // Produktkonfigurator: a template in mode variants never gets a TO —
-      // also for the KO row's Skapa TO on a row that predates the mode.
-      if (article) assertOrderableArticle(article);
-      const quantity = roundUpToMultiple(input.quantity, article?.rounding);
-
-      // Konfigurator 4c: a beställningsvara's TO carries its derived structure
-      // from creation. With a sales order row the ROW owns the choices; without
-      // one (Ny tillverkningsorder) the body does. The derivation runs here,
-      // BEFORE the repo's transaction (never inside another module's tx) —
-      // the tx only re-checks the row's key under the row lock.
-      let configured: Parameters<ManufacturingRepository["createManufacturingOrder"]>[3];
-      if (article?.configuratorMode === "to_order") {
-        if (input.salesOrderRowId && input.configuration) throw new ConfigurationNotAllowedError(article.articleNumber);
-        const rowConfiguration = linkedRow?.configuration ?? null;
-        if (input.salesOrderRowId && !rowConfiguration) throw new ConfigurationRequiredError(article.articleNumber);
-        if (!input.salesOrderRowId && !input.configuration) throw new ConfigurationRequiredError(article.articleNumber);
-        if (!configuredStructure) throw new Error("ConfiguredStructureReader not wired");
-        const selection = rowConfiguration ? selectionFromEntries(rowConfiguration.selection) : input.configuration!.selection;
-        const structure = await configuredStructure(articleId!, selection, quantity);
-        if (!structure.valid || structure.key === null) throw new ConfiguratorInvalidConfigurationError(structure.errors);
-        configured = {
-          configuration: {
-            templateArticleId: articleId!,
-            key: structure.key,
-            // The row's entries are copied as stored (frozen labels, as on the
-            // row's documents); a free TO takes the derivation's own.
-            selection: rowConfiguration ? rowConfiguration.selection : structure.selection,
-            cost: {
-              manufacturingCostPerUnit: structure.cost?.manufacturingCostPerUnit ?? null,
-              calculatedAt: new Date().toISOString(),
-            },
-          },
-          operations: structure.operations,
-          materials: structure.materials,
-          // The key is canonical for the choices, so an unchanged row yields
-          // the same key. A template change that alters the key for the same
-          // choices (a new default, say) is refused the same way — the TO is
-          // never built on other choices than the row's; the user runs Ändra
-          // konfiguration.
-          ...(rowConfiguration && input.salesOrderRowId
-            ? { lockRow: { rowId: input.salesOrderRowId, expectedKey: structure.key, lock: salesOrders.lockRowForManufacturing } }
-            : {}),
-        };
-      } else if (linkedRow?.configuration) {
-        // The row was configured on a beställningsvara whose template has
-        // since left the mode (or lost its template). An ordinary TO would
-        // release on the template's own BOM and silently drop the row's
-        // choices — refuse instead; the user re-plans the row.
-        throw new ConfiguratorNotToOrderModeError();
-      } else if (input.configuration) {
-        throw new ConfigurationNotAllowedError(article?.articleNumber ?? articleId!);
-      }
-
+      const prepared = await prepareCreate(input);
       const result = await repo.createManufacturingOrder(
-        { ...input, articleId: articleId!, quantity },
+        { ...input, articleId: prepared.articleId, quantity: prepared.quantity },
         createdBy,
-        linkedSalesOrderId ? { salesOrderId: linkedSalesOrderId, markInProduction: salesOrders.markInProduction } : undefined,
-        configured
+        prepared.linkedSalesOrder,
+        prepared.configured,
+        planning ? (tx, moId) => planning.planNewOrderInTx(tx, moId) : undefined
       );
       if (!result.ok) throw new RowConfigurationChangedError();
       await audit.log({ entityType: "manufacturing_order", entityId: result.order.orderNumber, action: "released", userId: createdBy });
-      // releaseWarnings: the same shortage warnings Släpp returns.
+      // releaseWarnings: the same shortage warnings Släpp returns, plus the
+      // plan's (horizon, Sen).
+      return { ...result.order, releaseWarnings: result.warnings };
+    },
+
+    // The same inside a caller's transaction (the reservation creates a
+    // whole tree of TOs atomically). The validation and the configurator's
+    // derivation read as plain committed reads, like createManufacturingOrder;
+    // the repository body takes the production_plan lock first. With
+    // `plannedWeeks` (by sequence number) the allocations are written as
+    // given instead of planned by the engine. Logs nothing — the caller
+    // writes its own händelselogg (and "released" per TO if it wants it).
+    async createManufacturingOrderInTx(
+      tx: Tx,
+      input: CreateManufacturingOrderInput,
+      createdBy: string | null,
+      opts: { plannedWeeks?: { sequenceNo: number; weeks: PlannedWeek[] }[] } = {}
+    ) {
+      const prepared = await prepareCreate(input);
+      const result = await repo.createManufacturingOrderInTx(
+        tx,
+        { ...input, articleId: prepared.articleId, quantity: prepared.quantity },
+        createdBy,
+        prepared.linkedSalesOrder,
+        prepared.configured,
+        planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks) : undefined
+      );
+      if (!result.ok) throw new RowConfigurationChangedError();
       return { ...result.order, releaseWarnings: result.warnings };
     },
 
@@ -986,8 +1042,24 @@ export function createManufacturingService(
       return { ...order, salesOrder };
     },
 
+    // Produktionsplanering: each row carries plannedStartWeek/plannedEndWeek
+    // (min/max over its pending operations' planned weeks) and late (Sen)
+    // from the plan — nulls/false without a plan reader or a plan.
     async listManufacturingOrders(query: ListManufacturingOrdersQuery) {
-      return repo.listManufacturingOrders(query);
+      const result = await repo.listManufacturingOrders(query);
+      const summaries = planning ? await planning.orderPlanSummaries(result.rows.map((row) => row.id)) : new Map();
+      return {
+        ...result,
+        rows: result.rows.map((row) => {
+          const summary = summaries.get(row.id);
+          return {
+            ...row,
+            plannedStartWeek: summary?.plannedStartWeek ?? null,
+            plannedEndWeek: summary?.plannedEndWeek ?? null,
+            late: summary?.late ?? false,
+          };
+        }),
+      };
     },
 
     async listMaterialConsumptions(moId: string) {

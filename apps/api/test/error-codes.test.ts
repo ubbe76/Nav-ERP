@@ -1,4 +1,8 @@
-import { SalesOrderNotOpenError } from "../src/modules/planning/service/planning.service.js";
+import {
+  OperationNotFoundError,
+  OperationNotPlannableError,
+  SalesOrderNotOpenError,
+} from "../src/modules/planning/service/planning.service.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
@@ -440,6 +444,8 @@ const cases: Array<[Error, string]> = [
   [new MoReportTimeLockedError("2026-09-30"), ERROR_CODES.MO_REPORT_TIME_LOCKED],
   [new ManufacturingOrderHasReportsError(), ERROR_CODES.MANUFACTURING_ORDER_HAS_REPORTS],
   [new ManufacturingOrderStampedInError(), ERROR_CODES.MANUFACTURING_ORDER_STAMPED_IN],
+  [new OperationNotFoundError("x"), ERROR_CODES.OPERATION_NOT_FOUND],
+  [new OperationNotPlannableError("done"), ERROR_CODES.OPERATION_NOT_PLANNABLE],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

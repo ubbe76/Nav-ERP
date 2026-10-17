@@ -13,6 +13,7 @@ import {
   inquiryRows,
   manufacturingOrders,
   moMaterialConsumptions,
+  moOperationPlanWeeks,
   moOperations,
   productionGroups,
   purchaseOrderRows,
@@ -20,12 +21,14 @@ import {
   routingOperations,
   salesOrderRows,
   salesOrders,
+  stampSessions,
   stockBalances,
   suppliers,
   units,
   weekScheduleDays,
   workCenters,
   type Db,
+  type Tx,
 } from "@navet/db";
 import { computeDayScheduleNetMinutes, type OrderRowConfiguration } from "@navet/shared";
 import type {
@@ -37,7 +40,8 @@ import type {
   SalesOrderStatus,
 } from "../service/requirements-calc.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
-import type { CapacityInput } from "../service/capacity-calc.js";
+import type { CapacityInput, PlannedWeek } from "../service/capacity-calc.js";
+import type { OperationPlan } from "../service/production-plan.js";
 import type { ArticleOverviewInput } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 
@@ -668,11 +672,23 @@ export function createPlanningRepository(db: Db) {
     },
 
     // Beläggning (E2) — one set-based batch; the pure calc owns all rules.
-    // Holidays are only needed inside the visible week horizon.
-    async loadCapacityInput(holidayFrom: string, holidayTo: string): Promise<CapacityInput> {
-      const [workCenterRows, groupRows, operationRows, weekDayRows, dayRows, breakRows, holidayRows] =
+    // Holidays are only needed inside the visible week horizon. `dbc` lets
+    // Planera, Flytta and the planning of a new TO read the load inside
+    // their own transaction, AFTER the production_plan lock (the same
+    // Db | Tx widening as loadDeliveryContext).
+    async loadCapacityInput(
+      holidayFrom: string,
+      holidayTo: string,
+      dbc: Db | Tx = db,
+      // The TO list's plan summary: only these orders' operations (the
+      // calendars are loaded as usual — the finish day needs them).
+      opts: { orderIds?: string[] } = {}
+    ): Promise<CapacityInput> {
+      const openOrders = inArray(manufacturingOrders.status, ["released", "in_progress"]);
+      const orderFilter = opts.orderIds ? and(openOrders, inArray(manufacturingOrders.id, opts.orderIds)) : openOrders;
+      const [workCenterRows, groupRows, operationRows, weekDayRows, dayRows, breakRows, holidayRows, planRows] =
         await Promise.all([
-          db
+          dbc
             .select({
               workCenterId: workCenters.id,
               code: workCenters.code,
@@ -683,12 +699,13 @@ export function createPlanningRepository(db: Db) {
               capacityFactor: workCenters.capacityFactor,
               hoursPerDay: workCenters.hoursPerDay,
               active: workCenters.active,
+              leadTimeDays: workCenters.leadTimeDays,
             })
             .from(workCenters),
-          db
+          dbc
             .select({ productionGroupId: productionGroups.id, code: productionGroups.code, name: productionGroups.name })
             .from(productionGroups),
-          db
+          dbc
             .select({
               moOperationId: moOperations.id,
               manufacturingOrderId: moOperations.manufacturingOrderId,
@@ -704,22 +721,24 @@ export function createPlanningRepository(db: Db) {
               operationStatus: moOperations.status,
               quantityCompleted: moOperations.quantityCompleted,
               quantityScrapped: moOperations.quantityScrapped,
+              planLocked: moOperations.planLocked,
+              plannedAt: moOperations.plannedAt,
             })
             .from(moOperations)
             .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
             .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
-            .where(inArray(manufacturingOrders.status, ["released", "in_progress"])),
-          db
+            .where(orderFilter),
+          dbc
             .select({
               weekScheduleId: weekScheduleDays.weekScheduleId,
               weekday: weekScheduleDays.weekday,
               dayScheduleId: weekScheduleDays.dayScheduleId,
             })
             .from(weekScheduleDays),
-          db
+          dbc
             .select({ id: daySchedules.id, startTime: daySchedules.startTime, endTime: daySchedules.endTime })
             .from(daySchedules),
-          db
+          dbc
             .select({
               dayScheduleId: dayScheduleBreaks.dayScheduleId,
               type: dayScheduleBreaks.type,
@@ -727,11 +746,31 @@ export function createPlanningRepository(db: Db) {
               endTime: dayScheduleBreaks.endTime,
             })
             .from(dayScheduleBreaks),
-          db
+          dbc
             .select({ date: holidays.date, dayScheduleId: holidays.dayScheduleId })
             .from(holidays)
             .where(and(gte(holidays.date, holidayFrom), lte(holidays.date, holidayTo))),
+          // The allocations of every open operation — the same status filter
+          // as the operations, so a plan row never arrives without its row.
+          dbc
+            .select({
+              moOperationId: moOperationPlanWeeks.moOperationId,
+              monday: moOperationPlanWeeks.weekMonday,
+              minutes: moOperationPlanWeeks.minutes,
+            })
+            .from(moOperationPlanWeeks)
+            .innerJoin(moOperations, eq(moOperations.id, moOperationPlanWeeks.moOperationId))
+            .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+            .where(orderFilter)
+            .orderBy(moOperationPlanWeeks.weekMonday),
         ]);
+
+      const plansByOperation = new Map<string, PlannedWeek[]>();
+      for (const row of planRows) {
+        const list = plansByOperation.get(row.moOperationId) ?? [];
+        list.push({ monday: row.monday, minutes: Number(row.minutes) });
+        plansByOperation.set(row.moOperationId, list);
+      }
 
       const breaksBySchedule = new Map<string, { type: "unpaid" | "paid"; startTime: string; endTime: string }[]>();
       for (const row of breakRows) {
@@ -745,6 +784,7 @@ export function createPlanningRepository(db: Db) {
           ...r,
           capacityFactor: Number(r.capacityFactor),
           hoursPerDay: r.hoursPerDay === null ? null : Number(r.hoursPerDay),
+          leadTimeDays: r.leadTimeDays === null ? null : Number(r.leadTimeDays),
         })),
         productionGroups: groupRows,
         operations: operationRows.map((r) => ({
@@ -754,6 +794,8 @@ export function createPlanningRepository(db: Db) {
           runTimePerUnit: Number(r.runTimePerUnit),
           quantityCompleted: r.quantityCompleted === null ? null : Number(r.quantityCompleted),
           quantityScrapped: Number(r.quantityScrapped),
+          plannedWeeks: plansByOperation.get(r.moOperationId) ?? null,
+          plannedAt: r.plannedAt === null ? null : r.plannedAt.toISOString(),
         })),
         weekScheduleDays: weekDayRows,
         daySchedules: dayRows.map((r) => ({
@@ -766,6 +808,91 @@ export function createPlanningRepository(db: Db) {
         })),
         holidays: holidayRows,
       };
+    },
+
+    // --- Produktionsplanering ---------------------------------------------
+
+    // Planera, Flytta and Lås upp each run in one transaction that starts
+    // with the production_plan lock (plan-lock.ts).
+    transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+      return db.transaction(fn);
+    },
+
+    // Påbörjad through the terminal: operations with an open or paused stamp
+    // session (nothing reported yet, but someone is on it).
+    async stampedOperationIds(dbc: Db | Tx = db): Promise<Set<string>> {
+      const rows = await dbc
+        .selectDistinct({ moOperationId: stampSessions.moOperationId })
+        .from(stampSessions)
+        .where(isNull(stampSessions.stoppedAt));
+      return new Set(rows.map((r) => r.moOperationId));
+    },
+
+    // The ONE writer of allocations: replaces each planned operation's weeks
+    // (DELETE + INSERT) and sets the mirror columns from the allocation
+    // (start = first Monday, end = last) and planned_at; `clear` removes the
+    // allocation and the mirror — and the lock, which the CHECK forbids
+    // without a plan (a cleared operation is done, lego, 0 minutes or beyond
+    // the horizon, where a lock means nothing). Runs inside the caller's
+    // transaction, under the production_plan lock.
+    async writeOperationPlans(tx: Tx, write: { plans: OperationPlan[]; clear: string[]; plannedAt: Date }): Promise<void> {
+      const touched = [...new Set([...write.plans.map((p) => p.operationId), ...write.clear])];
+      if (touched.length === 0) return;
+      await tx.delete(moOperationPlanWeeks).where(inArray(moOperationPlanWeeks.moOperationId, touched));
+      const rows = write.plans.flatMap((p) =>
+        p.weeks.map((w) => ({ moOperationId: p.operationId, weekMonday: w.monday, minutes: w.minutes.toFixed(2) }))
+      );
+      if (rows.length > 0) await tx.insert(moOperationPlanWeeks).values(rows);
+      for (const p of write.plans) {
+        await tx
+          .update(moOperations)
+          .set({ plannedStartWeek: p.startWeek, plannedEndWeek: p.endWeek, plannedAt: write.plannedAt })
+          .where(eq(moOperations.id, p.operationId));
+      }
+      if (write.clear.length > 0) {
+        await tx
+          .update(moOperations)
+          .set({ plannedStartWeek: null, plannedEndWeek: null, planLocked: false, plannedAt: write.plannedAt })
+          .where(inArray(moOperations.id, write.clear));
+      }
+    },
+
+    // Flytta / Lås upp: the operation as the plan sees it, with what decides
+    // whether it can be planned (its own status, the resource type, the
+    // order's status). Read under the lock.
+    async planOperation(opId: string, dbc: Db | Tx = db) {
+      const [row] = await dbc
+        .select({
+          moOperationId: moOperations.id,
+          manufacturingOrderId: moOperations.manufacturingOrderId,
+          orderNumber: manufacturingOrders.orderNumber,
+          orderStatus: manufacturingOrders.status,
+          sequenceNo: moOperations.sequenceNo,
+          operationStatus: moOperations.status,
+          workCenterType: workCenters.type,
+          workCenterCode: workCenters.code,
+          plannedStartWeek: moOperations.plannedStartWeek,
+          plannedEndWeek: moOperations.plannedEndWeek,
+          planLocked: moOperations.planLocked,
+        })
+        .from(moOperations)
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
+        .where(eq(moOperations.id, opId));
+      return row ?? null;
+    },
+
+    async setOperationLock(tx: Tx, opId: string, locked: boolean) {
+      const [row] = await tx
+        .update(moOperations)
+        .set({ planLocked: locked })
+        .where(eq(moOperations.id, opId))
+        .returning({
+          plannedStartWeek: moOperations.plannedStartWeek,
+          plannedEndWeek: moOperations.plannedEndWeek,
+          planLocked: moOperations.planLocked,
+        });
+      return row ?? null;
     },
 
     // Order creation only: the staffel is loaded here, not for the whole

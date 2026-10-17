@@ -226,6 +226,9 @@ export const ERROR_CODES = {
   MO_REPORT_TIME_LOCKED: "mo-report-time-locked",
   MANUFACTURING_ORDER_HAS_REPORTS: "manufacturing-order-has-reports",
   MANUFACTURING_ORDER_STAMPED_IN: "manufacturing-order-stamped-in",
+  // Produktionsplanering: Flytta / Lås upp on an operation
+  OPERATION_NOT_FOUND: "operation-not-found",
+  OPERATION_NOT_PLANNABLE: "operation-not-plannable",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

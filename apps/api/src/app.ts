@@ -63,7 +63,7 @@ import { createPlanningRepository } from "./modules/planning/repository/planning
 import { createReportsRepository } from "./modules/reports/repository/reports.repository.js";
 import { createReportsService } from "./modules/reports/service/reports.service.js";
 import { reportsRoutes } from "./modules/reports/routes/reports.routes.js";
-import { createPlanningService } from "./modules/planning/service/planning.service.js";
+import { createPlanningService, type ManufacturingPlanReader } from "./modules/planning/service/planning.service.js";
 import { planningRoutes } from "./modules/planning/routes/planning.routes.js";
 import { createPayrollService } from "./modules/payroll/service/payroll.service.js";
 import { createPeriodLockChecker } from "./modules/payroll/service/period-lock.js";
@@ -292,6 +292,14 @@ export function buildApp(database: Db = db) {
   // manufacturing too, whose Ångra rapportering removes a stamp's time report.
   const payrollRepository = createPayrollRepository(database);
   const periodLockChecker = createPeriodLockChecker(payrollRepository);
+  // Produktionsplanering: a new TO is planned inside its create transaction
+  // by the planning service, which is built after manufacturing — bound
+  // late like configuredStructureRef.
+  const planReaderRef: { current: ManufacturingPlanReader | null } = { current: null };
+  const planReader: ManufacturingPlanReader = {
+    planNewOrderInTx: (tx, moId, given) => planReaderRef.current!.planNewOrderInTx(tx, moId, given),
+    orderPlanSummaries: (ids) => planReaderRef.current!.orderPlanSummaries(ids),
+  };
   const manufacturingService = createManufacturingService(
     createManufacturingRepository(database),
     documentPdfService,
@@ -307,7 +315,8 @@ export function buildApp(database: Db = db) {
     configuredStructureReader,
     periodLockChecker,
     // Materialbrist vid rapportering (manufacturing_material_shortage).
-    systemService
+    systemService,
+    planReader
   );
   const purchaseService = createPurchaseService(
     createPurchaseRepository(database),
@@ -464,7 +473,9 @@ export function buildApp(database: Db = db) {
     // Konfigurator 4c: the configured KO rows' material cascade — the same
     // late-bound reader the manufacturing service derives TO structure with.
     configuredStructure: configuredStructureReader,
+    audit: auditRepository,
   });
+  planReaderRef.current = planningService;
   // Rapporter (F1) — read-only derived reports, admin-only in the routes.
   // costingService supplies the self cost the margin report measures against.
   const reportsService = createReportsService(createReportsRepository(database), costingService);

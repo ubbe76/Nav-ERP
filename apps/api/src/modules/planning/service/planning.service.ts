@@ -4,8 +4,10 @@ import type {
   CreatePlanningOrdersInput,
   DeliveryTimeCheckRequest,
   ListRequirementsQuery,
+  MoveOperationInput,
   Paged,
 } from "@navet/shared";
+import type { Tx } from "@navet/db";
 import { roundUpToMultiple } from "@navet/shared";
 import type { PlanningRepository } from "../repository/planning.repository.js";
 import {
@@ -16,9 +18,22 @@ import {
   type RequirementRow,
   type RequirementsInput,
 } from "./requirements-calc.js";
-import { capacityHorizon, computeCapacity, type CapacityResult } from "./capacity-calc.js";
+import {
+  buildScheduleLookups,
+  capacityHorizon,
+  computeCapacity,
+  orderPlanStatus,
+  remainingOperationMinutes,
+  type CapacityInput,
+  type CapacityOperationRow,
+  type CapacityResult,
+  type PlannedWeek,
+} from "./capacity-calc.js";
 import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput } from "./article-overview.js";
-import { PLAN_HORIZON_WEEKS } from "./capacity-book.js";
+import { PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./capacity-book.js";
+import { planProduction, type OperationPlan, type PlanOperation, type PlanOrder, type PlanWarning } from "./production-plan.js";
+import { lockProductionPlan } from "../repository/plan-lock.js";
+import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import {
   checkDeliveryTime,
   type DeliveryTimeCheckResult,
@@ -89,6 +104,70 @@ export class SalesOrderNotOpenError extends Error {
 // The statuses Leveranstidskontroll accepts — the same set the order card's
 // header edits allow (quote/confirmed/in_production).
 const OPEN_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["quote", "confirmed", "in_production"]);
+
+// Produktionsplanering: Flytta / Lås upp on an operation that does not exist.
+export class OperationNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Operation ${id} not found`);
+    this.name = "OperationNotFoundError";
+  }
+}
+
+// Flytta on an operation the plan cannot place: done, lego, 0 minutes, or
+// its order is not released/in progress. 409.
+export class OperationNotPlannableError extends Error {
+  constructor(public reason: "done" | "subcontract" | "no_time" | "order_not_open") {
+    super(
+      reason === "done"
+        ? "Operationen är klar och kan inte flyttas"
+        : reason === "subcontract"
+          ? "En legooperation planeras inte på egen kapacitet"
+          : reason === "no_time"
+            ? "Operationen har ingen återstående tid att planera"
+            : "Tillverkningsordern är inte frisläppt eller pågående"
+    );
+    this.name = "OperationNotPlannableError";
+  }
+}
+
+// What Planera, Flytta and the planning of a new TO answer with.
+export interface PlanRunResult {
+  plannedAt: string;
+  orders: number;
+  operations: number;
+  warnings: PlanWarning[];
+}
+
+export interface PlannedOperationWeeks {
+  plannedStartWeek: string | null;
+  plannedEndWeek: string | null;
+  planLocked: boolean;
+}
+
+export interface MoveOperationResult {
+  operation: PlannedOperationWeeks;
+  following: { moOperationId: string; sequenceNo: number; plannedStartWeek: string | null; plannedEndWeek: string | null }[];
+  warnings: PlanWarning[];
+}
+
+// The TO list's plan summary per order (min/max over the pending
+// operations' planned weeks, Sen from the plan walk).
+export interface OrderPlanSummary {
+  plannedStartWeek: string | null;
+  plannedEndWeek: string | null;
+  late: boolean;
+}
+
+// What the manufacturing module needs from the plan (bound late in app.ts,
+// like the configurator's readers): a new TO's operations planned inside
+// its own create transaction, and the list's summaries.
+export interface ManufacturingPlanReader {
+  planNewOrderInTx(tx: Tx, manufacturingOrderId: string, given?: { sequenceNo: number; weeks: PlannedWeek[] }[]): Promise<string[]>;
+  orderPlanSummaries(orderIds: string[]): Promise<Map<string, OrderPlanSummary>>;
+}
+
+const OPEN_MO_STATUSES: ReadonlySet<string> = new Set(["released", "in_progress"]);
+const hasPlan = (op: CapacityOperationRow) => !!op.plannedWeeks && op.plannedWeeks.length > 0;
 
 export class ConfigurationRequiredError extends Error {
   constructor(public articleNumber: string) {
@@ -188,9 +267,13 @@ export function createPlanningService(
     now?: () => number;
     // Today as a Stockholm day; the unit tests pin it.
     today?: () => string;
+    // Produktionsplanering's händelselogg (Planera, Flytta, Lås upp) —
+    // optional for the fixtures, app.ts passes the real one.
+    audit?: AuditWriter;
   }
 ) {
   const cacheMs = deps.requirementsCacheMs ?? REQUIREMENTS_CACHE_MS;
+  const audit: AuditWriter = deps.audit ?? { async log() {} };
   const now = deps.now ?? Date.now;
   const todayFn = deps.today ?? stockholmToday;
   // Shared by every user — the result doesn't depend on who asks. The
@@ -356,6 +439,137 @@ export function createPlanningService(
       });
     }
     return cache!;
+  }
+
+  // --- Produktionsplanering ----------------------------------------------
+  // The plan's world: every open operation with its allocation, the
+  // resources as the book sees them (lead time included), the calendars and
+  // the full-day holidays out to the horizon. Read through `dbc` so a run
+  // reads AFTER the production_plan lock in its own transaction.
+  async function loadPlanWorld(dbc?: Tx) {
+    const today = todayFn();
+    const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
+    const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc);
+    return planWorldOf(capacity, today);
+  }
+  function planWorldOf(capacity: CapacityInput, today: string) {
+    const workCenters = new Map<string, PlanWorkCenter>(
+      capacity.workCenters.map((w) => [
+        w.workCenterId,
+        {
+          workCenterId: w.workCenterId,
+          code: w.code,
+          name: w.name,
+          type: w.type,
+          weekScheduleId: w.weekScheduleId,
+          hoursPerDay: w.hoursPerDay,
+          capacityFactor: w.capacityFactor,
+          leadTimeDays: w.leadTimeDays ?? null,
+        },
+      ])
+    );
+    return {
+      today,
+      offDays: new Set(capacity.holidays.filter((h) => h.dayScheduleId === null).map((h) => h.date)) as ReadonlySet<string>,
+      workCenters,
+      schedule: { weekScheduleDays: capacity.weekScheduleDays, daySchedules: capacity.daySchedules, holidays: capacity.holidays },
+      operations: capacity.operations,
+    };
+  }
+  // Påbörjad: something reported, or an open/paused stamp session.
+  const startedOf = (op: CapacityOperationRow, stamped: ReadonlySet<string>) =>
+    (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0 || stamped.has(op.moOperationId);
+  function groupOrders(operations: CapacityOperationRow[], stamped: ReadonlySet<string>): PlanOrder[] {
+    const byOrder = new Map<string, PlanOrder>();
+    for (const op of operations) {
+      const order = byOrder.get(op.manufacturingOrderId) ?? {
+        id: op.manufacturingOrderId,
+        orderNumber: op.orderNumber,
+        dueDate: op.dueDate,
+        operations: [],
+      };
+      order.operations.push({ ...op, started: startedOf(op, stamped) });
+      byOrder.set(op.manufacturingOrderId, order);
+    }
+    return [...byOrder.values()];
+  }
+
+  // A new TO's operations planned in its own create transaction (the caller
+  // — createManufacturingOrderInTx — already holds the production_plan
+  // lock; the advisory lock is reentrant, so taking it again is harmless and
+  // keeps this safe to call on its own). Every other open operation is
+  // existing load. With `given` (the reservation) the allocations are
+  // written as they are, keyed by sequence number — no engine run. Returns
+  // the warnings as texts for releaseWarnings: the horizon ("not planned")
+  // and Sen, never a refusal.
+  async function planNewOrderInTx(
+    tx: Tx,
+    manufacturingOrderId: string,
+    given?: { sequenceNo: number; weeks: PlannedWeek[] }[]
+  ): Promise<string[]> {
+    await lockProductionPlan(tx);
+    const world = await loadPlanWorld(tx);
+    const own = world.operations.filter((o) => o.manufacturingOrderId === manufacturingOrderId);
+    if (own.length === 0) return [];
+    const plannedAt = new Date();
+    if (given) {
+      const bySeq = new Map(own.map((o) => [o.sequenceNo, o]));
+      const plans: OperationPlan[] = [];
+      const clear: string[] = [];
+      for (const g of given) {
+        const op = bySeq.get(g.sequenceNo);
+        if (!op) continue;
+        const weeks = [...g.weeks].sort((a, b) => (a.monday < b.monday ? -1 : a.monday > b.monday ? 1 : 0));
+        if (weeks.length === 0) clear.push(op.moOperationId);
+        else {
+          plans.push({
+            operationId: op.moOperationId,
+            manufacturingOrderId,
+            weeks,
+            startWeek: weeks[0]!.monday,
+            endWeek: weeks[weeks.length - 1]!.monday,
+          });
+        }
+      }
+      await repo.writeOperationPlans(tx, { plans, clear, plannedAt });
+      return [];
+    }
+    const others = world.operations.filter((o) => o.manufacturingOrderId !== manufacturingOrderId);
+    const result = planProduction({
+      today: world.today,
+      offDays: world.offDays,
+      workCenters: world.workCenters,
+      schedule: world.schedule,
+      orders: [{ id: manufacturingOrderId, orderNumber: own[0]!.orderNumber, dueDate: own[0]!.dueDate, operations: own.map((o) => ({ ...o, started: false })) }],
+      existingOperations: others,
+    });
+    await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt });
+    return result.warnings.filter((w) => w.kind === "horizon" || w.kind === "late").map((w) => w.message);
+  }
+
+  async function orderPlanSummaries(orderIds: string[]): Promise<Map<string, OrderPlanSummary>> {
+    const summaries = new Map<string, OrderPlanSummary>();
+    if (orderIds.length === 0) return summaries;
+    const today = todayFn();
+    const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
+    const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, undefined, { orderIds });
+    const world = planWorldOf(capacity, today);
+    const lookups = buildScheduleLookups(capacity.weekScheduleDays, capacity.daySchedules, capacity.holidays);
+    const byOrder = new Map<string, CapacityOperationRow[]>();
+    for (const op of capacity.operations) byOrder.set(op.manufacturingOrderId, [...(byOrder.get(op.manufacturingOrderId) ?? []), op]);
+    for (const [orderId, ops] of byOrder) {
+      const status = orderPlanStatus(ops, { today, offDays: world.offDays, lookups, workCenters: world.workCenters });
+      const mondays = ops
+        .filter((op) => op.operationStatus === "pending" && hasPlan(op))
+        .flatMap((op) => op.plannedWeeks!.map((w) => w.monday))
+        .sort();
+      summaries.set(orderId, {
+        plannedStartWeek: mondays[0] ?? null,
+        plannedEndWeek: mondays[mondays.length - 1] ?? null,
+        late: status.late,
+      });
+    }
+    return summaries;
   }
 
   return {
@@ -596,14 +810,152 @@ export function createPlanningService(
       const today = todayFn();
       // Same horizon authority as the calc itself — the holiday query bounds
       // can never drift from the week columns.
-      const { firstMonday, horizonSunday } = capacityHorizon(today, query.weeks);
-      const input = await repo.loadCapacityInput(firstMonday, horizonSunday);
-      const result = computeCapacity(input, { today, weeks: query.weeks });
+      const { firstMonday } = capacityHorizon(today, query.weeks);
+      // Holidays out to the plan horizon, not just the visible weeks: Sen
+      // walks a planned operation's finish day (and a lego lead time) past
+      // the matrix's last column.
+      const input = await repo.loadCapacityInput(firstMonday, addDays(today, PLAN_HORIZON_WEEKS * 7 + 14));
+      const offDays = new Set(input.holidays.filter((h) => h.dayScheduleId === null).map((h) => h.date));
+      const result = computeCapacity(input, { today, weeks: query.weeks, offDays });
       if (query.productionGroupId) {
         result.groups = result.groups.filter((g) => g.productionGroupId === query.productionGroupId);
       }
       return result;
     },
+
+    // Planera — every open TO's pending operations placed on free capacity
+    // in priority order (production-plan.ts). One transaction under the
+    // production_plan lock; the load is read after it.
+    async planProductionRun(userId: string | null): Promise<PlanRunResult> {
+      const run = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const [world, stamped] = [await loadPlanWorld(tx), await repo.stampedOperationIds(tx)];
+        const orders = groupOrders(world.operations, stamped);
+        const result = planProduction({
+          today: world.today,
+          offDays: world.offDays,
+          workCenters: world.workCenters,
+          schedule: world.schedule,
+          orders,
+        });
+        const plannedAt = new Date();
+        await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt });
+        return { plannedAt: plannedAt.toISOString(), orders: orders.length, operations: result.plans.length, warnings: result.warnings };
+      });
+      await audit.log({
+        entityType: "production_plan",
+        entityId: null,
+        action: "planned",
+        detail: { orders: run.orders, operations: run.operations, warnings: run.warnings },
+        userId,
+      });
+      return run;
+    },
+
+    // Flytta — the operation starts in weekMonday (whole-week capacity,
+    // overload allowed) and is locked. The TO's earlier operations and, without
+    // moveFollowing, its later ones keep their weeks (fixed load, like a
+    // lock); with moveFollowing the later unlocked ones are replanned from
+    // the new finish week. Everything else is existing load.
+    async moveOperation(opId: string, input: MoveOperationInput, userId: string | null): Promise<MoveOperationResult> {
+      const moved = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const op = await repo.planOperation(opId, tx);
+        if (!op) throw new OperationNotFoundError(opId);
+        if (op.operationStatus === "done") throw new OperationNotPlannableError("done");
+        if (op.workCenterType === "subcontract") throw new OperationNotPlannableError("subcontract");
+        if (!OPEN_MO_STATUSES.has(op.orderStatus)) throw new OperationNotPlannableError("order_not_open");
+        const world = await loadPlanWorld(tx);
+        const target = world.operations.find((o) => o.moOperationId === opId);
+        if (!target) throw new OperationNotPlannableError("order_not_open");
+        if (remainingOperationMinutes(target) <= 0) throw new OperationNotPlannableError("no_time");
+        const stamped = await repo.stampedOperationIds(tx);
+
+        const orderOps: PlanOperation[] = [];
+        const fixed: CapacityOperationRow[] = [];
+        for (const o of world.operations.filter((o) => o.manufacturingOrderId === op.manufacturingOrderId)) {
+          const started = startedOf(o, stamped);
+          const replan =
+            o.moOperationId === opId ||
+            o.operationStatus === "done" ||
+            (o.sequenceNo > op.sequenceNo && input.moveFollowing && !o.planLocked);
+          if (replan) orderOps.push({ ...o, started });
+          // Kept as it is: planned ⇒ a (virtual) lock, so the engine treats it
+          // as fixed load and the sequence floor; unplanned ⇒ its due-date
+          // bucket, untouched.
+          else if (hasPlan(o)) orderOps.push({ ...o, started, planLocked: true });
+          else fixed.push(o);
+        }
+        const result = planProduction({
+          today: world.today,
+          offDays: world.offDays,
+          workCenters: world.workCenters,
+          schedule: world.schedule,
+          orders: [{ id: op.manufacturingOrderId, orderNumber: op.orderNumber, dueDate: target.dueDate, operations: orderOps }],
+          existingOperations: [...world.operations.filter((o) => o.manufacturingOrderId !== op.manufacturingOrderId), ...fixed],
+          forceStart: { operationId: opId, weekMonday: input.weekMonday },
+        });
+        await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt: new Date() });
+        // Locked only when it got a plan — beyond the horizon it is cleared
+        // (the CHECK forbids a lock without weeks) and the warning says so.
+        const placed = result.plans.some((p) => p.operationId === opId);
+        const row = placed
+          ? (await repo.setOperationLock(tx, opId, true))!
+          : { plannedStartWeek: null, plannedEndWeek: null, planLocked: false };
+        const seqOf = new Map(orderOps.map((o) => [o.moOperationId, o.sequenceNo]));
+        const following = [
+          ...result.plans
+            .filter((p) => p.operationId !== opId)
+            .map((p) => ({ moOperationId: p.operationId, sequenceNo: seqOf.get(p.operationId)!, plannedStartWeek: p.startWeek, plannedEndWeek: p.endWeek })),
+          ...result.clear
+            .filter((id) => id !== opId && (seqOf.get(id) ?? 0) > op.sequenceNo)
+            .map((id) => ({ moOperationId: id, sequenceNo: seqOf.get(id)!, plannedStartWeek: null, plannedEndWeek: null })),
+        ].sort((a, b) => a.sequenceNo - b.sequenceNo);
+        return { op, operation: row, following, warnings: result.warnings };
+      });
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: moved.op.orderNumber,
+        action: "operation_moved",
+        detail: {
+          moOperationId: opId,
+          sequenceNo: moved.op.sequenceNo,
+          workCenterCode: moved.op.workCenterCode,
+          fromWeek: moved.op.plannedStartWeek,
+          toWeek: input.weekMonday,
+          plannedStartWeek: moved.operation.plannedStartWeek,
+          plannedEndWeek: moved.operation.plannedEndWeek,
+          moveFollowing: input.moveFollowing,
+          warnings: moved.warnings,
+        },
+        userId,
+      });
+      return { operation: moved.operation, following: moved.following, warnings: moved.warnings };
+    },
+
+    // Lås upp — the allocation stays until the next Planera. Idempotent.
+    async unlockOperation(opId: string, userId: string | null): Promise<{ operation: PlannedOperationWeeks }> {
+      const unlocked = await repo.transaction(async (tx) => {
+        await lockProductionPlan(tx);
+        const op = await repo.planOperation(opId, tx);
+        if (!op) throw new OperationNotFoundError(opId);
+        const row = (await repo.setOperationLock(tx, opId, false))!;
+        return { op, row };
+      });
+      if (unlocked.op.planLocked) {
+        await audit.log({
+          entityType: "manufacturing_order",
+          entityId: unlocked.op.orderNumber,
+          action: "operation_unlocked",
+          detail: { moOperationId: opId, sequenceNo: unlocked.op.sequenceNo, workCenterCode: unlocked.op.workCenterCode },
+          userId,
+        });
+      }
+      return { operation: unlocked.row };
+    },
+
+    planNewOrderInTx,
+    orderPlanSummaries,
 
     // One draft IO per primary supplier (Monitor-style grouping) plus one
     // planned TO per manufactured article. No batch transaction on purpose:

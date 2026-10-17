@@ -869,6 +869,13 @@
       "when": 1792231806282,
       "tag": "0123_work_center_hours_per_day",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1792246148706,
+      "tag": "0124_production_plan",
+      "breakpoints": true
     }
   ]
 }

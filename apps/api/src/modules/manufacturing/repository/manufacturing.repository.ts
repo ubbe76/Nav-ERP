@@ -48,6 +48,8 @@ import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+// Produktionsplanering: a leaf with only the lock SQL — no module cycle.
+import { lockProductionPlan } from "../../planning/repository/plan-lock.js";
 // Regel 10 — a leaf that imports only the schema, so no module cycle.
 import { closeStampSessionsInTx } from "../../timereport/repository/stamp-close.js";
 // Materialbrist vid rapportering — a leaf like count-guard, called inside
@@ -320,6 +322,31 @@ export interface OperationSummary {
   productionGroupCode: string | null;
   productionGroupName: string | null;
 }
+
+// Konfigurator 4c: a beställningsvara's TO is created WITH its derived
+// structure (written in the same transaction) — the release that follows
+// snapshots nothing for it. lockRow re-checks the row's key under the row
+// lock (row before order, the same order Ändra konfiguration locks in); a
+// mismatch returns "configuration_changed" and writes nothing.
+export interface ConfiguredCreateInput {
+  configuration: ManufacturingOrderConfiguration;
+  operations: ManufacturingOperation[];
+  materials: ManufacturingMaterial[];
+  lockRow?: {
+    rowId: string;
+    expectedKey: string;
+    lock: (tx: Tx, rowId: string) => Promise<{ configurationKey: string | null } | null>;
+  };
+}
+
+// Produktionsplanering: plans the new TO's operations inside the create
+// transaction and returns its warning texts (bound to the planning service
+// in app.ts; absent in fixtures that never read the plan).
+export type NewOrderPlanner = (tx: Tx, manufacturingOrderId: string) => Promise<string[]>;
+
+export type CreateManufacturingOrderOutcome =
+  | { ok: true; order: typeof manufacturingOrders.$inferSelect; warnings: string[] }
+  | { ok: false; reason: "configuration_changed" };
 
 // Finished-goods receipt (inleverans) up to `targetReceived` in total — the
 // one implementation behind both the delinleverans from the last operation
@@ -892,6 +919,8 @@ export function createManufacturingRepository(db: Db) {
           quantityCompleted: moOperations.quantityCompleted,
           quantityScrapped: moOperations.quantityScrapped,
           packingInstructions: moOperations.packingInstructions,
+          plannedStartWeek: moOperations.plannedStartWeek,
+          plannedEndWeek: moOperations.plannedEndWeek,
         })
         .from(moOperations)
         .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
@@ -1230,76 +1259,85 @@ export function createManufacturingRepository(db: Db) {
       input: CreateManufacturingOrderInput & { articleId: string },
       createdBy: string | null,
       linkedSalesOrder?: { salesOrderId: string; markInProduction: (tx: Tx, salesOrderId: string) => Promise<void> },
-      // Konfigurator 4c: a beställningsvara's TO is created WITH its derived
-      // structure (written here, in the same transaction) — the release that
-      // follows snapshots nothing for it. lockRow re-checks the row's key under the
-      // row lock FIRST (row before order, the same order Ändra konfiguration
-      // locks in); a mismatch returns "configuration_changed" and writes nothing.
-      configured?: {
-        configuration: ManufacturingOrderConfiguration;
-        operations: ManufacturingOperation[];
-        materials: ManufacturingMaterial[];
-        lockRow?: {
-          rowId: string;
-          expectedKey: string;
-          lock: (tx: Tx, rowId: string) => Promise<{ configurationKey: string | null } | null>;
-        };
+      configured?: ConfiguredCreateInput,
+      plan?: NewOrderPlanner
+    ): Promise<CreateManufacturingOrderOutcome> {
+      return db.transaction((tx) => this.createManufacturingOrderInTx(tx, input, createdBy, linkedSalesOrder, configured, plan));
+    },
+
+    // The create transaction's body, Tx-only so the reservation
+    // (Leveranstidskontrollen's Använd datumet) can create a whole tree of
+    // TOs in ONE transaction. Order inside: the production_plan advisory
+    // lock FIRST (before the KO row lock and the order number — the lock
+    // order is always advisory → rows, so a TO created while Planera runs is
+    // either in Planera's reading or planned against Planera's result, never
+    // in between), then the row lock, the number, the insert, the release,
+    // the plan (`plan`, bound to the planning service) and the KO autoflip.
+    async createManufacturingOrderInTx(
+      tx: Tx,
+      input: CreateManufacturingOrderInput & { articleId: string },
+      createdBy: string | null,
+      linkedSalesOrder?: { salesOrderId: string; markInProduction: (tx: Tx, salesOrderId: string) => Promise<void> },
+      // Konfigurator 4c (ConfiguredCreateInput): the row lock is the first
+      // row lock of the transaction, right after the advisory lock.
+      configured?: ConfiguredCreateInput,
+      plan?: NewOrderPlanner
+    ): Promise<CreateManufacturingOrderOutcome> {
+      await lockProductionPlan(tx);
+      if (configured?.lockRow) {
+        const locked = await configured.lockRow.lock(tx, configured.lockRow.rowId);
+        if (!locked || locked.configurationKey !== configured.lockRow.expectedKey) {
+          return { ok: false, reason: "configuration_changed" };
+        }
       }
-    ): Promise<
-      { ok: true; order: typeof manufacturingOrders.$inferSelect; warnings: string[] } | { ok: false; reason: "configuration_changed" }
-    > {
-      return db.transaction(async (tx) => {
-        if (configured?.lockRow) {
-          const locked = await configured.lockRow.lock(tx, configured.lockRow.rowId);
-          if (!locked || locked.configurationKey !== configured.lockRow.expectedKey) {
-            return { ok: false, reason: "configuration_changed" };
-          }
+      const orderNumber = await getNextOrderNumber(tx, "manufacturing_order");
+      const [row] = await tx
+        .insert(manufacturingOrders)
+        .values({
+          orderNumber,
+          articleId: input.articleId,
+          quantity: String(input.quantity),
+          note: input.note,
+          dueDate: input.dueDate ?? null,
+          salesOrderRowId: input.salesOrderRowId,
+          configuration: configured?.configuration ?? null,
+          createdBy,
+        })
+        .returning();
+      if (configured) {
+        // Operations first so the material rows can point at them — the
+        // same shape release writes for a plain TO.
+        const inserted =
+          configured.operations.length > 0
+            ? await tx
+                .insert(moOperations)
+                .values(configured.operations.map((op) => ({ ...op, manufacturingOrderId: row!.id })))
+                .returning()
+            : [];
+        const opIdBySeq = new Map(inserted.map((o) => [o.sequenceNo, o.id]));
+        if (configured.materials.length > 0) {
+          await tx.insert(moMaterialConsumptions).values(
+            configured.materials.map((m) => ({
+              manufacturingOrderId: row!.id,
+              componentArticleId: m.componentArticleId,
+              moOperationId: m.operationSequenceNo === null ? null : opIdBySeq.get(m.operationSequenceNo) ?? null,
+              quantityPlanned: String(Number(m.totalQuantity.toFixed(4))),
+              unitId: m.unitId,
+              unitFactor: m.unitFactor,
+            }))
+          );
         }
-        const orderNumber = await getNextOrderNumber(tx, "manufacturing_order");
-        const [row] = await tx
-          .insert(manufacturingOrders)
-          .values({
-            orderNumber,
-            articleId: input.articleId,
-            quantity: String(input.quantity),
-            note: input.note,
-            dueDate: input.dueDate ?? null,
-            salesOrderRowId: input.salesOrderRowId,
-            configuration: configured?.configuration ?? null,
-            createdBy,
-          })
-          .returning();
-        if (configured) {
-          // Operations first so the material rows can point at them — the
-          // same shape release writes for a plain TO.
-          const inserted =
-            configured.operations.length > 0
-              ? await tx
-                  .insert(moOperations)
-                  .values(configured.operations.map((op) => ({ ...op, manufacturingOrderId: row!.id })))
-                  .returning()
-              : [];
-          const opIdBySeq = new Map(inserted.map((o) => [o.sequenceNo, o.id]));
-          if (configured.materials.length > 0) {
-            await tx.insert(moMaterialConsumptions).values(
-              configured.materials.map((m) => ({
-                manufacturingOrderId: row!.id,
-                componentArticleId: m.componentArticleId,
-                moOperationId: m.operationSequenceNo === null ? null : opIdBySeq.get(m.operationSequenceNo) ?? null,
-                quantityPlanned: String(Number(m.totalQuantity.toFixed(4))),
-                unitId: m.unitId,
-                unitFactor: m.unitFactor,
-              }))
-            );
-          }
-        }
-        // Release at creation: the TO is stampable in the terminal at once.
-        // A configured TO's rows were written above, so release only runs
-        // its shortage check for it.
-        const released = (await releaseInTx(tx, row!.id))!;
-        if (linkedSalesOrder) await linkedSalesOrder.markInProduction(tx, linkedSalesOrder.salesOrderId);
-        return { ok: true, order: released.order, warnings: released.warnings };
-      });
+      }
+      // Release at creation: the TO is stampable in the terminal at once.
+      // A configured TO's rows were written above, so release only runs
+      // its shortage check for it.
+      const released = (await releaseInTx(tx, row!.id))!;
+      // Produktionsplanering: the new TO's operations are planned on free
+      // capacity against every other open operation, in this same
+      // transaction (the horizon only adds a warning, never a refusal).
+      const planWarnings = plan ? await plan(tx, row!.id) : [];
+      if (linkedSalesOrder) await linkedSalesOrder.markInProduction(tx, linkedSalesOrder.salesOrderId);
+      return { ok: true, order: released.order, warnings: [...released.warnings, ...planWarnings] };
     },
 
     // E3 (KO→TO-koppling): coverage ("varav i tillverkning") for a batch of
