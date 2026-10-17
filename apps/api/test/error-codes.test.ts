@@ -1,3 +1,4 @@
+import { SalesOrderNotOpenError } from "../src/modules/planning/service/planning.service.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
@@ -426,6 +427,7 @@ const cases: Array<[Error, string]> = [
   [new ConfiguratorNotPublishedError("63000"), ERROR_CODES.CONFIGURATOR_NOT_PUBLISHED],
   [new ConfigurationRequiredError("63000"), ERROR_CODES.CONFIGURATION_REQUIRED],
   [new ConfigurationNotAllowedError("63000"), ERROR_CODES.CONFIGURATION_NOT_ALLOWED],
+  [new SalesOrderNotOpenError("cancelled"), ERROR_CODES.SALES_ORDER_NOT_OPEN],
   [new RowConfigurationLockedError("x"), ERROR_CODES.ROW_CONFIGURATION_LOCKED],
   [new RowConfigurationChangedError(), ERROR_CODES.ROW_CONFIGURATION_CHANGED],
   [new RowVariantExistsError("63000-B"), ERROR_CODES.ROW_VARIANT_EXISTS],

@@ -209,6 +209,8 @@ export const ERROR_CODES = {
   CONFIGURATOR_NOT_PUBLISHED: "configurator-not-published",
   CONFIGURATION_REQUIRED: "configuration-required",
   CONFIGURATION_NOT_ALLOWED: "configuration-not-allowed",
+  // Leveranstidskontroll on an order that is no longer open.
+  SALES_ORDER_NOT_OPEN: "sales-order-not-open",
   ROW_CONFIGURATION_LOCKED: "row-configuration-locked",
   // Konfigurator 4c: the row was reconfigured while its TO was being created.
   ROW_CONFIGURATION_CHANGED: "row-configuration-changed",

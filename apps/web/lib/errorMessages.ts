@@ -271,6 +271,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "configurator-not-published": "Mallen är inte publicerad för API:t.",
   "configuration-required": serverMessage("Artikeln är en beställningsvara — konfigurera den."),
   "configuration-not-allowed": serverMessage("Artikeln är inte en beställningsvara."),
+  "sales-order-not-open": "Leveranstiden kan bara kontrolleras för en offert, en bekräftad order eller en order under tillverkning.",
   "row-configuration-locked": serverMessage("Konfigurationen kan inte ändras — raden har gått vidare."),
   "row-configuration-changed":
     "Raden konfigurerades om medan tillverkningsordern skapades — kontrollera raden och försök igen, eller använd Ändra konfiguration.",

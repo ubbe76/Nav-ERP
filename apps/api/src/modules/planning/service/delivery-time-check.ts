@@ -1,8 +1,9 @@
 // Leveranstidskontroll — the earliest ship and delivery date for a set of
 // rows (a sales order, the Ny kundorder form or the stand-alone page) from
-// what already exists (stock and open orders after the demands already
-// promised), the lead time on what has to be bought, and free capacity per
-// resource and week for what has to be made, all levels down.
+// what already exists (the projected balance of stock and open orders after
+// the demands already promised — available to promise), the lead time on
+// what has to be bought, and free capacity per resource and week for what
+// has to be made, all levels down.
 //
 // Pure, like capacity-calc.ts and article-overview.ts: the planning service
 // loads flat rows (the overviews are already on ship dates) and this module
@@ -112,7 +113,9 @@ export type DtcStep =
       date: string;
       documentType: ArticleOverviewRow["documentType"];
       documentNumber: string;
-      undated: boolean;
+      undated: boolean; // the order has no date — counted as available t0
+      late: boolean; // the order's date is before t0 — `date` is its own date, the row is ready t0
+      isDraft: boolean; // a draft IO — counted, like the requirements calculation does
     }
   | {
       kind: "purchase";
@@ -163,12 +166,6 @@ export interface DeliveryTimeCheckResult {
   notes: string[];
 }
 
-interface Lot {
-  date: string;
-  quantity: number;
-  source: { kind: "stock" } | { kind: "supply"; documentType: ArticleOverviewRow["documentType"]; documentNumber: string; undated: boolean };
-}
-
 // What a node (an article quantity) resolves to: when it is ready and the
 // critical chain behind that date. readyDate null = it can't be planned.
 interface Resolution {
@@ -188,8 +185,11 @@ const mondayOf = (date: string) => addDays(date, -((new Date(`${date}T00:00:00Z`
 interface RowNotes {
   other: Set<string>;
   unscheduled: Set<string>; // resource codes without a capacity calendar
-  undated: Set<string>; // document numbers
+  undated: Set<string>; // document numbers of undated supply the row counts on
+  late: Set<string>; // document numbers of supply dated before t0 the row counts on
+  draft: Set<string>; // document numbers of draft IOs the row counts on
   noSupplier: Set<string>; // article numbers
+  noPreparation: Set<string>; // made articles without structure and routing
   legoNoLead: Set<string>; // lego resource codes
 }
 
@@ -197,7 +197,10 @@ const newRowNotes = (): RowNotes => ({
   other: new Set(),
   unscheduled: new Set(),
   undated: new Set(),
+  late: new Set(),
+  draft: new Set(),
   noSupplier: new Set(),
+  noPreparation: new Set(),
   legoNoLead: new Set(),
 });
 
@@ -225,12 +228,148 @@ function rowNoteTexts(n: RowNotes): string[] {
       `${swedishList(n.noSupplier)} saknar huvudleverantör — ${many(n.noSupplier) ? "räknade som tillgängliga" : "räknad som tillgänglig"} direkt`
     );
   }
+  if (n.noPreparation.size > 0) {
+    texts.push(
+      `${swedishList(n.noPreparation)} saknar beredning — ${many(n.noPreparation) ? "räknade som tillgängliga" : "räknad som tillgänglig"} direkt`
+    );
+  }
   if (n.undated.size > 0) {
     texts.push(
       `${swedishList(n.undated)} saknar datum — ${many(n.undated) ? "räknade som tillgängliga" : "räknad som tillgänglig"} direkt`
     );
   }
+  if (n.late.size > 0) {
+    texts.push(
+      `${swedishList(n.late)} ${many(n.late) ? "är försenade — räknade som tillgängliga" : "är försenad — räknad som tillgänglig"} direkt`
+    );
+  }
+  if (n.draft.size > 0) {
+    texts.push(
+      `${swedishList(n.draft)} ${many(n.draft) ? "är utkast — räknade som tillgång" : "är ett utkast — räknat som tillgång"}`
+    );
+  }
   return texts;
+}
+
+// --- The pool of one article: available to promise ------------------------
+// Everything the overview knows about the article as dated events on the
+// projected balance: stock (t0), open supply on its date, existing demand
+// on its date (undated demand last, like the overview — it still counts),
+// plus what this check has already taken and the rounding surplus it has
+// created. What the check may take on a day D is the least projected
+// balance on any day from D on — taking it never makes a later promise
+// short. So an existing demand only blocks the supply that actually covers
+// it; stock that a supply arriving before that demand replaces is free now.
+const FAR = "9999-12-31"; // undated demand sorts here
+
+type PoolSource =
+  | { kind: "stock" }
+  | {
+      kind: "supply";
+      documentType: ArticleOverviewRow["documentType"];
+      documentNumber: string;
+      date: string | null; // the order's own date
+      undated: boolean;
+      late: boolean;
+      isDraft: boolean;
+    }
+  // The rest of a rounded-up shortage (purchase or batch) this check already
+  // resolved: the next row or level takes it instead of buying/making again,
+  // and points at the same chain.
+  | { kind: "surplus"; chain: DtcStep[] };
+
+interface PoolEvent {
+  date: string; // ≥ t0
+  delta: number; // + supply, − demand (existing or this check's own takes)
+  source: PoolSource | null; // null = demand
+}
+
+const flagged = (e: PoolEvent) => e.source?.kind === "supply" && (e.source.undated || e.source.late || e.source.isDraft);
+
+interface PoolTake {
+  quantity: number; // what could be covered (≤ asked)
+  date: string;
+  chain: DtcStep[]; // the step that makes the date (stock, the order, or a surplus' chain)
+  countsOn: Extract<PoolSource, { kind: "supply" }>[]; // flagged supply the coverage rests on
+}
+
+class ArticlePool {
+  private readonly events: PoolEvent[] = []; // sorted by date, insertion order within a day
+
+  constructor(private readonly t0: string) {}
+
+  add(event: PoolEvent) {
+    let i = this.events.length;
+    while (i > 0 && this.events[i - 1]!.date > event.date) i--;
+    this.events.splice(i, 0, event);
+  }
+
+  // The least projected balance on any day from `date` on. The balance is
+  // read at the end of each day (receipts and withdrawals of the same day
+  // net), so a supply and the demand it covers on the same day cancel.
+  availableFrom(date: string, include: (e: PoolEvent) => boolean = () => true): number {
+    let balance = 0;
+    let i = 0;
+    for (; i < this.events.length && this.events[i]!.date <= date; i++) {
+      if (include(this.events[i]!)) balance += this.events[i]!.delta;
+    }
+    let least = balance;
+    while (i < this.events.length) {
+      const day = this.events[i]!.date;
+      for (; i < this.events.length && this.events[i]!.date === day; i++) {
+        if (include(this.events[i]!)) balance += this.events[i]!.delta;
+      }
+      least = Math.min(least, balance);
+    }
+    return least;
+  }
+
+  // Cover as much of `quantity` as the projected balance ever allows, on the
+  // earliest day it allows it, and record the take on that day.
+  take(quantity: number, articleNumber: string): PoolTake | null {
+    const coverable = Math.min(quantity, this.availableFrom(FAR));
+    if (coverable <= EPS) return null;
+    const covered = round4(coverable);
+    const candidates = [this.t0, ...this.events.filter((e) => e.delta > 0 && e.date > this.t0).map((e) => e.date)];
+    let date = FAR;
+    for (const d of candidates) {
+      if (this.availableFrom(d) >= covered - EPS) {
+        date = d;
+        break;
+      }
+    }
+    // The first receipt of that day makes the date: stock (always first at
+    // t0), else the order or surplus in the overview's order.
+    const maker = this.events.find((e) => e.date === date && e.delta > 0 && e.source);
+    const source: PoolSource = maker?.source ?? { kind: "stock" };
+    const chain: DtcStep[] =
+      source.kind === "stock"
+        ? [{ kind: "stock", articleNumber, quantity: covered, date }]
+        : source.kind === "supply"
+          ? [
+              {
+                kind: "supply",
+                articleNumber,
+                quantity: covered,
+                date: source.date ?? date,
+                documentType: source.documentType,
+                documentNumber: source.documentNumber,
+                undated: source.undated,
+                late: source.late,
+                isDraft: source.isDraft,
+              },
+            ]
+          : source.chain;
+    // Undated, late and draft supply are noted when the coverage rests on
+    // them: without all of them (up to the day) the day would not hold.
+    const flaggedUpTo = this.events.filter((e) => e.date <= date && flagged(e));
+    const countsOn =
+      flaggedUpTo.length > 0 && this.availableFrom(date, (e) => !flagged(e)) < covered - EPS
+        ? flaggedUpTo.map((e) => e.source as Extract<PoolSource, { kind: "supply" }>)
+        : [];
+    this.add({ date, delta: -covered, source: null });
+    return { quantity: covered, date, chain, countsOn };
+  }
 }
 
 export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCheckResult {
@@ -263,54 +402,63 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   const booked = new Map<string, Map<string, number>>(); // this run's own bookings
   const usedResources = new Set<string>();
 
-  // --- Pools: what is left of stock and open supply for this check --------
-  const pools = new Map<string, Lot[]>();
-  function poolFor(articleId: string): Lot[] {
+  // Existing load as it will actually be worked: week by week from its
+  // bucket, what does not fit the week's capacity (from today in the current
+  // week) rolls into the next — a backlog never vanishes just because its
+  // week is over-full. Only resources with a capacity calendar are rolled
+  // (the others are unlimited anyway); undated load stays out (noted).
+  const rolledLoadByResource = new Map<string, Map<string, number>>();
+  function rolledLoad(wc: DtcWorkCenter): Map<string, number> {
+    let rolled = rolledLoadByResource.get(wc.workCenterId);
+    if (rolled) return rolled;
+    rolled = new Map();
+    const buckets = existingLoad.get(wc.workCenterId) ?? new Map<string, number>();
+    const lastBucket = [...buckets.keys()].reduce((a, b) => maxDate(a, b), firstMonday);
+    let carry = 0;
+    for (let monday = firstMonday; monday < horizonMonday && (carry > EPS || monday <= lastBucket); monday = addDays(monday, 7)) {
+      const load = (buckets.get(monday) ?? 0) + carry;
+      const capacity = weekCapacityFrom(wc, monday, maxDate(monday, today));
+      rolled.set(monday, Math.min(load, capacity));
+      carry = Math.max(0, load - capacity);
+    }
+    rolledLoadByResource.set(wc.workCenterId, rolled);
+    return rolled;
+  }
+
+  // --- Pools: the projected balance per article for this check -------------
+  const pools = new Map<string, ArticlePool>();
+  function poolFor(articleId: string): ArticlePool {
     let pool = pools.get(articleId);
     if (pool) return pool;
     const overview = input.overviews.get(articleId);
-    const lots: Lot[] = [];
-    let deficit = 0; // negative stock is a shortage today — it takes first
-    if (overview) {
-      if (overview.onHand > EPS) lots.push({ date: t0, quantity: overview.onHand, source: { kind: "stock" } });
-      else if (overview.onHand < -EPS) deficit = -overview.onHand;
-      for (const row of overview.rows) {
-        if (row.direction !== "supply") continue;
-        lots.push({
-          // Undated supply counts as available now (the overview counts it
-          // too), flagged so the chain can say so.
-          date: row.date ?? t0,
-          quantity: row.quantity,
+    pool = new ArticlePool(t0);
+    // Stock is the first event of t0. Negative stock is a shortage today
+    // that the first supply fills before anyone may take — a demand.
+    if (overview && Math.abs(overview.onHand) > EPS) {
+      pool.add({ date: t0, delta: overview.onHand, source: overview.onHand > 0 ? { kind: "stock" } : null });
+    }
+    for (const row of overview?.rows ?? []) {
+      if (row.direction === "supply") {
+        // Undated supply counts now (the overview counts it too), late
+        // supply counts now as well — both flagged so the row can say so.
+        pool.add({
+          date: row.date === null ? t0 : maxDate(row.date, t0),
+          delta: row.quantity,
           source: {
             kind: "supply",
             documentType: row.documentType,
             documentNumber: row.documentNumber,
+            date: row.date,
             undated: row.date === null,
+            late: row.date !== null && row.date < t0,
+            isDraft: row.isDraft,
           },
         });
-      }
-    }
-    // Stock first, then supply in date order (stable: the overview's order).
-    lots.sort((a, b) => (a.source.kind === "stock" ? -1 : b.source.kind === "stock" ? 1 : a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    const take = (quantity: number) => {
-      let rest = quantity;
-      for (const lot of lots) {
-        if (rest <= EPS) break;
-        const used = Math.min(lot.quantity, rest);
-        lot.quantity = round4(lot.quantity - used);
-        rest = round4(rest - used);
-      }
-    };
-    take(deficit);
-    // Demands already promised take first, in the overview's date order.
-    if (overview) {
-      for (const row of overview.rows) {
-        if (row.direction !== "demand") continue;
+      } else {
         if (row.kind === "sales_order" && row.documentId === input.excludeSalesOrderId) continue;
-        take(-row.quantity);
+        pool.add({ date: row.date === null ? FAR : maxDate(row.date, t0), delta: row.quantity, source: null });
       }
     }
-    pool = lots.filter((l) => l.quantity > EPS);
     pools.set(articleId, pool);
     return pool;
   }
@@ -330,10 +478,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   }
   function freeMinutes(wc: DtcWorkCenter, monday: string, fromDay: string): number {
     const weekFromToday = weekCapacityFrom(wc, monday, maxDate(monday, today));
-    const left =
-      weekFromToday -
-      (existingLoad.get(wc.workCenterId)?.get(monday) ?? 0) -
-      (booked.get(wc.workCenterId)?.get(monday) ?? 0);
+    const left = weekFromToday - (rolledLoad(wc).get(monday) ?? 0) - (booked.get(wc.workCenterId)?.get(monday) ?? 0);
     return Math.max(0, Math.min(weekCapacityFrom(wc, monday, maxDate(fromDay, today)), left));
   }
   function book(wc: DtcWorkCenter, monday: string, minutes: number) {
@@ -353,14 +498,18 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   }
 
   // Operations in sequence order from `materialReady`. Returns the ready day
-  // and one step per operation, or null when the horizon is exceeded.
+  // and one step per operation — or, when the horizon is exceeded, readyDate
+  // null with the steps that were planned plus one for the operation that
+  // did not fit (its weeks are the ones searched). The bookings the planned
+  // operations made are left in place: the order will be made regardless,
+  // and a later row on the same resource should see that load.
   function scheduleOperations(
     article: DtcArticle,
     operations: DtcOperation[],
     quantity: number,
     materialReady: string,
     notes: RowNotes
-  ): { readyDate: string; steps: DtcStep[] } | null {
+  ): { readyDate: string | null; steps: DtcStep[] } {
     const steps: DtcStep[] = [];
     let floor = maxDate(materialReady, t0); // capacity may be used from this day
     let ready = floor;
@@ -400,7 +549,11 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
       let rest = minutes;
       let dayFloor = floor;
       while (rest > EPS) {
-        if (monday >= horizonMonday) return null;
+        if (monday >= horizonMonday) {
+          const lastWeek = addDays(horizonMonday, -7);
+          steps.push({ kind: "operation", ...base, fromWeek: fromWeek ?? mondayOf(floor), toWeek: lastWeek, date: weekFinishDay(wc, lastWeek, floor) });
+          return { readyDate: null, steps };
+        }
         const take = Math.min(rest, freeMinutes(wc, monday, dayFloor));
         if (take > EPS) {
           book(wc, monday, take);
@@ -475,47 +628,35 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
       }
     }
     const operations = structure ? structure.operations : (input.routings.get(article.articleId) ?? []);
+    if (!structure && components.size === 0 && operations.length === 0) notes.noPreparation.add(article.articleNumber);
     const scheduled = scheduleOperations(article, operations, quantity, materialReady, notes);
-    if (!scheduled) {
-      notes.other.add("Kapaciteten räcker inte inom två år");
-      return { readyDate: null, chain: critical };
-    }
+    if (scheduled.readyDate === null) notes.other.add("Kapaciteten räcker inte inom två år");
     return { readyDate: scheduled.readyDate, chain: [...critical, ...scheduled.steps] };
   }
 
-  // A need of `quantity`: first what is left in the pool, then a shortage.
+  // A need of `quantity`: first what the projected balance allows, then a
+  // shortage. The shortage is rounded up to the article's step and the
+  // surplus goes back into the pool on the shortage's ready date.
   function resolveNeed(article: DtcArticle, quantity: number, notes: RowNotes, path: Set<string>): Resolution {
     if (article.type === "service") return { readyDate: t0, chain: [] };
     const pool = poolFor(article.articleId);
-    let rest = quantity;
+    const taken = pool.take(quantity, article.articleNumber);
     let covered: Resolution = { readyDate: null, chain: [] };
-    for (const lot of pool) {
-      if (rest <= EPS) break;
-      if (lot.quantity <= EPS) continue;
-      const used = Math.min(lot.quantity, rest);
-      lot.quantity = round4(lot.quantity - used);
-      rest = round4(rest - used);
-      // Lots are in date order, so the last one used is the covered date.
-      const step: DtcStep =
-        lot.source.kind === "stock"
-          ? { kind: "stock", articleNumber: article.articleNumber, quantity: used, date: lot.date }
-          : {
-              kind: "supply",
-              articleNumber: article.articleNumber,
-              quantity: used,
-              date: lot.date,
-              documentType: lot.source.documentType,
-              documentNumber: lot.source.documentNumber,
-              undated: lot.source.undated,
-            };
-      if (lot.source.kind === "supply" && lot.source.undated) {
-        notes.undated.add(lot.source.documentNumber);
+    if (taken) {
+      covered = { readyDate: taken.date, chain: taken.chain };
+      for (const s of taken.countsOn) {
+        if (s.undated) notes.undated.add(s.documentNumber);
+        if (s.late) notes.late.add(s.documentNumber);
+        if (s.isDraft) notes.draft.add(s.documentNumber);
       }
-      if (covered.readyDate === null || lot.date >= covered.readyDate) covered = { readyDate: lot.date, chain: [step] };
     }
+    const rest = round4(quantity - (taken?.quantity ?? 0));
     if (rest <= EPS) return covered;
     const shortage = roundUpToMultiple(rest, article.rounding);
     const made = resolveShortage(article, shortage, notes, path);
+    if (made.readyDate !== null && shortage - rest > EPS) {
+      pool.add({ date: made.readyDate, delta: round4(shortage - rest), source: { kind: "surplus", chain: made.chain } });
+    }
     if (made.readyDate === null || covered.readyDate === null || made.readyDate >= covered.readyDate) return made;
     return covered;
   }

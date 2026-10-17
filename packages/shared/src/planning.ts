@@ -74,6 +74,8 @@ export type DueDateSuggestionQuery = z.infer<typeof dueDateSuggestionQuerySchema
 // Leveranstidskontroll: POST /delivery-time-check. salesOrderId = check an
 // existing order (its own rows are not existing demand; without `rows` the
 // order's open rows are checked). A configured row carries its selection.
+// `rows`, when given, is never empty — an empty list with a salesOrderId
+// would check nothing and answer with an empty result.
 export const deliveryTimeCheckSchema = z
   .object({
     customerId: z.string().uuid().optional(),
@@ -86,10 +88,11 @@ export const deliveryTimeCheckSchema = z
           configuration: orderRowConfigurationInputSchema.optional(),
         })
       )
+      .min(1)
       .max(200)
       .optional(),
   })
-  .refine((d) => d.salesOrderId !== undefined || (d.rows !== undefined && d.rows.length > 0), {
+  .refine((d) => d.salesOrderId !== undefined || d.rows !== undefined, {
     message: "rows or salesOrderId required",
     path: ["rows"],
   });

@@ -38,8 +38,11 @@ export function formatDtcStep(step: DtcStep): string {
   switch (step.kind) {
     case "stock":
       return `Lagersaldo — ${formatDtcQuantity(step.quantity)} st ${step.articleNumber}`;
-    case "supply":
-      return `${step.articleNumber}: ${step.documentNumber} ${step.undated ? "(utan datum)" : step.date}`;
+    case "supply": {
+      const flags = [step.late ? "försenad" : null, step.isDraft ? "utkast" : null].filter(Boolean);
+      const suffix = flags.length > 0 ? ` (${flags.join(", ")})` : "";
+      return `${step.articleNumber}: ${step.documentNumber} ${step.undated ? "(utan datum)" : step.date}${suffix}`;
+    }
     case "purchase": {
       const supplier = step.supplierName ?? "ingen huvudleverantör";
       const lead = step.leadTimeDays === null ? "" : `, ledtid ${step.leadTimeDays} dagar`;

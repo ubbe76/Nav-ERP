@@ -49,7 +49,15 @@ describe("GET /supplier-delivery-date-suggestion (route, inject)", () => {
     expect(res.json()).toEqual(body);
   });
 
-  it.each(["supplierId=nope", `supplierId=${crypto.randomUUID()}&date=2026-13-40`])("400s %s", async (query) => {
+  // 9999-12-31 and 0001-01-01 are well-formed dates, but the date arithmetic
+  // behind the suggestion would render year 10000 / year 0 strings Postgres
+  // rejects — refused up front (businessDateSchema, 1900–2999).
+  it.each([
+    "supplierId=nope",
+    `supplierId=${crypto.randomUUID()}&date=2026-13-40`,
+    `supplierId=${crypto.randomUUID()}&date=9999-12-31`,
+    `supplierId=${crypto.randomUUID()}&date=0001-01-01`,
+  ])("400s %s", async (query) => {
     const app = buildApp({ getSupplierDeliveryDateSuggestion: async () => null }, {});
     const res = await app.inject({ method: "GET", url: `/supplier-delivery-date-suggestion?${query}` });
     expect(res.statusCode).toBe(400);
@@ -84,7 +92,12 @@ describe("GET /customer-delivery-date-suggestion (route, inject)", () => {
     expect(res.json()).toEqual(body);
   });
 
-  it.each(["customerId=nope", `customerId=${crypto.randomUUID()}&date=igår`])("400s %s", async (query) => {
+  it.each([
+    "customerId=nope",
+    `customerId=${crypto.randomUUID()}&date=igår`,
+    `customerId=${crypto.randomUUID()}&date=9999-12-31`,
+    `customerId=${crypto.randomUUID()}&date=0001-01-01`,
+  ])("400s %s", async (query) => {
     const app = buildApp({}, { getCustomerDeliveryDateSuggestion: async () => null });
     const res = await app.inject({ method: "GET", url: `/customer-delivery-date-suggestion?${query}` });
     expect(res.statusCode).toBe(400);

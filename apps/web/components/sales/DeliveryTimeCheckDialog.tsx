@@ -63,8 +63,9 @@ export function DeliveryTimeCheckDialog({
       <FormError>{useDateError}</FormError>
       {loading && <FormHint>Kontrollerar…</FormHint>}
       {result && <DeliveryTimeCheckResult result={result} withCustomer={withCustomer} />}
+      {result && !withCustomer && <FormHint>Välj kund för att räkna med kundens transportdagar.</FormHint>}
       <FormActions>
-        {result?.deliveryDate && (
+        {withCustomer && result?.deliveryDate && (
           <Button type="button" variant="primary" disabled={useDateBusy} onClick={() => onUseDate(result.deliveryDate!)}>
             {useDateBusy ? "Sparar…" : "Använd datumet"}
           </Button>

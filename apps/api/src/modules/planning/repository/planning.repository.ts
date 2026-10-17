@@ -403,14 +403,27 @@ export function createPlanningRepository(db: Db) {
     },
 
     // Artikelöversikt — ONE article's open rows WITH dates, for the pure
-    // builder in article-overview.ts. Same status filters and the same lego
-    // exclusion as loadRequirementsInput, so the two readers agree; the
-    // only additions are the order dates and the document/partner columns
-    // the row list shows. Planned MOs are loaded for every article (no
-    // snapshot exists yet — the builder explodes the parent's BOM), as the
-    // MRP does per run. Resolves null when the article does not exist.
+    // builder in article-overview.ts. Delegates to the batch loader below
+    // (one implementation); null when the article does not exist.
     async loadArticleOverviewInput(articleId: string): Promise<ArticleOverviewInput | null> {
-      const [article] = await db
+      return (await this.loadArticleOverviewInputs([articleId])).get(articleId) ?? null;
+    },
+
+    // The same for a SET of articles in a fixed number of queries
+    // (Leveranstidskontroll loads every article in the checked tree): the
+    // per-article sources are loaded with inArray and partitioned in JS,
+    // the shared ones (planned MOs, BOM edges, phantoms) once. Same status
+    // filters and the same lego exclusion as loadRequirementsInput, so the
+    // two readers agree; the only additions are the order dates and the
+    // document/partner columns the row list shows. Planned MOs are loaded
+    // for every article (no snapshot exists yet — the builder explodes the
+    // parent's BOM), as the MRP does per run. Unknown ids are simply absent.
+    async loadArticleOverviewInputs(articleIds: string[]): Promise<Map<string, ArticleOverviewInput>> {
+      const result = new Map<string, ArticleOverviewInput>();
+      const ids = [...new Set(articleIds)];
+      if (ids.length === 0) return result;
+
+      const articleRows = await db
         .select({
           articleId: articles.id,
           articleNumber: articles.articleNumber,
@@ -425,17 +438,22 @@ export function createPlanningRepository(db: Db) {
         })
         .from(articles)
         .innerJoin(units, eq(units.id, articles.unitId))
-        .where(eq(articles.id, articleId));
-      if (!article) return null;
+        .where(inArray(articles.id, ids));
+      if (articleRows.length === 0) return result;
 
       const [stockRows, salesRows, purchaseRows, moRows, materialRows, plannedRows, bomEdges, phantomRows, primary] =
         await Promise.all([
           db
-            .select({ quantity: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}), 0)` })
+            .select({
+              articleId: stockBalances.articleId,
+              quantity: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}), 0)`,
+            })
             .from(stockBalances)
-            .where(eq(stockBalances.articleId, articleId)),
+            .where(inArray(stockBalances.articleId, ids))
+            .groupBy(stockBalances.articleId),
           db
             .select({
+              articleId: salesOrderRows.articleId,
               rowId: salesOrderRows.id,
               salesOrderId: salesOrders.id,
               orderNumber: salesOrders.orderNumber,
@@ -455,9 +473,10 @@ export function createPlanningRepository(db: Db) {
             .innerJoin(customers, eq(customers.id, salesOrders.customerId))
             // Konfigurator 4c: configured rows are demand on the template
             // here too — same rows as loadRequirementsInput's demand query.
-            .where(and(eq(salesOrderRows.articleId, articleId), inArray(salesOrders.status, OPEN_SALES))),
+            .where(and(inArray(salesOrderRows.articleId, ids), inArray(salesOrders.status, OPEN_SALES))),
           db
             .select({
+              articleId: purchaseOrderRows.articleId,
               rowId: purchaseOrderRows.id,
               purchaseOrderId: purchaseOrders.id,
               orderNumber: purchaseOrders.orderNumber,
@@ -475,13 +494,14 @@ export function createPlanningRepository(db: Db) {
             .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
             .where(
               and(
-                eq(purchaseOrderRows.articleId, articleId),
+                inArray(purchaseOrderRows.articleId, ids),
                 inArray(purchaseOrders.status, OPEN_PO),
                 isNull(purchaseOrderRows.moOperationId)
               )
             ),
           db
             .select({
+              articleId: manufacturingOrders.articleId,
               moId: manufacturingOrders.id,
               orderNumber: manufacturingOrders.orderNumber,
               status: manufacturingOrders.status,
@@ -490,9 +510,10 @@ export function createPlanningRepository(db: Db) {
               quantity: moRemainingQuantity,
             })
             .from(manufacturingOrders)
-            .where(and(eq(manufacturingOrders.articleId, articleId), inArray(manufacturingOrders.status, OPEN_MO))),
+            .where(and(inArray(manufacturingOrders.articleId, ids), inArray(manufacturingOrders.status, OPEN_MO))),
           db
             .select({
+              articleId: moMaterialConsumptions.componentArticleId,
               rowId: moMaterialConsumptions.id,
               moId: manufacturingOrders.id,
               orderNumber: manufacturingOrders.orderNumber,
@@ -511,7 +532,7 @@ export function createPlanningRepository(db: Db) {
             .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))
             .where(
               and(
-                eq(moMaterialConsumptions.componentArticleId, articleId),
+                inArray(moMaterialConsumptions.componentArticleId, ids),
                 inArray(manufacturingOrders.status, OPEN_MO)
               )
             ),
@@ -539,51 +560,76 @@ export function createPlanningRepository(db: Db) {
             })
             .from(bomComponents),
           db.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true)),
-          primarySuppliersFor([articleId]),
+          primarySuppliersFor(ids),
         ]);
 
-      const supplier = primary[0];
-      return {
-        article: {
-          articleId: article.articleId,
-          articleNumber: article.articleNumber,
-          name: article.name,
-          type: article.type,
-          isPhantom: article.isPhantom,
-          active: article.active,
-          unitCode: article.unitCode,
-          reorderPoint: article.reorderPoint === null ? null : Number(article.reorderPoint),
-          orderQuantity: article.orderQuantity === null ? null : Number(article.orderQuantity),
-          rounding: article.rounding === null ? null : Number(article.rounding),
-        },
-        onHand: Number(stockRows[0]?.quantity ?? 0),
-        salesRows: salesRows.map((r) => ({
-          ...r,
-          quantityOrdered: Number(r.quantityOrdered),
-          quantityDelivered: Number(r.quantityDelivered),
-        })),
-        purchaseRows: purchaseRows.map((r) => ({
-          ...r,
-          quantityOrdered: Number(r.quantityOrdered),
-          quantityReceived: Number(r.quantityReceived),
-        })),
-        manufacturingOrders: moRows.map((r) => ({ ...r, quantity: Number(r.quantity) })),
-        materialRows: materialRows.map((r) => ({
-          ...r,
-          quantityPlanned: Number(r.quantityPlanned),
-          quantityConsumed: Number(r.quantityConsumed),
-        })),
-        plannedMos: plannedRows.map((r) => ({ ...r, quantity: Number(r.quantity) })),
-        bomEdges: bomEdges.map((r) => ({
-          parentArticleId: r.parentArticleId,
-          componentArticleId: r.componentArticleId,
-          quantity: Number(r.quantity),
-        })),
-        phantomIds: phantomRows.map((r) => r.id),
-        primarySupplier: supplier
-          ? { supplierId: supplier.supplierId, supplierName: supplier.supplierName, leadTimeDays: supplier.leadTimeDays }
-          : null,
-      };
+      // Partition the per-article rows; the article id column is dropped
+      // again so the row shapes stay exactly the builder's.
+      function groupBy<T extends { articleId: string }>(rows: T[]): Map<string, Omit<T, "articleId">[]> {
+        const map = new Map<string, Omit<T, "articleId">[]>();
+        for (const { articleId, ...rest } of rows) {
+          const list = map.get(articleId) ?? [];
+          list.push(rest);
+          map.set(articleId, list);
+        }
+        return map;
+      }
+      const stockByArticle = new Map(stockRows.map((r) => [r.articleId, Number(r.quantity)]));
+      const salesByArticle = groupBy(salesRows);
+      const purchaseByArticle = groupBy(purchaseRows);
+      const moByArticle = groupBy(moRows);
+      const materialByArticle = groupBy(materialRows);
+      const supplierByArticle = new Map(primary.map((s) => [s.articleId, s]));
+      // Shared, read-only — the builder never mutates its input.
+      const plannedMos = plannedRows.map((r) => ({ ...r, quantity: Number(r.quantity) }));
+      const sharedBomEdges = bomEdges.map((r) => ({
+        parentArticleId: r.parentArticleId,
+        componentArticleId: r.componentArticleId,
+        quantity: Number(r.quantity),
+      }));
+      const phantomIds = phantomRows.map((r) => r.id);
+
+      for (const article of articleRows) {
+        const supplier = supplierByArticle.get(article.articleId);
+        result.set(article.articleId, {
+          article: {
+            articleId: article.articleId,
+            articleNumber: article.articleNumber,
+            name: article.name,
+            type: article.type,
+            isPhantom: article.isPhantom,
+            active: article.active,
+            unitCode: article.unitCode,
+            reorderPoint: article.reorderPoint === null ? null : Number(article.reorderPoint),
+            orderQuantity: article.orderQuantity === null ? null : Number(article.orderQuantity),
+            rounding: article.rounding === null ? null : Number(article.rounding),
+          },
+          onHand: stockByArticle.get(article.articleId) ?? 0,
+          salesRows: (salesByArticle.get(article.articleId) ?? []).map((r) => ({
+            ...r,
+            quantityOrdered: Number(r.quantityOrdered),
+            quantityDelivered: Number(r.quantityDelivered),
+          })),
+          purchaseRows: (purchaseByArticle.get(article.articleId) ?? []).map((r) => ({
+            ...r,
+            quantityOrdered: Number(r.quantityOrdered),
+            quantityReceived: Number(r.quantityReceived),
+          })),
+          manufacturingOrders: (moByArticle.get(article.articleId) ?? []).map((r) => ({ ...r, quantity: Number(r.quantity) })),
+          materialRows: (materialByArticle.get(article.articleId) ?? []).map((r) => ({
+            ...r,
+            quantityPlanned: Number(r.quantityPlanned),
+            quantityConsumed: Number(r.quantityConsumed),
+          })),
+          plannedMos,
+          bomEdges: sharedBomEdges,
+          phantomIds,
+          primarySupplier: supplier
+            ? { supplierId: supplier.supplierId, supplierName: supplier.supplierName, leadTimeDays: supplier.leadTimeDays }
+            : null,
+        });
+      }
+      return result;
     },
 
     // Konfigurator 4c: ONE sales order row for the färdigdatumsförslag — the

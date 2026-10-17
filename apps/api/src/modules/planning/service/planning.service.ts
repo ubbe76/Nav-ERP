@@ -17,7 +17,7 @@ import {
   type RequirementsInput,
 } from "./requirements-calc.js";
 import { capacityHorizon, computeCapacity, type CapacityResult } from "./capacity-calc.js";
-import { buildArticleOverview, type ArticleOverview } from "./article-overview.js";
+import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput } from "./article-overview.js";
 import {
   CHECK_HORIZON_WEEKS,
   checkDeliveryTime,
@@ -76,6 +76,19 @@ export class SalesOrderNotFoundError extends Error {
     this.name = "SalesOrderNotFoundError";
   }
 }
+
+// Leveranstidskontroll on an order that is no longer open (delivered,
+// invoiced, cancelled): there is nothing left to promise a date for. 409.
+export class SalesOrderNotOpenError extends Error {
+  constructor(public status: string) {
+    super(`Kundordern är inte öppen (status ${status}) — leveranstiden kan bara kontrolleras för offert, bekräftad eller under tillverkning`);
+    this.name = "SalesOrderNotOpenError";
+  }
+}
+
+// The statuses Leveranstidskontroll accepts — the same set the order card's
+// header edits allow (quote/confirmed/in_production).
+const OPEN_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["quote", "confirmed", "in_production"]);
 
 export class ConfigurationRequiredError extends Error {
   constructor(public articleNumber: string) {
@@ -216,6 +229,23 @@ export function createPlanningService(
     const input = await repo.loadArticleOverviewInput(articleId);
     if (!input) throw new ArticleNotFoundError(articleId);
     return { ...input, salesRows: await toShipDates(input.salesRows) };
+  }
+
+  // The same for a set of articles (Leveranstidskontroll's whole tree): one
+  // batch load and ONE delivery context for every KO row across the set —
+  // toShipDates preserves order and length, so the rows are flattened and
+  // sliced back per article. Unknown ids are absent, never an error.
+  async function loadOverviewInputs(articleIds: string[]) {
+    const inputs = await repo.loadArticleOverviewInputs(articleIds);
+    const entries = [...inputs.values()];
+    const shifted = await toShipDates(entries.flatMap((i) => i.salesRows));
+    const result = new Map<string, ArticleOverviewInput>();
+    let offset = 0;
+    for (const input of entries) {
+      result.set(input.article.articleId, { ...input, salesRows: shifted.slice(offset, offset + input.salesRows.length) });
+      offset += input.salesRows.length;
+    }
+    return result;
   }
 
   // Konfigurator 4c: the configured rows and their cascade are derived here,
@@ -368,6 +398,14 @@ export function createPlanningService(
       return buildArticleOverview(await loadOverviewInput(articleId));
     },
 
+    // The same for a set of articles in one batch (Leveranstidskontroll's
+    // tree) — identical to getArticleOverview per article; unknown ids are
+    // left out instead of failing the set.
+    async getArticleOverviews(articleIds: string[]): Promise<Map<string, ArticleOverview>> {
+      const inputs = await loadOverviewInputs(articleIds);
+      return new Map([...inputs].map(([articleId, input]) => [articleId, buildArticleOverview(input)]));
+    },
+
     // Färdigdatumsförslag for a new TO on the article — one working day
     // before its first firm demand not already covered by stock or open
     // IO/TO (or before the linked KO row's delivery date, if that row is
@@ -399,6 +437,7 @@ export function createPlanningService(
       if (request.salesOrderId) {
         const order = await repo.deliveryCheckOrder(request.salesOrderId);
         if (!order) throw new SalesOrderNotFoundError(request.salesOrderId);
+        if (!OPEN_SALES_ORDER_STATUSES.has(order.status)) throw new SalesOrderNotOpenError(order.status);
         customerId ??= order.customerId;
         if (!request.rows) {
           requestRows = order.rows
@@ -490,13 +529,14 @@ export function createPlanningService(
         ])
       );
       // Overviews (on ship dates) for everything with a pool — not the
-      // configured templates themselves.
+      // configured templates themselves. One batch load for the whole tree.
       const overviews = new Map<string, { onHand: number; rows: ArticleOverview["rows"] }>();
       const configuredTemplates = new Set(dtcRows.filter((r) => r.structure).map((r) => r.articleId));
-      for (const a of treeArticles) {
-        if (a.type === "service" || a.isPhantom || configuredTemplates.has(a.articleId)) continue;
-        const overview = buildArticleOverview(await loadOverviewInput(a.articleId));
-        overviews.set(a.articleId, { onHand: overview.onHand, rows: overview.rows });
+      const poolIds = treeArticles
+        .filter((a) => !(a.type === "service" || a.isPhantom || configuredTemplates.has(a.articleId)))
+        .map((a) => a.articleId);
+      for (const [articleId, overview] of await this.getArticleOverviews(poolIds)) {
+        overviews.set(articleId, { onHand: overview.onHand, rows: overview.rows });
       }
       const routings = new Map<string, DtcOperation[]>();
       for (const r of routingRows) {
@@ -679,18 +719,25 @@ export function createPlanningService(
       // transit (late ⇒ a warning). Without settings: the working day before
       // the demand, exactly as before. A failed suggestion is just no date —
       // it must not stop the order (a real problem fails addRow).
-      const demandDates = new Map<string, string | null>();
+      const suggestions = new Map<string, { demandDate: string; dueDate: string } | null>();
       for (const group of bySupplier.values()) {
         for (const row of group.rows) {
           const suggestion = await this.suggestManufacturingDueDate(row.articleId).catch(() => null);
-          demandDates.set(row.articleId, suggestion?.demandDate ?? null);
+          suggestions.set(row.articleId, suggestion ? { demandDate: suggestion.demandDate, dueDate: suggestion.dueDate } : null);
         }
       }
+      const demandDates = new Map([...suggestions].map(([articleId, s]) => [articleId, s?.demandDate ?? null]));
       const today = todayFn();
       const knownDemands = [...demandDates.values()].filter((d): d is string => d !== null);
       const maxLead = Math.max(0, ...[...supplierByArticle.values()].map((s) => s.leadTimeDays ?? 0));
+      // The delivery context (defaults + holidays) is a convenience for the
+      // dates, never a reason to fail — the TOs above already exist. Without
+      // it the rows are dated as before fasta leveransdagar: the TO
+      // färdigdatum rule's own date (the working day before the demand).
       const delivery =
-        bySupplier.size > 0 ? await repo.deliveryContext(deliveryHolidayWindow([today, ...knownDemands], maxLead + 60)) : null;
+        bySupplier.size > 0
+          ? await repo.deliveryContext(deliveryHolidayWindow([today, ...knownDemands], maxLead + 60)).catch(() => null)
+          : null;
 
       for (const [supplierId, group] of bySupplier) {
         // The order gets the earliest date; a row whose own date is later
@@ -700,13 +747,15 @@ export function createPlanningService(
           const supplier = supplierByArticle.get(row.articleId)!;
           dates.set(
             row.articleId,
-            suggestPurchaseDeliveryDate({
-              demandDate: demandDates.get(row.articleId) ?? null,
-              today,
-              leadTimeDays: supplier.leadTimeDays,
-              settings: effectiveDeliverySettings(supplier.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery!.defaults),
-              offDays: delivery!.offDays,
-            })
+            delivery
+              ? suggestPurchaseDeliveryDate({
+                  demandDate: demandDates.get(row.articleId) ?? null,
+                  today,
+                  leadTimeDays: supplier.leadTimeDays,
+                  settings: effectiveDeliverySettings(supplier.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
+                  offDays: delivery.offDays,
+                })
+              : { date: suggestions.get(row.articleId)?.dueDate ?? null, late: false }
           );
         }
         const orderDate = [...dates.values()]

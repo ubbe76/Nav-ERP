@@ -816,4 +816,105 @@ describe("planning service — leveransdagar on created purchase orders", () => 
     expect(orders[0]?.expectedDeliveryDate).toBeUndefined();
     expect(result.warnings).toEqual([]);
   });
+
+  // The delivery context is loaded AFTER the TOs are created: a failure
+  // there must never 500 the request (the TOs would exist with no answer).
+  // Without the context the rows are dated as before fasta leveransdagar —
+  // the TO färdigdatum rule's own date — and the order is still created.
+  describe("a failing delivery context", () => {
+    async function runWithFailingContext(opts: { failFrom: number; supplierDelivery?: PartnerDeliveryFields }) {
+      let calls = 0;
+      const orders: { expectedDeliveryDate?: string }[] = [];
+      const rows: { articleId: string; expectedDeliveryDate?: string }[] = [];
+      const service = createPlanningService(
+        makeRepo({
+          async loadArticleOverviewInput(articleId: string) {
+            return overviewInput(articleId, { a1: "2026-10-28", a2: "2026-11-04" }[articleId] ?? null);
+          },
+          // The färdigdatum suggestion per row loads the context first (one
+          // call per row, through toShipDates); Skapa ordrar's own load for
+          // the IO dates comes after them.
+          async deliveryContext() {
+            calls += 1;
+            if (calls >= opts.failFrom) throw new Error('Failed query: select "key", "value" from "system_settings"');
+            return {
+              defaults: { supplier: { mode: "arrival", transitDays: 0 }, customer: { mode: "dispatch", transitDays: 0 } },
+              offDays: new Set<string>(),
+            };
+          },
+          async primarySuppliersForArticles(articleIds: string[]) {
+            return articleIds.map((articleId) => ({
+              articleId,
+              supplierId: "sup-1",
+              supplierName: "Stål AB",
+              price: 10,
+              currency: "SEK",
+              leadTimeDays: 10,
+              priceBreaks: [],
+              supplierDelivery: opts.supplierDelivery,
+            }));
+          },
+        }),
+        {
+          purchase: {
+            async createPurchaseOrder(input: { expectedDeliveryDate?: string }) {
+              orders.push(input);
+              return { id: "po-1", orderNumber: "IO-1" };
+            },
+            async addRow(_orderId: string, input: { articleId: string; expectedDeliveryDate?: string }) {
+              rows.push({ articleId: input.articleId, expectedDeliveryDate: input.expectedDeliveryDate });
+              return {};
+            },
+            async cancel() {
+              throw new Error("must not cancel");
+            },
+          },
+          manufacturing: {
+            async createManufacturingOrder() {
+              throw new Error("not used in this test");
+            },
+            async createFromSalesOrderRow() {
+              throw new Error("not used in this test");
+            },
+          },
+          today: () => "2026-10-17",
+        }
+      );
+      const result = await service.createOrdersFromProposals(
+        {
+          proposals: [
+            { articleId: "a1", quantity: 5, kind: "purchase" },
+            { articleId: "a2", quantity: 5, kind: "purchase" },
+          ],
+        },
+        "user-1"
+      );
+      return { result, orders, rows, calls: () => calls };
+    }
+
+    it("dates the rows with the färdigdatum rule (the working day before the demand) and creates the order", async () => {
+      // Two suggestion loads succeed (one per row), the IO-date load fails.
+      const { result, orders, rows, calls } = await runWithFailingContext({ failFrom: 3, supplierDelivery: mondays });
+      expect(calls()).toBe(3);
+      expect(result.errors).toEqual([]);
+      expect(result.warnings).toEqual([]);
+      expect(result.purchaseOrders).toEqual([
+        { id: "po-1", orderNumber: "IO-1", supplierId: "sup-1", supplierName: "Stål AB", rowCount: 2 },
+      ]);
+      // Not the Monday rule or the lead-time floor — exactly the old dates.
+      expect(orders[0]?.expectedDeliveryDate).toBe("2026-10-27");
+      expect(rows).toEqual([
+        { articleId: "a1", expectedDeliveryDate: undefined },
+        { articleId: "a2", expectedDeliveryDate: "2026-11-03" },
+      ]);
+    });
+
+    it("creates the order undated when even the suggestions' context fails", async () => {
+      const { result, orders, rows } = await runWithFailingContext({ failFrom: 1 });
+      expect(result.errors).toEqual([]);
+      expect(result.purchaseOrders).toHaveLength(1);
+      expect(orders[0]?.expectedDeliveryDate).toBeUndefined();
+      expect(rows.map((r) => r.expectedDeliveryDate)).toEqual([undefined, undefined]);
+    });
+  });
 });

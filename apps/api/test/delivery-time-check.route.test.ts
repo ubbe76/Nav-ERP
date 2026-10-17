@@ -8,6 +8,7 @@ import {
   ConfigurationRequiredError,
   CustomerNotFoundError,
   SalesOrderNotFoundError,
+  SalesOrderNotOpenError,
   type PlanningService,
 } from "../src/modules/planning/service/planning.service.js";
 
@@ -45,18 +46,36 @@ describe("POST /delivery-time-check (route, inject)", () => {
     expect(res.json()).toEqual(result);
   });
 
-  it.each([{}, { rows: [] }, { rows: [{ articleId: "nope", quantity: 1 }] }, { rows: [{ articleId: id(), quantity: 0 }] }])(
-    "400s %o",
-    async (payload) => {
-      const res = await buildApp(async () => result).inject({ method: "POST", url: "/delivery-time-check", payload });
-      expect(res.statusCode).toBe(400);
-    }
-  );
+  it.each([
+    {},
+    { rows: [] },
+    // An empty rows list with an order would check nothing — refused rather
+    // than answered with an empty result.
+    { salesOrderId: id(), rows: [] },
+    { rows: [{ articleId: "nope", quantity: 1 }] },
+    { rows: [{ articleId: id(), quantity: 0 }] },
+  ])("400s %o", async (payload) => {
+    const res = await buildApp(async () => {
+      throw new Error("the service must not be called");
+    }).inject({ method: "POST", url: "/delivery-time-check", payload });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("passes an order without rows through (the order's open rows are checked)", async () => {
+    const salesOrderId = id();
+    const app = buildApp(async (request) => {
+      expect(request).toEqual({ salesOrderId });
+      return result;
+    });
+    const res = await app.inject({ method: "POST", url: "/delivery-time-check", payload: { salesOrderId } });
+    expect(res.statusCode).toBe(200);
+  });
 
   it.each([
     [new ArticleNotFoundError("x"), 404, "article-not-found"],
     [new CustomerNotFoundError("x"), 404, "customer-not-found"],
     [new SalesOrderNotFoundError("x"), 404, "sales-order-not-found"],
+    [new SalesOrderNotOpenError("cancelled"), 409, "sales-order-not-open"],
     [new ConfigurationRequiredError("63000"), 409, "configuration-required"],
     [new ConfigurationNotAllowedError("1001"), 400, "configuration-not-allowed"],
   ] as const)("maps %s", async (error, status, code) => {

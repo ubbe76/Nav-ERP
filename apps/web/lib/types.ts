@@ -4008,6 +4008,10 @@ export type DtcStep =
       documentType: "sales_order" | "purchase_order" | "manufacturing_order";
       documentNumber: string;
       undated: boolean;
+      // The order's own date is before today (`date` is that own date).
+      late: boolean;
+      // A purchase order draft.
+      isDraft: boolean;
     }
   | {
       kind: "purchase";

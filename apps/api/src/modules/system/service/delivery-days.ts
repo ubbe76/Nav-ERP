@@ -163,10 +163,27 @@ export function lastListedOnOrBefore(date: string, s: DeliverySettings, offDays:
   return findListed(date, -1, s, offDays) ?? date;
 }
 
+// The latest calendar day a dispatch can leave and still arrive (after
+// transit WORKING days) on or before date: the day before the transit:th
+// working day counted back from date (date itself counts when it is a
+// working day). Transit 0 ⇒ date. That day may itself be a weekend day — an
+// explicitly ticked Saturday with transit 1 still arrives on Monday — so the
+// search below starts here, not at the last working day. Counted backwards
+// only: a date near the end of the calendar never overflows.
+function latestDispatchStart(date: string, transitDays: number, offDays: ReadonlySet<string>): string {
+  if (transitDays === 0) return date;
+  const lastWorking = isWorkingDay(date, offDays) ? date : previousWorkingDay(date, offDays);
+  return addDays(subtractWorkingDays(lastWorking, transitDays - 1, offDays), -1);
+}
+
 // The latest listed dispatch day s whose arrival (s + transit) is on or
-// before date; null when none is found within the search window.
+// before date; null when none is found within the search window. The
+// search starts at the latest possible dispatch day (transit is up to 60
+// WORKING days, so starting at date would run out of window) and the
+// arrival check guards the invariant for every candidate.
 function latestDispatchFor(date: string, s: DeliverySettings, offDays: ReadonlySet<string>): string | null {
-  for (let i = 0, day = date; i <= SEARCH_DAYS; i++, day = addDays(day, -1)) {
+  const start = latestDispatchStart(date, s.transitDays, offDays);
+  for (let i = 0, day = start; i <= SEARCH_DAYS; i++, day = addDays(day, -1)) {
     if (isListedDay(day, s, offDays) && addWorkingDays(day, s.transitDays, offDays) <= date) return day;
   }
   return null;
@@ -298,15 +315,28 @@ export function deliveryDateWarning(
     : `Datumet passar inte våra avsändningsdagar till kunden (${days}).`;
 }
 
+// The range of dates the system reasons about. New input is validated to it
+// (businessDateSchema in @navet/shared); stored dates outside it (an old
+// order dated 9999-12-31) are clamped where they reach date arithmetic that
+// feeds a query, so they can't produce a +010000-… string Postgres rejects.
+export const BUSINESS_DATE_MIN = "1900-01-01";
+export const BUSINESS_DATE_MAX = "2999-12-31";
+
+function clampBusinessDate(date: string): string {
+  return date < BUSINESS_DATE_MIN ? BUSINESS_DATE_MIN : date > BUSINESS_DATE_MAX ? BUSINESS_DATE_MAX : date;
+}
+
 // The holiday range a caller must load so every search above sees the
 // register: twice the working days added or subtracted (weekends) plus the
-// 60-day search and some margin, both ways. dates must not be empty.
+// 60-day search and some margin, both ways. dates must not be empty. The
+// window is clamped to the business range (the inputs BEFORE the arithmetic,
+// the result after it) — the register has nothing outside it anyway.
 export function deliveryHolidayWindow(dates: string[], extraWorkingDays: number): { from: string; to: string } {
-  const first = dates.reduce((a, b) => (b < a ? b : a));
-  const last = dates.reduce((a, b) => (b > a ? b : a));
+  const first = clampBusinessDate(dates.reduce((a, b) => (b < a ? b : a)));
+  const last = clampBusinessDate(dates.reduce((a, b) => (b > a ? b : a)));
   return {
-    from: addDays(first, -(2 * extraWorkingDays + 75)),
-    to: addDays(last, 2 * extraWorkingDays + 120),
+    from: clampBusinessDate(addDays(first, -(2 * extraWorkingDays + 75))),
+    to: clampBusinessDate(addDays(last, 2 * extraWorkingDays + 120)),
   };
 }
 

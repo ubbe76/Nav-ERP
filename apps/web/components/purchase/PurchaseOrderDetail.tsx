@@ -635,6 +635,10 @@ function AddRowForm({
     supplierId,
     articleId: article?.id ?? null,
     date: deliveryDate,
+    // No row suggestion is fetched or prefilled until an article is picked
+    // (without one the hook would return the header's suggestion); the warning
+    // for a typed date still works.
+    suggest: article !== null,
   });
   useEffect(() => {
     if (dateTouched) return;

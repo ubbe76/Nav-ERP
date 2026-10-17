@@ -4,6 +4,7 @@ import { listQuerySchema, statusListParam } from "./list.js";
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
 
 import { blankSafe } from "./coerce.js";
+import { businessDateSchema } from "./business-date.js";
 import { partnerDeliveryFields } from "./delivery.js";
 
 export const salesOrderStatusSchema = z.enum([
@@ -180,7 +181,8 @@ export const updateSalesOrderHeaderSchema = z
     paymentTermId: z.string().uuid().nullable().optional(),
     carrierId: z.string().uuid().nullable().optional(),
     // Set by "Använd datumet" in Leveranstidskontroll on the order card.
-    expectedDeliveryDate: z.string().date().nullable().optional(),
+    // businessDateSchema: the date feeds the planning's date arithmetic.
+    expectedDeliveryDate: businessDateSchema.nullable().optional(),
     // `false` saves without bumping the order's revision — the UI asks on
     // every save; omitted means bump (external callers unchanged).
     bumpRevision: z.boolean().optional(),
@@ -193,7 +195,7 @@ export type UpdateSalesOrderHeaderInput = z.infer<typeof updateSalesOrderHeaderS
 
 export const createQuoteSchema = z.object({
   customerId: z.string().uuid(),
-  expectedDeliveryDate: z.string().date().optional(),
+  expectedDeliveryDate: businessDateSchema.optional(),
   note: z.string().optional(),
   rows: z.array(quoteRowSchema).min(1),
   // The customer's own PO number, their reference, and which of their

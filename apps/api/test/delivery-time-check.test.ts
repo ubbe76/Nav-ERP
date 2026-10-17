@@ -18,7 +18,12 @@ function article(articleId: string, type: DtcArticle["type"] = "purchased", roun
   return { articleId, articleNumber: `NR-${articleId}`, name: articleId, type, rounding };
 }
 
-function supply(date: string | null, quantity: number, documentNumber = "IO-1"): ArticleOverviewRow {
+function supply(
+  date: string | null,
+  quantity: number,
+  documentNumber = "IO-1",
+  extra: Partial<Pick<ArticleOverviewRow, "isDraft" | "kind" | "documentType" | "status">> = {}
+): ArticleOverviewRow {
   return {
     id: `po:${documentNumber}:${date}`,
     kind: "purchase_order",
@@ -32,6 +37,7 @@ function supply(date: string | null, quantity: number, documentNumber = "IO-1"):
     quantity,
     balance: 0,
     isDraft: false,
+    ...extra,
   };
 }
 
@@ -169,7 +175,14 @@ describe("Leveranstidskontroll — what already exists", () => {
       })
     );
     expect(result.rows[0]!.readyDate).toBe("2026-10-28");
-    expect(result.rows[0]!.chain[0]).toMatchObject({ kind: "supply", documentNumber: "IO-2", date: "2026-10-28" });
+    expect(result.rows[0]!.chain[0]).toMatchObject({
+      kind: "supply",
+      documentNumber: "IO-2",
+      date: "2026-10-28",
+      undated: false,
+      late: false,
+      isDraft: false,
+    });
     expect(result.shipDate).toBe("2026-10-29");
   });
 
@@ -209,6 +222,140 @@ describe("Leveranstidskontroll — what already exists", () => {
     );
     expect(result.rows[0]!.readyDate).toBe("2026-10-22");
   });
+
+  it("a later demand does not take stock that an earlier supply replaces (projected balance)", () => {
+    // Stock 10, IO +10 on 2 Nov, KO −10 on 1 Dec: the projected balance never
+    // goes below 10, so 10 can ship today — the December order gets the IO.
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p")),
+        overviews: new Map([["p", { onHand: 10, rows: [supply("2026-11-02", 10, "IO-5"), salesDemand("2026-12-01", 10)] }]]),
+        suppliers: new Map([["p", supplier(30)]]),
+        rows: [row("p", 10)],
+      })
+    );
+    expect(result.shipDate).toBe(TODAY);
+    expect(result.rows[0]!.chain).toEqual([{ kind: "stock", articleNumber: "NR-p", quantity: 10, date: TODAY }]);
+  });
+
+  it("a demand before the supply does take the stock: the row waits for the supply", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p")),
+        overviews: new Map([["p", { onHand: 10, rows: [salesDemand("2026-10-22", 10), supply("2026-11-02", 10, "IO-5")] }]]),
+        rows: [row("p", 10)],
+      })
+    );
+    expect(result.rows[0]!.readyDate).toBe("2026-11-02");
+    expect(result.rows[0]!.chain[0]).toMatchObject({ kind: "supply", documentNumber: "IO-5", date: "2026-11-02" });
+  });
+
+  it("what an earlier row took is demand for the next, on the date it was taken", () => {
+    // Row a takes 10 at t0 (stock). Row b: the IO on 2 Nov is all that is left.
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p")),
+        overviews: new Map([["p", { onHand: 10, rows: [supply("2026-11-02", 10, "IO-5")] }]]),
+        rows: [row("p", 10, { key: "a" }), row("p", 5, { key: "b" })],
+      })
+    );
+    expect(result.rows.map((r) => r.readyDate)).toEqual([TODAY, "2026-11-02"]);
+  });
+
+  it("late supply counts now, keeps its own date in the step and gets a note", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p")),
+        overviews: new Map([["p", { onHand: 0, rows: [supply("2026-10-01", 5, "IO-7")] }]]),
+        rows: [row("p", 5)],
+      })
+    );
+    expect(result.rows[0]!.readyDate).toBe(TODAY);
+    expect(result.shipDate).toBe(TODAY);
+    expect(result.rows[0]!.chain).toEqual([
+      {
+        kind: "supply",
+        articleNumber: "NR-p",
+        quantity: 5,
+        date: "2026-10-01",
+        documentType: "purchase_order",
+        documentNumber: "IO-7",
+        undated: false,
+        late: true,
+        isDraft: false,
+      },
+    ]);
+    expect(result.rows[0]!.notes).toEqual(["IO-7 är försenad — räknad som tillgänglig direkt"]);
+  });
+
+  it("several late orders are one note", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p")),
+        overviews: new Map([
+          [
+            "p",
+            {
+              onHand: 0,
+              rows: [
+                supply("2026-10-01", 5, "IO-7"),
+                supply("2026-10-05", 5, "TO-3", { kind: "manufacturing_order", documentType: "manufacturing_order" }),
+              ],
+            },
+          ],
+        ]),
+        rows: [row("p", 10)],
+      })
+    );
+    expect(result.rows[0]!.notes).toEqual(["IO-7 och TO-3 är försenade — räknade som tillgängliga direkt"]);
+  });
+
+  it("a draft IO counts as supply, marked in the step and noted", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p")),
+        overviews: new Map([["p", { onHand: 0, rows: [supply("2026-10-22", 5, "IO-9", { isDraft: true, status: "draft" })] }]]),
+        rows: [row("p", 5)],
+      })
+    );
+    expect(result.rows[0]!.readyDate).toBe("2026-10-22");
+    expect(result.rows[0]!.chain[0]).toMatchObject({ kind: "supply", documentNumber: "IO-9", isDraft: true, late: false });
+    expect(result.rows[0]!.notes).toEqual(["IO-9 är ett utkast — räknat som tillgång"]);
+  });
+
+  it("several draft IOs are one note", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p")),
+        overviews: new Map([
+          [
+            "p",
+            {
+              onHand: 0,
+              rows: [
+                supply("2026-10-22", 5, "IO-9", { isDraft: true, status: "draft" }),
+                supply("2026-10-22", 5, "IO-10", { isDraft: true, status: "draft" }),
+              ],
+            },
+          ],
+        ]),
+        rows: [row("p", 10)],
+      })
+    );
+    expect(result.rows[0]!.notes).toEqual(["IO-9 och IO-10 är utkast — räknade som tillgång"]);
+  });
+
+  it("supply the row does not depend on is not noted", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p")),
+        overviews: new Map([["p", { onHand: 10, rows: [supply(null, 5, "IO-9"), supply("2026-10-01", 5, "IO-7")] }]]),
+        rows: [row("p", 5)],
+      })
+    );
+    expect(result.rows[0]!.chain).toEqual([{ kind: "stock", articleNumber: "NR-p", quantity: 5, date: TODAY }]);
+    expect(result.rows[0]!.notes).toEqual([]);
+  });
 });
 
 describe("Leveranstidskontroll — bought", () => {
@@ -223,6 +370,57 @@ describe("Leveranstidskontroll — bought", () => {
       input({ articles: articles(article("p", "purchased", 5)), suppliers: new Map([["p", supplier(1)]]), rows: [row("p", 3)] })
     );
     expect(result.rows[0]!.chain[0]).toMatchObject({ kind: "purchase", quantity: 5 });
+  });
+
+  it("the rounding surplus covers the next row on the same date", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("p", "purchased", 10)),
+        suppliers: new Map([["p", supplier(2)]]),
+        rows: [row("p", 1, { key: "a" }), row("p", 1, { key: "b" })],
+      })
+    );
+    expect(result.rows.map((r) => r.readyDate)).toEqual(["2026-10-21", "2026-10-21"]);
+    // One purchase of 10: row a's chain. Row b is covered by the surplus and
+    // points at the same purchase.
+    expect(result.rows[0]!.chain).toEqual([
+      { kind: "purchase", articleNumber: "NR-p", quantity: 10, date: "2026-10-21", supplierName: "Stål AB", leadTimeDays: 2 },
+    ]);
+    expect(result.rows[1]!.chain).toEqual(result.rows[0]!.chain);
+  });
+
+  it("the rounding surplus of a made article covers the next row instead of a second batch", () => {
+    // Rounding 10 and 20 h + 1 h/st: one batch of 10 is 30 h (fits week 43).
+    // A second batch would spill into week 44 — the surplus makes row b
+    // ready the same day as row a.
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("m", "manufactured", 10)),
+        routings: new Map([["m", [{ ...op(10, 20), runTimePerUnit: 60 }]]]),
+        rows: [row("m", 1, { key: "a" }), row("m", 1, { key: "b" })],
+      })
+    );
+    expect(result.rows.map((r) => r.readyDate)).toEqual(["2026-10-23", "2026-10-23"]);
+    expect(result.rows[1]!.chain).toEqual(result.rows[0]!.chain);
+    expect(result.rows[1]!.chain[0]).toMatchObject({ kind: "operation", quantity: 10 });
+  });
+
+  it("the rounding surplus of a component covers the next level too", () => {
+    // m1 and m2 each need 1 of the made part h (rounding 10, 30 h a batch):
+    // m2 takes m1's surplus instead of a second batch in week 44.
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("m1", "manufactured"), article("m2", "manufactured"), article("h", "manufactured", 10)),
+        bomEdges: [
+          { parentArticleId: "m1", componentArticleId: "h", quantity: 1 },
+          { parentArticleId: "m2", componentArticleId: "h", quantity: 1 },
+        ],
+        routings: new Map([["h", [{ ...op(10, 20), runTimePerUnit: 60 }]]]),
+        rows: [row("m1", 1), row("m2", 1)],
+      })
+    );
+    expect(result.rows.map((r) => r.readyDate)).toEqual(["2026-10-23", "2026-10-23"]);
+    expect(result.rows[1]!.chain[0]).toMatchObject({ kind: "operation", articleNumber: "NR-h", quantity: 10 });
   });
 
   it("the supplier's delivery days decide the arrival", () => {
@@ -288,6 +486,22 @@ describe("Leveranstidskontroll — made, capacity per week", () => {
   it("past-due load lands in the current week", () => {
     const result = checkDeliveryTime(made([op(10, 11)], { existingOperations: [existing("wc-1", "2026-10-01", 40)] }));
     expect(result.rows[0]!.readyDate).toBe("2026-10-30");
+  });
+
+  it("load beyond a week's capacity rolls into the following weeks", () => {
+    // 75 h due this week on a 40 h resource: week 43 full, 35 h spill into
+    // week 44 (5 h free), so 11 h is 5 h in week 44 + 6 h in week 45.
+    const result = checkDeliveryTime(made([op(10, 11)], { existingOperations: [existing("wc-1", "2026-10-21", 75)] }));
+    expect(result.rows[0]!.chain[0]).toMatchObject({ fromWeek: "2026-10-26", toWeek: "2026-11-02", date: "2026-11-06" });
+  });
+
+  it("the backlog of several weeks rolls as one queue", () => {
+    // Week 43: 40 h (full). Week 44: 60 h — 20 h roll into week 45, leaving
+    // 20 h there; 25 h is 20 h in week 45 + 5 h in week 46.
+    const result = checkDeliveryTime(
+      made([op(10, 25)], { existingOperations: [existing("wc-1", "2026-10-21", 40), existing("wc-1", "2026-10-28", 60)] })
+    );
+    expect(result.rows[0]!.chain[0]).toMatchObject({ fromWeek: "2026-11-02", toWeek: "2026-11-09", date: "2026-11-13" });
   });
 
   it("the current week only counts from today", () => {
@@ -373,6 +587,43 @@ describe("Leveranstidskontroll — made, capacity per week", () => {
     );
     expect(result.rows[0]).toMatchObject({ readyDate: null, notes: ["Kapaciteten räcker inte inom två år"] });
     expect(result).toMatchObject({ shipDate: null, deliveryDate: null });
+  });
+
+  it("a row that reaches the horizon still shows the steps that were planned", () => {
+    // Material bought, Op 10 fits on 110, Op 20 is on a resource with 0 h a day.
+    const wc0: DtcWorkCenter = { ...wc1, workCenterId: "wc-0", code: "120", name: "Svets", weekScheduleId: null, hoursPerDay: 0 };
+    const result = checkDeliveryTime(
+      made([op(10, 4), op(20, 1, "wc-0")], {
+        workCenters: new Map([["wc-1", wc1], ["wc-0", wc0]]),
+        overviews: new Map([["p", { onHand: 0, rows: [] }]]),
+        suppliers: new Map([["p", supplier(1)]]),
+      })
+    );
+    expect(result.rows[0]).toMatchObject({ readyDate: null, notes: ["Kapaciteten räcker inte inom två år"] });
+    expect(result.rows[0]!.chain.map((s) => s.kind)).toEqual(["purchase", "operation", "operation"]);
+    expect(result.rows[0]!.chain[1]).toMatchObject({ sequenceNo: 10, workCenterCode: "110", fromWeek: "2026-10-19" });
+    expect(result.rows[0]!.chain[2]).toMatchObject({ sequenceNo: 20, workCenterCode: "120" });
+  });
+
+  it("a made article without structure and routing counts as available now, with a note", () => {
+    const result = checkDeliveryTime(input({ articles: articles(article("m", "manufactured")), rows: [row("m", 2)] }));
+    expect(result.shipDate).toBe(TODAY);
+    expect(result.rows[0]!.notes).toEqual(["NR-m saknar beredning — räknad som tillgänglig direkt"]);
+  });
+
+  it("several components without preparation are one note", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("m", "manufactured"), article("h1", "manufactured"), article("h2", "manufactured")),
+        bomEdges: [
+          { parentArticleId: "m", componentArticleId: "h1", quantity: 1 },
+          { parentArticleId: "m", componentArticleId: "h2", quantity: 1 },
+        ],
+        routings: new Map([["m", [op(10, 1)]]]),
+        rows: [row("m", 1)],
+      })
+    );
+    expect(result.rows[0]!.notes).toEqual(["NR-h1 och NR-h2 saknar beredning — räknade som tillgängliga direkt"]);
   });
 });
 

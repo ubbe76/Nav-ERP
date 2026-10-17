@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { businessDateSchema } from "./business-date.js";
 
 // Fasta leveransdagar — the partner fields on suppliers and customers and
 // the system defaults. The date rules live in the API's delivery-days.ts.
@@ -31,11 +32,12 @@ export interface DeliverySettingsView {
 
 // GET /supplier-delivery-date-suggestion — without articleId the order
 // header's suggestion, with it the row's (catalog lead time). `date` is
-// checked against the supplier's days for `warning`.
+// checked against the supplier's days for `warning`. Both `date` fields
+// feed date arithmetic, hence businessDateSchema (1900–2999).
 export const supplierDeliveryDateQuerySchema = z.object({
   supplierId: z.string().uuid(),
   articleId: z.string().uuid().optional(),
-  date: z.string().date().optional(),
+  date: businessDateSchema.optional(),
 });
 export type SupplierDeliveryDateQuery = z.infer<typeof supplierDeliveryDateQuerySchema>;
 
@@ -51,7 +53,7 @@ export interface SupplierDeliveryDateSuggestion {
 // day the customer gets the goods) and the warning for `date`.
 export const customerDeliveryDateQuerySchema = z.object({
   customerId: z.string().uuid(),
-  date: z.string().date().optional(),
+  date: businessDateSchema.optional(),
 });
 export type CustomerDeliveryDateQuery = z.infer<typeof customerDeliveryDateQuerySchema>;
 

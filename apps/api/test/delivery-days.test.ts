@@ -176,6 +176,110 @@ describe("delivery-days — customer side", () => {
   });
 });
 
+// Transit is up to 60 WORKING days. The search for the latest dispatch must
+// start at the latest possible dispatch day, not at the delivery date — a
+// 60-calendar-day window from the delivery date never reaches a dispatch
+// 43+ working days back, and the callers then fell back silently (the ship
+// date became the delivery date, every purchase suggestion was late, every
+// date invalid). Monday 2026-10-19 is the dispatch day in every case.
+describe("delivery-days — long transit (43–60 working days)", () => {
+  const today = "2026-10-17";
+  const ship = "2026-10-19";
+  // Tuesday dispatch only; Tuesday 2026-11-03 is a full-day holiday.
+  const offSparse = new Set(["2026-11-03", "2026-12-25", "2027-01-01", "2027-01-06"]);
+  const tuesdayShip = "2026-10-20";
+
+  describe.each([43, 50, 60])("transit %i", (transit) => {
+    const working = s([], "dispatch", transit);
+    const sparse = s([2], "dispatch", transit);
+    const delivery = addWorkingDays(ship, transit, off);
+    const sparseDelivery = addWorkingDays(tuesdayShip, transit, offSparse);
+
+    it("shipDateFor finds the dispatch day", () => {
+      expect(shipDateFor(delivery, working, off)).toBe(ship);
+      expect(shipDateFor(sparseDelivery, sparse, offSparse)).toBe(tuesdayShip);
+      // The dispatch Tuesday that would fit is a holiday: the Tuesday before.
+      const holidayDelivery = addWorkingDays("2026-11-03", transit, offSparse);
+      expect(shipDateFor(holidayDelivery, sparse, offSparse)).toBe("2026-10-27");
+    });
+
+    it("isValidCustomerDelivery and isValidPurchaseArrival accept the arrival and refuse the day after", () => {
+      expect(isValidCustomerDelivery(delivery, working, off)).toBe(true);
+      expect(isValidPurchaseArrival(delivery, working, off)).toBe(true);
+      // A Saturday is never an arrival in working-day mode.
+      const saturday = addDays(delivery, (6 - new Date(`${delivery}T00:00:00Z`).getUTCDay() + 7) % 7 || 7);
+      expect(isValidCustomerDelivery(saturday, working, off)).toBe(false);
+      expect(isValidPurchaseArrival(saturday, working, off)).toBe(false);
+
+      expect(isValidCustomerDelivery(sparseDelivery, sparse, offSparse)).toBe(true);
+      expect(isValidPurchaseArrival(sparseDelivery, sparse, offSparse)).toBe(true);
+      expect(isValidCustomerDelivery(addDays(sparseDelivery, 1), sparse, offSparse)).toBe(false);
+      expect(isValidPurchaseArrival(addDays(sparseDelivery, 1), sparse, offSparse)).toBe(false);
+      // The holiday Tuesday's would-be arrival has no dispatch.
+      expect(isValidCustomerDelivery(addWorkingDays("2026-11-03", transit, offSparse), sparse, offSparse)).toBe(false);
+    });
+
+    it("suggestPurchaseDeliveryDate: the latest arrival before the demand, not late", () => {
+      // Demand two working days after the earliest arrival: the dispatch
+      // one working day after Monday still makes it (arrival = the working
+      // day before the demand).
+      const demand = addWorkingDays(delivery, 2, off);
+      expect(
+        suggestPurchaseDeliveryDate({ demandDate: demand, today, leadTimeDays: 0, settings: working, offDays: off })
+      ).toEqual({ date: addWorkingDays(delivery, 1, off), late: false });
+
+      // Tuesday dispatch: demand the working day after the arrival ⇒ that
+      // arrival (the next Tuesday's would be too late).
+      expect(
+        suggestPurchaseDeliveryDate({
+          demandDate: addWorkingDays(sparseDelivery, 1, offSparse),
+          today,
+          leadTimeDays: 0,
+          settings: sparse,
+          offDays: offSparse,
+        })
+      ).toEqual({ date: sparseDelivery, late: false });
+
+      // Demand before the earliest arrival ⇒ the floor and late.
+      expect(
+        suggestPurchaseDeliveryDate({ demandDate: delivery, today, leadTimeDays: 0, settings: working, offDays: off })
+      ).toEqual({ date: delivery, late: true });
+    });
+  });
+
+  // The latest possible dispatch may be a weekend day when it is ticked: a
+  // Saturday dispatch with one transit day arrives on Monday.
+  it("a ticked Saturday with transit 1 ships the Saturday before a Monday delivery", () => {
+    expect(shipDateFor("2026-10-26", s([6], "dispatch", 1), off)).toBe("2026-10-24");
+    expect(isValidCustomerDelivery("2026-10-26", s([6], "dispatch", 1), off)).toBe(true);
+  });
+
+  // Equivalence with the previous definition (search back from the
+  // delivery date itself) wherever that one could find an answer: every
+  // date over four months, transit 0–8, many weekday sets, holidays.
+  it("agrees with a brute-force search back from the delivery date", () => {
+    const holidays = new Set(["2026-11-03", "2026-12-24", "2026-12-25", "2026-12-31", "2027-01-01", "2027-01-06"]);
+    const reference = (date: string, settings: DeliverySettings): string => {
+      for (let i = 0, day = date; i <= 120; i++, day = addDays(day, -1)) {
+        if (isListedDay(day, settings, holidays) && addWorkingDays(day, settings.transitDays, holidays) <= date) return day;
+      }
+      return date;
+    };
+    const weekdaySets = [[], [1], [6], [7], [2, 4], [5], [1, 2, 3, 4, 5, 6, 7]];
+    for (let date = "2026-10-01"; date <= "2027-01-31"; date = addDays(date, 1)) {
+      for (let transit = 0; transit <= 8; transit++) {
+        for (const weekdays of weekdaySets) {
+          const settings = s(weekdays, "dispatch", transit);
+          if (!transit && !weekdays.length) continue; // short-circuit, not a search
+          expect(shipDateFor(date, settings, holidays), `${date} transit ${transit} [${weekdays}]`).toBe(
+            reference(date, settings)
+          );
+        }
+      }
+    }
+  });
+});
+
 describe("delivery-days — isValidPurchaseArrival", () => {
   it("dispatch mode: Monday + 2 = Wednesday is valid, Thursday is not", () => {
     expect(isValidPurchaseArrival("2026-10-28", s([1], "dispatch", 2), off)).toBe(true);
@@ -266,5 +370,26 @@ describe("delivery-days — settings", () => {
 
   it("deliveryHolidayWindow covers the searches both ways", () => {
     expect(deliveryHolidayWindow(["2026-10-17", "2026-11-01"], 5)).toEqual({ from: "2026-07-24", to: "2027-03-11" });
+  });
+
+  // A stored date near 9999 or 0001 (older orders predate the zod bound)
+  // must not turn into a "+010000-…" string Postgres rejects with a 500.
+  it("deliveryHolidayWindow is clamped to 1900-01-01…2999-12-31", () => {
+    expect(deliveryHolidayWindow(["9999-12-31"], 60)).toEqual({
+      from: addDays("2999-12-31", -(2 * 60 + 75)),
+      to: "2999-12-31",
+    });
+    expect(deliveryHolidayWindow(["0001-01-01"], 0)).toEqual({ from: "1900-01-01", to: "1900-05-01" });
+    expect(deliveryHolidayWindow(["0001-01-01", "9999-12-31"], 0)).toEqual({ from: "1900-01-01", to: "2999-12-31" });
+    // The extremes of the range itself stay inside it.
+    expect(deliveryHolidayWindow(["2999-12-31"], 0).to).toBe("2999-12-31");
+    expect(deliveryHolidayWindow(["1900-01-01"], 0).from).toBe("1900-01-01");
+  });
+
+  it("shipDateFor copes with a delivery date at the end of the calendar", () => {
+    // Friday 9999-12-31, two transit days ⇒ Wednesday; nothing counts forward.
+    expect(shipDateFor("9999-12-31", s([], "dispatch", 2), off)).toBe("9999-12-29");
+    // 43 working days back from a Friday is a Tuesday; the Monday before it.
+    expect(shipDateFor("9999-12-31", s([1], "dispatch", 43), off)).toBe(subtractWorkingDays("9999-12-31", 44, off));
   });
 });

@@ -14,6 +14,7 @@ import {
   ConfigurationRequiredError,
   CustomerNotFoundError,
   SalesOrderNotFoundError,
+  SalesOrderNotOpenError,
   type PlanningService,
 } from "../service/planning.service.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -75,7 +76,9 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       ) {
         return reply.code(404).send(errorBody(err));
       }
-      if (err instanceof ConfigurationRequiredError) return reply.code(409).send(errorBody(err));
+      if (err instanceof ConfigurationRequiredError || err instanceof SalesOrderNotOpenError) {
+        return reply.code(409).send(errorBody(err));
+      }
       if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
       throw err;
     }

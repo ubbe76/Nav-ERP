@@ -28,7 +28,7 @@ import { insertPlannedManufacturingOrder } from "./helpers/planned-manufacturing
 import { createScheduleRepository } from "../src/modules/timereport/repository/schedule.repository.js";
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
-import { CustomerNotFoundError } from "../src/modules/planning/service/planning.service.js";
+import { CustomerNotFoundError, SalesOrderNotOpenError } from "../src/modules/planning/service/planning.service.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const authRepo = createAuthRepository(db);
@@ -832,6 +832,86 @@ describe("planning service — getArticleOverview", () => {
   });
 });
 
+// Leveranstidskontroll loads the overviews of a whole BOM tree in ONE batch
+// (getArticleOverviews, a fixed number of queries + one delivery context).
+// It must be indistinguishable from getArticleOverview per article —
+// including the KO rows' shift to the ship date.
+describe("planning service — getArticleOverviews (batch)", () => {
+  it("matches getArticleOverview per article: stock, IO, TO material, planned TO, KO at a customer with transit days", async () => {
+    const user = await makeUser();
+    const c = await makeArticle({ articleNumber: "BAT-C" });
+    const d = await makeArticle({ articleNumber: "BAT-D" });
+    const p = await makeArticle({ articleNumber: "BAT-P", type: "manufactured" });
+    const empty = await makeArticle({ articleNumber: "BAT-E" });
+    await articleService.addBomComponent(p.id, { componentArticleId: c.id, quantity: 2 });
+    await articleService.addBomComponent(p.id, { componentArticleId: d.id, quantity: 1 });
+    const supplier = await makeSupplierWithCatalog("Stål AB", [c.id, d.id], 10, 14);
+    await addStock(c.id, 10);
+    await addStock(d.id, 3);
+
+    // KO at a customer with 2 transit days: Thursday 2026-10-01 ⇒ ships
+    // Tuesday 2026-09-29. Two rows (component and parent) on one order.
+    const customer = await salesService.createCustomer({
+      name: "Bygg AB",
+      active: true,
+      deliveryDayMode: "dispatch",
+      transitDays: 2,
+    });
+    await salesService.createQuote(
+      {
+        customerId: customer.id,
+        confirm: true,
+        expectedDeliveryDate: "2026-10-01",
+        rows: [
+          { articleId: c.id, quantity: 4, unitPrice: 100 },
+          { articleId: p.id, quantity: 1, unitPrice: 500 },
+        ],
+      },
+      user.id
+    );
+    const io = await purchaseService.createPurchaseOrder(
+      { supplierId: supplier.id, exchangeRate: 1, expectedDeliveryDate: "2026-09-20" },
+      user.id
+    );
+    await purchaseService.addRow(io.id, { articleId: c.id, quantity: 5, unitPrice: 10 });
+    await purchaseService.addRow(io.id, { articleId: d.id, quantity: 1, unitPrice: 10 });
+    await purchaseService.confirm(io.id);
+    // A planned TO (exploded through the BOM) and a released one (snapshot rows).
+    await insertPlannedManufacturingOrder({ articleId: p.id, quantity: 3, dueDate: "2026-09-25", createdBy: user.id });
+    await mfgService.createManufacturingOrder({ articleId: p.id, quantity: 2, dueDate: "2026-09-15" }, user.id);
+
+    const ids = [c.id, d.id, p.id, empty.id];
+    const batch = await planningService.getArticleOverviews([...ids, crypto.randomUUID()]);
+
+    // An unknown id is left out; every known one equals the single read.
+    expect([...batch.keys()].sort()).toEqual([...ids].sort());
+    for (const id of ids) expect(batch.get(id)).toEqual(await planningService.getArticleOverview(id));
+
+    // Not vacuous: the batch carries the real rows, partitioned per
+    // article, with the KO rows on the ship date.
+    expect(batch.get(c.id)!.rows.map((r) => [r.kind, r.date, r.quantity, r.balance])).toEqual([
+      ["mo_material", "2026-09-15", -4, 6],
+      ["purchase_order", "2026-09-20", 5, 11],
+      ["mo_planned_material", "2026-09-25", -6, 5],
+      ["sales_order", "2026-09-29", -4, 1],
+    ]);
+    expect(batch.get(c.id)!.primarySupplier).toMatchObject({ supplierName: "Stål AB", leadTimeDays: 14 });
+    expect(batch.get(d.id)!.rows.map((r) => [r.kind, r.date, r.quantity, r.balance])).toEqual([
+      ["mo_material", "2026-09-15", -2, 1],
+      ["purchase_order", "2026-09-20", 1, 2],
+      ["mo_planned_material", "2026-09-25", -3, -1],
+    ]);
+    expect(batch.get(p.id)!.rows.map((r) => [r.kind, r.date, r.quantity])).toEqual([
+      ["manufacturing_order", "2026-09-15", 2],
+      ["manufacturing_order", "2026-09-25", 3],
+      ["sales_order", "2026-09-29", -1],
+    ]);
+    expect(batch.get(p.id)!.primarySupplier).toBeNull();
+    expect(batch.get(empty.id)).toMatchObject({ onHand: 0, rows: [], closingBalance: 0 });
+    expect(await planningService.getArticleOverviews([])).toEqual(new Map());
+  });
+});
+
 // Fasta leveransdagar: a sales order's date is the day the customer gets the
 // goods — the overview and the färdigdatumsförslag plan by the SHIP date.
 // 2030-03-04 is a Monday, 2030-03-06 a Wednesday.
@@ -871,6 +951,16 @@ describe("planning service — kundorderns behov på avsändningsdagen", () => {
     // Ships Tuesdays, 1 transit day: Tuesday 5 + 1 = Wednesday 6.
     await koWith(m.id, user.id, "2030-03-08", { deliveryWeekdays: [2], deliveryDayMode: "dispatch", transitDays: 1 });
     expect(await koRowDate(m.id)).toBe("2030-03-05");
+  });
+
+  // Stored dates predate the 1900–2999 bound: the holiday window is clamped
+  // so the overview never asks Postgres for a "+010000-…" date (a 500).
+  it("a stored delivery date at the end of the calendar does not break the overview", async () => {
+    const user = await makeUser();
+    const m = await makeArticle({ articleNumber: "SHIP-9999", type: "manufactured" });
+    // Friday 9999-12-31, two transit days ⇒ Wednesday.
+    await koWith(m.id, user.id, "9999-12-31", { deliveryDayMode: "dispatch", transitDays: 2 });
+    expect(await koRowDate(m.id)).toBe("9999-12-29");
   });
 
   it("the default transit shifts a customer without own settings, across the weekend", async () => {
@@ -960,6 +1050,19 @@ describe("planning service — leveranstidskontroll", () => {
     const customer = await salesService.createCustomer({ name: "Långt bort AB", active: true, deliveryDayMode: "dispatch", transitDays: 2 });
     const result = await pinned.checkDeliveryTime({ customerId: customer.id, rows: [{ articleId: m.id, quantity: 3 }] });
     expect(result).toMatchObject({ shipDate: "2030-03-25", deliveryDate: "2030-03-27" });
+  });
+
+  it("a quote is checked, a cancelled order is refused", async () => {
+    const user = await makeUser();
+    const m = await makeArticle({ articleNumber: "DTC-Q", type: "manufactured" });
+    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const quote = await salesService.createQuote(
+      { customerId: customer.id, rows: [{ articleId: m.id, quantity: 1, unitPrice: 100 }] },
+      user.id
+    );
+    expect((await pinned.checkDeliveryTime({ salesOrderId: quote.order.id })).rows).toHaveLength(1);
+    await salesService.cancel(quote.order.id, user.id);
+    await expect(pinned.checkDeliveryTime({ salesOrderId: quote.order.id })).rejects.toBeInstanceOf(SalesOrderNotOpenError);
   });
 
   it("unknown article and customer are refused", async () => {
