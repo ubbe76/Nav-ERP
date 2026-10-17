@@ -4,6 +4,7 @@ import { listQuerySchema, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
 import { vatRateSchema } from "./vat.js";
 import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.js";
+import { partnerDeliveryFields } from "./delivery.js";
 
 export const purchaseOrderStatusSchema = z.enum([
   "draft",
@@ -134,6 +135,7 @@ export const createSupplierSchema = z.object({
   currency: z.string().regex(/^[A-Z]{3}$/, "3 stora bokstäver, t.ex. SEK").default("SEK"),
   active: z.boolean().default(true),
   ...supplierPaymentDetailsFields,
+  ...partnerDeliveryFields,
 });
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>;
 
@@ -158,6 +160,7 @@ export const updateSupplierSchema = z
     currency: z.string().regex(/^[A-Z]{3}$/, "3 stora bokst\u00e4ver, t.ex. SEK").optional(),
     active: z.boolean().optional(),
     ...supplierPaymentDetailsFields,
+    ...partnerDeliveryFields,
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateSupplierInput = z.infer<typeof updateSupplierSchema>;

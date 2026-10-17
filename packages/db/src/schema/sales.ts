@@ -11,6 +11,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   unique,
@@ -22,7 +23,7 @@ import { articleGroups, articles } from "./article";
 import { users } from "./auth";
 import { bankFileEntries } from "./banking";
 import { verifications } from "./economy";
-import { carriers, deliveryTerms, paymentTerms, units } from "./register";
+import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, units } from "./register";
 import type { StoredRates } from "./shipping";
 import { freightProducts, shipments } from "./shipping";
 
@@ -100,10 +101,19 @@ export const customers = pgTable("customers", {
   // dialog, and what the invoice PDF follows at issue (configurator 4b).
   showConfigurationPrices: boolean("show_configuration_prices").notNull().default(false),
   // Webbsida — free text, may lack a scheme ("www.example.se").
+  // Fasta leveransdagar (delivery-days.ts): ISO weekdays 1–7, sorted, no
+  // duplicates (normalized by zod); empty = no fixed days. Mode and transit
+  // days null = the system default for the side (system_settings).
+  deliveryWeekdays: smallint("delivery_weekdays").array().notNull().default(sql`'{}'::smallint[]`),
+  deliveryDayMode: deliveryDayModeEnum("delivery_day_mode"),
+  transitDays: smallint("transit_days"),
   website: varchar("website", { length: 255 }),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  check("customers_delivery_weekdays", sql`${table.deliveryWeekdays} <@ '{1,2,3,4,5,6,7}'::smallint[]`),
+  check("customers_transit_days", sql`${table.transitDays} between 0 and 60`),
+]);
 
 // Multiple delivery addresses per customer; at most one is the default,
 // enforced by the partial unique index (same pattern as the primary

@@ -7,6 +7,11 @@ import { boolean, numeric, pgEnum, pgTable, text, timestamp, uuid, varchar } fro
 // generic repository/route machinery shape-identical; the web only surfaces
 // it where it carries meaning (delivery terms today).
 
+// Fasta leveransdagar: whether a supplier's or customer's delivery weekdays
+// are the days the goods ARRIVE or the days they are DISPATCHED. Here
+// because both suppliers (purchase.ts) and customers (sales.ts) use it.
+export const deliveryDayModeEnum = pgEnum("delivery_day_mode", ["arrival", "dispatch"]);
+
 // Leveransvillkor (e.g. DAP / "Delivered at Place")
 export const deliveryTerms = pgTable("delivery_terms", {
   id: uuid("id").primaryKey().defaultRandom(),

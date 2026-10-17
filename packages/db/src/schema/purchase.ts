@@ -9,6 +9,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   unique,
@@ -19,7 +20,7 @@ import {
 import { articles } from "./article";
 import { users } from "./auth";
 import { verifications } from "./economy";
-import { carriers, deliveryTerms, paymentTerms, units } from "./register";
+import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, units } from "./register";
 import { bankFileEntries, paymentBatchItems } from "./banking";
 import { stockLocations, stockTransactions } from "./stock";
 
@@ -80,6 +81,12 @@ export const suppliers = pgTable("suppliers", {
   bankAccountNumber: varchar("bank_account_number", { length: 15 }),
   iban: varchar("iban", { length: 34 }),
   bic: varchar("bic", { length: 11 }),
+  // Fasta leveransdagar (delivery-days.ts): ISO weekdays 1–7, sorted, no
+  // duplicates (normalized by zod); empty = no fixed days. Mode and transit
+  // days null = the system default for the side (system_settings).
+  deliveryWeekdays: smallint("delivery_weekdays").array().notNull().default(sql`'{}'::smallint[]`),
+  deliveryDayMode: deliveryDayModeEnum("delivery_day_mode"),
+  transitDays: smallint("transit_days"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
@@ -91,6 +98,8 @@ export const suppliers = pgTable("suppliers", {
       or (${table.paymentMethod} = 'bank_account' and ${table.bankClearing} is not null and ${table.bankAccountNumber} is not null)
       or (${table.paymentMethod} = 'iban' and ${table.iban} is not null)`
   ),
+  check("suppliers_delivery_weekdays", sql`${table.deliveryWeekdays} <@ '{1,2,3,4,5,6,7}'::smallint[]`),
+  check("suppliers_transit_days", sql`${table.transitDays} between 0 and 60`),
 ]);
 
 // Multiple contacts per supplier; at most one is the primary contact

@@ -4,6 +4,7 @@ import { listQuerySchema, statusListParam } from "./list.js";
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
 
 import { blankSafe } from "./coerce.js";
+import { partnerDeliveryFields } from "./delivery.js";
 
 export const salesOrderStatusSchema = z.enum([
   "quote",
@@ -84,6 +85,7 @@ export const createCustomerSchema = z.object({
   website: z.string().max(255).optional(),
   defaultFreightProductId: z.string().uuid().optional(),
   active: z.boolean().default(true),
+  ...partnerDeliveryFields,
 });
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 
@@ -122,6 +124,7 @@ export const updateCustomerSchema = z
     website: z.string().max(255).nullable().optional(),
     defaultFreightProductId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
+    ...partnerDeliveryFields,
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;

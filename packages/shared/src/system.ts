@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { costingMaterialSourceSchema, costingSupplierPriceTierSchema } from "./costing.js";
+import { deliveryDayModeSchema, transitDaysSchema } from "./delivery.js";
 
 // Materialbrist vid rapportering — see updateSystemSettingsSchema below.
 export const manufacturingMaterialShortageSchema = z.enum(["none", "warn", "block"]);
@@ -89,6 +90,12 @@ const systemSettingsFieldsSchema = z.object({
     // the behaviour before the setting existed and the default when unset),
     // a question the client can override ("warn") or a refusal ("block").
     manufacturingMaterialShortage: manufacturingMaterialShortageSchema.optional(),
+    // Fasta leveransdagar: the default mode and transit days for suppliers
+    // and customers without their own (delivery-days.ts decodes the keys).
+    supplierDeliveryDayMode: deliveryDayModeSchema.optional(),
+    supplierTransitDays: transitDaysSchema.optional(),
+    customerDeliveryDayMode: deliveryDayModeSchema.optional(),
+    customerTransitDays: transitDaysSchema.optional(),
     // Automatic accounting (Ekonomi → automatkontering) — BAS-styled 4-digit
     // account codes used when posting customer/supplier invoices to the
     // ledger automatically. An empty string clears the override (same

@@ -11,6 +11,7 @@ import type {
 import { round2 } from "@navet/shared";
 import type { SystemRepository } from "../repository/system.repository.js";
 import { createDatabaseBackup } from "./backup.js";
+import { decodeDeliveryDefaults, DELIVERY_SETTING_KEYS, type DeliveryDefaults } from "./delivery-days.js";
 import {
   codeSetting,
   decodePostingSettings,
@@ -107,6 +108,15 @@ function decodeOverReceiptPercent(raw: string | null): number | null {
 const MANUFACTURING_MATERIAL_SHORTAGE_KEY = "manufacturing_material_shortage";
 function decodeMaterialShortage(raw: string | null | undefined): ManufacturingMaterialShortage {
   return raw === "warn" || raw === "block" ? raw : "none";
+}
+
+function flattenDeliveryDefaults(d: DeliveryDefaults) {
+  return {
+    supplierDeliveryDayMode: d.supplier.mode,
+    supplierTransitDays: d.supplier.transitDays,
+    customerDeliveryDayMode: d.customer.mode,
+    customerTransitDays: d.customer.transitDays,
+  };
 }
 
 // The 14 posting accounts + 2 kundreskontra amounts (Ekonomi →
@@ -211,6 +221,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       costingGeneralMarkupPercent: percentSetting(get(COSTING_GENERAL_MARKUP_PERCENT_KEY)),
       purchaseOverReceiptPercent: decodeOverReceiptPercent(get(PURCHASE_OVER_RECEIPT_PERCENT_KEY)),
       manufacturingMaterialShortage: decodeMaterialShortage(get(MANUFACTURING_MATERIAL_SHORTAGE_KEY)),
+      // Fasta leveransdagar — the default mode/transit days for partners
+      // without their own; junk decodes to the default (delivery-days.ts).
+      ...flattenDeliveryDefaults(decodeDeliveryDefaults(get)),
       // Automatic accounting (Ekonomi → automatkontering) — the 14 posting
       // accounts + the 2 kundreskontra amounts, decoded by the leaf that owns
       // their keys/defaults (posting-settings.js).
@@ -439,6 +452,18 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.manufacturingMaterialShortage !== undefined) {
         await set(MANUFACTURING_MATERIAL_SHORTAGE_KEY, input.manufacturingMaterialShortage);
+      }
+      if (input.supplierDeliveryDayMode !== undefined) {
+        await set(DELIVERY_SETTING_KEYS.supplierMode, input.supplierDeliveryDayMode);
+      }
+      if (input.supplierTransitDays !== undefined) {
+        await set(DELIVERY_SETTING_KEYS.supplierTransit, String(input.supplierTransitDays));
+      }
+      if (input.customerDeliveryDayMode !== undefined) {
+        await set(DELIVERY_SETTING_KEYS.customerMode, input.customerDeliveryDayMode);
+      }
+      if (input.customerTransitDays !== undefined) {
+        await set(DELIVERY_SETTING_KEYS.customerTransit, String(input.customerTransitDays));
       }
       if (input.postingAccountsReceivable !== undefined) {
         await set(POSTING_ACCOUNTS_RECEIVABLE_KEY, input.postingAccountsReceivable);

@@ -855,6 +855,13 @@
       "when": 1792140013009,
       "tag": "0121_employee_work_centers",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1792218993040,
+      "tag": "0122_delivery_days",
+      "breakpoints": true
     }
   ]
 }

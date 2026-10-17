@@ -111,6 +111,47 @@ describe("system service — settings", () => {
     expect(updateSystemSettingsSchema.safeParse({ manufacturingMaterialShortage: "block" }).success).toBe(true);
   });
 
+  it("defaults the delivery-day settings and round-trips them; junk decodes to the defaults", async () => {
+    const keys = ["supplier_delivery_day_mode", "supplier_transit_days", "customer_delivery_day_mode", "customer_transit_days"];
+    await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    try {
+      expect(await systemService.getSettings()).toMatchObject({
+        supplierDeliveryDayMode: "arrival",
+        supplierTransitDays: 0,
+        customerDeliveryDayMode: "dispatch",
+        customerTransitDays: 0,
+      });
+      const updated = await systemService.updateSettings({
+        supplierDeliveryDayMode: "dispatch",
+        supplierTransitDays: 2,
+        customerDeliveryDayMode: "arrival",
+        customerTransitDays: 60,
+      });
+      expect(updated).toMatchObject({
+        supplierDeliveryDayMode: "dispatch",
+        supplierTransitDays: 2,
+        customerDeliveryDayMode: "arrival",
+        customerTransitDays: 60,
+      });
+      for (const key of keys) {
+        await db
+          .insert(systemSettings)
+          .values({ key, value: "abc" })
+          .onConflictDoUpdate({ target: systemSettings.key, set: { value: "abc" } });
+      }
+      expect(await systemService.getSettings()).toMatchObject({
+        supplierDeliveryDayMode: "arrival",
+        supplierTransitDays: 0,
+        customerDeliveryDayMode: "dispatch",
+        customerTransitDays: 0,
+      });
+    } finally {
+      await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    }
+    expect(updateSystemSettingsSchema.safeParse({ supplierTransitDays: 61 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ customerDeliveryDayMode: "maybe" }).success).toBe(false);
+  });
+
   it("defaults Tillåten överleverans to 0 % and round-trips a percent and 'no limit' (null)", async () => {
     // system_settings is shared across test files — remove the key afterwards
     // so everyone else sees the default again.

@@ -397,6 +397,8 @@ export interface DocumentTermsFields {
 }
 
 // Common card fields shared by customers and suppliers.
+export type DeliveryDayMode = "arrival" | "dispatch";
+
 export interface PartnerCardFields {
   address: string | null;
   postalCode: string | null;
@@ -407,6 +409,11 @@ export interface PartnerCardFields {
   paymentTermId: string | null;
   carrierId: string | null;
   carrierCustomerNumber: string | null;
+  // Fasta leveransdagar: ISO weekdays (Monday = 1); mode/transit null = the
+  // system default for the side.
+  deliveryWeekdays: number[];
+  deliveryDayMode: DeliveryDayMode | null;
+  transitDays: number | null;
   // Joined names/codes — present on the detail endpoint (GET :id) only.
   deliveryTermCode?: string | null;
   deliveryTermName?: string | null;
@@ -2046,6 +2053,10 @@ export interface SystemSettings {
   costingSupplierPriceTier: CostingSupplierPriceTier;
   // Materialbrist vid rapportering: none = ingen kontroll, warn = fråga först, block = spärr.
   manufacturingMaterialShortage: "none" | "warn" | "block";
+  supplierDeliveryDayMode: DeliveryDayMode;
+  supplierTransitDays: number;
+  customerDeliveryDayMode: DeliveryDayMode;
+  customerTransitDays: number;
   costingMoPercent: number;
   costingLoPercent: number;
   costingAffoPercent: number;
