@@ -5,7 +5,7 @@
 // employee-bound resolveEmployeeCalendar) and the group/resource matrix —
 // fully unit-testable without a database (same pattern as requirements-calc).
 import { isoWeekOf, isoWeekRange } from "../../timereport/service/schedule.service.js";
-import { addWorkingDays, isWorkingDay } from "../../system/service/delivery-days.js";
+import { addWorkingDays, isWorkingDay, nextWorkingDayOnOrAfter } from "../../system/service/delivery-days.js";
 
 export interface CapacityWorkCenter {
   workCenterId: string;
@@ -326,7 +326,10 @@ export function weekFinishDay(
     if (day < floor) break;
     if (calendar && hasCapacityCalendar(calendar) ? resourceDayMinutes(lookups, calendar, day) > 0 : isWorkingDay(day, offDays)) return day;
   }
-  return floor;
+  // No working day left in the week from `floor` (a weekend or holiday
+  // floor on a resource without a calendar): ready the next working day —
+  // never "ready on a Saturday".
+  return nextWorkingDayOnOrAfter(floor, offDays);
 }
 
 export interface PlanStatusWorkCenter extends ResourceCalendar {

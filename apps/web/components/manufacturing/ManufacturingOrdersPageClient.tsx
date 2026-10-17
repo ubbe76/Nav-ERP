@@ -25,6 +25,7 @@ import {
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/tillverkning/ordrar/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { plannedWeekLabel } from "../../lib/planning";
 import { useCan, useCanOpen } from "../PermissionsProvider";
 
 const BULK_ACTIONS: OrderAction[] = ["release", "close", "cancel"];
@@ -256,6 +257,7 @@ export function ManufacturingOrdersPageClient({
           { key: "articleNumber", label: "Artikel", width: "minmax(160px, 1fr)" },
           { key: "quantity", label: "Antal", width: "90px", align: "right" as const },
           { key: "dueDate", label: "Färdigt", width: "110px" },
+          { key: "planned", label: "Planerad", width: "150px" },
           { key: "status", label: "Status", width: "120px" },
           { key: "actions", label: "Åtgärder", width: "210px", align: "right" as const },
         ].filter((c) => !readOnly || (c.key !== "actions" && c.key !== "select"))}
@@ -291,6 +293,17 @@ export function ManufacturingOrdersPageClient({
               return Number(order.quantity);
             case "dueDate":
               return order.dueDate ?? "—";
+            // Produktionsplanering: planned weeks of the pending operations;
+            // Sen = planned finish after the due date (or overdue unplanned).
+            case "planned": {
+              const weeks = plannedWeekLabel(order.plannedStartWeek ?? null, order.plannedEndWeek ?? null);
+              return (
+                <span className={styles.plannedCell}>
+                  {weeks ?? "—"}
+                  {order.late && <StatusPill status="delayed" label="Sen" compact />}
+                </span>
+              );
+            }
             case "status": {
               const pill = MANUFACTURING_ORDER_STATUS_PILL[order.status];
               return <StatusPill status={pill.status} label={pill.label} compact />;

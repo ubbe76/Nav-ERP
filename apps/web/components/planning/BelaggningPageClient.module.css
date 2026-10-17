@@ -16,6 +16,8 @@
      this component. */
   max-width: 100%;
   max-height: calc(100vh - 220px);
+  /* Lets the expansion row size itself to the visible matrix width (cqw). */
+  container-type: inline-size;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
   background: var(--color-surface);
@@ -138,13 +140,27 @@
 }
 
 .cell[data-tone="warn"] .cellHours,
-.cell[data-tone="warn"] .cellPercent {
+.cell[data-tone="warn"] .cellPercent,
+.cell[data-tone="warn"] .cellFlags {
   color: var(--status-delayed-text);
 }
 
 .cell[data-tone="alert"] .cellHours,
-.cell[data-tone="alert"] .cellPercent {
+.cell[data-tone="alert"] .cellPercent,
+.cell[data-tone="alert"] .cellFlags {
   color: var(--status-stopped-text);
+}
+
+/* Locked / late markers (icons, with titles and labels) under the load. */
+.cellFlags {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  color: var(--color-text-secondary);
+}
+
+.cellFlags > span {
+  display: inline-flex;
 }
 
 .fillTrack {
@@ -194,6 +210,15 @@
   grid-column: 1 / -1;
   border-top: 1px solid var(--color-divider);
   background: var(--color-bg);
+}
+
+/* Sticky at the left edge and as wide as the visible matrix, so the list is
+   in view (and phone-wide) wherever the clicked cell was scrolled to. */
+.expansionInner {
+  position: sticky;
+  left: 0;
+  box-sizing: border-box;
+  width: 100cqw;
   padding: 12px 16px;
 }
 
@@ -205,18 +230,44 @@
   margin-bottom: 8px;
 }
 
-.orderRow {
-  display: grid;
-  grid-template-columns: 110px 1fr 90px 90px 110px 90px;
-  gap: 10px;
-  align-items: center;
-  padding: 5px 0;
+.orderItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
   font-size: 13px;
   border-top: 1px solid var(--color-divider);
 }
 
-.orderRow:first-child {
+.expansionTitle + .orderItem {
   border-top: none;
+}
+
+.orderMain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.orderMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  color: var(--color-text-secondary);
+}
+
+.lockedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-surface);
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 
 .rowLink {
@@ -234,4 +285,59 @@
   align-items: center;
   margin-bottom: 16px;
   flex-wrap: wrap;
+}
+
+/* Planera result and the plan summary line. */
+.planNotice {
+  margin-bottom: 16px;
+}
+
+.warningList {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
+.noticeLink {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.linkButton {
+  padding: 4px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--accent-fg);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.summary {
+  margin-bottom: 16px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+}
+
+.summaryLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: baseline;
+}
+
+.plannedAt {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.summaryList {
+  margin: 8px 0 0;
+  padding: 10px 16px 10px 32px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
 }

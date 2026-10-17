@@ -122,7 +122,7 @@ Den som bara har rättigheten **Tillverkningsorder (läsläge)** (verkstadsprofi
 
 ### Skapa och frisläppa
 
-1. **+ Ny tillverkningsorder**: välj artikel (artikelväljaren) och antal (har artikeln en **Avrundning** på Lager-fliken avrundas antalet uppåt till närmaste multipel när ordern skapas — 12 med Avrundning 10 blir 20; detsamma gäller en TO som skapas från en kundorderrad), samt eventuellt **Planerat färdigdatum** — datumet styr vilken vecka orderns operationstid räknas i i [beläggningen](#belaggning) och kan sättas eller ändras på TO-kortet i efterhand (med **Spara**, så länge ordern är Planerad/Frisläppt/Pågår). Ordern får ett TO-nummer och **frisläpps direkt** (status **Frisläppt**), så den syns i [stämpelterminalen](/hjalp/terminal) och går att stämpla in på med en gång. När du väljer artikel föreslås färdigdatumet automatiskt, se [Föreslaget färdigdatum](#foreslaget-fardigdatum).
+1. **+ Ny tillverkningsorder**: välj artikel (artikelväljaren) och antal (har artikeln en **Avrundning** på Lager-fliken avrundas antalet uppåt till närmaste multipel när ordern skapas — 12 med Avrundning 10 blir 20; detsamma gäller en TO som skapas från en kundorderrad), samt eventuellt **Planerat färdigdatum** — datumet styr vilken vecka orderns operationstid räknas i i [beläggningen](#belaggning) så länge ordern inte är planerad (en planerad order räknas i sina [planerade veckor](#planerade-veckor); färdigdatumet ändras aldrig av planeringen) och kan sättas eller ändras på TO-kortet i efterhand (med **Spara**, så länge ordern är Planerad/Frisläppt/Pågår). Ordern får ett TO-nummer och **frisläpps direkt** (status **Frisläppt**), så den syns i [stämpelterminalen](/hjalp/terminal) och går att stämpla in på med en gång. Den **planeras också direkt**: operationerna läggs i tur och ordning på resursernas lediga tid från i dag, se [Planerade veckor](#planerade-veckor). När du väljer artikel föreslås färdigdatumet automatiskt, se [Föreslaget färdigdatum](#foreslaget-fardigdatum).
    En konfigurerbar mall i läget Variantartiklar (se [Artiklar](/hjalp/artiklar#varianter)) visas i artikelväljaren med märkningen **Konfigurerbar**. Väljer du den öppnas dialogen **Konfigurera**: gör valen och klicka **Lägg in**, så blir ordern en tillverkningsorder på varianten (den hämtas om den finns och skapas annars). Dialogen visar inget pris här. Mallen själv kan inte tillverkas. En mall i läget Beställningsvara tillverkas däremot med valen på ordern, se [Tillverkningsorder för beställningsvara](#tillverkningsorder-for-bestallningsvara).
 2. **Frisläppet sker när ordern skapas** — oavsett om den skapas här, [från en kundorderrad](#skapa-fran-kundorder) eller med behovsberäkningens **Skapa ordrar**. Då snapshotas artikelns struktur till en **materiallista** och rutten till **operationer** — senare ändringar på artikeln påverkar inte en redan frisläppt order. Räcker inte lagersaldot till materialet visas **Varning vid frisläpp — otillräckligt lagersaldo** överst på TO-kortet när du kommer dit; ordern skapas och frisläpps ändå. Ordrar som skapades innan frisläppet blev automatiskt kan stå kvar som **Planerad** — dem frisläpper du med **Frisläpp** på detaljsidan eller i listan. Fantomartiklar i strukturen löses upp till sina komponenter. Operationer som är märkta **Kalkyl** i beredningen följer inte med (se [Artiklar](/hjalp/artiklar#kalkyloperationer)): de prissätts i förkalkylen men syns aldrig på ordern, i terminalen, i beläggningen eller i efterkalkylen.
 
@@ -156,6 +156,14 @@ Förslaget görs i **+ Ny tillverkningsorder**, när en TO skapas [från en kund
 Statusen behöver inte ändras order för order på detaljsidan. Kolumnen **Åtgärder** i listan visar de knappar som gäller för radens status: **Frisläpp** och **Makulera order** på en Planerad order, **Makulera order** på en Frisläppt, **Stäng order** på en Klar. En order som Pågår visar i stället **Slutför på kortet** — slutförandet anger lagerplats och antal och bokför inleveransen, så det görs på detaljsidan. **Makulera order** frågar alltid först; en makulerad order kan inte återöppnas, och den går bara att makulera så länge inget är rapporterat på den (se [Makulera order](#makulera-order)).
 
 Kryssa för flera ordrar (kryssrutan i rubrikraden väljer alla på sidan som går att påverka) så visas en rad under listan med **Frisläpp valda**, **Stäng order valda** och **Makulera order valda** — siffran inom parentes är hur många av de valda som just den åtgärden gäller för. Ordrarna behandlas en och en; misslyckas någon listas den i en felruta och förblir markerad så du kan försöka igen, medan de som lyckades avmarkeras. Lagervarningar från frisläppet visas ovanför listan med TO-numret framför varje rad. På en smal skärm (mobil i stående läge) visas listan som staplade kort utan rubrikrad; då ligger kryssrutan **Välj alla på sidan** och knapparna för valda ordrar i stället i en rad ovanför listan som följer med när du skrollar.
+
+### Planerade veckor
+
+Varje operation på en tillverkningsorder kan ha en **planerad vecka** (eller flera, om tiden inte ryms i en): den vecka operationen beräknas börja och den vecka den beräknas bli klar, utifrån resursens lediga tid. Operationstabellen på TO-kortet har kolumnen **Planerad vecka** — till exempel **v.45** eller **v.45–47**. Står det **Ej planerad** har operationen ingen plan än (äldre ordrar, tills du kört **Planera** första gången, eller en operation som inte rymdes inom två år). **Låst** betyder att veckan är flyttad för hand i [beläggningen](#belaggning) och ligger kvar när du kör **Planera**. Klara operationer och legooperationer visar **–**.
+
+En **ny tillverkningsorder planeras direkt när den skapas**, oavsett om den skapas från **+ Ny tillverkningsorder**, från en kundorderrad, med behovsberäkningens **Skapa ordrar** eller via API:t: operationerna läggs i tur och ordning från i dag på ledig kapacitet, mot all annan last. Räcker inte kapaciteten inom två år lämnas operationen oplanerad och ordern visar en varning vid frisläpp. Planen ändrar aldrig **Planerat färdigdatum** — datumet är kundens behov, planen är vår.
+
+Ordern märks **Sen** — på TO-kortet bredvid statusen, och i listan i kolumnen **Planerad** — när den sista operationen beräknas bli klar efter **Planerat färdigdatum**. En order utan plan är **Sen** när färdigdatumet passerat. Listan **Tillverkning → Ordrar** har kolumnen **Planerad** med orderns planerade veckor (från första till sista väntande operation).
 
 ### Skapa från kundorder
 
@@ -345,20 +353,46 @@ Sökrutan matchar även kundordernumret och valen.
 
 ## Beläggning
 
-**Tillverkning → Beläggning** visar operationstid per resurs och vecka från släppta tillverkningsordrar, ställd mot resursens tillgängliga tid. Allt beräknas i stunden — inget lagras.
+**Tillverkning → Beläggning** visar operationstid per resurs och vecka från släppta tillverkningsordrar, ställd mot resursens tillgängliga tid. Lasten beräknas i stunden; själva planen — vilka veckor varje operation ligger i — sparas på operationerna (se [Planera](#planera)).
 
 ### Vad som räknas
 
-- **Lasten** kommer från tillverkningsordrar i status **Frisläppt** eller **Pågår** (nya ordrar frisläpps när de skapas; en äldre order som står kvar som **Planerad** räknas inte förrän den frisläppts). Per operation räknas den återstående tiden: stycktid × kvarvarande antal, plus ställtiden så länge inget antal avrapporterats. En slutförd operation belastar inte. Ställtid och stycktid är i **minuter**; beläggningen visar timmar.
+- **Lasten** kommer från tillverkningsordrar i status **Frisläppt** eller **Pågår** (nya ordrar frisläpps när de skapas; en äldre order som står kvar som **Planerad** räknas inte förrän den frisläppts). Per operation räknas den återstående tiden: stycktid × kvarvarande antal, plus ställtiden så länge inget antal avrapporterats. En slutförd operation belastar inte. En **planerad** operation lägger sin tid i sina planerade veckor; har den delvis rapporterats räknas det som är gjort i de tidigaste veckorna, så det som återstår ligger i de senare. En operation som **inte är planerad** räknas som förut i färdigdatumets vecka. Ställtid och stycktid är i **minuter**; beläggningen visar timmar.
 - **Tillgänglig tid** per resurs och vecka kommer från resursens **Veckoschema (kapacitet)** — eller, utan schema, **Kapacitet (timmar per dag)** måndag–fredag — × **Kapacitetsfaktor** (se [Resurser](#resurser)), upplöst mot den faktiska kalenderveckan — **röda dagar och halvdagar i helgdagskalendern minskar kapaciteten** den veckan. En resurs utan veckoschema och timmar per dag visar **—** som kapacitet men lasten syns ändå.
 
 ### Veckomatrisen
 
-Kolumnerna är innevarande vecka och framåt (välj horisont med **Veckor**: 4/8/13/26), följt av **Senare** (färdigdatum bortom horisonten) och **Odaterat** (ordrar utan **Planerat färdigdatum**). Lasten hamnar i färdigdatumets vecka; ett passerat färdigdatum rullas in i innevarande vecka och ordern märks **Försenad**. Raderna grupperas per produktionsgrupp med en **Summa**-rad per grupp (resurser utan grupp hamnar under **Ogrupperade resurser**); filtrera med produktionsgruppsvalet.
+Kolumnerna är innevarande vecka och framåt (välj horisont med **Veckor**: 4/8/13/26), följt av **Senare** (färdigdatum bortom horisonten) och **Odaterat** (ordrar utan **Planerat färdigdatum**). Planerade operationer ligger i sina planerade veckor — en operation som sträcker sig över flera veckor finns i en cell per vecka, med sin andel av tiden. Oplanerade operationer ligger i färdigdatumets vecka; ett passerat färdigdatum rullas in i innevarande vecka och ordern märks **Försenad**. Raderna grupperas per produktionsgrupp med en **Summa**-rad per grupp (resurser utan grupp hamnar under **Ogrupperade resurser**); filtrera med produktionsgruppsvalet.
 
-Varje cell visar last / tillgänglig tid och beläggningsgrad: neutral till 85 %, gul över 85 % och röd över 100 %. Klicka på en cell för att fälla ut vilka ordrar och operationer som utgör lasten, med länk till TO-kortet.
+Varje cell visar last / tillgänglig tid och beläggningsgrad: neutral till 85 %, gul över 85 % och röd över 100 %. Klicka på en cell för att fälla ut vilka ordrar och operationer som utgör lasten, med länk till TO-kortet. Per operation visas **timmar i veckan** och hur många timmar som är kvar totalt, de planerade veckorna (**v.45–47**, eller **Ej planerad**), färdigdatum och märkena **Försenad**, **Sen** och **Låst**, samt knappen **Flytta…**.
 
-[Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) i Försäljning använder samma beläggning: den lägger en ny orders operationer på resursernas lediga tid per vecka, det vill säga tillgänglig tid minus lasten som visas här.
+Cellerna markerar dessutom med små symboler när de innehåller **sena ordrar** (klocka) eller **låsta operationer** (hänglås). Överbelagda celler är röda som förut.
+
+### Planera
+
+Knappen **Planera** (kräver rättigheten Tillverkning) planerar om alla öppna tillverkningsordrar på ledig kapacitet. Du får först frågan "Planera om alla öppna tillverkningsordrar på ledig kapacitet? Veckor som flyttats för hand ligger kvar." — bekräfta med **Planera**.
+
+- Ordrarna tas i ordning efter **Planerat färdigdatum**, tidigast först (ordrar utan datum sist, sedan ordernummer), och varje orders operationer läggs i tur och ordning: nästa operation får börja samma vecka som föregående blev klar om det finns tid kvar. En operation som redan är påbörjad (rapporterad eller instämplad) planeras från innevarande vecka.
+- **Låsta** operationer (se [Flytta och Lås upp](#flytta-och-las-upp)) rörs inte — deras tid räknas som upptagen innan något annat planeras. Klara operationer får sin plan borttagen.
+- **Äldre ordrar är oplanerade** och räknas som förut i färdigdatumets vecka tills du kört **Planera** första gången.
+- Planen ändrar aldrig något färdigdatum, bara operationernas veckor. Inget mejl eller meddelande skickas.
+
+Efter körningen visas hur många operationer och ordrar som planerats, och eventuella varningar: en order som beräknas bli **sen**, en operation som inte rymdes inom två år ("Kapaciteten räcker inte inom två år"), en operation som kommit före föregående operation, eller en resurs utan kapacitet. Matrisen läses om.
+
+### Flytta och Lås upp
+
+Klicka på en cell och sedan **Flytta…** vid operationen. I dialogen **Flytta operation** väljer du **Vecka** — veckorna i matrisen, med ledig tid per vecka (till exempel "v.45 · 2 nov — ledigt 12 h av 40"); fler veckor nås genom att öka **Veckor** i beläggningen. Kryssrutan **Flytta även efterföljande operationer** är förvald: orderns senare, olåsta operationer planeras om från den nya veckan. Klicka **Flytta**.
+
+- Operationen **börjar i den valda veckan även om veckan är full** — veckan blir då röd, så överlasten syns. Resten av tiden fortsätter på ledig kapacitet veckorna efter.
+- En flyttad operation blir **Låst**: **Planera** låter den ligga kvar. Varningar (sen order, operationer i fel ordning) visas i dialogen innan du stänger den.
+- **Lås upp** (i samma dialog, för en låst operation) släpper låset. Veckan ligger kvar tills nästa **Planera**, som då planerar om operationen. Låset försvinner också när operationen blir klar.
+- En klar operation, en legooperation, en operation utan tid och en operation på en order som inte är frisläppt eller pågående går inte att flytta.
+
+### Sammanfattningen
+
+Ovanför matrisen står **Senast planerad** (tidpunkten för senaste **Planera**, eller "Inte planerad ännu") och en sammanfattning, till exempel "3 överbelagda celler · 2 sena ordrar · 4 ej planerade". Klicka på ett tal för att fälla ut listan: de överbelagda cellerna (resurs, vecka, belastning), de **sena** ordrarna (färdigdatum och planerat klar) och de **ej planerade** ordrarna — ordernumren länkar till TO-kortet. En order är **Sen** när den sista operationen beräknas bli klar efter färdigdatumet.
+
+[Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) i Försäljning använder samma beläggning och samma planeringsregel: den lägger en ny orders operationer på resursernas lediga tid per vecka, det vill säga tillgänglig tid minus lasten som visas här — inklusive de planerade veckorna.
 
 Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har kapacitet (veckoschema eller timmar per dag) — lasten summeras över alla medlemmar, så procenttalet kan överdrivas när någon resurs i gruppen saknar kapacitet.
 

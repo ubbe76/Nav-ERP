@@ -1,0 +1,37 @@
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.facts dt {
+  color: var(--color-text-secondary);
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.warnings {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-5);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}

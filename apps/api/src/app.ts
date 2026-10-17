@@ -474,6 +474,9 @@ export function buildApp(database: Db = db) {
     // late-bound reader the manufacturing service derives TO structure with.
     configuredStructure: configuredStructureReader,
     audit: auditRepository,
+    // Reservationen: the KO's Förväntat leveransdatum is set by the sales
+    // service inside the planning transaction (SalesOrderDateWriter).
+    salesOrderDates: salesService,
   });
   planReaderRef.current = planningService;
   // Rapporter (F1) — read-only derived reports, admin-only in the routes.

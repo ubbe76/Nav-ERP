@@ -42,6 +42,8 @@ import { CostChain } from "../ui/CostChain";
 import { chainLines } from "../../lib/costChain";
 import { SectionHeading } from "../ui/SectionHeading";
 import { AuditTrailSection } from "../system/AuditTrailSection";
+import { Lock } from "lucide-react";
+import { plannedWeekLabel } from "../../lib/planning";
 
 interface ManufacturingOrderDetailProps {
   order: ManufacturingOrder;
@@ -89,6 +91,9 @@ export function ManufacturingOrderDetail({
     const handedOver = takeReleaseWarnings(order.id);
     if (handedOver) setReleaseWarnings(handedOver);
   }, [order.id]);
+  // Produktionsplanering: Sen (planned finish after the due date), from the
+  // order's plan summary.
+  const late = order.late === true;
   // Opens the specification for the calculation that was just made.
   const [openCalculationId, setOpenCalculationId] = useState<string | null>(null);
 
@@ -96,6 +101,11 @@ export function ManufacturingOrderDetail({
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 24, marginBottom: 20, alignItems: "center" }}>
         <StatusPill status={pill.status} label={pill.label} />
+        {late && (
+          <span title="Planerat klar ligger efter färdigdatumet">
+            <StatusPill status="delayed" label="Sen" />
+          </span>
+        )}
         <span>
           Antal: <strong>{Number(order.quantity)}</strong>
         </span>
@@ -201,6 +211,7 @@ export function ManufacturingOrderDetail({
           columns={[
             { key: "sequenceNo", label: "Sekvensnr", width: "100px", align: "right" },
             { key: "workCenterName", label: "Operation", width: "minmax(0, 1fr)" },
+            { key: "plannedWeek", label: "Planerad vecka", width: "130px" },
             { key: "setupTime", label: "Ställtid (min)", width: "100px", align: "right" },
             { key: "runTimePerUnit", label: "Tid/enhet", width: "100px", align: "right" },
             { key: "status", label: "Status", width: "100px" },
@@ -251,6 +262,33 @@ export function ManufacturingOrderDetail({
                     )}
                   </>
                 );
+              // Produktionsplanering: the planned weeks; Låst = moved by hand
+              // in the Beläggning and left alone by Planera.
+              case "plannedWeek": {
+                if (row.status === "done" || row.workCenterType === "subcontract") return "–";
+                const weeks = plannedWeekLabel(row.plannedStartWeek, row.plannedEndWeek);
+                if (!weeks) return <span style={{ color: "var(--color-text-muted)" }}>Ej planerad</span>;
+                return (
+                  <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                    {weeks}
+                    {row.planLocked && (
+                      <span
+                        title="Flyttad för hand — Planera låter veckan ligga kvar"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 3,
+                          fontSize: 12,
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
+                        <Lock size={12} aria-hidden="true" />
+                        Låst
+                      </span>
+                    )}
+                  </span>
+                );
+              }
               case "setupTime":
               case "runTimePerUnit": {
                 // Lego operations carry prices, not times.

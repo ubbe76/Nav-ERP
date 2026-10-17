@@ -1039,7 +1039,15 @@ export function createManufacturingService(
         const row = await salesOrders.findRowForManufacturing(order.salesOrderRowId);
         if (row) salesOrder = { id: row.salesOrderId, orderNumber: row.orderNumber, customerName: row.customerName };
       }
-      return { ...order, salesOrder };
+      // Produktionsplanering: the same plan summary as the list rows.
+      const summary = planning ? (await planning.orderPlanSummaries([order.id])).get(order.id) : undefined;
+      return {
+        ...order,
+        salesOrder,
+        plannedStartWeek: summary?.plannedStartWeek ?? null,
+        plannedEndWeek: summary?.plannedEndWeek ?? null,
+        late: summary?.late ?? false,
+      };
     },
 
     // Produktionsplanering: each row carries plannedStartWeek/plannedEndWeek

@@ -79,6 +79,9 @@ describe("planning service — stafflat leverantörspris on created rows", () =>
           async createManufacturingOrder() {
             throw new Error("not used in this test");
           },
+          async createManufacturingOrderInTx() {
+            throw new Error("not used in this test");
+          },
         },
       }
     );
@@ -121,6 +124,9 @@ describe("planning service — order creation failure branches", () => {
         async createManufacturingOrder() {
           throw new Error("not used");
         },
+        async createManufacturingOrderInTx() {
+          throw new Error("not used");
+        },
       },
     });
 
@@ -151,6 +157,9 @@ describe("planning service — order creation failure branches", () => {
       },
       manufacturing: {
         async createManufacturingOrder() {
+          throw new Error("not used");
+        },
+        async createManufacturingOrderInTx() {
           throw new Error("not used");
         },
       },
@@ -194,6 +203,9 @@ describe("planning service — order creation failure branches", () => {
         },
         manufacturing: {
           async createManufacturingOrder() {
+            throw new Error("not used");
+          },
+          async createManufacturingOrderInTx() {
             throw new Error("not used");
           },
         },
@@ -277,6 +289,9 @@ describe("planning service — subcontract (lego) proposals", () => {
           async createManufacturingOrder() {
             throw new Error("not used");
           },
+          async createManufacturingOrderInTx() {
+            throw new Error("not used");
+          },
         },
       }
     );
@@ -332,6 +347,9 @@ describe("planning service — subcontract (lego) proposals", () => {
           async createManufacturingOrder() {
             throw new Error("not used");
           },
+          async createManufacturingOrderInTx() {
+            throw new Error("not used");
+          },
         },
       }
     );
@@ -371,6 +389,9 @@ describe("planning service — subcontract (lego) proposals", () => {
         },
         manufacturing: {
           async createManufacturingOrder() {
+            throw new Error("not used");
+          },
+          async createManufacturingOrderInTx() {
             throw new Error("not used");
           },
         },
@@ -753,6 +774,9 @@ describe("planning service — leveransdagar on created purchase orders", () => 
         },
         manufacturing: {
           async createManufacturingOrder() {
+            throw new Error("not used in this test");
+          },
+          async createManufacturingOrderInTx() {
             throw new Error("not used in this test");
           },
           async createFromSalesOrderRow() {

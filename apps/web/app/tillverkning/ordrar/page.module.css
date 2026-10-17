@@ -74,3 +74,11 @@
     display: none;
   }
 }
+
+/* Planerad column: the planned weeks with the Sen pill beside them. */
+.plannedCell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}

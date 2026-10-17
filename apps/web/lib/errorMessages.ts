@@ -271,7 +271,11 @@ const MESSAGES: Record<string, MessageEntry> = {
   "configurator-not-published": "Mallen är inte publicerad för API:t.",
   "configuration-required": serverMessage("Artikeln är en beställningsvara — konfigurera den."),
   "configuration-not-allowed": serverMessage("Artikeln är inte en beställningsvara."),
-  "sales-order-not-open": "Leveranstiden kan bara kontrolleras för en offert, en bekräftad order eller en order under tillverkning.",
+  // The server's message says which: a check needs an open order, a
+  // reservation (Skapa tillverkningsordrar) a confirmed one.
+  "sales-order-not-open": serverMessage(
+    "Leveranstiden kan bara kontrolleras för en offert, en bekräftad order eller en order under tillverkning."
+  ),
   "row-configuration-locked": serverMessage("Konfigurationen kan inte ändras — raden har gått vidare."),
   "row-configuration-changed":
     "Raden konfigurerades om medan tillverkningsordern skapades — kontrollera raden och försök igen, eller använd Ändra konfiguration.",
@@ -291,6 +295,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   // Produktionsplanering (Flytta / Lås upp)
   "operation-not-found": "Operationen finns inte — ladda om beläggningen.",
   "operation-not-plannable": serverMessage("Operationen kan inte planeras — den är klar, en legooperation, utan tid eller ordern är inte öppen."),
+  // Reservationen från Leveranstidskontrollen (the 409 body carries the new result).
+  "delivery-time-changed": "Läget har ändrats sedan kontrollen — se det nya datumet och försök igen.",
+  "nothing-to-reserve": "Kontrollen fann inget att tillverka — det som saknas köps in eller finns redan på väg.",
   "mo-report-time-locked": "Stämplingens tid ligger i en låst löneperiod — rapporteringen kan inte ångras.",
   "manufacturing-order-has-reports": "Ordern har rapporteringar — ångra dem först under Rapporteringar.",
   "manufacturing-order-stamped-in": "Någon är instämplad på ordern — stämpla ut först.",

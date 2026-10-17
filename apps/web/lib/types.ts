@@ -1553,6 +1553,12 @@ export interface ManufacturingOrder {
   // capacity matrix's week bucketing (overdue orders roll into the current
   // week) and is editable via PATCH while the order is open.
   dueDate: string | null;
+  // Produktionsplanering — only on list rows (GET /manufacturing-orders):
+  // min/max planned week (Mondays) over the pending operations, null =
+  // unplanned; late = Sen.
+  plannedStartWeek?: string | null;
+  plannedEndWeek?: string | null;
+  late?: boolean;
   // Konfigurator 4c: the choices of a made-to-order (beställningsvara) TO; null for a plain TO.
   configuration: ManufacturingOrderConfiguration | null;
   // Only present when the list was fetched with ?withOperations=true
@@ -1589,7 +1595,20 @@ export interface CapacityCellOrder {
   sequenceNo: number;
   dueDate: string | null;
   overdue: boolean;
+  // The operation's whole remaining time; hoursInWeek is the share this cell
+  // carries (a multi-week operation appears in one cell per planned week).
   remainingHours: number;
+  moOperationId: string;
+  hoursInWeek: number;
+  // Produktionsplanering: false = unplanned (counted in the due-date week).
+  planned: boolean;
+  // Mondays (YYYY-MM-DD); null when unplanned.
+  plannedStartWeek: string | null;
+  plannedEndWeek: string | null;
+  // Moved by hand — Planera leaves it where it is until Lås upp.
+  planLocked: boolean;
+  // Planned finish is after the order's due date (Sen).
+  late: boolean;
 }
 
 export interface CapacityCell {
@@ -1633,9 +1652,50 @@ export interface CapacityWeek {
   sunday: string;
 }
 
+export interface CapacitySummary {
+  // max(planned_at) over the operations; null = never planned.
+  plannedAt: string | null;
+  overloadedCells: number;
+  lateOrders: { manufacturingOrderId: string; orderNumber: string; dueDate: string; plannedFinish: string | null }[];
+  unplannedOrders: { manufacturingOrderId: string; orderNumber: string }[];
+}
+
 export interface CapacityResult {
   weeks: CapacityWeek[];
   groups: CapacityGroupBlock[];
+  summary: CapacitySummary;
+}
+
+// Produktionsplanering: warning from Planera / Flytta / a new order's plan.
+export interface PlanWarning {
+  kind: "late" | "horizon" | "sequence" | "unscheduled_resource";
+  manufacturingOrderId: string;
+  orderNumber: string;
+  sequenceNo?: number;
+  workCenterCode?: string;
+  dueDate?: string;
+  plannedFinish?: string;
+  message: string;
+}
+
+// POST /planning/plan.
+export interface PlanResult {
+  plannedAt: string;
+  orders: number;
+  operations: number;
+  warnings: PlanWarning[];
+}
+
+// POST /planning/operations/:opId/move.
+export interface MoveOperationResult {
+  operation: { plannedStartWeek: string | null; plannedEndWeek: string | null; planLocked: boolean };
+  following: { moOperationId: string; sequenceNo: number; plannedStartWeek: string | null; plannedEndWeek: string | null }[];
+  warnings: PlanWarning[];
+}
+
+// POST /planning/operations/:opId/unlock.
+export interface UnlockOperationResult {
+  operation: { plannedStartWeek: string | null; plannedEndWeek: string | null; planLocked: boolean };
 }
 
 export interface MOMaterialConsumption {
@@ -1694,6 +1754,12 @@ export interface MOOperation {
   setupPrice: string | null;
   unitPrice: string | null;
   showNetWeight: boolean;
+  // Produktionsplanering: planned weeks (Mondays), null = unplanned. A locked
+  // plan was moved by hand and stays put through Planera.
+  plannedStartWeek: string | null;
+  plannedEndWeek: string | null;
+  planLocked: boolean;
+  plannedAt: string | null;
   createdAt: string;
 }
 
@@ -3981,6 +4047,9 @@ export interface TerminalOperation {
   quantityCompleted: string | null;
   quantityScrapped: string;
   dueDate: string | null;
+  // Produktionsplanering: planned weeks (Mondays); null = unplanned.
+  plannedStartWeek: string | null;
+  plannedEndWeek: string | null;
   readiness: TerminalReadiness;
   available: string;
   materials: TerminalMaterial[];
@@ -4032,6 +4101,8 @@ export type DtcStep =
       // Mondays of the first and last week the operation occupies.
       fromWeek: string;
       toWeek: string;
+      // Minutes booked per week (Mondays).
+      weeks?: { monday: string; minutes: number }[];
       date: string;
     }
   | {
@@ -4056,10 +4127,42 @@ export interface DeliveryTimeCheckRow {
   notes: string[];
 }
 
+// A shortage batch the check would have made — "Använd datumet" can create a
+// manufacturing order per batch (POST /delivery-time-check/apply).
+export interface DtcBatch {
+  key: string;
+  rowKey: string;
+  // 1 = the order row's own article, 2+ = semi-finished goods below it.
+  level: number;
+  articleId: string;
+  articleNumber: string;
+  quantity: number;
+  readyDate: string | null;
+  operations: { sequenceNo: number; workCenterId: string; weeks: { monday: string; minutes: number }[] }[];
+}
+
+// POST /delivery-time-check/apply.
+export interface ApplyDeliveryTimeResult {
+  deliveryDate: string;
+  shipDate: string;
+  manufacturingOrders: {
+    id: string;
+    orderNumber: string;
+    articleNumber: string;
+    quantity: number;
+    level: number;
+    salesOrderRowId: string | null;
+  }[];
+  // Plain texts, or plan warnings carrying a message.
+  warnings: (string | { message: string })[];
+}
+
 export interface DeliveryTimeCheckResult {
   shipDate: string | null;
   // = shipDate without a customer; null = some row has no date.
   deliveryDate: string | null;
   rows: DeliveryTimeCheckRow[];
   notes: string[];
+  // Shortage batches of manufactured articles; empty/absent = nothing to create.
+  batches?: DtcBatch[];
 }

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import {
+  applyDeliveryTimeSchema,
   capacityQuerySchema,
   createPlanningOrdersSchema,
   deliveryTimeCheckSchema,
@@ -14,12 +15,18 @@ import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   CustomerNotFoundError,
+  DeliveryTimeChangedError,
+  NothingToReserveError,
   OperationNotFoundError,
   OperationNotPlannableError,
   SalesOrderNotFoundError,
   SalesOrderNotOpenError,
   type PlanningService,
 } from "../service/planning.service.js";
+import { LinkedRowNotFoundError } from "../../manufacturing/service/manufacturing.service.js";
+import { RowConfigurationChangedError } from "../../sales/service/sales.errors.js";
+import { ConfiguratorInvalidConfigurationError } from "../../configurator/service/configurator.errors.js";
+import { InvalidStatusTransitionError as SalesStatusError } from "../../sales/service/sales.service.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { DELIVERY_CHECK, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
 
@@ -83,6 +90,46 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
         return reply.code(409).send(errorBody(err));
       }
       if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Reservationen — Skapa tillverkningsordrar för det som saknas: the check
+  // run again under the production_plan lock, one TO per shortage batch
+  // planned in the weeks it booked, and the KO's Förväntat leveransdatum.
+  // Access: DELIVERY_CHECK, although this WRITES (KO date, TOs) — the
+  // point is that the seller promises a date that holds; the KO status
+  // guard and the manufacturing service's own rules are the double check.
+  // 409 delivery-time-changed carries the new result in `result`.
+  app.post("/delivery-time-check/apply", { config: { access: DELIVERY_CHECK } }, async (req, reply) => {
+    const input = applyDeliveryTimeSchema.parse(req.body);
+    try {
+      return await service.applyDeliveryTime(input, req.user!.id);
+    } catch (err) {
+      if (err instanceof DeliveryTimeChangedError) return reply.code(409).send({ ...errorBody(err), result: err.result });
+      if (
+        err instanceof ArticleNotFoundError ||
+        err instanceof CustomerNotFoundError ||
+        err instanceof SalesOrderNotFoundError ||
+        err instanceof LinkedRowNotFoundError
+      ) {
+        return reply.code(404).send(errorBody(err));
+      }
+      if (
+        err instanceof SalesOrderNotOpenError ||
+        err instanceof NothingToReserveError ||
+        err instanceof ConfigurationRequiredError ||
+        // The manufacturing service's own guards on the linked row (the row
+        // was reconfigured meanwhile) and the sales header's status guard.
+        err instanceof RowConfigurationChangedError ||
+        err instanceof SalesStatusError
+      ) {
+        return reply.code(409).send(errorBody(err));
+      }
+      if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
+      if (err instanceof ConfiguratorInvalidConfigurationError) {
+        return reply.code(400).send({ ...errorBody(err), details: err.details });
+      }
       throw err;
     }
   });

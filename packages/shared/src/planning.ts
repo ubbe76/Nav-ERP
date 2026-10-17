@@ -113,3 +113,14 @@ export const moveOperationSchema = z.object({
   moveFollowing: z.boolean().default(true),
 });
 export type MoveOperationInput = z.infer<typeof moveOperationSchema>;
+
+// POST /delivery-time-check/apply — the reservation: Leveranstidskontrollen is
+// run again inside one transaction, the TOs for every shortage batch are
+// created with the weeks the check booked, and the order's Förväntat
+// leveransdatum is set. deliveryDate is the date the client was shown — a
+// different outcome under the lock is refused (delivery-time-changed).
+export const applyDeliveryTimeSchema = z.object({
+  salesOrderId: z.string().uuid(),
+  deliveryDate: businessDateSchema,
+});
+export type ApplyDeliveryTimeInput = z.infer<typeof applyDeliveryTimeSchema>;

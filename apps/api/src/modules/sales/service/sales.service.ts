@@ -30,6 +30,7 @@ import type {
   UpdateSalesOrderHeaderInput,
   UpdateSalesOrderRowInput,
 } from "@navet/shared";
+import type { Tx } from "@navet/db";
 import type { RowConfigurationMutationResult, SalesRepository, SalesRowWrite } from "../repository/sales.repository.js";
 import { ROW_ARTICLE_UNIQUE } from "../repository/sales.repository.js";
 import type { PriceResolution } from "./price-resolver.js";
@@ -729,6 +730,24 @@ export function createSalesService(
       await validateRegisterRefs(input);
       const updated = await repo.updateSalesOrderHeader(orderId, input);
       return repo.findSalesOrderById(updated!.id);
+    },
+
+    // Reservationen (Leveranstidskontroll → Skapa tillverkningsordrar): the
+    // planning service sets Förväntat leveransdatum inside its own
+    // transaction, after the TOs — the same status guard as the header
+    // PATCH above, read under the order's row lock. The revision is not
+    // bumped (the body has no bumpRevision — the rows and prices are
+    // unchanged, the date is the planner's promise) and nothing is logged
+    // here: the caller writes delivery_time_applied on the order. Returns
+    // the order number for that log.
+    async setExpectedDeliveryDateInTx(tx: Tx, orderId: string, date: string): Promise<{ orderNumber: string; previous: string | null }> {
+      const order = await repo.lockSalesOrderForHeader(tx, orderId);
+      if (!order) throw new SalesOrderNotFoundError(orderId);
+      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+        throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
+      }
+      await repo.updateSalesOrderHeader(orderId, { expectedDeliveryDate: date, bumpRevision: false }, tx);
+      return { orderNumber: order.orderNumber, previous: order.expectedDeliveryDate };
     },
 
     async createQuote(input: CreateQuoteInput, createdBy: string | null) {

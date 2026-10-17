@@ -3,7 +3,7 @@ import type { TerminalOperation } from "./types";
 // Pure sort / filter / search / label helpers for the stamp terminal's
 // operation list (stämpelterminalens operationslista).
 
-export type TerminalSort = "urgent" | "material";
+export type TerminalSort = "planned" | "urgent" | "material";
 
 const collator = new Intl.Collator("sv-SE", { numeric: true });
 
@@ -18,6 +18,18 @@ function byUrgency(a: TerminalOperation, b: TerminalOperation): number {
   return collator.compare(a.orderNumber, b.orderNumber) || a.sequenceNo - b.sequenceNo;
 }
 
+// Produktionsplanering: the planner's order — planned start week ascending
+// (Mondays, so a string compare is a date compare), unplanned last, then as
+// urgent.
+function byPlannedWeek(a: TerminalOperation, b: TerminalOperation): number {
+  if (a.plannedStartWeek !== b.plannedStartWeek) {
+    if (a.plannedStartWeek === null) return 1;
+    if (b.plannedStartWeek === null) return -1;
+    return a.plannedStartWeek < b.plannedStartWeek ? -1 : 1;
+  }
+  return byUrgency(a, b);
+}
+
 function firstMaterialNumber(row: TerminalOperation): string | null {
   let first: string | null = null;
   for (const m of row.materials) {
@@ -28,6 +40,7 @@ function firstMaterialNumber(row: TerminalOperation): string | null {
 
 export function sortTerminalOperations(rows: TerminalOperation[], sort: TerminalSort): TerminalOperation[] {
   const copy = [...rows];
+  if (sort === "planned") return copy.sort(byPlannedWeek);
   if (sort === "urgent") return copy.sort(byUrgency);
   return copy.sort((a, b) => {
     const ma = firstMaterialNumber(a);

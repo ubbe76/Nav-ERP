@@ -1,0 +1,48 @@
+.reserve {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.reserve input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.created {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.createdRow {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.createdLink {
+  font-weight: 600;
+  color: var(--accent-fg);
+}
+
+.createdMeta {
+  color: var(--color-text-secondary);
+}
+
+.appliedTitle {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: var(--space-4) 0 0;
+}

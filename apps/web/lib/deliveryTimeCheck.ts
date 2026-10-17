@@ -1,5 +1,5 @@
 import { apiFetch } from "./api";
-import type { DeliveryTimeCheckResult, DtcStep } from "./types";
+import type { ApplyDeliveryTimeResult, DeliveryTimeCheckResult, DtcStep } from "./types";
 
 export interface DeliveryTimeCheckRequest {
   customerId?: string;
@@ -13,6 +13,17 @@ export interface DeliveryTimeCheckRequest {
 
 export function runDeliveryTimeCheck(body: DeliveryTimeCheckRequest): Promise<DeliveryTimeCheckResult> {
   return apiFetch<DeliveryTimeCheckResult>("/api/v1/delivery-time-check", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// "Använd datumet" with "Skapa tillverkningsordrar för det som saknas":
+// creates the manufacturing orders of the check's shortage batches and sets
+// the order's expected delivery date in one transaction. 409
+// delivery-time-changed carries the fresh check as `result`.
+export function applyDeliveryTime(body: { salesOrderId: string; deliveryDate: string }): Promise<ApplyDeliveryTimeResult> {
+  return apiFetch<ApplyDeliveryTimeResult>("/api/v1/delivery-time-check/apply", {
     method: "POST",
     body: JSON.stringify(body),
   });

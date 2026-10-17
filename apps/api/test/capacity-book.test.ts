@@ -218,7 +218,7 @@ describe("capacity book — placement", () => {
     const b = book({ offDays: new Set(["2026-10-23"]) });
     expect(b.weekFinishDay(wc1, W43, TODAY)).toBe("2026-10-23"); // the resource's own calendar, not offDays
     expect(b.weekFinishDay(null, W43, TODAY)).toBe("2026-10-22"); // no calendar: company working days
-    expect(b.weekFinishDay(wc1, W43, "2026-10-24")).toBe("2026-10-24"); // floor after the last working day
+    expect(b.weekFinishDay(wc1, W43, "2026-10-24")).toBe("2026-10-26"); // floor after the last working day: the next working day, never a Saturday
   });
 
   it("the capacity factor scales the week", () => {

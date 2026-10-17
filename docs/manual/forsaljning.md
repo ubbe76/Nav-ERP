@@ -238,7 +238,7 @@ Orderns detaljsida har en sektion **E-post** längst ner (kräver att SMTP är k
 
 Leveranstidskontrollen räknar fram den **tidigaste avsändningsdagen** och det **tidigaste leveransdatumet** för en kundorder — utifrån vad som finns i lager, vad som redan är på väg in, ledtiden på material som måste köpas och produktionens lediga tid. Den kan köras på en kundorder, på raderna i **Ny kundorder** eller på en fristående sida för artiklar och antal.
 
-Kontrollen är en beräkning som läser och räknar — den ändrar ingenting. Datumet sätts först när du själv väljer det.
+Själva kontrollen är en beräkning som läser och räknar — den ändrar ingenting. Datumet sätts, och tillverkningsordrar skapas, först när du själv klickar **Använd datumet** (se [Skapa tillverkningsordrar för det som saknas](#skapa-tillverkningsordrar-for-det-som-saknas)).
 
 ### Starta en kontroll
 
@@ -248,13 +248,25 @@ Kontrollen är en beräkning som läser och räknar — den ändrar ingenting. D
 
 Knappen **Använd datumet** i dialogen sätter orderns **Förväntat leveransdatum**; i **Ny kundorder** fylls fältet i. Knappen visas bara när kontrollen räknats med en kund — utan kund är datumet avsändningsdagen och dialogen visar i stället texten "Välj kund för att räkna med kundens transportdagar." Raderna på ordern ändras aldrig. Kräver behörigheten Försäljning eller Tillverkning.
 
+### Skapa tillverkningsordrar för det som saknas
+
+Räknade kontrollen med tillverkade artiklar som saknas i lager, visas under resultatet i dialogen på kortet för en **bekräftad** kundorder (eller en order **under tillverkning**) kryssrutan **Skapa tillverkningsordrar för det som saknas (3 st)** — antalet är de tillverkningsordrar som skulle skapas. Den är förvald. Med kryssrutan ikryssad skapar **Använd datumet** tillverkningsordrarna och sätter orderns **Förväntat leveransdatum** i ett svep; avkryssad sätts bara datumet, som förut. På en offert, i **Ny kundorder** och på den fristående sidan finns ingen kryssruta — tillverkningsordrar kopplas bara till en bekräftad orders rader.
+
+- Det skapas **en tillverkningsorder per brist-parti på varje nivå** i strukturen: kundorderradens artikel (kopplad till raden, som **Skapa tillverkningsorder** — raden visar därefter **I tillverkning**) och de halvfabrikat som saknas under den (vanliga tillverkningsordrar med noteringen "Skapad från leveranstidskontroll för KO-…"). Antalet är bristen (avrundat enligt artikelns **Avrundning**), färdigdatumet är det datum kontrollen räknade för partiet.
+- Ordrarna **planeras i exakt de veckor kontrollen räknade med**, så att det lovade datumet håller kapaciteten — de syns direkt i [Beläggning](/hjalp/tillverkning#belaggning). Halvfabrikaten skapas före sin förälder.
+- **Inköp skapas inte.** Material som måste köpas syns i Behovsberäkningen, som skapar inköpsorderna med **Skapa ordrar**.
+- Allt eller inget: går något fel skapas ingen order alls och datumet ändras inte.
+- Efter lyckat resultat visar dialogen de skapade tillverkningsordrarna med länkar (till dem du har behörighet att öppna) och orderkortet läses om.
+- **Läget kan ha ändrats:** har någon annan hunnit boka kapacitet eller skapa en order sedan kontrollen, visas "Läget har ändrats sedan kontrollen — det nya datumet är …" och dialogen byter till den nya kontrollen. Ingenting har skapats — granska resultatet och klicka **Använd datumet** igen.
+- Finns det inget att skapa (allt täcks av lager och öppna ordrar) visas ett felmeddelande; avkryssa kryssrutan för att bara sätta datumet.
+
 ### Vad som räknas
 
 Kontrollen går igenom varje rad, och för en tillverkad artikel varje nivå i strukturen:
 
 1. **Det som redan finns.** Lagersaldo och öppna inköps- och tillverkningsordrar läggs i datumordning. Det som redan finns räknas mot det **projicerade saldot**: det kontrollen kan ta på en dag är det som finns kvar utan att saldot någon gång längre fram går under noll för de behov som redan är lovade (andra kundordrar och tillverkningsordrars materialbehov). Exempel: 10 i lager, ett inköp om 10 som kommer om två veckor och en kundorder om 10 om sex veckor — en ny order på 10 kan skickas i dag. Det som täcks av en öppen order räknas som klart den dag ordern kommer. Kontrollerar du en befintlig kundorder räknas inte orderns egna rader som behov.
 2. **Det som saknas och köps.** Bristen får **huvudleverantörens ledtid** i leverantörskatalogen, tillsammans med leverantörens leveransdagar och transportdagar (se [Leveransdagar](/hjalp/inkop#leveransdagar) i Inköp). Saknar artikeln huvudleverantör räknas den som tillgänglig direkt, och en notering visas.
-3. **Det som saknas och tillverkas — på alla nivåer.** Strukturen löses upp (fantomartiklar går genom), varje komponent räknas på samma sätt, och när materialet är klart läggs beredningens operationer i tur och ordning på **ledig tid per resurs och vecka**. Den lediga tiden är resursens veckoschema — eller, utan schema, dess kapacitet i timmar per dag — × kapacitetsfaktor minus beläggningen från öppna tillverkningsordrar — samma beläggning som visas i [Beläggning](/hjalp/tillverkning#belaggning). En operation kan delas över flera veckor och räknas klar sista arbetsdagen i den vecka den blir färdig; nästa operation får börja samma vecka om det finns tid kvar. Innevarande vecka räknas bara från i dag. Last som inte ryms i en vecka (t.ex. försenade tillverkningsordrar) skjuts framåt till nästa vecka innan kontrollen lägger sina operationer. **Legooperationer** tar legoresursens ledtid i arbetsdagar. Operationer märkta **Kalkyl** räknas inte.
+3. **Det som saknas och tillverkas — på alla nivåer.** Strukturen löses upp (fantomartiklar går genom), varje komponent räknas på samma sätt, och när materialet är klart läggs beredningens operationer i tur och ordning på **ledig tid per resurs och vecka**. Den lediga tiden är resursens veckoschema — eller, utan schema, dess kapacitet i timmar per dag — × kapacitetsfaktor minus beläggningen från öppna tillverkningsordrar (planerade operationer räknas i sina planerade veckor) — samma beläggning som visas i [Beläggning](/hjalp/tillverkning#belaggning). En operation kan delas över flera veckor och räknas klar sista arbetsdagen i den vecka den blir färdig; nästa operation får börja samma vecka om det finns tid kvar. Innevarande vecka räknas bara från i dag. Last som inte ryms i en vecka (t.ex. försenade tillverkningsordrar) skjuts framåt till nästa vecka innan kontrollen lägger sina operationer. **Legooperationer** tar legoresursens ledtid i arbetsdagar. Operationer märkta **Kalkyl** räknas inte.
 4. **Avsändningsdag och leveransdatum.** Avsändningsdagen är nästa arbetsdag efter att allt är klart; finns allt i lager redan i dag är den i dag. **Leveransdatum** är avsändningsdagen plus kundens transportdagar och leveransdagar (se [Leveransdagar](#leveransdagar)). Utan kund, på den fristående sidan, är svaret avsändningsdagen.
 
 **Konfigurerade rader:** en beställningsvara räknas på sin konfigurerade struktur och rutt. En variant som redan finns räknas som sin artikel, annars på den struktur den skulle få — kontrollen skapar aldrig en variant.

@@ -1,4 +1,6 @@
 import {
+  DeliveryTimeChangedError,
+  NothingToReserveError,
   OperationNotFoundError,
   OperationNotPlannableError,
   SalesOrderNotOpenError,
@@ -446,6 +448,11 @@ const cases: Array<[Error, string]> = [
   [new ManufacturingOrderStampedInError(), ERROR_CODES.MANUFACTURING_ORDER_STAMPED_IN],
   [new OperationNotFoundError("x"), ERROR_CODES.OPERATION_NOT_FOUND],
   [new OperationNotPlannableError("done"), ERROR_CODES.OPERATION_NOT_PLANNABLE],
+  [
+    new DeliveryTimeChangedError("2030-03-20", { shipDate: null, deliveryDate: null, rows: [], notes: [], batches: [] }),
+    ERROR_CODES.DELIVERY_TIME_CHANGED,
+  ],
+  [new NothingToReserveError(), ERROR_CODES.NOTHING_TO_RESERVE],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

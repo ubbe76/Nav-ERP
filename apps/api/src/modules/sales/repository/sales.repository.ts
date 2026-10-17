@@ -410,10 +410,29 @@ export function createSalesRepository(db: Db) {
     },
 
     // Header fields editable while quote/confirmed/in_production (service guard).
-    async updateSalesOrderHeader(orderId: string, input: UpdateSalesOrderHeaderInput) {
+    // Reservationen (Leveranstidskontroll → Skapa tillverkningsordrar): the
+    // order's status read under its row lock, inside the caller's
+    // transaction — the guard and the date write cannot straddle a
+    // concurrent status change. null = no such order.
+    async lockSalesOrderForHeader(tx: Tx, orderId: string) {
+      const [row] = await tx
+        .select({
+          id: salesOrders.id,
+          orderNumber: salesOrders.orderNumber,
+          status: salesOrders.status,
+          expectedDeliveryDate: salesOrders.expectedDeliveryDate,
+        })
+        .from(salesOrders)
+        .where(eq(salesOrders.id, orderId))
+        .for("update");
+      return row ?? null;
+    },
+
+    // `dbc`: the reservation writes the date inside its own transaction.
+    async updateSalesOrderHeader(orderId: string, input: UpdateSalesOrderHeaderInput, dbc: Db | Tx = db) {
       // bumpRevision is a directive, not a column — strip it before the spread.
       const { bumpRevision, ...fields } = input;
-      const [row] = await db
+      const [row] = await dbc
         .update(salesOrders)
         .set({
           ...fields,

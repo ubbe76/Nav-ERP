@@ -25,6 +25,7 @@ import {
   sortTerminalOperations,
   type TerminalSort,
 } from "../../lib/terminalOperations";
+import { plannedWeekLabel } from "../../lib/planning";
 import { formatElapsed, formatQuantity, operationProgress, type OperationProgress } from "../../lib/stampSessions";
 import { formatHours } from "./SchedulesPageClient";
 import styles from "./StampTerminal.module.css";
@@ -78,7 +79,7 @@ export function StampTerminal({
   // pickOperations: the operation list and its station/material/sort/search state.
   const [stationIds, setStationIds] = useState<string[]>([]);
   const [materialId, setMaterialId] = useState("");
-  const [sort, setSort] = useState<TerminalSort>("urgent");
+  const [sort, setSort] = useState<TerminalSort>("planned");
   const [onlyReady, setOnlyReady] = useState(false);
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<TerminalOperation[]>([]);
@@ -109,7 +110,7 @@ export function StampTerminal({
     setSelectedOperationIds(new Set());
     setStationIds([]);
     setMaterialId("");
-    setSort("urgent");
+    setSort("planned");
     setOnlyReady(false);
     setSearch("");
     setRows([]);
@@ -283,7 +284,7 @@ export function StampTerminal({
     const known = new Set(stations.map((st) => st.id));
     setStationIds((employee.defaultWorkCenterIds ?? []).filter((id) => known.has(id)));
     setMaterialId("");
-    setSort("urgent");
+    setSort("planned");
     setOnlyReady(false);
     setSearch("");
     setSelectedOperationIds(new Set());
@@ -1189,6 +1190,7 @@ function OperationListView({
           value={sort}
           onChange={onSort}
           options={[
+            { value: "planned", label: "Planerad vecka" },
             { value: "urgent", label: "Brådskande" },
             { value: "material", label: "Material" },
           ]}
@@ -1252,6 +1254,11 @@ function OperationListView({
                       <span className={styles.dueDate} data-overdue={overdue}>
                         Färdigdatum <span className="num">{formatStockholmDate(op.dueDate)}</span>
                         {overdue && <span className={styles.visuallyHidden}> Försenad</span>}
+                      </span>
+                    )}
+                    {plannedWeekLabel(op.plannedStartWeek, op.plannedEndWeek) && (
+                      <span className={styles.dueDate}>
+                        Planerad <span className="num">{plannedWeekLabel(op.plannedStartWeek, op.plannedEndWeek)}</span>
                       </span>
                     )}
                     {stamped && <span className={styles.choiceSecondary}>Du är instämplad</span>}

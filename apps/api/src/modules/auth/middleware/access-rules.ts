@@ -21,7 +21,11 @@ export const OVERVIEW_READ: AccessRule = ["office", "artikeloversikt"];
 export const DIRECTORY_READ: AccessRule = ["office", "terminal", "tillverkningsorder_las"];
 // Konfigurera på orderraden: sales, planning and the article card all resolve variants.
 export const CONFIGURE_ROW_WRITE: AccessRule = ["forsaljning", "tillverkning", "artiklar"];
-// Leveranstidskontroll: a POST that only reads — sales and planning both run it.
+// Leveranstidskontroll: a POST that only reads — sales and planning both run
+// it. Reused by POST /delivery-time-check/apply, which WRITES (the KO's
+// Förväntat leveransdatum and the TOs for what is missing): the seller is the
+// one promising the date, so Försäljning alone must reach it; the KO status
+// guard and the manufacturing service's own rules are the double check.
 export const DELIVERY_CHECK: AccessRule = ["forsaljning", "tillverkning"];
 
 // Prices (standard cost, sales price, lego setup/unit prices) are office data.

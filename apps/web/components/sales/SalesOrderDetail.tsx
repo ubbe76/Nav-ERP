@@ -702,6 +702,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         onUseDate={useCheckedDate}
         useDateBusy={dtcBusy}
         useDateError={dtcError}
+        onApplied={() => router.refresh()}
+        canCreateOrders={order.status === "confirmed" || order.status === "in_production"}
       />
 
       <FreightQuoteDialog

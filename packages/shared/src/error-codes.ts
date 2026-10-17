@@ -229,6 +229,10 @@ export const ERROR_CODES = {
   // Produktionsplanering: Flytta / Lås upp on an operation
   OPERATION_NOT_FOUND: "operation-not-found",
   OPERATION_NOT_PLANNABLE: "operation-not-plannable",
+  // Reservationen (POST /delivery-time-check/apply): the check gave another
+  // date under the lock / no manufactured shortage to make a TO for.
+  DELIVERY_TIME_CHANGED: "delivery-time-changed",
+  NOTHING_TO_RESERVE: "nothing-to-reserve",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

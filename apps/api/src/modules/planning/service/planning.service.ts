@@ -1,4 +1,5 @@
 import type {
+  ApplyDeliveryTimeInput,
   CapacityQuery,
   ConfiguratorSelection,
   CreatePlanningOrdersInput,
@@ -94,9 +95,15 @@ export class SalesOrderNotFoundError extends Error {
 
 // Leveranstidskontroll on an order that is no longer open (delivered,
 // invoiced, cancelled): there is nothing left to promise a date for. 409.
+// The reservation ("reserve") is stricter — its TOs are linked to the rows
+// like Skapa TO, which needs a confirmed order, so a quote is refused too.
 export class SalesOrderNotOpenError extends Error {
-  constructor(public status: string) {
-    super(`Kundordern är inte öppen (status ${status}) — leveranstiden kan bara kontrolleras för offert, bekräftad eller under tillverkning`);
+  constructor(public status: string, action: "check" | "reserve" = "check") {
+    super(
+      action === "reserve"
+        ? `Kundordern är inte bekräftad (status ${status}) — tillverkningsordrar kan bara skapas för en bekräftad order eller en order under tillverkning`
+        : `Kundordern är inte öppen (status ${status}) — leveranstiden kan bara kontrolleras för offert, bekräftad eller under tillverkning`
+    );
     this.name = "SalesOrderNotOpenError";
   }
 }
@@ -104,6 +111,33 @@ export class SalesOrderNotOpenError extends Error {
 // The statuses Leveranstidskontroll accepts — the same set the order card's
 // header edits allow (quote/confirmed/in_production).
 const OPEN_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["quote", "confirmed", "in_production"]);
+// The statuses the reservation accepts — a linked TO needs a confirmed order
+// (prepareCreate's LinkedOrderStatusError), so the guard sits up front.
+const RESERVABLE_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["confirmed", "in_production"]);
+
+// Reservationen: the check run under the lock gave another delivery date
+// than the one the client was shown. 409 — the body carries the new result
+// so the dialog can show it and offer the button again. Nothing is written.
+export class DeliveryTimeChangedError extends Error {
+  constructor(public deliveryDate: string | null, public result: DeliveryTimeCheckResult) {
+    super(
+      deliveryDate === null
+        ? "Läget har ändrats sedan kontrollen — det går inte längre att lova ett datum"
+        : `Läget har ändrats sedan kontrollen — det nya datumet är ${deliveryDate}`
+    );
+    this.name = "DeliveryTimeChangedError";
+  }
+}
+
+// Reservationen: the check found no shortage batch on a manufactured
+// article — nothing to make a TO for (what is missing is bought, or already
+// on its way). 409.
+export class NothingToReserveError extends Error {
+  constructor() {
+    super("Kontrollen fann inget att tillverka — det som saknas köps in eller finns redan på väg");
+    this.name = "NothingToReserveError";
+  }
+}
 
 // Produktionsplanering: Flytta / Lås upp on an operation that does not exist.
 export class OperationNotFoundError extends Error {
@@ -221,6 +255,44 @@ export interface ManufacturingOrderCreator {
     input: { quantity?: number; dueDate?: string | null },
     createdBy: string | null
   ): Promise<{ id: string; orderNumber: string }>;
+  // Reservationen: the same create inside the caller's transaction (the
+  // whole tree of TOs, all or nothing), with the weeks the check booked
+  // written as the plan (by sequence number). With a salesOrderRowId the TO
+  // is linked to the row and the KO flips to in_production, exactly like
+  // Skapa TO; a configured row's structure is derived from the row.
+  createManufacturingOrderInTx(
+    tx: Tx,
+    input: { articleId?: string; salesOrderRowId?: string; quantity: number; note?: string; dueDate?: string | null },
+    createdBy: string | null,
+    opts?: { plannedWeeks?: { sequenceNo: number; weeks: PlannedWeek[] }[] }
+  ): Promise<{ id: string; orderNumber: string; releaseWarnings: string[] }>;
+}
+
+// Reservationen's last write: the KO's Förväntat leveransdatum, set by the
+// sales service inside the planning transaction with the header PATCH's
+// status guard (declared consumer-side like the creators above; app.ts
+// passes salesService).
+export interface SalesOrderDateWriter {
+  setExpectedDeliveryDateInTx(tx: Tx, salesOrderId: string, date: string): Promise<{ orderNumber: string; previous: string | null }>;
+}
+
+// What POST /delivery-time-check/apply answers with.
+export interface ApplyDeliveryTimeResult {
+  deliveryDate: string;
+  shipDate: string;
+  // In creation order: children before their parents; level 1 = the KO
+  // row's own article (linked to the row), 2+ = semi-finished parts.
+  manufacturingOrders: {
+    id: string;
+    orderNumber: string;
+    articleNumber: string;
+    quantity: number;
+    level: number;
+    salesOrderRowId: string | null;
+  }[];
+  // The TOs' releaseWarnings (material shortage, a plan the engine had to
+  // make), prefixed with the TO number. Never a refusal.
+  warnings: string[];
 }
 
 
@@ -270,6 +342,9 @@ export function createPlanningService(
     // Produktionsplanering's händelselogg (Planera, Flytta, Lås upp) —
     // optional for the fixtures, app.ts passes the real one.
     audit?: AuditWriter;
+    // Reservationen's KO date write (app.ts passes salesService). Optional
+    // so the fixtures that never reserve need not wire it.
+    salesOrderDates?: SalesOrderDateWriter;
   }
 ) {
   const cacheMs = deps.requirementsCacheMs ?? REQUIREMENTS_CACHE_MS;
@@ -288,12 +363,13 @@ export function createPlanningService(
   // A row without customer fields (test fakes) follows the system defaults.
   const NO_PARTNER_SETTINGS: PartnerDeliveryFields = { deliveryWeekdays: [], deliveryDayMode: null, transitDays: null };
   async function toShipDates<T extends { expectedDeliveryDate: string | null; customerDelivery?: PartnerDeliveryFields }>(
-    rows: T[]
+    rows: T[],
+    dbc?: Tx
   ): Promise<T[]> {
     const dates = rows.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : []));
     if (dates.length === 0) return rows;
     // Transit days are at most 60 working days.
-    const { defaults, offDays } = await repo.deliveryContext(deliveryHolidayWindow(dates, 60));
+    const { defaults, offDays } = await repo.deliveryContext(deliveryHolidayWindow(dates, 60), dbc);
     return rows.map((r) =>
       r.expectedDeliveryDate
         ? {
@@ -318,10 +394,12 @@ export function createPlanningService(
   // batch load and ONE delivery context for every KO row across the set —
   // toShipDates preserves order and length, so the rows are flattened and
   // sliced back per article. Unknown ids are absent, never an error.
-  async function loadOverviewInputs(articleIds: string[]) {
-    const inputs = await repo.loadArticleOverviewInputs(articleIds);
+  // `dbc`: the reservation reads inside its own transaction (undefined =
+  // the plain db, as every other read).
+  async function loadOverviewInputs(articleIds: string[], dbc?: Tx) {
+    const inputs = await repo.loadArticleOverviewInputs(articleIds, dbc);
     const entries = [...inputs.values()];
-    const shifted = await toShipDates(entries.flatMap((i) => i.salesRows));
+    const shifted = await toShipDates(entries.flatMap((i) => i.salesRows), dbc);
     const result = new Map<string, ArticleOverviewInput>();
     let offset = 0;
     for (const input of entries) {
@@ -512,6 +590,18 @@ export function createPlanningService(
     const own = world.operations.filter((o) => o.manufacturingOrderId === manufacturingOrderId);
     if (own.length === 0) return [];
     const plannedAt = new Date();
+    // The reservation's weeks are keyed by sequence number: when the TO's
+    // operations are not the ones the check planned (a configured row whose
+    // template changed in between), the engine plans it instead and says so.
+    const givenMatches =
+      given !== undefined &&
+      given.length === own.length &&
+      given.every((g) => own.some((o) => o.sequenceNo === g.sequenceNo));
+    const warnings: string[] = [];
+    if (given && !givenMatches) {
+      warnings.push("Operationerna stämmer inte med leveranstidskontrollens — ordern planerades på ledig kapacitet i stället");
+      given = undefined;
+    }
     if (given) {
       const bySeq = new Map(own.map((o) => [o.sequenceNo, o]));
       const plans: OperationPlan[] = [];
@@ -544,7 +634,7 @@ export function createPlanningService(
       existingOperations: others,
     });
     await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt });
-    return result.warnings.filter((w) => w.kind === "horizon" || w.kind === "late").map((w) => w.message);
+    return [...warnings, ...result.warnings.filter((w) => w.kind === "horizon" || w.kind === "late").map((w) => w.message)];
   }
 
   async function orderPlanSummaries(orderIds: string[]): Promise<Map<string, OrderPlanSummary>> {
@@ -570,6 +660,203 @@ export function createPlanningService(
       });
     }
     return summaries;
+  }
+
+  // Promise.all, or one load at a time: a transaction has one connection,
+  // which cannot run statements concurrently.
+  async function loadAll<T extends readonly unknown[] | []>(
+    sequential: boolean,
+    thunks: { [K in keyof T]: () => Promise<T[K]> }
+  ): Promise<T> {
+    const list = thunks as readonly (() => Promise<unknown>)[];
+    if (!sequential) return (await Promise.all(list.map((load) => load()))) as unknown as T;
+    const out: unknown[] = [];
+    for (const load of list) out.push(await load());
+    return out as unknown as T;
+  }
+
+  // Leveranstidskontroll — the earliest ship/delivery date for a set of
+  // rows from stock, open orders, material lead times and free capacity.
+  // The pure rules are in delivery-time-check.ts; this loads the rows. With
+  // `dbc` every read is bound to the reservation's transaction (the
+  // configurator's derivation is a plain committed read, like
+  // prepareCreate's); `action: "reserve"` also requires a confirmed order.
+  async function runDeliveryTimeCheck(
+    request: DeliveryTimeCheckRequest,
+    opts: { dbc?: Tx; action: "check" | "reserve" } = { action: "check" }
+  ): Promise<DeliveryTimeCheckResult & { order: { id: string; orderNumber: string } | null }> {
+    const dbc = opts.dbc;
+    const today = todayFn();
+    let customerId = request.customerId ?? null;
+    let checkedOrder: { id: string; orderNumber: string } | null = null;
+    type RequestRow = { key: string; articleId: string; quantity: number; selection: ConfiguratorSelection | null };
+    let requestRows: RequestRow[] = (request.rows ?? []).map((r, i) => ({
+      key: String(i),
+      articleId: r.articleId,
+      quantity: r.quantity,
+      selection: r.configuration ? r.configuration.selection : null,
+    }));
+    if (request.salesOrderId) {
+      const order = await repo.deliveryCheckOrder(request.salesOrderId, dbc);
+      if (!order) throw new SalesOrderNotFoundError(request.salesOrderId);
+      if (!OPEN_SALES_ORDER_STATUSES.has(order.status)) throw new SalesOrderNotOpenError(order.status);
+      if (opts.action === "reserve" && !RESERVABLE_SALES_ORDER_STATUSES.has(order.status)) {
+        throw new SalesOrderNotOpenError(order.status, "reserve");
+      }
+      checkedOrder = { id: order.id, orderNumber: order.orderNumber };
+      customerId ??= order.customerId;
+      if (!request.rows) {
+        requestRows = order.rows
+          .filter((r) => r.rest > 0)
+          .map((r) => ({
+            key: r.rowId,
+            articleId: r.articleId,
+            quantity: r.rest,
+            selection: r.configuration ? selectionFromEntries(r.configuration.selection) : null,
+          }));
+      }
+    }
+
+    const rowArticles = new Map(
+      (await repo.deliveryCheckArticles([...new Set(requestRows.map((r) => r.articleId))], dbc)).map((a) => [a.articleId, a])
+    );
+    // Configured rows: derived structure, or an existing variant as a
+    // plain article. The check never creates a variant.
+    const dtcRows: DtcRowInput[] = [];
+    for (const r of requestRows) {
+      const a = rowArticles.get(r.articleId);
+      if (!a) throw new ArticleNotFoundError(r.articleId);
+      if (a.configuratorMode === null) {
+        if (r.selection) throw new ConfigurationNotAllowedError(a.articleNumber);
+        dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity });
+        continue;
+      }
+      if (!r.selection) throw new ConfigurationRequiredError(a.articleNumber);
+      if (!deps.configuredStructure) throw new Error("ConfiguredStructureReader not wired");
+      const s = await deps.configuredStructure(r.articleId, r.selection, r.quantity, { withCost: false, allowVariants: true });
+      if (!s.valid) {
+        dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity, error: s.errors[0] ?? "Konfigurationen är inte giltig" });
+        continue;
+      }
+      const variantId = a.configuratorMode === "variants" && s.key ? await repo.findVariantByKey(r.articleId, s.key, dbc) : null;
+      if (variantId) {
+        dtcRows.push({ key: r.key, articleId: variantId, quantity: r.quantity });
+        continue;
+      }
+      dtcRows.push({
+        key: r.key,
+        articleId: r.articleId,
+        quantity: r.quantity,
+        structure: {
+          operations: s.operations.map((o) => ({
+            sequenceNo: o.sequenceNo,
+            workCenterId: o.workCenterId,
+            description: o.description,
+            setupTime: Number(o.setupTime),
+            runTimePerUnit: Number(o.runTimePerUnit),
+          })),
+          materials: s.materials.map((m) => ({ articleId: m.componentArticleId, quantity: m.totalQuantity })),
+        },
+      });
+    }
+
+    // The whole tree: every article reachable through the BOM (phantoms
+    // included) from the rows and the configured rows' material.
+    const bomEdges = await repo.loadBomEdges(dbc);
+    const childrenOf = new Map<string, string[]>();
+    for (const e of bomEdges) childrenOf.set(e.parentArticleId, [...(childrenOf.get(e.parentArticleId) ?? []), e.componentArticleId]);
+    const treeIds = new Set<string>();
+    const queue = dtcRows.flatMap((r) => (r.structure ? r.structure.materials.map((m) => m.articleId) : [r.articleId]));
+    while (queue.length > 0) {
+      const id = queue.pop()!;
+      if (treeIds.has(id)) continue;
+      treeIds.add(id);
+      queue.push(...(childrenOf.get(id) ?? []));
+    }
+    for (const r of dtcRows) treeIds.add(r.articleId);
+    const ids = [...treeIds];
+
+    const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
+    // Sequential inside a transaction (one connection, no concurrent
+    // statements on it); parallel on the plain db as before.
+    const [treeArticles, routingRows, leadTimes, capacity, suppliers, delivery, customerFields] = await loadAll(dbc !== undefined, [
+      () => repo.deliveryCheckArticles(ids, dbc),
+      () => repo.routingsForArticles(ids, dbc),
+      () => repo.workCenterLeadTimes(dbc),
+      () => repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc),
+      () => repo.primarySuppliersForArticles(ids, dbc),
+      () => repo.deliveryContext({ from: addDays(today, -200), to: horizonTo }, dbc),
+      () => (customerId ? repo.customerDeliveryFields(customerId, dbc) : Promise.resolve(null)),
+    ]);
+    if (customerId && !customerFields) throw new CustomerNotFoundError(customerId);
+
+    const articles = new Map<string, DtcArticle>(
+      treeArticles.map((a) => [
+        a.articleId,
+        { articleId: a.articleId, articleNumber: a.articleNumber, name: a.name, type: a.type, rounding: a.rounding },
+      ])
+    );
+    // Overviews (on ship dates) for everything with a pool — not the
+    // configured templates themselves. One batch load for the whole tree.
+    const overviews = new Map<string, { onHand: number; rows: ArticleOverview["rows"] }>();
+    const configuredTemplates = new Set(dtcRows.filter((r) => r.structure).map((r) => r.articleId));
+    const poolIds = treeArticles
+      .filter((a) => !(a.type === "service" || a.isPhantom || configuredTemplates.has(a.articleId)))
+      .map((a) => a.articleId);
+    for (const [articleId, input] of await loadOverviewInputs(poolIds, dbc)) {
+      const overview = buildArticleOverview(input);
+      overviews.set(articleId, { onHand: overview.onHand, rows: overview.rows });
+    }
+    const routings = new Map<string, DtcOperation[]>();
+    for (const r of routingRows) {
+      routings.set(r.articleId, [
+        ...(routings.get(r.articleId) ?? []),
+        { sequenceNo: r.sequenceNo, workCenterId: r.workCenterId, description: r.description, setupTime: r.setupTime, runTimePerUnit: r.runTimePerUnit },
+      ]);
+    }
+    const leadTimeOf = new Map(leadTimes.map((l) => [l.workCenterId, l.leadTimeDays]));
+    const workCenters = new Map<string, DtcWorkCenter>(
+      capacity.workCenters.map((w) => [
+        w.workCenterId,
+        {
+          workCenterId: w.workCenterId,
+          code: w.code,
+          name: w.name,
+          type: w.type,
+          weekScheduleId: w.weekScheduleId,
+          hoursPerDay: w.hoursPerDay,
+          capacityFactor: w.capacityFactor,
+          leadTimeDays: leadTimeOf.get(w.workCenterId) ?? null,
+        },
+      ])
+    );
+
+    const result = checkDeliveryTime({
+      today,
+      offDays: delivery.offDays,
+      articles,
+      overviews,
+      excludeSalesOrderId: request.salesOrderId ?? null,
+      bomEdges,
+      phantomIds: new Set(treeArticles.filter((a) => a.isPhantom).map((a) => a.articleId)),
+      routings,
+      workCenters,
+      schedule: { weekScheduleDays: capacity.weekScheduleDays, daySchedules: capacity.daySchedules, holidays: capacity.holidays },
+      existingOperations: capacity.operations,
+      suppliers: new Map(
+        suppliers.map((s) => [
+          s.articleId,
+          {
+            supplierName: s.supplierName,
+            leadTimeDays: s.leadTimeDays,
+            settings: effectiveDeliverySettings(s.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
+          },
+        ])
+      ),
+      customer: customerFields ? effectiveDeliverySettings(customerFields, "customer", delivery.defaults) : null,
+      rows: dtcRows,
+    });
+    return { ...result, order: checkedOrder };
   }
 
   return {
@@ -635,172 +922,91 @@ export function createPlanningService(
       return suggestDueDate(demand, { today, offDays });
     },
 
-    // Leveranstidskontroll — the earliest ship/delivery date for a set of
-    // rows from stock, open orders, material lead times and free capacity.
-    // Reads only; the pure rules are in delivery-time-check.ts.
+    // Leveranstidskontroll — reads only (nothing is booked).
     async checkDeliveryTime(request: DeliveryTimeCheckRequest): Promise<DeliveryTimeCheckResult> {
-      const today = todayFn();
-      let customerId = request.customerId ?? null;
-      type RequestRow = { key: string; articleId: string; quantity: number; selection: ConfiguratorSelection | null };
-      let requestRows: RequestRow[] = (request.rows ?? []).map((r, i) => ({
-        key: String(i),
-        articleId: r.articleId,
-        quantity: r.quantity,
-        selection: r.configuration ? r.configuration.selection : null,
-      }));
-      if (request.salesOrderId) {
-        const order = await repo.deliveryCheckOrder(request.salesOrderId);
-        if (!order) throw new SalesOrderNotFoundError(request.salesOrderId);
-        if (!OPEN_SALES_ORDER_STATUSES.has(order.status)) throw new SalesOrderNotOpenError(order.status);
-        customerId ??= order.customerId;
-        if (!request.rows) {
-          requestRows = order.rows
-            .filter((r) => r.rest > 0)
-            .map((r) => ({
-              key: r.rowId,
-              articleId: r.articleId,
-              quantity: r.rest,
-              selection: r.configuration ? selectionFromEntries(r.configuration.selection) : null,
-            }));
+      const { order: _order, ...result } = await runDeliveryTimeCheck(request);
+      return result;
+    },
+
+    // Reservationen (Skapa tillverkningsordrar för det som saknas): ONE
+    // transaction under the production_plan lock — the check is run again
+    // with every read bound to the transaction, its delivery date must be
+    // the one the client was shown, then a TO per shortage batch (children
+    // before parents, planned in exactly the weeks the check booked; level
+    // 1 linked to the KO row like Skapa TO, lower levels with a note), and
+    // last the KO's Förväntat leveransdatum. Any error rolls everything
+    // back — no half trees. Logged after the commit: "released" per TO and
+    // delivery_time_applied on the KO.
+    async applyDeliveryTime(input: ApplyDeliveryTimeInput, userId: string | null): Promise<ApplyDeliveryTimeResult> {
+      const dates = deps.salesOrderDates;
+      if (!dates) throw new Error("SalesOrderDateWriter not wired");
+      const applied = await repo.transaction(async (tx) => {
+        // The lock FIRST, before the check reads: what it sees is what the
+        // TOs are planned against (same order as every other plan write).
+        await lockProductionPlan(tx);
+        const { order, ...result } = await runDeliveryTimeCheck({ salesOrderId: input.salesOrderId }, { dbc: tx, action: "reserve" });
+        if (result.deliveryDate !== input.deliveryDate || result.shipDate === null) {
+          throw new DeliveryTimeChangedError(result.deliveryDate, result);
         }
-      }
-
-      const rowArticles = new Map(
-        (await repo.deliveryCheckArticles([...new Set(requestRows.map((r) => r.articleId))])).map((a) => [a.articleId, a])
-      );
-      // Configured rows: derived structure, or an existing variant as a
-      // plain article. The check never creates a variant.
-      const dtcRows: DtcRowInput[] = [];
-      for (const r of requestRows) {
-        const a = rowArticles.get(r.articleId);
-        if (!a) throw new ArticleNotFoundError(r.articleId);
-        if (a.configuratorMode === null) {
-          if (r.selection) throw new ConfigurationNotAllowedError(a.articleNumber);
-          dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity });
-          continue;
+        if (result.batches.length === 0) throw new NothingToReserveError();
+        const orderNumber = order!.orderNumber;
+        const manufacturingOrders: ApplyDeliveryTimeResult["manufacturingOrders"] = [];
+        const warnings: string[] = [];
+        // batches is already children-before-parents.
+        for (const batch of result.batches) {
+          const linked = batch.level === 1;
+          const created = await deps.manufacturing.createManufacturingOrderInTx(
+            tx,
+            linked
+              ? { salesOrderRowId: batch.rowKey, quantity: batch.quantity, dueDate: batch.readyDate }
+              : {
+                  articleId: batch.articleId,
+                  quantity: batch.quantity,
+                  dueDate: batch.readyDate,
+                  note: `Skapad från leveranstidskontroll för ${orderNumber}`,
+                },
+            userId,
+            { plannedWeeks: batch.operations.map((o) => ({ sequenceNo: o.sequenceNo, weeks: o.weeks })) }
+          );
+          manufacturingOrders.push({
+            id: created.id,
+            orderNumber: created.orderNumber,
+            articleNumber: batch.articleNumber,
+            quantity: batch.quantity,
+            level: batch.level,
+            salesOrderRowId: linked ? batch.rowKey : null,
+          });
+          warnings.push(...created.releaseWarnings.map((w) => `${created.orderNumber}: ${w}`));
         }
-        if (!r.selection) throw new ConfigurationRequiredError(a.articleNumber);
-        if (!deps.configuredStructure) throw new Error("ConfiguredStructureReader not wired");
-        const s = await deps.configuredStructure(r.articleId, r.selection, r.quantity, { withCost: false, allowVariants: true });
-        if (!s.valid) {
-          dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity, error: s.errors[0] ?? "Konfigurationen är inte giltig" });
-          continue;
-        }
-        const variantId = a.configuratorMode === "variants" && s.key ? await repo.findVariantByKey(r.articleId, s.key) : null;
-        if (variantId) {
-          dtcRows.push({ key: r.key, articleId: variantId, quantity: r.quantity });
-          continue;
-        }
-        dtcRows.push({
-          key: r.key,
-          articleId: r.articleId,
-          quantity: r.quantity,
-          structure: {
-            operations: s.operations.map((o) => ({
-              sequenceNo: o.sequenceNo,
-              workCenterId: o.workCenterId,
-              description: o.description,
-              setupTime: Number(o.setupTime),
-              runTimePerUnit: Number(o.runTimePerUnit),
-            })),
-            materials: s.materials.map((m) => ({ articleId: m.componentArticleId, quantity: m.totalQuantity })),
-          },
-        });
-      }
-
-      // The whole tree: every article reachable through the BOM (phantoms
-      // included) from the rows and the configured rows' material.
-      const bomEdges = await repo.loadBomEdges();
-      const childrenOf = new Map<string, string[]>();
-      for (const e of bomEdges) childrenOf.set(e.parentArticleId, [...(childrenOf.get(e.parentArticleId) ?? []), e.componentArticleId]);
-      const treeIds = new Set<string>();
-      const queue = dtcRows.flatMap((r) => (r.structure ? r.structure.materials.map((m) => m.articleId) : [r.articleId]));
-      while (queue.length > 0) {
-        const id = queue.pop()!;
-        if (treeIds.has(id)) continue;
-        treeIds.add(id);
-        queue.push(...(childrenOf.get(id) ?? []));
-      }
-      for (const r of dtcRows) treeIds.add(r.articleId);
-      const ids = [...treeIds];
-
-      const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
-      const [treeArticles, routingRows, leadTimes, capacity, suppliers, delivery, customerFields] = await Promise.all([
-        repo.deliveryCheckArticles(ids),
-        repo.routingsForArticles(ids),
-        repo.workCenterLeadTimes(),
-        repo.loadCapacityInput(addDays(today, -7), horizonTo),
-        repo.primarySuppliersForArticles(ids),
-        repo.deliveryContext({ from: addDays(today, -200), to: horizonTo }),
-        customerId ? repo.customerDeliveryFields(customerId) : Promise.resolve(null),
-      ]);
-      if (customerId && !customerFields) throw new CustomerNotFoundError(customerId);
-
-      const articles = new Map<string, DtcArticle>(
-        treeArticles.map((a) => [
-          a.articleId,
-          { articleId: a.articleId, articleNumber: a.articleNumber, name: a.name, type: a.type, rounding: a.rounding },
-        ])
-      );
-      // Overviews (on ship dates) for everything with a pool — not the
-      // configured templates themselves. One batch load for the whole tree.
-      const overviews = new Map<string, { onHand: number; rows: ArticleOverview["rows"] }>();
-      const configuredTemplates = new Set(dtcRows.filter((r) => r.structure).map((r) => r.articleId));
-      const poolIds = treeArticles
-        .filter((a) => !(a.type === "service" || a.isPhantom || configuredTemplates.has(a.articleId)))
-        .map((a) => a.articleId);
-      for (const [articleId, overview] of await this.getArticleOverviews(poolIds)) {
-        overviews.set(articleId, { onHand: overview.onHand, rows: overview.rows });
-      }
-      const routings = new Map<string, DtcOperation[]>();
-      for (const r of routingRows) {
-        routings.set(r.articleId, [
-          ...(routings.get(r.articleId) ?? []),
-          { sequenceNo: r.sequenceNo, workCenterId: r.workCenterId, description: r.description, setupTime: r.setupTime, runTimePerUnit: r.runTimePerUnit },
-        ]);
-      }
-      const leadTimeOf = new Map(leadTimes.map((l) => [l.workCenterId, l.leadTimeDays]));
-      const workCenters = new Map<string, DtcWorkCenter>(
-        capacity.workCenters.map((w) => [
-          w.workCenterId,
-          {
-            workCenterId: w.workCenterId,
-            code: w.code,
-            name: w.name,
-            type: w.type,
-            weekScheduleId: w.weekScheduleId,
-            hoursPerDay: w.hoursPerDay,
-            capacityFactor: w.capacityFactor,
-            leadTimeDays: leadTimeOf.get(w.workCenterId) ?? null,
-          },
-        ])
-      );
-
-      return checkDeliveryTime({
-        today,
-        offDays: delivery.offDays,
-        articles,
-        overviews,
-        excludeSalesOrderId: request.salesOrderId ?? null,
-        bomEdges,
-        phantomIds: new Set(treeArticles.filter((a) => a.isPhantom).map((a) => a.articleId)),
-        routings,
-        workCenters,
-        schedule: { weekScheduleDays: capacity.weekScheduleDays, daySchedules: capacity.daySchedules, holidays: capacity.holidays },
-        existingOperations: capacity.operations,
-        suppliers: new Map(
-          suppliers.map((s) => [
-            s.articleId,
-            {
-              supplierName: s.supplierName,
-              leadTimeDays: s.leadTimeDays,
-              settings: effectiveDeliverySettings(s.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
-            },
-          ])
-        ),
-        customer: customerFields ? effectiveDeliverySettings(customerFields, "customer", delivery.defaults) : null,
-        rows: dtcRows,
+        const dateWrite = await dates.setExpectedDeliveryDateInTx(tx, input.salesOrderId, input.deliveryDate);
+        return {
+          orderNumber,
+          previousDeliveryDate: dateWrite.previous,
+          result: { deliveryDate: input.deliveryDate, shipDate: result.shipDate, manufacturingOrders, warnings },
+        };
       });
+      for (const mo of applied.result.manufacturingOrders) {
+        await audit.log({ entityType: "manufacturing_order", entityId: mo.orderNumber, action: "released", userId });
+      }
+      await audit.log({
+        entityType: "sales_order",
+        entityId: applied.orderNumber,
+        action: "delivery_time_applied",
+        detail: {
+          deliveryDate: applied.result.deliveryDate,
+          shipDate: applied.result.shipDate,
+          previousDeliveryDate: applied.previousDeliveryDate,
+          manufacturingOrders: applied.result.manufacturingOrders.map((mo) => ({
+            orderNumber: mo.orderNumber,
+            articleNumber: mo.articleNumber,
+            quantity: mo.quantity,
+            level: mo.level,
+          })),
+          warnings: applied.result.warnings,
+        },
+        userId,
+      });
+      return applied.result;
     },
 
     // Beläggning (E2) — fully derived at read time, like listRequirements.

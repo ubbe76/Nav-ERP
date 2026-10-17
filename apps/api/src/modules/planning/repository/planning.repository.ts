@@ -168,11 +168,11 @@ export function createPlanningRepository(db: Db) {
     );
   }
 
-  async function primarySuppliersFor(articleIds?: string[]) {
+  async function primarySuppliersFor(articleIds?: string[], dbc: Db | Tx = db) {
     const where = articleIds
       ? and(eq(articleSuppliers.isPrimary, true), inArray(articleSuppliers.articleId, articleIds))
       : eq(articleSuppliers.isPrimary, true);
-    const rows = await db
+    const rows = await dbc
       .select({
         rowId: articleSuppliers.id,
         articleId: articleSuppliers.articleId,
@@ -409,8 +409,8 @@ export function createPlanningRepository(db: Db) {
     // Artikelöversikt — ONE article's open rows WITH dates, for the pure
     // builder in article-overview.ts. Delegates to the batch loader below
     // (one implementation); null when the article does not exist.
-    async loadArticleOverviewInput(articleId: string): Promise<ArticleOverviewInput | null> {
-      return (await this.loadArticleOverviewInputs([articleId])).get(articleId) ?? null;
+    async loadArticleOverviewInput(articleId: string, dbc: Db | Tx = db): Promise<ArticleOverviewInput | null> {
+      return (await this.loadArticleOverviewInputs([articleId], dbc)).get(articleId) ?? null;
     },
 
     // The same for a SET of articles in a fixed number of queries
@@ -422,12 +422,14 @@ export function createPlanningRepository(db: Db) {
     // document/partner columns the row list shows. Planned MOs are loaded
     // for every article (no snapshot exists yet — the builder explodes the
     // parent's BOM), as the MRP does per run. Unknown ids are simply absent.
-    async loadArticleOverviewInputs(articleIds: string[]): Promise<Map<string, ArticleOverviewInput>> {
+    // `dbc`: the reservation runs the check inside its own transaction
+    // (same Db | Tx widening as loadCapacityInput / loadDeliveryContext).
+    async loadArticleOverviewInputs(articleIds: string[], dbc: Db | Tx = db): Promise<Map<string, ArticleOverviewInput>> {
       const result = new Map<string, ArticleOverviewInput>();
       const ids = [...new Set(articleIds)];
       if (ids.length === 0) return result;
 
-      const articleRows = await db
+      const articleRows = await dbc
         .select({
           articleId: articles.id,
           articleNumber: articles.articleNumber,
@@ -447,7 +449,7 @@ export function createPlanningRepository(db: Db) {
 
       const [stockRows, salesRows, purchaseRows, moRows, materialRows, plannedRows, bomEdges, phantomRows, primary] =
         await Promise.all([
-          db
+          dbc
             .select({
               articleId: stockBalances.articleId,
               quantity: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}), 0)`,
@@ -455,7 +457,7 @@ export function createPlanningRepository(db: Db) {
             .from(stockBalances)
             .where(inArray(stockBalances.articleId, ids))
             .groupBy(stockBalances.articleId),
-          db
+          dbc
             .select({
               articleId: salesOrderRows.articleId,
               rowId: salesOrderRows.id,
@@ -478,7 +480,7 @@ export function createPlanningRepository(db: Db) {
             // Konfigurator 4c: configured rows are demand on the template
             // here too — same rows as loadRequirementsInput's demand query.
             .where(and(inArray(salesOrderRows.articleId, ids), inArray(salesOrders.status, OPEN_SALES))),
-          db
+          dbc
             .select({
               articleId: purchaseOrderRows.articleId,
               rowId: purchaseOrderRows.id,
@@ -503,7 +505,7 @@ export function createPlanningRepository(db: Db) {
                 isNull(purchaseOrderRows.moOperationId)
               )
             ),
-          db
+          dbc
             .select({
               articleId: manufacturingOrders.articleId,
               moId: manufacturingOrders.id,
@@ -515,7 +517,7 @@ export function createPlanningRepository(db: Db) {
             })
             .from(manufacturingOrders)
             .where(and(inArray(manufacturingOrders.articleId, ids), inArray(manufacturingOrders.status, OPEN_MO))),
-          db
+          dbc
             .select({
               articleId: moMaterialConsumptions.componentArticleId,
               rowId: moMaterialConsumptions.id,
@@ -540,7 +542,7 @@ export function createPlanningRepository(db: Db) {
                 inArray(manufacturingOrders.status, OPEN_MO)
               )
             ),
-          db
+          dbc
             .select({
               moId: manufacturingOrders.id,
               orderNumber: manufacturingOrders.orderNumber,
@@ -556,14 +558,14 @@ export function createPlanningRepository(db: Db) {
             // has material rows (seen via materialRows above, planned is in
             // MATERIAL_MO_STATUSES) — exploding it too would double count.
             .where(and(eq(manufacturingOrders.status, "planned"), isNull(manufacturingOrders.configuration))),
-          db
+          dbc
             .select({
               parentArticleId: bomComponents.parentArticleId,
               componentArticleId: bomComponents.componentArticleId,
               quantity: bomComponents.quantity,
             })
             .from(bomComponents),
-          db.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true)),
+          dbc.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true)),
           primarySuppliersFor(ids),
         ]);
 
@@ -897,10 +899,10 @@ export function createPlanningRepository(db: Db) {
 
     // Order creation only: the staffel is loaded here, not for the whole
     // requirements run (the MRP nets quantities, never prices).
-    async primarySuppliersForArticles(articleIds: string[]): Promise<PrimarySupplierWithBreaks[]> {
+    async primarySuppliersForArticles(articleIds: string[], dbc: Db | Tx = db): Promise<PrimarySupplierWithBreaks[]> {
       if (articleIds.length === 0) return [];
-      const rows = await primarySuppliersFor(articleIds);
-      const breaks = await loadPriceBreaks(db, rows.map((r) => r.rowId));
+      const rows = await primarySuppliersFor(articleIds, dbc);
+      const breaks = await loadPriceBreaks(dbc, rows.map((r) => r.rowId));
       return rows.map((r) => ({ ...r, priceBreaks: breaks.get(r.rowId) ?? [] }));
     },
 
@@ -914,8 +916,8 @@ export function createPlanningRepository(db: Db) {
 
     // Fasta leveransdagar: the system defaults + full-day holidays in the
     // window — the service moves sales order dates to the ship date with it.
-    async deliveryContext(window: { from: string; to: string }) {
-      return loadDeliveryContext(db, window);
+    async deliveryContext(window: { from: string; to: string }, dbc: Db | Tx = db) {
+      return loadDeliveryContext(dbc, window);
     },
 
     // Färdigdatumsförslag: the holiday register's full days off in [from, to]
@@ -930,8 +932,8 @@ export function createPlanningRepository(db: Db) {
 
     // Just the BOM edges — Skapa ordrar orders its TO proposals parents first
     // without loading the whole MRP input.
-    async loadBomEdges(): Promise<{ parentArticleId: string; componentArticleId: string; quantity: number }[]> {
-      const rows = await db
+    async loadBomEdges(dbc: Db | Tx = db): Promise<{ parentArticleId: string; componentArticleId: string; quantity: number }[]> {
+      const rows = await dbc
         .select({
           parentArticleId: bomComponents.parentArticleId,
           componentArticleId: bomComponents.componentArticleId,
@@ -945,13 +947,13 @@ export function createPlanningRepository(db: Db) {
 
     // The order a check is run for: its customer and open rows (restantal
     // and configuration). null = no such order.
-    async deliveryCheckOrder(salesOrderId: string) {
-      const [order] = await db
-        .select({ id: salesOrders.id, customerId: salesOrders.customerId, status: salesOrders.status })
+    async deliveryCheckOrder(salesOrderId: string, dbc: Db | Tx = db) {
+      const [order] = await dbc
+        .select({ id: salesOrders.id, orderNumber: salesOrders.orderNumber, customerId: salesOrders.customerId, status: salesOrders.status })
         .from(salesOrders)
         .where(eq(salesOrders.id, salesOrderId));
       if (!order) return null;
-      const rows = await db
+      const rows = await dbc
         .select({
           rowId: salesOrderRows.id,
           articleId: salesOrderRows.articleId,
@@ -972,8 +974,8 @@ export function createPlanningRepository(db: Db) {
       };
     },
 
-    async customerDeliveryFields(customerId: string) {
-      const [row] = await db
+    async customerDeliveryFields(customerId: string, dbc: Db | Tx = db) {
+      const [row] = await dbc
         .select({
           deliveryWeekdays: customers.deliveryWeekdays,
           deliveryDayMode: customers.deliveryDayMode,
@@ -986,9 +988,9 @@ export function createPlanningRepository(db: Db) {
 
     // Articles in the checked tree, with their configurator mode (null = not
     // a template).
-    async deliveryCheckArticles(articleIds: string[]) {
+    async deliveryCheckArticles(articleIds: string[], dbc: Db | Tx = db) {
       if (articleIds.length === 0) return [];
-      const rows = await db
+      const rows = await dbc
         .select({
           articleId: articles.id,
           articleNumber: articles.articleNumber,
@@ -1006,9 +1008,9 @@ export function createPlanningRepository(db: Db) {
 
     // Worked operations only — Kalkyl (costing-only) operations never reach
     // a TO, so they take no capacity.
-    async routingsForArticles(articleIds: string[]) {
+    async routingsForArticles(articleIds: string[], dbc: Db | Tx = db) {
       if (articleIds.length === 0) return [];
-      const rows = await db
+      const rows = await dbc
         .select({
           articleId: routingOperations.articleId,
           sequenceNo: routingOperations.sequenceNo,
@@ -1023,16 +1025,16 @@ export function createPlanningRepository(db: Db) {
     },
 
     // Legoresurser's lead time in days (Monitor's Lego export).
-    async workCenterLeadTimes() {
-      const rows = await db
+    async workCenterLeadTimes(dbc: Db | Tx = db) {
+      const rows = await dbc
         .select({ workCenterId: workCenters.id, leadTimeDays: workCenters.leadTimeDays })
         .from(workCenters);
       return rows.map((r) => ({ workCenterId: r.workCenterId, leadTimeDays: r.leadTimeDays === null ? null : Number(r.leadTimeDays) }));
     },
 
     // The variant already made for (template, configuration key), if any.
-    async findVariantByKey(templateArticleId: string, configKey: string): Promise<string | null> {
-      const [row] = await db
+    async findVariantByKey(templateArticleId: string, configKey: string, dbc: Db | Tx = db): Promise<string | null> {
+      const [row] = await dbc
         .select({ articleId: configuratorVariants.articleId })
         .from(configuratorVariants)
         .where(and(eq(configuratorVariants.templateArticleId, templateArticleId), eq(configuratorVariants.configKey, configKey)));
