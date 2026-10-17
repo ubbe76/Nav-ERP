@@ -13,6 +13,7 @@
 // Pure, like article-overview.ts: the service loads the overview and the
 // holiday register, this module owns the rules. Split in two because the
 // demand date decides which holidays the service has to load.
+import { addDays, isWorkingDay, previousWorkingDay } from "../../system/service/delivery-days.js";
 import type { ArticleOverview, ArticleOverviewRow } from "./article-overview.js";
 
 export interface FirmDemand {
@@ -78,29 +79,9 @@ export function findFirmDemand(
   return first && hasDate(first) ? fromRow(first, "shortage") : null;
 }
 
-// Calendar arithmetic on YYYY-MM-DD strings in UTC, so no local time zone or
-// DST shift can move a date.
-function addDays(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-// A working day is Monday–Friday and not a full-day holiday (offDays = the
-// holiday register's dates without a day schedule). The company has no
-// week schedule of its own — resources and employees do — so the weekend
-// is the fixed default.
-export function isWorkingDay(date: string, offDays: ReadonlySet<string>): boolean {
-  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay(); // 0 = Sunday
-  return weekday !== 0 && weekday !== 6 && !offDays.has(date);
-}
-
-export function previousWorkingDay(date: string, offDays: ReadonlySet<string>): string {
-  let day = addDays(date, -1);
-  // Bounded: a register that marks a whole year off can't loop forever.
-  for (let i = 0; i < 366 && !isWorkingDay(day, offDays); i++) day = addDays(day, -1);
-  return day;
-}
+// The working-day calendar lives in the delivery-days leaf (one
+// implementation); re-exported here for the existing callers.
+export { addDays, isWorkingDay, previousWorkingDay };
 
 // How far back previousWorkingDay can reach in practice — the service loads
 // holidays for [demandDate − HOLIDAY_LOOKBACK_DAYS, demandDate].
