@@ -27,4 +27,6 @@ await esbuild.build({
   sourcemap: true,
   target: "node20",
   external,
+  // GET /health reports the version the image was built from.
+  define: { "process.env.APP_VERSION": JSON.stringify(pkg.version) },
 });

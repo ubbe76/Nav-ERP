@@ -176,6 +176,15 @@ export function Nav({ active, userName, userRole, role, permissions }: NavProps)
           <div className={styles.userText}>
             <div className={styles.userName}>{userName}</div>
             <div className={styles.userRole}>{userRole}</div>
+            <a
+              className={styles.version}
+              href="https://naverp.se/versioner/"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Vad är nytt i versionerna"
+            >
+              Version {process.env.NEXT_PUBLIC_APP_VERSION}
+            </a>
           </div>
         </div>
       </nav>

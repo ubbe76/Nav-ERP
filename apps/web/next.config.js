@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // The app version shown at the bottom of the sidebar — read from this
+  // package.json at build time, so it follows every version bump.
+  env: { NEXT_PUBLIC_APP_VERSION: require("./package.json").version },
   // Hosts the dev server may be reached through (Next.js blocks cross-origin
   // requests to /_next/* dev resources from unlisted hosts, which silently
   // kills all client-side JS on the page).

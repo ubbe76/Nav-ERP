@@ -246,3 +246,17 @@
   font-size: 11.5px;
   color: var(--color-text-muted);
 }
+
+/* The app version under the user — small and quiet, links to the release
+   notes. Hidden with the rest of the user text when collapsed. */
+.version {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.version:hover {
+  text-decoration: underline;
+}

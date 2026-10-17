@@ -14,6 +14,7 @@ Efter 10 misslyckade inloggningsförsök på samma konto spärras kontot i 15 mi
 
 - **Sidomenyn** till vänster har ett menyval per modul och inga undermenyer: Översikt, Artiklar, Inköp, Försäljning, Tillverkning, Lager, Ekonomi, Rapporter, System (endast administratörer) och Hjälp — du ser bara de moduler din behörighetsgrupp ger dig (se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)). Klickar du på en modul öppnas **modulens egen sida**, där alla dess funktioner ligger grupperade i ett rutnät med en kort förklaring under varje. Därifrån går du vidare till rutinen du ska arbeta i. Funktioner som du inte har behörighet till visas inte i rutnätet.
 - Rutnätet är indelat i grupper med en rubrik över de funktioner som hör ihop. Under **Tillverkning** ligger till exempel **Behovsberäkning**, **Beläggning** och **Scheman** i gruppen **Planering**.
+- Längst ned i sidomenyn står ditt namn, din roll och vilken version av Nav|ERP du använder, t.ex. **Version 0.2.4-alpha**. Klickar du på versionen öppnas versionssidan på naverp.se med vad som är nytt i varje version. Versionen syns också i API:ets `GET /health`.
 - Med **pilknappen** överst i sidomenyn fäller du ihop menyn till enbart ikoner. Valet sparas i webbläsaren och gäller tills du fäller ut den igen.
 - Uppe till höger finns **Logga ut** och väljaren för färgtema: **Ljust**, **Mörkt** och **Dracula** (ett mörkt tema i lila och rosa efter [Dracula](https://draculatheme.com), som används under MIT-licensen). Valet sparas i webbläsaren och gäller på alla sidor, även stämpelterminalen och inloggningen.
 

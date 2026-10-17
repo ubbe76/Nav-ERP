@@ -662,7 +662,12 @@ export function buildApp(database: Db = db) {
     { prefix: "/api/v1" }
   );
 
-  app.get("/health", async () => ({ status: "ok" }));
+  // version: baked in by build.mjs in the image; npm sets
+  // npm_package_version when the API runs with `npm run dev`.
+  app.get("/health", async () => ({
+    status: "ok",
+    version: process.env.APP_VERSION ?? process.env.npm_package_version ?? null,
+  }));
 
   return app;
 }
