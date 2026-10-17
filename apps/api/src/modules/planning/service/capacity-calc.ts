@@ -142,13 +142,13 @@ const addDays = (date: string, days: number) => {
 
 // Prebuilt lookups shared across every resource × week in a run — rebuilding
 // them per resolver call would be O(R × W × dataset).
-interface ScheduleLookups {
+export interface ScheduleLookups {
   netByDaySchedule: Map<string, number>;
   daysBySchedule: Map<string, Map<number, string>>; // weekScheduleId -> weekday -> dayScheduleId
   holidayByDate: Map<string, HolidayRow>;
 }
 
-function buildScheduleLookups(
+export function buildScheduleLookups(
   weekScheduleDays: WeekScheduleDayRow[],
   daySchedules: DayScheduleNetRow[],
   holidays: HolidayRow[]
@@ -178,20 +178,33 @@ function resolveWeekHoursFromLookups(
   isoYear: number,
   isoWeek: number
 ): number {
-  const dayByWeekday = lookups.daysBySchedule.get(weekScheduleId) ?? new Map<number, string>();
   const { monday } = isoWeekRange(isoYear, isoWeek);
   let minutes = 0;
-  for (let i = 0; i < 7; i++) {
-    const dayScheduleId = dayByWeekday.get(i + 1);
-    if (!dayScheduleId) continue; // day off in the schedule — a holiday never adds
-    const holiday = lookups.holidayByDate.get(addDays(monday, i));
-    if (holiday) {
-      minutes += holiday.dayScheduleId ? (lookups.netByDaySchedule.get(holiday.dayScheduleId) ?? 0) : 0;
-    } else {
-      minutes += lookups.netByDaySchedule.get(dayScheduleId) ?? 0;
-    }
-  }
+  for (let i = 0; i < 7; i++) minutes += resourceDayMinutes(lookups, weekScheduleId, addDays(monday, i));
   return (minutes / 60) * capacityFactor;
+}
+
+// One day's net scheduled minutes for a week schedule (before the capacity
+// factor) — the single day rule the week sum and Leveranstidskontrollen's
+// day-by-day booking share.
+export function resourceDayMinutes(lookups: ScheduleLookups, weekScheduleId: string, date: string): number {
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay() || 7; // ISO 1 = Monday … 7 = Sunday
+  const dayScheduleId = lookups.daysBySchedule.get(weekScheduleId)?.get(weekday);
+  if (!dayScheduleId) return 0; // day off in the schedule — a holiday never adds
+  const holiday = lookups.holidayByDate.get(date);
+  if (holiday) return holiday.dayScheduleId ? (lookups.netByDaySchedule.get(holiday.dayScheduleId) ?? 0) : 0;
+  return lookups.netByDaySchedule.get(dayScheduleId) ?? 0;
+}
+
+// The Monday of the week an operation's remaining load counts in: the week
+// of its MO's due date, a past-due date in the first (current) week — the
+// work can't happen in the past — and null for an undated MO (the matrix's
+// "Utan datum" column; Leveranstidskontrollen leaves it out).
+export function loadBucketMonday(dueDate: string | null, firstMonday: string): string | null {
+  if (dueDate == null) return null;
+  if (dueDate < firstMonday) return firstMonday;
+  const { isoYear, isoWeek } = isoWeekOf(dueDate);
+  return isoWeekRange(isoYear, isoWeek).monday;
 }
 
 // Public convenience wrapper (used directly by the unit tests) — builds the
@@ -289,17 +302,13 @@ export function computeCapacity(
     // Overdue at DAY granularity — a due date earlier this week is already
     // passed even though it buckets into the current week column.
     const overdue = operation.dueDate != null && operation.dueDate < options.today;
-    if (operation.dueDate == null) {
+    const bucketMonday = loadBucketMonday(operation.dueDate, firstMonday);
+    if (bucketMonday == null) {
       cell = buckets.undated;
-    } else if (operation.dueDate < firstMonday) {
-      // Past due — the work can't happen in the past; roll into current week.
-      cell = buckets.weeks[0]!;
-    } else if (operation.dueDate > horizonSunday) {
+    } else if (bucketMonday > horizonSunday) {
       cell = buckets.later;
     } else {
-      const { isoYear, isoWeek } = isoWeekOf(operation.dueDate);
-      const index = weeks.findIndex((w) => w.isoYear === isoYear && w.isoWeek === isoWeek);
-      cell = buckets.weeks[index]!;
+      cell = buckets.weeks[weeks.findIndex((w) => w.monday === bucketMonday)]!;
     }
 
     const hours = round2(minutes / 60);

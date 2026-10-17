@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildScheduleLookups,
   computeCapacity,
+  loadBucketMonday,
   remainingOperationMinutes,
+  resourceDayMinutes,
   resolveResourceWeekHours,
   type CapacityInput,
   type CapacityOperationRow,
@@ -172,6 +175,24 @@ describe("resolveResourceWeekHours", () => {
 
   it("an empty week schedule yields zero", () => {
     expect(resolveResourceWeekHours({ ...base, weekScheduleDays: [] })).toBe(0);
+  });
+});
+
+describe("resourceDayMinutes and loadBucketMonday (shared with Leveranstidskontrollen)", () => {
+  const lookups = buildScheduleLookups(STD_WEEK.weekScheduleDays, STD_WEEK.daySchedules, [
+    { date: "2026-08-19", dayScheduleId: null },
+  ]);
+
+  it("gives a scheduled day's net minutes, zero on a day off and on a full holiday", () => {
+    expect(resourceDayMinutes(lookups, "ws-40", "2026-08-18")).toBe(480); // Tuesday
+    expect(resourceDayMinutes(lookups, "ws-40", "2026-08-22")).toBe(0); // Saturday
+    expect(resourceDayMinutes(lookups, "ws-40", "2026-08-19")).toBe(0); // röd dag
+  });
+
+  it("buckets by the due date's week, past due into the first week, undated as null", () => {
+    expect(loadBucketMonday("2026-08-27", "2026-08-17")).toBe("2026-08-24");
+    expect(loadBucketMonday("2026-08-10", "2026-08-17")).toBe("2026-08-17");
+    expect(loadBucketMonday(null, "2026-08-17")).toBeNull();
   });
 });
 

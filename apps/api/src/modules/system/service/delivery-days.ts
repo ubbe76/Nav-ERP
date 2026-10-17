@@ -236,11 +236,17 @@ export function shipDateFor(deliveryDate: string, s: DeliverySettings, offDays: 
   return latestDispatchFor(deliveryDate, s, offDays) ?? deliveryDate;
 }
 
+// The day the customer gets goods that are ready to ship on `ship`: in
+// dispatch mode the next dispatch day plus transit, in arrival mode transit
+// then the next receiving day. Leveranstidskontrollen's last step.
+export function deliveryFromShipDate(ship: string, s: DeliverySettings, offDays: ReadonlySet<string>): string {
+  if (s.mode === "dispatch") return addWorkingDays(nextListedOnOrAfter(ship, s, offDays), s.transitDays, offDays);
+  return nextListedOnOrAfter(addWorkingDays(ship, s.transitDays, offDays), s, offDays);
+}
+
 // Ignores stock, material and capacity — that is Leveranstidskontrollen.
 export function earliestCustomerDelivery(today: string, s: DeliverySettings, offDays: ReadonlySet<string>): string {
-  const t0 = startDay(today, offDays);
-  if (s.mode === "dispatch") return addWorkingDays(nextListedOnOrAfter(t0, s, offDays), s.transitDays, offDays);
-  return nextListedOnOrAfter(addWorkingDays(t0, s.transitDays, offDays), s, offDays);
+  return deliveryFromShipDate(startDay(today, offDays), s, offDays);
 }
 
 export function isValidCustomerDelivery(date: string, s: DeliverySettings, offDays: ReadonlySet<string>): boolean {

@@ -3,6 +3,7 @@ import {
   addDays,
   addWorkingDays,
   decodeDeliveryDefaults,
+  deliveryFromShipDate,
   deliveryDateWarning,
   deliveryHolidayWindow,
   deliverySummary,
@@ -156,6 +157,15 @@ describe("delivery-days — customer side", () => {
   it("earliestCustomerDelivery in both modes", () => {
     expect(earliestCustomerDelivery("2026-10-17", s([2], "arrival", 2), off)).toBe("2026-10-27");
     expect(earliestCustomerDelivery("2026-10-17", s([1, 4], "dispatch", 2), off)).toBe("2026-10-21");
+  });
+
+  it("deliveryFromShipDate from a given ship day in both modes", () => {
+    // Ready to ship Wednesday 21: next Tuesday is the 27th after 2 transit days (Friday 23).
+    expect(deliveryFromShipDate("2026-10-21", s([2], "arrival", 2), off)).toBe("2026-10-27");
+    // Dispatch Mon/Thu: Thursday 22 + 2 = Monday 26.
+    expect(deliveryFromShipDate("2026-10-21", s([1, 4], "dispatch", 2), off)).toBe("2026-10-26");
+    // No settings: the ship day itself.
+    expect(deliveryFromShipDate("2026-10-21", none, off)).toBe("2026-10-21");
   });
 
   it("isValidCustomerDelivery mirrors the purchase side", () => {
