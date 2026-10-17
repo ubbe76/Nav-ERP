@@ -8,7 +8,7 @@ Rapportsidorna filtreras med ett månadsintervall (**Från månad** / **Till må
 
 **Rapporter → Leveransprecision** mäter hur väl lovade leveransdatum hålls, för kundordrar och inköpsordrar var för sig.
 
-- **Kundordrar**: ordern räknas när den är **Levererad** eller **Fakturerad**. Utlovat datum är orderns **Förväntat leveransdatum**; faktiskt datum är det **sista leveranstillfällets** datum. Leverans samma dag som utlovat räknas **i tid**.
+- **Kundordrar**: ordern räknas när den är **Levererad** eller **Fakturerad**. Utlovat datum är orderns **Förväntat leveransdatum** (dagen kunden får varan — även för kunder med [transportdagar](/hjalp/forsaljning#leveransdagar)); faktiskt datum är det **sista leveranstillfällets** datum. Leverans samma dag som utlovat räknas **i tid**.
 - **Inköpsordrar**: ordern räknas när den är **Mottagen** eller **Stängd** och har minst en inleverans. Faktiskt datum är den sista inleveransens datum.
 - **Precision** = andelen ordrar i tid av de mätbara; **Snitt försening** räknas enbart över de försenade ordrarna.
 - **Ej mätbara** redovisas separat: ordrar utan förväntat leveransdatum, och äldre kundordrar som levererades innan leveranstillfällen infördes (de saknar leveransdatum i systemet).

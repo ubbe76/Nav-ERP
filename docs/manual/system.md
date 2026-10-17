@@ -247,6 +247,15 @@ POST /api/v1/quotes
 - **Tillåten överleverans på inköpsorder (%)** — hur mycket mer än beställt antal som får tas emot på en inköpsorderrad, i procent av radens beställda antal. Med 10 får en rad på 100 st ta emot högst 110 st totalt. **0** = aldrig mer än beställt (standard). **Tomt fält** = ingen gräns. Fältet sparas när du lämnar det. Se [Inleverans](/hjalp/inkop#inleverans).
 - **Materialbrist vid rapportering** — vad som händer när en rapportering drar mer ingående material än vad som finns. Tillgängligt är artikelns **totala saldo på alla lagerplatser**; tjänsteartiklar kontrolleras aldrig. Valet sparas direkt när du ändrar det. **Ingen kontroll** (standard) — ingen kontroll görs, saldot kan bli negativt. **Varning** — du får frågan "Det saknas ingående delar: … Rapportera ändå?" innan något sparas; svarar du **Rapportera ändå** bokförs rapporteringen, annars sparas ingenting. **Spärr** — rapporteringen nekas med en lista över de delar som saknas. Gäller utstämpling i terminalen, **Slutför operation**, **Slutför order** och **Förbruka** på tillverkningsordern samt inleverans av legorader. Se [Materialbrist vid rapportering](/hjalp/tillverkning#materialbrist-vid-rapportering).
 
+### Leveransdagar
+
+Avsnittet **Leveransdagar** på **System → Inställningar** (`/system/installningar`) sätter förvalen för [leverantörernas](/hjalp/inkop#leveransdagar) och [kundernas](/hjalp/forsaljning#leveransdagar) fasta leveransdagar:
+
+- **Leverantörer — Dagarna avser**: **Ankomst till oss** (förval) eller **Avsändning från leverantören**. **Transportdagar** (förval 0).
+- **Kunder — Dagarna avser**: **Ankomst till kunden** eller **Avsändning från oss** (förval). **Transportdagar** (förval 0).
+
+Hjälptexten säger: "Transportdagar räknas i arbetsdagar. Gäller leverantörer och kunder som inte har en egen inställning." En leverantör eller kund som anger eget läge eller egna transportdagar på sitt kort avviker från förvalet. Själva veckodagarna har inget förval — de anges alltid per leverantör respektive kund.
+
 ### Lön & PAXml
 
 I panelen **Lön & PAXml** ställs tidkoderna som skrivs ut i löneunderlagsexporten (PAXml) och den dagliga övertidströskeln:

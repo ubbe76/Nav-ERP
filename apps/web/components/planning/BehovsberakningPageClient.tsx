@@ -12,7 +12,7 @@ import { Card } from "../ui/Card";
 import { Checkbox, Input } from "../ui/Field";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagination } from "../ui/ListControls";
-import { FormActions, FormError, FormHint } from "../ui/Form";
+import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { fetchDefaultRecipient } from "../../lib/mail";
 import { createLegoInquiries } from "../../lib/legoInquiries";
@@ -557,6 +557,17 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               Inköpsordrarna skapas som <strong>Utkast</strong> — att mejla en order skickar den och sätter den
               samtidigt till <strong>Bekräftad</strong>.
             </FormHint>
+          )}
+          {result.warnings.length > 0 && (
+            <FormNotice style={{ marginTop: "var(--space-4)" }}>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {result.warnings.map((w, i) => (
+                  <li key={`${w.orderNumber}-${w.articleNumber}-${i}`}>
+                    {w.orderNumber} · {w.articleNumber}: {w.message}
+                  </li>
+                ))}
+              </ul>
+            </FormNotice>
           )}
           {result.errors.length > 0 && (
             <FormError margin="above">

@@ -3983,3 +3983,12 @@ export interface TerminalOperation {
   materials: TerminalMaterial[];
   packingInstructions: string | null;
 }
+
+// GET /supplier-delivery-date-suggestion and /customer-delivery-date-suggestion
+// (fasta leveransdagar). The texts are ready-made by the API; the web shows
+// them as they are and never computes dates itself.
+export interface DeliveryDateSuggestion {
+  date: string | null;
+  summary: string | null;
+  warning: string | null;
+}

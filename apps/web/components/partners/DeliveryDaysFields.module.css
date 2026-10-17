@@ -1,0 +1,15 @@
+.weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.weekday {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}

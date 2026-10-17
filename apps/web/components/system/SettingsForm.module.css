@@ -113,3 +113,47 @@
   font-size: 13px;
   color: var(--status-stopped-text);
 }
+
+/* Leveransdagar: a heading plus one line per side (mode select + transit days). */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.sideRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sideLabel {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sideControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+
+.modeSelect {
+  flex: 1 1 220px;
+  max-width: 280px;
+}
+
+.transit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}

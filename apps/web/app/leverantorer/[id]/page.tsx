@@ -4,7 +4,7 @@ import { AppShell } from "../../../components/AppShell";
 import { PartnerTabs } from "../../../components/partners/PartnerTabs";
 import { NewOrderFromSupplierButton } from "../../../components/purchase/NewOrderFromSupplierButton";
 import { apiGet } from "../../../lib/api";
-import type { PartnerContact, RegisterEntry, Supplier, SupplierDeliveryAddress } from "../../../lib/types";
+import type { PartnerContact, RegisterEntry, Supplier, SupplierDeliveryAddress, SystemSettings } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
@@ -17,12 +17,15 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
   const supplier = await apiGet<Supplier>(`/api/v1/suppliers/${params.id}`, cookieHeader).catch(() => null);
   if (!supplier) notFound();
 
-  const [deliveryTerms, paymentTerms, carriers, contacts, deliveryAddresses] = await Promise.all([
+  const [deliveryTerms, paymentTerms, carriers, contacts, deliveryAddresses, settings] = await Promise.all([
     apiGet<RegisterEntry[]>("/api/v1/delivery-terms", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/payment-terms", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/carriers", cookieHeader),
     apiGet<PartnerContact[]>(`/api/v1/suppliers/${params.id}/contacts`, cookieHeader),
     apiGet<SupplierDeliveryAddress[]>(`/api/v1/suppliers/${params.id}/delivery-addresses`, cookieHeader),
+    // Only names the delivery-day defaults on Villkor & frakt — the card
+    // works without them.
+    apiGet<SystemSettings>("/api/v1/settings", cookieHeader).catch(() => null),
   ]);
 
   return (
@@ -46,6 +49,9 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
         registers={{ deliveryTerms, paymentTerms, carriers }}
         contacts={contacts}
         deliveryAddresses={deliveryAddresses}
+        deliveryDayDefaults={
+          settings ? { mode: settings.supplierDeliveryDayMode, transitDays: settings.supplierTransitDays } : null
+        }
       />
     </AppShell>
   );

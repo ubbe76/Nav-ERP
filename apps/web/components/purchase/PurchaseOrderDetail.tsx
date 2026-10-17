@@ -19,6 +19,8 @@ import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, 
 import { toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import { formatMoney } from "../../lib/format";
 import { apiFetch } from "../../lib/api";
+import { useSupplierDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
+import { DeliveryDateHint } from "../ui/DeliveryDateHint";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { askBumpRevision } from "../../lib/revision";
@@ -86,6 +88,14 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   const [editPriceTouched, setEditPriceTouched] = useState(false);
   const editPricedBaseQuantityRef = useRef(0);
   const editRequestSeq = useRef(0);
+  // Fasta leveransdagar: only the warning for the row's date while editing —
+  // an existing row's date is never prefilled.
+  const editDateHint = useSupplierDeliveryDateSuggestion({
+    supplierId: editingRowId !== null ? order.supplierId : null,
+    articleId: rows.find((r) => r.id === editingRowId)?.articleId ?? null,
+    date: editDeliveryDate,
+    suggest: false,
+  });
 
   useEffect(() => {
     if (editingRowId === null || editPriceTouched) return;
@@ -351,6 +361,9 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                         <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                           Tomt = som ordern{order.expectedDeliveryDate ? ` (${order.expectedDeliveryDate})` : ""}
                         </span>
+                        <div style={{ flexBasis: "100%" }}>
+                          <DeliveryDateHint warning={editDateHint.warning} />
+                        </div>
                       </div>
                     )}
                   </>
@@ -492,6 +505,11 @@ function EditHeaderForm({
   const [terms, setTerms] = useState<TermsValue>(termsFrom(order));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const dateHint = useSupplierDeliveryDateSuggestion({
+    supplierId: order.supplierId,
+    date: expectedDeliveryDate,
+    suggest: true,
+  });
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -533,6 +551,7 @@ function EditHeaderForm({
             value={expectedDeliveryDate}
             onChange={(e) => setExpectedDeliveryDate(e.target.value)}
           />
+          <DeliveryDateHint summary={dateHint.summary} warning={dateHint.warning} />
         </Field>
         <Field label="Växelkurs" htmlFor="headerExchangeRate">
           <Input
@@ -603,11 +622,25 @@ function AddRowForm({
   const [unitPrice, setUnitPrice] = useState("0");
   const [unitId, setUnitId] = useState(""); // "" = the article's base unit
   const [deliveryDate, setDeliveryDate] = useState(""); // "" = the order's
+  // Fasta leveransdagar: the row suggestion prefills the row's own date only
+  // when it falls after the order's date (or the order has none) — otherwise
+  // the row simply follows the order. "Manuellt vinner", per article.
+  const [dateTouched, setDateTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const unitOptions = useUnitOptions(article);
   const currentFactor = unitOptions.find((o) => o.value === unitId)?.factor ?? 1;
   const unitCode = unitOptions.find((o) => o.value === unitId)?.code;
+  const { suggestion: dateSuggestion, warning: dateWarning } = useSupplierDeliveryDateSuggestion({
+    supplierId,
+    articleId: article?.id ?? null,
+    date: deliveryDate,
+  });
+  useEffect(() => {
+    if (dateTouched) return;
+    const suggested = dateSuggestion?.date ?? null;
+    setDeliveryDate(suggested && (!orderDeliveryDate || suggested > orderDeliveryDate) ? suggested : "");
+  }, [dateSuggestion, dateTouched, orderDeliveryDate]);
 
   // Stafflat leverantörspris prefill from the order supplier's catalog for
   // the entered quantity — "manuellt vinner": once the operator types a
@@ -645,6 +678,7 @@ function AddRowForm({
     setUnitId(next?.purchaseUnitId ?? "");
     // "Manuellt vinner" is per article — a new pick gets its own prefill.
     setPriceTouched(false);
+    setDateTouched(false);
   }
 
   function handleUnitChange(option: UnitOption) {
@@ -715,10 +749,20 @@ function AddRowForm({
       </FormRow>
 
       <Field label="Önskat leveransdatum (valfritt)" htmlFor="rowDeliveryDate">
-        <Input id="rowDeliveryDate" type="date" size="sm" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+        <Input
+          id="rowDeliveryDate"
+          type="date"
+          size="sm"
+          value={deliveryDate}
+          onChange={(e) => {
+            setDateTouched(true);
+            setDeliveryDate(e.target.value);
+          }}
+        />
         <FormHint attached>
           Tomt = samma som ordern{orderDeliveryDate ? ` (${orderDeliveryDate})` : ""}.
         </FormHint>
+        <DeliveryDateHint warning={dateWarning} />
       </Field>
 
       <FormActions>

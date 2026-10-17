@@ -23,7 +23,7 @@ Klicka på leverantörens namn för att öppna **leverantörskortet** med fyra f
 
 - **Allmänt** — **Leverantörsnummer** (unikt internt nummer; kan skrivas över i efterhand, upptagna nummer avvisas — skrivs inte ut på några dokument), **Vårt kundnummer** (vårt kundnummer i leverantörens system — skrivs ut som "Vårt kundnummer hos er" på förfrågan och inköpsorder när det är ifyllt), namn, aktiv, adress, postnummer, postort och valuta.
 - **Adresser** — en lista med valbara **Leveransadresser** (**+ Ny leveransadress**), var och en med **Benämning** (t.ex. "Huvudlager"), adress, postnummer och postort. Knappen **Kopiera från adressen** i dialogen fyller i adressfälten från Allmänt-flikens adress (visas bara när en adress finns). En adress kan markeras som **Förvald**; max en adress åt gången är förvald, markeras en ny flyttas markeringen automatiskt. Till skillnad från kundkortets adressflik finns ingen fakturaadress här — leverantörens adress på Allmänt-fliken används som den.
-- **Villkor & frakt** — organisationsnummer, VAT-nummer, leveransvillkor, betalningsvillkor, speditör och kundnummer hos speditör. Villkor och speditörer väljs ur registren under [Grunddata](/hjalp/grunddata) och visas med sitt namn, t.ex. "30 dagar netto".
+- **Villkor & frakt** — organisationsnummer, VAT-nummer, leveransvillkor, betalningsvillkor, speditör och kundnummer hos speditör. Villkor och speditörer väljs ur registren under [Grunddata](/hjalp/grunddata) och visas med sitt namn, t.ex. "30 dagar netto". Här anges också leverantörens **Leveransdagar**, **Dagarna avser** och **Transportdagar**, se [Leveransdagar](#leveransdagar).
 - **Kontakter** — flera kontakter per leverantör med namn, telefon, mobil, e-post och kommentar. En kontakt kan markeras som **Huvudkontakt** och visas då överst.
 
 Uppe till höger på kortet finns **+ Ny förfrågan** och **+ Ny inköpsorder** — båda skapas med leverantören förvald.
@@ -31,6 +31,34 @@ Uppe till höger på kortet finns **+ Ny förfrågan** och **+ Ny inköpsorder**
 ### Betalning
 
 Fliken **Villkor & frakt** har sektionen **Betalning**. Där väljer du **Betalningssätt** (**Bankgiro**, **Plusgiro**, **Bankkonto** eller **IBAN**) och fyller i numret. Nav kontrollerar kontrollsiffran och sparar numret utan mellanslag och bindestreck. Clearingnummer i 8-serien (Swedbank) ska vara 5 siffror, t.ex. 8327-9; övriga banker har 4 siffror. En leverantör utan betalningssätt kan inte betalas via betalfil. **IBAN** kan bara användas för svenska konton (SE…), eftersom utlandsbetalningar inte stöds.
+
+### Leveransdagar
+
+Vissa leverantörer levererar bara vissa veckodagar, eller skickar varor bara vissa dagar. Det anger du på leverantörskortets flik **Villkor & frakt**, och Nav använder det för att föreslå datum och varna när ett datum inte passar. Förslagen och varningarna är bara stöd — de spärrar aldrig något, och du kan alltid skriva ett eget datum.
+
+Fälten på fliken **Villkor & frakt**:
+
+- **Leveransdagar** — kryssrutorna **Mån**, **Tis**, **Ons**, **Tor**, **Fre**, **Lör** och **Sön**. Hjälptexten säger "Lämna tomt om alla dagar fungerar." Ingen dag vald betyder att leverantören saknar fasta dagar — alla arbetsdagar fungerar, och inga förslag eller varningar görs.
+- **Dagarna avser** — väljer vad veckodagarna betyder: **Systemets förval (…)** (förvalets namn står inom parentes) eller ett av lägena **Ankomst till oss** respektive **Avsändning från leverantören**.
+- **Transportdagar** — hur många arbetsdagar transporten tar. Tomt betyder systemets förval; platshållaren visar förvalet, t.ex. *Förval: 0*.
+
+Spara med **Spara**. Förvalet för läge och transportdagar sätts för alla leverantörer under [System → Inställningar → Leveransdagar](/hjalp/system#leveransdagar); en leverantör kan avvika. Veckodagarna har inget förval.
+
+**Så räknas datumen:**
+
+- **Ledtid och transportdagar räknas i arbetsdagar** — måndag–fredag utom helgdagar i [helgdagsregistret](/hjalp/personal-tid#helgdagar). En helgdag med eget dagschema (en kortdag) räknas som arbetsdag. Ett förslag räknas aldrig från en lördag eller söndag: en beräkning "från i dag" startar på nästa arbetsdag.
+- Läget **Ankomst till oss**: veckodagarna är de dagar varorna kan komma fram till oss. Förslaget är den första sådan dag som ligger efter leverantörens ledtid och transportdagar.
+- Läget **Avsändning från leverantören**: veckodagarna är de dagar leverantören skickar. Ankomsten är avsändningsdagen plus transportdagarna.
+- **Ledtiden** är leverantörskatalogens **Ledtid (dagar)** på artikelkortets Inköp-flik (se [Artiklar](/hjalp/artiklar#inkop)) — arbetsdagar tills leverantören kan skicka. Ledtid och transportdagar adderas.
+
+**Var du ser det:**
+
+- **Ny inköpsorder:** väljer du en leverantör med leveransdagar fylls **Önskat leveransdatum (valfritt)** i med den tidigast möjliga ankomstdagen från i dag. Ändrar du datumet själv rör förslaget det inte mer. Under fältet står leverantörens dagar, t.ex. "Levereras till oss mån, tor" eller "Leverantören skickar mån, tor · 2 transportdagar".
+- **Inköpsorderkortet:** samma sammanfattning visas under huvudets datum. I **Lägg till rad** föreslås tidigaste ankomst när artikeln väljs, med artikelns ledtid i leverantörskatalogen (plus leverantörens dagar och transportdagar). Förslaget fylls i radens **Önskat leveransdatum** bara om det är senare än orderns datum eller ordern saknar datum — annars följer raden ordern.
+- **Varningar** visas under datumfälten på ny inköpsorder och på inköpsorderkortets huvud och rader, bara när leverantören har leveransdagar. I ankomstläget: "Leverantören levererar inte till oss på onsdagar." (på en helgdag: "Leverantören levererar inte till oss på helgdagar."). I avsändningsläget: "Datumet passar inte leverantörens avsändningsdagar (mån, tor + 2 transportdagar)."
+- **Skapa ordrar** i behovsberäkningen sätter inköpsordrarnas datum efter leverantörens dagar, se [Önskat leveransdatum](#onskat-leveransdatum).
+
+En **förfrågan** får varken förslag eller varning. Leverantörsimporten läser inte fälten — de sätts på kortet.
 
 ## Importera leverantörer
 
@@ -158,7 +186,9 @@ Ordern får automatiskt leverantörens **Leveransvillkor**, **Betalningsvillkor*
 - På en befintlig rad redigeras datumet med **Ändra** (under benämningen); töm fältet så följer raden ordern igen.
 - En rad med eget datum visar **Önskat leveransdatum …** under benämningen på orderkortet, och på PDF:en skrivs datumet ut under raden. Rader som följer orderns datum får ingen egen rad — orderns datum gäller för dem.
 
-Radens datum (annars orderns) är också det datum inleveransen räknas på i [artikelöversikten](/hjalp/artiklar#artikeloversikt) och i [färdigdatumsförslaget](/hjalp/tillverkning#foreslaget-fardigdatum). Inköpsordrar som [behovsberäkningens](/hjalp/tillverkning#orderforslag-och-skapa-ordrar) **Skapa ordrar** skapar får datumet satt automatiskt: arbetsdagen före varje artikels första otäckta behov, där ordern får det tidigaste och rader med ett senare behov får sitt eget datum.
+Radens datum (annars orderns) är också det datum inleveransen räknas på i [artikelöversikten](/hjalp/artiklar#artikeloversikt) och i [färdigdatumsförslaget](/hjalp/tillverkning#foreslaget-fardigdatum). Inköpsordrar som [behovsberäkningens](/hjalp/tillverkning#orderforslag-och-skapa-ordrar) **Skapa ordrar** skapar får datumet satt automatiskt: arbetsdagen före varje artikels första otäckta behov, där ordern får det tidigaste och rader med ett senare behov får sitt eget datum. Har leverantören [leveransdagar](#leveransdagar), ledtid eller transportdagar följer datumet dem i stället: den senaste möjliga ankomsten **före** behovsdagen enligt leverantörens dagar, men aldrig tidigare än den tidigast möjliga ankomsten med ledtid och transportdagar. Hamnar leveransen efter behovet skapas ordern ändå och en varning listas i resultatet.
+
+Har leverantören [leveransdagar](#leveransdagar) fylls datumet i på **Ny inköpsorder** och i **Lägg till rad** med ett förslag, och ett datum som inte passar ger en varning (som aldrig spärrar).
 
 I orderhuvudet finns även kryssrutan **Frakt på vårt konto**. Kryssa i den när företaget står för frakten — då skrivs företagets eget kundnummer hos den valda speditören ut bredvid speditören på inköpsorderns PDF ("Vårt kundnr: …"), så leverantören kan boka frakten på rätt konto. Kundnumren läggs upp per speditör under [Företagsinformation → Speditörer](/hjalp/system#foretagsinformation); finns inget kundnummer för orderns speditör skrivs inget extra ut.
 

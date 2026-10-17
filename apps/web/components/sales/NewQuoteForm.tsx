@@ -11,6 +11,8 @@ import type { ConfiguratorEvaluation, ResolveVariantResult, RowConfigurationDraf
 import { SearchPicker } from "../ui/SearchPicker";
 import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
 import { apiFetch } from "../../lib/api";
+import { useCustomerDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
+import { DeliveryDateHint } from "../ui/DeliveryDateHint";
 import { toBaseQuantity, toBasePrice, toUnitPrice } from "../../lib/units";
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
 import type { Article, Customer, CustomerDeliveryAddress, PriceQuote, SalesOrder } from "../../lib/types";
@@ -51,6 +53,18 @@ export function NewQuoteForm({
   const router = useRouter();
   const [customer, setCustomer] = useState<Customer | null>(lockedCustomer ?? null);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
+  // Fasta leveransdagar: the customer's earliest delivery date prefills the
+  // field unless the operator has touched it ("manuellt vinner"); an
+  // untouched field follows the suggestion, also back to empty.
+  const [dateTouched, setDateTouched] = useState(false);
+  const { suggestion, summary, warning } = useCustomerDeliveryDateSuggestion({
+    customerId: customer?.id ?? null,
+    date: expectedDeliveryDate,
+  });
+  useEffect(() => {
+    if (dateTouched) return;
+    setExpectedDeliveryDate(suggestion?.date ?? "");
+  }, [suggestion, dateTouched]);
   const [note, setNote] = useState("");
   const [customerOrderNumber, setCustomerOrderNumber] = useState("");
   const [customerReference, setCustomerReference] = useState("");
@@ -174,8 +188,12 @@ export function NewQuoteForm({
             type="date"
             size="sm"
             value={expectedDeliveryDate}
-            onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+            onChange={(e) => {
+              setDateTouched(true);
+              setExpectedDeliveryDate(e.target.value);
+            }}
           />
+          <DeliveryDateHint summary={summary} warning={warning} />
         </Field>
         <Field label="Anteckning (valfritt)" htmlFor="note">
           <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />

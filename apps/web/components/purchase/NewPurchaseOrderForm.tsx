@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
+import { useSupplierDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
+import { DeliveryDateHint } from "../ui/DeliveryDateHint";
 import type { PurchaseOrder, Supplier } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
@@ -19,6 +21,18 @@ export function NewPurchaseOrderForm({
   const router = useRouter();
   const [supplier, setSupplier] = useState<Supplier | null>(lockedSupplier ?? null);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
+  // Fasta leveransdagar: the supplier's suggestion prefills the date, but
+  // "manuellt vinner" — once the operator has touched the field it is left
+  // alone. An untouched field follows the suggestion, also back to empty.
+  const [dateTouched, setDateTouched] = useState(false);
+  const { suggestion, summary, warning } = useSupplierDeliveryDateSuggestion({
+    supplierId: supplier?.id ?? null,
+    date: expectedDeliveryDate,
+  });
+  useEffect(() => {
+    if (dateTouched) return;
+    setExpectedDeliveryDate(suggestion?.date ?? "");
+  }, [suggestion, dateTouched]);
   const [note, setNote] = useState("");
   const [exchangeRate, setExchangeRate] = useState("1");
   const [yourReference, setYourReference] = useState("");
@@ -82,8 +96,12 @@ export function NewPurchaseOrderForm({
             type="date"
             size="sm"
             value={expectedDeliveryDate}
-            onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+            onChange={(e) => {
+              setDateTouched(true);
+              setExpectedDeliveryDate(e.target.value);
+            }}
           />
+          <DeliveryDateHint summary={summary} warning={warning} />
         </Field>
         <Field label="Växelkurs" htmlFor="exchangeRate">
           <Input

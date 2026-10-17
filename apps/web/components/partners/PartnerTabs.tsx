@@ -26,6 +26,7 @@ import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { SupplierPaymentDetailsSection } from "../banking/SupplierPaymentDetailsSection";
 import { CustomerPricesTab } from "./CustomerPricesTab";
+import { DeliveryDaysFields, type DeliveryDayDefaults, type DeliveryDaysValue } from "./DeliveryDaysFields";
 
 // Prefixes https:// onto a bare domain (no "://" scheme) so the Webbsida
 // link always navigates instead of being treated as a relative path.
@@ -67,6 +68,10 @@ interface PartnerTabsProps {
   // Customers only (C3 Kundpriser): enables the Priser tab.
   customerPrices?: CustomerPrice[];
   articleGroups?: ArticleGroup[];
+  // System default delivery-day mode/transit days for this side (from
+  // GET /settings), only used to name the defaults on Villkor & frakt.
+  // null = the settings could not be read.
+  deliveryDayDefaults?: DeliveryDayDefaults | null;
 }
 
 // Kund-/leverantörskort — tabbed card shared by both partner types,
@@ -82,6 +87,7 @@ export function PartnerTabs({
   priceLists,
   customerPrices,
   articleGroups,
+  deliveryDayDefaults = null,
 }: PartnerTabsProps) {
   const [activeTab, setActiveTab] = useState<Tab>("Allmänt");
   const isCustomer = kind === "customer";
@@ -128,6 +134,7 @@ export function PartnerTabs({
           registers={registers}
           isCustomer={isCustomer}
           priceLists={priceLists}
+          deliveryDayDefaults={deliveryDayDefaults}
         />
       )}
       {activeTab === "Kontakter" && (
@@ -769,12 +776,14 @@ function VillkorTab({
   registers,
   isCustomer,
   priceLists,
+  deliveryDayDefaults,
 }: {
   partner: Customer | Supplier;
   endpointBase: string;
   registers: PartnerRegisters;
   isCustomer: boolean;
   priceLists?: PriceList[];
+  deliveryDayDefaults: DeliveryDayDefaults | null;
 }) {
   const router = useRouter();
   const s = partner as Supplier;
@@ -789,6 +798,11 @@ function VillkorTab({
   const [paymentTermId, setPaymentTermId] = useState(partner.paymentTermId ?? "");
   const [carrierId, setCarrierId] = useState(partner.carrierId ?? "");
   const [carrierCustomerNumber, setCarrierCustomerNumber] = useState(partner.carrierCustomerNumber ?? "");
+  const [deliveryDays, setDeliveryDays] = useState<DeliveryDaysValue>({
+    weekdays: partner.deliveryWeekdays,
+    mode: partner.deliveryDayMode,
+    transitDays: partner.transitDays === null ? "" : String(partner.transitDays),
+  });
   const [priceListId, setPriceListId] = useState(isCustomer ? ((partner as Customer).priceListId ?? "") : "");
   // Kundrabatt (%) — blanket discount, price chain's last fallback. Stored as
   // a decimal string; edited as plain text like the other percentage inputs.
@@ -822,6 +836,13 @@ function VillkorTab({
     e.preventDefault();
     setError(null);
     setSaved(false);
+    // Empty = null (the system default); the server validates 0-60 too.
+    const transitText = deliveryDays.transitDays.trim();
+    const transitDays = transitText === "" ? null : Number(transitText);
+    if (transitDays !== null && (!Number.isInteger(transitDays) || transitDays < 0 || transitDays > 60)) {
+      setError("Transportdagar måste vara ett heltal 0–60 eller tomt för systemets förval");
+      return;
+    }
     setPending(true);
     try {
       await apiFetch(`${endpointBase}/${partner.id}`, {
@@ -833,6 +854,9 @@ function VillkorTab({
           paymentTermId: paymentTermId || null,
           carrierId: carrierId || null,
           carrierCustomerNumber: orNull(carrierCustomerNumber),
+          deliveryWeekdays: deliveryDays.weekdays,
+          deliveryDayMode: deliveryDays.mode,
+          transitDays,
           ...(isCustomer ? { priceListId: priceListId || null } : {}),
           // blankSafe on the API side rejects "" outright — an emptied field
           // means "no discount", sent as 0, never as a blank string.
@@ -923,6 +947,13 @@ function VillkorTab({
             />
           </Field>
         </FormRow>
+
+        <DeliveryDaysFields
+          kind={isCustomer ? "customer" : "supplier"}
+          value={deliveryDays}
+          onChange={setDeliveryDays}
+          defaults={deliveryDayDefaults}
+        />
 
         {/* On its own line, not in a two-column FormRow: "Transportör – Produkt"
             is long and gets truncated in half a row (same full-width pattern

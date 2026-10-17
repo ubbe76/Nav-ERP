@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { Select } from "../ui/Field";
-import type { SystemSettings } from "../../lib/types";
+import type { DeliveryDayMode, SystemSettings } from "../../lib/types";
 import styles from "./SettingsForm.module.css";
 
 export function SettingsForm({ settings }: { settings: SystemSettings }) {
@@ -18,6 +18,11 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   const [overReceiptPercent, setOverReceiptPercent] = useState(formatPercent(settings.purchaseOverReceiptPercent));
   const [overReceiptSaved, setOverReceiptSaved] = useState(false);
   const [materialShortage, setMaterialShortage] = useState(settings.manufacturingMaterialShortage);
+  const [supplierMode, setSupplierMode] = useState(settings.supplierDeliveryDayMode);
+  const [supplierTransit, setSupplierTransit] = useState(String(settings.supplierTransitDays));
+  const [customerMode, setCustomerMode] = useState(settings.customerDeliveryDayMode);
+  const [customerTransit, setCustomerTransit] = useState(String(settings.customerTransitDays));
+  const [transitSaved, setTransitSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -86,6 +91,30 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   async function changeMaterialShortage(next: SystemSettings["manufacturingMaterialShortage"]) {
     const updated = await save({ manufacturingMaterialShortage: next });
     if (updated) setMaterialShortage(updated.manufacturingMaterialShortage);
+  }
+
+  async function changeDeliveryDayMode(side: "supplier" | "customer", next: DeliveryDayMode) {
+    const updated = await save(
+      side === "supplier" ? { supplierDeliveryDayMode: next } : { customerDeliveryDayMode: next }
+    );
+    if (!updated) return;
+    if (side === "supplier") setSupplierMode(updated.supplierDeliveryDayMode);
+    else setCustomerMode(updated.customerDeliveryDayMode);
+  }
+
+  async function saveTransit(side: "supplier" | "customer") {
+    setTransitSaved(false);
+    const text = side === "supplier" ? supplierTransit : customerTransit;
+    const days = text.trim() === "" ? NaN : Number(text);
+    if (!Number.isInteger(days) || days < 0 || days > 60) {
+      setError("Transportdagar måste vara ett heltal 0–60");
+      return;
+    }
+    const updated = await save(side === "supplier" ? { supplierTransitDays: days } : { customerTransitDays: days });
+    if (!updated) return;
+    if (side === "supplier") setSupplierTransit(String(updated.supplierTransitDays));
+    else setCustomerTransit(String(updated.customerTransitDays));
+    setTransitSaved(true);
   }
 
   return (
@@ -235,6 +264,79 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
             <option value="block">Spärr</option>
           </Select>
         </div>
+      </div>
+      <div className={styles.section}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Leveransdagar</div>
+          <div className={styles.description}>
+            Transportdagar räknas i arbetsdagar. Gäller leverantörer och kunder som inte har en egen inställning.
+          </div>
+        </div>
+        <div className={styles.sideRow}>
+          <div className={styles.sideLabel}>Leverantörer — Dagarna avser</div>
+          <div className={styles.sideControls}>
+            <div className={styles.modeSelect}>
+              <Select
+                aria-label="Leverantörer — Dagarna avser"
+                value={supplierMode}
+                disabled={pending}
+                onChange={(e) => changeDeliveryDayMode("supplier", e.target.value as DeliveryDayMode)}
+              >
+                <option value="arrival">Ankomst till oss</option>
+                <option value="dispatch">Avsändning från leverantören</option>
+              </Select>
+            </div>
+            <label className={styles.transit}>
+              Transportdagar
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className={styles.numberInput}
+                value={supplierTransit}
+                disabled={pending}
+                onChange={(e) => {
+                  setTransitSaved(false);
+                  setSupplierTransit(e.target.value);
+                }}
+                onBlur={() => saveTransit("supplier")}
+              />
+            </label>
+          </div>
+        </div>
+        <div className={styles.sideRow}>
+          <div className={styles.sideLabel}>Kunder — Dagarna avser</div>
+          <div className={styles.sideControls}>
+            <div className={styles.modeSelect}>
+              <Select
+                aria-label="Kunder — Dagarna avser"
+                value={customerMode}
+                disabled={pending}
+                onChange={(e) => changeDeliveryDayMode("customer", e.target.value as DeliveryDayMode)}
+              >
+                <option value="arrival">Ankomst till kunden</option>
+                <option value="dispatch">Avsändning från oss</option>
+              </Select>
+            </div>
+            <label className={styles.transit}>
+              Transportdagar
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className={styles.numberInput}
+                value={customerTransit}
+                disabled={pending}
+                onChange={(e) => {
+                  setTransitSaved(false);
+                  setCustomerTransit(e.target.value);
+                }}
+                onBlur={() => saveTransit("customer")}
+              />
+            </label>
+          </div>
+        </div>
+        {transitSaved && <span className={styles.saved}>Sparat</span>}
       </div>
       {error && <p className={styles.error}>{error}</p>}
     </div>
