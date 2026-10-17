@@ -358,6 +358,8 @@ Kolumnerna är innevarande vecka och framåt (välj horisont med **Veckor**: 4/8
 
 Varje cell visar last / tillgänglig tid och beläggningsgrad: neutral till 85 %, gul över 85 % och röd över 100 %. Klicka på en cell för att fälla ut vilka ordrar och operationer som utgör lasten, med länk till TO-kortet.
 
+[Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) i Försäljning använder samma beläggning: den lägger en ny orders operationer på resursernas lediga tid per vecka, det vill säga tillgänglig tid minus lasten som visas här.
+
 Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har veckoschema — lasten summeras över alla medlemmar, så procenttalet kan överdrivas när någon resurs i gruppen saknar schema.
 
 ## Pågående arbete

@@ -13,6 +13,8 @@ import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, ty
 import { apiFetch } from "../../lib/api";
 import { useCustomerDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
+import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
+import type { DeliveryTimeCheckRequest } from "../../lib/deliveryTimeCheck";
 import { toBaseQuantity, toBasePrice, toUnitPrice } from "../../lib/units";
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
 import type { Article, Customer, CustomerDeliveryAddress, PriceQuote, SalesOrder } from "../../lib/types";
@@ -38,6 +40,9 @@ interface QuoteRow {
   variantInfo: { articleNumber: string; created: boolean } | null;
   // Beställningsvara (to_order): the template stays the row's article, the choices travel with the row.
   configuration: RowConfigurationDraft | null;
+  // Base units per entered unit, reported up by the row's unit dropdown so the
+  // parent can express the quantity in the base unit (Leveranstidskontroll).
+  unitFactor: number;
 }
 
 // Pass `lockedCustomer` (e.g. from the customer card) to skip the customer
@@ -71,7 +76,7 @@ export function NewQuoteForm({
   const [deliveryAddressId, setDeliveryAddressId] = useState("");
   const [deliveryAddresses, setDeliveryAddresses] = useState<CustomerDeliveryAddress[]>([]);
   const [rows, setRows] = useState<QuoteRow[]>([
-    { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null },
+    { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1 },
   ]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -100,6 +105,24 @@ export function NewQuoteForm({
     };
   }, [customer]);
 
+  const [dtcOpen, setDtcOpen] = useState(false);
+  // Rows the check can use: an article and a positive quantity (in base units).
+  const checkRows = rows.flatMap((r) => {
+    const quantity = Number(r.quantity);
+    if (!r.article || !Number.isFinite(quantity) || quantity <= 0) return [];
+    return [
+      {
+        articleId: r.article.id,
+        quantity: toBaseQuantity(quantity, r.unitFactor),
+        ...(r.configuration ? { configuration: { selection: r.configuration.selection } } : {}),
+      },
+    ];
+  });
+  const checkRequest: DeliveryTimeCheckRequest = {
+    ...(customer ? { customerId: customer.id } : {}),
+    rows: checkRows,
+  };
+
   const nounSingular = mode === "order" ? "kundorder" : "offert";
 
   function updateRow(index: number, patch: Partial<QuoteRow>) {
@@ -109,7 +132,7 @@ export function NewQuoteForm({
   function addRow() {
     setRows((prev) => [
       ...prev,
-      { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null },
+      { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1 },
     ]);
   }
 
@@ -194,6 +217,11 @@ export function NewQuoteForm({
             }}
           />
           <DeliveryDateHint summary={summary} warning={warning} />
+          <div style={{ marginTop: 8 }}>
+            <Button type="button" variant="secondary" size="small" disabled={checkRows.length === 0} onClick={() => setDtcOpen(true)}>
+              Leveranstidskontroll
+            </Button>
+          </div>
         </Field>
         <Field label="Anteckning (valfritt)" htmlFor="note">
           <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />
@@ -262,6 +290,20 @@ export function NewQuoteForm({
           {pending ? "Skapar…" : mode === "order" ? "Skapa kundorder" : "Skapa offert"}
         </Button>
       </FormActions>
+
+      <DeliveryTimeCheckDialog
+        open={dtcOpen}
+        onClose={() => setDtcOpen(false)}
+        request={checkRequest}
+        withCustomer={customer !== null}
+        onUseDate={(date) => {
+          // A date taken from the check counts as typed by hand: the customer's
+          // delivery-day suggestion no longer overwrites it.
+          setDateTouched(true);
+          setExpectedDeliveryDate(date);
+          setDtcOpen(false);
+        }}
+      />
     </Form>
   );
 }
@@ -296,6 +338,12 @@ function QuoteRowFields({
   const currentFactor = unitOptions.find((o) => o.value === row.unitId)?.factor ?? 1;
   const unitCode = unitOptions.find((o) => o.value === row.unitId)?.code;
   const requestSeq = useRef(0);
+
+  // Report the unit factor up so the form can send base-unit quantities to the check.
+  useEffect(() => {
+    if (row.unitFactor !== currentFactor) onChange({ unitFactor: currentFactor });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFactor, row.unitFactor]);
 
   const [configureTemplate, setConfigureTemplate] = useState<Article | null>(null);
   const [configureKey, setConfigureKey] = useState(0);

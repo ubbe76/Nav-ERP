@@ -2,6 +2,7 @@
 
 import { confirmDelete } from "../../lib/confirm";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
 import { FreightQuoteDialog } from "../shipping/FreightQuoteDialog";
 import { formatSek } from "../../lib/shipping";
 import Link from "next/link";
@@ -75,6 +76,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // "Skapa tillverkningsorder" posts to the manufacturing module, which only
   // Tillverkning may write — hidden for everyone else.
   const canCreateMo = useCan()(["tillverkning"]);
+  // Leveranstidskontroll is open to Försäljning and Tillverkning alike.
+  const canCheckDelivery = useCan()(["forsaljning", "tillverkning"]);
+  const [dtcOpen, setDtcOpen] = useState(false);
+  const [dtcBusy, setDtcBusy] = useState(false);
+  const [dtcError, setDtcError] = useState<string | null>(null);
   const pill = SALES_ORDER_STATUS_PILL[order.status];
   // Rows stay editable until the order is delivered/invoiced/cancelled;
   // per-row guards (quantity ≥ delivered, no delete with deliveries) are
@@ -323,6 +329,25 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       setRowError(err instanceof Error ? err.message : "Kunde inte ta bort raden");
     } finally {
       setRowPending(false);
+    }
+  }
+
+  // "Använd datumet" in Leveranstidskontroll: sets the order's expected delivery date.
+  async function useCheckedDate(date: string) {
+    const bumpRevision = await askBumpRevision(order.revision);
+    setDtcError(null);
+    setDtcBusy(true);
+    try {
+      await apiFetch(`/api/v1/sales-orders/${order.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ expectedDeliveryDate: date, bumpRevision }),
+      });
+      setDtcOpen(false);
+      router.refresh();
+    } catch (err) {
+      setDtcError(apiErrorMessage(err, "Kunde inte sätta leveransdatumet"));
+    } finally {
+      setDtcBusy(false);
     }
   }
 
@@ -596,6 +621,19 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           </Button>
         )}
 
+        {canCheckDelivery && rowsEditable && (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setDtcError(null);
+              setDtcOpen(true);
+            }}
+          >
+            Leveranstidskontroll
+          </Button>
+        )}
+
         {order.status === "quote" && (
           <Button type="button" variant="primary" disabled={actionPending !== null} onClick={() => runAction("confirm")}>
             {actionPending === "confirm" ? "Arbetar…" : "Bekräfta"}
@@ -655,6 +693,16 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           {freight.carrierPrice !== null ? ` (offererat ${formatSek(freight.carrierPrice)})` : ""}
         </FormHint>
       )}
+
+      <DeliveryTimeCheckDialog
+        open={dtcOpen}
+        onClose={() => setDtcOpen(false)}
+        request={{ salesOrderId: order.id }}
+        withCustomer
+        onUseDate={useCheckedDate}
+        useDateBusy={dtcBusy}
+        useDateError={dtcError}
+      />
 
       <FreightQuoteDialog
         orderId={order.id}

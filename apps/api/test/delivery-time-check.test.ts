@@ -313,6 +313,21 @@ describe("Leveranstidskontroll — made, capacity per week", () => {
     expect(result.rows[0]!.chain[1]).toMatchObject({ fromWeek: "2026-10-26", toWeek: "2026-11-02", date: "2026-11-06" });
   });
 
+  it("repeating notes are merged into one per kind", () => {
+    const wc2: DtcWorkCenter = { ...wc1, workCenterId: "wc-2", code: "200", weekScheduleId: null };
+    const wc3: DtcWorkCenter = { ...wc1, workCenterId: "wc-3", code: "100", weekScheduleId: null };
+    const result = checkDeliveryTime(
+      made([op(10, 1, "wc-2"), op(20, 1, "wc-3")], {
+        workCenters: new Map([["wc-1", wc1], ["wc-2", wc2], ["wc-3", wc3]]),
+        overviews: new Map([["p", { onHand: 0, rows: [supply(null, 10, "IO-7"), supply(null, 10, "IO-12")] }]]),
+      })
+    );
+    expect(result.rows[0]!.notes).toEqual([
+      "Resurserna 100 och 200 saknar veckoschema — kapaciteten räknas inte",
+      "IO-7 och IO-12 saknar datum — räknade som tillgängliga direkt",
+    ]);
+  });
+
   it("undated existing load is left out, with a note", () => {
     const result = checkDeliveryTime(made([op(10, 2)], { existingOperations: [existing("wc-1", null, 40)] }));
     expect(result.rows[0]!.readyDate).toBe("2026-10-23");

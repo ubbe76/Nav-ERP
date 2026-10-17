@@ -3992,3 +3992,67 @@ export interface DeliveryDateSuggestion {
   summary: string | null;
   warning: string | null;
 }
+
+// Leveranstidskontroll: POST /delivery-time-check. One step in a row's
+// limiting chain, in time order.
+export type DtcStep =
+  | { kind: "stock"; articleNumber: string; quantity: number; date: string }
+  | {
+      kind: "supply";
+      articleNumber: string;
+      quantity: number;
+      date: string;
+      documentType: "sales_order" | "purchase_order" | "manufacturing_order";
+      documentNumber: string;
+      undated: boolean;
+    }
+  | {
+      kind: "purchase";
+      articleNumber: string;
+      quantity: number;
+      date: string;
+      supplierName: string | null;
+      leadTimeDays: number | null;
+    }
+  | {
+      kind: "operation";
+      articleNumber: string;
+      quantity: number;
+      sequenceNo: number;
+      description: string | null;
+      workCenterCode: string;
+      workCenterName: string;
+      // Mondays of the first and last week the operation occupies.
+      fromWeek: string;
+      toWeek: string;
+      date: string;
+    }
+  | {
+      kind: "subcontract";
+      articleNumber: string;
+      quantity: number;
+      sequenceNo: number;
+      description: string | null;
+      workCenterCode: string;
+      workCenterName: string;
+      leadTimeDays: number | null;
+      date: string;
+    };
+
+export interface DeliveryTimeCheckRow {
+  key: string;
+  articleId: string;
+  articleNumber: string;
+  quantity: number;
+  readyDate: string | null;
+  chain: DtcStep[];
+  notes: string[];
+}
+
+export interface DeliveryTimeCheckResult {
+  shipDate: string | null;
+  // = shipDate without a customer; null = some row has no date.
+  deliveryDate: string | null;
+  rows: DeliveryTimeCheckRow[];
+  notes: string[];
+}

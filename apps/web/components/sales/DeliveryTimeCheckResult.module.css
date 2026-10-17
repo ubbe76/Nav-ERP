@@ -1,0 +1,104 @@
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-7);
+  margin-bottom: var(--space-4);
+}
+
+.summaryLabel {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.summaryValue {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.noDate {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--status-delayed-text);
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.row {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+
+.rowHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-5);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.article {
+  font-weight: 600;
+}
+
+.cell {
+  color: var(--color-text-secondary);
+}
+
+.cellValue {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.chainLabel {
+  margin-top: var(--space-3);
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.chain {
+  margin: var(--space-2) 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.chain li {
+  overflow-wrap: anywhere;
+}
+
+.rowNotes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.noteList {
+  margin: 0;
+  padding-left: var(--space-5);
+}

@@ -43,7 +43,7 @@ Spara med **Spara**. Förvalet för läge och transportdagar sätts under [Syste
 
 Kundorderns **Förväntat leveransdatum** är **dagen kunden får varan**. Det vi måste ha klart är **avsändningsdagen**: leveransdatumet minus transportdagarna (och, i avsändningsläget, den senaste avsändningsdag som hinner fram).
 
-- **Ny kundorder** och **Ny offert:** väljer du en kund med leveransdagar fylls **Förväntat leveransdatum (valfritt)** i med det tidigast möjliga leveransdatumet. Förslaget tar inte hänsyn till lager, material eller beläggning. Under fältet står en sammanfattning, t.ex. "Kunden tar emot tis · 2 transportdagar" eller "Vi skickar mån, tor". Ändrar du datumet själv rör förslaget det inte mer.
+- **Ny kundorder** och **Ny offert:** väljer du en kund med leveransdagar fylls **Förväntat leveransdatum (valfritt)** i med det tidigast möjliga leveransdatumet. Förslaget räknar bara kundens egna dagar och tar inte hänsyn till lager, material eller beläggning — det gör [Leveranstidskontroll](#leveranstidskontroll), som även räknar lager, inköpsledtider och beläggning i produktionen. Under fältet står en sammanfattning, t.ex. "Kunden tar emot tis · 2 transportdagar" eller "Vi skickar mån, tor". Ändrar du datumet själv rör förslaget det inte mer.
 - **Varning** under datumfältet, bara när kunden har leveransdagar och aldrig som spärr: i ankomstläget "Kunden tar inte emot leveranser på onsdagar." (på en helgdag "… på helgdagar."), i avsändningsläget "Datumet passar inte våra avsändningsdagar till kunden (mån, tor + 2 transportdagar)."
 - **Planering:** behovsberäkningen, artikelöversikten och färdigdatumsförslaget räknar kundorderns behov på **avsändningsdagen**, se [Föreslaget färdigdatum](/hjalp/tillverkning#foreslaget-fardigdatum). Kundorderkortet visar fortfarande leveransdatumet, och [leveransprecisionsrapporten](/hjalp/rapporter) mäter mot leveransdatumet.
 
@@ -182,6 +182,8 @@ Ordern får automatiskt kundens **Leveransvillkor**, **Betalningsvillkor** och *
 
 **Orderhuvudet.** Orderkortet inleds med ett kort som visar status, **Rev**, valuta (och fakturanummer när ordern är fakturerad) tillsammans med orderns uppgifter: **Kund** (klickbar till kundkortet), **Kundens ordernummer**, **Referens**, **Leveransdatum**, de tre villkoren, **Leveransadress** och **Notering**. Knappen **Ändra** öppnar dialogen **Ändra orderhuvud**, där kundens ordernummer, referens, villkoren och leveransadressen redigeras på ett ställe och sparas i ett svep, så länge ordern är i status Offert, Bekräftad eller Under tillverkning. Leveransdatum och notering sätts när offerten skapas och visas bara.
 
+Vill du veta vilket leveransdatum du faktiskt kan lova, använd knappen **Leveranstidskontroll** på orderkortet (och i **Ny kundorder**) — den räknar fram ett datum ur lager, material och produktionens beläggning och låter dig sätta **Förväntat leveransdatum** med **Använd datumet**. Se [Leveranstidskontroll](#leveranstidskontroll).
+
 Längst ner på kortet visar sektionen **Historik** ordens egna händelser (statusövergångar och radändringar) — se [Händelselogg](/hjalp/system#handelselogg).
 
 ### Statusflöde
@@ -231,6 +233,60 @@ Orderns detaljsida har en sektion **E-post** längst ner (kräver att SMTP är k
 - Har ordern konfigurerade rader (se [Beställningsvara](#offert-och-kundorder)) visas kryssrutan **Visa tilläggspriser** bredvid PDF-länkarna — ikryssad enligt kundkortets inställning **Visa tilläggspriser**. Med kryss skrivs varje vals tillägg ut efter valet, t.ex. *Lock: Lock B (+ 240,00)*; utan kryss bara valet. Valet gäller både **Offert (PDF)**/**Orderbekräftelse (PDF)** och mejlets bilaga, sparas i e-postloggen och används oförändrat av **Skicka om**.
 - **Offert (PDF)**, **Orderbekräftelse (PDF)** och **Plocklista (PDF)** (se [Plocklista](#plocklista)) laddar ner dokumenten utan att skicka något. Offertens och orderbekräftelsens radtabell har en egen kolumn **Rabatt**; cellen är tom för rader utan rabatt.
 - Kortets utskickshistorik visas under knapparna; hela loggen finns i [System → E-postlogg](/hjalp/system).
+
+## Leveranstidskontroll
+
+Leveranstidskontrollen räknar fram den **tidigaste avsändningsdagen** och det **tidigaste leveransdatumet** för en kundorder — utifrån vad som finns i lager, vad som redan är på väg in, ledtiden på material som måste köpas och produktionens lediga tid. Den kan köras på en kundorder, på raderna i **Ny kundorder** eller på en fristående sida för artiklar och antal.
+
+Kontrollen är en beräkning som läser och räknar — den ändrar ingenting. Datumet sätts först när du själv väljer det.
+
+### Starta en kontroll
+
+- **På kundorderkortet:** knappen **Leveranstidskontroll** finns när ordern är i status Offert, Bekräftad eller Under tillverkning. Dialogen visar resultatet för orderns rader.
+- **I Ny kundorder:** samma knapp räknar formulärets rader (och vald kund) innan ordern är sparad.
+- **Fristående:** **Försäljning → Leveranstidskontroll**. Lägg in rader med **Lägg till rad** — artikel och antal; en konfigurerbar mall konfigureras med **Konfigurera**, som på en orderrad — välj om du vill en **Kund** och klicka **Kontrollera**.
+
+Knappen **Använd datumet** i dialogen sätter orderns **Förväntat leveransdatum**; i **Ny kundorder** fylls fältet i. Raderna på ordern ändras aldrig. Kräver behörigheten Försäljning eller Tillverkning.
+
+### Vad som räknas
+
+Kontrollen går igenom varje rad, och för en tillverkad artikel varje nivå i strukturen:
+
+1. **Det som redan finns.** Lagersaldo och öppna inköps- och tillverkningsordrar läggs i datumordning. Andra kundordrar och tillverkningsordrars materialbehov som redan finns tar sin del först — de är redan lovade. Det som täcks av en öppen order räknas som klart den dag ordern kommer. Kontrollerar du en befintlig kundorder räknas inte orderns egna rader som behov.
+2. **Det som saknas och köps.** Bristen får **huvudleverantörens ledtid** i leverantörskatalogen, tillsammans med leverantörens leveransdagar och transportdagar (se [Leveransdagar](/hjalp/inkop#leveransdagar) i Inköp). Saknar artikeln huvudleverantör räknas den som tillgänglig direkt, och en notering visas.
+3. **Det som saknas och tillverkas — på alla nivåer.** Strukturen löses upp (fantomartiklar går genom), varje komponent räknas på samma sätt, och när materialet är klart läggs beredningens operationer i tur och ordning på **ledig tid per resurs och vecka**. Den lediga tiden är resursens veckoschema × kapacitetsfaktor minus beläggningen från öppna tillverkningsordrar — samma beläggning som visas i [Beläggning](/hjalp/tillverkning#belaggning). En operation kan delas över flera veckor och räknas klar sista arbetsdagen i den vecka den blir färdig; nästa operation får börja samma vecka om det finns tid kvar. Innevarande vecka räknas bara från i dag. **Legooperationer** tar legoresursens ledtid i arbetsdagar. Operationer märkta **Kalkyl** räknas inte.
+4. **Avsändningsdag och leveransdatum.** Avsändningsdagen är nästa arbetsdag efter att allt är klart; finns allt i lager redan i dag är den i dag. **Leveransdatum** är avsändningsdagen plus kundens transportdagar och leveransdagar (se [Leveransdagar](#leveransdagar)). Utan kund, på den fristående sidan, är svaret avsändningsdagen.
+
+**Konfigurerade rader:** en beställningsvara räknas på sin konfigurerade struktur och rutt. En variant som redan finns räknas som sin artikel, annars på den struktur den skulle få — kontrollen skapar aldrig en variant.
+
+### Läsa resultatet
+
+Överst står **Leveransdatum** och **Avsändningsdag** — eller *Inget datum — se noteringarna* när något inte går att räkna. Under dem visas en rad per orderrad med *Artikel*, *Antal*, *Klar* och *Vad som begränsar*. Den sista kolumnen följer den **kritiska kedjan** steg för steg, från det som kommer sist och nedåt, till exempel:
+
+- *Köps 40 PLÅT-2 — ankomst 2026-11-02 (Stål AB, ledtid 10 dagar)*
+- *BÄNK-1 op 20 Bocka — Kantpress (110), vecka 45–46, klar 2026-11-13*
+- *Lagersaldo — 5 st SKRUV-6*
+- *SKRUV-6: IO-1042 2026-10-28*
+
+Raden med senast klar-datum bestämmer ordern; det är den du behöver påverka för att få ett tidigare datum.
+
+### Noteringar
+
+Under resultatet kan noteringar visas när något i underlaget saknas. Gäller samma sak flera artiklar, ordrar eller resurser samlas de i en notering per rad, t.ex. *Resurserna 100, 200 och 700 saknar veckoschema — kapaciteten räknas inte*:
+
+- *<artikel> saknar huvudleverantör — räknad som tillgänglig direkt*
+- *<dokumentnr> saknar datum — räknad som tillgänglig direkt* (en öppen order utan datum)
+- *Resurs <kod> saknar veckoschema — kapaciteten räknas inte*
+- *Legoresurs <kod> saknar ledtid — räknad som 0 dagar*
+- *Resurs <kod> har <n> h beläggning utan datum som inte räknas*
+- *Kapaciteten räcker inte inom två år* — raden får då inget datum och ordern inget leveransdatum.
+
+### Vad kontrollen inte gör
+
+- Den **bokar ingenting**: den reserverar varken tid eller material, så två kontroller efter varandra ser inte varandra. Lovar du två kunder samma lediga tid får båda samma svar.
+- Den gör ingen detaljplanering per dag och räknar inga köer — bara ledig tid per vecka.
+- **Odaterad beläggning** (tillverkningsordrar utan **Planerat färdigdatum**) ingår inte; en notering visar hur många timmar det gäller.
+- Alternativa leverantörer eller resurser prövas inte — bara huvudleverantören och operationens egen resurs.
 
 ## Fakturor
 

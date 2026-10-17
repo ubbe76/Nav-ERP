@@ -179,6 +179,8 @@ export const updateSalesOrderHeaderSchema = z
     deliveryTermId: z.string().uuid().nullable().optional(),
     paymentTermId: z.string().uuid().nullable().optional(),
     carrierId: z.string().uuid().nullable().optional(),
+    // Set by "Använd datumet" in Leveranstidskontroll on the order card.
+    expectedDeliveryDate: z.string().date().nullable().optional(),
     // `false` saves without bumping the order's revision — the UI asks on
     // every save; omitted means bump (external callers unchanged).
     bumpRevision: z.boolean().optional(),

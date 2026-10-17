@@ -179,6 +179,58 @@ const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 const maxDate = (a: string, b: string) => (a > b ? a : b);
 const mondayOf = (date: string) => addDays(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7));
 
+// A row's notes. The repeating kinds — resources without a week schedule,
+// undated supply, articles without a primary supplier, lego resources
+// without lead time — are gathered and written as ONE note each: real data
+// can name dozens, and a note per resource buries the result.
+interface RowNotes {
+  other: Set<string>;
+  unscheduled: Set<string>; // resource codes
+  undated: Set<string>; // document numbers
+  noSupplier: Set<string>; // article numbers
+  legoNoLead: Set<string>; // lego resource codes
+}
+
+const newRowNotes = (): RowNotes => ({
+  other: new Set(),
+  unscheduled: new Set(),
+  undated: new Set(),
+  noSupplier: new Set(),
+  legoNoLead: new Set(),
+});
+
+// "a", "a och b", "a, b och c" — sorted so two loads read the same.
+function swedishList(items: Set<string>): string {
+  const list = [...items].sort((a, b) => a.localeCompare(b, "sv", { numeric: true }));
+  return list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join(", ")} och ${list[list.length - 1]}`;
+}
+
+function rowNoteTexts(n: RowNotes): string[] {
+  const texts = [...n.other];
+  const many = (set: Set<string>) => set.size > 1;
+  if (n.unscheduled.size > 0) {
+    texts.push(
+      `${many(n.unscheduled) ? "Resurserna" : "Resurs"} ${swedishList(n.unscheduled)} saknar veckoschema — kapaciteten räknas inte`
+    );
+  }
+  if (n.legoNoLead.size > 0) {
+    texts.push(
+      `${many(n.legoNoLead) ? "Legoresurserna" : "Legoresurs"} ${swedishList(n.legoNoLead)} saknar ledtid — ${many(n.legoNoLead) ? "räknade" : "räknad"} som 0 dagar`
+    );
+  }
+  if (n.noSupplier.size > 0) {
+    texts.push(
+      `${swedishList(n.noSupplier)} saknar huvudleverantör — ${many(n.noSupplier) ? "räknade som tillgängliga" : "räknad som tillgänglig"} direkt`
+    );
+  }
+  if (n.undated.size > 0) {
+    texts.push(
+      `${swedishList(n.undated)} saknar datum — ${many(n.undated) ? "räknade som tillgängliga" : "räknad som tillgänglig"} direkt`
+    );
+  }
+  return texts;
+}
+
 export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCheckResult {
   const { today, offDays } = input;
   const t0 = nextWorkingDayOnOrAfter(today, offDays);
@@ -305,7 +357,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     operations: DtcOperation[],
     quantity: number,
     materialReady: string,
-    notes: Set<string>
+    notes: RowNotes
   ): { readyDate: string; steps: DtcStep[] } | null {
     const steps: DtcStep[] = [];
     let floor = maxDate(materialReady, t0); // capacity may be used from this day
@@ -322,7 +374,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
         workCenterName: wc?.name ?? "",
       };
       if (wc?.type === "subcontract") {
-        if (wc.leadTimeDays == null) notes.add(`Legoresurs ${code} saknar ledtid — räknad som 0 dagar`);
+        if (wc.leadTimeDays == null) notes.legoNoLead.add(code);
         ready = addWorkingDays(maxDate(ready, floor), Math.ceil(wc.leadTimeDays ?? 0), offDays);
         floor = ready;
         steps.push({ kind: "subcontract", ...base, leadTimeDays: wc.leadTimeDays, date: ready });
@@ -334,7 +386,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
         continue;
       }
       if (!wc || !wc.weekScheduleId) {
-        notes.add(`Resurs ${code} saknar veckoschema — kapaciteten räknas inte`);
+        notes.unscheduled.add(code);
         const monday = mondayOf(floor);
         ready = maxDate(ready, weekFinishDay(null, monday, floor));
         steps.push({ kind: "operation", ...base, fromWeek: monday, toWeek: monday, date: ready });
@@ -370,14 +422,14 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   function resolveShortage(
     article: DtcArticle,
     quantity: number,
-    notes: Set<string>,
+    notes: RowNotes,
     path: Set<string>,
     structure?: DtcStructure
   ): Resolution {
     if (article.type === "service") return { readyDate: t0, chain: [] };
     if (article.type === "purchased" && !structure) {
       const supplier = input.suppliers.get(article.articleId);
-      if (!supplier) notes.add(`${article.articleNumber} saknar huvudleverantör — räknad som tillgänglig direkt`);
+      if (!supplier) notes.noSupplier.add(article.articleNumber);
       const date =
         suggestPurchaseDeliveryDate({
           demandDate: null,
@@ -423,14 +475,14 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     const operations = structure ? structure.operations : (input.routings.get(article.articleId) ?? []);
     const scheduled = scheduleOperations(article, operations, quantity, materialReady, notes);
     if (!scheduled) {
-      notes.add("Kapaciteten räcker inte inom två år");
+      notes.other.add("Kapaciteten räcker inte inom två år");
       return { readyDate: null, chain: critical };
     }
     return { readyDate: scheduled.readyDate, chain: [...critical, ...scheduled.steps] };
   }
 
   // A need of `quantity`: first what is left in the pool, then a shortage.
-  function resolveNeed(article: DtcArticle, quantity: number, notes: Set<string>, path: Set<string>): Resolution {
+  function resolveNeed(article: DtcArticle, quantity: number, notes: RowNotes, path: Set<string>): Resolution {
     if (article.type === "service") return { readyDate: t0, chain: [] };
     const pool = poolFor(article.articleId);
     let rest = quantity;
@@ -455,7 +507,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
               undated: lot.source.undated,
             };
       if (lot.source.kind === "supply" && lot.source.undated) {
-        notes.add(`${lot.source.documentNumber} saknar datum — räknad som tillgänglig direkt`);
+        notes.undated.add(lot.source.documentNumber);
       }
       if (covered.readyDate === null || lot.date >= covered.readyDate) covered = { readyDate: lot.date, chain: [step] };
     }
@@ -469,11 +521,11 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
   // --- Rows ----------------------------------------------------------------
   const rows: DtcRowResult[] = input.rows.map((row) => {
     const article = input.articles.get(row.articleId);
-    const notes = new Set<string>();
+    const notes = newRowNotes();
     const articleNumber = article?.articleNumber ?? "";
     if (row.error || !article) {
-      if (row.error) notes.add(row.error);
-      return { key: row.key, articleId: row.articleId, articleNumber, quantity: row.quantity, readyDate: null, chain: [], notes: [...notes] };
+      if (row.error) notes.other.add(row.error);
+      return { key: row.key, articleId: row.articleId, articleNumber, quantity: row.quantity, readyDate: null, chain: [], notes: rowNoteTexts(notes) };
     }
     const resolved = row.structure
       ? resolveShortage(article, row.quantity, notes, new Set(), row.structure)
@@ -485,7 +537,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
       quantity: row.quantity,
       readyDate: resolved.readyDate,
       chain: resolved.chain,
-      notes: [...notes],
+      notes: rowNoteTexts(notes),
     };
   });
 

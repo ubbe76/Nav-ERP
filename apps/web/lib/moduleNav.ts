@@ -188,6 +188,11 @@ export const FORSALJNING_SECTIONS: ModuleNavSection[] = [
         description: "Rapportera levererat gods på en hel kundorder och skapa följesedel.",
       },
       {
+        href: "/forsaljning/leveranstidskontroll",
+        title: "Leveranstidskontroll",
+        description: "Tidigaste avsändnings- och leveransdag för valfria artiklar och antal — lager, inköp och kapacitet.",
+      },
+      {
         href: "/forsaljning/forsandelser",
         title: "Försändelser",
         description: "Transportbokning via Sendify — priser, bokning, fraktsedel och avbokning.",

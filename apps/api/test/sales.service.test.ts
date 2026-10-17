@@ -1170,6 +1170,12 @@ describe("sales service — order header fields", () => {
     const cleared = await salesService.updateSalesOrderHeader(order.id, { deliveryAddressId: null });
     expect(cleared.deliveryAddressId).toBeNull();
 
+    // Förväntat leveransdatum (Leveranstidskontrollens Använd datumet): set and cleared.
+    const dated = await salesService.updateSalesOrderHeader(order.id, { expectedDeliveryDate: "2030-03-25" });
+    expect(dated.expectedDeliveryDate).toBe("2030-03-25");
+    const undated = await salesService.updateSalesOrderHeader(order.id, { expectedDeliveryDate: null });
+    expect(undated.expectedDeliveryDate).toBeNull();
+
     // A foreign customer's address is rejected on PATCH as well.
     const other = await salesService.createCustomer({ name: "Annan Kund AB", active: true });
     const foreignAddress = await salesService.createDeliveryAddress(other.id, {

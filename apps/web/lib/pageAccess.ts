@@ -25,6 +25,7 @@ const ENTRIES: readonly Entry[] = [
   { path: "/grunddata", rule: SHARED_REGISTERS },
   { path: "/inkop", rule: ["inkop"] },
   { path: "/leverantorer", rule: ["inkop"] },
+  { path: "/forsaljning/leveranstidskontroll", rule: ["forsaljning", "tillverkning"] },
   { path: "/forsaljning", rule: ["forsaljning"] },
   { path: "/kunder", rule: ["forsaljning"] },
   { path: "/lager", rule: ["lager"] },
