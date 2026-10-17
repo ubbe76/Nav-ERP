@@ -141,6 +141,10 @@ describe("resolveResourceWeekHours", () => {
     expect(resolveResourceWeekHours({ ...base, capacityFactor: 2 })).toBe(80);
   });
 
+  it("hours per day without a schedule: five days × hours × factor", () => {
+    expect(resolveResourceWeekHours({ ...base, weekScheduleId: null, hoursPerDay: 6, capacityFactor: 2 })).toBe(60);
+  });
+
   it("a full-off holiday (röd dag) removes that day", () => {
     // Wednesday 2026-08-19 inside week 34.
     expect(resolveResourceWeekHours({ ...base, holidays: [{ date: "2026-08-19", dayScheduleId: null }] })).toBe(32);
@@ -184,9 +188,27 @@ describe("resourceDayMinutes and loadBucketMonday (shared with Leveranstidskontr
   ]);
 
   it("gives a scheduled day's net minutes, zero on a day off and on a full holiday", () => {
-    expect(resourceDayMinutes(lookups, "ws-40", "2026-08-18")).toBe(480); // Tuesday
-    expect(resourceDayMinutes(lookups, "ws-40", "2026-08-22")).toBe(0); // Saturday
-    expect(resourceDayMinutes(lookups, "ws-40", "2026-08-19")).toBe(0); // röd dag
+    const ws = { weekScheduleId: "ws-40", hoursPerDay: null };
+    expect(resourceDayMinutes(lookups, ws, "2026-08-18")).toBe(480); // Tuesday
+    expect(resourceDayMinutes(lookups, ws, "2026-08-22")).toBe(0); // Saturday
+    expect(resourceDayMinutes(lookups, ws, "2026-08-19")).toBe(0); // röd dag
+  });
+
+  it("hours per day: Monday–Friday, a röd dag off, a kortdag on the holiday's own schedule", () => {
+    const withKortdag = buildScheduleLookups([], [{ id: "ds-240", netMinutes: 240 }], [
+      { date: "2026-08-19", dayScheduleId: null },
+      { date: "2026-08-20", dayScheduleId: "ds-240" },
+    ]);
+    const h = { weekScheduleId: null, hoursPerDay: 7.5 };
+    expect(resourceDayMinutes(withKortdag, h, "2026-08-18")).toBe(450);
+    expect(resourceDayMinutes(withKortdag, h, "2026-08-19")).toBe(0);
+    expect(resourceDayMinutes(withKortdag, h, "2026-08-20")).toBe(240);
+    expect(resourceDayMinutes(withKortdag, h, "2026-08-22")).toBe(0); // Saturday
+    expect(resourceDayMinutes(withKortdag, { weekScheduleId: null, hoursPerDay: null }, "2026-08-18")).toBe(0);
+  });
+
+  it("the week schedule wins over hours per day", () => {
+    expect(resourceDayMinutes(lookups, { weekScheduleId: "ws-40", hoursPerDay: 2 }, "2026-08-18")).toBe(480);
   });
 
   it("buckets by the due date's week, past due into the first week, undated as null", () => {

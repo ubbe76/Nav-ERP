@@ -862,6 +862,13 @@
       "when": 1792218993040,
       "tag": "0122_delivery_days",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1792231806282,
+      "tag": "0123_work_center_hours_per_day",
+      "breakpoints": true
     }
   ]
 }

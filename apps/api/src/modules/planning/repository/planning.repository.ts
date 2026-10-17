@@ -635,6 +635,7 @@ export function createPlanningRepository(db: Db) {
               productionGroupId: workCenters.productionGroupId,
               weekScheduleId: workCenters.weekScheduleId,
               capacityFactor: workCenters.capacityFactor,
+              hoursPerDay: workCenters.hoursPerDay,
               active: workCenters.active,
             })
             .from(workCenters),
@@ -697,6 +698,7 @@ export function createPlanningRepository(db: Db) {
         workCenters: workCenterRows.map((r) => ({
           ...r,
           capacityFactor: Number(r.capacityFactor),
+          hoursPerDay: r.hoursPerDay === null ? null : Number(r.hoursPerDay),
         })),
         productionGroups: groupRows,
         operations: operationRows.map((r) => ({

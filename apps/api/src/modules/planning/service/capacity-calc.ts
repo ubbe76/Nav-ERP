@@ -16,8 +16,19 @@ export interface CapacityWorkCenter {
   productionGroupId: string | null;
   weekScheduleId: string | null;
   capacityFactor: number;
+  // Kapacitet (timmar per dag) — used when there is no week schedule.
+  hoursPerDay: number | null;
   active: boolean;
 }
+
+// What a resource's daily capacity comes from: its week schedule, else its
+// hours per day, else nothing (no capacity shown / not capacity-planned).
+export interface ResourceCalendar {
+  weekScheduleId: string | null;
+  hoursPerDay: number | null;
+}
+
+export const hasCapacityCalendar = (r: ResourceCalendar) => r.weekScheduleId != null || r.hoursPerDay != null;
 
 export interface CapacityProductionGroup {
   productionGroupId: string;
@@ -173,27 +184,38 @@ export function buildScheduleLookups(
 // employee resolver — no employee overrides here.
 function resolveWeekHoursFromLookups(
   lookups: ScheduleLookups,
-  weekScheduleId: string,
+  calendar: ResourceCalendar,
   capacityFactor: number,
   isoYear: number,
   isoWeek: number
 ): number {
   const { monday } = isoWeekRange(isoYear, isoWeek);
   let minutes = 0;
-  for (let i = 0; i < 7; i++) minutes += resourceDayMinutes(lookups, weekScheduleId, addDays(monday, i));
+  for (let i = 0; i < 7; i++) minutes += resourceDayMinutes(lookups, calendar, addDays(monday, i));
   return (minutes / 60) * capacityFactor;
 }
 
-// One day's net scheduled minutes for a week schedule (before the capacity
-// factor) — the single day rule the week sum and Leveranstidskontrollen's
-// day-by-day booking share.
-export function resourceDayMinutes(lookups: ScheduleLookups, weekScheduleId: string, date: string): number {
+// One day's net minutes for a resource (before the capacity factor) — the
+// single day rule the week sum and Leveranstidskontrollen's day-by-day
+// booking share. A week schedule gives its day schedule; without one, hours
+// per day count Monday–Friday. Either way a holiday only REDUCES: a full
+// holiday is off, a shortened one (with its own day schedule) replaces the
+// day, and a day the resource has off never gains anything.
+export function resourceDayMinutes(lookups: ScheduleLookups, calendar: ResourceCalendar, date: string): number {
   const weekday = new Date(`${date}T00:00:00Z`).getUTCDay() || 7; // ISO 1 = Monday … 7 = Sunday
-  const dayScheduleId = lookups.daysBySchedule.get(weekScheduleId)?.get(weekday);
-  if (!dayScheduleId) return 0; // day off in the schedule — a holiday never adds
+  let normal: number;
+  if (calendar.weekScheduleId != null) {
+    const dayScheduleId = lookups.daysBySchedule.get(calendar.weekScheduleId)?.get(weekday);
+    normal = dayScheduleId ? (lookups.netByDaySchedule.get(dayScheduleId) ?? 0) : 0;
+  } else if (calendar.hoursPerDay != null) {
+    normal = weekday <= 5 ? calendar.hoursPerDay * 60 : 0;
+  } else {
+    return 0;
+  }
+  if (normal <= 0) return 0;
   const holiday = lookups.holidayByDate.get(date);
   if (holiday) return holiday.dayScheduleId ? (lookups.netByDaySchedule.get(holiday.dayScheduleId) ?? 0) : 0;
-  return lookups.netByDaySchedule.get(dayScheduleId) ?? 0;
+  return normal;
 }
 
 // The Monday of the week an operation's remaining load counts in: the week
@@ -210,7 +232,8 @@ export function loadBucketMonday(dueDate: string | null, firstMonday: string): s
 // Public convenience wrapper (used directly by the unit tests) — builds the
 // lookups itself; computeCapacity builds them once per run instead.
 export function resolveResourceWeekHours(args: {
-  weekScheduleId: string;
+  weekScheduleId: string | null;
+  hoursPerDay?: number | null;
   capacityFactor: number;
   isoYear: number;
   isoWeek: number;
@@ -220,7 +243,7 @@ export function resolveResourceWeekHours(args: {
 }): number {
   return resolveWeekHoursFromLookups(
     buildScheduleLookups(args.weekScheduleDays, args.daySchedules, args.holidays),
-    args.weekScheduleId,
+    { weekScheduleId: args.weekScheduleId, hoursPerDay: args.hoursPerDay ?? null },
     args.capacityFactor,
     args.isoYear,
     args.isoWeek
@@ -334,12 +357,14 @@ export function computeCapacity(
   const resourceRows = new Map<string, CapacityResourceRow>();
   for (const workCenter of included) {
     const buckets = bucketsFor(workCenter.workCenterId);
-    const hasSchedule = workCenter.weekScheduleId != null;
+    // hasSchedule (kept as the response's name) = the resource has a
+    // capacity calendar — a week schedule or hours per day.
+    const hasSchedule = hasCapacityCalendar(workCenter);
     if (hasSchedule) {
       for (let i = 0; i < weeks.length; i++) {
         buckets.weeks[i]!.availableHours = resolveWeekHoursFromLookups(
           lookups,
-          workCenter.weekScheduleId!,
+          workCenter,
           workCenter.capacityFactor,
           weeks[i]!.isoYear,
           weeks[i]!.isoWeek

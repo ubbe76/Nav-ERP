@@ -515,6 +515,7 @@ export function createPlanningService(
             name: w.name,
             type: w.type,
             weekScheduleId: w.weekScheduleId,
+            hoursPerDay: w.hoursPerDay,
             capacityFactor: w.capacityFactor,
             leadTimeDays: leadTimeOf.get(w.workCenterId) ?? null,
           },

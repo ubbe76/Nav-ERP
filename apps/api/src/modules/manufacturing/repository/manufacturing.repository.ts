@@ -821,6 +821,7 @@ export function createManufacturingRepository(db: Db) {
           overheadPercent: String(input.overheadPercent ?? 0),
           weekScheduleId: input.weekScheduleId ?? null,
           capacityFactor: String(input.capacityFactor ?? 1),
+          hoursPerDay: numericOrNull(input.hoursPerDay),
           supplierId: input.supplierId ?? null,
           active: input.active,
           defaultSetupTime: numericOrNull(input.defaultSetupTime),
@@ -855,6 +856,7 @@ export function createManufacturingRepository(db: Db) {
           overheadPercent: input.overheadPercent === undefined ? undefined : String(input.overheadPercent),
           capacityFactor: input.capacityFactor === undefined ? undefined : String(input.capacityFactor),
           // Nullable numerics: undefined = untouched, null = cleared.
+          hoursPerDay: numericPatch(input.hoursPerDay),
           defaultSetupTime: numericPatch(input.defaultSetupTime),
           calcRate1: numericPatch(input.calcRate1),
           leadTimeDays: numericPatch(input.leadTimeDays),

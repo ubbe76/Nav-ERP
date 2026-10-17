@@ -25,7 +25,7 @@ Under fältet **Nummer (3 siffror)** visas en lista över redan upptagna nummer 
 
 Timkostnaden ger den direkta lönekostnaden i för- och efterkalkylen, och **TO-påslaget** (tillverkningsomkostnad) läggs på den lönekostnaden. TO-påslaget är det enda påslaget som sätts per resurs — övriga påslag (MO, LO, Affo och generellt påslag) är systemomfattande och ligger under **System → Kalkyler**, se [System & inställningar](/hjalp/system#kalkyler).
 
-För [beläggningen](#belaggning) har resursen även **Veckoschema (kapacitet)** — ett veckoschema ur schemaregistret som anger resursens tillgängliga tid — och **Kapacitetsfaktor** (t.ex. 2 = två likadana maskiner eller två personer som delar schemat; 0,5 = halvtid). Utan veckoschema visar beläggningen ingen kapacitet för resursen, bara dess last.
+För [beläggningen](#belaggning) och [Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) har resursen även **Veckoschema (kapacitet)** — ett veckoschema ur schemaregistret som anger resursens tillgängliga tid — eller, enklare, **Kapacitet (timmar per dag)**: så många timmar måndag–fredag, där en röd dag i helgdagskalendern är ledig och en halvdag följer helgdagens dagschema. Har resursen båda gäller veckoschemat. **Kapacitetsfaktor** multiplicerar tiden (t.ex. 2 = två likadana maskiner eller två personer; 0,5 = halvtid). Utan veckoschema och timmar per dag visar beläggningen ingen kapacitet för resursen, bara dess last. I resurslistan heter kolumnen **Kapacitet** och visar veckoschemat eller t.ex. *7,5 h/dag*.
 
 Resursen kan också bära fem förvalsfält som ännu bara sparas — beredningen läser dem inte än: **Förvald ställtid**, **Förvald operationsbenämning**, **Kalkylpris 1**, **Gäller ställ** och **Gäller styck**.
 
@@ -350,7 +350,7 @@ Sökrutan matchar även kundordernumret och valen.
 ### Vad som räknas
 
 - **Lasten** kommer från tillverkningsordrar i status **Frisläppt** eller **Pågår** (nya ordrar frisläpps när de skapas; en äldre order som står kvar som **Planerad** räknas inte förrän den frisläppts). Per operation räknas den återstående tiden: stycktid × kvarvarande antal, plus ställtiden så länge inget antal avrapporterats. En slutförd operation belastar inte. Ställtid och stycktid är i **minuter**; beläggningen visar timmar.
-- **Tillgänglig tid** per resurs och vecka kommer från resursens **Veckoschema (kapacitet)** × **Kapacitetsfaktor** (se [Resurser](#resurser)), upplöst mot den faktiska kalenderveckan — **röda dagar och halvdagar i helgdagskalendern minskar kapaciteten** den veckan. En resurs utan veckoschema visar **—** som kapacitet men lasten syns ändå.
+- **Tillgänglig tid** per resurs och vecka kommer från resursens **Veckoschema (kapacitet)** — eller, utan schema, **Kapacitet (timmar per dag)** måndag–fredag — × **Kapacitetsfaktor** (se [Resurser](#resurser)), upplöst mot den faktiska kalenderveckan — **röda dagar och halvdagar i helgdagskalendern minskar kapaciteten** den veckan. En resurs utan veckoschema och timmar per dag visar **—** som kapacitet men lasten syns ändå.
 
 ### Veckomatrisen
 
@@ -360,7 +360,7 @@ Varje cell visar last / tillgänglig tid och beläggningsgrad: neutral till 85 %
 
 [Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) i Försäljning använder samma beläggning: den lägger en ny orders operationer på resursernas lediga tid per vecka, det vill säga tillgänglig tid minus lasten som visas här.
 
-Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har veckoschema — lasten summeras över alla medlemmar, så procenttalet kan överdrivas när någon resurs i gruppen saknar schema.
+Observera att en grupps **Summa**-procent bara ställs mot de medlemmar som har kapacitet (veckoschema eller timmar per dag) — lasten summeras över alla medlemmar, så procenttalet kan överdrivas när någon resurs i gruppen saknar kapacitet.
 
 ## Pågående arbete
 

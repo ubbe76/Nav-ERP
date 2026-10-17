@@ -5,7 +5,7 @@ import { Button } from "../ui/Button";
 import { Field, Input, Select, Toggle } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import type { ProductionGroup, WeekSchedule, WorkCenter } from "../../lib/types";
-import { Form, FormActions, FormError, FormRow } from "../ui/Form";
+import { Form, FormHint, FormActions, FormError, FormRow } from "../ui/Form";
 import { findCodeClash, WorkCenterCodeField, WorkCenterCodeHint } from "./WorkCenterCodeField";
 
 // Creates a work center (resurs), or edits one when `workCenter` is passed.
@@ -35,6 +35,9 @@ export function NewWorkCenterForm({
   const [weekScheduleId, setWeekScheduleId] = useState(workCenter?.weekScheduleId ?? "");
   const [capacityFactor, setCapacityFactor] = useState(
     workCenter ? String(Number(workCenter.capacityFactor)) : "1"
+  );
+  const [hoursPerDay, setHoursPerDay] = useState(
+    workCenter?.hoursPerDay != null ? String(Number(workCenter.hoursPerDay)) : ""
   );
   const [active, setActive] = useState(workCenter?.active ?? true);
   // Monitor G5 import fields (Produktionsgruppslista Kostnader/Lista) —
@@ -72,6 +75,7 @@ export function NewWorkCenterForm({
         overheadPercent: Number(overheadPercent),
         weekScheduleId: weekScheduleId || null,
         capacityFactor: Number(capacityFactor),
+        hoursPerDay: hoursPerDay.trim() === "" ? null : Number(hoursPerDay),
         active,
         calcRate1: calcRate1.trim() === "" ? null : Number(calcRate1),
         rateAppliesToSetup,
@@ -198,6 +202,22 @@ export function NewWorkCenterForm({
           />
         </Field>
       </FormRow>
+
+      {/* Without a week schedule, hours per day (Monday–Friday) give the
+          resource capacity — the schedule wins when both are set. */}
+      <Field label="Kapacitet (timmar per dag)" htmlFor="hoursPerDay">
+        <Input
+          id="hoursPerDay"
+          type="number"
+          min="0"
+          max="24"
+          step="any"
+          size="xs"
+          value={hoursPerDay}
+          onChange={(e) => setHoursPerDay(e.target.value)}
+        />
+      </Field>
+      <FormHint attached>Måndag–fredag, helgdagar avräknade. Används när resursen saknar veckoschema.</FormHint>
 
       <Field label="Aktiv" htmlFor="active">
         <Toggle id="active" checked={active} onChange={(e) => setActive(e.target.checked)} />

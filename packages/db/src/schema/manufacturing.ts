@@ -88,6 +88,11 @@ export const workCenters = pgTable(
     // register.
     weekScheduleId: uuid("week_schedule_id"),
     capacityFactor: numeric("capacity_factor", { precision: 6, scale: 2 }).notNull().default("1"),
+    // Kapacitet (timmar per dag): a simpler alternative to the week schedule —
+    // these hours Monday–Friday (× capacityFactor), a full-day holiday off,
+    // a shortened holiday on its own day schedule. The week schedule wins
+    // when both are set. null = none.
+    hoursPerDay: numeric("hours_per_day", { precision: 5, scale: 2 }),
     // Legoresurs (type "subcontract") only: the resource's default supplier,
     // prefilled on new lego operations in the beredning. set null — deleting
     // a supplier degrades to "no default", never breaks the register.
@@ -112,7 +117,10 @@ export const workCenters = pgTable(
     queueTimeDays: numeric("queue_time_days", { precision: 6, scale: 1 }),
     orderLeadTimeDays: numeric("order_lead_time_days", { precision: 6, scale: 1 }),
   },
-  (table) => [check("work_center_code_three_digits", sql`${table.code} ~ '^[0-9]{3}$'`)]
+  (table) => [
+    check("work_center_code_three_digits", sql`${table.code} ~ '^[0-9]{3}$'`),
+    check("work_centers_hours_per_day", sql`${table.hoursPerDay} > 0 and ${table.hoursPerDay} <= 24`),
+  ]
 );
 
 // Routing = an article's operation list. No separate "routing" header table —

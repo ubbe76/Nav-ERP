@@ -58,6 +58,7 @@ const wc1: DtcWorkCenter = {
   name: "Kantpress",
   type: "machine",
   weekScheduleId: "ws-40",
+  hoursPerDay: null,
   capacityFactor: 1,
   leadTimeDays: null,
 };
@@ -323,7 +324,7 @@ describe("Leveranstidskontroll — made, capacity per week", () => {
       })
     );
     expect(result.rows[0]!.notes).toEqual([
-      "Resurserna 100 och 200 saknar veckoschema — kapaciteten räknas inte",
+      "Resurserna 100 och 200 saknar veckoschema och timmar per dag — kapaciteten räknas inte",
       "IO-7 och IO-12 saknar datum — räknade som tillgängliga direkt",
     ]);
   });
@@ -334,12 +335,21 @@ describe("Leveranstidskontroll — made, capacity per week", () => {
     expect(result.notes).toEqual(["Resurs 110 har 40 h beläggning utan datum som inte räknas"]);
   });
 
+  it("hours per day give capacity without a week schedule", () => {
+    // 4 h a day: 20 h a week, so 30 h is week 43 + 10 h of week 44.
+    const result = checkDeliveryTime(
+      made([op(10, 30)], { workCenters: new Map([["wc-1", { ...wc1, weekScheduleId: null, hoursPerDay: 4 }]]) })
+    );
+    expect(result.rows[0]!.chain[0]).toMatchObject({ fromWeek: "2026-10-19", toWeek: "2026-10-26", date: "2026-10-30" });
+    expect(result.rows[0]!.notes).toEqual([]);
+  });
+
   it("a resource without a week schedule is not capacity-planned", () => {
     const result = checkDeliveryTime(
       made([op(10, 100)], { workCenters: new Map([["wc-1", { ...wc1, weekScheduleId: null }]]) })
     );
     expect(result.rows[0]!.readyDate).toBe("2026-10-23");
-    expect(result.rows[0]!.notes).toEqual(["Resurs 110 saknar veckoschema — kapaciteten räknas inte"]);
+    expect(result.rows[0]!.notes).toEqual(["Resurs 110 saknar veckoschema och timmar per dag — kapaciteten räknas inte"]);
   });
 
   it("a lego operation takes the resource's lead time in working days", () => {

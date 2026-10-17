@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { updateWorkCenterSchema } from "@navet/shared";
 import { and, eq, sql } from "drizzle-orm";
 import { auditLog, db, stockTransactions, weekSchedules } from "@navet/db";
 import { completeManufacturingOrderSchema } from "@navet/shared";
@@ -1625,6 +1626,17 @@ describe("work center capacity fields (E2)", () => {
     });
     const updated = await mfgService.updateWorkCenter(workCenter.id, { weekScheduleId: null });
     expect(updated.weekScheduleId).toBeNull();
+  });
+
+  it("stores Kapacitet (timmar per dag), clears it with null and the schema keeps it within 0–24", async () => {
+    const workCenter = await mfgService.createWorkCenter({ code: "153", name: "Borr", capacityFactor: 1, hoursPerDay: 7.5, active: true });
+    expect(Number(workCenter.hoursPerDay)).toBe(7.5);
+    const changed = await mfgService.updateWorkCenter(workCenter.id, { hoursPerDay: 16 });
+    expect(Number(changed.hoursPerDay)).toBe(16);
+    const cleared = await mfgService.updateWorkCenter(workCenter.id, { hoursPerDay: null });
+    expect(cleared.hoursPerDay).toBeNull();
+    expect(updateWorkCenterSchema.safeParse({ hoursPerDay: 0 }).success).toBe(false);
+    expect(updateWorkCenterSchema.safeParse({ hoursPerDay: 25 }).success).toBe(false);
   });
 });
 

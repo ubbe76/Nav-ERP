@@ -1,0 +1,2 @@
+ALTER TABLE "work_centers" ADD COLUMN "hours_per_day" numeric(5, 2);--> statement-breakpoint
+ALTER TABLE "work_centers" ADD CONSTRAINT "work_centers_hours_per_day" CHECK ("work_centers"."hours_per_day" > 0 and "work_centers"."hours_per_day" <= 24);

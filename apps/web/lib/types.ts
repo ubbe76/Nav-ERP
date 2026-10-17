@@ -1447,6 +1447,9 @@ export interface WorkCenter {
   weekScheduleCode: string | null;
   weekScheduleName: string | null;
   capacityFactor: string;
+  // Kapacitet (timmar per dag): Monday–Friday hours used when the resource
+  // has no week schedule (the schedule wins when both are set). null = none.
+  hoursPerDay: string | null;
   // Legoresurs only: the resource's default supplier, prefilled on new lego
   // operations in the beredning (supplierName joined by the list endpoint).
   supplierId: string | null;

@@ -254,7 +254,7 @@ Kontrollen går igenom varje rad, och för en tillverkad artikel varje nivå i s
 
 1. **Det som redan finns.** Lagersaldo och öppna inköps- och tillverkningsordrar läggs i datumordning. Andra kundordrar och tillverkningsordrars materialbehov som redan finns tar sin del först — de är redan lovade. Det som täcks av en öppen order räknas som klart den dag ordern kommer. Kontrollerar du en befintlig kundorder räknas inte orderns egna rader som behov.
 2. **Det som saknas och köps.** Bristen får **huvudleverantörens ledtid** i leverantörskatalogen, tillsammans med leverantörens leveransdagar och transportdagar (se [Leveransdagar](/hjalp/inkop#leveransdagar) i Inköp). Saknar artikeln huvudleverantör räknas den som tillgänglig direkt, och en notering visas.
-3. **Det som saknas och tillverkas — på alla nivåer.** Strukturen löses upp (fantomartiklar går genom), varje komponent räknas på samma sätt, och när materialet är klart läggs beredningens operationer i tur och ordning på **ledig tid per resurs och vecka**. Den lediga tiden är resursens veckoschema × kapacitetsfaktor minus beläggningen från öppna tillverkningsordrar — samma beläggning som visas i [Beläggning](/hjalp/tillverkning#belaggning). En operation kan delas över flera veckor och räknas klar sista arbetsdagen i den vecka den blir färdig; nästa operation får börja samma vecka om det finns tid kvar. Innevarande vecka räknas bara från i dag. **Legooperationer** tar legoresursens ledtid i arbetsdagar. Operationer märkta **Kalkyl** räknas inte.
+3. **Det som saknas och tillverkas — på alla nivåer.** Strukturen löses upp (fantomartiklar går genom), varje komponent räknas på samma sätt, och när materialet är klart läggs beredningens operationer i tur och ordning på **ledig tid per resurs och vecka**. Den lediga tiden är resursens veckoschema — eller, utan schema, dess kapacitet i timmar per dag — × kapacitetsfaktor minus beläggningen från öppna tillverkningsordrar — samma beläggning som visas i [Beläggning](/hjalp/tillverkning#belaggning). En operation kan delas över flera veckor och räknas klar sista arbetsdagen i den vecka den blir färdig; nästa operation får börja samma vecka om det finns tid kvar. Innevarande vecka räknas bara från i dag. **Legooperationer** tar legoresursens ledtid i arbetsdagar. Operationer märkta **Kalkyl** räknas inte.
 4. **Avsändningsdag och leveransdatum.** Avsändningsdagen är nästa arbetsdag efter att allt är klart; finns allt i lager redan i dag är den i dag. **Leveransdatum** är avsändningsdagen plus kundens transportdagar och leveransdagar (se [Leveransdagar](#leveransdagar)). Utan kund, på den fristående sidan, är svaret avsändningsdagen.
 
 **Konfigurerade rader:** en beställningsvara räknas på sin konfigurerade struktur och rutt. En variant som redan finns räknas som sin artikel, annars på den struktur den skulle få — kontrollen skapar aldrig en variant.
@@ -272,11 +272,11 @@ Raden med senast klar-datum bestämmer ordern; det är den du behöver påverka 
 
 ### Noteringar
 
-Under resultatet kan noteringar visas när något i underlaget saknas. Gäller samma sak flera artiklar, ordrar eller resurser samlas de i en notering per rad, t.ex. *Resurserna 100, 200 och 700 saknar veckoschema — kapaciteten räknas inte*:
+Under resultatet kan noteringar visas när något i underlaget saknas. Gäller samma sak flera artiklar, ordrar eller resurser samlas de i en notering per rad, t.ex. *Resurserna 100, 200 och 700 saknar veckoschema och timmar per dag — kapaciteten räknas inte*:
 
 - *<artikel> saknar huvudleverantör — räknad som tillgänglig direkt*
 - *<dokumentnr> saknar datum — räknad som tillgänglig direkt* (en öppen order utan datum)
-- *Resurs <kod> saknar veckoschema — kapaciteten räknas inte*
+- *Resurs <kod> saknar veckoschema och timmar per dag — kapaciteten räknas inte* (ange **Veckoschema (kapacitet)** eller **Kapacitet (timmar per dag)** på resursen)
 - *Legoresurs <kod> saknar ledtid — räknad som 0 dagar*
 - *Resurs <kod> har <n> h beläggning utan datum som inte räknas*
 - *Kapaciteten räcker inte inom två år* — raden får då inget datum och ordern inget leveransdatum.

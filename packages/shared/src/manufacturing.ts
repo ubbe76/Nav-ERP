@@ -59,6 +59,9 @@ export const createWorkCenterSchema = z.object({
   // clear the schedule instead.
   weekScheduleId: z.string().uuid().nullable().optional(),
   capacityFactor: z.coerce.number().positive().default(1),
+  // Kapacitet (timmar per dag): Monday–Friday hours used when the resource
+  // has no week schedule (the schedule wins when both are set).
+  hoursPerDay: z.coerce.number().positive().max(24).nullable().optional(),
   // Legoresurs only: the resource's default supplier, prefilled on new lego
   // operations in the beredning.
   supplierId: z.string().uuid().nullable().optional(),
@@ -87,6 +90,7 @@ export const updateWorkCenterSchema = z
     overheadPercent: z.coerce.number().nonnegative().optional(),
     weekScheduleId: z.string().uuid().nullable().optional(),
     capacityFactor: z.coerce.number().positive().optional(),
+    hoursPerDay: z.coerce.number().positive().max(24).nullable().optional(),
     supplierId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
     defaultSetupTime: z.coerce.number().nonnegative().nullable().optional(),

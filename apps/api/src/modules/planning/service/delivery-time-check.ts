@@ -12,6 +12,7 @@ import { explodeOneLevel, type BomEdge } from "./requirements-calc.js";
 import type { ArticleOverviewRow } from "./article-overview.js";
 import {
   buildScheduleLookups,
+  hasCapacityCalendar,
   loadBucketMonday,
   remainingOperationMinutes,
   resourceDayMinutes,
@@ -57,6 +58,7 @@ export interface DtcWorkCenter {
   name: string;
   type: "machine" | "personnel" | "subcontract";
   weekScheduleId: string | null;
+  hoursPerDay: number | null; // Kapacitet (timmar per dag) — when there is no week schedule
   capacityFactor: number;
   leadTimeDays: number | null; // legoresurs: working days the supplier takes
 }
@@ -185,7 +187,7 @@ const mondayOf = (date: string) => addDays(date, -((new Date(`${date}T00:00:00Z`
 // can name dozens, and a note per resource buries the result.
 interface RowNotes {
   other: Set<string>;
-  unscheduled: Set<string>; // resource codes
+  unscheduled: Set<string>; // resource codes without a capacity calendar
   undated: Set<string>; // document numbers
   noSupplier: Set<string>; // article numbers
   legoNoLead: Set<string>; // lego resource codes
@@ -210,7 +212,7 @@ function rowNoteTexts(n: RowNotes): string[] {
   const many = (set: Set<string>) => set.size > 1;
   if (n.unscheduled.size > 0) {
     texts.push(
-      `${many(n.unscheduled) ? "Resurserna" : "Resurs"} ${swedishList(n.unscheduled)} saknar veckoschema — kapaciteten räknas inte`
+      `${many(n.unscheduled) ? "Resurserna" : "Resurs"} ${swedishList(n.unscheduled)} saknar veckoschema och timmar per dag — kapaciteten räknas inte`
     );
   }
   if (n.legoNoLead.size > 0) {
@@ -322,7 +324,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     for (let i = 0; i < 7; i++) {
       const day = addDays(monday, i);
       if (day < fromDay) continue;
-      minutes += resourceDayMinutes(lookups, wc.weekScheduleId!, day);
+      minutes += resourceDayMinutes(lookups, wc, day);
     }
     return minutes * wc.capacityFactor;
   }
@@ -345,7 +347,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     for (let i = 6; i >= 0; i--) {
       const day = addDays(monday, i);
       if (day < floor) break;
-      if (wc?.weekScheduleId ? resourceDayMinutes(lookups, wc.weekScheduleId, day) > 0 : isWorkingDay(day, offDays)) return day;
+      if (wc && hasCapacityCalendar(wc) ? resourceDayMinutes(lookups, wc, day) > 0 : isWorkingDay(day, offDays)) return day;
     }
     return floor;
   }
@@ -385,7 +387,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
         steps.push({ kind: "operation", ...base, fromWeek: mondayOf(floor), toWeek: mondayOf(floor), date: ready });
         continue;
       }
-      if (!wc || !wc.weekScheduleId) {
+      if (!wc || !hasCapacityCalendar(wc)) {
         notes.unscheduled.add(code);
         const monday = mondayOf(floor);
         ready = maxDate(ready, weekFinishDay(null, monday, floor));

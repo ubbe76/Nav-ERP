@@ -26,6 +26,7 @@ interface RowDraft {
   productionGroupId: string;
   weekScheduleId: string;
   capacityFactor: string;
+  hoursPerDay: string;
 }
 
 // API decimals arrive as "450.0000"; show them the way the form does.
@@ -40,6 +41,7 @@ function draftFor(workCenter: WorkCenter): RowDraft {
     productionGroupId: workCenter.productionGroupId ?? "",
     weekScheduleId: workCenter.weekScheduleId ?? "",
     capacityFactor: plain(workCenter.capacityFactor),
+    hoursPerDay: workCenter.hoursPerDay == null ? "" : plain(workCenter.hoursPerDay),
   };
 }
 
@@ -52,6 +54,8 @@ function patchFor(workCenter: WorkCenter, draft: RowDraft): Record<string, unkno
   if ((draft.productionGroupId || null) !== workCenter.productionGroupId) patch.productionGroupId = draft.productionGroupId || null;
   if ((draft.weekScheduleId || null) !== workCenter.weekScheduleId) patch.weekScheduleId = draft.weekScheduleId || null;
   if (Number(draft.capacityFactor) !== Number(workCenter.capacityFactor)) patch.capacityFactor = Number(draft.capacityFactor);
+  const hours = draft.hoursPerDay.trim() === "" ? null : Number(draft.hoursPerDay);
+  if (hours !== (workCenter.hoursPerDay == null ? null : Number(workCenter.hoursPerDay))) patch.hoursPerDay = hours;
   return patch;
 }
 
@@ -159,7 +163,7 @@ export function WorkCentersPageClient({
           { key: "name", label: "Namn", width: "minmax(120px, 1fr)" },
           { key: "type", label: "Typ", width: "80px" },
           { key: "productionGroupId", label: "Produktionsgrupp", width: "150px" },
-          { key: "weekScheduleId", label: "Veckoschema", width: "140px" },
+          { key: "weekScheduleId", label: "Kapacitet", width: "140px" },
           { key: "hourlyRate", label: "Timkostnad", width: "110px", align: "right" },
           { key: "overheadPercent", label: "TO-påslag", width: "100px", align: "right" },
           { key: "active", label: "Status", width: "80px" },
@@ -239,13 +243,31 @@ export function WorkCentersPageClient({
                         aria-label={`Kapacitetsfaktor för ${workCenter.name}`}
                       />
                     </span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--color-text-secondary)" }}>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="24"
+                        step="any"
+                        size="xs"
+                        value={draft.hoursPerDay}
+                        onChange={(e) => update("hoursPerDay", e.target.value)}
+                        onKeyDown={keys}
+                        aria-label={`Kapacitet i timmar per dag för ${workCenter.name}`}
+                      />
+                      h/dag
+                    </span>
                   </span>
                 );
               }
               const factor = Number(workCenter.capacityFactor);
+              // The schedule wins; hours per day show only without one.
+              const capacity =
+                workCenter.weekScheduleCode ??
+                (workCenter.hoursPerDay != null ? `${Number(workCenter.hoursPerDay).toLocaleString("sv-SE")} h/dag` : "—");
               return (
                 <>
-                  {workCenter.weekScheduleCode ?? "—"}
+                  {capacity}
                   {factor !== 1 && <span style={{ opacity: 0.7 }}> ×{factor}</span>}
                 </>
               );

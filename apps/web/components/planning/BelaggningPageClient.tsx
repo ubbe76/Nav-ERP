@@ -226,7 +226,7 @@ function ResourceBlock({
         </span>
         {resource.capacityFactor !== 1 && <span className={styles.factorBadge}>×{resource.capacityFactor}</span>}
         {!resource.hasSchedule && (
-          <span className={styles.resourceMuted} title="Saknar veckoschema">
+          <span className={styles.resourceMuted} title="Saknar veckoschema och timmar per dag">
             —
           </span>
         )}
