@@ -21,3 +21,43 @@ export const partnerDeliveryFields = {
   deliveryDayMode: deliveryDayModeSchema.nullable().optional(),
   transitDays: transitDaysSchema.nullable().optional(),
 };
+
+// A partner's effective settings (own values, else the system default).
+export interface DeliverySettingsView {
+  weekdays: number[];
+  mode: DeliveryDayMode;
+  transitDays: number;
+}
+
+// GET /supplier-delivery-date-suggestion — without articleId the order
+// header's suggestion, with it the row's (catalog lead time). `date` is
+// checked against the supplier's days for `warning`.
+export const supplierDeliveryDateQuerySchema = z.object({
+  supplierId: z.string().uuid(),
+  articleId: z.string().uuid().optional(),
+  date: z.string().date().optional(),
+});
+export type SupplierDeliveryDateQuery = z.infer<typeof supplierDeliveryDateQuerySchema>;
+
+export interface SupplierDeliveryDateSuggestion {
+  date: string | null; // null = nothing to suggest (no fixed days, lead time or transit)
+  leadTimeDays: number | null;
+  settings: DeliverySettingsView;
+  summary: string | null;
+  warning: string | null;
+}
+
+// GET /customer-delivery-date-suggestion — the earliest delivery date (the
+// day the customer gets the goods) and the warning for `date`.
+export const customerDeliveryDateQuerySchema = z.object({
+  customerId: z.string().uuid(),
+  date: z.string().date().optional(),
+});
+export type CustomerDeliveryDateQuery = z.infer<typeof customerDeliveryDateQuerySchema>;
+
+export interface CustomerDeliveryDateSuggestion {
+  date: string | null; // null = the customer has no fixed days
+  settings: DeliverySettingsView;
+  summary: string | null;
+  warning: string | null;
+}

@@ -38,6 +38,15 @@ import { RegisterEntryNotFoundError } from "../../register/service/register.serv
 import type { MailService } from "../../mail/service/mail.service.js";
 import type { DocumentPdfService } from "../../mail/service/document-pdf.js";
 import { roundUpToMultiple, toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "@navet/shared";
+import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
+import {
+  deliveryDateWarning,
+  deliveryHolidayWindow,
+  deliverySummary,
+  earliestCustomerDelivery,
+  effectiveDeliverySettings,
+  stockholmToday,
+} from "../../system/service/delivery-days.js";
 import type { ArticleFileReader, ArticleRevisionReader, ArticleUnitReader } from "../../article/service/article.service.js";
 import { ArticleGroupNotFoundError, ArticleNotFoundError, assertOrderableArticle } from "../../article/service/article.service.js";
 import { formatArticleAttributes, formatRevisionInfo, type DocumentSettingsReader } from "../../mail/service/document-pdf.js";
@@ -635,6 +644,26 @@ export function createSalesService(
 
     async getCustomer(id: string) {
       return repo.findCustomerById(id);
+    },
+
+    // Fasta leveransdagar: the earliest Förväntat leveransdatum (the day the
+    // customer gets the goods) — only when the customer has fixed days, the
+    // same prefill rule as the IO header — and the warning for q.date. null
+    // = unknown customer.
+    async getCustomerDeliveryDateSuggestion(
+      q: CustomerDeliveryDateQuery,
+      today: string = stockholmToday()
+    ): Promise<CustomerDeliveryDateSuggestion | null> {
+      const customer = await repo.findCustomerById(q.customerId);
+      if (!customer) return null;
+      const { defaults, offDays } = await repo.deliveryContext(deliveryHolidayWindow([today, q.date ?? today], 60));
+      const settings = effectiveDeliverySettings(customer, "customer", defaults);
+      return {
+        date: settings.weekdays.length > 0 ? earliestCustomerDelivery(today, settings, offDays) : null,
+        settings,
+        summary: deliverySummary("customer", settings),
+        warning: q.date ? deliveryDateWarning("customer", q.date, settings, offDays) : null,
+      };
     },
 
     async listCustomerContacts(customerId: string) {

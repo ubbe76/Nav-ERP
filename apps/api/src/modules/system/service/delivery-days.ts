@@ -303,3 +303,8 @@ export function deliveryHolidayWindow(dates: string[], extraWorkingDays: number)
     to: addDays(last, 2 * extraWorkingDays + 120),
   };
 }
+
+// Today as a Stockholm day — the "from today" of every suggestion.
+export function stockholmToday(): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
+}

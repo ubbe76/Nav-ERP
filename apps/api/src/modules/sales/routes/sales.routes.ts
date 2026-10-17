@@ -5,6 +5,7 @@ import {
   createDeliveryAddressSchema,
   createPriceListSchema,
   createSalesOrderRowSchema,
+  customerDeliveryDateQuerySchema,
   customerPriceInputSchema,
   deliverBatchSchema,
   deliverGoodsSchema,
@@ -90,6 +91,14 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
     filenameBase: "kunder",
     columns: CUSTOMER_CSV_COLUMNS,
     fetch: (q) => service.listCustomers(q),
+  });
+
+  // Fasta leveransdagar: the new sales order's suggested date + warning.
+  app.get("/customer-delivery-date-suggestion", async (req, reply) => {
+    const query = customerDeliveryDateQuerySchema.parse(req.query);
+    const result = await service.getCustomerDeliveryDateSuggestion(query);
+    if (!result) return reply.code(404).send(errorBody(new CustomerNotFoundError(query.customerId)));
+    return result;
   });
 
   app.get<{ Params: { id: string } }>("/customers/:id", async (req, reply) => {

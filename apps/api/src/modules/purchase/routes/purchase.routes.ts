@@ -28,7 +28,7 @@ import {
   updateSupplierSchema,
   receiveGoodsSchema,
 } from "@navet/shared";
-import { supplierPriceQuoteQuerySchema } from "@navet/shared";
+import { supplierDeliveryDateQuerySchema, supplierPriceQuoteQuerySchema } from "@navet/shared";
 import { MailSendError, SmtpNotConfiguredError } from "../../mail/service/mail.service.js";
 import type { PurchaseService } from "../service/purchase.service.js";
 import {
@@ -655,6 +655,14 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
     const query = supplierPriceQuoteQuerySchema.parse(req.query);
     const result = await service.getSupplierPriceQuote(query);
     if (!result) return reply.code(404).send(errorBody(new ArticleNotFoundError(query.articleId)));
+    return result;
+  });
+
+  // Fasta leveransdagar: the IO header's/row's suggested date + warning.
+  app.get("/supplier-delivery-date-suggestion", async (req, reply) => {
+    const query = supplierDeliveryDateQuerySchema.parse(req.query);
+    const result = await service.getSupplierDeliveryDateSuggestion(query);
+    if (!result) return reply.code(404).send(errorBody(new SupplierNotFoundError(query.supplierId)));
     return result;
   });
 

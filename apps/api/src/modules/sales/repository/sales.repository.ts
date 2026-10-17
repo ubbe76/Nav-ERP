@@ -57,6 +57,7 @@ import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { PriceListInUseError, RowHasManufacturingOrdersError } from "../service/sales.errors.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
+import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 
 // Leveranstillfälle (delivery occasion) — C2. The whole batch is one
 // transaction: every row goes through the exact per-row guard/lock/booking
@@ -246,6 +247,12 @@ export function createSalesRepository(db: Db) {
       const set = discountPercent === undefined ? rest : { ...rest, discountPercent: String(discountPercent) };
       const [row] = await db.update(customers).set(set).where(eq(customers.id, id)).returning();
       return row ?? null;
+    },
+
+    // Fasta leveransdagar: the system defaults + full-day holidays in the
+    // window, for the delivery date suggestion (delivery-context.ts).
+    async deliveryContext(window: { from: string; to: string }) {
+      return loadDeliveryContext(db, window);
     },
 
     async findCustomerById(id: string) {

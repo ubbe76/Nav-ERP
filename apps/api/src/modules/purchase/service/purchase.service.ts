@@ -47,7 +47,20 @@ import type { ArticleFileReader, ArticleRevisionReader, ArticleUnitReader } from
 import { ArticleNotFoundError, assertPurchasableArticle } from "../../article/service/article.service.js";
 import { formatArticleAttributes, formatRevisionInfo, type DocumentSettingsReader } from "../../mail/service/document-pdf.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
-import type { SupplierPriceQuote, SupplierPriceQuoteQuery } from "@navet/shared";
+import type {
+  SupplierDeliveryDateQuery,
+  SupplierDeliveryDateSuggestion,
+  SupplierPriceQuote,
+  SupplierPriceQuoteQuery,
+} from "@navet/shared";
+import {
+  deliveryDateWarning,
+  deliveryHolidayWindow,
+  deliverySummary,
+  effectiveDeliverySettings,
+  stockholmToday,
+  suggestPurchaseDeliveryDate,
+} from "../../system/service/delivery-days.js";
 import { resolveSupplierPrice } from "./supplier-price.js";
 // G1: append-only audit trail — optional with a no-op default (see
 // sales.service.ts's identical comment) so the many pre-existing test call
@@ -1514,6 +1527,36 @@ export function createPurchaseService(
           resolved.price === null
             ? null
             : { unitPrice: resolved.price, currency: row.currency, fromQuantity: resolved.fromQuantity!, source: resolved.source! },
+      };
+    },
+
+    // Fasta leveransdagar: the suggested Önskat leveransdatum (an ARRIVAL
+    // date) — without articleId for the order header (only when the
+    // supplier has fixed days), with it for a row (the catalog row's lead
+    // time; null via the short-circuit when there are no days, lead time or
+    // transit). `warning` checks q.date against the supplier's days. null =
+    // unknown supplier.
+    async getSupplierDeliveryDateSuggestion(
+      q: SupplierDeliveryDateQuery,
+      today: string = stockholmToday()
+    ): Promise<SupplierDeliveryDateSuggestion | null> {
+      const supplier = await repo.findSupplierById(q.supplierId);
+      if (!supplier) return null;
+      const catalogRow = q.articleId ? await repo.findArticleSupplierBySupplier(q.articleId, q.supplierId) : null;
+      const leadTimeDays = q.articleId ? (catalogRow?.leadTimeDays ?? null) : null;
+      const { defaults, offDays } = await repo.deliveryContext(
+        deliveryHolidayWindow([today, q.date ?? today], (leadTimeDays ?? 0) + 60)
+      );
+      const settings = effectiveDeliverySettings(supplier, "supplier", defaults);
+      const suggest = () =>
+        suggestPurchaseDeliveryDate({ demandDate: null, today, leadTimeDays: leadTimeDays ?? 0, settings, offDays }).date;
+      const date = q.articleId ? suggest() : settings.weekdays.length > 0 ? suggest() : null;
+      return {
+        date,
+        leadTimeDays,
+        settings,
+        summary: deliverySummary("supplier", settings),
+        warning: q.date ? deliveryDateWarning("supplier", q.date, settings, offDays) : null,
       };
     },
 

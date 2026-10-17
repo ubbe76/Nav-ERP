@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNotNull, not, notInArray, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
+import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import {
   articleSuppliers,
   articles,
@@ -1160,6 +1161,12 @@ export function createPurchaseRepository(db: Db) {
 
     // The catalog row ONE supplier has for an article (+ its staffel) — the
     // basis for the purchase order card's à-pris prefill.
+    // Fasta leveransdagar: the system defaults + full-day holidays in the
+    // window, for the date suggestions (delivery-context.ts).
+    async deliveryContext(window: { from: string; to: string }) {
+      return loadDeliveryContext(db, window);
+    },
+
     async findArticleSupplierBySupplier(articleId: string, supplierId: string) {
       const [row] = await db
         .select()
