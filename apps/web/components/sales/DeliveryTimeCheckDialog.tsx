@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Field";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
 import { Modal } from "../ui/Modal";
@@ -86,12 +87,12 @@ export function DeliveryTimeCheckDialog({
   const batchCount = result?.batches?.length ?? 0;
   const canReserve = canCreateOrders && withCustomer && !!salesOrderId && batchCount > 0;
 
-  async function applyReservation(orderId: string, deliveryDate: string) {
+  async function applyReservation(orderId: string, deliveryDate: string, expectedOrders: number) {
     setApplyError(null);
     setChangedNotice(null);
     setApplying(true);
     try {
-      const res = await applyDeliveryTime({ salesOrderId: orderId, deliveryDate });
+      const res = await applyDeliveryTime({ salesOrderId: orderId, deliveryDate, expectedOrders });
       setApplied(res);
       onApplied?.();
     } catch (err) {
@@ -115,7 +116,7 @@ export function DeliveryTimeCheckDialog({
 
   function useDate(date: string) {
     if (canReserve && reserve && salesOrderId) {
-      void applyReservation(salesOrderId, date);
+      void applyReservation(salesOrderId, date, batchCount);
       return;
     }
     onUseDate(date);
@@ -135,7 +136,7 @@ export function DeliveryTimeCheckDialog({
 
       {canReserve && !applied && (
         <label className={styles.reserve}>
-          <input type="checkbox" checked={reserve} disabled={busy} onChange={(e) => setReserve(e.target.checked)} />
+          <Checkbox checked={reserve} disabled={busy} onChange={(e) => setReserve(e.target.checked)} />
           <span>Skapa tillverkningsordrar för det som saknas ({batchCount} st)</span>
         </label>
       )}

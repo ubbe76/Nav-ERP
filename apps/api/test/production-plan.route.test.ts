@@ -5,6 +5,7 @@ import { planningRoutes } from "../src/modules/planning/routes/planning.routes.j
 import {
   OperationNotFoundError,
   OperationNotPlannableError,
+  PlanWeekInPastError,
   type PlanningService,
 } from "../src/modules/planning/service/planning.service.js";
 
@@ -100,6 +101,7 @@ describe("POST /planning/operations/:opId/move", () => {
     [new OperationNotFoundError("x"), 404, "operation-not-found"],
     [new OperationNotPlannableError("done"), 409, "operation-not-plannable"],
     [new OperationNotPlannableError("subcontract"), 409, "operation-not-plannable"],
+    [new PlanWeekInPastError("2030-02-25", "2030-03-04"), 400, "plan-week-in-past"],
   ] as const)("maps %s", async (error, status, code) => {
     const app = buildApp({
       moveOperation: async () => {

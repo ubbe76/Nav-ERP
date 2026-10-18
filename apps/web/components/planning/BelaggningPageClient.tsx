@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { StatusPill } from "../ui/StatusPill";
 import { Select } from "../ui/Field";
 import { ListFilterSelect, useListNavigation } from "../ui/ListControls";
 import { Button } from "../ui/Button";
-import { FormError, FormNotice } from "../ui/Form";
+import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { MoveOperationDialog, type MoveTarget } from "./MoveOperationDialog";
 import { Clock, Lock } from "lucide-react";
 import { apiFetch } from "../../lib/api";
@@ -24,6 +24,7 @@ import type {
   CapacityResult,
   CapacityWeek,
   PlanResult,
+  PlanWarning,
   ProductionGroup,
 } from "../../lib/types";
 import styles from "./BelaggningPageClient.module.css";
@@ -57,6 +58,24 @@ interface ExpandedCell {
   cell: CapacityCell;
 }
 
+// After a reload (Flytta…/Lås upp): the expansion stays when its cell still
+// holds orders, with the fresh cell data; otherwise it closes.
+function refreshExpanded(prev: ExpandedCell | null, res: CapacityResult): ExpandedCell | null {
+  if (!prev) return null;
+  const colKey = prev.key.slice(prev.workCenterId.length + 1);
+  for (const group of res.groups) {
+    const resource = group.resources.find((r) => r.workCenterId === prev.workCenterId);
+    if (!resource) continue;
+    const cell = colKey.startsWith("week:")
+      ? resource.weeks[Number(colKey.slice(5))]
+      : colKey === "later"
+        ? resource.later
+        : resource.undated;
+    return cell && cell.orders.length > 0 ? { ...prev, cell } : null;
+  }
+  return null;
+}
+
 export function BelaggningPageClient() {
   const searchParams = useSearchParams();
   const { setFilter } = useListNavigation();
@@ -85,17 +104,25 @@ export function BelaggningPageClient() {
   const weeks = WEEK_OPTIONS.includes(weeksRaw) ? weeksRaw : DEFAULT_WEEKS;
   const productionGroupId = searchParams.get("productionGroupId") ?? "";
 
+  // A changed filter/horizon closes the expansion; a plain reload (reloadTick)
+  // keeps it, see refreshExpanded.
+  const lastQueryKey = useRef(queryKey);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    setExpanded(null);
+    if (lastQueryKey.current !== queryKey) {
+      lastQueryKey.current = queryKey;
+      setExpanded(null);
+    }
     const qs = new URLSearchParams({ weeks: String(weeks) });
     if (productionGroupId) qs.set("productionGroupId", productionGroupId);
     apiFetch<CapacityResult>(`/api/v1/planning/capacity?${qs.toString()}`)
       .then((res) => {
         if (cancelled) return;
         setData(res);
+        setExpanded((prev) => refreshExpanded(prev, res));
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -179,6 +206,7 @@ export function BelaggningPageClient() {
 
       <FormError margin="below">{loadError}</FormError>
       <FormError margin="below">{planError}</FormError>
+      {loading && data && <FormHint>Uppdaterar…</FormHint>}
 
       {planResult && (
         <FormNotice className={styles.planNotice}>
@@ -191,16 +219,13 @@ export function BelaggningPageClient() {
             <ul className={styles.warningList}>
               {(showAllWarnings ? planResult.warnings : planResult.warnings.slice(0, 10)).map((w, i) => (
                 <li key={i}>
-                  <Link href={`/tillverkning/ordrar/${w.manufacturingOrderId}`} className={styles.noticeLink}>
-                    {w.orderNumber}
-                  </Link>
-                  : {w.message}
+                  <WarningLine warning={w} />
                 </li>
               ))}
             </ul>
           )}
           {!showAllWarnings && planResult.warnings.length > 10 && (
-            <button type="button" className={styles.linkButton} onClick={() => setShowAllWarnings(true)}>
+            <button type="button" className={styles.noticeButton} onClick={() => setShowAllWarnings(true)}>
               Visa alla ({planResult.warnings.length})
             </button>
           )}
@@ -250,7 +275,11 @@ export function BelaggningPageClient() {
         target={moveTarget}
         weeks={data?.weeks ?? []}
         onClose={() => setMoveTarget(null)}
-        onChanged={() => setReloadTick((n) => n + 1)}
+        onChanged={() => {
+          // The Planera result no longer describes the plan.
+          setPlanResult(null);
+          setReloadTick((n) => n + 1);
+        }}
       />
     </>
   );
@@ -502,6 +531,31 @@ function ExpansionRow({
         })}
       </div>
     </div>
+  );
+}
+
+// A warning line led by its order number as a link. Some messages already
+// start with the number ("TO-123 blir klar …") — then that number is the link
+// and is not repeated.
+function WarningLine({ warning }: { warning: PlanWarning }) {
+  const href = `/tillverkning/ordrar/${warning.manufacturingOrderId}`;
+  if (warning.message.startsWith(warning.orderNumber)) {
+    return (
+      <>
+        <Link href={href} className={styles.noticeLink}>
+          {warning.orderNumber}
+        </Link>
+        {warning.message.slice(warning.orderNumber.length)}
+      </>
+    );
+  }
+  return (
+    <>
+      <Link href={href} className={styles.noticeLink}>
+        {warning.orderNumber}
+      </Link>
+      : {warning.message}
+    </>
   );
 }
 

@@ -303,6 +303,19 @@
   text-decoration: underline;
 }
 
+/* A link-looking button inside a FormNotice: the notice's own text colour
+   (--accent-fg on the notice tint misses AA in some themes). */
+.noticeButton {
+  padding: 4px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .linkButton {
   padding: 4px 0;
   border: none;

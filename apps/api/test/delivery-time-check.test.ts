@@ -606,10 +606,14 @@ describe("Leveranstidskontroll — made, capacity per week", () => {
     expect(result.rows[0]!.chain[2]).toMatchObject({ sequenceNo: 20, workCenterCode: "120" });
   });
 
-  it("a made article without structure and routing counts as available now, with a note", () => {
+  it("a made article without structure and routing counts as available now, with a note — and no batch", () => {
     const result = checkDeliveryTime(input({ articles: articles(article("m", "manufactured")), rows: [row("m", 2)] }));
     expect(result.shipDate).toBe(TODAY);
     expect(result.rows[0]!.notes).toEqual(["NR-m saknar beredning — räknad som tillgänglig direkt"]);
+    expect(result.rows[0]!.chain).toEqual([]);
+    // Nothing to make a TO of: a reservation would otherwise create an
+    // empty order for it.
+    expect(result.batches).toEqual([]);
   });
 
   it("several components without preparation are one note", () => {
@@ -677,11 +681,82 @@ describe("Leveranstidskontroll — configured rows, customer and errors", () => 
           ["t", { onHand: 50, rows: [] }], // the template's stock is another configuration's
           ["p", { onHand: 10, rows: [] }],
         ]),
-        rows: [row("t", 2, { structure: { operations: [op(10, 8)], materials: [{ articleId: "p", quantity: 6 }] } })],
+        rows: [row("t", 2, { structure: { quantity: 2, operations: [op(10, 8)], materials: [{ articleId: "p", quantity: 6 }] } })],
       })
     );
     expect(result.rows[0]!.chain.map((s) => s.kind)).toEqual(["operation"]);
     expect(result.rows[0]!.readyDate).toBe("2026-10-23");
+  });
+
+  // The row's linked TOs (an earlier reservation, Skapa TO): the service
+  // nets them with uncoveredConfiguredQuantity and derives the batch for the
+  // rest; the check shows the TO in the chain and makes only the rest.
+  const linked = (quantity: number, dueDate: string | null, done = false) => ({
+    manufacturingOrderId: "mo-1",
+    orderNumber: "TO-1",
+    quantity,
+    dueDate,
+    done,
+  });
+  const plannedExisting = {
+    ...existing("wc-1", "2026-11-30", 1),
+    manufacturingOrderId: "mo-1",
+    orderNumber: "TO-1",
+    plannedWeeks: [{ monday: "2026-10-26", minutes: 60 }],
+  };
+
+  it("a configured row's linked TO covers its part on the TO's planned finish day; only the rest is a batch", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("t", "manufactured")),
+        existingOperations: [plannedExisting],
+        rows: [
+          row("t", 2, {
+            key: "cfg",
+            structure: { quantity: 1, operations: [op(10, 8)], materials: [], covered: { quantity: 1, orders: [linked(1, "2026-11-30")] } },
+          }),
+        ],
+      })
+    );
+    // The batch (8 h this week) is ready Friday the 23rd; the TO's planned
+    // week 44 finishes Friday the 30th — the later one is the row's date.
+    expect(result.batches.map((b) => [b.rowKey, b.quantity])).toEqual([["cfg", 1]]);
+    expect(result.rows[0]).toMatchObject({ quantity: 2, readyDate: "2026-10-30", notes: [] });
+    expect(result.rows[0]!.chain).toEqual([
+      expect.objectContaining({ kind: "supply", documentType: "manufacturing_order", documentNumber: "TO-1", quantity: 1, date: "2026-10-30", undated: false, late: false }),
+    ]);
+    expect(result.shipDate).toBe("2026-11-02");
+  });
+
+  it("a configured row fully covered by its linked TO gives no batch; a done TO is ready now", () => {
+    const result = checkDeliveryTime(
+      input({
+        articles: articles(article("t", "manufactured")),
+        rows: [row("t", 2, { key: "cfg", structure: { quantity: 0, operations: [], materials: [], covered: { quantity: 2, orders: [linked(2, null, true)] } } })],
+      })
+    );
+    expect(result.batches).toEqual([]);
+    expect(result.rows[0]).toMatchObject({ readyDate: TODAY, notes: [] });
+    expect(result.rows[0]!.chain).toEqual([expect.objectContaining({ kind: "supply", documentNumber: "TO-1", quantity: 2, date: TODAY })]);
+    expect(result.shipDate).toBe(TODAY);
+  });
+
+  it("a linked TO without plan takes its due date; without a date it counts now, with a note", () => {
+    const dated = checkDeliveryTime(
+      input({
+        articles: articles(article("t", "manufactured")),
+        rows: [row("t", 1, { structure: { quantity: 0, operations: [], materials: [], covered: { quantity: 1, orders: [linked(1, "2026-11-04")] } } })],
+      })
+    );
+    expect(dated.rows[0]).toMatchObject({ readyDate: "2026-11-04", notes: [] });
+    const undated = checkDeliveryTime(
+      input({
+        articles: articles(article("t", "manufactured")),
+        rows: [row("t", 1, { structure: { quantity: 0, operations: [], materials: [], covered: { quantity: 1, orders: [linked(1, null)] } } })],
+      })
+    );
+    expect(undated.rows[0]).toMatchObject({ readyDate: TODAY, notes: ["TO-1 saknar datum — räknad som tillgänglig direkt"] });
+    expect(undated.batches).toEqual([]);
   });
 
   it("a row with an error gets no date and blocks the order's date", () => {
@@ -843,7 +918,7 @@ describe("Leveranstidskontroll — planned load, weeks and batches", () => {
       input({
         articles: articles(article("t", "manufactured"), article("p")),
         overviews: new Map([["p", { onHand: 10, rows: [] }]]),
-        rows: [row("t", 2, { key: "cfg", structure: { operations: [op(10, 8)], materials: [{ articleId: "p", quantity: 6 }] } })],
+        rows: [row("t", 2, { key: "cfg", structure: { quantity: 2, operations: [op(10, 8)], materials: [{ articleId: "p", quantity: 6 }] } })],
       })
     );
     expect(result.batches).toEqual([

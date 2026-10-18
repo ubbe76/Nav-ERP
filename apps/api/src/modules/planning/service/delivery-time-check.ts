@@ -58,11 +58,31 @@ export interface DtcSupplier {
   settings: DeliverySettings; // the supplier's effective delivery days
 }
 
+// A TO already linked to a configured row (an earlier reservation, Skapa TO
+// from the row): what it makes is this row's, ready when the TO is — its
+// planned finish day (the last planned week of its pending operations in
+// `existingOperations`), else its due date, or at once when it is done.
+export interface DtcLinkedOrder {
+  manufacturingOrderId: string;
+  orderNumber: string;
+  quantity: number;
+  dueDate: string | null;
+  done: boolean; // finished goods — in stock for the row now
+}
+
 // A configured (beställningsvara) row brings its own derived structure; the
-// template itself has no pool — a configuration is unique.
+// template itself has no pool — a configuration is unique. The service
+// rounds the shortage up to the article's step BEFORE deriving (the material
+// totals are for the batch quantity), and nets the row's linked TOs with
+// uncoveredConfiguredQuantity — the one implementation behovsberäkningen
+// uses — so a row that already has its TO is never made twice.
 export interface DtcStructure {
+  quantity: number; // the batch to make (the TO's quantity); 0 = nothing to make
   operations: DtcOperation[];
-  materials: { articleId: string; quantity: number }[]; // totals for the row's quantity
+  materials: { articleId: string; quantity: number }[]; // totals for `quantity`
+  // What the linked TOs cover of the row's quantity, and the TOs themselves
+  // (the critical chain names the one that makes the date).
+  covered?: { quantity: number; orders: DtcLinkedOrder[] };
 }
 
 export interface DtcRowInput {
@@ -560,7 +580,12 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
       }
     }
     const operations = structure ? structure.operations : (input.routings.get(article.articleId) ?? []);
-    if (!structure && components.size === 0 && operations.length === 0) notes.noPreparation.add(article.articleNumber);
+    // No structure and no routing: nothing to make a TO of — counted as
+    // available at once (the note says so), no batch.
+    if (!structure && components.size === 0 && operations.length === 0) {
+      notes.noPreparation.add(article.articleNumber);
+      return { readyDate: t0, chain: [] };
+    }
     const scheduled = scheduleOperations(article, operations, quantity, materialReady, notes);
     if (scheduled.readyDate === null) {
       notes.other.add("Kapaciteten räcker inte inom två år");
@@ -609,6 +634,55 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
     return covered;
   }
 
+  // The day a linked TO is ready: the finish day of the last planned week of
+  // its pending operations, else its due date (null = undated).
+  function linkedOrderReady(order: DtcLinkedOrder): string | null {
+    let last: { monday: string; workCenterId: string } | null = null;
+    for (const op of input.existingOperations) {
+      if (op.manufacturingOrderId !== order.manufacturingOrderId || op.operationStatus !== "pending") continue;
+      for (const w of op.plannedWeeks ?? []) {
+        if (!last || w.monday > last.monday) last = { monday: w.monday, workCenterId: op.workCenterId };
+      }
+    }
+    if (!last) return order.dueDate;
+    return book.weekFinishDay(input.workCenters.get(last.workCenterId) ?? null, last.monday, t0);
+  }
+
+  // A configured row: first what its linked TOs already make (a private
+  // pool — the template's stock is other configurations'), then the batch.
+  function resolveConfigured(article: DtcArticle, row: DtcRowInput, structure: DtcStructure, notes: RowNotes): Resolution {
+    let covered: Resolution = { readyDate: null, chain: [] };
+    if (structure.covered && structure.covered.quantity > EPS && structure.covered.orders.length > 0) {
+      const pool = new ArticlePool(t0);
+      for (const order of structure.covered.orders) {
+        const ready = order.done ? t0 : linkedOrderReady(order);
+        pool.add({
+          date: ready === null ? t0 : maxDate(ready, t0),
+          delta: order.quantity,
+          source: {
+            kind: "supply",
+            documentType: "manufacturing_order",
+            documentNumber: order.orderNumber,
+            date: ready,
+            undated: ready === null,
+            late: ready !== null && ready < t0,
+            isDraft: false,
+          },
+        });
+      }
+      const taken = pool.take(structure.covered.quantity, article.articleNumber);
+      covered = { readyDate: taken?.date ?? t0, chain: taken?.chain ?? [] };
+      for (const s of taken?.countsOn ?? []) {
+        if (s.undated) notes.undated.add(s.documentNumber);
+        if (s.late) notes.late.add(s.documentNumber);
+      }
+    }
+    if (structure.quantity <= EPS) return covered.readyDate === null ? { readyDate: t0, chain: [] } : covered;
+    const made = resolveShortage(article, structure.quantity, notes, new Set(), row.key, structure);
+    if (made.readyDate === null || covered.readyDate === null || made.readyDate >= covered.readyDate) return made;
+    return covered;
+  }
+
   // --- Rows ----------------------------------------------------------------
   const rows: DtcRowResult[] = input.rows.map((row) => {
     const article = input.articles.get(row.articleId);
@@ -619,7 +693,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
       return { key: row.key, articleId: row.articleId, articleNumber, quantity: row.quantity, readyDate: null, chain: [], notes: rowNoteTexts(notes) };
     }
     const resolved = row.structure
-      ? resolveShortage(article, row.quantity, notes, new Set(), row.key, row.structure)
+      ? resolveConfigured(article, row, row.structure, notes)
       : resolveNeed(article, row.quantity, notes, new Set(), row.key);
     return {
       key: row.key,

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   createCapacityBook,
+  MIN_PLAN_MINUTES,
   PLAN_HORIZON_WEEKS,
+  roundPlanWeeks,
   type CapacityBookInput,
   type PlanWorkCenter,
 } from "../src/modules/planning/service/capacity-book.js";
@@ -202,6 +204,20 @@ describe("capacity book — placement", () => {
     expect(b.place(wc1, h(1), { floor: TODAY })).toMatchObject({ horizonExceeded: true, partial: [] });
   });
 
+  it("release gives the partial bookings back — Planera's rule when the operation is not planned", () => {
+    const b = book({ horizonWeeks: 2 });
+    const placed = b.place(wc1, h(100), { floor: TODAY });
+    expect(placed).toMatchObject({ horizonExceeded: true, partial: weeks([W43, 40], [W44, 40]) });
+    b.release(wc1, placed.horizonExceeded ? placed.partial : []);
+    expect(b.freeMinutes(wc1, W43, TODAY)).toBe(h(40));
+    expect(b.freeMinutes(wc1, W44, W44)).toBe(h(40));
+    expect(b.place(wc1, h(10), { floor: TODAY })).toMatchObject({ horizonExceeded: false, weeks: weeks([W43, 10]) });
+    // Releasing nothing, or on a resource without bookings, is harmless.
+    b.release(wc1, []);
+    b.release({ ...wc1, workCenterId: "wc-9" }, weeks([W43, 5]));
+    expect(b.freeMinutes(wc1, W43, TODAY)).toBe(h(30));
+  });
+
   it("a floor beyond the horizon is reported from the floor's week", () => {
     const placed = book({ horizonWeeks: 2 }).place(wc1, h(1), { floor: W45 });
     expect(placed).toMatchObject({ horizonExceeded: true, searchedFrom: W45, searchedTo: W44, partial: [] });
@@ -219,6 +235,58 @@ describe("capacity book — placement", () => {
     expect(b.weekFinishDay(wc1, W43, TODAY)).toBe("2026-10-23"); // the resource's own calendar, not offDays
     expect(b.weekFinishDay(null, W43, TODAY)).toBe("2026-10-22"); // no calendar: company working days
     expect(b.weekFinishDay(wc1, W43, "2026-10-24")).toBe("2026-10-26"); // floor after the last working day: the next working day, never a Saturday
+  });
+
+  it("never books less than a hundredth of a minute: a tiny rest goes with the last whole piece", () => {
+    // 40 h + 0.0003 min: the week's 40 h is the last whole piece, the rest
+    // (under the threshold, a row the CHECK would refuse) joins it instead
+    // of becoming a week of its own.
+    const b = book();
+    const placed = b.place(wc1, h(40) + 0.0003, { floor: TODAY });
+    expect(placed).toMatchObject({ horizonExceeded: false, fromWeek: W43, toWeek: W43 });
+    expect(placed.horizonExceeded ? [] : placed.weeks).toEqual([{ monday: W43, minutes: h(40) + 0.0003 }]);
+    // The total is preserved and no row is under the threshold.
+    const total = (placed.horizonExceeded ? [] : placed.weeks).reduce((s, w) => s + w.minutes, 0);
+    expect(total).toBeCloseTo(h(40) + 0.0003, 6);
+    expect((placed.horizonExceeded ? [] : placed.weeks).every((w) => w.minutes >= MIN_PLAN_MINUTES)).toBe(true);
+  });
+
+  it("a week with less than a hundredth of a minute free is skipped, and an operation under the threshold books nothing", () => {
+    // 0.0004 min free in week 43: nothing is booked there, the operation
+    // starts in week 44.
+    const b = book({ existingOperations: [existing("wc-1", "2026-10-21", 0, { setupTime: h(40) - 0.0004 })] });
+    expect(b.freeMinutes(wc1, W43, TODAY)).toBeCloseTo(0.0004, 6);
+    const placed = b.place(wc1, h(10), { floor: TODAY });
+    expect(placed).toMatchObject({ horizonExceeded: false, fromWeek: W44, toWeek: W44 });
+    expect(placed.horizonExceeded ? [] : placed.weeks).toEqual(weeks([W44, 10]));
+    // 0.0003 min on its own: no week at all — the caller clears the plan.
+    const tiny = b.place(wc1, 0.0003, { floor: TODAY });
+    expect(tiny).toMatchObject({ horizonExceeded: false, fromWeek: W43, toWeek: W43 });
+    expect(tiny.horizonExceeded ? null : tiny.weeks).toEqual([]);
+    expect(MIN_PLAN_MINUTES).toBe(0.01);
+  });
+
+  it("roundPlanWeeks: what the database holds — two decimals, no row under 0.01, the total kept", () => {
+    const sum = (list: PlannedWeek[]) => list.reduce((s, w) => s + w.minutes, 0);
+    // A trailing 0.0003 joins the week before it; a leading 0.0004 the week after.
+    expect(roundPlanWeeks([{ monday: W43, minutes: 2400 }, { monday: W44, minutes: 0.0003 }])).toEqual([{ monday: W43, minutes: 2400 }]);
+    expect(roundPlanWeeks([{ monday: W43, minutes: 0.0004 }, { monday: W44, minutes: 600 }])).toEqual([{ monday: W44, minutes: 600 }]);
+    // A tiny middle week joins the previous one; unsorted input is sorted.
+    const middle = roundPlanWeeks([{ monday: W45, minutes: 100.004 }, { monday: W43, minutes: 50.003 }, { monday: W44, minutes: 0.004 }]);
+    expect(middle).toEqual([{ monday: W43, minutes: 50.01 }, { monday: W45, minutes: 100 }]);
+    expect(sum(middle)).toBeCloseTo(150.01, 10); // = round2(150.011)
+    expect(middle.every((w) => w.minutes >= MIN_PLAN_MINUTES)).toBe(true);
+    // Rounding residuals land in the last row so the rows add up to the
+    // total: 3 × 1.004 = 3.012 ⇒ 3.01, not 3.00.
+    expect(roundPlanWeeks([{ monday: W43, minutes: 1.004 }, { monday: W44, minutes: 1.004 }, { monday: W45, minutes: 1.004 }])).toEqual([
+      { monday: W43, minutes: 1 },
+      { monday: W44, minutes: 1 },
+      { monday: W45, minutes: 1.01 },
+    ]);
+    // Duplicate Mondays are summed (one row per week); all tiny ⇒ nothing.
+    expect(roundPlanWeeks([{ monday: W43, minutes: 5 }, { monday: W43, minutes: 2.5 }])).toEqual([{ monday: W43, minutes: 7.5 }]);
+    expect(roundPlanWeeks([{ monday: W43, minutes: 0.0003 }, { monday: W44, minutes: 0.0004 }])).toEqual([]);
+    expect(roundPlanWeeks([])).toEqual([]);
   });
 
   it("the capacity factor scales the week", () => {

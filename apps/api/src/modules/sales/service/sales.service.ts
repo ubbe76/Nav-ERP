@@ -750,6 +750,19 @@ export function createSalesService(
       return { orderNumber: order.orderNumber, previous: order.expectedDeliveryDate };
     },
 
+    // Reservationen's lock order: every KO row that gets a TO is locked
+    // FOR UPDATE — sorted by id, one at a time — BEFORE the first TO is
+    // created, so the transaction's order is advisory → rows → order header
+    // (markInProduction). A TO per row would otherwise lock row 1, then the
+    // header, then row 2 — the reverse of updateRow/replaceRowConfiguration
+    // (row → header) — and two orders' worth of rows could deadlock. A row
+    // that no longer exists is left to the TO's own LinkedRowNotFoundError.
+    async lockRowsInTx(tx: Tx, rowIds: string[]): Promise<void> {
+      for (const rowId of [...new Set(rowIds)].sort()) {
+        await repo.lockRowForManufacturing(tx, rowId);
+      }
+    },
+
     async createQuote(input: CreateQuoteInput, createdBy: string | null) {
       // The delivery address must belong to the ordering customer.
       if (input.deliveryAddressId) {

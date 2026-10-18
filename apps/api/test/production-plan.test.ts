@@ -306,8 +306,53 @@ describe("Planera — lego, resources without calendar, horizon, Sen", () => {
         message: "Kapaciteten räcker inte inom två år — Op 20 på 110 och efterföljande operationer är inte planerade",
       },
     ]);
-    // No Sen for a TO without a finish.
+    // No Sen for a TO without a finish whose due date is still ahead.
     expect(result.orders[0]).toMatchObject({ plannedFinish: null, late: false });
+  });
+
+  it("the horizon releases the partial bookings — a later TO in the same run may use that capacity", () => {
+    const result = plan({
+      horizonWeeks: 1,
+      orders: [
+        order("a", "TO-1", "2026-10-23", (o) => [pop(o, 10, 10), pop(o, 20, 50)]),
+        // Due later, so planned after TO-1: week 43 has 30 h left once
+        // TO-1's partial 30 h of Op 20 are given back.
+        order("b", "TO-2", "2026-10-30", (o) => [pop(o, 10, 20)]),
+      ],
+    });
+    expect(plansOf(result)).toEqual([
+      ["a:10", weeks([W43, 10])],
+      ["b:10", weeks([W43, 20])],
+    ]);
+    expect(result.warnings.map((w) => [w.kind, w.orderNumber])).toEqual([["horizon", "TO-1"]]);
+  });
+
+  it("a TO that hit the horizon is Sen when its due date has passed — as the matrix says", () => {
+    const result = plan({
+      horizonWeeks: 1,
+      orders: [order("a", "TO-1", "2026-10-16", (o) => [pop(o, 10, 50)])],
+    });
+    expect(result.plans).toEqual([]);
+    expect(result.orders[0]).toEqual({ manufacturingOrderId: "a", orderNumber: "TO-1", dueDate: "2026-10-16", plannedFinish: null, late: true });
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ kind: "horizon", sequenceNo: 10 }),
+      {
+        kind: "late",
+        manufacturingOrderId: "a",
+        orderNumber: "TO-1",
+        dueDate: "2026-10-16",
+        plannedFinish: null,
+        message: "TO-1 är inte planerad och färdigdatumet 2026-10-16 har passerat",
+      },
+    ]);
+  });
+
+  it("an operation with less than a hundredth of a minute left is cleared, never planned", () => {
+    const result = plan({
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 0, { setupTime: 0.0003, plannedWeeks: weeks([W43, 1]) }), pop(o, 20, 10)])],
+    });
+    expect(result.clear).toEqual(["a:10"]);
+    expect(plansOf(result)).toEqual([["a:20", weeks([W43, 10])]]);
   });
 });
 
@@ -356,7 +401,62 @@ describe("Planera — Flytta (forced start on one operation)", () => {
       orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10), pop(o, 20, 10, { planLocked: true, plannedWeeks: weeks([W44, 10]) })])],
     });
     expect(plansOf(result)).toEqual([["a:10", weeks([W46, 10])]]);
-    expect(result.warnings).toEqual([expect.objectContaining({ kind: "sequence", sequenceNo: 20 })]);
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ kind: "sequence", sequenceNo: 20, message: "Op 20 på 110 är låst i veckan som börjar 2026-10-26, före föregående operation är klar (2026-11-13)" }),
+    ]);
+  });
+
+  it("an operation kept where it is by a move (fixed, not locked) says so in the sequence-break text", () => {
+    const result = plan({
+      forceStart: { operationId: "a:10", weekMonday: W46 },
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10), pop(o, 20, 10, { fixed: true, plannedWeeks: weeks([W44, 10]) })])],
+    });
+    // Kept as fixed load: not replanned, not cleared.
+    expect(plansOf(result)).toEqual([["a:10", weeks([W46, 10])]]);
+    expect(result.clear).toEqual([]);
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        kind: "sequence",
+        sequenceNo: 20,
+        message: "Op 20 på 110 är planerad och ligger fast i veckan som börjar 2026-10-26, före föregående operation är klar (2026-11-13)",
+      }),
+    ]);
+  });
+
+  it("a started later operation forced into the current week before the previous one is done is a sequence break", () => {
+    const started = { orderQuantity: 10, setupTime: 0, runTimePerUnit: 60, quantityCompleted: 2, started: true };
+    // Planera: Op 10 (50 h) finishes in week 44, Op 20 is under way and
+    // starts this week regardless.
+    const planned = plan({
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 50), pop(o, 20, 0, started)])],
+    });
+    expect(plansOf(planned)).toEqual([
+      ["a:10", weeks([W43, 40], [W44, 10])],
+      ["a:20", weeks([W43, 8])],
+    ]);
+    expect(planned.warnings).toEqual([
+      {
+        kind: "sequence",
+        manufacturingOrderId: "a",
+        orderNumber: "TO-1",
+        sequenceNo: 20,
+        workCenterCode: "110",
+        message: "Op 20 på 110 är påbörjad i veckan som börjar 2026-10-19, före föregående operation är klar (2026-10-30)",
+      },
+    ]);
+    // Flytta Op 10 to week 45 with the started Op 20 following: same break.
+    const moved = plan({
+      forceStart: { operationId: "a:10", weekMonday: W45 },
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10), pop(o, 20, 0, started)])],
+    });
+    expect(plansOf(moved)).toEqual([
+      ["a:10", weeks([W45, 10])],
+      ["a:20", weeks([W43, 8])],
+    ]);
+    expect(moved.warnings).toEqual([expect.objectContaining({ kind: "sequence", sequenceNo: 20 })]);
+    // In the same week as the previous one finishes: no break.
+    const same = plan({ orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 10), pop(o, 20, 0, started)])] });
+    expect(same.warnings).toEqual([]);
   });
 });
 

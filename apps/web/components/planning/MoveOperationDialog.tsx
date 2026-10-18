@@ -70,6 +70,8 @@ function MoveForm({
   const [error, setError] = useState<string | null>(null);
   // Set once a move went through with warnings: the dialog stays to show them.
   const [warnings, setWarnings] = useState<PlanWarning[] | null>(null);
+  // The order's new planned weeks, from the move response.
+  const [movedWeeks, setMovedWeeks] = useState<{ start: string | null; end: string | null; locked: boolean } | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -82,10 +84,14 @@ function MoveForm({
         body: JSON.stringify({ weekMonday, moveFollowing }),
       });
       onChanged();
-      if (res.warnings.length > 0) setWarnings(res.warnings);
-      else onClose();
+      if (res.warnings.length > 0) {
+        setMovedWeeks({ start: res.operation.plannedStartWeek, end: res.operation.plannedEndWeek, locked: res.operation.planLocked });
+        setWarnings(res.warnings);
+      } else onClose();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte flytta operationen"));
+      // The operation may have changed meanwhile — show the matrix as it is.
+      onChanged();
     } finally {
       setBusy(false);
     }
@@ -102,12 +108,15 @@ function MoveForm({
       onClose();
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte låsa upp operationen"));
+      onChanged();
     } finally {
       setBusy(false);
     }
   }
 
-  const planned = plannedWeekLabel(order.plannedStartWeek, order.plannedEndWeek);
+  const planned = movedWeeks
+    ? plannedWeekLabel(movedWeeks.start, movedWeeks.end)
+    : plannedWeekLabel(order.plannedStartWeek, order.plannedEndWeek);
 
   return (
     <form onSubmit={submit}>
@@ -127,7 +136,7 @@ function MoveForm({
         <dt>Planerad</dt>
         <dd>
           {planned ?? "Ej planerad"}
-          {order.planLocked ? " · Låst" : ""}
+          {(movedWeeks ? movedWeeks.locked : order.planLocked) ? " · Låst" : ""}
         </dd>
       </dl>
 

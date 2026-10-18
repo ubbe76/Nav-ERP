@@ -119,8 +119,12 @@ export type MoveOperationInput = z.infer<typeof moveOperationSchema>;
 // created with the weeks the check booked, and the order's Förväntat
 // leveransdatum is set. deliveryDate is the date the client was shown — a
 // different outcome under the lock is refused (delivery-time-changed).
+// expectedOrders: the number of TOs the client showed (the check's
+// batches.length) — a different count under the lock is refused the same
+// way. Left out, only the date is compared.
 export const applyDeliveryTimeSchema = z.object({
   salesOrderId: z.string().uuid(),
   deliveryDate: businessDateSchema,
+  expectedOrders: z.number().int().min(0).optional(),
 });
 export type ApplyDeliveryTimeInput = z.infer<typeof applyDeliveryTimeSchema>;

@@ -76,6 +76,46 @@ export interface PlaceOptions {
   forceStartWeek?: string;
 }
 
+// The smallest piece the book places in a week — mo_operation_plan_weeks
+// stores minutes with two decimals under CHECK minutes > 0, so anything
+// under a hundredth of a minute would round to a row the database refuses.
+// Free time under it counts as none, and a rest under it goes with the
+// last whole piece instead of becoming a week of its own.
+export const MIN_PLAN_MINUTES = 0.01;
+
+// An allocation as mo_operation_plan_weeks can hold it (writeOperationPlans
+// runs every allocation through this): ascending weeks, one row per Monday,
+// two decimals, every row ≥ MIN_PLAN_MINUTES. Minutes a week would lose to
+// the rounding go to the previous kept week (the first week's to the next),
+// and the rounding residual lands in the last row so the rows add up to the
+// total at two decimals. [] when the whole allocation rounds away — the
+// caller clears the operation.
+export function roundPlanWeeks(weeks: PlannedWeek[]): PlannedWeek[] {
+  const byMonday = new Map<string, number>();
+  for (const w of weeks) byMonday.set(w.monday, (byMonday.get(w.monday) ?? 0) + w.minutes);
+  const sorted = [...byMonday].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const total = sorted.reduce((sum, [, minutes]) => sum + minutes, 0);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const kept: PlannedWeek[] = [];
+  let carry = 0;
+  for (const [monday, raw] of sorted) {
+    const minutes = raw + carry;
+    carry = 0;
+    if (round2(minutes) < MIN_PLAN_MINUTES) {
+      if (kept.length > 0) kept[kept.length - 1]!.minutes += minutes;
+      else carry = minutes;
+      continue;
+    }
+    kept.push({ monday, minutes });
+  }
+  if (carry > 0 && kept.length > 0) kept[kept.length - 1]!.minutes += carry;
+  const rounded = kept.map((w) => ({ monday: w.monday, minutes: round2(w.minutes) })).filter((w) => w.minutes >= MIN_PLAN_MINUTES);
+  if (rounded.length === 0) return [];
+  const last = rounded[rounded.length - 1]!;
+  last.minutes = round2(last.minutes + (round2(total) - rounded.reduce((sum, w) => sum + w.minutes, 0)));
+  return last.minutes >= MIN_PLAN_MINUTES ? rounded : rounded.slice(0, -1);
+}
+
 const EPS = 1e-9;
 const maxDate = (a: string, b: string) => (a > b ? a : b);
 
@@ -85,6 +125,10 @@ export interface CapacityBook {
   readonly horizonMonday: string; // the first Monday outside the horizon
   readonly lookups: ScheduleLookups;
   place(wc: PlanWorkCenter | null, minutes: number, options: PlaceOptions): Placement;
+  // Gives booked weeks back — Planera's rule for an operation that hit the
+  // horizon: its partial bookings must not stay as phantom load for the
+  // TOs planned after it (Leveranstidskontrollen keeps them on purpose).
+  release(wc: PlanWorkCenter, weeks: PlannedWeek[]): void;
   // A lego operation: ready `leadTimeDays` working days after `floor`
   // (null = 0 days). Books nothing — the supplier's capacity is not ours.
   subcontract(wc: PlanWorkCenter, floor: string): string;
@@ -168,6 +212,11 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
     weeks.set(monday, (weeks.get(monday) ?? 0) + minutes);
     booked.set(wc.workCenterId, weeks);
   }
+  function release(wc: PlanWorkCenter, weeks: PlannedWeek[]) {
+    const own = booked.get(wc.workCenterId);
+    if (!own) return;
+    for (const w of weeks) own.set(w.monday, Math.max(0, (own.get(w.monday) ?? 0) - w.minutes));
+  }
   const finishDay = (wc: PlanWorkCenter | null, monday: string, floor: string) =>
     weekFinishDay(lookups, offDays, wc, monday, floor);
 
@@ -176,11 +225,13 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
     const floor = options.forceStartWeek ? maxDate(maxDate(options.forceStartWeek, firstMonday), today) : options.floor;
     const startMonday = mondayOf(floor);
     if (!wc || !hasCapacityCalendar(wc)) {
-      // No calendar: unlimited — everything in the floor's week.
-      if (wc) book(wc, startMonday, minutes);
+      // No calendar: unlimited — everything in the floor's week (nothing at
+      // all under the threshold).
+      const whole = minutes >= MIN_PLAN_MINUTES;
+      if (wc && whole) book(wc, startMonday, minutes);
       return {
         horizonExceeded: false,
-        weeks: [{ monday: startMonday, minutes }],
+        weeks: whole ? [{ monday: startMonday, minutes }] : [],
         fromWeek: startMonday,
         toWeek: startMonday,
         readyDate: finishDay(null, startMonday, floor),
@@ -192,7 +243,7 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
     let rest = minutes;
     let dayFloor = floor;
     let forced = !!options.forceStartWeek;
-    while (rest > EPS) {
+    while (rest >= MIN_PLAN_MINUTES) {
       if (monday >= horizonMonday) {
         return {
           horizonExceeded: true,
@@ -202,14 +253,17 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
         };
       }
       const room = forced ? weekCapacity(wc, monday) : freeMinutes(wc, monday, dayFloor);
-      const take = Math.min(rest, room);
-      if (take > EPS) {
+      let take = Math.min(rest, room);
+      // What would be left after this week is under the threshold: it goes
+      // here, with the last whole piece, never as a week of its own.
+      if (rest - take < MIN_PLAN_MINUTES) take = rest;
+      if (take >= MIN_PLAN_MINUTES) {
         book(wc, monday, take);
         weeks.push({ monday, minutes: take });
         rest -= take;
       }
       forced = false;
-      if (rest > EPS) {
+      if (rest >= MIN_PLAN_MINUTES) {
         monday = addDays(monday, 7);
         dayFloor = monday;
       }
@@ -230,6 +284,7 @@ export function createCapacityBook(input: CapacityBookInput): CapacityBook {
     horizonMonday,
     lookups,
     place,
+    release,
     subcontract: (wc, floor) => addWorkingDays(floor, Math.ceil(wc.leadTimeDays ?? 0), offDays),
     undatedMinutes: (workCenterId) => undatedLoad.get(workCenterId) ?? 0,
     weekCapacity,

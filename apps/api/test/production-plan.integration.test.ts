@@ -17,6 +17,7 @@ import {
   createPlanningService,
   OperationNotFoundError,
   OperationNotPlannableError,
+  PlanWeekInPastError,
   type ManufacturingPlanReader,
 } from "../src/modules/planning/service/planning.service.js";
 
@@ -412,6 +413,17 @@ describe("Flytta and Lås upp", () => {
     expect(await planRows(a.op20.id)).toEqual([{ monday: W2, minutes: 1200 }]);
   });
 
+  it("refuses a week before the current one, writing nothing", async () => {
+    const world = await seedWorld();
+    const a = await createOrder(world, 20, W4);
+    await expect(planningService.moveOperation(a.op10.id, { weekMonday: "2030-02-25", moveFollowing: true }, world.user.id)).rejects.toBeInstanceOf(
+      PlanWeekInPastError
+    );
+    expect(await planRows(a.op10.id)).toEqual([{ monday: W1, minutes: 1200 }]);
+    expect(await opRow(a.op10.id)).toMatchObject({ plannedStartWeek: W1, planLocked: false });
+    expect(auditEntries.some((e) => e.action === "operation_moved")).toBe(false);
+  });
+
   it("refuses what cannot be planned", async () => {
     const world = await seedWorld();
     const a = await createOrder(world, 20, W4);
@@ -430,6 +442,79 @@ describe("Flytta and Lås upp", () => {
     await expect(planningService.moveOperation(b.op10.id, { weekMonday: W2, moveFollowing: true }, world.user.id)).rejects.toBeInstanceOf(
       OperationNotPlannableError
     );
+  });
+});
+
+describe("the written allocation", () => {
+  // Routes whose times do not come out in whole hundredths of a minute: a
+  // rest under 0.01 min used to become a row the CHECK (minutes > 0, two
+  // decimals) refused — a 500 in Planera, Flytta and every TO creation.
+  async function tinyArticle(world: Awaited<ReturnType<typeof seedWorld>>, runTimePerUnit: number) {
+    const article = await articleService.createArticle({
+      articleNumber: `TINY-${crypto.randomUUID().slice(0, 8)}`,
+      name: "Små minuter",
+      type: "manufactured",
+      active: true,
+    });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: world.r1.id, setupTime: 0, runTimePerUnit });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: world.r2.id, setupTime: 0, runTimePerUnit });
+    return article;
+  }
+
+  it("never writes a row under 0.01 min: a tiny rest joins the last whole piece, a tiny operation is cleared", async () => {
+    const world = await seedWorld();
+    // 40 h + 0.004 min on each resource: one row of 2400.00, not a second
+    // week of 0.00.
+    const nearlyWhole = await tinyArticle(world, 60.0001);
+    const a = await mfgService.createManufacturingOrder({ articleId: nearlyWhole.id, quantity: 40, dueDate: W4 }, world.user.id);
+    const aOps = await mfgService.listOperations(a.id);
+    expect(a.releaseWarnings).toEqual([]);
+    for (const op of aOps) {
+      expect(await planRows(op.id)).toEqual([{ monday: W1, minutes: 2400 }]);
+      expect(await opRow(op.id)).toMatchObject({ plannedStartWeek: W1, plannedEndWeek: W1 });
+    }
+    // 3 × 0.0001 = 0.0003 min: nothing to plan — no row, no mirror, no error.
+    const tiny = await tinyArticle(world, 0.0001);
+    const b = await mfgService.createManufacturingOrder({ articleId: tiny.id, quantity: 3, dueDate: W4 }, world.user.id);
+    const bOps = await mfgService.listOperations(b.id);
+    expect(b.releaseWarnings).toEqual([]);
+    for (const op of bOps) {
+      expect(await planRows(op.id)).toEqual([]);
+      expect(await opRow(op.id)).toMatchObject({ plannedStartWeek: null, plannedEndWeek: null, planLocked: false });
+    }
+    // Planera and Flytta on the same load go through too; the 0.0003-minute
+    // operation is not plannable by hand (no time).
+    const run = await planningService.planProductionRun(world.user.id);
+    expect(run.warnings).toEqual([]);
+    expect(await planRows(aOps[0]!.id)).toEqual([{ monday: W1, minutes: 2400 }]);
+    const moved = await planningService.moveOperation(aOps[0]!.id, { weekMonday: W2, moveFollowing: true }, world.user.id);
+    expect(moved.operation).toEqual({ plannedStartWeek: W2, plannedEndWeek: W2, planLocked: true });
+    expect(await planRows(aOps[0]!.id)).toEqual([{ monday: W2, minutes: 2400 }]);
+    await expect(planningService.moveOperation(bOps[0]!.id, { weekMonday: W2, moveFollowing: true }, world.user.id)).rejects.toMatchObject({
+      name: "OperationNotPlannableError",
+      reason: "no_time",
+    });
+    expect(await duplicateAllocations()).toEqual([]);
+  });
+
+  it("mirrors start/end from the written rows and stamps one plannedAt for the whole run", async () => {
+    const world = await seedWorld();
+    const orders = [await createOrder(world, 50, W4), await createOrder(world, 30, "2030-03-05"), await createOrder(world, 45, W3)];
+    const run = await planningService.planProductionRun(world.user.id);
+    expect(run.operations).toBe(6);
+    const stamps = new Set<string>();
+    for (const o of orders) {
+      for (const op of [o.op10, o.op20]) {
+        const rows = await planRows(op.id);
+        const row = await opRow(op.id);
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows.every((r) => r.minutes >= 0.01)).toBe(true);
+        expect([row.plannedStartWeek, row.plannedEndWeek]).toEqual([rows[0]!.monday, rows[rows.length - 1]!.monday]);
+        stamps.add(row.plannedAt!.toISOString());
+      }
+    }
+    expect(stamps.size).toBe(1);
+    expect([...stamps][0]).toBe(run.plannedAt);
   });
 });
 

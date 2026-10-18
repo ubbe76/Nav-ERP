@@ -5,9 +5,9 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import { createPlanningRepository } from "../src/modules/planning/repository/planning.repository.js";
-import { createPlanningService, type ManufacturingPlanReader } from "../src/modules/planning/service/planning.service.js";
-import { CONFIGURED_MFG_TRUNCATE, confirmedRow, resetCostingSettings } from "./helpers/configured-manufacturing.js";
-import { configurator, makeUser, purchaseService, resetConfiguredRows, salesRepository, salesService } from "./helpers/configured-rows.js";
+import { createPlanningService, NothingToReserveError, type ManufacturingPlanReader } from "../src/modules/planning/service/planning.service.js";
+import { buildToOrderWithStructure, CONFIGURED_MFG_TRUNCATE, confirmedRow, FULL, resetCostingSettings } from "./helpers/configured-manufacturing.js";
+import { configurator, makeCustomer, makeUser, purchaseService, resetConfiguredRows, salesRepository, salesService } from "./helpers/configured-rows.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 
 // Reservationen on a configured (beställningsvara) KO row: the TO goes the
@@ -97,5 +97,107 @@ describe("reservationen — configured row", () => {
     expect(await planRows(ops[1]!.id)).toEqual(batch.operations[1]!.weeks);
     const after = await salesService.getSalesOrder(order.id);
     expect(after).toMatchObject({ status: "in_production", expectedDeliveryDate: check.deliveryDate });
+    // The promised weeks are locked.
+    expect(ops.map((o) => o.planLocked)).toEqual([true, true]);
+
+    // The row now has its TO: the next check nets it (the same rule as
+    // behovsberäkningen's uncoveredConfiguredQuantity), shows the TO in the
+    // chain and finds nothing to make — a second reservation is refused,
+    // never a second TO for the same row.
+    const again = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    expect(again.batches).toEqual([]);
+    expect(again.rows[0]).toMatchObject({ quantity: 2, readyDate: expect.any(String), notes: [] });
+    expect(again.rows[0]!.chain).toEqual([
+      expect.objectContaining({ kind: "supply", documentType: "manufacturing_order", documentNumber: mo.orderNumber, quantity: 2 }),
+    ]);
+    expect(again.deliveryDate).toBe(check.deliveryDate);
+    await expect(planning.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: again.deliveryDate! }, user.id)).rejects.toBeInstanceOf(
+      NothingToReserveError
+    );
+    expect(await mfg.coverageForSalesOrderRows([row.id])).toEqual(new Map([[row.id, expect.objectContaining({ quantity: 2 })]]));
+  });
+
+  it("rounds the batch up to the template's step and answers with the TO's own quantity", async () => {
+    const user = await makeUser();
+    const { s, order, row } = await confirmedRow(2);
+    // Set after the order so the row itself stays 2 (the sales row is
+    // rounded too, on its own).
+    await testArticleService.updateArticle(s.article.id, { rounding: 5 } as never);
+    const check = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    expect(check.rows[0]).toMatchObject({ quantity: 2 });
+    expect(check.batches[0]).toMatchObject({ rowKey: row.id, quantity: 5 });
+    // The structure is derived for the batch: op 10 is 6 + 5 × 3 = 21 min.
+    expect(check.batches[0]!.operations[0]!.weeks.map((w) => w.minutes)).toEqual([21]);
+
+    const applied = await planning.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate!, expectedOrders: 1 }, user.id);
+    expect(applied.manufacturingOrders[0]).toMatchObject({ quantity: 5, salesOrderRowId: row.id });
+    const mo = (await mfg.getManufacturingOrder(applied.manufacturingOrders[0]!.id))!;
+    expect(Number(mo.quantity)).toBe(5);
+    expect(applied.warnings).toContain(`${mo.orderNumber}: Skruv: behöver 40, tillgängligt 0`);
+    // The plan written is the check's (21 minutes), not a re-plan.
+    const ops = await mfg.listOperations(mo.id);
+    expect(await planRows(ops[0]!.id)).toEqual(check.batches[0]!.operations[0]!.weeks);
+  });
+
+  it("locks every KO row before the first TO: a row edit during the reservation waits instead of deadlocking", async () => {
+    const user = await makeUser();
+    const s = await buildToOrderWithStructure();
+    const c = await makeCustomer();
+    const { order, rows } = await salesService.createQuote(
+      {
+        customerId: c.id,
+        confirm: true,
+        rows: [
+          { articleId: s.article.id, quantity: 1, configuration: { selection: FULL } },
+          { articleId: s.article.id, quantity: 2, configuration: { selection: { ...FULL, AVLOPP: false } } },
+        ],
+      } as never,
+      null
+    );
+    const check = await planning.checkDeliveryTime({ salesOrderId: order.id });
+    expect(check.batches.map((b) => [b.rowKey, b.quantity])).toEqual([
+      [rows[0]!.id, 1],
+      [rows[1]!.id, 2],
+    ]);
+
+    // While the first TO is being created the reservation already holds
+    // both rows (advisory → rows → order header): an edit of row 2 blocks
+    // on its row lock until the commit. Without the up-front row locks the
+    // edit would take row 2 and wait for the header (held since TO 1's
+    // markInProduction) while TO 2 waits for row 2 — a deadlock.
+    let edit: Promise<unknown> | null = null;
+    const racing = createPlanningService(createPlanningRepository(db), {
+      purchase: purchaseService as never,
+      manufacturing: {
+        ...mfg,
+        createManufacturingOrderInTx: async (tx, input, createdBy, opts) => {
+          if (!edit) {
+            edit = salesService.updateRow(order.id, rows[1]!.id, { unitPrice: 999 }, user.id);
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
+          return mfg.createManufacturingOrderInTx(tx, input, createdBy, opts);
+        },
+      },
+      configuredStructure: (t, sel, q, o) => configurator.deriveForManufacturing(t, sel, q, o),
+      requirementsCacheMs: 0,
+      salesOrderDates: salesService,
+    });
+    let applied;
+    try {
+      applied = await racing.applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate!, expectedOrders: 2 }, user.id);
+    } finally {
+      // Never leave the edit running into the next test's truncate.
+      if (edit) await (edit as Promise<unknown>).catch(() => undefined);
+    }
+    expect(applied.manufacturingOrders.map((m) => [m.salesOrderRowId, m.quantity])).toEqual([
+      [rows[0]!.id, 1],
+      [rows[1]!.id, 2],
+    ]);
+    // The edit went through after the commit (the row → TO links are the
+    // salesOrderRowIds above — this salesService has no coverage reader).
+    await edit!;
+    const after = await salesService.listRows(order.id);
+    expect(after.map((r) => Number(r.unitPrice))).toEqual([Number(rows[0]!.unitPrice), 999]);
+    expect(await salesService.getSalesOrder(order.id)).toMatchObject({ status: "in_production", expectedDeliveryDate: check.deliveryDate });
   });
 });

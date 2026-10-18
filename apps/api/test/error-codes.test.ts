@@ -3,6 +3,7 @@ import {
   NothingToReserveError,
   OperationNotFoundError,
   OperationNotPlannableError,
+  PlanWeekInPastError,
   SalesOrderNotOpenError,
 } from "../src/modules/planning/service/planning.service.js";
 import { readFileSync } from "node:fs";
@@ -448,6 +449,7 @@ const cases: Array<[Error, string]> = [
   [new ManufacturingOrderStampedInError(), ERROR_CODES.MANUFACTURING_ORDER_STAMPED_IN],
   [new OperationNotFoundError("x"), ERROR_CODES.OPERATION_NOT_FOUND],
   [new OperationNotPlannableError("done"), ERROR_CODES.OPERATION_NOT_PLANNABLE],
+  [new PlanWeekInPastError("2030-02-25", "2030-03-04"), ERROR_CODES.PLAN_WEEK_IN_PAST],
   [
     new DeliveryTimeChangedError("2030-03-20", { shipDate: null, deliveryDate: null, rows: [], notes: [], batches: [] }),
     ERROR_CODES.DELIVERY_TIME_CHANGED,

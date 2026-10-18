@@ -255,10 +255,11 @@ Räknade kontrollen med tillverkade artiklar som saknas i lager, visas under res
 - Det skapas **en tillverkningsorder per brist-parti på varje nivå** i strukturen: kundorderradens artikel (kopplad till raden, som **Skapa tillverkningsorder** — raden visar därefter **I tillverkning**) och de halvfabrikat som saknas under den (vanliga tillverkningsordrar med noteringen "Skapad från leveranstidskontroll för KO-…"). Antalet är bristen (avrundat enligt artikelns **Avrundning**), färdigdatumet är det datum kontrollen räknade för partiet.
 - Ordrarna **planeras i exakt de veckor kontrollen räknade med**, så att det lovade datumet håller kapaciteten — de syns direkt i [Beläggning](/hjalp/tillverkning#belaggning). Halvfabrikaten skapas före sin förälder.
 - **Inköp skapas inte.** Material som måste köpas syns i Behovsberäkningen, som skapar inköpsorderna med **Skapa ordrar**.
+- Tillverkningsordrarna **låses** i de veckor kontrollen räknade, så att **Planera** i [Beläggning](/hjalp/tillverkning#belaggning) inte flyttar dem — det lovade datumet håller tills någon väljer **Lås upp** på operationen.
 - Allt eller inget: går något fel skapas ingen order alls och datumet ändras inte.
 - Efter lyckat resultat visar dialogen de skapade tillverkningsordrarna med länkar (till dem du har behörighet att öppna) och orderkortet läses om.
-- **Läget kan ha ändrats:** har någon annan hunnit boka kapacitet eller skapa en order sedan kontrollen, visas "Läget har ändrats sedan kontrollen — det nya datumet är …" och dialogen byter till den nya kontrollen. Ingenting har skapats — granska resultatet och klicka **Använd datumet** igen.
-- Finns det inget att skapa (allt täcks av lager och öppna ordrar) visas ett felmeddelande; avkryssa kryssrutan för att bara sätta datumet.
+- **Läget kan ha ändrats:** har någon annan hunnit boka kapacitet eller skapa en order sedan kontrollen, eller har antalet tillverkningsordrar som skulle skapas ändrats, visas "Läget har ändrats sedan kontrollen — det nya datumet är …" och dialogen byter till den nya kontrollen. Ingenting har skapats — granska resultatet och klicka **Använd datumet** igen.
+- Finns det inget att skapa (allt täcks av lager och öppna ordrar) visas ingen kryssruta, och **Använd datumet** sätter bara datumet.
 
 ### Vad som räknas
 

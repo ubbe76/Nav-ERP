@@ -259,12 +259,15 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
     const parentOps = await mfgService.listOperations(parentMo!.id);
     expect(await planRows(childOps[0]!.id)).toEqual([{ monday: W1, minutes: 600 }]);
     expect(await planRows(parentOps[0]!.id)).toEqual(parentBatch!.operations[0]!.weeks);
-    expect(childOps[0]).toMatchObject({ plannedStartWeek: W1, plannedEndWeek: W1, planLocked: false });
+    // The promised weeks are locked (plan_locked): Planera keeps them.
+    expect(childOps[0]).toMatchObject({ plannedStartWeek: W1, plannedEndWeek: W1, planLocked: true });
     expect(parentOps[0]).toMatchObject({
       plannedStartWeek: parentBatch!.operations[0]!.weeks[0]!.monday,
       plannedEndWeek: parentBatch!.operations[0]!.weeks.at(-1)!.monday,
-      planLocked: false,
+      planLocked: true,
     });
+    // The parent starts on the Friday the child finishes and ends in W2.
+    expect(parentOps[0]!.plannedEndWeek).toBe(W2);
 
     // The KO: the date set without a revision bump, the row I tillverkning.
     expect(await salesOrderRow(order.id)).toEqual({ status: "in_production", expectedDeliveryDate: W3, revision: before.revision });
@@ -301,6 +304,47 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
       NothingToReserveError
     );
     expect(await allManufacturingOrders()).toHaveLength(2);
+
+    // Planera after the reservation: the engine would put the whole parent
+    // in this week (R1 is free and it knows nothing of the child's
+    // material) — the lock keeps the promised weeks.
+    await planningService.planProductionRun(world.user.id);
+    expect(await planRows(childOps[0]!.id)).toEqual([{ monday: W1, minutes: 600 }]);
+    expect(await planRows(parentOps[0]!.id)).toEqual(parentBatch!.operations[0]!.weeks);
+    const afterPlan = await mfgService.listOperations(parentMo!.id);
+    expect(afterPlan[0]).toMatchObject({ plannedEndWeek: W2, planLocked: true });
+    // Lås upp + Planera: the parent is pulled into this week — the lock was
+    // what held it.
+    await planningService.unlockOperation(afterPlan[0]!.id, world.user.id);
+    await planningService.planProductionRun(world.user.id);
+    expect((await mfgService.listOperations(parentMo!.id))[0]).toMatchObject({ plannedStartWeek: W1, plannedEndWeek: W1, planLocked: false });
+  });
+
+  it("refuses with delivery-time-changed when the number of TOs is not the one the client showed (expectedOrders)", async () => {
+    const world = await seedWorld();
+    const { order } = await confirmedOrder(world, world.parent.id, 10);
+    const check = await planningService.checkDeliveryTime({ salesOrderId: order.id });
+    expect(check.batches).toHaveLength(2);
+    // The dialog showed one TO (say the child's TO was created in between
+    // and the client's result is stale the other way round): refused with
+    // the new result, nothing written.
+    const failure = await planningService
+      .applyDeliveryTime({ salesOrderId: order.id, deliveryDate: check.deliveryDate!, expectedOrders: 1 }, world.user.id)
+      .then(() => null, (err: unknown) => err);
+    expect(failure).toBeInstanceOf(DeliveryTimeChangedError);
+    const changed = failure as DeliveryTimeChangedError;
+    expect(changed.orders).toEqual({ expected: 1, actual: 2 });
+    expect(changed.message).toBe("Läget har ändrats sedan kontrollen — det skapas nu 2 tillverkningsordrar i stället för 1");
+    expect(changed.result.batches).toHaveLength(2);
+    expect(await allManufacturingOrders()).toEqual([]);
+    expect(await salesOrderRow(order.id)).toMatchObject({ status: "confirmed", expectedDeliveryDate: null });
+
+    // The right count goes through; without the field only the date counts.
+    const applied = await planningService.applyDeliveryTime(
+      { salesOrderId: order.id, deliveryDate: check.deliveryDate!, expectedOrders: 2 },
+      world.user.id
+    );
+    expect(applied.manufacturingOrders).toHaveLength(2);
   });
 
   it("refuses with delivery-time-changed when a TO created in between moved the date — nothing is written", async () => {
@@ -357,6 +401,7 @@ describe("reservationen — Skapa tillverkningsordrar för det som saknas", () =
 
     // The same when the last step — the KO date — fails.
     const dateFails = buildPlanning(mfgService, {
+      lockRowsInTx: salesService.lockRowsInTx,
       async setExpectedDeliveryDateInTx() {
         throw new Error("datumet sprack");
       },

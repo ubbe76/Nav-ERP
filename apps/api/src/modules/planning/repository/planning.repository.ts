@@ -42,6 +42,7 @@ import type {
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { CapacityInput, PlannedWeek } from "../service/capacity-calc.js";
 import type { OperationPlan } from "../service/production-plan.js";
+import { roundPlanWeeks } from "../service/capacity-book.js";
 import type { ArticleOverviewInput } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 
@@ -64,6 +65,15 @@ const OPEN_INQUIRY: ("draft" | "sent" | "answered")[] = ["draft", "sent", "answe
 // An open TO's supply: the order quantity minus what is already received
 // into stock (delinleverans from the last operation), never below zero.
 const moRemainingQuantity = sql<string>`greatest(${manufacturingOrders.quantity} - ${manufacturingOrders.quantityReceived}, 0)`;
+
+// Rows per INSERT / UPDATE … FROM (VALUES …) in writeOperationPlans — well
+// under the driver's parameter limit at three parameters a row.
+const WRITE_BATCH = 1000;
+function chunk<T>(list: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
 
 export function createPlanningRepository(db: Db) {
   // Pending lego (subcontract) operations on released/in_progress MOs, with
@@ -566,7 +576,7 @@ export function createPlanningRepository(db: Db) {
             })
             .from(bomComponents),
           dbc.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true)),
-          primarySuppliersFor(ids),
+          primarySuppliersFor(ids, dbc),
         ]);
 
       // Partition the per-article rows; the article id column is dropped
@@ -831,31 +841,51 @@ export function createPlanningRepository(db: Db) {
     },
 
     // The ONE writer of allocations: replaces each planned operation's weeks
-    // (DELETE + INSERT) and sets the mirror columns from the allocation
+    // (DELETE + INSERT) and sets the mirror columns from the WRITTEN rows
     // (start = first Monday, end = last) and planned_at; `clear` removes the
     // allocation and the mirror — and the lock, which the CHECK forbids
     // without a plan (a cleared operation is done, lego, 0 minutes or beyond
-    // the horizon, where a lock means nothing). Runs inside the caller's
-    // transaction, under the production_plan lock.
+    // the horizon, where a lock means nothing). The rows are stored with two
+    // decimals under CHECK minutes > 0, so the weeks are rounded here
+    // (`roundPlanWeeks`): a week that rounds to 0.00 is merged into its
+    // neighbour, and an operation left without rows is cleared instead —
+    // whatever the engine or the reservation handed over, the write never
+    // breaks the CHECK. One statement per table (the mirror as one
+    // UPDATE … FROM (VALUES …) per batch) — this runs under the
+    // production_plan lock, one round trip per operation would hold it for
+    // every open TO. Runs inside the caller's transaction.
     async writeOperationPlans(tx: Tx, write: { plans: OperationPlan[]; clear: string[]; plannedAt: Date }): Promise<void> {
-      const touched = [...new Set([...write.plans.map((p) => p.operationId), ...write.clear])];
+      const plans: { operationId: string; weeks: PlannedWeek[]; startWeek: string; endWeek: string }[] = [];
+      const clear = new Set(write.clear);
+      for (const p of write.plans) {
+        const weeks = roundPlanWeeks(p.weeks);
+        if (weeks.length === 0) clear.add(p.operationId);
+        else plans.push({ operationId: p.operationId, weeks, startWeek: weeks[0]!.monday, endWeek: weeks[weeks.length - 1]!.monday });
+      }
+      const touched = [...new Set([...plans.map((p) => p.operationId), ...clear])];
       if (touched.length === 0) return;
       await tx.delete(moOperationPlanWeeks).where(inArray(moOperationPlanWeeks.moOperationId, touched));
-      const rows = write.plans.flatMap((p) =>
+      const rows = plans.flatMap((p) =>
         p.weeks.map((w) => ({ moOperationId: p.operationId, weekMonday: w.monday, minutes: w.minutes.toFixed(2) }))
       );
-      if (rows.length > 0) await tx.insert(moOperationPlanWeeks).values(rows);
-      for (const p of write.plans) {
-        await tx
-          .update(moOperations)
-          .set({ plannedStartWeek: p.startWeek, plannedEndWeek: p.endWeek, plannedAt: write.plannedAt })
-          .where(eq(moOperations.id, p.operationId));
+      for (const batch of chunk(rows, WRITE_BATCH)) await tx.insert(moOperationPlanWeeks).values(batch);
+      for (const batch of chunk(plans, WRITE_BATCH)) {
+        const values = sql.join(
+          batch.map((p) => sql`(${p.operationId}::uuid, ${p.startWeek}::date, ${p.endWeek}::date)`),
+          sql`, `
+        );
+        await tx.execute(sql`
+          UPDATE ${moOperations} AS o
+          SET planned_start_week = v.start_week, planned_end_week = v.end_week, planned_at = ${write.plannedAt.toISOString()}::timestamptz
+          FROM (VALUES ${values}) AS v(id, start_week, end_week)
+          WHERE o.id = v.id
+        `);
       }
-      if (write.clear.length > 0) {
+      if (clear.size > 0) {
         await tx
           .update(moOperations)
           .set({ plannedStartWeek: null, plannedEndWeek: null, planLocked: false, plannedAt: write.plannedAt })
-          .where(inArray(moOperations.id, write.clear));
+          .where(inArray(moOperations.id, [...clear]));
       }
     },
 
@@ -963,15 +993,59 @@ export function createPlanningRepository(db: Db) {
         })
         .from(salesOrderRows)
         .where(eq(salesOrderRows.salesOrderId, salesOrderId));
+      // The TOs linked to the configured rows (a configured row's template
+      // has no pool, so its own TOs are netted by uncoveredConfiguredQuantity
+      // in the service — an ordinary row's linked TO is supply in the
+      // article overview). Cancelled ones count for nothing, as everywhere.
+      const configuredRowIds = rows.filter((r) => r.configuration !== null).map((r) => r.rowId);
+      const linked =
+        configuredRowIds.length === 0
+          ? []
+          : await dbc
+              .select({
+                rowId: manufacturingOrders.salesOrderRowId,
+                id: manufacturingOrders.id,
+                orderNumber: manufacturingOrders.orderNumber,
+                status: manufacturingOrders.status,
+                quantity: manufacturingOrders.quantity,
+                dueDate: manufacturingOrders.dueDate,
+              })
+              .from(manufacturingOrders)
+              .where(and(inArray(manufacturingOrders.salesOrderRowId, configuredRowIds), ne(manufacturingOrders.status, "cancelled")))
+              .orderBy(manufacturingOrders.orderNumber);
+      const linkedByRow = new Map<string, { id: string; orderNumber: string; status: string; quantity: number; dueDate: string | null }[]>();
+      for (const l of linked) {
+        if (!l.rowId) continue;
+        linkedByRow.set(l.rowId, [
+          ...(linkedByRow.get(l.rowId) ?? []),
+          { id: l.id, orderNumber: l.orderNumber, status: l.status, quantity: Number(l.quantity), dueDate: l.dueDate },
+        ]);
+      }
       return {
         ...order,
         rows: rows.map((r) => ({
           rowId: r.rowId,
           articleId: r.articleId,
+          quantityOrdered: Number(r.quantityOrdered),
+          quantityDelivered: Number(r.quantityDelivered),
           rest: Math.max(Number(r.quantityOrdered) - Number(r.quantityDelivered), 0),
           configuration: r.configuration as OrderRowConfiguration | null,
+          linkedOrders: linkedByRow.get(r.rowId) ?? [],
         })),
       };
+    },
+
+    // Reservationen: the plans of a new TO's operations are locked (Planera
+    // keeps them — the promised date holds until Lås upp). Only operations
+    // with a plan: the CHECK forbids a lock without one, and a lego or
+    // 0-minute operation has none. Runs in the reservation's transaction.
+    async lockOrderPlans(tx: Tx, manufacturingOrderId: string): Promise<number> {
+      const rows = await tx
+        .update(moOperations)
+        .set({ planLocked: true })
+        .where(and(eq(moOperations.manufacturingOrderId, manufacturingOrderId), isNotNull(moOperations.plannedStartWeek)))
+        .returning({ id: moOperations.id });
+      return rows.length;
     },
 
     async customerDeliveryFields(customerId: string, dbc: Db | Tx = db) {

@@ -1553,9 +1553,8 @@ export interface ManufacturingOrder {
   // capacity matrix's week bucketing (overdue orders roll into the current
   // week) and is editable via PATCH while the order is open.
   dueDate: string | null;
-  // Produktionsplanering — only on list rows (GET /manufacturing-orders):
-  // min/max planned week (Mondays) over the pending operations, null =
-  // unplanned; late = Sen.
+  // Produktionsplanering — on list rows and the single GET: min/max planned
+  // week (Mondays) over the pending operations, null = unplanned; late = Sen.
   plannedStartWeek?: string | null;
   plannedEndWeek?: string | null;
   late?: boolean;

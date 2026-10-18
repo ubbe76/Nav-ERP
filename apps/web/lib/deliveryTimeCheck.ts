@@ -22,7 +22,14 @@ export function runDeliveryTimeCheck(body: DeliveryTimeCheckRequest): Promise<De
 // creates the manufacturing orders of the check's shortage batches and sets
 // the order's expected delivery date in one transaction. 409
 // delivery-time-changed carries the fresh check as `result`.
-export function applyDeliveryTime(body: { salesOrderId: string; deliveryDate: string }): Promise<ApplyDeliveryTimeResult> {
+// expectedOrders is the number of manufacturing orders the user was shown
+// (the check's batch count); a different count under the lock is refused with
+// the same 409.
+export function applyDeliveryTime(body: {
+  salesOrderId: string;
+  deliveryDate: string;
+  expectedOrders?: number;
+}): Promise<ApplyDeliveryTimeResult> {
   return apiFetch<ApplyDeliveryTimeResult>("/api/v1/delivery-time-check/apply", {
     method: "POST",
     body: JSON.stringify(body),

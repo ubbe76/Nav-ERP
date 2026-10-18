@@ -19,13 +19,26 @@ import {
   NothingToReserveError,
   OperationNotFoundError,
   OperationNotPlannableError,
+  PlanWeekInPastError,
   SalesOrderNotFoundError,
   SalesOrderNotOpenError,
   type PlanningService,
 } from "../service/planning.service.js";
-import { LinkedRowNotFoundError } from "../../manufacturing/service/manufacturing.service.js";
-import { RowConfigurationChangedError } from "../../sales/service/sales.errors.js";
-import { ConfiguratorInvalidConfigurationError } from "../../configurator/service/configurator.errors.js";
+import {
+  LinkedOrderStatusError,
+  LinkedRowArticleMismatchError,
+  LinkedRowNotFoundError,
+  LinkedRowNotManufacturedError,
+} from "../../manufacturing/service/manufacturing.service.js";
+import { ArticleIsTemplateError } from "../../article/service/article.service.js";
+// The sales module's configuration errors — the manufacturing service throws
+// these (not planning's own classes of the same name) from prepareCreate.
+import {
+  ConfigurationNotAllowedError as SalesConfigurationNotAllowedError,
+  ConfigurationRequiredError as SalesConfigurationRequiredError,
+  RowConfigurationChangedError,
+} from "../../sales/service/sales.errors.js";
+import { ConfiguratorInvalidConfigurationError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 import { InvalidStatusTransitionError as SalesStatusError } from "../../sales/service/sales.service.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { DELIVERY_CHECK, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
@@ -120,13 +133,26 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
         err instanceof NothingToReserveError ||
         err instanceof ConfigurationRequiredError ||
         // The manufacturing service's own guards on the linked row (the row
-        // was reconfigured meanwhile) and the sales header's status guard.
+        // was reconfigured meanwhile, the order's status, the template's
+        // mode) — mapped exactly as POST /manufacturing-orders maps them —
+        // and the sales header's status guard.
         err instanceof RowConfigurationChangedError ||
+        err instanceof LinkedOrderStatusError ||
+        err instanceof ArticleIsTemplateError ||
+        err instanceof SalesConfigurationRequiredError ||
+        err instanceof ConfiguratorNotToOrderModeError ||
         err instanceof SalesStatusError
       ) {
         return reply.code(409).send(errorBody(err));
       }
-      if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
+      if (
+        err instanceof ConfigurationNotAllowedError ||
+        err instanceof SalesConfigurationNotAllowedError ||
+        err instanceof LinkedRowArticleMismatchError ||
+        err instanceof LinkedRowNotManufacturedError
+      ) {
+        return reply.code(400).send(errorBody(err));
+      }
       if (err instanceof ConfiguratorInvalidConfigurationError) {
         return reply.code(400).send({ ...errorBody(err), details: err.details });
       }
@@ -153,6 +179,7 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
       return await service.moveOperation(req.params.opId, input, req.user!.id);
     } catch (err) {
       if (err instanceof OperationNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof PlanWeekInPastError) return reply.code(400).send(errorBody(err));
       if (err instanceof OperationNotPlannableError) return reply.code(409).send(errorBody(err));
       throw err;
     }

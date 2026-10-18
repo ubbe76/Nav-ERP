@@ -21,6 +21,7 @@ import {
 } from "./requirements-calc.js";
 import {
   buildScheduleLookups,
+  mondayOf,
   capacityHorizon,
   computeCapacity,
   orderPlanStatus,
@@ -31,7 +32,7 @@ import {
   type PlannedWeek,
 } from "./capacity-calc.js";
 import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput } from "./article-overview.js";
-import { PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./capacity-book.js";
+import { MIN_PLAN_MINUTES, PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./capacity-book.js";
 import { planProduction, type OperationPlan, type PlanOperation, type PlanOrder, type PlanWarning } from "./production-plan.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
@@ -119,11 +120,18 @@ const RESERVABLE_SALES_ORDER_STATUSES: ReadonlySet<string> = new Set(["confirmed
 // than the one the client was shown. 409 — the body carries the new result
 // so the dialog can show it and offer the button again. Nothing is written.
 export class DeliveryTimeChangedError extends Error {
-  constructor(public deliveryDate: string | null, public result: DeliveryTimeCheckResult) {
+  constructor(
+    public deliveryDate: string | null,
+    public result: DeliveryTimeCheckResult,
+    // The date held but the number of TOs to create did not (expectedOrders).
+    public orders?: { expected: number; actual: number }
+  ) {
     super(
       deliveryDate === null
         ? "Läget har ändrats sedan kontrollen — det går inte längre att lova ett datum"
-        : `Läget har ändrats sedan kontrollen — det nya datumet är ${deliveryDate}`
+        : orders
+          ? `Läget har ändrats sedan kontrollen — det skapas nu ${orders.actual} tillverkningsordrar i stället för ${orders.expected}`
+          : `Läget har ändrats sedan kontrollen — det nya datumet är ${deliveryDate}`
     );
     this.name = "DeliveryTimeChangedError";
   }
@@ -161,6 +169,15 @@ export class OperationNotPlannableError extends Error {
             : "Tillverkningsordern är inte frisläppt eller pågående"
     );
     this.name = "OperationNotPlannableError";
+  }
+}
+
+// Flytta to a week before the current one: the work cannot happen in the
+// past (the engine would clamp it to the current week silently). 400.
+export class PlanWeekInPastError extends Error {
+  constructor(public weekMonday: string, public currentWeekMonday: string) {
+    super(`Veckan som börjar ${weekMonday} har passerat — en operation kan inte flyttas till en vecka före innevarande (${currentWeekMonday})`);
+    this.name = "PlanWeekInPastError";
   }
 }
 
@@ -265,14 +282,16 @@ export interface ManufacturingOrderCreator {
     input: { articleId?: string; salesOrderRowId?: string; quantity: number; note?: string; dueDate?: string | null },
     createdBy: string | null,
     opts?: { plannedWeeks?: { sequenceNo: number; weeks: PlannedWeek[] }[] }
-  ): Promise<{ id: string; orderNumber: string; releaseWarnings: string[] }>;
+  ): Promise<{ id: string; orderNumber: string; quantity: string | number; releaseWarnings: string[] }>;
 }
 
-// Reservationen's last write: the KO's Förväntat leveransdatum, set by the
-// sales service inside the planning transaction with the header PATCH's
-// status guard (declared consumer-side like the creators above; app.ts
-// passes salesService).
+// Reservationen's sales-side writes: the KO rows locked up front (the lock
+// order advisory → rows → header, see applyDeliveryTime) and, last, the
+// KO's Förväntat leveransdatum, set by the sales service inside the
+// planning transaction with the header PATCH's status guard (declared
+// consumer-side like the creators above; app.ts passes salesService).
 export interface SalesOrderDateWriter {
+  lockRowsInTx(tx: Tx, rowIds: string[]): Promise<void>;
   setExpectedDeliveryDateInTx(tx: Tx, salesOrderId: string, date: string): Promise<{ orderNumber: string; previous: string | null }>;
 }
 
@@ -689,7 +708,21 @@ export function createPlanningService(
     const today = todayFn();
     let customerId = request.customerId ?? null;
     let checkedOrder: { id: string; orderNumber: string } | null = null;
-    type RequestRow = { key: string; articleId: string; quantity: number; selection: ConfiguratorSelection | null };
+    // coverage: an order row's linked TOs (a configured row's own TOs are
+    // netted by uncoveredConfiguredQuantity below — the one implementation
+    // behovsberäkningen uses — so a row that already has its TO is never
+    // made twice; an ordinary row's linked TO is supply in the overview).
+    type RequestRow = {
+      key: string;
+      articleId: string;
+      quantity: number;
+      selection: ConfiguratorSelection | null;
+      coverage?: {
+        quantityOrdered: number;
+        quantityDelivered: number;
+        linkedOrders: { id: string; orderNumber: string; status: string; quantity: number; dueDate: string | null }[];
+      };
+    };
     let requestRows: RequestRow[] = (request.rows ?? []).map((r, i) => ({
       key: String(i),
       articleId: r.articleId,
@@ -713,6 +746,7 @@ export function createPlanningService(
             articleId: r.articleId,
             quantity: r.rest,
             selection: r.configuration ? selectionFromEntries(r.configuration.selection) : null,
+            coverage: { quantityOrdered: r.quantityOrdered, quantityDelivered: r.quantityDelivered, linkedOrders: r.linkedOrders },
           }));
       }
     }
@@ -733,7 +767,32 @@ export function createPlanningService(
       }
       if (!r.selection) throw new ConfigurationRequiredError(a.articleNumber);
       if (!deps.configuredStructure) throw new Error("ConfiguredStructureReader not wired");
-      const s = await deps.configuredStructure(r.articleId, r.selection, r.quantity, { withCost: false, allowVariants: true });
+      // The batch: what the row's linked TOs do not already make, rounded
+      // up to the article's step like an ordinary row's shortage — and the
+      // structure is derived at THAT quantity, since the TO (prepareCreate
+      // rounds the same way) carries the material totals for it.
+      const uncovered = r.coverage
+        ? uncoveredConfiguredQuantity({
+            quantityOrdered: r.coverage.quantityOrdered,
+            quantityDelivered: r.coverage.quantityDelivered,
+            linkedOrders: r.coverage.linkedOrders,
+          })
+        : r.quantity;
+      const batchQuantity = uncovered > 0 ? roundUpToMultiple(uncovered, a.rounding) : 0;
+      const covered = {
+        quantity: Math.max(0, Number((r.quantity - uncovered).toFixed(4))),
+        orders: (r.coverage?.linkedOrders ?? []).map((o) => ({
+          manufacturingOrderId: o.id,
+          orderNumber: o.orderNumber,
+          quantity: o.quantity,
+          dueDate: o.dueDate,
+          done: o.status === "done" || o.status === "closed",
+        })),
+      };
+      const s = await deps.configuredStructure(r.articleId, r.selection, batchQuantity > 0 ? batchQuantity : r.quantity, {
+        withCost: false,
+        allowVariants: true,
+      });
       if (!s.valid) {
         dtcRows.push({ key: r.key, articleId: r.articleId, quantity: r.quantity, error: s.errors[0] ?? "Konfigurationen är inte giltig" });
         continue;
@@ -748,14 +807,19 @@ export function createPlanningService(
         articleId: r.articleId,
         quantity: r.quantity,
         structure: {
-          operations: s.operations.map((o) => ({
-            sequenceNo: o.sequenceNo,
-            workCenterId: o.workCenterId,
-            description: o.description,
-            setupTime: Number(o.setupTime),
-            runTimePerUnit: Number(o.runTimePerUnit),
-          })),
-          materials: s.materials.map((m) => ({ articleId: m.componentArticleId, quantity: m.totalQuantity })),
+          quantity: batchQuantity,
+          operations:
+            batchQuantity > 0
+              ? s.operations.map((o) => ({
+                  sequenceNo: o.sequenceNo,
+                  workCenterId: o.workCenterId,
+                  description: o.description,
+                  setupTime: Number(o.setupTime),
+                  runTimePerUnit: Number(o.runTimePerUnit),
+                }))
+              : [],
+          materials: batchQuantity > 0 ? s.materials.map((m) => ({ articleId: m.componentArticleId, quantity: m.totalQuantity })) : [],
+          covered,
         },
       });
     }
@@ -948,8 +1012,22 @@ export function createPlanningService(
         if (result.deliveryDate !== input.deliveryDate || result.shipDate === null) {
           throw new DeliveryTimeChangedError(result.deliveryDate, result);
         }
+        // The client showed N TOs: a different count now (a TO created in
+        // between covers a row, a template changed) is a changed outcome too.
+        if (input.expectedOrders !== undefined && input.expectedOrders !== result.batches.length) {
+          throw new DeliveryTimeChangedError(result.deliveryDate, result, { expected: input.expectedOrders, actual: result.batches.length });
+        }
         if (result.batches.length === 0) throw new NothingToReserveError();
         const orderNumber = order!.orderNumber;
+        // Lock order: advisory → the KO rows (sorted) → the order header.
+        // Every row that gets a TO is locked here, before the first create —
+        // the create takes the configured row's lock and then the header
+        // (markInProduction), so without this a second row would be locked
+        // AFTER the header, the reverse of updateRow/replaceRowConfiguration.
+        await dates.lockRowsInTx(
+          tx,
+          result.batches.filter((b) => b.level === 1).map((b) => b.rowKey)
+        );
         const manufacturingOrders: ApplyDeliveryTimeResult["manufacturingOrders"] = [];
         const warnings: string[] = [];
         // batches is already children-before-parents.
@@ -968,11 +1046,17 @@ export function createPlanningService(
             userId,
             { plannedWeeks: batch.operations.map((o) => ({ sequenceNo: o.sequenceNo, weeks: o.weeks })) }
           );
+          // The promised weeks are locked: Planera keeps them until Lås upp
+          // (operations without a plan — lego, 0 minutes, beyond the
+          // horizon — have nothing to lock).
+          await repo.lockOrderPlans(tx, created.id);
           manufacturingOrders.push({
             id: created.id,
             orderNumber: created.orderNumber,
             articleNumber: batch.articleNumber,
-            quantity: batch.quantity,
+            // The TO's own quantity (prepareCreate rounds to the article's
+            // step — the check rounds the same way, this is the authority).
+            quantity: Number(created.quantity),
             level: batch.level,
             salesOrderRowId: linked ? batch.rowKey : null,
           });
@@ -1068,13 +1152,16 @@ export function createPlanningService(
         await lockProductionPlan(tx);
         const op = await repo.planOperation(opId, tx);
         if (!op) throw new OperationNotFoundError(opId);
+        const currentWeek = mondayOf(todayFn());
+        if (input.weekMonday < currentWeek) throw new PlanWeekInPastError(input.weekMonday, currentWeek);
         if (op.operationStatus === "done") throw new OperationNotPlannableError("done");
         if (op.workCenterType === "subcontract") throw new OperationNotPlannableError("subcontract");
         if (!OPEN_MO_STATUSES.has(op.orderStatus)) throw new OperationNotPlannableError("order_not_open");
         const world = await loadPlanWorld(tx);
         const target = world.operations.find((o) => o.moOperationId === opId);
         if (!target) throw new OperationNotPlannableError("order_not_open");
-        if (remainingOperationMinutes(target) <= 0) throw new OperationNotPlannableError("no_time");
+        // Under the book's threshold nothing would be written (roundPlanWeeks).
+        if (remainingOperationMinutes(target) < MIN_PLAN_MINUTES) throw new OperationNotPlannableError("no_time");
         const stamped = await repo.stampedOperationIds(tx);
 
         const orderOps: PlanOperation[] = [];
@@ -1086,10 +1173,10 @@ export function createPlanningService(
             o.operationStatus === "done" ||
             (o.sequenceNo > op.sequenceNo && input.moveFollowing && !o.planLocked);
           if (replan) orderOps.push({ ...o, started });
-          // Kept as it is: planned ⇒ a (virtual) lock, so the engine treats it
-          // as fixed load and the sequence floor; unplanned ⇒ its due-date
-          // bucket, untouched.
-          else if (hasPlan(o)) orderOps.push({ ...o, started, planLocked: true });
+          // Kept as it is: planned ⇒ fixed load and the sequence floor, like a
+          // lock but reported as "ligger fast" rather than "låst"; unplanned
+          // ⇒ its due-date bucket, untouched.
+          else if (hasPlan(o)) orderOps.push({ ...o, started, fixed: true });
           else fixed.push(o);
         }
         const result = planProduction({

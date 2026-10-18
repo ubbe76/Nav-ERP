@@ -381,7 +381,7 @@ Efter körningen visas hur många operationer och ordrar som planerats, och even
 
 ### Flytta och Lås upp
 
-Klicka på en cell och sedan **Flytta…** vid operationen. I dialogen **Flytta operation** väljer du **Vecka** — veckorna i matrisen, med ledig tid per vecka (till exempel "v.45 · 2 nov — ledigt 12 h av 40"); fler veckor nås genom att öka **Veckor** i beläggningen. Kryssrutan **Flytta även efterföljande operationer** är förvald: orderns senare, olåsta operationer planeras om från den nya veckan. Klicka **Flytta**.
+Klicka på en cell och sedan **Flytta…** vid operationen. I dialogen **Flytta operation** väljer du **Vecka** — veckorna i matrisen, med ledig tid per vecka (till exempel "v.45 · 2 nov — ledigt 12 h av 40"); fler veckor nås genom att öka **Veckor** i beläggningen. Innevarande vecka visas som "— innevarande vecka" utan ledig-tid-siffra, eftersom bara dagarna från i dag kan användas; en vecka före innevarande kan inte väljas. Kryssrutan **Flytta även efterföljande operationer** är förvald: orderns senare, olåsta operationer planeras om från den nya veckan. Klicka **Flytta**.
 
 - Operationen **börjar i den valda veckan även om veckan är full** — veckan blir då röd, så överlasten syns. Resten av tiden fortsätter på ledig kapacitet veckorna efter.
 - En flyttad operation blir **Låst**: **Planera** låter den ligga kvar. Varningar (sen order, operationer i fel ordning) visas i dialogen innan du stänger den.

@@ -19,12 +19,16 @@ import {
   type PlannedWeek,
   type WeekScheduleDayRow,
 } from "./capacity-calc.js";
-import { createCapacityBook, type PlanWorkCenter } from "./capacity-book.js";
+import { createCapacityBook, MIN_PLAN_MINUTES, type PlanWorkCenter } from "./capacity-book.js";
 
 export interface PlanOperation extends CapacityOperationRow {
   // Påbörjad: something reported (OK or scrap) or an open/paused stamp
   // session — the work is under way and starts in the current week.
   started: boolean;
+  // Ligger fast: kept where it is by a move (the TO's other planned
+  // operations) — treated like a locked one in this run, but it is not
+  // locked, and the sequence-break text says so.
+  fixed?: boolean;
 }
 
 export interface PlanOrder {
@@ -88,7 +92,6 @@ export interface PlanProductionResult {
   orders: PlannedOrderSummary[];
 }
 
-const EPS = 1e-9;
 const maxDate = (a: string, b: string) => (a > b ? a : b);
 const hasPlan = (op: CapacityOperationRow) => !!op.plannedWeeks && op.plannedWeeks.length > 0;
 
@@ -112,7 +115,8 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
   // Låst: a hand-moved operation keeps its weeks — it is existing load
   // before anything else is placed, and is never touched (unless it is the
   // one being moved again).
-  const isLocked = (op: PlanOperation) => op.operationStatus === "pending" && !!op.planLocked && hasPlan(op) && !isForced(op);
+  const isLocked = (op: PlanOperation) =>
+    op.operationStatus === "pending" && (!!op.planLocked || !!op.fixed) && hasPlan(op) && !isForced(op);
 
   const book = createCapacityBook({
     today,
@@ -166,7 +170,7 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
         if (chunks.length === 0) continue; // nothing left — the plan is moot
         const startWeek = chunks[0]!.monday!;
         const endWeek = chunks[chunks.length - 1]!.monday!;
-        sequenceBreak(op, code, startWeek, "låst");
+        sequenceBreak(op, code, startWeek, op.planLocked ? "låst" : "planerad och ligger fast");
         ready = maxDate(ready, book.weekFinishDay(wc, endWeek, floor));
         floor = maxDate(floor, endWeek);
         prevEndWeek = endWeek;
@@ -180,13 +184,16 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
         continue;
       }
       const minutes = remainingOperationMinutes(op);
-      if (minutes <= EPS) {
+      if (minutes < MIN_PLAN_MINUTES) {
         if (hasPlan(op)) clear.push(op.moOperationId);
         continue;
       }
       const forceStartWeek = isForced(op) ? forced!.weekMonday : op.started ? firstMonday : undefined;
       const placed = book.place(wc, minutes, forceStartWeek ? { floor, forceStartWeek } : { floor });
       if (placed.horizonExceeded) {
+        // Not planned — what it booked before the horizon is given back, or
+        // it would sit as phantom load for every TO planned after it.
+        if (wc) book.release(wc, placed.partial);
         warnings.push({
           kind: "horizon",
           ...head,
@@ -209,6 +216,7 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
         });
       }
       if (isForced(op)) sequenceBreak(op, code, placed.fromWeek, "flyttad");
+      else if (op.started) sequenceBreak(op, code, placed.fromWeek, "påbörjad");
       plans.push({
         operationId: op.moOperationId,
         manufacturingOrderId: order.id,
@@ -223,16 +231,22 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
     }
 
     // Sen: the last pending operation (lego through its lead time) finishes
-    // after the due date. A TO that hit the horizon has no finish.
+    // after the due date. A TO that hit the horizon has no finish — then Sen
+    // is the matrix's rule for an unplanned TO (orderPlanStatus): the due
+    // date has passed.
     const plannedFinish = horizonHit ? null : ready;
-    const late = plannedFinish !== null && order.dueDate !== null && plannedFinish > order.dueDate;
+    const late =
+      order.dueDate !== null && (plannedFinish !== null ? plannedFinish > order.dueDate : order.dueDate < today);
     if (late) {
       warnings.push({
         kind: "late",
         ...head,
         dueDate: order.dueDate,
         plannedFinish,
-        message: `${order.orderNumber} blir klar ${plannedFinish}, efter färdigdatumet ${order.dueDate}`,
+        message:
+          plannedFinish !== null
+            ? `${order.orderNumber} blir klar ${plannedFinish}, efter färdigdatumet ${order.dueDate}`
+            : `${order.orderNumber} är inte planerad och färdigdatumet ${order.dueDate} har passerat`,
       });
     }
     orders.push({ ...head, dueDate: order.dueDate, plannedFinish, late });
