@@ -33,7 +33,7 @@ import {
 } from "./capacity-calc.js";
 import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput } from "./article-overview.js";
 import { MIN_PLAN_MINUTES, PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./capacity-book.js";
-import { planProduction, type OperationPlan, type PlanOperation, type PlanOrder, type PlanWarning } from "./production-plan.js";
+import { longOperationWarnings, planProduction, type OperationPlan, type PlanOperation, type PlanOrder, type PlanWarning } from "./production-plan.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import {
@@ -547,7 +547,9 @@ export function createPlanningService(
     const today = todayFn();
     const horizonTo = addDays(today, PLAN_HORIZON_WEEKS * 7 + 14);
     const capacity = await repo.loadCapacityInput(addDays(today, -7), horizonTo, dbc);
-    return planWorldOf(capacity, today);
+    // Optional on the repo for the unit tests' fakes ⇒ the default limit.
+    const longOperationWeeks = await repo.longOperationWeeks?.(dbc);
+    return { ...planWorldOf(capacity, today), longOperationWeeks };
   }
   function planWorldOf(capacity: CapacityInput, today: string) {
     const workCenters = new Map<string, PlanWorkCenter>(
@@ -612,6 +614,12 @@ export function createPlanningService(
     // The reservation's weeks are keyed by sequence number: when the TO's
     // operations are not the ones the check planned (a configured row whose
     // template changed in between), the engine plans it instead and says so.
+    const ownOrder: PlanOrder = {
+      id: manufacturingOrderId,
+      orderNumber: own[0]!.orderNumber,
+      dueDate: own[0]!.dueDate,
+      operations: own.map((o) => ({ ...o, started: false })),
+    };
     const givenMatches =
       given !== undefined &&
       given.length === own.length &&
@@ -641,7 +649,14 @@ export function createPlanningService(
         }
       }
       await repo.writeOperationPlans(tx, { plans, clear, plannedAt });
-      return [];
+      return longOperationWarnings({
+        today: world.today,
+        offDays: world.offDays,
+        workCenters: world.workCenters,
+        schedule: world.schedule,
+        orders: [ownOrder],
+        longOperationWeeks: world.longOperationWeeks,
+      }).map((w) => w.message);
     }
     const others = world.operations.filter((o) => o.manufacturingOrderId !== manufacturingOrderId);
     const result = planProduction({
@@ -649,11 +664,16 @@ export function createPlanningService(
       offDays: world.offDays,
       workCenters: world.workCenters,
       schedule: world.schedule,
-      orders: [{ id: manufacturingOrderId, orderNumber: own[0]!.orderNumber, dueDate: own[0]!.dueDate, operations: own.map((o) => ({ ...o, started: false })) }],
+      orders: [ownOrder],
       existingOperations: others,
+      longOperationWeeks: world.longOperationWeeks,
     });
     await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt });
-    return [...warnings, ...result.warnings.filter((w) => w.kind === "horizon" || w.kind === "late").map((w) => w.message)];
+    // Orimligt mycket tid is the one to catch here — the TO was just made
+    // from the routing. A sequence break cannot happen on a fresh TO, and an
+    // unscheduled resource is the matrix's business.
+    const shown = new Set<PlanWarning["kind"]>(["long_operation", "horizon", "late"]);
+    return [...warnings, ...result.warnings.filter((w) => shown.has(w.kind)).map((w) => w.message)];
   }
 
   async function orderPlanSummaries(orderIds: string[]): Promise<Map<string, OrderPlanSummary>> {
@@ -1127,6 +1147,7 @@ export function createPlanningService(
           workCenters: world.workCenters,
           schedule: world.schedule,
           orders,
+          longOperationWeeks: world.longOperationWeeks,
         });
         const plannedAt = new Date();
         await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt });
@@ -1187,6 +1208,7 @@ export function createPlanningService(
           orders: [{ id: op.manufacturingOrderId, orderNumber: op.orderNumber, dueDate: target.dueDate, operations: orderOps }],
           existingOperations: [...world.operations.filter((o) => o.manufacturingOrderId !== op.manufacturingOrderId), ...fixed],
           forceStart: { operationId: opId, weekMonday: input.weekMonday },
+          longOperationWeeks: world.longOperationWeeks,
         });
         await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt: new Date() });
         // Locked only when it got a plan — beyond the horizon it is cleared

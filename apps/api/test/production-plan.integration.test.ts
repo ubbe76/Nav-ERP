@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, count, eq, gt, sql } from "drizzle-orm";
-import { db, moOperationPlanWeeks, moOperations } from "@navet/db";
+import { db, moOperationPlanWeeks, moOperations, systemSettings } from "@navet/db";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -231,6 +231,28 @@ describe("a new TO is planned in its create transaction", () => {
     expect(capacity.summary.lateOrders).toEqual([
       { manufacturingOrderId: late.order.id, orderNumber: late.order.orderNumber, dueDate: "2030-03-05", plannedFinish: "2030-03-22" },
     ]);
+  });
+
+  it("warns for orimligt mycket tid in releaseWarnings, against the system setting's limit", async () => {
+    const world = await seedWorld();
+    const setLimit = (value: string) =>
+      db.insert(systemSettings).values({ key: "planning_long_operation_weeks", value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+    try {
+      // Default 4 weeks: 50 h on a 40 h week is fine.
+      expect((await createOrder(world, 50)).order.releaseWarnings).toEqual([]);
+      await setLimit("1");
+      const long = await createOrder(world, 50);
+      expect(long.order.releaseWarnings).toEqual([
+        "Op 10 på 101 (" + world.article.articleNumber + " Planeringsartikel) har orimligt mycket tid: 50 h kvar, motsvarar 1,3 veckors kapacitet på resursen (40 h/vecka); ställtid 0 min, stycktid 60 min/st, antal 50 st — kontrollera operationens tider och orderns antal",
+        expect.stringContaining("Op 20 på 201"),
+      ]);
+      // Planned anyway.
+      expect(long.op10.plannedStartWeek).not.toBeNull();
+      await setLimit("0");
+      expect((await createOrder(world, 500)).order.releaseWarnings).toEqual([]);
+    } finally {
+      await db.delete(systemSettings).where(eq(systemSettings.key, "planning_long_operation_weeks"));
+    }
   });
 
   it("leaves a TO created without the plan reader unplanned — its load counts in the due date's week as before", async () => {

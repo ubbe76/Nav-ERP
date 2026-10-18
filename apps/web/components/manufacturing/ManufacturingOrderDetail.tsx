@@ -162,7 +162,7 @@ export function ManufacturingOrderDetail({
 
       {releaseWarnings && releaseWarnings.length > 0 && (
         <FormError margin="below">
-          <strong>Varning vid frisläpp — otillräckligt lagersaldo:</strong>
+          <strong>Varning vid frisläpp:</strong>
           <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
             {releaseWarnings.map((w, i) => (
               <li key={i}>{w}</li>

@@ -10,6 +10,7 @@
 // plans it gets back and logs the warnings. Deterministic — the same input
 // gives the same plan, and a run on its own output gives it again.
 import {
+  hasCapacityCalendar,
   mondayOf,
   operationLoadWeeks,
   remainingOperationMinutes,
@@ -19,7 +20,20 @@ import {
   type PlannedWeek,
   type WeekScheduleDayRow,
 } from "./capacity-calc.js";
-import { createCapacityBook, MIN_PLAN_MINUTES, type PlanWorkCenter } from "./capacity-book.js";
+import { addDays } from "../../system/service/delivery-days.js";
+import { DEFAULT_LONG_OPERATION_WEEKS } from "../../system/service/plan-settings.js";
+import { createCapacityBook, MIN_PLAN_MINUTES, type CapacityBook, type PlanWorkCenter } from "./capacity-book.js";
+
+// Orimligt mycket tid: an operation whose remaining time alone would fill its
+// resource for more than `longOperationWeeks` normal weeks (the system
+// setting planning_long_operation_weeks, plan-settings.ts) is most likely a
+// data error (times in the wrong unit, a typo in the quantity). It is
+// planned as usual, with a warning that names it.
+// A normal week is the largest whole-week capacity among the weeks after the
+// current one (a holiday week never sets the bar); a resource without a
+// capacity calendar is measured against a 40-hour week.
+const NORMAL_WEEK_SAMPLE = 8;
+const STANDARD_WEEK_MINUTES = 40 * 60;
 
 export interface PlanOperation extends CapacityOperationRow {
   // Påbörjad: something reported (OK or scrap) or an open/paused stamp
@@ -53,6 +67,9 @@ export interface PlanProductionInput {
   // (whole-week capacity, overload allowed), locked or not.
   forceStart?: { operationId: string; weekMonday: string };
   horizonWeeks?: number;
+  // Orimligt mycket tid: the limit in normal weeks; 0 = no warning.
+  // Default DEFAULT_LONG_OPERATION_WEEKS.
+  longOperationWeeks?: number;
 }
 
 // An operation's new plan — what `writeOperationPlans` stores.
@@ -65,13 +82,14 @@ export interface OperationPlan {
 }
 
 export interface PlanWarning {
-  kind: "late" | "horizon" | "sequence" | "unscheduled_resource";
+  kind: "late" | "horizon" | "sequence" | "unscheduled_resource" | "long_operation";
   manufacturingOrderId: string;
   orderNumber: string;
   sequenceNo?: number;
   workCenterCode?: string;
   dueDate?: string | null;
   plannedFinish?: string | null;
+  remainingHours?: number; // long_operation: the operation's remaining time
   message: string;
 }
 
@@ -93,6 +111,7 @@ export interface PlanProductionResult {
 }
 
 const maxDate = (a: string, b: string) => (a > b ? a : b);
+const formatNumber = (n: number, decimals = 1) => n.toLocaleString("sv-SE", { maximumFractionDigits: decimals });
 const hasPlan = (op: CapacityOperationRow) => !!op.plannedWeeks && op.plannedWeeks.length > 0;
 
 // Prioritet: due date ascending, null last, then order number (then id —
@@ -131,6 +150,7 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
   const clear: string[] = [];
   const warnings: PlanWarning[] = [];
   const orders: PlannedOrderSummary[] = [];
+  const longOperation = longOperationChecker(book, firstMonday, input.longOperationWeeks);
 
   for (const order of [...input.orders].sort(compareOrderPriority)) {
     const head = { manufacturingOrderId: order.id, orderNumber: order.orderNumber };
@@ -159,6 +179,11 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
         if (hasPlan(op)) clear.push(op.moOperationId);
         continue;
       }
+      // Checked on every pending operation of our own resources — locked or
+      // beyond the horizon too: the time is the data error, and the horizon
+      // warning that may follow is usually its consequence.
+      const long = longOperation(op, wc);
+      if (long) warnings.push({ ...head, ...long });
       if (horizonHit) {
         // Nothing after the operation that did not fit is planned; a locked
         // one keeps its weeks (Planera never touches it).
@@ -253,4 +278,79 @@ export function planProduction(input: PlanProductionInput): PlanProductionResult
   }
 
   return { plans, clear, warnings, orders };
+}
+
+// Orimligt mycket tid for the operations of `orders` without planning them —
+// the reservation writes Leveranstidskontrollen's weeks as they are, but its
+// TOs get the same warning as one Planera places.
+export function longOperationWarnings(
+  input: Pick<PlanProductionInput, "today" | "offDays" | "workCenters" | "schedule" | "orders" | "longOperationWeeks">
+): PlanWarning[] {
+  const book = createCapacityBook({ ...input, existingOperations: [] });
+  const check = longOperationChecker(book, mondayOf(input.today), input.longOperationWeeks);
+  const warnings: PlanWarning[] = [];
+  for (const order of input.orders) {
+    for (const op of [...order.operations].sort((a, b) => a.sequenceNo - b.sequenceNo)) {
+      if (op.operationStatus === "done") continue;
+      const long = check(op, input.workCenters.get(op.workCenterId) ?? null);
+      if (long) warnings.push({ manufacturingOrderId: order.id, orderNumber: order.orderNumber, ...long });
+    }
+  }
+  return warnings;
+}
+
+type LongOperationWarning = Omit<PlanWarning, "manufacturingOrderId" | "orderNumber">;
+
+// The check for one run: the normal week per resource is cached. Lego is
+// never checked — the supplier's time is not our capacity.
+function longOperationChecker(
+  book: CapacityBook,
+  firstMonday: string,
+  limitWeeks = DEFAULT_LONG_OPERATION_WEEKS,
+): (op: PlanOperation, wc: PlanWorkCenter | null) => LongOperationWarning | null {
+  const cache = new Map<string, number | null>();
+  const normalWeek = (wc: PlanWorkCenter | null): number | null => {
+    if (!wc || !hasCapacityCalendar(wc)) return null;
+    if (!cache.has(wc.workCenterId)) {
+      let max = 0;
+      for (let i = 1; i <= NORMAL_WEEK_SAMPLE; i++) max = Math.max(max, book.weekCapacity(wc, addDays(firstMonday, i * 7)));
+      cache.set(wc.workCenterId, max > 0 ? max : null);
+    }
+    return cache.get(wc.workCenterId)!;
+  };
+  return (op, wc) => {
+    if (limitWeeks <= 0 || wc?.type === "subcontract") return null;
+    return longOperationWarning(op, wc, normalWeek(wc), limitWeeks);
+  };
+}
+
+// The long_operation warning: remaining time, how many normal weeks it is
+// and the routing values it comes from, so the planner can tell a wrong unit
+// from a wrong quantity. null when the operation is within reason.
+function longOperationWarning(
+  op: PlanOperation,
+  wc: PlanWorkCenter | null,
+  weekMinutes: number | null,
+  limitWeeks: number,
+): LongOperationWarning | null {
+  const minutes = remainingOperationMinutes(op);
+  const week = weekMinutes ?? STANDARD_WEEK_MINUTES;
+  if (minutes <= limitWeeks * week) return null;
+  const code = wc?.code ?? "?";
+  const remainingHours = Math.round((minutes / 60) * 10) / 10;
+  const weeks = formatNumber(minutes / week);
+  const scale =
+    weekMinutes !== null
+      ? `${weeks} veckors kapacitet på resursen (${formatNumber(weekMinutes / 60)} h/vecka)`
+      : `${weeks} veckor à 40 h — resursen saknar kapacitet`;
+  const routing = `ställtid ${formatNumber(op.setupTime, 2)} min, stycktid ${formatNumber(op.runTimePerUnit, 4)} min/st, antal ${formatNumber(op.orderQuantity, 3)} st`;
+  return {
+    kind: "long_operation",
+    sequenceNo: op.sequenceNo,
+    workCenterCode: code,
+    remainingHours,
+    message:
+      `Op ${op.sequenceNo} på ${code} (${op.articleNumber} ${op.articleName}) har orimligt mycket tid: ` +
+      `${formatNumber(remainingHours)} h kvar, motsvarar ${scale}; ${routing} — kontrollera operationens tider och orderns antal`,
+  };
 }

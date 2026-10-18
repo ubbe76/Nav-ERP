@@ -45,6 +45,7 @@ import type { OperationPlan } from "../service/production-plan.js";
 import { roundPlanWeeks } from "../service/capacity-book.js";
 import type { ArticleOverviewInput } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
+import { loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
 
 export interface PlanningArticleInfo {
   articleId: string;
@@ -948,6 +949,11 @@ export function createPlanningRepository(db: Db) {
     // window — the service moves sales order dates to the ship date with it.
     async deliveryContext(window: { from: string; to: string }, dbc: Db | Tx = db) {
       return loadDeliveryContext(dbc, window);
+    },
+
+    // Orimligt mycket tid — the planner's limit, read in the run's transaction.
+    async longOperationWeeks(dbc: Db | Tx = db) {
+      return loadLongOperationWeeks(dbc);
     },
 
     // Färdigdatumsförslag: the holiday register's full days off in [from, to]

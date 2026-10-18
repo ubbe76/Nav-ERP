@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compareOrderPriority,
+  longOperationWarnings,
   planProduction,
   type PlanOperation,
   type PlanOrder,
@@ -491,5 +492,125 @@ describe("Planera — determinism", () => {
     expect(second.warnings).toEqual(first.warnings);
     expect(second.orders).toEqual(first.orders);
     expect(second.clear).toEqual([]); // nothing left to clear
+  });
+});
+
+describe("Planera — orimligt mycket tid", () => {
+  it("warns for an operation over four normal weeks of its resource, with the routing values", () => {
+    const result = plan({
+      orders: [
+        order("a", "TO-1", null, (o) => [
+          pop(o, 10, 0, { setupTime: 30, runTimePerUnit: 102, orderQuantity: 100 }), // 170,5 h on a 40 h week
+          pop(o, 20, 160, { workCenterId: "wc-3" }), // exactly four weeks: within reason
+        ]),
+      ],
+    });
+    expect(result.warnings).toEqual([
+      {
+        kind: "long_operation",
+        manufacturingOrderId: "a",
+        orderNumber: "TO-1",
+        sequenceNo: 10,
+        workCenterCode: "110",
+        remainingHours: 170.5,
+        message:
+          "Op 10 på 110 (ART Artikel) har orimligt mycket tid: 170,5 h kvar, motsvarar 4,3 veckors kapacitet på resursen (40 h/vecka); " +
+          "ställtid 30 min, stycktid 102 min/st, antal 100 st — kontrollera operationens tider och orderns antal",
+      },
+    ]);
+    // Planned anyway.
+    expect(result.plans.map((p) => p.operationId)).toEqual(["a:10", "a:20"]);
+  });
+
+  it("measures remaining time — reported quantity and a consumed setup count off", () => {
+    const result = plan({
+      orders: [
+        order("a", "TO-1", null, (o) => [
+          pop(o, 10, 0, { setupTime: 600, runTimePerUnit: 102, orderQuantity: 100, quantityCompleted: 10, started: true }),
+        ]),
+      ],
+    });
+    expect(result.warnings).toEqual([]); // 90 × 102 min = 153 h
+  });
+
+  it("a holiday week does not lower the bar, the capacity factor does", () => {
+    const holidays = [{ date: "2026-11-03", dayScheduleId: null }];
+    const half: PlanWorkCenter = { ...wc3, capacityFactor: 0.5 };
+    const result = plan({
+      schedule: {
+        weekScheduleDays: [1, 2, 3, 4, 5].map((weekday) => ({ weekScheduleId: "ws-40", weekday, dayScheduleId: "ds-480" })),
+        daySchedules: [{ id: "ds-480", netMinutes: 480 }],
+        holidays,
+      },
+      workCenters: new Map([
+        ["wc-1", wc1],
+        ["wc-3", half],
+      ]),
+      orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 150), pop(o, 20, 90, { workCenterId: "wc-3" })])],
+    });
+    expect(result.warnings.map((w) => [w.kind, w.sequenceNo, w.remainingHours])).toEqual([["long_operation", 20, 90]]);
+    expect(result.warnings[0]!.message).toContain("motsvarar 4,5 veckors kapacitet på resursen (20 h/vecka)");
+  });
+
+  it("a resource without a calendar is measured against a 40-hour week; lego is never checked", () => {
+    const result = plan({
+      orders: [
+        order("a", "TO-1", null, (o) => [
+          pop(o, 10, 200, { workCenterId: "wc-2" }),
+          pop(o, 20, 500, { workCenterId: "wc-l" }),
+        ]),
+      ],
+    });
+    expect(result.warnings.map((w) => w.kind)).toEqual(["long_operation", "unscheduled_resource"]);
+    expect(result.warnings[0]!.message).toContain("200 h kvar, motsvarar 5 veckor à 40 h — resursen saknar kapacitet;");
+  });
+
+  it("comes before the horizon warning it causes, and covers locked operations", () => {
+    const result = plan({
+      horizonWeeks: 2,
+      orders: [
+        order("a", "TO-1", null, (o) => [
+          pop(o, 10, 200),
+          pop(o, 20, 170, { workCenterId: "wc-3", planLocked: true, plannedWeeks: weeks([W43, 40], [W44, 40], [W45, 40], [W46, 50]) }),
+        ]),
+      ],
+    });
+    expect(result.warnings.map((w) => [w.kind, w.sequenceNo])).toEqual([
+      ["long_operation", 10],
+      ["horizon", 10],
+      ["long_operation", 20],
+    ]);
+  });
+
+  it("takes its limit from longOperationWeeks — decimals allowed, 0 turns it off", () => {
+    const orders = [order("a", "TO-1", null, (o) => [pop(o, 10, 70)])];
+    expect(plan({ orders }).warnings).toEqual([]);
+    expect(plan({ orders, longOperationWeeks: 1.5 }).warnings.map((w) => [w.kind, w.remainingHours])).toEqual([["long_operation", 70]]);
+    expect(plan({ orders: [order("a", "TO-1", null, (o) => [pop(o, 10, 3000)])], longOperationWeeks: 0 }).warnings).toEqual([]);
+  });
+
+  it("longOperationWarnings checks without planning — done and lego operations skipped", () => {
+    const warnings = longOperationWarnings({
+      today: TODAY,
+      offDays: new Set(),
+      workCenters: new Map([
+        ["wc-1", wc1],
+        ["wc-l", lego],
+      ]),
+      schedule: {
+        weekScheduleDays: [1, 2, 3, 4, 5].map((weekday) => ({ weekScheduleId: "ws-40", weekday, dayScheduleId: "ds-480" })),
+        daySchedules: [{ id: "ds-480", netMinutes: 480 }],
+        holidays: [],
+      },
+      longOperationWeeks: 1,
+      orders: [
+        order("a", "TO-1", null, (o) => [
+          pop(o, 10, 50, { operationStatus: "done" }),
+          pop(o, 20, 50, { workCenterId: "wc-l" }),
+          pop(o, 30, 50),
+        ]),
+      ],
+    });
+    expect(warnings.map((w) => [w.kind, w.orderNumber, w.sequenceNo])).toEqual([["long_operation", "TO-1", 30]]);
   });
 });

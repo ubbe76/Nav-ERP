@@ -36,6 +36,7 @@ import {
   REMINDER_FEE_KEY,
 } from "./posting-settings.js";
 import { isUniqueViolation } from "./db-errors.js";
+import { decodeLongOperationWeeks, PLANNING_LONG_OPERATION_WEEKS_KEY } from "./plan-settings.js";
 // G1: append-only audit trail. system_settings/company_info are singletons —
 // entityId is null (no natural per-row id); number_series/company_carrier
 // use their own readable key/code. updateSettings NEVER logs values — only
@@ -221,6 +222,8 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       costingGeneralMarkupPercent: percentSetting(get(COSTING_GENERAL_MARKUP_PERCENT_KEY)),
       purchaseOverReceiptPercent: decodeOverReceiptPercent(get(PURCHASE_OVER_RECEIPT_PERCENT_KEY)),
       manufacturingMaterialShortage: decodeMaterialShortage(get(MANUFACTURING_MATERIAL_SHORTAGE_KEY)),
+      // Orimligt mycket tid (Planera, ny TO) — plan-settings.ts owns the default.
+      planningLongOperationWeeks: decodeLongOperationWeeks(get(PLANNING_LONG_OPERATION_WEEKS_KEY)),
       // Fasta leveransdagar — the default mode/transit days for partners
       // without their own; junk decodes to the default (delivery-days.ts).
       ...flattenDeliveryDefaults(decodeDeliveryDefaults(get)),
@@ -452,6 +455,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.manufacturingMaterialShortage !== undefined) {
         await set(MANUFACTURING_MATERIAL_SHORTAGE_KEY, input.manufacturingMaterialShortage);
+      }
+      if (input.planningLongOperationWeeks !== undefined) {
+        await set(PLANNING_LONG_OPERATION_WEEKS_KEY, String(input.planningLongOperationWeeks));
       }
       if (input.supplierDeliveryDayMode !== undefined) {
         await set(DELIVERY_SETTING_KEYS.supplierMode, input.supplierDeliveryDayMode);

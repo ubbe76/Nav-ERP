@@ -111,6 +111,24 @@ describe("system service — settings", () => {
     expect(updateSystemSettingsSchema.safeParse({ manufacturingMaterialShortage: "block" }).success).toBe(true);
   });
 
+  it("defaults Orimligt mycket tid to 4 weeks, round-trips decimals and 0, and junk decodes to the default", async () => {
+    await db.delete(systemSettings).where(eq(systemSettings.key, "planning_long_operation_weeks"));
+    try {
+      expect((await systemService.getSettings()).planningLongOperationWeeks).toBe(4);
+      expect((await systemService.updateSettings({ planningLongOperationWeeks: 2.5 })).planningLongOperationWeeks).toBe(2.5);
+      expect((await systemService.updateSettings({ planningLongOperationWeeks: 0 })).planningLongOperationWeeks).toBe(0);
+      await db
+        .insert(systemSettings)
+        .values({ key: "planning_long_operation_weeks", value: "garbage" })
+        .onConflictDoUpdate({ target: systemSettings.key, set: { value: "garbage" } });
+      expect((await systemService.getSettings()).planningLongOperationWeeks).toBe(4);
+    } finally {
+      await db.delete(systemSettings).where(eq(systemSettings.key, "planning_long_operation_weeks"));
+    }
+    expect(updateSystemSettingsSchema.safeParse({ planningLongOperationWeeks: -1 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ planningLongOperationWeeks: 105 }).success).toBe(false);
+  });
+
   it("defaults the delivery-day settings and round-trips them; junk decodes to the defaults", async () => {
     const keys = ["supplier_delivery_day_mode", "supplier_transit_days", "customer_delivery_day_mode", "customer_transit_days"];
     await db.delete(systemSettings).where(inArray(systemSettings.key, keys));

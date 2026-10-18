@@ -90,6 +90,10 @@ const systemSettingsFieldsSchema = z.object({
     // the behaviour before the setting existed and the default when unset),
     // a question the client can override ("warn") or a refusal ("block").
     manufacturingMaterialShortage: manufacturingMaterialShortageSchema.optional(),
+    // Orimligt mycket tid: Planera and a new TO warn for an operation whose
+    // remaining time alone fills its resource for more than this many normal
+    // weeks. Decimals allowed; 0 = no warning; default 4 when unset.
+    planningLongOperationWeeks: z.number().min(0).max(104).optional(),
     // Fasta leveransdagar: the default mode and transit days for suppliers
     // and customers without their own (delivery-days.ts decodes the keys).
     supplierDeliveryDayMode: deliveryDayModeSchema.optional(),

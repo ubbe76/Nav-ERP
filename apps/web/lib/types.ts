@@ -1667,13 +1667,14 @@ export interface CapacityResult {
 
 // Produktionsplanering: warning from Planera / Flytta / a new order's plan.
 export interface PlanWarning {
-  kind: "late" | "horizon" | "sequence" | "unscheduled_resource";
+  kind: "late" | "horizon" | "sequence" | "unscheduled_resource" | "long_operation";
   manufacturingOrderId: string;
   orderNumber: string;
   sequenceNo?: number;
   workCenterCode?: string;
   dueDate?: string;
   plannedFinish?: string;
+  remainingHours?: number; // long_operation: the operation's remaining time
   message: string;
 }
 
@@ -2121,6 +2122,9 @@ export interface SystemSettings {
   costingSupplierPriceTier: CostingSupplierPriceTier;
   // Materialbrist vid rapportering: none = ingen kontroll, warn = fråga först, block = spärr.
   manufacturingMaterialShortage: "none" | "warn" | "block";
+  // Orimligt mycket tid (Planera, ny TO): weeks of a resource's capacity one
+  // operation may fill before the planner warns; 0 = no warning.
+  planningLongOperationWeeks: number;
   supplierDeliveryDayMode: DeliveryDayMode;
   supplierTransitDays: number;
   customerDeliveryDayMode: DeliveryDayMode;

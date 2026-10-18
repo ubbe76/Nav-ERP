@@ -18,6 +18,8 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   const [overReceiptPercent, setOverReceiptPercent] = useState(formatPercent(settings.purchaseOverReceiptPercent));
   const [overReceiptSaved, setOverReceiptSaved] = useState(false);
   const [materialShortage, setMaterialShortage] = useState(settings.manufacturingMaterialShortage);
+  const [longOperationWeeks, setLongOperationWeeks] = useState(String(settings.planningLongOperationWeeks));
+  const [longOperationSaved, setLongOperationSaved] = useState(false);
   const [supplierMode, setSupplierMode] = useState(settings.supplierDeliveryDayMode);
   const [supplierTransit, setSupplierTransit] = useState(String(settings.supplierTransitDays));
   const [customerMode, setCustomerMode] = useState(settings.customerDeliveryDayMode);
@@ -96,6 +98,21 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   async function changeMaterialShortage(next: SystemSettings["manufacturingMaterialShortage"]) {
     const updated = await save({ manufacturingMaterialShortage: next });
     if (updated) setMaterialShortage(updated.manufacturingMaterialShortage);
+  }
+
+  async function saveLongOperationWeeks(badInput: boolean) {
+    setLongOperationSaved(false);
+    const trimmed = longOperationWeeks.trim().replace(",", ".");
+    const weeks = trimmed === "" ? NaN : Number(trimmed);
+    if (badInput || !Number.isFinite(weeks) || weeks < 0 || weeks > 104) {
+      setError("Orimligt mycket tid måste vara 0–104 veckor (0 = ingen varning)");
+      return;
+    }
+    const updated = await save({ planningLongOperationWeeks: weeks });
+    if (updated) {
+      setLongOperationWeeks(String(updated.planningLongOperationWeeks));
+      setLongOperationSaved(true);
+    }
   }
 
   async function changeDeliveryDayMode(side: "supplier" | "customer", next: DeliveryDayMode) {
@@ -270,6 +287,34 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
             <option value="warn">Varning</option>
             <option value="block">Spärr</option>
           </Select>
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Orimligt mycket tid på en operation (veckor)</div>
+          <div className={styles.description}>
+            Planera, Flytta och en ny tillverkningsorder varnar när en operations återstående tid ensam skulle
+            fylla resursen i fler vanliga veckor än så — oftast tider i fel enhet eller ett felskrivet antal.
+            Operationen planeras ändå. 0 = ingen varning.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="0"
+            max={104}
+            step="any"
+            aria-label="Orimligt mycket tid på en operation (veckor)"
+            className={styles.numberInput}
+            value={longOperationWeeks}
+            disabled={pending}
+            onChange={(e) => {
+              setLongOperationSaved(false);
+              setLongOperationWeeks(e.target.value);
+            }}
+            onBlur={(e) => saveLongOperationWeeks(e.currentTarget.validity.badInput)}
+          />
+          {longOperationSaved && <span className={styles.saved}>Sparat</span>}
         </div>
       </div>
       <div className={styles.section}>
