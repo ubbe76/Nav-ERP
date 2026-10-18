@@ -1,20 +1,12 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Marked } from "marked";
+import { slugify, splitIntoSections, type ManualSection } from "./manualSearch";
 
 // Same slugify on both sides: the renderer gives every heading an id, and
 // HelpLink anchors are built from the same rule. Swedish letters fold to
 // a/o so anchors stay plain ASCII.
-export function slugifyHeading(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[åä]/g, "a")
-    .replace(/ö/g, "o")
-    .replace(/é/g, "e")
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
-}
+export const slugifyHeading = slugify;
 
 const renderer = new Marked({
   renderer: {
@@ -146,4 +138,17 @@ const MANUAL_DIR = path.join(process.cwd(), "..", "..", "docs", "manual");
 export async function loadChapterHtml(chapter: ManualChapter): Promise<string> {
   const markdown = await readFile(path.join(MANUAL_DIR, chapter.file), "utf8");
   return renderer.parse(markdown, { async: false });
+}
+
+// Search index: one section per heading across all chapters. Built from the
+// same markdown files; cached per process (the manual only changes on deploy).
+let sectionCache: Promise<ManualSection[]> | null = null;
+
+export function loadManualSections(): Promise<ManualSection[]> {
+  sectionCache ??= Promise.all(
+    MANUAL_CHAPTERS.map(async (c) =>
+      splitIntoSections(c.slug, c.title, await readFile(path.join(MANUAL_DIR, c.file), "utf8")),
+    ),
+  ).then((all) => all.flat());
+  return sectionCache;
 }

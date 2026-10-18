@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../components/AppShell";
 import { MANUAL_CHAPTERS, getChapter, loadChapterHtml } from "../../../lib/manual";
+import { ManualSearch } from "../../../components/help/ManualSearch";
 import shellStyles from "../../../components/AppShell.module.css";
 import styles from "./manual.module.css";
 
@@ -28,6 +29,8 @@ export default async function ManualChapterPage(props: { params: Promise<{ chapt
           </div>
         </div>
       </div>
+
+      <ManualSearch query="" />
 
       <article className={styles.article} dangerouslySetInnerHTML={{ __html: html }} />
 
