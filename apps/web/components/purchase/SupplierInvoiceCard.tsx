@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
+import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import {
@@ -231,6 +232,7 @@ export function SupplierInvoiceCard({
           <AddRowForm
             invoiceId={invoice.id}
             supplierName={invoice.supplierName}
+            purchaseOrderNumber={invoice.purchaseOrderNumber ?? null}
             onDone={() => router.refresh()}
           />
         )}
@@ -282,7 +284,12 @@ function MatchCell({ row }: { row: SupplierInvoiceRow }) {
   );
 }
 
+// The picker only needs id + label; the invoice carries the supplier's name
+// but not its number, so the initial value is shown by name alone.
+type SupplierOption = { id: string; name: string; supplierNumber?: string };
+
 function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSaved: () => void }) {
+  const [supplier, setSupplier] = useState<SupplierOption | null>({ id: invoice.supplierId, name: invoice.supplierName });
   const [invoiceNumber, setInvoiceNumber] = useState(invoice.invoiceNumber);
   const [invoiceDate, setInvoiceDate] = useState(invoice.invoiceDate);
   const [dueDate, setDueDate] = useState(invoice.dueDate ?? "");
@@ -296,6 +303,10 @@ function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSa
 
   async function save(e: FormEvent) {
     e.preventDefault();
+    if (!supplier) {
+      setError("Välj leverantören som fakturan ska betalas till");
+      return;
+    }
     setError(null);
     setSaved(false);
     setPending(true);
@@ -303,6 +314,8 @@ function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSa
       await apiFetch(`/api/v1/supplier-invoices/${invoice.id}`, {
         method: "PATCH",
         body: JSON.stringify({
+          // Only sent when changed, so an ordinary save never logs a change.
+          supplierId: supplier.id !== invoice.supplierId ? supplier.id : undefined,
           invoiceNumber,
           invoiceDate,
           dueDate: dueDate.trim() || null,
@@ -325,6 +338,17 @@ function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSa
     <Card maxWidth={520} style={{ marginBottom: 20 }}>
       <Form onSubmit={save}>
         <FormError>{error}</FormError>
+        <Field label="Leverantör (betalas till)" htmlFor="hdrSupplier">
+          <SearchPicker<SupplierOption>
+            id="hdrSupplier"
+            endpoint="/api/v1/suppliers"
+            value={supplier}
+            onChange={setSupplier}
+            formatLabel={(s) => (s.supplierNumber ? `${s.supplierNumber} — ${s.name}` : s.name)}
+            placeholder="Sök leverantörnummer eller namn…"
+            emptyText="Inga leverantörer matchar sökningen"
+          />
+        </Field>
         <FormRow>
           <Field label="Leverantörens fakturanummer" htmlFor="hdrInvoiceNumber">
             <Input id="hdrInvoiceNumber" size="md" required maxLength={50} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
@@ -364,14 +388,18 @@ function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSa
 }
 
 // Adds a line — with an optional link to a purchase-order row for the same
-// supplier + article (IO-matchning). The API validates the match.
+// article (IO-matchning). The candidates are the invoice supplier's orders
+// plus the invoice's own purchase order, which may be another supplier's
+// when the invoice is paid to someone else. The API validates the match.
 function AddRowForm({
   invoiceId,
   supplierName,
+  purchaseOrderNumber,
   onDone,
 }: {
   invoiceId: string;
   supplierName: string;
+  purchaseOrderNumber: string | null;
   onDone: () => void;
 }) {
   const [description, setDescription] = useState("");
@@ -384,8 +412,7 @@ function AddRowForm({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  // Picking an article offers its purchase-order rows for this supplier as
-  // match candidates (price-history rows carry the PO row id).
+  // Picking an article offers its purchase-order rows as match candidates (price-history rows carry the PO row id).
   async function handleArticleChange(next: Article | null) {
     setArticle(next);
     setPoRowId("");
@@ -395,7 +422,9 @@ function AddRowForm({
       const history = await apiFetch<Paged<PriceHistoryEntry>>(
         `/api/v1/price-history?articleId=${next.id}&limit=100`
       );
-      setMatchOptions(history.rows.filter((r) => r.supplierName === supplierName));
+      setMatchOptions(
+        history.rows.filter((r) => r.supplierName === supplierName || r.orderNumber === purchaseOrderNumber)
+      );
     } catch {
       // Non-fatal — matching just won't be offered.
     }

@@ -7,7 +7,7 @@ import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
-import { Field, Input, Select } from "../ui/Field";
+import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
@@ -16,6 +16,7 @@ import { formatMoney, round2 } from "../../lib/format";
 import {
   PURCHASE_ORDER_STATUS_PILL,
   SUPPLIER_INVOICE_STATUS_PILL,
+  VAT_RATES,
   type Paged,
   type PurchaseOrder,
   type PurchaseOrderRow,
@@ -132,14 +133,29 @@ export function NewSupplierInvoiceForm({
   initialOrderId?: string;
 }) {
   const router = useRouter();
+  // The supplier the goods were ordered from — it picks the purchase orders
+  // to pull the invoice basis from. The invoice is paid to the same supplier
+  // unless Betalas till en annan leverantör is ticked (a factoring company,
+  // a parent company); the rows stay matched against the order either way.
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const supplierId = supplier?.id ?? "";
+  const [otherPayee, setOtherPayee] = useState(false);
+  const [payee, setPayee] = useState<Supplier | null>(null);
+  const invoiceSupplier = otherPayee ? payee : supplier;
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [netAmount, setNetAmount] = useState("");
   const [vatAmount, setVatAmount] = useState("");
   const [grossAmount, setGrossAmount] = useState("");
+  // Momsen förifylls: Momsbelopp = Nettobelopp × Momssats and Bruttobelopp =
+  // netto + moms, until the field is typed in by hand (manuellt vinner).
+  // Picking another Momssats is an explicit request, so it recomputes the
+  // VAT again. Foreign-currency suppliers start at 0 % — they invoice
+  // without Swedish VAT.
+  const [vatRate, setVatRate] = useState<number>(25);
+  const [vatTouched, setVatTouched] = useState(false);
+  const [grossTouched, setGrossTouched] = useState(false);
   const [note, setNote] = useState("");
   // Underlag — the supplier's invoice as PDF/scan, uploaded right after the
   // invoice is created (the file needs the new LF's id).
@@ -164,6 +180,26 @@ export function NewSupplierInvoiceForm({
       .catch(() => setError("Kunde inte hämta leverantören att förifylla"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const invoiceCurrency = invoiceSupplier?.currency;
+  useEffect(() => {
+    if (!invoiceCurrency) return;
+    setVatRate(invoiceCurrency === "SEK" ? 25 : 0);
+    setVatTouched(false);
+  }, [invoiceCurrency]);
+
+  useEffect(() => {
+    const net = Number(netAmount);
+    const hasNet = netAmount.trim() !== "" && Number.isFinite(net);
+    let vat = Number(vatAmount);
+    if (!vatTouched) {
+      vat = hasNet ? round2((net * vatRate) / 100) : 0;
+      setVatAmount(hasNet ? String(vat) : "");
+    }
+    if (!grossTouched) {
+      setGrossAmount(hasNet ? String(round2(net + (Number.isFinite(vat) ? vat : 0))) : "");
+    }
+  }, [netAmount, vatAmount, vatRate, vatTouched, grossTouched]);
 
   // Load the supplier's inlevererade orders whenever the supplier changes.
   useEffect(() => {
@@ -227,10 +263,10 @@ export function NewSupplierInvoiceForm({
         }
       }
       setPreviewRows(built);
-      // Fill net/gross from the row sum when the amounts are still empty.
+      // Fill the net amount from the row sum when it is still empty — the
+      // VAT and gross follow from it (see the prefill effect above).
       const sum = round2(built.reduce((acc, r) => acc + r.quantity * r.unitPrice, 0));
       if (isEmptyAmount(netAmount)) setNetAmount(String(sum));
-      if (isEmptyAmount(grossAmount)) setGrossAmount(String(sum));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte hämta orderraderna");
     }
@@ -246,13 +282,17 @@ export function NewSupplierInvoiceForm({
       setError("Välj en leverantör");
       return;
     }
+    if (!invoiceSupplier) {
+      setError("Välj leverantören som fakturan ska betalas till");
+      return;
+    }
     setError(null);
     setPending(true);
     try {
       const invoice = await apiFetch<SupplierInvoiceDetail>("/api/v1/supplier-invoices", {
         method: "POST",
         body: JSON.stringify({
-          supplierId,
+          supplierId: invoiceSupplier.id,
           invoiceNumber,
           invoiceDate,
           dueDate: dueDate.trim() || undefined,
@@ -266,6 +306,9 @@ export function NewSupplierInvoiceForm({
             articleId: r.articleId,
             quantity: r.quantity,
             unitPrice: r.unitPrice,
+            // The row's rate only steers the konteringsregel lookup; the
+            // header's Momsbelopp is what is booked.
+            vatRate,
             purchaseOrderRowId: r.purchaseOrderRowId,
           })),
         }),
@@ -340,6 +383,27 @@ export function NewSupplierInvoiceForm({
         <FormHint attached>Leverantören har inga inlevererade inköpsorder att hämta från.</FormHint>
       )}
 
+      {supplierId && (
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Checkbox checked={otherPayee} onChange={(e) => setOtherPayee(e.target.checked)} />
+          <span>Betalas till en annan leverantör</span>
+        </label>
+      )}
+      {supplierId && otherPayee && (
+        <Field label="Betalas till" htmlFor="invoicePayee">
+          <SearchPicker
+            id="invoicePayee"
+            endpoint="/api/v1/suppliers"
+            value={payee}
+            onChange={setPayee}
+            formatLabel={(s) => `${s.supplierNumber} — ${s.name}`}
+            placeholder="Sök leverantörnummer eller namn…"
+            emptyText="Inga leverantörer matchar sökningen"
+          />
+          <FormHint>Raderna förblir matchade mot inköpsordern.</FormHint>
+        </Field>
+      )}
+
       {previewRows.length > 0 && (
         <Table<PreviewRow>
           columns={[
@@ -397,9 +461,39 @@ export function NewSupplierInvoiceForm({
       </FormRow>
 
       <FormRow>
-        <Field label="Momsbelopp" htmlFor="vatAmount">
-          <Input id="vatAmount" type="number" step="0.01" size="sm" value={vatAmount} onChange={(e) => setVatAmount(e.target.value)} />
+        <Field label="Momssats" htmlFor="vatRate">
+          <Select
+            id="vatRate"
+            size="xs"
+            value={String(vatRate)}
+            onChange={(e) => {
+              setVatRate(Number(e.target.value));
+              setVatTouched(false);
+            }}
+          >
+            {VAT_RATES.map((rate) => (
+              <option key={rate} value={String(rate)}>
+                {rate} %
+              </option>
+            ))}
+          </Select>
         </Field>
+        <Field label="Momsbelopp" htmlFor="vatAmount">
+          <Input
+            id="vatAmount"
+            type="number"
+            step="0.01"
+            size="sm"
+            value={vatAmount}
+            onChange={(e) => {
+              setVatTouched(true);
+              setVatAmount(e.target.value);
+            }}
+          />
+        </Field>
+      </FormRow>
+
+      <FormRow>
         <Field label="Bruttobelopp" htmlFor="grossAmount">
           <Input
             id="grossAmount"
@@ -407,7 +501,10 @@ export function NewSupplierInvoiceForm({
             step="0.01"
             size="sm"
             value={grossAmount}
-            onChange={(e) => setGrossAmount(e.target.value)}
+            onChange={(e) => {
+              setGrossTouched(true);
+              setGrossAmount(e.target.value);
+            }}
           />
         </Field>
       </FormRow>

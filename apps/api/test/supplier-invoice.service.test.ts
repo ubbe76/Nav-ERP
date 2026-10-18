@@ -312,22 +312,32 @@ describe("supplier invoice — rows and PO matching", () => {
     await purchaseService.confirm(order.id);
     await purchaseService.receiveGoods(order.id, poRow.id, { locationId: location.id, quantity: 8 }, user.id);
 
-    // Wrong supplier → mismatch
+    // Another supplier to pay → the match against the order still stands
     const otherInvoice = await supplierInvoiceService.create(
       { supplierId: otherSupplier.id, invoiceNumber: "M-1", invoiceDate: "2026-07-01", rows: [] },
       user.id
     );
+    const otherRow = await supplierInvoiceService.addRow(otherInvoice!.id, {
+      description: "m",
+      articleId: article.id,
+      purchaseOrderRowId: poRow.id,
+      quantity: 8,
+      unitPrice: 45,
+    });
+    expect(otherRow.purchaseOrderRowId).toBe(poRow.id);
+
+    // Unknown PO row → mismatch
     await expect(
       supplierInvoiceService.addRow(otherInvoice!.id, {
         description: "m",
         articleId: article.id,
-        purchaseOrderRowId: poRow.id,
+        purchaseOrderRowId: crypto.randomUUID(),
         quantity: 8,
         unitPrice: 45,
       })
     ).rejects.toThrow(PoMatchMismatchError);
 
-    // Right supplier, wrong article → mismatch
+    // Wrong article → mismatch
     const invoice = await supplierInvoiceService.create(
       { supplierId: supplier.id, invoiceNumber: "M-2", invoiceDate: "2026-07-01", rows: [] },
       user.id
@@ -391,27 +401,118 @@ describe("supplier invoice — basis from purchase order", () => {
     expect(Number(row.quantityVariance)).toBe(0); // 7 invoiced − 7 received
   });
 
-  it("rejects create rows matched to another supplier's purchase order", async () => {
+  it("creates an invoice paid to another supplier than the purchase order's, keeping the match", async () => {
     const user = await makeUser();
-    const supplier = await makeSupplier("A");
-    const other = await makeSupplier("B");
+    const payee = await makeSupplier("Factoring AB");
+    const orderedFrom = await makeSupplier("B");
     const article = await makeArticle(`ART-X-${crypto.randomUUID()}`);
-    const order = await purchaseService.createPurchaseOrder({ supplierId: other.id }, user.id);
+    const order = await purchaseService.createPurchaseOrder({ supplierId: orderedFrom.id }, user.id);
     const poRow = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 5, unitPrice: 10 });
 
+    const invoice = await supplierInvoiceService.create(
+      {
+        supplierId: payee.id,
+        invoiceNumber: "X-1",
+        invoiceDate: "2026-07-01",
+        purchaseOrderId: order.id,
+        rows: [
+          { description: "m", articleId: article.id, quantity: 5, unitPrice: 12, purchaseOrderRowId: poRow.id },
+        ],
+      },
+      user.id
+    );
+    expect(invoice!.supplierId).toBe(payee.id);
+    expect(invoice!.purchaseOrderId).toBe(order.id);
+    expect(invoice!.rows[0]!.purchaseOrderRowId).toBe(poRow.id);
+    expect(Number(invoice!.rows[0]!.priceVariance)).toBe(2);
+  });
+});
+
+describe("supplier invoice — byte av leverantör", () => {
+  it("changes the supplier of a draft, keeps the PO match, re-snapshots the currency and logs it", async () => {
+    const user = await makeUser();
+    const orderedFrom = await makeSupplier("Beställd hos AB");
+    const payee = await makeSupplier("Betalas till AB", "EUR");
+    const article = await makeArticle(`ART-B-${crypto.randomUUID()}`);
+    const location = await makeLocation();
+    const order = await purchaseService.createPurchaseOrder({ supplierId: orderedFrom.id }, user.id);
+    const poRow = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 4, unitPrice: 25 });
+    await purchaseService.confirm(order.id);
+    await purchaseService.receiveGoods(order.id, poRow.id, { locationId: location.id, quantity: 4 }, user.id);
+    const invoice = await supplierInvoiceService.create(
+      {
+        supplierId: orderedFrom.id,
+        invoiceNumber: "B-1",
+        invoiceDate: "2026-07-01",
+        purchaseOrderId: order.id,
+        rows: [{ description: "m", articleId: article.id, quantity: 4, unitPrice: 25, purchaseOrderRowId: poRow.id }],
+      },
+      user.id
+    );
+    expect(invoice!.currency).toBe("SEK");
+
+    const updated = await supplierInvoiceService.updateHeader(invoice!.id, { supplierId: payee.id }, user.id);
+    expect(updated!.supplierId).toBe(payee.id);
+    expect(updated!.supplierName).toBe("Betalas till AB");
+    expect(updated!.currency).toBe("EUR");
+    expect(updated!.purchaseOrderId).toBe(order.id);
+    expect(updated!.rows[0]!.purchaseOrderRowId).toBe(poRow.id);
+    expect(Number(updated!.rows[0]!.quantityVariance)).toBe(0);
+
+    // A row added afterwards can still be matched against the order.
+    const added = await supplierInvoiceService.addRow(invoice!.id, {
+      description: "m2",
+      articleId: article.id,
+      purchaseOrderRowId: poRow.id,
+      quantity: 1,
+      unitPrice: 25,
+    });
+    expect(added.purchaseOrderRowId).toBe(poRow.id);
+
+    const entries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, invoice!.registrationNumber), eq(auditLog.action, "supplier_changed")));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.detail).toEqual({
+      before: { supplier: `${orderedFrom.supplierNumber} Beställd hos AB` },
+      after: { supplier: `${payee.supplierNumber} Betalas till AB` },
+    });
+  });
+
+  it("logs nothing when the same supplier is sent again", async () => {
+    const { user, supplier, invoice } = await makeInvoice();
+    await supplierInvoiceService.updateHeader(invoice.id, { supplierId: supplier.id, note: "x" }, user.id);
+    const entries = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, invoice.registrationNumber), eq(auditLog.action, "supplier_changed")));
+    expect(entries).toHaveLength(0);
+  });
+
+  it("404s an unknown supplier and refuses a duplicate invoice number at the new supplier", async () => {
+    const { user, invoice } = await makeInvoice();
     await expect(
-      supplierInvoiceService.create(
-        {
-          supplierId: supplier.id,
-          invoiceNumber: "X-1",
-          invoiceDate: "2026-07-01",
-          rows: [
-            { description: "m", articleId: article.id, quantity: 5, unitPrice: 10, purchaseOrderRowId: poRow.id },
-          ],
-        },
-        user.id
-      )
-    ).rejects.toThrow(PoMatchMismatchError);
+      supplierInvoiceService.updateHeader(invoice.id, { supplierId: crypto.randomUUID() }, user.id)
+    ).rejects.toThrow(SupplierNotFoundError);
+
+    const other = await makeSupplier("Annan AB");
+    await supplierInvoiceService.create(
+      { supplierId: other.id, invoiceNumber: invoice.invoiceNumber, invoiceDate: "2026-07-01", rows: [] },
+      user.id
+    );
+    await expect(supplierInvoiceService.updateHeader(invoice.id, { supplierId: other.id }, user.id)).rejects.toThrow(
+      DuplicateSupplierInvoiceNumberError
+    );
+  });
+
+  it("refuses to change the supplier once the invoice is approved", async () => {
+    const { user, invoice } = await makeInvoice();
+    await supplierInvoiceService.approve(invoice.id, user.id);
+    const other = await makeSupplier("Sen AB");
+    await expect(supplierInvoiceService.updateHeader(invoice.id, { supplierId: other.id }, user.id)).rejects.toThrow(
+      InvalidStatusTransitionError
+    );
   });
 });
 

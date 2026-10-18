@@ -122,7 +122,7 @@ export async function supplierInvoiceRoutes(app: FastifyInstance, opts: { servic
   app.patch<{ Params: { id: string } }>("/supplier-invoices/:id", async (req, reply) => {
     const input = updateSupplierInvoiceHeaderSchema.parse(req.body);
     try {
-      return await service.updateHeader(req.params.id, input);
+      return await service.updateHeader(req.params.id, input, req.user!.id);
     } catch (err) {
       return invoiceError(err, reply);
     }

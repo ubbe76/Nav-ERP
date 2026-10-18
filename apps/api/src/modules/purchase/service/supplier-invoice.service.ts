@@ -197,15 +197,17 @@ export function createSupplierInvoiceService(
 ) {
   // Validates the optional PO-match and computes the line/vat amounts so the
   // stored numbers always equal quantity × unitPrice.
-  async function resolveRow(invoiceSupplierId: string, input: RowInput): Promise<SupplierInvoiceRowWrite> {
+  async function resolveRow(input: RowInput): Promise<SupplierInvoiceRowWrite> {
     const articleId = input.articleId ?? null;
     const purchaseOrderRowId = input.purchaseOrderRowId ?? null;
+    // The PO's supplier is deliberately NOT compared with the invoice's: the
+    // invoice may be paid to another supplier than the one the goods were
+    // ordered from (a factoring company, a parent company), and the match
+    // still reconciles price and quantity against the order. The article must
+    // line up — that is what the variance is computed on.
     if (purchaseOrderRowId) {
       const poRow = await repo.findPurchaseOrderRowForMatch(purchaseOrderRowId);
       if (!poRow) throw new PoMatchMismatchError("The matched purchase order row does not exist");
-      if (poRow.supplierId !== invoiceSupplierId) {
-        throw new PoMatchMismatchError("The matched purchase order belongs to a different supplier");
-      }
       if (articleId === null || poRow.articleId !== articleId) {
         throw new PoMatchMismatchError("The matched purchase order row is for a different article");
       }
@@ -278,7 +280,7 @@ export function createSupplierInvoiceService(
           : null;
         dueDate = computeDueDate(input.invoiceDate, paymentTermCode);
       }
-      const rows = await Promise.all(input.rows.map((r) => resolveRow(input.supplierId, r)));
+      const rows = await Promise.all(input.rows.map((r) => resolveRow(r)));
       let invoice;
       try {
         invoice = await repo.create(
@@ -315,13 +317,15 @@ export function createSupplierInvoiceService(
     },
 
     // Header edits are allowed only in draft.
-    async updateHeader(id: string, input: UpdateSupplierInvoiceHeaderInput) {
+    async updateHeader(id: string, input: UpdateSupplierInvoiceHeaderInput, userId: string | null = null) {
       const invoice = await repo.findRawById(id);
       if (!invoice) throw new SupplierInvoiceNotFoundError(id);
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change a supplier invoice in status "${invoice.status}"`);
       }
       const patch: {
+        supplierId?: string;
+        currency?: string;
         invoiceNumber?: string;
         purchaseOrderId?: string | null;
         invoiceDate?: string;
@@ -333,6 +337,23 @@ export function createSupplierInvoiceService(
         paymentReferenceKind?: PaymentReferenceKind | null;
         paymentReference?: string | null;
       } = {};
+      // Byte av leverantör (betalas till): the currency is re-snapshotted from
+      // the new supplier, as at creation. The due date is left alone — like
+      // every other draft edit it stays under manual control.
+      let supplierChange: { from: string; to: string } | null = null;
+      if (input.supplierId !== undefined && input.supplierId !== invoice.supplierId) {
+        const [previous, next] = await Promise.all([
+          repo.findSupplierById(invoice.supplierId),
+          repo.findSupplierById(input.supplierId),
+        ]);
+        if (!next) throw new SupplierNotFoundError(input.supplierId);
+        patch.supplierId = next.id;
+        patch.currency = next.currency;
+        supplierChange = {
+          from: previous ? `${previous.supplierNumber} ${previous.name}` : invoice.supplierId,
+          to: `${next.supplierNumber} ${next.name}`,
+        };
+      }
       if (input.invoiceNumber !== undefined) patch.invoiceNumber = input.invoiceNumber;
       if (input.purchaseOrderId !== undefined) patch.purchaseOrderId = input.purchaseOrderId;
       if (input.invoiceDate !== undefined) patch.invoiceDate = input.invoiceDate;
@@ -345,11 +366,26 @@ export function createSupplierInvoiceService(
         patch.paymentReferenceKind = input.paymentReference?.kind ?? null;
         patch.paymentReference = input.paymentReference?.value ?? null;
       }
+      let updated;
       try {
-        await repo.updateHeader(id, patch);
+        updated = await repo.updateHeader(id, patch);
       } catch (err) {
-        if (isUniqueViolation(err)) throw new DuplicateSupplierInvoiceNumberError(input.invoiceNumber ?? "");
+        // The unique key is (supplier, invoice number), so a supplier change
+        // alone can hit it too.
+        if (isUniqueViolation(err)) throw new DuplicateSupplierInvoiceNumberError(input.invoiceNumber ?? invoice.invoiceNumber);
         throw err;
+      }
+      // The repository's own status guard: an attest (or makulering) won the
+      // race after the check above.
+      if (!updated) throw new InvalidStatusTransitionError("The supplier invoice was changed by someone else");
+      if (supplierChange) {
+        await audit.log({
+          entityType: "supplier_invoice",
+          entityId: invoice.registrationNumber,
+          action: "supplier_changed",
+          detail: { before: { supplier: supplierChange.from }, after: { supplier: supplierChange.to } },
+          userId,
+        });
       }
       return service.getInvoice(id);
     },
@@ -379,7 +415,7 @@ export function createSupplierInvoiceService(
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change rows on a supplier invoice in status "${invoice.status}"`);
       }
-      return repo.addRow(invoiceId, await resolveRow(invoice.supplierId, input));
+      return repo.addRow(invoiceId, await resolveRow(input));
     },
 
     async updateRow(invoiceId: string, rowId: string, input: UpdateSupplierInvoiceRowInput) {
@@ -401,7 +437,7 @@ export function createSupplierInvoiceService(
         vatRate:
           input.vatRate !== undefined ? input.vatRate : existing.vatRate !== null ? Number(existing.vatRate) : null,
       };
-      const row = await repo.updateRow(invoiceId, rowId, await resolveRow(invoice.supplierId, merged));
+      const row = await repo.updateRow(invoiceId, rowId, await resolveRow(merged));
       if (!row) throw new SupplierInvoiceRowNotFoundError(rowId);
       return row;
     },

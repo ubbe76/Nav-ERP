@@ -80,6 +80,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   sent: "Skickad",
   answered: "Besvarad",
   payment_reference_changed: "Betalningsreferens ändrad",
+  supplier_changed: "Leverantör ändrad",
   exported: "Exporterad",
   items_added: "Poster tillagda",
   item_updated: "Post ändrad",

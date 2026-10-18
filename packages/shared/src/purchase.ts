@@ -397,10 +397,13 @@ export const createSupplierInvoiceSchema = z.object({
 });
 export type CreateSupplierInvoiceInput = z.infer<typeof createSupplierInvoiceSchema>;
 
-// The supplier stays locked after creation (identity for matching + the
-// unique invoice number per supplier).
+// supplierId = the supplier the invoice is paid to (draft only). The rows'
+// PO matching is left as it is, so an invoice from another supplier than the
+// one the goods were ordered from (a factoring company, a parent company)
+// still reconciles against the purchase order.
 export const updateSupplierInvoiceHeaderSchema = z
   .object({
+    supplierId: z.string().uuid().optional(),
     invoiceNumber: z.string().min(1).max(50).optional(),
     purchaseOrderId: z.string().uuid().nullable().optional(),
     invoiceDate: z.string().date().optional(),

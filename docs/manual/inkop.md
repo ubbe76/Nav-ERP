@@ -269,11 +269,15 @@ Listan visar en rad per inköpsorder med **Ordernr** (länk till orderkortet), *
 
 ### Skapa en faktura
 
-**+ Ny leverantörsfaktura**. I huvudet anges **Leverantör**, **Leverantörens fakturanummer**, **Fakturadatum**, **Förfallodatum**, **Nettobelopp**, **Momsbelopp**, **Bruttobelopp** och **Notering**. Beloppen i huvudet matas in från pappersfakturan och är det som gäller — så att frakt och öresavrundning alltid stämmer.
+**+ Ny leverantörsfaktura**. I huvudet anges **Leverantör**, **Leverantörens fakturanummer**, **Fakturadatum**, **Förfallodatum**, **Nettobelopp**, **Momssats**, **Momsbelopp**, **Bruttobelopp** och **Notering**. Beloppen i huvudet matas in från pappersfakturan och är det som gäller — så att frakt och öresavrundning alltid stämmer.
+
+**Momsen förifylls.** När du fyller i **Nettobelopp** räknas **Momsbelopp** ut som nettobeloppet × **Momssats**, och **Bruttobelopp** som netto + moms. Momssatsen är **25 %** för leverantörer i svenska kronor och **0 %** för leverantörer i annan valuta. Skriver du själv i **Momsbelopp** eller **Bruttobelopp** rörs fältet inte längre — välj en annan **Momssats** så räknas momsen om igen. Kontrollera alltid beloppen mot pappersfakturan.
+
+**Betalas till en annan leverantör.** Ibland kommer fakturan från någon annan än leverantören du beställde av, t.ex. ett factoringbolag eller ett moderbolag. Välj då leverantören du beställde av under **Leverantör** (så att dess inköpsorder går att hämta), kryssa i **Betalas till en annan leverantör** och välj leverantören fakturan ska betalas till under **Betalas till**. Fakturan registreras på den leverantören — det är den som syns i reskontran och får betalningen — medan raderna förblir matchade mot inköpsordern. På fakturakortet kan leverantören ändras under **Leverantör (betalas till)** så länge fakturan är ett **Utkast**; valutan följer då med från den nya leverantören, och bytet loggas i **Historik** som **Leverantör ändrad**.
 
 Rader kan läggas till med **Beskrivning**, **Artikel** (valfri — frakt- och avgiftsrader saknar artikel), **Antal**, **À-pris** och **Moms %** — en lista med **25 %**, **12 %**, **6 %**, **0 %** eller **"— Ingen —"** (samma satser som på kundfakturan; radens momssats används bara för konteringsregeluppslaget, det är huvudets **Momsbelopp** som bokförs). Radens belopp räknas ut automatiskt (Antal × À-pris). Rader kan också läggas till i efterhand på fakturakortet så länge fakturan är i **Utkast**.
 
-**Hämta underlag från inköpsorder.** När leverantören är vald visas **Hämta underlag från inköpsorder** med en lista över leverantörens inlevererade order (status Delvis mottagen, Mottagen eller Stängd). Välj en order, välj **Mottaget antal** (bara inlevererade rader, med mottaget antal) eller **Beställt antal** (alla rader, med beställt antal) och klicka **Hämta orderrader**. Raderna fylls i som en förhandsgranskning där enskilda rader kan tas bort innan du sparar, à-priset tas från orderraden, och varje rad blir automatiskt IO-matchad (se nedan). Är **Nettobelopp** och **Bruttobelopp** tomma fylls de i från radsumman — redan ifyllda belopp och momsen rörs inte. Har leverantören inga inlevererade order visas i stället en upplysning, och du kan mata in raderna för hand som vanligt.
+**Hämta underlag från inköpsorder.** När leverantören är vald visas **Hämta underlag från inköpsorder** med en lista över leverantörens inlevererade order (status Delvis mottagen, Mottagen eller Stängd). Välj en order, välj **Mottaget antal** (bara inlevererade rader, med mottaget antal) eller **Beställt antal** (alla rader, med beställt antal) och klicka **Hämta orderrader**. Raderna fylls i som en förhandsgranskning där enskilda rader kan tas bort innan du sparar, à-priset tas från orderraden, och varje rad blir automatiskt IO-matchad (se nedan). Är **Nettobelopp** tomt fylls det i från radsumman, och momsen och bruttobeloppet räknas ut därifrån som ovan. Raderna får fakturans **Momssats**. Har leverantören inga inlevererade order visas i stället en upplysning, och du kan mata in raderna för hand som vanligt.
 
 ### Underlag — leverantörens faktura
 
@@ -289,7 +293,7 @@ Underlagen lagras i databasen och följer därmed med i varje säkerhetskopia (s
 
 ### IO-matchning
 
-En fakturarad kan kopplas till en rad på en inköpsorder. Leverantören och artikeln måste vara desamma, annars nekas kopplingen. Systemet visar då pris- och antalsavvikelse mot ordern/mottaget. Matchningen påverkar inte lagersaldot — lagret bokfördes redan vid inleveransen.
+En fakturarad kan kopplas till en rad på en inköpsorder. Artikeln måste vara densamma, annars nekas kopplingen. Leverantören behöver inte vara densamma — fakturan kan betalas till en annan leverantör än den du beställde av (se ovan). På fakturakortet erbjuds rader från fakturaleverantörens inköpsorder och från fakturans egen inköpsorder. Systemet visar då pris- och antalsavvikelse mot ordern/mottaget. Matchningen påverkar inte lagersaldot — lagret bokfördes redan vid inleveransen.
 
 ### Betalningsreferens
 

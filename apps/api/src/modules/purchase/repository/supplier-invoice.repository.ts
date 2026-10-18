@@ -119,6 +119,8 @@ export type SupplierInvoiceHeaderWrite = {
 // Header patch (draft only) — amounts already stringified for the numeric
 // columns by the service.
 type HeaderPatch = {
+  supplierId?: string;
+  currency?: string;
   invoiceNumber?: string;
   purchaseOrderId?: string | null;
   invoiceDate?: string;
@@ -315,11 +317,16 @@ export function createSupplierInvoiceRepository(db: Db) {
         .orderBy(asc(supplierInvoiceRows.createdAt));
     },
 
+    // Only a draft is changed: the status guard sits in the UPDATE itself, so
+    // an attest that commits between the service's check and this write (it
+    // books the L verification from the header it read under FOR UPDATE)
+    // leaves the header alone instead of having its amounts or supplier
+    // changed after the posting. null = not found or no longer a draft.
     async updateHeader(id: string, patch: HeaderPatch) {
       const [row] = await db
         .update(supplierInvoices)
         .set({ ...patch, updatedAt: new Date() })
-        .where(eq(supplierInvoices.id, id))
+        .where(and(eq(supplierInvoices.id, id), eq(supplierInvoices.status, "draft")))
         .returning();
       return row ?? null;
     },
