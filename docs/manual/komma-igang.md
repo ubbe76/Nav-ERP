@@ -53,6 +53,6 @@ Där en artikel ska väljas (orderrader, tillverkningsorder, struktur) finns en 
 
 ## Licens
 
-nav | ERP är fri programvara, © 2026 Urban Källefors, och sprids under **GNU General Public License version 3 eller senare** (GPL-3.0-or-later). Du får använda, sprida och ändra programmet enligt licensens villkor; det levereras utan garanti. Den fullständiga licenstexten finns i filen `LICENSE` i källkoden.
+Nav|ERP är fri programvara, © 2026 Urban Källefors, och sprids under **GNU General Public License version 3 eller senare** (GPL-3.0-or-later). Du får använda, sprida och ändra programmet enligt licensens villkor; det levereras utan garanti. Den fullständiga licenstexten finns i filen `LICENSE` i källkoden.
 
 Färgtemat **Dracula** bygger på [Dracula-paletten](https://draculatheme.com) (© 2023 Dracula Theme) och används under MIT-licensen — licenstexten finns i `licenses/Dracula-MIT.txt`.
