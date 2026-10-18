@@ -24,7 +24,7 @@ Nav|ERP är en alfaversion och **inte redo för produktion**. Bara den senaste v
 
 | Version | Får rättningar |
 |---|---|
-| 0.2.5-alpha (senaste `main`) | Ja |
+| 0.3.0-alpha (senaste `main`) | Ja |
 | Äldre | Nej — uppdatera till senaste |
 
 ## Driftsätt säkert

@@ -506,7 +506,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.2.5-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.3.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -594,8 +594,13 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   tillverkningsorder (arbetsdagen före artikelns första otäckta behov);
   **behovsberäkning** med orderförslag och **Skapa ordrar** (resultatet
   återanvänds en minut, **Uppdatera** räknar om), **artikelöversikt**
-  med lagersaldo och löpande disponibelt antal, och beläggning per
-  resurs och vecka
+  med lagersaldo och löpande disponibelt antal, beläggning per
+  resurs och vecka och **produktionsplanering** (operationerna planeras
+  på resursernas lediga kapacitet vecka för vecka med **Planera**,
+  flyttas och låses för hand, och en ny tillverkningsorder planeras
+  direkt); **Leveranstidskontroll** på kundordern räknar fram ett
+  leveransdatum ur lager, inköp och kapacitet och kan skapa och låsa
+  tillverkningsordrarna för det som saknas
 - **Tidrapportering & personal** — **stämpelterminal** (helskärmsvy för en
   delad skärm i verkstaden: närvarostämpling kom/gå med sifferknappsats,
   in-/utstämpling på order/operationer som materialiserar tidrapporter,

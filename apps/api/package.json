@@ -1,6 +1,6 @@
 {
   "name": "@navet/api",
-  "version": "0.2.5-alpha",
+  "version": "0.3.0-alpha",
   "private": true,
   "type": "module",
   "scripts": {
