@@ -171,12 +171,28 @@ export const updateDeliveryAddressSchema = z
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateDeliveryAddressInput = z.infer<typeof updateDeliveryAddressSchema>;
 
+// Ny leveransadress typed in on the order itself. Without saveToCustomer it
+// is an engångsadress: stored with the customer's addresses (so every reader
+// goes through the order's delivery_address_id) but hidden from the
+// customer's list and pickers. saveToCustomer adds it to the customer's
+// delivery addresses like one created on the customer card.
+export const newDeliveryAddressSchema = createDeliveryAddressSchema
+  .omit({ isDefault: true })
+  .extend({ saveToCustomer: z.boolean().default(false) });
+export type NewDeliveryAddressInput = z.infer<typeof newDeliveryAddressSchema>;
+
+const oneDeliveryAddressChoice = {
+  message: "Ange antingen deliveryAddressId eller newDeliveryAddress, inte båda",
+  path: ["newDeliveryAddress"],
+};
+
 // Header fields editable while the order is quote/confirmed/in_production.
 export const updateSalesOrderHeaderSchema = z
   .object({
     customerOrderNumber: z.string().max(50).nullable().optional(),
     customerReference: z.string().max(100).nullable().optional(),
     deliveryAddressId: z.string().uuid().nullable().optional(),
+    newDeliveryAddress: newDeliveryAddressSchema.optional(),
     deliveryTermId: z.string().uuid().nullable().optional(),
     paymentTermId: z.string().uuid().nullable().optional(),
     carrierId: z.string().uuid().nullable().optional(),
@@ -190,7 +206,8 @@ export const updateSalesOrderHeaderSchema = z
   .refine(
     (data) => Object.keys(data).some((key) => key !== "bumpRevision"),
     "At least one field must be provided"
-  );
+  )
+  .refine((data) => !(data.deliveryAddressId !== undefined && data.newDeliveryAddress), oneDeliveryAddressChoice);
 export type UpdateSalesOrderHeaderInput = z.infer<typeof updateSalesOrderHeaderSchema>;
 
 export const createQuoteSchema = z.object({
@@ -203,10 +220,13 @@ export const createQuoteSchema = z.object({
   customerOrderNumber: z.string().max(50).optional(),
   customerReference: z.string().max(100).optional(),
   deliveryAddressId: z.string().uuid().optional(),
+  // Or a new address typed in on the order (see newDeliveryAddressSchema),
+  // created in the order's own transaction.
+  newDeliveryAddress: newDeliveryAddressSchema.optional(),
   // Create as a confirmed order directly ("Ny kundorder") instead of a
   // quote — the order is confirmed via the normal status transition.
   confirm: z.boolean().default(false),
-});
+}).refine((data) => !(data.deliveryAddressId && data.newDeliveryAddress), oneDeliveryAddressChoice);
 export type CreateQuoteInput = z.infer<typeof createQuoteSchema>;
 
 // For adding further rows to a quote before it's confirmed. Extends (not

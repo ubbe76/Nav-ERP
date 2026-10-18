@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
-import { Field, Input, Select } from "../ui/Field";
+import { Field, Input } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { ConfigureModal } from "../configurator/ConfigureModal";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
@@ -18,6 +18,12 @@ import type { DeliveryTimeCheckRequest } from "../../lib/deliveryTimeCheck";
 import { toBaseQuantity, toBasePrice, toUnitPrice } from "../../lib/units";
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
 import type { Article, Customer, CustomerDeliveryAddress, PriceQuote, SalesOrder } from "../../lib/types";
+import {
+  DeliveryAddressChoice,
+  deliveryAddressPayload,
+  emptyDeliveryAddressDraft,
+  type DeliveryAddressDraft,
+} from "./DeliveryAddressChoice";
 import { Form, FormActions, FormError, FormHint, FormLineRow, FormLineRowTop, FormRow } from "../ui/Form";
 
 interface CreateQuoteResponse {
@@ -75,6 +81,7 @@ export function NewQuoteForm({
   const [customerReference, setCustomerReference] = useState("");
   const [deliveryAddressId, setDeliveryAddressId] = useState("");
   const [deliveryAddresses, setDeliveryAddresses] = useState<CustomerDeliveryAddress[]>([]);
+  const [newDeliveryAddress, setNewDeliveryAddress] = useState<DeliveryAddressDraft>(emptyDeliveryAddressDraft());
   const [rows, setRows] = useState<QuoteRow[]>([
     { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1 },
   ]);
@@ -161,7 +168,7 @@ export function NewQuoteForm({
           note: note || undefined,
           customerOrderNumber: customerOrderNumber.trim() || undefined,
           customerReference: customerReference.trim() || undefined,
-          deliveryAddressId: deliveryAddressId || undefined,
+          ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, undefined),
           confirm: mode === "order",
           rows: rows.map((r) => ({
             articleId: r.article!.id,
@@ -248,20 +255,16 @@ export function NewQuoteForm({
         </Field>
       </FormRow>
 
-      <Field label="Leveransadress" htmlFor="deliveryAddressId">
-        <Select
-          id="deliveryAddressId"
+      {customer && (
+        <DeliveryAddressChoice
+          idPrefix="quote"
+          addresses={deliveryAddresses}
           value={deliveryAddressId}
-          onChange={(e) => setDeliveryAddressId(e.target.value)}
-        >
-          <option value="">Ingen</option>
-          {deliveryAddresses.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.label} — {[a.address, [a.postalCode, a.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
-            </option>
-          ))}
-        </Select>
-      </Field>
+          onChange={setDeliveryAddressId}
+          draft={newDeliveryAddress}
+          onDraftChange={setNewDeliveryAddress}
+        />
+      )}
 
       <div>
         <Label>Rader</Label>

@@ -724,12 +724,20 @@ export function createSalesService(
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
       }
       if (input.deliveryAddressId) {
+        // Another order's engångsadress is not the customer's to pick; the
+        // order's own may be sent back unchanged.
         const address = await repo.findDeliveryAddress(order.customerId, input.deliveryAddressId);
-        if (!address) throw new DeliveryAddressNotFoundError(input.deliveryAddressId);
+        if (!address || (address.oneOff && address.id !== order.deliveryAddressId)) {
+          throw new DeliveryAddressNotFoundError(input.deliveryAddressId);
+        }
       }
       await validateRegisterRefs(input);
-      const updated = await repo.updateSalesOrderHeader(orderId, input);
-      return repo.findSalesOrderById(updated!.id);
+      const result = await repo.updateSalesOrderHeaderWithAddress(orderId, input);
+      if (!result.ok) {
+        if (result.reason === "not_found") throw new SalesOrderNotFoundError(orderId);
+        throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${result.status}"`);
+      }
+      return repo.findSalesOrderById(result.order.id);
     },
 
     // Reservationen (Leveranstidskontroll → Skapa tillverkningsordrar): the
@@ -767,7 +775,7 @@ export function createSalesService(
       // The delivery address must belong to the ordering customer.
       if (input.deliveryAddressId) {
         const address = await repo.findDeliveryAddress(input.customerId, input.deliveryAddressId);
-        if (!address) throw new DeliveryAddressNotFoundError(input.deliveryAddressId);
+        if (!address || address.oneOff) throw new DeliveryAddressNotFoundError(input.deliveryAddressId);
       }
       // Variants resolved here (delprojekt 5) are created under the template
       // lock BEFORE the order's transaction, so they outlive a quote that

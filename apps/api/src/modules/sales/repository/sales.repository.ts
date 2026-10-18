@@ -38,6 +38,7 @@ import {
   type ListPriceListsQuery,
   type ListQuery,
   type ListSalesOrdersQuery,
+  type NewDeliveryAddressInput,
   type OrderRowConfiguration,
   type OrderRowConfigurationCost,
   type PriceListRowInput,
@@ -149,6 +150,33 @@ export type RowConfigurationMutationResult =
     };
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+// Ny leveransadress on an order (create or header PATCH), inside the order's
+// own transaction: an engångsadress unless Spara på kunden is ticked. Never
+// the default — the customer card decides that.
+async function insertNewDeliveryAddress(tx: Tx, customerId: string, input: NewDeliveryAddressInput) {
+  const { saveToCustomer, ...address } = input;
+  const [row] = await tx
+    .insert(customerDeliveryAddresses)
+    .values({ ...address, customerId, isDefault: false, oneOff: !saveToCustomer })
+    .returning();
+  return row!;
+}
+
+// bumpRevision is a directive, not a column — stripped before the spread.
+async function writeSalesOrderHeader(dbc: Db | Tx, orderId: string, input: UpdateSalesOrderHeaderInput) {
+  const { bumpRevision, newDeliveryAddress: _newDeliveryAddress, ...fields } = input;
+  const [row] = await dbc
+    .update(salesOrders)
+    .set({
+      ...fields,
+      revision: bumpRevision !== false ? sql`${salesOrders.revision} + 1` : undefined,
+      updatedAt: new Date(),
+    })
+    .where(eq(salesOrders.id, orderId))
+    .returning();
+  return row ?? null;
+}
 
 // Content changes (header/terms/rows) bump the order's revision by 1 inside
 // the same transaction — status transitions and deliveries never do. Callers
@@ -348,12 +376,16 @@ export function createSalesRepository(db: Db) {
     },
 
     // --- Delivery addresses (leveransadresser) — contact-pattern CRUD ---
+    // An order's engångsadress (one_off) is not part of the customer's
+    // register: hidden from the list and untouchable through these routes.
+    // findDeliveryAddress returns it, so the service can let an order keep
+    // its own one.
 
     async listDeliveryAddresses(customerId: string) {
       return db
         .select()
         .from(customerDeliveryAddresses)
-        .where(eq(customerDeliveryAddresses.customerId, customerId))
+        .where(and(eq(customerDeliveryAddresses.customerId, customerId), eq(customerDeliveryAddresses.oneOff, false)))
         .orderBy(desc(customerDeliveryAddresses.isDefault), asc(customerDeliveryAddresses.label));
     },
 
@@ -395,7 +427,13 @@ export function createSalesRepository(db: Db) {
         const [row] = await tx
           .update(customerDeliveryAddresses)
           .set(input)
-          .where(and(eq(customerDeliveryAddresses.id, addressId), eq(customerDeliveryAddresses.customerId, customerId)))
+          .where(
+            and(
+              eq(customerDeliveryAddresses.id, addressId),
+              eq(customerDeliveryAddresses.customerId, customerId),
+              eq(customerDeliveryAddresses.oneOff, false)
+            )
+          )
           .returning();
         return row ?? null;
       });
@@ -404,7 +442,13 @@ export function createSalesRepository(db: Db) {
     async deleteDeliveryAddress(customerId: string, addressId: string) {
       const [row] = await db
         .delete(customerDeliveryAddresses)
-        .where(and(eq(customerDeliveryAddresses.id, addressId), eq(customerDeliveryAddresses.customerId, customerId)))
+        .where(
+          and(
+            eq(customerDeliveryAddresses.id, addressId),
+            eq(customerDeliveryAddresses.customerId, customerId),
+            eq(customerDeliveryAddresses.oneOff, false)
+          )
+        )
         .returning();
       return row ?? null;
     },
@@ -430,18 +474,50 @@ export function createSalesRepository(db: Db) {
 
     // `dbc`: the reservation writes the date inside its own transaction.
     async updateSalesOrderHeader(orderId: string, input: UpdateSalesOrderHeaderInput, dbc: Db | Tx = db) {
-      // bumpRevision is a directive, not a column — strip it before the spread.
-      const { bumpRevision, ...fields } = input;
-      const [row] = await dbc
-        .update(salesOrders)
-        .set({
-          ...fields,
-          revision: bumpRevision !== false ? sql`${salesOrders.revision} + 1` : undefined,
-          updatedAt: new Date(),
-        })
-        .where(eq(salesOrders.id, orderId))
-        .returning();
-      return row ?? null;
+      return writeSalesOrderHeader(dbc, orderId, input);
+    },
+
+    // Header PATCH: the status guard is re-read under the order's row lock
+    // (the service's own check is an unlocked pre-read), a Ny leveransadress
+    // is created in the same transaction, and an engångsadress the order no
+    // longer uses is deleted — nothing else can reference it, but the
+    // NOT EXISTS keeps a second order pointing at it (only possible through
+    // a bug) from losing its address.
+    async updateSalesOrderHeaderWithAddress(orderId: string, input: UpdateSalesOrderHeaderInput) {
+      return db.transaction(async (tx) => {
+        const [order] = await tx
+          .select({
+            id: salesOrders.id,
+            status: salesOrders.status,
+            customerId: salesOrders.customerId,
+            deliveryAddressId: salesOrders.deliveryAddressId,
+          })
+          .from(salesOrders)
+          .where(eq(salesOrders.id, orderId))
+          .for("update");
+        if (!order) return { ok: false as const, reason: "not_found" as const };
+        if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+          return { ok: false as const, reason: "status" as const, status: order.status };
+        }
+        const { newDeliveryAddress, ...fields } = input;
+        if (newDeliveryAddress) {
+          fields.deliveryAddressId = (await insertNewDeliveryAddress(tx, order.customerId, newDeliveryAddress)).id;
+        }
+        const updated = await writeSalesOrderHeader(tx, orderId, fields);
+        const previous = order.deliveryAddressId;
+        if (fields.deliveryAddressId !== undefined && previous && previous !== fields.deliveryAddressId) {
+          await tx
+            .delete(customerDeliveryAddresses)
+            .where(
+              and(
+                eq(customerDeliveryAddresses.id, previous),
+                eq(customerDeliveryAddresses.oneOff, true),
+                sql`not exists (select 1 from ${salesOrders} where ${salesOrders.deliveryAddressId} = ${previous})`
+              )
+            );
+        }
+        return { ok: true as const, order: updated! };
+      });
     },
 
     // Atomic: the order header and all its rows are created together, per
@@ -455,6 +531,9 @@ export function createSalesRepository(db: Db) {
         // currency) — later changes on the customer card don't touch orders.
         const [customer] = await tx.select().from(customers).where(eq(customers.id, input.customerId));
         const orderNumber = await getNextOrderNumber(tx, "sales_order");
+        const deliveryAddressId = input.newDeliveryAddress
+          ? (await insertNewDeliveryAddress(tx, input.customerId, input.newDeliveryAddress)).id
+          : input.deliveryAddressId;
         const [order] = await tx
           .insert(salesOrders)
           .values({
@@ -462,7 +541,7 @@ export function createSalesRepository(db: Db) {
             customerId: input.customerId,
             customerOrderNumber: input.customerOrderNumber,
             customerReference: input.customerReference,
-            deliveryAddressId: input.deliveryAddressId,
+            deliveryAddressId,
             deliveryTermId: customer?.deliveryTermId ?? null,
             paymentTermId: customer?.paymentTermId ?? null,
             carrierId: customer?.carrierId ?? null,
@@ -519,6 +598,9 @@ export function createSalesRepository(db: Db) {
           deliveryPostalCode: customerDeliveryAddresses.postalCode,
           deliveryCity: customerDeliveryAddresses.city,
           deliveryCountry: customerDeliveryAddresses.country,
+          // The order card shows an engångsadress, which the customer's
+          // address list (its picker) does not carry.
+          deliveryAddressOneOff: customerDeliveryAddresses.oneOff,
           deliveryTermCode: deliveryTerms.code,
           deliveryTermName: deliveryTerms.name,
           paymentTermCode: paymentTerms.code,

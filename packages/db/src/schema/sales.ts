@@ -131,10 +131,18 @@ export const customerDeliveryAddresses = pgTable(
     city: varchar("city", { length: 100 }),
     country: varchar("country", { length: 2 }).notNull().default("SE"),
     isDefault: boolean("is_default").notNull().default(false),
+    // Engångsadress: typed in on a single order (Ny leveransadress) without
+    // Spara på kunden. It lives here so every reader of an order's delivery
+    // address (documents, pick list, freight) works through the same FK, but
+    // it is hidden from the customer's list, the order's address picker and
+    // the import's matching — and deleted again when the order switches to
+    // another address. Never the default.
+    oneOff: boolean("one_off").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("customer_delivery_addresses_one_default").on(table.customerId).where(sql`${table.isDefault}`),
+    check("customer_delivery_addresses_one_off_not_default", sql`not (${table.oneOff} and ${table.isDefault})`),
   ]
 );
 

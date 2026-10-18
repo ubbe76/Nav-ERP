@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { auditLog, db, manufacturingOrders, numberSeries, salesOrders, units } from "@navet/db";
-import { createQuoteSchema } from "@navet/shared";
+import { auditLog, customerDeliveryAddresses, db, manufacturingOrders, numberSeries, salesOrders, units } from "@navet/db";
+import { createQuoteSchema, updateSalesOrderHeaderSchema } from "@navet/shared";
 import { PriceNotFoundError, RowHasManufacturingOrdersError } from "../src/modules/sales/service/sales.errors.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -1192,6 +1192,130 @@ describe("sales service — order header fields", () => {
       InvalidStatusTransitionError
     );
     void customer;
+  });
+
+  it("creates an order with a Ny leveransadress — an engångsadress hidden from the customer's register", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const article = await makeArticle();
+    const { order } = await salesService.createQuote(
+      {
+        customerId: customer.id,
+        newDeliveryAddress: {
+          label: "Bygget Solna",
+          address: "Arenavägen 7",
+          postalCode: "169 79",
+          city: "Solna",
+          country: "SE",
+          saveToCustomer: false,
+        },
+        rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }],
+      },
+      user.id
+    );
+    const fetched = await salesService.getSalesOrder(order.id);
+    expect(fetched!.deliveryAddressLabel).toBe("Bygget Solna");
+    expect(fetched!.deliveryCity).toBe("Solna");
+    expect(fetched!.deliveryAddressOneOff).toBe(true);
+    expect(await salesService.listDeliveryAddresses(customer.id)).toHaveLength(0);
+
+    // Not reachable through the customer's address routes …
+    await expect(
+      salesService.updateDeliveryAddress(customer.id, fetched!.deliveryAddressId!, { city: "Fel" })
+    ).rejects.toThrow(DeliveryAddressNotFoundError);
+    await expect(salesService.deleteDeliveryAddress(customer.id, fetched!.deliveryAddressId!)).rejects.toThrow(
+      DeliveryAddressNotFoundError
+    );
+    // … nor pickable on another order of the same customer.
+    await expect(
+      salesService.createQuote(
+        {
+          customerId: customer.id,
+          deliveryAddressId: fetched!.deliveryAddressId!,
+          rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }],
+        },
+        user.id
+      )
+    ).rejects.toThrow(DeliveryAddressNotFoundError);
+    // The order itself may send its own address back unchanged.
+    const same = await salesService.updateSalesOrderHeader(order.id, {
+      deliveryAddressId: fetched!.deliveryAddressId!,
+      customerReference: "Kalle",
+    });
+    expect(same.deliveryAddressId).toBe(fetched!.deliveryAddressId);
+  });
+
+  it("saves a Ny leveransadress on the customer when Spara på kunden is ticked", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const article = await makeArticle();
+    const { order } = await salesService.createQuote(
+      {
+        customerId: customer.id,
+        newDeliveryAddress: { label: "Lager Väst", address: "Hamngatan 3", country: "SE", saveToCustomer: true },
+        rows: [{ articleId: article.id, quantity: 1, unitPrice: 10 }],
+      },
+      user.id
+    );
+    const list = await salesService.listDeliveryAddresses(customer.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.label).toBe("Lager Väst");
+    expect(list[0]!.isDefault).toBe(false);
+    expect(list[0]!.id).toBe(order.deliveryAddressId);
+    expect((await salesService.getSalesOrder(order.id))!.deliveryAddressOneOff).toBe(false);
+  });
+
+  it("replaces the order's address via PATCH and deletes the engångsadress it no longer uses", async () => {
+    const { order, address, customer } = await makeOrderWithAddress();
+    const exists = async (id: string) =>
+      (await db.select().from(customerDeliveryAddresses).where(eq(customerDeliveryAddresses.id, id))).length === 1;
+
+    const first = await salesService.updateSalesOrderHeader(order.id, {
+      newDeliveryAddress: { label: "Engång 1", address: "Gata 1", country: "SE", saveToCustomer: false },
+    });
+    const firstId = first.deliveryAddressId!;
+    expect(first.deliveryAddressLabel).toBe("Engång 1");
+    // The customer's saved address is left alone.
+    expect(await exists(address.id)).toBe(true);
+
+    const second = await salesService.updateSalesOrderHeader(order.id, {
+      newDeliveryAddress: { label: "Engång 2", address: "Gata 2", country: "SE", saveToCustomer: false },
+    });
+    expect(second.deliveryAddressLabel).toBe("Engång 2");
+    expect(await exists(firstId)).toBe(false);
+
+    const back = await salesService.updateSalesOrderHeader(order.id, { deliveryAddressId: address.id });
+    expect(back.deliveryAddressId).toBe(address.id);
+    expect(await exists(second.deliveryAddressId!)).toBe(false);
+    expect((await salesService.listDeliveryAddresses(customer.id)).map((a) => a.id)).toEqual([address.id]);
+
+    // A saved address the order stops using stays on the customer.
+    const saved = await salesService.updateSalesOrderHeader(order.id, {
+      newDeliveryAddress: { label: "Sparad", address: "Gata 3", country: "SE", saveToCustomer: true },
+    });
+    await salesService.updateSalesOrderHeader(order.id, { deliveryAddressId: null });
+    expect(await exists(saved.deliveryAddressId!)).toBe(true);
+  });
+
+  it("refuses a Ny leveransadress outside the editable statuses", async () => {
+    const { order } = await makeOrderWithAddress();
+    await salesService.cancel(order.id);
+    await expect(
+      salesService.updateSalesOrderHeader(order.id, {
+        newDeliveryAddress: { label: "Sen", address: "Gata 4", country: "SE", saveToCustomer: false },
+      })
+    ).rejects.toThrow(InvalidStatusTransitionError);
+  });
+
+  it("accepts either deliveryAddressId or newDeliveryAddress, never both", () => {
+    const newDeliveryAddress = { label: "A", address: "Gata 1" };
+    const base = { customerId: crypto.randomUUID(), rows: [{ articleId: crypto.randomUUID(), quantity: 1 }] };
+    expect(createQuoteSchema.safeParse({ ...base, newDeliveryAddress }).success).toBe(true);
+    expect(
+      createQuoteSchema.safeParse({ ...base, newDeliveryAddress, deliveryAddressId: crypto.randomUUID() }).success
+    ).toBe(false);
+    expect(updateSalesOrderHeaderSchema.safeParse({ newDeliveryAddress }).success).toBe(true);
+    expect(updateSalesOrderHeaderSchema.safeParse({ newDeliveryAddress, deliveryAddressId: null }).success).toBe(false);
   });
 
   it("bumps the revision on content changes but not on status transitions or deliveries", async () => {

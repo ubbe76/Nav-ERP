@@ -1020,6 +1020,9 @@ export interface SalesOrder extends DocumentTermsFields {
   deliveryAddress?: string | null;
   deliveryPostalCode?: string | null;
   deliveryCity?: string | null;
+  // The address is an engångsadress typed in on this order (not one of the
+  // customer's saved addresses).
+  deliveryAddressOneOff?: boolean | null;
   // Assigned when the order is invoiced (FA number series).
   invoiceNumber: string | null;
   invoicedAt: string | null;

@@ -1390,7 +1390,8 @@ export function createImportRepository(db: Db) {
             isDefault: customerDeliveryAddresses.isDefault,
           })
           .from(customerDeliveryAddresses)
-          .where(inArray(customerDeliveryAddresses.customerId, part));
+          // An order's engångsadress is not one of the customer's addresses.
+          .where(and(inArray(customerDeliveryAddresses.customerId, part), eq(customerDeliveryAddresses.oneOff, false)));
         for (const row of rows) {
           const list = map.get(row.customerId) ?? [];
           list.push({

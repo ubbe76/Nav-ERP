@@ -1,0 +1,2 @@
+ALTER TABLE "customer_delivery_addresses" ADD COLUMN "one_off" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "customer_delivery_addresses" ADD CONSTRAINT "customer_delivery_addresses_one_off_not_default" CHECK (not ("customer_delivery_addresses"."one_off" and "customer_delivery_addresses"."is_default"));

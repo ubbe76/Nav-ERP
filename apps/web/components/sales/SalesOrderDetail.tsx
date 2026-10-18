@@ -45,6 +45,12 @@ import {
   type SalesOrderRow,
   type StockLocation,
 } from "../../lib/types";
+import {
+  DeliveryAddressChoice,
+  deliveryAddressPayload,
+  emptyDeliveryAddressDraft,
+  type DeliveryAddressDraft,
+} from "./DeliveryAddressChoice";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { SuggestedDueDateField } from "../manufacturing/SuggestedDueDateField";
 
@@ -776,6 +782,19 @@ function EditHeaderForm({
   const [customerOrderNumber, setCustomerOrderNumber] = useState(order.customerOrderNumber ?? "");
   const [customerReference, setCustomerReference] = useState(order.customerReference ?? "");
   const [deliveryAddressId, setDeliveryAddressId] = useState(order.deliveryAddressId ?? "");
+  const [newDeliveryAddress, setNewDeliveryAddress] = useState<DeliveryAddressDraft>(emptyDeliveryAddressDraft());
+  // The order's engångsadress is not in the customer's list — offered as its
+  // own choice so saving the header keeps it.
+  const oneOff =
+    order.deliveryAddressOneOff && order.deliveryAddressId && order.deliveryAddress
+      ? {
+          id: order.deliveryAddressId,
+          label: order.deliveryAddressLabel ?? "",
+          address: order.deliveryAddress,
+          postalCode: order.deliveryPostalCode ?? null,
+          city: order.deliveryCity ?? null,
+        }
+      : null;
   const [terms, setTerms] = useState<TermsValue>(termsFrom(order));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -791,7 +810,7 @@ function EditHeaderForm({
         body: JSON.stringify({
           customerOrderNumber: customerOrderNumber.trim() || null,
           customerReference: customerReference.trim() || null,
-          deliveryAddressId: deliveryAddressId || null,
+          ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, null),
           ...termsPayload(terms),
           bumpRevision,
         }),
@@ -830,20 +849,15 @@ function EditHeaderForm({
 
       <TermsFields registers={registers} value={terms} onChange={setTerms} />
 
-      <Field label="Leveransadress" htmlFor="headerDeliveryAddressId">
-        <Select
-          id="headerDeliveryAddressId"
-          value={deliveryAddressId}
-          onChange={(e) => setDeliveryAddressId(e.target.value)}
-        >
-          <option value="">Ingen</option>
-          {deliveryAddresses.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.label} — {[a.address, [a.postalCode, a.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
-            </option>
-          ))}
-        </Select>
-      </Field>
+      <DeliveryAddressChoice
+        idPrefix="header"
+        addresses={deliveryAddresses}
+        oneOff={oneOff}
+        value={deliveryAddressId}
+        onChange={setDeliveryAddressId}
+        draft={newDeliveryAddress}
+        onDraftChange={setNewDeliveryAddress}
+      />
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>
