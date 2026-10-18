@@ -13,7 +13,9 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { takeReleaseWarnings } from "../../lib/releaseWarnings";
-import { confirmDialog } from "../../lib/confirm";
+import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { MoMaterialModal } from "./MoMaterialModal";
+import { OperationModal, type OperationPayload } from "../articles/OperationModal";
 import { ReportsSection } from "./ReportsSection";
 import { suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
 import { useCan, useCanOpen } from "../PermissionsProvider";
@@ -26,6 +28,9 @@ import {
   type EmployeeDirectoryEntry,
   type ManufacturingOrder,
   type MOMaterialConsumption,
+  type MOOperationDeleteResult,
+  type MOOperationSaveResult,
+  type WorkCenter,
   type MOOperation,
   type MOReport,
   type ScrapEntry,
@@ -36,7 +41,7 @@ import { Card } from "../ui/Card";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
 import { configurationLines } from "../../lib/configurationLines";
 import { formatMoney } from "../../lib/format";
-import { Form, FormActions, FormError, FormHint, FormRow, FormStack } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
 import { CostCalculationList } from "../costing/CostCalculationList";
 import { CostChain } from "../ui/CostChain";
 import { chainLines } from "../../lib/costChain";
@@ -96,6 +101,88 @@ export function ManufacturingOrderDetail({
   const late = order.late === true;
   // Opens the specification for the calculation that was just made.
   const [openCalculationId, setOpenCalculationId] = useState<string | null>(null);
+
+  // Ändra material och operationer: only while the order is released or in
+  // progress, and never in the workshop profile's read-only mode.
+  const canEditLines = !readOnly && (order.status === "released" || order.status === "in_progress");
+  const [materialDialog, setMaterialDialog] = useState<{ editing: MOMaterialConsumption | null } | null>(null);
+  const [operationDialog, setOperationDialog] = useState<{ editing: MOOperation | null } | null>(null);
+  const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
+  // Warnings (shortage, planning) and the outcome of the last change.
+  const [changeNotice, setChangeNotice] = useState<{ warnings: string[]; message?: string } | null>(null);
+  const [lineError, setLineError] = useState<string | null>(null);
+  // Historik fetches on mount — remounted after a change so the new event shows.
+  const [historyKey, setHistoryKey] = useState(0);
+  function afterLineChange() {
+    setHistoryKey((k) => k + 1);
+    router.refresh();
+  }
+
+  function openOperationDialog(editing: MOOperation | null) {
+    setOperationDialog({ editing });
+    if (workCenters.length === 0) {
+      apiFetch<WorkCenter[]>("/api/v1/work-centers")
+        .then((rows) => setWorkCenters(rows.filter((wc) => wc.active)))
+        .catch(() => setWorkCenters([]));
+    }
+  }
+
+  // Nothing reported on the operation, as far as this card can see — the
+  // server makes the final call (mo-operation-reported / -linked-purchase).
+  function operationUntouched(op: MOOperation) {
+    return (
+      op.status === "pending" &&
+      !(Number(op.quantityCompleted ?? 0) > 0) &&
+      !(Number(op.quantityScrapped) > 0) &&
+      op.actualTime === null &&
+      !reports.some((r) => r.moOperationId === op.id) &&
+      !timeReports.some((t) => t.operationSequenceNo === op.sequenceNo)
+    );
+  }
+
+  async function removeMaterial(row: MOMaterialConsumption) {
+    if (!(await confirmDelete(`Ta bort materialet ${row.componentArticleNumber} från ordern?`))) return;
+    setLineError(null);
+    try {
+      await apiFetch(`/api/v1/manufacturing-orders/${order.id}/materials/${row.id}`, { method: "DELETE" });
+      setChangeNotice(null);
+      afterLineChange();
+    } catch (err) {
+      setLineError(apiErrorMessage(err, "Kunde inte ta bort materialet"));
+    }
+  }
+
+  async function removeOperation(op: MOOperation) {
+    if (!(await confirmDelete(`Ta bort operation ${op.sequenceNo} från ordern?`))) return;
+    setLineError(null);
+    try {
+      const res = await apiFetch<MOOperationDeleteResult>(
+        `/api/v1/manufacturing-orders/${order.id}/operations/${op.id}`,
+        { method: "DELETE" }
+      );
+      const unlinked = res?.unlinkedMaterials ?? 0;
+      setChangeNotice({
+        warnings: res?.warnings ?? [],
+        message:
+          unlinked > 0
+            ? `${unlinked} materialrad${unlinked === 1 ? "" : "er"} var kopplad${unlinked === 1 ? "" : "e"} till operationen och dras nu vid inleverans.`
+            : undefined,
+      });
+      afterLineChange();
+    } catch (err) {
+      setLineError(apiErrorMessage(err, "Kunde inte ta bort operationen"));
+    }
+  }
+
+  async function saveOperation(editing: MOOperation | null, payload: OperationPayload) {
+    const res = await apiFetch<MOOperationSaveResult>(
+      editing
+        ? `/api/v1/manufacturing-orders/${order.id}/operations/${editing.id}`
+        : `/api/v1/manufacturing-orders/${order.id}/operations`,
+      { method: editing ? "PATCH" : "POST", body: JSON.stringify(payload) }
+    );
+    setChangeNotice({ warnings: res?.warnings ?? [] });
+  }
 
   return (
     <div>
@@ -171,7 +258,31 @@ export function ManufacturingOrderDetail({
         </FormError>
       )}
 
-      <SectionHeading>Material</SectionHeading>
+      {changeNotice && (changeNotice.warnings.length > 0 || changeNotice.message) && (
+        <FormNotice style={{ marginBottom: 12 }} role="status">
+          {changeNotice.message && <div>{changeNotice.message}</div>}
+          {changeNotice.warnings.length > 0 && (
+            <ul style={{ margin: changeNotice.message ? "6px 0 0" : 0, paddingLeft: 18 }}>
+              {changeNotice.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          )}
+        </FormNotice>
+      )}
+      {lineError && <FormError margin="below">{lineError}</FormError>}
+
+      <SectionHeading
+        actions={
+          canEditLines && (
+            <Button type="button" variant="ghost" size="small" onClick={() => setMaterialDialog({ editing: null })}>
+              + Lägg till material
+            </Button>
+          )
+        }
+      >
+        Material
+      </SectionHeading>
       {materials.length > 0 ? (
         <Table<MOMaterialConsumption>
           columns={[
@@ -181,6 +292,7 @@ export function ManufacturingOrderDetail({
             { key: "quantityPlanned", label: "Planerat", width: "100px", align: "right" },
             { key: "unitCode", label: "Enhet", width: "70px" },
             { key: "quantityConsumed", label: "Förbrukat", width: "100px", align: "right" },
+            ...(canEditLines ? [{ key: "id", label: "", width: "170px", align: "right" as const }] : []),
           ]}
           rows={materials}
           renderCell={(row, key) => {
@@ -190,6 +302,19 @@ export function ManufacturingOrderDetail({
                 // Displayed in the BOM row's unit (snapshotted at release) —
                 // stored values are in the component's base unit.
                 return toUnitQuantity(Number(row[key]), row.unitFactor);
+              case "id":
+                return (
+                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
+                    <Button type="button" variant="ghost" size="small" onClick={() => setMaterialDialog({ editing: row })}>
+                      Ändra
+                    </Button>
+                    {Number(row.quantityConsumed) === 0 && (
+                      <Button type="button" variant="ghost" size="small" onClick={() => removeMaterial(row)}>
+                        Ta bort
+                      </Button>
+                    )}
+                  </span>
+                );
               case "moOperationId": {
                 // Linked material is drawn when its operation is completed;
                 // unlinked material is drawn at final reporting.
@@ -205,7 +330,18 @@ export function ManufacturingOrderDetail({
         <p>Inga materialrader (artikeln saknar struktur, eller ordern är inte frisläppt än).</p>
       )}
 
-      <SectionHeading spaced>Operationer</SectionHeading>
+      <SectionHeading
+        spaced
+        actions={
+          canEditLines && (
+            <Button type="button" variant="ghost" size="small" onClick={() => openOperationDialog(null)}>
+              + Lägg till operation
+            </Button>
+          )
+        }
+      >
+        Operationer
+      </SectionHeading>
       {operations.length > 0 ? (
         <Table<MOOperation>
           columns={[
@@ -218,7 +354,7 @@ export function ManufacturingOrderDetail({
             { key: "quantityCompleted", label: "Antal OK", width: "100px", align: "right" },
             { key: "quantityScrapped", label: "Kasserat", width: "90px", align: "right" },
             { key: "actualTime", label: "Faktisk tid", width: "100px", align: "right" },
-            { key: "id", label: "", width: "80px", align: "right" },
+            { key: "id", label: "", width: canEditLines ? "230px" : "80px", align: "right" },
           ]}
           rows={operations}
           renderCell={(row, key) => {
@@ -229,14 +365,26 @@ export function ManufacturingOrderDetail({
               // param, so it shows the accumulated reported quantity.
               case "id":
                 return (
-                  <a
-                    href={`/api/v1/manufacturing-orders/${order.id}/operations/${row.id}/pallet-card`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: 13 }}
-                  >
-                    Pallkort
-                  </a>
+                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
+                    <a
+                      href={`/api/v1/manufacturing-orders/${order.id}/operations/${row.id}/pallet-card`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: 13 }}
+                    >
+                      Pallkort
+                    </a>
+                    {canEditLines && row.status === "pending" && (
+                      <Button type="button" variant="ghost" size="small" onClick={() => openOperationDialog(row)}>
+                        Ändra
+                      </Button>
+                    )}
+                    {canEditLines && operationUntouched(row) && (
+                      <Button type="button" variant="ghost" size="small" onClick={() => removeOperation(row)}>
+                        Ta bort
+                      </Button>
+                    )}
+                  </span>
                 );
               // The description is what the step IS; the resource code keeps
               // the machine visible. Falls back to the resource name.
@@ -385,6 +533,38 @@ export function ManufacturingOrderDetail({
         </>
       )}
 
+      {canEditLines && (
+        <>
+          <MoMaterialModal
+            open={materialDialog !== null}
+            onClose={() => setMaterialDialog(null)}
+            orderId={order.id}
+            orderArticleId={order.articleId}
+            operations={operations}
+            editing={materialDialog?.editing ?? null}
+            onSaved={(warnings) => {
+              setMaterialDialog(null);
+              setLineError(null);
+              setChangeNotice({ warnings });
+              afterLineChange();
+            }}
+          />
+          <OperationModal
+            open={operationDialog !== null}
+            onClose={() => setOperationDialog(null)}
+            workCenters={workCenters}
+            editing={operationDialog?.editing ?? null}
+            defaultSequenceNo={(operations.reduce((max, op) => Math.max(max, op.sequenceNo), 0)) + 10}
+            onSubmit={(payload) => saveOperation(operationDialog?.editing ?? null, payload)}
+            onSaved={() => {
+              setOperationDialog(null);
+              setLineError(null);
+              afterLineChange();
+            }}
+          />
+        </>
+      )}
+
       <ReportsSection
         orderId={order.id}
         reports={reports}
@@ -472,7 +652,7 @@ export function ManufacturingOrderDetail({
       )}
 
       {/* The audit-log API is admin-only. */}
-      {isAdmin && <AuditTrailSection entityType="manufacturing_order" entityId={order.orderNumber} />}
+      {isAdmin && <AuditTrailSection key={historyKey} entityType="manufacturing_order" entityId={order.orderNumber} />}
     </div>
   );
 }

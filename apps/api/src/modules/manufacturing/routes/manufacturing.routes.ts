@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { articleCardWrite, canSeePrices, MO_READ, TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import {
@@ -7,6 +7,8 @@ import {
   consumeMaterialSchema,
   createFromSalesOrderRowSchema,
   createManufacturingOrderSchema,
+  createMoMaterialSchema,
+  createMoOperationSchema,
   createProductionGroupSchema,
   createRoutingOperationSchema,
   createWorkCenterSchema,
@@ -17,6 +19,8 @@ import {
   setProductionGroupWorkCentersSchema,
   terminalOperationsQuerySchema,
   updateManufacturingOrderSchema,
+  updateMoMaterialSchema,
+  updateMoOperationSchema,
   updateProductionGroupSchema,
   updateRoutingOperationSchema,
   updateWorkCenterSchema,
@@ -28,6 +32,18 @@ import {
   DuplicateWorkCenterCodeError,
   InvalidOperationFileTypeError,
   InvalidStatusTransitionError,
+  LastOperationLockedError,
+  ManufacturingOrderNotEditableError,
+  MoMaterialConsumedError,
+  MoMaterialDuplicateError,
+  MoMaterialOwnArticleError,
+  MoMaterialPhantomError,
+  MoOperationDoneError,
+  MoOperationLinkedPurchaseError,
+  MoOperationNotOnOrderError,
+  MoOperationReportedError,
+  MoOperationSequenceTakenError,
+  MoOperationStampedError,
   NotSubcontractOperationError,
   OperationFileNotFoundError,
   WorkCenterSupplierNotFoundError,
@@ -56,7 +72,7 @@ import {
 } from "../service/manufacturing.service.js";
 import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
 import { materialShortageBody } from "../service/material-shortage.js";
-import { ArticleIsTemplateError } from "../../article/service/article.service.js";
+import { ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
 // Konfigurator 4c: the TO paths of a beställningsvara answer with the same
 // row-configuration errors as the order row (sales.routes.ts).
 import {
@@ -564,6 +580,95 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
       }
     }
   );
+
+  // --- Ändra material och operationer på en skapad TO (Frisläppt/Pågår).
+  // Write = tillverkning via the module registration. Lägg till/ändra answer
+  // { material | operation, warnings } — the row in the same shape as the
+  // list endpoints, the shortage/plan warnings as texts.
+  const materialEditError = (err: unknown, reply: FastifyReply) => {
+    if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof MOMaterialConsumptionNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof ManufacturingOrderNotEditableError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoMaterialConsumedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoMaterialDuplicateError) return reply.code(409).send(errorBody(err));
+    if (err instanceof ArticleIsTemplateError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoMaterialOwnArticleError) return reply.code(400).send(errorBody(err));
+    if (err instanceof MoMaterialPhantomError) return reply.code(400).send(errorBody(err));
+    if (err instanceof MoOperationNotOnOrderError) return reply.code(400).send(errorBody(err));
+    if (err instanceof InvalidUnitError) return reply.code(400).send(errorBody(err));
+    throw err;
+  };
+  const operationEditError = (err: unknown, reply: FastifyReply) => {
+    if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof MOOperationNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof WorkCenterNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof ManufacturingOrderNotEditableError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoOperationSequenceTakenError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoOperationDoneError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoOperationStampedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoOperationLinkedPurchaseError) return reply.code(409).send(errorBody(err));
+    if (err instanceof MoOperationReportedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof LastOperationLockedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof NotSubcontractOperationError) return reply.code(400).send(errorBody(err));
+    if (err instanceof WorkCenterSupplierNotFoundError) return reply.code(400).send(errorBody(err));
+    throw err;
+  };
+
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/materials", async (req, reply) => {
+    const input = createMoMaterialSchema.parse(req.body);
+    try {
+      const result = await service.addMaterial(req.params.id, input, req.user!.id);
+      return reply.code(201).send(result);
+    } catch (err) {
+      return materialEditError(err, reply);
+    }
+  });
+
+  app.patch<{ Params: { id: string; rowId: string } }>("/manufacturing-orders/:id/materials/:rowId", async (req, reply) => {
+    const input = updateMoMaterialSchema.parse(req.body);
+    try {
+      return await service.updateMaterial(req.params.id, req.params.rowId, input, req.user!.id);
+    } catch (err) {
+      return materialEditError(err, reply);
+    }
+  });
+
+  app.delete<{ Params: { id: string; rowId: string } }>("/manufacturing-orders/:id/materials/:rowId", async (req, reply) => {
+    try {
+      await service.removeMaterial(req.params.id, req.params.rowId, req.user!.id);
+      return reply.code(204).send();
+    } catch (err) {
+      return materialEditError(err, reply);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/operations", async (req, reply) => {
+    const input = createMoOperationSchema.parse(req.body);
+    try {
+      const result = await service.addOperation(req.params.id, input, req.user!.id);
+      return reply.code(201).send(result);
+    } catch (err) {
+      return operationEditError(err, reply);
+    }
+  });
+
+  app.patch<{ Params: { id: string; opId: string } }>("/manufacturing-orders/:id/operations/:opId", async (req, reply) => {
+    const input = updateMoOperationSchema.parse(req.body);
+    try {
+      return await service.updateOperation(req.params.id, req.params.opId, input, req.user!.id);
+    } catch (err) {
+      return operationEditError(err, reply);
+    }
+  });
+
+  app.delete<{ Params: { id: string; opId: string } }>("/manufacturing-orders/:id/operations/:opId", async (req, reply) => {
+    try {
+      return await service.removeOperation(req.params.id, req.params.opId, req.user!.id);
+    } catch (err) {
+      return operationEditError(err, reply);
+    }
+  });
 
   app.post<{ Params: { id: string; opId: string } }>(
     "/manufacturing-orders/:id/operations/:opId/complete",

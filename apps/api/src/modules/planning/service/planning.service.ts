@@ -214,6 +214,9 @@ export interface OrderPlanSummary {
 // its own create transaction, and the list's summaries.
 export interface ManufacturingPlanReader {
   planNewOrderInTx(tx: Tx, manufacturingOrderId: string, given?: { sequenceNo: number; weeks: PlannedWeek[] }[]): Promise<string[]>;
+  // Ändra operationer: the order's operations replanned inside the edit's
+  // transaction (Planera's rules for one order), the warnings as texts.
+  replanOrderInTx(tx: Tx, manufacturingOrderId: string): Promise<string[]>;
   orderPlanSummaries(orderIds: string[]): Promise<Map<string, OrderPlanSummary>>;
 }
 
@@ -674,6 +677,33 @@ export function createPlanningService(
     // unscheduled resource is the matrix's business.
     const shown = new Set<PlanWarning["kind"]>(["long_operation", "horizon", "late"]);
     return [...warnings, ...result.warnings.filter((w) => shown.has(w.kind)).map((w) => w.message)];
+  }
+
+  // Ändra operationer: one order replanned with exactly Planera's rules —
+  // påbörjad via reported quantities or an open stamp, locked operations
+  // stay as fixed load, every other open operation is existing load — in
+  // the edit's own transaction (the caller holds the production_plan lock;
+  // the advisory lock is reentrant). Returns the warnings that concern the
+  // edited order as texts: orimligt mycket tid, the horizon, Sen and a
+  // sequence break.
+  async function replanOrderInTx(tx: Tx, manufacturingOrderId: string): Promise<string[]> {
+    await lockProductionPlan(tx);
+    const [world, stamped] = [await loadPlanWorld(tx), await repo.stampedOperationIds(tx)];
+    const own = world.operations.filter((o) => o.manufacturingOrderId === manufacturingOrderId);
+    if (own.length === 0) return [];
+    const others = world.operations.filter((o) => o.manufacturingOrderId !== manufacturingOrderId);
+    const result = planProduction({
+      today: world.today,
+      offDays: world.offDays,
+      workCenters: world.workCenters,
+      schedule: world.schedule,
+      orders: groupOrders(own, stamped),
+      existingOperations: others,
+      longOperationWeeks: world.longOperationWeeks,
+    });
+    await repo.writeOperationPlans(tx, { plans: result.plans, clear: result.clear, plannedAt: new Date() });
+    const shown = new Set<PlanWarning["kind"]>(["long_operation", "horizon", "late", "sequence"]);
+    return result.warnings.filter((w) => shown.has(w.kind)).map((w) => w.message);
   }
 
   async function orderPlanSummaries(orderIds: string[]): Promise<Map<string, OrderPlanSummary>> {
@@ -1270,6 +1300,7 @@ export function createPlanningService(
     },
 
     planNewOrderInTx,
+    replanOrderInTx,
     orderPlanSummaries,
 
     // One draft IO per primary supplier (Monitor-style grouping) plus one

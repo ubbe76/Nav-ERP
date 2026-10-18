@@ -13,19 +13,44 @@ import styles from "./OperationModal.module.css";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { minutesPerUnitToUnitsPerHour, unitsPerHourToMinutesPerUnit } from "../../lib/units";
-import type { Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
+import type { MOOperation, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
 interface OperationModalProps {
   open: boolean;
   onClose: () => void;
-  articleId: string;
+  // The article whose routing is edited (routing mode only).
+  articleId?: string;
   workCenters: WorkCenter[];
   // null = the modal creates a new operation; a row = it edits that row.
-  editing: RoutingOperation | null;
+  editing: RoutingOperation | MOOperation | null;
+  // Manufacturing-order mode: the form saves through this callback instead of
+  // the article's routing endpoints, and hides the routing-only fields
+  // (Kalkyl, the lego drawing upload). Absent = the beredning's behaviour.
+  onSubmit?: (payload: OperationPayload) => Promise<void>;
   // Suggested Sekvensnr for a new operation (last + 10).
   defaultSequenceNo: number;
   onSaved: () => void;
+}
+
+// What the form sends — the fields the routing and the MO operation share, plus
+// the routing-only costingOnly/useArticleDrawing (omitted in MO mode).
+export interface OperationPayload {
+  sequenceNo: number;
+  description: string;
+  workCenterId: string;
+  setupTime: number;
+  runTimePerUnit: number;
+  timeUnit: "minutes_per_unit" | "units_per_hour";
+  costingOnly?: boolean;
+  comment: string;
+  printOnWorkCard: boolean;
+  packingInstructions: string;
+  subcontractSupplierId: string | null;
+  setupPrice: number | null;
+  unitPrice: number | null;
+  showNetWeight: boolean;
+  useArticleDrawing?: boolean;
 }
 
 export function OperationModal({
@@ -36,6 +61,7 @@ export function OperationModal({
   editing,
   defaultSequenceNo,
   onSaved,
+  onSubmit,
 }: OperationModalProps) {
   // Resources are a Tillverkning register; an Artiklar-only user gets the
   // explanation without a button into a page they can't open.
@@ -70,6 +96,7 @@ export function OperationModal({
           editing={editing}
           defaultSequenceNo={defaultSequenceNo}
           onSaved={onSaved}
+          onSubmit={onSubmit}
         />
       )}
     </Modal>
@@ -90,7 +117,12 @@ function OperationForm({
   editing,
   defaultSequenceNo,
   onSaved,
+  onSubmit,
 }: Omit<OperationModalProps, "open" | "onClose">) {
+  // MO mode: an order's operation has no Kalkyl flag and no routing file.
+  const moMode = onSubmit !== undefined;
+  // Routing-only fields exist on the beredning's row, not on an MO operation.
+  const routingEditing = editing && "costingOnly" in editing ? editing : null;
   // The resource picker splits ordinary resources from legoresurser — a lego
   // operation is bought (supplier + prices), not timed.
   const standardCenters = workCenters.filter((wc) => wc.type !== "subcontract");
@@ -119,7 +151,7 @@ function OperationForm({
     }
     return String(minutes);
   });
-  const [costingOnly, setCostingOnly] = useState(editing?.costingOnly ?? false);
+  const [costingOnly, setCostingOnly] = useState(routingEditing?.costingOnly ?? false);
   const [comment, setComment] = useState(editing?.comment ?? "");
   const [printOnWorkCard, setPrintOnWorkCard] = useState(editing?.printOnWorkCard ?? false);
   const [packingInstructions, setPackingInstructions] = useState(editing?.packingInstructions ?? "");
@@ -128,8 +160,8 @@ function OperationForm({
   const [setupPrice, setSetupPrice] = useState(editing?.setupPrice != null ? String(Number(editing.setupPrice)) : "");
   const [unitPrice, setUnitPrice] = useState(editing?.unitPrice != null ? String(Number(editing.unitPrice)) : "");
   const [showNetWeight, setShowNetWeight] = useState(editing?.showNetWeight ?? false);
-  const [useArticleDrawing, setUseArticleDrawing] = useState(editing?.useArticleDrawing ?? true);
-  const [hasFile, setHasFile] = useState(editing?.hasFile ?? false);
+  const [useArticleDrawing, setUseArticleDrawing] = useState(routingEditing?.useArticleDrawing ?? true);
+  const [hasFile, setHasFile] = useState(routingEditing?.hasFile ?? false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -185,7 +217,7 @@ function OperationForm({
     }
     setPending(true);
     try {
-      const payload = {
+      const payload: OperationPayload = {
         sequenceNo: Number(sequenceNo),
         description,
         workCenterId,
@@ -202,7 +234,6 @@ function OperationForm({
         // a stray st/h preference from before the resource switch must not
         // survive the save.
         timeUnit: isLego ? "minutes_per_unit" : timeUnit,
-        costingOnly,
         comment,
         // Nothing to print without a comment — keeps the flag from lingering
         // on a row whose text was just erased.
@@ -214,8 +245,13 @@ function OperationForm({
         setupPrice: isLego && setupPrice !== "" ? Number(setupPrice) : null,
         unitPrice: isLego && unitPrice !== "" ? Number(unitPrice) : null,
         showNetWeight: isLego ? showNetWeight : false,
-        useArticleDrawing: isLego ? useArticleDrawing : true,
+        ...(moMode ? {} : { costingOnly, useArticleDrawing: isLego ? useArticleDrawing : true }),
       };
+      if (onSubmit) {
+        await onSubmit(payload);
+        onSaved();
+        return;
+      }
       let operationId = editing?.id;
       if (editing) {
         await apiFetch(`/api/v1/articles/${articleId}/routing/${editing.id}`, {
@@ -259,11 +295,11 @@ function OperationForm({
   }
 
   async function removeFile() {
-    if (!editing) return;
+    if (!routingEditing) return;
     if (!(await confirmDelete("Ta bort operationens ritning?"))) return;
     setError(null);
     try {
-      await apiFetch(`/api/v1/articles/${articleId}/routing/${editing.id}/file`, { method: "DELETE" });
+      await apiFetch(`/api/v1/articles/${articleId}/routing/${routingEditing.id}/file`, { method: "DELETE" });
       setHasFile(false);
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte ta bort ritningen"));
@@ -375,7 +411,7 @@ function OperationForm({
             fil som laddas upp här på operationen.
           </FormHint>
 
-          {!useArticleDrawing && (
+          {!moMode && !useArticleDrawing && (
             <>
               <Field label="Ritning (PDF/JPEG/PNG, max 20 MB)" htmlFor="operationFile">
                 <input
@@ -386,11 +422,11 @@ function OperationForm({
                   className={fieldStyles.input}
                 />
               </Field>
-              {hasFile && editing && (
+              {hasFile && routingEditing && (
                 <FormHint attached>
                   En ritning finns redan på operationen —{" "}
                   <a
-                    href={`${API_URL}/api/v1/articles/${articleId}/routing/${editing.id}/file/download`}
+                    href={`${API_URL}/api/v1/articles/${articleId}/routing/${routingEditing.id}/file/download`}
                     target="_blank"
                     rel="noreferrer"
                   >
@@ -443,15 +479,19 @@ function OperationForm({
       {/* Checkbox (ui/Field.tsx) has no `label` prop — the visible text
           is a sibling inside a wrapping <label>, same pattern as
           NewStockCountForm.tsx. */}
-      <label style={checkboxRowStyle}>
-        <Checkbox id="costingOnly" checked={costingOnly} onChange={(e) => setCostingOnly(e.target.checked)} />
-        Kalkyl
-      </label>
-      <FormHint attached>
-        Operationen räknas med i förkalkylen — standardpris och försäljningspris — men följer inte med när en
-        tillverkningsorder frisläpps. Den syns alltså inte på arbetskortet, i stämpelterminalen, i beläggningen
-        eller i efterkalkylen. En operation som material är kopplat till kan inte märkas Kalkyl.
-      </FormHint>
+      {!moMode && (
+        <>
+          <label style={checkboxRowStyle}>
+            <Checkbox id="costingOnly" checked={costingOnly} onChange={(e) => setCostingOnly(e.target.checked)} />
+            Kalkyl
+          </label>
+          <FormHint attached>
+            Operationen räknas med i förkalkylen — standardpris och försäljningspris — men följer inte med när en
+            tillverkningsorder frisläpps. Den syns alltså inte på arbetskortet, i stämpelterminalen, i beläggningen
+            eller i efterkalkylen. En operation som material är kopplat till kan inte märkas Kalkyl.
+          </FormHint>
+        </>
+      )}
 
       <Field label="Kommentar (valfritt)" htmlFor="comment">
         <textarea
@@ -475,9 +515,9 @@ function OperationForm({
         Skriv ut på arbetskortet
       </label>
       <FormHint attached>
-        Kommentaren skrivs ut under operationsraden på utskriften Skriv ut TO (PDF). Utan kryss syns den bara här
-        på artikelkortet. Texten som gäller när tillverkningsordern frisläpps är den som hamnar på utskriften —
-        senare ändringar i rutten påverkar inte en redan frisläppt order.
+        {moMode
+          ? "Kommentaren skrivs ut under operationsraden på utskriften Skriv ut TO (PDF). Utan kryss syns den bara här på tillverkningsordern."
+          : "Kommentaren skrivs ut under operationsraden på utskriften Skriv ut TO (PDF). Utan kryss syns den bara här på artikelkortet. Texten som gäller när tillverkningsordern frisläpps är den som hamnar på utskriften — senare ändringar i rutten påverkar inte en redan frisläppt order."}
       </FormHint>
 
       <Field label="Packinstruktion (valfritt)" htmlFor="packingInstructions">

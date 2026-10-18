@@ -214,6 +214,73 @@ export const updateRoutingOperationSchema = z
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateRoutingOperationInput = z.infer<typeof updateRoutingOperationSchema>;
 
+// --- Ändra material och operationer på en skapad TO (released/in_progress) ---
+// The TO's own rows are edited, never the article's BOM/routing.
+
+// POST /manufacturing-orders/:id/materials — quantity is entered in `unitId`
+// (one of the COMPONENT's units, null/omitted = its base unit) and stored
+// in the base unit with the factor snapshotted, exactly like a BOM row.
+// moOperationId null/omitted = not tied to an operation (drawn at receipt).
+export const createMoMaterialSchema = z.object({
+  componentArticleId: z.string().uuid(),
+  quantity: z.coerce.number().positive(),
+  unitId: z.string().uuid().nullable().optional(),
+  moOperationId: z.string().uuid().nullable().optional(),
+});
+export type CreateMoMaterialInput = z.infer<typeof createMoMaterialSchema>;
+
+// PATCH …/materials/:rowId — quantity is interpreted in the row's unit, or
+// in the newly given unitId. A component swap resets the unit to the new
+// component's base unit unless unitId is given alongside.
+export const updateMoMaterialSchema = z
+  .object({
+    quantity: z.coerce.number().positive().optional(),
+    unitId: z.string().uuid().nullable().optional(),
+    moOperationId: z.string().uuid().nullable().optional(),
+    componentArticleId: z.string().uuid().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
+export type UpdateMoMaterialInput = z.infer<typeof updateMoMaterialSchema>;
+
+// POST /manufacturing-orders/:id/operations — the routing operation's fields
+// minus costingOnly (a Kalkyl operation never exists on a TO) and
+// useArticleDrawing (a TO operation has no routing row to read it from).
+export const createMoOperationSchema = z.object({
+  sequenceNo: z.coerce.number().int().positive(),
+  description: routingDescriptionSchema.optional(),
+  workCenterId: z.string().uuid(),
+  setupTime: z.coerce.number().nonnegative(),
+  runTimePerUnit: z.coerce.number().nonnegative(),
+  timeUnit: z.enum(operationTimeUnits).optional(),
+  comment: routingCommentSchema.optional(),
+  printOnWorkCard: z.boolean().optional(),
+  packingInstructions: routingPackingInstructionsSchema.optional(),
+  subcontractSupplierId: z.string().uuid().nullable().optional(),
+  setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+  unitPrice: z.coerce.number().nonnegative().nullable().optional(),
+  showNetWeight: z.boolean().optional(),
+});
+export type CreateMoOperationInput = z.infer<typeof createMoOperationSchema>;
+
+export const updateMoOperationSchema = z
+  .object({
+    sequenceNo: z.coerce.number().int().positive().optional(),
+    description: routingDescriptionSchema.optional(),
+    workCenterId: z.string().uuid().optional(),
+    setupTime: z.coerce.number().nonnegative().optional(),
+    runTimePerUnit: z.coerce.number().nonnegative().optional(),
+    timeUnit: z.enum(operationTimeUnits).optional(),
+    comment: routingCommentSchema.optional(),
+    printOnWorkCard: z.boolean().optional(),
+    packingInstructions: routingPackingInstructionsSchema.optional(),
+    subcontractSupplierId: z.string().uuid().nullable().optional(),
+    setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+    unitPrice: z.coerce.number().nonnegative().nullable().optional(),
+    showNetWeight: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
+export type UpdateMoOperationInput = z.infer<typeof updateMoOperationSchema>;
+
 // Header only — material consumption rows and operations are derived from
 // the article's BOM and Routing at release time, not supplied here.
 // E3: salesOrderRowId links the TO to a KO row (KO→TO-koppling). When set,

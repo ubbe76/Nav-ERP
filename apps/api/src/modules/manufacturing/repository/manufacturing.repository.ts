@@ -15,7 +15,6 @@ import {
   routingOperationFiles,
   routingOperations,
   stampSessions,
-  stockBalances,
   stockTransactions,
   suppliers,
   timeReports,
@@ -28,12 +27,14 @@ import {
 import {
   ilikePattern,
   type CreateManufacturingOrderInput,
+  type CreateMoOperationInput,
   type ManufacturingOrderConfiguration,
   type CreateProductionGroupInput,
   type CreateRoutingOperationInput,
   type CreateWorkCenterInput,
   type ListManufacturingOrdersQuery,
   type ListWorkCentersQuery,
+  type UpdateMoOperationInput,
   type UpdateProductionGroupInput,
   type UpdateRoutingOperationInput,
   type UpdateWorkCenterInput,
@@ -61,6 +62,22 @@ import {
   type MaterialShortage,
   type MaterialShortageCheck,
 } from "../service/material-shortage.js";
+import { shortageWarnings } from "./shortage-warnings.js";
+// Ändra material och operationer: the edit transactions and the row
+// selects they share with the list endpoints.
+import {
+  addMaterialInTx,
+  addOperationInTx,
+  removeMaterialInTx,
+  removeOperationInTx,
+  selectMaterialRows,
+  selectOperationRows,
+  updateMaterialInTx,
+  updateOperationInTx,
+  type AddMaterialInput,
+  type OrderReplanner,
+  type UpdateMaterialInput,
+} from "./order-edit.js";
 
 export type ConsumeMaterialResult =
   | { ok: true; row: typeof moMaterialConsumptions.$inferSelect }
@@ -623,26 +640,8 @@ async function releaseInTx(tx: Tx, moId: string) {
 
   // Soft shortage check over the material rows the TO now has — the
   // freshly snapshotted ones for a plain TO, the rows written at
-  // creation for a configured one. Warnings only, never a refusal.
-  const shortageWarnings = async (
-    rows: { componentArticleId: string; quantityPlanned: string }[],
-    names: Map<string, string>
-  ) => {
-    const warnings: string[] = [];
-    for (const row of rows) {
-      const [balance] = await tx
-        .select({ total: sql<string>`coalesce(sum(${stockBalances.quantityOnHand}), 0)` })
-        .from(stockBalances)
-        .where(eq(stockBalances.articleId, row.componentArticleId));
-      const available = Number(balance?.total ?? 0);
-      const needed = Number(row.quantityPlanned);
-      if (available < needed) {
-        warnings.push(`${names.get(row.componentArticleId) ?? row.componentArticleId}: behöver ${needed}, tillgängligt ${available}`);
-      }
-    }
-    return warnings;
-  };
-
+  // creation for a configured one. Warnings only, never a refusal
+  // (shortage-warnings.ts, shared with Ändra material).
   let warnings: string[] = [];
   if (configured) {
     const written = await tx
@@ -656,7 +655,7 @@ async function releaseInTx(tx: Tx, moId: string) {
       .where(eq(moMaterialConsumptions.manufacturingOrderId, moId))
       // Stable warning order: by component name, then row id.
       .orderBy(asc(articles.name), asc(moMaterialConsumptions.id));
-    warnings = await shortageWarnings(written, new Map(written.map((r) => [r.componentArticleId, r.componentName])));
+    warnings = await shortageWarnings(tx, written, new Map(written.map((r) => [r.componentArticleId, r.componentName])));
   } else if (exploded.length > 0) {
     const materialRows = await tx
       .insert(moMaterialConsumptions)
@@ -673,7 +672,7 @@ async function releaseInTx(tx: Tx, moId: string) {
         }))
       )
       .returning();
-    warnings = await shortageWarnings(materialRows, new Map(exploded.map((c) => [c.componentArticleId, c.componentName])));
+    warnings = await shortageWarnings(tx, materialRows, new Map(exploded.map((c) => [c.componentArticleId, c.componentName])));
   }
 
   const [updatedOrder] = await tx
@@ -1456,43 +1455,42 @@ export function createManufacturingRepository(db: Db) {
       return row ?? null;
     },
 
+    // Row shape shared with Ändra material (order-edit.ts): the unit the
+    // row displays in is the unit snapshotted on the row (the BOM row's at
+    // release), falling back to the component's base unit.
     async listMaterialConsumptions(manufacturingOrderId: string) {
-      const rowUnits = alias(units, "row_units");
-      return db
-        .select({
-          ...getTableColumns(moMaterialConsumptions),
-          componentArticleNumber: articles.articleNumber,
-          componentName: articles.name,
-          // The unit the row displays in: the BOM row's unit snapshotted at
-          // release, falling back to the component's base unit.
-          unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
-        })
-        .from(moMaterialConsumptions)
-        .innerJoin(articles, eq(articles.id, moMaterialConsumptions.componentArticleId))
-        .innerJoin(units, eq(units.id, articles.unitId))
-        .leftJoin(rowUnits, eq(rowUnits.id, moMaterialConsumptions.unitId))
+      return selectMaterialRows(db)
         .where(eq(moMaterialConsumptions.manufacturingOrderId, manufacturingOrderId))
         .orderBy(asc(articles.articleNumber));
     },
 
+    // Row shape shared with Ändra operationer (order-edit.ts): the work
+    // card and the terminal show the description where the resource name
+    // used to be, so the code rides along; the terminal hides lego
+    // operations (they are bought, not stamped) and the MO card badges them.
     async listOperations(manufacturingOrderId: string) {
-      return db
-        .select({
-          ...getTableColumns(moOperations),
-          workCenterName: workCenters.name,
-          // The work card and the terminal show the description where the
-          // resource name used to be, so the code has to ride along.
-          workCenterCode: workCenters.code,
-          // Lego: the terminal hides subcontract operations (they are bought,
-          // not stamped); the MO card badges them.
-          workCenterType: workCenters.type,
-          subcontractSupplierName: suppliers.name,
-        })
-        .from(moOperations)
-        .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
-        .leftJoin(suppliers, eq(suppliers.id, moOperations.subcontractSupplierId))
-        .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId))
-        .orderBy(moOperations.sequenceNo);
+      return selectOperationRows(db).where(eq(moOperations.manufacturingOrderId, manufacturingOrderId)).orderBy(moOperations.sequenceNo);
+    },
+
+    // --- Ändra material och operationer (order-edit.ts) — each edit is one
+    // transaction; the plan reader replans the order's operations inside it.
+    async addMaterial(moId: string, input: AddMaterialInput) {
+      return db.transaction((tx) => addMaterialInTx(tx, moId, input));
+    },
+    async updateMaterial(moId: string, rowId: string, input: UpdateMaterialInput) {
+      return db.transaction((tx) => updateMaterialInTx(tx, moId, rowId, input));
+    },
+    async removeMaterial(moId: string, rowId: string) {
+      return db.transaction((tx) => removeMaterialInTx(tx, moId, rowId));
+    },
+    async addOperation(moId: string, input: CreateMoOperationInput, replan?: OrderReplanner) {
+      return db.transaction((tx) => addOperationInTx(tx, moId, input, replan));
+    },
+    async updateOperation(moId: string, opId: string, input: UpdateMoOperationInput, replan?: OrderReplanner) {
+      return db.transaction((tx) => updateOperationInTx(tx, moId, opId, input, replan));
+    },
+    async removeOperation(moId: string, opId: string, replan?: OrderReplanner) {
+      return db.transaction((tx) => removeOperationInTx(tx, moId, opId, replan));
     },
 
     // Atomic: Släpp of a TO still in planned — see releaseInTx.

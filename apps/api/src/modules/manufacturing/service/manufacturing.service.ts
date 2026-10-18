@@ -3,6 +3,10 @@ import type {
   CompleteOperationInput,
   ConsumeMaterialInput,
   CreateManufacturingOrderInput,
+  CreateMoMaterialInput,
+  CreateMoOperationInput,
+  UpdateMoMaterialInput,
+  UpdateMoOperationInput,
   ManufacturingOrderConfiguration,
   OrderRowConfiguration,
   UpdateManufacturingOrderInput,
@@ -34,7 +38,8 @@ export { MaterialShortageError, type MaterialShortage } from "./material-shortag
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { appendFilesToPdf, mergePdfs } from "../../mail/service/pdf-merge.js";
-import { assertOrderableArticle, type ArticleFileReader } from "../../article/service/article.service.js";
+import { ArticleNotFoundError, assertOrderableArticle, type ArticleFileReader, type ArticleUnitReader } from "../../article/service/article.service.js";
+import type { MaterialRow, OperationRowView } from "../repository/order-edit.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import type { Tx } from "@navet/db";
 // G1: append-only audit trail (see audit.repository.ts). Status transitions
@@ -298,6 +303,96 @@ export class ManufacturingOrderStampedInError extends Error {
   }
 }
 
+// --- Ändra material och operationer på en skapad TO ---------------------
+
+// Only a Frisläppt/Pågår order has a snapshot to edit.
+export class ManufacturingOrderNotEditableError extends Error {
+  constructor(status: string) {
+    super(`Material and operations can only be changed while the order is released or in progress (status "${status}")`);
+    this.name = "ManufacturingOrderNotEditableError";
+  }
+}
+
+// Component swap/removal on a row that has drawn material or report lines.
+export class MoMaterialConsumedError extends Error {
+  constructor() {
+    super("The material row has consumption and can neither change component nor be removed");
+    this.name = "MoMaterialConsumedError";
+  }
+}
+
+export class MoMaterialDuplicateError extends Error {
+  constructor() {
+    super("The order already has this component on the same operation");
+    this.name = "MoMaterialDuplicateError";
+  }
+}
+
+export class MoMaterialOwnArticleError extends Error {
+  constructor() {
+    super("The order's own article cannot be its material");
+    this.name = "MoMaterialOwnArticleError";
+  }
+}
+
+export class MoMaterialPhantomError extends Error {
+  constructor(articleNumber: string) {
+    super(`${articleNumber} is a phantom article and is never stocked — add its components instead`);
+    this.name = "MoMaterialPhantomError";
+  }
+}
+
+export class MoOperationNotOnOrderError extends Error {
+  constructor(opId: string) {
+    super(`Operation ${opId} does not belong to the order`);
+    this.name = "MoOperationNotOnOrderError";
+  }
+}
+
+export class MoOperationSequenceTakenError extends Error {
+  constructor(sequenceNo: number) {
+    super(`The order already has an operation with sequence number ${sequenceNo}`);
+    this.name = "MoOperationSequenceTakenError";
+  }
+}
+
+export class MoOperationDoneError extends Error {
+  constructor() {
+    super("A completed operation cannot be changed");
+    this.name = "MoOperationDoneError";
+  }
+}
+
+export class MoOperationStampedError extends Error {
+  constructor() {
+    super("Someone is stamped in on the operation — the resource cannot be changed");
+    this.name = "MoOperationStampedError";
+  }
+}
+
+export class MoOperationLinkedPurchaseError extends Error {
+  constructor() {
+    super("A purchase order or inquiry row points at the operation");
+    this.name = "MoOperationLinkedPurchaseError";
+  }
+}
+
+export class MoOperationReportedError extends Error {
+  constructor() {
+    super("Something has already been reported on the operation");
+    this.name = "MoOperationReportedError";
+  }
+}
+
+// Finished goods have been received from the last operation: which
+// operation is last cannot change any more.
+export class LastOperationLockedError extends Error {
+  constructor() {
+    super("Finished goods have been received from the last operation — it cannot be changed, removed or followed by another");
+    this.name = "LastOperationLockedError";
+  }
+}
+
 // E3 (KO→TO-koppling): validation errors for createManufacturingOrder's
 // optional salesOrderRowId link.
 export class LinkedRowNotFoundError extends Error {
@@ -357,6 +452,47 @@ const MO_STATUS_LABELS: Record<string, string> = {
   cancelled: "Makulerad",
 };
 
+// Lego fields belong to operations on a legoresurs (work center type
+// "subcontract") — on any other resource they are refused rather than
+// silently stored. ONE rule for the routing (beredning) and the TO's own
+// operations (Ändra operationer): `hasLegoFields` says whether the input
+// carries any, `clearedLegoFields` is the patch that empties them when an
+// operation moves to an ordinary resource.
+interface LegoFieldInput {
+  subcontractSupplierId?: string | null;
+  setupPrice?: number | null;
+  unitPrice?: number | null;
+  showNetWeight?: boolean;
+  useArticleDrawing?: boolean;
+}
+function hasLegoFields(input: LegoFieldInput): boolean {
+  return (
+    input.subcontractSupplierId != null ||
+    input.setupPrice != null ||
+    input.unitPrice != null ||
+    input.showNetWeight === true ||
+    input.useArticleDrawing === false
+  );
+}
+// Throws when the effective resource is not a legoresurs but lego fields
+// are given. For a create on a legoresurs, the supplier defaults from the
+// resource when not given (the returned object is the input to store).
+function assertLegoFieldsForResource<T extends LegoFieldInput>(
+  workCenter: { type: string; supplierId: string | null },
+  input: T,
+  mode: "create" | "update"
+): T {
+  if (workCenter.type !== "subcontract") {
+    if (hasLegoFields(input)) throw new NotSubcontractOperationError();
+    return input;
+  }
+  if (mode === "create" && input.subcontractSupplierId === undefined) {
+    return { ...input, subcontractSupplierId: workCenter.supplierId };
+  }
+  return input;
+}
+const CLEARED_LEGO_FIELDS = { subcontractSupplierId: null, setupPrice: null, unitPrice: null, showNetWeight: false } as const;
+
 // createManufacturingService is constructed in well over a dozen unrelated
 // test files across payroll/timereport/planning/reports/purchase (it's the
 // order-lifecycle service every cross-module fixture needs a working
@@ -401,19 +537,31 @@ export interface TerminalOperation {
   packingInstructions: string | null;
 }
 
+// Händelseloggen for Ändra material/operationer: the warnings the change got,
+// left out when there were none.
+const auditWarnings = (warnings: string[]) => (warnings.length > 0 ? { warnings } : {});
+
 export function createManufacturingService(
   repo: ManufacturingRepository,
   pdf: DocumentPdfService,
-  articleFiles: ArticleFileReader & {
-    // articles.rounding (Avrundning): the step the TO quantity is rounded up
-    // to at creation — app.ts and every test pass the article service, which
-    // implements this structurally (same inline extension as sales/purchase).
-    // configuratorMode: a template in mode variants is refused as a new TO's
-    // article (assertOrderableArticle in createManufacturingOrder).
-    getArticle(
-      id: string
-    ): Promise<{ id: string; articleNumber: string; rounding: string | null; configuratorMode: "variants" | "to_order" | null } | null>;
-  },
+  articleFiles: ArticleFileReader &
+    ArticleUnitReader & {
+      // articles.rounding (Avrundning): the step the TO quantity is rounded up
+      // to at creation — app.ts and every test pass the article service, which
+      // implements this structurally (same inline extension as sales/purchase).
+      // configuratorMode: a template in mode variants is refused as a new TO's
+      // article (assertOrderableArticle in createManufacturingOrder).
+      // isPhantom: a phantom is never a TO's material (Ändra material).
+      // resolveUnitSelection (ArticleUnitReader): a material row's unit, the
+      // same helper BOM rows use.
+      getArticle(id: string): Promise<{
+        id: string;
+        articleNumber: string;
+        rounding: string | null;
+        configuratorMode: "variants" | "to_order" | null;
+        isPhantom: boolean;
+      } | null>;
+    },
   salesOrders: SalesOrderLinkReader,
   audit: AuditWriter = NOOP_AUDIT,
   // Konfigurator 4c: optional so the many cross-module fixtures that only
@@ -601,6 +749,161 @@ export function createManufacturingService(
     };
   }
 
+  // --- Ändra material och operationer: the helpers the six methods share.
+
+  // A material component: never the order's own article, never a phantom
+  // (not stocked — its components are), never a template in mode variants.
+  async function assertMaterialComponent(orderArticleId: string, componentArticleId: string) {
+    if (componentArticleId === orderArticleId) throw new MoMaterialOwnArticleError();
+    const component = await articleFiles.getArticle(componentArticleId);
+    if (!component) throw new ArticleNotFoundError(componentArticleId);
+    if (component.isPhantom) throw new MoMaterialPhantomError(component.articleNumber);
+    assertOrderableArticle(component);
+    return component;
+  }
+
+  // The unique constraint (component once per operation) is the duplicate
+  // guard; the throw rolls the edit's transaction back.
+  async function catchMaterialDuplicate<T>(write: () => Promise<T>): Promise<T> {
+    try {
+      return await write();
+    } catch (err) {
+      if (isUniqueViolation(err, "mo_material_unique_per_operation")) throw new MoMaterialDuplicateError();
+      throw err;
+    }
+  }
+
+  // An operation write's constraint errors: the (order, sequence) unique
+  // index backs the pre-check, the supplier FK is the existence check.
+  async function catchOperationWriteErrors<T>(input: { sequenceNo?: number; subcontractSupplierId?: string | null }, write: () => Promise<T>): Promise<T> {
+    try {
+      return await write();
+    } catch (err) {
+      if (isUniqueViolation(err)) throw new MoOperationSequenceTakenError(input.sequenceNo ?? 0);
+      if (isForeignKeyViolation(err, "mo_operations_subcontract_supplier_id_suppliers_id_fk")) {
+        throw new WorkCenterSupplierNotFoundError(input.subcontractSupplierId ?? "");
+      }
+      throw err;
+    }
+  }
+
+  function materialEditError(
+    reason: "order_not_found" | "not_editable" | "row_not_found" | "operation_not_on_order" | "consumed",
+    moId: string,
+    status: string,
+    moOperationId: string | null,
+    rowId?: string
+  ): Error {
+    switch (reason) {
+      case "order_not_found":
+        return new ManufacturingOrderNotFoundError(moId);
+      case "not_editable":
+        return new ManufacturingOrderNotEditableError(status);
+      case "row_not_found":
+        return new MOMaterialConsumptionNotFoundError(rowId ?? "");
+      case "operation_not_on_order":
+        return new MoOperationNotOnOrderError(moOperationId ?? "");
+      case "consumed":
+        return new MoMaterialConsumedError();
+    }
+  }
+
+  function assertMaterialEdited<T extends { ok: true }>(
+    result: T | { ok: false; reason: Parameters<typeof materialEditError>[0] },
+    moId: string,
+    status: string,
+    moOperationId: string | null,
+    rowId?: string
+  ): T {
+    if (result.ok) return result;
+    throw materialEditError(result.reason, moId, status, moOperationId, rowId);
+  }
+
+  function operationEditError(
+    reason:
+      | "order_not_found"
+      | "not_editable"
+      | "operation_not_found"
+      | "sequence_taken"
+      | "done"
+      | "stamped"
+      | "linked_purchase"
+      | "reported"
+      | "last_operation_locked",
+    moId: string,
+    status: string,
+    sequenceNo: number,
+    opId?: string
+  ): Error {
+    switch (reason) {
+      case "order_not_found":
+        return new ManufacturingOrderNotFoundError(moId);
+      case "not_editable":
+        return new ManufacturingOrderNotEditableError(status);
+      case "operation_not_found":
+        return new MOOperationNotFoundError(opId ?? "");
+      case "sequence_taken":
+        return new MoOperationSequenceTakenError(sequenceNo);
+      case "done":
+        return new MoOperationDoneError();
+      case "stamped":
+        return new MoOperationStampedError();
+      case "linked_purchase":
+        return new MoOperationLinkedPurchaseError();
+      case "reported":
+        return new MoOperationReportedError();
+      case "last_operation_locked":
+        return new LastOperationLockedError();
+    }
+  }
+
+  // The order's operations are replanned inside the edit's transaction by
+  // the planning service; without a plan reader (fixtures) nothing is.
+  const replanner = () => (planning ? (tx: Tx, id: string) => planning.replanOrderInTx(tx, id) : undefined);
+
+  async function operationSequences(moId: string): Promise<Map<string, number>> {
+    return new Map((await repo.listOperations(moId)).map((op) => [op.id, op.sequenceNo]));
+  }
+
+  // The händelselogg's view of a material row / an operation, and the
+  // before/after of the fields an edit changed (same shape as the order
+  // rows' row_updated).
+  function materialAuditView(row: MaterialRow, sequences: Map<string, number>) {
+    return {
+      articleNumber: row.componentArticleNumber,
+      quantityPlanned: Number(row.quantityPlanned),
+      unitCode: row.unitCode,
+      operationSequenceNo: row.moOperationId ? sequences.get(row.moOperationId) ?? null : null,
+    };
+  }
+  function operationAuditView(op: OperationRowView) {
+    return {
+      sequenceNo: op.sequenceNo,
+      workCenterCode: op.workCenterCode,
+      description: op.description,
+      setupTime: Number(op.setupTime),
+      runTimePerUnit: Number(op.runTimePerUnit),
+      timeUnit: op.timeUnit,
+      comment: op.comment,
+      printOnWorkCard: op.printOnWorkCard,
+      packingInstructions: op.packingInstructions,
+      subcontractSupplierName: op.subcontractSupplierName,
+      setupPrice: op.setupPrice === null ? null : Number(op.setupPrice),
+      unitPrice: op.unitPrice === null ? null : Number(op.unitPrice),
+      showNetWeight: op.showNetWeight,
+    };
+  }
+  function changedFields<T extends Record<string, unknown>>(before: T, after: T): { before: Partial<T>; after: Partial<T> } {
+    const diff = { before: {} as Partial<T>, after: {} as Partial<T> };
+    for (const key of Object.keys(after) as (keyof T)[]) {
+      if (before[key] !== after[key]) {
+        diff.before[key] = before[key];
+        diff.after[key] = after[key];
+      }
+    }
+    return diff;
+  }
+
   return {
     async createWorkCenter(input: CreateWorkCenterInput) {
       if (await repo.findWorkCenterByCode(input.code)) throw new DuplicateWorkCenterCodeError(input.code);
@@ -755,18 +1058,8 @@ export function createManufacturingService(
       // rather than silently storing prices no calculation would ever read.
       const workCenter = await repo.findWorkCenterById(input.workCenterId);
       if (!workCenter) throw new WorkCenterNotFoundError(input.workCenterId);
-      const hasLegoFields =
-        input.subcontractSupplierId != null ||
-        input.setupPrice != null ||
-        input.unitPrice != null ||
-        input.showNetWeight === true ||
-        input.useArticleDrawing === false;
-      if (workCenter.type !== "subcontract" && hasLegoFields) throw new NotSubcontractOperationError();
       // Default the operation's supplier from the resource when not given.
-      const withDefaults =
-        workCenter.type === "subcontract" && input.subcontractSupplierId === undefined
-          ? { ...input, subcontractSupplierId: workCenter.supplierId }
-          : input;
+      const withDefaults = assertLegoFieldsForResource(workCenter, input, "create");
       try {
         return await repo.createRoutingOperation(articleId, withDefaults);
       } catch (err) {
@@ -827,22 +1120,9 @@ export function createManufacturingService(
       const workCenterId = input.workCenterId ?? existing.workCenterId;
       const workCenter = await repo.findWorkCenterById(workCenterId);
       if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
+      assertLegoFieldsForResource(workCenter, input, "update");
       if (workCenter.type !== "subcontract") {
-        const hasLegoFields =
-          input.subcontractSupplierId != null ||
-          input.setupPrice != null ||
-          input.unitPrice != null ||
-          input.showNetWeight === true ||
-          input.useArticleDrawing === false;
-        if (hasLegoFields) throw new NotSubcontractOperationError();
-        patch = {
-          ...input,
-          subcontractSupplierId: null,
-          setupPrice: null,
-          unitPrice: null,
-          showNetWeight: false,
-          useArticleDrawing: true,
-        };
+        patch = { ...input, ...CLEARED_LEGO_FIELDS, useArticleDrawing: true };
       }
 
       try {
@@ -1347,6 +1627,160 @@ export function createManufacturingService(
         allow,
         false
       );
+    },
+
+    // --- Ändra material och operationer på en skapad TO ------------------
+    // Edits the TO's own rows while the order is Frisläppt/Pågår; the
+    // article's BOM/routing are never touched. The guards that need the
+    // locks run in the repository transaction (order-edit.ts); what can be
+    // validated on committed data (the component, its unit) runs here
+    // first, like every other guard in this file. Each edit is logged on
+    // the order after the commit, with changed fields as before/after.
+
+    async addMaterial(moId: string, input: CreateMoMaterialInput, userId: string | null) {
+      const order = await repo.findManufacturingOrderById(moId);
+      if (!order) throw new ManufacturingOrderNotFoundError(moId);
+      const component = await assertMaterialComponent(order.articleId, input.componentArticleId);
+      const unit = await articleFiles.resolveUnitSelection(component.id, input.unitId);
+      const result = await catchMaterialDuplicate(() =>
+        repo.addMaterial(moId, {
+          componentArticleId: component.id,
+          quantity: input.quantity,
+          unitId: unit.unitId,
+          unitFactor: unit.unitFactor,
+          moOperationId: input.moOperationId ?? null,
+        })
+      );
+      const done = assertMaterialEdited(result, moId, order.status, input.moOperationId ?? null);
+      const sequences = await operationSequences(moId);
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: done.order.orderNumber,
+        action: "material_added",
+        detail: { ...materialAuditView(done.material, sequences), ...auditWarnings(done.warnings) },
+        userId,
+      });
+      return { material: done.material, warnings: done.warnings };
+    },
+
+    async updateMaterial(moId: string, rowId: string, input: UpdateMoMaterialInput, userId: string | null) {
+      const order = await repo.findManufacturingOrderById(moId);
+      if (!order) throw new ManufacturingOrderNotFoundError(moId);
+      const existing = await repo.findMaterialConsumptionById(rowId);
+      if (!existing || existing.manufacturingOrderId !== moId) throw new MOMaterialConsumptionNotFoundError(rowId);
+      const componentChanged = input.componentArticleId !== undefined && input.componentArticleId !== existing.componentArticleId;
+      const componentId = input.componentArticleId ?? existing.componentArticleId;
+      if (componentChanged) await assertMaterialComponent(order.articleId, componentId);
+      // A new unit, or a new component (whose base unit applies unless a
+      // unit is given alongside) — resolved against the component's units
+      // with the same helper as a BOM row.
+      const unit =
+        input.unitId !== undefined || componentChanged
+          ? await articleFiles.resolveUnitSelection(componentId, input.unitId ?? null)
+          : undefined;
+      const result = await catchMaterialDuplicate(() =>
+        repo.updateMaterial(moId, rowId, {
+          componentArticleId: componentChanged ? componentId : undefined,
+          quantity: input.quantity,
+          unit,
+          moOperationId: input.moOperationId,
+        })
+      );
+      const done = assertMaterialEdited(result, moId, order.status, input.moOperationId ?? null, rowId);
+      const sequences = await operationSequences(moId);
+      const diff = changedFields(materialAuditView(done.before!, sequences), materialAuditView(done.material, sequences));
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: done.order.orderNumber,
+        action: "material_changed",
+        detail: { articleNumber: done.material.componentArticleNumber, ...diff, ...auditWarnings(done.warnings) },
+        userId,
+      });
+      return { material: done.material, warnings: done.warnings };
+    },
+
+    async removeMaterial(moId: string, rowId: string, userId: string | null) {
+      const order = await repo.findManufacturingOrderById(moId);
+      if (!order) throw new ManufacturingOrderNotFoundError(moId);
+      const result = await repo.removeMaterial(moId, rowId);
+      if (!result.ok) throw materialEditError(result.reason, moId, order.status, null, rowId);
+      const sequences = await operationSequences(moId);
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: result.order.orderNumber,
+        action: "material_removed",
+        detail: materialAuditView(result.before, sequences),
+        userId,
+      });
+    },
+
+    async addOperation(moId: string, input: CreateMoOperationInput, userId: string | null) {
+      const order = await repo.findManufacturingOrderById(moId);
+      if (!order) throw new ManufacturingOrderNotFoundError(moId);
+      const workCenter = await repo.findWorkCenterById(input.workCenterId);
+      if (!workCenter) throw new WorkCenterNotFoundError(input.workCenterId);
+      // The beredning's lego rule, and the supplier defaulted from the resource.
+      const withDefaults = assertLegoFieldsForResource(workCenter, input, "create");
+      const result = await catchOperationWriteErrors(input, () => repo.addOperation(moId, withDefaults, replanner()));
+      if (!result.ok) throw operationEditError(result.reason, moId, order.status, input.sequenceNo);
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: result.order.orderNumber,
+        action: "operation_added",
+        detail: { ...operationAuditView(result.operation), ...auditWarnings(result.warnings) },
+        userId,
+      });
+      return { operation: result.operation, warnings: result.warnings };
+    },
+
+    async updateOperation(moId: string, opId: string, input: UpdateMoOperationInput, userId: string | null) {
+      const order = await repo.findManufacturingOrderById(moId);
+      if (!order) throw new ManufacturingOrderNotFoundError(moId);
+      const existing = await repo.findOperationById(opId);
+      if (!existing || existing.manufacturingOrderId !== moId) throw new MOOperationNotFoundError(opId);
+      // The effective resource decides whether lego fields are legal —
+      // same rule as updateRoutingOperation; moving to an ordinary resource
+      // clears them.
+      const workCenterId = input.workCenterId ?? existing.workCenterId;
+      const workCenter = await repo.findWorkCenterById(workCenterId);
+      if (!workCenter) throw new WorkCenterNotFoundError(workCenterId);
+      assertLegoFieldsForResource(workCenter, input, "update");
+      const patch: UpdateMoOperationInput = workCenter.type !== "subcontract" ? { ...input, ...CLEARED_LEGO_FIELDS } : input;
+      const result = await catchOperationWriteErrors(input, () => repo.updateOperation(moId, opId, patch, replanner()));
+      if (!result.ok) throw operationEditError(result.reason, moId, order.status, input.sequenceNo ?? existing.sequenceNo, opId);
+      const diff = changedFields(operationAuditView(result.before!), operationAuditView(result.operation));
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: result.order.orderNumber,
+        action: "operation_changed",
+        detail: {
+          sequenceNo: result.operation.sequenceNo,
+          workCenterCode: result.operation.workCenterCode,
+          ...diff,
+          ...auditWarnings(result.warnings),
+        },
+        userId,
+      });
+      return { operation: result.operation, warnings: result.warnings };
+    },
+
+    async removeOperation(moId: string, opId: string, userId: string | null) {
+      const order = await repo.findManufacturingOrderById(moId);
+      if (!order) throw new ManufacturingOrderNotFoundError(moId);
+      const result = await repo.removeOperation(moId, opId, replanner());
+      if (!result.ok) throw operationEditError(result.reason, moId, order.status, 0, opId);
+      await audit.log({
+        entityType: "manufacturing_order",
+        entityId: result.order.orderNumber,
+        action: "operation_removed",
+        detail: {
+          ...operationAuditView(result.before),
+          unlinkedMaterials: result.unlinkedMaterials,
+          ...auditWarnings(result.warnings),
+        },
+        userId,
+      });
+      return { warnings: result.warnings, unlinkedMaterials: result.unlinkedMaterials };
     },
 
     async listScrapForOrder(moId: string) {

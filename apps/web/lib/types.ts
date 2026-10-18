@@ -1716,6 +1716,24 @@ export interface MOMaterialConsumption {
   createdAt: string;
 }
 
+// Ändra material och operationer på en skapad TO — the API answers with the
+// saved row plus warnings (shortage, planning), never blocking.
+export interface MOMaterialSaveResult {
+  material: MOMaterialConsumption;
+  warnings: string[];
+}
+
+export interface MOOperationSaveResult {
+  operation: MOOperation;
+  warnings: string[];
+}
+
+export interface MOOperationDeleteResult {
+  warnings: string[];
+  // Material rows that were tied to the removed operation and are now drawn at receipt.
+  unlinkedMaterials: number;
+}
+
 export type MOOperationStatus = "pending" | "done";
 
 export interface MOOperation {
@@ -3451,6 +3469,12 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   row_added: "Rad tillagd",
   row_updated: "Rad ändrad",
   row_deleted: "Rad borttagen",
+  material_added: "Material tillagt",
+  material_changed: "Material ändrat",
+  material_removed: "Material borttaget",
+  operation_added: "Operation tillagd",
+  operation_changed: "Operation ändrad",
+  operation_removed: "Operation borttagen",
   row_configuration_changed: "Konfiguration ändrad",
   file_added: "Underlag uppladdat",
   file_deleted: "Underlag borttaget",
