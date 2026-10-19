@@ -630,7 +630,7 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   **lagervärdering** (`/lager/vardering`, administratörer): lagrets värde
   per valfritt datum med tre metoder — standardpris, senaste inköp eller
   vägt snitt — uppdelat per artikelgrupp och nedladdningsbart som PDF
-- **Ekonomi** (administratörer) — full redovisning: **Kontoplan** med
+- **Ekonomi** (rättigheten Ekonomi) — full redovisning: **Kontoplan** med
   BAS-seedning i ett klick, **Räkenskapsår** med automatiskt genererade
   perioder och låsning, **Verifikat** i egna verifikatserier (bokförs
   append-only, kan omföras, utskrivbara som verifikatlista), härledd
@@ -640,9 +640,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   och leverantörsreskontra med betalningsregistrering (OCR-matchning,
   tolerans, kvittning) och betalningspåminnelser, **Momsrapport** per
   månad/kvartal med Skatteverkets rutor och bokförd momsomföring, härledda
-  **Balansräkning** och **Resultaträkning**, samt **SIE-filer**
-  (SIE4-export per räkenskapsår och import av ingående balanser) — nio
-  sidor under Ekonomi i sidomenyn. Anpassat efter **bokföringslagen**:
+  **Balansräkning** och **Resultaträkning**, **Anläggningsregister** med
+  planenliga avskrivningar, **Bokslut** (en guide i sex steg som stänger
+  räkenskapsåret) samt **SIE-filer** (SIE4-export per räkenskapsår och
+  import av ingående balanser). Anpassat efter **bokföringslagen**:
   **underlag** (kvitto, kontoutdrag) kan bifogas verifikat, och bokförda
   verifikat, deras rader och underlag samt arkiverade fakturor skyddas av
   en **spärr i databasen** mot ändring och radering — rättelser görs med
@@ -668,8 +669,7 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   [naverp.se/hjalp](https://naverp.se/hjalp/)) med kapitel för alla rutiner
   och inställningar
 
-Känd begränsning: det finns ingen **årsbokslutsfunktion** — bokslutet
-görs i ett annat program utifrån SIE4-exporten. Se
+Se
 [`docs/architecture.md`](docs/architecture.md#8-byggordning--faser) för
 full byggordning och [`TODO.md`](TODO.md) för det som återstår.
 

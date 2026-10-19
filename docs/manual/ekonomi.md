@@ -83,7 +83,7 @@ Resultatet visas som ett block per konto, i kontonummerordning, med samma tabell
 
 ## Balansräkning
 
-**Ekonomi → Balansräkning** visar företagets tillgångar, eget kapital och skulder vid ett givet datum. Administratörsbehörighet krävs.
+**Ekonomi → Balansräkning** visar företagets tillgångar, eget kapital och skulder vid ett givet datum. Kräver rättigheten **Ekonomi**, som resten av modulen.
 
 Sidan har ett enda styrfält, datumfältet **Per datum** — förifyllt med slutdatumet för det senaste räkenskapsåret. Rapporten hämtas om automatiskt så fort datumet ändras, det finns ingen sökknapp. Räkenskapsåret som datumet faller inom härleds och visas som **"Räkenskapsår 2026"** ovanför tabellen.
 
@@ -148,7 +148,7 @@ När omföringen är bokförd visar kortet **Deklarerad** med en länk till veri
 
 ## SIE-filer
 
-**Ekonomi → SIE-filer** hanterar utbyte av bokföring med revisor eller ett annat bokföringsprogram, i det svenska SIE-formatet (typ 4). Administratörsbehörighet krävs.
+**Ekonomi → SIE-filer** hanterar utbyte av bokföring med revisor eller ett annat bokföringsprogram, i det svenska SIE-formatet (typ 4). Kräver rättigheten **Ekonomi**, som resten av modulen.
 
 ### Exportera
 

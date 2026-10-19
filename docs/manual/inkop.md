@@ -294,7 +294,7 @@ Leverantörens egen faktura sparas som **underlag** på leverantörsfakturan, s�
 Underlaget är **räkenskapsinformation** och ska enligt bokföringslagen sparas i sju år. Därför gäller:
 
 - Så länge fakturan är **Utkast** kan en fil tas bort med **Ta bort** (om fel fil valdes).
-- Efter **Attestera** — och på en avbruten faktura — kan underlag bara **läggas till**, aldrig tas bort.
+- Efter **Godkänn** — och på en avbruten faktura — kan underlag bara **läggas till**, aldrig tas bort.
 - Varje uppladdning och borttagning loggas i fakturans **Historik** (**Underlag uppladdat**/**Underlag borttaget**), och för varje fil sparas en kontrollsumma (SHA-256, visas när du håller muspekaren över filnamnet) som visar att filen är oförändrad sedan uppladdningen.
 
 Underlagen lagras i databasen och följer därmed med i varje säkerhetskopia (se [Säkerhetskopiering](/hjalp/system#sakerhetskopiering)).
@@ -305,7 +305,7 @@ En fakturarad kan kopplas till en rad på en inköpsorder. Artikeln måste vara 
 
 ### Betalningsreferens
 
-**Betalningsreferens** är antingen **OCR** (från leverantörens inbetalningskort, kontrolleras med kontrollsiffra) eller **Meddelande**. Referensen kan ändras i utkast och på attesterade fakturor, men inte medan fakturan ingår i en betalfil (*Ingår i betalfil BO-7*). Utan referens skickas "Faktura {fakturanummer}". Till ett bankkonto får meddelandet vara högst 12 tecken, så där skickas bara fakturanumret.
+**Betalningsreferens** är antingen **OCR** (från leverantörens inbetalningskort, kontrolleras med kontrollsiffra) eller **Meddelande**. Referensen kan ändras i utkast och på godkända fakturor, men inte medan fakturan ingår i en betalfil (*Ingår i betalfil BO-7*). Utan referens skickas "Faktura {fakturanummer}". Till ett bankkonto får meddelandet vara högst 12 tecken, så där skickas bara fakturanumret.
 
 ### Statusflöde
 
@@ -392,7 +392,7 @@ På betalningens detaljsida (klicka på UTB-numret i listan) finns knappen **Mak
 
 En betalfil är en betalningsomgång som Nav skriver som en pain.001-fil. Filen laddas upp i internetbankens filöverföring och attesteras där. Ingenting bokförs när filen skapas, eftersom banken kan avvisa betalningar. Utbetalningarna bokförs först när banken har bekräftat dem.
 
-Förutsättningar: **System → Bank** är ifyllt (administratör), leverantören har ett **Betalningssätt** och fakturan är attesterad.
+Förutsättningar: **System → Bank** är ifyllt (administratör), leverantören har ett **Betalningssätt** och fakturan är **Godkänd**.
 
 ### Skapa betalfil
 
