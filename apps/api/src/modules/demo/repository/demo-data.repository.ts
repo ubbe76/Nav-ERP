@@ -196,7 +196,7 @@ export async function writeDemoData(tx: Tx, data: DemoData, userId: string | nul
       groupId: groupIds.get(a.group),
       defaultLocationId: locations[a.location],
     });
-    const row = await insertArticle(tx, { ...input, unitId: unitIdByCode.get(a.unit)! });
+    const row = await insertArticle(tx, { ...input, articleNumber: a.articleNumber, unitId: unitIdByCode.get(a.unit)! });
     articleIds.set(a.articleNumber, row!.id);
   }
 

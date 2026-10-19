@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { packageTypes, parcelKindEnum, units } from "./register";
 import { users } from "./auth";
+import { numberSeries } from "./system";
 
 // Same pattern as the company logo in system.ts — no built-in bytea helper
 // in drizzle-orm/pg-core.
@@ -40,6 +41,12 @@ export const articleGroups = pgTable(
     name: varchar("name", { length: 100 }).notNull().unique(),
     // Free-text note on what the group covers (Beskrivning), max 500 chars.
     description: varchar("description", { length: 500 }),
+    // The article number series a new article in this group draws from
+    // (null = the default "article" series). Deleting the series falls the
+    // group back to the default.
+    numberSeriesKey: varchar("number_series_key", { length: 50 }).references(() => numberSeries.key, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [check("code_three_or_four_digits", sql`${table.code} ~ '^[0-9]{3,4}$'`)]

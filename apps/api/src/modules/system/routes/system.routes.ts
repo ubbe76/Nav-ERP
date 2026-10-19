@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import {
+  createArticleNumberSeriesSchema,
   createCompanyCarrierSchema,
   updateCompanyCarrierSchema,
   updateCompanyInfoSchema,
@@ -13,8 +14,10 @@ import { contentDisposition } from "../service/content-disposition.js";
 import { errorBody } from "../service/error-body.js";
 import type { SystemService } from "../service/system.service.js";
 import {
+  BuiltInNumberSeriesError,
   CarrierNotFoundError,
   CompanyCarrierNotFoundError,
+  DuplicateNumberSeriesNameError,
   DuplicateCompanyCarrierError,
   NumberSeriesNotFoundError,
 } from "../service/system.service.js";
@@ -145,6 +148,34 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
         return await service.updateNumberSeries(req.params.key, input, req.user!.id);
       } catch (err) {
         if (err instanceof NumberSeriesNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof BuiltInNumberSeriesError) return reply.code(400).send(errorBody(err));
+        if (err instanceof DuplicateNumberSeriesNameError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // Egna artikelnummerserier (migration 0127).
+  app.post("/number-series", { preHandler: requireRole("admin") }, async (req, reply) => {
+    const input = createArticleNumberSeriesSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await service.createArticleNumberSeries(input, req.user!.id));
+    } catch (err) {
+      if (err instanceof DuplicateNumberSeriesNameError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  app.delete<{ Params: { key: string } }>(
+    "/number-series/:key",
+    { preHandler: requireRole("admin") },
+    async (req, reply) => {
+      try {
+        await service.deleteNumberSeries(req.params.key, req.user!.id);
+        return reply.code(204).send();
+      } catch (err) {
+        if (err instanceof NumberSeriesNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof BuiltInNumberSeriesError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }

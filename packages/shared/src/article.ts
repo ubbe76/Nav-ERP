@@ -57,7 +57,10 @@ export const articleCopyFromSchema = z.object({
 export type ArticleCopyFromInput = z.infer<typeof articleCopyFromSchema>;
 
 export const createArticleSchema = z.object({
-  articleNumber: z.string().min(1).max(50),
+  // Omitted ⇒ the next free number in an article number series: the one
+  // given (numberSeriesKey), else the group's, else the default "article".
+  articleNumber: z.string().min(1).max(50).optional(),
+  numberSeriesKey: z.string().min(1).max(50).optional(),
   name: z.string().min(1).max(255),
   type: articleTypeSchema,
   // Phantom BOM article (Monitor-style fantomartikel) — locked after creation, like `type`.
@@ -214,6 +217,9 @@ export const createArticleGroupSchema = z.object({
   code: articleGroupCodeSchema,
   name: z.string().min(1).max(100),
   description: optionalText(500).optional(),
+  // The article number series new articles in the group draw from; null =
+  // the default series.
+  numberSeriesKey: z.string().min(1).max(50).nullable().optional(),
 });
 export type CreateArticleGroupInput = z.infer<typeof createArticleGroupSchema>;
 
@@ -221,6 +227,7 @@ export const updateArticleGroupSchema = z.object({
   code: articleGroupCodeSchema,
   name: z.string().min(1).max(100),
   description: optionalText(500).optional(),
+  numberSeriesKey: z.string().min(1).max(50).nullable().optional(),
 });
 export type UpdateArticleGroupInput = z.infer<typeof updateArticleGroupSchema>;
 

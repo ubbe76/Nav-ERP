@@ -67,3 +67,11 @@
     grid-template-columns: 1fr;
   }
 }
+
+.sectionTitle {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 28px 0 12px;
+}

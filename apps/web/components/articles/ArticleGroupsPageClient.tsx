@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -8,7 +8,8 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { NewArticleGroupForm } from "./NewArticleGroupForm";
-import type { ArticleGroup } from "../../lib/types";
+import { apiFetch } from "../../lib/api";
+import type { ArticleGroup, ArticleNumberSeriesOption } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 
@@ -16,6 +17,14 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ArticleGroup | null>(null);
+  const [seriesNames, setSeriesNames] = useState<Record<string, string>>({});
+
+  // Own series are named; null/unknown keys read as the default series.
+  useEffect(() => {
+    apiFetch<ArticleNumberSeriesOption[]>("/api/v1/article-number-series")
+      .then((rows) => setSeriesNames(Object.fromEntries(rows.map((r) => [r.key, r.name ?? "Standard"]))))
+      .catch(() => setSeriesNames({}));
+  }, []);
 
   return (
     <>
@@ -39,6 +48,7 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
         columns={[
           { key: "code", label: "Kod", width: "0.4fr" },
           { key: "name", label: "Namn", width: "1.2fr" },
+          { key: "series", label: "Nummerserie", width: "1fr" },
           { key: "description", label: "Beskrivning", width: "minmax(0, 2.4fr)" },
         ]}
         rows={groups}
@@ -56,6 +66,8 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
                   <strong>{group.name}</strong>
                 </button>
               );
+            case "series":
+              return group.numberSeriesKey ? (seriesNames[group.numberSeriesKey] ?? group.numberSeriesKey) : "Standard";
             case "description":
               return group.description ? (
                 <span

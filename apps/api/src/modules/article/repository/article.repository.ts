@@ -1,6 +1,12 @@
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
+  claimArticleNumber,
+  findArticleNumberSeries,
+  listArticleNumberSeries,
+  previewArticleNumber,
+} from "./article-number.js";
+import {
   articleDrawingRevisions,
   articleDrawings,
   articleFiles,
@@ -63,7 +69,12 @@ export async function recordStandardCostHistory(
 }
 
 // unitId is resolved by the service (explicit choice or the "st" default).
-export type InsertArticleInput = CreateArticleInput & { unitId: string };
+// The number is always settled by the time the article is inserted — the
+// service issues it from a series when the caller left it out.
+export type InsertArticleInput = Omit<CreateArticleInput, "articleNumber" | "numberSeriesKey"> & {
+  articleNumber: string;
+  unitId: string;
+};
 
 // The body of create() without the transaction — a Tx-only leaf so a caller
 // that creates several articles in ONE transaction (the configurator's
@@ -435,6 +446,23 @@ export function createArticleRepository(db: Db) {
       const [row] = await db.select({ id: articleGroups.id }).from(articleGroups).where(eq(articleGroups.id, id));
       return row !== undefined;
     },
+
+    // The group's article number series (null = the default), undefined =
+    // no such group.
+    async articleGroupNumberSeries(id: string) {
+      const [row] = await db
+        .select({ numberSeriesKey: articleGroups.numberSeriesKey })
+        .from(articleGroups)
+        .where(eq(articleGroups.id, id));
+      return row ? row.numberSeriesKey : undefined;
+    },
+
+    // Artikelnummerserier (article-number.ts).
+    listArticleNumberSeries: () => listArticleNumberSeries(db),
+    findArticleNumberSeries: (key: string) => findArticleNumberSeries(db, key),
+    previewArticleNumber: (series: Awaited<ReturnType<typeof listArticleNumberSeries>>[number]) =>
+      previewArticleNumber(db, series),
+    claimArticleNumber: (key: string) => claimArticleNumber(db, key),
 
     async packageTypeExists(id: string) {
       const [row] = await db.select({ id: packageTypes.id }).from(packageTypes).where(eq(packageTypes.id, id));

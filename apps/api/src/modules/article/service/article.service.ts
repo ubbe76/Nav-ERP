@@ -24,6 +24,7 @@ import {
 import type { Db, Tx } from "@navet/db";
 import type { ArticleRepository } from "../repository/article.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { DEFAULT_ARTICLE_SERIES_KEY, SeriesExhaustedError } from "../../system/service/number-series.js";
 import { ERROR_CODES } from "@navet/shared";
 import { codeFromName, errorBody } from "../../system/service/error-body.js";
 import { assertModeAllowed } from "../../configurator/service/configurator-rules.js";
@@ -290,7 +291,17 @@ export class ArticleUnitInUseError extends Error {
   }
 }
 
+// A series-issued number that collides with one typed by hand meanwhile is
+// retried with the next free number this many times.
+const ARTICLE_NUMBER_UNIQUE = "articles_article_number_unique";
+const ARTICLE_NUMBER_RETRIES = 5;
+
 export function createArticleService(repo: ArticleRepository) {
+  // A group (or an article) may only point at an article number series.
+  async function assertArticleNumberSeries(key: string | null | undefined) {
+    if (key && !(await repo.findArticleNumberSeries(key))) throw new InvalidReferenceError("Unknown article number series");
+  }
+
   // A BOM row may only point at one of its OWN article's routing operations —
   // otherwise the material would be tied to a step that never runs on this MO.
   async function assertOperationBelongsToArticle(operationId: string, articleId: string) {
@@ -346,18 +357,57 @@ export function createArticleService(repo: ArticleRepository) {
       for (const defaultUnit of [input.purchaseUnitId, input.salesUnitId]) {
         if (defaultUnit && !usableDefaultUnits.has(defaultUnit)) throw new InvalidUnitError();
       }
-      try {
-        const loadingMeters = deriveLoadingMeters(input.palletSpaces, input.loadingMeters) ?? undefined;
-        const created = await repo.create({ ...input, loadingMeters, unitId, defaultLocationId });
+      const { numberSeriesKey, articleNumber, ...fields } = input;
+      const loadingMeters = deriveLoadingMeters(input.palletSpaces, input.loadingMeters) ?? undefined;
+      const insert = async (number: string) => {
+        const created = await repo.create({ ...fields, articleNumber: number, loadingMeters, unitId, defaultLocationId });
         // The source was deleted between the check above and the transaction.
         if (!created) throw new ArticleNotFoundError(copy!.articleId);
         return created;
-      } catch (err) {
-        // Same mapping updateArticle already has — a duplicate number on
-        // POST was a raw 500 until the importer needed the 409.
-        if (isUniqueViolation(err)) throw new DuplicateArticleNumberError(input.articleNumber);
-        throw err;
+      };
+
+      if (articleNumber !== undefined) {
+        try {
+          return await insert(articleNumber);
+        } catch (err) {
+          // Same mapping updateArticle already has — a duplicate number on
+          // POST was a raw 500 until the importer needed the 409.
+          if (isUniqueViolation(err)) throw new DuplicateArticleNumberError(articleNumber);
+          throw err;
+        }
       }
+
+      // Artikelnummerserie: the one asked for, else the group's, else the
+      // default. The claimed number was free when it was issued; a number
+      // typed by hand on another article in between makes the insert
+      // collide, and the next free number is taken instead (bounded).
+      const key =
+        numberSeriesKey ?? (input.groupId ? await repo.articleGroupNumberSeries(input.groupId) : null) ?? DEFAULT_ARTICLE_SERIES_KEY;
+      for (let attempt = 0; ; attempt++) {
+        const issued = await repo.claimArticleNumber(key);
+        if (issued === null) throw new InvalidReferenceError("Unknown article number series");
+        try {
+          return await insert(issued);
+        } catch (err) {
+          if (!isUniqueViolation(err, ARTICLE_NUMBER_UNIQUE)) throw err;
+          if (attempt >= ARTICLE_NUMBER_RETRIES) throw new SeriesExhaustedError(key);
+        }
+      }
+    },
+
+    // Ny artikel: the article number series with the number each would
+    // issue right now (a preview — nothing is reserved).
+    async listArticleNumberSeries() {
+      const rows = await repo.listArticleNumberSeries();
+      return Promise.all(
+        rows.map(async (row) => ({
+          key: row.key,
+          name: row.name,
+          prefix: row.prefix,
+          isDefault: row.key === DEFAULT_ARTICLE_SERIES_KEY,
+          nextArticleNumber: await repo.previewArticleNumber(row),
+        }))
+      );
     },
 
     async getArticle(id: string) {
@@ -553,12 +603,14 @@ export function createArticleService(repo: ArticleRepository) {
     },
 
     async createArticleGroup(input: CreateArticleGroupInput) {
+      await assertArticleNumberSeries(input.numberSeriesKey);
       if (await repo.findArticleGroupByCode(input.code)) throw new DuplicateArticleGroupError("code", input.code);
       if (await repo.findArticleGroupByName(input.name)) throw new DuplicateArticleGroupError("name", input.name);
       return repo.createArticleGroup(input);
     },
 
     async updateArticleGroup(id: string, input: UpdateArticleGroupInput) {
+      await assertArticleNumberSeries(input.numberSeriesKey);
       // A group may of course keep its own code/name, so conflicts only
       // count when they sit on a different row.
       const byCode = await repo.findArticleGroupByCode(input.code);

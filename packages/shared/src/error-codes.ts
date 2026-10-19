@@ -137,6 +137,8 @@ export const ERROR_CODES = {
   DUPLICATE_INQUIRY_ROW: "duplicate-inquiry-row",
   // system
   SERIES_EXHAUSTED: "series-exhausted",
+  DUPLICATE_NUMBER_SERIES_NAME: "duplicate-number-series-name",
+  BUILT_IN_NUMBER_SERIES: "built-in-number-series",
   DEMO_DATA_NOT_AVAILABLE: "demo-data-not-available",
   // auth
   INVALID_CREDENTIALS: "invalid-credentials",

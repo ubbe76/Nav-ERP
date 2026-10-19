@@ -1,6 +1,7 @@
 import type {
   CostingMaterialSource,
   CostingSupplierPriceTier,
+  CreateArticleNumberSeriesInput,
   CreateCompanyCarrierInput,
   ManufacturingMaterialShortage,
   UpdateCompanyCarrierInput,
@@ -9,6 +10,8 @@ import type {
   UpdateSystemSettingsInput,
 } from "@navet/shared";
 import { round2 } from "@navet/shared";
+import { randomUUID } from "node:crypto";
+import { DEFAULT_ARTICLE_SERIES_KEY } from "./number-series.js";
 import type { SystemRepository } from "../repository/system.repository.js";
 import { createDatabaseBackup } from "./backup.js";
 import { decodeDeliveryDefaults, DELIVERY_SETTING_KEYS, type DeliveryDefaults } from "./delivery-days.js";
@@ -144,6 +147,31 @@ export class NumberSeriesNotFoundError extends Error {
   }
 }
 
+// The default article series (DEFAULT_ARTICLE_SERIES_KEY) is built in like
+// the order series; only the user's own article series can be renamed or
+// deleted.
+export class DuplicateNumberSeriesNameError extends Error {
+  constructor(name: string) {
+    super(`A number series named ${name} already exists`);
+    this.name = "DuplicateNumberSeriesNameError";
+  }
+}
+
+// Renaming or deleting a built-in series (order series, Artikelnummer).
+export class BuiltInNumberSeriesError extends Error {
+  constructor(key: string, action: "rename" | "delete") {
+    super(
+      action === "delete"
+        ? `Number series "${key}" is built in and cannot be deleted`
+        : `Number series "${key}" is built in and cannot be renamed`
+    );
+    this.name = "BuiltInNumberSeriesError";
+  }
+}
+
+const isOwnArticleSeries = (row: { key: string; forArticles: boolean }) =>
+  row.forArticles && row.key !== DEFAULT_ARTICLE_SERIES_KEY;
+
 export class CarrierNotFoundError extends Error {
   constructor(id: string) {
     super(`Carrier ${id} not found`);
@@ -276,19 +304,63 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     async updateNumberSeries(key: string, input: UpdateNumberSeriesInput, userId: string | null = null) {
       const existing = await repo.getNumberSeries(key);
       if (!existing) throw new NumberSeriesNotFoundError(key);
-      const row = await repo.updateNumberSeries(key, input);
+      if (input.name !== undefined && !isOwnArticleSeries(existing)) throw new BuiltInNumberSeriesError(key, "rename");
+      let row;
+      try {
+        row = await repo.updateNumberSeries(key, input);
+      } catch (err) {
+        if (isUniqueViolation(err, "number_series_name_unique")) throw new DuplicateNumberSeriesNameError(input.name!);
+        throw err;
+      }
       if (!row) throw new NumberSeriesNotFoundError(key);
+      const names = input.name !== undefined ? [{ name: existing.name }, { name: row.name }] : [{}, {}];
       await audit.log({
         entityType: "number_series",
         entityId: key,
         action: "updated",
         detail: {
-          before: { prefix: existing.prefix, nextNumber: existing.nextNumber, digits: existing.digits },
-          after: { prefix: row.prefix, nextNumber: row.nextNumber, digits: row.digits },
+          before: { ...names[0], prefix: existing.prefix, nextNumber: existing.nextNumber, digits: existing.digits },
+          after: { ...names[1], prefix: row.prefix, nextNumber: row.nextNumber, digits: row.digits },
         },
         userId,
       });
       return row;
+    },
+
+    async createArticleNumberSeries(input: CreateArticleNumberSeriesInput, userId: string | null = null) {
+      // Keys are internal (they address the series in the API); the name is
+      // what the user sees and picks.
+      const key = `article_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+      let row;
+      try {
+        row = await repo.createArticleNumberSeries(key, input);
+      } catch (err) {
+        if (isUniqueViolation(err, "number_series_name_unique")) throw new DuplicateNumberSeriesNameError(input.name);
+        throw err;
+      }
+      await audit.log({
+        entityType: "number_series",
+        entityId: key,
+        action: "created",
+        detail: { name: row.name, prefix: row.prefix, nextNumber: row.nextNumber, digits: row.digits },
+        userId,
+      });
+      return row;
+    },
+
+    async deleteNumberSeries(key: string, userId: string | null = null) {
+      const existing = await repo.getNumberSeries(key);
+      if (!existing) throw new NumberSeriesNotFoundError(key);
+      if (!isOwnArticleSeries(existing)) throw new BuiltInNumberSeriesError(key, "delete");
+      const row = await repo.deleteNumberSeries(key);
+      if (!row) throw new NumberSeriesNotFoundError(key);
+      await audit.log({
+        entityType: "number_series",
+        entityId: key,
+        action: "deleted",
+        detail: { name: existing.name, prefix: existing.prefix, nextNumber: existing.nextNumber },
+        userId,
+      });
     },
 
     getSettings,

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
-import { Field, Input, Textarea } from "../ui/Field";
+import { Field, Input, Select, Textarea } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 
-import type { ArticleGroup } from "../../lib/types";
+import type { ArticleGroup, ArticleNumberSeriesOption } from "../../lib/types";
 import { Form, FormActions, FormError } from "../ui/Form";
 
 // Creates an article group, or renames one when `group` is passed.
@@ -13,15 +13,24 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
   const [code, setCode] = useState(group?.code ?? "");
   const [name, setName] = useState(group?.name ?? "");
   const [description, setDescription] = useState(group?.description ?? "");
+  // "" = the default series.
+  const [numberSeriesKey, setNumberSeriesKey] = useState(group?.numberSeriesKey ?? "");
+  const [seriesOptions, setSeriesOptions] = useState<ArticleNumberSeriesOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    apiFetch<ArticleNumberSeriesOption[]>("/api/v1/article-number-series")
+      .then(setSeriesOptions)
+      .catch(() => setSeriesOptions([]));
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setPending(true);
     try {
-      const body = JSON.stringify({ code, name, description });
+      const body = JSON.stringify({ code, name, description, numberSeriesKey: numberSeriesKey === "" ? null : numberSeriesKey });
       if (group) {
         await apiFetch(`/api/v1/article-groups/${group.id}`, { method: "PATCH", body });
       } else {
@@ -63,6 +72,19 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
+      </Field>
+
+      <Field label="Nummerserie" htmlFor="numberSeriesKey">
+        <Select id="numberSeriesKey" value={numberSeriesKey} onChange={(e) => setNumberSeriesKey(e.target.value)}>
+          <option value="">Artikelnummer (standard)</option>
+          {seriesOptions
+            .filter((o) => !o.isDefault)
+            .map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.name ?? o.key}
+              </option>
+            ))}
+        </Select>
       </Field>
 
       <FormActions>

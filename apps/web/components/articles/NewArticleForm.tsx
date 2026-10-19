@@ -14,7 +14,7 @@ import {
   articleCopyPartAllowed,
   type ArticleCopyPart,
 } from "../../lib/articleCopy";
-import type { Article, ArticleGroup, ArticleType, RegisterEntry, StockLocation } from "../../lib/types";
+import type { Article, ArticleGroup, ArticleNumberSeriesOption, ArticleType, RegisterEntry, StockLocation } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { CopyFromModal } from "./CopyFromModal";
 import styles from "./NewArticleForm.module.css";
@@ -43,10 +43,22 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
   const [defaultLocationId, setDefaultLocationId] = useState("");
   const [locations, setLocations] = useState<StockLocation[]>([]);
 
+  const [seriesOptions, setSeriesOptions] = useState<ArticleNumberSeriesOption[]>([]);
+  // "" = the default series. Once picked by hand the group no longer drives it.
+  const [seriesKey, setSeriesKey] = useState("");
+  const [seriesTouched, setSeriesTouched] = useState(false);
+
   useEffect(() => {
+    apiFetch<ArticleNumberSeriesOption[]>("/api/v1/article-number-series")
+      .then(setSeriesOptions)
+      .catch(() => setSeriesOptions([]));
     apiFetch<StockLocation[]>("/api/v1/stock/locations").then(setLocations).catch(() => setLocations([]));
     apiFetch<RegisterEntry[]>("/api/v1/units").then(setUnits).catch(() => setUnits([]));
   }, []);
+  function changeGroup(next: string) {
+    setGroupId(next);
+    if (!seriesTouched) setSeriesKey(groups.find((g) => g.id === next)?.numberSeriesKey ?? "");
+  }
   const [quantity, setQuantity] = useState("1");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -89,7 +101,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
       setIsPhantom(source.isPhantom);
       setUnitId(source.unit === "st" ? "" : source.unitId);
       setStandardCost(source.standardCost === null ? "" : String(Number(source.standardCost)));
-      setGroupId(source.groupId ?? "");
+      changeGroup(source.groupId ?? "");
       // Only an active location is in the list; otherwise *** (standard).
       setDefaultLocationId(locations.some((l) => l.id === source.defaultLocationId) ? source.defaultLocationId! : "");
     }
@@ -125,7 +137,10 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
       article = await apiFetch<Article>("/api/v1/articles", {
         method: "POST",
         body: JSON.stringify({
-          articleNumber,
+          articleNumber: articleNumber.trim() === "" ? undefined : articleNumber.trim(),
+          // Always the chosen series ("" = the default "article") — omitting
+          // it would let the server fall back to the group's own series.
+          numberSeriesKey: articleNumber.trim() === "" ? seriesKey || "article" : undefined,
           name,
           type,
           isPhantom,
@@ -185,6 +200,14 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
     return parts.join(" ");
   }
 
+  const chosenSeries = seriesOptions.find((o) => (seriesKey === "" ? o.isDefault : o.key === seriesKey));
+  const seriesHint =
+    articleNumber.trim() !== ""
+      ? "Eget nummer — serien används inte."
+      : chosenSeries
+        ? `Tomt = nästa nummer i serien ${chosenSeries.name ?? "Artikelnummer"}: ${chosenSeries.nextArticleNumber}`
+        : "Tomt = nästa nummer i serien Artikelnummer.";
+
   return (
     <>
       <Form onSubmit={handleSubmit}>
@@ -192,7 +215,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
 
         <FormRow>
           <Field label="Artikelnummer" htmlFor="articleNumber">
-            <Input id="articleNumber" size="md" required value={articleNumber} onChange={(e) => setArticleNumber(e.target.value)} />
+            <Input id="articleNumber" size="md" value={articleNumber} onChange={(e) => setArticleNumber(e.target.value)} />
           </Field>
           <Field label="Typ" htmlFor="type">
             <Select id="type" value={type} onChange={(e) => changeType(e.target.value as ArticleType)}>
@@ -202,6 +225,30 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
             </Select>
           </Field>
         </FormRow>
+
+        <FormRow>
+          <Field label="Nummerserie" htmlFor="numberSeriesKey">
+            <Select
+              id="numberSeriesKey"
+              value={seriesKey}
+              disabled={articleNumber.trim() !== ""}
+              onChange={(e) => {
+                setSeriesKey(e.target.value);
+                setSeriesTouched(true);
+              }}
+            >
+              <option value="">Artikelnummer (standard)</option>
+              {seriesOptions
+                .filter((o) => !o.isDefault)
+                .map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.name ?? o.key}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+        </FormRow>
+        <FormHint attached>{seriesHint}</FormHint>
 
         <FormRow>
           <Field label="Benämning" htmlFor="name">
@@ -266,7 +313,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
 
         <FormRow>
           <Field label="Artikelgrupp (valfritt)" htmlFor="groupId">
-            <Select id="groupId" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+            <Select id="groupId" value={groupId} onChange={(e) => changeGroup(e.target.value)}>
               <option value="">Ingen grupp</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>

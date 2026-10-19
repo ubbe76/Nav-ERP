@@ -86,7 +86,19 @@ export interface ArticleGroup {
   code: string;
   name: string;
   description: string | null;
+  // null = the default article number series.
+  numberSeriesKey: string | null;
   createdAt: string;
+}
+
+// An article number series as offered when creating articles / groups.
+export interface ArticleNumberSeriesOption {
+  key: string;
+  name: string | null;
+  prefix: string;
+  isDefault: boolean;
+  // The number a new article would get right now (a preview).
+  nextArticleNumber: string;
 }
 
 // One alternative unit on an article: "1 base unit = quantityPerBase of this
@@ -2337,6 +2349,7 @@ export interface CompanyCarrier {
 }
 
 export type NumberSeriesKey =
+  | "article"
   | "purchase_order"
   | "sales_order"
   | "manufacturing_order"
@@ -2354,6 +2367,7 @@ export type NumberSeriesKey =
   | "stock_count";
 
 export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
+  article: "Artikelnummer",
   purchase_order: "Inköpsorder",
   sales_order: "Kundorder",
   manufacturing_order: "Tillverkningsorder",
@@ -2372,7 +2386,11 @@ export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
 };
 
 export interface NumberSeries {
-  key: NumberSeriesKey;
+  // A built-in key, or a generated one for the user's own article series.
+  key: string;
+  // Only the user's own article series carry a name.
+  name: string | null;
+  forArticles: boolean;
   prefix: string;
   nextNumber: number;
   digits: number;

@@ -40,6 +40,11 @@ export class SeriesExhaustedError extends Error {
   }
 }
 
+// Artikelnummer — the default article number series (migration 0127). The
+// user's own article series get generated keys; article-number.ts issues
+// their numbers (skipping taken ones), not getNextOrderNumber.
+export const DEFAULT_ARTICLE_SERIES_KEY = "article";
+
 export async function getNextOrderNumber(db: Db | Tx, key: string): Promise<string> {
   const [row] = await db
     .update(numberSeries)

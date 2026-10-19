@@ -208,6 +208,7 @@ export const numberSeriesKeys = [
   "stock_count",
   "fixed_asset",
   "payment_batch",
+  "article",
 ] as const;
 export type NumberSeriesKey = (typeof numberSeriesKeys)[number];
 
@@ -218,6 +219,19 @@ export const updateNumberSeriesSchema = z
     prefix: z.string().max(20).optional(),
     nextNumber: z.coerce.number().int().positive().optional(),
     digits: z.coerce.number().int().min(0).max(10).optional(),
+    // Only the user's own article series have a name (the built-in ones are
+    // labelled by the web).
+    name: z.string().trim().min(1).max(100).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateNumberSeriesInput = z.infer<typeof updateNumberSeriesSchema>;
+
+// Egna artikelnummerserier (migration 0127): created on System →
+// Nummerserier and linked to article groups. The key is generated.
+export const createArticleNumberSeriesSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  prefix: z.string().max(20).default(""),
+  nextNumber: z.coerce.number().int().positive().default(1),
+  digits: z.coerce.number().int().min(0).max(10).default(0),
+});
+export type CreateArticleNumberSeriesInput = z.infer<typeof createArticleNumberSeriesSchema>;

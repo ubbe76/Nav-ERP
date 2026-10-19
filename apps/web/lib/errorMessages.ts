@@ -179,6 +179,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "duplicate-inquiry-row": "Artikeln finns redan på förfrågan — lägg operationen på en egen förfrågan.",
   // system
   "series-exhausted": "Nummerserien är full — kontrollera nummerserien under System.",
+  "duplicate-number-series-name": "Det finns redan en nummerserie med det namnet.",
+  "built-in-number-series": "Den inbyggda nummerserien kan inte byta namn eller tas bort.",
   "demo-data-not-available": (err) => {
     const blockers = (err.body as { blockers?: string[] } | undefined)?.blockers ?? [];
     return blockers.length

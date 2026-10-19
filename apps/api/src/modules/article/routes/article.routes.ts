@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { SeriesExhaustedError } from "../../system/service/number-series.js";
 import {
   createArticleDrawingSchema,
   createArticleGroupSchema,
@@ -82,6 +83,8 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       return reply.code(201).send(article);
     } catch (err) {
       if (err instanceof DuplicateArticleNumberError) return reply.code(409).send(errorBody(err));
+      // The article number series kept colliding (or is full).
+      if (err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
       if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidUnitError) return reply.code(400).send(errorBody(err));
       if (err instanceof ArticleCopyPartNotAllowedError) return reply.code(400).send(errorBody(err));
@@ -90,6 +93,10 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       throw err;
     }
   });
+
+  // Artikelnummerserier for Ny artikel and the group register, each with
+  // the number it would issue right now.
+  app.get("/article-number-series", async () => service.listArticleNumberSeries());
 
   app.get("/article-groups", async () => service.listArticleGroups());
 
@@ -100,6 +107,7 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       return reply.code(201).send(group);
     } catch (err) {
       if (err instanceof DuplicateArticleGroupError) return reply.code(409).send(errorBody(err));
+      if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });
@@ -181,6 +189,7 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
     } catch (err) {
       if (err instanceof ArticleGroupNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicateArticleGroupError) return reply.code(409).send(errorBody(err));
+      if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

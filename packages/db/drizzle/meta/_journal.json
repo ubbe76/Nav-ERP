@@ -890,6 +890,13 @@
       "when": 1792380393544,
       "tag": "0126_order_row_delivery_dates",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1792384531290,
+      "tag": "0127_article_number_series",
+      "breakpoints": true
     }
   ]
 }

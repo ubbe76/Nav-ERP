@@ -23,7 +23,7 @@ export default async function NumberSeriesPage() {
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Nummerserier</div>
-          <div className={shellStyles.meta}>Prefix och löpnummer för order</div>
+          <div className={shellStyles.meta}>Prefix och löpnummer för order och artiklar</div>
         </div>
         <HelpLink chapter="system" anchor="nummerserier" label="Hjälp om nummerserier" />
       </div>

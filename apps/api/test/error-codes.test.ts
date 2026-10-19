@@ -169,6 +169,7 @@ import {
 import { SupplierInvoiceInPaymentBatchError } from "../src/modules/purchase/service/supplier-invoice.service.js";
 
 import { SeriesExhaustedError } from "../src/modules/system/service/number-series.js";
+import { BuiltInNumberSeriesError, DuplicateNumberSeriesNameError } from "../src/modules/system/service/system.service.js";
 import {
   InvalidOperationFileTypeError,
   NotSubcontractOperationError,
@@ -371,6 +372,8 @@ const cases: Array<[Error, string]> = [
   [new CostingOnlyOperationLinkError(), ERROR_CODES.COSTING_ONLY_OPERATION_LINK],
   [new DuplicateBomComponentError(), ERROR_CODES.DUPLICATE_BOM_COMPONENT],
   [new SeriesExhaustedError("customer"), ERROR_CODES.SERIES_EXHAUSTED],
+  [new DuplicateNumberSeriesNameError("Plåt"), ERROR_CODES.DUPLICATE_NUMBER_SERIES_NAME],
+  [new BuiltInNumberSeriesError("article", "delete"), ERROR_CODES.BUILT_IN_NUMBER_SERIES],
   [new DemoDataNotAvailableError(["customers"]), ERROR_CODES.DEMO_DATA_NOT_AVAILABLE],
   // auth
   [new InvalidCredentialsError(), ERROR_CODES.INVALID_CREDENTIALS],

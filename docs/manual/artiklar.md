@@ -17,8 +17,14 @@ Sökfältet går att använda helt från tangentbordet:
 ### Skapa en artikel
 
 1. Klicka **+ Ny artikel**.
-2. Fyll i **artikelnummer** (unikt), **benämning**, **typ** och **grundenhet** (standard `st`; enheterna kommer från registret under [Grunddata](/hjalp/grunddata)).
+2. Fyll i **benämning**, **typ** och **grundenhet** (standard `st`; enheterna kommer från registret under [Grunddata](/hjalp/grunddata)), och ev. **artikelnummer** (unikt).
 3. Spara — artikeln öppnas sedan från listan för vidare beredning.
+
+#### Artikelnummer ur en nummerserie
+
+Lämnar du **Artikelnummer** tomt får artikeln nästa nummer i den serie som står i **Nummerserie**. Under fältet står vilket nummer det blir, t.ex. "Tomt = nästa nummer i serien Plåt: PL-043". Serien är förvald efter artikelgruppen: har gruppen en egen serie (se [Artikelgrupper](#artikelgrupper)) används den, annars standardserien **Artikelnummer**. Väljer du en annan serie själv ligger den kvar även om du byter grupp. Skriver du ett eget artikelnummer används det, och serien rörs inte.
+
+Nummer som redan finns — t.ex. importerade artiklar eller nummer som skrivits för hand — hoppas över, så serien ger alltid ett ledigt nummer. Serierna ställs in under [System → Nummerserier](/hjalp/system#nummerserier).
 
 #### Kopiera från befintlig artikel
 
@@ -554,4 +560,4 @@ Kolumner: **Artikelnummer**, **Sekvensnr**, **Resurs**, **Ställtid** och **Styc
 
 ## Artikelgrupper
 
-**Artiklar → Artikelgrupper** är ett fritt register för kontering/statistik/rapportuppdelning. Varje grupp har en **kod (3–4 siffror)** och en **benämning**, samt en valfri **Beskrivning** (högst 500 tecken, visas som kolumn i listan); registret är platt utan huvudgruppsnivå. Skapa med **+ Ny grupp**, redigera genom att klicka på namnet. Artikeln kopplas till gruppen på artikelkortets Allmänt-flik.
+**Artiklar → Artikelgrupper** är ett fritt register för kontering/statistik/rapportuppdelning. Varje grupp har en **kod (3–4 siffror)** och en **benämning**, samt en valfri **Beskrivning** (högst 500 tecken, visas som kolumn i listan); registret är platt utan huvudgruppsnivå. Skapa med **+ Ny grupp**, redigera genom att klicka på namnet. Artikeln kopplas till gruppen på artikelkortets Allmänt-flik. Fältet **Nummerserie** väljer vilken artikelnummerserie nya artiklar i gruppen får sina nummer ur — standardserien **Artikelnummer** eller en egen artikelserie (se [System → Nummerserier](/hjalp/system#nummerserier)), se [Artikelnummer ur en nummerserie](#artikelnummer-ur-en-nummerserie).

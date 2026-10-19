@@ -17,6 +17,12 @@ export const numberSeries = pgTable("number_series", {
   prefix: varchar("prefix", { length: 20 }).notNull(),
   nextNumber: integer("next_number").notNull(),
   digits: integer("digits").notNull().default(0), // 0 = no zero-padding
+  // Artikelnummerserier (migration 0127): "article" is the default series
+  // every new article without a number draws from; further article series
+  // are created by the user (name set, key generated) and linked to article
+  // groups. Only rows with for_articles can number an article.
+  name: varchar("name", { length: 100 }).unique(),
+  forArticles: boolean("for_articles").notNull().default(false),
 });
 
 // Free-form system-wide settings as key–value rows, so new toggles don't

@@ -84,7 +84,7 @@ Prova den första betalfilen i bankens testverktyg innan den skarpa betalningen:
 
 ## Nummerserier
 
-**System → Nummerserier** styr numreringen av ordrar, förfrågningar och fakturor:
+**System → Nummerserier** styr numreringen av ordrar, förfrågningar, fakturor och artiklar:
 
 | Serie | Prefix (standard) |
 |---|---|
@@ -103,8 +103,13 @@ Prova den första betalfilen i bankens testverktyg innan den skarpa betalningen:
 | Betalfil | BO- |
 | Kundnummer | (inget prefix) |
 | Leverantörsnummer | (inget prefix) |
+| Artikelnummer | (inget prefix, från 1001) |
 
 Prefix, **nästa nummer** och antal siffror (nollutfyllnad) kan ändras per serie. Nästa nummer delas ut när posten skapas — utom fakturanumret, som delas ut när fakturan **utfärdas** (se [Fakturor](/hjalp/forsaljning#fakturor)), inte när den skapas som utkast.
+
+**Artikelnummer** är standardserien för nya artiklar som saknar artikelnummer (se [Artikelnummer ur en nummerserie](/hjalp/artiklar#artikelnummer-ur-en-nummerserie)). Till skillnad från orderserierna hoppar artikelserierna över nummer som redan finns, så du kan låta serien börja mitt bland importerade artikelnummer.
+
+Under **Egna artikelserier** skapar du fler artikelserier med **+ Ny artikelserie**: **Namn** (unikt, det som visas i Ny artikel och på artikelgruppen), **Prefix**, **Nästa nummer** och **Antal siffror**, och **Skapa artikelserie**. En egen serie kopplas till en eller flera [artikelgrupper](/hjalp/artiklar#artikelgrupper) med gruppens fält **Nummerserie**, och kan väljas direkt i Ny artikel. **Redigera** ändrar även namnet, och **Ta bort** tar bort serien — artikelgrupper som använde den får standardserien, och artiklarna behåller sina nummer. Standardserien och orderserierna kan inte tas bort eller byta namn.
 
 Serien **Kundnummer** (startar på 1001, utan prefix) används av kundregistret: en ny kund utan manuellt ifyllt kundnummer får nästa nummer härifrån. Serien **Leverantörsnummer** (startar på 5001, utan prefix) fungerar likadant för leverantörsregistret: en ny leverantör utan manuellt ifyllt leverantörsnummer får nästa nummer härifrån. Manuellt satta nummer stäms inte av mot respektive serie — sätter du t.ex. 1050 eller 5050 för hand kan serien så småningom hinna ikapp numret. Den stegar då automatiskt vidare till nästa lediga nummer i stället för att krocka, förbi upp till fem tagna nummer i rad. Är sex eller fler tagna i en obruten följd behöver du justera seriens **nästa nummer** för hand här.
 
