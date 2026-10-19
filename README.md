@@ -1,7 +1,7 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/nav-erp-logo-dark.svg">
-    <img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/nav-erp-logo.svg" alt="nav | ERP" width="340">
+    <img src="https://github.com/ubbe76/Nav-ERP/raw/main/docs/assets/nav-erp-logo.svg" alt="Nav|ERP" width="340">
   </picture>
 
   <p>
@@ -19,11 +19,13 @@
 > från. Använd det inte för riktig bokföring, lön, fakturering eller
 > lagerhållning ännu — prova det med exempeldata.
 
-Ett affärssystem (ERP) med öppen källkod för mindre och medelstora svenska
-tillverkande företag. Byggt för att täcka kärnflödet **artikel → lager →
-inköp/försäljning → tillverkningsorder → tidrapportering → kalkyl**.
+**Nav|ERP** är ett affärssystem (ERP) med öppen källkod för mindre och
+medelstora svenska tillverkande företag. Byggt för att täcka kärnflödet
+**artikel → lager → inköp/försäljning → tillverkningsorder → tidrapportering →
+kalkyl**.
 
 Webbplats, funktionsöversikt och användarmanual: **[naverp.se](https://naverp.se)**.
+Prova utan att installera: [demon med ett besökskonto som bara kan läsa](https://naverp.se/kom-igang/#demo).
 
 Se [`docs/architecture.md`](docs/architecture.md) för full kravspecifikation,
 datamodell och statusflöden, och [`CLAUDE.md`](CLAUDE.md) för
