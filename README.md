@@ -19,9 +19,11 @@
 > från. Använd det inte för riktig bokföring, lön, fakturering eller
 > lagerhållning ännu — prova det med exempeldata.
 
-Ett öppet källkod-ERP för mindre/medelstora svenska tillverkande företag.
-Byggt för att täcka kärnflödet **artikel → lager → inköp/försäljning →
-tillverkningsorder → tidrapportering → kalkyl**.
+Ett affärssystem (ERP) med öppen källkod för mindre och medelstora svenska
+tillverkande företag. Byggt för att täcka kärnflödet **artikel → lager →
+inköp/försäljning → tillverkningsorder → tidrapportering → kalkyl**.
+
+Webbplats, funktionsöversikt och användarmanual: **[naverp.se](https://naverp.se)**.
 
 Se [`docs/architecture.md`](docs/architecture.md) för full kravspecifikation,
 datamodell och statusflöden, och [`CLAUDE.md`](CLAUDE.md) för
@@ -662,8 +664,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   **Mörkt** och **Dracula** (all text klarar WCAG AA i alla teman; nya
   teman läggs till som ett token-block), mobilanpassat
 - **Hjälp** — inbyggd användarmanual på `/hjalp` (renderad från
-  [`docs/manual/`](docs/manual/)) med kapitel för alla rutiner och
-  inställningar
+  [`docs/manual/`](docs/manual/) och publicerad på
+  [naverp.se/hjalp](https://naverp.se/hjalp/)) med kapitel för alla rutiner
+  och inställningar
 
 Känd begränsning: det finns ingen **årsbokslutsfunktion** — bokslutet
 görs i ett annat program utifrån SIE4-exporten. Se
