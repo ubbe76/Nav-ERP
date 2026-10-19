@@ -3,7 +3,7 @@
 import { confirmDelete } from "../../lib/confirm";
 import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
-import { Field, Input, Select } from "../ui/Field";
+import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import type { AdminUser, PermissionGroup, UserRole } from "../../lib/types";
@@ -29,6 +29,7 @@ export function UserForm({
   const [email, setEmail] = useState(user?.email ?? "");
   const [role, setRole] = useState<UserRole>(user?.role ?? "user");
   const [active, setActive] = useState(user?.active ?? true);
+  const [readOnly, setReadOnly] = useState(user?.readOnly ?? false);
   const defaultGroupId = user ? (user.permissionGroupId ?? "") : (groups.find((g) => g.code === "ALLA")?.id ?? "");
   const [permissionGroupId, setPermissionGroupId] = useState(defaultGroupId);
   const [password, setPassword] = useState("");
@@ -39,16 +40,27 @@ export function UserForm({
     e.preventDefault();
     setError(null);
     setPending(true);
+    // Endast läsning never goes with Administratör (the API refuses it), so
+    // choosing that role clears the box.
+    const readOnlyValue = role !== "admin" && readOnly;
     try {
       if (user) {
         await apiFetch(`/api/v1/auth/users/${user.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name, email, role, active, permissionGroupId: permissionGroupId || null, ...(password ? { password } : {}) }),
+          body: JSON.stringify({
+            name,
+            email,
+            role,
+            active,
+            permissionGroupId: permissionGroupId || null,
+            readOnly: readOnlyValue,
+            ...(password ? { password } : {}),
+          }),
         });
       } else {
         await apiFetch("/api/v1/auth/users", {
           method: "POST",
-          body: JSON.stringify({ name, email, role, password, permissionGroupId: permissionGroupId || null }),
+          body: JSON.stringify({ name, email, role, password, permissionGroupId: permissionGroupId || null, readOnly: readOnlyValue }),
         });
       }
       onSuccess();
@@ -111,6 +123,12 @@ export function UserForm({
             </Select>
           </Field>
           <FormHint attached>Styr vilka menyer användaren når. Administratörer har alltid tillgång till allt.</FormHint>
+
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Checkbox id="user-read-only" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
+            <span>Endast läsning</span>
+          </label>
+          <FormHint attached>Kan öppna allt som behörighetsgruppen ger, men inte ändra något. För demokonton och revisorer.</FormHint>
         </>
       )}
 

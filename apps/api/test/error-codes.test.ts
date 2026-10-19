@@ -215,7 +215,9 @@ import {
   InvalidSetupCodeError,
   RegistrationClosedError,
   SelfDeleteError,
+  ReadOnlyAdminError,
 } from "../src/modules/auth/service/auth.service.js";
+import { ReadOnlyAccountError } from "../src/modules/auth/middleware/auth.middleware.js";
 import { LoginThrottledError } from "../src/modules/auth/service/login-throttle.js";
 import { ClientCustomerMismatchError, ClientPriceNotAllowedError, ClientScopeMissingError } from "../src/modules/auth/middleware/permission.middleware.js";
 import { ApiClientCustomerNotFoundError } from "../src/modules/oauth/service/oauth.service.js";
@@ -389,6 +391,8 @@ const cases: Array<[Error, string]> = [
   [new SelfDeleteError(), ERROR_CODES.SELF_DELETE],
   [new PermissionGroupInUseError(1), ERROR_CODES.PERMISSION_GROUP_IN_USE],
   [new DuplicatePermissionGroupCodeError("x"), ERROR_CODES.DUPLICATE_PERMISSION_GROUP_CODE],
+  [new ReadOnlyAccountError(), ERROR_CODES.READ_ONLY_ACCOUNT],
+  [new ReadOnlyAdminError(), ERROR_CODES.READ_ONLY_ADMIN],
   // bankfiler
   [new InvalidSupplierPaymentDetailsError({ bankgiro: "Bankgiro saknas" }), ERROR_CODES.INVALID_SUPPLIER_PAYMENT_DETAILS],
   [new SupplierInvoiceReservedError("LF-1"), ERROR_CODES.SUPPLIER_INVOICE_RESERVED],

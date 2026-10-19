@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, index, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 
 // Roles: admin (everything, incl. System), supervisor (attest powers),
 // user. What a non-admin may open is decided by their permission group.
@@ -31,6 +31,12 @@ export const users = pgTable(
     role: userRoleEnum("role").notNull().default("user"),
     permissionGroupId: uuid("permission_group_id").references(() => permissionGroups.id, { onDelete: "restrict" }),
     active: boolean("active").notNull().default(true),
+    // Endast läsning: the account may open everything its permission group
+    // gives but change nothing — the API refuses every write for it (see
+    // requireAuth / readOnlyGuard). For demo logins and auditors. Never on an
+    // admin: System's own reads (users with e-mails, API clients) would stay
+    // open, so the combination is refused in the service and here.
+    readOnly: boolean("read_only").notNull().default(false),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -38,6 +44,7 @@ export const users = pgTable(
   (table) => [
     uniqueIndex("users_email_unique").on(table.email).where(sql`${table.deletedAt} is null`),
     index("users_permission_group_idx").on(table.permissionGroupId),
+    check("users_read_only_not_admin", sql`not (${table.readOnly} and ${table.role} = 'admin')`),
   ]
 );
 

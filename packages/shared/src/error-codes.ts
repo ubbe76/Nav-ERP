@@ -153,6 +153,10 @@ export const ERROR_CODES = {
   SELF_DELETE: "self-delete",
   PERMISSION_GROUP_IN_USE: "permission-group-in-use",
   DUPLICATE_PERMISSION_GROUP_CODE: "duplicate-permission-group-code",
+  // Endast läsning: every write from a read-only account, and the refused
+  // combination read-only + administrator.
+  READ_ONLY_ACCOUNT: "read-only-account",
+  READ_ONLY_ADMIN: "read-only-admin",
   // bankfiler
   INVALID_SUPPLIER_PAYMENT_DETAILS: "invalid-supplier-payment-details",
   SUPPLIER_INVOICE_RESERVED: "supplier-invoice-reserved",

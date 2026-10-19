@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { ZodType } from "zod";
 import { articleCardWrite } from "../../auth/middleware/access-rules.js";
 import { postCalculateSchema, preCalculateSchema } from "@navet/shared";
 import type { CostingService } from "../service/costing.service.js";
@@ -11,6 +12,14 @@ import {
   PostCalculationLockedError,
 } from "../service/costing.service.js";
 
+// Endast läsning: a calculation without `save` only computes and answers, so
+// a read-only account may run it — the same schema the route parses decides,
+// and a body that would not parse counts as a write (refused, fail closed).
+function isPreview(schema: ZodType<{ save?: boolean }>, body: unknown): boolean {
+  const parsed = schema.safeParse(body);
+  return parsed.success && !parsed.data.save;
+}
+
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
 export async function costingRoutes(app: FastifyInstance, opts: { service: CostingService }) {
@@ -20,7 +29,7 @@ export async function costingRoutes(app: FastifyInstance, opts: { service: Costi
   // with it the calculation is written and answered exactly as before (201).
   app.post<{ Params: { id: string } }>(
     "/articles/:id/cost-calculations/pre-calculate",
-    { config: { access: articleCardWrite(["tillverkning"]) } },
+    { config: { access: articleCardWrite(["tillverkning"]), readOnlySafe: (req) => isPreview(preCalculateSchema, req.body) } },
     async (req, reply) => {
       const input = preCalculateSchema.parse(req.body);
       try {
@@ -39,18 +48,22 @@ export async function costingRoutes(app: FastifyInstance, opts: { service: Costi
 
   // The body may be absent entirely — apiFetch omits it for body-less action
   // calls — so a missing body parses as an empty object, i.e. a preview.
-  app.post<{ Params: { id: string } }>("/manufacturing-orders/:id/cost-calculations/post-calculate", async (req, reply) => {
-    const input = postCalculateSchema.parse(req.body ?? {});
-    try {
-      if (input.save) {
-        return reply.code(201).send(await service.postCalculate(req.params.id, true));
+  app.post<{ Params: { id: string } }>(
+    "/manufacturing-orders/:id/cost-calculations/post-calculate",
+    { config: { readOnlySafe: (req) => isPreview(postCalculateSchema, req.body ?? {}) } },
+    async (req, reply) => {
+      const input = postCalculateSchema.parse(req.body ?? {});
+      try {
+        if (input.save) {
+          return reply.code(201).send(await service.postCalculate(req.params.id, true));
+        }
+        return reply.send(await service.postCalculate(req.params.id));
+      } catch (err) {
+        if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+        throw err;
       }
-      return reply.send(await service.postCalculate(req.params.id));
-    } catch (err) {
-      if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
-      throw err;
     }
-  });
+  );
 
   app.get<{ Params: { id: string } }>("/articles/:id/cost-calculations", async (req) => {
     return service.listCostCalculations(req.params.id);

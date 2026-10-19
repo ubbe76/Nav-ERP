@@ -1,0 +1,17 @@
+/* Same amber pair as FormNotice: a notice to read, not a failure. */
+.banner {
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--status-delayed-text);
+  background: var(--status-delayed-bg);
+  border-radius: var(--radius-control-sm);
+  padding: 8px 12px;
+  margin-bottom: 16px;
+}
+
+.flush {
+  border-radius: 0;
+  margin-bottom: 0;
+  text-align: center;
+}

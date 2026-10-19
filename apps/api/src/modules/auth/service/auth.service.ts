@@ -74,6 +74,17 @@ export class PermissionGroupNotFoundError extends Error {
   }
 }
 
+// Endast läsning on an administrator would leave System's own reads (the user
+// list with e-mails, API clients) open to a shared demo login, so the
+// combination is refused — a read-only account is a normal user with a
+// permission group. The users table has the same CHECK as a backstop.
+export class ReadOnlyAdminError extends Error {
+  constructor() {
+    super("A read-only account cannot be an administrator");
+    this.name = "ReadOnlyAdminError";
+  }
+}
+
 export interface AuthTokenPayload {
   sub: string;
   role: UserRole;
@@ -87,9 +98,18 @@ export interface PublicUser {
   // Effective permissions — admin gets the whole catalog, implications are
   // already expanded. The web only ever reads this list.
   permissions: Permission[];
+  // Endast läsning: every write is refused (requireAuth's readOnlyGuard).
+  readOnly: boolean;
 }
 
-type UserRow = { id: string; email: string; name: string; role: UserRole; groupPermissions: string[] | null };
+type UserRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  readOnly: boolean;
+  groupPermissions: string[] | null;
+};
 
 function toPublicUser(row: UserRow): PublicUser {
   return {
@@ -98,6 +118,7 @@ function toPublicUser(row: UserRow): PublicUser {
     name: row.name,
     role: row.role,
     permissions: effectivePermissions(row.role, row.groupPermissions),
+    readOnly: row.readOnly,
   };
 }
 
@@ -183,6 +204,8 @@ export function createAuthService(
       if (input.permissionGroupId && !(await repo.groupExists(input.permissionGroupId))) {
         throw new PermissionGroupNotFoundError(input.permissionGroupId);
       }
+      const readOnly = input.readOnly ?? false;
+      if (readOnly && input.role === "admin") throw new ReadOnlyAdminError();
       const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
       const created = await repo.create({
         email: input.email,
@@ -190,6 +213,7 @@ export function createAuthService(
         name: input.name,
         role: input.role,
         permissionGroupId: input.permissionGroupId ?? null,
+        readOnly,
       });
       // create returns the bare row; re-read through the group join.
       const user = (await repo.findById(created.id))!;
@@ -197,7 +221,7 @@ export function createAuthService(
         entityType: "user",
         entityId: user.email,
         action: "created",
-        detail: { name: user.name, role: user.role, permissionGroupId: user.permissionGroupId },
+        detail: { name: user.name, role: user.role, permissionGroupId: user.permissionGroupId, readOnly: user.readOnly },
         userId: actingUserId,
       });
       return toPublicUser(user);
@@ -235,12 +259,19 @@ export function createAuthService(
         throw new PermissionGroupNotFoundError(input.permissionGroupId);
       }
 
+      // Judged on the resulting account: making a read-only user admin is as
+      // refused as making an admin read-only.
+      if ((input.readOnly ?? existing.readOnly) && (input.role ?? existing.role) === "admin") {
+        throw new ReadOnlyAdminError();
+      }
+
       const fields: Parameters<typeof repo.update>[1] = {};
       if (input.email !== undefined) fields.email = input.email;
       if (input.name !== undefined) fields.name = input.name;
       if (input.role !== undefined) fields.role = input.role;
       if (input.active !== undefined) fields.active = input.active;
       if (input.permissionGroupId !== undefined) fields.permissionGroupId = input.permissionGroupId;
+      if (input.readOnly !== undefined) fields.readOnly = input.readOnly;
       if (input.password !== undefined) fields.passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
       if (!(await repo.update(id, fields))) throw new UserNotFoundError(id);
@@ -267,6 +298,10 @@ export function createAuthService(
       if (input.active !== undefined && input.active !== existing.active) {
         changedFields.push("active");
         detail.active = { before: existing.active, after: input.active };
+      }
+      if (input.readOnly !== undefined && input.readOnly !== existing.readOnly) {
+        changedFields.push("readOnly");
+        detail.readOnly = { before: existing.readOnly, after: input.readOnly };
       }
       if (input.password !== undefined) {
         changedFields.push("password");

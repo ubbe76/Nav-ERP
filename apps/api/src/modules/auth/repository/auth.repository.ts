@@ -19,6 +19,7 @@ export function createAuthRepository(db: Db) {
       name: string;
       role: UserRole;
       permissionGroupId?: string | null;
+      readOnly?: boolean;
     }) {
       const [row] = await db
         .insert(users)
@@ -28,6 +29,7 @@ export function createAuthRepository(db: Db) {
           name: input.name,
           role: input.role,
           permissionGroupId: input.permissionGroupId ?? null,
+          readOnly: input.readOnly ?? false,
         })
         .returning();
       return row!;
@@ -85,6 +87,7 @@ export function createAuthRepository(db: Db) {
         active: boolean;
         passwordHash: string;
         permissionGroupId: string | null;
+        readOnly: boolean;
       }>
     ) {
       const [row] = await db

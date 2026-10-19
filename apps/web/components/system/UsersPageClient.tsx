@@ -63,7 +63,7 @@ export function UsersPageClient({ users, groups, currentUserId }: { users: Admin
             case "email":
               return user.email;
             case "role":
-              return ROLE_LABELS[user.role];
+              return user.readOnly ? `${ROLE_LABELS[user.role]} · Endast läsning` : ROLE_LABELS[user.role];
             case "group":
               return user.role === "admin" ? "Alla (administratör)" : (user.permissionGroupName ?? "Ingen åtkomst");
             case "active":

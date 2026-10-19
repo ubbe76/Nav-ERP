@@ -1,0 +1,2 @@
+ALTER TABLE "users" ADD COLUMN "read_only" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "users" ADD CONSTRAINT "users_read_only_not_admin" CHECK (not ("users"."read_only" and "users"."role" = 'admin'));

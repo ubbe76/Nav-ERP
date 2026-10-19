@@ -340,7 +340,17 @@ describe("auth service — audit log", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.entityId).toBe(op.email);
     expect(rows[0]!.userId).toBe(admin.id);
-    expect(rows[0]!.detail).toEqual({ name: "Op", role: "user", permissionGroupId: null });
+    expect(rows[0]!.detail).toEqual({ name: "Op", role: "user", permissionGroupId: null, readOnly: false });
+  });
+
+  it("logs Endast läsning with before/after when it changes", async () => {
+    const { user: admin } = await service.register({ email: "admin@example.com", password: "correcthorsebattery", name: "Admin" });
+    const op = await service.createUser({ email: "op@example.com", password: "correcthorsebattery", name: "Op", role: "user", readOnly: true }, admin.id);
+    expect(op.readOnly).toBe(true);
+
+    await service.updateUser(op.id, { readOnly: false }, admin.id);
+    const [row] = await auditRows("user", "updated");
+    expect(row!.detail).toEqual({ changedFields: ["readOnly"], readOnly: { before: true, after: false } });
   });
 
   it("logs updateUser's role/active with before/after and skips unrelated no-op saves", async () => {

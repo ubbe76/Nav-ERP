@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import styles from "./page.module.css";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { LogoutButton } from "../components/LogoutButton";
+import { ReadOnlyBanner } from "../components/ReadOnlyBanner";
 import { Nav } from "../components/ui/Nav";
 import { PermissionsProvider } from "../components/PermissionsProvider";
 import { Button } from "../components/ui/Button";
@@ -213,6 +214,7 @@ export default async function OverviewPage() {
 
       <main className={styles.main}>
         <PermissionsProvider role={user.role} permissions={user.permissions}>
+        <ReadOnlyBanner readOnly={user.readOnly} />
         <div className={styles.themeRow}>
           <LogoutButton />
           <ThemeToggle />

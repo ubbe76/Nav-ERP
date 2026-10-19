@@ -127,7 +127,7 @@ export async function configuratorRoutes(app: FastifyInstance, opts: { service: 
 
   // Stocked variants: list/variant-of are office reads (module read rule), preview is a POST but a read.
   app.get<{ Params: P }>("/articles/:id/configurator/variants", (req, reply) => run(reply, () => service.listVariants(req.params.id)));
-  app.post<{ Params: P }>("/articles/:id/configurator/variants/preview", { config: { access: ["office"] } }, (req, reply) =>
+  app.post<{ Params: P }>("/articles/:id/configurator/variants/preview", { config: { access: ["office"], readOnlySafe: true } }, (req, reply) =>
     run(reply, () => service.previewVariants(req.params.id, variantRequestSchema.parse(req.body ?? {}))));
   app.post<{ Params: P }>("/articles/:id/configurator/variants", (req, reply) =>
     run(reply, () => service.createVariants(req.params.id, variantRequestSchema.parse(req.body ?? {}), req.user?.id ?? null), 201));
@@ -136,7 +136,7 @@ export async function configuratorRoutes(app: FastifyInstance, opts: { service: 
   // derive is a POST but a READ (office), like evaluate.
   app.post<{ Params: { articleId: string } }>(
     "/configurator/:articleId/derive",
-    { config: { access: ["office"] } },
+    { config: { access: ["office"], readOnlySafe: true } },
     (req, reply) => run(reply, () => service.derive(req.params.articleId, deriveConfigurationSchema.parse(req.body ?? {})))
   );
 }

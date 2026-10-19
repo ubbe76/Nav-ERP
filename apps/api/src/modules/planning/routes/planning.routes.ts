@@ -87,7 +87,7 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
 
   // Leveranstidskontroll — reads only (nothing is booked), a POST because
   // the rows travel in the body.
-  app.post("/delivery-time-check", { config: { access: DELIVERY_CHECK } }, async (req, reply) => {
+  app.post("/delivery-time-check", { config: { access: DELIVERY_CHECK, readOnlySafe: true } }, async (req, reply) => {
     const input = deliveryTimeCheckSchema.parse(req.body);
     try {
       return await service.checkDeliveryTime(input);

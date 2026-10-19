@@ -14,6 +14,7 @@ import {
   InvalidSetupCodeError,
   LastAdminError,
   PermissionGroupNotFoundError,
+  ReadOnlyAdminError,
   RegistrationClosedError,
   SelfDeleteError,
   UserNotFoundError,
@@ -109,6 +110,7 @@ export async function authRoutes(
     }
   });
 
+  // Never behind requireAuth, so a read-only account can always log out.
   app.post("/auth/logout", async (_req, reply) => {
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return reply.code(204).send();
@@ -142,6 +144,7 @@ export async function authRoutes(
       } catch (err) {
         if (err instanceof DuplicateEmailError) return reply.code(409).send(errorBody(err));
         if (err instanceof PermissionGroupNotFoundError) return reply.code(400).send(errorBody(err));
+        if (err instanceof ReadOnlyAdminError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }
@@ -170,6 +173,7 @@ export async function authRoutes(
         if (err instanceof DuplicateEmailError) return reply.code(409).send(errorBody(err));
         if (err instanceof LastAdminError) return reply.code(409).send(errorBody(err));
         if (err instanceof PermissionGroupNotFoundError) return reply.code(400).send(errorBody(err));
+        if (err instanceof ReadOnlyAdminError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }

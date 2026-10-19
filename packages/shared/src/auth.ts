@@ -29,6 +29,9 @@ export const createUserSchema = z.object({
   // Behörighetsgrupp — ignored for admins (who have every permission). null =
   // no group = no access beyond Hjälp.
   permissionGroupId: z.string().uuid().nullable().optional(),
+  // Endast läsning: may open what the group gives but change nothing. Never
+  // together with role admin — the service refuses it (read-only-admin).
+  readOnly: z.boolean().optional(),
 });
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
@@ -44,6 +47,8 @@ export const updateUserSchema = z.object({
   // Behörighetsgrupp — ignored for admins (who have every permission). null =
   // no group = no access beyond Hjälp.
   permissionGroupId: z.string().uuid().nullable().optional(),
+  // Endast läsning — see createUserSchema.
+  readOnly: z.boolean().optional(),
 });
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 

@@ -40,6 +40,8 @@ export interface SessionUser {
   name: string;
   role: "admin" | "supervisor" | "user";
   permissions: Permission[];
+  // Endast läsning: the API refuses every change (403 read-only-account).
+  readOnly: boolean;
 }
 
 // Server Components / middleware don't auto-forward the incoming request's

@@ -2556,6 +2556,8 @@ export interface AdminUser {
   deletedAt: string | null;
   permissionGroupId: string | null;
   permissionGroupName: string | null;
+  // Endast läsning (never on an administrator).
+  readOnly: boolean;
 }
 
 export interface PermissionGroup {

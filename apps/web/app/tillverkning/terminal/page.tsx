@@ -4,6 +4,7 @@ import { getCurrentUser, apiGet } from "../../../lib/api";
 import { canOpen } from "../../../lib/pageAccess";
 import { StampTerminal } from "../../../components/timereport/StampTerminal";
 import { ConfirmDialogHost } from "../../../components/ui/ConfirmDialogHost";
+import { ReadOnlyBanner } from "../../../components/ReadOnlyBanner";
 import type {
   AttendanceSession,
   EmployeeDirectoryEntry,
@@ -35,6 +36,7 @@ export default async function StampTerminalPage() {
   // showing and then silently answers Avbryt.
   return (
     <>
+      <ReadOnlyBanner readOnly={user.readOnly} flush />
       <StampTerminal
         employees={employees.filter((e) => e.active)}
         initialOpenSessions={openSessions}

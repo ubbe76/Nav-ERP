@@ -7,6 +7,7 @@ import { Nav } from "./ui/Nav";
 import { PermissionsProvider } from "./PermissionsProvider";
 import { ArticleOverviewProvider } from "./articles/ArticleOverviewProvider";
 import { ConfirmDialogHost } from "./ui/ConfirmDialogHost";
+import { ReadOnlyBanner } from "./ReadOnlyBanner";
 import { getCurrentUser } from "../lib/api";
 import styles from "./AppShell.module.css";
 
@@ -36,6 +37,7 @@ export async function AppShell({ active, children }: AppShellProps) {
         permissions={user.permissions}
       />
       <main className={styles.main}>
+        <ReadOnlyBanner readOnly={user.readOnly} />
         <div className={styles.themeRow}>
           <LogoutButton />
           <ThemeToggle />

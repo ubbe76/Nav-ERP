@@ -29,7 +29,7 @@ export async function publicConfiguratorRoutes(app: FastifyInstance, opts: { ser
   // price lookup like GET /price-quote, so for a client it needs prices:read
   // and, for a client bound to a customer, that very customer. Without a
   // customer the answer is the template's own price (configurator:read).
-  app.post<{ Params: { articleId: string } }>("/configurator/:articleId/evaluate", { config: { access: ["office"], clientScope: "configurator:read" } }, (req, reply) => {
+  app.post<{ Params: { articleId: string } }>("/configurator/:articleId/evaluate", { config: { access: ["office"], clientScope: "configurator:read", readOnlySafe: true } }, (req, reply) => {
     const input = evaluateConfigurationSchema.parse(req.body ?? {});
     if (input.customerId) {
       if (!clientHasScope(req, "prices:read")) return reply.code(403).send(errorBody(new ClientScopeMissingError("prices:read")));

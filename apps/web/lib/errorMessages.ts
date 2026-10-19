@@ -208,6 +208,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   "self-delete": "Du kan inte ta bort ditt eget konto.",
   "permission-group-in-use": "Gruppen används av användare — välj en grupp att flytta dem till.",
   "duplicate-permission-group-code": "Det finns redan en behörighetsgrupp med den koden.",
+  // Endast läsning
+  "read-only-account": "Kontot kan bara läsa — ändringar är avstängda.",
+  "read-only-admin": "En administratör kan inte ha Endast läsning — välj rollen Användare eller Arbetsledare och en behörighetsgrupp.",
   // bankfiler
   "invalid-supplier-payment-details": serverMessage("Betalningsuppgifterna är ogiltiga."),
   "supplier-invoice-reserved": "Fakturan ingår i en betalfil och betalas när banken bekräftat betalningen.",
