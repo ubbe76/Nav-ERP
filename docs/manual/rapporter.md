@@ -2,7 +2,23 @@
 
 **Rapporter** i huvudmenyn samlar de analyserande rapporterna. Hela avsnittet kräver rättigheten **Rapporter** i användarens behörighetsgrupp (administratörer har den alltid) — menyposten syns inte för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper). Alla rapporter är härledda ur befintliga order-, faktura- och tillverkningsdata i det ögonblick de visas; ingenting lagras separat.
 
-Rapportsidorna filtreras med ett månadsintervall (**Från månad** / **Till månad**); utan val visas de senaste tolv månaderna inklusive innevarande. Varje rapport har **Exportera CSV** — se [Exportera till Excel (CSV)](#exportera-till-excel-csv).
+Statistikrapporterna filtreras med ett månadsintervall (**Från månad** / **Till månad**); utan val visas de senaste tolv månaderna inklusive innevarande. Orderförteckningarna har egna urval med datum, se nedan. Varje rapport har **Exportera CSV** — se [Exportera till Excel (CSV)](#exportera-till-excel-csv).
+
+## Orderförteckning
+
+**Rapporter → Orderförteckning kundorder** och **Rapporter → Orderförteckning inköp** listar ordrarna med **Ordervärde** och **Restvärde** — som en rad per order, eller med kryssrutan **Visa rader** som order med sina rader (artikel, antal, **Levererat**/**Mottaget**, rest, à-pris, belopp, restbelopp och leveransdatum).
+
+Urvalet:
+
+- **Datum avser** — **Orderdatum** (dagen ordern skapades) eller **Leveransdatum**, med **Från** och **Till**. Leveransdatum är radens eget datum, annars orderns; på inköpsordrar går **Bekräftat leveransdatum** före **Önskat leveransdatum**, samma regel som planeringen använder. Tomma datum = inget datumurval.
+- **Kund** / **Leverantör**, **Status** (förvalt **Öppna ordrar**: Offert, Bekräftad och Under tillverkning för kundordrar; Utkast, Bekräftad och Delvis mottagen för inköpsordrar), **Artikelgrupp** och **Artikel**.
+- **Bara rader med rest** — bara rader som inte är fullt levererade eller mottagna.
+
+Urvalet gäller **orderraderna**: leveransdatum, artikel, artikelgrupp och rest väljer rader, och en order visas med de rader som kom med — dess ordervärde och restvärde summerar bara dem. Ordrar utan rader visas inte.
+
+Värdena räknas per rad: antal × à-pris med radens rabatt (kundorder) och ställpriset (inköp; ställpriset räknas som rest tills något på raden är mottaget). Inköpsordrar i annan valuta visas i sin valuta; summorna överst och på utskriften är omräknade till SEK med orderns växelkurs. Antal och à-pris visas i radens enhet.
+
+**Skriv ut** öppnar förteckningen som PDF (liggande A4) med urvalet i rubriken, och **Exportera CSV** ger samma urval som fil — med **Visa rader** en rad per orderrad med orderns uppgifter upprepade, så att den går att filtrera i Excel. Ett urval med fler än 10 000 orderrader avvisas; avgränsa då med datum, status eller kund/leverantör.
 
 ## Leveransprecision
 

@@ -6,10 +6,18 @@ import {
   purchaseStatisticsQuerySchema,
   scrapStatisticsQuerySchema,
   deliveryPrecisionCsvQuerySchema,
+  purchaseOrderRegisterQuerySchema,
+  salesOrderRegisterQuerySchema,
 } from "@navet/shared";
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import type { ReportsService } from "../service/reports.service.js";
+import { errorBody } from "../../system/service/error-body.js";
+import {
+  OrderRegisterTooLargeError,
+  type OrderRegisterKind,
+  type OrderRegisterService,
+} from "../service/order-register.service.js";
 import {
   buildCalculationOutcomeCsv,
   buildDeliveryPrecisionCsv,
@@ -22,8 +30,11 @@ import {
 // F1 Rapporter — the whole section requires the Rapporter permission
 // (management information; the admin role always has it). The plugin-level
 // hook keeps the guard in mini-app tests that register this plugin directly.
-export async function reportsRoutes(app: FastifyInstance, opts: { service: ReportsService }) {
-  const { service } = opts;
+export async function reportsRoutes(
+  app: FastifyInstance,
+  opts: { service: ReportsService; orderRegister: OrderRegisterService }
+) {
+  const { service, orderRegister } = opts;
   app.addHook("preHandler", requirePermission("rapporter"));
 
   // F2: CSV download — same content, text/csv instead of JSON.
@@ -104,4 +115,45 @@ export async function reportsRoutes(app: FastifyInstance, opts: { service: Repor
     const filename = `kassationsstatistik-${result.groupBy}-${result.from}-${result.to}.csv`;
     return sendCsv(reply, filename, buildScrapStatisticsCsv(result));
   });
+
+  // Orderförteckning — kundorder and inköp share one service; each side has
+  // its JSON, CSV and PDF variants over the same query.
+  const registers = [
+    { kind: "sales", path: "/reports/sales-order-register", schema: salesOrderRegisterQuerySchema },
+    { kind: "purchase", path: "/reports/purchase-order-register", schema: purchaseOrderRegisterQuerySchema },
+  ] as const satisfies readonly { kind: OrderRegisterKind; path: string; schema: unknown }[];
+
+  for (const register of registers) {
+    async function run<T>(reply: FastifyReply, work: () => Promise<T>) {
+      try {
+        return await work();
+      } catch (err) {
+        if (err instanceof OrderRegisterTooLargeError) return reply.code(400).send(errorBody(err));
+        throw err;
+      }
+    }
+
+    app.get(register.path, async (req, reply) => {
+      const query = register.schema.parse(req.query);
+      return run(reply, () => orderRegister.get(register.kind, query));
+    });
+
+    app.get(`${register.path}/csv`, async (req, reply) => {
+      const query = register.schema.parse(req.query);
+      return run(reply, async () => {
+        const { filename, content } = await orderRegister.getCsv(register.kind, query);
+        return sendCsv(reply, filename, content);
+      });
+    });
+
+    app.get(`${register.path}/pdf`, async (req, reply) => {
+      const query = register.schema.parse(req.query);
+      return run(reply, async () => {
+        const { filename, content } = await orderRegister.getPdf(register.kind, query);
+        reply.header("Content-Type", "application/pdf");
+        reply.header("Content-Disposition", contentDisposition(filename, "inline"));
+        return reply.send(content);
+      });
+    });
+  }
 }

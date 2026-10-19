@@ -181,6 +181,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "series-exhausted": "Nummerserien är full — kontrollera nummerserien under System.",
   "duplicate-number-series-name": "Det finns redan en nummerserie med det namnet.",
   "built-in-number-series": "Den inbyggda nummerserien kan inte byta namn eller tas bort.",
+  "order-register-too-large": "Urvalet har fler än 10 000 orderrader — avgränsa med datum, status eller kund/leverantör.",
   "demo-data-not-available": (err) => {
     const blockers = (err.body as { blockers?: string[] } | undefined)?.blockers ?? [];
     return blockers.length

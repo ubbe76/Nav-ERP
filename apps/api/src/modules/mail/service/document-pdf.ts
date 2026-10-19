@@ -391,6 +391,40 @@ export interface VerificationListPdfInput {
   emptyText: string;
 }
 
+// Orderförteckning (reports module formats every cell). Landscape A4: one
+// line per order, or — withRows — an order heading line followed by its rows.
+export interface OrderRegisterPdfInput {
+  title: string;
+  subtitle: string;
+  partnerLabel: string; // "Kund" / "Leverantör"
+  doneLabel: string; // "Levererat" / "Mottaget"
+  withRows: boolean;
+  orders: {
+    orderNumber: string;
+    orderDate: string;
+    partner: string;
+    status: string;
+    deliveryDate: string;
+    currency: string;
+    orderValue: string;
+    restValue: string;
+    rows: {
+      articleNumber: string;
+      articleName: string;
+      quantity: string;
+      done: string;
+      rest: string;
+      unit: string;
+      unitPrice: string;
+      amount: string;
+      restAmount: string;
+      deliveryDate: string;
+    }[];
+  }[];
+  totals: { label: string; orderValue: string; restValue: string };
+  emptyText: string;
+}
+
 // Räknelista (D2) — count sheet for a stock-count session: article rows with
 // an empty "Räknat" column to fill in by hand. Blind by default: the booked
 // balance column only prints when showBalances is set.
@@ -594,6 +628,31 @@ const FIXED_ASSET_PLAN_COLS = {
   bookValue: { x: 436, w: 59 },
 } as const;
 
+// Orderförteckning, landscape content width ≈ 742 pt.
+const ORDER_REGISTER_TABLE_BOTTOM = 530;
+const ORDER_REGISTER_ORDER_COLS = {
+  orderNumber: { x: 0, w: 75 },
+  orderDate: { x: 78, w: 60 },
+  partner: { x: 141, w: 215 },
+  status: { x: 359, w: 95 },
+  deliveryDate: { x: 457, w: 76 },
+  currency: { x: 536, w: 36 },
+  orderValue: { x: 575, w: 82 },
+  restValue: { x: 660, w: 82 },
+} as const;
+const ORDER_REGISTER_ROW_COLS = {
+  articleNumber: { x: 12, w: 80 },
+  articleName: { x: 95, w: 165 },
+  quantity: { x: 263, w: 52 },
+  done: { x: 318, w: 52 },
+  rest: { x: 373, w: 52 },
+  unit: { x: 428, w: 32 },
+  unitPrice: { x: 463, w: 62 },
+  amount: { x: 528, w: 72 },
+  restAmount: { x: 603, w: 72 },
+  deliveryDate: { x: 680, w: 62 },
+} as const;
+
 const VERIFICATION_LIST_COLS = {
   account: { x: 0, w: 200 },
   text: { x: 205, w: 165 },
@@ -703,12 +762,20 @@ export function computePerRowVatGroups(rows: DocumentPdfRow[]): { rate: number; 
 export function createDocumentPdfService(system: Pick<SystemService, "getCompanyInfo" | "getLogo">) {
   // Shared scaffolding: a new A4 document with the company header + logo
   // drawn, plus the promise that resolves to the finished buffer.
-  async function startDocument() {
+  // `landscape` is for wide internal reports (orderförteckningen); every
+  // page-size-dependent position below reads doc.page, not the portrait
+  // constants.
+  async function startDocument(options: { landscape?: boolean } = {}) {
     const [company, logo] = await Promise.all([system.getCompanyInfo(), system.getLogo()]);
 
     // bufferPages keeps pages addressable so the footer can be stamped on
     // every page after the content is laid out.
-    const doc = new PDFDocument({ size: "A4", margin: PAGE_MARGIN, bufferPages: true });
+    const doc = new PDFDocument({
+      size: "A4",
+      layout: options.landscape ? "landscape" : "portrait",
+      margin: PAGE_MARGIN,
+      bufferPages: true,
+    });
     const chunks: Buffer[] = [];
     doc.on("data", (chunk: Buffer) => chunks.push(chunk));
     const finished = new Promise<Buffer>((resolve, reject) => {
@@ -736,7 +803,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // Logo top-right. pdfkit reads PNG/JPEG buffers; anything else is skipped.
       if (logo?.logo) {
         try {
-          doc.image(logo.logo, PAGE_WIDTH - PAGE_MARGIN - 120, PAGE_MARGIN - 5, { fit: [120, 45], align: "right" });
+          doc.image(logo.logo, doc.page.width - PAGE_MARGIN - 120, PAGE_MARGIN - 5, { fit: [120, 45], align: "right" });
         } catch {
           // Unsupported image format — render without logo rather than failing the document.
         }
@@ -807,8 +874,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const previousBottom = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
       doc.font("Helvetica").fontSize(7.5).fillColor("#666666");
-      doc.text(`Sida ${i - range.start + 1} av ${range.count}`, PAGE_MARGIN, 812, {
-        width: CONTENT_WIDTH,
+      doc.text(`Sida ${i - range.start + 1} av ${range.count}`, PAGE_MARGIN, doc.page.height - 30, {
+        width: doc.page.width - PAGE_MARGIN * 2,
         align: "right",
         lineBreak: false,
       });
@@ -2147,6 +2214,118 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     return finished;
   }
 
+  async function renderOrderRegister(input: OrderRegisterPdfInput): Promise<Buffer> {
+    const { doc, finished } = await startDocument({ landscape: true });
+    const left = PAGE_MARGIN;
+    const O = ORDER_REGISTER_ORDER_COLS;
+    const R = ORDER_REGISTER_ROW_COLS;
+    let y = startReport(doc, input.title, input.subtitle);
+    const cell = (text: string, col: { x: number; w: number }, align: "left" | "right" = "left") =>
+      // One line per cell: the height cap makes pdfkit cut a too-long text
+      // with an ellipsis instead of wrapping into the next row.
+      doc.text(text, left + col.x, y, { width: col.w, height: 11, align, ellipsis: true });
+
+    const orderHeader = () => {
+      doc.font("Helvetica-Bold").fontSize(8.5);
+      cell("Order", O.orderNumber);
+      cell("Orderdatum", O.orderDate);
+      cell(input.partnerLabel, O.partner);
+      cell("Status", O.status);
+      cell("Leveransdatum", O.deliveryDate);
+      cell("Valuta", O.currency);
+      cell("Ordervärde", O.orderValue, "right");
+      cell("Restvärde", O.restValue, "right");
+      y += 12;
+      if (input.withRows) {
+        doc.font("Helvetica-Oblique").fontSize(8);
+        cell("Artikel", R.articleNumber);
+        cell("Benämning", R.articleName);
+        cell("Antal", R.quantity, "right");
+        cell(input.doneLabel, R.done, "right");
+        cell("Rest", R.rest, "right");
+        cell("Enhet", R.unit);
+        cell("À-pris", R.unitPrice, "right");
+        cell("Belopp", R.amount, "right");
+        cell("Restbelopp", R.restAmount, "right");
+        cell("Leveransdatum", R.deliveryDate);
+        y += 11;
+      }
+      doc
+        .moveTo(left, y)
+        .lineTo(doc.page.width - PAGE_MARGIN, y)
+        .strokeColor("#999999")
+        .lineWidth(0.5)
+        .stroke();
+      y += 4;
+    };
+    // A new page repeats the column header so every sheet reads on its own.
+    const ensure = (height: number) => {
+      if (y + height > ORDER_REGISTER_TABLE_BOTTOM) {
+        doc.addPage();
+        y = PAGE_MARGIN;
+        orderHeader();
+      }
+    };
+
+    if (input.orders.length === 0) {
+      doc.font("Helvetica").fontSize(10).text(input.emptyText, left, y);
+      doc.end();
+      return finished;
+    }
+
+    orderHeader();
+    for (const order of input.orders) {
+      // An order heading never lands alone at the foot of a page.
+      ensure(input.withRows && order.rows.length > 0 ? 24 : 12);
+      doc.font(input.withRows ? "Helvetica-Bold" : "Helvetica").fontSize(8.5);
+      cell(order.orderNumber, O.orderNumber);
+      cell(order.orderDate, O.orderDate);
+      cell(order.partner, O.partner);
+      cell(order.status, O.status);
+      cell(order.deliveryDate, O.deliveryDate);
+      cell(order.currency, O.currency);
+      cell(order.orderValue, O.orderValue, "right");
+      cell(order.restValue, O.restValue, "right");
+      y += 12;
+
+      if (input.withRows) {
+        doc.font("Helvetica").fontSize(8);
+        for (const row of order.rows) {
+          ensure(11);
+          cell(row.articleNumber, R.articleNumber);
+          cell(row.articleName, R.articleName);
+          cell(row.quantity, R.quantity, "right");
+          cell(row.done, R.done, "right");
+          cell(row.rest, R.rest, "right");
+          cell(row.unit, R.unit);
+          cell(row.unitPrice, R.unitPrice, "right");
+          cell(row.amount, R.amount, "right");
+          cell(row.restAmount, R.restAmount, "right");
+          cell(row.deliveryDate, R.deliveryDate);
+          y += 11;
+        }
+        y += 5;
+      }
+    }
+
+    ensure(20);
+    doc
+      .moveTo(left, y)
+      .lineTo(doc.page.width - PAGE_MARGIN, y)
+      .strokeColor("#666666")
+      .lineWidth(0.5)
+      .stroke();
+    y += 5;
+    doc.font("Helvetica-Bold").fontSize(9);
+    doc.text(input.totals.label, left, y, { width: O.orderValue.x - 5, height: 12, ellipsis: true });
+    cell(input.totals.orderValue, O.orderValue, "right");
+    cell(input.totals.restValue, O.restValue, "right");
+
+    drawPageNumbers(doc);
+    doc.end();
+    return finished;
+  }
+
   async function renderFixedAssetPlan(input: FixedAssetPlanPdfInput): Promise<Buffer> {
     const { doc, finished } = await startDocument();
     const left = PAGE_MARGIN;
@@ -2246,6 +2425,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     renderGeneralLedger,
     renderVerificationList,
     renderFixedAssetPlan,
+    renderOrderRegister,
   };
 }
 

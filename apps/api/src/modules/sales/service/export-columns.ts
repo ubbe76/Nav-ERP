@@ -50,7 +50,7 @@ export const CUSTOMER_CSV_COLUMNS: CsvColumn<CustomerRow>[] = [
 
 // --- Kundordrar (sales orders) ---
 
-const SALES_ORDER_STATUS_LABELS: Record<(typeof salesOrderStatusEnum.enumValues)[number], string> = {
+export const SALES_ORDER_STATUS_LABELS: Record<(typeof salesOrderStatusEnum.enumValues)[number], string> = {
   quote: "Offert",
   confirmed: "Bekräftad",
   in_production: "Under tillverkning",

@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
 import { errorBody } from "../src/modules/system/service/error-body.js";
+import { OrderRegisterTooLargeError } from "../src/modules/reports/service/order-register.service.js";
 import {
   ConfiguratorCodeLockedError,
   ConfiguratorCodeTakenError,
@@ -375,6 +376,7 @@ const cases: Array<[Error, string]> = [
   [new DuplicateNumberSeriesNameError("Plåt"), ERROR_CODES.DUPLICATE_NUMBER_SERIES_NAME],
   [new BuiltInNumberSeriesError("article", "delete"), ERROR_CODES.BUILT_IN_NUMBER_SERIES],
   [new DemoDataNotAvailableError(["customers"]), ERROR_CODES.DEMO_DATA_NOT_AVAILABLE],
+  [new OrderRegisterTooLargeError(), ERROR_CODES.ORDER_REGISTER_TOO_LARGE],
   // auth
   [new InvalidCredentialsError(), ERROR_CODES.INVALID_CREDENTIALS],
   [new ClientScopeMissingError("prices:read"), ERROR_CODES.CLIENT_SCOPE_MISSING],

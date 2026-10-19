@@ -63,6 +63,8 @@ import { createPlanningRepository } from "./modules/planning/repository/planning
 import { createReportsRepository } from "./modules/reports/repository/reports.repository.js";
 import { createReportsService } from "./modules/reports/service/reports.service.js";
 import { reportsRoutes } from "./modules/reports/routes/reports.routes.js";
+import { createOrderRegisterService } from "./modules/reports/service/order-register.service.js";
+import { createOrderRegisterRepository } from "./modules/reports/repository/order-register.repository.js";
 import { createPlanningService, type ManufacturingPlanReader } from "./modules/planning/service/planning.service.js";
 import { planningRoutes } from "./modules/planning/routes/planning.routes.js";
 import { createPayrollService } from "./modules/payroll/service/payroll.service.js";
@@ -483,6 +485,7 @@ export function buildApp(database: Db = db) {
   // Rapporter (F1) — read-only derived reports, admin-only in the routes.
   // costingService supplies the self cost the margin report measures against.
   const reportsService = createReportsService(createReportsRepository(database), costingService);
+  const orderRegisterService = createOrderRegisterService(createOrderRegisterRepository(database), documentPdfService);
   const oauthService = createOAuthService(createOAuthRepository(database), jwtSecret);
   // auditRepository is constructed earlier (ahead of purchase/sales) — see
   // that declaration's comment. Payroll/timereport reuse the same instance.
@@ -624,7 +627,7 @@ export function buildApp(database: Db = db) {
         );
         await registerModule(protectedRoutes, manufacturingRoutes, { service: manufacturingService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, planningRoutes, { service: planningService }, { read: office, write: ["tillverkning"] });
-        await registerModule(protectedRoutes, reportsRoutes, { service: reportsService }, { read: ["rapporter"], write: ["rapporter"] });
+        await registerModule(protectedRoutes, reportsRoutes, { service: reportsService, orderRegister: orderRegisterService }, { read: ["rapporter"], write: ["rapporter"] });
         await registerModule(protectedRoutes, timeReportRoutes, { service: timeReportService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, scheduleRoutes, { service: scheduleService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, atfRoutes, { service: atfService }, { read: office, write: ["tillverkning"] });

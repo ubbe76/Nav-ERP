@@ -139,6 +139,7 @@ export const ERROR_CODES = {
   SERIES_EXHAUSTED: "series-exhausted",
   DUPLICATE_NUMBER_SERIES_NAME: "duplicate-number-series-name",
   BUILT_IN_NUMBER_SERIES: "built-in-number-series",
+  ORDER_REGISTER_TOO_LARGE: "order-register-too-large",
   DEMO_DATA_NOT_AVAILABLE: "demo-data-not-available",
   // auth
   INVALID_CREDENTIALS: "invalid-credentials",

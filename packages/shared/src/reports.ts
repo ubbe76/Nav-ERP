@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { purchaseOrderStatusSchema } from "./purchase.js";
+import { salesOrderStatusSchema } from "./sales.js";
 
 // F1 Rapporter — query schemas. All reports take an optional month range
 // (YYYY-MM strings, lexicographically comparable); the service defaults a
@@ -61,3 +63,53 @@ export const deliveryPrecisionCsvQuerySchema = z
   })
   .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
 export type DeliveryPrecisionCsvQuery = z.infer<typeof deliveryPrecisionCsvQuerySchema>;
+
+// Orderförteckning — one register per side (kundorder / inköpsorder). The
+// selection works on ORDER ROWS: a date range on the order date or the row's
+// effective delivery date, article/article group and "rest kvar" pick rows,
+// and an order is listed with the rows that matched (its values sum only
+// those). Status and partner filter the order. Dates are YYYY-MM-DD.
+const dayParam = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ange datum som ÅÅÅÅ-MM-DD");
+const flagParam = z
+  .enum(["true", "false"])
+  .transform((value) => value === "true")
+  .optional();
+
+function orderRegisterQuerySchema<T extends readonly [string, ...string[]]>(statuses: T) {
+  return z
+    .object({
+      dateBasis: z.enum(["order", "delivery"]).default("order"),
+      from: dayParam.optional(),
+      to: dayParam.optional(),
+      partnerId: z.string().uuid().optional(),
+      // "open" = the side's not-yet-finished statuses; otherwise a comma list.
+      status: z
+        .string()
+        .optional()
+        .transform((raw, ctx) => {
+          if (raw === undefined || raw.trim() === "") return undefined;
+          if (raw === "open") return "open" as const;
+          const parts = raw.split(",").map((p) => p.trim()).filter((p) => p !== "");
+          const invalid = parts.filter((p) => !(statuses as readonly string[]).includes(p));
+          if (invalid.length > 0) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Okänd status: ${invalid.join(", ")}` });
+            return z.NEVER;
+          }
+          return parts as T[number][];
+        }),
+      openOnly: flagParam,
+      articleId: z.string().uuid().optional(),
+      articleGroupId: z.string().uuid().optional(),
+      withRows: flagParam,
+    })
+    .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
+}
+
+export const SALES_ORDER_OPEN_STATUSES = ["quote", "confirmed", "in_production"] as const;
+export const PURCHASE_ORDER_OPEN_STATUSES = ["draft", "confirmed", "partially_received"] as const;
+
+export const salesOrderRegisterQuerySchema = orderRegisterQuerySchema(salesOrderStatusSchema.options);
+export type SalesOrderRegisterQuery = z.infer<typeof salesOrderRegisterQuerySchema>;
+
+export const purchaseOrderRegisterQuerySchema = orderRegisterQuerySchema(purchaseOrderStatusSchema.options);
+export type PurchaseOrderRegisterQuery = z.infer<typeof purchaseOrderRegisterQuerySchema>;

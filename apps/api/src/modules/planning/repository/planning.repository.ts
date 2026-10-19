@@ -46,6 +46,7 @@ import { roundPlanWeeks } from "../service/capacity-book.js";
 import type { ArticleOverviewInput } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
+import { purchaseRowArrivalDate, salesRowDeliveryDate } from "./effective-dates.js";
 
 export interface PlanningArticleInfo {
   articleId: string;
@@ -71,15 +72,6 @@ const moRemainingQuantity = sql<string>`greatest(${manufacturingOrders.quantity}
 // under the driver's parameter limit at three parameters a row.
 const WRITE_BATCH = 1000;
 
-// The effective dates (migration 0126): a sales order row's own Leveransdatum,
-// else the order's; a purchase order row's Bekräftat leveransdatum (its own,
-// else the order's) before the requested one (its own, else the order's).
-const salesRowDeliveryDate = sql<
-  string | null
->`coalesce(${salesOrderRows.expectedDeliveryDate}, ${salesOrders.expectedDeliveryDate})`;
-const purchaseRowArrivalDate = sql<
-  string | null
->`coalesce(${purchaseOrderRows.confirmedDeliveryDate}, ${purchaseOrders.confirmedDeliveryDate}, ${purchaseOrderRows.expectedDeliveryDate}, ${purchaseOrders.expectedDeliveryDate})`;
 function chunk<T>(list: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));

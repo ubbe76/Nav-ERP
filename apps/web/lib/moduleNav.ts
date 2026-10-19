@@ -511,6 +511,16 @@ export const RAPPORTER_SECTIONS: ModuleNavSection[] = [
     title: "Rapporter",
     items: [
       {
+        href: "/rapporter/orderforteckning-kundorder",
+        title: "Orderförteckning kundorder",
+        description: "Kundordrar med ordervärde och restvärde, per order eller med rader — urval på datum, kund, status och artikel.",
+      },
+      {
+        href: "/rapporter/orderforteckning-inkop",
+        title: "Orderförteckning inköp",
+        description: "Inköpsordrar med ordervärde och restvärde, per order eller med rader — urval på datum, leverantör, status och artikel.",
+      },
+      {
         href: "/rapporter/leveransprecision",
         title: "Leveransprecision",
         description: "Hur väl lovade leveransdatum hålls, för kundordrar och inköpsordrar var för sig.",
