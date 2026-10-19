@@ -510,7 +510,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.3.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.4.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -556,13 +556,16 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   ända tills ordern är helt mottagen (antal spärras mot redan mottaget);
   **inleveransrutin** som rapporterar mottagning av hela ordern på en
   gång med beställt, mottaget och **rest** per rad och förifyllda
-  restantal; **önskat leveransdatum** på ordern med möjlighet till eget
-  datum per rad (utskrivet på inköpsorderns och förfrågans PDF); ny förfrågan/inköpsorder kan skapas
+  restantal; **önskat** och **bekräftat leveransdatum** på ordern med
+  möjlighet till eget datum per rad (planeringen räknar med det bekräftade
+  före det önskade; önskat datum skrivs ut på inköpsorderns och förfrågans
+  PDF); ny förfrågan/inköpsorder kan skapas
   direkt från leverantörskortet; **leverantörsfakturor** (leverantörs-
   reskontra med egen LF-nummerserie och statusflöde utkast → godkänd →
   betald, där fakturarader kan IO-matchas mot inköpsorderrader med pris-
   och antalsavvikelse, och underlaget kan hämtas direkt från en inlevererad
-  inköpsorder; leverantörens faktura laddas upp som **underlag** (PDF/bild)
+  inköpsorder; momsen förifylls ur nettot och fakturan kan betalas till en
+  annan leverantör än inköpsorderns; leverantörens faktura laddas upp som **underlag** (PDF/bild)
   redan vid registreringen och kan inte tas bort efter attest)
 - **Försäljning** — kunder med kundkort (samma flikupplägg som
   leverantörskortet plus fliken **Adresser**: besöksadress på Allmänt,
@@ -573,8 +576,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   fakturerad); ordern bär **kundens ordernummer**, **referens** och vald
   **leveransadress** (redigerbara på orderkortet tills levererad,
   utskrivna som "Ert ordernummer"/"Er referens" och leveransadressblock
-  på offert/orderbekräftelse och plocklista); orderrader redigerbara
-  tills ordern är levererad (antal spärras mot redan levererat);
+  på offert/orderbekräftelse och plocklista; en ny leveransadress kan
+  skrivas in direkt på ordern, som engångsadress eller sparad på kunden); orderrader redigerbara
+  tills ordern är levererad (antal spärras mot redan levererat) och med
+  eget **leveransdatum** per rad;
   **utleveransrutin** som rapporterar leverans av hela ordern på en
   gång (med **rest** per rad) och skapar följesedel, med utskrivbar **plocklista** (PDF med restantal och
   lagerplatssaldon per artikel); ny offert eller kundorder (skapas
@@ -594,7 +599,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   operation och rapporteras vid varje utstämpling i terminalen eller
   från TO-kortet; överrapportering drar mer), **utskrivbar TO**
   (PDF med operationer, material, signaturkolumner och artikelns
-  ritningar inbakade), efterkalkyl; **föreslaget färdigdatum** på ny
+  ritningar inbakade), material och operationer som kan **ändras på en
+  skapad order** utan att artikelns beredning rörs, efterkalkyl; **föreslaget färdigdatum** på ny
   tillverkningsorder (arbetsdagen före artikelns första otäckta behov);
   **behovsberäkning** med orderförslag och **Skapa ordrar** (resultatet
   återanvänds en minut, **Uppdatera** räknar om), **artikelöversikt**
@@ -659,7 +665,12 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   lyckas), valbara ritningsbilagor (artikelfiler), nedladdningsbara
   PDF:er, utskickshistorik per kort och en central e-postlogg med
   omskick av misslyckade utskick
-- **System** (admin) — företagsinformation med logotyp, nummerserier,
+- **Rapporter** — bland annat **orderförteckning** för kundorder och
+  inköp (ordervärde och restvärde per order eller rad, som PDF och CSV),
+  marginal och kalkylutfall
+- **System** (admin) — företagsinformation med logotyp, nummerserier
+  (även för **artikelnummer**, med egna serier per artikelgrupp),
+  användare och behörighetsgrupper (med konton för **endast läsning**),
   API-klienter (OAuth2) för integrationer, e-postlogg, samt
   systeminställningar (t.ex. parallella stämplingar, ATF-intjäning och
   E-post/SMTP)
@@ -669,7 +680,7 @@ Alla register och strukturer är fullt redigerbara i efterhand:
 - **Hjälp** — inbyggd användarmanual på `/hjalp` (renderad från
   [`docs/manual/`](docs/manual/) och publicerad på
   [naverp.se/hjalp](https://naverp.se/hjalp/)) med kapitel för alla rutiner
-  och inställningar
+  och inställningar och **sökning** i alla kapitel
 
 Se
 [`docs/architecture.md`](docs/architecture.md#8-byggordning--faser) för
