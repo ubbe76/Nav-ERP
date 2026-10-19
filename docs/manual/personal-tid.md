@@ -1,6 +1,6 @@
 # Personal & tid
 
-Personalregistret, scheman/kalendrar och ATF utgör grunden för närvarohantering och framtida löneunderlag.
+Personalregistret, scheman/kalendrar och ATF utgör grunden i Nav|ERP för närvarohantering och löneunderlag.
 
 ## Personal
 

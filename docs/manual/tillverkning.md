@@ -1,6 +1,6 @@
 # Tillverkning
 
-Tillverkningsmodulen driver tillverkningsordrar (TO) genom flödet frisläppt → pågår → klar → stängd (en ny tillverkningsorder frisläpps när den skapas; status planerad finns kvar för äldre ordrar), med materialförbrukning, tidrapportering och efterkalkyl. Menyvalet **Tillverkning** öppnar modulens sida, som samlar modulens funktioner i ett rutnät.
+Tillverkningsmodulen i Nav|ERP driver tillverkningsordrar (TO) genom flödet frisläppt → pågår → klar → stängd (en ny tillverkningsorder frisläpps när den skapas; status planerad finns kvar för äldre ordrar), med materialförbrukning, tidrapportering och efterkalkyl. Menyvalet **Tillverkning** öppnar modulens sida, som samlar modulens funktioner i ett rutnät.
 
 ## Översikt
 
@@ -19,7 +19,7 @@ Grupperna **Personal** och **Lön** visas bara för de roller som har åtkomst �
 
 **Tillverkning → Resurser** är register över maskiner och personalresurser som utför operationer. Varje resurs har **nummer (3 siffror)**, namn, typ (Maskin/Personal), **timkostnad**, **TO-påslag (%)** och en produktionsgrupp.
 
-De fält som justeras oftast går att ändra direkt i listan: tryck **Ändra** längst till höger på raden så blir **Produktionsgrupp**, **Veckoschema** (med kapacitetsfaktorn under, efter ×), **Timkostnad** och **TO-påslag** inmatningsfält. **Spara** (eller Enter) skriver ändringarna, **Avbryt** (eller Esc) lämnar raden som den var; bara en rad kan redigeras åt gången. Övriga fält — nummer, namn, typ, status och förvalsfälten — ändras som förut genom att trycka på resursens namn, vilket öppnar hela formuläret.
+De fält som justeras oftast går att ändra direkt i listan: tryck **Ändra** längst till höger på raden så blir **Produktionsgrupp**, **Veckoschema** (med kapacitetsfaktorn under, efter ×), **Timkostnad** och **TO-påslag** inmatningsfält. **Spara** (eller Enter) skriver ändringarna, **Avbryt** (eller Esc) lämnar raden som den var; bara en rad kan redigeras åt gången. Övriga fält — nummer, namn, typ, status och förvalsfälten — ändras genom att trycka på resursens namn, vilket öppnar hela formuläret.
 
 Under fältet **Nummer (3 siffror)** visas en lista över redan upptagna nummer med resursens namn — maskiner, personal och legoresurser delar samma nummerserie, så listan visar alla tre sorterna oavsett vilket register du står i. Skriver du in ett upptaget nummer byts listan mot en varning, t.ex. "Numret 101 används redan av Svarv (Maskin)", och knappen **Skapa resurs** (**Spara resurs** när du redigerar) går inte att klicka förrän du väljer ett annat nummer. Redigerar du en befintlig resurs räknas dess eget nummer förstås inte som upptaget.
 
@@ -343,7 +343,7 @@ Markera raderna och klicka **Skapa ordrar**:
 
 - Inköpsförslag grupperas till **en inköpsorder per huvudleverantör**, i status **Utkast** med **Önskat leveransdatum** satt efter behovet och leverantörens [leveransdagar](/hjalp/inkop#leveransdagar), ledtid och transportdagar (se [Inköp](/hjalp/inkop#onskat-leveransdatum)) och à-pris från leverantörskatalogen — har huvudleverantören staffelsteg används steget för förslagets antal, annars grundpriset (se [Artiklar](/hjalp/artiklar#inkop)); listan i sig visar bara grundpriset, så orderradens à-pris kan vara lägre än det som stod i listan. Granska och skicka den från inköpsorderkortet som vanligt. En rad utan huvudleverantör kan inte väljas (**Saknar huvudleverantör**); lägg upp leverantören på artikelkortets Inköp-flik först.
 - Tillverkningsförslag blir en tillverkningsorder per artikel, frisläppt direkt (status **Frisläppt**), med **Planerat färdigdatum** satt till arbetsdagen före artikelns första otäckta behov (se [Föreslaget färdigdatum](#foreslaget-fardigdatum)); utan otäckt behov med datum, t.ex. ett förslag som bara fyller upp till beställningspunkten, lämnas datumet tomt. Föräldrar skapas före sina komponenter — och tillverkningsordrarna före inköpsordrarna — så en komponents tillverkningsorder, eller ett inköpt material, blir klar arbetsdagen före förälderns.
-- **Inköpens datum följer leverantören.** **Önskat leveransdatum** blir den senaste möjliga ankomsten **före** behovsdagen enligt leverantörens leveransdagar, men aldrig tidigare än den tidigast möjliga ankomsten med leverantörens ledtid (leverantörskatalogens **Ledtid (dagar)**) och transportdagar. Utan leveransdagar, ledtid och transportdagar blir det arbetsdagen före behovet, som förut. Hamnar leveransen efter behovet skapas ordern ändå, och en varning listas i resultatet efter **Skapa ordrar**, t.ex. "IO-1042 · ART-1: Leveransen (2026-11-02) kommer efter behovet (2026-10-21)". Kundorderns behov räknas här på avsändningsdagen, se [Leveransdagar](/hjalp/forsaljning#leveransdagar).
+- **Inköpens datum följer leverantören.** **Önskat leveransdatum** blir den senaste möjliga ankomsten **före** behovsdagen enligt leverantörens leveransdagar, men aldrig tidigare än den tidigast möjliga ankomsten med leverantörens ledtid (leverantörskatalogens **Ledtid (dagar)**) och transportdagar. Utan leveransdagar, ledtid och transportdagar blir det arbetsdagen före behovet. Hamnar leveransen efter behovet skapas ordern ändå, och en varning listas i resultatet efter **Skapa ordrar**, t.ex. "IO-1042 · ART-1: Leveransen (2026-11-02) kommer efter behovet (2026-10-21)". Kundorderns behov räknas här på avsändningsdagen, se [Leveransdagar](/hjalp/forsaljning#leveransdagar).
 - **Lego-rader** (märkta **Lego**, med tillverkningsorderns nummer och operation under artikeln) är operationsbehov, inte artikelbehov: varje ofärdig lego-operation på en frisläppt/pågående tillverkningsorder föreslås med **orderantal minus redan beställt** (summan på ej makulerade inköpsorderrader mot operationen), utan kvittning mot lagersaldo. Förslagen grupperas till en inköpsorder i status **Utkast** per leverantör, med operationens styckpris som à-pris och ställpriset på raden. En operation utan leverantör kan inte väljas (**Saknar leverantör**) — sätt leverantören på operationen i beredningen. Planerade tillverkningsordrar ger inga lego-rader (operationerna snapshotas först vid frisläpp).
 
 - **Konfigurerade kundorderrader** (sektionen under artikellistan) blir en frisläppt tillverkningsorder per rad, med radens val, se [Konfigurerade kundorderrader](#konfigurerade-kundorderrader).
@@ -378,7 +378,7 @@ Sökrutan matchar även kundordernumret och valen.
 
 ### Vad som räknas
 
-- **Lasten** kommer från tillverkningsordrar i status **Frisläppt** eller **Pågår** (nya ordrar frisläpps när de skapas; en äldre order som står kvar som **Planerad** räknas inte förrän den frisläppts). Per operation räknas den återstående tiden: stycktid × kvarvarande antal, plus ställtiden så länge inget antal avrapporterats. En slutförd operation belastar inte. En **planerad** operation lägger sin tid i sina planerade veckor; har den delvis rapporterats räknas det som är gjort i de tidigaste veckorna, så det som återstår ligger i de senare. En operation som **inte är planerad** räknas som förut i färdigdatumets vecka. Ställtid och stycktid är i **minuter**; beläggningen visar timmar.
+- **Lasten** kommer från tillverkningsordrar i status **Frisläppt** eller **Pågår** (nya ordrar frisläpps när de skapas; en äldre order som står kvar som **Planerad** räknas inte förrän den frisläppts). Per operation räknas den återstående tiden: stycktid × kvarvarande antal, plus ställtiden så länge inget antal avrapporterats. En slutförd operation belastar inte. En **planerad** operation lägger sin tid i sina planerade veckor; har den delvis rapporterats räknas det som är gjort i de tidigaste veckorna, så det som återstår ligger i de senare. En operation som **inte är planerad** räknas i färdigdatumets vecka. Ställtid och stycktid är i **minuter**; beläggningen visar timmar.
 - **Tillgänglig tid** per resurs och vecka kommer från resursens **Veckoschema (kapacitet)** — eller, utan schema, **Kapacitet (timmar per dag)** måndag–fredag — × **Kapacitetsfaktor** (se [Resurser](#resurser)), upplöst mot den faktiska kalenderveckan — **röda dagar och halvdagar i helgdagskalendern minskar kapaciteten** den veckan. En resurs utan veckoschema och timmar per dag visar **—** som kapacitet men lasten syns ändå.
 
 ### Veckomatrisen
@@ -387,7 +387,7 @@ Kolumnerna är innevarande vecka och framåt (välj horisont med **Veckor**: 4/8
 
 Varje cell visar last / tillgänglig tid och beläggningsgrad: neutral till 85 %, gul över 85 % och röd över 100 %. Klicka på en cell för att fälla ut vilka ordrar och operationer som utgör lasten, med länk till TO-kortet. Per operation visas **timmar i veckan** och hur många timmar som är kvar totalt, de planerade veckorna (**v.45–47**, eller **Ej planerad**), färdigdatum och märkena **Försenad**, **Sen** och **Låst**, samt knappen **Flytta…**.
 
-Cellerna markerar dessutom med små symboler när de innehåller **sena ordrar** (klocka) eller **låsta operationer** (hänglås). Överbelagda celler är röda som förut.
+Cellerna markerar dessutom med små symboler när de innehåller **sena ordrar** (klocka) eller **låsta operationer** (hänglås). Överbelagda celler är röda.
 
 ### Planera
 
@@ -395,7 +395,7 @@ Knappen **Planera** (kräver rättigheten Tillverkning) planerar om alla öppna 
 
 - Ordrarna tas i ordning efter **Planerat färdigdatum**, tidigast först (ordrar utan datum sist, sedan ordernummer), och varje orders operationer läggs i tur och ordning: nästa operation får börja samma vecka som föregående blev klar om det finns tid kvar. En operation som redan är påbörjad (rapporterad eller instämplad) planeras från innevarande vecka.
 - **Låsta** operationer (se [Flytta och Lås upp](#flytta-och-las-upp)) rörs inte — deras tid räknas som upptagen innan något annat planeras. Klara operationer får sin plan borttagen.
-- **Äldre ordrar är oplanerade** och räknas som förut i färdigdatumets vecka tills du kört **Planera** första gången.
+- **Äldre ordrar är oplanerade** och räknas i färdigdatumets vecka tills du kört **Planera** första gången.
 - Planen ändrar aldrig något färdigdatum, bara operationernas veckor. Inget mejl eller meddelande skickas.
 
 Efter körningen visas hur många operationer och ordrar som planerats, och eventuella varningar: en order som beräknas bli **sen**, en operation som inte rymdes inom två år ("Kapaciteten räcker inte inom två år"), en operation som kommit före föregående operation, en resurs utan kapacitet, eller en operation med **orimligt mycket tid**. Matrisen läses om.

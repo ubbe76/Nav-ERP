@@ -1,6 +1,6 @@
 # Rapporter
 
-**Rapporter** i huvudmenyn samlar de analyserande rapporterna. Hela avsnittet kräver rättigheten **Rapporter** i användarens behörighetsgrupp (administratörer har den alltid) — menyposten syns inte för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper). Alla rapporter är härledda ur befintliga order-, faktura- och tillverkningsdata i det ögonblick de visas; ingenting lagras separat.
+**Rapporter** i Nav|ERP:s huvudmeny samlar de analyserande rapporterna. Hela avsnittet kräver rättigheten **Rapporter** i användarens behörighetsgrupp (administratörer har den alltid) — menyposten syns inte för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper). Alla rapporter är härledda ur befintliga order-, faktura- och tillverkningsdata i det ögonblick de visas; ingenting lagras separat.
 
 Statistikrapporterna filtreras med ett månadsintervall (**Från månad** / **Till månad**); utan val visas de senaste tolv månaderna inklusive innevarande. Orderförteckningarna har egna urval med datum, se nedan. Varje rapport har **Exportera CSV** — se [Exportera till Excel (CSV)](#exportera-till-excel-csv).
 

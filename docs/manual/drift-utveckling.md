@@ -1,6 +1,6 @@
 # Drift & utveckling
 
-Det här kapitlet riktar sig till den som driftar eller utvecklar Nav ERP — inte till den dagliga användaren. Fullständig teknisk dokumentation finns i projektets `README.md` och `docs/architecture.md`.
+Det här kapitlet riktar sig till den som driftar eller utvecklar Nav|ERP — inte till den dagliga användaren. Fullständig teknisk dokumentation finns i projektets `README.md` och `docs/architecture.md`.
 
 ## Projektstruktur
 
@@ -68,7 +68,7 @@ docker compose exec -T postgres psql -U erp -d erp \
 gunzip -c ~/backups/nav-erp/erp-2026-07-20_0230.sql.gz | docker compose exec -T postgres psql -U erp -d erp
 ```
 
-Både `public` och `drizzle` måste bort: dumpen innehåller migrationsjournalen `drizzle.__drizzle_migrations`, och den skapas numera redan när `api`-containern startar.
+Både `public` och `drizzle` måste bort: dumpen innehåller migrationsjournalen `drizzle.__drizzle_migrations`, och den skapas redan när `api`-containern startar.
 
 Vill du bara titta i en dump utan att röra driften — återställ den i en engångsdatabas i stället (`CREATE DATABASE erp_kontroll;` och kör `ERP_DB_NAME=erp_kontroll scripts/restore-db.sh <fil> --yes`).
 

@@ -1,6 +1,6 @@
 # Grunddata
 
-**Inköp → Grunddata** (även under Försäljning och Artiklar) samlar de små register som delas av flera moduler: leveransvillkor, betalningsvillkor, speditörer, enheter och kollityper. Varje post har en **kod** och en **benämning**, båda unika inom sitt register.
+**Inköp → Grunddata** i Nav|ERP (även under Försäljning och Artiklar) samlar de små register som delas av flera moduler: leveransvillkor, betalningsvillkor, speditörer, enheter och kollityper. Varje post har en **kod** och en **benämning**, båda unika inom sitt register.
 
 ## Leveransvillkor
 

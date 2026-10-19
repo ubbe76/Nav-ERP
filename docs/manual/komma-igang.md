@@ -1,6 +1,6 @@
 # Komma igång
 
-Nav ERP är byggt kring kärnflödet **artikel → lager → inköp/försäljning → tillverkningsorder → tidrapportering → kalkyl**. Den här manualen beskriver alla rutiner; det här kapitlet täcker det som är gemensamt för hela systemet.
+Nav|ERP är byggt kring kärnflödet **artikel → lager → inköp/försäljning → tillverkningsorder → tidrapportering → kalkyl**. Den här manualen beskriver alla rutiner; det här kapitlet täcker det som är gemensamt för hela systemet.
 
 ## Logga in
 

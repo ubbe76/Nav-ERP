@@ -1,6 +1,6 @@
 # Inköp
 
-Inköpsmodulen omfattar leverantörsregistret, förfrågningar (prisförfrågningar), inköpsorder med mottagning, fakturaunderlag och leverantörsfakturor.
+Inköpsmodulen i Nav|ERP omfattar leverantörsregistret, förfrågningar (prisförfrågningar), inköpsorder med mottagning, fakturaunderlag och leverantörsfakturor.
 
 ## Översikt
 
@@ -13,7 +13,7 @@ Menyvalet **Inköp** öppnar modulens sida, där alla inköpsfunktioner ligger g
 
 Knappen **+ Ny inköpsorder** leder till orderlistan där ordern registreras. Nyckeltal och bevakningslistor för hela verksamheten finns på **Översikt**, startsidan.
 
-Inköpsorderlistan och orderkorten ligger numera under **Inköp → Inköpsorder** (`/inkop/ordrar`). Gamla länkar och bokmärken till ett orderkort på den tidigare adressen skickas vidare automatiskt.
+Inköpsorderlistan och orderkorten ligger under **Inköp → Inköpsorder** (`/inkop/ordrar`). Gamla länkar och bokmärken till ett orderkort på den tidigare adressen skickas vidare automatiskt.
 
 ## Leverantörer
 

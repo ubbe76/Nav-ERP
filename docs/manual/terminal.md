@@ -1,6 +1,6 @@
 # Stämpelterminalen
 
-**Tillverkning → Stämpelterminal** är en helskärmsvy avsedd för en delad skärm i verkstaden. Terminalen körs under en vanlig inloggad session; personalen identifierar sig per åtgärd med sitt anställningsnummer.
+**Tillverkning → Stämpelterminal** i Nav|ERP är en helskärmsvy avsedd för en delad skärm i verkstaden. Terminalen körs under en vanlig inloggad session; personalen identifierar sig per åtgärd med sitt anställningsnummer.
 
 ## Identifiera dig
 

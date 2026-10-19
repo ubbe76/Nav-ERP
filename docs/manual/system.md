@@ -1,6 +1,6 @@
 # System & inställningar
 
-**System** i sidomenyn är endast synlig för administratörer och samlar systemomfattande inställningar.
+**System** i Nav|ERP:s sidomeny är endast synlig för administratörer och samlar systemomfattande inställningar.
 
 ## Kom igång
 

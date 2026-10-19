@@ -1,6 +1,6 @@
 # Artiklar
 
-Artikelregistret är grunden för allt annat i systemet — lager, inköp, försäljning, tillverkning och kalkyl utgår från artikeln.
+Artikelregistret är grunden för allt annat i Nav|ERP — lager, inköp, försäljning, tillverkning och kalkyl utgår från artikeln.
 
 ## Artikelregistret
 
@@ -293,7 +293,7 @@ Beskrivningen visas **i stället för resursnamnet** överallt där operationen 
 - stämpelterminalens val av operation (resursen står kvar på raden under),
 - utskriften **Skriv ut TO (PDF)**, där kolumnen heter **Operation**.
 
-**Lämnas fältet tomt visas resursnamnet precis som förut** — inget blir tomt, och en rutt som lades upp innan fältet fanns läser oförändrat.
+**Lämnas fältet tomt visas resursnamnet** — ingen rad blir tom.
 
 Precis som tiderna och kommentaren **fryses beskrivningen vid frisläppet**: tillverkningsordern får en kopia, så en senare ändring i rutten påverkar inte en order som redan är frisläppt.
 
@@ -383,7 +383,7 @@ Sektionen **Planering** överst på fliken har tre fält som styr [behovsberäkn
   - Halvfabrikatet står kvar som **en** rad i specifikationen, märkt **halvfabrikat**, med priskällan **Beräknat (flernivå)**. Dess komponenter och operationer syns alltså inte som egna rader på slutartikeln — de ligger inne i dess à-pris.
   - À-priset är halvfabrikatets **tillverkningskostnad (TVK) per styck**, alltså utan Affo-påslag och utan generellt påslag. De två läggs på en gång, längst upp på slutartikeln, och skulle annars räknas två gånger. Raden bär av samma skäl **inget MO-påslag** — materialomkostnaden är redan pålagd inne i halvfabrikatets egen kalkyl.
   - Underkalkylen körs för det **antal halvfabrikat den här kalkylen behöver** (kalkylantalet gånger antalet per slutartikel). Ställtiden i halvfabrikatets rutt fördelas därmed på det antalet, precis som slutartikelns egen ställtid — kalkylerar du 100 i stället för 10 sjunker alltså även halvfabrikatets styckpris.
-  - Ett halvfabrikat som varken har struktur eller rutt går inte att räkna om. Det får sitt standardpris precis som förut, och kalkylen visar en varning om vilken artikel det gäller. Detsamma gäller om strukturen skulle vara cirkulär.
+  - Ett halvfabrikat som varken har struktur eller rutt går inte att räkna om. Det räknas då till sitt standardpris, och kalkylen visar en varning om vilken artikel det gäller. Detsamma gäller om strukturen skulle vara cirkulär.
   - Ändrar du kryssrutan töms panelen, av samma skäl som när du ändrar antalet: siffrorna hörde till den andra inställningen.
 - **Spara kalkyl** i panelen lägger beräkningen som en ny rad i listan högst upp och öppnar **Kalkylspecifikation** direkt. Kalkylen räknas om vid sparningen, så byter någon inställning under tiden är det de nya påslagen som sparas.
 - En sparad **Förkalkyl** tas bort med **Ta bort** längst till höger på raden (bekräftas först). **Efterkalkyl** har ingen sådan knapp — den är facit för vad ordern kostade och kan inte tas bort.

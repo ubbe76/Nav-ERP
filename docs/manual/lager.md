@@ -1,6 +1,6 @@
 # Lager
 
-Lagermodulen visar saldon och den fullständiga transaktionsloggen, hanterar lagerplatser, lagerflytt, inventering och justeringar.
+Lagermodulen i Nav|ERP visar saldon och den fullständiga transaktionsloggen, hanterar lagerplatser, lagerflytt, inventering och justeringar.
 
 ## Så fungerar saldot
 

@@ -1,6 +1,6 @@
 # Försäljning
 
-Försäljningsmodulen omfattar kundregistret och flödet offert → kundorder → leverans → fakturering.
+Försäljningsmodulen i Nav|ERP omfattar kundregistret och flödet offert → kundorder → leverans → fakturering.
 
 ## Översikt
 
@@ -13,7 +13,7 @@ Menyvalet **Försäljning** öppnar modulens sida, där alla försäljningsfunkt
 
 Knappen **+ Ny kundorder** leder till orderlistan där ordern registreras. Nyckeltal och bevakningslistor för hela verksamheten finns på **Översikt**, startsidan.
 
-Kundorderlistan och orderkorten ligger numera under **Försäljning → Kundorder** (`/forsaljning/ordrar`). Gamla länkar och bokmärken till ett orderkort på den tidigare adressen skickas vidare automatiskt.
+Kundorderlistan och orderkorten ligger under **Försäljning → Kundorder** (`/forsaljning/ordrar`). Gamla länkar och bokmärken till ett orderkort på den tidigare adressen skickas vidare automatiskt.
 
 ## Kunder
 
@@ -262,7 +262,7 @@ Knappen **Använd datumet** i dialogen sätter orderns **Förväntat leveransdat
 
 ### Skapa tillverkningsordrar för det som saknas
 
-Räknade kontrollen med tillverkade artiklar som saknas i lager, visas under resultatet i dialogen på kortet för en **bekräftad** kundorder (eller en order **under tillverkning**) kryssrutan **Skapa tillverkningsordrar för det som saknas (3 st)** — antalet är de tillverkningsordrar som skulle skapas. Den är förvald. Med kryssrutan ikryssad skapar **Använd datumet** tillverkningsordrarna och sätter orderns **Förväntat leveransdatum** i ett svep; avkryssad sätts bara datumet, som förut. På en offert, i **Ny kundorder** och på den fristående sidan finns ingen kryssruta — tillverkningsordrar kopplas bara till en bekräftad orders rader.
+Räknade kontrollen med tillverkade artiklar som saknas i lager, visas under resultatet i dialogen på kortet för en **bekräftad** kundorder (eller en order **under tillverkning**) kryssrutan **Skapa tillverkningsordrar för det som saknas (3 st)** — antalet är de tillverkningsordrar som skulle skapas. Den är förvald. Med kryssrutan ikryssad skapar **Använd datumet** tillverkningsordrarna och sätter orderns **Förväntat leveransdatum** i ett svep; avkryssad sätts bara datumet. På en offert, i **Ny kundorder** och på den fristående sidan finns ingen kryssruta — tillverkningsordrar kopplas bara till en bekräftad orders rader.
 
 - Det skapas **en tillverkningsorder per brist-parti på varje nivå** i strukturen: kundorderradens artikel (kopplad till raden, som **Skapa tillverkningsorder** — raden visar därefter **I tillverkning**) och de halvfabrikat som saknas under den (vanliga tillverkningsordrar med noteringen "Skapad från leveranstidskontroll för KO-…"). Antalet är bristen (avrundat enligt artikelns **Avrundning**), färdigdatumet är det datum kontrollen räknade för partiet.
 - Ordrarna **planeras i exakt de veckor kontrollen räknade med**, så att det lovade datumet håller kapaciteten — de syns direkt i [Beläggning](/hjalp/tillverkning#belaggning). Halvfabrikaten skapas före sin förälder.
@@ -492,7 +492,7 @@ Banken anger normalt en unik referens per transaktion. Swedbank gör det bara f�
 
 ## Faktura
 
-Fakturor skapas numera i **fakturamodulen** (se [Fakturor](#fakturor) ovan) i stället för direkt på kundorderkortet — en faktura kan bygga på rader från flera kundordrar hos samma kund, och kan redigeras som utkast innan den bokförs. Ordrar fakturerade före fakturamodulen behåller sitt FA-nummer på ordern; deras PDF och e-post nås som tidigare från orderkortet. Nedanstående beskriver hur dessa äldre, redan fakturerade ordrar fortsätter att fungera:
+Fakturor skapas i **fakturamodulen** (se [Fakturor](#fakturor) ovan) i stället för direkt på kundorderkortet — en faktura kan bygga på rader från flera kundordrar hos samma kund, och kan redigeras som utkast innan den bokförs. Ordrar fakturerade före fakturamodulen behåller sitt FA-nummer på ordern; deras PDF och e-post nås som tidigare från orderkortet. Nedanstående beskriver hur dessa äldre, redan fakturerade ordrar fortsätter att fungera:
 
 - **Adress:** fakturan ställs till kundens **Fakturaadress** (kundkortets Allmänt-flik) under rubriken **Fakturaadress**; saknas den används besöksadressen under rubriken **Kund**.
 - **Förfallodatum:** räknas fram ur orderns betalningsvillkor när villkorets kod är ett antal dagar (t.ex. `30` → fakturadatum + 30 dagar); annars utelämnas raden och villkoret skrivs ut som vanligt.
