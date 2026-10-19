@@ -477,6 +477,9 @@ export interface PurchaseOrder extends DocumentTermsFields {
   exchangeRate: string;
   status: PurchaseOrderStatus;
   expectedDeliveryDate: string | null;
+  confirmedDeliveryDate: string | null;
+  // List-only: earliest effective delivery date among open rows.
+  nextDeliveryDate?: string | null;
   note: string | null;
   // "Frakt på vårt konto" — prints our carrier customer number on the PO.
   freightPaidByUs: boolean;
@@ -570,6 +573,7 @@ export interface PurchaseOrderRow {
   articleId: string;
   articleNumber: string;
   articleName: string;
+  confirmedDeliveryDate: string | null;
   // Always stored in the article's base unit; unitCode/unitFactor say which
   // unit the row was entered in (factor null = base unit).
   quantityOrdered: string;
@@ -1010,6 +1014,8 @@ export interface SalesOrder extends DocumentTermsFields {
   customerId: string;
   customerName: string;
   status: SalesOrderStatus;
+  // List-only: earliest effective delivery date among open rows.
+  nextDeliveryDate?: string | null;
   expectedDeliveryDate: string | null;
   note: string | null;
   customerOrderNumber: string | null;
@@ -1083,6 +1089,7 @@ export interface SalesOrderRow {
   articleId: string;
   articleNumber: string;
   articleName: string;
+  expectedDeliveryDate: string | null;
   // E3: only manufactured articles offer "Skapa tillverkningsorder".
   articleType: ArticleType;
   // Always stored in the article's base unit; unitCode/unitFactor say which

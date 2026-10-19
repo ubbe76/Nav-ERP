@@ -23,7 +23,7 @@ Efter 10 misslyckade inloggningsförsök på samma konto spärras kontot i 15 mi
 
 Startsidan visar materialflödet i fyra stationer — Inköp, Lager, Tillverkning, Försäljning — med antal öppna ordrar och varningar (försenade ordrar, negativa saldon). Varje station är klickbar: Inköp, Tillverkning och Försäljning öppnar modulens sida, och Lager landar direkt på saldolistan som stationens siffror beskriver. Under den finns:
 
-- **Bevakningslistan** — artiklar med saldo ≤ 0, försenade inköps- och kundordrar, värst först.
+- **Bevakningslistan** — artiklar med saldo ≤ 0, försenade inköps- och kundordrar, värst först. En order räknas som försenad när någon av raderna som inte är fullt mottagen/levererad har passerat sitt leveransdatum.
 - **Aktiva tillverkningsordrar** och de senaste lagertransaktionerna.
 
 Stationerna, raderna och knappen **+ Ny order** följer din behörighetsgrupp: det du inte får öppna visas som vanlig text i stället för som länk, och **+ Ny order** visas bara för den som kan öppna tillverkningsorderlistan.

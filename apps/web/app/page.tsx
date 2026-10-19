@@ -88,10 +88,10 @@ export default async function OverviewPage() {
   const today = stockholmToday();
 
   const openPurchaseOrders = openPurchaseOrdersPage.rows;
-  const overduePurchaseOrders = openPurchaseOrders.filter((o) => isOverdue(o.expectedDeliveryDate, today));
+  const overduePurchaseOrders = openPurchaseOrders.filter((o) => isOverdue(o.nextDeliveryDate ?? o.expectedDeliveryDate, today));
 
   const openSalesOrders = openSalesOrdersPage.rows;
-  const overdueSalesOrders = openSalesOrders.filter((o) => isOverdue(o.expectedDeliveryDate, today));
+  const overdueSalesOrders = openSalesOrders.filter((o) => isOverdue(o.nextDeliveryDate ?? o.expectedDeliveryDate, today));
 
   const activeManufacturingOrders = [...activeManufacturingOrdersPage.rows]
     .sort((a, b) =>
@@ -176,22 +176,22 @@ export default async function OverviewPage() {
       secondary: `Lager · saldo ${a.quantity.toLocaleString("sv-SE")}`,
     })),
     ...overduePurchaseOrders
-      .sort((a, b) => (a.expectedDeliveryDate ?? "").localeCompare(b.expectedDeliveryDate ?? ""))
+      .sort((a, b) => ((a.nextDeliveryDate ?? a.expectedDeliveryDate) ?? "").localeCompare((b.nextDeliveryDate ?? b.expectedDeliveryDate) ?? ""))
       .map((o): AttentionItem => ({
         key: `po-${o.id}`,
         href: `/inkop/ordrar/${o.id}`,
         tone: "delayed",
         primary: `${o.orderNumber} · ${o.supplierName}`,
-        secondary: `Inköp · ${lateLabel(o.expectedDeliveryDate!, today)}`,
+        secondary: `Inköp · ${lateLabel((o.nextDeliveryDate ?? o.expectedDeliveryDate)!, today)}`,
       })),
     ...overdueSalesOrders
-      .sort((a, b) => (a.expectedDeliveryDate ?? "").localeCompare(b.expectedDeliveryDate ?? ""))
+      .sort((a, b) => ((a.nextDeliveryDate ?? a.expectedDeliveryDate) ?? "").localeCompare((b.nextDeliveryDate ?? b.expectedDeliveryDate) ?? ""))
       .map((o): AttentionItem => ({
         key: `so-${o.id}`,
         href: `/forsaljning/ordrar/${o.id}`,
         tone: "delayed",
         primary: `${o.orderNumber} · ${o.customerName}`,
-        secondary: `Försäljning · ${lateLabel(o.expectedDeliveryDate!, today)}`,
+        secondary: `Försäljning · ${lateLabel((o.nextDeliveryDate ?? o.expectedDeliveryDate)!, today)}`,
       })),
   ];
 

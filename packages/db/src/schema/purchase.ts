@@ -168,6 +168,10 @@ export const purchaseOrders = pgTable("purchase_orders", {
   // (company_carriers) for the chosen carrier is printed on the PO document.
   freightPaidByUs: boolean("freight_paid_by_us").notNull().default(false),
   expectedDeliveryDate: date("expected_delivery_date"),
+  // Bekräftat leveransdatum — the supplier's promise. Inherited by every row
+  // without its own (purchase_order_rows.confirmed_delivery_date) and always
+  // wins over the requested dates when planning reads the row.
+  confirmedDeliveryDate: date("confirmed_delivery_date"),
   note: text("note"),
   // References printed on the PO document (Er referens = the supplier's
   // contact, Vår referens = our buyer) — like Monitor's IO header fields.
@@ -288,6 +292,10 @@ export const purchaseOrderRows = pgTable(
     // null = follow purchase_orders.expected_delivery_date. Effective date =
     // coalesce(row, header); printed per row on the IO PDF only when set.
     expectedDeliveryDate: date("expected_delivery_date"),
+    // Bekräftat leveransdatum for THIS row — null = follow the order's.
+    // Effective arrival date = coalesce(row confirmed, order confirmed, row
+    // requested, order requested): a confirmation always wins.
+    confirmedDeliveryDate: date("confirmed_delivery_date"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [unique().on(table.purchaseOrderId, table.articleId)]

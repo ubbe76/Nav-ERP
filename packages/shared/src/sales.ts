@@ -144,6 +144,8 @@ const quoteRowSchema = z.object({
   // Konfigurator 4b: the choices for a beställningsvara row (the article is
   // the template). Omitted on an ordinary row; the server derives the rest.
   configuration: orderRowConfigurationInputSchema.optional(),
+  // The row's own Leveransdatum; omitted/null = the order's date.
+  expectedDeliveryDate: businessDateSchema.nullable().optional(),
 });
 
 // Creates the order and all its rows atomically, per architecture.md §5's
@@ -246,6 +248,8 @@ export const updateSalesOrderRowSchema = z
     unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
     unitId: z.string().uuid().nullable().optional(),
+    // null clears the row's own date (the row follows the order again).
+    expectedDeliveryDate: businessDateSchema.nullable().optional(),
     bumpRevision: z.boolean().optional(),
   })
   .refine(

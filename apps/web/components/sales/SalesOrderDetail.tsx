@@ -114,6 +114,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   const [editPrice, setEditPrice] = useState("");
   const [editDiscountPercent, setEditDiscountPercent] = useState("0");
   const [editUnitId, setEditUnitId] = useState("");
+  const [editDeliveryDate, setEditDeliveryDate] = useState("");
   // C3: mirrors AddRowForm's priceTouched — set once the operator types in
   // the price/discount field for the row being edited, so a quantity edit
   // afterwards never silently overwrites it ("manuellt vinner"). Reset
@@ -242,6 +243,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     setEditDiscountPercent(String(Number(row.discountPercent)));
     setEditPriceTouched(false);
     setEditUnitId(row.unitId ?? "");
+    setEditDeliveryDate(row.expectedDeliveryDate ?? "");
     setEditArticle(null);
     apiFetch<Article>(`/api/v1/articles/${row.articleId}`).then(setEditArticle).catch(() => {});
   }
@@ -309,6 +311,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           unitPrice: Number(editPrice),
           discountPercent: Number(editDiscountPercent),
           unitId: editUnitId === "" ? null : editUnitId,
+          expectedDeliveryDate: editDeliveryDate || null,
           bumpRevision,
         }),
       });
@@ -435,6 +438,32 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                   <>
                     {row.articleName}
                     <ConfigurationLines configuration={row.configuration} />
+                    {/* The row's own leveransdatum — only shown when it differs
+                        from the order's (otherwise the row follows the header). */}
+                    {editingRowId !== row.id &&
+                      row.expectedDeliveryDate &&
+                      row.expectedDeliveryDate !== order.expectedDeliveryDate && (
+                        <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                          Leveransdatum {row.expectedDeliveryDate}
+                        </div>
+                      )}
+                    {editingRowId === row.id && (
+                      <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <label htmlFor={`deliveryDate-${row.id}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                          Leveransdatum
+                        </label>
+                        <Input
+                          id={`deliveryDate-${row.id}`}
+                          type="date"
+                          size="sm"
+                          value={editDeliveryDate}
+                          onChange={(e) => setEditDeliveryDate(e.target.value)}
+                        />
+                        <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                          Tomt = som ordern{order.expectedDeliveryDate ? ` (${order.expectedDeliveryDate})` : ""}
+                        </span>
+                      </div>
+                    )}
                   </>
                 );
               case "quantityOrdered":
@@ -710,6 +739,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         useDateError={dtcError}
         onApplied={() => router.refresh()}
         canCreateOrders={order.status === "confirmed" || order.status === "in_production"}
+        rowsWithOwnDate={rows.filter((r) => r.expectedDeliveryDate).length}
       />
 
       <FreightQuoteDialog
@@ -737,6 +767,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           orderId={order.id}
           customerId={order.customerId}
           revision={order.revision}
+          orderDeliveryDate={order.expectedDeliveryDate}
           onDone={refresh}
           onCancel={() => setModal(null)}
         />
@@ -877,12 +908,14 @@ function AddRowForm({
   orderId,
   customerId,
   revision,
+  orderDeliveryDate,
   onDone,
   onCancel,
 }: {
   orderId: string;
   customerId: string;
   revision: number;
+  orderDeliveryDate: string | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -891,6 +924,7 @@ function AddRowForm({
   const [unitPrice, setUnitPrice] = useState("0");
   const [discountPercent, setDiscountPercent] = useState("0");
   const [unitId, setUnitId] = useState(""); // "" = the article's base unit
+  const [deliveryDate, setDeliveryDate] = useState(""); // "" = the order's
   // C3: set once the operator types in the price/discount field themselves —
   // the price-chain prefill below never overwrites a touched field
   // ("manuellt vinner"). Reset when the article changes.
@@ -1036,6 +1070,7 @@ function AddRowForm({
           unitPrice: Number(unitPrice),
           discountPercent: Number(discountPercent),
           unitId: unitId === "" ? null : unitId,
+          ...(deliveryDate ? { expectedDeliveryDate: deliveryDate } : {}),
           ...(rowConfiguration ? { configuration: { selection: rowConfiguration.selection } } : {}),
           bumpRevision,
         }),
@@ -1129,6 +1164,19 @@ function AddRowForm({
           />
         </Field>
       </FormRow>
+
+      <Field label="Leveransdatum (valfritt)" htmlFor="rowDeliveryDate">
+        <Input
+          id="rowDeliveryDate"
+          type="date"
+          size="sm"
+          value={deliveryDate}
+          onChange={(e) => setDeliveryDate(e.target.value)}
+        />
+        <FormHint attached>
+          Tomt = samma som ordern{orderDeliveryDate ? ` (${orderDeliveryDate})` : ""}.
+        </FormHint>
+      </Field>
 
       {/* Live against the fields, without a server round-trip per keystroke —
           the self cost is fetched once per article. */}

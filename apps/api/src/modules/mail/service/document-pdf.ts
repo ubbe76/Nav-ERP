@@ -58,6 +58,9 @@ export interface DocumentPdfRow {
   // Purchase order: this row's own Önskat leveransdatum, printed as a
   // sub-line — the callsite sets it only when it differs from the header's.
   requestedDeliveryDate?: string | null;
+  // Quote/order confirmation: this row's own Leveransdatum, likewise only
+  // when it differs from the header's.
+  deliveryDate?: string | null;
   // Konfigurator 4b: "Grupp: Värde" per choice of a configured row
   // (configurationLines), printed among the info lines under the name —
   // with the price additions only when the callsite put them there.
@@ -199,6 +202,9 @@ export interface DocumentPdfInput {
   // Önskat leveransdatum (inquiry/PO) — when we want the goods; rows with a
   // date of their own carry DocumentPdfRow.requestedDeliveryDate.
   requestedDeliveryDate?: string | null;
+  // Leveransdatum (quote/order confirmation) — the day the customer gets the
+  // goods; rows with a date of their own carry DocumentPdfRow.deliveryDate.
+  deliveryDate?: string | null;
   // Our customer number at the supplier (vårt kundnummer hos leverantören) —
   // printed on inquiry/PO. Deliberately NOT labelled "Vårt kundnr:", which
   // the carrier line below already uses for our number at the CARRIER.
@@ -233,6 +239,9 @@ export interface PickListRow {
   // Konfigurator 4b: the configured row's choices under the name — never
   // with prices (this is a shop-floor document).
   configurationLines?: string[];
+  // The row's own Leveransdatum — the callsite sets it only when it differs
+  // from the order's (printed in the header).
+  deliveryDate?: string | null;
 }
 
 export interface PickListPdfInput {
@@ -892,6 +901,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(`Önskat leveransdatum: ${input.requestedDeliveryDate}`, left, y);
       y += 14;
     }
+    if (input.deliveryDate) {
+      doc.text(`Leveransdatum: ${input.deliveryDate}`, left, y);
+      y += 14;
+    }
     if (input.ourCustomerNumberAtSupplier) {
       doc.text(`Vårt kundnummer hos er: ${input.ourCustomerNumberAtSupplier}`, left, y);
       y += 14;
@@ -994,6 +1007,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         row.setupPrice != null ? `Ställpris: ${formatNumber(Number(row.setupPrice))} ${input.currency}` : null,
         row.netWeightKg != null ? `Nettovikt: ${formatNumber(row.netWeightKg, 1)} kg` : null,
         row.requestedDeliveryDate ? `Önskat leveransdatum: ${row.requestedDeliveryDate}` : null,
+        row.deliveryDate ? `Leveransdatum: ${row.deliveryDate}` : null,
       ].filter((line): line is string => line !== null);
       const infoHeight = infoLines.length * 11;
       const rowHeight = Math.max(nameHeight + infoHeight, 11) + 6;
@@ -1288,9 +1302,11 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     for (const row of input.rows) {
       const locationText = row.locations.length > 0 ? row.locations.join("\n") : "–";
       const nameHeight = doc.heightOfString(row.articleName, { width: PICK_COLS.articleName.w });
-      // Konfigurator 4b: 8pt choice lines under the name, counted into the
-      // row height (a plain row has none, so it is laid out exactly as before).
-      const cfgHeight = (row.configurationLines?.length ?? 0) * 11;
+      // Konfigurator 4b: 8pt choice lines under the name, then the row's own
+      // date, counted into the row height (a plain row has none, so it is
+      // laid out exactly as before).
+      const infoLines = [...(row.configurationLines ?? []), ...(row.deliveryDate ? [`Leveransdatum: ${row.deliveryDate}`] : [])];
+      const cfgHeight = infoLines.length * 11;
       const rowHeight =
         Math.max(nameHeight + cfgHeight, doc.heightOfString(locationText, { width: PICK_COLS.locations.w }), 11) + 8;
       if (y + rowHeight > TABLE_BOTTOM) {
@@ -1311,10 +1327,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(locationText, left + PICK_COLS.locations.x, y, { width: PICK_COLS.locations.w });
       // Empty line for the picker to tick off by hand.
       doc.text("____", left + PICK_COLS.picked.x, y, { width: PICK_COLS.picked.w, align: "right" });
-      if (row.configurationLines && row.configurationLines.length > 0) {
+      if (infoLines.length > 0) {
         doc.fontSize(8).fillColor("#666666");
         let infoY = y + nameHeight + 1;
-        for (const line of row.configurationLines) {
+        for (const line of infoLines) {
           doc.text(line, left + PICK_COLS.articleName.x, infoY, { width: PICK_COLS.articleName.w });
           infoY += 11;
         }

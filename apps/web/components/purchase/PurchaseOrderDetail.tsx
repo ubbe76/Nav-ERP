@@ -72,6 +72,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   const [editSetupPrice, setEditSetupPrice] = useState("");
   // "" = the row follows the order's Önskat leveransdatum.
   const [editDeliveryDate, setEditDeliveryDate] = useState("");
+  const [editConfirmedDate, setEditConfirmedDate] = useState("");
   // The article behind the row being edited — fetched so the unit dropdown
   // knows the base unit + alternative units.
   const [editArticle, setEditArticle] = useState<Article | null>(null);
@@ -148,6 +149,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     setEditUnitId(row.unitId ?? "");
     setEditSetupPrice(row.setupPrice != null ? String(Number(row.setupPrice)) : "");
     setEditDeliveryDate(row.expectedDeliveryDate ?? "");
+    setEditConfirmedDate(row.confirmedDeliveryDate ?? "");
     setEditArticle(null);
     apiFetch<Article>(`/api/v1/articles/${row.articleId}`).then(setEditArticle).catch(() => {});
   }
@@ -171,6 +173,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           unitId: editUnitId === "" ? null : editUnitId,
           setupPrice: editSetupPrice.trim() === "" ? null : Number(editSetupPrice),
           expectedDeliveryDate: editDeliveryDate || null,
+          confirmedDeliveryDate: editConfirmedDate || null,
           bumpRevision,
         }),
       });
@@ -221,6 +224,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
         fields={[
           { label: "Leverantör", value: order.supplierName, href: `/leverantorer/${order.supplierId}` },
           { label: "Önskat leveransdatum", value: order.expectedDeliveryDate },
+          { label: "Bekräftat leveransdatum", value: order.confirmedDeliveryDate },
           { label: "Växelkurs", value: order.exchangeRate },
           { label: "Er referens", value: order.yourReference },
           { label: "Vår referens", value: order.ourReference },
@@ -346,6 +350,13 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                           Önskat leveransdatum {row.expectedDeliveryDate}
                         </div>
                       )}
+                    {editingRowId !== row.id &&
+                      row.confirmedDeliveryDate &&
+                      row.confirmedDeliveryDate !== order.confirmedDeliveryDate && (
+                        <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                          Bekräftat leveransdatum {row.confirmedDeliveryDate}
+                        </div>
+                      )}
                     {editingRowId === row.id && (
                       <div style={{ marginTop: 4, display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <label htmlFor={`deliveryDate-${row.id}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
@@ -364,6 +375,19 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                         <div style={{ flexBasis: "100%" }}>
                           <DeliveryDateHint warning={editDateHint.warning} />
                         </div>
+                        <label htmlFor={`confirmedDate-${row.id}`} style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                          Bekräftat leveransdatum
+                        </label>
+                        <Input
+                          id={`confirmedDate-${row.id}`}
+                          type="date"
+                          size="sm"
+                          value={editConfirmedDate}
+                          onChange={(e) => setEditConfirmedDate(e.target.value)}
+                        />
+                        <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                          Tomt = som ordern{order.confirmedDeliveryDate ? ` (${order.confirmedDeliveryDate})` : ""}
+                        </span>
                       </div>
                     )}
                   </>
@@ -462,6 +486,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           currency={order.currency}
           revision={order.revision}
           orderDeliveryDate={order.expectedDeliveryDate}
+          orderConfirmedDate={order.confirmedDeliveryDate}
           onDone={refresh}
           onCancel={() => setModal(null)}
         />
@@ -497,6 +522,7 @@ function EditHeaderForm({
   onCancel: () => void;
 }) {
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(order.expectedDeliveryDate ?? "");
+  const [confirmedDeliveryDate, setConfirmedDeliveryDate] = useState(order.confirmedDeliveryDate ?? "");
   const [exchangeRate, setExchangeRate] = useState(order.exchangeRate);
   const [yourReference, setYourReference] = useState(order.yourReference ?? "");
   const [ourReference, setOurReference] = useState(order.ourReference ?? "");
@@ -521,6 +547,7 @@ function EditHeaderForm({
         method: "PATCH",
         body: JSON.stringify({
           expectedDeliveryDate: expectedDeliveryDate || null,
+          confirmedDeliveryDate: confirmedDeliveryDate || null,
           exchangeRate: Number(exchangeRate),
           yourReference: yourReference.trim() || null,
           ourReference: ourReference.trim() || null,
@@ -552,6 +579,15 @@ function EditHeaderForm({
             onChange={(e) => setExpectedDeliveryDate(e.target.value)}
           />
           <DeliveryDateHint summary={dateHint.summary} warning={dateHint.warning} />
+        </Field>
+        <Field label="Bekräftat leveransdatum" htmlFor="headerConfirmedDeliveryDate">
+          <Input
+            id="headerConfirmedDeliveryDate"
+            type="date"
+            size="sm"
+            value={confirmedDeliveryDate}
+            onChange={(e) => setConfirmedDeliveryDate(e.target.value)}
+          />
         </Field>
         <Field label="Växelkurs" htmlFor="headerExchangeRate">
           <Input
@@ -606,6 +642,7 @@ function AddRowForm({
   currency,
   revision,
   orderDeliveryDate,
+  orderConfirmedDate,
   onDone,
   onCancel,
 }: {
@@ -614,6 +651,7 @@ function AddRowForm({
   currency: string;
   revision: number;
   orderDeliveryDate: string | null;
+  orderConfirmedDate: string | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -622,6 +660,7 @@ function AddRowForm({
   const [unitPrice, setUnitPrice] = useState("0");
   const [unitId, setUnitId] = useState(""); // "" = the article's base unit
   const [deliveryDate, setDeliveryDate] = useState(""); // "" = the order's
+  const [confirmedDate, setConfirmedDate] = useState(""); // "" = the order's
   // Fasta leveransdagar: the row suggestion prefills the row's own date only
   // when it falls after the order's date (or the order has none) — otherwise
   // the row simply follows the order. "Manuellt vinner", per article.
@@ -709,6 +748,7 @@ function AddRowForm({
           unitPrice: Number(unitPrice),
           unitId: unitId === "" ? null : unitId,
           expectedDeliveryDate: deliveryDate || null,
+          ...(confirmedDate ? { confirmedDeliveryDate: confirmedDate } : {}),
           bumpRevision,
         }),
       });
@@ -767,6 +807,19 @@ function AddRowForm({
           Tomt = samma som ordern{orderDeliveryDate ? ` (${orderDeliveryDate})` : ""}.
         </FormHint>
         <DeliveryDateHint warning={dateWarning} />
+      </Field>
+
+      <Field label="Bekräftat leveransdatum (valfritt)" htmlFor="rowConfirmedDate">
+        <Input
+          id="rowConfirmedDate"
+          type="date"
+          size="sm"
+          value={confirmedDate}
+          onChange={(e) => setConfirmedDate(e.target.value)}
+        />
+        <FormHint attached>
+          Tomt = samma som ordern{orderConfirmedDate ? ` (${orderConfirmedDate})` : ""}.
+        </FormHint>
       </Field>
 
       <FormActions>

@@ -440,6 +440,12 @@ export function createSalesService(
       configurationCost,
     };
   }
+  // A row's own Leveransdatum is worth a document line only when it differs
+  // from the order's (a row without one follows the order).
+  function ownDeliveryDate(rowDate: string | null, orderDate: string | null) {
+    return rowDate && rowDate !== orderDate ? rowDate : null;
+  }
+
   // The quote and the order confirmation are the same document with a
   // different title — shared by the download endpoint and the email flow.
   // showConfigurationPrices (konfigurator 4b, "Visa tilläggspriser"): whether
@@ -480,8 +486,10 @@ export function createSalesService(
           colour: r.articleColour,
         }),
         configurationLines: rowConfigurationLines(r.configuration, showConfigurationPrices),
+        deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
       })),
       showTotal: true,
+      deliveryDate: order.expectedDeliveryDate,
       revision: showOrderRevisionOnDocuments ? order.revision : null,
       partnerNumber: customer!.customerNumber,
       ourSupplierNumberAtCustomer: customer!.ourSupplierNumber,
@@ -983,11 +991,15 @@ export function createSalesService(
           discountPercent,
           configuration: configurationPatch,
           configurationCost: configurationCostPatch,
+          expectedDeliveryDate: input.expectedDeliveryDate,
         },
         input.bumpRevision !== false
       );
       if (result.ok) {
         const article = await articleFiles.getArticle(existing.articleId);
+        // The row's own date only when it changed (the card always sends it).
+        const dateChanged = existing.expectedDeliveryDate !== result.row!.expectedDeliveryDate;
+        const date = (r: typeof existing) => (dateChanged ? { expectedDeliveryDate: r.expectedDeliveryDate } : {});
         await audit.log({
           entityType: "sales_order_row",
           entityId: order.orderNumber,
@@ -998,11 +1010,13 @@ export function createSalesService(
               quantity: existing.quantityOrdered,
               unitPrice: existing.unitPrice,
               discountPercent: existing.discountPercent,
+              ...date(existing),
             },
             after: {
               quantity: result.row!.quantityOrdered,
               unitPrice: result.row!.unitPrice,
               discountPercent: result.row!.discountPercent,
+              ...date(result.row!),
             },
           },
           userId: userId ?? null,
@@ -1232,6 +1246,7 @@ export function createSalesService(
           unit: r.unitCode,
           // Shop-floor document: the choices, never their prices.
           configurationLines: rowConfigurationLines(r.configuration, false),
+          deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
           locations: balances
             .filter((b) => b.articleId === r.articleId)
             .map((b) =>

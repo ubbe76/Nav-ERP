@@ -69,7 +69,7 @@ const PURCHASE_ORDER_STATUS_LABELS: Record<(typeof purchaseOrderStatusEnum.enumV
   cancelled: "Avbruten",
 };
 
-type PurchaseOrderRow = typeof purchaseOrders.$inferSelect & { supplierName: string };
+type PurchaseOrderRow = typeof purchaseOrders.$inferSelect & { supplierName: string; nextDeliveryDate: string | null };
 
 export const PURCHASE_ORDER_CSV_COLUMNS: CsvColumn<PurchaseOrderRow>[] = [
   { label: "Ordernummer", value: (r) => r.orderNumber },
@@ -77,6 +77,8 @@ export const PURCHASE_ORDER_CSV_COLUMNS: CsvColumn<PurchaseOrderRow>[] = [
   { label: "Status", value: (r) => PURCHASE_ORDER_STATUS_LABELS[r.status] },
   { label: "Valuta", value: (r) => r.currency },
   { label: "Önskat leveransdatum", value: (r) => r.expectedDeliveryDate, format: "date" },
+  { label: "Bekräftat leveransdatum", value: (r) => r.confirmedDeliveryDate, format: "date" },
+  { label: "Nästa leveransdatum", value: (r) => r.nextDeliveryDate, format: "date" },
   { label: "Er referens", value: (r) => r.yourReference },
   { label: "Vår referens", value: (r) => r.ourReference },
   { label: "Notering", value: (r) => r.note },

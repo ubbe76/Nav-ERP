@@ -1504,6 +1504,88 @@ describe("sales service — order header fields", () => {
   });
 });
 
+describe("sales service — leveransdatum per rad", () => {
+  async function orderWithTwoRows() {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const a = await makeArticle();
+    const b = await makeArticle();
+    const location = await makeLocation();
+    await seedStock(a.id, location.id, 10);
+    await seedStock(b.id, location.id, 10);
+    const { order, rows } = await salesService.createQuote(
+      {
+        customerId: customer.id,
+        expectedDeliveryDate: "2030-03-20",
+        rows: [
+          { articleId: a.id, quantity: 2, unitPrice: 10, expectedDeliveryDate: "2030-03-06" },
+          { articleId: b.id, quantity: 2, unitPrice: 10 },
+        ],
+      },
+      user.id
+    );
+    return { user, order, location, early: rows[0]!, follows: rows[1]! };
+  }
+
+  it("stores a row's own date on create, addRow and PATCH — null follows the order again", async () => {
+    const { order, early, follows } = await orderWithTwoRows();
+    expect(early.expectedDeliveryDate).toBe("2030-03-06");
+    expect(follows.expectedDeliveryDate).toBeNull();
+
+    const changed = await salesService.updateRow(order.id, follows.id, { expectedDeliveryDate: "2030-03-27" });
+    expect(changed.row!.expectedDeliveryDate).toBe("2030-03-27");
+    const cleared = await salesService.updateRow(order.id, follows.id, { expectedDeliveryDate: null });
+    expect(cleared.row!.expectedDeliveryDate).toBeNull();
+
+    const added = await salesService.addRow(order.id, {
+      articleId: (await makeArticle()).id,
+      quantity: 1,
+      unitPrice: 5,
+      expectedDeliveryDate: "2030-04-01",
+    });
+    expect(added.expectedDeliveryDate).toBe("2030-04-01");
+  });
+
+  it("logs a changed row date in the row's before/after", async () => {
+    const { user, order, follows } = await orderWithTwoRows();
+    await salesService.updateRow(order.id, follows.id, { expectedDeliveryDate: "2030-03-27" }, user.id);
+    const [entry] = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, order.orderNumber), eq(auditLog.action, "row_updated")));
+    const detail = entry!.detail as { before: Record<string, unknown>; after: Record<string, unknown> };
+    expect(detail.before.expectedDeliveryDate).toBeNull();
+    expect(detail.after.expectedDeliveryDate).toBe("2030-03-27");
+  });
+
+  it("Nästa leveransdatum in the list is the earliest date among rows not fully delivered", async () => {
+    const { user, order, location, early } = await orderWithTwoRows();
+    const nextOf = async () =>
+      (await salesService.listSalesOrders({ search: order.orderNumber, limit: 10, offset: 0 })).rows.find(
+        (o) => o.id === order.id
+      )!.nextDeliveryDate;
+    expect(await nextOf()).toBe("2030-03-06");
+
+    await salesService.confirm(order.id);
+    await salesService.startProduction(order.id);
+    await salesService.deliverGoods(order.id, early.id, { locationId: location.id, quantity: 2 }, user.id);
+    // The early row is delivered — the remaining row follows the order.
+    expect(await nextOf()).toBe("2030-03-20");
+  });
+
+  it("prints Leveransdatum in the header and per row only where the row differs", async () => {
+    const { order } = await orderWithTwoRows();
+    const confirmation = pdfText((await salesService.getSalesOrderPdf(order.id, "confirmation")).content);
+    expect(confirmation).toContain("Leveransdatum: 2030-03-20");
+    expect(confirmation).toContain("Leveransdatum: 2030-03-06");
+    expect(confirmation.split("Leveransdatum:").length - 1).toBe(2);
+
+    const pickList = pdfText((await salesService.getPickListPdf(order.id)).content);
+    expect(pickList).toContain("Leveransdatum: 2030-03-06");
+    expect(pickList.split("Leveransdatum:").length - 1).toBe(2);
+  });
+});
+
 describe("sales service — order terms (villkor)", () => {
   it("snapshots the customer's terms onto a new quote and allows header edits", async () => {
     const user = await makeUser();

@@ -32,6 +32,7 @@ export function DeliveryTimeCheckDialog({
   useDateError = null,
   onApplied,
   canCreateOrders = false,
+  rowsWithOwnDate = 0,
 }: {
   open: boolean;
   onClose: () => void;
@@ -46,6 +47,9 @@ export function DeliveryTimeCheckDialog({
   // Only a confirmed order (or one in production) can get linked TOs — the
   // API refuses a quote (sales-order-not-open), so the box is not offered.
   canCreateOrders?: boolean;
+  // Order rows that carry their own leveransdatum — "Använd datumet" sets the
+  // order's date only, those rows keep theirs.
+  rowsWithOwnDate?: number;
 }) {
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -169,6 +173,14 @@ export function DeliveryTimeCheckDialog({
             <FormNotice key={i}>{typeof w === "string" ? w : w.message}</FormNotice>
           ))}
         </>
+      )}
+
+      {withCustomer && result?.deliveryDate && !applied && rowsWithOwnDate > 0 && (
+        <FormHint>
+          {rowsWithOwnDate === 1
+            ? "1 rad har ett eget leveransdatum och behåller det."
+            : `${rowsWithOwnDate} rader har ett eget leveransdatum och behåller det.`}
+        </FormHint>
       )}
 
       <FormActions>

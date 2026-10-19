@@ -60,7 +60,7 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
           { key: "supplierName", label: "Leverantör", width: "1fr" },
           { key: "status", label: "Status", width: "160px" },
           { key: "currency", label: "Valuta", width: "90px" },
-          { key: "expectedDeliveryDate", label: "Önskat leveransdatum", width: "170px" },
+          { key: "expectedDeliveryDate", label: "Leveransdatum", width: "170px" },
         ]}
         rows={orders.rows}
         emptyText="Inga ordrar matchar sökningen"
@@ -81,7 +81,7 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
             case "currency":
               return order.currency;
             case "expectedDeliveryDate":
-              return order.expectedDeliveryDate ?? "–";
+              return order.nextDeliveryDate ?? order.expectedDeliveryDate ?? "–";
             default:
               return null;
           }

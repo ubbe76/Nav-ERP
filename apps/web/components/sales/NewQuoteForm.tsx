@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
-import { Field, Input } from "../ui/Field";
+import { Checkbox, Field, Input } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { ConfigureModal } from "../configurator/ConfigureModal";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
@@ -49,6 +49,8 @@ interface QuoteRow {
   // Base units per entered unit, reported up by the row's unit dropdown so the
   // parent can express the quantity in the base unit (Leveranstidskontroll).
   unitFactor: number;
+  // Own leveransdatum ("" = follows the order); only sent while "Eget leveransdatum per rad" is on.
+  deliveryDate: string;
 }
 
 // Pass `lockedCustomer` (e.g. from the customer card) to skip the customer
@@ -83,7 +85,7 @@ export function NewQuoteForm({
   const [deliveryAddresses, setDeliveryAddresses] = useState<CustomerDeliveryAddress[]>([]);
   const [newDeliveryAddress, setNewDeliveryAddress] = useState<DeliveryAddressDraft>(emptyDeliveryAddressDraft());
   const [rows, setRows] = useState<QuoteRow[]>([
-    { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1 },
+    { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1, deliveryDate: "" },
   ]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -113,6 +115,7 @@ export function NewQuoteForm({
   }, [customer]);
 
   const [dtcOpen, setDtcOpen] = useState(false);
+  const [perRowDates, setPerRowDates] = useState(false);
   // Rows the check can use: an article and a positive quantity (in base units).
   const checkRows = rows.flatMap((r) => {
     const quantity = Number(r.quantity);
@@ -139,7 +142,7 @@ export function NewQuoteForm({
   function addRow() {
     setRows((prev) => [
       ...prev,
-      { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1 },
+      { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1, deliveryDate: "" },
     ]);
   }
 
@@ -179,6 +182,7 @@ export function NewQuoteForm({
             discountPercent: Number(r.discountPercent),
             unitId: r.unitId === "" ? null : r.unitId,
             configuration: r.configuration ? { selection: r.configuration.selection } : undefined,
+            expectedDeliveryDate: perRowDates && r.deliveryDate ? r.deliveryDate : undefined,
           })),
         }),
       });
@@ -276,11 +280,16 @@ export function NewQuoteForm({
               row={row}
               customerId={customer?.id ?? null}
               canRemove={rows.length > 1}
+              perRowDate={perRowDates}
               onChange={(patch) => updateRow(index, patch)}
               onRemove={() => removeRow(index)}
             />
           ))}
         </div>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+          <Checkbox checked={perRowDates} onChange={(e) => setPerRowDates(e.target.checked)} />
+          <span>Eget leveransdatum per rad</span>
+        </label>
         <div style={{ marginTop: 10 }}>
           <Button type="button" variant="secondary" size="small" onClick={addRow}>
             + Lägg till rad
@@ -299,6 +308,7 @@ export function NewQuoteForm({
         onClose={() => setDtcOpen(false)}
         request={checkRequest}
         withCustomer={customer !== null}
+        rowsWithOwnDate={perRowDates ? rows.filter((r) => r.deliveryDate).length : 0}
         onUseDate={(date) => {
           // A date taken from the check counts as typed by hand: the customer's
           // delivery-day suggestion no longer overwrites it.
@@ -327,6 +337,7 @@ function QuoteRowFields({
   row,
   customerId,
   canRemove,
+  perRowDate,
   onChange,
   onRemove,
 }: {
@@ -334,6 +345,7 @@ function QuoteRowFields({
   row: QuoteRow;
   customerId: string | null;
   canRemove: boolean;
+  perRowDate: boolean;
   onChange: (patch: Partial<QuoteRow>) => void;
   onRemove: () => void;
 }) {
@@ -556,6 +568,17 @@ function QuoteRowFields({
           />
         </Field>
       </FormRow>
+      {perRowDate && (
+        <Field label="Leveransdatum (tomt = som ordern)" htmlFor={`deliveryDate-${index}`}>
+          <Input
+            id={`deliveryDate-${index}`}
+            type="date"
+            size="sm"
+            value={row.deliveryDate}
+            onChange={(e) => onChange({ deliveryDate: e.target.value })}
+          />
+        </Field>
+      )}
       {/* Täckningsbidrag against the article's latest saved pre-calculation,
           recomputed locally as the price is typed. */}
       <FormHint>

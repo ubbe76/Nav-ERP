@@ -78,7 +78,7 @@ export function SalesOrdersPageClient({
               return <StatusPill status={pill.status} label={pill.label} compact />;
             }
             case "expectedDeliveryDate":
-              return order.expectedDeliveryDate ?? "–";
+              return order.nextDeliveryDate ?? order.expectedDeliveryDate ?? "–";
             default:
               return null;
           }

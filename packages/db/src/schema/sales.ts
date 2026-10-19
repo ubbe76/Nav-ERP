@@ -296,6 +296,10 @@ export const salesOrderRows = pgTable(
     // article's quantity_per_base snapshotted at entry time.
     unitId: uuid("unit_id").references(() => units.id, { onDelete: "restrict" }),
     unitFactor: numeric("unit_factor", { precision: 16, scale: 6 }),
+    // Leveransdatum for THIS row when it differs from the order's — null =
+    // follow sales_orders.expected_delivery_date. Effective date =
+    // coalesce(row, header), the day the customer gets the goods.
+    expectedDeliveryDate: date("expected_delivery_date"),
     // Konfigurator 4b: a beställningsvara row keeps the template as article
     // and its choices, labels and price split here (OrderRowConfiguration in
     // @navet/shared). null = ordinary row.

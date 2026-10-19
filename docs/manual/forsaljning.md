@@ -184,6 +184,16 @@ Ordern får automatiskt kundens **Leveransvillkor**, **Betalningsvillkor** och *
 
 **Orderhuvudet.** Orderkortet inleds med ett kort som visar status, **Rev**, valuta (och fakturanummer när ordern är fakturerad) tillsammans med orderns uppgifter: **Kund** (klickbar till kundkortet), **Kundens ordernummer**, **Referens**, **Leveransdatum**, de tre villkoren, **Leveransadress** och **Notering**. Knappen **Ändra** öppnar dialogen **Ändra orderhuvud**, där kundens ordernummer, referens, villkoren och leveransadressen redigeras på ett ställe och sparas i ett svep, så länge ordern är i status Offert, Bekräftad eller Under tillverkning. Leveransdatum och notering sätts när offerten skapas och visas bara.
 
+### Leveransdatum per rad
+
+Orderns **Leveransdatum** gäller alla rader. Ska en rad levereras ett annat datum ger du den ett eget:
+
+- I **Ny kundorder** och **Ny offert** kryssar du i **Eget leveransdatum per rad**, så får varje rad fältet **Leveransdatum**. Tomt betyder samma som ordern.
+- På orderkortet finns fältet **Leveransdatum** i **Lägg till rad** och i radens **Ändra**, med texten "Tomt = som ordern" under. Töm fältet så följer raden orderns datum igen.
+- En rad med eget datum visar **Leveransdatum …** under benämningen. På offerten, orderbekräftelsen och plocklistan står orderns **Leveransdatum** i huvudet och radens eget datum under raden, bara när det avviker.
+
+Radens datum, annars orderns, är det datum planeringen räknar behovet på: [artikelöversikten](/hjalp/artiklar#artikeloversikt), [färdigdatumsförslaget](/hjalp/tillverkning#foreslaget-fardigdatum) (även **Skapa TO** på raden) och [Leveranstidskontrollen](#leveranstidskontroll) — på avsändningsdagen, se [Leveransdagar](#leveransdagar). Kolumnen **Leveransdatum** i kundorderlistan och bevakningslistan på [Översikten](/hjalp/komma-igang#oversikten) visar **nästa leveransdatum**: det tidigaste datumet bland raderna som inte är fullt levererade. Leveransprecisionsrapporten mäter fortfarande hela ordern mot orderns datum.
+
 Vill du veta vilket leveransdatum du faktiskt kan lova, använd knappen **Leveranstidskontroll** på orderkortet (och i **Ny kundorder**) — den räknar fram ett datum ur lager, material och produktionens beläggning och låter dig sätta **Förväntat leveransdatum** med **Använd datumet**. Se [Leveranstidskontroll](#leveranstidskontroll).
 
 Längst ner på kortet visar sektionen **Historik** ordens egna händelser (statusövergångar och radändringar) — se [Händelselogg](/hjalp/system#handelselogg).
@@ -248,7 +258,7 @@ Själva kontrollen är en beräkning som läser och räknar — den ändrar inge
 - **I Ny kundorder:** samma knapp räknar formulärets rader (och vald kund) innan ordern är sparad.
 - **Fristående:** **Försäljning → Leveranstidskontroll**. Lägg in rader med **Lägg till rad** — artikel och antal; en konfigurerbar mall konfigureras med **Konfigurera**, som på en orderrad — välj om du vill en **Kund** och klicka **Kontrollera**.
 
-Knappen **Använd datumet** i dialogen sätter orderns **Förväntat leveransdatum**; i **Ny kundorder** fylls fältet i. Knappen visas bara när kontrollen räknats med en kund — utan kund är datumet avsändningsdagen och dialogen visar i stället texten "Välj kund för att räkna med kundens transportdagar." Raderna på ordern ändras aldrig. Kräver behörigheten Försäljning eller Tillverkning.
+Knappen **Använd datumet** i dialogen sätter orderns **Förväntat leveransdatum**; i **Ny kundorder** fylls fältet i. Knappen visas bara när kontrollen räknats med en kund — utan kund är datumet avsändningsdagen och dialogen visar i stället texten "Välj kund för att räkna med kundens transportdagar." Raderna på ordern ändras aldrig — har några rader ett [eget leveransdatum](#leveransdatum-per-rad) behåller de det, och dialogen säger hur många de är. Kräver behörigheten Försäljning eller Tillverkning.
 
 ### Skapa tillverkningsordrar för det som saknas
 

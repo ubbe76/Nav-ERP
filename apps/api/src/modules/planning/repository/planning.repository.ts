@@ -70,6 +70,16 @@ const moRemainingQuantity = sql<string>`greatest(${manufacturingOrders.quantity}
 // Rows per INSERT / UPDATE … FROM (VALUES …) in writeOperationPlans — well
 // under the driver's parameter limit at three parameters a row.
 const WRITE_BATCH = 1000;
+
+// The effective dates (migration 0126): a sales order row's own Leveransdatum,
+// else the order's; a purchase order row's Bekräftat leveransdatum (its own,
+// else the order's) before the requested one (its own, else the order's).
+const salesRowDeliveryDate = sql<
+  string | null
+>`coalesce(${salesOrderRows.expectedDeliveryDate}, ${salesOrders.expectedDeliveryDate})`;
+const purchaseRowArrivalDate = sql<
+  string | null
+>`coalesce(${purchaseOrderRows.confirmedDeliveryDate}, ${purchaseOrders.confirmedDeliveryDate}, ${purchaseOrderRows.expectedDeliveryDate}, ${purchaseOrders.expectedDeliveryDate})`;
 function chunk<T>(list: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
@@ -371,7 +381,7 @@ export function createPlanningRepository(db: Db) {
           orderNumber: salesOrders.orderNumber,
           customerName: customers.name,
           articleId: salesOrderRows.articleId,
-          expectedDeliveryDate: salesOrders.expectedDeliveryDate,
+          expectedDeliveryDate: salesRowDeliveryDate,
           customerDelivery: {
             deliveryWeekdays: customers.deliveryWeekdays,
             deliveryDayMode: customers.deliveryDayMode,
@@ -476,7 +486,7 @@ export function createPlanningRepository(db: Db) {
               orderNumber: salesOrders.orderNumber,
               orderStatus: salesOrders.status,
               customerName: customers.name,
-              expectedDeliveryDate: salesOrders.expectedDeliveryDate,
+              expectedDeliveryDate: salesRowDeliveryDate,
               customerDelivery: {
                 deliveryWeekdays: customers.deliveryWeekdays,
                 deliveryDayMode: customers.deliveryDayMode,
@@ -499,10 +509,9 @@ export function createPlanningRepository(db: Db) {
               orderNumber: purchaseOrders.orderNumber,
               orderStatus: purchaseOrders.status,
               supplierName: suppliers.name,
-              // The row's own Önskat leveransdatum, else the order's.
-              expectedDeliveryDate: sql<
-                string | null
-              >`coalesce(${purchaseOrderRows.expectedDeliveryDate}, ${purchaseOrders.expectedDeliveryDate})`,
+              // A Bekräftat leveransdatum (the row's, else the order's) wins
+              // over the requested one (the row's, else the order's).
+              expectedDeliveryDate: purchaseRowArrivalDate,
               quantityOrdered: purchaseOrderRows.quantityOrdered,
               quantityReceived: purchaseOrderRows.quantityReceived,
             })
@@ -661,7 +670,7 @@ export function createPlanningRepository(db: Db) {
           salesOrderId: salesOrders.id,
           orderNumber: salesOrders.orderNumber,
           orderStatus: salesOrders.status,
-          expectedDeliveryDate: salesOrders.expectedDeliveryDate,
+          expectedDeliveryDate: salesRowDeliveryDate,
           customerDelivery: {
             deliveryWeekdays: customers.deliveryWeekdays,
             deliveryDayMode: customers.deliveryDayMode,

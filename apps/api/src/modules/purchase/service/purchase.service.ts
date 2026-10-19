@@ -1133,19 +1133,29 @@ export function createPurchaseService(
           // Ställpris is entered per row (not per unit) — no unit conversion.
           setupPrice: input.setupPrice,
           expectedDeliveryDate: input.expectedDeliveryDate,
+          confirmedDeliveryDate: input.confirmedDeliveryDate,
         },
         input.bumpRevision !== false
       );
       if (result.ok) {
         const article = await articleFiles.getArticle(existing.articleId);
+        const updated = result.row!;
+        // The row's own dates only when they changed (the card always sends
+        // them) — the quantity/price pair stays the entry's fixed core.
+        const requestedChanged = existing.expectedDeliveryDate !== updated.expectedDeliveryDate;
+        const confirmedChanged = existing.confirmedDeliveryDate !== updated.confirmedDeliveryDate;
+        const dates = (r: typeof updated) => ({
+          ...(requestedChanged ? { requestedDeliveryDate: r.expectedDeliveryDate } : {}),
+          ...(confirmedChanged ? { confirmedDeliveryDate: r.confirmedDeliveryDate } : {}),
+        });
         await audit.log({
           entityType: "purchase_order_row",
           entityId: order.orderNumber,
           action: "row_updated",
           detail: {
             articleNumber: article?.articleNumber ?? null,
-            before: { quantity: existing.quantityOrdered, unitPrice: existing.unitPrice },
-            after: { quantity: result.row!.quantityOrdered, unitPrice: result.row!.unitPrice },
+            before: { quantity: existing.quantityOrdered, unitPrice: existing.unitPrice, ...dates(existing) },
+            after: { quantity: updated.quantityOrdered, unitPrice: updated.unitPrice, ...dates(updated) },
           },
           userId: userId ?? null,
         });

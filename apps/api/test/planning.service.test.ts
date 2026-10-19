@@ -674,6 +674,62 @@ describe("planning service — färdigdatumsförslag", () => {
     expect(await dateOf(b.id)).toBe("2030-03-04");
   });
 
+  it("a Bekräftat leveransdatum wins over Önskat — the row's own, else the order's", async () => {
+    const user = await makeUser();
+    const a = await makeArticle({ articleNumber: "DD-CF-A" });
+    const b = await makeArticle({ articleNumber: "DD-CF-B" });
+    const c = await makeArticle({ articleNumber: "DD-CF-C" });
+    const supplier = await makeSupplierWithCatalog("Stål AB", [a.id, b.id, c.id]);
+    const io = await purchaseService.createPurchaseOrder(
+      { supplierId: supplier.id, exchangeRate: 1, expectedDeliveryDate: "2030-03-04" },
+      user.id
+    );
+    await purchaseService.addRow(io.id, { articleId: a.id, quantity: 1, unitPrice: 1, expectedDeliveryDate: "2030-05-01" });
+    await purchaseService.addRow(io.id, { articleId: b.id, quantity: 1, unitPrice: 1 });
+    const own = await purchaseService.addRow(io.id, { articleId: c.id, quantity: 1, unitPrice: 1 });
+
+    const dateOf = async (articleId: string) =>
+      (await planningService.getArticleOverview(articleId)).rows.find((r) => r.kind === "purchase_order")!.date;
+    // Not confirmed yet: the requested dates as before.
+    expect(await dateOf(a.id)).toBe("2030-05-01");
+
+    await purchaseService.updatePurchaseOrderHeader(io.id, { confirmedDeliveryDate: "2030-03-11" });
+    await purchaseService.updateRow(io.id, own.id, { confirmedDeliveryDate: "2030-03-18" });
+    // The order's confirmation reaches even the row with its own requested date.
+    expect(await dateOf(a.id)).toBe("2030-03-11");
+    expect(await dateOf(b.id)).toBe("2030-03-11");
+    expect(await dateOf(c.id)).toBe("2030-03-18");
+  });
+
+  it("the artikelöversikt dates a KO row by its own Leveransdatum, else the order's", async () => {
+    const user = await makeUser();
+    const a = await makeArticle({ articleNumber: "DD-KO-A" });
+    const b = await makeArticle({ articleNumber: "DD-KO-B" });
+    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const ko = await salesService.createQuote(
+      {
+        customerId: customer.id,
+        confirm: true,
+        expectedDeliveryDate: "2030-03-04",
+        rows: [
+          { articleId: a.id, quantity: 1, unitPrice: 100, expectedDeliveryDate: "2030-04-08" },
+          { articleId: b.id, quantity: 1, unitPrice: 100 },
+        ],
+      },
+      user.id
+    );
+    expect(ko.rows.find((r) => r.articleId === a.id)!.expectedDeliveryDate).toBe("2030-04-08");
+
+    const dateOf = async (articleId: string) =>
+      (await planningService.getArticleOverview(articleId)).rows.find((r) => r.kind === "sales_order")!.date;
+    expect(await dateOf(a.id)).toBe("2030-04-08");
+    expect(await dateOf(b.id)).toBe("2030-03-04");
+
+    const rowB = ko.rows.find((r) => r.articleId === b.id)!;
+    await salesService.updateRow(ko.order.id, rowB.id, { expectedDeliveryDate: "2030-03-25" });
+    expect(await dateOf(b.id)).toBe("2030-03-25");
+  });
+
   it("KO → TO carries the dialog's färdigdatum onto the order", async () => {
     const user = await makeUser();
     const m = await makeArticle({ articleNumber: "DD-6", type: "manufactured" });

@@ -60,13 +60,14 @@ const SALES_ORDER_STATUS_LABELS: Record<(typeof salesOrderStatusEnum.enumValues)
 };
 
 // The list omits the detail-only freight_quote jsonb (listSalesOrders).
-type SalesOrderRow = Omit<typeof salesOrders.$inferSelect, "freightQuote"> & { customerName: string };
+type SalesOrderRow = Omit<typeof salesOrders.$inferSelect, "freightQuote"> & { customerName: string; nextDeliveryDate: string | null };
 
 export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
   { label: "Ordernummer", value: (r) => r.orderNumber },
   { label: "Kund", value: (r) => r.customerName },
   { label: "Status", value: (r) => SALES_ORDER_STATUS_LABELS[r.status] },
   { label: "Leveransdatum", value: (r) => r.expectedDeliveryDate, format: "date" },
+  { label: "Nästa leveransdatum", value: (r) => r.nextDeliveryDate, format: "date" },
   { label: "Kundens ordernr", value: (r) => r.customerOrderNumber },
   { label: "Kundens referens", value: (r) => r.customerReference },
   { label: "Notering", value: (r) => r.note },

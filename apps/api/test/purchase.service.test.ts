@@ -1523,6 +1523,46 @@ describe("purchase service — önskat leveransdatum", () => {
     expect(cleared.row!.expectedDeliveryDate).toBeNull();
   });
 
+  it("Bekräftat leveransdatum: set on the header and per row, null clears, Nästa leveransdatum follows", async () => {
+    const user = await makeUser();
+    const supplier = await makeSupplier();
+    const location = await makeLocation();
+    const a = await makeArticle(`ART-CF-A-${crypto.randomUUID()}`);
+    const b = await makeArticle(`ART-CF-B-${crypto.randomUUID()}`);
+    const order = await purchaseService.createPurchaseOrder(
+      { supplierId: supplier.id, expectedDeliveryDate: "2030-03-04" },
+      user.id
+    );
+    const rowA = await purchaseService.addRow(order.id, { articleId: a.id, quantity: 1, unitPrice: 1 });
+    const rowB = await purchaseService.addRow(order.id, {
+      articleId: b.id,
+      quantity: 1,
+      unitPrice: 1,
+      confirmedDeliveryDate: "2030-03-25",
+    });
+    expect(rowB.confirmedDeliveryDate).toBe("2030-03-25");
+
+    const nextOf = async () =>
+      (await purchaseService.listPurchaseOrders({ search: order.orderNumber, limit: 10, offset: 0 })).rows.find(
+        (o) => o.id === order.id
+      )!.nextDeliveryDate;
+    // Row A has nothing of its own: the order's requested date.
+    expect(await nextOf()).toBe("2030-03-04");
+
+    await purchaseService.updatePurchaseOrderHeader(order.id, { confirmedDeliveryDate: "2030-03-11" });
+    expect((await purchaseService.getPurchaseOrder(order.id))!.confirmedDeliveryDate).toBe("2030-03-11");
+    expect(await nextOf()).toBe("2030-03-11");
+
+    await purchaseService.confirm(order.id);
+    await purchaseService.receiveGoods(order.id, rowA.id, { locationId: location.id, quantity: 1 }, user.id);
+    // Row A is received — row B's own confirmation remains.
+    expect(await nextOf()).toBe("2030-03-25");
+
+    const cleared = await purchaseService.updateRow(order.id, rowB.id, { confirmedDeliveryDate: null });
+    expect(cleared.row!.confirmedDeliveryDate).toBeNull();
+    expect(await nextOf()).toBe("2030-03-11");
+  });
+
   it("PATCH persists a lego row's ställpris (it used to be dropped)", async () => {
     const { order, row } = await makeOrderWithRow(5);
     const patched = await purchaseService.updateRow(order.id, row.id, { setupPrice: 350 });

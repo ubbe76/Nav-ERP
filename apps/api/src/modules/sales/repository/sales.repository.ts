@@ -576,6 +576,8 @@ export function createSalesRepository(db: Db) {
               unitFactor: r.unitFactor !== null ? String(r.unitFactor) : null,
               configuration: r.configuration ?? null,
               configurationCost: r.configurationCost ?? null,
+              // null = the row follows the order's Leveransdatum.
+              expectedDeliveryDate: r.expectedDeliveryDate ?? null,
               createdAt: new Date(now + i),
             }))
           )
@@ -650,6 +652,10 @@ export function createSalesRepository(db: Db) {
       // Correlated-subquery shape as listPurchaseOrders' openRowCount —
       // opt-in (withOpenRows) so the plain register list doesn't pay for it.
       const openRowCountSql = sql<number>`(select count(*)::int from ${salesOrderRows} r where r.sales_order_id = ${salesOrders}.id and r.quantity_delivered < r.quantity_ordered)`;
+      // Nästa leveransdatum: the earliest effective date among rows not
+      // fully delivered, else the order's own — same rule as
+      // listPurchaseOrders, so one early row shows the order late.
+      const nextDeliveryDateSql = sql<string | null>`coalesce((select min(coalesce(r.expected_delivery_date, ${salesOrders.expectedDeliveryDate})) from ${salesOrderRows} r where r.sales_order_id = ${salesOrders}.id and r.quantity_delivered < r.quantity_ordered), ${salesOrders.expectedDeliveryDate})`;
 
       // The stored Sendify answer (freight_quote jsonb) is detail-only —
       // the register list would otherwise ship it on every row.
@@ -660,6 +666,7 @@ export function createSalesRepository(db: Db) {
           .select({
             ...listColumns,
             customerName: customers.name,
+            nextDeliveryDate: nextDeliveryDateSql,
             ...(query.withOpenRows ? { openRowCount: openRowCountSql } : {}),
           })
           .from(salesOrders)
@@ -704,6 +711,7 @@ export function createSalesRepository(db: Db) {
             unitFactor: input.unitFactor !== null ? String(input.unitFactor) : null,
             configuration: input.configuration ?? null,
             configurationCost: input.configurationCost ?? null,
+            expectedDeliveryDate: input.expectedDeliveryDate ?? null,
           })
           .returning();
         if (input.bumpRevision !== false) await bumpRevision(tx, salesOrderId);
@@ -796,6 +804,7 @@ export function createSalesRepository(db: Db) {
           unitFactor?: string | null;
           configuration?: OrderRowConfiguration;
           configurationCost?: OrderRowConfigurationCost | null;
+          expectedDeliveryDate?: string | null;
         } = {};
         if (patch.quantity !== undefined) set.quantityOrdered = String(patch.quantity);
         if (patch.unitPrice !== undefined) set.unitPrice = String(patch.unitPrice);
@@ -804,6 +813,7 @@ export function createSalesRepository(db: Db) {
         if (patch.unitFactor !== undefined) set.unitFactor = patch.unitFactor !== null ? String(patch.unitFactor) : null;
         if (patch.configuration !== undefined) set.configuration = patch.configuration;
         if (patch.configurationCost !== undefined) set.configurationCost = patch.configurationCost;
+        if (patch.expectedDeliveryDate !== undefined) set.expectedDeliveryDate = patch.expectedDeliveryDate;
         const [updated] = await tx.update(salesOrderRows).set(set).where(eq(salesOrderRows.id, rowId)).returning();
 
         if (bump) await bumpRevision(tx, orderId);

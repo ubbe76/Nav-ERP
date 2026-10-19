@@ -746,12 +746,17 @@ export function createPurchaseRepository(db: Db) {
       // Correlated-subquery shape as listPriceLists' rowCount — opt-in
       // (withOpenRows) so the plain register list doesn't pay for it.
       const openRowCountSql = sql<number>`(select count(*)::int from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered)`;
+      // Nästa leveransdatum: the earliest effective arrival date among rows
+      // not fully received (a confirmation always wins over a requested
+      // date), else the order's own — so one early row shows the order late.
+      const nextDeliveryDateSql = sql<string | null>`coalesce((select min(coalesce(r.confirmed_delivery_date, ${purchaseOrders.confirmedDeliveryDate}, r.expected_delivery_date, ${purchaseOrders.expectedDeliveryDate})) from ${purchaseOrderRows} r where r.purchase_order_id = ${purchaseOrders}.id and r.quantity_received < r.quantity_ordered), ${purchaseOrders.confirmedDeliveryDate}, ${purchaseOrders.expectedDeliveryDate})`;
 
       const [rows, totalRows] = await Promise.all([
         db
           .select({
             ...getTableColumns(purchaseOrders),
             supplierName: suppliers.name,
+            nextDeliveryDate: nextDeliveryDateSql,
             ...(query.withOpenRows ? { openRowCount: openRowCountSql } : {}),
           })
           .from(purchaseOrders)
@@ -795,6 +800,8 @@ export function createPurchaseRepository(db: Db) {
             setupPrice: input.setupPrice != null ? String(input.setupPrice) : null,
             // null = the row follows the order's Önskat leveransdatum.
             expectedDeliveryDate: input.expectedDeliveryDate ?? null,
+            // null = the row follows the order's Bekräftat leveransdatum.
+            confirmedDeliveryDate: input.confirmedDeliveryDate ?? null,
           })
           .returning();
         if (input.bumpRevision !== false) await bumpRevision(tx, purchaseOrderId);
@@ -835,6 +842,7 @@ export function createPurchaseRepository(db: Db) {
           unitFactor?: string | null;
           setupPrice?: string | null;
           expectedDeliveryDate?: string | null;
+          confirmedDeliveryDate?: string | null;
         } = {};
         if (patch.quantity !== undefined) set.quantityOrdered = String(patch.quantity);
         if (patch.unitPrice !== undefined) set.unitPrice = String(patch.unitPrice);
@@ -842,6 +850,7 @@ export function createPurchaseRepository(db: Db) {
         if (patch.unitFactor !== undefined) set.unitFactor = patch.unitFactor !== null ? String(patch.unitFactor) : null;
         if (patch.setupPrice !== undefined) set.setupPrice = patch.setupPrice !== null ? String(patch.setupPrice) : null;
         if (patch.expectedDeliveryDate !== undefined) set.expectedDeliveryDate = patch.expectedDeliveryDate;
+        if (patch.confirmedDeliveryDate !== undefined) set.confirmedDeliveryDate = patch.confirmedDeliveryDate;
         const [updated] = await tx.update(purchaseOrderRows).set(set).where(eq(purchaseOrderRows.id, rowId)).returning();
 
         if (bump) await bumpRevision(tx, orderId);

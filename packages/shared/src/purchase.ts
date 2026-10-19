@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { businessDateSchema } from "./business-date.js";
 import { materialShortageOverrideSchema } from "./manufacturing.js";
 import { listQuerySchema, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
@@ -198,6 +199,8 @@ export const createPurchaseOrderRowSchema = z.object({
   setupPrice: z.coerce.number().nonnegative().nullable().optional(),
   // Önskat leveransdatum for this row; omitted/null = the order's date.
   expectedDeliveryDate: z.string().date().nullable().optional(),
+  // Bekräftat leveransdatum for this row; omitted/null = the order's.
+  confirmedDeliveryDate: businessDateSchema.nullable().optional(),
 });
 export type CreatePurchaseOrderRowInput = z.infer<typeof createPurchaseOrderRowSchema>;
 
@@ -216,6 +219,7 @@ export const updatePurchaseOrderRowSchema = z
     setupPrice: z.coerce.number().nonnegative().nullable().optional(),
     // null clears the row's own date (the row follows the order again).
     expectedDeliveryDate: z.string().date().nullable().optional(),
+    confirmedDeliveryDate: businessDateSchema.nullable().optional(),
   })
   .refine(
     (data) => Object.keys(data).some((key) => key !== "bumpRevision"),
@@ -229,6 +233,8 @@ export type UpdatePurchaseOrderRowInput = z.infer<typeof updatePurchaseOrderRowS
 export const updatePurchaseOrderHeaderSchema = z
   .object({
     expectedDeliveryDate: z.string().date().nullable().optional(),
+    // Bekräftat leveransdatum — every row without its own inherits it.
+    confirmedDeliveryDate: businessDateSchema.nullable().optional(),
     note: z.string().nullable().optional(),
     // Not nullable — an order always has an exchange rate.
     exchangeRate: z.coerce.number().positive().optional(),
