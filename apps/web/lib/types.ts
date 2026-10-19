@@ -3406,7 +3406,9 @@ export interface CalculationOutcomeResponse {
   to: string;
   rows: OutcomeRow[];
   summary: { count: number; avgDeviationPct: number | null };
-  notComparable: { onlyPre: number; onlyPost: number; invalidQuantity: number };
+  // onlyPost: orders whose latest efterkalkyl has no comparable förkalkyl (none
+  // saved on the article at or before it, or a beställningsvara's TO).
+  notComparable: { onlyPost: number; invalidQuantity: number };
 }
 
 // --- Händelselogg (G1): read side of the append-only audit_log ---

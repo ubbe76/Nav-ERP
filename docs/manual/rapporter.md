@@ -46,6 +46,17 @@ Orsaken är fritext från avrapporteringen och grupperas på exakt text — "Mat
 
 ## Kalkylutfall
 
+**Rapporter → Kalkylutfall** ställer förkalkyl mot efterkalkyl per tillverkningsorder. Varje order med en sparad [efterkalkyl](/hjalp/tillverkning#efterkalkyl) jämförs med sin senaste efterkalkyl. En förkalkyl sparas däremot på artikeln, inte på ordern (se [Artiklar](/hjalp/artiklar#kalkyl)), så ordern jämförs med artikelns **senaste förkalkyl som sparades före efterkalkylen** — den kalkyl som gällde när ordern efterkalkylerades. En förkalkyl som sparas senare ändrar alltså inte utfallet för en order som redan är efterkalkylerad, och två ordrar på samma artikel kan jämföras mot olika förkalkyler. Tas den förkalkyl bort som en order jämfördes mot, jämförs ordern i stället med närmast tidigare förkalkyl.
+
+Tillverkningskostnaden (TVK) jämförs **per styck** — förkalkylens och efterkalkylens antal kan skilja. **Avvikelse %** är efterkalkylens styck-TVK mot förkalkylens; rapportens nyckeltal är snittavvikelsen. En förkalkyl som gjordes med **Räkna om underliggande nivåer** märks **flernivå** på raden: den räknar halvfabrikaten till deras egen tillverkningskostnad medan efterkalkylen tar det pris de levererades in till, så en stor avvikelse där kan bero på metoden snarare än på tillverkningen.
+
+Under tabellen redovisas ordrar som **ej jämförbara**:
+
+- **utan jämförbar förkalkyl** — artikeln hade ingen sparad förkalkyl när efterkalkylen sparades, eller ordern är en [beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara), vars förkalkyl hör till konfigurationen och inte till mallartikeln.
+- **med ogiltigt antal** — förkalkylen eller efterkalkylen har antalet 0.
+
+En förkalkyl utan efterkalkylerad order räknas inte någonstans; den hör till artikeln och gör ingen order ojämförbar. Intervallet filtrerar på efterkalkylens datum, både för tabellen och för de ej jämförbara. TO-numret länkar till orderkortet.
+
 ## Marginal
 
 **Rapporter → Marginal** visar **täckningsbidraget** på fakturerad omsättning, grupperat per **Månad**, **Kund** eller **Artikel**. Underlaget är fakturaraderna (utfärdade och betalda fakturor), så nettoomsättningen stämmer med [Försäljningsstatistiken](#forsaljningsstatistik); kreditfakturor räknas med omvänt tecken.
@@ -58,8 +69,6 @@ Självkostnaden hämtas från artikelns **senaste sparade förkalkyl**, självko
 För en beställningsvara räknas TB mot konfigurationens förkalkyl från kundorderraden, inte mot mallartikelns egen kalkyl; går konfigurationens kostnad inte att räkna fram hamnar raden under **Utan kalkyl**.
 
 Kolumnerna är **Nettoomsättning**, **Självkostnad**, **TB** (täckningsbidrag), **TG** (täckningsgrad i procent, mot den omsättning som har en kalkyl) och **Utan kalkyl**. Negativ täckningsgrad tonas rött. Rapporten kan exporteras som CSV, där totalraden ingår.
-
-**Rapporter → Kalkylutfall** ställer förkalkyl mot efterkalkyl per tillverkningsorder: senaste förkalkylen jämförs med senaste efterkalkylen, och tillverkningskostnaden (TVK) jämförs **per styck** — för- och efterkalkylens antal kan skilja. **Avvikelse %** är efterkalkylens styck-TVK mot förkalkylens; rapportens nyckeltal är snittavvikelsen. Ordrar med enbart förkalkyl eller enbart efterkalkyl redovisas som ej jämförbara. Intervallet filtrerar på efterkalkylens datum. TO-numret länkar till orderkortet.
 
 ## Lagervärde
 

@@ -1,4 +1,4 @@
-import { inArray, isNotNull, eq, and, gte, lte, sql } from "drizzle-orm";
+import { inArray, isNotNull, isNull, eq, and, or, gte, lte, sql } from "drizzle-orm";
 import {
   articles,
   costCalculations,
@@ -107,12 +107,17 @@ export function createReportsRepository(db: Db) {
       }));
     },
 
-    // Every MO-linked cost calculation with order/article identity.
+    // The calculations Kalkylutfall pairs: every MO-linked post-calculation
+    // (with its order number, and whether the MO is a beställningsvara) and
+    // every article-level pre-calculation (manufacturing_order_id null — the
+    // only kind the costing module saves). The pure calc does the pairing.
     async loadCalculationRows(): Promise<CalcRowInput[]> {
       const rows = await db
         .select({
+          articleId: costCalculations.articleId,
           manufacturingOrderId: costCalculations.manufacturingOrderId,
           orderNumber: manufacturingOrders.orderNumber,
+          configured: sql<boolean>`(${manufacturingOrders.configuration} IS NOT NULL)`,
           articleNumber: articles.articleNumber,
           articleName: articles.name,
           type: costCalculations.type,
@@ -128,12 +133,19 @@ export function createReportsRepository(db: Db) {
           multiLevel: costCalculations.multiLevel,
         })
         .from(costCalculations)
-        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, costCalculations.manufacturingOrderId))
+        .leftJoin(manufacturingOrders, eq(manufacturingOrders.id, costCalculations.manufacturingOrderId))
         .innerJoin(articles, eq(articles.id, costCalculations.articleId))
-        .where(isNotNull(costCalculations.manufacturingOrderId));
+        .where(
+          or(
+            and(eq(costCalculations.type, "post"), isNotNull(costCalculations.manufacturingOrderId)),
+            and(eq(costCalculations.type, "pre"), isNull(costCalculations.manufacturingOrderId))
+          )
+        );
       return rows.map((r) => ({
-        manufacturingOrderId: r.manufacturingOrderId!,
+        articleId: r.articleId,
+        manufacturingOrderId: r.manufacturingOrderId,
         orderNumber: r.orderNumber,
+        configured: Boolean(r.configured),
         articleNumber: r.articleNumber,
         articleName: r.articleName,
         type: r.type,

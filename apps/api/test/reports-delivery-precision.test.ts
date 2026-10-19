@@ -182,7 +182,7 @@ describe("reports service — delivery precision", () => {
 });
 
 describe("reports service — calculation outcome", () => {
-  it("pairs seeded pre/post calculations per manufacturing order", async () => {
+  it("pairs the order's post-calculation with the article's earlier pre-calculation", async () => {
     const user = await makeUser();
     const article = await makeArticle("manufactured");
     const mo = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 10 }, user.id);
@@ -201,8 +201,10 @@ describe("reports service — calculation outcome", () => {
       generalMarkup: "0",
       salesPrice: "0",
     };
+    // A förkalkyl is saved on the article (no MO) — seeding it on the MO is
+    // what once hid that the report could never pair a real one.
     await db.insert(costCalculations).values([
-      { ...base, type: "pre" },
+      { ...base, type: "pre", manufacturingOrderId: null, calculatedAt: new Date(Date.now() - 60_000) },
       { ...base, type: "post", materialCost: "150" },
     ]);
 

@@ -138,8 +138,8 @@ export function KalkylutfallPageClient({
           </Card>
 
           <FormHint>
-            Ej jämförbara: {data.notComparable.onlyPre} med endast förkalkyl, {data.notComparable.onlyPost} med
-            endast efterkalkyl, {data.notComparable.invalidQuantity} med ogiltigt antal.
+            Ej jämförbara: {data.notComparable.onlyPost} utan jämförbar förkalkyl,{" "}
+            {data.notComparable.invalidQuantity} med ogiltigt antal.
           </FormHint>
         </>
       )}
