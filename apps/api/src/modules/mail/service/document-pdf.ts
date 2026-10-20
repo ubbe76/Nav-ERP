@@ -281,6 +281,8 @@ export interface DeliveryNoteRow {
   // Konfigurator 4b: the configured row's choices under the name — never
   // with prices (the delivery note carries no prices at all).
   configurationLines?: string[];
+  // Ångra utleverans: the row was undone — printed as a line under the name.
+  undoneAt?: Date | null;
 }
 
 export interface DeliveryNotePdfInput {
@@ -289,6 +291,8 @@ export interface DeliveryNotePdfInput {
   deliveredAt: Date;
   customerName: string;
   rows: DeliveryNoteRow[];
+  // Ångra utleverans: every row undone — the header says so.
+  undoneAt?: Date | null;
   customerOrderNumber?: string | null;
   customerReference?: string | null;
   deliveryAddress?: DeliveryAddressBlock | null;
@@ -1560,6 +1564,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
     doc.text(`Leveransdatum: ${input.deliveredAt.toISOString().slice(0, 10)}`, left, y);
     y += 14;
+    if (input.undoneAt) {
+      doc.font("Helvetica-Bold").text(`Ångrad ${formatStockholmDateTime(input.undoneAt)}`, left, y).font("Helvetica");
+      y += 14;
+    }
     doc.text(`Ordernummer: ${input.orderNumber}`, left, y);
     y += 14;
     doc.text(`Kund: ${input.customerName}`, left, y);
@@ -1614,7 +1622,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const nameHeight = doc.heightOfString(row.articleName, { width: DELIVERY_NOTE_COLS.articleName.w });
       // Konfigurator 4b: 8pt choice lines under the name, counted into the
       // row height (a plain row has none, so it is laid out exactly as before).
-      const cfgHeight = (row.configurationLines?.length ?? 0) * 11;
+      // An undone row gets one more 8pt line of the same kind.
+      const infoLines = [...(row.configurationLines ?? []), ...(row.undoneAt ? [`Ångrad ${formatStockholmDateTime(row.undoneAt)}`] : [])];
+      const cfgHeight = infoLines.length * 11;
       const rowHeight = Math.max(nameHeight + cfgHeight, 11) + 8;
       if (y + rowHeight > TABLE_BOTTOM) {
         doc.addPage();
@@ -1637,10 +1647,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         width: DELIVERY_NOTE_COLS.priorDelivered.w,
         align: "right",
       });
-      if (row.configurationLines && row.configurationLines.length > 0) {
+      if (infoLines.length > 0) {
         doc.fontSize(8).fillColor("#666666");
         let infoY = y + nameHeight + 1;
-        for (const line of row.configurationLines) {
+        for (const line of infoLines) {
           doc.text(line, left + DELIVERY_NOTE_COLS.articleName.x, infoY, { width: DELIVERY_NOTE_COLS.articleName.w });
           infoY += 11;
         }

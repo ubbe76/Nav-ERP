@@ -31,6 +31,7 @@ import { getNextOrderNumber } from "../../system/service/number-series.js";
 import type { TrackingEvent } from "../service/freight-provider.js";
 import type { ParcelArticle, ParcelDraft, ParcelPackageType } from "../service/parcels.js";
 import type { RecipientSource } from "../service/recipient.js";
+import { ShipmentDeliveryUndoneError } from "../service/shipping.errors.js";
 
 export interface FreightProductKey {
   carrierCode: string;
@@ -58,6 +59,30 @@ const TRACKING_LEASE_KEY = "freight_tracking_lease_until";
 const TRACKING_RUN_KEY = "freight_last_tracking_run_at";
 
 const ACTIVE_LINK_CONSTRAINT = "shipment_deliveries_active_delivery_unique";
+
+// A följesedel with at least one row that is not undone (Ångra utleverans).
+const hasLiveRows = sql`exists (select 1 from ${deliveryRows} where ${deliveryRows.deliveryId} = ${deliveries.id} and ${deliveryRows.undoneAt} is null)`;
+
+// Inside the link insert's transaction: locks the följesedlar FOR SHARE —
+// Ångra utleverans holds FOR UPDATE on the följesedel while it checks for a
+// live shipment, so either the undo sees this link or this check sees the
+// undo — and refuses one whose rows are all undone.
+async function assertDeliveriesLive(tx: Tx, deliveryIds: string[]) {
+  if (deliveryIds.length === 0) return;
+  const locked = await tx
+    .select({ id: deliveries.id, deliveryNumber: deliveries.deliveryNumber })
+    .from(deliveries)
+    .where(inArray(deliveries.id, deliveryIds))
+    .orderBy(asc(deliveries.id))
+    .for("share");
+  const live = await tx
+    .select({ id: deliveries.id })
+    .from(deliveries)
+    .where(and(inArray(deliveries.id, deliveryIds), hasLiveRows));
+  const liveIds = new Set(live.map((d) => d.id));
+  const undone = locked.find((d) => !liveIds.has(d.id));
+  if (undone) throw new ShipmentDeliveryUndoneError(undone.deliveryNumber);
+}
 
 // The partial unique index fired: the delivery is already in a live shipment.
 export function isActiveLinkViolation(err: unknown): boolean {
@@ -220,6 +245,8 @@ export function createShippingRepository(db: Db) {
           customerReference: salesOrders.customerReference,
           deliveryAddressId: salesOrders.deliveryAddressId,
           customerDefaultFreightProductId: customers.defaultFreightProductId,
+          // Ångra utleverans: false once every row is undone.
+          live: sql<boolean>`${hasLiveRows}`,
         })
         .from(deliveries)
         .innerJoin(salesOrders, eq(salesOrders.id, deliveries.salesOrderId))
@@ -260,7 +287,8 @@ export function createShippingRepository(db: Db) {
         .where(
           and(
             eq(salesOrders.customerId, customerId),
-            sql`not exists (select 1 from ${shipmentDeliveries} where ${shipmentDeliveries.deliveryId} = ${deliveries.id} and ${shipmentDeliveries.active})`
+            sql`not exists (select 1 from ${shipmentDeliveries} where ${shipmentDeliveries.deliveryId} = ${deliveries.id} and ${shipmentDeliveries.active})`,
+            hasLiveRows
           )
         )
         .orderBy(desc(deliveries.deliveredAt))
@@ -274,7 +302,8 @@ export function createShippingRepository(db: Db) {
         .select({ articleId: salesOrderRows.articleId, quantity: sql<string>`sum(${deliveryRows.quantity})` })
         .from(deliveryRows)
         .innerJoin(salesOrderRows, eq(salesOrderRows.id, deliveryRows.salesOrderRowId))
-        .where(inArray(deliveryRows.deliveryId, deliveryIds))
+        // Undone rows (Ångra utleverans) are back in stock, not in the parcel.
+        .where(and(inArray(deliveryRows.deliveryId, deliveryIds), isNull(deliveryRows.undoneAt)))
         .groupBy(salesOrderRows.articleId);
       return rows.map((r) => ({ articleId: r.articleId, quantity: Number(r.quantity) }));
     },
@@ -380,6 +409,7 @@ export function createShippingRepository(db: Db) {
 
     async insertShipment(values: NewShipment, deliveryIds: string[], parcels: ParcelDraft[]): Promise<string> {
       return db.transaction(async (tx) => {
+        await assertDeliveriesLive(tx, deliveryIds);
         const [row] = await tx.insert(shipments).values(values).returning({ id: shipments.id });
         await tx.insert(shipmentDeliveries).values(deliveryIds.map((deliveryId) => ({ shipmentId: row!.id, deliveryId })));
         await insertParcels(tx, row!.id, parcels);
@@ -476,8 +506,9 @@ export function createShippingRepository(db: Db) {
       await insertParcels(executor, id, parcels);
     },
 
-    async addDeliveryLink(executor: Db | Tx, shipmentId: string, deliveryId: string) {
-      await executor.insert(shipmentDeliveries).values({ shipmentId, deliveryId });
+    async addDeliveryLink(tx: Tx, shipmentId: string, deliveryId: string) {
+      await assertDeliveriesLive(tx, [deliveryId]);
+      await tx.insert(shipmentDeliveries).values({ shipmentId, deliveryId });
     },
 
     async removeDeliveryLink(executor: Db | Tx, shipmentId: string, deliveryId: string) {

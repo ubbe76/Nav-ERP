@@ -19,6 +19,7 @@ import { resolveRecipient, senderReferenceFor } from "./recipient.js";
 import { missingForBooking } from "./shipment-validation.js";
 import {
   DeliveryAlreadyShippedError,
+  ShipmentDeliveryUndoneError,
   FreightBookingInProgressError,
   FreightBookingTakenOverError,
   FreightCancelInProgressError,
@@ -259,6 +260,8 @@ export function createShippingService(deps: {
         return d;
       });
       if (new Set(ordered.map((d) => d.customerId)).size > 1) throw new MixedCustomersError();
+      const undone = ordered.find((d) => !d.live);
+      if (undone) throw new ShipmentDeliveryUndoneError(undone.deliveryNumber);
       await assertNotShipped(ids);
 
       const slot = await settings.nextPickup();
@@ -407,6 +410,7 @@ export function createShippingService(deps: {
     async addDelivery(id: string, deliveryId: string, userId: string | null) {
       const [delivery] = await repo.findDeliveries([deliveryId]);
       if (!delivery) throw new ShipmentDeliveryNotFoundError(deliveryId);
+      if (!delivery.live) throw new ShipmentDeliveryUndoneError(delivery.deliveryNumber);
       await assertNotShipped([deliveryId]);
       let warnings: string[];
       try {

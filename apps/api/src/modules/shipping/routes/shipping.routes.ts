@@ -26,6 +26,7 @@ import type { ShippingService } from "../service/shipping.service.js";
 import type { TrackingService } from "../service/tracking.service.js";
 import {
   DeliveryAlreadyShippedError,
+  ShipmentDeliveryUndoneError,
   FreightBookingInProgressError,
   FreightBookingTakenOverError,
   FreightCancelInProgressError,
@@ -98,6 +99,7 @@ export function mapShippingError(reply: FastifyReply, err: unknown): FastifyRepl
   if (
     err instanceof InvalidShipmentStatusError ||
     err instanceof DeliveryAlreadyShippedError ||
+    err instanceof ShipmentDeliveryUndoneError ||
     err instanceof FreightNotConfiguredError ||
     err instanceof FreightBookingInProgressError ||
     err instanceof FreightBookingTakenOverError ||

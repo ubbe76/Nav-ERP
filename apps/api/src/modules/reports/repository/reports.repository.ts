@@ -4,6 +4,7 @@ import {
   costCalculations,
   customers,
   deliveries,
+  deliveryRows,
   invoiceRows,
   invoices,
   manufacturingOrders,
@@ -63,7 +64,8 @@ const toIso = (raw: string | Date | null) => (raw == null ? null : new Date(raw)
 export function createReportsRepository(db: Db) {
   return {
     // Completed sales orders with promise + last delivery timestamp (null =
-    // delivered before C2's delivery occasions existed).
+    // delivered before C2's delivery occasions existed). A följesedel whose
+    // rows are all undone (Ångra utleverans) is no delivery.
     async loadSalesPrecisionOrders(): Promise<PrecisionOrderInput[]> {
       // Correlated MAX subquery. NOTE: the outer id must be qualified by hand —
       // in a join-free select drizzle renders ${salesOrders.id} as a bare "id",
@@ -72,7 +74,8 @@ export function createReportsRepository(db: Db) {
       // survives because its query has joins that force full qualification).
       const lastDelivery = sql<
         string | null
-      >`(SELECT MAX(d.delivered_at) FROM ${deliveries} d WHERE d.sales_order_id = ${sql.raw('"sales_orders"."id"')})`;
+      >`(SELECT MAX(d.delivered_at) FROM ${deliveries} d WHERE d.sales_order_id = ${sql.raw('"sales_orders"."id"')}
+          AND EXISTS (SELECT 1 FROM ${deliveryRows} r WHERE r.delivery_id = d.id AND r.undone_at IS NULL))`;
       const rows = await db
         .select({
           expectedDeliveryDate: salesOrders.expectedDeliveryDate,

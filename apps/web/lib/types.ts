@@ -1176,8 +1176,25 @@ export interface SalesDelivery {
   deliveryNumber: string;
   deliveredAt: string;
   rowCount: number;
+  // Rows undone by Ångra utleverans; undoneRowCount === rowCount ⇒ the whole följesedel is Ångrad.
+  undoneRowCount: number;
   // Frakt: the live (non-cancelled) shipment of this följesedel, if any.
   shipment: DeliveryShipmentInfo | null;
+}
+
+// GET /deliveries/:id/rows — quantities already in the row's unit.
+export interface DeliveryRowsResponse {
+  deliveryNumber: string;
+  rows: {
+    id: string;
+    articleNumber: string;
+    articleName: string;
+    quantity: number;
+    unit: string;
+    undoneAt: string | null;
+    undoneByName: string | null;
+    undoable: boolean;
+  }[];
 }
 
 // --- Kundfaktura (customer invoice) — C1 ---

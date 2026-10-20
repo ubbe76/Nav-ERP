@@ -36,7 +36,13 @@ import {
   CustomerNotFoundError,
   DeliveryAddressNotFoundError,
   DeliveryNotFoundError,
+  DeliveryOnShipmentError,
+  DeliveryRowAlreadyUndoneError,
+  DeliveryRowInvoicedError,
+  DeliveryRowNotFoundError,
   DeliveryRowNotInDeliveryError,
+  DeliveryRowNotUndoableError,
+  DeliveryUndoneError,
   DuplicateCustomerNumberError,
   InvalidStatusTransitionError,
   OverDeliveryError,
@@ -610,6 +616,27 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
     }
   });
 
+  // Ångra utleverans — reverses one delivery row (sales.service.ts's
+  // undoDeliveryRow); the module's write rule (forsaljning), same as deliver.
+  app.post<{ Params: { id: string; deliveryId: string; deliveryRowId: string } }>(
+    "/sales-orders/:id/deliveries/:deliveryId/rows/:deliveryRowId/undo",
+    async (req, reply) => {
+      try {
+        return await service.undoDeliveryRow(req.params.id, req.params.deliveryId, req.params.deliveryRowId, req.user!.id);
+      } catch (err) {
+        if (err instanceof DeliveryNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof DeliveryRowNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof DeliveryRowAlreadyUndoneError) return reply.code(409).send(errorBody(err));
+        if (err instanceof DeliveryRowNotUndoableError) return reply.code(409).send(errorBody(err));
+        if (err instanceof DeliveryOnShipmentError) return reply.code(409).send(errorBody(err));
+        if (err instanceof DeliveryRowInvoicedError) return reply.code(409).send(errorBody(err));
+        if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+        if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
   // Följesedel — the delivery note for one leveranstillfälle (delivery
   // occasion), not scoped under /sales-orders since a delivery's id is
   // already globally unique (same top-level shape as /deliveries elsewhere).
@@ -640,6 +667,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
     } catch (err) {
       if (err instanceof DeliveryNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DeliveryRowNotInDeliveryError) return reply.code(400).send(errorBody(err));
+      if (err instanceof DeliveryUndoneError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

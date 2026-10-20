@@ -597,8 +597,8 @@ describe("pallkort — delivery (GET /deliveries/:id/pallet-card)", () => {
 
     expect(rows.deliveryNumber).toBe(deliveryNumber);
     expect(rows.rows).toEqual([
-      { id: expect.any(String), articleNumber: "PALL-A", articleName: "Modul A", quantity: 10, unit: "st" },
-      { id: expect.any(String), articleNumber: "PALL-B", articleName: "Modul B", quantity: 5, unit: "st" },
+      { id: expect.any(String), articleNumber: "PALL-A", articleName: "Modul A", quantity: 10, unit: "st", undoneAt: null, undoneByName: null, undoable: true },
+      { id: expect.any(String), articleNumber: "PALL-B", articleName: "Modul B", quantity: 5, unit: "st", undoneAt: null, undoneByName: null, undoable: true },
     ]);
   });
 

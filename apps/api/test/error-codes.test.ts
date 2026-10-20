@@ -113,7 +113,17 @@ import {
   VatPeriodNotCoveredError,
 } from "../src/modules/economy/service/vat-report.service.js";
 
-import { OverDeliveryError, SalesOrderRowNotFoundError } from "../src/modules/sales/service/sales.service.js";
+import {
+  DeliveryNotFoundError,
+  DeliveryOnShipmentError,
+  DeliveryRowAlreadyUndoneError,
+  DeliveryRowInvoicedError,
+  DeliveryRowNotFoundError,
+  DeliveryRowNotUndoableError,
+  DeliveryUndoneError,
+  OverDeliveryError,
+  SalesOrderRowNotFoundError,
+} from "../src/modules/sales/service/sales.service.js";
 import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
@@ -124,7 +134,7 @@ import {
   RowConfigurationChangedError,
   RowVariantExistsError,
 } from "../src/modules/sales/service/sales.errors.js";
-import { ShipmentOnDraftInvoiceError } from "../src/modules/shipping/service/shipping.errors.js";
+import { ShipmentDeliveryUndoneError, ShipmentOnDraftInvoiceError } from "../src/modules/shipping/service/shipping.errors.js";
 import { InvalidOcrError, PaymentExceedsOpenAmountError, VerificationAlreadyReversedError } from "../src/modules/sales/service/payment.service.js";
 import {
   CollectiveInvoicingCustomerError,
@@ -351,6 +361,14 @@ const cases: Array<[Error, string]> = [
   [new PurchaseReceiptAlreadyUndoneError(), ERROR_CODES.PURCHASE_RECEIPT_ALREADY_UNDONE],
   [new PurchaseReceiptStockMissingError(1, 5), ERROR_CODES.PURCHASE_RECEIPT_STOCK_MISSING],
   [new PurchaseReceiptManufacturingOrderLockedError(), ERROR_CODES.PURCHASE_RECEIPT_MANUFACTURING_ORDER_LOCKED],
+  [new DeliveryNotFoundError("x"), ERROR_CODES.DELIVERY_NOT_FOUND],
+  [new DeliveryRowNotFoundError("x"), ERROR_CODES.DELIVERY_ROW_NOT_FOUND],
+  [new DeliveryRowAlreadyUndoneError(), ERROR_CODES.DELIVERY_ROW_ALREADY_UNDONE],
+  [new DeliveryRowNotUndoableError(), ERROR_CODES.DELIVERY_ROW_NOT_UNDOABLE],
+  [new DeliveryOnShipmentError("FS-1", "FR-1"), ERROR_CODES.DELIVERY_ON_SHIPMENT],
+  [new DeliveryRowInvoicedError(6, 0), ERROR_CODES.DELIVERY_ROW_INVOICED],
+  [new DeliveryUndoneError("FS-1"), ERROR_CODES.DELIVERY_UNDONE],
+  [new ShipmentDeliveryUndoneError("FS-1"), ERROR_CODES.SHIPMENT_DELIVERY_UNDONE],
   [new PriceListInUseError("PL1"), ERROR_CODES.PRICE_LIST_IN_USE],
   [new DuplicatePriceListRowError(10), ERROR_CODES.DUPLICATE_PRICE_LIST_ROW],
   [new InvalidOcrError("123"), ERROR_CODES.INVALID_OCR],

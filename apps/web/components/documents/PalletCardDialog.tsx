@@ -6,16 +6,12 @@ import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { FormActions, FormError } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
+import type { DeliveryRowsResponse } from "../../lib/types";
 
 // Pallkort: one card per kolli, each kolli with its own quantity. "single" =
 // one operation or report; "delivery" = a block per delivery row (0 kolli
 // skips the row). A summary line warns when the kolli don't add up to the
 // total; printing then needs the system setting that allows a mismatch.
-
-interface DeliveryRowsResponse {
-  deliveryNumber: string;
-  rows: { id: string; articleNumber: string; articleName: string; quantity: number; unit: string }[];
-}
 
 export type PalletCardTarget =
   | { kind: "single"; url: string; quantity: number | null; unit?: string }
@@ -252,6 +248,7 @@ function DeliveryForm({ deliveryId, onClose }: { deliveryId: string; onClose: ()
   useEffect(() => {
     let cancelled = false;
     apiFetch<DeliveryRowsResponse>(`/api/v1/deliveries/${deliveryId}/rows`)
+      .then((full) => ({ ...full, rows: full.rows.filter((r) => r.undoneAt === null) }))
       .then((res) => {
         if (cancelled) return;
         setData(res);

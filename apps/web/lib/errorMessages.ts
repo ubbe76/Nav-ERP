@@ -299,6 +299,16 @@ const MESSAGES: Record<string, MessageEntry> = {
   "purchase-receipt-stock-missing": serverMessage("De inlevererade varorna finns inte kvar på lagerplatsen."),
   "purchase-receipt-manufacturing-order-locked":
     "Tillverkningsordern som legoraden hör till är inte längre öppen — inleveransen kan inte ångras.",
+  // Ångra utleverans
+  "delivery-not-found": "Följesedeln finns inte — ladda om sidan.",
+  "delivery-row-not-found": "Följesedelsraden finns inte — ladda om sidan.",
+  "delivery-row-already-undone": "Raden är redan ångrad — ladda om sidan.",
+  "delivery-row-not-undoable": "Leveransen gjordes innan Nav sparade lagerplatsen och kan inte ångras.",
+  "delivery-on-shipment": serverMessage("Följesedeln ligger på en försändelse — ta bort den därifrån eller avboka först."),
+  "delivery-row-invoiced": serverMessage("Raden är fakturerad — kreditera fakturan eller ta bort fakturautkastet först."),
+  "delivery-undone": "Följesedeln är ångrad — pallkort kan inte skrivas ut.",
+  "shipment-delivery-undone": serverMessage("Följesedeln är ångrad och kan inte ligga på en försändelse."),
+  "location-under-stock-count": serverMessage("Lagerplatsen är under inventering — försök igen när inventeringen är klar."),
   // Produktionsplanering (Flytta / Lås upp)
   "operation-not-found": "Operationen finns inte — ladda om beläggningen.",
   "operation-not-plannable": serverMessage("Operationen kan inte planeras — den är klar, en legooperation, utan tid eller ordern är inte öppen."),

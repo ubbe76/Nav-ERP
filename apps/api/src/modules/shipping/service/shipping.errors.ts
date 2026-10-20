@@ -42,6 +42,15 @@ export class DeliveryAlreadyShippedError extends Error {
   }
 }
 
+// Ångra utleverans: every row of the följesedel has been undone — nothing
+// left to ship.
+export class ShipmentDeliveryUndoneError extends Error {
+  constructor(readonly deliveryNumber: string) {
+    super(`Följesedel ${deliveryNumber} är ångrad — det finns inget kvar att skicka`);
+    this.name = "ShipmentDeliveryUndoneError";
+  }
+}
+
 export class MixedCustomersError extends Error {
   constructor() {
     super("Följesedlarna i en försändelse måste gå till samma kund");

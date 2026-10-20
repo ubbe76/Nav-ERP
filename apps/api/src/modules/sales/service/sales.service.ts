@@ -239,6 +239,62 @@ export class DeliveryRowNotInDeliveryError extends Error {
   }
 }
 
+// --- Ångra utleverans ---
+
+export class DeliveryRowNotFoundError extends Error {
+  constructor(deliveryRowId: string) {
+    super(`Delivery row ${deliveryRowId} not found`);
+    this.name = "DeliveryRowNotFoundError";
+  }
+}
+
+export class DeliveryRowAlreadyUndoneError extends Error {
+  constructor() {
+    super("The delivery row has already been undone");
+    this.name = "DeliveryRowAlreadyUndoneError";
+  }
+}
+
+// A delivery the 0132 backfill could not pair with its stock movement — there
+// is no record of where the goods were taken from.
+export class DeliveryRowNotUndoableError extends Error {
+  constructor() {
+    super("The delivery predates the stock link and cannot be undone");
+    this.name = "DeliveryRowNotUndoableError";
+  }
+}
+
+// Swedish — the web shows it as is (names the shipment).
+export class DeliveryOnShipmentError extends Error {
+  constructor(deliveryNumber: string, shipmentNumber: string) {
+    super(
+      `Följesedel ${deliveryNumber} ligger på försändelse ${shipmentNumber} — ta bort den ur försändelsen, eller avboka försändelsen, först`
+    );
+    this.name = "DeliveryOnShipmentError";
+  }
+}
+
+// Swedish — the web shows it as is. Quantities in the article's base unit.
+export class DeliveryRowInvoicedError extends Error {
+  constructor(
+    readonly invoiced: number,
+    readonly deliveredAfter: number
+  ) {
+    super(
+      `Raden är fakturerad (${invoiced.toLocaleString("sv-SE")}) och levererat antal skulle bli ${deliveredAfter.toLocaleString("sv-SE")} — kreditera fakturan eller ta bort fakturautkastet först`
+    );
+    this.name = "DeliveryRowInvoicedError";
+  }
+}
+
+// Pallkort for a följesedel whose rows are all undone — nothing left to ship.
+export class DeliveryUndoneError extends Error {
+  constructor(deliveryNumber: string) {
+    super(`Delivery ${deliveryNumber} has been undone`);
+    this.name = "DeliveryUndoneError";
+  }
+}
+
 
 // "TERM01 · Fritt vårt lager"-strings for the PDF's terms lines.
 // Konfigurator 4c: a configured row's stored förkalkyl
@@ -1448,6 +1504,57 @@ export function createSalesService(
       }
     },
 
+    // Ångra utleverans: reverses one delivery row — the goods back to the
+    // location they were taken from, the order row's delivered quantity and
+    // the order status. All in one transaction; see repo.undoDeliveryRow.
+    async undoDeliveryRow(orderId: string, deliveryId: string, deliveryRowId: string, userId: string) {
+      const result = await repo.undoDeliveryRow(orderId, deliveryId, deliveryRowId, { undoneBy: userId });
+      if (!result.ok) {
+        switch (result.reason) {
+          case "delivery_not_found":
+            throw new DeliveryNotFoundError(deliveryId);
+          case "row_not_found":
+            throw new DeliveryRowNotFoundError(deliveryRowId);
+          case "already_undone":
+            throw new DeliveryRowAlreadyUndoneError();
+          case "not_undoable":
+            throw new DeliveryRowNotUndoableError();
+          case "invalid_status":
+            throw new InvalidStatusTransitionError(
+              `Deliveries can only be undone while the order is in production or delivered (it is ${result.status})`
+            );
+          case "on_shipment": {
+            const delivery = await repo.getDeliveryForPdf(deliveryId);
+            throw new DeliveryOnShipmentError(delivery?.deliveryNumber ?? "", result.shipmentNumber);
+          }
+          case "invoiced":
+            throw new DeliveryRowInvoicedError(result.invoiced, result.deliveredAfter);
+        }
+      }
+
+      const article = await articleFiles.getArticle(result.articleId);
+      await audit.log({
+        entityType: "delivery",
+        entityId: result.deliveryNumber,
+        action: "delivery_row_undone",
+        detail: {
+          orderNumber: result.orderNumber,
+          articleNumber: article?.articleNumber ?? null,
+          quantity: Number(result.deliveryRow.quantity),
+          locationId: result.locationId,
+          ...(result.statusBefore !== result.orderStatus
+            ? { statusBefore: result.statusBefore, statusAfter: result.orderStatus }
+            : {}),
+        },
+        userId,
+      });
+      return {
+        deliveryRowId: result.deliveryRow.id,
+        undoneAt: result.deliveryRow.undoneAt,
+        orderStatus: result.orderStatus,
+      };
+    },
+
     // Newest first — the delivery history section on the order card, with the
     // live shipment (Frakt) of each följesedel when the shipping module is wired.
     async listDeliveries(orderId: string) {
@@ -1478,6 +1585,8 @@ export function createSalesService(
         documentNumber: delivery.deliveryNumber,
         orderNumber: delivery.orderNumber,
         deliveredAt: delivery.deliveredAt,
+        // Ångra utleverans: the note stays printable, marked.
+        undoneAt: delivery.undoneAt,
         customerName: delivery.customerName,
         customerOrderNumber: delivery.customerOrderNumber,
         customerReference: delivery.customerReference,
@@ -1497,6 +1606,7 @@ export function createSalesService(
           quantity: toUnitQuantity(Number(r.quantity), r.unitFactor),
           unit: r.unitCode,
           priorDelivered: toUnitQuantity(r.priorDelivered, r.unitFactor),
+          undoneAt: r.undoneAt,
           // The delivery note carries no prices at all — choices only.
           configurationLines: rowConfigurationLines(r.configuration, false),
         })),
@@ -1518,14 +1628,18 @@ export function createSalesService(
       const delivery = await repo.getDeliveryForPdf(deliveryId);
       if (!delivery) throw new DeliveryNotFoundError(deliveryId);
 
-      const byId = new Map(delivery.rows.map((r) => [r.deliveryRowId, r]));
+      // Ångra utleverans: undone rows left the delivery — a picked one is "not
+      // on the följesedel", and with every row undone there is no card.
+      const liveRows = delivery.rows.filter((r) => r.undoneAt === null);
+      if (liveRows.length === 0) throw new DeliveryUndoneError(delivery.deliveryNumber);
+      const byId = new Map(liveRows.map((r) => [r.deliveryRowId, r]));
       const picks = selection
         ? selection.map((s) => {
             const row = byId.get(s.deliveryRowId);
             if (!row) throw new DeliveryRowNotInDeliveryError(s.deliveryRowId);
             return { row, quantities: s.quantities };
           })
-        : delivery.rows.map((row) => ({ row, quantities: [toUnitQuantity(Number(row.quantity), row.unitFactor)] }));
+        : liveRows.map((row) => ({ row, quantities: [toUnitQuantity(Number(row.quantity), row.unitFactor)] }));
 
       // Kod på pallkort: the customer's own choice, else the system setting.
       const code = delivery.customerPalletCardCode ?? (await settings.getSettings()).palletCardCode;
@@ -1575,6 +1689,10 @@ export function createSalesService(
           articleName: r.articleName,
           quantity: toUnitQuantity(Number(r.quantity), r.unitFactor),
           unit: r.unitCode,
+          // Ångra utleverans dialog; the pallet card dialog shows live rows.
+          undoneAt: r.undoneAt,
+          undoneByName: r.undoneByName,
+          undoable: r.undoable,
         })),
       };
     },

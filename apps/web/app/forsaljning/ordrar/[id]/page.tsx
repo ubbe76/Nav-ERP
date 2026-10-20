@@ -6,6 +6,7 @@ import { SalesOrderDetail } from "../../../../components/sales/SalesOrderDetail"
 import { MailSection, type SendButtonConfig } from "../../../../components/mail/MailSection";
 import { AuditTrailSection } from "../../../../components/system/AuditTrailSection";
 import { Table } from "../../../../components/ui/Table";
+import { UndoDeliveryButton } from "../../../../components/sales/UndoDeliveryDialog";
 import { BookTransportButton } from "../../../../components/shipping/BookTransportButton";
 import { apiGet } from "../../../../lib/api";
 import { countDrawings, getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
@@ -21,6 +22,11 @@ import type {
 import shellStyles from "../../../../components/AppShell.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
 import { SectionHeading } from "../../../../components/ui/SectionHeading";
+
+// Ångra utleverans: a följesedel whose rows are all undone.
+function isUndone(delivery: SalesDelivery) {
+  return delivery.rowCount > 0 && delivery.undoneRowCount === delivery.rowCount;
+}
 
 export default async function SalesOrderDetailPage(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
@@ -119,20 +125,32 @@ export default async function SalesOrderDetailPage(props: { params: Promise<{ id
             renderCell={(row, key) => {
               switch (key) {
                 case "deliveryNumber":
-                  return row.deliveryNumber;
+                  return isUndone(row) ? (
+                    <span>
+                      {row.deliveryNumber}{" "}
+                      <span style={{ background: "var(--status-stopped-bg)", color: "var(--status-stopped-text)", padding: "1px 8px", borderRadius: "var(--radius-control-sm)", fontSize: 12, fontWeight: 600 }}>
+                        Ångrad
+                      </span>
+                    </span>
+                  ) : (
+                    row.deliveryNumber
+                  );
                 case "deliveredAt":
                   return new Date(row.deliveredAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
                 case "rowCount":
                   return row.rowCount;
                 case "shipment":
-                  return <BookTransportButton deliveryId={row.id} shipment={row.shipment} enabled={freightStatus.enabled} />;
+                  return isUndone(row) ? null : <BookTransportButton deliveryId={row.id} shipment={row.shipment} enabled={freightStatus.enabled} />;
                 case "id":
                   return (
                     <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>
                       <a href={`/api/v1/deliveries/${row.id}/pdf`} target="_blank" rel="noopener noreferrer">
                         PDF
                       </a>
-                      <PalletCardButton deliveryId={row.id} />
+                      {!(isUndone(row)) && <PalletCardButton deliveryId={row.id} />}
+                      {!(isUndone(row)) && (
+                        <UndoDeliveryButton orderId={order.id} deliveryId={row.id} orderStatus={order.status} />
+                      )}
                     </span>
                   );
                 default:

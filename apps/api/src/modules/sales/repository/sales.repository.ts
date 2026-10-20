@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
   articleGroups,
@@ -24,6 +24,7 @@ import {
   shipments,
   stockTransactions,
   units,
+  users,
   type Db,
 } from "@navet/db";
 import {
@@ -60,6 +61,7 @@ import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js"
 import { PriceListInUseError, RowHasManufacturingOrdersError } from "../service/sales.errors.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
+import { getInvoicedQuantitiesWith } from "./invoice.repository.js";
 
 // Leveranstillfälle (delivery occasion) — C2. The whole batch is one
 // transaction: every row goes through the exact per-row guard/lock/booking
@@ -105,6 +107,25 @@ export type DeliverBatchResult =
     }
   | { ok: false; reason: "order_not_found" | "invalid_status" }
   | { ok: false; reason: "row_not_found" | "over_delivery"; rowId: string };
+
+// Ångra utleverans — one delivery row reversed (see undoDeliveryRow below).
+// Every refusal is decided before anything is written, so returning it from
+// inside the transaction commits nothing.
+export type UndoDeliveryRowResult =
+  | {
+      ok: true;
+      deliveryRow: typeof deliveryRows.$inferSelect;
+      deliveryNumber: string;
+      orderNumber: string;
+      articleId: string;
+      locationId: string;
+      statusBefore: SalesOrderStatus;
+      orderStatus: SalesOrderStatus;
+    }
+  | { ok: false; reason: "delivery_not_found" | "row_not_found" | "already_undone" | "not_undoable" }
+  | { ok: false; reason: "invalid_status"; status: SalesOrderStatus }
+  | { ok: false; reason: "on_shipment"; shipmentNumber: string }
+  | { ok: false; reason: "invoiced"; invoiced: number; deliveredAfter: number };
 
 // Internal control-flow signals only — never leave deliverBatch below.
 // db.transaction() only rolls back on a THROWN error: a plain `{ ok: false }`
@@ -156,6 +177,11 @@ export type RowConfigurationMutationResult =
     };
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+// Quantities live in numeric(14,4) — compare and store at that precision.
+function round4(n: number): number {
+  return Math.round((n + Number.EPSILON) * 10000) / 10000;
+}
 
 // Ny leveransadress on an order (create or header PATCH), inside the order's
 // own transaction: an engångsadress unless Spara på kunden is ticked. Never
@@ -1011,6 +1037,9 @@ export function createSalesRepository(db: Db) {
           }
 
           const updatedRows: (typeof salesOrderRows.$inferSelect)[] = [];
+          // Ångra utleverans: where each row's goods were taken from and the
+          // movement that took them, written on its delivery_rows row below.
+          const links: { locationId: string; stockTransactionId: string }[] = [];
           for (const r of input.rows) {
             const [row] = await tx
               .select()
@@ -1032,14 +1061,18 @@ export function createSalesRepository(db: Db) {
 
             const locationId = await resolveStockLocation(tx, row.articleId, input.locationId);
             await assertLocationNotUnderCount(tx, locationId);
-            await tx.insert(stockTransactions).values({
-              articleId: row.articleId,
-              locationId,
-              quantityDelta: String(-r.quantity),
-              transactionType: "sales_delivery",
-              referenceId: orderId,
-              createdBy: input.createdBy,
-            });
+            const [movement] = await tx
+              .insert(stockTransactions)
+              .values({
+                articleId: row.articleId,
+                locationId,
+                quantityDelta: String(-r.quantity),
+                transactionType: "sales_delivery",
+                referenceId: orderId,
+                createdBy: input.createdBy,
+              })
+              .returning({ id: stockTransactions.id });
+            links.push({ locationId, stockTransactionId: movement!.id });
             // The delivery may have emptied the location.
             await deactivateEmptyLocation(tx, locationId);
 
@@ -1055,10 +1088,12 @@ export function createSalesRepository(db: Db) {
             .values({ salesOrderId: orderId, deliveryNumber, createdBy: input.createdBy })
             .returning();
           await tx.insert(deliveryRows).values(
-            input.rows.map((r) => ({
+            input.rows.map((r, i) => ({
               deliveryId: delivery!.id,
               salesOrderRowId: r.rowId,
               quantity: String(r.quantity),
+              locationId: links[i]!.locationId,
+              stockTransactionId: links[i]!.stockTransactionId,
             }))
           );
 
@@ -1084,6 +1119,109 @@ export function createSalesRepository(db: Db) {
       }
     },
 
+    // Ångra utleverans: reverses ONE delivery row in one transaction — the
+    // goods back to the location they were taken from (a positive
+    // sales_delivery movement without unit_cost, so the moving average only
+    // sees the quantity), the order row's delivered quantity down, the order
+    // status re-derived (Levererad → Under tillverkning) and the row stamped
+    // undone. Refused while the följesedel is on a live shipment and when
+    // the order row would end up delivered below what is invoiced — drafts
+    // included (the user's decision: a draft must stay issuable). Lock order
+    // följesedel → delivery row → order row → order: row → order is the
+    // order deliverBatch, updateRow and invoice issue take; the följesedel
+    // lock first serialises against a shipment being created for it (its
+    // link insert takes FOR KEY SHARE, and insertShipment/addDeliveryLink
+    // lock it FOR SHARE).
+    async undoDeliveryRow(
+      orderId: string,
+      deliveryId: string,
+      deliveryRowId: string,
+      input: { undoneBy: string }
+    ): Promise<UndoDeliveryRowResult> {
+      return db.transaction(async (tx) => {
+        const [delivery] = await tx
+          .select()
+          .from(deliveries)
+          .where(and(eq(deliveries.id, deliveryId), eq(deliveries.salesOrderId, orderId)))
+          .for("update");
+        if (!delivery) return { ok: false, reason: "delivery_not_found" };
+
+        const [deliveryRow] = await tx
+          .select()
+          .from(deliveryRows)
+          .where(and(eq(deliveryRows.id, deliveryRowId), eq(deliveryRows.deliveryId, deliveryId)))
+          .for("update");
+        if (!deliveryRow) return { ok: false, reason: "row_not_found" };
+        if (deliveryRow.undoneAt) return { ok: false, reason: "already_undone" };
+        if (!deliveryRow.stockTransactionId || !deliveryRow.locationId) return { ok: false, reason: "not_undoable" };
+
+        const [orderRow] = await tx
+          .select()
+          .from(salesOrderRows)
+          .where(eq(salesOrderRows.id, deliveryRow.salesOrderRowId))
+          .for("update");
+        const [order] = await tx.select().from(salesOrders).where(eq(salesOrders.id, orderId)).for("update");
+        if (!orderRow || !order) return { ok: false, reason: "row_not_found" };
+        if (order.status !== "in_production" && order.status !== "delivered") {
+          return { ok: false, reason: "invalid_status", status: order.status };
+        }
+
+        const [shipment] = await tx
+          .select({ shipmentNumber: shipments.shipmentNumber })
+          .from(shipmentDeliveries)
+          .innerJoin(shipments, eq(shipments.id, shipmentDeliveries.shipmentId))
+          .where(and(eq(shipmentDeliveries.deliveryId, deliveryId), eq(shipmentDeliveries.active, true)));
+        if (shipment) return { ok: false, reason: "on_shipment", shipmentNumber: shipment.shipmentNumber };
+
+        const quantity = Number(deliveryRow.quantity);
+        const deliveredAfter = Math.max(round4(Number(orderRow.quantityDelivered) - quantity), 0);
+        const invoiced = (await getInvoicedQuantitiesWith(tx, [orderRow.id], { includeDrafts: true })).get(orderRow.id) ?? 0;
+        if (round4(invoiced) > deliveredAfter) return { ok: false, reason: "invoiced", invoiced, deliveredAfter };
+
+        // An explicit location is reactivated if the delivery emptied it.
+        const locationId = await resolveStockLocation(tx, orderRow.articleId, deliveryRow.locationId);
+        await assertLocationNotUnderCount(tx, locationId);
+        await tx.insert(stockTransactions).values({
+          articleId: orderRow.articleId,
+          locationId,
+          quantityDelta: String(quantity),
+          transactionType: "sales_delivery",
+          referenceId: orderId,
+          createdBy: input.undoneBy,
+        });
+
+        await tx
+          .update(salesOrderRows)
+          .set({ quantityDelivered: String(deliveredAfter) })
+          .where(eq(salesOrderRows.id, orderRow.id));
+        const [undone] = await tx
+          .update(deliveryRows)
+          .set({ undoneAt: new Date(), undoneBy: input.undoneBy })
+          .where(eq(deliveryRows.id, deliveryRow.id))
+          .returning();
+
+        let orderStatus: SalesOrderStatus = order.status;
+        if (order.status === "delivered") {
+          const allRows = await tx.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, orderId));
+          if (!allRows.every((r) => Number(r.quantityDelivered) >= Number(r.quantityOrdered))) {
+            orderStatus = "in_production";
+            await tx.update(salesOrders).set({ status: orderStatus, updatedAt: new Date() }).where(eq(salesOrders.id, orderId));
+          }
+        }
+
+        return {
+          ok: true,
+          deliveryRow: undone!,
+          deliveryNumber: delivery.deliveryNumber,
+          orderNumber: order.orderNumber,
+          articleId: orderRow.articleId,
+          locationId,
+          statusBefore: order.status,
+          orderStatus,
+        };
+      });
+    },
+
     // Newest first — the delivery history on the order card. rowCount comes
     // from a left join + count so a delivery is never silently dropped by an
     // inner join if a row is ever missing (defensive; delivery_rows are
@@ -1095,6 +1233,9 @@ export function createSalesRepository(db: Db) {
           deliveryNumber: deliveries.deliveryNumber,
           deliveredAt: deliveries.deliveredAt,
           rowCount: count(deliveryRows.id),
+          // Ångra utleverans: count() skips nulls — the undone rows. All of
+          // them undone = the följesedel is undone.
+          undoneRowCount: count(deliveryRows.undoneAt),
         })
         .from(deliveries)
         .leftJoin(deliveryRows, eq(deliveryRows.deliveryId, deliveries.id))
@@ -1141,12 +1282,19 @@ export function createSalesRepository(db: Db) {
       if (!delivery) return null;
 
       const rowUnits = alias(units, "row_units");
+      const undoneByUser = alias(users, "undone_by_user");
       const [rows, occasions] = await Promise.all([
         db
           .select({
             deliveryRowId: deliveryRows.id,
             salesOrderRowId: deliveryRows.salesOrderRowId,
             quantity: deliveryRows.quantity,
+            // Ångra utleverans: the row's undo stamp, and whether it can be
+            // undone at all (a row the 0132 backfill could not pair has no
+            // stock link).
+            undoneAt: deliveryRows.undoneAt,
+            undoneByName: undoneByUser.name,
+            stockTransactionId: deliveryRows.stockTransactionId,
             articleNumber: articles.articleNumber,
             articleName: articles.name,
             unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
@@ -1160,6 +1308,7 @@ export function createSalesRepository(db: Db) {
           .innerJoin(articles, eq(articles.id, salesOrderRows.articleId))
           .innerJoin(units, eq(units.id, articles.unitId))
           .leftJoin(rowUnits, eq(rowUnits.id, salesOrderRows.unitId))
+          .leftJoin(undoneByUser, eq(undoneByUser.id, deliveryRows.undoneBy))
           .where(eq(deliveryRows.deliveryId, deliveryId))
           .orderBy(asc(salesOrderRows.createdAt), asc(salesOrderRows.id)),
         // Every occasion on the order, oldest first — pins down "this and
@@ -1178,12 +1327,23 @@ export function createSalesRepository(db: Db) {
       const laterSums = await db
         .select({ salesOrderRowId: deliveryRows.salesOrderRowId, total: sql<string>`sum(${deliveryRows.quantity})` })
         .from(deliveryRows)
-        .where(inArray(deliveryRows.deliveryId, laterDeliveryIds))
+        // Undone rows are already out of quantity_delivered — subtracting
+        // them again would understate what went before.
+        .where(and(inArray(deliveryRows.deliveryId, laterDeliveryIds), isNull(deliveryRows.undoneAt)))
         .groupBy(deliveryRows.salesOrderRowId);
       const laterMap = new Map(laterSums.map((s) => [s.salesOrderRowId, Number(s.total)]));
 
+      // The följesedel counts as undone once every row is — stamped with the
+      // last undo.
+      const undoneStamps = rows.map((r) => r.undoneAt);
+      const undoneAt =
+        rows.length > 0 && undoneStamps.every((d) => d !== null)
+          ? new Date(Math.max(...undoneStamps.map((d) => d!.getTime())))
+          : null;
+
       return {
         ...delivery,
+        undoneAt,
         rows: rows.map((r) => ({
           deliveryRowId: r.deliveryRowId,
           articleNumber: r.articleNumber,
@@ -1193,6 +1353,9 @@ export function createSalesRepository(db: Db) {
           unitFactor: r.unitFactor,
           priorDelivered: Math.max(0, Number(r.quantityDelivered) - (laterMap.get(r.salesOrderRowId) ?? 0)),
           configuration: r.configuration,
+          undoneAt: r.undoneAt,
+          undoneByName: r.undoneByName,
+          undoable: r.undoneAt === null && r.stockTransactionId !== null,
         })),
       };
     },

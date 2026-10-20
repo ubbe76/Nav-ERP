@@ -82,9 +82,11 @@ class CommitOverCreditingError extends Error {}
 // Shared invoiced-quantity aggregation, parameterized by executor so the
 // order-status recompute (which must run inside issueInvoice's own tx) and
 // the repository's plain-db getInvoicedQuantities share one implementation.
+// Ångra utleverans (sales.repository.ts's undoDeliveryRow) reads it inside its
+// own transaction too, drafts included.
 // Credits count negative — the CASE expression is the ONLY place the sign
 // convention lives on the aggregation side.
-async function getInvoicedQuantitiesWith(
+export async function getInvoicedQuantitiesWith(
   executor: Db | Tx,
   salesOrderRowIds: string[],
   opts: { includeDrafts: boolean }

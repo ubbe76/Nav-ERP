@@ -210,7 +210,7 @@ Rader vars artikel saknar förkalkyl kan inte mätas. De ingår i orderns summa 
 
 1. **Bekräfta** — offerten blir kundorder. Rader kan läggas till (**Lägg till rad** i knappraden), ändras (**Ändra** — antal, enhet, á-pris och rabatt) och tas bort (**Ta bort**) så länge ordern är i status Offert, Bekräftad eller Under tillverkning; antalet kan aldrig sättas under det som redan är levererat, och en rad med levererat gods eller en kopplad tillverkningsorder kan inte tas bort — kopplingen blockerar borttagning även om tillverkningsordern har avbrutits, men en avbruten TO räknas inte längre med i kolumnen **I tillverkning**.
 2. **Starta tillverkning** — markerar att tillverkning pågår. En rad med en tillverkningsartikel kan i stället kopplas till en riktig tillverkningsorder med knappen **Skapa tillverkningsorder** direkt på raden (kräver status Bekräftad eller Under tillverkning) — se [Skapa från kundorder](/hjalp/tillverkning#skapa-fran-kundorder). Det flyttar automatiskt ordern till **Under tillverkning** om den inte redan är det, och raden får kolumnen **I tillverkning** med det kopplade antalet och en länk till tillverkningsordern. På en konfigurerad beställningsvarurad finns knappen också; tillverkningsordern får radens val (se [Tillverkningsorder för beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara)).
-3. **Leverera** — ange rad, lagerplats och antal i dialogen; ett utleveranssaldo bokförs i lagret och en följesedel skapas (se [Följesedel](#foljesedel)). Delleveranser stöds. Hela ordern rapporteras smidigast i rutinen [Utleverans](#utleverans), som nås direkt med knappen **Utleveransrutinen**.
+3. **Leverera** — ange rad, lagerplats och antal i dialogen; ett utleveranssaldo bokförs i lagret och en följesedel skapas (se [Följesedel](#foljesedel)). Delleveranser stöds. Hela ordern rapporteras smidigast i rutinen [Utleverans](#utleverans), som nås direkt med knappen **Utleveransrutinen**. En felrapporterad leverans ångras rad för rad (se [Ångra utleverans](#angra-utleverans)); en **Levererad** order går då tillbaka till **Under tillverkning**.
 4. **Fakturera** — synlig när ordern är **Levererad**; knappen tar dig till **Försäljning → Fakturor** med skapa-dialogen förifylld på ordern (se [Fakturor](#fakturor)). Knappen tilldelar inget fakturanummer själv — det sker när fakturan **utfärdas** i fakturamodulen — och ordern blir automatiskt **Fakturerad** först när alla dess rader är fullt fakturerade.
 5. **Avbryt order** — möjligt i status Offert och Bekräftad.
 
@@ -540,6 +540,26 @@ Varje leveranstillfälle — via utleveransrutinen eller kundorderkortets **Leve
 - Kundorderkortet listar alla leveranstillfällen under rubriken **Följesedlar**: FS-nummer, datum, antal rader och en PDF-länk per tillfälle. Listan visas bara när ordern har minst en leverans.
 
 > Externa system (t.ex. en produktkonfigurator) kan skapa offerter programmatiskt via API:t — se [System & inställningar](/hjalp/system) om integrationer.
+
+### Ångra utleverans
+
+Har en leverans rapporterats fel kan den ångras i efterhand. På kundorderkortet, i listan **Följesedlar**, öppnar **Ångra…** dialogen **Ångra utleverans** med följesedelns rader (artikel, benämning och levererat antal). Knappen visas bara när ordern är **Under tillverkning** eller **Levererad** och du har behörighet till Försäljning.
+
+- Varje rad ångras för sig med knappen **Ångra** och alltid med hela sitt levererade antal. Du får först en bekräftelsefråga.
+- Varorna läggs tillbaka på den lagerplats de togs från. Hade leveransen tömt platsen och gjort den inaktiv aktiveras den igen.
+- Radens levererade antal på kundordern minskar, och en **Levererad** order går tillbaka till **Under tillverkning**.
+- Ångrade rader ligger kvar i dialogen, överstrukna och märkta **Ångrad** med tid och namn.
+- När alla rader på en följesedel är ångrade visas följesedeln som **Ångrad** i listan. Den går fortfarande att skriva ut — PDF:en markerar de ångrade raderna och rubriken **Ångrad** — men **Pallkort** och **Boka transport** finns inte längre för den.
+
+En rad kan inte ångras när:
+
+- raden är fakturerad, även på ett fakturautkast — kreditera fakturan eller ta bort utkastet först.
+- följesedeln ligger på en försändelse — ta bort den från försändelseutkastet eller avboka försändelsen först.
+- ordern har en annan status än **Under tillverkning** eller **Levererad**.
+- lagerplatsen är under inventering.
+- leveransen gjordes innan funktionen fanns och kunde inte kopplas till sin lagerrörelse. Raden visas då som **Kan inte ångras**.
+
+Det går inte att ångra bara en del av en rads antal. Ångra raden och leverera på nytt med rätt antal — den nya leveransen får ett nytt följesedelsnummer.
 
 ## Frakt
 

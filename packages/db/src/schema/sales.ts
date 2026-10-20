@@ -24,6 +24,7 @@ import { users } from "./auth";
 import { bankFileEntries } from "./banking";
 import { verifications } from "./economy";
 import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, units } from "./register";
+import { stockLocations, stockTransactions } from "./stock";
 
 // Kod på pallkort (pallet card code): what machine-readable code the pallet
 // card prints for the article number and the order number. The system
@@ -365,8 +366,21 @@ export const deliveryRows = pgTable(
       .notNull()
       .references(() => salesOrderRows.id, { onDelete: "restrict" }),
     quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
+    // Ångra utleverans (migration 0132): where the goods were taken from and
+    // the stock movement that took them — the undo puts them back exactly
+    // there. Null only on deliveries the backfill could not pair (never
+    // undoable).
+    locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "restrict" }),
+    stockTransactionId: uuid("stock_transaction_id").references(() => stockTransactions.id, { onDelete: "restrict" }),
+    // Set when the row was undone; the row stays (the följesedel number is
+    // never reused). A följesedel whose rows are all undone counts as undone.
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+    undoneBy: uuid("undone_by").references(() => users.id, { onDelete: "set null" }),
   },
-  (table) => [index("idx_delivery_rows_delivery").on(table.deliveryId)]
+  (table) => [
+    index("idx_delivery_rows_delivery").on(table.deliveryId),
+    index("delivery_rows_by_stock_transaction").on(table.stockTransactionId),
+  ]
 );
 
 // Kundfaktura (customer invoice) — C1. The invoice is its own document,
