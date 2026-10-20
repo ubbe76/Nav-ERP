@@ -207,9 +207,12 @@ export function createTimeReportService(
       throw new StampSessionAlreadyStoppedError();
     }
 
+    // Pallkort: the mo_reports row this stamp-out wrote, so the terminal can
+    // print the REPORT's card (date + reporter) rather than the operation's.
+    let reportId: string | null = null;
     if (hasQuantities || markDone) {
       const totalHours = markDone ? await repo.sumReportedHoursForOperation(session.moOperationId) : undefined;
-      await manufacturing.reportOperationQuantities(session.moOperationId, {
+      const reported = await manufacturing.reportOperationQuantities(session.moOperationId, {
         quantityOk,
         quantityScrapped,
         scrapReason: input.scrapReason,
@@ -225,17 +228,19 @@ export function createTimeReportService(
         // accepted (see assertMaterialBeforeOperationReport).
         materialShortageChecked: hasQuantities,
       });
+      reportId = reported.reportId;
     } else {
       // Nothing to report, but the stamp is still a report row on the TO
       // card, so its time can be undone there too.
-      await manufacturing.logTimeOnlyReport(session.moOperationId, {
+      const timeOnly = await manufacturing.logTimeOnlyReport(session.moOperationId, {
         timeReportId: report.id,
         employeeId: session.employeeId,
         createdBy,
       });
+      reportId = timeOnly?.id ?? null;
     }
 
-    return { session: closed, timeReport: report };
+    return { session: closed, timeReport: report, reportId };
   }
 
   return {

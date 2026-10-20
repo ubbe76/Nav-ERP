@@ -313,6 +313,8 @@ describe("profiles against the real app", () => {
     expect(await status(c, "GET", "/attendance-sessions?open=true")).toBe(200);
     expect(await status(c, "GET", "/employees/directory")).toBe(200);
     expect(await status(c, "GET", "/settings/terminal")).toBe(200);
+    expect(await status(c, "GET", "/settings/pallet-card")).toBe(200);
+    expect(await status(c, "GET", `/manufacturing-orders/${NO_ID}/reports/${NO_ID}/pallet-card`)).not.toBe(403);
     expect(await status(c, "GET", "/manufacturing-orders")).toBe(200);
     expect(await status(c, "GET", `/manufacturing-orders/${NO_ID}`)).toBe(404);
     expect(await status(c, "GET", `/manufacturing-orders/${NO_ID}/operations`)).not.toBe(403);

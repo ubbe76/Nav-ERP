@@ -56,11 +56,13 @@ export function ReportsSection({
   reports,
   canUndo,
   onDone,
+  onPalletCard,
 }: {
   orderId: string;
   reports: MOReport[];
   canUndo: boolean;
   onDone: () => void;
+  onPalletCard: (report: MOReport) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -95,7 +97,7 @@ export function ReportsSection({
           { key: "quantityReceived", label: "Inlevererat", width: "90px", align: "right" },
           { key: "hours", label: "Timmar", width: "70px", align: "right" },
           { key: "employeeName", label: "Av", width: "minmax(0, 1fr)" },
-          { key: "id", label: "", width: "130px", align: "right" },
+          { key: "id", label: "", width: "200px", align: "right" },
         ]}
         rows={reports}
         renderCell={(row, key) => {
@@ -135,15 +137,26 @@ export function ReportsSection({
                 );
               }
               // A lego receipt belongs to its IO.
-              if (row.source === "purchase_receipt") {
-                return <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>Ångras på IO</span>;
+              {
+                const palletCard =
+                  row.kind === "operation" && row.moOperationId !== null && Number(row.quantityOk) > 0 ? (
+                    <Button type="button" size="small" variant="ghost" onClick={() => onPalletCard(row)}>
+                      Pallkort
+                    </Button>
+                  ) : null;
+                return (
+                  <span style={{ display: "inline-flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
+                    {palletCard}
+                    {row.source === "purchase_receipt" ? (
+                      <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>Ångras på IO</span>
+                    ) : canUndo ? (
+                      <Button type="button" size="small" variant="secondary" disabled={pendingId !== null} onClick={() => undo(row)}>
+                        {pendingId === row.id ? "Ångrar…" : "Ångra"}
+                      </Button>
+                    ) : null}
+                  </span>
+                );
               }
-              if (!canUndo) return null;
-              return (
-                <Button type="button" size="small" variant="secondary" disabled={pendingId !== null} onClick={() => undo(row)}>
-                  {pendingId === row.id ? "Ångrar…" : "Ångra"}
-                </Button>
-              );
             default:
               return null;
           }

@@ -1,5 +1,7 @@
 import PDFDocument from "pdfkit";
+import QRCode from "qrcode";
 import { minutesPerUnitToUnitsPerHour } from "@navet/shared";
+import { CODE128_QUIET_ZONE, code128TotalModules, encodeCode128 } from "./code128.js";
 import type { SystemService } from "../../system/service/system.service.js";
 
 // One shared A4 layout for all outgoing business documents (förfrågan,
@@ -70,7 +72,12 @@ export interface DocumentPdfRow {
 // Narrow settings view for document printing — implemented by SystemService
 // (same pattern as timereport's settings reader).
 export interface DocumentSettingsReader {
-  getSettings(): Promise<{ showRevisionsOnDocuments: boolean; showOrderRevisionOnDocuments: boolean }>;
+  getSettings(): Promise<{
+    showRevisionsOnDocuments: boolean;
+    showOrderRevisionOnDocuments: boolean;
+    // Kod på pallkort — the system default the services fall back on.
+    palletCardCode: PalletCardCodeType;
+  }>;
 }
 
 // "Ytbehandling: Pulverlack RAL 9010 · Färg: Vit" — an empty half is left
@@ -513,36 +520,59 @@ export interface ManufacturingOrderPdfInput {
 // is reported or a delivery leaves the building. Printed on the TOP HALF of
 // a portrait A4 so the sheet can be folded in the middle and still show the
 // whole card. Two variants: "final" (last operation of a KO-linked TO, or a
-// customer delivery — carries the customer and order numbers) and
-// "internal" (a pallet moving to the next operation on the shop floor).
-// Everything is pre-formatted by the calling service (mail owns the paper,
-// the modules own the content) — the renderer only lays out label/value
-// pairs in big type readable from a distance.
+// customer delivery — carries the customer and order numbers, TILL KUND) and
+// "internal" (a pallet moving to the next operation on the shop floor,
+// INTERNT). Everything is pre-formatted by the calling service (mail owns
+// the paper, the modules own the content) — the renderer only lays out
+// label/value pairs in big type readable from a distance.
+//
+// Kod på pallkort: `code` says which machine-readable code the article
+// number and the order number get — none (the plain card), a Code 128
+// barcode under the value or a QR code beside it. The SERVICE resolves the
+// effective type (customer's choice ?? system setting); the renderer never
+// reads settings. Omitted = none, so every existing call renders as before.
+export type PalletCardCodeType = "none" | "barcode" | "qr";
+
+interface PalletCardCommon {
+  articleNumber: string;
+  articleName?: string | null;
+  quantity: number;
+  unit?: string | null;
+  code?: PalletCardCodeType;
+  // Datum in the card's footer — the event's time (the report's created_at,
+  // the delivery's delivered_at) or the print time. Formatted in
+  // Europe/Stockholm. Omitted = now, so the date is always printed.
+  printedAt?: Date;
+  // Rapporterad av — the employee/user who reported; omitted when unknown.
+  reportedBy?: string | null;
+  // The footer's reference: "FS-123" on a delivery card, "TO-456 · op 20" on
+  // an operation card.
+  reference?: string | null;
+  // Kolli: this card's number among the cards printed for the same row/
+  // operation — "Kolli 2 av 3", always printed; omitted ⇒ "Kolli 1 av 1".
+  parcel?: { index: number; count: number };
+}
+
 export type PalletCardPdfInput =
-  | {
+  | (PalletCardCommon & {
       kind: "final";
-      articleNumber: string;
-      articleName?: string | null;
       customerName: string;
       // Kundens ordernummer — may be missing on the order; rendered as "—".
       customerOrderNumber: string | null;
       // Vårt kundordernummer (the sales order's own number).
       orderNumber: string;
-      quantity: number;
-      unit?: string | null;
-    }
-  | {
+      // The sales order's chosen delivery address (null = no LEVERANSADRESS
+      // cell at all).
+      deliveryAddress?: { address: string; postalCode: string | null; city: string | null; country: string | null } | null;
+    })
+  | (PalletCardCommon & {
       kind: "internal";
-      articleNumber: string;
-      articleName?: string | null;
       // The manufacturing order's number.
       orderNumber: string;
-      // Pre-formatted "seq · description/resource" — omitted (no row at
-      // all) when this was the last operation of an unlinked order.
+      // Pre-formatted "seq · description/resource" — null/omitted when this
+      // was the last operation of an unlinked order (the cell prints "—").
       nextOperation?: string | null;
-      quantity: number;
-      unit?: string | null;
-    };
+    });
 
 const PAGE_MARGIN = 50;
 const PAGE_WIDTH = 595.28; // A4 portrait, points
@@ -702,6 +732,20 @@ export function formatNumber(value: number, decimals = 2): string {
   return value
     .toLocaleString("sv-SE", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
     .replace("−", "-");
+}
+
+// "2026-10-20 14:32" in Europe/Stockholm — the pallet card's Datum, so a
+// container running UTC still prints the clock the operator saw.
+const STOCKHOLM_DATE_TIME = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Europe/Stockholm",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+export function formatStockholmDateTime(date: Date): string {
+  return STOCKHOLM_DATE_TIME.format(date);
 }
 
 function formatQuantity(raw: string): string {
@@ -1828,23 +1872,96 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   // pallet), all content on the TOP HALF of a portrait A4 so the sheet can
   // be folded at the middle. Internal document: no payment footer, page
   // numbers only when there are several cards (drawPageNumbers is a no-op on
-  // a single page). Big bold values under small grey labels — the card is
-  // read from a distance on the shop floor / loading dock.
+  // a single page). A framed card under the company header: a black title
+  // band (PALLKORT · TILL KUND/INTERNT), the article with its code and the
+  // quantity side by side, a grid of label/value cells, and a bottom row
+  // of cells with date, reporter and reference. Big bold values under small grey
+  // labels — the card is read from a distance on the shop floor / loading
+  // dock. The grid is laid out two cells per row (rather than one full-width
+  // cell per field) because the full set — article, name, customer, address,
+  // two order numbers with barcodes, quantity — does not fit above the fold
+  // stacked vertically.
   async function renderPalletCard(cards: PalletCardPdfInput[]): Promise<Buffer> {
     const { doc, finished, drawHeader } = await startDocument();
     const left = PAGE_MARGIN;
+    const right = PAGE_MARGIN + CONTENT_WIDTH;
     const fold = PAGE_HEIGHT / 2;
+    const cardTop = 104;
+    const pad = 8;
+    const BARCODE_HEIGHT = 20;
+    const QR_SIZE = 56;
 
     // Small grey uppercase label above each value.
     const label = (text: string, x: number, y: number) => {
-      doc.font("Helvetica-Bold").fontSize(8).fillColor("#888888");
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#777777");
       doc.text(text, x, y, { lineBreak: false });
+      doc.fillColor("#000000");
     };
     // One line, big and bold — ellipsis instead of wrapping, so a long value
     // can never push the card past the fold.
     const value = (text: string, x: number, y: number, size: number, width: number) => {
       doc.font("Helvetica-Bold").fontSize(size).fillColor("#000000");
-      doc.text(text, x, y, { width, height: size * 1.3, ellipsis: true });
+      doc.text(text, x, y, { width, height: size * 1.25, ellipsis: true });
+    };
+    // The quantity: shrinks the font (never below 20 pt) until the value and
+    // its unit fit on one line — "1 234,5 kg" must stay whole.
+    const fitValue = (text: string, x: number, y: number, size: number, width: number) => {
+      doc.font("Helvetica-Bold").fillColor("#000000");
+      let fontSize = size;
+      while (fontSize > 20 && doc.fontSize(fontSize).widthOfString(text) > width) fontSize -= 2;
+      doc.fontSize(fontSize).text(text, x, y + (size - fontSize) / 2, { width, height: fontSize * 1.25, ellipsis: true });
+    };
+    const thinLine = (x1: number, y1: number, x2: number, y2: number) => {
+      doc.moveTo(x1, y1).lineTo(x2, y2).lineWidth(0.5).strokeColor("#000000").stroke();
+    };
+
+    // Code 128 under a value: scaled to the width available (never wider
+    // than maxWidth, modules never thinner than 0.5 pt — below that a
+    // printer cannot hold the bars apart, so a very long text prints no
+    // barcode). Returns whether anything was drawn.
+    const drawBarcode = (text: string, x: number, y: number, maxWidth: number): boolean => {
+      const widths = encodeCode128(text);
+      if (!widths) return false;
+      const modules = code128TotalModules(widths);
+      const moduleWidth = Math.min(1, maxWidth / modules);
+      if (moduleWidth < 0.5) return false;
+      let cursor = x + CODE128_QUIET_ZONE * moduleWidth;
+      widths.forEach((w, i) => {
+        if (i % 2 === 0) doc.rect(cursor, y, w * moduleWidth, BARCODE_HEIGHT).fill("#000000");
+        cursor += w * moduleWidth;
+      });
+      doc.fillColor("#000000");
+      return true;
+    };
+    // QR code (error correction M) in a square of `size` pt including a
+    // 4-module quiet zone on each side. Byte mode carries å/ä/ö, so this
+    // never falls back.
+    const drawQr = (text: string, x: number, y: number, size: number) => {
+      const { modules } = QRCode.create(text, { errorCorrectionLevel: "M" });
+      const cell = size / (modules.size + 8);
+      const origin = 4 * cell;
+      for (let row = 0; row < modules.size; row++) {
+        for (let col = 0; col < modules.size; col++) {
+          if (modules.get(row, col)) doc.rect(x + origin + col * cell, y + origin + row * cell, cell, cell).fill("#000000");
+        }
+      }
+      doc.fillColor("#000000");
+    };
+
+    // A cell holding a coded value (order number): label, value and the code
+    // under (barcode) or beside (QR) it. Returns the cell's content height.
+    const codedCellHeight = (code: PalletCardCodeType) =>
+      code === "barcode" ? 6 + 9 + 21 + 3 + BARCODE_HEIGHT + 5 : code === "qr" ? 6 + QR_SIZE + 6 : 6 + 9 + 21 + 6;
+    const codedCell = (text: string, labelText: string, x: number, y: number, width: number, code: PalletCardCodeType) => {
+      label(labelText, x + pad, y + 6);
+      const valueWidth = code === "qr" ? width - 2 * pad - QR_SIZE - 6 : width - 2 * pad;
+      value(text, x + pad, y + 15, 18, valueWidth);
+      if (code === "barcode") drawBarcode(text, x + pad, y + 39, Math.min(width - 2 * pad, CONTENT_WIDTH / 2));
+      if (code === "qr") drawQr(text, x + width - pad - QR_SIZE, y + 6, QR_SIZE);
+    };
+    const plainCell = (text: string, labelText: string, x: number, y: number, width: number) => {
+      label(labelText, x + pad, y + 6);
+      value(text, x + pad, y + 15, 18, width - 2 * pad);
     };
 
     cards.forEach((card, index) => {
@@ -1852,61 +1969,147 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         doc.addPage();
         drawHeader();
       }
+      const code: PalletCardCodeType = card.code ?? "none";
 
-      doc.font("Helvetica-Bold").fontSize(10).fillColor("#888888");
-      doc.text("PALLKORT", left, 108, { lineBreak: false });
+      // 1. Title band.
+      doc.rect(left, cardTop, CONTENT_WIDTH, 20).fill("#000000");
+      doc.font("Helvetica-Bold").fontSize(10).fillColor("#ffffff");
+      doc.text("PALLKORT", left + pad, cardTop + 5.5, { lineBreak: false });
+      doc.text(card.kind === "final" ? "TILL KUND" : "INTERNT", left, cardTop + 5.5, {
+        width: CONTENT_WIDTH - pad,
+        align: "right",
+        lineBreak: false,
+      });
+      doc.fillColor("#000000");
 
-      let y = 134;
-      label("ARTIKELNUMMER", left, y);
-      value(card.articleNumber, left, y + 12, 34, CONTENT_WIDTH);
-      y += 54;
-
-      if (card.articleName) {
-        label("BENÄMNING", left, y);
-        // Two-line budget before ellipsizing — same big-bold-black treatment
-        // as value(), but value() is single-line only, so this is a direct
-        // doc.text call with a taller fixed box (up to 2 lines at 18pt).
-        doc.font("Helvetica-Bold").fontSize(18).fillColor("#000000");
-        doc.text(card.articleName, left, y + 12, { width: CONTENT_WIDTH, height: 44, ellipsis: true });
-        y += 58;
-      } else {
-        y += 10;
+      // 2. Article (left column) and 4. quantity (right column), side by side.
+      let y = cardTop + 20;
+      const articleColWidth = Math.round(CONTENT_WIDTH * 0.6);
+      const qtyColX = left + articleColWidth;
+      const qtyColWidth = CONTENT_WIDTH - articleColWidth;
+      const yA = y + 6;
+      label("ARTIKELNUMMER", left + pad, yA);
+      const numberWidth = code === "qr" ? articleColWidth - 2 * pad - QR_SIZE - 6 : articleColWidth - 2 * pad;
+      value(card.articleNumber, left + pad, yA + 10, 30, numberWidth);
+      let yName = yA + 48;
+      if (code === "barcode") {
+        drawBarcode(card.articleNumber, left + pad, yA + 44, Math.min(articleColWidth - 2 * pad, CONTENT_WIDTH / 2));
+        yName = yA + 44 + BARCODE_HEIGHT + 5;
+      } else if (code === "qr") {
+        drawQr(card.articleNumber, left + articleColWidth - pad - QR_SIZE, yA, QR_SIZE);
+        yName = yA + QR_SIZE + 6;
       }
+      label("BENÄMNING", left + pad, yName);
+      // Two-line budget before ellipsizing — same bold-black treatment as
+      // value(), which is single-line only, so a direct doc.text call with a
+      // taller fixed box (up to 2 lines at 13 pt).
+      doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
+      doc.text(card.articleName || "—", left + pad, yName + 10, { width: articleColWidth - 2 * pad, height: 32, ellipsis: true });
+      const rowABottom = yName + 10 + 30 + 6;
 
-      const halfWidth = (CONTENT_WIDTH - 24) / 2;
-      if (card.kind === "final") {
-        label("KUND", left, y);
-        value(card.customerName, left, y + 12, 20, CONTENT_WIDTH);
-        y += 52;
-        label("KUNDENS ORDERNUMMER", left, y);
-        value(card.customerOrderNumber || "—", left, y + 12, 20, halfWidth);
-        label("VÅRT KUNDORDERNUMMER", left + halfWidth + 24, y);
-        value(card.orderNumber, left + halfWidth + 24, y + 12, 20, halfWidth);
-        y += 52;
-      } else {
-        label("TILLVERKNINGSORDER", left, y);
-        value(card.orderNumber, left, y + 12, 20, halfWidth);
-        if (card.nextOperation) {
-          label("NÄSTA OPERATION", left + halfWidth + 24, y);
-          value(card.nextOperation, left + halfWidth + 24, y + 12, 20, halfWidth);
-        }
-        y += 52;
-      }
-
-      label("ANTAL", left, y);
-      value(
+      label("ANTAL", qtyColX + pad, yA);
+      fitValue(
         `${formatQuantity(String(card.quantity))}${card.unit ? ` ${card.unit}` : ""}`,
-        left,
-        y + 12,
-        34,
-        CONTENT_WIDTH
+        qtyColX + pad,
+        yA + 12,
+        40,
+        qtyColWidth - 2 * pad
       );
+      // Kolli n av m under the quantity, in its own cell — read together
+      // with the quantity when the pallets are counted.
+      const parcel = card.parcel ?? { index: 1, count: 1 };
+      thinLine(qtyColX, yA + 66, right, yA + 66);
+      value(`Kolli ${parcel.index} av ${parcel.count}`, qtyColX + pad, yA + 74, 18, qtyColWidth - 2 * pad);
+      thinLine(qtyColX, y, qtyColX, rowABottom);
+      y = rowABottom;
+      thinLine(left, y, right, y);
+
+      // 3. Grid.
+      const half = CONTENT_WIDTH / 2;
+      if (card.kind === "final") {
+        // At most three lines: street (every row on one line), postal code +
+        // city, country — the last only when ≠ SE, as every other document.
+        const address = card.deliveryAddress
+          ? [
+              card.deliveryAddress.address
+                .split(/\r\n|\r|\n/)
+                .map((row) => row.trim())
+                .filter((row) => row !== "")
+                .join(", "),
+              ...addressLines({ ...card.deliveryAddress, address: null }),
+            ].filter((line) => line !== "")
+          : [];
+        // Beside an address the customer gets half the width: a name that
+        // does not fit at 18 pt shrinks to 14 pt, and failing that wraps to
+        // two 13 pt lines (the row grows to hold them).
+        const nameWidth = half - 2 * pad;
+        doc.font("Helvetica-Bold");
+        const nameSize =
+          address.length === 0 ? 18 : ([18, 16, 14].find((size) => doc.fontSize(size).widthOfString(card.customerName) <= nameWidth) ?? 13);
+        const nameHeight = nameSize === 13 ? 2 * 13 * 1.25 : 21;
+        const rowBHeight = 6 + 9 + Math.max(nameHeight, address.length * 11) + 6;
+        if (address.length > 0) {
+          label("KUND", left + pad, y + 6);
+          doc.font("Helvetica-Bold").fontSize(nameSize).fillColor("#000000");
+          doc.text(card.customerName, left + pad, y + 15 + (nameSize === 13 ? 0 : 18 - nameSize), {
+            width: nameWidth,
+            height: nameSize === 13 ? nameHeight : nameSize * 1.25,
+            ellipsis: true,
+          });
+          thinLine(left + half, y, left + half, y + rowBHeight);
+          label("LEVERANSADRESS", left + half + pad, y + 6);
+          doc.font("Helvetica-Bold").fontSize(10).fillColor("#000000");
+          address.forEach((line, i) => {
+            doc.text(line, left + half + pad, y + 16 + i * 11, { width: half - 2 * pad, height: 11, ellipsis: true });
+          });
+        } else {
+          plainCell(card.customerName, "KUND", left, y, CONTENT_WIDTH);
+        }
+        y += rowBHeight;
+        thinLine(left, y, right, y);
+
+        const rowCHeight = codedCellHeight(code);
+        plainCell(card.customerOrderNumber || "—", "KUNDENS ORDERNUMMER", left, y, half);
+        thinLine(left + half, y, left + half, y + rowCHeight);
+        codedCell(card.orderNumber, "VÅRT KUNDORDERNUMMER", left + half, y, half, code);
+        y += rowCHeight;
+      } else {
+        const rowBHeight = codedCellHeight(code);
+        codedCell(card.orderNumber, "TILLVERKNINGSORDER", left, y, half, code);
+        thinLine(left + half, y, left + half, y + rowBHeight);
+        // "—" rather than no cell, so the grid keeps its shape on the last
+        // operation of an unlinked order.
+        plainCell(card.nextOperation || "—", "NÄSTA OPERATION", left + half, y, half);
+        y += rowBHeight;
+      }
+      thinLine(left, y, right, y);
+
+      // 5. Bottom row: date · reporter · reference as ordinary cells — a
+      // small grey footer line was easy to miss on the dock. No reporter
+      // (the delivery card never names one, a TO card only when known) ⇒
+      // two cells instead of three.
+      const bottomCells: [string, string][] = [
+        ["DATUM", formatStockholmDateTime(card.printedAt ?? new Date())],
+        ...(card.reportedBy ? [["RAPPORTERAD AV", card.reportedBy] as [string, string]] : []),
+        ["REFERENS", card.reference || "—"],
+      ];
+      const cellWidth = CONTENT_WIDTH / bottomCells.length;
+      bottomCells.forEach(([labelText, text], i) => {
+        const x = left + i * cellWidth;
+        if (i > 0) thinLine(x, y, x, y + 32);
+        label(labelText, x + pad, y + 5);
+        value(text, x + pad, y + 14, 12, cellWidth - 2 * pad);
+      });
+      y += 32;
+
+      // The frame around the whole card (1 pt) — ends above the fold.
+      doc.rect(left, cardTop, CONTENT_WIDTH, y - cardTop).lineWidth(1).strokeColor("#000000").stroke();
 
       // Fold mark at exactly half the page height — the lower half stays
       // empty on purpose (it folds away behind the card).
       doc
         .moveTo(left, fold)
-        .lineTo(left + CONTENT_WIDTH, fold)
+        .lineTo(right, fold)
         .dash(3, { space: 5 })
         .strokeColor("#bbbbbb")
         .lineWidth(0.5)

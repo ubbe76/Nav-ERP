@@ -1,3 +1,4 @@
+import { PalletCardButton } from "../../../../components/documents/PalletCardButton";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
@@ -127,9 +128,12 @@ export default async function SalesOrderDetailPage(props: { params: Promise<{ id
                   return <BookTransportButton deliveryId={row.id} shipment={row.shipment} enabled={freightStatus.enabled} />;
                 case "id":
                   return (
-                    <a href={`/api/v1/deliveries/${row.id}/pdf`} target="_blank" rel="noopener noreferrer">
-                      PDF
-                    </a>
+                    <span style={{ display: "inline-flex", gap: 12, alignItems: "center" }}>
+                      <a href={`/api/v1/deliveries/${row.id}/pdf`} target="_blank" rel="noopener noreferrer">
+                        PDF
+                      </a>
+                      <PalletCardButton deliveryId={row.id} />
+                    </span>
                   );
                 default:
                   return null;

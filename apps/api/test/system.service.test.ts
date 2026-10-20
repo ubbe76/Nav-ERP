@@ -111,6 +111,41 @@ describe("system service — settings", () => {
     expect(updateSystemSettingsSchema.safeParse({ manufacturingMaterialShortage: "block" }).success).toBe(true);
   });
 
+  it("defaults Kod på pallkort to 'none' and round-trips the three code types", async () => {
+    // Absent key ⇒ "none" — no codes, the card as before the setting
+    // existed. An unknown stored value decodes the same way.
+    await db.delete(systemSettings).where(eq(systemSettings.key, "pallet_card_code"));
+    try {
+      expect((await systemService.getSettings()).palletCardCode).toBe("none");
+      expect((await systemService.updateSettings({ palletCardCode: "barcode" })).palletCardCode).toBe("barcode");
+      expect((await systemService.getSettings()).palletCardCode).toBe("barcode");
+      expect((await systemService.updateSettings({ palletCardCode: "qr" })).palletCardCode).toBe("qr");
+      expect((await systemService.updateSettings({ palletCardCode: "none" })).palletCardCode).toBe("none");
+      await db
+        .insert(systemSettings)
+        .values({ key: "pallet_card_code", value: "garbage" })
+        .onConflictDoUpdate({ target: systemSettings.key, set: { value: "garbage" } });
+      expect((await systemService.getSettings()).palletCardCode).toBe("none");
+    } finally {
+      await db.delete(systemSettings).where(eq(systemSettings.key, "pallet_card_code"));
+    }
+    expect(updateSystemSettingsSchema.safeParse({ palletCardCode: "ean" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ palletCardCode: "qr" }).success).toBe(true);
+  });
+
+  it("defaults Tillåt utskrift av pallkort även om kollina inte stämmer to false and round-trips it", async () => {
+    await db.delete(systemSettings).where(eq(systemSettings.key, "pallet_card_allow_quantity_mismatch"));
+    try {
+      expect((await systemService.getSettings()).palletCardAllowQuantityMismatch).toBe(false);
+      expect((await systemService.updateSettings({ palletCardAllowQuantityMismatch: true })).palletCardAllowQuantityMismatch).toBe(true);
+      expect((await systemService.getSettings()).palletCardAllowQuantityMismatch).toBe(true);
+      expect((await systemService.updateSettings({ palletCardAllowQuantityMismatch: false })).palletCardAllowQuantityMismatch).toBe(false);
+    } finally {
+      await db.delete(systemSettings).where(eq(systemSettings.key, "pallet_card_allow_quantity_mismatch"));
+    }
+    expect(updateSystemSettingsSchema.safeParse({ palletCardAllowQuantityMismatch: "yes" }).success).toBe(false);
+  });
+
   it("defaults Orimligt mycket tid to 4 weeks, round-trips decimals and 0, and junk decodes to the default", async () => {
     await db.delete(systemSettings).where(eq(systemSettings.key, "planning_long_operation_weeks"));
     try {

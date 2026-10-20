@@ -18,6 +18,8 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   const [overReceiptPercent, setOverReceiptPercent] = useState(formatPercent(settings.purchaseOverReceiptPercent));
   const [overReceiptSaved, setOverReceiptSaved] = useState(false);
   const [materialShortage, setMaterialShortage] = useState(settings.manufacturingMaterialShortage);
+  const [palletMismatch, setPalletMismatch] = useState(settings.palletCardAllowQuantityMismatch);
+  const [palletCardCode, setPalletCardCode] = useState(settings.palletCardCode);
   const [longOperationWeeks, setLongOperationWeeks] = useState(String(settings.planningLongOperationWeeks));
   const [longOperationSaved, setLongOperationSaved] = useState(false);
   const [supplierMode, setSupplierMode] = useState(settings.supplierDeliveryDayMode);
@@ -98,6 +100,16 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   async function changeMaterialShortage(next: SystemSettings["manufacturingMaterialShortage"]) {
     const updated = await save({ manufacturingMaterialShortage: next });
     if (updated) setMaterialShortage(updated.manufacturingMaterialShortage);
+  }
+
+  async function togglePalletMismatch() {
+    const updated = await save({ palletCardAllowQuantityMismatch: !palletMismatch });
+    if (updated) setPalletMismatch(updated.palletCardAllowQuantityMismatch);
+  }
+
+  async function changePalletCardCode(next: SystemSettings["palletCardCode"]) {
+    const updated = await save({ palletCardCode: next });
+    if (updated) setPalletCardCode(updated.palletCardCode);
   }
 
   async function saveLongOperationWeeks(badInput: boolean) {
@@ -288,6 +300,48 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
             <option value="block">Spärr</option>
           </Select>
         </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Kod på pallkort</div>
+          <div className={styles.description}>
+            Om pallkortet får en streckkod eller QR-kod för artikelnumret och ordernumret. Gäller interna kort och
+            kunder som inte har ett eget val på kundkortet.
+          </div>
+        </div>
+        <div style={{ flexShrink: 0, width: 160 }}>
+          <Select
+            aria-label="Kod på pallkort"
+            value={palletCardCode}
+            disabled={pending}
+            onChange={(e) => changePalletCardCode(e.target.value as SystemSettings["palletCardCode"])}
+          >
+            <option value="none">Ingen</option>
+            <option value="barcode">Streckkod</option>
+            <option value="qr">QR-kod</option>
+          </Select>
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Tillåt utskrift av pallkort även om kollina inte stämmer med totalt antal</div>
+          <div className={styles.description}>
+            Av: Skriv ut i dialogen Pallkort är avstängd så länge kollina inte summerar till totalt antal. På: du
+            varnas men kan skriva ut ändå.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={palletMismatch}
+          aria-label="Tillåt utskrift av pallkort även om kollina inte stämmer med totalt antal"
+          className={styles.switch}
+          data-on={palletMismatch}
+          disabled={pending}
+          onClick={togglePalletMismatch}
+        >
+          <span className={styles.knob} aria-hidden="true" />
+        </button>
       </div>
       <div className={styles.row}>
         <div className={styles.texts}>

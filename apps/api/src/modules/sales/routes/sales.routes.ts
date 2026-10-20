@@ -8,6 +8,7 @@ import {
   customerDeliveryDateQuerySchema,
   customerPriceInputSchema,
   deliverBatchSchema,
+  deliveryPalletCardQuerySchema,
   deliverGoodsSchema,
   listPriceListsQuerySchema,
   listQuerySchema,
@@ -35,6 +36,7 @@ import {
   CustomerNotFoundError,
   DeliveryAddressNotFoundError,
   DeliveryNotFoundError,
+  DeliveryRowNotInDeliveryError,
   DuplicateCustomerNumberError,
   InvalidStatusTransitionError,
   OverDeliveryError,
@@ -625,13 +627,29 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
 
   // Pallkort (Etapp F) — one card page per delivered row, placed on the
   // pallets when the delivery leaves. Same top-level /deliveries/ shape as
-  // the delivery note above.
+  // the delivery note above. Repeated ?row=<deliveryRowId>:<antal>,<antal>,…
+  // picks rows and gives each kolli its quantity (deliveryPalletCardQuerySchema);
+  // an empty list skips the row, omitted = every row once.
   app.get<{ Params: { id: string } }>("/deliveries/:id/pallet-card", async (req, reply) => {
+    const { row } = deliveryPalletCardQuerySchema.parse(req.query);
     try {
-      const { filename, pdf: content } = await service.deliveryPalletCardPdf(req.params.id);
+      const { filename, pdf: content } = await service.deliveryPalletCardPdf(req.params.id, row);
       reply.header("Content-Type", "application/pdf");
       reply.header("Content-Disposition", contentDisposition(filename));
       return reply.send(content);
+    } catch (err) {
+      if (err instanceof DeliveryNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof DeliveryRowNotInDeliveryError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // The delivery's rows for the pallet card dialog: { deliveryNumber,
+  // rows: [{ id, articleNumber, articleName, quantity, unit }] }, quantity
+  // in the row's unit.
+  app.get<{ Params: { id: string } }>("/deliveries/:id/rows", async (req, reply) => {
+    try {
+      return await service.deliveryRows(req.params.id);
     } catch (err) {
       if (err instanceof DeliveryNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;

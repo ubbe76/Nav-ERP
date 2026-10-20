@@ -22,6 +22,7 @@ import type {
   ListPriceHistoryQuery,
   ListPurchaseInvoiceBasisQuery,
   ListPurchaseOrdersQuery,
+  PalletCardCode,
   ListQuery,
   PurchaseOrderStatus,
   ReceiveGoodsInput,
@@ -410,6 +411,9 @@ export interface PurchaseSettingsReader extends DocumentSettingsReader {
     showRevisionsOnDocuments: boolean;
     showOrderRevisionOnDocuments: boolean;
     purchaseOverReceiptPercent: number | null;
+    // Inherited from DocumentSettingsReader (the pallet card is sales/
+    // manufacturing's, never printed from here).
+    palletCardCode: PalletCardCode;
   }>;
   getCompanyCarrierNumber(carrierId: string): Promise<string | null>;
 }

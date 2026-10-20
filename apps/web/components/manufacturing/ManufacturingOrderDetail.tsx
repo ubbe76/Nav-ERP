@@ -17,6 +17,7 @@ import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { MoMaterialModal } from "./MoMaterialModal";
 import { OperationModal, type OperationPayload } from "../articles/OperationModal";
 import { ReportsSection } from "./ReportsSection";
+import { PalletCardDialog, type PalletCardTarget } from "../documents/PalletCardDialog";
 import { suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
 import { useCan, useCanOpen } from "../PermissionsProvider";
 import { stockholmToday } from "../../lib/date";
@@ -108,6 +109,7 @@ export function ManufacturingOrderDetail({
   const [materialDialog, setMaterialDialog] = useState<{ editing: MOMaterialConsumption | null } | null>(null);
   const [operationDialog, setOperationDialog] = useState<{ editing: MOOperation | null } | null>(null);
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
+  const [palletCard, setPalletCard] = useState<PalletCardTarget | null>(null);
   // Warnings (shortage, planning) and the outcome of the last change.
   const [changeNotice, setChangeNotice] = useState<{ warnings: string[]; message?: string } | null>(null);
   const [lineError, setLineError] = useState<string | null>(null);
@@ -366,14 +368,22 @@ export function ManufacturingOrderDetail({
               case "id":
                 return (
                   <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
-                    <a
-                      href={`/api/v1/manufacturing-orders/${order.id}/operations/${row.id}/pallet-card`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: 13 }}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="small"
+                      onClick={() =>
+                        setPalletCard({
+                          kind: "single",
+                          url: `/api/v1/manufacturing-orders/${order.id}/operations/${row.id}/pallet-card`,
+                          // Same default as the API: accumulated OK, else the order quantity.
+                          quantity: Number(row.quantityCompleted ?? 0) > 0 ? Number(row.quantityCompleted) : Number(order.quantity),
+                          unit: order.articleUnitCode,
+                        })
+                      }
                     >
                       Pallkort
-                    </a>
+                    </Button>
                     {canEditLines && row.status === "pending" && (
                       <Button type="button" variant="ghost" size="small" onClick={() => openOperationDialog(row)}>
                         Ändra
@@ -565,9 +575,19 @@ export function ManufacturingOrderDetail({
         </>
       )}
 
+      <PalletCardDialog target={palletCard} onClose={() => setPalletCard(null)} />
+
       <ReportsSection
         orderId={order.id}
         reports={reports}
+        onPalletCard={(report) =>
+          setPalletCard({
+            kind: "single",
+            url: `/api/v1/manufacturing-orders/${order.id}/reports/${report.id}/pallet-card`,
+            quantity: Number(report.quantityOk),
+            unit: order.articleUnitCode,
+          })
+        }
         canUndo={!readOnly && canUndoReports}
         onDone={() => router.refresh()}
       />
@@ -1024,8 +1044,11 @@ function CompleteOperationsList({
       // fallback. Without a positive quantity the card falls back to the
       // operation's accumulated quantity.
       const reported = Number(quantityCompleted) || 0;
+      const reportId = (completed as { reportId?: string | null }).reportId ?? null;
       window.open(
-        `/api/v1/manufacturing-orders/${orderId}/operations/${opId}/pallet-card${reported > 0 ? `?quantity=${reported}` : ""}`,
+        reportId
+          ? `/api/v1/manufacturing-orders/${orderId}/reports/${reportId}/pallet-card`
+          : `/api/v1/manufacturing-orders/${orderId}/operations/${opId}/pallet-card${reported > 0 ? `?quantity=${reported}` : ""}`,
         "_blank",
         "noopener"
       );

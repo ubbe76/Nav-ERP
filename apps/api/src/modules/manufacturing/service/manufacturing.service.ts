@@ -21,7 +21,7 @@ import type {
   UpdateWorkCenterInput,
 } from "@navet/shared";
 import { roundUpToMultiple, toUnitQuantity } from "@navet/shared";
-import type { ManufacturingMaterialShortage } from "@navet/shared";
+import type { ManufacturingMaterialShortage, PalletCardCode } from "@navet/shared";
 import type {
   ManufacturingRepository,
   ReportOperationQuantitiesInput,
@@ -84,6 +84,10 @@ export interface SalesOrderLinkReader {
     // Konfigurator 4c: the row's stored configuration — the TO of a
     // beställningsvara is derived from it; null on a plain row.
     configuration: OrderRowConfiguration | null;
+    // Pallkort: the customer's Kod på pallkort (null = system setting) and
+    // the order's chosen delivery address, for the final card.
+    customerPalletCardCode: PalletCardCode | null;
+    deliveryAddress: { address: string; postalCode: string | null; city: string | null; country: string | null } | null;
   } | null>;
   // Konfigurator 4c: locks the row FOR UPDATE inside the TO's create-tx and
   // returns the key stored at that moment — compared against the key the
@@ -241,6 +245,17 @@ export class OverConsumptionError extends Error {
   constructor() {
     super("Consumed quantity would exceed the planned quantity for this material");
     this.name = "OverConsumptionError";
+  }
+}
+
+// Pallkort per rapport: only a live operation report (kind "operation", not
+// undone) has a card to print. The code is derived from `name`
+// (error-body.ts), so the name carries the agreed code
+// "report-has-no-pallet-card" rather than the class name.
+export class MoReportNoPalletCardError extends Error {
+  constructor() {
+    super("Rapporten har inget pallkort — bara en operationsrapport som inte är ångrad kan skrivas ut");
+    this.name = "ReportHasNoPalletCardError";
   }
 }
 
@@ -439,7 +454,12 @@ export class NothingLeftToManufactureError extends Error {
 // every transaction, like purchaseOverReceiptPercent — a settings change
 // racing a report may go either way.
 export interface MaterialShortageSettingsReader {
-  getSettings(): Promise<{ manufacturingMaterialShortage: ManufacturingMaterialShortage }>;
+  getSettings(): Promise<{
+    manufacturingMaterialShortage: ManufacturingMaterialShortage;
+    // Kod på pallkort — the default code type on the pallet cards (the
+    // customer's own choice wins on the final card). Omitted reader ⇒ none.
+    palletCardCode: PalletCardCode;
+  }>;
 }
 
 // Swedish labels for the printout — the UI's status pills use the same words.
@@ -902,6 +922,84 @@ export function createManufacturingService(
       }
     }
     return diff;
+  }
+
+  // Pallkort: the cards for one operation of a released order — shared by
+  // the operation route (print time, no reporter) and the report route
+  // (report time + reporter). Last operation of a KO-linked order → the
+  // customer-facing "final" card with the customer's Kod på pallkort and the
+  // order's delivery address; anything else → the "internal" card pointing
+  // at the next operation, with the system's code type. Quantity: explicit
+  // → the operation's accumulated OK quantity → the order quantity.
+  async function buildOperationPalletCards(
+    moId: string,
+    operationId: string,
+    extras: { quantities?: number[]; printedAt: Date; reportedBy: string | null }
+  ) {
+    const order = await repo.findManufacturingOrderById(moId);
+    if (!order) throw new ManufacturingOrderNotFoundError(moId);
+    // A planned order has no mo_operations yet (they are snapshotted at
+    // release) — a clear 409 beats an unexplained operation-404.
+    if (order.status === "planned") {
+      throw new InvalidStatusTransitionError(
+        "Pallet cards are only available once the order is released — release the order first"
+      );
+    }
+
+    const operations = await repo.listOperations(moId);
+    const operation = operations.find((op) => op.id === operationId);
+    if (!operation) throw new MOOperationNotFoundError(operationId);
+
+    // "Last" = the highest sequence number on the order; "next" = the
+    // lowest sequence number after this one.
+    const isLast = operations.every((op) => op.sequenceNo <= operation.sequenceNo);
+    const next = operations
+      .filter((op) => op.sequenceNo > operation.sequenceNo)
+      .sort((a, b) => a.sequenceNo - b.sequenceNo)[0];
+
+    const quantities = extras.quantities ?? [
+      Number(operation.quantityCompleted ?? 0) > 0 ? Number(operation.quantityCompleted) : Number(order.quantity),
+    ];
+
+    const salesOrderRow =
+      isLast && order.salesOrderRowId ? await salesOrders.findRowForManufacturing(order.salesOrderRowId) : null;
+
+    // Kod på pallkort: the customer's choice on the final card, else the
+    // system setting; an omitted settings reader means none (the plain card).
+    const systemCode: PalletCardCode = settings ? (await settings.getSettings()).palletCardCode : "none";
+    // One card per kolli, numbered Kolli n av m.
+    const cards: PalletCardPdfInput[] = quantities.map((quantity, i) => {
+      const common = {
+        articleNumber: order.articleNumber,
+        articleName: order.articleName,
+        quantity,
+        unit: order.articleUnitCode,
+        parcel: { index: i + 1, count: quantities.length },
+        printedAt: extras.printedAt,
+        reportedBy: extras.reportedBy,
+        reference: `${order.orderNumber} · op ${operation.sequenceNo}`,
+      };
+      return salesOrderRow
+        ? {
+            ...common,
+            kind: "final",
+            code: salesOrderRow.customerPalletCardCode ?? systemCode,
+            customerName: salesOrderRow.customerName,
+            customerOrderNumber: salesOrderRow.customerOrderNumber,
+            orderNumber: salesOrderRow.orderNumber,
+            deliveryAddress: salesOrderRow.deliveryAddress,
+          }
+        : {
+            ...common,
+            kind: "internal",
+            code: systemCode,
+            orderNumber: order.orderNumber,
+            // Same description-over-resource fallback as every other surface
+            // that names an operation.
+            nextOperation: next ? `${next.sequenceNo} · ${next.description?.trim() || next.workCenterName}` : null,
+          };
+    });
+    return { order, operation, cards };
   }
 
   return {
@@ -1907,62 +2005,38 @@ export function createManufacturingService(
     // Pallkort (Etapp F) — printed when an operation is reported and placed
     // on the pallet. Last operation of a KO-linked order → the
     // customer-facing "final" card; anything else → the "internal" card
-    // pointing at the next operation. Quantity precedence: explicit
-    // ?quantity → the operation's accumulated OK quantity → the order
-    // quantity.
-    async getOperationPalletCardPdf(moId: string, operationId: string, quantity?: number) {
-      const order = await repo.findManufacturingOrderById(moId);
-      if (!order) throw new ManufacturingOrderNotFoundError(moId);
-      // A planned order has no mo_operations yet (they are snapshotted at
-      // release) — a clear 409 beats an unexplained operation-404.
-      if (order.status === "planned") {
-        throw new InvalidStatusTransitionError(
-          "Pallet cards are only available once the order is released — release the order first"
-        );
-      }
+    // pointing at the next operation. `quantities`: one card per kolli with
+    // that quantity (Kolli n av m); omitted ⇒ one card with the operation's
+    // accumulated OK quantity, then the order quantity. Datum = the print
+    // time; no Rapporterad av (the accumulated quantity has no single
+    // reporter).
+    async getOperationPalletCardPdf(moId: string, operationId: string, quantities?: number[]) {
+      const { order, operation, cards } = await buildOperationPalletCards(moId, operationId, {
+        quantities,
+        printedAt: new Date(),
+        reportedBy: null,
+      });
+      const content = await pdf.renderPalletCard(cards);
+      return { filename: `pallkort-${order.orderNumber}-op${operation.sequenceNo}.pdf`, content };
+    },
 
-      const operations = await repo.listOperations(moId);
-      const operation = operations.find((op) => op.id === operationId);
-      if (!operation) throw new MOOperationNotFoundError(operationId);
+    // Pallkort per rapport (omutskrift from the TO card's Rapporteringar):
+    // the same card as the operation's, but dated on the report's created_at
+    // with the reporter's name and the report's OK quantity as the default.
+    // Only a live operation report has a card — Slutför order, manual draws
+    // and undone reports are refused (409); a lego receipt's report is an
+    // operation report and prints.
+    async getReportPalletCardPdf(moId: string, reportId: string, quantities?: number[]) {
+      const report = await repo.findReportForPalletCard(reportId);
+      if (!report || report.manufacturingOrderId !== moId) throw new MoReportNotFoundError(reportId);
+      if (report.kind !== "operation" || !report.moOperationId || report.undoneAt) throw new MoReportNoPalletCardError();
 
-      // "Last" = the highest sequence number on the order; "next" = the
-      // lowest sequence number after this one.
-      const isLast = operations.every((op) => op.sequenceNo <= operation.sequenceNo);
-      const next = operations
-        .filter((op) => op.sequenceNo > operation.sequenceNo)
-        .sort((a, b) => a.sequenceNo - b.sequenceNo)[0];
-
-      const cardQuantity =
-        quantity ??
-        (Number(operation.quantityCompleted ?? 0) > 0 ? Number(operation.quantityCompleted) : Number(order.quantity));
-
-      const salesOrderRow =
-        isLast && order.salesOrderRowId ? await salesOrders.findRowForManufacturing(order.salesOrderRowId) : null;
-
-      const card: PalletCardPdfInput = salesOrderRow
-        ? {
-            kind: "final",
-            articleNumber: order.articleNumber,
-            articleName: order.articleName,
-            customerName: salesOrderRow.customerName,
-            customerOrderNumber: salesOrderRow.customerOrderNumber,
-            orderNumber: salesOrderRow.orderNumber,
-            quantity: cardQuantity,
-            unit: order.articleUnitCode,
-          }
-        : {
-            kind: "internal",
-            articleNumber: order.articleNumber,
-            articleName: order.articleName,
-            orderNumber: order.orderNumber,
-            // Same description-over-resource fallback as every other surface
-            // that names an operation.
-            nextOperation: next ? `${next.sequenceNo} · ${next.description?.trim() || next.workCenterName}` : null,
-            quantity: cardQuantity,
-            unit: order.articleUnitCode,
-          };
-
-      const content = await pdf.renderPalletCard([card]);
+      const { order, operation, cards } = await buildOperationPalletCards(moId, report.moOperationId, {
+        quantities: quantities ?? (Number(report.quantityOk) > 0 ? [Number(report.quantityOk)] : undefined),
+        printedAt: report.createdAt,
+        reportedBy: report.employeeName ?? report.userName ?? null,
+      });
+      const content = await pdf.renderPalletCard(cards);
       return { filename: `pallkort-${order.orderNumber}-op${operation.sequenceNo}.pdf`, content };
     },
   };

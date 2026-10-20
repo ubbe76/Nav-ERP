@@ -481,8 +481,11 @@ export function StampTerminal({
       // stop it). A stamp-out without a quantity opens nothing.
       const reportedOk = Number(quantityOk) || 0;
       if (reportedOk > 0) {
+        const reportId = (stopped as { reportId?: string | null } | undefined)?.reportId ?? null;
         window.open(
-          `/api/v1/manufacturing-orders/${session.manufacturingOrderId}/operations/${session.moOperationId}/pallet-card?quantity=${reportedOk}`,
+          reportId
+            ? `/api/v1/manufacturing-orders/${session.manufacturingOrderId}/reports/${reportId}/pallet-card`
+            : `/api/v1/manufacturing-orders/${session.manufacturingOrderId}/operations/${session.moOperationId}/pallet-card?quantity=${reportedOk}`,
           "_blank",
           "noopener"
         );

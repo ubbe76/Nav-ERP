@@ -24,6 +24,12 @@ import { users } from "./auth";
 import { bankFileEntries } from "./banking";
 import { verifications } from "./economy";
 import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, units } from "./register";
+
+// Kod på pallkort (pallet card code): what machine-readable code the pallet
+// card prints for the article number and the order number. The system
+// setting pallet_card_code holds the default; customers.pallet_card_code
+// overrides it for the customer-facing card (null = follow the system).
+export const palletCardCodeEnum = pgEnum("pallet_card_code", ["none", "barcode", "qr"]);
 import type { StoredRates } from "./shipping";
 import { freightProducts, shipments } from "./shipping";
 
@@ -100,6 +106,9 @@ export const customers = pgTable("customers", {
   // Visa tilläggspriser — default for the quote/confirmation print & mail
   // dialog, and what the invoice PDF follows at issue (configurator 4b).
   showConfigurationPrices: boolean("show_configuration_prices").notNull().default(false),
+  // Kod på pallkort — the customer's own choice for the final (TILL KUND)
+  // card; null = the system setting pallet_card_code (migration 0129).
+  palletCardCode: palletCardCodeEnum("pallet_card_code"),
   // Webbsida — free text, may lack a scheme ("www.example.se").
   // Fasta leveransdagar (delivery-days.ts): ISO weekdays 1–7, sorted, no
   // duplicates (normalized by zod); empty = no fixed days. Mode and transit

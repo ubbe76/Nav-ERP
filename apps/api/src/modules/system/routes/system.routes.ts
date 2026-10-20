@@ -9,7 +9,7 @@ import {
   updateSystemSettingsSchema,
 } from "@navet/shared";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
-import { TERMINAL_READ } from "../../auth/middleware/access-rules.js";
+import { MO_READ, TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 import { contentDisposition } from "../service/content-disposition.js";
 import { errorBody } from "../service/error-body.js";
 import type { SystemService } from "../service/system.service.js";
@@ -62,6 +62,15 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
   app.get("/settings/terminal", { config: { access: TERMINAL_READ } }, async () => {
     const settings = await service.getSettings();
     return { allowMultipleStamps: settings.allowMultipleStamps };
+  });
+
+  // The pallet card dialog's one setting (Tillåt utskrift av pallkort även
+  // om kollina inte stämmer) — readable by everyone who can print a card:
+  // office, the terminal and Tillverkningsorder (läsläge), none of whom can
+  // necessarily read the full settings payload.
+  app.get("/settings/pallet-card", { config: { access: MO_READ } }, async () => {
+    const settings = await service.getSettings();
+    return { allowQuantityMismatch: settings.palletCardAllowQuantityMismatch };
   });
 
   // Settings are readable by every office user (module read default). Writing

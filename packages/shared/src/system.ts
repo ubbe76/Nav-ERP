@@ -6,6 +6,14 @@ import { deliveryDayModeSchema, transitDaysSchema } from "./delivery.js";
 export const manufacturingMaterialShortageSchema = z.enum(["none", "warn", "block"]);
 export type ManufacturingMaterialShortage = z.infer<typeof manufacturingMaterialShortageSchema>;
 
+// Kod på pallkort (pallet card code): which machine-readable code the pallet
+// card prints for the article number and the order number — none (the card
+// as before the setting existed), a Code 128 barcode or a QR code. The
+// system setting is the default; a customer may override it for the
+// customer-facing card (customers.pallet_card_code, null = follow this).
+export const palletCardCodeSchema = z.enum(["none", "barcode", "qr"]);
+export type PalletCardCode = z.infer<typeof palletCardCodeSchema>;
+
 export const updateCompanyInfoSchema = z
   .object({
     name: z.string().min(1).max(255).optional(),
@@ -90,6 +98,14 @@ const systemSettingsFieldsSchema = z.object({
     // the behaviour before the setting existed and the default when unset),
     // a question the client can override ("warn") or a refusal ("block").
     manufacturingMaterialShortage: manufacturingMaterialShortageSchema.optional(),
+    // Kod på pallkort: the default code type on pallet cards ("none" = no
+    // codes, the behaviour before the setting existed and the default when
+    // unset). Customers may override it for their own cards.
+    palletCardCode: palletCardCodeSchema.optional(),
+    // Tillåt utskrift av pallkort även om kollina inte stämmer med totalt
+    // antal: the dialog's rule (the server never checks the sum); false when
+    // unset = Skriv ut is disabled while the kolli differ from the total.
+    palletCardAllowQuantityMismatch: z.boolean().optional(),
     // Orimligt mycket tid: Planera and a new TO warn for an operation whose
     // remaining time alone fills its resource for more than this many normal
     // weeks. Decimals allowed; 0 = no warning; default 4 when unset.

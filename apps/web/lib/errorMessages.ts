@@ -289,6 +289,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "work-center-not-found": "Resursen finns inte.",
   // Ångra rapportering / Makulera order (TO)
   "mo-report-not-found": "Rapporteringen finns inte — ladda om sidan.",
+  "report-has-no-pallet-card": "Rapporten har inget pallkort — bara en operationsrapport som inte är ångrad kan skrivas ut.",
   "mo-report-already-undone": "Rapporteringen är redan ångrad — ladda om sidan.",
   "mo-report-from-purchase-receipt": "Rapporteringen kommer från en inleverans på inköpsordern och kan inte ångras här.",
   "mo-report-stock-missing": serverMessage("De inlevererade varorna finns inte kvar på lagerplatsen."),

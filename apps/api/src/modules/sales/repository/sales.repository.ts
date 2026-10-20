@@ -40,6 +40,7 @@ import {
   type ListSalesOrdersQuery,
   type NewDeliveryAddressInput,
   type OrderRowConfiguration,
+  type PalletCardCode,
   type OrderRowConfigurationCost,
   type PriceListRowInput,
   type SalesOrderStatus,
@@ -87,6 +88,11 @@ export interface SalesOrderRowForManufacturing {
   // Konfigurator 4c: the row's stored configuration — a beställningsvara's
   // TO is derived from its selection; null on a plain row.
   configuration: OrderRowConfiguration | null;
+  // Pallkort: the customer's Kod på pallkort (null = the system setting) and
+  // the order's chosen delivery address (null = none chosen), both printed
+  // on the final card of the last operation.
+  customerPalletCardCode: PalletCardCode | null;
+  deliveryAddress: { address: string; postalCode: string | null; city: string | null; country: string | null } | null;
 }
 
 export type DeliverBatchResult =
@@ -740,19 +746,28 @@ export function createSalesRepository(db: Db) {
           articleType: articles.type,
           quantityOrdered: salesOrderRows.quantityOrdered,
           configuration: salesOrderRows.configuration,
+          customerPalletCardCode: customers.palletCardCode,
+          deliveryAddress: customerDeliveryAddresses.address,
+          deliveryPostalCode: customerDeliveryAddresses.postalCode,
+          deliveryCity: customerDeliveryAddresses.city,
+          deliveryCountry: customerDeliveryAddresses.country,
         })
         .from(salesOrderRows)
         .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
         .innerJoin(articles, eq(articles.id, salesOrderRows.articleId))
+        .leftJoin(customerDeliveryAddresses, eq(customerDeliveryAddresses.id, salesOrders.deliveryAddressId))
         .where(eq(salesOrderRows.id, rowId));
-      return row
-        ? {
-            ...row,
-            quantityOrdered: Number(row.quantityOrdered),
-            configuration: (row.configuration as OrderRowConfiguration | null) ?? null,
-          }
-        : null;
+      if (!row) return null;
+      const { deliveryAddress, deliveryPostalCode, deliveryCity, deliveryCountry, ...rest } = row;
+      return {
+        ...rest,
+        quantityOrdered: Number(row.quantityOrdered),
+        configuration: (row.configuration as OrderRowConfiguration | null) ?? null,
+        deliveryAddress: deliveryAddress
+          ? { address: deliveryAddress, postalCode: deliveryPostalCode, city: deliveryCity, country: deliveryCountry }
+          : null,
+      };
     },
 
     // Konfigurator 4c: the row a configured TO is created from, locked FOR
@@ -1110,6 +1125,8 @@ export function createSalesRepository(db: Db) {
           customerName: customers.name,
           customerOrderNumber: salesOrders.customerOrderNumber,
           customerReference: salesOrders.customerReference,
+          // Pallkort: the customer's Kod på pallkort.
+          customerPalletCardCode: customers.palletCardCode,
           deliveryAddressLabel: customerDeliveryAddresses.label,
           deliveryAddress: customerDeliveryAddresses.address,
           deliveryPostalCode: customerDeliveryAddresses.postalCode,
@@ -1127,6 +1144,7 @@ export function createSalesRepository(db: Db) {
       const [rows, occasions] = await Promise.all([
         db
           .select({
+            deliveryRowId: deliveryRows.id,
             salesOrderRowId: deliveryRows.salesOrderRowId,
             quantity: deliveryRows.quantity,
             articleNumber: articles.articleNumber,
@@ -1167,6 +1185,7 @@ export function createSalesRepository(db: Db) {
       return {
         ...delivery,
         rows: rows.map((r) => ({
+          deliveryRowId: r.deliveryRowId,
           articleNumber: r.articleNumber,
           articleName: r.articleName,
           quantity: r.quantity,

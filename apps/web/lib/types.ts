@@ -933,6 +933,8 @@ export interface Customer extends PartnerCardFields {
   // Visa tilläggspriser — förval för konfigurerade raders pristillägg på
   // offert/orderbekräftelse (och vad fakturan följer).
   showConfigurationPrices: boolean;
+  // Kod på pallkort — null = följ systeminställningen.
+  palletCardCode: PalletCardCode | null;
   website: string | null;
   active: boolean;
   createdAt: string;
@@ -1561,6 +1563,9 @@ export interface ManufacturingOrder {
   articleId: string;
   articleNumber: string;
   articleName: string;
+  // The article's base unit (MO quantities are base-unit); only on the
+  // detail GET, not in the list.
+  articleUnitCode?: string;
   quantity: string;
   // Inlevererat — received into stock so far (delinleverans from the last
   // operation, plus Slutför).
@@ -2162,6 +2167,10 @@ export interface SystemSettings {
   costingSupplierPriceTier: CostingSupplierPriceTier;
   // Materialbrist vid rapportering: none = ingen kontroll, warn = fråga först, block = spärr.
   manufacturingMaterialShortage: "none" | "warn" | "block";
+  // Kod på pallkort: none = inga koder, barcode = Code 128, qr = QR-kod.
+  palletCardCode: PalletCardCode;
+  // Tillåt utskrift av pallkort även om kollina inte stämmer med totalt antal.
+  palletCardAllowQuantityMismatch: boolean;
   // Orimligt mycket tid (Planera, ny TO): weeks of a resource's capacity one
   // operation may fill before the planner warns; 0 = no warning.
   planningLongOperationWeeks: number;
@@ -3564,6 +3573,8 @@ export interface OrderMarginResponse {
 }
 
 // --- Frakt (Sendify) ---
+
+export type PalletCardCode = "none" | "barcode" | "qr";
 
 export type ParcelKind = "package" | "pallet" | "other";
 export type ShipmentStatus = "draft" | "booked" | "delivered" | "cancelled";

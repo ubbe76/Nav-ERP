@@ -4,6 +4,7 @@ import type {
   CreateArticleNumberSeriesInput,
   CreateCompanyCarrierInput,
   ManufacturingMaterialShortage,
+  PalletCardCode,
   UpdateCompanyCarrierInput,
   UpdateCompanyInfoInput,
   UpdateNumberSeriesInput,
@@ -112,6 +113,14 @@ function decodeOverReceiptPercent(raw: string | null): number | null {
 const MANUFACTURING_MATERIAL_SHORTAGE_KEY = "manufacturing_material_shortage";
 function decodeMaterialShortage(raw: string | null | undefined): ManufacturingMaterialShortage {
   return raw === "warn" || raw === "block" ? raw : "none";
+}
+// Kod på pallkort. "none" = no codes, which is what every card printed
+// before the setting existed — an absent or unknown value changes nothing.
+const PALLET_CARD_CODE_KEY = "pallet_card_code";
+// Tillåt utskrift av pallkort även om kollina inte stämmer — absent ⇒ false.
+const PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY = "pallet_card_allow_quantity_mismatch";
+function decodePalletCardCode(raw: string | null | undefined): PalletCardCode {
+  return raw === "barcode" || raw === "qr" ? raw : "none";
 }
 
 function flattenDeliveryDefaults(d: DeliveryDefaults) {
@@ -250,6 +259,8 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       costingGeneralMarkupPercent: percentSetting(get(COSTING_GENERAL_MARKUP_PERCENT_KEY)),
       purchaseOverReceiptPercent: decodeOverReceiptPercent(get(PURCHASE_OVER_RECEIPT_PERCENT_KEY)),
       manufacturingMaterialShortage: decodeMaterialShortage(get(MANUFACTURING_MATERIAL_SHORTAGE_KEY)),
+      palletCardCode: decodePalletCardCode(get(PALLET_CARD_CODE_KEY)),
+      palletCardAllowQuantityMismatch: get(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY) === "true",
       // Orimligt mycket tid (Planera, ny TO) — plan-settings.ts owns the default.
       planningLongOperationWeeks: decodeLongOperationWeeks(get(PLANNING_LONG_OPERATION_WEEKS_KEY)),
       // Fasta leveransdagar — the default mode/transit days for partners
@@ -527,6 +538,10 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.manufacturingMaterialShortage !== undefined) {
         await set(MANUFACTURING_MATERIAL_SHORTAGE_KEY, input.manufacturingMaterialShortage);
+      }
+      if (input.palletCardCode !== undefined) await set(PALLET_CARD_CODE_KEY, input.palletCardCode);
+      if (input.palletCardAllowQuantityMismatch !== undefined) {
+        await set(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY, String(input.palletCardAllowQuantityMismatch));
       }
       if (input.planningLongOperationWeeks !== undefined) {
         await set(PLANNING_LONG_OPERATION_WEEKS_KEY, String(input.planningLongOperationWeeks));

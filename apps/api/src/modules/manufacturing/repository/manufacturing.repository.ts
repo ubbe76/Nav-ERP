@@ -1679,6 +1679,29 @@ export function createManufacturingRepository(db: Db) {
       return row ?? null;
     },
 
+    // Pallkort per rapport: the report with who reported it — the employee
+    // (terminal stamp) first, else the user (TO card / Slutför operation).
+    async findReportForPalletCard(reportId: string) {
+      const [row] = await db
+        .select({
+          id: moReports.id,
+          manufacturingOrderId: moReports.manufacturingOrderId,
+          moOperationId: moReports.moOperationId,
+          kind: moReports.kind,
+          source: moReports.source,
+          quantityOk: moReports.quantityOk,
+          createdAt: moReports.createdAt,
+          undoneAt: moReports.undoneAt,
+          employeeName: employees.name,
+          userName: users.name,
+        })
+        .from(moReports)
+        .leftJoin(employees, eq(employees.id, moReports.employeeId))
+        .leftJoin(users, eq(users.id, moReports.createdBy))
+        .where(eq(moReports.id, reportId));
+      return row ?? null;
+    },
+
     async findTimeReportById(timeReportId: string) {
       const [row] = await db.select().from(timeReports).where(eq(timeReports.id, timeReportId));
       return row ?? null;

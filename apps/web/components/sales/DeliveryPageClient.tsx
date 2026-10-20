@@ -19,6 +19,7 @@ import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { FormError, FormNotice } from "../ui/Form";
 import { BookTransportButton } from "../shipping/BookTransportButton";
+import { PalletCardDialog } from "../documents/PalletCardDialog";
 import styles from "./DeliveryPageClient.module.css";
 
 // Utleverans routine — report a whole delivery in one go. Quantities are
@@ -55,6 +56,7 @@ export function DeliveryPageClient({
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [palletCardDeliveryId, setPalletCardDeliveryId] = useState<string | null>(null);
   const [done, setDone] = useState<{ message: string; deliveryId: string; deliveryNumber: string } | null>(null);
 
   // Frakt: "Boka transport" on the result block only when freight is
@@ -214,14 +216,17 @@ export function DeliveryPageClient({
           >
             Följesedel {done.deliveryNumber} (PDF)
           </a>
-          <a
-            href={`/api/v1/deliveries/${done.deliveryId}/pallet-card`}
+          <button
+            type="button"
             className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-            target="_blank"
-            rel="noopener noreferrer"
+            onClick={() => setPalletCardDeliveryId(done.deliveryId)}
           >
             Pallkort (PDF)
-          </a>
+          </button>
+          <PalletCardDialog
+            target={palletCardDeliveryId ? { kind: "delivery", deliveryId: palletCardDeliveryId } : null}
+            onClose={() => setPalletCardDeliveryId(null)}
+          />
           <BookTransportButton deliveryId={done.deliveryId} shipment={null} enabled={freightEnabled} />
         </div>
       )}

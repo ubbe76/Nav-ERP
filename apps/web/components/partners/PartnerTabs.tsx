@@ -189,6 +189,9 @@ function AllmantTab({
   const [showConfigurationPrices, setShowConfigurationPrices] = useState(
     isCustomer ? (partner as Customer).showConfigurationPrices : false
   );
+  const [palletCardCode, setPalletCardCode] = useState<string>(
+    isCustomer ? ((partner as Customer).palletCardCode ?? "") : ""
+  );
   const [address, setAddress] = useState(partner.address ?? "");
   const [postalCode, setPostalCode] = useState(partner.postalCode ?? "");
   const [city, setCity] = useState(partner.city ?? "");
@@ -213,6 +216,7 @@ function AllmantTab({
           ...(isCustomer ? { ourSupplierNumber: orNull(ourSupplierNumber) } : {}),
           ...(isCustomer ? { website: orNull(website) } : {}),
           ...(isCustomer ? { showConfigurationPrices } : {}),
+          ...(isCustomer ? { palletCardCode: palletCardCode === "" ? null : palletCardCode } : {}),
           address: orNull(address),
           postalCode: orNull(postalCode),
           city: orNull(city),
@@ -342,6 +346,18 @@ function AllmantTab({
             <FormHint attached>
               Förval för Visa tilläggspriser när offert och orderbekräftelse skrivs ut eller mejlas; fakturan följer
               inställningen när den utfärdas.
+            </FormHint>
+            <Field label="Kod på pallkort" htmlFor="palletCardCode">
+              <Select id="palletCardCode" value={palletCardCode} onChange={(e) => setPalletCardCode(e.target.value)}>
+                <option value="">Systemets förval</option>
+                <option value="none">Ingen</option>
+                <option value="barcode">Streckkod</option>
+                <option value="qr">QR-kod</option>
+              </Select>
+            </Field>
+            <FormHint attached>
+              Om kundens pallkort får en streckkod eller QR-kod för artikelnumret och vårt ordernummer. Systemets
+              förval är inställningen under System.
             </FormHint>
           </>
         )}

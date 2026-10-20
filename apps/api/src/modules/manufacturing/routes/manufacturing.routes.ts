@@ -56,6 +56,7 @@ import {
   ManufacturingOrderStampedInError,
   MoReportAlreadyUndoneError,
   MoReportFromPurchaseReceiptError,
+  MoReportNoPalletCardError,
   MoReportNotFoundError,
   MoReportStockMissingError,
   MoReportTimeLockedError,
@@ -449,7 +450,8 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
 
   // Pallkort (Etapp F) — the card placed on the pallet when the operation is
   // reported. ?quantity overrides the printed quantity (defaults to the
-  // operation's accumulated OK quantity, then the order quantity).
+  // operation's accumulated OK quantity, then the order quantity); repeated
+  // ⇒ one card per kolli with that quantity.
   app.get<{ Params: { id: string; opId: string } }>(
     "/manufacturing-orders/:id/operations/:opId/pallet-card",
     { config: { access: MO_READ } },
@@ -463,6 +465,33 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
       } catch (err) {
         if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof MOOperationNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // Pallkort per rapport (omutskrift from Rapporteringar): the report's
+  // operation card dated on the report with the reporter's name; ?quantity
+  // (repeatable, one card per kolli) defaults to the report's OK quantity.
+  // Same shop-floor read rule as the
+  // operation route. 404 when the report is not on this order, 409
+  // report-has-no-pallet-card for anything but a live operation report.
+  app.get<{ Params: { id: string; reportId: string } }>(
+    "/manufacturing-orders/:id/reports/:reportId/pallet-card",
+    { config: { access: MO_READ } },
+    async (req, reply) => {
+      const { quantity } = palletCardQuerySchema.parse(req.query);
+      try {
+        const { filename, content } = await service.getReportPalletCardPdf(req.params.id, req.params.reportId, quantity);
+        reply.header("Content-Type", "application/pdf");
+        reply.header("Content-Disposition", contentDisposition(filename));
+        return reply.send(content);
+      } catch (err) {
+        if (err instanceof ManufacturingOrderNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof MoReportNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof MOOperationNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof MoReportNoPalletCardError) return reply.code(409).send(errorBody(err));
         if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
         throw err;
       }

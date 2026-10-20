@@ -6,6 +6,7 @@ import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from ".
 import { blankSafe } from "./coerce.js";
 import { businessDateSchema } from "./business-date.js";
 import { partnerDeliveryFields } from "./delivery.js";
+import { palletCardCodeSchema } from "./system.js";
 
 export const salesOrderStatusSchema = z.enum([
   "quote",
@@ -83,6 +84,9 @@ export const createCustomerSchema = z.object({
   // Visa tilläggspriser — default for the configured rows' price split on
   // quote/order confirmation (and what the invoice follows).
   showConfigurationPrices: z.boolean().default(false),
+  // Kod på pallkort — the customer's own code type on the customer-facing
+  // pallet card; null/omitted = the system setting pallet_card_code.
+  palletCardCode: palletCardCodeSchema.nullable().optional(),
   website: z.string().max(255).optional(),
   defaultFreightProductId: z.string().uuid().optional(),
   active: z.boolean().default(true),
@@ -122,6 +126,7 @@ export const updateCustomerSchema = z
     collectiveInvoicing: z.boolean().optional(),
     privatePerson: z.boolean().optional(),
     showConfigurationPrices: z.boolean().optional(),
+    palletCardCode: palletCardCodeSchema.nullable().optional(),
     website: z.string().max(255).nullable().optional(),
     defaultFreightProductId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
@@ -510,3 +515,41 @@ export const priceQuoteQuerySchema = z.object({
   quantity: z.coerce.number().positive(),
 });
 export type PriceQuoteQuery = z.infer<typeof priceQuoteQuerySchema>;
+
+// Pallkort on a delivery (GET /deliveries/:id/pallet-card): which rows to
+// print and the quantity of each kolli. `row` is repeated —
+// `row=<deliveryRowId>:<antal>,<antal>,…` — one card per listed quantity
+// (in the row's unit, > 0, 1–50 per row); an empty list (`row=<id>:`) skips
+// the row. Fastify hands a single value as a string and several as an
+// array, so both shapes are accepted and normalised to a list. Omitted ⇒
+// every row, one card with the delivered quantity (the behaviour before the
+// dialog existed). Listing only skipped rows prints nothing, which is
+// refused here (⇒ 400 validation-failed) rather than answering with an
+// empty PDF. The kolli are never checked against the delivered total.
+export const deliveryPalletCardRowSchema = z.object({
+  deliveryRowId: z.string().uuid(),
+  quantities: z.array(z.coerce.number().positive()).max(50),
+});
+export type DeliveryPalletCardRow = z.infer<typeof deliveryPalletCardRowSchema>;
+
+const deliveryPalletCardRowParam = z
+  .string()
+  .transform((raw, ctx) => {
+    const colon = raw.indexOf(":");
+    if (colon === -1) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Expected <deliveryRowId>:<quantity>,<quantity>,…" });
+      return z.NEVER;
+    }
+    const list = raw.slice(colon + 1).trim();
+    return { deliveryRowId: raw.slice(0, colon), quantities: list === "" ? [] : list.split(",") };
+  })
+  .pipe(deliveryPalletCardRowSchema);
+
+export const deliveryPalletCardQuerySchema = z.object({
+  row: z
+    .preprocess((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]), z.array(deliveryPalletCardRowParam).min(1).optional())
+    // Runs on dirty data too (zod keeps going after an element failed), so
+    // an element that never parsed is skipped rather than dereferenced.
+    .refine((rows) => rows === undefined || rows.some((r) => Array.isArray(r?.quantities) && r.quantities.length > 0), "At least one row must get a card"),
+});
+export type DeliveryPalletCardQuery = z.infer<typeof deliveryPalletCardQuerySchema>;

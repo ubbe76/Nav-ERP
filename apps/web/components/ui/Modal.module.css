@@ -25,6 +25,9 @@
   color: var(--color-text-primary);
   box-shadow: var(--shadow-frame);
   overflow: hidden;
+  /* A dialog rendered inside a right-aligned table cell (the KO card's
+     delivery list) would otherwise inherit that alignment. */
+  text-align: start;
 }
 
 .dialog::backdrop {

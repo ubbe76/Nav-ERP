@@ -904,6 +904,13 @@
       "when": 1792428897011,
       "tag": "0128_user_read_only",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1792467768333,
+      "tag": "0129_pallet_card_code",
+      "breakpoints": true
     }
   ]
 }

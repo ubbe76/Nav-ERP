@@ -366,9 +366,17 @@ export const completeManufacturingOrderSchema = z.object({
 export type CompleteManufacturingOrderInput = z.infer<typeof completeManufacturingOrderSchema>;
 
 // Pallkort (pallet card) — the quantity printed on the card. Omitted, the
-// service falls back to the operation's accumulated OK quantity, then the
-// order quantity.
+// service falls back to the operation's accumulated OK quantity (the
+// report's OK quantity on the report route) and prints ONE card. Repeated
+// (`?quantity=10&quantity=10&quantity=4`) ⇒ one card per kolli with that
+// quantity, in that order, 1–50 cards; Fastify hands a single value as a
+// string and several as an array, both normalised to a list. The server
+// never checks that the kolli add up to the total — the dialog warns.
+export const palletCardQuantitiesSchema = z.preprocess(
+  (value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]),
+  z.array(z.coerce.number().positive()).min(1).max(50).optional()
+);
 export const palletCardQuerySchema = z.object({
-  quantity: z.coerce.number().positive().optional(),
+  quantity: palletCardQuantitiesSchema,
 });
 export type PalletCardQuery = z.infer<typeof palletCardQuerySchema>;

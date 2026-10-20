@@ -231,6 +231,8 @@ export const ERROR_CODES = {
   // Materialbrist vid rapportering (system setting manufacturing_material_shortage)
   MATERIAL_SHORTAGE: "material-shortage",
   MO_REPORT_TIME_LOCKED: "mo-report-time-locked",
+  // Pallkort per rapport: only a live operation report has a card
+  REPORT_HAS_NO_PALLET_CARD: "report-has-no-pallet-card",
   MANUFACTURING_ORDER_HAS_REPORTS: "manufacturing-order-has-reports",
   MANUFACTURING_ORDER_STAMPED_IN: "manufacturing-order-stamped-in",
   // Ändra material och operationer på en skapad TO

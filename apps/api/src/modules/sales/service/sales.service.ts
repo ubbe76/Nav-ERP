@@ -8,6 +8,7 @@ import type {
   CreateSalesOrderRowInput,
   CustomerPriceInput,
   DeliverBatchInput,
+  DeliveryPalletCardRow,
   DeliverGoodsInput,
   ListPriceListsQuery,
   ListQuery,
@@ -37,7 +38,7 @@ import type { PriceResolution } from "./price-resolver.js";
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
-import type { DocumentPdfService } from "../../mail/service/document-pdf.js";
+import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { roundUpToMultiple, toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "@navet/shared";
 import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
 import {
@@ -226,6 +227,15 @@ export class DeliveryNotFoundError extends Error {
   constructor(id: string) {
     super(`Delivery ${id} not found`);
     this.name = "DeliveryNotFoundError";
+  }
+}
+
+// Pallkort on a delivery: a `row=` selection names a delivery row that does
+// not belong to this delivery (→ 400).
+export class DeliveryRowNotInDeliveryError extends Error {
+  constructor(deliveryRowId: string) {
+    super(`Delivery row ${deliveryRowId} does not belong to this delivery`);
+    this.name = "DeliveryRowNotInDeliveryError";
   }
 }
 
@@ -1494,27 +1504,79 @@ export function createSalesService(
       return { pdf: content, filename: `foljesedel-${delivery.deliveryNumber}.pdf`, deliveryNumber: delivery.deliveryNumber };
     },
 
-    // Pallkort (Etapp F) — one card PAGE per delivered row, all in the
-    // "final" (customer-facing) variant: the pallet leaves the building, so
-    // the card names the customer and both order numbers. Quantities in the
-    // row's display unit, same as the delivery note above.
-    async deliveryPalletCardPdf(deliveryId: string) {
+    // Pallkort (Etapp F) — one card PAGE per kolli, all in the "final"
+    // (customer-facing) variant: the pallet leaves the building, so the card
+    // names the customer, both order numbers and the delivery address.
+    // Quantities in the row's display unit, same as the delivery note above.
+    // `selection` (the dialog's row= parameters) picks rows and gives each
+    // kolli its own quantity — an empty list skips the row; omitted ⇒ every
+    // row as one kolli with the delivered quantity. A row id outside the
+    // delivery is refused (400). The kolli are never checked against the
+    // delivered total (the dialog warns). Datum is the delivery's
+    // delivered_at, Rapporterad av the user who delivered.
+    async deliveryPalletCardPdf(deliveryId: string, selection?: DeliveryPalletCardRow[]) {
       const delivery = await repo.getDeliveryForPdf(deliveryId);
       if (!delivery) throw new DeliveryNotFoundError(deliveryId);
 
-      const content = await pdf.renderPalletCard(
-        delivery.rows.map((r) => ({
-          kind: "final" as const,
+      const byId = new Map(delivery.rows.map((r) => [r.deliveryRowId, r]));
+      const picks = selection
+        ? selection.map((s) => {
+            const row = byId.get(s.deliveryRowId);
+            if (!row) throw new DeliveryRowNotInDeliveryError(s.deliveryRowId);
+            return { row, quantities: s.quantities };
+          })
+        : delivery.rows.map((row) => ({ row, quantities: [toUnitQuantity(Number(row.quantity), row.unitFactor)] }));
+
+      // Kod på pallkort: the customer's own choice, else the system setting.
+      const code = delivery.customerPalletCardCode ?? (await settings.getSettings()).palletCardCode;
+      const cards: PalletCardPdfInput[] = [];
+      for (const pick of picks) {
+        pick.quantities.forEach((quantity, i) => {
+          cards.push({
+            kind: "final",
+            code,
+            articleNumber: pick.row.articleNumber,
+            articleName: pick.row.articleName,
+            customerName: delivery.customerName,
+            customerOrderNumber: delivery.customerOrderNumber,
+            orderNumber: delivery.orderNumber,
+            quantity,
+            unit: pick.row.unitCode,
+            parcel: { index: i + 1, count: pick.quantities.length },
+            printedAt: delivery.deliveredAt,
+            // The delivery card deliberately names no reporter (user's
+            // decision) — only the TO cards carry Rapporterad av.
+            reference: delivery.deliveryNumber,
+            deliveryAddress: delivery.deliveryAddress
+              ? {
+                  address: delivery.deliveryAddress,
+                  postalCode: delivery.deliveryPostalCode,
+                  city: delivery.deliveryCity,
+                  country: delivery.deliveryCountry,
+                }
+              : null,
+          });
+        });
+      }
+      const content = await pdf.renderPalletCard(cards);
+      return { pdf: content, filename: `pallkort-${delivery.deliveryNumber}.pdf` };
+    },
+
+    // The delivery's rows for the pallet card dialog (GET /deliveries/:id/
+    // rows): id + article + delivered quantity in the row's unit.
+    async deliveryRows(deliveryId: string) {
+      const delivery = await repo.getDeliveryForPdf(deliveryId);
+      if (!delivery) throw new DeliveryNotFoundError(deliveryId);
+      return {
+        deliveryNumber: delivery.deliveryNumber,
+        rows: delivery.rows.map((r) => ({
+          id: r.deliveryRowId,
           articleNumber: r.articleNumber,
           articleName: r.articleName,
-          customerName: delivery.customerName,
-          customerOrderNumber: delivery.customerOrderNumber,
-          orderNumber: delivery.orderNumber,
           quantity: toUnitQuantity(Number(r.quantity), r.unitFactor),
           unit: r.unitCode,
-        }))
-      );
-      return { pdf: content, filename: `pallkort-${delivery.deliveryNumber}.pdf` };
+        })),
+      };
     },
 
     // --- C3 Kundpriser: prislistor ---
