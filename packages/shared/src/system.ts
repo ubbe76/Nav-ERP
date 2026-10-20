@@ -79,15 +79,18 @@ const systemSettingsFieldsSchema = z.object({
     smtpFromEmail: z.union([z.literal(""), z.string().trim().email().max(255)]).optional(),
     // Costing (System → Kalkyler). The markups build Monitor's påläggskalkyl:
     // dM + MO% x dM, dL + TO% x dL (TO per work center), Lego + LO% x Lego
-    // = TVK, + Affo% x TVK = SVK, + generellt påslag % x SVK = sales price.
-    // All default to 0 / "standard", so the calculation is unchanged until
-    // someone configures it. Decimals allowed (12.5 %).
+    // = TVK, + Affo% x TVK = SVK, + generellt påslag % x SVK
+    // + materialpåslag % x (dM + MO) + TO = sales price. TO and the
+    // materialpåslag are outside TVK/SVK. All default to 0 / "standard", so
+    // the calculation is unchanged until someone configures it. Decimals
+    // allowed (12.5 %).
     costingMaterialSource: costingMaterialSourceSchema.optional(),
     costingSupplierPriceTier: costingSupplierPriceTierSchema.optional(),
     costingMoPercent: z.number().min(0).max(1000).optional(),
     costingLoPercent: z.number().min(0).max(1000).optional(),
     costingAffoPercent: z.number().min(0).max(1000).optional(),
     costingGeneralMarkupPercent: z.number().min(0).max(1000).optional(),
+    costingMaterialMarkupPercent: z.number().min(0).max(1000).optional(),
     // Tillåten överleverans på inköpsorder: how far past the ordered quantity
     // a purchase order row may be received, in percent of the row's ordered
     // quantity. null = no limit; 0 = never past the ordered quantity (the

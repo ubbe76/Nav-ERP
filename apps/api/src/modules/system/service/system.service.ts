@@ -97,6 +97,7 @@ const COSTING_MO_PERCENT_KEY = "costing_mo_percent";
 const COSTING_LO_PERCENT_KEY = "costing_lo_percent";
 const COSTING_AFFO_PERCENT_KEY = "costing_affo_percent";
 const COSTING_GENERAL_MARKUP_PERCENT_KEY = "costing_general_markup_percent";
+const COSTING_MATERIAL_MARKUP_PERCENT_KEY = "costing_material_markup_percent";
 // Tillåten överleverans på inköpsorder. Three states in one text value: key
 // absent ⇒ 0 % (receipts stop at the ordered quantity, exactly as before the
 // setting existed), "" ⇒ null = no limit, otherwise the percent.
@@ -257,6 +258,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       costingLoPercent: percentSetting(get(COSTING_LO_PERCENT_KEY)),
       costingAffoPercent: percentSetting(get(COSTING_AFFO_PERCENT_KEY)),
       costingGeneralMarkupPercent: percentSetting(get(COSTING_GENERAL_MARKUP_PERCENT_KEY)),
+      costingMaterialMarkupPercent: percentSetting(get(COSTING_MATERIAL_MARKUP_PERCENT_KEY)),
       purchaseOverReceiptPercent: decodeOverReceiptPercent(get(PURCHASE_OVER_RECEIPT_PERCENT_KEY)),
       manufacturingMaterialShortage: decodeMaterialShortage(get(MANUFACTURING_MATERIAL_SHORTAGE_KEY)),
       palletCardCode: decodePalletCardCode(get(PALLET_CARD_CODE_KEY)),
@@ -530,6 +532,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       if (input.costingAffoPercent !== undefined) await set(COSTING_AFFO_PERCENT_KEY, String(input.costingAffoPercent));
       if (input.costingGeneralMarkupPercent !== undefined) {
         await set(COSTING_GENERAL_MARKUP_PERCENT_KEY, String(input.costingGeneralMarkupPercent));
+      }
+      if (input.costingMaterialMarkupPercent !== undefined) {
+        await set(COSTING_MATERIAL_MARKUP_PERCENT_KEY, String(input.costingMaterialMarkupPercent));
       }
       if (input.purchaseOverReceiptPercent !== undefined) {
         await set(

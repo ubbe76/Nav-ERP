@@ -65,6 +65,7 @@ const costingSettings = {
   costingLoPercent: 0,
   costingAffoPercent: 0,
   costingGeneralMarkupPercent: 0,
+  costingMaterialMarkupPercent: 0,
 };
 const costingService = createCostingService(createCostingRepository(db), {
   getSettings: async () => costingSettings,
@@ -88,6 +89,7 @@ beforeEach(async () => {
     costingLoPercent: 0,
     costingAffoPercent: 0,
     costingGeneralMarkupPercent: 0,
+    costingMaterialMarkupPercent: 0,
   });
 });
 
@@ -433,6 +435,39 @@ describe("costing service — markups", () => {
     expect(calculation.generalMarkup).toBe("85.1200");
     // SVK + generellt påslag + TO = 425.6 + 85.12 + 6
     expect(calculation.salesPrice).toBe("516.7200");
+  });
+
+  it("puts the materialpåslag on dM + MO, towards the sales price only", async () => {
+    const { parent } = await makeParentWithBom(10, 2);
+    await addServiceComponent(parent.id, 40, 1);
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", hourlyRate: 60, overheadPercent: 10, active: true });
+    await mfgService.createRoutingOperation(parent.id, { sequenceNo: 1, workCenterId: workCenter.id, setupTime: 30, runTimePerUnit: 6 });
+    Object.assign(costingSettings, {
+      costingMoPercent: 10,
+      costingLoPercent: 5,
+      costingAffoPercent: 12,
+      costingGeneralMarkupPercent: 20,
+      costingMaterialMarkupPercent: 25,
+    });
+
+    const { calculation } = await costingService.preCalculate(parent.id, 5, true);
+
+    // 25 % of dM 100 + MO 10 — lego, LO and labor get none of it.
+    expect(calculation.materialMarkup).toBe("27.5000");
+    expect(calculation.materialMarkupPercent).toBe("25.00");
+    // Affo and the general markup are the same as without it (see above).
+    expect(calculation.businessOverhead).toBe("45.6000");
+    expect(calculation.generalMarkup).toBe("85.1200");
+    // SVK 425.6 + generellt 85.12 + materialpåslag 27.5 + TO 6
+    expect(calculation.salesPrice).toBe("544.2200");
+
+    // Prisåterföring writes the price with the markup; the standard cost
+    // (TVK) and the TB basis (SVK) stay without it.
+    const { calculation: draft } = await costingService.preCalculate(parent.id, 5);
+    expect(draft.materialMarkup).toBe("27.5000");
+    expect(draft.salesPrice).toBe("544.2200");
+    const selfCosts = await costingService.latestPreCalculationSelfCost([parent.id]);
+    expect(selfCosts.get(parent.id)!.selfCostPerUnit).toBeCloseTo(425.6 / 5, 10);
   });
 
   it("snapshots the material source and the markups that applied", async () => {

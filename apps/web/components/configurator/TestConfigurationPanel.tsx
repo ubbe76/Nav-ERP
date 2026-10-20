@@ -378,6 +378,9 @@ function DerivationView({ derivation, stale }: { derivation: ConfiguratorDerivat
             {/* TO sits outside TVK — it is added to the sales price last. */}
             <dt>TO-påslag</dt>
             <dd>{formatMoney(costing.overhead)}</dd>
+            {/* Materialpåslag likewise: on dM + MO, sales price only. */}
+            <dt>Materialpåslag</dt>
+            <dd>{formatMoney(costing.materialMarkup)}</dd>
           </dl>
           {costing.warnings.map((w) => (
             <FormNotice key={w}>{w}</FormNotice>

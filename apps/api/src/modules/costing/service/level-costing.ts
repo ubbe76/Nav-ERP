@@ -42,8 +42,10 @@ export function buildMaterialRow(
       unitCost: cost,
       priceSource: used,
       amount: component.quantity * cost,
-      // A bought component carries no TO of its own.
+      // A bought component carries no TO of its own, and its materialpåslag is
+      // computed on the header's dM + MO, not per row.
       overheadAmount: 0,
+      materialMarkupAmount: 0,
     },
     warning,
   };
@@ -62,11 +64,14 @@ export function buildMaterialRow(
 // inside `amount`; it rides on the row as overheadAmount and directCosts adds
 // it to the parent's TO bucket. The row thus explains BOTH figures it feeds,
 // and the specification can show the halvfabrikat's TO next to the
-// operations' TO without anything being counted twice.
+// operations' TO without anything being counted twice. `materialMarkupTotal`
+// (the sub-level's materialpåslag) travels up the same way, for the same
+// reason.
 export function buildSemiFinishedRow(
   component: { componentArticleId: string; quantity: number; unitId: string | null; unitFactor: string | null },
   manufacturingCostTotal: number,
-  overheadTotal: number
+  overheadTotal: number,
+  materialMarkupTotal: number
 ): MaterialRowWrite {
   return {
     componentArticleId: component.componentArticleId,
@@ -78,6 +83,7 @@ export function buildSemiFinishedRow(
     priceSource: "calculated",
     amount: manufacturingCostTotal,
     overheadAmount: overheadTotal,
+    materialMarkupAmount: materialMarkupTotal,
   };
 }
 
@@ -193,5 +199,7 @@ export function directCosts(materialRows: MaterialRowWrite[], operationRows: Ope
     // material rows by `kind`, so no row can land in two buckets. Always 0 in
     // a single-level run, since nothing produces a "semi" row then.
     semiFinishedCost: sumRows(materialRows.filter((r) => r.kind === "semi"), (r) => r.amount),
+    // The sub-assemblies' materialpåslag, lifted up like their TO.
+    liftedMaterialMarkup: sumRows(materialRows, (r) => r.materialMarkupAmount),
   };
 }

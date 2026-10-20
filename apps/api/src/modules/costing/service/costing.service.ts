@@ -80,6 +80,8 @@ export interface CostingSettingsReader {
     costingLoPercent: number;
     costingAffoPercent: number;
     costingGeneralMarkupPercent: number;
+    // Optional for the same reason; absent = 0, no materialpåslag.
+    costingMaterialMarkupPercent?: number;
   }>;
 }
 
@@ -109,6 +111,7 @@ export interface CostCalculationDraft {
   semiFinishedCost: string;
   businessOverhead: string;
   generalMarkup: string;
+  materialMarkup: string;
   salesPrice: string;
   materialSource: CostingMaterialSource;
   multiLevel: boolean;
@@ -116,6 +119,7 @@ export interface CostCalculationDraft {
   loPercent: string;
   affoPercent: string;
   generalMarkupPercent: string;
+  materialMarkupPercent: string;
   type: CostCalculationType;
   calculatedAt: null;
 }
@@ -181,6 +185,7 @@ function toHeader(
     semiFinishedCost: round(costs.semiFinishedCost, 4),
     businessOverhead: round(costs.businessOverhead, 4),
     generalMarkup: round(costs.generalMarkup, 4),
+    materialMarkup: round(costs.materialMarkup, 4),
     salesPrice: round(costs.salesPrice, 4),
     materialSource: source,
     multiLevel: identity.multiLevel,
@@ -188,6 +193,7 @@ function toHeader(
     loPercent: round(markups.loPercent, 2),
     affoPercent: round(markups.affoPercent, 2),
     generalMarkupPercent: round(markups.generalMarkupPercent, 2),
+    materialMarkupPercent: round(markups.materialMarkupPercent, 2),
   };
 }
 
@@ -206,6 +212,7 @@ function toDraft(header: CostCalculationWrite): CostCalculationDraft {
     semiFinishedCost: money(header.semiFinishedCost),
     businessOverhead: money(header.businessOverhead),
     generalMarkup: money(header.generalMarkup),
+    materialMarkup: money(header.materialMarkup),
     salesPrice: money(header.salesPrice),
     materialSource: header.materialSource,
     multiLevel: header.multiLevel,
@@ -213,6 +220,7 @@ function toDraft(header: CostCalculationWrite): CostCalculationDraft {
     loPercent: percent(header.loPercent),
     affoPercent: percent(header.affoPercent),
     generalMarkupPercent: percent(header.generalMarkupPercent),
+    materialMarkupPercent: percent(header.materialMarkupPercent),
     type: header.type,
     calculatedAt: null,
   };
@@ -269,6 +277,7 @@ export function createCostingService(
         loPercent: s.costingLoPercent,
         affoPercent: s.costingAffoPercent,
         generalMarkupPercent: s.costingGeneralMarkupPercent,
+        materialMarkupPercent: s.costingMaterialMarkupPercent ?? 0,
       },
     };
   }
@@ -519,6 +528,7 @@ export function createCostingService(
       operationCost: level.operationRows.reduce((t, r) => t + r.laborAmount + (r.subcontractAmount ?? 0), 0),
       markups: costs.materialOverhead + costs.subcontractOverhead,
       overhead: costs.overhead,
+      materialMarkup: costs.materialMarkup,
       manufacturingCost: manufacturing,
       manufacturingCostPerUnit: perUnit(manufacturing, quantity) ?? 0,
       selfCost: costs.selfCost,

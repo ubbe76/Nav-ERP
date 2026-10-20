@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { applyMarkups, resolveUnitCost } from "../src/modules/costing/service/markup.js";
 
-const DIRECT = { materialCost: 100, laborCost: 60, overhead: 6, subcontractCost: 40, semiFinishedCost: 0 };
-const NO_MARKUPS = { moPercent: 0, loPercent: 0, affoPercent: 0, generalMarkupPercent: 0 };
+const DIRECT = { materialCost: 100, laborCost: 60, overhead: 6, subcontractCost: 40, semiFinishedCost: 0, liftedMaterialMarkup: 0 };
+const NO_MARKUPS = { moPercent: 0, loPercent: 0, affoPercent: 0, generalMarkupPercent: 0, materialMarkupPercent: 0 };
 
 describe("applyMarkups — påläggskalkyl", () => {
   it("applies MO on material, LO on lego, Affo on TVK, the general markup on SVK and TO last", () => {
-    const costs = applyMarkups(DIRECT, { moPercent: 10, loPercent: 5, affoPercent: 12, generalMarkupPercent: 20 });
+    const costs = applyMarkups(DIRECT, { ...NO_MARKUPS, moPercent: 10, loPercent: 5, affoPercent: 12, generalMarkupPercent: 20 });
 
     expect(costs.materialOverhead).toBe(10); // MO: 100 * 10%
     expect(costs.subcontractOverhead).toBe(2); // LO: 40 * 5%
@@ -20,8 +20,8 @@ describe("applyMarkups — påläggskalkyl", () => {
   });
 
   it("adds TO to the sales price after the general markup, with no Affo or profit on it", () => {
-    const withTo = applyMarkups(DIRECT, { moPercent: 0, loPercent: 0, affoPercent: 50, generalMarkupPercent: 100 });
-    const withoutTo = applyMarkups({ ...DIRECT, overhead: 0 }, { moPercent: 0, loPercent: 0, affoPercent: 50, generalMarkupPercent: 100 });
+    const withTo = applyMarkups(DIRECT, { ...NO_MARKUPS, affoPercent: 50, generalMarkupPercent: 100 });
+    const withoutTo = applyMarkups({ ...DIRECT, overhead: 0 }, { ...NO_MARKUPS, affoPercent: 50, generalMarkupPercent: 100 });
 
     // Every figure up to and including the general markup is blind to TO …
     expect(withTo.manufacturingCost).toBe(withoutTo.manufacturingCost);
@@ -68,9 +68,35 @@ describe("applyMarkups — påläggskalkyl", () => {
   it("is identical to the pre-multi-level result when there is no halvfabrikat", () => {
     // The regression that matters: a single-level run must produce exactly the
     // numbers it produced before the bucket existed.
-    const costs = applyMarkups(DIRECT, { moPercent: 10, loPercent: 5, affoPercent: 12, generalMarkupPercent: 20 });
+    const costs = applyMarkups(DIRECT, { ...NO_MARKUPS, moPercent: 10, loPercent: 5, affoPercent: 12, generalMarkupPercent: 20 });
     expect(costs.manufacturingCost).toBe(212);
     expect(costs.salesPrice).toBeCloseTo(290.928, 10);
+  });
+
+  it("puts the materialpåslag on dM + MO, outside TVK/SVK and beside the general markup", () => {
+    const markups = { moPercent: 10, loPercent: 5, affoPercent: 12, generalMarkupPercent: 20 };
+    const withMaterial = applyMarkups(DIRECT, { ...markups, materialMarkupPercent: 30 });
+    const without = applyMarkups(DIRECT, { ...markups, materialMarkupPercent: 0 });
+
+    // 30 % of dM 100 + MO 10 — not of labor, lego or LO
+    expect(withMaterial.materialMarkup).toBeCloseTo(33, 10);
+    // The self cost and the general markup are blind to it — no stacking …
+    expect(withMaterial.manufacturingCost).toBe(without.manufacturingCost);
+    expect(withMaterial.selfCost).toBe(without.selfCost);
+    expect(withMaterial.generalMarkup).toBe(without.generalMarkup);
+    // … and the price differs by exactly the markup.
+    expect(withMaterial.salesPrice - without.salesPrice).toBeCloseTo(33, 10);
+    expect(without.materialMarkup).toBe(0);
+  });
+
+  it("adds the sub-assemblies' lifted materialpåslag without marking up the halvfabrikat's TVK", () => {
+    const costs = applyMarkups(
+      { ...DIRECT, semiFinishedCost: 300, liftedMaterialMarkup: 12 },
+      { ...NO_MARKUPS, materialMarkupPercent: 10 }
+    );
+    // 10 % of dM 100 (no MO) + 12 lifted — the 300 gets nothing here
+    expect(costs.materialMarkup).toBeCloseTo(22, 10);
+    expect(costs.salesPrice).toBeCloseTo(100 + 60 + 40 + 300 + 22 + 6, 10);
   });
 
   it("does not put the MO markup on lego or the LO markup on material", () => {

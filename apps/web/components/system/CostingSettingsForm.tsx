@@ -12,7 +12,8 @@ import type { CostingMaterialSource, CostingSupplierPriceTier, SystemSettings } 
 // Fixed example amounts for the live preview, so the numbers below move only
 // with the percentages the user is typing. TO is included because it is part
 // of the chain even though it is set per arbetsplats, not here — it sits
-// outside TVK/SVK and is added last, towards the sales price.
+// outside TVK/SVK and is added last, towards the sales price, like the
+// materialpåslag.
 const EXAMPLE = { material: 1000, labor: 500, overhead: 50, subcontract: 200, semiFinished: 300 };
 
 function toPercent(raw: string): number | null {
@@ -31,6 +32,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
   const [lo, setLo] = useState(String(settings.costingLoPercent));
   const [affo, setAffo] = useState(String(settings.costingAffoPercent));
   const [general, setGeneral] = useState(String(settings.costingGeneralMarkupPercent));
+  const [materialMarkup, setMaterialMarkup] = useState(String(settings.costingMaterialMarkupPercent));
 
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +48,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
       costingLoPercent: toPercent(lo),
       costingAffoPercent: toPercent(affo),
       costingGeneralMarkupPercent: toPercent(general),
+      costingMaterialMarkupPercent: toPercent(materialMarkup),
     };
     if (Object.values(percents).some((value) => value === null)) {
       setError("Påslagen måste vara tal mellan 0 och 1000");
@@ -85,6 +88,8 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
   const affoAmount = manufacturingCost * ((toPercent(affo) ?? 0) / 100);
   const selfCost = manufacturingCost + affoAmount;
   const generalAmount = selfCost * ((toPercent(general) ?? 0) / 100);
+  // On dM + MO, beside the general markup — not on SVK, not stacked.
+  const materialMarkupAmount = (EXAMPLE.material + moAmount) * ((toPercent(materialMarkup) ?? 0) / 100);
 
   const lines: CostChainLine[] = [
     { label: "Direkt material (dM)", amount: EXAMPLE.material },
@@ -97,8 +102,13 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
     { label: `Affo-påslag ${toPercent(affo) ?? 0} %`, amount: affoAmount, kind: "markup" },
     { label: "Självkostnad (SVK)", amount: selfCost, kind: "subtotal" },
     { label: `Generellt påslag ${toPercent(general) ?? 0} %`, amount: generalAmount, kind: "markup" },
+    { label: `Materialpåslag ${toPercent(materialMarkup) ?? 0} % (på dM + MO)`, amount: materialMarkupAmount, kind: "markup" },
     { label: "TO-påslag (per arbetsplats)", amount: EXAMPLE.overhead, kind: "markup" },
-    { label: "Försäljningspris", amount: selfCost + generalAmount + EXAMPLE.overhead, kind: "result" },
+    {
+      label: "Försäljningspris",
+      amount: selfCost + generalAmount + materialMarkupAmount + EXAMPLE.overhead,
+      kind: "result",
+    },
   ];
 
   return (
@@ -169,8 +179,8 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
           </Field>
         </FormRow>
         <FormHint attached>
-          MO = materialomkostnader, läggs på det direkta materialet. LO = legoomkostnader, läggs på legokostnaden —
-          tjänsteartiklar i artikelns struktur räknas som lego.
+          MO = materialomkostnader, läggs på det direkta materialet och ingår i självkostnaden. LO =
+          legoomkostnader, läggs på legokostnaden — tjänsteartiklar i artikelns struktur räknas som lego.
         </FormHint>
 
         <FormRow>
@@ -202,6 +212,23 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
         <FormHint attached>
           Affo = affärsomkostnader, läggs på tillverkningskostnaden. Det generella påslaget läggs sist på
           självkostnaden och ger försäljningspriset. TO-påslaget sätts per arbetsplats under Tillverkning → Resurser.
+        </FormHint>
+
+        <Field label="Materialpåslag (%)" htmlFor="costingMaterialMarkupPercent">
+          <Input
+            id="costingMaterialMarkupPercent"
+            type="number"
+            min={0}
+            max={1000}
+            step="0.1"
+            size="xs"
+            value={materialMarkup}
+            onChange={(e) => setMaterialMarkup(e.target.value)}
+          />
+        </Field>
+        <FormHint attached>
+          Läggs på direkt material + MO och ingår bara i försäljningspriset, bredvid det generella påslaget —
+          självkostnaden påverkas inte. Halvfabrikatens materialpåslag följer med upp till den färdiga artikeln.
         </FormHint>
 
         <FormActions>

@@ -6,10 +6,12 @@ import { resolveSupplierPrice, type PriceBreak } from "../../purchase/service/su
 // markup percentage here: it already sits per work center on
 // work_centers.overhead_percent and arrives as `overhead`. It is also NOT part
 // of TVK or SVK: it is added last, towards the sales price, after the general
-// markup, and carries no profit markup of its own —
+// markup, and carries no profit markup of its own. The materialpåslag is the
+// same kind of step — a sales markup on dM + MO, outside TVK/SVK so the self
+// cost stays the real cost, and not stacked with the general markup —
 //   TVK = dM + MO + dL + Lego + LO + Halvfabrikat
 //   SVK = TVK + Affo
-//   Försäljningspris = SVK + generellt påslag + TO
+//   Försäljningspris = SVK + generellt påslag + materialpåslag + TO
 export interface CostingMarkups {
   // MO = materialomkostnader, on direct material.
   moPercent: number;
@@ -19,6 +21,8 @@ export interface CostingMarkups {
   affoPercent: number;
   // Vinstpålägg, on the self cost (SVK).
   generalMarkupPercent: number;
+  // Materialpåslag, on dM + MO — sales price only.
+  materialMarkupPercent: number;
 }
 
 export interface DirectCosts {
@@ -41,6 +45,12 @@ export interface DirectCosts {
    * until it has decided what belongs here. Always 0 in a single-level run.
    */
   semiFinishedCost: number;
+  /**
+   * Materialpåslag the sub-assemblies (semi rows) lifted up to this level —
+   * their own dM + MO's markup, recursively. Outside TVK/SVK like TO, so it
+   * cannot travel inside semiFinishedCost. Always 0 in a single-level run.
+   */
+  liftedMaterialMarkup: number;
 }
 
 export interface MarkedUpCosts extends DirectCosts {
@@ -52,7 +62,9 @@ export interface MarkedUpCosts extends DirectCosts {
   /** SVK — självkostnad, without TO. Derived, never stored. */
   selfCost: number;
   generalMarkup: number;
-  /** SVK + generellt påslag + TO. */
+  /** Materialpåslag on dM + MO, plus what the sub-assemblies lifted up. */
+  materialMarkup: number;
+  /** SVK + generellt påslag + materialpåslag + TO. */
   salesPrice: number;
 }
 
@@ -80,6 +92,10 @@ export function applyMarkups(direct: DirectCosts, markups: CostingMarkups): Mark
   const businessOverhead = percentOf(manufacturingCost, markups.affoPercent);
   const selfCost = manufacturingCost + businessOverhead;
   const generalMarkup = percentOf(selfCost, markups.generalMarkupPercent);
+  // On dM + MO only — never on a semi row's TVK (its material got its markup
+  // one level down and arrives as liftedMaterialMarkup) and never on labor.
+  const materialMarkup =
+    percentOf(direct.materialCost + materialOverhead, markups.materialMarkupPercent) + direct.liftedMaterialMarkup;
   return {
     ...direct,
     materialOverhead,
@@ -88,7 +104,8 @@ export function applyMarkups(direct: DirectCosts, markups: CostingMarkups): Mark
     businessOverhead,
     selfCost,
     generalMarkup,
-    salesPrice: selfCost + generalMarkup + direct.overhead,
+    materialMarkup,
+    salesPrice: selfCost + generalMarkup + materialMarkup + direct.overhead,
   };
 }
 

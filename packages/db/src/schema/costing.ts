@@ -67,6 +67,12 @@ export const costCalculations = pgTable("cost_calculations", {
   semiFinishedCost: numeric("semi_finished_cost", { precision: 14, scale: 4 }).notNull().default("0"),
   businessOverhead: numeric("business_overhead", { precision: 14, scale: 4 }).notNull().default("0"),
   generalMarkup: numeric("general_markup", { precision: 14, scale: 4 }).notNull().default("0"),
+  // Materialpåslag — a sales markup on dM + MO (plus what the sub-assemblies
+  // lifted up, see cost_calculation_material_rows.material_markup_amount).
+  // Like TO it is outside TVK and SVK and goes to the sales price only, so the
+  // self cost stays the real cost. Default 0 means every calculation saved
+  // before the markup existed still sums to its stored sales price.
+  materialMarkup: numeric("material_markup", { precision: 14, scale: 4 }).notNull().default("0"),
   salesPrice: numeric("sales_price", { precision: 14, scale: 4 }).notNull().default("0"),
   // The System → Kalkyler configuration this calculation ran under, so an old
   // calculation stays explainable after the settings change. numeric(6,2)
@@ -83,6 +89,7 @@ export const costCalculations = pgTable("cost_calculations", {
   loPercent: numeric("lo_percent", { precision: 6, scale: 2 }).notNull().default("0"),
   affoPercent: numeric("affo_percent", { precision: 6, scale: 2 }).notNull().default("0"),
   generalMarkupPercent: numeric("general_markup_percent", { precision: 6, scale: 2 }).notNull().default("0"),
+  materialMarkupPercent: numeric("material_markup_percent", { precision: 6, scale: 2 }).notNull().default("0"),
   type: costCalculationTypeEnum("type").notNull(),
   calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -115,6 +122,11 @@ export const costCalculationMaterialRows = pgTable(
     // 0 on material/lego rows and on every row saved before the column existed
     // — those calculations carried the sub-level's TO inside `amount`.
     overheadAmount: numeric("overhead_amount", { precision: 14, scale: 4 }).notNull().default("0"),
+    // Materialpåslag lifted up from a "semi" row's sub-calculation, the same
+    // way as overheadAmount: outside TVK, so not in `amount`; the header's
+    // material_markup = the markup on this level's dM + MO + this. 0 on
+    // material/lego rows and on rows saved before the column existed.
+    materialMarkupAmount: numeric("material_markup_amount", { precision: 14, scale: 4 }).notNull().default("0"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

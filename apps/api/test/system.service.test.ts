@@ -233,6 +233,7 @@ describe("system service — settings", () => {
         costingLoPercent: 5,
         costingAffoPercent: 12,
         costingGeneralMarkupPercent: 20,
+        costingMaterialMarkupPercent: 15,
       });
       expect(updated.costingMaterialSource).toBe("supplier");
       expect(updated.costingMoPercent).toBe(12.5);
@@ -241,6 +242,7 @@ describe("system service — settings", () => {
       expect(reread.costingLoPercent).toBe(5);
       expect(reread.costingAffoPercent).toBe(12);
       expect(reread.costingGeneralMarkupPercent).toBe(20);
+      expect(reread.costingMaterialMarkupPercent).toBe(15);
     } finally {
       const restored = await systemService.updateSettings({
         costingMaterialSource: "standard",
@@ -248,6 +250,7 @@ describe("system service — settings", () => {
         costingLoPercent: 0,
         costingAffoPercent: 0,
         costingGeneralMarkupPercent: 0,
+        costingMaterialMarkupPercent: 0,
       });
       expect(restored.costingMaterialSource).toBe("standard");
       expect(restored.costingMoPercent).toBe(0);

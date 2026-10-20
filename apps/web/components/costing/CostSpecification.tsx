@@ -100,15 +100,17 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
   // some row has one: single-level calculations and every calculation saved
   // before the column existed have 0 on every row.
   const hasRowOverhead = detail.materialRows.some((row) => Number(row.overheadAmount) !== 0);
+  // Same rule for the materialpåslag a halvfabrikat lifted up.
+  const hasRowMaterialMarkup = detail.materialRows.some((row) => Number(row.materialMarkupAmount) !== 0);
 
   return (
     <div>
       <FormHint>
         Beräknad med materialkälla {SOURCE_LABELS[detail.materialSource]}, MO {percent(detail.moPercent)}, LO{" "}
         {percent(detail.loPercent)}, Affo {percent(detail.affoPercent)}, generellt påslag{" "}
-        {percent(detail.generalMarkupPercent)}.
+        {percent(detail.generalMarkupPercent)}, materialpåslag {percent(detail.materialMarkupPercent)}.
         {detail.multiLevel &&
-          " Flernivåkalkyl: tillverkade halvfabrikat kostades ur sina egna strukturer och rutter, och bär därför inget MO-påslag här; deras TO-påslag ingår i kedjans TO-påslag."}
+          " Flernivåkalkyl: tillverkade halvfabrikat kostades ur sina egna strukturer och rutter, och bär därför inget MO-påslag här; deras TO-påslag och materialpåslag ingår i kedjans TO-påslag och materialpåslag."}
       </FormHint>
 
       {hasRows ? (
@@ -126,6 +128,9 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
                   { key: "priceSource", label: "Priskälla", width: "150px" },
                   { key: "amount", label: "Belopp", width: "120px", align: "right" },
                   ...(hasRowOverhead ? [{ key: "overheadAmount", label: "TO-belopp", width: "120px", align: "right" as const }] : []),
+                  ...(hasRowMaterialMarkup
+                    ? [{ key: "materialMarkupAmount", label: "Materialpåslag", width: "130px", align: "right" as const }]
+                    : []),
                 ]}
                 rows={detail.materialRows}
                 renderCell={(row, key) => {
@@ -149,6 +154,8 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
                       return money(row[key]);
                     case "overheadAmount":
                       return row.kind === "semi" ? money(row.overheadAmount) : "—";
+                    case "materialMarkupAmount":
+                      return row.kind === "semi" ? money(row.materialMarkupAmount) : "—";
                     case "priceSource":
                       return <PriceSourceCell row={row} configured={detail.materialSource} />;
                     default:

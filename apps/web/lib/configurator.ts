@@ -214,6 +214,7 @@ export type DerivedCosting = {
   operationCost: number; // lön + lego, without TO
   markups: number; // MO + LO
   overhead: number; // TO — outside TVK/SVK, added to the sales price last
+  materialMarkup: number; // materialpåslag on dM + MO — outside TVK/SVK, sales price only
   manufacturingCost: number;
   manufacturingCostPerUnit: number;
   selfCost: number;

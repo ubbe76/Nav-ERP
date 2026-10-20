@@ -310,14 +310,15 @@ Gäller bara när materialkostnaden hämtas från **Aktiv leverantörs pris** oc
 
 Påslagen anges i procent och får ha decimaler. Alla är 0 % från början, vilket innebär att försäljningspriset blir exakt lika med självkostnaden plus TO-påslaget tills du fyller i något.
 
-- **MO-påslag (%)** — materialomkostnader. Läggs på det direkta materialet.
+- **MO-påslag (%)** — materialomkostnader. Läggs på det direkta materialet och ingår i tillverkningskostnaden och självkostnaden.
 - **LO-påslag (%)** — legoomkostnader. Läggs på legokostnaden. **Artiklar av typen Tjänst i artikelns struktur räknas som legoarbete** och hamnar alltså under Legokostnad i stället för under Direkt material.
 - **Affo-påslag (%)** — affärsomkostnader. Läggs på tillverkningskostnaden.
-- **Generellt påslag (%)** — läggs på självkostnaden. Därefter läggs TO-påslaget till, och summan är försäljningspriset.
+- **Generellt påslag (%)** — läggs på självkostnaden. Därefter läggs materialpåslaget och TO-påslaget till, och summan är försäljningspriset.
+- **Materialpåslag (%)** — ett försäljningspåslag på materialet. Läggs på direkt material + MO-påslaget och ingår **bara i försäljningspriset**, inte i tillverkningskostnaden (TVK) eller självkostnaden (SVK). Självkostnaden blir alltså den riktiga kostnaden, medan priset du sätter (och offererar via artikelns försäljningspris) bär påslaget för materialet. Det läggs **bredvid** det generella påslaget, inte ovanpå: det generella påslaget räknas på självkostnaden som förut, och materialpåslaget får inget generellt påslag på sig.
 
 **TO-påslaget sätts inte här.** Tillverkningsomkostnaden är knuten till resursen som utför operationen och anges som **TO-påslag (%)** per arbetsplats under **Tillverkning → Resurser**. TO-påslaget ingår **inte** i tillverkningskostnaden (TVK) eller självkostnaden (SVK): det läggs till sist i kedjan, efter det generella påslaget, direkt på försäljningspriset, och får därför varken Affo-påslag eller generellt påslag på sig.
 
-**Halvfabrikat bär inget påslag.** Kör du en förkalkyl med **Räkna om underliggande nivåer** (se [Artiklar](/hjalp/artiklar#kalkyl)) kostas varje tillverkat halvfabrikat ur sin egen struktur och rutt, och kommer in i kedjan som en egen post **Halvfabrikat**. Den posten får varken MO- eller LO-påslag: påslagen är redan pålagda en nivå ned, inne i halvfabrikatets egen tillverkningskostnad. Affo-påslaget och det generella påslaget träffar den däremot — de är företagsgemensamma och ska ligga på den färdiga artikeln exakt en gång. Halvfabrikatets eget TO-påslag följer inte med i posten utan läggs till kedjans **TO-påslag**, tillsammans med slutartikelns egna operationers — det hamnar alltså på försäljningspriset precis som slutartikelns eget.
+**Halvfabrikat bär inget påslag.** Kör du en förkalkyl med **Räkna om underliggande nivåer** (se [Artiklar](/hjalp/artiklar#kalkyl)) kostas varje tillverkat halvfabrikat ur sin egen struktur och rutt, och kommer in i kedjan som en egen post **Halvfabrikat**. Den posten får varken MO- eller LO-påslag: påslagen är redan pålagda en nivå ned, inne i halvfabrikatets egen tillverkningskostnad. Affo-påslaget och det generella påslaget träffar den däremot — de är företagsgemensamma och ska ligga på den färdiga artikeln exakt en gång. Halvfabrikatets eget TO-påslag följer inte med i posten utan läggs till kedjans **TO-påslag**, tillsammans med slutartikelns egna operationers — det hamnar alltså på försäljningspriset precis som slutartikelns eget. Halvfabrikatets materialpåslag (på dess eget direkta material + MO) följer med upp på samma sätt och läggs till kedjans **Materialpåslag**.
 
 ### Så räknas försäljningspriset
 
@@ -336,6 +337,7 @@ Panelen **Så räknas försäljningspriset** längst ned på sidan visar hela ke
 ─────────────────────────────────
 = Självkostnad (SVK)
 + Generellt påslag % × SVK
++ Materialpåslag  % × (dM + MO)   (inget påslag på det)
 + TO-påslag     × dL   (per arbetsplats, inget påslag på det)
 ─────────────────────────────────
 = Försäljningspris

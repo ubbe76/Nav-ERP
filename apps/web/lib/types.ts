@@ -276,6 +276,10 @@ export interface CostCalculation {
   semiFinishedCost: string;
   businessOverhead: string;
   generalMarkup: string;
+  // Materialpåslag on dM + MO (plus the halvfabrikats' lifted up) — outside
+  // TVK/SVK, towards the sales price only. "0.0000" on every calculation saved
+  // before the markup existed.
+  materialMarkup: string;
   salesPrice: string;
   // The System → Kalkyler configuration this calculation ran under, so an old
   // calculation stays explainable after the settings change.
@@ -286,6 +290,7 @@ export interface CostCalculation {
   loPercent: string;
   affoPercent: string;
   generalMarkupPercent: string;
+  materialMarkupPercent: string;
   type: CostCalculationType;
   calculatedAt: string;
 }
@@ -309,6 +314,8 @@ export interface CostCalculationMaterialRow {
   // TO lifted up from a halvfabrikat's own calculation ("semi" rows); "0.0000"
   // on other rows and on rows saved before the column existed.
   overheadAmount: string;
+  // Materialpåslag lifted up the same way; "0.0000" otherwise.
+  materialMarkupAmount: string;
   articleNumber: string;
   articleName: string;
   unitCode: string;
@@ -2186,6 +2193,7 @@ export interface SystemSettings {
   costingLoPercent: number;
   costingAffoPercent: number;
   costingGeneralMarkupPercent: number;
+  costingMaterialMarkupPercent: number;
   // Tillåten överleverans på inköpsorder, percent of the row's ordered
   // quantity. null = no limit, 0 (the default) = never past the ordered
   // quantity.

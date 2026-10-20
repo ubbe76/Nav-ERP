@@ -25,7 +25,8 @@ import {
 // last, markup.ts), so the sub-level's TO travels up SEPARATELY, on the semi
 // row's overheadAmount, and lands in the parent's TO bucket — recursively, so
 // the finished article's TO is the sum of every level's TO. Nothing is lost
-// and nothing is marked up on the way.
+// and nothing is marked up on the way. The materialpåslag (also outside TVK)
+// travels up beside it on materialMarkupAmount, by the same rule.
 
 // One BOM level, as the article module's explodeBom returns it (phantoms
 // already dissolved).
@@ -67,11 +68,13 @@ interface Context {
   memo: Map<string, SubAssemblyCost | null>;
 }
 
-// What a costed sub-assembly hands up: its TVK (into the parent's semi row)
-// and its TO (into the parent's TO bucket), both for the cascade quantity.
+// What a costed sub-assembly hands up: its TVK (into the parent's semi row),
+// its TO (into the parent's TO bucket) and its materialpåslag (into the
+// parent's materialpåslag), all for the cascade quantity.
 interface SubAssemblyCost {
   manufacturingCost: number;
   overhead: number;
+  materialMarkup: number;
 }
 
 // Whether a component should be resolved into its own calculation rather than
@@ -121,7 +124,11 @@ async function manufacturingCostOf(
   // costs.overhead already includes what THIS level's own sub-assemblies
   // lifted up (directCosts adds the semi rows' overheadAmount), so the
   // recursion carries every level's TO to the top.
-  const total: SubAssemblyCost = { manufacturingCost: costs.manufacturingCost, overhead: costs.overhead };
+  const total: SubAssemblyCost = {
+    manufacturingCost: costs.manufacturingCost,
+    overhead: costs.overhead,
+    materialMarkup: costs.materialMarkup,
+  };
   ctx.memo.set(key, total);
   return total;
 }
@@ -168,7 +175,7 @@ export async function costLevel(
         warnings
       );
       if (total !== null) {
-        materialRows.push(buildSemiFinishedRow(component, total.manufacturingCost, total.overhead));
+        materialRows.push(buildSemiFinishedRow(component, total.manufacturingCost, total.overhead, total.materialMarkup));
         continue;
       }
       // Fell back: priced from the standard cost, kind "material", and so it

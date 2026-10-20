@@ -14,13 +14,14 @@ export interface CostChainSource {
   semiFinishedCost: string;
   businessOverhead: string;
   generalMarkup: string;
+  materialMarkup: string;
   salesPrice: string;
 }
 
 // TVK and SVK are plain sums of the stored steps — the API never stores them.
-// TO (`overhead`) is in neither: it is added last, towards the sales price,
-// after the general markup (the API's cost-figures.ts is the sibling
-// authority). A calculation saved under the earlier chain (TO inside TVK)
+// TO (`overhead`) is in neither, and neither is the materialpåslag: both are
+// added last, towards the sales price, after the general markup (the API's
+// cost-figures.ts is the sibling authority). A calculation saved under the earlier chain (TO inside TVK)
 // still sums to its stored salesPrice — the same amounts, read in the new
 // order.
 function manufacturingCost(c: CostChainSource) {
@@ -50,6 +51,7 @@ export function chainLines(c: CostChainSource, quantity?: number): CostChainLine
   ): CostChainLine => ({ label, amount, kind, perUnit: perUnit(amount) });
 
   const semiFinished = Number(c.semiFinishedCost);
+  const materialMarkup = Number(c.materialMarkup);
 
   return [
     line("Direkt material (dM)", Number(c.materialCost)),
@@ -66,6 +68,9 @@ export function chainLines(c: CostChainSource, quantity?: number): CostChainLine
     line("Affo-påslag", Number(c.businessOverhead), "markup"),
     line("Självkostnad (SVK)", selfCost, "subtotal"),
     line("Generellt påslag", Number(c.generalMarkup), "markup"),
+    // Like Halvfabrikat: only when it applies, so calculations saved before
+    // the markup existed do not grow a "0 kr" row. On dM + MO, no stacking.
+    ...(materialMarkup !== 0 ? [line("Materialpåslag", materialMarkup, "markup")] : []),
     // TO last: outside TVK and SVK, no Affo or profit markup on it.
     line("TO-påslag", Number(c.overhead), "markup"),
     line("Försäljningspris", Number(c.salesPrice), "result"),

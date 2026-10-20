@@ -23,6 +23,7 @@ const costingSettings = {
   costingLoPercent: 0,
   costingAffoPercent: 0,
   costingGeneralMarkupPercent: 0,
+  costingMaterialMarkupPercent: 0,
 };
 const costingService = createCostingService(createCostingRepository(db), {
   getSettings: async () => costingSettings,
@@ -38,6 +39,7 @@ beforeEach(async () => {
     costingLoPercent: 0,
     costingAffoPercent: 0,
     costingGeneralMarkupPercent: 0,
+    costingMaterialMarkupPercent: 0,
   });
 });
 
@@ -198,6 +200,40 @@ describe("flernivåkalkyl — flaggan på", () => {
     const semiTo = detail!.materialRows.reduce((t, r) => t + Number(r.overheadAmount), 0);
     expect(opTo).toBe(50);
     expect(opTo + semiTo).toBe(Number(calculation.overhead));
+  });
+
+  it("lifts the sub-assembly's materialpåslag into the parent's, outside TVK and SVK", async () => {
+    const raw = await makeArticle({ type: "purchased", name: "Ramaterial", standardCost: 50 });
+    const own = await makeArticle({ type: "purchased", name: "Beslag", standardCost: 20 });
+    const semi = await makeArticle({ type: "manufactured", name: "Underrede", standardCost: 999 });
+    const top = await makeArticle({ type: "manufactured", name: "Slutprodukt" });
+    await articleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 1 });
+    await addRouting(semi.id, 60, 6, 50);
+    await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
+    await articleService.addBomComponent(top.id, { componentArticleId: own.id, quantity: 1 });
+    Object.assign(costingSettings, {
+      costingMoPercent: 10,
+      costingAffoPercent: 10,
+      costingGeneralMarkupPercent: 20,
+      costingMaterialMarkupPercent: 50,
+    });
+
+    const { calculation } = await costingService.preCalculate(top.id, 10, true, true);
+    const rows = await rowsOf(calculation.id);
+
+    // Sub-level (20 st): dM 1000 + MO 100 = 1100 → materialpåslag 550, lifted
+    // on the semi row; its TVK 1100 + labor 300 = 1400 carries no markup here.
+    const semiRow = rows.find((r) => r.kind === "semi")!;
+    expect(Number(semiRow.amount)).toBe(1400);
+    expect(Number(semiRow.materialMarkupAmount)).toBe(550);
+    // Own level: dM 200 + MO 20 = 220 → 110, plus the 550 lifted.
+    expect(Number(calculation.materialMarkup)).toBe(660);
+    expect(calculation.materialMarkupPercent).toBe("50.00");
+    // TVK 200 + 20 + 1400 = 1620 → Affo 162 → SVK 1782 → generellt 356.4;
+    // TO 150 from the sub-level. The self cost has no materialpåslag in it.
+    expect(Number(calculation.businessOverhead)).toBe(162);
+    expect(Number(calculation.generalMarkup)).toBeCloseTo(356.4, 4);
+    expect(Number(calculation.salesPrice)).toBeCloseTo(1782 + 356.4 + 660 + 150, 4);
   });
 
   it("carries TO up through three levels", async () => {

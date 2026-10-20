@@ -44,6 +44,9 @@ export interface MaterialRowWrite {
   // header's overhead bucket together with the operation rows' TO. 0 on
   // material/lego rows.
   overheadAmount: number;
+  // Materialpåslag lifted up from a "semi" row's sub-calculation, the same
+  // way as overheadAmount. 0 on material/lego rows.
+  materialMarkupAmount: number;
 }
 
 export interface OperationRowWrite {
@@ -76,6 +79,7 @@ export interface CostCalculationWrite {
   semiFinishedCost: number;
   businessOverhead: number;
   generalMarkup: number;
+  materialMarkup: number;
   salesPrice: number;
   materialSource: CostingMaterialSource;
   multiLevel: boolean;
@@ -83,6 +87,7 @@ export interface CostCalculationWrite {
   loPercent: number;
   affoPercent: number;
   generalMarkupPercent: number;
+  materialMarkupPercent: number;
   type: CostCalculationType;
 }
 
@@ -342,6 +347,7 @@ export function createCostingRepository(db: Db) {
             semiFinishedCost: String(input.semiFinishedCost),
             businessOverhead: String(input.businessOverhead),
             generalMarkup: String(input.generalMarkup),
+            materialMarkup: String(input.materialMarkup),
             salesPrice: String(input.salesPrice),
             materialSource: input.materialSource,
             multiLevel: input.multiLevel,
@@ -349,6 +355,7 @@ export function createCostingRepository(db: Db) {
             loPercent: String(input.loPercent),
             affoPercent: String(input.affoPercent),
             generalMarkupPercent: String(input.generalMarkupPercent),
+            materialMarkupPercent: String(input.materialMarkupPercent),
             type: input.type,
           })
           .returning();
@@ -366,6 +373,7 @@ export function createCostingRepository(db: Db) {
               priceSource: r.priceSource,
               amount: String(r.amount),
               overheadAmount: String(r.overheadAmount),
+              materialMarkupAmount: String(r.materialMarkupAmount),
             }))
           );
         }
