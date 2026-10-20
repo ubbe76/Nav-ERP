@@ -23,8 +23,7 @@ const BASE: CalcRowInput = {
   calculatedAt: "2026-08-10T10:00:00.000Z",
   materialCost: 100,
   materialOverhead: 10,
-  laborCost: 50,
-  overhead: 20,
+  laborCost: 70,
   subcontractCost: 0,
   subcontractOverhead: 0,
   semiFinishedCost: 0,
@@ -67,7 +66,7 @@ describe("pairCalculationOutcomes", () => {
     const result = pairCalculationOutcomes(
       [
         pre({ semiFinishedCost: 120, multiLevel: true }),
-        post({ quantity: 5, materialCost: 60, materialOverhead: 0, laborCost: 30, overhead: 10 }),
+        post({ quantity: 5, materialCost: 60, materialOverhead: 0, laborCost: 40 }),
       ],
       RANGE
     );
@@ -80,7 +79,7 @@ describe("pairCalculationOutcomes", () => {
   it("compares per-unit TVK across differing lot sizes", () => {
     // Pre: TVK 180 for 10 units → 18/unit. Post: TVK 100 for 5 units → 20/unit.
     const result = pairCalculationOutcomes(
-      [pre(), post({ quantity: 5, materialCost: 60, materialOverhead: 0, laborCost: 30, overhead: 10 })],
+      [pre(), post({ quantity: 5, materialCost: 60, materialOverhead: 0, laborCost: 40 })],
       RANGE
     );
     expect(result.rows).toHaveLength(1);
@@ -181,7 +180,7 @@ describe("pairCalculationOutcomes", () => {
   it("null deltaPct when pre TVK is zero, excluded from the average", () => {
     const result = pairCalculationOutcomes(
       [
-        pre({ materialCost: 0, materialOverhead: 0, laborCost: 0, overhead: 0 }),
+        pre({ materialCost: 0, materialOverhead: 0, laborCost: 0 }),
         post(),
         pre({ articleId: "art-2" }),
         post({
@@ -191,8 +190,7 @@ describe("pairCalculationOutcomes", () => {
           calculatedAt: "2026-08-16T10:00:00.000Z",
           materialCost: 190,
           materialOverhead: 10,
-          laborCost: 50,
-          overhead: 20,
+          laborCost: 70,
         }), // TVK 270 vs 180 → +50 %
       ],
       RANGE

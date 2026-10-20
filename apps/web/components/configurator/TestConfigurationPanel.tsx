@@ -375,6 +375,9 @@ function DerivationView({ derivation, stale }: { derivation: ConfiguratorDerivat
             <dd className={styles.total}>{formatMoney(costing.manufacturingCost)}</dd>
             <dt>Tillverkningskostnad per st</dt>
             <dd>{formatMoney(costing.manufacturingCostPerUnit)}</dd>
+            {/* TO sits outside TVK — it is added to the sales price last. */}
+            <dt>TO-påslag</dt>
+            <dd>{formatMoney(costing.overhead)}</dd>
           </dl>
           {costing.warnings.map((w) => (
             <FormNotice key={w}>{w}</FormNotice>

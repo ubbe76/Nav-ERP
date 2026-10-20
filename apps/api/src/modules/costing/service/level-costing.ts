@@ -42,21 +42,31 @@ export function buildMaterialRow(
       unitCost: cost,
       priceSource: used,
       amount: component.quantity * cost,
+      // A bought component carries no TO of its own.
+      overheadAmount: 0,
     },
     warning,
   };
 }
 
 // A manufactured sub-assembly costed from its OWN structure and routing. The
-// amount is the sub-calculation's exact manufacturing cost and the à-pris is
-// derived from it — never the other way round: `quantity × round(unitCost)`
-// would drift from the sub-level's own TVK by up to quantity × 0,00005, and
-// the parent's bucket would then stop agreeing with the calculation it came
-// from. priceSource "calculated" is what makes the row legible in the
-// specification; kind "semi" is what keeps the MO markup off it.
+// amount is the sub-calculation's exact manufacturing cost (TVK, without TO)
+// and the à-pris is derived from it — never the other way round:
+// `quantity × round(unitCost)` would drift from the sub-level's own TVK by up
+// to quantity × 0,00005, and the parent's bucket would then stop agreeing with
+// the calculation it came from. priceSource "calculated" is what makes the row
+// legible in the specification; kind "semi" is what keeps the MO markup off it.
+//
+// `overheadTotal` is the sub-level's TO (its own operations' plus whatever its
+// own sub-assemblies lifted up). TO sits outside TVK, so it cannot travel
+// inside `amount`; it rides on the row as overheadAmount and directCosts adds
+// it to the parent's TO bucket. The row thus explains BOTH figures it feeds,
+// and the specification can show the halvfabrikat's TO next to the
+// operations' TO without anything being counted twice.
 export function buildSemiFinishedRow(
   component: { componentArticleId: string; quantity: number; unitId: string | null; unitFactor: string | null },
-  manufacturingCostTotal: number
+  manufacturingCostTotal: number,
+  overheadTotal: number
 ): MaterialRowWrite {
   return {
     componentArticleId: component.componentArticleId,
@@ -67,6 +77,7 @@ export function buildSemiFinishedRow(
     unitCost: component.quantity !== 0 ? manufacturingCostTotal / component.quantity : 0,
     priceSource: "calculated",
     amount: manufacturingCostTotal,
+    overheadAmount: overheadTotal,
   };
 }
 
@@ -172,8 +183,11 @@ export function directCosts(materialRows: MaterialRowWrite[], operationRows: Ope
       sumRows(materialRows.filter((r) => r.kind === "subcontract"), (r) => r.amount) +
       sumRows(operationRows, (r) => r.subcontractAmount ?? 0),
     laborCost: sumRows(operationRows, (r) => r.laborAmount),
-    // TO — tillverkningsomkostnad, a percentage of labor set per work center.
-    overhead: sumRows(operationRows, (r) => r.overheadAmount),
+    // TO — tillverkningsomkostnad, a percentage of labor set per work center,
+    // plus the TO the sub-assemblies (semi rows) lifted up to this level: TO is
+    // outside TVK, so it cannot ride inside the semi row's amount and would
+    // otherwise vanish on the way up. Material/lego rows carry 0 here.
+    overhead: sumRows(operationRows, (r) => r.overheadAmount) + sumRows(materialRows, (r) => r.overheadAmount),
     // Halvfabrikat — manufactured sub-assemblies costed from their own
     // structure and routing (multi-level). The three filters partition the
     // material rows by `kind`, so no row can land in two buckets. Always 0 in

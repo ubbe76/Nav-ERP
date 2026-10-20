@@ -50,6 +50,7 @@ const workCenter = (code: string, hourlyRate: number, overheadPercent = 0, type:
 //   LASA   from choice  1/unit  → 10 × 30          =  300   (LOCK = A)
 //   FANT   phantom 3/unit → F1 6/unit (×3) + F2 3/unit (×4) → 60×3 = 180, 30×4 = 120
 //   HALV   semi 2/unit  → 20 units: material 20 × 50 = 1000 + (60 + 6×20)/60 h × 100 = 300 → 1300
+//          its resource has TO 50 % ⇒ TO 150, lifted into the parent's `overhead` (outside TVK)
 //   operation 10 (base, 600 kr/h): (5 + 1×10)/60 × 600 = 150
 //   operation 40 (conditional, 300 kr/h, run BREDD/1000 = 1,5 min): (0 + 1,5×10)/60 × 300 = 75
 async function build() {
@@ -76,7 +77,7 @@ async function build() {
   const ra = await part("Råmaterial", { standardCost: 50 });
   const halv = await part("Underrede", { type: "manufactured", standardCost: 999 });
   await testArticleService.addBomComponent(halv.id, { componentArticleId: ra.id, quantity: 1 });
-  const wcHalv = await workCenter("201", 100);
+  const wcHalv = await workCenter("201", 100, 50);
   await mfgService.createRoutingOperation(halv.id, { sequenceNo: 10, workCenterId: wcHalv.id, setupTime: 60, runTimePerUnit: 6 });
 
   await testArticleService.addBomComponent(article.id, { componentArticleId: skruv.id, quantity: 8 });
@@ -129,6 +130,27 @@ describe("configurator derive — structure and pre-costing", () => {
     expect(c.markups).toBe(0);
     expect(c.manufacturingCost).toBe(3485);
     expect(c.manufacturingCostPerUnit).toBeCloseTo(348.5, 6);
+    // The halvfabrikat's TO (300 × 50 %) is outside its TVK and surfaces here, not in the 1300.
+    expect(c.overhead).toBe(150);
+  });
+
+  it("keeps TO outside TVK and SVK: an operation's TO lands in `overhead` only", async () => {
+    const s = await build();
+    const wcTo = await workCenter("235", 300, 20);
+    await service.createOperation(s.article.id, {
+      conditions: [{ groupId: s.hjul.id, op: "selected" }], sequenceNo: 50, workCenterId: wcTo.id, setupTime: 0, runTimePerUnit: 2,
+    });
+    Object.assign(testCostingSettings, { costingAffoPercent: 10 });
+    const r = await service.derive(s.article.id, { selection: { LOCK: "A", BREDD: 1500, HJUL: true }, quantity: 10 });
+    const c = r.costing!;
+    // (2 × 10)/60 h × 300 = 100 kr lön, TO 20 % = 20 kr.
+    expect(c.operationRows.find((o) => o.sequenceNo === 50)!.total).toBeCloseTo(100, 6);
+    expect(c.operationCost).toBeCloseTo(325, 6);
+    expect(c.manufacturingCost).toBeCloseTo(3585, 6);
+    expect(c.materialCost + c.operationCost + c.markups).toBeCloseTo(c.manufacturingCost, 6);
+    expect(c.overhead).toBeCloseTo(150 + 20, 6);
+    // Affo is charged on TVK alone — never on TO.
+    expect(c.selfCost).toBeCloseTo(3585 * 1.1, 6);
   });
 
   it("the same article on lines linked to different operations: separate derived rows, costing merged per (article, operation)", async () => {
@@ -280,7 +302,7 @@ describe("lego operations and parity with the Kalkyl tab", () => {
     const c = r.costing!;
     // Lego: 100 + 5,5 × 10 = 155 bought, LO 5 %.
     expect(c.operationRows.find((o) => o.sequenceNo === 20)!.total).toBeCloseTo(155, 6);
-    const tvk = ["materialCost", "materialOverhead", "laborCost", "overhead", "subcontractCost", "subcontractOverhead", "semiFinishedCost"]
+    const tvk = ["materialCost", "materialOverhead", "laborCost", "subcontractCost", "subcontractOverhead", "semiFinishedCost"]
       .reduce((t, k) => t + Number((kalkyl as unknown as Record<string, string>)[k]), 0);
     expect(c.manufacturingCost).toBeCloseTo(tvk, 3);
     expect(c.manufacturingCostPerUnit).toBeCloseTo(tvk / 10, 3);

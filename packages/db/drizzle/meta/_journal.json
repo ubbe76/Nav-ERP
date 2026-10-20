@@ -911,6 +911,13 @@
       "when": 1792467768333,
       "tag": "0129_pallet_card_code",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792477199220,
+      "tag": "0130_cost_material_row_overhead",
+      "breakpoints": true
     }
   ]
 }

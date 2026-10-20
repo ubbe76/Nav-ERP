@@ -3,8 +3,9 @@
 // the self cost, this decides what follows from them.
 //
 // The self cost is the LATEST saved pre-calculation's självkostnad per unit
-// (SVK) — material, labor, TO, lego and Affo, but not the general markup,
-// which is the margin we are measuring.
+// (SVK) — material, labor, lego and Affo, but neither TO nor the general
+// markup: both are added above SVK, towards the sales price, and are part of
+// the margin we are measuring.
 //
 // The rule that matters most here: a missing self cost yields null, never 0.
 // An article without a calculation has an UNKNOWN cost, and treating unknown

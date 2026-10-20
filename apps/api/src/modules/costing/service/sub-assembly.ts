@@ -16,10 +16,16 @@ import {
 // calculation is byte-identical to what it has always produced.
 //
 // What travels up to the parent is the sub-level's TILLVERKNINGSKOSTNAD (TVK),
-// not its självkostnad: MO/TO/LO belong to the level that incurred them, while
+// not its självkostnad: MO/LO belong to the level that incurred them, while
 // Affo and the general markup are company-wide and must land exactly once, on
 // the finished article. The parent therefore books the figure into its own TVK
 // through a "semi" row that carries no markup of its own (see markup.ts).
+//
+// TO is the exception: it is outside TVK altogether (added to the sales price
+// last, markup.ts), so the sub-level's TO travels up SEPARATELY, on the semi
+// row's overheadAmount, and lands in the parent's TO bucket — recursively, so
+// the finished article's TO is the sum of every level's TO. Nothing is lost
+// and nothing is marked up on the way.
 
 // One BOM level, as the article module's explodeBom returns it (phantoms
 // already dissolved).
@@ -58,7 +64,14 @@ interface Context {
   // Memoised on article AND quantity: TVK per unit is not linear in the
   // quantity, because setup time is charged once per batch. Keying on the
   // article alone would hand a 10-off price to a 1000-off branch.
-  memo: Map<string, number | null>;
+  memo: Map<string, SubAssemblyCost | null>;
+}
+
+// What a costed sub-assembly hands up: its TVK (into the parent's semi row)
+// and its TO (into the parent's TO bucket), both for the cascade quantity.
+interface SubAssemblyCost {
+  manufacturingCost: number;
+  overhead: number;
 }
 
 // Whether a component should be resolved into its own calculation rather than
@@ -69,8 +82,8 @@ function isCostableSubAssembly(basis: CostBasis | undefined): boolean {
   return basis?.type === "manufactured" && (basis.hasBom === true || basis.hasRouting === true);
 }
 
-// The sub-assembly's total manufacturing cost for `quantity` units, or null
-// when it could not be computed and the caller should fall back to the
+// The sub-assembly's total manufacturing cost and TO for `quantity` units, or
+// null when it could not be computed and the caller should fall back to the
 // standard cost. Warnings are appended to the caller's list so every fallback
 // is visible in the calculation, exactly like resolveUnitCost's own.
 async function manufacturingCostOf(
@@ -81,7 +94,7 @@ async function manufacturingCostOf(
   ancestors: Set<string>,
   depth: number,
   warnings: string[]
-): Promise<number | null> {
+): Promise<SubAssemblyCost | null> {
   if (ancestors.has(articleId)) {
     // Guarded at BOM edit time by isDescendant, and again by the CSV import's
     // own cycle check — but a structure that slipped past both must degrade to
@@ -104,8 +117,11 @@ async function manufacturingCostOf(
   warnings.push(...level.warnings);
 
   const costs = applyMarkups(directCosts(level.materialRows, level.operationRows), ctx.markups);
-  // TVK, not SVK — see the file header.
-  const total = costs.manufacturingCost;
+  // TVK, not SVK — and TO alongside it, not inside it. See the file header.
+  // costs.overhead already includes what THIS level's own sub-assemblies
+  // lifted up (directCosts adds the semi rows' overheadAmount), so the
+  // recursion carries every level's TO to the top.
+  const total: SubAssemblyCost = { manufacturingCost: costs.manufacturingCost, overhead: costs.overhead };
   ctx.memo.set(key, total);
   return total;
 }
@@ -152,7 +168,7 @@ export async function costLevel(
         warnings
       );
       if (total !== null) {
-        materialRows.push(buildSemiFinishedRow(component, total));
+        materialRows.push(buildSemiFinishedRow(component, total.manufacturingCost, total.overhead));
         continue;
       }
       // Fell back: priced from the standard cost, kind "material", and so it

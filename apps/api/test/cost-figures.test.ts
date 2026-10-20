@@ -26,12 +26,17 @@ const STRINGS = {
 };
 
 describe("cost-figures — TVK and SVK", () => {
-  it("sums every bucket, including halvfabrikat, into TVK", () => {
-    expect(manufacturingCost(NUMERIC)).toBe(518);
+  it("sums every bucket except TO, including halvfabrikat, into TVK", () => {
+    expect(manufacturingCost(NUMERIC)).toBe(512);
   });
 
   it("adds Affo on top of TVK for SVK", () => {
-    expect(selfCost(NUMERIC)).toBeCloseTo(569.8, 10);
+    expect(selfCost(NUMERIC)).toBeCloseTo(563.8, 10);
+  });
+
+  it("leaves TO out of both — it goes to the sales price, after the general markup", () => {
+    expect(manufacturingCost({ ...NUMERIC, overhead: 1000 })).toBe(manufacturingCost(NUMERIC));
+    expect(selfCost({ ...NUMERIC, overhead: 1000 })).toBe(selfCost(NUMERIC));
   });
 
   it("reads the string form the database returns identically to the numeric form", () => {
@@ -41,8 +46,8 @@ describe("cost-figures — TVK and SVK", () => {
 
   it("counts a calculation saved before multi-level existed unchanged", () => {
     // semi_finished_cost defaults to '0', so an old row must produce exactly
-    // the TVK it produced before the column was added.
-    expect(manufacturingCost({ ...NUMERIC, semiFinishedCost: 0 })).toBe(218);
+    // the TVK it produces today for the same buckets.
+    expect(manufacturingCost({ ...NUMERIC, semiFinishedCost: 0 })).toBe(212);
   });
 });
 

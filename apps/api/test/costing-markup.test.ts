@@ -5,17 +5,32 @@ const DIRECT = { materialCost: 100, laborCost: 60, overhead: 6, subcontractCost:
 const NO_MARKUPS = { moPercent: 0, loPercent: 0, affoPercent: 0, generalMarkupPercent: 0 };
 
 describe("applyMarkups — påläggskalkyl", () => {
-  it("applies MO on material, LO on lego, Affo on TVK and the general markup on SVK", () => {
+  it("applies MO on material, LO on lego, Affo on TVK, the general markup on SVK and TO last", () => {
     const costs = applyMarkups(DIRECT, { moPercent: 10, loPercent: 5, affoPercent: 12, generalMarkupPercent: 20 });
 
     expect(costs.materialOverhead).toBe(10); // MO: 100 * 10%
     expect(costs.subcontractOverhead).toBe(2); // LO: 40 * 5%
-    // TVK: 100 + 10 + 60 + 6 + 40 + 2
-    expect(costs.manufacturingCost).toBe(218);
-    expect(costs.businessOverhead).toBeCloseTo(26.16, 10); // Affo: 218 * 12%
-    expect(costs.selfCost).toBeCloseTo(244.16, 10); // SVK
-    expect(costs.generalMarkup).toBeCloseTo(48.832, 10); // 244.16 * 20%
-    expect(costs.salesPrice).toBeCloseTo(292.992, 10);
+    // TVK: 100 + 10 + 60 + 40 + 2 — TO (6) is NOT in it
+    expect(costs.manufacturingCost).toBe(212);
+    expect(costs.businessOverhead).toBeCloseTo(25.44, 10); // Affo: 212 * 12%
+    expect(costs.selfCost).toBeCloseTo(237.44, 10); // SVK
+    expect(costs.generalMarkup).toBeCloseTo(47.488, 10); // 237.44 * 20%
+    // SVK + generellt påslag + TO
+    expect(costs.salesPrice).toBeCloseTo(237.44 + 47.488 + 6, 10);
+  });
+
+  it("adds TO to the sales price after the general markup, with no Affo or profit on it", () => {
+    const withTo = applyMarkups(DIRECT, { moPercent: 0, loPercent: 0, affoPercent: 50, generalMarkupPercent: 100 });
+    const withoutTo = applyMarkups({ ...DIRECT, overhead: 0 }, { moPercent: 0, loPercent: 0, affoPercent: 50, generalMarkupPercent: 100 });
+
+    // Every figure up to and including the general markup is blind to TO …
+    expect(withTo.manufacturingCost).toBe(withoutTo.manufacturingCost);
+    expect(withTo.businessOverhead).toBe(withoutTo.businessOverhead);
+    expect(withTo.selfCost).toBe(withoutTo.selfCost);
+    expect(withTo.generalMarkup).toBe(withoutTo.generalMarkup);
+    // … and the price differs by exactly the TO amount, not by TO × 1.5 × 2.
+    expect(withTo.salesPrice - withoutTo.salesPrice).toBe(6);
+    expect(withTo.overhead).toBe(6);
   });
 
   it("leaves the direct costs untouched and prices at self cost when every markup is zero", () => {
@@ -25,15 +40,16 @@ describe("applyMarkups — påläggskalkyl", () => {
     expect(costs.subcontractOverhead).toBe(0);
     expect(costs.businessOverhead).toBe(0);
     expect(costs.generalMarkup).toBe(0);
-    // 100 + 60 + 6 + 40 — no markup anywhere, so TVK = SVK = price
-    expect(costs.manufacturingCost).toBe(206);
-    expect(costs.selfCost).toBe(206);
+    // 100 + 60 + 40 — no markup anywhere, so TVK = SVK; the price is SVK + TO
+    expect(costs.manufacturingCost).toBe(200);
+    expect(costs.selfCost).toBe(200);
     expect(costs.salesPrice).toBe(206);
   });
 
   it("takes no markup of its own on the halvfabrikat bucket, but Affo still reaches it", () => {
-    // The sub-assembly's own MO/TO/LO are already inside the 300 — applying MO
-    // again here would be markup on markup. Affo and the general markup are
+    // The sub-assembly's own MO/LO are already inside the 300 — applying MO
+    // again here would be markup on markup. (Its TO is not in the 300: TO
+    // travels up separately, into `overhead`, see sub-assembly.ts.) Affo and the general markup are
     // meant to reach it, exactly once, which is why the sub-level hands its
     // manufacturing cost (TVK) upwards rather than its self cost.
     const costs = applyMarkups(
@@ -43,18 +59,18 @@ describe("applyMarkups — påläggskalkyl", () => {
 
     expect(costs.materialOverhead).toBe(10); // still only 100 * 10%
     expect(costs.subcontractOverhead).toBe(2); // still only 40 * 5%
-    // TVK: 100 + 10 + 60 + 6 + 40 + 2 + 300
-    expect(costs.manufacturingCost).toBe(518);
-    expect(costs.businessOverhead).toBeCloseTo(51.8, 10); // Affo DOES reach it
-    expect(costs.selfCost).toBeCloseTo(569.8, 10);
+    // TVK: 100 + 10 + 60 + 40 + 2 + 300
+    expect(costs.manufacturingCost).toBe(512);
+    expect(costs.businessOverhead).toBeCloseTo(51.2, 10); // Affo DOES reach it
+    expect(costs.selfCost).toBeCloseTo(563.2, 10);
   });
 
   it("is identical to the pre-multi-level result when there is no halvfabrikat", () => {
     // The regression that matters: a single-level run must produce exactly the
     // numbers it produced before the bucket existed.
     const costs = applyMarkups(DIRECT, { moPercent: 10, loPercent: 5, affoPercent: 12, generalMarkupPercent: 20 });
-    expect(costs.manufacturingCost).toBe(218);
-    expect(costs.salesPrice).toBeCloseTo(292.992, 10);
+    expect(costs.manufacturingCost).toBe(212);
+    expect(costs.salesPrice).toBeCloseTo(290.928, 10);
   });
 
   it("does not put the MO markup on lego or the LO markup on material", () => {

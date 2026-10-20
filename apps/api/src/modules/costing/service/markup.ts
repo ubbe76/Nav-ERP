@@ -4,7 +4,12 @@ import { resolveSupplierPrice, type PriceBreak } from "../../purchase/service/su
 // Monitor's påläggskalkyl, as pure arithmetic — no DB, no settings lookup, so
 // the chain can be tested on its own. TO (tillverkningsomkostnad) is not a
 // markup percentage here: it already sits per work center on
-// work_centers.overhead_percent and arrives as `overhead`.
+// work_centers.overhead_percent and arrives as `overhead`. It is also NOT part
+// of TVK or SVK: it is added last, towards the sales price, after the general
+// markup, and carries no profit markup of its own —
+//   TVK = dM + MO + dL + Lego + LO + Halvfabrikat
+//   SVK = TVK + Affo
+//   Försäljningspris = SVK + generellt påslag + TO
 export interface CostingMarkups {
   // MO = materialomkostnader, on direct material.
   moPercent: number;
@@ -21,7 +26,11 @@ export interface DirectCosts {
   materialCost: number;
   /** dL — direct labor from the routing. */
   laborCost: number;
-  /** TO — manufacturing overhead, already summed per work center. */
+  /**
+   * TO — manufacturing overhead, already summed per work center (and, in a
+   * multi-level run, the sub-assemblies' TO lifted up to this level). Outside
+   * TVK/SVK: added to the sales price only.
+   */
   overhead: number;
   /** Lego — subcontracted work (service articles in the structure). */
   subcontractCost: number;
@@ -37,12 +46,13 @@ export interface DirectCosts {
 export interface MarkedUpCosts extends DirectCosts {
   materialOverhead: number;
   subcontractOverhead: number;
-  /** TVK — tillverkningskostnad. Derived, never stored. */
+  /** TVK — tillverkningskostnad, without TO. Derived, never stored. */
   manufacturingCost: number;
   businessOverhead: number;
-  /** SVK — självkostnad. Derived, never stored. */
+  /** SVK — självkostnad, without TO. Derived, never stored. */
   selfCost: number;
   generalMarkup: number;
+  /** SVK + generellt påslag + TO. */
   salesPrice: number;
 }
 
@@ -53,16 +63,17 @@ function percentOf(base: number, percent: number): number {
 export function applyMarkups(direct: DirectCosts, markups: CostingMarkups): MarkedUpCosts {
   const materialOverhead = percentOf(direct.materialCost, markups.moPercent);
   const subcontractOverhead = percentOf(direct.subcontractCost, markups.loPercent);
-  // semiFinishedCost enters TVK with NO markup of its own — MO/TO/LO were
-  // already applied one level down, inside the sub-assembly's own calculation.
-  // Affo and the general markup below therefore hit it exactly once, at the
-  // top, which is the whole point of passing the sub-level's TVK (rather than
-  // its SVK) upwards.
+  // semiFinishedCost enters TVK with NO markup of its own — MO/LO were already
+  // applied one level down, inside the sub-assembly's own calculation. Affo
+  // and the general markup below therefore hit it exactly once, at the top,
+  // which is the whole point of passing the sub-level's TVK (rather than its
+  // SVK) upwards. TO is deliberately absent from TVK: it is added to the sales
+  // price below, after the general markup, so neither Affo nor the general
+  // markup is ever charged on it.
   const manufacturingCost =
     direct.materialCost +
     materialOverhead +
     direct.laborCost +
-    direct.overhead +
     direct.subcontractCost +
     subcontractOverhead +
     direct.semiFinishedCost;
@@ -77,7 +88,7 @@ export function applyMarkups(direct: DirectCosts, markups: CostingMarkups): Mark
     businessOverhead,
     selfCost,
     generalMarkup,
-    salesPrice: selfCost + generalMarkup,
+    salesPrice: selfCost + generalMarkup + direct.overhead,
   };
 }
 

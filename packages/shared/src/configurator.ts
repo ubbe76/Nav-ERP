@@ -472,11 +472,12 @@ export type DerivedCosting = {
   materialRows: { articleNumber: string; name: string; quantity: number; unitCost: number; total: number }[];
   operationRows: { sequenceNo: number; workCenterName: string; hours: number; total: number }[];
   materialCost: number;
-  operationCost: number;
-  markups: number;
-  manufacturingCost: number;
+  operationCost: number; // lön + lego, without TO
+  markups: number; // MO + LO
+  overhead: number; // TO — outside TVK/SVK, added to the sales price last
+  manufacturingCost: number; // TVK = materialCost + operationCost + markups
   manufacturingCostPerUnit: number;
-  selfCost: number; // SVK = tillverkningskostnad + Affo (no general markup) — margin.ts's basis
+  selfCost: number; // SVK = tillverkningskostnad + Affo (no general markup, no TO) — margin.ts's basis
   selfCostPerUnit: number;
   warnings: string[];
 };

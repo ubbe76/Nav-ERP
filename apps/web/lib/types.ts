@@ -258,11 +258,12 @@ export interface CostCalculation {
   quantity: string;
   // Monitor's påläggskalkyl, one field per step:
   //   dM (materialCost) + MO (materialOverhead)
-  // + dL (laborCost)    + TO (overhead, per work center)
+  // + dL (laborCost)
   // + Lego (subcontractCost) + LO (subcontractOverhead)
   // + Halvfabrikat (semiFinishedCost — no markup of its own)
-  // = TVK, + Affo (businessOverhead) = SVK, + generalMarkup = salesPrice.
-  // TVK and SVK are plain sums, derived on display.
+  // = TVK, + Affo (businessOverhead) = SVK,
+  // + generalMarkup + TO (overhead, per work center) = salesPrice.
+  // TO is outside TVK and SVK. TVK and SVK are plain sums, derived on display.
   materialCost: string;
   materialOverhead: string;
   laborCost: string;
@@ -305,6 +306,9 @@ export interface CostCalculationMaterialRow {
   unitCost: string;
   priceSource: CostPriceSource;
   amount: string;
+  // TO lifted up from a halvfabrikat's own calculation ("semi" rows); "0.0000"
+  // on other rows and on rows saved before the column existed.
+  overheadAmount: string;
   articleNumber: string;
   articleName: string;
   unitCode: string;

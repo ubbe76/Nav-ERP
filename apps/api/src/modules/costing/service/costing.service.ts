@@ -506,15 +506,19 @@ export function createCostingService(
         unitCost: r.unitCost,
         total: r.amount,
       })),
+      // Per operation: lön + lego, WITHOUT TO — TO is outside TVK (markup.ts)
+      // and is reported once, as `overhead`, so Material + Operationer +
+      // Påslag = Tillverkningskostnad holds in the panel.
       operationRows: level.operationRows.map((r) => ({
         sequenceNo: r.sequenceNo,
         workCenterName: workCenterById.get(r.workCenterId)?.name ?? "?",
         hours: r.hours,
-        total: r.laborAmount + r.overheadAmount + (r.subcontractAmount ?? 0),
+        total: r.laborAmount + (r.subcontractAmount ?? 0),
       })),
       materialCost: level.materialRows.reduce((t, r) => t + r.amount, 0),
-      operationCost: level.operationRows.reduce((t, r) => t + r.laborAmount + r.overheadAmount + (r.subcontractAmount ?? 0), 0),
+      operationCost: level.operationRows.reduce((t, r) => t + r.laborAmount + (r.subcontractAmount ?? 0), 0),
       markups: costs.materialOverhead + costs.subcontractOverhead,
+      overhead: costs.overhead,
       manufacturingCost: manufacturing,
       manufacturingCostPerUnit: perUnit(manufacturing, quantity) ?? 0,
       selfCost: costs.selfCost,
@@ -560,11 +564,11 @@ export function createCostingService(
     async applyStandardCostFromCalculation(id: string) {
       const calculation = await repo.findCostCalculationById(id);
       if (!calculation) throw new CostCalculationNotFoundError(id);
-      // TVK per unit: what it costs to MAKE the article — material, labor, TO
-      // and lego, without business overhead and without profit. That is what
-      // the field is already used for elsewhere: stock valuation and the value
-      // of a manufacturing receipt. Affo is a period cost and does not belong
-      // in a stock value.
+      // TVK per unit: what it costs to MAKE the article — material, labor and
+      // lego, without TO, without business overhead and without profit. That
+      // is what the field is already used for elsewhere: stock valuation and
+      // the value of a manufacturing receipt. Affo and TO are period costs
+      // and do not belong in a stock value.
       const perUnitCost = perUnit(manufacturingCost(calculation), calculation.quantity);
       if (perUnitCost === null) throw new InvalidCalculationQuantityError(id);
       return articles.updateStandardCost(calculation.articleId, round(perUnitCost, 4));

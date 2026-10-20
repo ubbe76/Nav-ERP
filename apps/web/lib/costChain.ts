@@ -18,12 +18,16 @@ export interface CostChainSource {
 }
 
 // TVK and SVK are plain sums of the stored steps — the API never stores them.
+// TO (`overhead`) is in neither: it is added last, towards the sales price,
+// after the general markup (the API's cost-figures.ts is the sibling
+// authority). A calculation saved under the earlier chain (TO inside TVK)
+// still sums to its stored salesPrice — the same amounts, read in the new
+// order.
 function manufacturingCost(c: CostChainSource) {
   return (
     Number(c.materialCost) +
     Number(c.materialOverhead) +
     Number(c.laborCost) +
-    Number(c.overhead) +
     Number(c.subcontractCost) +
     Number(c.subcontractOverhead) +
     Number(c.semiFinishedCost)
@@ -51,7 +55,6 @@ export function chainLines(c: CostChainSource, quantity?: number): CostChainLine
     line("Direkt material (dM)", Number(c.materialCost)),
     line("MO-påslag", Number(c.materialOverhead), "markup"),
     line("Direkt lön (dL)", Number(c.laborCost)),
-    line("TO-påslag", Number(c.overhead), "markup"),
     line("Legokostnad", Number(c.subcontractCost)),
     line("LO-påslag", Number(c.subcontractOverhead), "markup"),
     // Only when there is something to show: every calculation saved before
@@ -63,6 +66,8 @@ export function chainLines(c: CostChainSource, quantity?: number): CostChainLine
     line("Affo-påslag", Number(c.businessOverhead), "markup"),
     line("Självkostnad (SVK)", selfCost, "subtotal"),
     line("Generellt påslag", Number(c.generalMarkup), "markup"),
+    // TO last: outside TVK and SVK, no Affo or profit markup on it.
+    line("TO-påslag", Number(c.overhead), "markup"),
     line("Försäljningspris", Number(c.salesPrice), "result"),
   ];
 }

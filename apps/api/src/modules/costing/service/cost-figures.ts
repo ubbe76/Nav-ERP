@@ -1,5 +1,9 @@
 // TVK and SVK are plain sums of the stored buckets — the calculation never
-// stores them (see packages/db/src/schema/costing.ts). Before this file the
+// stores them (see packages/db/src/schema/costing.ts). TO (`overhead`) is in
+// neither: it is added to the sales price last, after the general markup
+// (markup.ts), so a stored calculation's lines sum as
+//   TVK + Affo = SVK; SVK + generellt påslag + TO = salesPrice.
+// Before this file the
 // derivation was hand-rolled at five separate call sites, so adding a bucket
 // meant finding all five; a missed one does not crash, it quietly reports a
 // too-low manufacturing cost. This is the server-side authority, the sibling of
@@ -20,20 +24,19 @@ export interface CostBuckets {
   businessOverhead: number | string;
 }
 
-/** TVK — tillverkningskostnad. */
+/** TVK — tillverkningskostnad. Without TO (see the file header). */
 export function manufacturingCost(c: CostBuckets): number {
   return (
     Number(c.materialCost) +
     Number(c.materialOverhead) +
     Number(c.laborCost) +
-    Number(c.overhead) +
     Number(c.subcontractCost) +
     Number(c.subcontractOverhead) +
     Number(c.semiFinishedCost)
   );
 }
 
-/** SVK — självkostnad. */
+/** SVK — självkostnad. Without TO, like TVK. */
 export function selfCost(c: CostBuckets): number {
   return manufacturingCost(c) + Number(c.businessOverhead);
 }

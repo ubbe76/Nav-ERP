@@ -1,0 +1,1 @@
+ALTER TABLE "cost_calculation_material_rows" ADD COLUMN "overhead_amount" numeric(14, 4) DEFAULT '0' NOT NULL;

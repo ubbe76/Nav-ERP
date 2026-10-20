@@ -42,11 +42,15 @@ export const costCalculations = pgTable("cost_calculations", {
   // from System → Kalkyler (system_settings) except TO, which sits per work
   // center on work_centers.overhead_percent:
   //   dM (materialCost) + MO (materialOverhead)
-  // + dL (laborCost)    + TO (overhead)
+  // + dL (laborCost)
   // + Lego (subcontractCost) + LO (subcontractOverhead)
   // + Halvfabrikat (semiFinishedCost — no markup of its own)
-  // = TVK, + Affo (businessOverhead) = SVK, + generalMarkup = salesPrice.
-  // TVK and SVK are plain sums and are derived on read, never stored.
+  // = TVK, + Affo (businessOverhead) = SVK,
+  // + generalMarkup + TO (overhead) = salesPrice.
+  // TO is outside TVK and SVK: it is added last, towards the sales price, and
+  // carries no profit markup. TVK and SVK are plain sums and are derived on
+  // read, never stored — a calculation saved under the earlier chain (TO inside
+  // TVK) still sums to its stored salesPrice, only the lines read differently.
   materialCost: numeric("material_cost", { precision: 14, scale: 4 }).notNull(),
   materialOverhead: numeric("material_overhead", { precision: 14, scale: 4 }).notNull().default("0"),
   laborCost: numeric("labor_cost", { precision: 14, scale: 4 }).notNull(),
@@ -54,10 +58,12 @@ export const costCalculations = pgTable("cost_calculations", {
   subcontractCost: numeric("subcontract_cost", { precision: 14, scale: 4 }).notNull().default("0"),
   subcontractOverhead: numeric("subcontract_overhead", { precision: 14, scale: 4 }).notNull().default("0"),
   // Manufactured sub-assemblies costed from their own structure and routing
-  // (multi-level). Enters TVK directly, WITHOUT a markup: MO/TO/LO are already
+  // (multi-level). Enters TVK directly, WITHOUT a markup: MO/LO are already
   // inside the figure, so Affo and the general markup are applied exactly once,
-  // at the top. Default 0 means every calculation saved before multi-level
-  // existed reads back unchanged.
+  // at the top. The sub-assemblies' TO is not in here — it is lifted into
+  // `overhead` (see cost_calculation_material_rows.overhead_amount). Default 0
+  // means every calculation saved before multi-level existed reads back
+  // unchanged.
   semiFinishedCost: numeric("semi_finished_cost", { precision: 14, scale: 4 }).notNull().default("0"),
   businessOverhead: numeric("business_overhead", { precision: 14, scale: 4 }).notNull().default("0"),
   generalMarkup: numeric("general_markup", { precision: 14, scale: 4 }).notNull().default("0"),
@@ -103,6 +109,12 @@ export const costCalculationMaterialRows = pgTable(
     unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
     priceSource: costPriceSourceEnum("price_source").notNull(),
     amount: numeric("amount", { precision: 14, scale: 4 }).notNull(),
+    // TO lifted up from a "semi" row's sub-calculation (its own operations'
+    // TO plus what its sub-assemblies lifted up). TO is outside TVK, so it is
+    // not in `amount`; the header's overhead = the operation rows' TO + this.
+    // 0 on material/lego rows and on every row saved before the column existed
+    // — those calculations carried the sub-level's TO inside `amount`.
+    overheadAmount: numeric("overhead_amount", { precision: 14, scale: 4 }).notNull().default("0"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

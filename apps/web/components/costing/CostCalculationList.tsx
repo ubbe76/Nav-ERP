@@ -27,12 +27,13 @@ function unitPrice(c: CostCalculation) {
 }
 
 // TVK and SVK are plain sums of the stored steps — the API never stores them.
+// TO (`overhead`) is outside both; it goes straight to the sales price (see
+// lib/costChain.ts).
 function selfCost(c: CostCalculation) {
   return (
     Number(c.materialCost) +
     Number(c.materialOverhead) +
     Number(c.laborCost) +
-    Number(c.overhead) +
     Number(c.subcontractCost) +
     Number(c.subcontractOverhead) +
     Number(c.semiFinishedCost) +

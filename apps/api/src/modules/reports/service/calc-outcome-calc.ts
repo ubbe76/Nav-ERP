@@ -27,7 +27,6 @@ export interface CalcRowInput {
   materialCost: number;
   materialOverhead: number;
   laborCost: number;
-  overhead: number;
   subcontractCost: number;
   subcontractOverhead: number;
   semiFinishedCost: number;
@@ -72,12 +71,13 @@ export interface OutcomeResult {
 const stockholmDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" });
 
 // TVK (tillverkningskostnad) from the stored cost columns — the same formula
-// markup.ts derives at calculation time: dM + MO + dL + TO + Lego + LO.
+// cost-figures.ts derives: dM + MO + dL + Lego + LO + Halvfabrikat. TO is
+// outside TVK (it is added to the sales price last), so the stored overhead
+// column is deliberately not read here.
 const tvk = (c: CalcRowInput) =>
   c.materialCost +
   c.materialOverhead +
   c.laborCost +
-  c.overhead +
   c.subcontractCost +
   c.subcontractOverhead +
   c.semiFinishedCost;

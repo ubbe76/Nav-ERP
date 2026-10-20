@@ -196,7 +196,7 @@ describe("costing service — pre-calculation", () => {
     // overhead: 60 * 10% = 6 (TO, per work center)
     expect(calculation.overhead).toBe("6.0000");
     // No markups configured, so the påläggskalkyl is inert and the price is
-    // just the direct cost: 100 + 60 + 6.
+    // just the direct cost plus TO: 100 + 60 + 6.
     expect(calculation.materialOverhead).toBe("0.0000");
     expect(calculation.subcontractCost).toBe("0.0000");
     expect(calculation.subcontractOverhead).toBe("0.0000");
@@ -227,7 +227,7 @@ describe("costing service — pre-calculation", () => {
     expect(calculation.laborCost).toBe("120.0000");
     expect(calculation.overhead).toBe("12.0000");
     // TVK/SVK are derived, never stored — with no markups configured the
-    // sales price IS the self cost: 100 material + 120 labor + 12 TO.
+    // sales price is the self cost plus TO: 100 material + 120 labor + 12 TO.
     expect(calculation.salesPrice).toBe("232.0000");
 
     const detail = await costingService.getCostCalculation(calculation.id);
@@ -427,11 +427,12 @@ describe("costing service — markups", () => {
     expect(calculation.overhead).toBe("6.0000"); // TO: 60 * 10%
     expect(calculation.subcontractCost).toBe("200.0000"); // Lego
     expect(calculation.subcontractOverhead).toBe("10.0000"); // LO: 200 * 5%
-    // TVK = 100 + 10 + 60 + 6 + 200 + 10 = 386; Affo = 386 * 12% = 46.32
-    expect(calculation.businessOverhead).toBe("46.3200");
-    // SVK = 432.32; generellt påslag = 432.32 * 20% = 86.464
-    expect(calculation.generalMarkup).toBe("86.4640");
-    expect(calculation.salesPrice).toBe("518.7840");
+    // TVK = 100 + 10 + 60 + 200 + 10 = 380 (TO is outside); Affo = 380 * 12% = 45.6
+    expect(calculation.businessOverhead).toBe("45.6000");
+    // SVK = 425.6; generellt påslag = 425.6 * 20% = 85.12
+    expect(calculation.generalMarkup).toBe("85.1200");
+    // SVK + generellt påslag + TO = 425.6 + 85.12 + 6
+    expect(calculation.salesPrice).toBe("516.7200");
   });
 
   it("snapshots the material source and the markups that applied", async () => {

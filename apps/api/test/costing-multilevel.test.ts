@@ -163,6 +163,65 @@ describe("flernivåkalkyl — flaggan på", () => {
     expect(rows.filter((r) => r.kind === "material")).toHaveLength(0);
   });
 
+  it("lifts the sub-assembly's TO into the parent's TO bucket instead of its TVK", async () => {
+    const raw = await makeArticle({ type: "purchased", name: "Ramaterial", standardCost: 50 });
+    const semi = await makeArticle({ type: "manufactured", name: "Underrede", standardCost: 999 });
+    const top = await makeArticle({ type: "manufactured", name: "Slutprodukt" });
+    await articleService.addBomComponent(semi.id, { componentArticleId: raw.id, quantity: 1 });
+    await addRouting(semi.id, 60, 6, 50); // TO 50 % on the sub-level's labor
+    await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
+    await addRouting(top.id, 0, 30, 10); // own: 10 × 30 min = 5 h × 100 = 500, TO 50
+    Object.assign(costingSettings, { costingAffoPercent: 10, costingGeneralMarkupPercent: 20 });
+
+    const { calculation } = await costingService.preCalculate(top.id, 10, true, true);
+    const rows = await rowsOf(calculation.id);
+
+    // Sub-level: material 1000 + labor 300 = TVK 1300; its TO 300 × 50 % = 150
+    // is NOT in the 1300 …
+    expect(Number(calculation.semiFinishedCost)).toBe(1300);
+    // … it rides on the semi row and lands in the parent's TO with the
+    // parent's own 50.
+    const semiRow = rows.find((r) => r.kind === "semi")!;
+    expect(Number(semiRow.amount)).toBe(1300);
+    expect(Number(semiRow.overheadAmount)).toBe(150);
+    expect(Number(calculation.overhead)).toBe(200);
+    expect(Number(calculation.laborCost)).toBe(500);
+    // TVK 1800 → Affo 180 → SVK 1980 → generellt 396 → + TO 200. Affo and the
+    // general markup never touch the TO, at any level.
+    expect(Number(calculation.businessOverhead)).toBe(180);
+    expect(Number(calculation.generalMarkup)).toBe(396);
+    expect(Number(calculation.salesPrice)).toBe(1980 + 396 + 200);
+
+    // The specification explains the whole TO bucket: operation rows + semi rows.
+    const detail = await costingService.getCostCalculation(calculation.id);
+    const opTo = detail!.operationRows.reduce((t, r) => t + Number(r.overheadAmount), 0);
+    const semiTo = detail!.materialRows.reduce((t, r) => t + Number(r.overheadAmount), 0);
+    expect(opTo).toBe(50);
+    expect(opTo + semiTo).toBe(Number(calculation.overhead));
+  });
+
+  it("carries TO up through three levels", async () => {
+    const raw = await makeArticle({ type: "purchased", name: "Plat", standardCost: 10 });
+    const lower = await makeArticle({ type: "manufactured", name: "Detalj", standardCost: 999 });
+    const middle = await makeArticle({ type: "manufactured", name: "Underrede", standardCost: 888 });
+    const top = await makeArticle({ type: "manufactured", name: "Slutprodukt" });
+    await articleService.addBomComponent(lower.id, { componentArticleId: raw.id, quantity: 1 });
+    await addRouting(lower.id, 0, 6, 100); // 1 lower = 6 min = 10 kr labor, TO 10
+    await articleService.addBomComponent(middle.id, { componentArticleId: lower.id, quantity: 2 });
+    await addRouting(middle.id, 0, 6, 50); // 1 middle = 10 kr labor, TO 5
+    await articleService.addBomComponent(top.id, { componentArticleId: middle.id, quantity: 1 });
+
+    const { calculation } = await costingService.preCalculate(top.id, 10, true, true);
+    const rows = await rowsOf(calculation.id);
+
+    // 10 tops → 10 middles → 20 lowers. lower: 20 × (10 + 10) = 400 TVK, TO 200;
+    // middle: 400 + 10 × 10 = 500 TVK, TO 50 own + 200 lifted = 250.
+    expect(Number(calculation.semiFinishedCost)).toBe(500);
+    expect(Number(calculation.overhead)).toBe(250);
+    expect(rows.map((r) => [r.kind, Number(r.amount), Number(r.overheadAmount)])).toEqual([["semi", 500, 250]]);
+    expect(Number(calculation.salesPrice)).toBe(750);
+  });
+
   it("keeps MO off the halvfabrikat but lets Affo reach it", async () => {
     const { top } = await makeTwoLevelStructure();
     Object.assign(costingSettings, { costingMoPercent: 50, costingAffoPercent: 10 });

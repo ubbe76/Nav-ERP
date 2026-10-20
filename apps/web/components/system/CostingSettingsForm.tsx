@@ -11,7 +11,8 @@ import type { CostingMaterialSource, CostingSupplierPriceTier, SystemSettings } 
 
 // Fixed example amounts for the live preview, so the numbers below move only
 // with the percentages the user is typing. TO is included because it is part
-// of the chain even though it is set per arbetsplats, not here.
+// of the chain even though it is set per arbetsplats, not here — it sits
+// outside TVK/SVK and is added last, towards the sales price.
 const EXAMPLE = { material: 1000, labor: 500, overhead: 50, subcontract: 200, semiFinished: 300 };
 
 function toPercent(raw: string): number | null {
@@ -78,7 +79,6 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
     EXAMPLE.material +
     moAmount +
     EXAMPLE.labor +
-    EXAMPLE.overhead +
     EXAMPLE.subcontract +
     loAmount +
     EXAMPLE.semiFinished;
@@ -90,7 +90,6 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
     { label: "Direkt material (dM)", amount: EXAMPLE.material },
     { label: `MO-påslag ${toPercent(mo) ?? 0} %`, amount: moAmount, kind: "markup" },
     { label: "Direkt lön (dL)", amount: EXAMPLE.labor },
-    { label: "TO-påslag (per arbetsplats)", amount: EXAMPLE.overhead, kind: "markup" },
     { label: "Legokostnad", amount: EXAMPLE.subcontract },
     { label: `LO-påslag ${toPercent(lo) ?? 0} %`, amount: loAmount, kind: "markup" },
     { label: "Halvfabrikat (inget påslag)", amount: EXAMPLE.semiFinished },
@@ -98,7 +97,8 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
     { label: `Affo-påslag ${toPercent(affo) ?? 0} %`, amount: affoAmount, kind: "markup" },
     { label: "Självkostnad (SVK)", amount: selfCost, kind: "subtotal" },
     { label: `Generellt påslag ${toPercent(general) ?? 0} %`, amount: generalAmount, kind: "markup" },
-    { label: "Försäljningspris", amount: selfCost + generalAmount, kind: "result" },
+    { label: "TO-påslag (per arbetsplats)", amount: EXAMPLE.overhead, kind: "markup" },
+    { label: "Försäljningspris", amount: selfCost + generalAmount + EXAMPLE.overhead, kind: "result" },
   ];
 
   return (

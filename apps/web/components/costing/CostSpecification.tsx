@@ -95,6 +95,11 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
   if (!detail) return <p>Hämtar kalkylen…</p>;
 
   const hasRows = detail.materialRows.length > 0 || detail.operationRows.length > 0;
+  // A halvfabrikat row carries the TO its own calculation lifted up (TO sits
+  // outside TVK, so it cannot be inside the row's amount). Shown only when
+  // some row has one: single-level calculations and every calculation saved
+  // before the column existed have 0 on every row.
+  const hasRowOverhead = detail.materialRows.some((row) => Number(row.overheadAmount) !== 0);
 
   return (
     <div>
@@ -103,7 +108,7 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
         {percent(detail.loPercent)}, Affo {percent(detail.affoPercent)}, generellt påslag{" "}
         {percent(detail.generalMarkupPercent)}.
         {detail.multiLevel &&
-          " Flernivåkalkyl: tillverkade halvfabrikat kostades ur sina egna strukturer och rutter, och bär därför inget MO-påslag här."}
+          " Flernivåkalkyl: tillverkade halvfabrikat kostades ur sina egna strukturer och rutter, och bär därför inget MO-påslag här; deras TO-påslag ingår i kedjans TO-påslag."}
       </FormHint>
 
       {hasRows ? (
@@ -120,6 +125,7 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
                   { key: "unitCost", label: "À-pris", width: "110px", align: "right" },
                   { key: "priceSource", label: "Priskälla", width: "150px" },
                   { key: "amount", label: "Belopp", width: "120px", align: "right" },
+                  ...(hasRowOverhead ? [{ key: "overheadAmount", label: "TO-belopp", width: "120px", align: "right" as const }] : []),
                 ]}
                 rows={detail.materialRows}
                 renderCell={(row, key) => {
@@ -141,6 +147,8 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
                     case "unitCost":
                     case "amount":
                       return money(row[key]);
+                    case "overheadAmount":
+                      return row.kind === "semi" ? money(row.overheadAmount) : "—";
                     case "priceSource":
                       return <PriceSourceCell row={row} configured={detail.materialSource} />;
                     default:
@@ -224,9 +232,9 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
             </FormActions>
             <FormHint>
               <strong>Sätt standardpris</strong> skriver kalkylens tillverkningskostnad{" "}
-              {money(perUnitFigures(detail)!.manufacturing)}/st till artikelns <strong>Standardkostnad</strong> och
-              loggar ändringen i standardprishistoriken. Fältet styr även lagervärdet och värdet på
-              tillverkningsinleveranser. <strong>Sätt försäljningspris</strong> skriver{" "}
+              {money(perUnitFigures(detail)!.manufacturing)}/st (utan TO-påslag) till artikelns{" "}
+              <strong>Standardkostnad</strong> och loggar ändringen i standardprishistoriken. Fältet styr även
+              lagervärdet och värdet på tillverkningsinleveranser. <strong>Sätt försäljningspris</strong> skriver{" "}
               {money(perUnitFigures(detail)!.sales)}/st till artikelns <strong>Försäljningspris</strong> — grundpriset
               längst ned i priskedjan.
             </FormHint>
