@@ -260,7 +260,8 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       purchaseOverReceiptPercent: decodeOverReceiptPercent(get(PURCHASE_OVER_RECEIPT_PERCENT_KEY)),
       manufacturingMaterialShortage: decodeMaterialShortage(get(MANUFACTURING_MATERIAL_SHORTAGE_KEY)),
       palletCardCode: decodePalletCardCode(get(PALLET_CARD_CODE_KEY)),
-      palletCardAllowQuantityMismatch: get(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY) === "true",
+      // Missing ⇒ allowed: the dialog warns, printing is not blocked.
+      palletCardAllowQuantityMismatch: get(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY) !== "false",
       // Orimligt mycket tid (Planera, ny TO) — plan-settings.ts owns the default.
       planningLongOperationWeeks: decodeLongOperationWeeks(get(PLANNING_LONG_OPERATION_WEEKS_KEY)),
       // Fasta leveransdagar — the default mode/transit days for partners

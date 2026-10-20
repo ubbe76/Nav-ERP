@@ -133,13 +133,13 @@ describe("system service — settings", () => {
     expect(updateSystemSettingsSchema.safeParse({ palletCardCode: "qr" }).success).toBe(true);
   });
 
-  it("defaults Tillåt utskrift av pallkort även om kollina inte stämmer to false and round-trips it", async () => {
+  it("defaults Tillåt utskrift av pallkort även om kollina inte stämmer to true and round-trips it", async () => {
     await db.delete(systemSettings).where(eq(systemSettings.key, "pallet_card_allow_quantity_mismatch"));
     try {
-      expect((await systemService.getSettings()).palletCardAllowQuantityMismatch).toBe(false);
-      expect((await systemService.updateSettings({ palletCardAllowQuantityMismatch: true })).palletCardAllowQuantityMismatch).toBe(true);
       expect((await systemService.getSettings()).palletCardAllowQuantityMismatch).toBe(true);
       expect((await systemService.updateSettings({ palletCardAllowQuantityMismatch: false })).palletCardAllowQuantityMismatch).toBe(false);
+      expect((await systemService.getSettings()).palletCardAllowQuantityMismatch).toBe(false);
+      expect((await systemService.updateSettings({ palletCardAllowQuantityMismatch: true })).palletCardAllowQuantityMismatch).toBe(true);
     } finally {
       await db.delete(systemSettings).where(eq(systemSettings.key, "pallet_card_allow_quantity_mismatch"));
     }

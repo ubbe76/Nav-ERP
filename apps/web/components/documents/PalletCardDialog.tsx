@@ -57,19 +57,17 @@ function fmt(n: number): string {
   return round4(n).toLocaleString("sv-SE");
 }
 
-// Whether a mismatching sum may still be printed (system setting); a failed
-// fetch counts as "no".
+// Whether a mismatching sum may still be printed (system setting, allowed
+// by default); a failed fetch keeps the default.
 function useAllowMismatch(): boolean {
-  const [allow, setAllow] = useState(false);
+  const [allow, setAllow] = useState(true);
   useEffect(() => {
     let cancelled = false;
     apiFetch<{ allowQuantityMismatch: boolean }>("/api/v1/settings/pallet-card")
       .then((res) => {
-        if (!cancelled) setAllow(res.allowQuantityMismatch === true);
+        if (!cancelled) setAllow(res.allowQuantityMismatch !== false);
       })
-      .catch(() => {
-        if (!cancelled) setAllow(false);
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
