@@ -585,7 +585,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   lagerplatssaldon per artikel); ny offert eller kundorder (skapas
   direkt som bekräftad) från kundkortet eller listan; kundfakturor med
   prislistor/kundpriser, och **utfärdade fakturor och påminnelser
-  arkiveras som PDF** exakt som de skickades
+  arkiveras som PDF** exakt som de skickades; **e-faktura via Peppol**
+  (Peppol BIS Billing 3, faktura och kreditfaktura till svenska kunder,
+  skickad via accesspunkten B2Brouter med **Skicka e-faktura** på
+  fakturakortet och leveransstatus som hämtas automatiskt)
 - **Grunddata** — delade register för leveransvillkor (förifyllbara med
   Combiterms), betalningsvillkor och speditörer, nåbara från både Inköp
   och Försäljning; villkoren ligger också på förfrågan, inköpsorder och
