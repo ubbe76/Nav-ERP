@@ -510,7 +510,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.4.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.4.1-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -582,7 +582,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   eget **leveransdatum** per rad;
   **utleveransrutin** som rapporterar leverans av hela ordern på en
   gång (med **rest** per rad) och skapar följesedel, med utskrivbar **plocklista** (PDF med restantal och
-  lagerplatssaldon per artikel); ny offert eller kundorder (skapas
+  lagerplatssaldon per artikel), **pallkort** per följesedel (streck- eller
+  QR-kod, eget antal per kolli) och möjlighet att **ångra en utleverans**
+  per leveransrad så länge den inte är fakturerad; ny offert eller kundorder (skapas
   direkt som bekräftad) från kundkortet eller listan; kundfakturor med
   prislistor/kundpriser, och **utfärdade fakturor och påminnelser
   arkiveras som PDF** exakt som de skickades; **e-faktura via Peppol**
