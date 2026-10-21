@@ -228,7 +228,7 @@ Rader vars artikel saknar förkalkyl kan inte mätas. De ingår i orderns summa 
 
 ### Giltighetstid och förlorade offerter
 
-**Giltig t.o.m.** är sista dagen offerten gäller. Fältet finns i formuläret **Ny offert** (inte i **Ny kundorder**), förifyllt med dagens datum plus inställningen **Offertens giltighetstid (dagar)** (förval 30, se [Inställningar](/hjalp/system#installningar)); töm fältet för en offert utan giltighetstid. På en befintlig offert ändras datumet i **Ändra orderhuvud** och visas i orderhuvudet; ändringen höjer revisionen eftersom datumet skrivs ut. Offert-PDF:en och offertmejlet skriver *Offerten gäller till och med 20 november 2026.* under huvudet; orderbekräftelsen skriver inte ut det.
+**Giltig t.o.m.** är sista dagen offerten gäller. Fältet finns i formuläret **Ny offert** (inte i **Ny kundorder**), förifyllt med dagens datum plus inställningen **Offertens giltighetstid (dagar)** (förval 30, se [Inställningar](/hjalp/system#installningar)); töm fältet för en offert utan giltighetstid. På en befintlig offert ändras datumet i **Ändra orderhuvud** och visas i orderhuvudet; ändringen höjer revisionen eftersom datumet skrivs ut. Offert-PDF:en och offertmejlet skriver *Offerten gäller till och med 2026-11-20.* under huvudet; orderbekräftelsen skriver inte ut det.
 
 Passerar datumet markeras offerten **Utgången** i orderhuvudet och i orderlistan, som har en egen kolumn **Giltig t.o.m.** för offerter. En utgången offert byter aldrig status av sig själv: den står kvar som offert tills du bekräftar den, markerar den som förlorad eller ändrar datumet. Offerter som snart går ut eller har gått ut dyker upp bland [Aviseringarna](/hjalp/aviseringar) som **Offerter att följa upp**.
 

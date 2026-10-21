@@ -1294,7 +1294,8 @@ export function createSalesService(
       if (order.status !== "quote") {
         throw new InvalidStatusTransitionError(`Cannot confirm an order in status "${order.status}"`);
       }
-      const updated = await repo.updateStatus(orderId, "confirmed");
+      const updated = await repo.updateStatus(orderId, "confirmed", null, "quote");
+      if (!updated) throw new InvalidStatusTransitionError("Cannot confirm — the quote changed status meanwhile");
       await audit.log({
         entityType: "sales_order",
         entityId: order.orderNumber,
@@ -1396,7 +1397,9 @@ export function createSalesService(
         showConfigurationPrices: showPrices,
       });
       if (input.variant === "confirmation" && order.status === "quote") {
-        return repo.updateStatus(orderId, "confirmed");
+        // The mail is already sent; a quote that moved on meanwhile (e.g.
+        // Förlorad) keeps its new status rather than being overwritten.
+        return (await repo.updateStatus(orderId, "confirmed", null, "quote")) ?? (await repo.findSalesOrderById(orderId));
       }
       return order;
     },

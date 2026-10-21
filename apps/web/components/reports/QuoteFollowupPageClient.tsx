@@ -233,7 +233,7 @@ export function QuoteFollowupPageClient({ defaults }: { defaults: QuoteFollowupD
             />
           </Scroller>
 
-          <SectionHeading>Per månad</SectionHeading>
+          <SectionHeading spaced>Per månad</SectionHeading>
           <Scroller>
             <Table
               columns={[
@@ -273,7 +273,7 @@ export function QuoteFollowupPageClient({ defaults }: { defaults: QuoteFollowupD
             />
           </Scroller>
 
-          <SectionHeading>Per förlustorsak</SectionHeading>
+          <SectionHeading spaced>Per förlustorsak</SectionHeading>
           <Scroller>
             <Table
               columns={[
@@ -301,7 +301,7 @@ export function QuoteFollowupPageClient({ defaults }: { defaults: QuoteFollowupD
             />
           </Scroller>
 
-          <SectionHeading>Offerter</SectionHeading>
+          <SectionHeading spaced>Offerter</SectionHeading>
           <Scroller>
             <Table
               columns={[

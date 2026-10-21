@@ -745,7 +745,9 @@ export function createSalesRepository(db: Db) {
     // clears the lost_* columns (Öppna igen's rule applies to setStatus
     // too); entering it through the override stamps when/who without a
     // reason — "Ingen orsak angiven" — unless the order already is lost.
-    async updateStatus(id: string, status: SalesOrderStatus, lostBy: string | null = null) {
+    // fromStatus makes the update conditional (null = the order had moved on),
+    // so a confirm cannot overwrite a concurrent Förlorad and vice versa.
+    async updateStatus(id: string, status: SalesOrderStatus, lostBy: string | null = null, fromStatus?: SalesOrderStatus) {
       const [row] = await db
         .update(salesOrders)
         .set(
@@ -758,7 +760,7 @@ export function createSalesRepository(db: Db) {
               }
             : { status, lostReasonId: null, lostNote: null, lostAt: null, lostBy: null, updatedAt: new Date() }
         )
-        .where(eq(salesOrders.id, id))
+        .where(fromStatus ? and(eq(salesOrders.id, id), eq(salesOrders.status, fromStatus)) : eq(salesOrders.id, id))
         .returning();
       return row ?? null;
     },

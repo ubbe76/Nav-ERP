@@ -248,6 +248,17 @@ describe("Förlorad / Öppna igen", () => {
     expect((await salesService.getSalesOrder(order.id))!.status).toBe("confirmed");
   });
 
+  it("a confirm that read the quote before a concurrent Förlorad does not overwrite it", async () => {
+    const { order, user } = await makeQuote();
+    const reason = await makeReason();
+    await salesService.lose(order.id, { lossReasonId: reason.id }, user.id);
+    // The confirm path's conditional update: the order is no longer a quote.
+    expect(await createSalesRepository(db).updateStatus(order.id, "confirmed", null, "quote")).toBeNull();
+    const after = await salesService.getSalesOrder(order.id);
+    expect(after!.status).toBe("lost");
+    expect(after!.lostReasonId).toBe(reason.id);
+  });
+
   it("a lost quote is locked like a cancelled order: no rows, no header, no PDF, no e-mail, no cancel", async () => {
     const { order, user, article } = await makeQuote();
     const reason = await makeReason();
