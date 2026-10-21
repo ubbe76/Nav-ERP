@@ -47,12 +47,13 @@ export const einvoiceTransmissions = pgTable(
   },
   (table) => [
     index("idx_einvoice_transmissions_invoice").on(table.invoiceId, table.startedAt.desc()),
-    // ONE live transmission per invoice: a resend is only possible after
-    // rejected/failed. The service inserts the `sending` row BEFORE calling
-    // the access point and maps this index's violation to
+    // ONE live transmission per invoice AND environment: a resend is only
+    // possible after rejected/failed, but a sandbox trial never blocks the
+    // real send (and vice versa). The service inserts the `sending` row
+    // BEFORE calling the access point and maps this index's violation to
     // EinvoiceAlreadySentError, so a double click can never send twice.
     uniqueIndex("einvoice_transmissions_live")
-      .on(table.invoiceId)
+      .on(table.invoiceId, table.environment)
       .where(sql`${table.status} IN ('sending', 'sent', 'delivered')`),
   ]
 );

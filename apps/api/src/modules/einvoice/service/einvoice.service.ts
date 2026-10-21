@@ -13,7 +13,7 @@ import {
   type CompanyInfoRow,
   type EinvoiceSettingsService,
 } from "./einvoice-settings.service.js";
-import { einvoiceStatusLabel } from "./einvoice-status.js";
+import { einvoiceStatusLabel, isLiveStatus, mapProviderState, providerErrorText } from "./einvoice-status.js";
 import {
   BLOCKED_MESSAGES,
   EinvoiceAlreadySentError,
@@ -29,8 +29,10 @@ import type { PeppolIdentifier, UblInvoiceInput, UblLine, UblPaymentAccount, Ubl
 // E-faktura via Peppol — sändning, läsning för fakturakortet och Kontrollera
 // mottagare (spec §3.4, §3.6). No DB transaction is ever held over the
 // access point call: the `sending` row is inserted first (the partial unique
-// index is the double-send guard), then the provider is called, then the
-// row is updated with the outcome.
+// index, per invoice AND environment, is the double-send guard), then the
+// provider is called — the access point's id is written to the row as soon
+// as the import is through, before the send — then the row is updated with
+// the outcome.
 
 // --- Narrow readers into sales/system (same pattern as RegisterReferenceReader) ---
 
@@ -225,9 +227,12 @@ export function buildUblInput(args: {
   const { invoice, customer, company } = args;
   const isCredit = invoice.type === "credit";
   const links = new Map(args.orderLinks.map((l) => [l.rowId, l]));
-  // BT-13/BT-10 from the FIRST linked order; neither ⇒ the customer number
-  // as BT-10 (Peppol requires one of them).
-  const first = args.orderLinks.find((l) => l.orderNumber !== null);
+  // BT-13/BT-10 from the FIRST linked order in the DOCUMENT's own line
+  // order (invoice.rows, the same order the lines are numbered in — so the
+  // header reference always matches line 1's order, however the rows'
+  // created_at tie); neither ⇒ the customer number as BT-10 (Peppol
+  // requires one of them).
+  const first = invoice.rows.map((r) => links.get(r.id)).find((l): l is OrderLink => l !== undefined && l.orderNumber !== null);
   const orderReference = first?.customerOrderNumber?.trim() || null;
   let buyerReference = first?.customerReference?.trim() || null;
   if (!orderReference && !buyerReference) buyerReference = invoice.customerNumber ?? customer.customerNumber;
@@ -304,9 +309,11 @@ export function createEinvoiceService(deps: {
   company: CompanyInfoReader;
   audit: AuditWriter;
   now?: () => Date;
+  log?: (msg: string, extra?: unknown) => void;
 }) {
   const { repo, settings, invoices, company, audit } = deps;
   const now = deps.now ?? (() => new Date());
+  const log = deps.log ?? ((msg: string, extra?: unknown) => console.error(msg, extra));
 
   async function loadInvoice(id: string) {
     const invoice = await invoices.getInvoice(id);
@@ -371,8 +378,7 @@ export function createEinvoiceService(deps: {
     async getDocument(id: string) {
       const row = await repo.findTransmissionDocument(id);
       if (!row) return null;
-      const invoice = await invoices.getInvoice(row.invoiceId);
-      return { filename: `${invoice?.invoiceNumber ?? row.invoiceId}.xml`, content: row.document };
+      return { filename: `${row.invoiceNumber ?? row.invoiceId}.xml`, content: row.document };
     },
 
     // Skicka e-faktura (spec §3.4).
@@ -385,7 +391,8 @@ export function createEinvoiceService(deps: {
       const { invoice, recipient, xml } = await prepareDocument(invoiceId);
 
       // The `sending` row first: the partial unique index is what makes a
-      // second live transmission impossible, whoever clicks.
+      // second live transmission in this environment impossible, whoever
+      // clicks.
       let transmissionId: string;
       try {
         transmissionId = await repo.insertTransmission({
@@ -402,28 +409,24 @@ export function createEinvoiceService(deps: {
         throw err;
       }
 
+      // The try covers the access point call ONLY. Once submit has
+      // returned, the document has been sent: a database failure after that
+      // must never mark the row failed (that would invite a second send) —
+      // it is logged and rethrown, and the row, which already carries the
+      // access point's id, is resolved by the status job from the state
+      // there.
+      let result;
       try {
-        const result = await provider.submit({ xml, filename: `${invoice.invoiceNumber}.xml` });
-        const at = now();
-        await repo.updateTransmission(transmissionId, {
-          status: "sent",
-          providerInvoiceId: result.providerInvoiceId,
-          providerState: result.state.slice(0, 40),
-          sentAt: at,
-          statusUpdatedAt: at,
-        });
-        await audit.log({
-          entityType: "invoice",
-          entityId: invoice.id,
-          action: "einvoice_sent",
-          detail: {
-            transmissionId,
-            recipientId: recipient.peppolId,
-            environment: s.environment,
-            providerInvoiceId: result.providerInvoiceId,
-          },
-          userId,
-        });
+        result = await provider.submit(
+          { xml, filename: `${invoice.invoiceNumber}.xml` },
+          {
+            // Persisted BEFORE the send: a process that dies in between still
+            // leaves a `sending` row with the id, which the status job polls.
+            onImported: async (providerInvoiceId) => {
+              await repo.updateTransmission(transmissionId, { status: "sending", providerInvoiceId });
+            },
+          }
+        );
       } catch (err) {
         const at = now();
         if (err instanceof EInvoiceProviderError) {
@@ -450,6 +453,45 @@ export function createEinvoiceService(deps: {
           status: "failed",
           errorMessage: err instanceof Error ? err.message : "Sändningen misslyckades",
           statusUpdatedAt: at,
+        });
+        throw err;
+      }
+
+      // The state the access point reported right after the send decides the
+      // row — an immediate error/refused is final at once, never "sent".
+      const at = now();
+      const status = mapProviderState(result.state);
+      const failedNow = status === "failed" || status === "rejected";
+      const errorMessage = failedNow
+        ? (providerErrorText(result.errorMessage) ?? (status === "rejected" ? "Mottagaren avvisade fakturan" : "Sändningen misslyckades"))
+        : null;
+      try {
+        await repo.updateTransmission(transmissionId, {
+          status,
+          providerInvoiceId: result.providerInvoiceId,
+          providerState: result.state.slice(0, 40),
+          errorMessage,
+          sentAt: isLiveStatus(status) && status !== "sending" ? at : null,
+          statusUpdatedAt: at,
+        });
+        await audit.log({
+          entityType: "invoice",
+          entityId: invoice.id,
+          action: failedNow ? "einvoice_failed" : "einvoice_sent",
+          detail: {
+            transmissionId,
+            recipientId: recipient.peppolId,
+            environment: s.environment,
+            providerInvoiceId: result.providerInvoiceId,
+            ...(failedNow ? { status, providerState: result.state, reason: errorMessage } : {}),
+          },
+          userId,
+        });
+      } catch (err) {
+        log("E-invoice sent but the transmission row could not be updated", {
+          transmissionId,
+          providerInvoiceId: result.providerInvoiceId,
+          error: err instanceof Error ? err.message : String(err),
         });
         throw err;
       }

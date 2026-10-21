@@ -77,12 +77,9 @@ export async function einvoiceRoutes(
     const input = updateEinvoiceSettingsSchema.parse(req.body);
     return run(reply, () => settings.update(input, req.user!.id));
   });
+  // Saves nothing: the form sends accountId + accountName back on Spara.
   app.post("/einvoice-settings/test", ADMIN, async (req, reply) =>
-    run(reply, async () => {
-      const result = await settings.testConnection(testEinvoiceConnectionSchema.parse(req.body ?? {}));
-      await settings.rememberAccountName(result.accountName);
-      return result;
-    })
+    run(reply, () => settings.testConnection(testEinvoiceConnectionSchema.parse(req.body ?? {})))
   );
   app.post("/einvoice-settings/validate", ADMIN, async (req, reply) => {
     const { invoiceId } = validateEinvoiceDocumentSchema.parse(req.body);

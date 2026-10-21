@@ -14,10 +14,11 @@ import {
 // facts from their OpenAPI 2026-06-26 are in the spec's "B2Brouters API i
 // korthet"; what the sandbox still has to confirm is marked SANDBOX below.
 
-// One base URL for both environments per the spec: a key that starts with
-// "test_" is routed to the sandbox by B2Brouter. (Their developer portal
-// also lists api-staging.b2brouter.net as a test server — SANDBOX: confirm
-// which host the test_ key wants and change the sandbox entry if needed.)
+// One base URL for both environments: B2Brouter routes by the KEY, not the
+// host (docs.b2brouter.net/en/developers/testing/environments — sandbox keys
+// start with "test_", production keys with "prod_" (older production keys
+// have no prefix), and "stag_" keys belong to their staging host, which Nav
+// does not use). Kept as a table so a per-environment host is one edit.
 export const B2BROUTER_BASE_URL = {
   sandbox: "https://api.b2brouter.net",
   production: "https://api.b2brouter.net",
@@ -26,6 +27,9 @@ export const B2BROUTER_BASE_URL = {
 export const B2BROUTER_API_VERSION = "2026-06-26";
 
 const TIMEOUT_MS = 30_000;
+// The import uploads the UBL with the base64 PDF inside it — a large
+// invoice takes a while to transfer and to be parsed at the other end.
+export const IMPORT_TIMEOUT_MS = 120_000;
 // Directory lookups are asynchronous: 202 until the directory answered.
 export const LOOKUP_POLL_INTERVAL_MS = 1_000;
 export const LOOKUP_MAX_WAIT_MS = 10_000;
@@ -35,6 +39,8 @@ export const B2BROUTER_MESSAGES = {
   unavailable: "B2Brouter svarar inte, försök igen",
   unexpected: "B2Brouter gav ett oväntat svar",
   noAccount: "API-nyckeln når inget konto hos B2Brouter",
+  accountNotFound: "B2Brouter hittar inte det valda kontot — kör Testa anslutning under System → E-faktura",
+  documentNotFound: "Dokumentet finns inte längre hos B2Brouter",
   rejected: "B2Brouter avvisade dokumentet",
   directoryUnavailable: "Katalogen svarade inte, försök igen",
   directoryInvalid: "Peppol-id:t är inte giltigt för schemat",
@@ -79,6 +85,8 @@ export function parseErrorBody(text: string): { code: string | null; message: st
 
 export interface B2BrouterDeps {
   fetch?: typeof fetch;
+  // The ordinary call timeout (tests shorten it); the import uses IMPORT_TIMEOUT_MS.
+  timeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   log?: (entry: { method: string; path: string; status: number; requestId: string | null; body: string }) => void;
@@ -96,13 +104,19 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
   const sleep = deps.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
   const now = deps.now ?? (() => Date.now());
   const log = deps.log ?? ((entry) => console.warn("B2Brouter request failed", entry));
+  const timeoutMs = deps.timeoutMs ?? TIMEOUT_MS;
   const baseUrl = B2BROUTER_BASE_URL[config.environment];
 
   // Raw HTTP: only the transport failure is turned into an error here; the
   // callers decide what each status means (the directory lookup reads 202/
-  // 404/424 as answers, not failures).
-  async function raw(method: string, path: string, body?: { xml: Buffer }): Promise<CallResult> {
+  // 404/424 as answers, not failures). ONE timeout covers the whole call,
+  // the body read included — a response whose body never arrives is as much
+  // a transport failure as a connect that hangs.
+  async function raw(method: string, path: string, body?: { xml: Buffer }, timeout = timeoutMs): Promise<CallResult> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
     let res: Response;
+    let text: string;
     try {
       res = await doFetch(baseUrl + path, {
         method,
@@ -113,14 +127,16 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
           ...(body ? { "Content-Type": "application/octet-stream" } : {}),
         },
         body: body ? new Uint8Array(body.xml) : undefined,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: controller.signal,
       });
+      text = await res.text();
     } catch (err) {
       log({ method, path, status: 0, requestId: null, body: transportSummary(err) });
       throw new EInvoiceProviderError(B2BROUTER_MESSAGES.unavailable, "unavailable");
+    } finally {
+      clearTimeout(timer);
     }
     const requestId = res.headers.get("x-b2b-api-request-id");
-    const text = await res.text().catch(() => "");
     let data: unknown = null;
     if (text !== "") {
       try {
@@ -133,19 +149,32 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
     return { status: res.status, requestId, data, text };
   }
 
-  // The common status → error mapping for the ordinary endpoints.
-  function failure(r: CallResult, validationMessage: string, providerInvoiceId: string | null = null): EInvoiceProviderError {
+  // What a 404 means depends on the call: on the import it is the account
+  // path (a configuration problem, treated like a refused key), on a status
+  // read it is the document itself (gone), elsewhere it is just odd.
+  type NotFoundMeaning = "account" | "document" | "unexpected";
+
+  // The common status → error mapping for the ordinary endpoints. Only 400/
+  // 422 are the access point refusing what we sent; any other 4xx is an
+  // answer we did not expect, never a "document refused".
+  function failure(r: CallResult, notFound: NotFoundMeaning, providerInvoiceId: string | null = null): EInvoiceProviderError {
     if (r.status === 401 || r.status === 403) {
       return new EInvoiceProviderError(B2BROUTER_MESSAGES.unauthorized, "unauthorized", [], r.requestId, providerInvoiceId);
     }
     if (r.status === 429 || r.status >= 500) {
       return new EInvoiceProviderError(B2BROUTER_MESSAGES.unavailable, "unavailable", [], r.requestId, providerInvoiceId);
     }
+    if (r.status === 404) {
+      if (notFound === "account") return new EInvoiceProviderError(B2BROUTER_MESSAGES.accountNotFound, "unauthorized", [], r.requestId, providerInvoiceId);
+      if (notFound === "document") return new EInvoiceProviderError(B2BROUTER_MESSAGES.documentNotFound, "not-found", [], r.requestId, providerInvoiceId);
+      return unexpected(r.requestId, providerInvoiceId);
+    }
+    if (r.status !== 400 && r.status !== 422) return unexpected(r.requestId, providerInvoiceId);
     const body = parseErrorBody(r.text);
     const fieldErrors: string[] = [];
     if (body.message) fieldErrors.push(body.param ? `${body.param}: ${body.message}` : body.message);
     return new EInvoiceProviderError(
-      body.message ? `${validationMessage}: ${body.message}` : `${validationMessage} (HTTP ${r.status})`,
+      body.message ? `${B2BROUTER_MESSAGES.rejected}: ${body.message}` : `${B2BROUTER_MESSAGES.rejected} (HTTP ${r.status})`,
       "validation",
       fieldErrors,
       r.requestId,
@@ -153,9 +182,9 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
     );
   }
 
-  async function call(method: string, path: string, body?: { xml: Buffer }): Promise<CallResult> {
-    const r = await raw(method, path, body);
-    if (r.status >= 400) throw failure(r, B2BROUTER_MESSAGES.rejected);
+  async function call(method: string, path: string, body?: { xml: Buffer }, opts: { notFound?: NotFoundMeaning; timeoutMs?: number } = {}): Promise<CallResult> {
+    const r = await raw(method, path, body, opts.timeoutMs);
+    if (r.status >= 400) throw failure(r, opts.notFound ?? "unexpected");
     return r;
   }
 
@@ -178,7 +207,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
   }
 
   async function readStatus(providerInvoiceId: string): Promise<ProviderStatus> {
-    const r = await call("GET", `/invoices/${encodeURIComponent(providerInvoiceId)}`);
+    const r = await call("GET", `/invoices/${encodeURIComponent(providerInvoiceId)}`, undefined, { notFound: "document" });
     const invoice = invoiceOf(r);
     const state = str(invoice.state);
     if (!state) throw unexpected(r.requestId, providerInvoiceId);
@@ -207,19 +236,32 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
       return { accountId, accountName: str(first.name) ?? accountId, vatNumber: str(first.tin_value) };
     },
 
-    async submit(doc) {
+    async submit(doc, opts = {}) {
       if (!config.accountId) throw new EInvoiceProviderError(B2BROUTER_MESSAGES.noAccount, "unexpected");
       // Import as raw XML (application/octet-stream, string/binary) —
       // SANDBOX-verified 2026-10-21: the raw body is accepted as is.
       const importPath =
         `/accounts/${encodeURIComponent(config.accountId)}/invoices/import` +
         `?send_after_import=false&transport_type_code_for_contact=peppol`;
-      const imported = await call("POST", importPath, { xml: doc.xml });
+      const imported = await call("POST", importPath, { xml: doc.xml }, { notFound: "account", timeoutMs: IMPORT_TIMEOUT_MS });
       const providerInvoiceId = idOf(invoiceOf(imported), imported.requestId);
+      // The caller persists the id before anything is sent (see SubmitOptions).
+      await opts.onImported?.(providerInvoiceId);
 
-      // The send is a separate call. A transient failure is retried once; a
-      // failure after that carries providerInvoiceId so the row can stay
-      // `sending` and the status job reads what became of the draft.
+      // The send is a separate call. A transient failure is retried once —
+      // but a timed-out send may well have gone through (B2Brouter queues it
+      // and answers the retry with 422 "Cannot send invoice in state
+      // sending"), so NO send failure after the import is taken at face
+      // value: the draft's state decides. Still "new" ⇒ nothing was sent and
+      // the failure stands; "error" ⇒ the access point itself failed it
+      // (SANDBOX-verified 2026-10-21: a send refused with 422 leaves the
+      // draft in state error) and the failure stands with the 422's text,
+      // which explains more than error_message does — a failed row is safe
+      // to resend either way, nothing reached the customer. Any other state
+      // ⇒ the send happened, this is a success. State unreadable ⇒ unknown:
+      // the error carries providerInvoiceId so the row stays `sending` and
+      // the status job reads what became of the draft. A refused key is the
+      // one exception — the state read would fail with the same key.
       const sendPath = `/invoices/send_invoice/${encodeURIComponent(providerInvoiceId)}`;
       let last: EInvoiceProviderError | null = null;
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -229,25 +271,37 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
             last = null;
             break;
           }
-          last = failure(r, B2BROUTER_MESSAGES.rejected, providerInvoiceId);
+          last = failure(r, "document", providerInvoiceId);
         } catch (err) {
           if (!(err instanceof EInvoiceProviderError)) throw err;
           last = new EInvoiceProviderError(err.message, err.kind, err.fieldErrors, err.requestId, providerInvoiceId);
         }
-        // A refused document or a refused key will not change on a retry.
-        if (last.kind === "validation" || last.kind === "unauthorized") break;
+        if (last.kind === "unauthorized") throw last;
+        if (last.kind === "unavailable" && attempt === 0) continue;
+        break;
       }
-      if (last) throw last;
+      if (last) {
+        let status: ProviderStatus;
+        try {
+          status = await readStatus(providerInvoiceId);
+        } catch (err) {
+          const requestId = err instanceof EInvoiceProviderError ? err.requestId : null;
+          throw new EInvoiceProviderError(B2BROUTER_MESSAGES.unavailable, "unavailable", [], requestId, providerInvoiceId);
+        }
+        const state = status.state.trim().toLowerCase();
+        if (state === "new" || state === "error") throw last;
+        return { providerInvoiceId, state: status.state, errorMessage: status.errorMessage };
+      }
 
       // Best effort: the state right after the send, for the row. A failed
       // read must not undo a successful send — "sending" is then assumed.
-      let state = "sending";
+      let status: ProviderStatus = { state: "sending", errorMessage: null, updatedAt: null };
       try {
-        state = (await readStatus(providerInvoiceId)).state;
+        status = await readStatus(providerInvoiceId);
       } catch {
         // see above
       }
-      return { providerInvoiceId, state };
+      return { providerInvoiceId, state: status.state, errorMessage: status.errorMessage };
     },
 
     getStatus: readStatus,
@@ -303,7 +357,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
     },
 
     async validate(xml) {
-      const r = await call("POST", "/documents/validate", { xml });
+      const r = await call("POST", "/documents/validate", { xml }, { timeoutMs: IMPORT_TIMEOUT_MS });
       const result = obj(obj(r.data)?.validation_result);
       const status = str(result?.status);
       if (status !== "valid" && status !== "valid_with_warnings" && status !== "invalid") throw unexpected(r.requestId);

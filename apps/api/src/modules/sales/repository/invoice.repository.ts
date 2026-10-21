@@ -744,9 +744,14 @@ export function createInvoiceRepository(db: Db) {
       // showing the name as it was at issue even after the customer is renamed.
       const customerName = sql<string>`COALESCE(${invoices.customerName}, ${customers.name})`;
 
-      // E-faktura: the latest transmission's status (null = never sent as an
-      // e-invoice), for the list's E-faktura column.
-      const einvoiceStatus = sql<EinvoiceStatus | null>`(SELECT t.status FROM ${einvoiceTransmissions} t WHERE t.invoice_id = ${invoices.id} ORDER BY t.started_at DESC, t.id DESC LIMIT 1)`;
+      // E-faktura: the latest transmission's status and environment (null =
+      // never sent as an e-invoice), for the list's E-faktura column. A
+      // production transmission always wins over a sandbox trial, however
+      // old — the column must never read "Mottagen" for a sandbox send
+      // when a real one exists.
+      const latestTransmission = sql`FROM ${einvoiceTransmissions} t WHERE t.invoice_id = ${invoices.id} ORDER BY (t.environment = 'production') DESC, t.started_at DESC, t.id DESC LIMIT 1`;
+      const einvoiceStatus = sql<EinvoiceStatus | null>`(SELECT t.status ${latestTransmission})`;
+      const einvoiceEnvironment = sql<"sandbox" | "production" | null>`(SELECT t.environment ${latestTransmission})`;
 
       const [rows, totalRows] = await Promise.all([
         db
@@ -757,6 +762,7 @@ export function createInvoiceRepository(db: Db) {
             vatAmount,
             verificationDisplayNumber: verificationDisplayNumberSql,
             einvoiceStatus,
+            einvoiceEnvironment,
           })
           .from(invoices)
           .innerJoin(customers, eq(customers.id, invoices.customerId))

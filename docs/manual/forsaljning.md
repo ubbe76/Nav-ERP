@@ -395,7 +395,7 @@ Med e-faktura skickas fakturan som ett strukturerat dokument (UBL, Peppol BIS Bi
 - Kunden är ingen **Privatperson** och är en svensk kund; fakturan är i SEK.
 - Kunden har ett Peppol-id, eget eller härlett ur organisationsnumret (se [Kunder](#kunder)). Saknas något av detta visar sektionen en förklaring i stället för knappen.
 
-**Skicka e-faktura.** Från och med **Utfärdad** har fakturakortet sektionen **E-faktura**. Den visar mottagaren — "Peppol-id 0007:5560000000 (kundens organisationsnummer)" eller "(angivet på kunden)" — och knappen **Skicka e-faktura**. Knappen är den primära när kundens **Fakturaleverans** är **E-faktura (Peppol)**, annars en sekundär knapp: du kan skicka e-faktura till vilken kund som helst som tar emot det. Klicka, bekräfta frågan "Skicka FA-… som e-faktura till …?" och dokumentet byggs, kontrolleras och skickas. En faktura kan bara ha en pågående eller godkänd sändning i taget. Har kunden **E-faktura (Peppol)** som Fakturaleverans visar kortet också en påminnelse vid **Skicka faktura** i sektionen E-post: "Kunden vill ha e-faktura". E-post fungerar fortfarande — Nav hindrar dig inte.
+**Skicka e-faktura.** Från och med **Utfärdad** har fakturakortet sektionen **E-faktura**. Den visar mottagaren — "Peppol-id 0007:5560000000 (kundens organisationsnummer)" eller "(angivet på kunden)" — och knappen **Skicka e-faktura**. Knappen är den primära när kundens **Fakturaleverans** är **E-faktura (Peppol)**, annars en sekundär knapp: du kan skicka e-faktura till vilken kund som helst som tar emot det. Klicka, bekräfta frågan "Skicka FA-… som e-faktura till …?" och dokumentet byggs, kontrolleras och skickas. En faktura kan bara ha en pågående eller godkänd sändning i taget per miljö — en sandboxsändning hindrar inte den riktiga. Har kunden **E-faktura (Peppol)** som Fakturaleverans visar kortet också en påminnelse vid **Skicka faktura** i sektionen E-post: "Kunden vill ha e-faktura". E-post fungerar fortfarande — Nav hindrar dig inte.
 
 **Statusarna.** Varje sändning loggas under **Sändningar** med tid, status och miljö:
 
@@ -411,9 +411,9 @@ Statusen uppdateras automatiskt av ett bakgrundsjobb (intervallet ställs in und
 
 **Mottagen betyder inte betald.** Statusen säger bara att dokumentet kommit fram. Betalningen registreras som vanligt under [Kundreskontra](#kundreskontra).
 
-**Påminnelser skickas fortfarande med e-post**, se [Skicka påminnelse](#skicka-paminnelse) — de skickas inte som e-faktura. Fakturalistan har kolumnen **E-faktura** med den senaste sändningens status.
+**Påminnelser skickas fortfarande med e-post**, se [Skicka påminnelse](#skicka-paminnelse) — de skickas inte som e-faktura. Fakturalistan har kolumnen **E-faktura** med den senaste produktionssändningens status, eller — när bara sandboxsändningar finns — den senaste av dem, märkt "(sandbox)".
 
-**Sandbox.** Är E-faktura inställt på miljön **Sandbox** visar sektionen texten "Sandbox — ingen faktura skickas på riktigt". Det är till för att prova flödet: sändningarna går till B2Brouters testmottagare och loggas som sandboxsändningar.
+**Sandbox.** Är E-faktura inställt på miljön **Sandbox** visar sektionen texten "Sandbox — ingen faktura skickas på riktigt". Det är till för att prova flödet: sändningarna går till B2Brouters testmottagare och loggas som sandboxsändningar — i listan **Sändningar** märkta **Sandbox** i kolumnen Miljö och "(sandbox)" efter statusen. Knapparna **Skicka e-faktura** och **Skicka igen** ser bara till sändningarna i den miljö som är vald just nu.
 
 ### Bokföring av fakturan
 

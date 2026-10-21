@@ -109,7 +109,10 @@ export function InvoicesPageClient({
               return <StatusPill status={pill.status} label={pill.label} compact />;
             }
             case "einvoiceStatus":
-              return invoice.einvoiceStatus ? EINVOICE_STATUS_LABELS[invoice.einvoiceStatus] : "";
+              // A sandbox trial is never mistaken for a real send.
+              return invoice.einvoiceStatus
+                ? `${EINVOICE_STATUS_LABELS[invoice.einvoiceStatus]}${invoice.einvoiceEnvironment === "sandbox" ? " (sandbox)" : ""}`
+                : "";
             default:
               return null;
           }

@@ -94,6 +94,9 @@ export class EinvoiceProviderUnavailableError extends Error {
   }
 }
 
+// not-found (the document is gone at the access point) only arises on a
+// status read, which the status service handles itself; reaching a route it
+// is as good as unavailable.
 export function fromProviderError(err: EInvoiceProviderError): Error {
   if (err.kind === "validation") return new EinvoiceProviderRejectedError(err.message, err.fieldErrors, err.requestId);
   if (err.kind === "unauthorized") return new EinvoiceProviderUnauthorizedError(err.message, err.requestId);

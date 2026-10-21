@@ -1,7 +1,8 @@
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import type { EinvoiceRepository, TransmissionRow } from "../repository/einvoice.repository.js";
+import { EInvoiceProviderError, type ProviderStatus } from "./einvoice-provider.js";
 import type { EinvoiceSettingsService } from "./einvoice-settings.service.js";
-import { isLiveStatus, isTerminalStatus, mapProviderState, providerErrorText } from "./einvoice-status.js";
+import { isLiveStatus, isTerminalStatus, mapProviderState, providerErrorText, type EInvoiceStatus } from "./einvoice-status.js";
 import { EinvoiceTransmissionNotFoundError } from "./einvoice.errors.js";
 
 // Statusjobbet (spec §3.5), the tracking service's counterpart: polls the
@@ -9,10 +10,16 @@ import { EinvoiceTransmissionNotFoundError } from "./einvoice.errors.js";
 // "Uppdatera status" on the invoice card and the scheduled run; the
 // scheduler itself lives in scheduler.ts and is started from server.ts only.
 
-// A `sending` row without a provider id this old is a send whose process
-// died between the insert and the answer.
+// A `sending` row this old whose send never went through is a send whose
+// process died on the way: without a provider id between the insert and the
+// import, with one (the draft still "new" at the access point) between the
+// import and the send. Either way nothing left B2Brouter, so the row is
+// marked failed and the invoice can be sent again.
 export const STALE_SENDING_MS = 10 * 60_000;
 export const STALE_SENDING_MESSAGE = "Sändningen avbröts";
+export const STALE_DRAFT_MESSAGE = "Sändningen avbröts hos B2Brouter — skicka igen";
+// The access point answers 404 for the document: nothing to wait for.
+export const DOCUMENT_GONE_MESSAGE = "Dokumentet finns inte längre hos B2Brouter";
 // A transmission never registered is not polled forever.
 export const STATUS_MAX_AGE_DAYS = 30;
 // A run holds the lease at most this long; an API that dies mid-run lets the
@@ -50,31 +57,63 @@ export function createEinvoiceStatusService(deps: {
     });
   }
 
+  // What one poll should write, from the row as read and the access
+  // point's answer. Pure, so the rules are testable without a database.
+  function resolvePoll(row: TransmissionRow, remote: ProviderStatus, at: Date): { status: EInvoiceStatus; errorMessage: string | null } {
+    const status = mapProviderState(remote.state);
+    const stale = at.getTime() - row.startedAt.getTime() >= STALE_SENDING_MS;
+    // The draft was never sent (the process died between import and send,
+    // or the send was refused with the state unreadable): nobody will send
+    // it now, so after the stale threshold it is a failure, not "sending".
+    if (status === "sending" && remote.state.trim().toLowerCase() === "new" && stale) {
+      return { status: "failed", errorMessage: STALE_DRAFT_MESSAGE };
+    }
+    if (status === "rejected" || status === "failed") {
+      return {
+        status,
+        errorMessage: providerErrorText(remote.errorMessage) ?? row.errorMessage ?? (status === "rejected" ? "Mottagaren avvisade fakturan" : "Sändningen misslyckades"),
+      };
+    }
+    // Past "sending" the earlier transient error text is history.
+    return { status, errorMessage: status === "sending" ? row.errorMessage : null };
+  }
+
   // One poll: GET the access point's state, map it, store it. A terminal
   // row or one without a provider id is returned as it is — nothing to ask.
+  // The write is conditional on the status that was read, so a card refresh
+  // racing the job can neither overwrite the other's result nor log the
+  // same failure twice.
   async function pollTransmission(id: string): Promise<TransmissionRow> {
     const row = await repo.findTransmission(id);
     if (!row) throw new EinvoiceTransmissionNotFoundError(id);
     if (!row.providerInvoiceId || isTerminalStatus(row.status)) return row;
     const provider = await settings.provider({ requireEnabled: false });
     const at = now();
-    const remote = await provider.getStatus(row.providerInvoiceId);
-    const status = mapProviderState(remote.state);
+    let remote: ProviderStatus;
+    try {
+      remote = await provider.getStatus(row.providerInvoiceId);
+    } catch (err) {
+      if (!(err instanceof EInvoiceProviderError) || err.kind !== "not-found") throw err;
+      const written = await repo.updateTransmission(id, { status: "failed", errorMessage: DOCUMENT_GONE_MESSAGE, lastPolledAt: at, statusUpdatedAt: at }, row.status);
+      if (written) await logFailure({ id, invoiceId: row.invoiceId, providerState: row.providerState }, DOCUMENT_GONE_MESSAGE, "failed");
+      return (await repo.findTransmission(id))!;
+    }
+    const { status, errorMessage } = resolvePoll(row, remote, at);
     const changed = status !== row.status || remote.state !== row.providerState;
-    const errorMessage =
-      status === "rejected" || status === "failed"
-        ? (providerErrorText(remote.errorMessage) ?? row.errorMessage ?? (status === "rejected" ? "Mottagaren avvisade fakturan" : "Sändningen misslyckades"))
-        : row.errorMessage;
-    await repo.updateTransmission(id, {
-      status,
-      providerState: remote.state.slice(0, 40),
-      errorMessage,
-      lastPolledAt: at,
-      ...(changed ? { statusUpdatedAt: at } : {}),
-      // sentAt: the first time the access point reports it past "sending".
-      ...(row.sentAt === null && isLiveStatus(status) && status !== "sending" ? { sentAt: at } : {}),
-    });
-    if ((status === "rejected" || status === "failed") && status !== row.status) {
+    const written = await repo.updateTransmission(
+      id,
+      {
+        status,
+        providerState: remote.state.slice(0, 40),
+        errorMessage,
+        lastPolledAt: at,
+        ...(changed ? { statusUpdatedAt: at } : {}),
+        // sentAt: the first time the access point reports it past "sending".
+        ...(row.sentAt === null && isLiveStatus(status) && status !== "sending" ? { sentAt: at } : {}),
+      },
+      row.status
+    );
+    if (written && (status === "rejected" || status === "failed") && status !== row.status) {
       await logFailure({ id, invoiceId: row.invoiceId, providerState: remote.state }, errorMessage, status);
     }
     return (await repo.findTransmission(id))!;

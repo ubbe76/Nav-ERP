@@ -180,7 +180,19 @@ export function createEinvoiceSettingsService(deps: {
       } else if (input.apiKey !== undefined && input.apiKey !== "") {
         await set(KEYS.apiKey, input.apiKey);
       }
-      if (input.accountId !== undefined) await set(KEYS.accountId, input.accountId ?? "");
+      // The account name only ever describes the stored account id: it is
+      // written together with a new id and cleared whenever the id goes
+      // away or changes without a name, so the two can never drift apart.
+      if (input.accountId !== undefined || input.accountName !== undefined) {
+        const stored = await read();
+        let name: string | null | undefined = input.accountName;
+        if (input.accountId !== undefined) {
+          await set(KEYS.accountId, input.accountId ?? "");
+          if (input.accountId === null) name = null;
+          else if (name === undefined && input.accountId !== stored.accountId) name = null;
+        }
+        if (name !== undefined && name !== stored.accountName) await set(KEYS.accountName, name ?? "");
+      }
       if (input.statusIntervalMinutes !== undefined) await set(KEYS.statusIntervalMinutes, String(input.statusIntervalMinutes));
       if (changed.length > 0) {
         changed.sort();
@@ -191,7 +203,7 @@ export function createEinvoiceSettingsService(deps: {
 
     // The key typed in the form when given, else the saved one — so a new
     // key can be checked before it is stored. Nothing is saved here; the
-    // form sends the account id back through update().
+    // form sends the account id and name back through update() on Spara.
     async testConnection(input: TestEinvoiceConnectionInput = {}) {
       const saved = await read();
       const apiKey = input.apiKey && input.apiKey !== "" ? input.apiKey : saved.apiKey;
@@ -199,12 +211,6 @@ export function createEinvoiceSettingsService(deps: {
       const environment = input.environment ?? saved.environment;
       const result = await providerFactory({ environment, apiKey, accountId: saved.accountId }).checkKey();
       return { ...result, environment };
-    },
-
-    // The account name is informational and only ever set from a successful
-    // Testa anslutning (the form calls this after the test).
-    async rememberAccountName(name: string) {
-      await repo.setSetting(KEYS.accountName, name);
     },
   };
 }

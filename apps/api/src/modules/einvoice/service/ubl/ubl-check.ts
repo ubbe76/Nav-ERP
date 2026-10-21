@@ -14,7 +14,8 @@
 // BR-S-09 (category VAT within ±1), BR-E-09 (exempt ⇒ 0 VAT), BR-CO-25 (due
 // date or payment terms), BR-27 (price ≥ 0), SE-R-001/002 (VAT number),
 // SE-R-003/004/013 (org number: 10 digits, Luhn), SE-R-006 (S only for
-// 25/12/6), SE-R-007..010 (bankgiro/plusgiro digits and length).
+// 25/12/6), SE-R-007..010 (bankgiro/plusgiro digits and length — only when
+// there is an account; PaymentMeans itself is optional).
 import { BIC_PATTERN, isLuhnValid, isValidIban, isValidOcrReference } from "@navet/shared";
 import { computeTotals, linePricing, toCents } from "./ubl-invoice-builder.js";
 import type { UblCheckResult, UblInvoiceInput, UblLine, UblPostalAddress } from "./ubl-types.js";
@@ -102,7 +103,10 @@ export function checkUblInput(input: UblInvoiceInput): UblCheckResult {
   if (buyer.orgNumber !== null && !blank(buyer.orgNumber) && digits(buyer.orgNumber).length !== 10) problems.push("Kundens organisationsnummer måste vara tio siffror.");
   checkAddress(buyer.address, "Kundens", problems);
 
-  // Payment — company_info; only an invoice asks for money.
+  // Payment — company_info; only an invoice asks for money. PaymentMeans is
+  // optional in Peppol BIS (BR-CO-25 wants a due date or terms, not an
+  // account): without one the builder omits the whole group, OCR included,
+  // and the settings page has already warned about it.
   const account = input.payment.account;
   if (account) {
     if (account.kind === "bankgiro") {
@@ -115,8 +119,6 @@ export function checkUblInput(input: UblInvoiceInput): UblCheckResult {
       if (!isValidIban((account.iban ?? "").toUpperCase().replace(/\s/g, ""))) problems.push("Företagets IBAN är ogiltigt (Företagsuppgifter).");
       if (account.bic !== null && !BIC_PATTERN.test(account.bic.trim().toUpperCase())) problems.push("Företagets BIC är ogiltigt (Företagsuppgifter).");
     }
-  } else if (!credit) {
-    problems.push("Företaget saknar bankgiro, plusgiro eller IBAN att skriva på fakturan (Företagsuppgifter).");
   }
   if (input.payment.ocrNumber !== null && !isValidOcrReference(input.payment.ocrNumber.trim())) problems.push("Fakturans OCR-nummer är ogiltigt.");
 

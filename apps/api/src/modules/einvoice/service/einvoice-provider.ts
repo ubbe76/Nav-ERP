@@ -8,9 +8,14 @@ export interface EInvoiceDocument {
   filename: string; // "FA-1234.xml" — informational for the access point
 }
 
+export interface SubmitOptions {
+  onImported?: (providerInvoiceId: string) => Promise<void>;
+}
+
 export interface SubmitResult {
   providerInvoiceId: string;
   state: string; // the access point's raw state right after the send call
+  errorMessage: string | null; // its error text when that state is a failure
 }
 
 export interface ProviderStatus {
@@ -42,10 +47,13 @@ export interface EInvoiceProvider {
   // vatNumber is the account's own VAT id (B2Brouter refuses an import whose
   // seller is another company), null when the access point gives none.
   checkKey(): Promise<{ accountId: string; accountName: string; vatNumber: string | null }>;
-  // import + send. Throws EInvoiceProviderError; when the import went through
+  // import + send. `onImported` is awaited between the two calls with the
+  // access point's id for the draft, so the caller can persist it BEFORE the
+  // send — a process that dies after the send then still knows the document
+  // exists there. Throws EInvoiceProviderError; when the import went through
   // but the send did not, the error carries providerInvoiceId so the row can
   // stay `sending` and the status job can read what became of it.
-  submit(doc: EInvoiceDocument): Promise<SubmitResult>;
+  submit(doc: EInvoiceDocument, opts?: SubmitOptions): Promise<SubmitResult>;
   getStatus(providerInvoiceId: string): Promise<ProviderStatus>;
   // Directory lookup, handles the access point's 202 polling itself.
   lookupParticipant(scheme: string, id: string): Promise<LookupResult>;
@@ -63,11 +71,13 @@ export interface EInvoiceProviderConfig {
 
 export type EInvoiceProviderFactory = (config: EInvoiceProviderConfig) => EInvoiceProvider;
 
-// validation: the access point refused the document (422) → 400 with
-// fieldErrors. unauthorized: it rejected our API key (401/403) → 409, points
-// at the settings. unavailable: network/timeout/429/5xx → 502. unexpected: an
-// answer we cannot read → 502.
-export type EInvoiceProviderErrorKind = "validation" | "unauthorized" | "unavailable" | "unexpected";
+// validation: the access point refused the document (400/422) → 400 with
+// fieldErrors. unauthorized: it rejected our API key or does not know the
+// configured account (401/403, 404 on import) → 409, points at the settings.
+// not-found: the document no longer exists there (404 on a status read) —
+// the status job marks the row failed. unavailable: network/timeout/429/5xx
+// → 502. unexpected: an answer we cannot read, or another 4xx → 502.
+export type EInvoiceProviderErrorKind = "validation" | "unauthorized" | "not-found" | "unavailable" | "unexpected";
 
 export class EInvoiceProviderError extends Error {
   constructor(

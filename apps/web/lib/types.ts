@@ -1264,8 +1264,10 @@ export interface InvoiceHeader {
 export interface Invoice extends InvoiceHeader {
   netAmount: string;
   vatAmount: string;
-  // E-faktura: status of the latest Peppol transmission (null = none sent).
+  // E-faktura: status of the latest Peppol transmission (null = none sent) —
+  // a production transmission before any sandbox one, whichever is newer.
   einvoiceStatus: "sending" | "sent" | "delivered" | "rejected" | "failed" | null;
+  einvoiceEnvironment: "sandbox" | "production" | null;
 }
 
 export interface InvoiceRow {
@@ -3515,6 +3517,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   payment_batch: "Betalfil",
   bank_file: "Bankfil",
   bank_settings: "Bankinställningar",
+  einvoice_settings: "E-fakturainställningar",
 };
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
@@ -3573,6 +3576,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   entry_booked: "Post bokförd",
   entry_ignored: "Post markerad som hanterad utanför Nav",
   entry_restored: "Post återställd",
+  einvoice_sent: "E-faktura skickad",
+  einvoice_failed: "E-faktura misslyckad",
 };
 
 export function auditEntityTypeLabel(entityType: string): string {

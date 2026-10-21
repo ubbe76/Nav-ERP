@@ -1,5 +1,5 @@
 {
-  "id": "31b561b1-7613-4a11-a95b-d02c55f21bdf",
+  "id": "7855b0e4-9189-489d-9967-14617de98d36",
   "prevId": "d2bd54f6-9b57-4dd2-8739-ac892378e7da",
   "version": "7",
   "dialect": "postgresql",
@@ -17209,6 +17209,12 @@
           "columns": [
             {
               "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "environment",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

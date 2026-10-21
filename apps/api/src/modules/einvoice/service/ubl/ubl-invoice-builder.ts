@@ -255,6 +255,8 @@ function customerParty(buyer: UblBuyer): XmlElement {
   ]);
 }
 
+// Optional in Peppol BIS: without a payment account the whole group is
+// left out — the OCR number (PaymentID) has nowhere to go without it.
 function paymentMeans(input: UblInvoiceInput): XmlChild {
   const account = input.payment.account;
   if (!account) return null;

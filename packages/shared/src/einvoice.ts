@@ -59,7 +59,10 @@ export const updateEinvoiceSettingsSchema = z
       .regex(/^[\x20-\x7E]*$/, "API-nyckeln får bara innehålla vanliga tecken")
       .nullable()
       .optional(),
+    // Both come from Testa anslutning (the form never types them); a new
+    // accountId without a name, or null, clears the stored name.
     accountId: z.string().trim().max(100).nullable().optional(),
+    accountName: z.string().trim().max(200).nullable().optional(),
     statusIntervalMinutes: z.coerce.number().int().min(5).max(1440).optional(),
   })
   .strict();

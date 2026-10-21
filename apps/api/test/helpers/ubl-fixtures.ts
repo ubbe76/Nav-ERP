@@ -172,6 +172,17 @@ export function ibanInvoice(): UblInvoiceInput {
   });
 }
 
+// No payment account in Företagsuppgifter: the invoice goes without
+// PaymentMeans (and so without the OCR number) — allowed by Peppol BIS.
+export function noPaymentAccountInvoice(): UblInvoiceInput {
+  return base({
+    invoiceNumber: "FA-1008",
+    payment: { account: null, ocrNumber: "10012345673" },
+    attachment: null,
+    lines: [line({ lineNumber: 1, description: "Montering", articleNumber: "9001", unitCode: "tim", quantity: 4, unitPrice: 850, lineAmount: 3400, vatAmount: 850, vatRate: 25 })],
+  });
+}
+
 export const GOLDEN_CASES: { name: string; input: () => UblInvoiceInput }[] = [
   { name: "invoice-two-rates-discount", input: invoiceTwoRatesDiscount },
   { name: "invoice-exempt-row", input: invoiceExemptRow },
@@ -180,4 +191,5 @@ export const GOLDEN_CASES: { name: string; input: () => UblInvoiceInput }[] = [
   { name: "invoice-configured-row", input: configuredRowInvoice },
   { name: "invoice-plusgiro-gln", input: plusgiroInvoice },
   { name: "invoice-iban", input: ibanInvoice },
+  { name: "invoice-no-payment-account", input: noPaymentAccountInvoice },
 ];

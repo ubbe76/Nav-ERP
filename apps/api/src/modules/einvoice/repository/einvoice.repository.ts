@@ -1,12 +1,14 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, lt, sql } from "drizzle-orm";
-import { einvoiceTransmissions, invoiceRows, salesOrderRows, salesOrders, systemSettings, users, type Db } from "@navet/db";
+import { einvoiceTransmissions, invoiceRows, invoices, salesOrderRows, salesOrders, systemSettings, users, type Db } from "@navet/db";
 import type { EinvoiceStatus } from "@navet/shared";
 
 // E-faktura (Peppol) — the module's own tables and the einvoice_* settings
 // keys. Reads of invoices/customers/company_info go through the narrow
-// readers the service is given (InvoiceReader/CompanyInfoReader); the one
-// cross-module read here is the order link of the invoice rows (BT-10/BT-13
-// and OrderLineReference), which no sales read model exposes.
+// readers the service is given (InvoiceReader/CompanyInfoReader); the
+// cross-module reads here are the order link of the invoice rows (BT-10/BT-13
+// and OrderLineReference), which no sales read model exposes, and the invoice
+// number joined onto the document download (loading the whole invoice for a
+// file name would be absurd).
 
 // One status run at a time across API processes (see claimStatusLease);
 // the stamp is what runStatusIfDue reads back through the settings.
@@ -79,7 +81,8 @@ export function createEinvoiceRepository(db: Db) {
 
     // The `sending` row written BEFORE the access point is called. The
     // partial unique index einvoice_transmissions_live refuses a second
-    // live row per invoice — the service maps that violation.
+    // live row per invoice and environment — the service maps that
+    // violation.
     async insertTransmission(input: TransmissionInsert) {
       const [row] = await db
         .insert(einvoiceTransmissions)
@@ -88,8 +91,16 @@ export function createEinvoiceRepository(db: Db) {
       return row!.id;
     },
 
-    async updateTransmission(id: string, patch: TransmissionStatusPatch) {
-      await db.update(einvoiceTransmissions).set(patch).where(eq(einvoiceTransmissions.id, id));
+    // `ifStatus` makes the write conditional on the status the caller read
+    // (the status job and a card refresh may race on the same row): false =
+    // someone else got there first, nothing written.
+    async updateTransmission(id: string, patch: TransmissionStatusPatch, ifStatus?: EinvoiceStatus): Promise<boolean> {
+      const rows = await db
+        .update(einvoiceTransmissions)
+        .set(patch)
+        .where(ifStatus ? and(eq(einvoiceTransmissions.id, id), eq(einvoiceTransmissions.status, ifStatus)) : eq(einvoiceTransmissions.id, id))
+        .returning({ id: einvoiceTransmissions.id });
+      return rows.length > 0;
     },
 
     async findTransmission(id: string) {
@@ -103,8 +114,9 @@ export function createEinvoiceRepository(db: Db) {
 
     async findTransmissionDocument(id: string) {
       const [row] = await db
-        .select({ invoiceId: einvoiceTransmissions.invoiceId, document: einvoiceTransmissions.document })
+        .select({ invoiceId: einvoiceTransmissions.invoiceId, invoiceNumber: invoices.invoiceNumber, document: einvoiceTransmissions.document })
         .from(einvoiceTransmissions)
+        .innerJoin(invoices, eq(invoices.id, einvoiceTransmissions.invoiceId))
         .where(eq(einvoiceTransmissions.id, id));
       return row ?? null;
     },
@@ -154,9 +166,10 @@ export function createEinvoiceRepository(db: Db) {
         .returning({ id: einvoiceTransmissions.id, invoiceId: einvoiceTransmissions.invoiceId });
     },
 
-    // The order side of an invoice's rows, in row order: which order each
-    // row settles (BT-13/BT-10 come from the FIRST linked order, the
-    // OrderLineReference from each). Free rows have no order.
+    // The order side of an invoice's rows: which order each row settles
+    // (the OrderLineReference per line; BT-13/BT-10 are taken by the
+    // service from the first linked line in the DOCUMENT's own row order,
+    // so header and lines can never disagree). Free rows have no order.
     async invoiceRowOrders(invoiceId: string) {
       return db
         .select({
@@ -176,7 +189,7 @@ export function createEinvoiceRepository(db: Db) {
         .leftJoin(salesOrderRows, eq(salesOrderRows.id, invoiceRows.salesOrderRowId))
         .leftJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
         .where(eq(invoiceRows.invoiceId, invoiceId))
-        .orderBy(asc(invoiceRows.createdAt));
+        .orderBy(asc(invoiceRows.createdAt), asc(invoiceRows.id));
     },
 
     // --- Statusjobbets lease (same atomic-upsert pattern as freight tracking) ---

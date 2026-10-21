@@ -59,9 +59,10 @@ describe("ubl-check", () => {
     );
   });
 
-  it("payment: account required on an invoice, bankgiro/plusgiro/IBAN/BIC/OCR validity", () => {
+  it("payment: no account is allowed (PaymentMeans is optional), bankgiro/plusgiro/IBAN/BIC/OCR validity", () => {
     const input = invoiceTwoRatesDiscount();
-    expect(checkUblInput({ ...input, payment: { account: null, ocrNumber: null } })).toContain("Företaget saknar bankgiro, plusgiro eller IBAN att skriva på fakturan (Företagsuppgifter).");
+    expect(checkUblInput({ ...input, payment: { account: null, ocrNumber: null } })).toEqual([]);
+    expect(checkUblInput({ ...input, payment: { account: null, ocrNumber: "10012345673" } })).toEqual([]);
     expect(checkUblInput({ ...input, payment: { account: { kind: "bankgiro", account: "5512349" }, ocrNumber: null } })).toContain("Företagets bankgiro är ogiltigt (Företagsuppgifter).");
     expect(checkUblInput({ ...input, payment: { account: { kind: "plusgiro", account: "4892163" }, ocrNumber: null } })).toContain("Företagets plusgiro är ogiltigt (Företagsuppgifter).");
     expect(checkUblInput({ ...input, payment: { account: { kind: "iban", iban: "SE3550000000054910000004", bic: null }, ocrNumber: null } })).toContain("Företagets IBAN är ogiltigt (Företagsuppgifter).");

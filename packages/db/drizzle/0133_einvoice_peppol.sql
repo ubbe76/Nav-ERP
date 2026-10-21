@@ -24,7 +24,7 @@ ALTER TABLE "customers" ADD COLUMN "peppol_id" varchar(60);--> statement-breakpo
 ALTER TABLE "einvoice_transmissions" ADD CONSTRAINT "einvoice_transmissions_invoice_id_invoices_id_fk" FOREIGN KEY ("invoice_id") REFERENCES "public"."invoices"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "einvoice_transmissions" ADD CONSTRAINT "einvoice_transmissions_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_einvoice_transmissions_invoice" ON "einvoice_transmissions" USING btree ("invoice_id","started_at" DESC NULLS LAST);--> statement-breakpoint
-CREATE UNIQUE INDEX "einvoice_transmissions_live" ON "einvoice_transmissions" USING btree ("invoice_id") WHERE "einvoice_transmissions"."status" IN ('sending', 'sent', 'delivered');--> statement-breakpoint
+CREATE UNIQUE INDEX "einvoice_transmissions_live" ON "einvoice_transmissions" USING btree ("invoice_id","environment") WHERE "einvoice_transmissions"."status" IN ('sending', 'sent', 'delivered');--> statement-breakpoint
 -- Sändningsloggen is räkenskapsinformation (bokföringslagen 5 kap 6 §, 7 kap):
 -- the UBL document exactly as it reached the customer must stay unchanged.
 -- Same NV001 pattern as migration 0095's invoice_documents guard — the API's

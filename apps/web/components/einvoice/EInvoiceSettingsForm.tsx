@@ -15,7 +15,11 @@ import cardStyles from "../system/SettingsForm.module.css";
 // E-fakturainställningar (admin). Like the freight form the API key is
 // write-only: blank keeps the stored key, "Ta bort nyckel" removes it. The
 // account is never typed — Testa anslutning asks B2Brouter which account the
-// key belongs to and Spara stores that account.
+// key belongs to (saving nothing) and Spara stores that account's id and
+// name together, so the two can never drift apart.
+// Uppercase, no spaces — how both Nav and B2Brouter print a VAT id.
+const normalizeVat = (value: string | null | undefined) => (value ?? "").replace(/\s/g, "").toUpperCase() || null;
+
 export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings }) {
   const [enabled, setEnabled] = useState(initial.enabled);
   const [environment, setEnvironment] = useState<EInvoiceEnvironment>(initial.environment);
@@ -30,6 +34,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [vatWarning, setVatWarning] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
 
   function apply(updated: EInvoiceSettings) {
@@ -49,6 +54,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
     setAccountId(null);
     setAccountName(null);
     setNotice(null);
+    setVatWarning(null);
   }
 
   async function save(e: FormEvent) {
@@ -64,7 +70,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
     try {
       const updated = await apiFetch<EInvoiceSettings>("/api/v1/einvoice-settings", {
         method: "PATCH",
-        body: JSON.stringify({ enabled, environment, apiKey, accountId, statusIntervalMinutes: minutes }),
+        body: JSON.stringify({ enabled, environment, apiKey, accountId, accountName, statusIntervalMinutes: minutes }),
       });
       apply(updated);
       setApiKey("");
@@ -84,6 +90,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
         body: JSON.stringify({ apiKey: null, accountId: null }),
       });
       apply(updated);
+      setVatWarning(null);
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte ta bort nyckeln"));
     }
@@ -91,15 +98,25 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
 
   async function testConnection() {
     setNotice(null);
+    setVatWarning(null);
     setTesting(true);
     try {
-      const result = await apiFetch<{ accountId: string; accountName: string; environment: EInvoiceEnvironment }>(
+      const result = await apiFetch<{ accountId: string; accountName: string; vatNumber: string | null; environment: EInvoiceEnvironment }>(
         "/api/v1/einvoice-settings/test",
         { method: "POST", body: JSON.stringify({ ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}), environment }) }
       );
       setAccountId(result.accountId);
       setAccountName(result.accountName);
       setNotice(`Anslutningen fungerar — konto: ${result.accountName}. Spara för att använda kontot.`);
+      // B2Brouter refuses an import whose seller VAT id is not the
+      // account's own — say so now rather than at the first send.
+      const accountVat = normalizeVat(result.vatNumber);
+      const companyVat = normalizeVat(company.vatNumber);
+      if (accountVat && companyVat && accountVat !== companyVat) {
+        setVatWarning(
+          `Momsnumret på B2Brouter-kontot (${accountVat}) skiljer sig från Företagsuppgifter (${companyVat}) — B2Brouter vägrar då fakturorna.`
+        );
+      }
     } catch (err) {
       setNotice(einvoiceErrorText(err, "Anslutningen misslyckades"));
     } finally {
@@ -182,6 +199,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
             </Button>
           </FormRow>
           {notice && <FormHint>{notice}</FormHint>}
+          {vatWarning && <FormNotice>{vatWarning}</FormNotice>}
           <Field label="Statusintervall (minuter)" htmlFor="einvoiceInterval">
             <Input
               id="einvoiceInterval"

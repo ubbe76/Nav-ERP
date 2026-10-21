@@ -80,6 +80,24 @@ describe("e-fakturainställningar", () => {
     expect(audit.entries).toEqual([]);
   });
 
+  it("keeps the account name tied to the account id: written together, cleared when the id goes or changes without a name", async () => {
+    await settings.update({ accountId: "100001", accountName: "Nav Test AB" }, "u1");
+    expect(await settings.read()).toMatchObject({ accountId: "100001", accountName: "Nav Test AB" });
+    // The same id again, without a name, keeps the name.
+    await settings.update({ accountId: "100001", enabled: true }, "u1");
+    expect(await settings.read()).toMatchObject({ accountId: "100001", accountName: "Nav Test AB" });
+    // A new id without a name clears it — the name described the old account.
+    await settings.update({ accountId: "100002" }, "u1");
+    expect(await settings.read()).toMatchObject({ accountId: "100002", accountName: null });
+    await settings.update({ accountId: "100002", accountName: "Annat AB" }, "u1");
+    expect((await settings.read()).accountName).toBe("Annat AB");
+    // Ta bort nyckel: null id ⇒ no name either, whatever was sent beside it.
+    await settings.update({ apiKey: null, accountId: null, accountName: "kvar?" }, "u1");
+    expect(await settings.read()).toMatchObject({ accountId: null, accountName: null });
+    expect(updateEinvoiceSettingsSchema.safeParse({ accountName: null }).success).toBe(true);
+    expect(JSON.stringify(audit.entries.at(-1))).toContain("einvoice_account_name");
+  });
+
   it("validates the inputs at the zod layer", () => {
     expect(updateEinvoiceSettingsSchema.safeParse({ apiKey: "bad\nkey" }).success).toBe(false);
     expect(updateEinvoiceSettingsSchema.safeParse({ statusIntervalMinutes: 2 }).success).toBe(false);

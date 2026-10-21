@@ -55,12 +55,17 @@ export function EInvoiceSection({ invoiceId, invoiceNumber }: { invoiceId: strin
 
   const canWrite = can(["forsaljning"]);
   const peppolId = data.recipient.peppolId;
-  const hasLive = data.transmissions.some((t) => isLiveEInvoiceStatus(t.status));
-  const latest = data.transmissions[0] ?? null;
+  // Only the transmissions in the CURRENT environment decide whether the
+  // invoice can be sent: a sandbox trial never blocks the real send (the
+  // database's live index is per invoice and environment too), and a real
+  // send is not resent because a sandbox row failed.
+  const inEnvironment = data.transmissions.filter((t) => t.environment === data.environment);
+  const hasLive = inEnvironment.some((t) => isLiveEInvoiceStatus(t.status));
+  const latest = inEnvironment[0] ?? null;
   const blocked = data.blockedReason !== null;
   // The main button is the first send; after a rejection or failure the
   // row's own Skicka igen takes over.
-  const showSend = canWrite && !blocked && !hasLive && data.transmissions.length === 0;
+  const showSend = canWrite && !blocked && !hasLive && inEnvironment.length === 0;
   const preferred = data.invoiceDelivery === "peppol";
 
   async function send() {
@@ -134,12 +139,16 @@ export function EInvoiceSection({ invoiceId, invoiceNumber }: { invoiceId: strin
                 case "status":
                   return (
                     <>
-                      <StatusPill status={EINVOICE_STATUS_PILL[t.status]} label={EINVOICE_STATUS_LABELS[t.status]} compact />
+                      <StatusPill
+                        status={EINVOICE_STATUS_PILL[t.status]}
+                        label={t.environment === "sandbox" ? `${EINVOICE_STATUS_LABELS[t.status]} (sandbox)` : EINVOICE_STATUS_LABELS[t.status]}
+                        compact
+                      />
                       {t.errorMessage && <div>{t.errorMessage}</div>}
                     </>
                   );
                 case "environment":
-                  return EINVOICE_ENVIRONMENT_LABELS[t.environment];
+                  return t.environment === "sandbox" ? <strong>{EINVOICE_ENVIRONMENT_LABELS.sandbox}</strong> : EINVOICE_ENVIRONMENT_LABELS[t.environment];
                 case "id":
                   return (
                     <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>

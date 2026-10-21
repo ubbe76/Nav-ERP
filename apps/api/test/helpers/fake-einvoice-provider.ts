@@ -20,8 +20,12 @@ export interface FakeEinvoice {
   state: {
     account: { accountId: string; accountName: string; vatNumber: string | null };
     checkKeyError: Error | null;
-    // What submit answers with (and the state getStatus reports until changed).
+    // What submit answers with (and the state getStatus reports until
+    // changed). "sent" by default: the state B2Brouter reports once the
+    // send call has gone through. submitErrorMessage is the access point's
+    // error text beside a failing state.
     submitState: string;
+    submitErrorMessage: string | null;
     importError: Error | null;
     // Thrown by submit AFTER the import: the error gets providerInvoiceId.
     sendError: EInvoiceProviderError | null;
@@ -40,7 +44,8 @@ export function createFakeEinvoiceProvider(): FakeEinvoice {
   const state: FakeEinvoice["state"] = {
     account: { accountId: "nav-test", accountName: "Nav Test AB", vatNumber: "SE556000000101" },
     checkKeyError: null,
-    submitState: "sending",
+    submitState: "sent",
+    submitErrorMessage: null,
     importError: null,
     sendError: null,
     submitted: [],
@@ -60,23 +65,26 @@ export function createFakeEinvoiceProvider(): FakeEinvoice {
       if (state.checkKeyError) throw state.checkKeyError;
       return { ...state.account };
     },
-    async submit(doc) {
+    async submit(doc, opts = {}) {
       record("submit", doc);
       if (state.importError) throw state.importError;
       const providerInvoiceId = String(nextId++);
       state.submitted.push(doc);
-      state.statuses[providerInvoiceId] = { state: state.submitState, errorMessage: null, updatedAt: null };
+      state.statuses[providerInvoiceId] = { state: state.submitState, errorMessage: state.submitErrorMessage, updatedAt: null };
+      // Like the real adapter: the caller learns the id before the send.
+      await opts.onImported?.(providerInvoiceId);
       if (state.sendError) {
         const e = state.sendError;
         throw new EInvoiceProviderError(e.message, e.kind, e.fieldErrors, e.requestId, providerInvoiceId);
       }
-      return { providerInvoiceId, state: state.submitState };
+      return { providerInvoiceId, state: state.submitState, errorMessage: state.submitErrorMessage };
     },
     async getStatus(id) {
       record("getStatus", id);
       if (state.statusError) throw state.statusError;
       const s = state.statuses[id];
       if (!s) throw new EInvoiceProviderError("B2Brouter gav ett oväntat svar", "unexpected");
+      if (s.state === "__gone__") throw new EInvoiceProviderError("Dokumentet finns inte längre hos B2Brouter", "not-found");
       return { ...s };
     },
     async lookupParticipant(scheme, id) {

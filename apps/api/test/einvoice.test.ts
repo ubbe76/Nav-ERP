@@ -25,7 +25,9 @@ import { createEinvoiceSettingsService } from "../src/modules/einvoice/service/e
 import { createEinvoiceService, resolveRecipient, blockedReasonFor } from "../src/modules/einvoice/service/einvoice.service.js";
 import {
   createEinvoiceStatusService,
+  DOCUMENT_GONE_MESSAGE,
   isStatusDue,
+  STALE_DRAFT_MESSAGE,
   STALE_SENDING_MESSAGE,
   STATUS_LEASE_MS,
 } from "../src/modules/einvoice/service/einvoice-status.service.js";
@@ -90,7 +92,9 @@ const einvoice = createEinvoiceService({
   company: systemService,
   audit: auditRepository,
   now,
+  log: (msg) => serviceLogged.push(msg),
 });
+const serviceLogged: string[] = [];
 const logged: string[] = [];
 const status = createEinvoiceStatusService({ repo, settings, audit: auditRepository, now, log: (msg) => logged.push(msg) });
 
@@ -104,9 +108,11 @@ beforeEach(async () => {
   await setupPostingBaseline();
   clock = new Date("2030-03-04T09:00:00Z");
   logged.length = 0;
+  serviceLogged.length = 0;
   fake.calls.length = 0;
   fake.configs.length = 0;
-  fake.state.submitState = "sending";
+  fake.state.submitState = "sent";
+  fake.state.submitErrorMessage = null;
   fake.state.importError = null;
   fake.state.sendError = null;
   fake.state.statusError = null;
@@ -189,6 +195,28 @@ async function issuedInvoice(customer: Awaited<ReturnType<typeof makeCustomer>>,
   if (!opts.credit) return issued!;
   const credit = await invoiceService.createCredit(issued!.id, {}, userId);
   return (await invoiceService.issue(credit!.id, userId))!;
+}
+
+// A transmission row written directly, as the status job would find it.
+async function sentRow(invoiceId: string, over: Partial<typeof einvoiceTransmissions.$inferInsert> = {}) {
+  const [row] = await db
+    .insert(einvoiceTransmissions)
+    .values({
+      invoiceId,
+      provider: "b2brouter",
+      environment: "sandbox",
+      recipientId: "0007:5565555555",
+      status: "sent",
+      providerInvoiceId: "4242",
+      providerState: "sent",
+      document: Buffer.from("<Invoice/>"),
+      sha256: "0".repeat(64),
+      startedAt: clock,
+      sentAt: clock,
+      ...over,
+    })
+    .returning();
+  return row!;
 }
 
 async function rowOf(id: string) {
@@ -312,7 +340,7 @@ describe("Skicka e-faktura — the send", () => {
       fake.provider.submit = original;
     }
     expect(rowsAtSubmit).toEqual([{ status: "sending", providerInvoiceId: null }]);
-    expect(view).toMatchObject({ status: "sent", statusLabel: "Skickad", environment: "sandbox", recipientId: "0088:7350000000000", providerInvoiceId: expect.stringMatching(/^\d+$/), providerState: "sending" });
+    expect(view).toMatchObject({ status: "sent", statusLabel: "Skickad", environment: "sandbox", recipientId: "0088:7350000000000", providerInvoiceId: expect.stringMatching(/^\d+$/), providerState: "sent", errorMessage: null });
     expect(view.sentAt?.toISOString()).toBe(clock.toISOString());
     expect(view.createdByName).toBe("Biller");
     // The provider was built from the settings, with the account.
@@ -432,6 +460,89 @@ describe("Skicka e-faktura — the send", () => {
     expect(row).toMatchObject({ status: "failed", errorMessage: "boom" });
   });
 
+  it("writes the access point's id to the row BEFORE the send, so a death in between leaves a pollable row", async () => {
+    const invoice = await issuedInvoice(await makeCustomer());
+    let rowAfterImport: { status: string; providerInvoiceId: string | null } | undefined;
+    const original = fake.provider.submit;
+    fake.provider.submit = (doc, opts) =>
+      original(doc, {
+        onImported: async (id) => {
+          await opts!.onImported!(id);
+          [rowAfterImport] = await db.select({ status: einvoiceTransmissions.status, providerInvoiceId: einvoiceTransmissions.providerInvoiceId }).from(einvoiceTransmissions);
+        },
+      });
+    try {
+      await einvoice.send(invoice.id, userId);
+    } finally {
+      fake.provider.submit = original;
+    }
+    expect(rowAfterImport).toEqual({ status: "sending", providerInvoiceId: expect.stringMatching(/^\d+$/) });
+  });
+
+  it("maps the state reported right after the send: a queued send stays Skickas without sentAt", async () => {
+    const invoice = await issuedInvoice(await makeCustomer());
+    fake.state.submitState = "sending";
+    const view = await einvoice.send(invoice.id, userId);
+    expect(view).toMatchObject({ status: "sending", providerState: "sending", sentAt: null });
+    expect((await auditActions(invoice.id)).map((a) => a.action)).toEqual(["einvoice_sent"]);
+    // Still live: the job polls it, nobody can send again.
+    await expect(einvoice.send(invoice.id, userId)).rejects.toBeInstanceOf(EinvoiceAlreadySentError);
+    fake.state.statuses[view.providerInvoiceId!] = { state: "sent", errorMessage: null, updatedAt: null };
+    expect(await status.pollTransmission(view.id)).toMatchObject({ status: "sent", sentAt: clock });
+  });
+
+  it("an immediate error or refusal after the send is final at once — never written as sent", async () => {
+    const a = await issuedInvoice(await makeCustomer());
+    fake.state.submitState = "error";
+    fake.state.submitErrorMessage = "PEPPOL_NO_RECEIVER";
+    const failed = await einvoice.send(a.id, userId);
+    expect(failed).toMatchObject({ status: "failed", providerState: "error", errorMessage: "Mottagaren finns inte i Peppol", sentAt: null });
+    expect(await auditActions(a.id)).toEqual([
+      { action: "einvoice_failed", detail: expect.objectContaining({ transmissionId: failed.id, status: "failed", providerState: "error", reason: "Mottagaren finns inte i Peppol" }) },
+    ]);
+    // Terminal: the invoice can be sent again right away.
+    fake.state.submitState = "refused";
+    fake.state.submitErrorMessage = null;
+    const rejected = await einvoice.send(a.id, userId);
+    expect(rejected).toMatchObject({ status: "rejected", errorMessage: "Mottagaren avvisade fakturan" });
+  });
+
+  it("a database failure AFTER the send is logged and rethrown — the row is never marked failed", async () => {
+    const invoice = await issuedInvoice(await makeCustomer());
+    const original = repo.updateTransmission;
+    repo.updateTransmission = async (id, patch, ifStatus) => {
+      if (patch.status !== "sending") throw new Error("db down");
+      return original.call(repo, id, patch, ifStatus);
+    };
+    try {
+      await expect(einvoice.send(invoice.id, userId)).rejects.toThrow("db down");
+    } finally {
+      repo.updateTransmission = original;
+    }
+    expect(fake.state.submitted).toHaveLength(1);
+    const [row] = await db.select().from(einvoiceTransmissions);
+    // The id written before the send is there; the status job resolves it.
+    expect(row).toMatchObject({ status: "sending", providerInvoiceId: expect.stringMatching(/^\d+$/), errorMessage: null });
+    expect(serviceLogged).toEqual(["E-invoice sent but the transmission row could not be updated"]);
+    expect(await status.pollTransmission(row!.id)).toMatchObject({ status: "sent" });
+  });
+
+  it("one live transmission per invoice AND environment: a sandbox trial never blocks the real send", async () => {
+    const invoice = await issuedInvoice(await makeCustomer());
+    await sentRow(invoice.id, { environment: "sandbox", status: "delivered", providerState: "registered" });
+    await enable({ einvoice_environment: "production" });
+    const real = await einvoice.send(invoice.id, userId);
+    expect(real).toMatchObject({ status: "sent", environment: "production" });
+    await expect(einvoice.send(invoice.id, userId)).rejects.toBeInstanceOf(EinvoiceAlreadySentError);
+    // And a live production row does not stop a sandbox trial either.
+    await enable({ einvoice_environment: "sandbox" });
+    await expect(einvoice.send(invoice.id, userId)).rejects.toBeInstanceOf(EinvoiceAlreadySentError);
+    await db.update(einvoiceTransmissions).set({ status: "failed" }).where(and(eq(einvoiceTransmissions.invoiceId, invoice.id), eq(einvoiceTransmissions.environment, "sandbox")));
+    expect((await einvoice.send(invoice.id, userId)).environment).toBe("sandbox");
+    const card = await einvoice.getInvoiceView(invoice.id);
+    expect(card.transmissions.map((t) => `${t.environment}:${t.status}`).sort()).toEqual(["production:sent", "sandbox:failed", "sandbox:sent"]);
+  });
+
   it("the database refuses changing or deleting the sent document (NV001)", async () => {
     const invoice = await issuedInvoice(await makeCustomer());
     const view = await einvoice.send(invoice.id, userId);
@@ -447,32 +558,12 @@ describe("Skicka e-faktura — the send", () => {
 });
 
 describe("statusjobbet", () => {
-  async function sentRow(invoiceId: string, over: Partial<typeof einvoiceTransmissions.$inferInsert> = {}) {
-    const [row] = await db
-      .insert(einvoiceTransmissions)
-      .values({
-        invoiceId,
-        provider: "b2brouter",
-        environment: "sandbox",
-        recipientId: "0007:5565555555",
-        status: "sent",
-        providerInvoiceId: "4242",
-        providerState: "sent",
-        document: Buffer.from("<Invoice/>"),
-        sha256: "0".repeat(64),
-        startedAt: clock,
-        sentAt: clock,
-        ...over,
-      })
-      .returning();
-    return row!;
-  }
-
   it.each(Object.entries(PROVIDER_STATE_MAP))("maps B2Brouter state %s to Nav status %s", async (state, expected) => {
     const invoice = await issuedInvoice(await makeCustomer());
     const row = await sentRow(invoice.id, { status: "sending", providerState: "new", sentAt: null });
     fake.state.statuses["4242"] = { state, errorMessage: state === "error" ? "PEPPOL_NO_RECEIVER" : null, updatedAt: null };
-    clock = new Date("2030-03-04T10:00:00Z");
+    // Five minutes later: a draft still "new" is not stale yet (see below).
+    clock = new Date("2030-03-04T09:05:00Z");
     const polled = await status.pollTransmission(row.id);
     expect(polled.status).toBe(expected);
     expect(polled.providerState).toBe(state);
@@ -518,6 +609,58 @@ describe("statusjobbet", () => {
     expect(await auditActions(a.id)).toEqual([{ action: "einvoice_failed", detail: expect.objectContaining({ reason: STALE_SENDING_MESSAGE }) }]);
     // The invoice can be sent again.
     expect((await einvoice.send(a.id, userId)).status).toBe("sent");
+  });
+
+  it("fails a draft that is still new at the access point after ten minutes — never a younger one", async () => {
+    const a = await issuedInvoice(await makeCustomer());
+    const b = await issuedInvoice(await makeCustomer());
+    const stale = await sentRow(a.id, { status: "sending", providerInvoiceId: "7", providerState: "new", sentAt: null, startedAt: new Date("2030-03-04T08:49:00Z") });
+    const young = await sentRow(b.id, { status: "sending", providerInvoiceId: "8", providerState: "new", sentAt: null, startedAt: new Date("2030-03-04T08:52:00Z") });
+    fake.state.statuses["7"] = { state: "new", errorMessage: null, updatedAt: null };
+    fake.state.statuses["8"] = { state: "new", errorMessage: null, updatedAt: null };
+    expect(await status.runStatus()).toEqual({ checked: 2, changed: 1, failed: 0, stale: 0 });
+    expect(await rowOf(stale.id)).toMatchObject({ status: "failed", providerState: "new", errorMessage: STALE_DRAFT_MESSAGE });
+    expect(await rowOf(young.id)).toMatchObject({ status: "sending", errorMessage: null });
+    expect(await auditActions(a.id)).toEqual([{ action: "einvoice_failed", detail: expect.objectContaining({ reason: STALE_DRAFT_MESSAGE, providerState: "new" }) }]);
+    expect(await auditActions(b.id)).toEqual([]);
+    expect((await einvoice.send(a.id, userId)).status).toBe("sent");
+  });
+
+  it("a document the access point no longer knows (404) is failed, once", async () => {
+    const a = await issuedInvoice(await makeCustomer());
+    const row = await sentRow(a.id, { providerInvoiceId: "9" });
+    fake.state.statuses["9"] = { state: "__gone__", errorMessage: null, updatedAt: null };
+    expect(await status.pollTransmission(row.id)).toMatchObject({ status: "failed", providerState: "sent", errorMessage: DOCUMENT_GONE_MESSAGE });
+    // Terminal now: polled again, nothing is asked and nothing logged twice.
+    await status.pollTransmission(row.id);
+    expect(await auditActions(a.id)).toEqual([{ action: "einvoice_failed", detail: expect.objectContaining({ reason: DOCUMENT_GONE_MESSAGE }) }]);
+  });
+
+  it("clears an earlier transient error text once the access point reports the send through", async () => {
+    const a = await issuedInvoice(await makeCustomer());
+    const row = await sentRow(a.id, { status: "sending", providerState: "new", sentAt: null, errorMessage: "B2Brouter svarar inte, försök igen" });
+    fake.state.statuses["4242"] = { state: "new", errorMessage: null, updatedAt: null };
+    expect((await status.pollTransmission(row.id)).errorMessage).toBe("B2Brouter svarar inte, försök igen");
+    fake.state.statuses["4242"] = { state: "sent", errorMessage: null, updatedAt: null };
+    expect(await status.pollTransmission(row.id)).toMatchObject({ status: "sent", errorMessage: null });
+  });
+
+  it("a refresh racing the job writes nothing and logs nothing when the row moved on in between", async () => {
+    const a = await issuedInvoice(await makeCustomer());
+    const row = await sentRow(a.id);
+    fake.state.statuses["4242"] = { state: "refused", errorMessage: "Fel kontering", updatedAt: null };
+    const original = repo.updateTransmission;
+    repo.updateTransmission = async (id, patch, ifStatus) => {
+      // The other poll got there first.
+      await db.update(einvoiceTransmissions).set({ status: "rejected", errorMessage: "först" }).where(eq(einvoiceTransmissions.id, id));
+      return original.call(repo, id, patch, ifStatus);
+    };
+    try {
+      expect(await status.pollTransmission(row.id)).toMatchObject({ status: "rejected", errorMessage: "först" });
+    } finally {
+      repo.updateTransmission = original;
+    }
+    expect(await auditActions(a.id)).toEqual([]);
   });
 
   it("polls only rows younger than 30 days, and one failing row does not stop the others", async () => {
@@ -632,12 +775,17 @@ describe("Kontrollera mottagaren", () => {
 });
 
 describe("fakturalistan", () => {
-  it("carries the latest transmission's status per invoice", async () => {
+  it("carries the latest transmission's status and environment per invoice, production before sandbox", async () => {
     const sent = await issuedInvoice(await makeCustomer());
     const never = await issuedInvoice(await makeCustomer());
+    const both = await issuedInvoice(await makeCustomer());
     await einvoice.send(sent.id, userId);
+    await sentRow(both.id, { environment: "production", status: "rejected", providerState: "refused", startedAt: new Date("2030-03-01T00:00:00Z") });
+    await sentRow(both.id, { environment: "sandbox", status: "delivered", providerState: "registered" });
     const { rows } = await invoiceService.list({ limit: 50, offset: 0 });
-    expect(rows.find((r) => r.id === sent.id)!.einvoiceStatus).toBe("sent");
-    expect(rows.find((r) => r.id === never.id)!.einvoiceStatus).toBeNull();
+    expect(rows.find((r) => r.id === sent.id)).toMatchObject({ einvoiceStatus: "sent", einvoiceEnvironment: "sandbox" });
+    expect(rows.find((r) => r.id === never.id)).toMatchObject({ einvoiceStatus: null, einvoiceEnvironment: null });
+    // The older production row wins over the newer sandbox one.
+    expect(rows.find((r) => r.id === both.id)).toMatchObject({ einvoiceStatus: "rejected", einvoiceEnvironment: "production" });
   });
 });
