@@ -584,6 +584,11 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
         title: "Frakt",
         description: "Sendify-koppling, avsändare, påslag, upphämtningstider och transportörsprodukter.",
       },
+      {
+        href: "/system/e-faktura",
+        title: "E-faktura",
+        description: "B2Brouter-koppling för Peppol — nyckel, miljö, testa anslutningen och se vilka företagsuppgifter som skickas.",
+      },
     ],
   },
   {

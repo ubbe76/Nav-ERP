@@ -332,6 +332,23 @@ const MESSAGES: Record<string, MessageEntry> = {
   "mo-operation-linked-purchase": "En inköpsorder eller förfrågan pekar på operationen — ta bort den raden först.",
   "mo-operation-reported": "Något är redan rapporterat på operationen — den går inte att ta bort eller byta typ av resurs på.",
   "last-operation-locked": "Varor är redan inlevererade — ändringen skulle byta vilken operation som är sist. Behåll den sista operationen.",
+  // E-faktura (Peppol via B2Brouter). einvoice-not-allowed's message is the
+  // Swedish sentence for the blocked reason; document-invalid and
+  // provider-rejected get their problem lists appended by einvoiceErrorText.
+  "einvoice-not-configured": (err) => {
+    const reason = (err.body as { reason?: string } | undefined)?.reason;
+    if (reason === "disabled") return "E-faktura är inte aktiverat — slå på det under System → E-faktura.";
+    if (reason === "no-key") return "E-faktura saknar API-nyckel — lägg in den under System → E-faktura.";
+    if (reason === "no-account") return "E-faktura saknar konto — kör Testa anslutning under System → E-faktura och spara.";
+    return "E-faktura är inte konfigurerat — se System → E-faktura.";
+  },
+  "einvoice-not-allowed": serverMessage("Fakturan kan inte skickas som e-faktura."),
+  "einvoice-already-sent": "Fakturan har redan en pågående eller godkänd e-fakturasändning.",
+  "einvoice-document-invalid": "E-fakturan klarade inte Navs egen kontroll och skickades inte",
+  "einvoice-provider-rejected": "Mottagande tjänst (B2Brouter) avvisade e-fakturan",
+  "einvoice-provider-unauthorized": "B2Brouter nekade åtkomst — kontrollera API-nyckeln och miljön under System → E-faktura.",
+  "einvoice-provider-unavailable": "B2Brouter svarar inte just nu — försök igen om en stund.",
+  "einvoice-transmission-not-found": "Sändningen finns inte — ladda om sidan.",
   // generic (thrown by the zod/body-parsing layer, not a named domain error)
   "validation-failed": "Ogiltiga uppgifter — kontrollera fälten.",
   "invalid-request-body": "Ogiltig förfrågan.",

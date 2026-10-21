@@ -12,6 +12,7 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
+import { EINVOICE_STATUS_LABELS } from "../../lib/einvoice";
 import { formatMoney, round2 } from "../../lib/format";
 import {
   INVOICE_STATUS_PILL,
@@ -79,6 +80,7 @@ export function InvoicesPageClient({
           { key: "dueDate", label: "Förfallodatum", width: "130px" },
           { key: "netAmount", label: "Belopp", width: "140px", align: "right" },
           { key: "status", label: "Status", width: "130px" },
+          { key: "einvoiceStatus", label: "E-faktura", width: "100px" },
         ]}
         rows={invoices.rows}
         emptyText="Inga fakturor matchar sökningen"
@@ -106,6 +108,8 @@ export function InvoicesPageClient({
               const pill = INVOICE_STATUS_PILL[invoice.status];
               return <StatusPill status={pill.status} label={pill.label} compact />;
             }
+            case "einvoiceStatus":
+              return invoice.einvoiceStatus ? EINVOICE_STATUS_LABELS[invoice.einvoiceStatus] : "";
             default:
               return null;
           }

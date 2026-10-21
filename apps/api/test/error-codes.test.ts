@@ -135,6 +135,16 @@ import {
   RowVariantExistsError,
 } from "../src/modules/sales/service/sales.errors.js";
 import { ShipmentDeliveryUndoneError, ShipmentOnDraftInvoiceError } from "../src/modules/shipping/service/shipping.errors.js";
+import {
+  EinvoiceAlreadySentError,
+  EinvoiceDocumentInvalidError,
+  EinvoiceNotAllowedError,
+  EinvoiceNotConfiguredError,
+  EinvoiceProviderRejectedError,
+  EinvoiceProviderUnauthorizedError,
+  EinvoiceProviderUnavailableError,
+  EinvoiceTransmissionNotFoundError,
+} from "../src/modules/einvoice/service/einvoice.errors.js";
 import { InvalidOcrError, PaymentExceedsOpenAmountError, VerificationAlreadyReversedError } from "../src/modules/sales/service/payment.service.js";
 import {
   CollectiveInvoicingCustomerError,
@@ -379,6 +389,15 @@ const cases: Array<[Error, string]> = [
   [new InvalidShipmentInvoiceRowError("x"), ERROR_CODES.INVALID_SHIPMENT_INVOICE_ROW],
   [new ShipmentAlreadyInvoicedError("FR-1"), ERROR_CODES.SHIPMENT_ALREADY_INVOICED],
   [new FreightAlreadyInvoicedError("FR-1"), ERROR_CODES.FREIGHT_ALREADY_INVOICED],
+  // E-faktura (Peppol)
+  [new EinvoiceNotConfiguredError("disabled"), ERROR_CODES.EINVOICE_NOT_CONFIGURED],
+  [new EinvoiceNotAllowedError("private-person"), ERROR_CODES.EINVOICE_NOT_ALLOWED],
+  [new EinvoiceAlreadySentError("FA-1"), ERROR_CODES.EINVOICE_ALREADY_SENT],
+  [new EinvoiceDocumentInvalidError(["x"]), ERROR_CODES.EINVOICE_DOCUMENT_INVALID],
+  [new EinvoiceProviderRejectedError("x"), ERROR_CODES.EINVOICE_PROVIDER_REJECTED],
+  [new EinvoiceProviderUnauthorizedError("x"), ERROR_CODES.EINVOICE_PROVIDER_UNAUTHORIZED],
+  [new EinvoiceProviderUnavailableError("x"), ERROR_CODES.EINVOICE_PROVIDER_UNAVAILABLE],
+  [new EinvoiceTransmissionNotFoundError("x"), ERROR_CODES.EINVOICE_TRANSMISSION_NOT_FOUND],
   [new ShipmentOnDraftInvoiceError(), ERROR_CODES.SHIPMENT_ON_DRAFT_INVOICE],
   // register (grunddata)
   [new RegisterEntryInUseError("30", { total: 1, references: [] }), ERROR_CODES.REGISTER_ENTRY_IN_USE],

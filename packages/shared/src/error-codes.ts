@@ -125,6 +125,15 @@ export const ERROR_CODES = {
   INVALID_SHIPMENT_INVOICE_ROW: "invalid-shipment-invoice-row",
   SHIPMENT_ALREADY_INVOICED: "shipment-already-invoiced",
   FREIGHT_ALREADY_INVOICED: "freight-already-invoiced",
+  // E-faktura (Peppol via B2Brouter)
+  EINVOICE_NOT_CONFIGURED: "einvoice-not-configured",
+  EINVOICE_NOT_ALLOWED: "einvoice-not-allowed",
+  EINVOICE_ALREADY_SENT: "einvoice-already-sent",
+  EINVOICE_DOCUMENT_INVALID: "einvoice-document-invalid",
+  EINVOICE_PROVIDER_REJECTED: "einvoice-provider-rejected",
+  EINVOICE_PROVIDER_UNAUTHORIZED: "einvoice-provider-unauthorized",
+  EINVOICE_PROVIDER_UNAVAILABLE: "einvoice-provider-unavailable",
+  EINVOICE_TRANSMISSION_NOT_FOUND: "einvoice-transmission-not-found",
   SHIPMENT_ON_DRAFT_INVOICE: "shipment-on-draft-invoice",
   // register (grunddata)
   REGISTER_ENTRY_IN_USE: "register-entry-in-use",

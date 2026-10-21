@@ -37,6 +37,11 @@ import { freightProducts, shipments } from "./shipping";
 // Same pattern as article.ts/system.ts — no built-in bytea helper.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
+// E-faktura (Peppol): how the customer wants invoices delivered. Steers
+// which send button the invoice card leads with — blocks nothing, both
+// ways always work (spec 2026-10-21-e-faktura-peppol-design.md §1).
+export const invoiceDeliveryEnum = pgEnum("invoice_delivery", ["email", "peppol"]);
+
 export const salesOrderStatusEnum = pgEnum("sales_order_status", [
   "quote",
   "confirmed",
@@ -118,6 +123,11 @@ export const customers = pgTable("customers", {
   deliveryDayMode: deliveryDayModeEnum("delivery_day_mode"),
   transitDays: smallint("transit_days"),
   website: varchar("website", { length: 255 }),
+  // E-faktura (Peppol, migration 0133): Fakturaleverans and the customer's
+  // Peppol-id as "scheme:value" (0007:5560000000). Null = derived from the
+  // organisationsnummer ("0007:" + digits) at send time, never stored.
+  invoiceDelivery: invoiceDeliveryEnum("invoice_delivery").notNull().default("email"),
+  peppolId: varchar("peppol_id", { length: 60 }),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [

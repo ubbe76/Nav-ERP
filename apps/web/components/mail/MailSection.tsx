@@ -23,6 +23,8 @@ export interface SendButtonConfig {
   // Overrides the shared default recipient (e.g. the customer's invoice
   // email for "Skicka faktura").
   to?: string;
+  // Small note next to the button (e.g. "Kunden vill ha e-faktura").
+  hint?: string;
 }
 
 export interface PdfLinkConfig {
@@ -65,9 +67,12 @@ export function MailSection({
       <strong>E-post</strong>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
         {sendButtons.map((btn) => (
-          <Button key={btn.label} type="button" variant="secondary" onClick={() => setActive(btn)}>
-            {btn.label}
-          </Button>
+          <span key={btn.label} style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Button type="button" variant="secondary" onClick={() => setActive(btn)}>
+              {btn.label}
+            </Button>
+            {btn.hint && <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{btn.hint}</span>}
+          </span>
         ))}
         {pdfLinks.map((link) => {
           const href = link.configurationPrices

@@ -947,6 +947,10 @@ export interface Customer extends PartnerCardFields {
   // Kod på pallkort — null = följ systeminställningen.
   palletCardCode: PalletCardCode | null;
   website: string | null;
+  // E-faktura (Peppol): hur kunden vill ha sina fakturor, och kundens
+  // Peppol-id ("0007:5560000000"; null = härleds ur organisationsnumret).
+  invoiceDelivery: "email" | "peppol";
+  peppolId: string | null;
   active: boolean;
   createdAt: string;
 }
@@ -1260,6 +1264,8 @@ export interface InvoiceHeader {
 export interface Invoice extends InvoiceHeader {
   netAmount: string;
   vatAmount: string;
+  // E-faktura: status of the latest Peppol transmission (null = none sent).
+  einvoiceStatus: "sending" | "sent" | "delivered" | "rejected" | "failed" | null;
 }
 
 export interface InvoiceRow {

@@ -7,6 +7,7 @@ import { blankSafe } from "./coerce.js";
 import { businessDateSchema } from "./business-date.js";
 import { partnerDeliveryFields } from "./delivery.js";
 import { palletCardCodeSchema } from "./system.js";
+import { invoiceDeliverySchema, peppolIdFieldSchema } from "./einvoice.js";
 
 export const salesOrderStatusSchema = z.enum([
   "quote",
@@ -89,6 +90,10 @@ export const createCustomerSchema = z.object({
   palletCardCode: palletCardCodeSchema.nullable().optional(),
   website: z.string().max(255).optional(),
   defaultFreightProductId: z.string().uuid().optional(),
+  // E-faktura (Peppol): Fakturaleverans and the customer's Peppol-id
+  // ("" clears — null = derived from the organisationsnummer).
+  invoiceDelivery: invoiceDeliverySchema.default("email"),
+  peppolId: peppolIdFieldSchema.optional(),
   active: z.boolean().default(true),
   ...partnerDeliveryFields,
 });
@@ -129,6 +134,8 @@ export const updateCustomerSchema = z
     palletCardCode: palletCardCodeSchema.nullable().optional(),
     website: z.string().max(255).nullable().optional(),
     defaultFreightProductId: z.string().uuid().nullable().optional(),
+    invoiceDelivery: invoiceDeliverySchema.optional(),
+    peppolId: peppolIdFieldSchema.optional(),
     active: z.boolean().optional(),
     ...partnerDeliveryFields,
   })

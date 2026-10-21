@@ -43,7 +43,11 @@ app
   .then(() => {
     // Background jobs run only in the real server process, never in tests.
     scheduler = startScheduler(
-      [{ name: "freight_tracking", run: () => app.freightTracking.runTrackingIfDue() }],
+      [
+        { name: "freight_tracking", run: () => app.freightTracking.runTrackingIfDue() },
+        // E-faktura: polls the live transmissions at the access point.
+        { name: "einvoice_status", run: () => app.einvoiceStatus.runStatusIfDue() },
+      ],
       { log: (msg, extra) => app.log.error(extra ?? {}, msg) }
     );
     return printSetupCode();

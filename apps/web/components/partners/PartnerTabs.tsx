@@ -26,6 +26,7 @@ import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { SupplierPaymentDetailsSection } from "../banking/SupplierPaymentDetailsSection";
 import { CustomerPricesTab } from "./CustomerPricesTab";
+import { PeppolFields } from "./PeppolFields";
 import { DeliveryDaysFields, type DeliveryDayDefaults, type DeliveryDaysValue } from "./DeliveryDaysFields";
 
 // Prefixes https:// onto a bare domain (no "://" scheme) so the Webbsida
@@ -810,6 +811,10 @@ function VillkorTab({
   const [collectiveInvoicing, setCollectiveInvoicing] = useState(
     isCustomer ? (partner as Customer).collectiveInvoicing : false
   );
+  const [invoiceDelivery, setInvoiceDelivery] = useState<"email" | "peppol">(
+    isCustomer ? (partner as Customer).invoiceDelivery : "email"
+  );
+  const [peppolId, setPeppolId] = useState(isCustomer ? ((partner as Customer).peppolId ?? "") : "");
   const [deliveryTermId, setDeliveryTermId] = useState(partner.deliveryTermId ?? "");
   const [paymentTermId, setPaymentTermId] = useState(partner.paymentTermId ?? "");
   const [carrierId, setCarrierId] = useState(partner.carrierId ?? "");
@@ -880,6 +885,9 @@ function VillkorTab({
             ? { discountPercent: discountPercent.trim() === "" ? 0 : Number(discountPercent) }
             : {}),
           ...(isCustomer ? { privatePerson, collectiveInvoicing } : {}),
+          // E-faktura: a private person never gets Peppol invoices, so the
+          // fields are hidden — and what is sent stays as it was saved.
+          ...(isCustomer && !privatePerson ? { invoiceDelivery, peppolId: peppolId.trim() } : {}),
           ...(isCustomer && freightProducts ? { defaultFreightProductId: defaultFreightProductId || null } : {}),
         }),
       });
@@ -930,6 +938,16 @@ function VillkorTab({
             <Input id="vatNumber" size="md" value={vatNumber} onChange={(e) => setVatNumber(e.target.value)} />
           </Field>
         </FormRow>
+
+        {isCustomer && !privatePerson && (
+          <PeppolFields
+            customerId={partner.id}
+            invoiceDelivery={invoiceDelivery}
+            onInvoiceDeliveryChange={setInvoiceDelivery}
+            peppolId={peppolId}
+            onPeppolIdChange={setPeppolId}
+          />
+        )}
 
         <FormRow>
           <Field label="Leveransvillkor" htmlFor="deliveryTermId">

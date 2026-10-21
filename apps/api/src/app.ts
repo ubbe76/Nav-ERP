@@ -113,6 +113,11 @@ import { createFreightSettingsService } from "./modules/shipping/service/freight
 import { createShippingService } from "./modules/shipping/service/shipping.service.js";
 import { createTrackingService } from "./modules/shipping/service/tracking.service.js";
 import { shippingRoutes } from "./modules/shipping/routes/shipping.routes.js";
+import { createEinvoiceRepository } from "./modules/einvoice/repository/einvoice.repository.js";
+import { createEinvoiceSettingsService } from "./modules/einvoice/service/einvoice-settings.service.js";
+import { createEinvoiceService } from "./modules/einvoice/service/einvoice.service.js";
+import { createEinvoiceStatusService } from "./modules/einvoice/service/einvoice-status.service.js";
+import { einvoiceRoutes } from "./modules/einvoice/routes/einvoice.routes.js";
 import { createStockRepository } from "./modules/stock/repository/stock.repository.js";
 import { createStockService } from "./modules/stock/service/stock.service.js";
 import { createValuationService } from "./modules/stock/service/valuation.service.js";
@@ -404,6 +409,35 @@ export function buildApp(database: Db = db) {
     // Frakt etapp 2: the freight article the shipment rows bill.
     { freightArticleId: async () => (await freightSettingsService.read()).freightArticleId }
   );
+  // E-faktura via Peppol (B2Brouter): reads the issued invoice, its archived
+  // PDF and the customer through narrow readers into sales, and the company
+  // data through the system service. The provider factory defaults to
+  // B2Brouter; tests inject a fake. The status job is decorated on the app
+  // for server.ts's scheduler, like freightTracking.
+  const einvoiceRepository = createEinvoiceRepository(database);
+  const einvoiceSettingsService = createEinvoiceSettingsService({
+    repo: einvoiceRepository,
+    company: systemService,
+    audit: auditRepository,
+  });
+  const einvoiceService = createEinvoiceService({
+    repo: einvoiceRepository,
+    settings: einvoiceSettingsService,
+    invoices: {
+      getInvoice: (id) => invoiceService.getInvoice(id),
+      archivedInvoicePdf: (id) => invoiceService.renderPdf(id),
+      findCustomerById: (id) => salesService.getCustomer(id),
+    },
+    company: systemService,
+    audit: auditRepository,
+  });
+  const einvoiceStatusService = createEinvoiceStatusService({
+    repo: einvoiceRepository,
+    settings: einvoiceSettingsService,
+    audit: auditRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
+  app.decorate("einvoiceStatus", einvoiceStatusService);
   // Kundreskontra (B3) — open items, payment registration and cancellation.
   // The same poster books the K verification inside the payment's own
   // transaction and reverses it when the payment is cancelled.
@@ -617,6 +651,12 @@ export function buildApp(database: Db = db) {
           protectedRoutes,
           shippingRoutes,
           { settings: freightSettingsService, service: shippingService, quotes: freightQuoteService, tracking: trackingService },
+          { read: office, write: ["forsaljning"] }
+        );
+        await registerModule(
+          protectedRoutes,
+          einvoiceRoutes,
+          { settings: einvoiceSettingsService, service: einvoiceService, status: einvoiceStatusService },
           { read: office, write: ["forsaljning"] }
         );
         await registerModule(

@@ -22,10 +22,12 @@ import {
   verificationSeries,
   type Db,
   type Tx,
+  einvoiceTransmissions,
 } from "@navet/db";
 import {
   ilikePattern,
   round2,
+  type EinvoiceStatus,
   type InvoiceStatus,
   type InvoiceType,
   type ListInvoicesQuery,
@@ -742,6 +744,10 @@ export function createInvoiceRepository(db: Db) {
       // showing the name as it was at issue even after the customer is renamed.
       const customerName = sql<string>`COALESCE(${invoices.customerName}, ${customers.name})`;
 
+      // E-faktura: the latest transmission's status (null = never sent as an
+      // e-invoice), for the list's E-faktura column.
+      const einvoiceStatus = sql<EinvoiceStatus | null>`(SELECT t.status FROM ${einvoiceTransmissions} t WHERE t.invoice_id = ${invoices.id} ORDER BY t.started_at DESC, t.id DESC LIMIT 1)`;
+
       const [rows, totalRows] = await Promise.all([
         db
           .select({
@@ -750,6 +756,7 @@ export function createInvoiceRepository(db: Db) {
             netAmount,
             vatAmount,
             verificationDisplayNumber: verificationDisplayNumberSql,
+            einvoiceStatus,
           })
           .from(invoices)
           .innerJoin(customers, eq(customers.id, invoices.customerId))

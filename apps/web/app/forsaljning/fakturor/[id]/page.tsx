@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
 import { InvoiceCard } from "../../../../components/sales/InvoiceCard";
+import { EInvoiceSection } from "../../../../components/sales/EInvoiceSection";
 import { MailSection, type SendButtonConfig } from "../../../../components/mail/MailSection";
 import { AuditTrailSection } from "../../../../components/system/AuditTrailSection";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
@@ -66,6 +67,7 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
           subject: `${documentLabel} ${invoice.invoiceNumber}`,
           message: `Hej!\n\nSe bifogad ${documentLabel.toLowerCase()} ${invoice.invoiceNumber}.\n\nMed vänliga hälsningar`,
           to: customer?.invoiceEmail ?? undefined,
+          hint: customer?.invoiceDelivery === "peppol" ? "Kunden vill ha e-faktura" : undefined,
         },
       ]
     : [];
@@ -90,6 +92,10 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
         reminderDefaultTo={reminderDefaultTo}
         reminderFee={settings.reminderFee}
       />
+
+      {canMail && invoice.invoiceNumber && (
+        <EInvoiceSection invoiceId={invoice.id} invoiceNumber={invoice.invoiceNumber} />
+      )}
 
       {canMail && (
         <MailSection

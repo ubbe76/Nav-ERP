@@ -76,6 +76,21 @@ Spara med **Spara**. Under **Upphämtningstider** kryssas varje veckodag som har
 
 Under **Fraktprodukter** testar **Testa anslutning** nyckeln i fältet **API-nyckel** mot vald **Miljö** utan att spara den; är fältet tomt testas den sparade nyckeln. **Hämta transportörsprodukter** fyller listan över transportörer och produkter (**Transportör**, **Produkt**). Listan fylls också på när priser hämtas på en försändelse.
 
+## E-faktura
+
+**System → E-faktura** (bara administratörer) styr e-fakturor via Peppol, som skickas från fakturakortet, se [E-faktura (Peppol)](/hjalp/forsaljning#e-faktura-peppol). Nav skickar genom tjänsten B2Brouter, så först behövs ett konto där:
+
+1. Skapa ett konto hos B2Brouter och lägg in företagets uppgifter där. Under utvecklarinställningarna (API) skapas en **API-nyckel**. En nyckel som börjar på `test_` hör till B2Brouters testmiljö (**Sandbox**); en nyckel utan det prefixet är en **Produktion**snyckel och skickar riktiga fakturor.
+2. Välj **Miljö** — **Sandbox** eller **Produktion** — så att den stämmer med nyckeln, och skriv in nyckeln i **API-nyckel**. Nyckeln visas aldrig igen: ett tomt fält behåller den sparade (fältet visar **Nyckel sparad**) och **Ta bort nyckel** raderar den.
+3. Klicka **Testa anslutning**. Nav frågar B2Brouter vilket konto nyckeln hör till och fyller i det skrivskyddade fältet **Konto** med kontots namn. Inget sparas av testet; byter du nyckel eller miljö töms **Konto** tills du testat igen.
+4. Kryssa i **Aktiverad** och klicka **Spara** — då sparas också det testade kontot. Utan Aktiverad och en nyckel visar fakturakorten ingen sektion E-faktura.
+
+**Statusintervall (minuter)** (5–1440, standard 30) anger hur ofta ett bakgrundsjobb frågar B2Brouter om utestående sändningars status (Skickas, Skickad). Under fältet visas **Senaste statuskörning**. Jobbet följer sändningar i 30 dagar; en sändning som blivit **Mottagen** ändras inte längre. Fakturakortets **Uppdatera status** hämtar statusen direkt. En sändning som fastnat i **Skickas** utan att ha nått B2Brouter märks **Misslyckad** efter tio minuter, så att den kan skickas igen.
+
+Börja i **Sandbox**: testa med en egen testfaktura och byt sedan till **Produktion** med produktionsnyckeln (byt miljö, skriv in den nya nyckeln, kör **Testa anslutning** och **Spara**). Sandboxsändningar och produktionssändningar loggas var för sig och märks med sin miljö.
+
+Sektionen **Företagsuppgifter som skickas** visar vad som skrivs i e-fakturan som säljare: företagets namn, organisationsnummer, VAT-nummer, adress, bankgiro, plusgiro, IBAN och BIC. Uppgifterna hämtas från [Företagsinformation](#foretagsinformation) och ändras där (länken öppnar sidan). Saknas något som e-fakturan kräver listas det som en varning — till exempel "Organisationsnummer saknas" — och sändningen stoppas på fakturakortet tills det är åtgärdat.
+
 ## Bank
 
 Under **System → Bank** väljer du företagets bank och fyller i uppgifterna banken kräver i betalfilerna. Nav gör betalfiler (pain.001) för leverantörsbetalningar och läser bankens avier (camt.054) för inbetalningar och bekräftade utbetalningar. Filerna laddas upp och ner i internetbankens filöverföring. Ett avtal om filöverföring med banken krävs.
