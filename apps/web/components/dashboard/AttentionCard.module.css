@@ -17,10 +17,10 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.marker[data-tone="delayed"] {
+.marker[data-tone="yellow"] {
   background: var(--status-delayed);
 }
-.marker[data-tone="stopped"] {
+.marker[data-tone="red"] {
   background: var(--status-stopped);
 }
 
@@ -73,15 +73,25 @@ span.row .chevron {
   border-radius: 6px;
 }
 
-.empty,
-.more {
+.empty {
   font-family: var(--font-body);
   font-size: 13px;
   color: var(--color-text-secondary);
   margin: 0;
 }
 
-.more {
+.all {
+  display: inline-block;
   padding-top: 10px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-fg);
+  text-decoration: none;
+}
+a.all:hover {
+  text-decoration: underline;
+}
+span.all {
   color: var(--color-text-muted);
 }

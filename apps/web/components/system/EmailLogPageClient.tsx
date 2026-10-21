@@ -126,7 +126,7 @@ export function EmailLogPageClient({ log, pageSize }: { log: Paged<EmailLogEntry
               );
             }
             case "id":
-              if (entry.status !== "failed") return null;
+              if (entry.status !== "failed" || entry.documentType === "alert_digest") return null;
               return (
                 <Button
                   type="button"

@@ -4,22 +4,24 @@ import styles from "./AttentionCard.module.css";
 
 export interface AttentionItem {
   key: string;
-  href: string;
-  /** delayed = overdue order (amber), stopped = stock shortage (red) */
-  tone: "delayed" | "stopped";
+  /** null = no card to open (rendered as plain text) */
+  href: string | null;
+  /** The alert's severity: yellow = amber, red = red. */
+  tone: "red" | "yellow";
   primary: string;
   secondary: string;
 }
 
-// The action queue: every row is a concrete thing to act on (an overdue order,
-// an article short on stock), deep-linked to where it can be fixed.
+// The action queue: the first rows of Aviseringar (GET /alerts), each a
+// concrete thing to act on, deep-linked to where it can be fixed.
 export function AttentionCard({
   items,
-  hiddenCount = 0,
-  emptyText = "Inget att bevaka — inga försenade ordrar eller negativa saldon.",
+  totalCount = items.length,
+  emptyText = "Inget att bevaka just nu.",
 }: {
   items: AttentionItem[];
-  hiddenCount?: number;
+  /** Sum of every group's count — the "Visa alla (N)" figure. */
+  totalCount?: number;
   emptyText?: string;
 }) {
   return (
@@ -32,20 +34,34 @@ export function AttentionCard({
       ) : (
         <div>
           {items.map((item) => (
-            <GatedLink key={item.key} href={item.href} className={styles.row}>
-              <span className={styles.marker} data-tone={item.tone} aria-hidden="true" />
-              <span className={styles.texts}>
-                <span className={styles.primary}>{item.primary}</span>
-                <span className={styles.secondary}>{item.secondary}</span>
-              </span>
-              <span className={styles.chevron} aria-hidden="true">
-                ›
-              </span>
-            </GatedLink>
+            <AttentionRow key={item.key} item={item} />
           ))}
-          {hiddenCount > 0 && <p className={styles.more}>+ {hiddenCount} till</p>}
+          <GatedLink href="/aviseringar" className={styles.all}>
+            Visa alla ({totalCount})
+          </GatedLink>
         </div>
       )}
     </div>
+  );
+}
+
+function AttentionRow({ item }: { item: AttentionItem }) {
+  const content = (
+    <>
+      <span className={styles.marker} data-tone={item.tone} aria-hidden="true" />
+      <span className={styles.texts}>
+        <span className={styles.primary}>{item.primary}</span>
+        {item.secondary && <span className={styles.secondary}>{item.secondary}</span>}
+      </span>
+      <span className={styles.chevron} aria-hidden="true">
+        ›
+      </span>
+    </>
+  );
+  if (item.href === null) return <span className={styles.row}>{content}</span>;
+  return (
+    <GatedLink href={item.href} className={styles.row}>
+      {content}
+    </GatedLink>
   );
 }

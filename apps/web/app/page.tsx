@@ -15,7 +15,7 @@ import { StockActivityCard } from "../components/dashboard/StockActivityCard";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
 import { getCurrentUser, apiGet } from "../lib/api";
-import { stockholmToday } from "../lib/date";
+import type { AlertKind, AlertsResponse } from "../lib/alerts";
 import { satisfiesRule } from "../lib/permissions";
 import type {
   ManufacturingOrder,
@@ -31,19 +31,6 @@ const ROLE_LABELS: Record<string, string> = { admin: "Administratör", superviso
 
 const MAX_ATTENTION_ROWS = 7;
 
-function isOverdue(expectedDeliveryDate: string | null, today: string) {
-  return expectedDeliveryDate !== null && expectedDeliveryDate < today;
-}
-
-function daysLate(expectedDeliveryDate: string, today: string) {
-  return Math.max(1, Math.round((Date.parse(today) - Date.parse(expectedDeliveryDate)) / 86_400_000));
-}
-
-function lateLabel(expectedDeliveryDate: string, today: string) {
-  const days = daysLate(expectedDeliveryDate, today);
-  return days === 1 ? "1 dag försenad" : `${days} dagar försenad`;
-}
-
 export default async function OverviewPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const user = await getCurrentUser(cookieHeader);
@@ -51,8 +38,14 @@ export default async function OverviewPage() {
 
   // Open orders are a naturally bounded set, so the dashboard fetches them via
   // status filters instead of pulling the full registers.
-  const [openPurchaseOrdersPage, openSalesOrdersPage, activeManufacturingOrdersPage, balancesPage, recentTransactionsPage] =
-    await Promise.all([
+  const [
+    openPurchaseOrdersPage,
+    openSalesOrdersPage,
+    activeManufacturingOrdersPage,
+    balancesPage,
+    recentTransactionsPage,
+    alerts,
+  ] = await Promise.all([
       apiGet<Paged<PurchaseOrder>>(
         "/api/v1/purchase-orders?status=draft,confirmed,partially_received&limit=1000",
         cookieHeader
@@ -67,6 +60,9 @@ export default async function OverviewPage() {
       ),
       apiGet<Paged<StockBalance>>("/api/v1/stock/balances?limit=1000", cookieHeader),
       apiGet<Paged<StockTransaction>>("/api/v1/stock/transactions?limit=6", cookieHeader),
+      // Aviseringar feed both the flow strip's signals and "Att bevaka"; a
+      // failing call must not take Översikten down.
+      apiGet<AlertsResponse>("/api/v1/alerts", cookieHeader).catch((): AlertsResponse | null => null),
     ]);
   // System → Kom igång: administrators see the setup checklist until it is
   // complete or hidden. Never lets a failing call take Översikten down, and
@@ -86,13 +82,19 @@ export default async function OverviewPage() {
 
   const balances = balancesPage.rows;
 
-  const today = stockholmToday();
+  // A group is missing from the response when the user may not see that kind;
+  // its signal is then neutral rather than a (false) "all clear".
+  const alertCount = (kind: AlertKind): number | null =>
+    alerts?.groups.find((g) => g.kind === kind && !g.error)?.count ?? null;
+  const purchaseLate = alertCount("purchase_order_late");
+  const salesLate = alertCount("sales_order_late");
+  const stockNegative = alertCount("stock_negative");
+  const lateSignal = (count: number | null) =>
+    count === null ? "Se Aviseringar" : count === 0 ? "Inga försenade" : count === 1 ? "1 försenad" : `${count} försenade`;
 
   const openPurchaseOrders = openPurchaseOrdersPage.rows;
-  const overduePurchaseOrders = openPurchaseOrders.filter((o) => isOverdue(o.nextDeliveryDate ?? o.expectedDeliveryDate, today));
 
   const openSalesOrders = openSalesOrdersPage.rows;
-  const overdueSalesOrders = openSalesOrders.filter((o) => isOverdue(o.nextDeliveryDate ?? o.expectedDeliveryDate, today));
 
   const activeManufacturingOrders = [...activeManufacturingOrdersPage.rows]
     .sort((a, b) =>
@@ -113,9 +115,6 @@ export default async function OverviewPage() {
     byArticle.set(b.articleId, entry);
   }
   const articlesInStock = [...byArticle.values()].filter((a) => a.quantity > 0).length;
-  const shortages = [...byArticle.entries()]
-    .filter(([, a]) => a.quantity <= 0)
-    .sort(([, a], [, b]) => a.quantity - b.quantity);
 
   const stations: FlowStation[] = [
     {
@@ -123,13 +122,8 @@ export default async function OverviewPage() {
       href: "/inkop",
       value: openPurchaseOrders.length,
       unit: openPurchaseOrders.length === 1 ? "öppen order" : "öppna ordrar",
-      signal:
-        overduePurchaseOrders.length === 0
-          ? "Inga försenade"
-          : overduePurchaseOrders.length === 1
-            ? "1 försenad"
-            : `${overduePurchaseOrders.length} försenade`,
-      tone: overduePurchaseOrders.length > 0 ? "warn" : "neutral",
+      signal: lateSignal(purchaseLate),
+      tone: purchaseLate ? "warn" : "neutral",
     },
     {
       label: "Lager",
@@ -140,8 +134,13 @@ export default async function OverviewPage() {
       href: "/lager/saldon",
       value: articlesInStock,
       unit: articlesInStock === 1 ? "artikel i lager" : "artiklar i lager",
-      signal: shortages.length === 0 ? "Inga negativa saldon" : `${shortages.length} med saldo ≤ 0`,
-      tone: shortages.length > 0 ? "alert" : "neutral",
+      signal:
+        stockNegative === null
+          ? "Se Aviseringar"
+          : stockNegative === 0
+            ? "Inga negativa saldon"
+            : `${stockNegative} med saldo ≤ 0`,
+      tone: stockNegative ? "alert" : "neutral",
     },
     {
       label: "Tillverkning",
@@ -156,45 +155,24 @@ export default async function OverviewPage() {
       href: "/forsaljning",
       value: openSalesOrders.length,
       unit: openSalesOrders.length === 1 ? "öppen order" : "öppna ordrar",
-      signal:
-        overdueSalesOrders.length === 0
-          ? "Inga försenade"
-          : overdueSalesOrders.length === 1
-            ? "1 försenad"
-            : `${overdueSalesOrders.length} försenade`,
-      tone: overdueSalesOrders.length > 0 ? "warn" : "neutral",
+      signal: lateSignal(salesLate),
+      tone: salesLate ? "warn" : "neutral",
     },
   ];
 
-  // Shortages block production, so they lead; then late inbound material,
-  // then late customer orders — each group worst-first.
-  const attentionItems: AttentionItem[] = [
-    ...shortages.map(([articleId, a]): AttentionItem => ({
-      key: `stock-${articleId}`,
-      href: `/artiklar/${articleId}`,
-      tone: "stopped",
-      primary: `${a.articleNumber} · ${a.articleName}`,
-      secondary: `Lager · saldo ${a.quantity.toLocaleString("sv-SE")}`,
-    })),
-    ...overduePurchaseOrders
-      .sort((a, b) => ((a.nextDeliveryDate ?? a.expectedDeliveryDate) ?? "").localeCompare((b.nextDeliveryDate ?? b.expectedDeliveryDate) ?? ""))
-      .map((o): AttentionItem => ({
-        key: `po-${o.id}`,
-        href: `/inkop/ordrar/${o.id}`,
-        tone: "delayed",
-        primary: `${o.orderNumber} · ${o.supplierName}`,
-        secondary: `Inköp · ${lateLabel((o.nextDeliveryDate ?? o.expectedDeliveryDate)!, today)}`,
-      })),
-    ...overdueSalesOrders
-      .sort((a, b) => ((a.nextDeliveryDate ?? a.expectedDeliveryDate) ?? "").localeCompare((b.nextDeliveryDate ?? b.expectedDeliveryDate) ?? ""))
-      .map((o): AttentionItem => ({
-        key: `so-${o.id}`,
-        href: `/forsaljning/ordrar/${o.id}`,
-        tone: "delayed",
-        primary: `${o.orderNumber} · ${o.customerName}`,
-        secondary: `Försäljning · ${lateLabel((o.nextDeliveryDate ?? o.expectedDeliveryDate)!, today)}`,
-      })),
-  ];
+  // "Att bevaka" is Aviseringar: the first rows over all groups in their
+  // fixed order (red before yellow), the rest behind "Visa alla".
+  const attentionItems: AttentionItem[] = (alerts?.groups ?? [])
+    .flatMap((g) => g.items.map((item) => ({ group: g, item })))
+    .slice(0, MAX_ATTENTION_ROWS)
+    .map(({ group, item }): AttentionItem => ({
+      key: `${group.kind}-${item.key}`,
+      href: item.href,
+      tone: item.severity,
+      primary: item.primary,
+      secondary: item.secondary ? `${group.label} · ${item.secondary}` : group.label,
+    }));
+  const attentionTotal = (alerts?.groups ?? []).reduce((sum, g) => sum + g.count, 0);
 
   // The transactions endpoint is sorted newest-first, so the six rows are
   // already the most recent.
@@ -245,10 +223,7 @@ export default async function OverviewPage() {
             width underneath — where the extra room goes to the article names
             it would otherwise ellipsise. */}
         <div className={styles.topRow}>
-          <AttentionCard
-            items={attentionItems.slice(0, MAX_ATTENTION_ROWS)}
-            hiddenCount={Math.max(0, attentionItems.length - MAX_ATTENTION_ROWS)}
-          />
+          <AttentionCard items={attentionItems} totalCount={attentionTotal} />
           <OrdersCard orders={activeManufacturingOrders.slice(0, 6)} />
         </div>
 

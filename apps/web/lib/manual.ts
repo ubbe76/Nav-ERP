@@ -57,6 +57,13 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
     group: "Register",
   },
   {
+    slug: "aviseringar",
+    title: "Aviseringar",
+    file: "aviseringar.md",
+    description: "Det som behöver åtgärdas just nu, och den dagliga sammanställningen via e-post.",
+    group: "Flöden",
+  },
+  {
     slug: "inkop",
     title: "Inköp",
     file: "inkop.md",

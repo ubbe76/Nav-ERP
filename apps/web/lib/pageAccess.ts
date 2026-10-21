@@ -13,6 +13,7 @@ const SHARED_REGISTERS: PageRule = ["artiklar", "inkop", "forsaljning"];
 
 const ENTRIES: readonly Entry[] = [
   { path: "/", exact: true, rule: ["office"] },
+  { path: "/aviseringar", rule: ["office"] },
   { path: "/hjalp", rule: ["any"] },
   { path: "/ingen-behorighet", rule: ["any"] },
   { path: "/system", rule: ["admin"] },

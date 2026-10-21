@@ -28,6 +28,7 @@ const NOT_IN_NAV = new Set([
   "/ingen-behorighet",
   // The sidebar's own entries — module roots ARE the grids.
   "/",
+  "/aviseringar",
   "/artiklar",
   "/inkop",
   "/forsaljning",

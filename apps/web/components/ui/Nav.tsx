@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Wordmark } from "./Wordmark";
 import {
   BarChartIcon,
+  BellIcon,
   CartIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -29,6 +30,7 @@ import styles from "./Nav.module.css";
 
 const NAV_ITEMS = [
   "Översikt",
+  "Aviseringar",
   "Artiklar",
   "Inköp",
   "Försäljning",
@@ -46,6 +48,7 @@ type NavItem = (typeof NAV_ITEMS)[number];
 // their page exists, rather than linking to a 404.
 const NAV_LINKS: Partial<Record<NavItem, string>> = {
   Översikt: "/",
+  Aviseringar: "/aviseringar",
   Artiklar: "/artiklar",
   Inköp: "/inkop",
   Försäljning: "/forsaljning",
@@ -59,6 +62,7 @@ const NAV_LINKS: Partial<Record<NavItem, string>> = {
 
 const NAV_ICONS: Record<NavItem, ReactNode> = {
   Översikt: <HomeIcon />,
+  Aviseringar: <BellIcon />,
   Artiklar: <CubeIcon />,
   Inköp: <CartIcon />,
   Försäljning: <TrendingUpIcon />,

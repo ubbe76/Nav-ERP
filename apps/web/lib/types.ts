@@ -2255,6 +2255,12 @@ export interface SystemSettings {
   // Unlike the account codes, there is no reset-to-default — always a number.
   paymentTolerance: number;
   reminderFee: number;
+  // Aviseringar: when the daily digest is sent (HH:MM, Stockholm time), how
+  // many days ahead "Leverantörsfakturor att betala" looks, and Navs adress
+  // for the links in the digest ("" = no links).
+  alertDigestTime: string;
+  alertSupplierInvoiceDays: number;
+  publicBaseUrl: string;
 }
 
 // "actual" = the moving average at the consumption date, derived from the stock
@@ -2310,6 +2316,8 @@ export type EmailDocumentType =
   | "invoice"
   // Betalningspåminnelse (B3) — logged against the invoice's own id.
   | "payment_reminder"
+  // Aviseringar: the daily digest — cannot be resent (the API answers 409).
+  | "alert_digest"
   | "test";
 export type EmailStatus = "sent" | "failed";
 
@@ -2320,6 +2328,7 @@ export const EMAIL_DOCUMENT_TYPE_LABELS: Record<EmailDocumentType, string> = {
   order_confirmation: "Orderbekräftelse",
   invoice: "Faktura",
   payment_reminder: "Betalningspåminnelse",
+  alert_digest: "Aviseringar",
   test: "Testmejl",
 };
 

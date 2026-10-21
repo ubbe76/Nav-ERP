@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
 import { SettingsForm } from "../../../components/system/SettingsForm";
 import { PayrollSettingsForm } from "../../../components/system/PayrollSettingsForm";
+import { AlertSettingsForm } from "../../../components/system/AlertSettingsForm";
 import { SmtpSettingsForm } from "../../../components/system/SmtpSettingsForm";
 import { getCurrentUser, apiGet } from "../../../lib/api";
 import type { SystemSettings } from "../../../lib/types";
@@ -35,6 +36,7 @@ export default async function SettingsPage() {
       </div>
 
       <SettingsForm settings={settings} />
+      <AlertSettingsForm settings={settings} />
       <PayrollSettingsForm settings={settings} />
       <SmtpSettingsForm settings={settings} />
     </AppShell>

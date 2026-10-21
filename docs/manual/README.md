@@ -19,6 +19,7 @@ Filerna i den här mappen är källan. Ändra här, så följer appen och webbpl
 
 ## Flöden
 
+- [Aviseringar](https://naverp.se/hjalp/aviseringar/) ([källfil](aviseringar.md)) — Det som behöver åtgärdas just nu, och den dagliga sammanställningen via e-post.
 - [Inköp](https://naverp.se/hjalp/inkop/) ([källfil](inkop.md)) — Leverantörer med import från CSV, förfrågningar och inköpsorder med mottagning.
 - [Försäljning](https://naverp.se/hjalp/forsaljning/) ([källfil](forsaljning.md)) — Kunder med import från CSV, offert, kundorder, leverans och fakturering.
 - [Tillverkning](https://naverp.se/hjalp/tillverkning/) ([källfil](tillverkning.md)) — Tillverkningsorder, resurser, produktionsgrupper och efterkalkyl.
