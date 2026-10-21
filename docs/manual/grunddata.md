@@ -1,6 +1,6 @@
 # Grunddata
 
-**Inköp → Grunddata** i Nav|ERP (även under Försäljning och Artiklar) samlar de små register som delas av flera moduler: leveransvillkor, betalningsvillkor, speditörer, enheter och kollityper. Varje post har en **kod** och en **benämning**, båda unika inom sitt register.
+**Inköp → Grunddata** i Nav|ERP (även under Försäljning och Artiklar) samlar de små register som delas av flera moduler: leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper och förlustorsaker. Varje post har en **kod** och en **benämning**, båda unika inom sitt register.
 
 ## Leveransvillkor
 
@@ -34,6 +34,14 @@ Förpackningstyper för artiklar, t.ex. `EUR · EUR-pall` och `KRT · Kartong`. 
 - **+ Ny kollityp** för egna typer.
 - Kollitypernas kolumn **Frakt** sammanfattar fraktuppgifterna; klicka på den för dialogen **Fraktuppgifter — <kollityp>**. Fälten är **Kolliart** (Paket eller Pall), **Längd (mm)**, **Bredd (mm)** och **Höjd (mm)** för full förpackning, **Egenvikt (kg)**, **Flakmeter** (tomt = transportören räknar från måtten) och **Stapelbar**. De används för kolliförslaget på en [försändelse](/hjalp/forsaljning#frakt). Standardkollityperna EUR-pall, halvpall och kvartspall får fotavtryck och egenvikt när de läggs in med **Lägg till standardkollityper**.
 - **+ Ny enhet** för egna enheter.
+
+## Förlustorsaker
+
+Orsakerna man väljer när en offert markeras som **Förlorad** (se [Giltighetstid och förlorade offerter](/hjalp/forsaljning#giltighetstid-och-forlorade-offerter)), t.ex. `PRIS · Pris` och `LEVTID · Leveranstid`. Från början finns fem: Pris, Leveranstid, Valde annan leverantör, Projektet lades ned och Inget svar från kunden — de kan ändras och tas bort som alla andra poster.
+
+- **+ Ny förlustorsak** för egna orsaker. **Kod** skrivs med versaler och siffror (högst 10 tecken), **Benämning** högst 100; båda måste vara unika.
+- **Aktiv**: en inaktiv orsak kan inte väljas när en ny offert markeras som förlorad, men finns kvar på de offerter som redan använder den och i [Offertuppföljningen](/hjalp/rapporter#offertuppfoljning).
+- Borttagning och flytt av kopplingar fungerar som för övriga register (se nedan); offerterna som använde orsaken flyttas då till den du väljer.
 
 ## Användning och regler
 

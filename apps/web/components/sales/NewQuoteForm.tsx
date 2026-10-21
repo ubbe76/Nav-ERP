@@ -11,6 +11,7 @@ import type { ConfiguratorEvaluation, ResolveVariantResult, RowConfigurationDraf
 import { SearchPicker } from "../ui/SearchPicker";
 import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
 import { apiFetch } from "../../lib/api";
+import { addDaysIso, stockholmToday } from "../../lib/date";
 import { useCustomerDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
@@ -70,6 +71,30 @@ export function NewQuoteForm({
   // field unless the operator has touched it ("manuellt vinner"); an
   // untouched field follows the suggestion, also back to empty.
   const [dateTouched, setDateTouched] = useState(false);
+  // Giltig t.o.m. (offer only): prefilled with today + the system setting.
+  // null = not known (settings unavailable) — the field is then omitted and
+  // the server applies the same default; "" = cleared on purpose (no date).
+  const [quoteValidUntil, setQuoteValidUntil] = useState<string | null>(null);
+  useEffect(() => {
+    if (mode === "order") return;
+    let cancelled = false;
+    apiFetch<{ quoteValidityDays?: number }>("/api/v1/settings")
+      .then((settings) => {
+        const days = settings.quoteValidityDays;
+        if (cancelled || typeof days !== "number") return;
+        setQuoteValidUntil((current) =>
+          current !== null
+            ? current
+            : days > 0
+              ? addDaysIso(stockholmToday(), days)
+              : ""
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
   const { suggestion, summary, warning } = useCustomerDeliveryDateSuggestion({
     customerId: customer?.id ?? null,
     date: expectedDeliveryDate,
@@ -173,6 +198,7 @@ export function NewQuoteForm({
           customerReference: customerReference.trim() || undefined,
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, undefined),
           confirm: mode === "order",
+          ...(mode === "order" || quoteValidUntil === null ? {} : { quoteValidUntil: quoteValidUntil === "" ? null : quoteValidUntil }),
           rows: rows.map((r) => ({
             articleId: r.article!.id,
             quantity: Number(r.quantity),
@@ -238,6 +264,20 @@ export function NewQuoteForm({
           <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
       </FormRow>
+
+      {mode !== "order" && (
+        <FormRow>
+          <Field label="Giltig t.o.m. (valfritt)" htmlFor="quoteValidUntil">
+            <Input
+              id="quoteValidUntil"
+              type="date"
+              size="sm"
+              value={quoteValidUntil ?? ""}
+              onChange={(e) => setQuoteValidUntil(e.target.value)}
+            />
+          </Field>
+        </FormRow>
+      )}
 
       <FormRow>
         <Field label="Kundens ordernummer (valfritt)" htmlFor="customerOrderNumber">

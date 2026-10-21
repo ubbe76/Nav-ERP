@@ -21,3 +21,10 @@ export function toDateTimeLocalValue(iso: string): string {
   const date = new Date(iso);
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+// YYYY-MM-DD plus whole calendar days (pure calendar arithmetic in UTC, so
+// the browser's timezone and DST never shift the result).
+export function addDaysIso(day: string, days: number): string {
+  const [y = 0, m = 1, d = 1] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}

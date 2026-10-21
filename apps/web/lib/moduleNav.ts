@@ -521,6 +521,11 @@ export const RAPPORTER_SECTIONS: ModuleNavSection[] = [
         description: "Inköpsordrar med ordervärde och restvärde, per order eller med rader — urval på datum, leverantör, status och artikel.",
       },
       {
+        href: "/rapporter/offertuppfoljning",
+        title: "Offertuppföljning",
+        description: "Hur stor andel av offerterna som blir order — hit rate per kund, månad och förlustorsak.",
+      },
+      {
         href: "/rapporter/leveransprecision",
         title: "Leveransprecision",
         description: "Hur väl lovade leveransdatum hålls, för kundordrar och inköpsordrar var för sig.",

@@ -20,6 +20,20 @@ Värdena räknas per rad: antal × à-pris med radens rabatt (kundorder) och st�
 
 **Skriv ut** öppnar förteckningen som PDF (liggande A4) med urvalet i rubriken, och **Exportera CSV** ger samma urval som fil — med **Visa rader** en rad per orderrad med orderns uppgifter upprepade, så att den går att filtrera i Excel. Ett urval med fler än 10 000 orderrader avvisas; avgränsa då med datum, status eller kund/leverantör.
 
+## Offertuppföljning
+
+**Rapporter → Offertuppföljning** visar hur stor andel av offerterna som blir order. Urvalet är **Från** och **Till** (förval innevarande år) på dagen offerten skapades, och valfritt en **Kund**; alla val ligger i adressen så att urvalet går att spara eller skicka vidare.
+
+Överst står nyckeltalen **Offerter**, **Vunna**, **Förlorade**, **Öppna** (med antalet utgångna), **Makulerade**, **Hit rate (antal)** och **Hit rate (värde)**. Därunder kommer tabellerna **Per kund** (störst offererat värde först), **Per månad**, **Per förlustorsak** (antal, värde och andel av de förlorade; offerter förlorade utan orsak står som *Ingen orsak angiven*) och **Offerter** med varje offert: nummer (länkat till kortet), kund, skapad, giltig t.o.m., utfall, orsak och värde. **Exportera CSV** ger offertlistan.
+
+Definitionerna:
+
+- **Vunnen** är en offert som blivit bekräftad, under tillverkning, levererad eller fakturerad. **Förlorad** är en offert med status Förlorad. **Öppen** är en offert som fortfarande är offert, varav **Utgången** när **Giltig t.o.m.** har passerat. **Makulerad** är en avbruten offert.
+- **Hit rate (antal)** = vunna / (vunna + förlorade). **Hit rate (värde)** räknas på samma sätt med vunnet och förlorat värde. Öppna och makulerade offerter räknas inte; finns varken vunna eller förlorade visas **–**.
+- **Värde** är radernas nuvarande värde (antal × à-pris minus rabatt) exklusive moms, i SEK. En offert vars rader har ändrats efter att den vanns visar alltså det nya värdet.
+- En order skapad med **+ Ny kundorder** är ingen offert och ingår inte. Statistiken gäller offerter som var öppna när funktionen infördes och offerter som skapats efter det; äldre ordrar går inte att avgöra och räknas inte.
+- Ett urval med fler än 10 000 offerter avvisas; korta ned perioden eller välj en kund.
+
 ## Leveransprecision
 
 **Rapporter → Leveransprecision** mäter hur väl lovade leveransdatum hålls, för kundordrar och inköpsordrar var för sig.

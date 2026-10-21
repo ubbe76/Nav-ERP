@@ -8,12 +8,13 @@ import type { RegisterEntry } from "../../lib/types";
 // suppliers: leveransvillkor, betalningsvillkor, speditörer and enheter.
 export default async function GrunddataPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
-  const [deliveryTerms, paymentTerms, carriers, units, packageTypes] = await Promise.all([
+  const [deliveryTerms, paymentTerms, carriers, units, packageTypes, lossReasons] = await Promise.all([
     apiGet<RegisterEntry[]>("/api/v1/delivery-terms", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/payment-terms", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/carriers", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/units", cookieHeader),
     apiGet<RegisterEntry[]>("/api/v1/package-types", cookieHeader),
+    apiGet<RegisterEntry[]>("/api/v1/quote-loss-reasons", cookieHeader),
   ]);
 
   return (
@@ -24,6 +25,7 @@ export default async function GrunddataPage() {
         carriers={carriers}
         units={units}
         packageTypes={packageTypes}
+        lossReasons={lossReasons}
       />
     </AppShell>
   );

@@ -212,7 +212,9 @@ Rader vars artikel saknar förkalkyl kan inte mätas. De ingår i orderns summa 
 2. **Starta tillverkning** — markerar att tillverkning pågår. En rad med en tillverkningsartikel kan i stället kopplas till en riktig tillverkningsorder med knappen **Skapa tillverkningsorder** direkt på raden (kräver status Bekräftad eller Under tillverkning) — se [Skapa från kundorder](/hjalp/tillverkning#skapa-fran-kundorder). Det flyttar automatiskt ordern till **Under tillverkning** om den inte redan är det, och raden får kolumnen **I tillverkning** med det kopplade antalet och, för varje tillverkningsorder, TO-numret som länk och dess status (t.ex. **Frisläppt**, **Pågår**, **Klar**). När raden har en tillverkningsorder men inte är helt täckt heter knappen **Skapa TO för resten (N st)**; när tillverkningsordrarna täcker hela radens antal, eller raden är helt levererad, visas ingen knapp — en extra tillverkningsorder skapas då med **+ Ny tillverkningsorder**. På en konfigurerad beställningsvarurad finns knappen också; tillverkningsordern får radens val (se [Tillverkningsorder för beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara)).
 3. **Leverera** — ange rad, lagerplats och antal i dialogen; ett utleveranssaldo bokförs i lagret och en följesedel skapas (se [Följesedel](#foljesedel)). Delleveranser stöds. Hela ordern rapporteras smidigast i rutinen [Utleverans](#utleverans), som nås direkt med knappen **Utleveransrutinen**. En felrapporterad leverans ångras rad för rad (se [Ångra utleverans](#angra-utleverans)); en **Levererad** order går då tillbaka till **Under tillverkning**.
 4. **Fakturera** — synlig när ordern är **Levererad**; knappen tar dig till **Försäljning → Fakturor** med skapa-dialogen förifylld på ordern (se [Fakturor](#fakturor)). Knappen tilldelar inget fakturanummer själv — det sker när fakturan **utfärdas** i fakturamodulen — och ordern blir automatiskt **Fakturerad** först när alla dess rader är fullt fakturerade.
-5. **Avbryt order** — möjligt i status Offert och Bekräftad.
+5. **Förlorad…** — bara i status Offert; se [Giltighetstid och förlorade offerter](#giltighetstid-och-forlorade-offerter).
+6. **Öppna igen** — bara i status Förlorad.
+7. **Avbryt order** — möjligt i status Offert och Bekräftad.
 
 | Status | Betydelse |
 |---|---|
@@ -222,6 +224,17 @@ Rader vars artikel saknar förkalkyl kan inte mätas. De ingår i orderns summa 
 | Levererad | Utlevererad från lager |
 | Fakturerad | Avslutad |
 | Avbruten | Avbruten |
+| Förlorad | Offerten gick inte hem; orsak registrerad, låst som en avbruten |
+
+### Giltighetstid och förlorade offerter
+
+**Giltig t.o.m.** är sista dagen offerten gäller. Fältet finns i formuläret **Ny offert** (inte i **Ny kundorder**), förifyllt med dagens datum plus inställningen **Offertens giltighetstid (dagar)** (förval 30, se [Inställningar](/hjalp/system#installningar)); töm fältet för en offert utan giltighetstid. På en befintlig offert ändras datumet i **Ändra orderhuvud** och visas i orderhuvudet; ändringen höjer revisionen eftersom datumet skrivs ut. Offert-PDF:en och offertmejlet skriver *Offerten gäller till och med 20 november 2026.* under huvudet; orderbekräftelsen skriver inte ut det.
+
+Passerar datumet markeras offerten **Utgången** i orderhuvudet och i orderlistan, som har en egen kolumn **Giltig t.o.m.** för offerter. En utgången offert byter aldrig status av sig själv: den står kvar som offert tills du bekräftar den, markerar den som förlorad eller ändrar datumet. Offerter som snart går ut eller har gått ut dyker upp bland [Aviseringarna](/hjalp/aviseringar) som **Offerter att följa upp**.
+
+**Förlorad…** (bara i status Offert) öppnar dialogen **Markera offerten som förlorad**. Välj **Orsak** (obligatorisk, ur de aktiva [förlustorsakerna](/hjalp/grunddata#forlustorsaker)), skriv ev. en **Kommentar** och klicka **Markera som förlorad**. Offerten får status **Förlorad** och orderhuvudet visar **Förlustorsak**, **Markerad förlorad** (när och av vem) och **Kommentar**. En förlorad offert är låst som en avbruten: inga rad- eller huvudändringar och ingen PDF eller e-post. Skillnaden mot **Avbryt order** är att en förlorad offert räknas i [Offertuppföljningen](/hjalp/rapporter#offertuppfoljning), medan en avbruten offert ses som felregistrerad och inte räknas i hit rate.
+
+**Öppna igen** (bara i status Förlorad) frågar först och gör sedan ordern till en vanlig offert igen; förlustorsaken rensas men finns kvar i orderns historik. Giltigheten rörs inte, så ändra **Giltig t.o.m.** om den har gått ut. Sätter du status Förlorad med [Ändra status manuellt](#manuell-statusandring) blir det utan orsak (rapporten visar *Ingen orsak angiven*), och byter du från Förlorad till annan status rensas orsaken.
 
 ### Manuell statusändring
 

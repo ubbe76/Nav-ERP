@@ -68,7 +68,7 @@ export default async function SalesOrderDetailPage(props: { params: Promise<{ id
       extraBody: { variant: "quote" },
     });
   }
-  if (order.status !== "cancelled") {
+  if (order.status !== "cancelled" && order.status !== "lost") {
     sendButtons.push({
       label: "Skicka orderbekräftelse",
       modalTitle: `Skicka orderbekräftelse ${order.orderNumber} via e-post`,
@@ -170,7 +170,10 @@ export default async function SalesOrderDetailPage(props: { params: Promise<{ id
             ? { defaultChecked: customer?.showConfigurationPrices ?? false }
             : undefined
         }
-        pdfLinks={[
+        pdfLinks={
+          order.status === "lost"
+            ? []
+            : [
           { label: "Offert (PDF)", href: `/api/v1/sales-orders/${order.id}/pdf?variant=quote`, configurationPrices: true },
           {
             label: "Orderbekräftelse (PDF)",

@@ -375,6 +375,8 @@ export interface RegisterEntry {
   description?: string | null;
   // Kollityper only (frakt) — absent on the other registers.
   parcelKind?: "package" | "pallet" | "other";
+  // Förlustorsaker only — absent on the other registers.
+  active?: boolean;
   lengthMm?: string | null;
   widthMm?: string | null;
   heightMm?: string | null;
@@ -1048,6 +1050,17 @@ export interface SalesOrder extends DocumentTermsFields {
   // List-only: earliest effective delivery date among open rows.
   nextDeliveryDate?: string | null;
   expectedDeliveryDate: string | null;
+  // Offertuppföljning: created as a quote (not a direct order), Giltig t.o.m.
+  // and the loss registration (status lost).
+  quoted?: boolean;
+  quoteValidUntil?: string | null;
+  lostReasonId?: string | null;
+  lostReasonCode?: string | null;
+  lostReasonName?: string | null;
+  lostNote?: string | null;
+  lostAt?: string | null;
+  lostBy?: string | null;
+  lostByName?: string | null;
   note: string | null;
   customerOrderNumber: string | null;
   customerReference: string | null;
@@ -2262,6 +2275,10 @@ export interface SystemSettings {
   // for the links in the digest ("" = no links).
   alertDigestTime: string;
   alertSupplierInvoiceDays: number;
+  // Offerter att följa upp inom (dagar), 0–60.
+  alertQuoteFollowupDays: number;
+  // Offertens giltighetstid (dagar), 0–365; 0 = ingen giltighetstid.
+  quoteValidityDays: number;
   publicBaseUrl: string;
 }
 

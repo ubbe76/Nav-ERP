@@ -144,6 +144,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/ekonomi/konteringsregler": Route,
   "/ekonomi/anlaggningsgrupper": Folders,
   "/ekonomi/sie": FileDown,
+  "/rapporter/offertuppfoljning": BadgeCheck,
   "/rapporter/leveransprecision": Target,
   "/rapporter/forsaljningsstatistik": ChartColumn,
   "/rapporter/inkopsstatistik": ChartBar,

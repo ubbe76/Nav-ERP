@@ -22,6 +22,8 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   const [palletCardCode, setPalletCardCode] = useState(settings.palletCardCode);
   const [longOperationWeeks, setLongOperationWeeks] = useState(String(settings.planningLongOperationWeeks));
   const [longOperationSaved, setLongOperationSaved] = useState(false);
+  const [quoteValidityDays, setQuoteValidityDays] = useState(String(settings.quoteValidityDays));
+  const [quoteValiditySaved, setQuoteValiditySaved] = useState(false);
   const [supplierMode, setSupplierMode] = useState(settings.supplierDeliveryDayMode);
   const [supplierTransit, setSupplierTransit] = useState(String(settings.supplierTransitDays));
   const [customerMode, setCustomerMode] = useState(settings.customerDeliveryDayMode);
@@ -124,6 +126,20 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
     if (updated) {
       setLongOperationWeeks(String(updated.planningLongOperationWeeks));
       setLongOperationSaved(true);
+    }
+  }
+
+  async function saveQuoteValidityDays(badInput: boolean) {
+    setQuoteValiditySaved(false);
+    const value = quoteValidityDays.trim() === "" ? NaN : Number(quoteValidityDays);
+    if (badInput || !Number.isInteger(value) || value < 0 || value > 365) {
+      setError("Offertens giltighetstid måste vara ett heltal 0–365 dagar (0 = ingen giltighetstid)");
+      return;
+    }
+    const updated = await save({ quoteValidityDays: value });
+    if (updated) {
+      setQuoteValidityDays(String(updated.quoteValidityDays));
+      setQuoteValiditySaved(true);
     }
   }
 
@@ -369,6 +385,33 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
             onBlur={(e) => saveLongOperationWeeks(e.currentTarget.validity.badInput)}
           />
           {longOperationSaved && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Offertens giltighetstid (dagar)</div>
+          <div className={styles.description}>
+            Ny offert får Giltig t.o.m. = i dag plus så här många dagar, och datumet skrivs ut på offerten. Kan
+            ändras per offert. 0 = ingen giltighetstid.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="0"
+            max={365}
+            step="1"
+            aria-label="Offertens giltighetstid (dagar)"
+            className={styles.numberInput}
+            value={quoteValidityDays}
+            disabled={pending}
+            onChange={(e) => {
+              setQuoteValiditySaved(false);
+              setQuoteValidityDays(e.target.value);
+            }}
+            onBlur={(e) => saveQuoteValidityDays(e.currentTarget.validity.badInput)}
+          />
+          {quoteValiditySaved && <span className={styles.saved}>Sparat</span>}
         </div>
       </div>
       <div className={styles.section}>

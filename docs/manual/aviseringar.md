@@ -15,6 +15,7 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 | **Negativt saldo** | röd | Artikelns totala saldo över alla lagerplatser är mindre än 0. Raden visar artikelnummer, benämning och saldo. |
 | **Förfallna kundfakturor** | röd | Utfärdad kundfaktura med belopp kvar att betala och ett förfallodatum som har passerat. |
 | **Leverantörsfakturor att betala** | röd om förfallen, annars gul | Attesterad leverantörsfaktura med belopp kvar att betala och förfallodatum senast om så många dagar som inställningen **Leverantörsfakturor att betala inom (dagar)** anger (förval 7). Fakturor som ligger i en pågående betalningsomgång tas inte med, eftersom de redan är på väg att betalas. |
+| **Offerter att följa upp** | röd om utgången, annars gul | Offert (status Offert) vars **Giltig t.o.m.** har passerat eller infaller inom så många dagar som inställningen **Offerter att följa upp inom (dagar)** anger (förval 7). Raden visar *Gick ut 2026-10-15* eller *Går ut 2026-10-24 (om 3 dagar)* och länkar till kundordern; listan är Kundorder filtrerad på status Offert. Offerter utan giltighetstid tas inte med. |
 | **E-fakturor som inte gick fram** | röd | Fakturor vars senaste sändning i produktion misslyckades eller avvisades och som inte har någon pågående sändning. Sändningar i sandlådan räknas aldrig. |
 | **Utskick som misslyckades** | röd | Mejl med status **Misslyckat** de senaste 14 dagarna, utan ett senare lyckat utskick av samma dokument. Testmejl räknas inte. Bara administratörer ser typen. |
 | **Försenade kundordrar** | gul | Order med status bekräftad eller under tillverkning där en rad med rest har ett leveransdatum som har passerat. Offerter och levererade ordrar räknas aldrig. |
@@ -30,7 +31,7 @@ Datumen för order räknas som på [Översikten och i planeringen](/hjalp/komma-
 Du ser bara de typer som din behörighetsgrupp ger:
 
 - **Negativt saldo**: menyn **Lager**.
-- **Förfallna kundfakturor**, **E-fakturor som inte gick fram** och **Försenade kundordrar**: menyn **Försäljning**.
+- **Förfallna kundfakturor**, **E-fakturor som inte gick fram**, **Offerter att följa upp** och **Försenade kundordrar**: menyn **Försäljning**.
 - **Leverantörsfakturor att betala**, **Försenade inköpsordrar** och **Behöver beställas**: menyn **Inköp**.
 - **Sena tillverkningsordrar** och **Behöver tillverkas**: menyn **Tillverkning**.
 - **Utskick som misslyckades**: bara administratörer.

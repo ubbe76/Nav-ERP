@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
 import { errorBody } from "../src/modules/system/service/error-body.js";
 import { OrderRegisterTooLargeError } from "../src/modules/reports/service/order-register.service.js";
+import { QuoteFollowupTooLargeError } from "../src/modules/reports/service/quote-followup.service.js";
 import {
   ConfiguratorCodeLockedError,
   ConfiguratorCodeTakenError,
@@ -122,6 +123,7 @@ import {
   DeliveryRowNotUndoableError,
   DeliveryUndoneError,
   OverDeliveryError,
+  QuoteLossReasonInvalidError,
   SalesOrderRowNotFoundError,
 } from "../src/modules/sales/service/sales.service.js";
 import {
@@ -417,6 +419,8 @@ const cases: Array<[Error, string]> = [
   [new BuiltInNumberSeriesError("article", "delete"), ERROR_CODES.BUILT_IN_NUMBER_SERIES],
   [new DemoDataNotAvailableError(["customers"]), ERROR_CODES.DEMO_DATA_NOT_AVAILABLE],
   [new OrderRegisterTooLargeError(), ERROR_CODES.ORDER_REGISTER_TOO_LARGE],
+  [new QuoteFollowupTooLargeError(), ERROR_CODES.QUOTE_FOLLOWUP_TOO_LARGE],
+  [new QuoteLossReasonInvalidError("x"), ERROR_CODES.QUOTE_LOSS_REASON_INVALID],
   // auth
   [new InvalidCredentialsError(), ERROR_CODES.INVALID_CREDENTIALS],
   [new ClientScopeMissingError("prices:read"), ERROR_CODES.CLIENT_SCOPE_MISSING],

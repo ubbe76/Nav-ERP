@@ -12,6 +12,7 @@ import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui
 import { SALES_ORDER_STATUS_PILL, type Paged, type SalesOrder } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/forsaljning/ordrar/page.module.css";
+import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
 import { HelpLink } from "../ui/HelpLink";
 
 export function SalesOrdersPageClient({
@@ -60,6 +61,7 @@ export function SalesOrdersPageClient({
           { key: "customerName", label: "Kund", width: "1fr" },
           { key: "status", label: "Status", width: "160px" },
           { key: "expectedDeliveryDate", label: "Leveransdatum", width: "150px" },
+          { key: "quoteValidUntil", label: "Giltig t.o.m.", width: "170px" },
         ]}
         rows={orders.rows}
         emptyText="Inga ordrar matchar sökningen"
@@ -79,6 +81,15 @@ export function SalesOrdersPageClient({
             }
             case "expectedDeliveryDate":
               return order.nextDeliveryDate ?? order.expectedDeliveryDate ?? "–";
+            case "quoteValidUntil":
+              return order.status === "quote" ? (
+                <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="num">{order.quoteValidUntil ?? "–"}</span>
+                  {isQuoteExpired(order.status, order.quoteValidUntil) && <QuoteExpiredBadge />}
+                </span>
+              ) : (
+                ""
+              );
             default:
               return null;
           }

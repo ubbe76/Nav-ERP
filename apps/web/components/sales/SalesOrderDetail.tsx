@@ -1,6 +1,7 @@
 "use client";
 
-import { confirmDelete } from "../../lib/confirm";
+import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
 import { FreightQuoteDialog } from "../shipping/FreightQuoteDialog";
@@ -14,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
+import fieldStyles from "../ui/Field.module.css";
 import { Modal } from "../ui/Modal";
 import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
@@ -25,7 +27,7 @@ import { DocumentHeaderCard } from "../documents/DocumentHeaderCard";
 import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { ManualStatusChange } from "../documents/ManualStatusChange";
 import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, type TermsValue } from "../documents/TermsFields";
-import { formatStockholmDate } from "../../lib/date";
+import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import { configuredDeliveryWarning } from "../../lib/configuredDelivery";
 import { toBaseQuantity, toBasePrice, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
@@ -68,7 +70,7 @@ interface SalesOrderDetailProps {
 
 // Confirm / cancel / start-production — no body, just an action call.
 // Fakturera is now a Link into the invoice module (Task 9), not an action call.
-type SalesAction = "confirm" | "cancel" | "start-production";
+type SalesAction = "confirm" | "cancel" | "start-production" | "reopen";
 
 export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, registers, freightEnabled }: SalesOrderDetailProps) {
   const router = useRouter();
@@ -96,7 +98,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // enforced by the API and mirrored in the UI below.
   const rowsEditable = order.status === "quote" || order.status === "confirmed" || order.status === "in_production";
 
-  const [modal, setModal] = useState<"header" | "addRow" | "deliver" | "createMo" | null>(null);
+  const [modal, setModal] = useState<"header" | "addRow" | "deliver" | "createMo" | "lose" | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowPending, setRowPending] = useState(false);
   // E3: the row "Skapa tillverkningsorder" was invoked for — read by the
@@ -363,6 +365,22 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     }
   }
 
+  // Öppna igen: a lost quote becomes a quote again (the loss registration is
+  // cleared; the event log keeps the old reason).
+  async function reopenQuote() {
+    if (!(await confirmDialog(`Öppna ${order.orderNumber} igen? Förlustorsaken rensas och offerten blir en öppen offert.`, { confirmLabel: "Öppna igen" }))) return;
+    setActionError(null);
+    setActionPending("reopen");
+    try {
+      await apiFetch(`/api/v1/sales-orders/${order.id}/reopen`, { method: "POST" });
+      router.refresh();
+    } catch (err) {
+      setActionError(apiErrorMessage(err, "Kunde inte öppna offerten igen"));
+    } finally {
+      setActionPending(null);
+    }
+  }
+
   async function runAction(action: SalesAction) {
     setActionError(null);
     setActionPending(action);
@@ -392,6 +410,36 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           { label: "Kundens ordernummer", value: order.customerOrderNumber },
           { label: "Referens", value: order.customerReference },
           { label: "Leveransdatum", value: order.expectedDeliveryDate },
+          ...(order.status === "quote"
+            ? [
+                {
+                  label: "Giltig t.o.m.",
+                  value: order.quoteValidUntil ? (
+                    <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {order.quoteValidUntil}
+                      {isQuoteExpired(order.status, order.quoteValidUntil) && <QuoteExpiredBadge />}
+                    </span>
+                  ) : null,
+                },
+              ]
+            : []),
+          ...(order.status === "lost"
+            ? [
+                {
+                  label: "Förlustorsak",
+                  value: order.lostReasonName
+                    ? `${order.lostReasonCode ? `${order.lostReasonCode} · ` : ""}${order.lostReasonName}`
+                    : "Ingen orsak angiven",
+                },
+                {
+                  label: "Markerad förlorad",
+                  value: order.lostAt
+                    ? `${formatStockholmDateTime(order.lostAt)}${order.lostByName ? ` av ${order.lostByName}` : ""}`
+                    : null,
+                },
+                { label: "Kommentar", value: order.lostNote, wide: true },
+              ]
+            : []),
           { label: "Leveransvillkor", value: termsLabel(order.deliveryTermCode, order.deliveryTermName) },
           { label: "Betalningsvillkor", value: termsLabel(order.paymentTermCode, order.paymentTermName) },
           { label: "Speditör", value: termsLabel(order.carrierCode, order.carrierName) },
@@ -731,6 +779,18 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           </Link>
         )}
 
+        {order.status === "quote" && canSell && (
+          <Button type="button" variant="secondary" disabled={actionPending !== null} onClick={() => setModal("lose")}>
+            Förlorad…
+          </Button>
+        )}
+
+        {order.status === "lost" && canSell && (
+          <Button type="button" variant="primary" disabled={actionPending !== null} onClick={reopenQuote}>
+            {actionPending === "reopen" ? "Arbetar…" : "Öppna igen"}
+          </Button>
+        )}
+
         {(order.status === "quote" || order.status === "confirmed") && (
           <Button type="button" variant="danger" disabled={actionPending !== null} onClick={() => runAction("cancel")}>
             {actionPending === "cancel" ? "Arbetar…" : "Avbryt order"}
@@ -778,6 +838,10 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         />
       </Modal>
 
+      <Modal open={modal === "lose"} onClose={() => setModal(null)} title="Markera offerten som förlorad">
+        {modal === "lose" && <LoseQuoteForm orderId={order.id} onDone={refresh} onCancel={() => setModal(null)} />}
+      </Modal>
+
       <Modal open={modal === "addRow"} onClose={() => setModal(null)} title="Lägg till rad">
         <AddRowForm
           orderId={order.id}
@@ -805,6 +869,79 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         )}
       </Modal>
     </div>
+  );
+}
+
+// --- Förlorad: the loss dialog (Orsak is required, Kommentar optional) ---
+
+function LoseQuoteForm({ orderId, onDone, onCancel }: { orderId: string; onDone: () => void; onCancel: () => void }) {
+  const [reasons, setReasons] = useState<{ id: string; code: string; name: string }[] | null>(null);
+  const [reasonId, setReasonId] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    apiFetch<{ id: string; code: string; name: string; active: boolean }[]>("/api/v1/quote-loss-reasons")
+      .then((all) => setReasons(all.filter((r) => r.active)))
+      .catch((err) => {
+        setReasons([]);
+        setError(apiErrorMessage(err, "Kunde inte hämta förlustorsakerna"));
+      });
+  }, []);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    try {
+      await apiFetch(`/api/v1/sales-orders/${orderId}/lose`, {
+        method: "POST",
+        body: JSON.stringify({ lossReasonId: reasonId, lossNote: note.trim() || null }),
+      });
+      onDone();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte markera offerten som förlorad"));
+      setPending(false);
+    }
+  }
+
+  return (
+    <Form onSubmit={submit}>
+      <FormError>{error}</FormError>
+      <Field label="Orsak" htmlFor="lossReason">
+        <Select id="lossReason" required value={reasonId} onChange={(e) => setReasonId(e.target.value)}>
+          <option value="">— Välj —</option>
+          {(reasons ?? []).map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.code} · {r.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {reasons !== null && reasons.length === 0 && !error && (
+        <FormHint>Det finns inga aktiva förlustorsaker — lägg till en under Grunddata.</FormHint>
+      )}
+      <Field label="Kommentar (valfritt)" htmlFor="lossNote">
+        <textarea
+          id="lossNote"
+          rows={3}
+          maxLength={1000}
+          className={fieldStyles.input}
+          style={{ resize: "vertical", fontFamily: "inherit" }}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </Field>
+      <FormActions>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={pending}>
+          Avbryt
+        </Button>
+        <Button type="submit" variant="primary" disabled={pending || !reasonId}>
+          {pending ? "Sparar…" : "Markera som förlorad"}
+        </Button>
+      </FormActions>
+    </Form>
   );
 }
 
@@ -843,6 +980,7 @@ function EditHeaderForm({
         }
       : null;
   const [terms, setTerms] = useState<TermsValue>(termsFrom(order));
+  const [quoteValidUntil, setQuoteValidUntil] = useState(order.quoteValidUntil ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -859,6 +997,8 @@ function EditHeaderForm({
           customerReference: customerReference.trim() || null,
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, null),
           ...termsPayload(terms),
+          // Giltig t.o.m. only exists on a quote (the API refuses it otherwise).
+          ...(order.status === "quote" ? { quoteValidUntil: quoteValidUntil || null } : {}),
           bumpRevision,
         }),
       });
@@ -893,6 +1033,18 @@ function EditHeaderForm({
           />
         </Field>
       </FormRow>
+
+      {order.status === "quote" && (
+        <Field label="Giltig t.o.m." htmlFor="headerQuoteValidUntil">
+          <Input
+            id="headerQuoteValidUntil"
+            type="date"
+            size="sm"
+            value={quoteValidUntil}
+            onChange={(e) => setQuoteValidUntil(e.target.value)}
+          />
+        </Field>
+      )}
 
       <TermsFields registers={registers} value={terms} onChange={setTerms} />
 

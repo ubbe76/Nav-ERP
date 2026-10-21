@@ -157,6 +157,8 @@ export const ERROR_CODES = {
   DUPLICATE_NUMBER_SERIES_NAME: "duplicate-number-series-name",
   BUILT_IN_NUMBER_SERIES: "built-in-number-series",
   ORDER_REGISTER_TOO_LARGE: "order-register-too-large",
+  QUOTE_FOLLOWUP_TOO_LARGE: "quote-followup-too-large",
+  QUOTE_LOSS_REASON_INVALID: "quote-loss-reason-invalid",
   DEMO_DATA_NOT_AVAILABLE: "demo-data-not-available",
   // auth
   INVALID_CREDENTIALS: "invalid-credentials",

@@ -16,12 +16,19 @@ import tabStyles from "./PartnerTabs.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 
-const TABS = ["Leveransvillkor", "Betalningsvillkor", "Speditörer", "Enheter", "Kollityper"] as const;
+const TABS = ["Leveransvillkor", "Betalningsvillkor", "Speditörer", "Enheter", "Kollityper", "Förlustorsaker"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_CONFIG: Record<
   Tab,
-  { basePath: string; singular: string; seed?: { label: string; path: string }; showDescription?: boolean }
+  {
+    basePath: string;
+    singular: string;
+    seed?: { label: string; path: string };
+    showDescription?: boolean;
+    // Förlustorsaker: Aktiv flag, upper-case codes of at most 10 characters.
+    showActive?: boolean;
+  }
 > = {
   Leveransvillkor: {
     basePath: "/api/v1/delivery-terms",
@@ -43,6 +50,7 @@ const TAB_CONFIG: Record<
     singular: "kollityp",
     seed: { label: "Lägg till standardkollityper", path: "/api/v1/package-types/generate-standard" },
   },
+  Förlustorsaker: { basePath: "/api/v1/quote-loss-reasons", singular: "förlustorsak", showActive: true },
 };
 
 export function GrunddataPageClient({
@@ -51,12 +59,14 @@ export function GrunddataPageClient({
   carriers,
   units,
   packageTypes,
+  lossReasons,
 }: {
   deliveryTerms: RegisterEntry[];
   paymentTerms: RegisterEntry[];
   carriers: RegisterEntry[];
   units: RegisterEntry[];
   packageTypes: RegisterEntry[];
+  lossReasons: RegisterEntry[];
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("Leveransvillkor");
   const entriesByTab: Record<Tab, RegisterEntry[]> = {
@@ -65,6 +75,7 @@ export function GrunddataPageClient({
     Speditörer: carriers,
     Enheter: units,
     Kollityper: packageTypes,
+    Förlustorsaker: lossReasons,
   };
 
   return (
@@ -72,7 +83,7 @@ export function GrunddataPageClient({
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Grunddata</div>
-          <div className={shellStyles.meta}>Leveransvillkor, betalningsvillkor, speditörer, enheter och kollityper</div>
+          <div className={shellStyles.meta}>Leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper och förlustorsaker</div>
         </div>
         <HelpLink chapter="grunddata" label="Hjälp om grunddata" />
       </div>
@@ -103,7 +114,7 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
   const [freightEditing, setFreightEditing] = useState<RegisterEntry | null>(null);
   const [seedNotice, setSeedNotice] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
-  const { basePath, singular, seed, showDescription } = TAB_CONFIG[tab];
+  const { basePath, singular, seed, showDescription, showActive } = TAB_CONFIG[tab];
 
   async function runSeed() {
     if (!seed) return;
@@ -148,6 +159,7 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
           { key: "name", label: "Benämning", width: "2fr" },
           ...(showDescription ? [{ key: "description", label: "Förklaring", width: "3fr" }] : []),
           ...(tab === "Kollityper" ? [{ key: "freight", label: "Frakt", width: "2fr" }] : []),
+          ...(showActive ? [{ key: "active", label: "Status", width: "0.6fr" }] : []),
         ]}
         rows={entries}
         emptyText={`Inga ${tab.toLowerCase()} registrerade`}
@@ -167,6 +179,8 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
               );
             case "description":
               return entry.description ?? "—";
+            case "active":
+              return entry.active === false ? "Inaktiv" : "Aktiv";
             case "freight":
               return (
                 <button
@@ -187,6 +201,7 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
         <RegisterEntryForm
           basePath={basePath}
           showDescription={showDescription}
+          showActive={showActive}
           onSuccess={() => {
             setModalOpen(false);
             router.refresh();
@@ -202,6 +217,7 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
             entries={entries}
             singular={singular}
             showDescription={showDescription}
+            showActive={showActive}
             onSuccess={() => {
               setEditing(null);
               router.refresh();
@@ -316,6 +332,7 @@ function RegisterEntryForm({
   entries,
   singular,
   showDescription,
+  showActive,
   onSuccess,
 }: {
   basePath: string;
@@ -323,11 +340,13 @@ function RegisterEntryForm({
   entries?: RegisterEntry[];
   singular?: string;
   showDescription?: boolean;
+  showActive?: boolean;
   onSuccess: () => void;
 }) {
   const [code, setCode] = useState(entry?.code ?? "");
   const [name, setName] = useState(entry?.name ?? "");
   const [description, setDescription] = useState(entry?.description ?? "");
+  const [active, setActive] = useState(entry?.active ?? true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -347,7 +366,11 @@ function RegisterEntryForm({
       // Tabs without the description concept keep their wire format unchanged;
       // an emptied field is stored as null so the table's "—" stays honest.
       const body = JSON.stringify(
-        showDescription ? { code, name, description: description.trim() || null } : { code, name }
+        showDescription
+          ? { code, name, description: description.trim() || null }
+          : showActive
+            ? { code: code.trim().toUpperCase(), name, active }
+            : { code, name }
       );
       if (entry) {
         await apiFetch(`${basePath}/${entry.id}`, { method: "PATCH", body });
@@ -470,12 +493,27 @@ function RegisterEntryForm({
       <FormError>{error}</FormError>
 
       <Field label="Kod" htmlFor="registerCode">
-        <Input id="registerCode" size="md" required maxLength={20} value={code} onChange={(e) => setCode(e.target.value)} />
+        <Input
+          id="registerCode"
+          size="md"
+          required
+          maxLength={showActive ? 10 : 20}
+          value={code}
+          onChange={(e) => setCode(showActive ? e.target.value.toUpperCase() : e.target.value)}
+        />
       </Field>
 
       <Field label="Benämning" htmlFor="registerName">
         <Input id="registerName" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
+
+      {showActive && (
+        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <Checkbox checked={active} onChange={(e) => setActive(e.target.checked)} />
+          Aktiv
+        </label>
+      )}
+      {showActive && <FormHint>Inaktiva orsaker kan inte väljas när en offert markeras som förlorad.</FormHint>}
 
       {showDescription && (
         <Field label="Förklaring (valfritt)" htmlFor="registerDescription">
