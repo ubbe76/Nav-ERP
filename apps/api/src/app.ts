@@ -143,6 +143,9 @@ import { createDemoDataService } from "./modules/demo/service/demo-data.service.
 import { demoDataRoutes } from "./modules/demo/routes/demo-data.routes.js";
 import { createOnboardingService } from "./modules/system/service/onboarding.service.js";
 import { onboardingRoutes } from "./modules/system/routes/onboarding.routes.js";
+import { createAlertsRepository } from "./modules/alerts/repository/alerts.repository.js";
+import { createAlertsService } from "./modules/alerts/service/alerts.service.js";
+import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation } from "./modules/system/service/db-errors.js";
 
 // TRUST_PROXY → Fastify's trustProxy: "true", a hop count ("1") or a
@@ -516,6 +519,15 @@ export function buildApp(database: Db = db) {
     salesOrderDates: salesService,
   });
   planReaderRef.current = planningService;
+  // Aviseringar — derived at every read. The behovsberäkning (through its
+  // cache) and the TO list's Sen come from the planning service; the
+  // "due within N days" window from the system settings.
+  const alertsService = createAlertsService({
+    repo: createAlertsRepository(database),
+    planning: planningService,
+    settings: { supplierInvoiceDays: async () => (await systemService.getSettings()).alertSupplierInvoiceDays },
+  });
+  app.decorate("alerts", alertsService);
   // Rapporter (F1) — read-only derived reports, admin-only in the routes.
   // costingService supplies the self cost the margin report measures against.
   const reportsService = createReportsService(createReportsRepository(database), costingService);
@@ -667,6 +679,9 @@ export function buildApp(database: Db = db) {
         );
         await registerModule(protectedRoutes, manufacturingRoutes, { service: manufacturingService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, planningRoutes, { service: planningService }, { read: office, write: ["tillverkning"] });
+        // Aviseringar: one read, every office user; the kinds are filtered per
+        // user in the service (admin-only Utskick som misslyckades included).
+        await registerModule(protectedRoutes, alertsRoutes, { service: alertsService }, { read: office, write: ["admin"] });
         await registerModule(protectedRoutes, reportsRoutes, { service: reportsService, orderRegister: orderRegisterService }, { read: ["rapporter"], write: ["rapporter"] });
         await registerModule(protectedRoutes, timeReportRoutes, { service: timeReportService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, scheduleRoutes, { service: scheduleService }, { read: office, write: ["tillverkning"] });

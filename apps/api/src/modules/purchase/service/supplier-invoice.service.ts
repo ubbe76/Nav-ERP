@@ -172,7 +172,9 @@ export class SupplierInvoiceFileLockedError extends Error {
 // parsed with new Date("2026-07-01"), which ISO-parses to UTC midnight and
 // can land on the previous day once toLocaleDateString renders it in a
 // negative-offset timezone.
-function computeDueDate(invoiceDate: string, paymentTermCode: string | null): string | null {
+// Exported for the alerts module (Leverantörsfakturor att betala), which
+// derives the due date the same way for an invoice saved without one.
+export function computeDueDate(invoiceDate: string, paymentTermCode: string | null): string | null {
   const termDays = Number.parseInt(paymentTermCode ?? "", 10);
   if (!Number.isFinite(termDays)) return null;
   const [y, m, d] = invoiceDate.split("-").map(Number);

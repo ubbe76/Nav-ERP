@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { alertKindSchema } from "./alerts.js";
 
 // Per-user preferences (auth module, `user_settings` KV table) — distinct
 // from the system-wide system_settings module. First (and so far only) key
@@ -22,6 +23,12 @@ export const userSettingsSchema = z.object({
   listPageSize: listPageSizeSchema,
   // System → Kom igång: this administrator hid the checklist on Översikten.
   hideOnboarding: z.boolean(),
+  // Aviseringar: the daily e-mail digest is opt-in per user. alertDigestKinds
+  // narrows it to some kinds; null = every kind the user may see. Kinds the
+  // user may not see are ignored when the mail is built, never rejected —
+  // the permission may change afterwards.
+  alertDigest: z.boolean(),
+  alertDigestKinds: z.array(alertKindSchema).nullable(),
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 

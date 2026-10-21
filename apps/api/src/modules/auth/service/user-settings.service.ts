@@ -1,13 +1,40 @@
-import { DEFAULT_LIST_PAGE_SIZE, LIST_PAGE_SIZE_OPTIONS, type UpdateUserSettingsInput, type UserSettings } from "@navet/shared";
+import {
+  ALERT_KINDS,
+  DEFAULT_LIST_PAGE_SIZE,
+  LIST_PAGE_SIZE_OPTIONS,
+  type AlertKind,
+  type UpdateUserSettingsInput,
+  type UserSettings,
+} from "@navet/shared";
 import type { UserSettingsRepository } from "../repository/user-settings.repository.js";
 
 const LIST_PAGE_SIZE_KEY = "list_page_size";
 const HIDE_ONBOARDING_KEY = "hide_onboarding";
+// Aviseringar: the daily digest opt-in and its kind filter (a JSON array of
+// kind keys; absent or "null" = every kind the user may see).
+const ALERT_DIGEST_KEY = "alert_digest";
+const ALERT_DIGEST_KINDS_KEY = "alert_digest_kinds";
 
 const LIST_PAGE_SIZE_VALUES: readonly number[] = LIST_PAGE_SIZE_OPTIONS;
+const KNOWN_ALERT_KINDS: ReadonlySet<string> = new Set(ALERT_KINDS);
 
 function isValidListPageSize(value: number): value is UserSettings["listPageSize"] {
   return LIST_PAGE_SIZE_VALUES.includes(value);
+}
+
+// A stored list is kept to the kinds that still exist (a kind removed from
+// the catalog is dropped, like a removed permission in a group); anything
+// unparseable falls back to null = all.
+function decodeAlertDigestKinds(raw: string | undefined): AlertKind[] | null {
+  if (raw === undefined || raw === "null") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const kinds = parsed.filter((k): k is AlertKind => typeof k === "string" && KNOWN_ALERT_KINDS.has(k));
+    return [...new Set(kinds)];
+  } catch {
+    return null;
+  }
 }
 
 export function createUserSettingsService(repo: UserSettingsRepository) {
@@ -21,7 +48,12 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
     const raw = byKey.get(LIST_PAGE_SIZE_KEY);
     const parsed = raw === undefined ? NaN : Number(raw);
     const listPageSize = isValidListPageSize(parsed) ? parsed : DEFAULT_LIST_PAGE_SIZE;
-    return { listPageSize, hideOnboarding: byKey.get(HIDE_ONBOARDING_KEY) === "true" };
+    return {
+      listPageSize,
+      hideOnboarding: byKey.get(HIDE_ONBOARDING_KEY) === "true",
+      alertDigest: byKey.get(ALERT_DIGEST_KEY) === "true",
+      alertDigestKinds: decodeAlertDigestKinds(byKey.get(ALERT_DIGEST_KINDS_KEY)),
+    };
   }
 
   return {
@@ -33,6 +65,16 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       }
       if (input.hideOnboarding !== undefined) {
         await repo.upsert(userId, HIDE_ONBOARDING_KEY, String(input.hideOnboarding));
+      }
+      if (input.alertDigest !== undefined) {
+        await repo.upsert(userId, ALERT_DIGEST_KEY, String(input.alertDigest));
+      }
+      if (input.alertDigestKinds !== undefined) {
+        await repo.upsert(
+          userId,
+          ALERT_DIGEST_KINDS_KEY,
+          input.alertDigestKinds === null ? "null" : JSON.stringify([...new Set(input.alertDigestKinds)])
+        );
       }
       return getSettings(userId);
     },

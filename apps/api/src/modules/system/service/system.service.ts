@@ -41,6 +41,14 @@ import {
 } from "./posting-settings.js";
 import { isUniqueViolation } from "./db-errors.js";
 import { decodeLongOperationWeeks, PLANNING_LONG_OPERATION_WEEKS_KEY } from "./plan-settings.js";
+import {
+  ALERT_DIGEST_TIME_KEY,
+  ALERT_SUPPLIER_INVOICE_DAYS_KEY,
+  decodeAlertDigestTime,
+  decodeAlertSupplierInvoiceDays,
+  decodePublicBaseUrl,
+  PUBLIC_BASE_URL_KEY,
+} from "./alert-settings.js";
 // G1: append-only audit trail. system_settings/company_info are singletons —
 // entityId is null (no natural per-row id); number_series/company_carrier
 // use their own readable key/code. updateSettings NEVER logs values — only
@@ -269,6 +277,10 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // Fasta leveransdagar — the default mode/transit days for partners
       // without their own; junk decodes to the default (delivery-days.ts).
       ...flattenDeliveryDefaults(decodeDeliveryDefaults(get)),
+      // Aviseringar — alert-settings.ts owns the keys and defaults.
+      alertDigestTime: decodeAlertDigestTime(get(ALERT_DIGEST_TIME_KEY)),
+      alertSupplierInvoiceDays: decodeAlertSupplierInvoiceDays(get(ALERT_SUPPLIER_INVOICE_DAYS_KEY)),
+      publicBaseUrl: decodePublicBaseUrl(get(PUBLIC_BASE_URL_KEY)),
       // Automatic accounting (Ekonomi → automatkontering) — the 14 posting
       // accounts + the 2 kundreskontra amounts, decoded by the leaf that owns
       // their keys/defaults (posting-settings.js).
@@ -564,6 +576,12 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       if (input.customerTransitDays !== undefined) {
         await set(DELIVERY_SETTING_KEYS.customerTransit, String(input.customerTransitDays));
       }
+      // Aviseringar.
+      if (input.alertDigestTime !== undefined) await set(ALERT_DIGEST_TIME_KEY, input.alertDigestTime);
+      if (input.alertSupplierInvoiceDays !== undefined) {
+        await set(ALERT_SUPPLIER_INVOICE_DAYS_KEY, String(input.alertSupplierInvoiceDays));
+      }
+      if (input.publicBaseUrl !== undefined) await set(PUBLIC_BASE_URL_KEY, decodePublicBaseUrl(input.publicBaseUrl));
       if (input.postingAccountsReceivable !== undefined) {
         await set(POSTING_ACCOUNTS_RECEIVABLE_KEY, input.postingAccountsReceivable);
       }

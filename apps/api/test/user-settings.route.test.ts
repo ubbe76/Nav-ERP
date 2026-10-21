@@ -90,7 +90,7 @@ describe("GET /me/settings", () => {
 
     const res = await app.inject({ url: "/me/settings", headers: { cookie } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false });
+    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
     await app.close();
   });
 });
@@ -114,10 +114,10 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 100 },
     });
     expect(patchRes.statusCode).toBe(200);
-    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false });
+    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
 
     const getRes = await app.inject({ url: "/me/settings", headers: { cookie } });
-    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false });
+    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
 
     // Upsert, not insert-only: a second PATCH overwrites the first value
     // rather than erroring on the composite PK.
@@ -128,7 +128,7 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 25 },
     });
     expect(secondPatch.statusCode).toBe(200);
-    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false });
+    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
     await app.close();
   });
 
@@ -166,9 +166,35 @@ describe("PATCH /me/settings", () => {
     const cookieB = await registerAndLogin(app);
 
     const patch = await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie: cookieA }, payload: { hideOnboarding: true } });
-    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true });
+    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null });
     const other = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
     expect(other.json().hideOnboarding).toBe(false);
+    await app.close();
+  });
+
+  it("stores the alert digest opt-in and its kinds, drops unknown kinds and 400s a bad kind", async () => {
+    const app = buildApp();
+    const cookie = await registerAndLogin(app);
+
+    const on = await app.inject({
+      method: "PATCH",
+      url: "/me/settings",
+      headers: { cookie },
+      payload: { alertDigest: true, alertDigestKinds: ["purchase_needed", "stock_negative", "purchase_needed"] },
+    });
+    expect(on.statusCode).toBe(200);
+    expect(on.json()).toMatchObject({ alertDigest: true, alertDigestKinds: ["purchase_needed", "stock_negative"] });
+    // null = every kind the user may see.
+    const all = await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie }, payload: { alertDigestKinds: null } });
+    expect(all.json()).toMatchObject({ alertDigest: true, alertDigestKinds: null });
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json()).toMatchObject({ alertDigest: true, alertDigestKinds: null });
+
+    const bad = await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie }, payload: { alertDigestKinds: ["nope"] } });
+    expect(bad.statusCode).toBe(400);
+
+    // A kind that has since left the catalog is dropped on read, never surfaced.
+    await settingsRepo.upsert((await authRepo.findByEmail((await app.inject({ url: "/auth/me", headers: { cookie } })).json().email))!.id, "alert_digest_kinds", JSON.stringify(["gone", "email_failed"]));
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json().alertDigestKinds).toEqual(["email_failed"]);
     await app.close();
   });
 
@@ -185,7 +211,7 @@ describe("PATCH /me/settings", () => {
     });
 
     const resB = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
-    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false });
+    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
     await app.close();
   });
 });

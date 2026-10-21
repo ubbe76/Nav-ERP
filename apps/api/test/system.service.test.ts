@@ -146,6 +146,35 @@ describe("system service — settings", () => {
     expect(updateSystemSettingsSchema.safeParse({ palletCardAllowQuantityMismatch: "yes" }).success).toBe(false);
   });
 
+  it("Aviseringar: digest time, supplier invoice window and Navs adress default, round-trip and reject junk", async () => {
+    const KEYS = ["alert_digest_time", "alert_supplier_invoice_days", "public_base_url"];
+    await db.delete(systemSettings).where(inArray(systemSettings.key, KEYS));
+    try {
+      expect(await systemService.getSettings()).toMatchObject({ alertDigestTime: "07:00", alertSupplierInvoiceDays: 7, publicBaseUrl: "" });
+      expect(
+        await systemService.updateSettings({ alertDigestTime: "16:30", alertSupplierInvoiceDays: 0, publicBaseUrl: "https://erp.foretag.se/" })
+      ).toMatchObject({ alertDigestTime: "16:30", alertSupplierInvoiceDays: 0, publicBaseUrl: "https://erp.foretag.se" });
+      expect((await systemService.updateSettings({ publicBaseUrl: "" })).publicBaseUrl).toBe("");
+      for (const [key, value] of [
+        ["alert_digest_time", "25:99"],
+        ["alert_supplier_invoice_days", "999"],
+        ["public_base_url", "ftp://x"],
+      ] as const) {
+        await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+      }
+      expect(await systemService.getSettings()).toMatchObject({ alertDigestTime: "07:00", alertSupplierInvoiceDays: 7, publicBaseUrl: "" });
+    } finally {
+      await db.delete(systemSettings).where(inArray(systemSettings.key, KEYS));
+    }
+    expect(updateSystemSettingsSchema.safeParse({ alertDigestTime: "7:00" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ alertDigestTime: "24:00" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ alertSupplierInvoiceDays: 61 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ alertSupplierInvoiceDays: 1.5 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ publicBaseUrl: "erp.foretag.se" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ publicBaseUrl: "ftp://erp.foretag.se" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ publicBaseUrl: "http://localhost:3000" }).success).toBe(true);
+  });
+
   it("defaults Orimligt mycket tid to 4 weeks, round-trips decimals and 0, and junk decodes to the default", async () => {
     await db.delete(systemSettings).where(eq(systemSettings.key, "planning_long_operation_weeks"));
     try {

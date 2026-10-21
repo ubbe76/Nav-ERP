@@ -1007,6 +1007,14 @@ export function createPlanningService(
       };
     },
 
+    // Aviseringar (Behöver beställas / Behöver tillverkas): the rows with a
+    // proposal, read through the same cache as the list — never a recompute
+    // and never a mutation of the cached rows (filter copies).
+    async requirementProposals(): Promise<RequirementRow[]> {
+      const rows = await computedRequirements(false).rows;
+      return rows.filter((r) => r.proposalQuantity > 0);
+    },
+
     // Artikelöversikt (planeringsbild) — one article's open rows in date
     // order with a running balance. Derived at read time like the MRP.
     async getArticleOverview(articleId: string): Promise<ArticleOverview> {

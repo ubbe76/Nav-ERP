@@ -35,3 +35,4 @@ export * from "./user-settings.js";
 export * from "./vat.js";
 export * from "./configurator.js";
 export * from "./einvoice.js";
+export * from "./alerts.js";

@@ -154,6 +154,23 @@ const systemSettingsFieldsSchema = z.object({
     // these two (unlike the account codes, an empty amount is not valid).
     paymentTolerance: z.number().min(0).max(100000).optional(),
     reminderFee: z.number().min(0).max(100000).optional(),
+    // Aviseringar: when the daily digest is sent (Stockholm time, HH:MM),
+    // how far ahead "Leverantörsfakturor att betala" looks (days), and Navs
+    // adress for the links in the digest mail — a http(s) URL or "" (= no
+    // links in the mail).
+    alertDigestTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    alertSupplierInvoiceDays: z.number().int().min(0).max(60).optional(),
+    publicBaseUrl: z
+      .union([
+        z.literal(""),
+        z
+          .string()
+          .trim()
+          .max(255)
+          .url()
+          .refine((value) => /^https?:\/\//i.test(value), "Must be an http(s) URL"),
+      ])
+      .optional(),
   });
 
 export const updateSystemSettingsSchema = systemSettingsFieldsSchema.refine(
