@@ -8,6 +8,7 @@ import { formatSek } from "../../lib/shipping";
 import Link from "next/link";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { GatedLink } from "../ui/GatedLink";
+import { StatusPill } from "../ui/StatusPill";
 import { useCan } from "../PermissionsProvider";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -35,10 +36,12 @@ import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { askBumpRevision } from "../../lib/revision";
 import {
+  MANUFACTURING_ORDER_STATUS_PILL,
   SALES_ORDER_STATUS_PILL,
   type Article,
   type CustomerDeliveryAddress,
   type ManufacturingOrder,
+  type ManufacturingOrderStatus,
   type OrderFreight,
   type PriceQuote,
   type SalesOrder,
@@ -415,8 +418,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             { key: "unitCode", label: "Enhet", width: "60px" },
             { key: "quantityDelivered", label: "Levererat", width: "70px", align: "right" },
             // E3: quantity already in production (non-cancelled linked TOs)
-            // plus their order numbers, linking to the TO card.
-            { key: "quantityInProduction", label: "I tillverkning", width: "80px" },
+            // plus one line per TO — order number linking to the TO card and
+            // its status — so a row that has its TO is obvious at a glance.
+            // The pill sits under the number: a wider track pushes the table
+            // past the content column.
+            { key: "quantityInProduction", label: "I tillverkning", width: "90px" },
             { key: "unitPrice", label: "Á-pris", width: "90px", align: "right" },
             { key: "discountPercent", label: "Rabatt", width: "60px", align: "right" },
             { key: "lineAmount", label: "Belopp", width: "90px", align: "right" },
@@ -491,17 +497,20 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
               case "quantityDelivered":
                 return toUnitQuantity(Number(row.quantityDelivered), row.unitFactor);
               case "quantityInProduction":
-                if (row.quantityInProduction <= 0) return null;
+                if (row.manufacturingOrders.length === 0) return null;
                 return (
-                  <span>
-                    {toUnitQuantity(row.quantityInProduction, row.unitFactor)}{" "}
-                    {row.manufacturingOrders.map((mo, i) => (
-                      <span key={mo.id}>
-                        {i > 0 && ", "}
-                        <GatedLink href={`/tillverkning/ordrar/${mo.id}`}>{mo.orderNumber}</GatedLink>
-                      </span>
-                    ))}
-                  </span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span>{toUnitQuantity(row.quantityInProduction, row.unitFactor)}</span>
+                    {row.manufacturingOrders.map((mo) => {
+                      const moPill = MANUFACTURING_ORDER_STATUS_PILL[mo.status as ManufacturingOrderStatus];
+                      return (
+                        <span key={mo.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginTop: 2 }}>
+                          <GatedLink href={`/tillverkning/ordrar/${mo.id}`}>{mo.orderNumber}</GatedLink>
+                          {moPill && <StatusPill status={moPill.status} label={moPill.label} compact />}
+                        </span>
+                      );
+                    })}
+                  </div>
                 );
               case "unitPrice":
                 return editingRowId === row.id ? (
@@ -573,9 +582,16 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                       )}
                     {canCreateMo &&
                       row.articleType === "manufactured" &&
-                      (order.status === "confirmed" || order.status === "in_production") && (
+                      (order.status === "confirmed" || order.status === "in_production") &&
+                      moRemaining(row) > 0 &&
+                      Number(row.quantityDelivered) < Number(row.quantityOrdered) && (
                         <Button type="button" size="small" variant="secondary" onClick={() => openCreateMo(row)}>
-                          Skapa tillverkningsorder
+                          {/* Once the row has a TO the button only offers the
+                              rest; a fully covered row has no button at all
+                              (an extra TO goes via + Ny tillverkningsorder). */}
+                          {row.manufacturingOrders.length === 0
+                            ? "Skapa tillverkningsorder"
+                            : `Skapa TO för resten (${toUnitQuantity(moRemaining(row), row.unitFactor)} ${row.unitCode})`}
                         </Button>
                       )}
                   </span>
@@ -1202,6 +1218,13 @@ function AddRowForm({
 }
 
 // --- E3: Skapa tillverkningsorder från kundorderraden ---
+
+// What is left of the row to manufacture, in base quantity: ordered minus what
+// non-cancelled linked TOs already cover. Rounded so float noise never shows a
+// "rest" of 0.0000001.
+function moRemaining(row: SalesOrderRow): number {
+  return toUnitQuantity(Number(row.quantityOrdered) - row.quantityInProduction, null);
+}
 // Mirrors NewManufacturingOrderForm's "Antal"-only shape — an MO carries no
 // unit of its own, so the field (and the POST body) work directly in the
 // row's base quantity, same as quantityOrdered/quantityInProduction already
@@ -1223,7 +1246,7 @@ function CreateMoForm({
   // toUnitQuantity(diff, null) is exactly round4(diff) (factor null → ×1) —
   // avoids prefilling a float-noise remainder like "3.1999999999999993".
   const [quantity, setQuantity] = useState(
-    String(Math.max(0, toUnitQuantity(Number(row.quantityOrdered) - row.quantityInProduction, null)))
+    String(Math.max(0, moRemaining(row)))
   );
   // Prefilled with the working day before this row's delivery date.
   const [dueDate, setDueDate] = useState("");
