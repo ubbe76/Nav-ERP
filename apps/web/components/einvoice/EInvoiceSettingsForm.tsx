@@ -180,9 +180,11 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
               />
             </Field>
             {apiKeySet && (
-              <Button type="button" variant="ghost" size="small" onClick={removeKey}>
-                Ta bort nyckel
-              </Button>
+              <div style={{ display: "flex", alignItems: "flex-end" }}>
+                <Button type="button" variant="ghost" size="small" onClick={removeKey}>
+                  Ta bort nyckel
+                </Button>
+              </div>
             )}
           </FormRow>
           <FormRow>
@@ -194,9 +196,12 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
                 placeholder="Välj genom Testa anslutning"
               />
             </Field>
-            <Button type="button" variant="secondary" disabled={testing} onClick={testConnection}>
-              {testing ? "Testar…" : "Testa anslutning"}
-            </Button>
+            {/* Bottom-aligned at its natural size, not stretched by the grid row. */}
+            <div style={{ display: "flex", alignItems: "flex-end" }}>
+              <Button type="button" variant="secondary" disabled={testing} onClick={testConnection}>
+                {testing ? "Testar…" : "Testa anslutning"}
+              </Button>
+            </div>
           </FormRow>
           {notice && <FormHint>{notice}</FormHint>}
           {vatWarning && <FormNotice>{vatWarning}</FormNotice>}

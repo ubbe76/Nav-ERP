@@ -132,6 +132,14 @@ export function blockedReasonFor(
   return null;
 }
 
+// The failed row's text: the adapter's message plus any field errors it
+// does not already contain (B2Brouter's import refusal carries the same text
+// in both, which printed it twice).
+export function withFieldErrors(message: string, fieldErrors: string[]): string {
+  const extra = fieldErrors.filter((e) => !message.includes(e));
+  return extra.length > 0 ? `${message} — ${extra.join("; ")}` : message;
+}
+
 function addressOf(address: string | null, postalCode: string | null, city: string | null, country: string): UblPostalAddress {
   const lines = (address ?? "")
     .split(/\r?\n/)
@@ -437,7 +445,9 @@ export function createEinvoiceService(deps: {
           await repo.updateTransmission(transmissionId, {
             status: stillSending ? "sending" : "failed",
             providerInvoiceId: err.providerInvoiceId,
-            errorMessage: err.fieldErrors.length > 0 ? `${err.message} — ${err.fieldErrors.join("; ")}` : err.message,
+            // The adapter often folds the provider's text into the message
+            // already — append only the field errors it does not contain.
+            errorMessage: withFieldErrors(err.message, err.fieldErrors),
             statusUpdatedAt: at,
           });
           await audit.log({

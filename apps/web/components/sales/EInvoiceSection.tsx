@@ -69,7 +69,7 @@ export function EInvoiceSection({ invoiceId, invoiceNumber }: { invoiceId: strin
   const preferred = data.invoiceDelivery === "peppol";
 
   async function send() {
-    if (!(await confirmDialog(`Skicka ${invoiceNumber} som e-faktura till ${peppolId ?? "kunden"}?`))) return;
+    if (!(await confirmDialog(`Skicka ${invoiceNumber} som e-faktura till ${peppolId ?? "kunden"}?`, { confirmLabel: "Skicka" }))) return;
     setError(null);
     setBusyId("send");
     try {
@@ -138,14 +138,17 @@ export function EInvoiceSection({ invoiceId, invoiceNumber }: { invoiceId: strin
                   return formatStockholmDateTime(t.startedAt);
                 case "status":
                   return (
-                    <>
+                    // A column with the pill at its natural size — in the
+                    // phone layout the cell is a flex row and the pill
+                    // otherwise stretched to the error text's height.
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4, minWidth: 0 }}>
                       <StatusPill
                         status={EINVOICE_STATUS_PILL[t.status]}
                         label={t.environment === "sandbox" ? `${EINVOICE_STATUS_LABELS[t.status]} (sandbox)` : EINVOICE_STATUS_LABELS[t.status]}
                         compact
                       />
-                      {t.errorMessage && <div>{t.errorMessage}</div>}
-                    </>
+                      {t.errorMessage && <div style={{ overflowWrap: "anywhere" }}>{t.errorMessage}</div>}
+                    </div>
                   );
                 case "environment":
                   return t.environment === "sandbox" ? <strong>{EINVOICE_ENVIRONMENT_LABELS.sandbox}</strong> : EINVOICE_ENVIRONMENT_LABELS[t.environment];
