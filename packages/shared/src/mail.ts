@@ -4,7 +4,8 @@ import { listQuerySchema, statusListParam } from "./list.js";
 // Outbound email — documents are always sent as PDF attachments; the body is
 // a short plain-text message the user can edit in the send dialog.
 // payment_reminder (B3) logs against the INVOICE's id — the reminder is an
-// event on the invoice, not a document of its own.
+// event on the invoice, not a document of its own. alert_digest is the daily
+// aviseringar sammanställning — no documentId, and never resent.
 export const emailDocumentTypes = [
   "inquiry",
   "purchase_order",
@@ -13,6 +14,7 @@ export const emailDocumentTypes = [
   "invoice",
   "payment_reminder",
   "test",
+  "alert_digest",
 ] as const;
 export type EmailDocumentType = (typeof emailDocumentTypes)[number];
 

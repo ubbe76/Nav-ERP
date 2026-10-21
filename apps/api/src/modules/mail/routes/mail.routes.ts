@@ -6,7 +6,7 @@ import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { emailLogExportColumns } from "../service/export-columns.js";
 import type { MailService } from "../service/mail.service.js";
-import { resendAccessRule } from "../service/resend-access.js";
+import { AlertDigestResendError, resendAccessRule } from "../service/resend-access.js";
 import { EmailLogEntryNotFoundError, MailSendError, SmtpNotConfiguredError } from "../service/mail.service.js";
 import type { PurchaseService } from "../../purchase/service/purchase.service.js";
 import type { SalesService } from "../../sales/service/sales.service.js";
@@ -63,6 +63,8 @@ export async function mailRoutes(
     ) {
       return reply.code(409).send({ error: (err as Error).message });
     }
+    // The daily aviseringar digest is never resent — stale by definition.
+    if (err instanceof AlertDigestResendError) return reply.code(409).send(errorBody(err));
     if (err instanceof MailSendError) return reply.code(502).send(errorBody(err));
     throw err;
   }
@@ -126,6 +128,8 @@ export async function mailRoutes(
           return await invoiceService.sendReminder(entry.documentId!, { ...input, withFee: false }, req.user!.id);
         case "test":
           return await service.sendTestMail(entry.recipient);
+        case "alert_digest":
+          throw new AlertDigestResendError();
       }
     } catch (err) {
       return mailError(err, reply);

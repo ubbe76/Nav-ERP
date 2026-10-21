@@ -7,6 +7,10 @@ import type { AccessRule } from "@navet/shared";
 // a sales-only user can't confirm a purchase order and vice versa. The test
 // mail mirrors /mail/test (admin), and an unknown type fails closed.
 export function resendAccessRule(documentType: string): AccessRule {
+  // The alert digest is the one type that is never resent: it is a snapshot
+  // of that morning's aviseringar and the next working day brings a fresh
+  // one. The route answers 409 (AlertDigestResendError) before the rule is
+  // consulted; the admin rule here only keeps the fail-closed default.
   switch (documentType) {
     case "inquiry":
     case "purchase_order":
@@ -16,7 +20,17 @@ export function resendAccessRule(documentType: string): AccessRule {
     case "invoice":
     case "payment_reminder":
       return ["forsaljning"];
+    case "alert_digest":
     default:
       return ["admin"];
+  }
+}
+
+// Skicka om on an alert_digest row: 409, the Swedish text is what the web
+// shows (the button itself is hidden for the type).
+export class AlertDigestResendError extends Error {
+  constructor() {
+    super("Sammanställningen skickas igen nästa arbetsdag");
+    this.name = "AlertDigestResendError";
   }
 }

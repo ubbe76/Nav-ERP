@@ -257,17 +257,18 @@ async function transmission(invoiceId: string, environment: "production" | "sand
 }
 
 async function email(
-  documentType: "invoice" | "purchase_order" | "test",
+  documentType: "invoice" | "purchase_order" | "test" | "alert_digest",
   documentId: string | null,
   status: "sent" | "failed",
-  daysAgo: number
+  daysAgo: number,
+  recipient = "kund@example.com"
 ) {
   const [row] = await db
     .insert(emailLog)
     .values({
       documentType,
       documentId,
-      recipient: "kund@example.com",
+      recipient,
       subject: `Mejl ${suffix()}`,
       status,
       error: status === "failed" ? "SMTP timeout" : null,
@@ -537,6 +538,16 @@ describe("email_failed", () => {
     const failedAfter = await email("purchase_order", a, "failed", 2);
     const g = await group("email_failed");
     expect(g.items.map((i) => i.key)).toEqual([stillFailed.id, failedAfter.id]);
+  });
+
+  it("a failed alert digest (no document id) is resolved only by a later digest to the SAME recipient", async () => {
+    const toA = await email("alert_digest", null, "failed", 3, "a@example.com");
+    await email("alert_digest", null, "sent", 2, "b@example.com");
+    await email("alert_digest", null, "failed", 3, "c@example.com");
+    await email("alert_digest", null, "sent", 2, "c@example.com");
+    const g = await group("email_failed");
+    expect(g.items.map((i) => [i.key, i.href])).toEqual([[toA.id, "/system/e-postlogg"]]);
+    expect(g.items[0]!.primary).toBe(`Daglig sammanställning: ${toA.subject}`);
   });
 });
 

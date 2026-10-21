@@ -145,6 +145,8 @@ import { createOnboardingService } from "./modules/system/service/onboarding.ser
 import { onboardingRoutes } from "./modules/system/routes/onboarding.routes.js";
 import { createAlertsRepository } from "./modules/alerts/repository/alerts.repository.js";
 import { createAlertsService } from "./modules/alerts/service/alerts.service.js";
+import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
+import { createAlertDigestService } from "./modules/alerts/service/alert-digest.service.js";
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation } from "./modules/system/service/db-errors.js";
 
@@ -528,6 +530,22 @@ export function buildApp(database: Db = db) {
     settings: { supplierInvoiceDays: async () => (await systemService.getSettings()).alertSupplierInvoiceDays },
   });
   app.decorate("alerts", alertsService);
+  // Den dagliga sammanställningen: decorated for server.ts's scheduler like
+  // freightTracking/einvoiceStatus — never run from buildApp.
+  const alertDigestService = createAlertDigestService({
+    repo: createAlertDigestRepository(database),
+    alerts: alertsService,
+    mail: mailService,
+    settings: {
+      smtpConfigured: async () => (await systemService.getSmtpConfig()) !== null,
+      digestSettings: async () => {
+        const s = await systemService.getSettings();
+        return { digestTime: s.alertDigestTime, publicBaseUrl: s.publicBaseUrl };
+      },
+    },
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
+  app.decorate("alertDigest", alertDigestService);
   // Rapporter (F1) — read-only derived reports, admin-only in the routes.
   // costingService supplies the self cost the margin report measures against.
   const reportsService = createReportsService(createReportsRepository(database), costingService);

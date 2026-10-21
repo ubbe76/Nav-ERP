@@ -47,6 +47,9 @@ app
         { name: "freight_tracking", run: () => app.freightTracking.runTrackingIfDue() },
         // E-faktura: polls the live transmissions at the access point.
         { name: "einvoice_status", run: () => app.einvoiceStatus.runStatusIfDue() },
+        // Aviseringar: the daily sammanställning, once per recipient and
+        // working day after Skicka sammanställningen klockan.
+        { name: "alert_digest", run: () => app.alertDigest.runDigestIfDue() },
       ],
       { log: (msg, extra) => app.log.error(extra ?? {}, msg) }
     );

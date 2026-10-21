@@ -5,6 +5,8 @@ import { boolean, pgEnum, pgTable, text, timestamp, uuid, varchar } from "drizzl
 // A "payment_reminder" (B3) carries the invoice's OWN id as documentId — the
 // reminder is not a document of its own, it is an event on the invoice, so
 // the invoice card's send history shows invoice and reminder emails together.
+// "alert_digest" is the daily aviseringar sammanställning (migration 0134):
+// no documentId, and never resent — the content would be stale.
 export const emailDocumentTypeEnum = pgEnum("email_document_type", [
   "inquiry",
   "purchase_order",
@@ -13,6 +15,7 @@ export const emailDocumentTypeEnum = pgEnum("email_document_type", [
   "invoice",
   "payment_reminder",
   "test",
+  "alert_digest",
 ]);
 
 export const emailStatusEnum = pgEnum("email_status", ["sent", "failed"]);

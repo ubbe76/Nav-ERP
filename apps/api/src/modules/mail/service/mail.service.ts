@@ -11,9 +11,13 @@ export class SmtpNotConfiguredError extends Error {
 }
 
 export class MailSendError extends Error {
-  constructor(cause: string) {
+  // The failed email_log row — the attempt is logged before the throw, so a
+  // caller that keeps its own log (the alert digest's run row) can point at it.
+  readonly emailLogId: string | null;
+  constructor(cause: string, emailLogId: string | null = null) {
     super(`Email could not be sent: ${cause}`);
     this.name = "MailSendError";
+    this.emailLogId = emailLogId;
   }
 }
 
@@ -29,7 +33,11 @@ export interface OutgoingMail {
   documentId: string | null;
   to: string;
   subject: string;
+  // The plain-text body — what email_log keeps and what Skicka om replays.
   message: string;
+  // An HTML alternative of the same content (the alert digest); the text
+  // part is always sent with it, so a plain-text client reads the same.
+  html?: string;
   // The document PDF first, then any article drawings.
   attachments?: { filename: string; content: Buffer }[];
   attachDrawings?: boolean;
@@ -47,6 +55,7 @@ export interface MailTransport {
     to: string;
     subject: string;
     text: string;
+    html?: string;
     attachments?: { filename: string; content: Buffer }[];
   }): Promise<unknown>;
 }
@@ -85,11 +94,12 @@ export function createMailService(
           to: mail.to,
           subject: mail.subject,
           text: mail.message,
+          html: mail.html,
           attachments: mail.attachments && mail.attachments.length > 0 ? mail.attachments : undefined,
         });
       } catch (err) {
         const cause = err instanceof Error ? err.message : String(err);
-        await repo.logEmail({
+        const failed = await repo.logEmail({
           documentType: mail.documentType,
           documentId: mail.documentId,
           recipient: mail.to,
@@ -100,7 +110,7 @@ export function createMailService(
           status: "failed",
           error: cause,
         });
-        throw new MailSendError(cause);
+        throw new MailSendError(cause, failed.id);
       }
 
       return repo.logEmail({

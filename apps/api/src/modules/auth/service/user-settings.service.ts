@@ -24,8 +24,9 @@ function isValidListPageSize(value: number): value is UserSettings["listPageSize
 
 // A stored list is kept to the kinds that still exist (a kind removed from
 // the catalog is dropped, like a removed permission in a group); anything
-// unparseable falls back to null = all.
-function decodeAlertDigestKinds(raw: string | undefined): AlertKind[] | null {
+// unparseable falls back to null = all. Exported for the digest job, which
+// reads the stored value straight from its recipient query.
+export function decodeAlertDigestKinds(raw: string | undefined): AlertKind[] | null {
   if (raw === undefined || raw === "null") return null;
   try {
     const parsed: unknown = JSON.parse(raw);

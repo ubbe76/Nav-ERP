@@ -295,11 +295,15 @@ export function createAlertsRepository(db: Db) {
             sql`${emailLog.createdAt} >= ${since.toISOString()}::timestamptz`,
             // Outer columns spelled out — a single-table query renders an
             // interpolated column bare, which here would bind to `later`.
+            // A row without a document (the alert digest) is "the same
+            // document" only for the same recipient: user B's digest going
+            // out must not resolve user A's failed one.
             sql`NOT EXISTS (
               SELECT 1 FROM ${emailLog} later
               WHERE later.status = 'sent'
                 AND later.document_type = "email_log"."document_type"
                 AND later.document_id IS NOT DISTINCT FROM "email_log"."document_id"
+                AND ("email_log"."document_id" IS NOT NULL OR later.recipient = "email_log"."recipient")
                 AND later.created_at > "email_log"."created_at"
             )`
           )

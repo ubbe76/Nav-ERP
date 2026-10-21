@@ -262,6 +262,8 @@ describe("resendAccessRule", () => {
       expect(resendAccessRule(type)).toEqual(["forsaljning"]);
     }
     expect(resendAccessRule("test")).toEqual(["admin"]);
+    // The digest is never resent (409 before the rule); fail-closed here.
+    expect(resendAccessRule("alert_digest")).toEqual(["admin"]);
     expect(resendAccessRule("something_new")).toEqual(["admin"]);
   });
 });
