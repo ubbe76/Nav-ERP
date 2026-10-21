@@ -3,7 +3,7 @@ import { addDays, stockholmToday } from "../../system/service/delivery-days.js";
 import { stockholmNow } from "../../shipping/service/pickup.js";
 import { computeDueDate } from "../../purchase/service/supplier-invoice.service.js";
 import type { AlertsRepository } from "../repository/alerts.repository.js";
-import { alertKindDef, sortKinds, supplierInvoiceSeverity, visibleKinds, type AlertUser } from "./alert-kinds.js";
+import { alertKindDef, quoteFollowupSeverity, sortKinds, supplierInvoiceSeverity, visibleKinds, type AlertUser } from "./alert-kinds.js";
 
 // Aviseringar — computeAlerts runs the readers of the requested kinds in
 // parallel and builds one group per kind in catalog order. A reader that
@@ -41,6 +41,8 @@ export interface AlertPlanningReader {
 export interface AlertSettingsReader {
   // Leverantörsfakturor att betala inom (dagar).
   supplierInvoiceDays(): Promise<number>;
+  // Offerter att följa upp inom (dagar).
+  quoteFollowupDays(): Promise<number>;
 }
 
 // Utskick som misslyckades looks this far back.
@@ -64,6 +66,13 @@ function formatAmount(value: number): string {
 function daysLateText(date: string, today: string): string {
   const days = daysBetween(date, today);
   return days === 1 ? "1 dag försenad" : `${days} dagar försenad`;
+}
+
+// "(i dag)" / "(om 1 dag)" / "(om 3 dagar)" for a date today or ahead.
+function daysAheadText(date: string, today: string): string {
+  const days = daysBetween(today, date);
+  if (days === 0) return "i dag";
+  return days === 1 ? "om 1 dag" : `om ${days} dagar`;
 }
 
 const EINVOICE_STATUS_TEXT = { failed: "Sändningen misslyckades", rejected: "Avvisad av mottagaren" } as const;
@@ -215,6 +224,24 @@ export function createAlertsService(deps: {
       return items.sort((a, b) => a.date!.localeCompare(b.date!) || a.primary.localeCompare(b.primary, "sv"));
     },
 
+    // Open quotes expiring within N days (the system setting) — red once
+    // Giltig t.o.m. has passed, yellow while it is today or ahead.
+    async quote_followup(today) {
+      const days = await deps.settings.quoteFollowupDays();
+      const rows = await repo.quotesToFollowUp(addDays(today, days));
+      return rows.map((r) => {
+        const severity = quoteFollowupSeverity(r.validUntil, today);
+        return {
+          key: r.orderId,
+          severity,
+          href: `/forsaljning/ordrar/${r.orderId}`,
+          primary: `${r.orderNumber} ${r.customerName}`,
+          secondary: severity === "red" ? `Gick ut ${r.validUntil}` : `Går ut ${r.validUntil} (${daysAheadText(r.validUntil, today)})`,
+          date: r.validUntil,
+        };
+      });
+    },
+
     async einvoice_failed() {
       const rows = await repo.failedEinvoices();
       return rows.map((r) => ({
@@ -323,7 +350,7 @@ export function createAlertsService(deps: {
   };
 }
 
-// Within a kind: red before yellow (only supplier invoices mix), then the
+// Within a kind: red before yellow (supplier invoices and quotes mix), then the
 // reader's own order (date ascending, lowest balance first) — a stable sort
 // keeps it.
 function compareItems(a: AlertItem, b: AlertItem): number {

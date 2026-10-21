@@ -57,10 +57,15 @@ export const SALES_ORDER_STATUS_LABELS: Record<(typeof salesOrderStatusEnum.enum
   delivered: "Levererad",
   invoiced: "Fakturerad",
   cancelled: "Avbruten",
+  lost: "Förlorad",
 };
 
 // The list omits the detail-only freight_quote jsonb (listSalesOrders).
-type SalesOrderRow = Omit<typeof salesOrders.$inferSelect, "freightQuote"> & { customerName: string; nextDeliveryDate: string | null };
+type SalesOrderRow = Omit<typeof salesOrders.$inferSelect, "freightQuote"> & {
+  customerName: string;
+  nextDeliveryDate: string | null;
+  lostReasonName: string | null;
+};
 
 export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
   { label: "Ordernummer", value: (r) => r.orderNumber },
@@ -68,6 +73,8 @@ export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
   { label: "Status", value: (r) => SALES_ORDER_STATUS_LABELS[r.status] },
   { label: "Leveransdatum", value: (r) => r.expectedDeliveryDate, format: "date" },
   { label: "Nästa leveransdatum", value: (r) => r.nextDeliveryDate, format: "date" },
+  { label: "Giltig t.o.m.", value: (r) => r.quoteValidUntil, format: "date" },
+  { label: "Förlustorsak", value: (r) => r.lostReasonName },
   { label: "Kundens ordernr", value: (r) => r.customerOrderNumber },
   { label: "Kundens referens", value: (r) => r.customerReference },
   { label: "Notering", value: (r) => r.note },

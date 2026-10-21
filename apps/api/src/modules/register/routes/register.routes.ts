@@ -3,8 +3,11 @@ import {
   createRegisterEntrySchema,
   deleteRegisterEntrySchema,
   packageTypeFreightSchema,
+  quoteLossReasonInputSchema,
   updateRegisterEntrySchema,
+  type AccessRule,
 } from "@navet/shared";
+import type { z } from "zod";
 import type { RegisterService } from "../service/register.service.js";
 import {
   DuplicateRegisterEntryError,
@@ -16,7 +19,8 @@ import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { errorBody } from "../../system/service/error-body.js";
 
 // Base-data registers (grunddata): leveransvillkor, betalningsvillkor,
-// speditörer. Registered inside app.ts's protected route scope.
+// speditörer, enheter, kollityper, förlustorsaker. Registered inside app.ts's
+// protected route scope.
 export async function registerRoutes(app: FastifyInstance, opts: { service: RegisterService }) {
   const { service } = opts;
   const admin = { preHandler: requireRole("admin") };
@@ -42,19 +46,28 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
     }
   });
 
-  const registers = [
-    { path: "/delivery-terms", entries: service.deliveryTerms },
-    { path: "/payment-terms", entries: service.paymentTerms },
-    { path: "/carriers", entries: service.carriers },
-    { path: "/units", entries: service.units },
-    { path: "/package-types", entries: service.packageTypes },
-  ] as const;
-
-  for (const { path, entries } of registers) {
+  // Every register: the same five routes over its own service accessor and
+  // input schemas. The module default (read office, write any of artiklar/
+  // inkop/forsaljning) applies unless `write` names a narrower rule —
+  // förlustorsaker belong to Försäljning (the delete stays admin, as on
+  // every register).
+  type RegisterEntries<TInput> = {
+    list(): Promise<unknown>;
+    create(input: TInput): Promise<unknown>;
+    update(id: string, input: TInput): Promise<unknown>;
+    usage(id: string): Promise<unknown>;
+    remove(id: string, replacementId: string | null): Promise<unknown>;
+  };
+  function register<TInput>(
+    path: string,
+    entries: RegisterEntries<TInput>,
+    schemas: { create: z.ZodType<TInput, z.ZodTypeDef, unknown>; update: z.ZodType<TInput, z.ZodTypeDef, unknown> },
+    write?: { config: { access: AccessRule } }
+  ) {
     app.get(path, async () => entries.list());
 
-    app.post(path, async (req, reply) => {
-      const input = createRegisterEntrySchema.parse(req.body);
+    app.post(path, write ?? {}, async (req, reply) => {
+      const input = schemas.create.parse(req.body);
       try {
         return reply.code(201).send(await entries.create(input));
       } catch (err) {
@@ -63,8 +76,8 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
       }
     });
 
-    app.patch<{ Params: { id: string } }>(`${path}/:id`, async (req, reply) => {
-      const input = updateRegisterEntrySchema.parse(req.body);
+    app.patch<{ Params: { id: string } }>(`${path}/:id`, write ?? {}, async (req, reply) => {
+      const input = schemas.update.parse(req.body);
       try {
         return await entries.update(req.params.id, input);
       } catch (err) {
@@ -103,4 +116,17 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
       }
     });
   }
+
+  const termSchemas = { create: createRegisterEntrySchema, update: updateRegisterEntrySchema };
+  register("/delivery-terms", service.deliveryTerms, termSchemas);
+  register("/payment-terms", service.paymentTerms, termSchemas);
+  register("/carriers", service.carriers, termSchemas);
+  register("/units", service.units, termSchemas);
+  register("/package-types", service.packageTypes, termSchemas);
+  register(
+    "/quote-loss-reasons",
+    service.quoteLossReasons,
+    { create: quoteLossReasonInputSchema, update: quoteLossReasonInputSchema },
+    { config: { access: ["forsaljning"] } }
+  );
 }

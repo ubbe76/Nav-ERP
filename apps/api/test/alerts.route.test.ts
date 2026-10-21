@@ -122,6 +122,7 @@ describe("GET /alerts", () => {
     expect((res.json() as AlertsResponse).groups.map((g) => g.kind)).toEqual([
       "customer_invoice_overdue",
       "supplier_invoice_due",
+      "quote_followup",
       "einvoice_failed",
       "sales_order_late",
       "purchase_order_late",

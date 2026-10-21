@@ -43,12 +43,15 @@ import { isUniqueViolation } from "./db-errors.js";
 import { decodeLongOperationWeeks, PLANNING_LONG_OPERATION_WEEKS_KEY } from "./plan-settings.js";
 import {
   ALERT_DIGEST_TIME_KEY,
+  ALERT_QUOTE_FOLLOWUP_DAYS_KEY,
   ALERT_SUPPLIER_INVOICE_DAYS_KEY,
   decodeAlertDigestTime,
+  decodeAlertQuoteFollowupDays,
   decodeAlertSupplierInvoiceDays,
   decodePublicBaseUrl,
   PUBLIC_BASE_URL_KEY,
 } from "./alert-settings.js";
+import { decodeQuoteValidityDays, QUOTE_VALIDITY_DAYS_KEY } from "./quote-settings.js";
 // G1: append-only audit trail. system_settings/company_info are singletons —
 // entityId is null (no natural per-row id); number_series/company_carrier
 // use their own readable key/code. updateSettings NEVER logs values — only
@@ -280,7 +283,10 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // Aviseringar — alert-settings.ts owns the keys and defaults.
       alertDigestTime: decodeAlertDigestTime(get(ALERT_DIGEST_TIME_KEY)),
       alertSupplierInvoiceDays: decodeAlertSupplierInvoiceDays(get(ALERT_SUPPLIER_INVOICE_DAYS_KEY)),
+      alertQuoteFollowupDays: decodeAlertQuoteFollowupDays(get(ALERT_QUOTE_FOLLOWUP_DAYS_KEY)),
       publicBaseUrl: decodePublicBaseUrl(get(PUBLIC_BASE_URL_KEY)),
+      // Uppföljning av offerter — quote-settings.ts owns the key and default.
+      quoteValidityDays: decodeQuoteValidityDays(get(QUOTE_VALIDITY_DAYS_KEY)),
       // Automatic accounting (Ekonomi → automatkontering) — the 14 posting
       // accounts + the 2 kundreskontra amounts, decoded by the leaf that owns
       // their keys/defaults (posting-settings.js).
@@ -581,6 +587,10 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       if (input.alertSupplierInvoiceDays !== undefined) {
         await set(ALERT_SUPPLIER_INVOICE_DAYS_KEY, String(input.alertSupplierInvoiceDays));
       }
+      if (input.alertQuoteFollowupDays !== undefined) {
+        await set(ALERT_QUOTE_FOLLOWUP_DAYS_KEY, String(input.alertQuoteFollowupDays));
+      }
+      if (input.quoteValidityDays !== undefined) await set(QUOTE_VALIDITY_DAYS_KEY, String(input.quoteValidityDays));
       if (input.publicBaseUrl !== undefined) await set(PUBLIC_BASE_URL_KEY, decodePublicBaseUrl(input.publicBaseUrl));
       if (input.postingAccountsReceivable !== undefined) {
         await set(POSTING_ACCOUNTS_RECEIVABLE_KEY, input.postingAccountsReceivable);

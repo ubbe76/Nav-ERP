@@ -3,6 +3,7 @@ import { ALERT_KINDS, effectivePermissions, type AlertKind } from "@navet/shared
 import {
   ALERT_KIND_CATALOG,
   alertKindDef,
+  quoteFollowupSeverity,
   sortKinds,
   supplierInvoiceSeverity,
   visibleKinds,
@@ -24,6 +25,7 @@ describe("the catalog", () => {
       "stock_negative",
       "customer_invoice_overdue",
       "supplier_invoice_due",
+      "quote_followup",
       "einvoice_failed",
       "email_failed",
       "sales_order_late",
@@ -58,7 +60,12 @@ describe("visibleKinds", () => {
   });
 
   it("Försäljning gives the customer kinds, Tillverkning the TO kinds, Lager the stock kind", () => {
-    expect(visibleKinds(user(["forsaljning"]))).toEqual(["customer_invoice_overdue", "einvoice_failed", "sales_order_late"]);
+    expect(visibleKinds(user(["forsaljning"]))).toEqual([
+      "customer_invoice_overdue",
+      "quote_followup",
+      "einvoice_failed",
+      "sales_order_late",
+    ]);
     expect(visibleKinds(user(["tillverkning"]))).toEqual(["manufacturing_order_late", "manufacture_needed"]);
     expect(visibleKinds(user(["lager"]))).toEqual(["stock_negative"]);
   });
@@ -85,10 +92,12 @@ describe("sortKinds", () => {
   });
 });
 
-describe("supplierInvoiceSeverity", () => {
-  it("is red once the due date has passed and yellow today or ahead", () => {
+describe("supplierInvoiceSeverity / quoteFollowupSeverity", () => {
+  it("is red once the date has passed and yellow today or ahead", () => {
     expect(supplierInvoiceSeverity("2026-10-20", "2026-10-21")).toBe("red");
     expect(supplierInvoiceSeverity("2026-10-21", "2026-10-21")).toBe("yellow");
     expect(supplierInvoiceSeverity("2026-10-28", "2026-10-21")).toBe("yellow");
+    expect(quoteFollowupSeverity("2026-10-20", "2026-10-21")).toBe("red");
+    expect(quoteFollowupSeverity("2026-10-21", "2026-10-21")).toBe("yellow");
   });
 });

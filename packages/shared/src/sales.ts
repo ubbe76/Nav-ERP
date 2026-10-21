@@ -9,6 +9,8 @@ import { partnerDeliveryFields } from "./delivery.js";
 import { palletCardCodeSchema } from "./system.js";
 import { invoiceDeliverySchema, peppolIdFieldSchema } from "./einvoice.js";
 
+// "lost" (Förlorad): a quote the customer did not take — closed like
+// cancelled (no edits, no documents), reopenable to quote.
 export const salesOrderStatusSchema = z.enum([
   "quote",
   "confirmed",
@@ -16,6 +18,7 @@ export const salesOrderStatusSchema = z.enum([
   "delivered",
   "invoiced",
   "cancelled",
+  "lost",
 ]);
 export type SalesOrderStatus = z.infer<typeof salesOrderStatusSchema>;
 
@@ -39,6 +42,15 @@ export const setSalesOrderStatusSchema = z.object({
   status: salesOrderStatusSchema,
 });
 export type SetSalesOrderStatusInput = z.infer<typeof setSalesOrderStatusSchema>;
+
+// POST /sales-orders/:id/lose — Förlorad: the reason is required (an active
+// entry of the quote_loss_reasons register), the note optional. Only from
+// status quote; POST .../reopen takes the quote back.
+export const loseQuoteSchema = z.object({
+  lossReasonId: z.string().uuid(),
+  lossNote: z.string().trim().max(1000).nullable().optional(),
+});
+export type LoseQuoteInput = z.infer<typeof loseQuoteSchema>;
 
 // ISO 3166-1 alpha-2, upper-cased on input ("se" → "SE"). Customers default
 // to SE; documents print the country only when it differs.
@@ -213,6 +225,8 @@ export const updateSalesOrderHeaderSchema = z
     // Set by "Använd datumet" in Leveranstidskontroll on the order card.
     // businessDateSchema: the date feeds the planning's date arithmetic.
     expectedDeliveryDate: businessDateSchema.nullable().optional(),
+    // Giltig t.o.m. (quote only — 409 in any other status); null clears it.
+    quoteValidUntil: businessDateSchema.nullable().optional(),
     // `false` saves without bumping the order's revision — the UI asks on
     // every save; omitted means bump (external callers unchanged).
     bumpRevision: z.boolean().optional(),
@@ -237,6 +251,10 @@ export const createQuoteSchema = z.object({
   // Or a new address typed in on the order (see newDeliveryAddressSchema),
   // created in the order's own transaction.
   newDeliveryAddress: newDeliveryAddressSchema.optional(),
+  // Giltig t.o.m. — omitted: today + the system setting Offertens
+  // giltighetstid (0 days = none); null: explicitly none. Never set when
+  // `confirm` is true (a direct order is not a quote).
+  quoteValidUntil: businessDateSchema.nullable().optional(),
   // Create as a confirmed order directly ("Ny kundorder") instead of a
   // quote — the order is confirmed via the normal status transition.
   confirm: z.boolean().default(false),

@@ -18,6 +18,7 @@ import {
   paymentTerms,
   priceListRows,
   priceLists,
+  quoteLossReasons,
   salesOrderRows,
   salesOrders,
   shipmentDeliveries,
@@ -62,6 +63,10 @@ import { PriceListInUseError, RowHasManufacturingOrdersError } from "../service/
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { getInvoicedQuantitiesWith } from "./invoice.repository.js";
+
+// users joined a second time for "who marked the quote lost" (the order's
+// created_by is not the same person).
+const lostByUser = alias(users, "lost_by_user");
 
 // Leveranstillfälle (delivery occasion) — C2. The whole batch is one
 // transaction: every row goes through the exact per-row guard/lock/booking
@@ -531,6 +536,10 @@ export function createSalesRepository(db: Db) {
         if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
           return { ok: false as const, reason: "status" as const, status: order.status };
         }
+        // Giltig t.o.m. is a quote's field — once confirmed the date is history.
+        if (input.quoteValidUntil !== undefined && order.status !== "quote") {
+          return { ok: false as const, reason: "status" as const, status: order.status };
+        }
         const { newDeliveryAddress, ...fields } = input;
         if (newDeliveryAddress) {
           fields.deliveryAddressId = (await insertNewDeliveryAddress(tx, order.customerId, newDeliveryAddress)).id;
@@ -554,8 +563,11 @@ export function createSalesRepository(db: Db) {
 
     // Atomic: the order header and all its rows are created together, per
     // architecture.md §5's "skapa offert med rader" contract.
+    // quoteValidUntil is RESOLVED by the service (today + the setting, or
+    // the caller's date; null for a direct order) — the repository writes
+    // what it gets. `quoted` = created as a quote, the hit-rate population.
     async createQuote(
-      input: Omit<CreateQuoteInput, "rows"> & { rows: SalesRowWrite[] },
+      input: Omit<CreateQuoteInput, "rows" | "quoteValidUntil"> & { rows: SalesRowWrite[]; quoteValidUntil: string | null },
       createdBy: string | null
     ) {
       return db.transaction(async (tx) => {
@@ -579,6 +591,8 @@ export function createSalesRepository(db: Db) {
             carrierId: customer?.carrierId ?? null,
             expectedDeliveryDate: input.expectedDeliveryDate,
             note: input.note,
+            quoted: !input.confirm,
+            quoteValidUntil: input.quoteValidUntil,
             createdBy,
           })
           .returning();
@@ -641,6 +655,10 @@ export function createSalesRepository(db: Db) {
           paymentTermName: paymentTerms.name,
           carrierCode: carriers.code,
           carrierName: carriers.name,
+          // Förlorad: the reason's code/name and who marked it (null unless lost).
+          lostReasonCode: quoteLossReasons.code,
+          lostReasonName: quoteLossReasons.name,
+          lostByName: lostByUser.name,
         })
         .from(salesOrders)
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
@@ -648,6 +666,8 @@ export function createSalesRepository(db: Db) {
         .leftJoin(deliveryTerms, eq(deliveryTerms.id, salesOrders.deliveryTermId))
         .leftJoin(paymentTerms, eq(paymentTerms.id, salesOrders.paymentTermId))
         .leftJoin(carriers, eq(carriers.id, salesOrders.carrierId))
+        .leftJoin(quoteLossReasons, eq(quoteLossReasons.id, salesOrders.lostReasonId))
+        .leftJoin(lostByUser, eq(lostByUser.id, salesOrders.lostBy))
         .where(eq(salesOrders.id, id));
       return row ?? null;
     },
@@ -699,10 +719,15 @@ export function createSalesRepository(db: Db) {
             ...listColumns,
             customerName: customers.name,
             nextDeliveryDate: nextDeliveryDateSql,
+            lostReasonCode: quoteLossReasons.code,
+            lostReasonName: quoteLossReasons.name,
+            lostByName: lostByUser.name,
             ...(query.withOpenRows ? { openRowCount: openRowCountSql } : {}),
           })
           .from(salesOrders)
           .innerJoin(customers, eq(customers.id, salesOrders.customerId))
+          .leftJoin(quoteLossReasons, eq(quoteLossReasons.id, salesOrders.lostReasonId))
+          .leftJoin(lostByUser, eq(lostByUser.id, salesOrders.lostBy))
           .where(where)
           .orderBy(desc(salesOrders.orderNumber))
           .limit(query.limit)
@@ -716,11 +741,54 @@ export function createSalesRepository(db: Db) {
       return { rows, total: totalRows[0]!.total };
     },
 
-    async updateStatus(id: string, status: SalesOrderStatus) {
+    // State-machine transitions and the manual override. Leaving `lost`
+    // clears the lost_* columns (Öppna igen's rule applies to setStatus
+    // too); entering it through the override stamps when/who without a
+    // reason — "Ingen orsak angiven" — unless the order already is lost.
+    async updateStatus(id: string, status: SalesOrderStatus, lostBy: string | null = null) {
       const [row] = await db
         .update(salesOrders)
-        .set({ status, updatedAt: new Date() })
+        .set(
+          status === "lost"
+            ? {
+                status,
+                lostAt: sql`coalesce(${salesOrders.lostAt}, now())`,
+                lostBy: sql`coalesce(${salesOrders.lostBy}, ${lostBy}::uuid)`,
+                updatedAt: new Date(),
+              }
+            : { status, lostReasonId: null, lostNote: null, lostAt: null, lostBy: null, updatedAt: new Date() }
+        )
         .where(eq(salesOrders.id, id))
+        .returning();
+      return row ?? null;
+    },
+
+    // Förlorad: conditional on status quote so a concurrent confirm/cancel
+    // cannot be overwritten — null = the order is no longer a quote (or gone).
+    async markLost(id: string, input: { reasonId: string; note: string | null; userId: string | null }) {
+      const [row] = await db
+        .update(salesOrders)
+        .set({
+          status: "lost",
+          lostReasonId: input.reasonId,
+          lostNote: input.note,
+          lostAt: new Date(),
+          lostBy: input.userId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(salesOrders.id, id), eq(salesOrders.status, "quote")))
+        .returning();
+      return row ?? null;
+    },
+
+    // Öppna igen: back to quote with the lost_* columns cleared; the
+    // validity date is left as it is (the user sees it on the card). null =
+    // not lost any more (or gone).
+    async reopenLost(id: string) {
+      const [row] = await db
+        .update(salesOrders)
+        .set({ status: "quote", lostReasonId: null, lostNote: null, lostAt: null, lostBy: null, updatedAt: new Date() })
+        .where(and(eq(salesOrders.id, id), eq(salesOrders.status, "lost")))
         .returning();
       return row ?? null;
     },

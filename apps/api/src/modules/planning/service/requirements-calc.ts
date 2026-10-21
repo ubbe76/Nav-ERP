@@ -12,13 +12,15 @@
 import { roundUpToMultiple } from "@navet/shared";
 import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 
+// "lost" (Förlorad) is closed like cancelled — never demand.
 export type SalesOrderStatus =
   | "quote"
   | "confirmed"
   | "in_production"
   | "delivered"
   | "invoiced"
-  | "cancelled";
+  | "cancelled"
+  | "lost";
 export type PurchaseOrderStatus =
   | "draft"
   | "confirmed"

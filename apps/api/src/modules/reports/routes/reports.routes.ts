@@ -7,6 +7,7 @@ import {
   scrapStatisticsQuerySchema,
   deliveryPrecisionCsvQuerySchema,
   purchaseOrderRegisterQuerySchema,
+  quoteFollowupQuerySchema,
   salesOrderRegisterQuerySchema,
 } from "@navet/shared";
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
@@ -18,6 +19,7 @@ import {
   type OrderRegisterKind,
   type OrderRegisterService,
 } from "../service/order-register.service.js";
+import { QuoteFollowupTooLargeError, type QuoteFollowupService } from "../service/quote-followup.service.js";
 import {
   buildCalculationOutcomeCsv,
   buildDeliveryPrecisionCsv,
@@ -32,9 +34,9 @@ import {
 // hook keeps the guard in mini-app tests that register this plugin directly.
 export async function reportsRoutes(
   app: FastifyInstance,
-  opts: { service: ReportsService; orderRegister: OrderRegisterService }
+  opts: { service: ReportsService; orderRegister: OrderRegisterService; quoteFollowup: QuoteFollowupService }
 ) {
-  const { service, orderRegister } = opts;
+  const { service, orderRegister, quoteFollowup } = opts;
   app.addHook("preHandler", requirePermission("rapporter"));
 
   // F2: CSV download — same content, text/csv instead of JSON.
@@ -114,6 +116,29 @@ export async function reportsRoutes(
     const result = await service.getScrapStatistics(query);
     const filename = `kassationsstatistik-${result.groupBy}-${result.from}-${result.to}.csv`;
     return sendCsv(reply, filename, buildScrapStatisticsCsv(result));
+  });
+
+  // Offertuppföljning — hit rate per customer/month/loss reason over the
+  // quotes created in the range; the CSV is the quote list.
+  app.get("/reports/quote-followup", async (req, reply) => {
+    const query = quoteFollowupQuerySchema.parse(req.query);
+    try {
+      return await quoteFollowup.get(query);
+    } catch (err) {
+      if (err instanceof QuoteFollowupTooLargeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  app.get("/reports/quote-followup/csv", async (req, reply) => {
+    const query = quoteFollowupQuerySchema.parse(req.query);
+    try {
+      const { filename, content } = await quoteFollowup.getCsv(query);
+      return sendCsv(reply, filename, content);
+    } catch (err) {
+      if (err instanceof QuoteFollowupTooLargeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
   });
 
   // Orderförteckning — kundorder and inköp share one service; each side has

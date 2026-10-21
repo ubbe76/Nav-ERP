@@ -113,3 +113,88 @@ export type SalesOrderRegisterQuery = z.infer<typeof salesOrderRegisterQuerySche
 
 export const purchaseOrderRegisterQuerySchema = orderRegisterQuerySchema(purchaseOrderStatusSchema.options);
 export type PurchaseOrderRegisterQuery = z.infer<typeof purchaseOrderRegisterQuerySchema>;
+
+// Offertuppföljning (quote follow-up) — the quotes (quoted = true) created
+// in [from, to] (Stockholm days), optionally one customer's. The web's
+// default is the current year, so both dates are required here.
+export const quoteFollowupQuerySchema = z
+  .object({
+    from: dayParam,
+    to: dayParam,
+    customerId: z.string().uuid().optional(),
+  })
+  .refine((q) => q.from <= q.to, { message: "from måste vara före to" });
+export type QuoteFollowupQuery = z.infer<typeof quoteFollowupQuerySchema>;
+
+// The outcome of a quote: won (confirmed/in production/delivered/invoiced),
+// lost, open (status quote; `expired` when Giltig t.o.m. has passed) or
+// cancelled. Cancelled quotes are listed but never counted in the hit rate.
+export type QuoteOutcome = "won" | "lost" | "open" | "cancelled";
+
+export interface QuoteFollowupFigures {
+  count: number;
+  value: number;
+  won: number;
+  wonValue: number;
+  lost: number;
+  lostValue: number;
+  open: number;
+  openValue: number;
+  // Of the open ones, those whose validity date has passed.
+  expired: number;
+  expiredValue: number;
+  cancelled: number;
+  cancelledValue: number;
+  // won / (won + lost) by count and by value — null when the denominator is 0.
+  hitRateCount: number | null;
+  hitRateValue: number | null;
+}
+
+export interface QuoteFollowupCustomer extends QuoteFollowupFigures {
+  customerId: string;
+  customerNumber: string;
+  customerName: string;
+}
+
+export interface QuoteFollowupMonth extends QuoteFollowupFigures {
+  month: string; // YYYY-MM
+}
+
+export interface QuoteFollowupLossReason {
+  // null = lost without a reason (the manual status override): the row
+  // "Ingen orsak angiven".
+  reasonId: string | null;
+  code: string | null;
+  name: string;
+  count: number;
+  value: number;
+  // Share of the lost quotes by count; null when none are lost.
+  share: number | null;
+}
+
+export interface QuoteFollowupQuote {
+  id: string;
+  orderNumber: string;
+  customerId: string;
+  customerNumber: string;
+  customerName: string;
+  createdDate: string; // YYYY-MM-DD, Stockholm
+  quoteValidUntil: string | null;
+  status: string;
+  outcome: QuoteOutcome;
+  expired: boolean;
+  lostReason: { id: string; code: string; name: string } | null;
+  lostNote: string | null;
+  value: number; // SEK, the order's current rows
+}
+
+export interface QuoteFollowupReport {
+  from: string;
+  to: string;
+  customerId: string | null;
+  totals: QuoteFollowupFigures;
+  customers: QuoteFollowupCustomer[];
+  months: QuoteFollowupMonth[];
+  lossReasons: QuoteFollowupLossReason[];
+  quotes: QuoteFollowupQuote[];
+}

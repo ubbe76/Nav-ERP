@@ -13,6 +13,7 @@ import type {
   ListPriceListsQuery,
   ListQuery,
   ListSalesOrdersQuery,
+  LoseQuoteInput,
   OrderRowConfiguration,
   OrderRowConfigurationCost,
   OrderRowConfigurationInput,
@@ -42,6 +43,7 @@ import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/
 import { roundUpToMultiple, toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "@navet/shared";
 import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
 import {
+  addDays,
   deliveryDateWarning,
   deliveryHolidayWindow,
   deliverySummary,
@@ -160,6 +162,13 @@ export interface ManufacturingCoverageReader {
   ): Promise<Map<string, { quantity: number; orders: { id: string; orderNumber: string; status: string; quantity: string; quantityReceived: string }[] }>>;
 }
 
+// The system settings the sales module reads: the document toggles plus
+// Offertens giltighetstid (quote-settings.ts) — the same "extend the PDF
+// reader" shape as PurchaseSettingsReader.
+export interface SalesSettingsReader extends DocumentSettingsReader {
+  getSettings(): Promise<Awaited<ReturnType<DocumentSettingsReader["getSettings"]>> & { quoteValidityDays: number }>;
+}
+
 export class CustomerNotFoundError extends Error {
   constructor(id: string) {
     super(`Customer ${id} not found`);
@@ -192,6 +201,15 @@ export class SalesOrderRowNotFoundError extends Error {
   constructor(id: string) {
     super(`Sales order row ${id} not found`);
     this.name = "SalesOrderRowNotFoundError";
+  }
+}
+
+// Förlorad with an unknown or inactive förlustorsak (400 — the dialog only
+// offers active reasons, so this is a stale client or an integration).
+export class QuoteLossReasonInvalidError extends Error {
+  constructor(id: string) {
+    super(`Quote loss reason ${id} does not exist or is inactive`);
+    this.name = "QuoteLossReasonInvalidError";
   }
 }
 
@@ -359,7 +377,7 @@ export function createSalesService(
         id: string
       ): Promise<{ id: string; articleNumber: string; rounding: string | null; configuratorMode: "variants" | "to_order" | null } | null>;
     },
-  settings: DocumentSettingsReader,
+  settings: SalesSettingsReader,
   // C3: the price chain (price-resolver.ts's resolvePrice), already bound to
   // a db handle by the caller (app.ts) — same "inject a bound function"
   // shape as the other cross-module readers above, kept explicit rather than
@@ -517,6 +535,16 @@ export function createSalesService(
   // showConfigurationPrices (konfigurator 4b, "Visa tilläggspriser"): whether
   // a configured row's choice lines carry their price additions — already
   // resolved by the caller (explicit flag, else the customer's setting).
+  // Giltig t.o.m. of a new quote: the caller's date (null = none), else
+  // today (Stockholm) + Offertens giltighetstid, 0 days = none. A direct
+  // order ("Ny kundorder", confirm: true) is not a quote and never gets one.
+  async function resolveQuoteValidUntil(input: Pick<CreateQuoteInput, "confirm" | "quoteValidUntil">): Promise<string | null> {
+    if (input.confirm) return null;
+    if (input.quoteValidUntil !== undefined) return input.quoteValidUntil;
+    const { quoteValidityDays } = await settings.getSettings();
+    return quoteValidityDays > 0 ? addDays(stockholmToday(), quoteValidityDays) : null;
+  }
+
   async function renderSalesOrderPdf(
     order: NonNullable<Awaited<ReturnType<SalesRepository["findSalesOrderById"]>>>,
     variant: "quote" | "confirmation",
@@ -556,6 +584,9 @@ export function createSalesService(
       })),
       showTotal: true,
       deliveryDate: order.expectedDeliveryDate,
+      // Giltig t.o.m. is printed on the quote only — the confirmation is
+      // the order, the validity has played out.
+      validUntil: variant === "quote" ? order.quoteValidUntil : null,
       revision: showOrderRevisionOnDocuments ? order.revision : null,
       partnerNumber: customer!.customerNumber,
       ourSupplierNumberAtCustomer: customer!.ourSupplierNumber,
@@ -797,6 +828,11 @@ export function createSalesService(
       if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
       }
+      // Giltig t.o.m. only while the order is a quote (re-checked under the
+      // row lock in the repository).
+      if (input.quoteValidUntil !== undefined && order.status !== "quote") {
+        throw new InvalidStatusTransitionError(`Cannot change the validity date of an order in status "${order.status}"`);
+      }
       if (input.deliveryAddressId) {
         // Another order's engångsadress is not the customer's to pick; the
         // order's own may be sent back unchanged.
@@ -862,9 +898,10 @@ export function createSalesService(
       // rows (configuration set) may repeat.
       const duplicate = firstDuplicateArticleId(rows);
       if (duplicate) throw new RowVariantExistsError(await articleNumberOf(duplicate));
+      const quoteValidUntil = await resolveQuoteValidUntil(input);
       let created;
       try {
-        created = await repo.createQuote({ ...input, rows }, createdBy);
+        created = await repo.createQuote({ ...input, rows, quoteValidUntil }, createdBy);
       } catch (err) {
         // Backstop for the index, caught outside the repository's transaction
         // (which has already rolled back).
@@ -1271,6 +1308,10 @@ export function createSalesService(
     async getSalesOrderPdf(orderId: string, variant: "quote" | "confirmation", showConfigurationPrices?: boolean) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
+      // A lost quote is closed like a cancelled order: no documents (spec).
+      if (order.status === "lost") {
+        throw new InvalidStatusTransitionError(`Cannot print an order in status "${order.status}"`);
+      }
       const customer = await repo.findCustomerById(order.customerId);
       return renderSalesOrderPdf(order, variant, showConfigurationPrices ?? customer!.showConfigurationPrices);
     },
@@ -1279,7 +1320,7 @@ export function createSalesService(
     async getPickListPdf(orderId: string) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
-      if (order.status === "cancelled") {
+      if (order.status === "cancelled" || order.status === "lost") {
         throw new InvalidStatusTransitionError(`Cannot print a pick list for an order in status "${order.status}"`);
       }
       const rows = await repo.listRowsByOrder(orderId);
@@ -1332,7 +1373,7 @@ export function createSalesService(
     async sendSalesOrderEmail(orderId: string, input: SendSalesOrderEmailInput) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
-      if (order.status === "cancelled") {
+      if (order.status === "cancelled" || order.status === "lost") {
         throw new InvalidStatusTransitionError(`Cannot email an order in status "${order.status}"`);
       }
       // Visa tilläggspriser: the dialog's choice, else the customer's setting
@@ -1404,15 +1445,66 @@ export function createSalesService(
     // deliberately no transition guard. Never books stock, never touches
     // invoiceNumber/invoicedAt (a manually set "invoiced" has no invoice),
     // and does not bump the revision (the order's content is unchanged).
+    // Uppföljning av offerter: "lost" is allowed here without a reason (the
+    // card shows "Ingen orsak angiven"); leaving "lost" clears the lost_*
+    // columns exactly as Öppna igen does.
     async setStatus(orderId: string, status: SalesOrderStatus, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
-      await repo.updateStatus(orderId, status);
+      await repo.updateStatus(orderId, status, userId ?? null);
       await audit.log({
         entityType: "sales_order",
         entityId: order.orderNumber,
         action: "status_set",
         detail: { before: order.status, after: status },
+        userId: userId ?? null,
+      });
+      return repo.findSalesOrderById(orderId);
+    },
+
+    // Förlorad: only from quote; the reason must be an active förlustorsak.
+    // The conditional UPDATE is the guard against a concurrent confirm —
+    // a null there means the order left status quote under our feet.
+    async lose(orderId: string, input: LoseQuoteInput, userId?: string | null) {
+      const order = await repo.findSalesOrderById(orderId);
+      if (!order) throw new SalesOrderNotFoundError(orderId);
+      if (order.status !== "quote") {
+        throw new InvalidStatusTransitionError(`Cannot mark an order in status "${order.status}" as lost`);
+      }
+      const reason = await registers.quoteLossReasons.findById(input.lossReasonId);
+      if (!reason || !reason.active) throw new QuoteLossReasonInvalidError(input.lossReasonId);
+      const note = input.lossNote?.trim() ? input.lossNote.trim() : null;
+      const updated = await repo.markLost(orderId, { reasonId: reason.id, note, userId: userId ?? null });
+      if (!updated) throw new InvalidStatusTransitionError(`Cannot mark an order that is no longer a quote as lost`);
+      await audit.log({
+        entityType: "sales_order",
+        entityId: order.orderNumber,
+        action: "lost",
+        detail: { reasonCode: reason.code, reasonName: reason.name, note },
+        userId: userId ?? null,
+      });
+      return repo.findSalesOrderById(orderId);
+    },
+
+    // Öppna igen: lost → quote, the old reason kept in the log. The validity
+    // date is not touched — the user sees it on the card and may change it.
+    async reopen(orderId: string, userId?: string | null) {
+      const order = await repo.findSalesOrderById(orderId);
+      if (!order) throw new SalesOrderNotFoundError(orderId);
+      if (order.status !== "lost") {
+        throw new InvalidStatusTransitionError(`Cannot reopen an order in status "${order.status}"`);
+      }
+      const updated = await repo.reopenLost(orderId);
+      if (!updated) throw new InvalidStatusTransitionError(`Cannot reopen an order that is no longer lost`);
+      await audit.log({
+        entityType: "sales_order",
+        entityId: order.orderNumber,
+        action: "reopened",
+        detail: {
+          previousReasonCode: order.lostReasonCode,
+          previousReasonName: order.lostReasonName,
+          previousNote: order.lostNote,
+        },
         userId: userId ?? null,
       });
       return repo.findSalesOrderById(orderId);

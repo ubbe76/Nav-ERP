@@ -56,10 +56,11 @@ const planningService = createPlanningService(createPlanningRepository(db), {
   today: () => TODAY,
 });
 let supplierInvoiceDays = 7;
+let quoteFollowupDays = 7;
 const alerts = createAlertsService({
   repo: createAlertsRepository(db),
   planning: planningService,
-  settings: { supplierInvoiceDays: async () => supplierInvoiceDays },
+  settings: { supplierInvoiceDays: async () => supplierInvoiceDays, quoteFollowupDays: async () => quoteFollowupDays },
   today: () => TODAY,
 });
 
@@ -72,6 +73,7 @@ const TRUNCATE = sql`TRUNCATE email_log, einvoice_transmissions, invoice_rows, i
 beforeEach(async () => {
   await db.execute(TRUNCATE);
   supplierInvoiceDays = 7;
+  quoteFollowupDays = 7;
 });
 afterAll(async () => {
   await db.execute(TRUNCATE);
@@ -482,6 +484,56 @@ describe("supplier_invoice_due", () => {
   });
 });
 
+describe("quote_followup", () => {
+  async function quote(status: "quote" | "lost" | "confirmed" | "cancelled", validUntil: string | null) {
+    const customer = await makeCustomer();
+    const [order] = await db
+      .insert(salesOrders)
+      .values({ orderNumber: `KO-${suffix()}`, customerId: customer.id, status, quoted: true, quoteValidUntil: validUntil })
+      .returning();
+    return order!;
+  }
+
+  it("an expired quote is red, one expiring within N days yellow, earliest first; later ones are left out", async () => {
+    const soon = await quote("quote", "2030-03-07");
+    const expired = await quote("quote", "2030-03-01");
+    const today = await quote("quote", TODAY);
+    await quote("quote", "2030-03-12"); // day 8 — outside the 7-day window
+    const g = await group("quote_followup");
+    expect(g.severity).toBe("red");
+    expect(g.count).toBe(3);
+    expect(g.items.map((i) => [i.key, i.severity, i.date, i.secondary])).toEqual([
+      [expired.id, "red", "2030-03-01", "Gick ut 2030-03-01"],
+      [today.id, "yellow", TODAY, `Går ut ${TODAY} (i dag)`],
+      [soon.id, "yellow", "2030-03-07", "Går ut 2030-03-07 (om 3 dagar)"],
+    ]);
+    expect(g.items[0]!.href).toBe(`/forsaljning/ordrar/${expired.id}`);
+    expect(g.items[0]!.primary).toBe(`${expired.orderNumber} Kund AB`);
+    expect(g.listHref).toBe("/forsaljning/ordrar?status=quote");
+  });
+
+  it("the window follows the setting: the day exactly N ahead is in, 0 days means today only", async () => {
+    await quote("quote", "2030-03-11"); // day 7
+    await quote("quote", TOMORROW);
+    expect((await group("quote_followup")).count).toBe(2);
+    quoteFollowupDays = 0;
+    expect((await group("quote_followup")).count).toBe(0);
+    await quote("quote", TODAY);
+    expect((await group("quote_followup")).count).toBe(1);
+  });
+
+  it("the group is yellow when nothing has expired, and ignores lost, confirmed, cancelled and undated quotes", async () => {
+    await quote("quote", TOMORROW);
+    await quote("lost", "2030-01-01");
+    await quote("confirmed", "2030-01-01");
+    await quote("cancelled", "2030-01-01");
+    await quote("quote", null);
+    const g = await group("quote_followup");
+    expect(g.severity).toBe("yellow");
+    expect(g.count).toBe(1);
+  });
+});
+
 describe("einvoice_failed", () => {
   const t = (minutes: number) => new Date(Date.UTC(2030, 2, 1, 10, minutes));
 
@@ -569,7 +621,7 @@ describe("computeAlerts", () => {
         },
         orderPlanSummaries: async () => new Map(),
       },
-      settings: { supplierInvoiceDays: async () => 7 },
+      settings: { supplierInvoiceDays: async () => 7, quoteFollowupDays: async () => 7 },
       today: () => TODAY,
       log: () => {},
     });

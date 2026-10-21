@@ -62,6 +62,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   paxml_exported: "PAXml-export",
   confirmed: "Bekräftad",
   cancelled: "Avbruten",
+  lost: "Förlorad",
+  reopened: "Öppnad igen",
   issued: "Utfärdad",
   released: "Frisläppt",
   started: "Startad",

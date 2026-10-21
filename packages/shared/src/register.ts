@@ -22,3 +22,18 @@ export const deleteRegisterEntrySchema = z.object({
   replacementId: z.string().uuid().nullable().optional(),
 });
 export type DeleteRegisterEntryInput = z.infer<typeof deleteRegisterEntrySchema>;
+
+// Förlustorsaker (quote_loss_reasons): code = upper-case letters and digits
+// (lower case is upper-cased on input), max 10; name; active. No description
+// — the register is narrower than the terms registers. PATCH sends the whole
+// shape, like the other registers.
+export const quoteLossReasonInputSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .transform((value) => value.toUpperCase())
+    .pipe(z.string().regex(/^[A-Z0-9]{1,10}$/, "Koden får bara innehålla versaler och siffror, högst 10 tecken")),
+  name: z.string().trim().min(1).max(100),
+  active: z.boolean().default(true),
+});
+export type QuoteLossReasonInput = z.infer<typeof quoteLossReasonInputSchema>;

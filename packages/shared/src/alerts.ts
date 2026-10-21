@@ -15,6 +15,7 @@ export const ALERT_KINDS = [
   "manufacture_needed",
   "customer_invoice_overdue",
   "supplier_invoice_due",
+  "quote_followup",
   "einvoice_failed",
   "email_failed",
 ] as const;

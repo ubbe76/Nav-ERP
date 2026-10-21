@@ -50,6 +50,20 @@ export const units = pgTable("units", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Förlustorsaker (uppföljning av offerter): why a quote was lost — referenced
+// by sales_orders.lost_reason_id. Code (upper-case letters/digits, max 10)
+// and name are both unique; `active` hides a reason from the Förlorad dialog
+// without breaking the quotes that already carry it. No description: the
+// register is deliberately narrower than the terms registers above.
+export const quoteLossReasons = pgTable("quote_loss_reasons", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: varchar("code", { length: 10 }).notNull().unique(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Kolliart (frakt): Sendify's PACKAGE / PALLET / UNSPECIFIED. "other" is only
 // produced by the kolliförslag (weight without any freight description).
 export const parcelKindEnum = pgEnum("parcel_kind", ["package", "pallet", "other"]);

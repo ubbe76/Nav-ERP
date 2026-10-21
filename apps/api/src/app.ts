@@ -65,6 +65,8 @@ import { createReportsService } from "./modules/reports/service/reports.service.
 import { reportsRoutes } from "./modules/reports/routes/reports.routes.js";
 import { createOrderRegisterService } from "./modules/reports/service/order-register.service.js";
 import { createOrderRegisterRepository } from "./modules/reports/repository/order-register.repository.js";
+import { createQuoteFollowupService } from "./modules/reports/service/quote-followup.service.js";
+import { createQuoteFollowupRepository } from "./modules/reports/repository/quote-followup.repository.js";
 import { createPlanningService, type ManufacturingPlanReader } from "./modules/planning/service/planning.service.js";
 import { planningRoutes } from "./modules/planning/routes/planning.routes.js";
 import { createPayrollService } from "./modules/payroll/service/payroll.service.js";
@@ -527,7 +529,10 @@ export function buildApp(database: Db = db) {
   const alertsService = createAlertsService({
     repo: createAlertsRepository(database),
     planning: planningService,
-    settings: { supplierInvoiceDays: async () => (await systemService.getSettings()).alertSupplierInvoiceDays },
+    settings: {
+      supplierInvoiceDays: async () => (await systemService.getSettings()).alertSupplierInvoiceDays,
+      quoteFollowupDays: async () => (await systemService.getSettings()).alertQuoteFollowupDays,
+    },
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   app.decorate("alerts", alertsService);
@@ -551,6 +556,7 @@ export function buildApp(database: Db = db) {
   // costingService supplies the self cost the margin report measures against.
   const reportsService = createReportsService(createReportsRepository(database), costingService);
   const orderRegisterService = createOrderRegisterService(createOrderRegisterRepository(database), documentPdfService);
+  const quoteFollowupService = createQuoteFollowupService(createQuoteFollowupRepository(database));
   const oauthService = createOAuthService(createOAuthRepository(database), jwtSecret);
   // auditRepository is constructed earlier (ahead of purchase/sales) — see
   // that declaration's comment. Payroll/timereport reuse the same instance.
@@ -701,7 +707,12 @@ export function buildApp(database: Db = db) {
         // Aviseringar: one read, every office user; the kinds are filtered per
         // user in the service (admin-only Utskick som misslyckades included).
         await registerModule(protectedRoutes, alertsRoutes, { service: alertsService }, { read: office, write: ["admin"] });
-        await registerModule(protectedRoutes, reportsRoutes, { service: reportsService, orderRegister: orderRegisterService }, { read: ["rapporter"], write: ["rapporter"] });
+        await registerModule(
+          protectedRoutes,
+          reportsRoutes,
+          { service: reportsService, orderRegister: orderRegisterService, quoteFollowup: quoteFollowupService },
+          { read: ["rapporter"], write: ["rapporter"] }
+        );
         await registerModule(protectedRoutes, timeReportRoutes, { service: timeReportService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, scheduleRoutes, { service: scheduleService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, atfRoutes, { service: atfService }, { read: office, write: ["tillverkning"] });

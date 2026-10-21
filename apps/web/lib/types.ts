@@ -1026,7 +1026,8 @@ export type SalesOrderStatus =
   | "in_production"
   | "delivered"
   | "invoiced"
-  | "cancelled";
+  | "cancelled"
+  | "lost";
 
 export const SALES_ORDER_STATUS_PILL: Record<SalesOrderStatus, { status: "running" | "delayed" | "stopped" | "done" | "draft"; label: string }> = {
   quote: { status: "draft", label: "Offert" },
@@ -1035,6 +1036,7 @@ export const SALES_ORDER_STATUS_PILL: Record<SalesOrderStatus, { status: "runnin
   delivered: { status: "done", label: "Levererad" },
   invoiced: { status: "draft", label: "Fakturerad" },
   cancelled: { status: "stopped", label: "Avbruten" },
+  lost: { status: "stopped", label: "Förlorad" },
 };
 
 export interface SalesOrder extends DocumentTermsFields {

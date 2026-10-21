@@ -18,19 +18,27 @@ import {
   paymentTerms,
   purchaseOrderRows,
   purchaseOrders,
+  quoteLossReasons,
   salesOrderRows,
   salesOrders,
   suppliers,
   units,
   type Db,
 } from "@navet/db";
-import type { CreateRegisterEntryInput, PackageTypeFreightInput, UpdateRegisterEntryInput } from "@navet/shared";
+import type {
+  CreateRegisterEntryInput,
+  PackageTypeFreightInput,
+  QuoteLossReasonInput,
+  UpdateRegisterEntryInput,
+} from "@navet/shared";
 import { isForeignKeyViolation } from "../../system/service/db-errors.js";
 import { RegisterEntryInUseError, type RegisterUsage } from "../service/register.errors.js";
 
-// The five base-data registers share the exact same column shape, so one
+// The five terms-style registers share the exact same column shape, so one
 // table-parameterized accessor serves all of them. The casts below are safe
-// for the same reason — identical columns.
+// for the same reason — identical columns. quote_loss_reasons differs
+// (active, no description): it reuses the id/code/name machinery and gets
+// its own create/update below.
 type RegisterTable = typeof deliveryTerms;
 
 // One column somewhere in the schema that points at a register table — the
@@ -93,7 +101,7 @@ const PARTNER_AND_DOCUMENT_REFERENCES = {
 } satisfies Record<string, RegisterReference[]>;
 
 export const REGISTER_REFERENCES: Record<
-  "deliveryTerms" | "paymentTerms" | "carriers" | "units" | "packageTypes",
+  "deliveryTerms" | "paymentTerms" | "carriers" | "units" | "packageTypes" | "quoteLossReasons",
   RegisterReference[]
 > = {
   deliveryTerms: PARTNER_AND_DOCUMENT_REFERENCES.deliveryTerm,
@@ -116,6 +124,8 @@ export const REGISTER_REFERENCES: Record<
     ref(costCalculationMaterialRows, "cost_calculation_material_rows", "kalkylrad|kalkylrader", costCalculationMaterialRows.unitId),
   ],
   packageTypes: [ref(articles, "articles", "artikel|artiklar", articles.packageTypeId)],
+  // Förlustorsaker: the lost quotes carrying the reason (reopen clears it).
+  quoteLossReasons: [ref(salesOrders, "sales_orders", "förlorad offert|förlorade offerter", salesOrders.lostReasonId)],
 };
 
 export function createRegisterRepository(db: Db) {
@@ -225,12 +235,47 @@ export function createRegisterRepository(db: Db) {
     };
   }
 
+  // Förlustorsaker: the generic id/code/name accessor (list, lookups, usage,
+  // delete with reassign) with create/update on the register's own shape.
+  const lossReasonsBase = forTable(quoteLossReasons as unknown as RegisterTable, REGISTER_REFERENCES.quoteLossReasons);
+  const lossReasons = {
+    ...lossReasonsBase,
+    async list() {
+      return db.select().from(quoteLossReasons).orderBy(asc(quoteLossReasons.code));
+    },
+    async findById(id: string) {
+      const [row] = await db.select().from(quoteLossReasons).where(eq(quoteLossReasons.id, id));
+      return row ?? null;
+    },
+    async findByCode(code: string) {
+      const [row] = await db.select().from(quoteLossReasons).where(eq(quoteLossReasons.code, code));
+      return row ?? null;
+    },
+    async findByName(name: string) {
+      const [row] = await db.select().from(quoteLossReasons).where(eq(quoteLossReasons.name, name));
+      return row ?? null;
+    },
+    async create(input: QuoteLossReasonInput) {
+      const [row] = await db.insert(quoteLossReasons).values(input).returning();
+      return row!;
+    },
+    async update(id: string, input: QuoteLossReasonInput) {
+      const [row] = await db
+        .update(quoteLossReasons)
+        .set({ ...input, updatedAt: new Date() })
+        .where(eq(quoteLossReasons.id, id))
+        .returning();
+      return row ?? null;
+    },
+  };
+
   return {
     deliveryTerms: forTable(deliveryTerms, REGISTER_REFERENCES.deliveryTerms),
     paymentTerms: forTable(paymentTerms as unknown as RegisterTable, REGISTER_REFERENCES.paymentTerms),
     carriers: forTable(carriers as unknown as RegisterTable, REGISTER_REFERENCES.carriers),
     units: forTable(units as unknown as RegisterTable, REGISTER_REFERENCES.units),
     packageTypes: forTable(packageTypes as unknown as RegisterTable, REGISTER_REFERENCES.packageTypes),
+    quoteLossReasons: lossReasons,
     // Kollitypens fraktfält (frakt) — outside the generic code/name register.
     async updatePackageTypeFreight(id: string, input: PackageTypeFreightInput) {
       const num = (v: number | null) => (v === null ? null : String(v));

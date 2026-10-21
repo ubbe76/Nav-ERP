@@ -10,8 +10,9 @@ export interface AlertKindDef {
   kind: AlertKind;
   label: string;
   // The kind's colour for ordering and for its rows. supplier_invoice_due
-  // is the one kind whose rows differ: red once overdue, yellow while only
-  // due soon (supplierInvoiceSeverity) — it sits among the reds.
+  // and quote_followup are the kinds whose rows differ: red once the date
+  // has passed, yellow while it is only near (dueDateSeverity) — they sit
+  // among the reds.
   severity: AlertSeverity;
   rule: AccessRule;
   // The web page that lists every row of the kind ("Visa alla").
@@ -33,6 +34,14 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     severity: "red",
     rule: ["inkop"],
     listHref: "/inkop/reskontra",
+  },
+  // Offerter att följa upp: expired (red) and expiring within N days (yellow).
+  {
+    kind: "quote_followup",
+    label: "Offerter att följa upp",
+    severity: "red",
+    rule: ["forsaljning"],
+    listHref: "/forsaljning/ordrar?status=quote",
   },
   {
     kind: "einvoice_failed",
@@ -94,8 +103,11 @@ export function sortKinds(kinds: readonly AlertKind[]): AlertKind[] {
   return [...new Set(kinds)].sort((a, b) => ORDER.get(a)! - ORDER.get(b)!);
 }
 
-// Leverantörsfakturor att betala: red once the due date has passed, yellow
-// while it is today or ahead.
-export function supplierInvoiceSeverity(dueDate: string, today: string): AlertSeverity {
-  return dueDate < today ? "red" : "yellow";
+// A dated row: red once the date has passed, yellow while it is today or
+// ahead. Leverantörsfakturor att betala (due date) and Offerter att följa
+// upp (Giltig t.o.m.) share it.
+export function dueDateSeverity(date: string, today: string): AlertSeverity {
+  return date < today ? "red" : "yellow";
 }
+export const supplierInvoiceSeverity = dueDateSeverity;
+export const quoteFollowupSeverity = dueDateSeverity;

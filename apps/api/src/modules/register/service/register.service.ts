@@ -1,5 +1,6 @@
 import type { CreateRegisterEntryInput, PackageTypeFreightInput, UpdateRegisterEntryInput } from "@navet/shared";
 import type { RegisterRepository } from "../repository/register.repository.js";
+import type { RegisterUsage } from "./register.errors.js";
 import {
   DuplicateRegisterEntryError,
   InvalidReplacementError,
@@ -68,20 +69,37 @@ export const STANDARD_PACKAGE_TYPES: { code: string; name: string; freight?: Pac
   { code: "SÄCK", name: "Säck" },
 ];
 
+// What a register's repository accessor must offer — the terms registers
+// (CreateRegisterEntryInput) and förlustorsaker (QuoteLossReasonInput) both
+// fit; only the row/input shapes differ.
+interface RegisterEntries<TInput extends { code: string; name: string }, TRow extends { id: string; code: string }> {
+  list(): Promise<TRow[]>;
+  findById(id: string): Promise<TRow | null>;
+  findByCode(code: string): Promise<TRow | null>;
+  findByName(name: string): Promise<TRow | null>;
+  create(input: TInput): Promise<TRow>;
+  update(id: string, input: TInput): Promise<TRow | null>;
+  exists(id: string): Promise<boolean>;
+  countReferences(id: string): Promise<RegisterUsage>;
+  deleteWithReassign(id: string, replacementId: string | null): Promise<{ moved: { table: string; count: number }[] } | null>;
+}
+
 export function createRegisterService(repo: RegisterRepository) {
-  function forRegister(entries: RegisterRepository["deliveryTerms"]) {
+  function forRegister<TInput extends { code: string; name: string }, TRow extends { id: string; code: string }>(
+    entries: RegisterEntries<TInput, TRow>
+  ) {
     return {
       async list() {
         return entries.list();
       },
 
-      async create(input: CreateRegisterEntryInput) {
+      async create(input: TInput) {
         if (await entries.findByCode(input.code)) throw new DuplicateRegisterEntryError("code", input.code);
         if (await entries.findByName(input.name)) throw new DuplicateRegisterEntryError("name", input.name);
         return entries.create(input);
       },
 
-      async update(id: string, input: UpdateRegisterEntryInput) {
+      async update(id: string, input: TInput) {
         // An entry may keep its own code/name — conflicts only count on a
         // different row (same rule as article groups).
         const byCode = await entries.findByCode(input.code);
@@ -96,6 +114,10 @@ export function createRegisterService(repo: RegisterRepository) {
 
       async exists(id: string) {
         return entries.exists(id);
+      },
+
+      async findById(id: string) {
+        return entries.findById(id);
       },
 
       // What still points at the entry — the UI decides from this whether
@@ -127,11 +149,14 @@ export function createRegisterService(repo: RegisterRepository) {
   }
 
   return {
-    deliveryTerms: forRegister(repo.deliveryTerms),
-    paymentTerms: forRegister(repo.paymentTerms),
-    carriers: forRegister(repo.carriers),
-    units: forRegister(repo.units),
-    packageTypes: forRegister(repo.packageTypes),
+    deliveryTerms: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["deliveryTerms"]["create"]>>>(repo.deliveryTerms),
+    paymentTerms: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["paymentTerms"]["create"]>>>(repo.paymentTerms),
+    carriers: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["carriers"]["create"]>>>(repo.carriers),
+    units: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["units"]["create"]>>>(repo.units),
+    packageTypes: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["packageTypes"]["create"]>>>(repo.packageTypes),
+    // Förlustorsaker (uppföljning av offerter): same CRUD/usage/delete flow,
+    // its own input shape (code/name/active).
+    quoteLossReasons: forRegister(repo.quoteLossReasons),
 
     // Idempotent: creates the Combiterms entries that are missing and skips
     // the rest, so customized codes/names survive re-runs.
@@ -177,9 +202,11 @@ export function createRegisterService(repo: RegisterRepository) {
 
 export type RegisterService = ReturnType<typeof createRegisterService>;
 
-// The subset sales/purchase need to validate references on customers/suppliers.
+// The subset sales/purchase need to validate references on customers/suppliers
+// — plus the förlustorsak lookup Förlorad needs (sales only).
 export interface RegisterReferenceReader {
   deliveryTerms: { exists(id: string): Promise<boolean> };
   paymentTerms: { exists(id: string): Promise<boolean> };
   carriers: { exists(id: string): Promise<boolean> };
+  quoteLossReasons: { findById(id: string): Promise<{ id: string; code: string; name: string; active: boolean } | null> };
 }

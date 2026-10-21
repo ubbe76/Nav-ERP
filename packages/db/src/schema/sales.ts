@@ -23,7 +23,7 @@ import { articleGroups, articles } from "./article";
 import { users } from "./auth";
 import { bankFileEntries } from "./banking";
 import { verifications } from "./economy";
-import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, units } from "./register";
+import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, quoteLossReasons, units } from "./register";
 import { stockLocations, stockTransactions } from "./stock";
 
 // Kod på pallkort (pallet card code): what machine-readable code the pallet
@@ -42,6 +42,9 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 // ways always work (spec 2026-10-21-e-faktura-peppol-design.md §1).
 export const invoiceDeliveryEnum = pgEnum("invoice_delivery", ["email", "peppol"]);
 
+// Förlorad (lost): a quote the customer did not take — closed like
+// cancelled, with a reason from quote_loss_reasons; Öppna igen takes it back
+// to quote (uppföljning av offerter, 2026-10-21).
 export const salesOrderStatusEnum = pgEnum("sales_order_status", [
   "quote",
   "confirmed",
@@ -49,6 +52,7 @@ export const salesOrderStatusEnum = pgEnum("sales_order_status", [
   "delivered",
   "invoiced",
   "cancelled",
+  "lost",
 ]);
 
 export const customers = pgTable("customers", {
@@ -280,6 +284,19 @@ export const salesOrders = pgTable("sales_orders", {
   status: salesOrderStatusEnum("status").notNull().default("quote"),
   expectedDeliveryDate: date("expected_delivery_date"),
   note: text("note"),
+  // Uppföljning av offerter: `quoted` = created as a quote (Ny kundorder
+  // confirms at once and is NOT a quote — only quoted orders count in the
+  // hit rate; backfilled true for the quotes open at migration 0135).
+  // quote_valid_until = Giltig t.o.m., printed on the quote; expiry is
+  // derived (status quote and the date before today), never a status.
+  quoted: boolean("quoted").notNull().default(false),
+  quoteValidUntil: date("quote_valid_until"),
+  // Förlorad: set by lose (reason required there) or by the manual status
+  // override (no reason — "Ingen orsak angiven"); cleared on reopen.
+  lostReasonId: uuid("lost_reason_id").references(() => quoteLossReasons.id, { onDelete: "restrict" }),
+  lostNote: text("lost_note"),
+  lostAt: timestamp("lost_at", { withTimezone: true }),
+  lostBy: uuid("lost_by").references(() => users.id, { onDelete: "set null" }),
   // Bumped by 1 on every content change (header/terms/rows) — never by
   // status transitions or deliveries. Printed on quote/order confirmation.
   revision: integer("revision").notNull().default(1),

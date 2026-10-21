@@ -160,6 +160,11 @@ const systemSettingsFieldsSchema = z.object({
     // links in the mail).
     alertDigestTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
     alertSupplierInvoiceDays: z.number().int().min(0).max(60).optional(),
+    // Offerter att följa upp inom (dagar) — the quote_followup alert's window.
+    alertQuoteFollowupDays: z.number().int().min(0).max(60).optional(),
+    // Offertens giltighetstid (dagar): the default Giltig t.o.m. of a new
+    // quote = today + N; 0 = no validity date.
+    quoteValidityDays: z.number().int().min(0).max(365).optional(),
     publicBaseUrl: z
       .union([
         z.literal(""),

@@ -212,6 +212,9 @@ export interface DocumentPdfInput {
   // Leveransdatum (quote/order confirmation) — the day the customer gets the
   // goods; rows with a date of their own carry DocumentPdfRow.deliveryDate.
   deliveryDate?: string | null;
+  // Giltig t.o.m. (quote only): "Offerten gäller till och med <date>." under
+  // the meta lines. ISO date like every other date on the documents.
+  validUntil?: string | null;
   // Our customer number at the supplier (vårt kundnummer hos leverantören) —
   // printed on inquiry/PO. Deliberately NOT labelled "Vårt kundnr:", which
   // the carrier line below already uses for our number at the CARRIER.
@@ -1018,6 +1021,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     }
     if (input.deliveryDate) {
       doc.text(`Leveransdatum: ${input.deliveryDate}`, left, y);
+      y += 14;
+    }
+    if (input.validUntil) {
+      doc.text(`Offerten gäller till och med ${input.validUntil}.`, left, y);
       y += 14;
     }
     if (input.ourCustomerNumberAtSupplier) {

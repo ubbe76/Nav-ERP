@@ -147,22 +147,48 @@ describe("system service — settings", () => {
   });
 
   it("Aviseringar: digest time, supplier invoice window and Navs adress default, round-trip and reject junk", async () => {
-    const KEYS = ["alert_digest_time", "alert_supplier_invoice_days", "public_base_url"];
+    const KEYS = ["alert_digest_time", "alert_supplier_invoice_days", "alert_quote_followup_days", "quote_validity_days", "public_base_url"];
     await db.delete(systemSettings).where(inArray(systemSettings.key, KEYS));
     try {
-      expect(await systemService.getSettings()).toMatchObject({ alertDigestTime: "07:00", alertSupplierInvoiceDays: 7, publicBaseUrl: "" });
+      expect(await systemService.getSettings()).toMatchObject({
+        alertDigestTime: "07:00",
+        alertSupplierInvoiceDays: 7,
+        alertQuoteFollowupDays: 7,
+        quoteValidityDays: 30,
+        publicBaseUrl: "",
+      });
       expect(
-        await systemService.updateSettings({ alertDigestTime: "16:30", alertSupplierInvoiceDays: 0, publicBaseUrl: "https://erp.foretag.se/" })
-      ).toMatchObject({ alertDigestTime: "16:30", alertSupplierInvoiceDays: 0, publicBaseUrl: "https://erp.foretag.se" });
+        await systemService.updateSettings({
+          alertDigestTime: "16:30",
+          alertSupplierInvoiceDays: 0,
+          alertQuoteFollowupDays: 14,
+          quoteValidityDays: 0,
+          publicBaseUrl: "https://erp.foretag.se/",
+        })
+      ).toMatchObject({
+        alertDigestTime: "16:30",
+        alertSupplierInvoiceDays: 0,
+        alertQuoteFollowupDays: 14,
+        quoteValidityDays: 0,
+        publicBaseUrl: "https://erp.foretag.se",
+      });
       expect((await systemService.updateSettings({ publicBaseUrl: "" })).publicBaseUrl).toBe("");
       for (const [key, value] of [
         ["alert_digest_time", "25:99"],
         ["alert_supplier_invoice_days", "999"],
+        ["alert_quote_followup_days", "-3"],
+        ["quote_validity_days", "abc"],
         ["public_base_url", "ftp://x"],
       ] as const) {
         await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
       }
-      expect(await systemService.getSettings()).toMatchObject({ alertDigestTime: "07:00", alertSupplierInvoiceDays: 7, publicBaseUrl: "" });
+      expect(await systemService.getSettings()).toMatchObject({
+        alertDigestTime: "07:00",
+        alertSupplierInvoiceDays: 7,
+        alertQuoteFollowupDays: 7,
+        quoteValidityDays: 30,
+        publicBaseUrl: "",
+      });
     } finally {
       await db.delete(systemSettings).where(inArray(systemSettings.key, KEYS));
     }
@@ -170,6 +196,10 @@ describe("system service — settings", () => {
     expect(updateSystemSettingsSchema.safeParse({ alertDigestTime: "24:00" }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ alertSupplierInvoiceDays: 61 }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ alertSupplierInvoiceDays: 1.5 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ alertQuoteFollowupDays: 61 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ quoteValidityDays: 366 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ quoteValidityDays: -1 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ quoteValidityDays: 365, alertQuoteFollowupDays: 60 }).success).toBe(true);
     expect(updateSystemSettingsSchema.safeParse({ publicBaseUrl: "erp.foretag.se" }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ publicBaseUrl: "ftp://erp.foretag.se" }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ publicBaseUrl: "http://localhost:3000" }).success).toBe(true);

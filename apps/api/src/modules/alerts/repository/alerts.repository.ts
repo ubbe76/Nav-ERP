@@ -53,6 +53,13 @@ export interface OpenManufacturingOrderRow {
   dueDate: string | null;
 }
 
+export interface QuoteToFollowUpRow {
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  validUntil: string;
+}
+
 export interface OverdueInvoiceRow {
   invoiceId: string;
   invoiceNumber: string | null;
@@ -139,6 +146,25 @@ export function createAlertsRepository(db: Db) {
         )
         .groupBy(salesOrders.id, salesOrders.orderNumber, customers.name)
         .orderBy(sql`${earliest} asc`, asc(salesOrders.orderNumber));
+    },
+
+    // Offerter att följa upp: open quotes (status quote — a lost or
+    // confirmed one is not open) whose Giltig t.o.m. is on or before the
+    // horizon the service computes (today + N days); a quote without a
+    // validity date never expires and is left out. Earliest date first.
+    async quotesToFollowUp(horizon: string): Promise<QuoteToFollowUpRow[]> {
+      const rows = await db
+        .select({
+          orderId: salesOrders.id,
+          orderNumber: salesOrders.orderNumber,
+          customerName: customers.name,
+          validUntil: salesOrders.quoteValidUntil,
+        })
+        .from(salesOrders)
+        .innerJoin(customers, eq(customers.id, salesOrders.customerId))
+        .where(and(eq(salesOrders.status, "quote"), sql`${salesOrders.quoteValidUntil} <= ${horizon}::date`))
+        .orderBy(asc(salesOrders.quoteValidUntil), asc(salesOrders.orderNumber));
+      return rows.map((r) => ({ ...r, validUntil: r.validUntil! }));
     },
 
     // Försenade inköpsordrar: draft/confirmed/partially received with a row
