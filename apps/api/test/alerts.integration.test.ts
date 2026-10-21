@@ -571,11 +571,12 @@ describe("computeAlerts", () => {
       },
       settings: { supplierInvoiceDays: async () => 7 },
       today: () => TODAY,
+      log: () => {},
     });
     const partial = await broken.computeAlerts(["purchase_needed", "sales_order_late"]);
     expect(partial.groups.map((g) => [g.kind, g.count, g.error, g.message])).toEqual([
       ["sales_order_late", 1, false, null],
-      ["purchase_needed", 0, true, "Kunde inte räkna fram behöver beställas: MRP exploded"],
+      ["purchase_needed", 0, true, "Kunde inte räkna fram behöver beställas — se serverloggen."],
     ]);
   });
 

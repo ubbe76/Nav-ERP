@@ -14,7 +14,7 @@ const EMAIL_DOCUMENT_TYPE_LABELS: Record<EmailDocumentType, string> = {
   invoice: "Faktura",
   payment_reminder: "Betalningspåminnelse",
   test: "Testmejl",
-  alert_digest: "Aviseringar",
+  alert_digest: "Daglig sammanställning",
 };
 
 const EMAIL_STATUS_LABELS: Record<EmailStatus, string> = {

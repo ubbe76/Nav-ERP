@@ -528,6 +528,7 @@ export function buildApp(database: Db = db) {
     repo: createAlertsRepository(database),
     planning: planningService,
     settings: { supplierInvoiceDays: async () => (await systemService.getSettings()).alertSupplierInvoiceDays },
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   app.decorate("alerts", alertsService);
   // Den dagliga sammanställningen: decorated for server.ts's scheduler like

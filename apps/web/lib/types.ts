@@ -2328,7 +2328,7 @@ export const EMAIL_DOCUMENT_TYPE_LABELS: Record<EmailDocumentType, string> = {
   order_confirmation: "Orderbekräftelse",
   invoice: "Faktura",
   payment_reminder: "Betalningspåminnelse",
-  alert_digest: "Aviseringar",
+  alert_digest: "Daglig sammanställning",
   test: "Testmejl",
 };
 

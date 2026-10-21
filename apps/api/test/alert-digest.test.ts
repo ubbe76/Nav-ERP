@@ -284,6 +284,34 @@ describe("alert digest job", () => {
     expect(await runs()).toHaveLength(1);
   });
 
+  it("one recipient's failure does not stop the others", async () => {
+    await makeUser({ role: "admin" });
+    await makeUser({ role: "admin" });
+    const realRepo = createAlertDigestRepository(db);
+    let finishCalls = 0;
+    const flaky = createAlertDigestService({
+      repo: {
+        ...realRepo,
+        finishRun: async (...args: Parameters<typeof realRepo.finishRun>) => {
+          if (++finishCalls <= 2) throw new Error("db hiccup");
+          return realRepo.finishRun(...args);
+        },
+      },
+      alerts: { computeAlerts: fakeComputeAlerts },
+      mail: mailService,
+      settings: {
+        smtpConfigured: async () => true,
+        digestSettings: async () => ({ digestTime, publicBaseUrl }),
+      },
+      now: () => now,
+      log: (msg) => logged.push(msg),
+    });
+    const result = await flaky.runDigestIfDue();
+    expect(sentMails).toHaveLength(2);
+    expect(result.outcomes.filter((o) => o.status === "sent")).toHaveLength(1);
+    expect(logged.some((m) => m.includes("aborted"))).toBe(true);
+  });
+
   it("never catches up earlier days", async () => {
     await makeUser({ role: "admin" });
     now = new Date("2030-03-05T06:00:00Z");

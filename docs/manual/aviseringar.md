@@ -23,7 +23,7 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 | **Behöver beställas** | gul | Behovsberäkningens rader med förslaget att köpa eller lägga ut på legotillverkning: artikeln ligger under beställningspunkten eller räcker inte till behovet. |
 | **Behöver tillverkas** | gul | Behovsberäkningens rader med förslaget att tillverka, även konfigurerade artiklar. |
 
-Datumen för order räknas som på [Översikten och i planeringen](/hjalp/komma-igang#oversikten): radens eget leveransdatum gäller före orderns, och för kundorder räknas avsändningsdagen (se [Leveransdagar](/hjalp/forsaljning#leveransdagar)).
+Datumen för order räknas som på [Översikten och i planeringen](/hjalp/komma-igang#oversikten): radens eget leveransdatum gäller före orderns. För kundorder jämförs radens leveransdatum (annars orderns) med dagens datum.
 
 ## Vem ser vad
 
@@ -61,7 +61,7 @@ Så fungerar utskicket:
 - Mejlet skickas klockan **Skicka sammanställningen klockan** (förval 07:00, svensk tid) på arbetsdagar, alltså måndag till fredag utom heldagshelger. Har servern varit nere skickas dagens mejl så fort den är igång igen, men aldrig för tidigare dagar.
 - Finns inget att bevaka skickas inget mejl.
 - Ämnet är t.ex. "Nav: 5 saker att bevaka — tisdag 21 oktober". Mejlet har en rubrik per typ med antal och högst 20 rader, och sist en länk till **Aviseringar** med texten "Ändra vad du får". Raderna länkar till korten om **Navs adress** är angiven, annars står texten "Öppna Nav för att se detaljerna".
-- Ett misslyckat mejl försöks inte igen samma dag. Alla sammanställningar loggas i [E-postloggen](/hjalp/system#e-postlogg) med dokumenttypen **Aviseringar**. **Skicka om** finns inte för dem, eftersom innehållet vore inaktuellt, och ett misslyckat mejl syns dagen därpå som **Utskick som misslyckades** för administratörer.
+- Ett misslyckat mejl försöks inte igen samma dag. Alla sammanställningar loggas i [E-postloggen](/hjalp/system#e-postlogg) med dokumenttypen **Daglig sammanställning**. **Skicka om** finns inte för dem, eftersom innehållet vore inaktuellt, och ett misslyckat mejl syns dagen därpå som **Utskick som misslyckades** för administratörer.
 
 ## Inställningar
 

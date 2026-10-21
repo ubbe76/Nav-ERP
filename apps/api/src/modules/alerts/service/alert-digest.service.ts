@@ -113,7 +113,13 @@ export function createAlertDigestService(deps: {
       const runId = await repo.claimRun(recipient.userId, date);
       if (runId === null) continue; // another process or tick has this one
       const groups = computed.groups.filter((g) => kinds.includes(g.kind));
-      outcomes.push(await sendOne(recipient, runId, date, groups, publicBaseUrl));
+      try {
+        outcomes.push(await sendOne(recipient, runId, date, groups, publicBaseUrl));
+      } catch (err) {
+        // One recipient's failure (e.g. the run row could not be finished)
+        // never stops the others.
+        log(`Alert digest for ${recipient.email} aborted`, { error: err instanceof Error ? err.message : String(err) });
+      }
     }
     return { date, skipped: null, outcomes };
   }

@@ -11,6 +11,12 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
   const [baseUrl, setBaseUrl] = useState(settings.publicBaseUrl);
   const [time, setTime] = useState(settings.alertDigestTime);
   const [days, setDays] = useState(String(settings.alertSupplierInvoiceDays));
+  // The last values the server holds; a blur that changes nothing sends no PATCH.
+  const [last, setLast] = useState({
+    url: settings.publicBaseUrl,
+    time: settings.alertDigestTime,
+    days: settings.alertSupplierInvoiceDays,
+  });
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -24,6 +30,7 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
       setBaseUrl(updated.publicBaseUrl);
       setTime(updated.alertDigestTime);
       setDays(String(updated.alertSupplierInvoiceDays));
+      setLast({ url: updated.publicBaseUrl, time: updated.alertDigestTime, days: updated.alertSupplierInvoiceDays });
       setSaved(field);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte spara inställningen");
@@ -34,7 +41,7 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
 
   function saveBaseUrl() {
     const value = baseUrl.trim().replace(/\/+$/, "");
-    if (value === settings.publicBaseUrl && value === baseUrl.trim()) return;
+    if (value === last.url && value === baseUrl.trim()) return;
     void save("url", { publicBaseUrl: value });
   }
 
@@ -43,6 +50,7 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
       setError("Klockslaget måste anges som tt:mm");
       return;
     }
+    if (time === last.time) return;
     void save("time", { alertDigestTime: time });
   }
 
@@ -52,6 +60,7 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
       setError("Antal dagar måste vara ett heltal 0–60");
       return;
     }
+    if (value === last.days) return;
     void save("days", { alertSupplierInvoiceDays: value });
   }
 
@@ -68,12 +77,12 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
             sammanställningen; är den tom skickas mejlet utan länkar.
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexShrink: 1 }}>
           <input
             type="url"
             aria-label="Navs adress"
             className={styles.numberInput}
-            style={{ width: 240 }}
+            style={{ width: 240, maxWidth: "100%", minWidth: 0 }}
             value={baseUrl}
             disabled={pending}
             onChange={(e) => {
@@ -114,8 +123,8 @@ export function AlertSettingsForm({ settings }: { settings: SystemSettings }) {
         <div className={styles.texts}>
           <div className={styles.label}>Leverantörsfakturor att betala inom (dagar)</div>
           <div className={styles.description}>
-            Hur långt framåt aviseringen Leverantörsfakturor att betala tittar. 0 = bara fakturor som redan har
-            förfallit.
+            Hur långt framåt aviseringen Leverantörsfakturor att betala tittar. 0 = förfallna fakturor och de som
+            förfaller i dag.
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -1,5 +1,6 @@
 import { ALERT_ITEMS_LIMIT, type AlertGroup, type AlertItem, type AlertKind, type AlertSeverity, type AlertsResponse } from "@navet/shared";
 import { addDays, stockholmToday } from "../../system/service/delivery-days.js";
+import { stockholmNow } from "../../shipping/service/pickup.js";
 import { computeDueDate } from "../../purchase/service/supplier-invoice.service.js";
 import type { AlertsRepository } from "../repository/alerts.repository.js";
 import { alertKindDef, sortKinds, supplierInvoiceSeverity, visibleKinds, type AlertUser } from "./alert-kinds.js";
@@ -106,10 +107,12 @@ export function createAlertsService(deps: {
   // Today as a Stockholm day and the current instant; the tests pin them.
   today?: () => string;
   now?: () => Date;
+  log?: (msg: string, extra?: unknown) => void;
 }) {
   const todayFn = deps.today ?? stockholmToday;
   const nowFn = deps.now ?? (() => new Date());
   const { repo, planning } = deps;
+  const log = deps.log ?? ((msg: string, extra?: unknown) => console.error(msg, extra));
 
   // One reader per kind: the rows, already sorted oldest/most urgent first.
   const readers: Record<AlertKind, (today: string) => Promise<AlertItem[]>> = {
@@ -220,7 +223,7 @@ export function createAlertsService(deps: {
         href: `/forsaljning/fakturor/${r.invoiceId}`,
         primary: `${r.invoiceNumber ?? "Faktura"} ${r.customerName ?? ""}`.trim(),
         secondary: r.errorMessage ? `${EINVOICE_STATUS_TEXT[r.status]} · ${r.errorMessage}` : EINVOICE_STATUS_TEXT[r.status],
-        date: r.startedAt.toISOString().slice(0, 10),
+        date: stockholmNow(r.startedAt).date,
       }));
     },
 
@@ -233,7 +236,7 @@ export function createAlertsService(deps: {
         href: emailDocumentHref(r.documentType, r.documentId),
         primary: `${EMAIL_DOCUMENT_TEXT[r.documentType] ?? r.documentType}: ${r.subject}`,
         secondary: r.error ? `Till ${r.recipient} · ${r.error}` : `Till ${r.recipient}`,
-        date: r.createdAt.toISOString().slice(0, 10),
+        date: stockholmNow(r.createdAt).date,
       }));
     },
   };
@@ -295,6 +298,7 @@ export function createAlertsService(deps: {
             message: null,
           };
         } catch (err) {
+          log(`Alerts: ${kind} could not be computed`, { error: err instanceof Error ? (err.stack ?? err.message) : String(err) });
           return {
             kind,
             label: def.label,
@@ -303,7 +307,7 @@ export function createAlertsService(deps: {
             listHref: def.listHref,
             items: [],
             error: true,
-            message: `Kunde inte räkna fram ${def.label.toLowerCase()}: ${err instanceof Error ? err.message : String(err)}`,
+            message: `Kunde inte räkna fram ${def.label.toLowerCase()} — se serverloggen.`,
           };
         }
       })

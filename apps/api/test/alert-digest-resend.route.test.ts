@@ -59,6 +59,6 @@ describe("alert digest in the e-mail log", () => {
     expect(list.json().rows[0]).toMatchObject({ documentType: "alert_digest", linkKind: "alert_digest" });
     const csv = await app.inject({ method: "GET", url: "/api/v1/email-log/csv", headers: { cookie } });
     expect(csv.statusCode).toBe(200);
-    expect(csv.body).toContain("Aviseringar");
+    expect(csv.body).toContain("Daglig sammanställning");
   });
 });

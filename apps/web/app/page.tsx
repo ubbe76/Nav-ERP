@@ -128,7 +128,7 @@ export default async function OverviewPage() {
     {
       label: "Lager",
       // The saldo list, not the module menu: this station's numbers ARE the
-      // balance rows ("N artiklar i lager", "N med saldo ≤ 0"), so the
+      // balance rows ("N artiklar i lager", "N med negativt saldo"), so the
       // drill-down has to land on them. The sibling stations point at their
       // module page on purpose — they summarise orders, not one list.
       href: "/lager/saldon",
@@ -139,7 +139,7 @@ export default async function OverviewPage() {
           ? "Se Aviseringar"
           : stockNegative === 0
             ? "Inga negativa saldon"
-            : `${stockNegative} med saldo ≤ 0`,
+            : `${stockNegative} med negativt saldo`,
       tone: stockNegative ? "alert" : "neutral",
     },
     {
@@ -223,7 +223,11 @@ export default async function OverviewPage() {
             width underneath — where the extra room goes to the article names
             it would otherwise ellipsise. */}
         <div className={styles.topRow}>
-          <AttentionCard items={attentionItems} totalCount={attentionTotal} />
+          <AttentionCard
+            items={attentionItems}
+            totalCount={attentionTotal}
+            emptyText={alerts === null ? "Kunde inte läsa aviseringarna just nu." : undefined}
+          />
           <OrdersCard orders={activeManufacturingOrders.slice(0, 6)} />
         </div>
 
