@@ -14,6 +14,7 @@ Aktuella punkter och beslut. Avslutade block är arkiverade utanför det publika
 - [ ] **Förbättrad kundimport** — omfattning ej specad än.
 - [ ] **Förbättrad leverantörsimport** — omfattning ej specad än.
 - [ ] **Förbättrad lagerplatshantering** — omfattning ej specad än.
+- [ ] **Excelmallar för importerna** — en exempelfil (.xlsx) per import med en rubrik för varje importkolumn, och en cellkommentar på varje kolumnrubrik som förklarar tydligare vad kolumnen betyder (format, enhet, tillåtna värden, om den är obligatorisk). Omfattning ej specad än (2026-10-22).
 - [ ] **Redigerbar Översikt** — användaren ska kunna välja vad startsidan Översikt (dashboarden) visar. Omfattning ej specad än.
 - [x] **E-faktura (Peppol), etapp 1** — utgående kundfaktura och kreditfaktura som Peppol BIS Billing 3 via B2Brouter: kundens **Fakturaleverans** och **Peppol-id** med **Kontrollera**, **Skicka e-faktura** på fakturakortet med sändningslogg, statusjobb och inställningssidan System → E-faktura (migration 0133). Klar 2026-10-21.
 - [ ] **E-faktura (Peppol), etapp 2** — mottagning (inkommande e-faktura blir leverantörsfakturautkast med rader), webhooks, utländska mottagare och valutor (omvänd moms, export), automatisk sändning vid Utfärda och samlingsfakturering, ev. InExchange-adapter. Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7.
