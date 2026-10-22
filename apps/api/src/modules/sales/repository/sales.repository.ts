@@ -608,6 +608,7 @@ export function createSalesRepository(db: Db) {
             quoteNumber: input.confirm ? null : orderNumber,
             customerId: input.customerId,
             customerOrderNumber: input.customerOrderNumber,
+            customerInquiryNumber: input.customerInquiryNumber,
             customerReference: input.customerReference,
             deliveryAddressId,
             deliveryTermId: customer?.deliveryTermId ?? null,

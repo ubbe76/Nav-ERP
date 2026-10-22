@@ -239,6 +239,8 @@ POST /api/v1/quotes
 - Mall i läget **Beställningsvara**: raden ligger kvar på mallen och sparar valen, etiketterna och prisuppdelningen. Samma mall kan ligga flera gånger med olika val.
 - Pris och rabatt kommer ur utvärderingen (kundens priser och staffel räknas in) om raden inte anger eget `unitPrice`. Ett val som lämnade en valfri grupp tom behåller den tom även om mallen senare får ett förval; blir gruppen obligatorisk måste raden ändras med **Ändra konfiguration**.
 
+Offertens huvud kan även bära kundens egna referenser: `customerInquiryNumber` (kundens förfrågan, skrivs ut som **Er förfrågan** på offerten och orderbekräftelsen), `customerOrderNumber` (kundens ordernummer, **Ert ordernummer**) och `customerReference` (**Er referens**), alla valfria.
+
 **Felkoder.**
 
 | Kod | Status | Betyder |

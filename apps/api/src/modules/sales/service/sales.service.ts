@@ -598,7 +598,12 @@ export function createSalesService(
       partnerNumber: customer!.customerNumber,
       ourSupplierNumberAtCustomer: customer!.ourSupplierNumber,
       pricesIncludeVat: customer!.privatePerson,
+      // Both variants print whichever of the two the order carries: a quote
+      // normally answers Kundens förfrågan (an older one may have an order
+      // number), the confirmation has Ert ordernummer and, when set, the
+      // inquiry it came from.
       customerOrderNumber: order.customerOrderNumber,
+      customerInquiryNumber: order.customerInquiryNumber,
       yourReference: order.customerReference,
       deliveryAddress: order.deliveryAddress
         ? {

@@ -974,6 +974,13 @@
       "when": 1792695138348,
       "tag": "0138_quote_number",
       "breakpoints": true
+    },
+    {
+      "idx": 139,
+      "version": "7",
+      "when": 1792703033883,
+      "tag": "0139_customer_inquiry_number",
+      "breakpoints": true
     }
   ]
 }

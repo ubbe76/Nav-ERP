@@ -78,6 +78,7 @@ export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
   { label: "Giltig t.o.m.", value: (r) => r.quoteValidUntil, format: "date" },
   { label: "Förlustorsak", value: (r) => r.lostReasonName },
   { label: "Kundens ordernr", value: (r) => r.customerOrderNumber },
+  { label: "Kundens förfrågan", value: (r) => r.customerInquiryNumber },
   { label: "Kundens referens", value: (r) => r.customerReference },
   { label: "Notering", value: (r) => r.note },
   { label: "Skapad", value: (r) => r.createdAt.toISOString(), format: "datetime" },

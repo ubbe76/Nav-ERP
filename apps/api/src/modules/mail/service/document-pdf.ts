@@ -206,6 +206,9 @@ export interface DocumentPdfInput {
   partnerNumber?: string | null;
   // Kundens ordernummer (sales documents only).
   customerOrderNumber?: string | null;
+  // Kundens förfrågan — "Er förfrågan:", the customer's inquiry/RFQ
+  // reference (quote and order confirmation only).
+  customerInquiryNumber?: string | null;
   // "Er referens" — the customer's reference on sales documents, the
   // supplier's contact on the PO. "Vår referens" — our buyer on the PO.
   yourReference?: string | null;
@@ -1013,6 +1016,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     }
     if (input.customerOrderNumber) {
       doc.text(`Ert ordernummer: ${input.customerOrderNumber}`, left, y);
+      y += 14;
+    }
+    if (input.customerInquiryNumber) {
+      doc.text(`Er förfrågan: ${input.customerInquiryNumber}`, left, y);
       y += 14;
     }
     if (input.yourReference) {

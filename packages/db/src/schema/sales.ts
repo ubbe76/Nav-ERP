@@ -271,6 +271,10 @@ export const salesOrders = pgTable("sales_orders", {
   // The customer's own PO number and contact reference for the order —
   // printed on the quote/order confirmation and the pick list.
   customerOrderNumber: varchar("customer_order_number", { length: 50 }),
+  // Kundens förfrågan (migration 0139): the customer's own inquiry/RFQ
+  // reference — what a quote answers, when there is no PO number yet.
+  // Printed as "Er förfrågan:" on the quote and the order confirmation.
+  customerInquiryNumber: varchar("customer_inquiry_number", { length: 50 }),
   customerReference: varchar("customer_reference", { length: 100 }),
   // Which of the customer's delivery addresses this order ships to.
   deliveryAddressId: uuid("delivery_address_id").references(() => customerDeliveryAddresses.id, {

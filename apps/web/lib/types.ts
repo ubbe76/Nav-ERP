@@ -1067,6 +1067,8 @@ export interface SalesOrder extends DocumentTermsFields {
   lostByName?: string | null;
   note: string | null;
   customerOrderNumber: string | null;
+  // Kundens förfrågan — the customer's inquiry/RFQ reference (0139).
+  customerInquiryNumber: string | null;
   customerReference: string | null;
   deliveryAddressId: string | null;
   // Joined from the selected delivery address (detail endpoint only).

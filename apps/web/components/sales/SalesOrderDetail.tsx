@@ -37,6 +37,7 @@ import { apiFetch } from "../../lib/api";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { askBumpRevision } from "../../lib/revision";
+import { salesDocumentKind } from "../../lib/salesDocumentKind";
 import {
   MANUFACTURING_ORDER_STATUS_PILL,
   SALES_ORDER_STATUS_PILL,
@@ -409,7 +410,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         }
         fields={[
           { label: "Kund", value: order.customerName, href: `/kunder/${order.customerId}` },
-          { label: "Kundens ordernummer", value: order.customerOrderNumber },
+          ...customerNumberFields(order),
           { label: "Referens", value: order.customerReference },
           { label: "Leveransdatum", value: order.expectedDeliveryDate },
           ...(order.status === "quote"
@@ -947,7 +948,17 @@ function LoseQuoteForm({ orderId, onDone, onCancel }: { orderId: string; onDone:
   );
 }
 
-// --- Order header (kundens ordernummer/referens/leveransadress/villkor) ---
+// Kundens förfrågan / Kundens ordernummer in the header view: a quote shows
+// the inquiry it answers (and an order number only when an older quote has
+// one), an order its PO number (and the inquiry only when it has one).
+function customerNumberFields(order: SalesOrder) {
+  const inquiry = { label: "Kundens förfrågan", value: order.customerInquiryNumber };
+  const orderNumber = { label: "Kundens ordernummer", value: order.customerOrderNumber };
+  if (salesDocumentKind(order) === "quote") return order.customerOrderNumber ? [inquiry, orderNumber] : [inquiry];
+  return order.customerInquiryNumber ? [orderNumber, inquiry] : [orderNumber];
+}
+
+// --- Order header (kundens ordernummer/förfrågan/referens/leveransadress/villkor) ---
 // One PATCH /sales-orders/:id covers the whole header including the three
 // terms, so the card asks about a new revision exactly once. Leveransdatum
 // and anteckning are set when the quote is created and stay read-only.
@@ -966,6 +977,12 @@ function EditHeaderForm({
   onCancel: () => void;
 }) {
   const [customerOrderNumber, setCustomerOrderNumber] = useState(order.customerOrderNumber ?? "");
+  const [customerInquiryNumber, setCustomerInquiryNumber] = useState(order.customerInquiryNumber ?? "");
+  // A quote edits Kundens förfrågan; Kundens ordernummer only when an older
+  // quote already has one (so it can be corrected or cleared). An order
+  // edits both.
+  const isQuote = salesDocumentKind(order) === "quote";
+  const showOrderNumber = !isQuote || Boolean(order.customerOrderNumber);
   const [customerReference, setCustomerReference] = useState(order.customerReference ?? "");
   const [deliveryAddressId, setDeliveryAddressId] = useState(order.deliveryAddressId ?? "");
   const [newDeliveryAddress, setNewDeliveryAddress] = useState<DeliveryAddressDraft>(emptyDeliveryAddressDraft());
@@ -995,7 +1012,8 @@ function EditHeaderForm({
       await apiFetch(`/api/v1/sales-orders/${order.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          customerOrderNumber: customerOrderNumber.trim() || null,
+          ...(showOrderNumber ? { customerOrderNumber: customerOrderNumber.trim() || null } : {}),
+          customerInquiryNumber: customerInquiryNumber.trim() || null,
           customerReference: customerReference.trim() || null,
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, null),
           ...termsPayload(terms),
@@ -1012,20 +1030,37 @@ function EditHeaderForm({
     }
   }
 
+  const inquiryField = (
+    <Field label="Kundens förfrågan" htmlFor="headerCustomerInquiryNumber">
+      <Input
+        id="headerCustomerInquiryNumber"
+        size="md"
+        maxLength={50}
+        value={customerInquiryNumber}
+        onChange={(e) => setCustomerInquiryNumber(e.target.value)}
+      />
+    </Field>
+  );
+
   return (
     <Form onSubmit={save}>
       <FormError>{error}</FormError>
 
+      {/* Two or three fields: the grid wraps the third onto a new line (one column on phones). */}
       <FormRow>
-        <Field label="Kundens ordernummer" htmlFor="headerCustomerOrderNumber">
-          <Input
-            id="headerCustomerOrderNumber"
-            size="md"
-            maxLength={50}
-            value={customerOrderNumber}
-            onChange={(e) => setCustomerOrderNumber(e.target.value)}
-          />
-        </Field>
+        {isQuote && inquiryField}
+        {showOrderNumber && (
+          <Field label="Kundens ordernummer" htmlFor="headerCustomerOrderNumber">
+            <Input
+              id="headerCustomerOrderNumber"
+              size="md"
+              maxLength={50}
+              value={customerOrderNumber}
+              onChange={(e) => setCustomerOrderNumber(e.target.value)}
+            />
+          </Field>
+        )}
+        {!isQuote && inquiryField}
         <Field label="Referens" htmlFor="headerCustomerReference">
           <Input
             id="headerCustomerReference"

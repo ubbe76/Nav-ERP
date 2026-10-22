@@ -240,6 +240,8 @@ const oneDeliveryAddressChoice = {
 export const updateSalesOrderHeaderSchema = z
   .object({
     customerOrderNumber: z.string().max(50).nullable().optional(),
+    // Kundens förfrågan — the customer's inquiry/RFQ reference (0139).
+    customerInquiryNumber: z.string().max(50).nullable().optional(),
     customerReference: z.string().max(100).nullable().optional(),
     deliveryAddressId: z.string().uuid().nullable().optional(),
     newDeliveryAddress: newDeliveryAddressSchema.optional(),
@@ -267,9 +269,11 @@ export const createQuoteSchema = z.object({
   expectedDeliveryDate: businessDateSchema.optional(),
   note: z.string().optional(),
   rows: z.array(quoteRowSchema).min(1),
-  // The customer's own PO number, their reference, and which of their
+  // The customer's own PO number, their inquiry/RFQ reference (Kundens
+  // förfrågan — what a quote answers), their reference, and which of their
   // delivery addresses the order ships to.
   customerOrderNumber: z.string().max(50).optional(),
+  customerInquiryNumber: z.string().max(50).optional(),
   customerReference: z.string().max(100).optional(),
   deliveryAddressId: z.string().uuid().optional(),
   // Or a new address typed in on the order (see newDeliveryAddressSchema),

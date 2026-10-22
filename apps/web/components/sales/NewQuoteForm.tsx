@@ -104,7 +104,10 @@ export function NewQuoteForm({
     setExpectedDeliveryDate(suggestion?.date ?? "");
   }, [suggestion, dateTouched]);
   const [note, setNote] = useState("");
+  // A quote answers the customer's inquiry (Kundens förfrågan); a direct
+  // order carries their PO number (Kundens ordernummer).
   const [customerOrderNumber, setCustomerOrderNumber] = useState("");
+  const [customerInquiryNumber, setCustomerInquiryNumber] = useState("");
   const [customerReference, setCustomerReference] = useState("");
   const [deliveryAddressId, setDeliveryAddressId] = useState("");
   const [deliveryAddresses, setDeliveryAddresses] = useState<CustomerDeliveryAddress[]>([]);
@@ -194,7 +197,9 @@ export function NewQuoteForm({
           customerId: customer.id,
           expectedDeliveryDate: expectedDeliveryDate || undefined,
           note: note || undefined,
-          customerOrderNumber: customerOrderNumber.trim() || undefined,
+          ...(mode === "order"
+            ? { customerOrderNumber: customerOrderNumber.trim() || undefined }
+            : { customerInquiryNumber: customerInquiryNumber.trim() || undefined }),
           customerReference: customerReference.trim() || undefined,
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, undefined),
           confirm: mode === "order",
@@ -280,15 +285,27 @@ export function NewQuoteForm({
       )}
 
       <FormRow>
-        <Field label="Kundens ordernummer (valfritt)" htmlFor="customerOrderNumber">
-          <Input
-            id="customerOrderNumber"
-            size="md"
-            maxLength={50}
-            value={customerOrderNumber}
-            onChange={(e) => setCustomerOrderNumber(e.target.value)}
-          />
-        </Field>
+        {mode === "order" ? (
+          <Field label="Kundens ordernummer (valfritt)" htmlFor="customerOrderNumber">
+            <Input
+              id="customerOrderNumber"
+              size="md"
+              maxLength={50}
+              value={customerOrderNumber}
+              onChange={(e) => setCustomerOrderNumber(e.target.value)}
+            />
+          </Field>
+        ) : (
+          <Field label="Kundens förfrågan (valfritt)" htmlFor="customerInquiryNumber">
+            <Input
+              id="customerInquiryNumber"
+              size="md"
+              maxLength={50}
+              value={customerInquiryNumber}
+              onChange={(e) => setCustomerInquiryNumber(e.target.value)}
+            />
+          </Field>
+        )}
         <Field label="Referens (valfritt)" htmlFor="customerReference">
           <Input
             id="customerReference"
