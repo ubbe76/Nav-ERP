@@ -3,11 +3,14 @@ import { z } from "zod";
 import {
   createAbsenceSchema,
   createAbsenceTypeSchema,
+  createAttendanceDeviationReasonSchema,
+  updateAttendanceDeviationReasonSchema,
   createObRuleSchema,
   setOvertimeDispositionSchema,
   updateAbsenceTypeSchema,
   updateObRuleSchema,
 } from "@navet/shared";
+import { TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { EmployeeNotFoundError } from "../../timereport/service/timereport.service.js";
 import type { PayrollService } from "../service/payroll.service.js";
@@ -15,6 +18,7 @@ import {
   AbsenceNotFoundError,
   AbsenceTypeNotFoundError,
   AlreadyAttestedError,
+  AttendanceDeviationReasonNotFoundError,
   AttestationNotFoundError,
   DuplicateAbsenceError,
   DuplicatePayrollCodeError,
@@ -54,6 +58,7 @@ const attestBodySchema = z.object({ employeeId: z.string().uuid() });
 function isNotFound(err: unknown): err is Error {
   return (
     err instanceof AbsenceTypeNotFoundError ||
+    err instanceof AttendanceDeviationReasonNotFoundError ||
     err instanceof ObRuleNotFoundError ||
     err instanceof AbsenceNotFoundError ||
     err instanceof AttestationNotFoundError ||
@@ -128,6 +133,28 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
   app.post("/absence-types/generate-standard", { preHandler: requireRole("admin") }, async () => {
     return service.seedStandardAbsenceTypes();
   });
+
+  // Avvikelseorsaker: readable by office and the stamp terminal (which offers
+  // the active ones); writes are admin-only. No DELETE — sessions keep the
+  // reason as history, so a reason is only inactivated.
+  app.get("/attendance-deviation-reasons", { config: { access: TERMINAL_READ } }, async (req) => {
+    const { includeInactive } = listQuerySchema.parse(req.query);
+    return service.listAttendanceDeviationReasons(includeInactive);
+  });
+
+  app.post("/attendance-deviation-reasons", { preHandler: requireRole("admin") }, async (req, reply) => {
+    const input = createAttendanceDeviationReasonSchema.parse(req.body);
+    return handle(reply, async () => reply.code(201).send(await service.createAttendanceDeviationReason(input)));
+  });
+
+  app.patch<{ Params: { id: string } }>(
+    "/attendance-deviation-reasons/:id",
+    { preHandler: requireRole("admin") },
+    async (req, reply) => {
+      const input = updateAttendanceDeviationReasonSchema.parse(req.body);
+      return handle(reply, () => service.updateAttendanceDeviationReason(req.params.id, input));
+    }
+  );
 
   // OB-regler
   app.get("/ob-rules", async (req) => {

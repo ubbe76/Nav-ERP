@@ -291,7 +291,7 @@ Hjälptexten säger: "Transportdagar räknas i arbetsdagar. Gäller leverantöre
 
 ### Lön & PAXml
 
-I panelen **Lön & PAXml** ställs tidkoderna som skrivs ut i löneunderlagsexporten (PAXml) och den dagliga övertidströskeln:
+I panelen **Lön & PAXml** ställs tidkoderna som skrivs ut i löneunderlagsexporten (PAXml), den dagliga övertidströskeln och terminalens frågor om anledning och övertid:
 
 - **Tidkod arbetad tid** — löneartskoden för vanlig arbetad tid. Standard: **TID**.
 - **Tidkod övertid** — löneartskoden för övertid på schemalagd arbetsdag. Standard: **ÖT1**.
@@ -300,6 +300,10 @@ I panelen **Lön & PAXml** ställs tidkoderna som skrivs ut i löneunderlagsexpo
 - **Tidkod övertid – komptid** — löneartskoden för övertid på schemalagd arbetsdag som ersätts som komptid i stället för utbetalning. Standard: **ÖK1**.
 - **Tidkod övertid helg – komptid** — löneartskoden för övertid utanför schemat som ersätts som komptid. Standard: **ÖK2**.
 - **Övertidströskel (minuter per dag)** — hur många minuter arbetad tid får överstiga schemat innan det räknas som övertid en schemalagd dag. 0 = varje minut utöver schemat räknas som övertid.
+
+- **Kräv anledning vid sen ankomst och tidig hemgång** — av som förval. På: stämpelterminalen kräver en anledning (ur registret Avvikelseorsaker under Lönekoder) när närvaron stämplas in senare än schemats start, eller ut tidigare än schemats slut, med mer än marginalen.
+- **Marginal (minuter)** — förval 5, 0–120. Avvikelser upp till och med marginalen kräver ingen anledning.
+- **Fråga om övertidsersättning i terminalen** — av som förval. På: terminalen frågar vid **Gå hem** om övertiden ska betalas ut eller sparas som komptid när dagen ger övertid enligt lönens regel.
 
 Tidkoderna måste matcha lönesystemets egen löneartstabell — stäm av dem med er lönekonsult innan första löneunderlagsexporten. Ett tomt fält sparas som systemets standardkod.
 

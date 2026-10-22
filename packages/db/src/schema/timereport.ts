@@ -216,6 +216,19 @@ export const employeeDayOverrides = pgTable(
 // Närvarostämpling (kom/gå) — the raw material for löneunderlag. Independent
 // of work stamps, except that stopping attendance also stops the employee's
 // open stamp_sessions (service-layer rule).
+// Avvikelseorsaker: register of reasons for arriving late / leaving early,
+// chosen in the stamp terminal. Lives here (not in payroll.ts next to
+// absence_types) because payroll.ts imports this file — a reference from
+// attendance_sessions would otherwise create an import cycle. Rows are history
+// (FK restrict from sessions): inactivate, never delete.
+export const attendanceDeviationReasons = pgTable("attendance_deviation_reasons", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: varchar("code", { length: 10 }).notNull().unique(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const attendanceSessions = pgTable(
   "attendance_sessions",
   {
@@ -226,6 +239,12 @@ export const attendanceSessions = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     stoppedAt: timestamp("stopped_at", { withTimezone: true }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    // Reason + comment for a late start / early stop (the deviation itself is
+    // derived from the schedule, never stored).
+    startReasonId: uuid("start_reason_id").references(() => attendanceDeviationReasons.id, { onDelete: "restrict" }),
+    startNote: text("start_note"),
+    stopReasonId: uuid("stop_reason_id").references(() => attendanceDeviationReasons.id, { onDelete: "restrict" }),
+    stopNote: text("stop_note"),
   },
   (table) => [
     index("attendance_sessions_open_by_employee").on(table.employeeId).where(sql`${table.stoppedAt} is null`),

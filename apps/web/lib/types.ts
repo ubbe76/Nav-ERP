@@ -2191,6 +2191,11 @@ export interface SystemSettings {
   // Daily overtime grace period in minutes (löneunderlag) — worked time past
   // schedule must exceed this before it counts as overtime.
   payrollOvertimeThresholdMinutes: number;
+  // Stamp terminal: require a reason for a late arrival / early departure
+  // beyond the tolerance, and ask about overtime compensation on Gå hem.
+  attendanceReasonRequired: boolean;
+  attendanceReasonToleranceMinutes: number;
+  terminalOvertimeChoice: boolean;
   // PAXml löneart codes used by the payroll export — must match the payroll
   // system's own löneartstabell. Never empty: the API decodes an unset or
   // blanked key back to its Monitor-like default.
@@ -2477,6 +2482,14 @@ export interface AbsenceType {
   code: string;
   name: string;
   paxmlCode: string;
+  active: boolean;
+}
+
+// Avvikelseorsak: reason for a late arrival / early departure (never deleted).
+export interface AttendanceDeviationReason {
+  id: string;
+  code: string;
+  name: string;
   active: boolean;
 }
 

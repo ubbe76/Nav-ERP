@@ -2,6 +2,7 @@ import { and, asc, desc, eq, getTableColumns, gte, lte } from "drizzle-orm";
 import {
   absences,
   absenceTypes,
+  attendanceDeviationReasons,
   obRules,
   overtimeDispositions,
   payrollAttestations,
@@ -12,6 +13,8 @@ import {
 import type {
   CreateAbsenceInput,
   CreateAbsenceTypeInput,
+  CreateAttendanceDeviationReasonInput,
+  UpdateAttendanceDeviationReasonInput,
   CreateObRuleInput,
   OvertimeDisposition,
   UpdateAbsenceTypeInput,
@@ -71,6 +74,40 @@ export function createPayrollRepository(db: Db) {
     async createAbsenceTypeIfMissing(input: { code: string; name: string; paxmlCode: string }) {
       const rows = await db.insert(absenceTypes).values(input).onConflictDoNothing().returning();
       return rows.length > 0;
+    },
+
+    // --- Avvikelseorsaker ---
+
+    async listAttendanceDeviationReasons(includeInactive = false) {
+      return db
+        .select()
+        .from(attendanceDeviationReasons)
+        .where(includeInactive ? undefined : eq(attendanceDeviationReasons.active, true))
+        .orderBy(asc(attendanceDeviationReasons.code));
+    },
+
+    async findAttendanceDeviationReasonByCode(code: string) {
+      const [row] = await db.select().from(attendanceDeviationReasons).where(eq(attendanceDeviationReasons.code, code));
+      return row ?? null;
+    },
+
+    async findAttendanceDeviationReasonByName(name: string) {
+      const [row] = await db.select().from(attendanceDeviationReasons).where(eq(attendanceDeviationReasons.name, name));
+      return row ?? null;
+    },
+
+    async createAttendanceDeviationReason(input: CreateAttendanceDeviationReasonInput) {
+      const [row] = await db.insert(attendanceDeviationReasons).values(input).returning();
+      return row!;
+    },
+
+    async updateAttendanceDeviationReason(id: string, input: UpdateAttendanceDeviationReasonInput) {
+      const [row] = await db
+        .update(attendanceDeviationReasons)
+        .set(input)
+        .where(eq(attendanceDeviationReasons.id, id))
+        .returning();
+      return row ?? null;
     },
 
     // --- OB-regler ---

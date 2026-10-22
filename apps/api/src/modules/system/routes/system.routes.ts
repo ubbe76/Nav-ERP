@@ -57,11 +57,17 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
     return reply.send(logo.logo);
   });
 
-  // The only setting the stamp terminal reads — so the workshop profile never
-  // needs the full settings payload.
+  // The settings the stamp terminal reads (multiple stamps, attendance reason
+  // and overtime-choice behaviour) — so the workshop profile never needs the
+  // full settings payload.
   app.get("/settings/terminal", { config: { access: TERMINAL_READ } }, async () => {
     const settings = await service.getSettings();
-    return { allowMultipleStamps: settings.allowMultipleStamps };
+    return {
+      allowMultipleStamps: settings.allowMultipleStamps,
+      attendanceReasonRequired: settings.attendanceReasonRequired,
+      attendanceReasonToleranceMinutes: settings.attendanceReasonToleranceMinutes,
+      terminalOvertimeChoice: settings.terminalOvertimeChoice,
+    };
   });
 
   // The pallet card dialog's one setting (Tillåt utskrift av pallkort även

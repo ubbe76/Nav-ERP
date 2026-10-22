@@ -13,6 +13,16 @@ export const createAbsenceTypeSchema = z.object({
 export const updateAbsenceTypeSchema = createAbsenceTypeSchema.partial()
   .refine((d) => Object.keys(d).length > 0, "At least one field must be provided");
 
+// Avvikelseorsaker (reasons for a late arrival / early departure). No delete:
+// sessions reference them as history, so rows are only inactivated.
+export const createAttendanceDeviationReasonSchema = z.object({
+  code: z.string().trim().min(1).max(10),
+  name: z.string().trim().min(1).max(100),
+  active: z.boolean().optional(),
+});
+export const updateAttendanceDeviationReasonSchema = createAttendanceDeviationReasonSchema.partial()
+  .refine((d) => Object.keys(d).length > 0, "At least one field must be provided");
+
 export const createObRuleSchema = z.object({
   code: z.string().trim().min(1).max(20),
   name: z.string().trim().min(1).max(100),
@@ -27,6 +37,8 @@ export const updateObRuleSchema = createObRuleSchema.partial()
 
 export type CreateAbsenceTypeInput = z.infer<typeof createAbsenceTypeSchema>;
 export type UpdateAbsenceTypeInput = z.infer<typeof updateAbsenceTypeSchema>;
+export type CreateAttendanceDeviationReasonInput = z.infer<typeof createAttendanceDeviationReasonSchema>;
+export type UpdateAttendanceDeviationReasonInput = z.infer<typeof updateAttendanceDeviationReasonSchema>;
 export type CreateObRuleInput = z.infer<typeof createObRuleSchema>;
 export type UpdateObRuleInput = z.infer<typeof updateObRuleSchema>;
 

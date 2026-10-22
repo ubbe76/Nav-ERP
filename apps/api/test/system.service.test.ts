@@ -387,6 +387,33 @@ describe("system service — settings", () => {
     }
   });
 
+  it("defaults and round-trips the attendance reason / terminal overtime settings", async () => {
+    const keys = ["attendance_reason_required", "attendance_reason_tolerance_minutes", "terminal_overtime_choice"];
+    await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    try {
+      const defaults = await systemService.getSettings();
+      expect(defaults.attendanceReasonRequired).toBe(false);
+      expect(defaults.attendanceReasonToleranceMinutes).toBe(5);
+      expect(defaults.terminalOvertimeChoice).toBe(false);
+
+      const updated = await systemService.updateSettings({
+        attendanceReasonRequired: true,
+        attendanceReasonToleranceMinutes: 0,
+        terminalOvertimeChoice: true,
+      });
+      expect(updated.attendanceReasonRequired).toBe(true);
+      expect(updated.attendanceReasonToleranceMinutes).toBe(0);
+      expect(updated.terminalOvertimeChoice).toBe(true);
+
+      const reread = await systemService.getSettings();
+      expect(reread.attendanceReasonRequired).toBe(true);
+      expect(reread.attendanceReasonToleranceMinutes).toBe(0);
+      expect(reread.terminalOvertimeChoice).toBe(true);
+    } finally {
+      await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    }
+  });
+
   it("defaults the comp-time overtime codes and round-trips updates", async () => {
     try {
       const defaults = await systemService.getSettings();

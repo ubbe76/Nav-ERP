@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
 import { LonekoderPageClient } from "../../../components/payroll/LonekoderPageClient";
 import { getCurrentUser, apiGet } from "../../../lib/api";
-import type { AbsenceType, ObRule } from "../../../lib/types";
+import type { AbsenceType, AttendanceDeviationReason, ObRule } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
@@ -21,9 +21,10 @@ export default async function LonekoderPage() {
     );
   }
 
-  const [absenceTypes, obRules] = await Promise.all([
+  const [absenceTypes, obRules, deviationReasons] = await Promise.all([
     apiGet<AbsenceType[]>("/api/v1/absence-types?includeInactive=true", cookieHeader),
     apiGet<ObRule[]>("/api/v1/ob-rules?includeInactive=true", cookieHeader),
+    apiGet<AttendanceDeviationReason[]>("/api/v1/attendance-deviation-reasons?includeInactive=true", cookieHeader),
   ]);
 
   return (
@@ -31,12 +32,12 @@ export default async function LonekoderPage() {
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Lönekoder</div>
-          <div className={shellStyles.meta}>Frånvarokoder och OB-tillägg för löneunderlaget</div>
+          <div className={shellStyles.meta}>Frånvarokoder, OB-tillägg och avvikelseorsaker för löneunderlaget</div>
         </div>
         <HelpLink chapter="lon" anchor="franvarokoder" label="Hjälp om lönekoder" />
       </div>
 
-      <LonekoderPageClient absenceTypes={absenceTypes} obRules={obRules} />
+      <LonekoderPageClient absenceTypes={absenceTypes} obRules={obRules} deviationReasons={deviationReasons} />
     </AppShell>
   );
 }

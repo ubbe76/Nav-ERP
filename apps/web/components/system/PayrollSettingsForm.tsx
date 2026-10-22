@@ -23,6 +23,10 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
   const [codeAtf, setCodeAtf] = useState(settings.paxmlCodeAtf);
   const [thresholdMinutes, setThresholdMinutes] = useState(String(settings.payrollOvertimeThresholdMinutes));
 
+  const [reasonRequired, setReasonRequired] = useState(settings.attendanceReasonRequired);
+  const [toleranceMinutes, setToleranceMinutes] = useState(String(settings.attendanceReasonToleranceMinutes));
+  const [overtimeChoice, setOvertimeChoice] = useState(settings.terminalOvertimeChoice);
+
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -53,6 +57,12 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
       return;
     }
 
+    const tolerance = toleranceMinutes.trim() === "" ? 0 : Number(toleranceMinutes);
+    if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 120) {
+      setError("Marginalen måste vara ett heltal 0–120 minuter");
+      return;
+    }
+
     const updated = await save({
       paxmlCodeWorked: codeWorked,
       paxmlCodeOvertime: codeOvertime,
@@ -61,6 +71,9 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
       paxmlCodeOvertimeOffScheduleComp: codeOvertimeOffScheduleComp,
       paxmlCodeAtf: codeAtf,
       payrollOvertimeThresholdMinutes: minutes,
+      attendanceReasonRequired: reasonRequired,
+      attendanceReasonToleranceMinutes: tolerance,
+      terminalOvertimeChoice: overtimeChoice,
     });
     if (updated) {
       setCodeWorked(updated.paxmlCodeWorked);
@@ -70,6 +83,9 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
       setCodeOvertimeOffScheduleComp(updated.paxmlCodeOvertimeOffScheduleComp);
       setCodeAtf(updated.paxmlCodeAtf);
       setThresholdMinutes(String(updated.payrollOvertimeThresholdMinutes));
+      setReasonRequired(updated.attendanceReasonRequired);
+      setToleranceMinutes(String(updated.attendanceReasonToleranceMinutes));
+      setOvertimeChoice(updated.terminalOvertimeChoice);
       setSaved(true);
     }
   }
@@ -154,6 +170,66 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
             onChange={(e) => setThresholdMinutes(e.target.value)}
           />
         </Field>
+
+        <div className={cardStyles.row}>
+          <div className={cardStyles.texts}>
+            <div className={cardStyles.label}>Kräv anledning vid sen ankomst och tidig hemgång</div>
+            <div className={cardStyles.description}>
+              På: terminalen frågar efter en anledning när närvaron stämplas in senare än schemats start, eller ut
+              tidigare än schemats slut, med mer än marginalen. Gäller inte lediga dagar eller uttag av ATF.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={reasonRequired}
+            aria-label="Kräv anledning vid sen ankomst och tidig hemgång"
+            className={cardStyles.switch}
+            data-on={reasonRequired}
+            disabled={pending}
+            onClick={() => setReasonRequired(!reasonRequired)}
+          >
+            <span className={cardStyles.knob} aria-hidden="true" />
+          </button>
+        </div>
+
+        <Field label="Marginal (minuter)" htmlFor="attendanceReasonToleranceMinutes">
+          <Input
+            id="attendanceReasonToleranceMinutes"
+            type="number"
+            min={0}
+            max={120}
+            size="sm"
+            value={toleranceMinutes}
+            onChange={(e) => setToleranceMinutes(e.target.value)}
+          />
+        </Field>
+        <FormHint attached>
+          Avvikelser upp till och med marginalen kräver ingen anledning. Anledningarna väljs ur registret
+          Avvikelseorsaker under Lönekoder.
+        </FormHint>
+
+        <div className={cardStyles.row}>
+          <div className={cardStyles.texts}>
+            <div className={cardStyles.label}>Fråga om övertidsersättning i terminalen</div>
+            <div className={cardStyles.description}>
+              På: när dagen ger övertid enligt lönens regel frågar terminalen vid Gå hem om övertiden ska betalas ut
+              eller sparas som komptid. Valet sparas som dagens val i löneunderlaget.
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={overtimeChoice}
+            aria-label="Fråga om övertidsersättning i terminalen"
+            className={cardStyles.switch}
+            data-on={overtimeChoice}
+            disabled={pending}
+            onClick={() => setOvertimeChoice(!overtimeChoice)}
+          >
+            <span className={cardStyles.knob} aria-hidden="true" />
+          </button>
+        </div>
 
         <FormActions>
           <Button type="submit" variant="primary" disabled={pending}>

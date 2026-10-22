@@ -58,6 +58,12 @@ const systemSettingsFieldsSchema = z.object({
     // exceed this before it counts as overtime on a scheduled day. 0 = every
     // minute past schedule is overtime.
     payrollOvertimeThresholdMinutes: z.number().int().min(0).max(600).optional(),
+    // Stamp terminal: require a reason (from attendance_deviation_reasons) when
+    // attendance starts later / ends earlier than the schedule by more than the
+    // tolerance, and ask how overtime is compensated on Gå hem.
+    attendanceReasonRequired: z.boolean().optional(),
+    attendanceReasonToleranceMinutes: z.number().int().min(0).max(120).optional(),
+    terminalOvertimeChoice: z.boolean().optional(),
     // PAXml löneart codes used by the payroll export — must match the
     // payroll system's own löneartstabell. An empty string is accepted (it
     // means "clear the override") and getSettings() decodes it back to the

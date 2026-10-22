@@ -1,6 +1,8 @@
 import type {
   CreateAbsenceInput,
   CreateAbsenceTypeInput,
+  CreateAttendanceDeviationReasonInput,
+  UpdateAttendanceDeviationReasonInput,
   CreateObRuleInput,
   OvertimeDisposition,
   UpdateAbsenceTypeInput,
@@ -290,6 +292,13 @@ export class AbsenceTypeNotFoundError extends Error {
   constructor(id: string) {
     super(`Absence type ${id} not found`);
     this.name = "AbsenceTypeNotFoundError";
+  }
+}
+
+export class AttendanceDeviationReasonNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Attendance deviation reason ${id} not found`);
+    this.name = "AttendanceDeviationReasonNotFoundError";
   }
 }
 
@@ -687,6 +696,36 @@ export function createPayrollService(
         if (await repo.createAbsenceTypeIfMissing(type)) created++;
       }
       return { created, skipped: STANDARD_ABSENCE_TYPES.length - created };
+    },
+
+    // --- Avvikelseorsaker ---
+
+    async listAttendanceDeviationReasons(includeInactive = false) {
+      return repo.listAttendanceDeviationReasons(includeInactive);
+    },
+
+    async createAttendanceDeviationReason(input: CreateAttendanceDeviationReasonInput) {
+      if (await repo.findAttendanceDeviationReasonByCode(input.code)) {
+        throw new DuplicatePayrollCodeError("code", input.code);
+      }
+      if (await repo.findAttendanceDeviationReasonByName(input.name)) {
+        throw new DuplicatePayrollCodeError("name", input.name);
+      }
+      return repo.createAttendanceDeviationReason(input);
+    },
+
+    async updateAttendanceDeviationReason(id: string, input: UpdateAttendanceDeviationReasonInput) {
+      if (input.code) {
+        const byCode = await repo.findAttendanceDeviationReasonByCode(input.code);
+        if (byCode && byCode.id !== id) throw new DuplicatePayrollCodeError("code", input.code);
+      }
+      if (input.name) {
+        const byName = await repo.findAttendanceDeviationReasonByName(input.name);
+        if (byName && byName.id !== id) throw new DuplicatePayrollCodeError("name", input.name);
+      }
+      const row = await repo.updateAttendanceDeviationReason(id, input);
+      if (!row) throw new AttendanceDeviationReasonNotFoundError(id);
+      return row;
     },
 
     // --- OB-regler ---

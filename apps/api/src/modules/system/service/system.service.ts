@@ -77,6 +77,9 @@ const SHOW_REVISIONS_ON_DOCUMENTS_KEY = "show_revisions_on_documents";
 const SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY = "show_order_revision_on_documents";
 const ATF_MINUTES_PER_WEEK_KEY = "atf_minutes_per_week";
 const PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY = "payroll_overtime_threshold_minutes";
+const ATTENDANCE_REASON_REQUIRED_KEY = "attendance_reason_required";
+const ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY = "attendance_reason_tolerance_minutes";
+const TERMINAL_OVERTIME_CHOICE_KEY = "terminal_overtime_choice";
 const PAXML_CODE_WORKED_KEY = "paxml_code_worked";
 const PAXML_CODE_OVERTIME_KEY = "paxml_code_overtime";
 const PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY = "paxml_code_overtime_off_schedule";
@@ -244,6 +247,10 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       atfMinutesPerWeek: get(ATF_MINUTES_PER_WEEK_KEY) === null ? 0 : Number(get(ATF_MINUTES_PER_WEEK_KEY)),
       payrollOvertimeThresholdMinutes:
         get(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY) === null ? 0 : Number(get(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY)),
+      attendanceReasonRequired: get(ATTENDANCE_REASON_REQUIRED_KEY) === "true",
+      attendanceReasonToleranceMinutes:
+        get(ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY) === null ? 5 : Number(get(ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY)),
+      terminalOvertimeChoice: get(TERMINAL_OVERTIME_CHOICE_KEY) === "true",
       paxmlCodeWorked: codeSetting(get(PAXML_CODE_WORKED_KEY), "TID"),
       paxmlCodeOvertime: codeSetting(get(PAXML_CODE_OVERTIME_KEY), "ÖT1"),
       paxmlCodeOvertimeOffSchedule: codeSetting(get(PAXML_CODE_OVERTIME_OFF_SCHEDULE_KEY), "ÖT2"),
@@ -515,6 +522,15 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.payrollOvertimeThresholdMinutes !== undefined) {
         await set(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY, String(input.payrollOvertimeThresholdMinutes));
+      }
+      if (input.attendanceReasonRequired !== undefined) {
+        await set(ATTENDANCE_REASON_REQUIRED_KEY, String(input.attendanceReasonRequired));
+      }
+      if (input.attendanceReasonToleranceMinutes !== undefined) {
+        await set(ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY, String(input.attendanceReasonToleranceMinutes));
+      }
+      if (input.terminalOvertimeChoice !== undefined) {
+        await set(TERMINAL_OVERTIME_CHOICE_KEY, String(input.terminalOvertimeChoice));
       }
       if (input.paxmlCodeWorked !== undefined) await set(PAXML_CODE_WORKED_KEY, input.paxmlCodeWorked);
       if (input.paxmlCodeOvertime !== undefined) await set(PAXML_CODE_OVERTIME_KEY, input.paxmlCodeOvertime);

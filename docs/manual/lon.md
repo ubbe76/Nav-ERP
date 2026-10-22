@@ -4,7 +4,7 @@ Löneblocket i Nav|ERP täcker flödet frånvaro → attestering → låsning �
 
 ## Lönekoder
 
-**Tillverkning → Lön → Lönekoder** har två flikar: **Frånvarokoder** och **OB-tillägg**.
+**Tillverkning → Lön → Lönekoder** har tre flikar: **Frånvarokoder**, **OB-tillägg** och **Avvikelseorsaker**.
 
 ### Frånvarokoder
 
@@ -19,6 +19,12 @@ Frånvarokoder är de typer av frånvaro som kan registreras (t.ex. sjukfrånvar
 OB-tillägg (ersättning för obekväm arbetstid) definierar tidsfönster som ger ett lönetillägg utöver ordinarie arbetstid. Varje regel har **Kod**, **Namn**, **Dagtyp** (Vardag, Lördag, Söndag eller Helgdag — en helgdag räknas alltid som Helgdag, oavsett veckodag), **Från**/**Till** (klockslag i 24-timmarsformat) och **PAXml-kod**.
 
 Ett tidsfönster får inte gå över midnatt. Ett OB-tillägg som ska gälla natten mot nästa dag läggs därför upp som två rader, t.ex. 22:00–23:59 och 00:00–06:00.
+
+### Avvikelseorsaker
+
+Avvikelseorsaker är registret över anledningar som stämpelterminalen kan erbjuda när någon kommer sent eller går tidigare än schemat (se inställningen **Kräv anledning vid sen ankomst och tidig hemgång** under [System](/hjalp/system)). Varje orsak har **Kod**, **Benämning** och **Aktiv**. Klicka på en rad för att öppna den för redigering. En anledning påverkar inte lönen och registrerar ingen frånvaro.
+
+Orsaker kan inte raderas, eftersom stämplingar som redan sparats pekar på dem. Avmarkera **Aktiv** för att dölja en orsak i terminalen. Som förval finns **Trafik/resa**, **Läkar-/tandläkarbesök**, **Sjuk**, **Privat ärende**, **Vård av barn** och **Övrigt**.
 
 ### Viktigt om ändringar i efterhand
 

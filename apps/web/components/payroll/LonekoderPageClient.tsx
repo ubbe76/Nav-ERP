@@ -9,11 +9,17 @@ import { Button } from "../ui/Button";
 import { Field, Input, Select, Toggle } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { OB_DAY_KIND_LABELS, type AbsenceType, type ObDayKind, type ObRule } from "../../lib/types";
+import {
+  OB_DAY_KIND_LABELS,
+  type AbsenceType,
+  type AttendanceDeviationReason,
+  type ObDayKind,
+  type ObRule,
+} from "../../lib/types";
 import styles from "./LonekoderPageClient.module.css";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
-const TABS = ["Frånvarokoder", "OB-tillägg"] as const;
+const TABS = ["Frånvarokoder", "OB-tillägg", "Avvikelseorsaker"] as const;
 type Tab = (typeof TABS)[number];
 
 // Same free-form "HH:MM" normalization as SchedulesPageClient's ClockInput
@@ -98,9 +104,11 @@ const rowLinkStyle = {
 export function LonekoderPageClient({
   absenceTypes,
   obRules,
+  deviationReasons,
 }: {
   absenceTypes: AbsenceType[];
   obRules: ObRule[];
+  deviationReasons: AttendanceDeviationReason[];
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("Frånvarokoder");
 
@@ -122,6 +130,7 @@ export function LonekoderPageClient({
 
       {activeTab === "Frånvarokoder" && <AbsenceTypesTab absenceTypes={absenceTypes} />}
       {activeTab === "OB-tillägg" && <ObRulesTab obRules={obRules} />}
+      {activeTab === "Avvikelseorsaker" && <DeviationReasonsTab reasons={deviationReasons} />}
     </>
   );
 }
@@ -478,6 +487,141 @@ function ObRuleForm({ obRule, onDone }: { obRule?: ObRule; onDone: () => void })
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>
           {pending ? "Sparar…" : obRule ? "Spara" : "Skapa"}
+        </Button>
+      </FormActions>
+    </Form>
+  );
+}
+
+// --- Avvikelseorsaker ---
+
+function DeviationReasonsTab({ reasons }: { reasons: AttendanceDeviationReason[] }) {
+  const router = useRouter();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<AttendanceDeviationReason | null>(null);
+
+  return (
+    <>
+      <FormHint>
+        Orsaker som stämpelterminalen erbjuder när någon kommer sent eller går tidigt. Orsaker raderas aldrig —
+        avmarkera Aktiv för att dölja en.
+      </FormHint>
+      <FormActions style={{ margin: "12px 0" }}>
+        <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
+          + Ny avvikelseorsak
+        </Button>
+      </FormActions>
+
+      <Table<AttendanceDeviationReason>
+        columns={[
+          { key: "code", label: "Kod", width: "110px" },
+          { key: "name", label: "Benämning", width: "1fr" },
+          { key: "active", label: "Aktiv", width: "110px" },
+        ]}
+        rows={reasons}
+        emptyText="Inga avvikelseorsaker registrerade än"
+        renderCell={(reason, key) => {
+          switch (key) {
+            case "code":
+              return (
+                <button type="button" onClick={() => setEditing(reason)} style={rowLinkStyle}>
+                  {reason.code}
+                </button>
+              );
+            case "name":
+              return (
+                <button type="button" onClick={() => setEditing(reason)} style={rowLinkStyle}>
+                  <strong>{reason.name}</strong>
+                </button>
+              );
+            case "active":
+              return reason.active ? (
+                <StatusPill status="running" label="Aktiv" compact />
+              ) : (
+                <StatusPill status="draft" label="Inaktiv" compact />
+              );
+            default:
+              return null;
+          }
+        }}
+      />
+
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Ny avvikelseorsak">
+        <DeviationReasonForm
+          onDone={() => {
+            setCreateOpen(false);
+            router.refresh();
+          }}
+        />
+      </Modal>
+
+      <Modal
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={editing ? `${editing.code} · ${editing.name}` : ""}
+      >
+        {editing && (
+          <DeviationReasonForm
+            reason={editing}
+            onDone={() => {
+              setEditing(null);
+              router.refresh();
+            }}
+          />
+        )}
+      </Modal>
+    </>
+  );
+}
+
+function DeviationReasonForm({ reason, onDone }: { reason?: AttendanceDeviationReason; onDone: () => void }) {
+  const [code, setCode] = useState(reason?.code ?? "");
+  const [name, setName] = useState(reason?.name ?? "");
+  const [active, setActive] = useState(reason?.active ?? true);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setPending(true);
+    try {
+      const payload = { code, name, active };
+      if (reason) {
+        await apiFetch(`/api/v1/attendance-deviation-reasons/${reason.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiFetch("/api/v1/attendance-deviation-reasons", { method: "POST", body: JSON.stringify(payload) });
+      }
+      onDone();
+    } catch (err) {
+      setError(formatPayrollError(err));
+      setPending(false);
+    }
+  }
+
+  return (
+    <Form onSubmit={handleSubmit}>
+      <FormError>{error}</FormError>
+
+      <FormRow>
+        <Field label="Kod" htmlFor="deviationCode">
+          <Input id="deviationCode" required maxLength={10} size="md" value={code} onChange={(e) => setCode(e.target.value)} />
+        </Field>
+        <Field label="Aktiv" htmlFor="deviationActive">
+          <Toggle id="deviationActive" checked={active} onChange={(e) => setActive(e.target.checked)} />
+        </Field>
+      </FormRow>
+
+      <Field label="Benämning" htmlFor="deviationName">
+        <Input id="deviationName" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+
+      <FormActions>
+        <Button type="submit" variant="primary" disabled={pending}>
+          {pending ? "Sparar…" : reason ? "Spara" : "Skapa"}
         </Button>
       </FormActions>
     </Form>
