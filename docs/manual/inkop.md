@@ -64,6 +64,8 @@ En **förfrågan** får varken förslag eller varning. Leverantörsimporten läs
 
 **Inköp → Leverantörer → Importera** öppnar en guide med tre flikar — **Leverantörer**, **Kontakter** och **Leveransadresser** — som tillsammans tar in en fullständig leverantörsexport. Endast administratörer har åtkomst. Filer läses som CSV (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) eller Excel (.xlsx, bara det första bladet läses). Varje flik kör sin egen guide i fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#leverantorer) (kontakter: [#leverantorskontakter](/hjalp/importmallar#leverantorskontakter), leveransadresser: [#leverantorernas-leveransadresser](/hjalp/importmallar#leverantorernas-leveransadresser)).
+
 Leverantörsexporten består av flera separata filer. **Fliken Leverantörer** körs en gång per fil, alltid i den här ordningen:
 
 1. **Lista** — skapar leverantörerna (matchning på leverantörsnummer; finns leverantören redan uppdateras den i stället) med kortnamn, organisationsnummer, VAT-nummer och vårt kundnummer hos leverantören.
@@ -117,6 +119,8 @@ Läser exportens **Leveransadress**-fil. Mappningsbara fält (filens rubriker "L
 ## Importera inköpspriser
 
 Fliken **Inköpspriser** på **Artiklar → Importera** läser in artiklarnas leverantörskatalog (fliken **Inköp** på artikelkortet, se [Artiklar](/hjalp/artiklar#inkop)) från exporten **Prislista Inköp**. Två exportfiler läses med samma flik:
+
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#inkopspriser).
 
 - **Prislista-Inköp (Lista)** — en rad per artikel och leverantör med rubrikerna **Förvald**, **Leverantör** (leverantörsnumret), **Lev. art.nr**, **Pris** och **Rabatt**, som alla känns igen automatiskt. **Förvald** = Ja gör leverantören till artikelns **huvudleverantör**.
 - **Prislista-Inköp (stafflat)** — samma rader men en rad per **staffelsteg**: kolumnen **Gränsvärde antal** och en andra **Pris**-kolumn (guiden visar den som **Pris (2)** och mappar den till **Staffel: pris**). Grundpriset upprepas på varje rad. Filen saknar Förvald, så huvudleverantören lämnas orörd när den läses in.

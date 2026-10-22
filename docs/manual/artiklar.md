@@ -458,6 +458,8 @@ Artikelöversikten finns också som en **flyttbar panel** som öppnas ovanpå de
 
 Fliken **Alla filer** på **Artiklar → Importera** tar emot **alla exportfiler på en gång** i stället för en fil per flik. Guiden har fyra steg: **Filer**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
+Mallar för varje fil laddas ned med **Ladda ned mall** i respektive flik; kolumnerna förklaras i [Importmallar](/hjalp/importmallar).
+
 1. **Filer** — välj alla filer i filväljaren (flera kan markeras samtidigt). Varje fil läses in direkt och känns igen på sina kolumnrubriker: Artikellistan och dess delexporter (planering, extra benämning) som **Artiklar**, Enheter-filen som **Enheter**, Operationslistan som **Operationer**, Materiallistan som **Struktur**, Prislista Inköp (vanlig och stafflad) som **Inköpspriser** och Prislista Försäljning som **Kundpriser**. En fil som inte känns igen (t.ex. Nivålistan) visas som **Okänd fil – hoppas över**. Listan visar radantal och igenkänd typ per fil; **Ta bort** plockar bort en fil. Fler filer kan läggas till innan du går vidare.
 2. **Kolumner** — ett kort per fil, sorterat i importordning. Typen kan ändras i fältet på kortet (välj **Hoppa över filen** för att lämna en fil utanför), kolumnmappningen ligger hopfälld under **Kolumner (…)** och fungerar som i enfilsguiden, och under den finns filtypens egna val — **Hoppa över rader som redan finns**, **Standardtyp**, **Skapa saknade artiklar**, **Uppdatera befintliga operationer** osv. **Förhandsgranska alla** granskar filerna en och en.
 3. **Förhandsgranska** — ett kort per fil med sammanfattningen (nya, uppdateras, hoppas över, fel, varningar); kortet fälls ut automatiskt när filen har fel. **Importera alla** är låst tills ingen fil har fel — rätta filen, ta bort den eller sätt den till Hoppa över filen.
@@ -468,6 +470,8 @@ Raderna med omräkningsfaktor 1 i Enheter-filen räknas som överhoppade — se 
 ## Importera artiklar
 
 **Artiklar → Importera** läser in artiklar från fil, till exempel exporterade från ett tidigare affärssystem. Både **CSV** (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) och **Excel (.xlsx)** fungerar; av en arbetsbok läses bara det **första bladet**. Endast administratörer har åtkomst. Guiden har fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
+
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#artiklar).
 
 Sidan har sju flikar — **Alla filer** (se [ovan](#importera-alla-filer)), **Artiklar**, **Enheter**, **Operationer**, **Struktur**, **Inköpspriser** och **Kundpriser**. Byter du flik börjar guiden om från steget **Fil**. Vid en migrering från ett annat system är ordningen **artiklar → enheter → operationer → struktur → inköpspriser → kundpriser**: strukturens kolumn **Operation** slår upp en operation som redan måste finnas (saknas den importeras raden ändå, men utan koppling), och prisfilerna kräver att artiklar, leverantörer respektive kunder redan finns. Strukturimporten kan dessutom lägga upp de komponenter som inte kom med i artikelfilen — se [Importera artikelstruktur](#importera-artikelstruktur). Enheter beskrivs i [Importera alternativa enheter](#importera-alternativa-enheter), inköpspriser i [Inköp](/hjalp/inkop#importera-inkopspriser) och kundpriser i [Försäljning](/hjalp/forsaljning#importera-kundpriser).
 
@@ -493,6 +497,8 @@ Regler att känna till:
 ## Importera alternativa enheter
 
 Fliken **Enheter** läser exporten **Artikellista, Enheter** — en rad per artikel och enhet, med rubrikerna **Enh.**, **Omr.faktor**, **Inköpsorder** och **Kundorder** (de känns igen automatiskt; Förvald, Materialuttag, Rapportera inleverans, Packa för leverans, Rapportera utleverans, Lagerrapportering och Statistik importeras inte). Kolumner: **Artikelnummer**, **Enhet** och **Omräkningsfaktor** är obligatoriska; **Inköpsenhet (Inköpsorder)** och **Försäljningsenhet (Kundorder)** är valfria.
+
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#alternativa-enheter).
 
 - **Raden med omräkningsfaktor 1 är artikelns grundenhet** och hoppas över — bara alternativa enheter importeras (de ligger på artikelkortets Allmänt-flik under **Enheter**). Avviker den radens enhet från artikelns grundenhet visas en varning; grundenheten ändras aldrig av importen.
 - **Faktorn inverteras.** Filens Omr.faktor är antal *grundenheter per en alternativ enhet* (rundstål Ø12 med grundenhet kg: raden `m` säger 0,89 = 0,89 kg per meter). Nav lagrar det omvända — *alternativa enheter per grundenhet* — så 0,89 blir 1 kg = 1,123596 m (sex decimaler). Samma enhet som grundenheten med en annan faktor än 1 är ett fel.
@@ -522,6 +528,8 @@ Krysset gäller bara poster som redan finns i databasen. **Samma rad två gånge
 
 Fliken **Struktur** på **Artiklar → Importera** läser in strukturrader (BOM) — en rad per komponent. Guiden har samma fyra steg som artikelimporten.
 
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#artikelstruktur).
+
 Kolumner: **Artikelnummer** (den tillverkade artikeln), **Komponentnummer** och **Antal** är obligatoriska; **Enhet**, **Operation**, **Artikelbenämning (komponenten)**, **Komponentens artikeltyp** och **Komponentens standardpris** är valfria. De tre sista används bara tillsammans med **Skapa saknade artiklar**.
 
 - **Den överordnade artikeln måste alltid redan finnas.** Ett okänt nummer i kolumnen Artikelnummer blir ett fel — filen bär varken artikeltyp eller enhet för den överordnade artikeln, så den kan inte skapas automatiskt. Importera artiklarna först.
@@ -543,6 +551,8 @@ Materiallistan bär allt som behövs för de komponenter som inte kom med i arti
 ## Importera operationer
 
 Fliken **Operationer** på **Artiklar → Importera** läser in rutter — en rad per operation.
+
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#operationer).
 
 Kolumner: **Artikelnummer**, **Sekvensnr**, **Resurs**, **Ställtid** och **Stycktid / Tid per enhet** är obligatoriska; **Tidsenhet**, **Beskrivning**, **Kalkyl**, **Kommentar** och **Packinstruktion** är valfria.
 

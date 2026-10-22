@@ -9,6 +9,7 @@ import type { ImportFieldConfig } from "../../lib/importFields";
 import buttonStyles from "../ui/Button.module.css";
 import styles from "./ImportWizard.module.css";
 import { MappingTable } from "./MappingTable";
+import { IMPORT_TEMPLATE_FILES } from "../../lib/importEntities";
 import {
   ImportOptionsPanel,
   initialOptionValues,
@@ -199,12 +200,24 @@ export function ImportWizard({
             }}
           />
           {pending && <span>Läser in…</span>}
+          {IMPORT_TEMPLATE_FILES[entity] && (
+            <p>
+              <a
+                href={`/importmallar/${IMPORT_TEMPLATE_FILES[entity]}`}
+                download
+                className={`${buttonStyles.button} ${buttonStyles.secondary}`}
+              >
+                Ladda ned mall
+              </a>
+            </p>
+          )}
         </div>
       )}
 
       {step === "Kolumner" && parsed && (
         <div className={styles.stepBody}>
           <MappingTable
+            entity={entity}
             parsed={parsed}
             fields={fields}
             mapping={mapping}

@@ -53,6 +53,8 @@ Kundimporten läser inte fälten — de sätts på kortet.
 
 **Försäljning → Kunder → Importera** öppnar en guide med tre flikar — **Kunder**, **Kontakter** och **Leveransadresser** — som tillsammans tar in en fullständig kundexport. Endast administratörer har åtkomst. Filer läses som CSV (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) eller Excel (.xlsx, bara det första bladet läses). Varje flik kör sin egen guide i fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kunder) (kontakter: [#kundkontakter](/hjalp/importmallar#kundkontakter), leveransadresser: [#kundernas-leveransadresser](/hjalp/importmallar#kundernas-leveransadresser)).
+
 Kundexporten består av flera separata filer. **Fliken Kunder** körs en gång per fil, alltid i den här ordningen:
 
 1. **Lista** — skapar kunderna (matchning på kundnummer; finns kunden redan uppdateras den i stället) med kortnamn, organisationsnummer och VAT-nummer — och med villkor, speditör, prislista och rabatt när de kolumnerna finns med i filen (se nedan).
@@ -149,6 +151,8 @@ Offert- och orderformulären skickar alltid ett explicit pris, men API:t löser 
 ## Importera kundpriser
 
 Fliken **Kundpriser** på **Artiklar → Importera** läser in kundernas artikelpriser (kundkortets flik **Priser**, se [Kundpriser](#kundpriser)) från exporten **Prislista Försäljning** — en rad per kund och artikel med rubrikerna **Kund** (kundnumret), **Pris** och **Rabatt**, som känns igen automatiskt. Kolumner: **Artikelnummer**, **Kundnummer** och **Pris** är obligatoriska; **Rabatt (%)** är valfri. Namn, Kundens art.nummer, Ställpris och Prisdatum importeras inte (kundens eget artikelnummer har inget fält i systemet).
+
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kundpriser).
 
 - Kunden (matchad på **kundnummer**) och artikeln måste redan finnas.
 - Priset sparas som en **artikelregel med Specialpris (kr)** från antal 1 — exportfilen bär ingen staffel.

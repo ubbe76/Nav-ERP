@@ -284,6 +284,10 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
             }}
           />
           {pending && <span>{pending}</span>}
+          <FormHint>
+            Mallar finns i varje flik (<strong>Ladda ned mall</strong>) och i manualens kapitel{" "}
+            <Link href="/hjalp/importmallar">Importmallar</Link>.
+          </FormHint>
 
           {files.length > 0 && (
             <ul className={styles.fileList}>
@@ -357,6 +361,7 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
                         {Object.values(file.mapping).filter((field) => field !== null).length} mappade
                       </summary>
                       <MappingTable
+                        entity={file.entity!}
                         compact
                         parsed={file.parsed}
                         fields={config.fields}

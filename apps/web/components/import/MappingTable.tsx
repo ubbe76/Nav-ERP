@@ -1,12 +1,39 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Select } from "../ui/Field";
 import { FormHint } from "../ui/Form";
+import { apiFetch } from "../../lib/api";
 import type { ImportFieldConfig } from "../../lib/importFields";
 import type { ParseResponse } from "./importTypes";
 import styles from "./ImportWizard.module.css";
 
+interface FieldHelp {
+  field: string;
+  description: string;
+}
+
+// One fetch per entity per page load; a failed fetch is forgotten so the next
+// mount retries, and the table works without help meanwhile.
+const helpCache = new Map<string, Promise<Record<string, string>>>();
+
+function loadFieldHelp(entity: string): Promise<Record<string, string>> {
+  let promise = helpCache.get(entity);
+  if (!promise) {
+    promise = apiFetch<FieldHelp[]>(`/api/v1/imports/${entity}/fields`)
+      .then((rows) => Object.fromEntries(rows.map((r) => [r.field, r.description])))
+      .catch(() => {
+        helpCache.delete(entity);
+        return {};
+      });
+    helpCache.set(entity, promise);
+  }
+  return promise;
+}
+
 interface MappingTableProps {
+  /** The import entity — its field explanations are fetched for the help text. */
+  entity: string;
   parsed: ParseResponse;
   fields: ImportFieldConfig[];
   mapping: Record<string, string | null>;
@@ -17,7 +44,28 @@ interface MappingTableProps {
 
 // The Kolumner step's mapping grid: one Select per column in the file, with
 // the first data row as a sample. Shared by both wizards.
-export function MappingTable({ parsed, fields, mapping, onChange, compact = false }: MappingTableProps) {
+export function MappingTable({ entity, parsed, fields, mapping, onChange, compact = false }: MappingTableProps) {
+  const [help, setHelp] = useState<Record<string, string>>({});
+  // Explanations default to on for desktop and off on a phone, where they
+  // would make the table very long.
+  const [showHelp, setShowHelp] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadFieldHelp(entity).then((h) => {
+      if (!cancelled) setHelp(h);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [entity]);
+
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 640px)").matches) setShowHelp(false);
+  }, []);
+
+  const hasHelp = Object.keys(help).length > 0;
+
   return (
     <>
       {!compact && (
@@ -32,6 +80,12 @@ export function MappingTable({ parsed, fields, mapping, onChange, compact = fals
         <FormHint>
           Arbetsboken har {parsed.meta.sheetCount} blad — bara ”{parsed.meta.sheetName}” lästes in.
         </FormHint>
+      )}
+      {hasHelp && (
+        <label className={styles.checkbox}>
+          <input type="checkbox" checked={showHelp} onChange={(e) => setShowHelp(e.target.checked)} />
+          Visa förklaringar
+        </label>
       )}
       <div className={styles.mappingTable}>
         <div className={styles.mappingHead}>
@@ -56,6 +110,9 @@ export function MappingTable({ parsed, fields, mapping, onChange, compact = fals
                 </option>
               ))}
             </Select>
+            {showHelp && mapping[header] && help[mapping[header]!] && (
+              <span className={styles.mappingHelp}>{help[mapping[header]!]}</span>
+            )}
           </div>
         ))}
       </div>
