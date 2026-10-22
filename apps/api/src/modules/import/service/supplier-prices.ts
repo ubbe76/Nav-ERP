@@ -72,6 +72,8 @@ export const SUPPLIER_PRICE_HEADER_ALIASES: Record<string, string> = {
   gransvardeantal: "breakQuantity",
   gransvarde: "breakQuantity",
   franantal: "breakQuantity",
+  // The template's heading "Staffel: från antal".
+  staffelfranantal: "breakQuantity",
   staffelantal: "breakQuantity",
   staffelpris: "breakPrice",
   stafflatpris: "breakPrice",

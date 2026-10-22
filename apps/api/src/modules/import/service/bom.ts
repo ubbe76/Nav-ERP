@@ -90,6 +90,8 @@ export const BOM_HEADER_ALIASES: Record<string, string> = {
   standardpris: "componentStandardCost",
   standardkostnad: "componentStandardCost",
   sjalvkostnad: "componentStandardCost",
+  // The Excel template's heading (field-help.ts).
+  komponentensstandardpris: "componentStandardCost",
 };
 
 // Second chance (see suggestMapping): a header that repeats, or whose field an

@@ -62,6 +62,9 @@ export const SUPPLIER_CONTACT_HEADER_ALIASES: Record<string, string> = {
   leverantor: "supplierNumber",
   leverantorsnummer: "supplierNumber",
   levnr: "supplierNumber",
+  // The Excel template's heading (field-help.ts) — the bare "Namn" stays
+  // unaliased on purpose (it is the supplier's name in the Referenser export).
+  kontaktperson: "name",
   forvald: "isPrimary",
   referensnamn: "name",
   telefon: "phone",

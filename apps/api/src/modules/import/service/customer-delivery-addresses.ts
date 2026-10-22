@@ -56,6 +56,10 @@ const FIELD_LABELS: Record<CustomerDeliveryAddressImportField, string> = {
 // address's own name (that is "Leveransadress – Namn").
 export const CUSTOMER_DELIVERY_ADDRESS_HEADER_ALIASES: Record<string, string> = {
   kund: "customerNumber",
+  // The Excel template's headings (field-help.ts).
+  kundnummer: "customerNumber",
+  kundnr: "customerNumber",
+  adressnamn: "label",
   leveransadressnamn: "label",
   adressrad1: "address",
   adressrad2: "address2",

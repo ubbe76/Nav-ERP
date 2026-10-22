@@ -69,6 +69,8 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   standardkostnad: "standardCost",
   kostnad: "standardCost",
   vikt: "weight",
+  // The template's heading "Vikt (kg)" normalizes to "viktkg".
+  viktkg: "weight",
   nettovikt: "weight",
   ytbehandling: "surfaceTreatment",
   farg: "colour",

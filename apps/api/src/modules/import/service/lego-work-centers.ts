@@ -58,6 +58,8 @@ export const LEGO_WORK_CENTER_HEADER_ALIASES: Record<string, string> = {
   kotid: "queueTimeDays",
   kotiddagar: "queueTimeDays",
   ledtidbestallning: "orderLeadTimeDays",
+  // The Excel template's heading "Ledtid beställning (dagar)".
+  ledtidbestallningdagar: "orderLeadTimeDays",
   bestallningsledtid: "orderLeadTimeDays",
 };
 

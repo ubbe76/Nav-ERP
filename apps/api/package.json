@@ -7,6 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json --noEmit && node build.mjs",
     "start": "node dist/server.js",
+    "generate:import-templates": "tsx scripts/generate-import-templates.ts",
     "test": "DATABASE_URL=${DATABASE_URL:-postgresql://erp:erp_dev_password@localhost:5433/erp_test} vitest run"
   },
   "dependencies": {

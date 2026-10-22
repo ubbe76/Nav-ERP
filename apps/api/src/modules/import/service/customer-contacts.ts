@@ -59,6 +59,11 @@ const emailSchema = z.string().email();
 // deliberately left without an alias, same as the plan's omitted columns.
 export const CUSTOMER_CONTACT_HEADER_ALIASES: Record<string, string> = {
   kund: "customerNumber",
+  // The Excel template's headings (field-help.ts): "Kundnummer" and
+  // "Kontaktperson" — the bare "Namn" stays unaliased on purpose.
+  kundnummer: "customerNumber",
+  kundnr: "customerNumber",
+  kontaktperson: "name",
   forvald: "isPrimary",
   referensnamn: "name",
   telefon: "phone",

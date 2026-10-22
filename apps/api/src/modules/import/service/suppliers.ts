@@ -158,6 +158,8 @@ export const SUPPLIER_HEADER_ALIASES: Record<string, string> = {
   betalningsvillkor: "paymentTerm",
   leveransvillkor: "deliveryTerm",
   leveranssatt: "carrier",
+  // The template's heading "Leveranssätt/speditör".
+  leveranssattspeditor: "carrier",
   speditor: "carrier",
   kundnummerhosspeditor: "carrierCustomerNumber",
 };

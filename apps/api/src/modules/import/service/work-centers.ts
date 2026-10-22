@@ -82,6 +82,11 @@ export const WORK_CENTER_HEADER_ALIASES: Record<string, string> = {
   avdelningskod: "productionGroupCode",
   benamning: "productionGroupName",
   avdelningsnamn: "productionGroupName",
+  // The Excel template's headings (field-help.ts).
+  avdelningensnamn: "productionGroupName",
+  gallerstall: "rateAppliesToSetup",
+  gallerstyck: "rateAppliesToRun",
+  forvaldoperationsbenamning: "defaultOperationName",
   aktuellstd: "hourlyRate",
   timkostnad: "hourlyRate",
   aktuellkpris1: "calcRate1",

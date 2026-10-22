@@ -61,6 +61,8 @@ export const SUPPLIER_DELIVERY_ADDRESS_HEADER_ALIASES: Record<string, string> = 
   leverantorsnummer: "supplierNumber",
   levnr: "supplierNumber",
   leveransadressnamn: "label",
+  // The Excel template's heading (field-help.ts).
+  adressnamn: "label",
   adressrad1: "address",
   adressrad2: "address2",
   adressrad3: "address3",

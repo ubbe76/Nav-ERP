@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { importCommitSchema, importEntitySchema, type ImportEntity } from "@navet/shared";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { ImportFileError } from "../service/csv.js";
+import { importFieldHelp } from "../service/field-help.js";
 import { errorBody } from "../../system/service/error-body.js";
 import {
   ImportConflictError,
@@ -26,6 +27,20 @@ export async function importRoutes(app: FastifyInstance, opts: { service: Import
     }
     return parsed.data;
   }
+
+  // Field help for the mapping step: the wizard's fields with the template's
+  // column heading, the explanation and an example (field-help.ts — the same
+  // source the Excel templates and the manual chapter Importmallar are
+  // generated from). Admin like the rest, since the wizard is.
+  app.get<{ Params: { entity: string } }>(
+    "/imports/:entity/fields",
+    { preHandler: requireRole("admin") },
+    async (req, reply) => {
+      const entity = parseEntity(req.params.entity, reply);
+      if (!entity) return reply;
+      return importFieldHelp(entity);
+    }
+  );
 
   // Entity-less parse for the multi-file import: recognises the entity from
   // the header row (detect.ts). Same upload rules as /:entity/parse.

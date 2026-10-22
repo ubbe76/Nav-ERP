@@ -202,12 +202,27 @@ export const CUSTOMER_HEADER_ALIASES: Record<string, string> = {
   fakturaadressstad: "invoiceCity",
   fakturaadressland: "invoiceCountry",
   fakturaepost: "invoiceEmail",
+  // The Excel template's invoice headings (field-help.ts). They deliberately
+  // do NOT include "fakturaadressnamn"/"avvikerfranpostadress", which would
+  // flip suggestCustomerMapping into the invoice-address-file mode and turn
+  // the template's own Adressrad 2/Postnummer/Land into invoice columns.
+  fakturanamn: "invoiceName",
+  fakturaadressrad2: "invoiceAddress2",
+  fakturaadressrad3: "invoiceAddress3",
+  fakturapostnummer: "invoicePostalCode",
+  fakturapostort: "invoiceCity",
+  fakturaland: "invoiceCountry",
+  epostforfaktura: "invoiceEmail",
+  avvikandefakturaadress: "invoiceAddressDiffers",
   avvikerfranpostadress: "invoiceAddressDiffers",
   betalningsvillkor: "paymentTerm",
   leveransvillkor: "deliveryTerm",
   leveranssatt: "carrier",
+  // The template's heading "Leveranssätt/speditör".
+  leveranssattspeditor: "carrier",
   prislista: "priceList",
   rabatt: "discountPercent",
+  kundrabatt: "discountPercent",
   vartleverantorsnummer: "ourSupplierNumber",
   vartleverantorsnr: "ourSupplierNumber",
   samlingsfaktura: "collectiveInvoicing",

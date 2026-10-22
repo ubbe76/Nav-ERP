@@ -105,3 +105,18 @@ export const importCommitSchema = z.object({
   setAsDefault: z.boolean().optional(),
 });
 export type ImportCommitInput = z.infer<typeof importCommitSchema>;
+
+// GET /imports/:entity/fields — one entry per mappable field, in the
+// wizard's field order. `header` is the column heading the Excel template
+// uses (always recognised by the entity's own alias dictionary), `label` the
+// wizard's field name, and `required` what the wizard marks with *. The
+// mapping step shows `description`, the template's Instruktioner sheet and
+// the manual chapter Importmallar show all of it.
+export interface ImportFieldHelp {
+  field: string;
+  label: string;
+  required: boolean;
+  header: string;
+  description: string;
+  example: string;
+}

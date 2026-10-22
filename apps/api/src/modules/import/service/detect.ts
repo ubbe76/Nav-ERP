@@ -22,6 +22,14 @@ interface Signature {
 export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
   // Materiallista: parent + component + quantity.
   { entity: "bom", all: ["huvudartikel", "artikelnummer", "kvantitet"] },
+  // The Excel templates (field-help.ts headings) for the three files whose
+  // template would otherwise fall through to the article list — they carry
+  // "Artikelnummer" plus "Enhet" or nothing the article signature knows.
+  // The routing and article templates already match their export rules.
+  { entity: "bom", all: ["artikelnummer", "komponentnummer", "antal"] },
+  { entity: "articleUnits", all: ["artikelnummer", "enhet", "omrakningsfaktor"] },
+  { entity: "supplierPrices", all: ["artikelnummer", "leverantorsnummer", "pris"] },
+  { entity: "customerPrices", all: ["artikelnummer", "kundnummer", "pris"] },
   // Operationslista: article + resource/sequence + a time column.
   { entity: "routing", all: ["artikelnummer"], any: ["produktionsgrupp", "op", "sekvensnr"] },
   // Artikellista, Enheter: the conversion factor is unique to it.

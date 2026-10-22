@@ -15,6 +15,7 @@ Filerna i den här mappen är källan. Ändra här, så följer appen och webbpl
 
 - [Artiklar](https://naverp.se/hjalp/artiklar/) ([källfil](artiklar.md)) — Artikelregistret, artikelkortet, struktur/beredning, import från CSV och artikelgrupper.
 - [Grunddata](https://naverp.se/hjalp/grunddata/) ([källfil](grunddata.md)) — Leveransvillkor, betalningsvillkor och speditörer.
+- [Importmallar](https://naverp.se/hjalp/importmallar/) ([källfil](importmallar.md), genererad av `npm run generate:import-templates -w apps/api`) — Excelmallar för alla importer, med förklaring och exempel per kolumn.
 - [Personal & tid](https://naverp.se/hjalp/personal-tid/) ([källfil](personal-tid.md)) — Personal, scheman, kalendrar, ATF och tidrapporter.
 
 ## Flöden

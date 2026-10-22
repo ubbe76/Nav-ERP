@@ -43,9 +43,11 @@ export async function proxy(req: NextRequest) {
 export const config = {
   // Also exempt the same-origin API proxy (/api/v1 — rewritten to the API
   // server, which does its own auth; a 307 to /login would break login and
-  // register calls) and the brand/PWA assets — browsers fetch these on the
-  // login page too, and a 307 to /login would break the favicon and manifest.
+  // register calls), the brand/PWA assets — browsers fetch these on the
+  // login page too, and a 307 to /login would break the favicon and manifest
+  // — and the Excel import templates (public/importmallar, generated files
+  // with nothing sensitive, linked from the manual and the website).
   matcher: [
-    "/((?!api/v1|_next/static|_next/image|favicon.ico|favicon-16x16.png|favicon-32x32.png|apple-icon.png|manifest.webmanifest|android-chrome-192x192.png|android-chrome-512x512.png).*)",
+    "/((?!api/v1|_next/static|_next/image|importmallar/|favicon.ico|favicon-16x16.png|favicon-32x32.png|apple-icon.png|manifest.webmanifest|android-chrome-192x192.png|android-chrome-512x512.png).*)",
   ],
 };
