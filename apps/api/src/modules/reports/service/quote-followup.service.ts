@@ -20,7 +20,9 @@ export const QUOTE_OUTCOME_LABELS = {
 
 // CSV = the quote list, one line per quote.
 const CSV_COLUMNS: CsvColumn<QuoteFollowupQuote>[] = [
-  { label: "Offert", value: (q) => q.orderNumber },
+  { label: "Offert", value: (q) => q.quoteNumber },
+  // The KO- number a won OF- numbered quote got; empty while they agree.
+  { label: "Order", value: (q) => (q.orderNumber !== q.quoteNumber ? q.orderNumber : null) },
   { label: "Kundnummer", value: (q) => q.customerNumber },
   { label: "Kund", value: (q) => q.customerName },
   { label: "Skapad", value: (q) => q.createdDate, format: "date" },

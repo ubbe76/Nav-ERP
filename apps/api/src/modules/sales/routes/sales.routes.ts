@@ -306,7 +306,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
   registerListCsvRoute(app, {
     path: "/sales-orders/csv",
     querySchema: listSalesOrdersQuerySchema,
-    filenameBase: "kundordrar",
+    filenameBase: (q) => (q.kind === "quote" ? "offerter" : "kundordrar"),
     columns: SALES_ORDER_CSV_COLUMNS,
     fetch: (q) => service.listSalesOrders(q),
   });

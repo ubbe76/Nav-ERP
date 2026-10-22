@@ -98,6 +98,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/inkop/betalfiler": FileOutput,
   "/inkop/bankfiler": Landmark,
   "/leverantorer": Factory,
+  "/forsaljning/offerter": FileText,
   "/forsaljning/ordrar": ClipboardList,
   "/forsaljning/utleverans": Truck,
   "/forsaljning/leveranstidskontroll": CalendarCheck,

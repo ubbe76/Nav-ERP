@@ -197,6 +197,10 @@ export interface DocumentPdfInput {
   // Invoice-only meta lines under the date.
   dueDate?: Date | null;
   orderReference?: string | null;
+  // Offerter (0138): the OF- number an order confirmation came from —
+  // "Vår offert: OF-1001" under the date. The callsite passes it only when
+  // the order's number differs from its quote number.
+  quoteReference?: string | null;
   // Kundnummer — the customer's number in our register: live on quote/order
   // confirmation, the frozen snapshot on invoices. Sales documents only.
   partnerNumber?: string | null;
@@ -997,6 +1001,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     }
     if (input.orderReference) {
       doc.text(`Ordernummer: ${input.orderReference}`, left, y);
+      y += 14;
+    }
+    if (input.quoteReference) {
+      doc.text(`Vår offert: ${input.quoteReference}`, left, y);
       y += 14;
     }
     if (input.partnerNumber) {

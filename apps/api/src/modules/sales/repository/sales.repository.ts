@@ -30,6 +30,7 @@ import {
 } from "@navet/db";
 import {
   ilikePattern,
+  salesDocumentKind,
   type CreateContactInput,
   type CreateCustomerInput,
   type CreateDeliveryAddressInput,
@@ -45,6 +46,7 @@ import {
   type PalletCardCode,
   type OrderRowConfigurationCost,
   type PriceListRowInput,
+  type SalesDocumentKind,
   type SalesOrderStatus,
   type UpdateContactInput,
   type UpdateCustomerInput,
@@ -67,6 +69,23 @@ import { getInvoicedQuantitiesWith } from "./invoice.repository.js";
 // users joined a second time for "who marked the quote lost" (the order's
 // created_by is not the same person).
 const lostByUser = alias(users, "lost_by_user");
+
+// Offerter (0138): the SQL twin of @navet/shared's salesDocumentKind — the
+// one place the rule lives on the database side (list filter, list rows and
+// the detail read). Keep the two in step.
+const documentKindSql = sql<SalesDocumentKind>`(case when ${salesOrders.status} in ('quote', 'lost') or (${salesOrders.status} = 'cancelled' and ${salesOrders.quoteNumber} is not null and ${salesOrders.orderNumber} = ${salesOrders.quoteNumber}) then 'quote' else 'order' end)`;
+
+// A plain sales_orders row (from insert/update … returning) with its derived
+// document kind, so every write path answers in the same shape as the reads.
+function withDocumentKind<T extends { status: SalesOrderStatus; orderNumber: string; quoteNumber: string | null }>(
+  row: T
+): T & { documentKind: SalesDocumentKind } {
+  return { ...row, documentKind: salesDocumentKind(row) };
+}
+
+// Statuses that make a row an order: leaving a quote for one of these
+// gives an OF- numbered quote its KO- number (updateStatus).
+const ORDER_STATUSES: readonly SalesOrderStatus[] = ["confirmed", "in_production", "delivered", "invoiced"];
 
 // Leveranstillfälle (delivery occasion) — C2. The whole batch is one
 // transaction: every row goes through the exact per-row guard/lock/booking
@@ -574,7 +593,11 @@ export function createSalesRepository(db: Db) {
         // Terms are snapshotted from the customer at creation (like the PO's
         // currency) — later changes on the customer card don't touch orders.
         const [customer] = await tx.select().from(customers).where(eq(customers.id, input.customerId));
-        const orderNumber = await getNextOrderNumber(tx, "sales_order");
+        // Offerter (0138): a quote is numbered from its own series (OF-) and
+        // carries the number twice — order_number (what every reader shows)
+        // and quote_number (the reference that survives the confirmation).
+        // A direct order (Ny kundorder) takes a KO- number and burns no OF-.
+        const orderNumber = await getNextOrderNumber(tx, input.confirm ? "sales_order" : "quote");
         const deliveryAddressId = input.newDeliveryAddress
           ? (await insertNewDeliveryAddress(tx, input.customerId, input.newDeliveryAddress)).id
           : input.deliveryAddressId;
@@ -582,6 +605,7 @@ export function createSalesRepository(db: Db) {
           .insert(salesOrders)
           .values({
             orderNumber,
+            quoteNumber: input.confirm ? null : orderNumber,
             customerId: input.customerId,
             customerOrderNumber: input.customerOrderNumber,
             customerReference: input.customerReference,
@@ -629,7 +653,7 @@ export function createSalesRepository(db: Db) {
           )
           .returning();
 
-        return { order: order!, rows };
+        return { order: withDocumentKind(order!), rows };
       });
     },
 
@@ -637,6 +661,7 @@ export function createSalesRepository(db: Db) {
       const [row] = await db
         .select({
           ...getTableColumns(salesOrders),
+          documentKind: documentKindSql,
           customerName: customers.name,
           // The order card's "Fakturera" points at the samlingsfakturering
           // routine instead of the invoice dialog for flagged customers.
@@ -682,6 +707,8 @@ export function createSalesRepository(db: Db) {
         conditions.push(
           or(
             ilike(salesOrders.orderNumber, pattern),
+            // A confirmed quote is still found on its OF- number.
+            ilike(salesOrders.quoteNumber, pattern),
             ilike(customers.name, pattern),
             exists(
               db
@@ -699,6 +726,7 @@ export function createSalesRepository(db: Db) {
         );
       }
       if (query.status) conditions.push(inArray(salesOrders.status, query.status));
+      if (query.kind) conditions.push(sql`${documentKindSql} = ${query.kind}`);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       // Correlated-subquery shape as listPurchaseOrders' openRowCount —
@@ -717,6 +745,7 @@ export function createSalesRepository(db: Db) {
         db
           .select({
             ...listColumns,
+            documentKind: documentKindSql,
             customerName: customers.name,
             nextDeliveryDate: nextDeliveryDateSql,
             lostReasonCode: quoteLossReasons.code,
@@ -747,22 +776,79 @@ export function createSalesRepository(db: Db) {
     // reason — "Ingen orsak angiven" — unless the order already is lost.
     // fromStatus makes the update conditional (null = the order had moved on),
     // so a confirm cannot overwrite a concurrent Förlorad and vice versa.
+    //
+    // Offerter (0138): the one writer of a quote → order transition (Bekräfta,
+    // the order confirmation mail, setStatus and create-with-confirm all come
+    // through here), so it also hands out the KO- number: an order status on
+    // a row still numbered by its quote (order_number = quote_number) takes
+    // the next sales_order number, quote_number stays as the reference. The
+    // row is locked first and the number drawn only when the transition
+    // really happens — a failed fromStatus burns nothing, and a concurrent
+    // second transition sees the new number and draws none.
     async updateStatus(id: string, status: SalesOrderStatus, lostBy: string | null = null, fromStatus?: SalesOrderStatus) {
-      const [row] = await db
-        .update(salesOrders)
-        .set(
-          status === "lost"
-            ? {
-                status,
-                lostAt: sql`coalesce(${salesOrders.lostAt}, now())`,
-                lostBy: sql`coalesce(${salesOrders.lostBy}, ${lostBy}::uuid)`,
-                updatedAt: new Date(),
-              }
-            : { status, lostReasonId: null, lostNote: null, lostAt: null, lostBy: null, updatedAt: new Date() }
-        )
-        .where(fromStatus ? and(eq(salesOrders.id, id), eq(salesOrders.status, fromStatus)) : eq(salesOrders.id, id))
-        .returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const [current] = await tx
+          .select({ status: salesOrders.status, orderNumber: salesOrders.orderNumber, quoteNumber: salesOrders.quoteNumber })
+          .from(salesOrders)
+          .where(eq(salesOrders.id, id))
+          .for("update");
+        if (!current || (fromStatus && current.status !== fromStatus)) return null;
+        const numberedAsQuote = current.quoteNumber !== null && current.orderNumber === current.quoteNumber;
+        // A quote that ends as Förlorad/Makulerad goes back to its OF- number
+        // — it may hold a KO- number reserved by a confirmation send that
+        // failed (reserveOrderNumber), which is then left unused.
+        const endsAsQuote =
+          (status === "lost" || status === "cancelled") &&
+          (current.status === "quote" || current.status === "lost") &&
+          current.quoteNumber !== null &&
+          !numberedAsQuote;
+        const orderNumber =
+          ORDER_STATUSES.includes(status) && numberedAsQuote
+            ? await getNextOrderNumber(tx, "sales_order")
+            : endsAsQuote
+              ? current.quoteNumber!
+              : undefined;
+        const [row] = await tx
+          .update(salesOrders)
+          .set(
+            status === "lost"
+              ? {
+                  status,
+                  orderNumber,
+                  lostAt: sql`coalesce(${salesOrders.lostAt}, now())`,
+                  lostBy: sql`coalesce(${salesOrders.lostBy}, ${lostBy}::uuid)`,
+                  updatedAt: new Date(),
+                }
+              : { status, orderNumber, lostReasonId: null, lostNote: null, lostAt: null, lostBy: null, updatedAt: new Date() }
+          )
+          .where(eq(salesOrders.id, id))
+          .returning();
+        return row ? withDocumentKind(row) : null;
+      });
+    },
+
+    // The order confirmation mail confirms the quote only AFTER the send
+    // succeeded, yet the attached confirmation must already carry the KO-
+    // number. So the mail path reserves it first: a quote still numbered by
+    // its OF- number gets the next sales_order number written to
+    // order_number (status stays quote; updateStatus then draws none).
+    // Returns the number the confirmation carries — reserved now, or earlier
+    // by a send that failed or is still in flight (the reservation is kept so
+    // a retry or a concurrent send prints the same number) — and null when
+    // the order is no longer a quote.
+    async reserveOrderNumber(id: string): Promise<string | null> {
+      return db.transaction(async (tx) => {
+        const [current] = await tx
+          .select({ status: salesOrders.status, orderNumber: salesOrders.orderNumber, quoteNumber: salesOrders.quoteNumber })
+          .from(salesOrders)
+          .where(eq(salesOrders.id, id))
+          .for("update");
+        if (!current || current.status !== "quote") return null;
+        if (current.quoteNumber === null || current.orderNumber !== current.quoteNumber) return current.orderNumber;
+        const orderNumber = await getNextOrderNumber(tx, "sales_order");
+        await tx.update(salesOrders).set({ orderNumber, updatedAt: new Date() }).where(eq(salesOrders.id, id));
+        return orderNumber;
+      });
     },
 
     // Förlorad: conditional on status quote so a concurrent confirm/cancel
@@ -772,6 +858,7 @@ export function createSalesRepository(db: Db) {
         .update(salesOrders)
         .set({
           status: "lost",
+          orderNumber: sql`coalesce(${salesOrders.quoteNumber}, ${salesOrders.orderNumber})`,
           lostReasonId: input.reasonId,
           lostNote: input.note,
           lostAt: new Date(),
@@ -780,7 +867,7 @@ export function createSalesRepository(db: Db) {
         })
         .where(and(eq(salesOrders.id, id), eq(salesOrders.status, "quote")))
         .returning();
-      return row ?? null;
+      return row ? withDocumentKind(row) : null;
     },
 
     // Öppna igen: back to quote with the lost_* columns cleared; the
@@ -792,7 +879,7 @@ export function createSalesRepository(db: Db) {
         .set({ status: "quote", lostReasonId: null, lostNote: null, lostAt: null, lostBy: null, updatedAt: new Date() })
         .where(and(eq(salesOrders.id, id), eq(salesOrders.status, "lost")))
         .returning();
-      return row ?? null;
+      return row ? withDocumentKind(row) : null;
     },
 
     // invoiceOrder was removed in C1 — the invoice module (invoice.repository.ts)

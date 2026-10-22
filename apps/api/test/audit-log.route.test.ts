@@ -201,6 +201,29 @@ describe("GET /audit-log", () => {
     expect((res.json() as { total: number }).total).toBe(2);
     await app.close();
   });
+
+  // Offerter (0138): a quote that became an order is logged under both its
+  // OF- and its KO- number — the order card asks for both in one list.
+  it("alsoEntityId widens the exact match to a second id", async () => {
+    const app = buildApp();
+    const { cookie } = await registerAdminAndLogin(app);
+    await auditRepo.log({ entityType: "sales_order", entityId: "OF-1001", action: "confirmed" });
+    await auditRepo.log({ entityType: "sales_order", entityId: "KO-2500001", action: "production_started" });
+    await auditRepo.log({ entityType: "sales_order", entityId: "KO-2500002", action: "confirmed" });
+
+    const res = await app.inject({
+      url: "/audit-log?entityType=sales_order&entityId=KO-2500001&alsoEntityId=OF-1001",
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { total: number; rows: Array<{ entityId: string }> };
+    expect(body.total).toBe(2);
+    expect(body.rows.map((r) => r.entityId).sort()).toEqual(["KO-2500001", "OF-1001"]);
+
+    const tooLong = await app.inject({ url: `/audit-log?entityId=KO-1&alsoEntityId=${"x".repeat(101)}`, headers: { cookie } });
+    expect(tooLong.statusCode).toBe(400);
+    await app.close();
+  });
 });
 
 describe("GET /audit-log/csv", () => {

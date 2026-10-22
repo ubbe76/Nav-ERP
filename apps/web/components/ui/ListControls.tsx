@@ -165,7 +165,7 @@ export function ListExportLink({ endpoint, renameParams }: { endpoint: string; r
   }
   const qs = params.toString();
   return (
-    <a href={`${API_URL}${endpoint}${qs ? `?${qs}` : ""}`} download className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+    <a href={`${API_URL}${endpoint}${qs ? `${endpoint.includes("?") ? "&" : "?"}${qs}` : ""}`} download className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
       Exportera CSV
     </a>
   );

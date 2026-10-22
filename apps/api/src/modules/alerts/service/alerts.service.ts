@@ -96,7 +96,9 @@ function emailDocumentHref(documentType: string, documentId: string | null): str
         return `/inkop/forfragningar/${documentId}`;
       case "purchase_order":
         return `/inkop/ordrar/${documentId}`;
+      // The web redirects a quote that has become an order to its order card.
       case "quote":
+        return `/forsaljning/offerter/${documentId}`;
       case "order_confirmation":
         return `/forsaljning/ordrar/${documentId}`;
       case "invoice":
@@ -234,7 +236,7 @@ export function createAlertsService(deps: {
         return {
           key: r.orderId,
           severity,
-          href: `/forsaljning/ordrar/${r.orderId}`,
+          href: `/forsaljning/offerter/${r.orderId}`,
           primary: `${r.orderNumber} ${r.customerName}`,
           secondary: severity === "red" ? `Gick ut ${r.validUntil}` : `Går ut ${r.validUntil} (${daysAheadText(r.validUntil, today)})`,
           date: r.validUntil,

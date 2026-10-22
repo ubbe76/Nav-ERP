@@ -69,6 +69,8 @@ type SalesOrderRow = Omit<typeof salesOrders.$inferSelect, "freightQuote"> & {
 
 export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
   { label: "Ordernummer", value: (r) => r.orderNumber },
+  // Offerter (0138): the OF- number, also on an order that came from one.
+  { label: "Offertnummer", value: (r) => r.quoteNumber },
   { label: "Kund", value: (r) => r.customerName },
   { label: "Status", value: (r) => SALES_ORDER_STATUS_LABELS[r.status] },
   { label: "Leveransdatum", value: (r) => r.expectedDeliveryDate, format: "date" },

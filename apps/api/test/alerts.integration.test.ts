@@ -507,9 +507,9 @@ describe("quote_followup", () => {
       [today.id, "yellow", TODAY, `Går ut ${TODAY} (i dag)`],
       [soon.id, "yellow", "2030-03-07", "Går ut 2030-03-07 (om 3 dagar)"],
     ]);
-    expect(g.items[0]!.href).toBe(`/forsaljning/ordrar/${expired.id}`);
+    expect(g.items[0]!.href).toBe(`/forsaljning/offerter/${expired.id}`);
     expect(g.items[0]!.primary).toBe(`${expired.orderNumber} Kund AB`);
-    expect(g.listHref).toBe("/forsaljning/ordrar?status=quote");
+    expect(g.listHref).toBe("/forsaljning/offerter?status=quote");
   });
 
   it("the window follows the setting: the day exactly N ahead is in, 0 days means today only", async () => {

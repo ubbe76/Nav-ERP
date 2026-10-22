@@ -13,6 +13,7 @@ function row(over: Partial<QuoteFollowupSourceRow> = {}): QuoteFollowupSourceRow
   return {
     id: `id-${n}`,
     orderNumber: `KO-${1000 + n}`,
+    quoteNumber: null,
     customerId: "c-anna",
     customerNumber: "10001",
     customerName: "Anna Storkök AB",

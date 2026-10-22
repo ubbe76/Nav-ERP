@@ -19,10 +19,14 @@ import { useCan } from "../PermissionsProvider";
 export function AuditTrailSection({
   entityType,
   entityId,
+  alsoEntityId,
   title = "Historik",
 }: {
   entityType: string;
   entityId: string;
+  // A second number the same document was logged under (offertnumret OF-…
+  // after the quote became a kundorder).
+  alsoEntityId?: string;
   title?: string;
 }) {
   // The audit-log API is admin-only (like System → Händelselogg), so the
@@ -38,7 +42,7 @@ export function AuditTrailSection({
     setLoading(true);
     setError(null);
     apiFetch<Paged<AuditLogEntry>>(
-      `/api/v1/audit-log?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}&limit=50`
+      `/api/v1/audit-log?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}${alsoEntityId ? `&alsoEntityId=${encodeURIComponent(alsoEntityId)}` : ""}&limit=50`
     )
       .then((res) => {
         if (!cancelled) setEntries(res.rows);
@@ -52,7 +56,7 @@ export function AuditTrailSection({
     return () => {
       cancelled = true;
     };
-  }, [entityType, entityId, isAdmin]);
+  }, [entityType, entityId, alsoEntityId, isAdmin]);
 
   if (!isAdmin || loading) return null;
 

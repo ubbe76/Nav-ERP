@@ -556,9 +556,16 @@ export function createSalesService(
       settings.getSettings(),
     ]);
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
+    // Offerter (0138): the quote prints its OF- number even after the order
+    // took a KO- one; the confirmation prints the order's number and, when
+    // it came from an OF- numbered quote, "Vår offert:" as the reference.
+    const documentNumber = variant === "quote" ? (order.quoteNumber ?? order.orderNumber) : order.orderNumber;
+    const quoteReference =
+      variant === "confirmation" && order.quoteNumber && order.quoteNumber !== order.orderNumber ? order.quoteNumber : null;
     const content = await pdf.render({
       title: variant === "quote" ? "Offert" : "Orderbekräftelse",
-      documentNumber: order.orderNumber,
+      documentNumber,
+      quoteReference,
       date: order.createdAt,
       partnerLabel: "Kund",
       partner: customer!,
@@ -607,7 +614,7 @@ export function createSalesService(
       carrier: termLabel(order.carrierCode, order.carrierName),
     });
     const prefix = variant === "quote" ? "Offert" : "Orderbekraftelse";
-    return { filename: `${prefix}-${order.orderNumber}.pdf`, content };
+    return { filename: `${prefix}-${documentNumber}.pdf`, content };
   }
 
   // The invoice: same document skeleton as the quote/confirmation but
@@ -1296,10 +1303,13 @@ export function createSalesService(
       }
       const updated = await repo.updateStatus(orderId, "confirmed", null, "quote");
       if (!updated) throw new InvalidStatusTransitionError("Cannot confirm — the quote changed status meanwhile");
+      // Logged under the number the quote had; an OF- numbered quote's new
+      // KO- number goes in the detail (the card reads both numbers).
       await audit.log({
         entityType: "sales_order",
         entityId: order.orderNumber,
         action: "confirmed",
+        detail: updated.orderNumber !== order.orderNumber ? { orderNumber: updated.orderNumber } : undefined,
         userId: userId ?? null,
       });
       return updated;
@@ -1382,7 +1392,19 @@ export function createSalesService(
       // after the customer's setting changes.
       const customer = await repo.findCustomerById(order.customerId);
       const showPrices = input.showConfigurationPrices ?? customer!.showConfigurationPrices;
-      const attachment = await renderSalesOrderPdf(order, input.variant, showPrices);
+      // Offerter (0138): the confirmation that confirms an OF- numbered quote
+      // is the order's first document — it carries the KO- number the
+      // confirmation will keep, reserved before the send (the status still
+      // changes only after SMTP succeeded). A failed send keeps the
+      // reservation for the next try; Förlorad/Makulera give the quote its
+      // OF- number back.
+      const reserved =
+        input.variant === "confirmation" && order.status === "quote" ? await repo.reserveOrderNumber(orderId) : null;
+      const attachment = await renderSalesOrderPdf(
+        reserved ? { ...order, orderNumber: reserved } : order,
+        input.variant,
+        showPrices
+      );
       const drawings = input.attachDrawings
         ? await drawingAttachments((await repo.listRowsByOrder(orderId)).map((r) => r.articleId))
         : [];
@@ -1399,7 +1421,8 @@ export function createSalesService(
       if (input.variant === "confirmation" && order.status === "quote") {
         // The mail is already sent; a quote that moved on meanwhile (e.g.
         // Förlorad) keeps its new status rather than being overwritten.
-        return (await repo.updateStatus(orderId, "confirmed", null, "quote")) ?? (await repo.findSalesOrderById(orderId));
+        const confirmed = await repo.updateStatus(orderId, "confirmed", null, "quote");
+        return confirmed ?? repo.findSalesOrderById(orderId);
       }
       return order;
     },

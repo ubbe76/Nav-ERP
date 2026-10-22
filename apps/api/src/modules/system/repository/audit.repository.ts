@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, lte, or } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, lte, or } from "drizzle-orm";
 import { auditLog, users, type Db } from "@navet/db";
 import { ilikePattern, type ListAuditLogQuery } from "@navet/shared";
 
@@ -64,7 +64,11 @@ export function createAuditRepository(db: Db) {
         conditions.push(or(ilike(auditLog.entityId, pattern), ilike(auditLog.action, pattern)));
       }
       if (query.entityType) conditions.push(eq(auditLog.entityType, query.entityType));
-      if (query.entityId) conditions.push(eq(auditLog.entityId, query.entityId));
+      // alsoEntityId: a document known under two numbers (an offert that
+      // became a kundorder) — the card asks for both in one list.
+      const entityIds = [...new Set([query.entityId, query.alsoEntityId].filter((id): id is string => !!id))];
+      if (entityIds.length === 1) conditions.push(eq(auditLog.entityId, entityIds[0]!));
+      else if (entityIds.length > 1) conditions.push(inArray(auditLog.entityId, entityIds));
       if (query.userId) conditions.push(eq(auditLog.userId, query.userId));
       // Date-only filters — the whole day for `to`, so an event at 23:59 on
       // the end date isn't silently cut off by a midnight boundary.

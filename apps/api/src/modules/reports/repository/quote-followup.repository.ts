@@ -10,6 +10,7 @@ import type { QuoteFollowupQuery } from "@navet/shared";
 export interface QuoteFollowupSourceRow {
   id: string;
   orderNumber: string;
+  quoteNumber: string | null;
   customerId: string;
   customerNumber: string;
   customerName: string;
@@ -47,6 +48,7 @@ export function createQuoteFollowupRepository(db: Db) {
         .select({
           id: salesOrders.id,
           orderNumber: salesOrders.orderNumber,
+          quoteNumber: salesOrders.quoteNumber,
           customerId: salesOrders.customerId,
           customerNumber: customers.customerNumber,
           customerName: customers.name,

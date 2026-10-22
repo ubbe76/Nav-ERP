@@ -178,9 +178,15 @@ export const FORSALJNING_SECTIONS: ModuleNavSection[] = [
     title: "Order",
     items: [
       {
+        href: "/forsaljning/offerter",
+        title: "Offerter",
+        description:
+          "Offerter med giltighetstid, uppföljning och förlorade affärer — bekräftad offert blir kundorder med eget KO-nummer.",
+      },
+      {
         href: "/forsaljning/ordrar",
         title: "Kundorder",
-        description: "Offert, kundorder och orderbekräftelse — hela vägen från offert till levererad order.",
+        description: "Kundorder och orderbekräftelse — från bekräftad order till levererad och fakturerad.",
       },
       {
         href: "/forsaljning/utleverans",

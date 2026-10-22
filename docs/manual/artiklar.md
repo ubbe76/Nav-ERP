@@ -135,7 +135,7 @@ Fliken **Konfigurator** (för tillverkade artiklar, bredvid Allmänt) gör artik
 Har artikeln ingen mall visas en förklaring och knappen **Gör konfigurerbar**. Du väljer ett **Läge**:
 
 - **Variantartiklar** — varje kombination av val blir en egen, lagerförd artikel (se [Varianter](#varianter)). Kräver en tillverkad artikel (*Variantartiklar kräver en tillverkad artikel*) som inte är fantom.
-- **Beställningsvara** — artikeln ligger kvar som den är och säljs med valen på orderraden: säljaren konfigurerar den i dialogen **Konfigurera** på offert/kundorder, raden får valen, etiketterna och prisuppdelningen sparade, och samma mall kan ligga flera gånger på en order med olika val (se [Försäljning](/hjalp/forsaljning#offert-och-kundorder)). Raden kan tillverkas: **Skapa tillverkningsorder** på kundorderraden, **+ Ny tillverkningsorder** (med **Konfigurera**) och [behovsberäkningens](/hjalp/tillverkning#konfigurerade-kundorderrader) sektion **Konfigurerade kundorderrader** tar valen med sig och tillverkningsordern visar **Lagervärde vid inleverans** ur förkalkylen — se [Tillverkningsorder för beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara). Inköp av mallen förblir spärrat: den visas inte i artikelväljaren på inköpsorder och förfrågan. Kräver en tillverkad artikel; fliken Konfigurator finns därför bara på tillverkade artiklar.
+- **Beställningsvara** — artikeln ligger kvar som den är och säljs med valen på orderraden: säljaren konfigurerar den i dialogen **Konfigurera** på offert/kundorder, raden får valen, etiketterna och prisuppdelningen sparade, och samma mall kan ligga flera gånger på en order med olika val (se [Försäljning](/hjalp/forsaljning#kundorder)). Raden kan tillverkas: **Skapa tillverkningsorder** på kundorderraden, **+ Ny tillverkningsorder** (med **Konfigurera**) och [behovsberäkningens](/hjalp/tillverkning#konfigurerade-kundorderrader) sektion **Konfigurerade kundorderrader** tar valen med sig och tillverkningsordern visar **Lagervärde vid inleverans** ur förkalkylen — se [Tillverkningsorder för beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara). Inköp av mallen förblir spärrat: den visas inte i artikelväljaren på inköpsorder och förfrågan. Kräver en tillverkad artikel; fliken Konfigurator finns därför bara på tillverkade artiklar.
 
 En fantomartikel kan aldrig vara mall, och ett typbyte på en mallartikel som skulle bryta läget vägras. Läget ändras med **Ändra** och mallen tas bort med **Ta bort konfigurator** (valgrupper och regler försvinner, artikeln blir en vanlig artikel). **Grundpris** är artikelns försäljningspris i blocket Försäljning på fliken [Allmänt](#allmant); saknas det visas varningen *Grundpris saknas — ange försäljningspris på artikeln*.
 
@@ -233,7 +233,7 @@ Under priset finns fältet **Antal** (standard 1, komma eller punkt) och knappen
 
 I läget **Variantartiklar** finns dessutom knappen **Skapa variant** bredvid **Visa struktur och kalkyl**, se [Skapa variant](#skapa-variant).
 
-> I läget Beställningsvara läggs mallen på offert och kundorder med valen på raden — se [Försäljning](/hjalp/forsaljning#offert-och-kundorder).
+> I läget Beställningsvara läggs mallen på offert och kundorder med valen på raden — se [Försäljning](/hjalp/forsaljning#kundorder).
 
 #### Varianter
 

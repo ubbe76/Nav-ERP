@@ -25,6 +25,9 @@ export interface SendButtonConfig {
   to?: string;
   // Small note next to the button (e.g. "Kunden vill ha e-faktura").
   hint?: string;
+  // Navigate here after a successful send instead of refreshing (a quote's
+  // orderbekräftelse turns it into a kundorder with a new card URL).
+  redirectTo?: string;
 }
 
 export interface PdfLinkConfig {
@@ -135,7 +138,8 @@ export function MailSection({
           configurationPrices={configurationPrices ? showPrices : null}
           onSuccess={() => {
             setActive(null);
-            router.refresh();
+            if (active.redirectTo) router.push(active.redirectTo);
+            else router.refresh();
           }}
         />
       )}

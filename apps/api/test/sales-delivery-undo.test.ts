@@ -153,14 +153,15 @@ async function makeOrder(stockA = 10, stockB = 5) {
     },
     user.id
   );
-  await salesService.confirm(order.id);
+  // Offerter (0138): confirming gives the quote its KO- number.
+  const { orderNumber } = await salesService.confirm(order.id);
   await salesService.startProduction(order.id);
   return {
     customer,
     articleA,
     articleB,
     location,
-    order,
+    order: { ...order, orderNumber },
     rowA: rows.find((r) => r.articleId === articleA.id)!,
     rowB: rows.find((r) => r.articleId === articleB.id)!,
   };

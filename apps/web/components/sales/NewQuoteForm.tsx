@@ -212,7 +212,7 @@ export function NewQuoteForm({
           })),
         }),
       });
-      router.push(`/forsaljning/ordrar/${result.order.id}`);
+      router.push(`${mode === "order" ? "/forsaljning/ordrar" : "/forsaljning/offerter"}/${result.order.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : `Kunde inte skapa ${nounSingular}en`);
       setPending(false);

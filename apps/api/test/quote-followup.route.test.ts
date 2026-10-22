@@ -141,9 +141,33 @@ describe("quote follow-up service", () => {
     const { filename, content } = await service.getCsv({ from: "2030-01-01", to: "2030-12-31" });
     expect(filename).toBe("offertuppfoljning-2030-01-01-2030-12-31.csv");
     const lines = content.split(/\r?\n/).filter((l) => l !== "");
-    expect(lines[0]!.replace(/^\ufeff/, "")).toBe("Offert;Kundnummer;Kund;Skapad;Giltig t.o.m.;Status;Utfall;Förlustorsak;Kommentar;Värde");
+    expect(lines[0]!.replace(/^\ufeff/, "")).toBe("Offert;Order;Kundnummer;Kund;Skapad;Giltig t.o.m.;Status;Utfall;Förlustorsak;Kommentar;Värde");
     expect(lines[1]).toContain(";10001;Anna Storkök AB;2030-01-10;2030-01-31;Förlorad;Förlorad;Ingen orsak angiven;;200,00");
     expect(lines[2]).toContain(";2030-01-11;2030-02-01;Offert;Utgången;;;200,00");
+  });
+
+  // Offerter (0138): Offert = the OF- number (an older quote's KO- number
+  // when it has none), Order = the KO- number a won OF- quote took.
+  it("shows the quote number as Offert and a won quote's order number as Order", async () => {
+    const anna = await makeCustomer("Anna Storkök AB", "10001");
+    const won = await quote(anna.id, "2030-01-10T10:00:00Z", { status: "confirmed", orderNumber: "KO-QF1", quoteNumber: "OF-QF1" });
+    const open = await quote(anna.id, "2030-01-11T10:00:00Z", { orderNumber: "OF-QF2", quoteNumber: "OF-QF2" });
+    const legacy = await quote(anna.id, "2030-01-12T10:00:00Z", { orderNumber: "KO-QF3" });
+    const cancelled = await quote(anna.id, "2030-01-13T10:00:00Z", { status: "cancelled", orderNumber: "OF-QF4", quoteNumber: "OF-QF4" });
+
+    const report = await service.get({ from: "2030-01-01", to: "2030-12-31" });
+    expect(report.quotes.map((q) => [q.id, q.quoteNumber, q.orderNumber, q.documentKind])).toEqual([
+      [won.id, "OF-QF1", "KO-QF1", "order"],
+      [open.id, "OF-QF2", "OF-QF2", "quote"],
+      [legacy.id, "KO-QF3", "KO-QF3", "quote"],
+      [cancelled.id, "OF-QF4", "OF-QF4", "quote"],
+    ]);
+
+    const { content } = await service.getCsv({ from: "2030-01-01", to: "2030-12-31" });
+    const lines = content.split(/\r?\n/).filter((l) => l !== "");
+    expect(lines[1]).toMatch(/^OF-QF1;KO-QF1;10001;/);
+    expect(lines[2]).toMatch(/^OF-QF2;;10001;/);
+    expect(lines[3]).toMatch(/^KO-QF3;;10001;/);
   });
 });
 

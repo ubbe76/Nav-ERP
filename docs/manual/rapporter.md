@@ -24,7 +24,7 @@ Värdena räknas per rad: antal × à-pris med radens rabatt (kundorder) och st�
 
 **Rapporter → Offertuppföljning** visar hur stor andel av offerterna som blir order. Urvalet är **Från** och **Till** (förval innevarande år) på dagen offerten skapades, och valfritt en **Kund**; alla val ligger i adressen så att urvalet går att spara eller skicka vidare.
 
-Överst står nyckeltalen **Offerter**, **Vunna**, **Förlorade**, **Öppna** (med antalet utgångna), **Makulerade**, **Hit rate (antal)** och **Hit rate (värde)**. Därunder kommer tabellerna **Per kund** (störst offererat värde först), **Per månad**, **Per förlustorsak** (antal, värde och andel av de förlorade; offerter förlorade utan orsak står som *Ingen orsak angiven*) och **Offerter** med varje offert: nummer (länkat till kortet), kund, skapad, giltig t.o.m., utfall, orsak och värde. **Exportera CSV** ger offertlistan.
+Överst står nyckeltalen **Offerter**, **Vunna**, **Förlorade**, **Öppna** (med antalet utgångna), **Makulerade**, **Hit rate (antal)** och **Hit rate (värde)**. Därunder kommer tabellerna **Per kund** (störst offererat värde först), **Per månad**, **Per förlustorsak** (antal, värde och andel av de förlorade; offerter förlorade utan orsak står som *Ingen orsak angiven*) och **Offerter** med varje offert: offertnummer (länkat till offertkortet; vunna offerter visar även det KO-nummer de fick), kund, skapad, giltig t.o.m., utfall, orsak och värde. **Exportera CSV** ger offertlistan.
 
 Definitionerna:
 

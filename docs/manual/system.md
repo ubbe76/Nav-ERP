@@ -107,11 +107,12 @@ Prova den första betalfilen i bankens testverktyg innan den skarpa betalningen:
 
 ## Nummerserier
 
-**System → Nummerserier** styr numreringen av ordrar, förfrågningar, fakturor och artiklar:
+**System → Nummerserier** styr numreringen av offerter, ordrar, förfrågningar, fakturor och artiklar:
 
 | Serie | Prefix (standard) |
 |---|---|
 | Inköpsorder | IO- |
+| Offert | OF- (från 1001) |
 | Kundorder | KO- |
 | Tillverkningsorder | TO- |
 | Förfrågan | FO- |
@@ -128,7 +129,7 @@ Prova den första betalfilen i bankens testverktyg innan den skarpa betalningen:
 | Leverantörsnummer | (inget prefix) |
 | Artikelnummer | (inget prefix, från 1001) |
 
-Prefix, **nästa nummer** och antal siffror (nollutfyllnad) kan ändras per serie. Nästa nummer delas ut när posten skapas — utom fakturanumret, som delas ut när fakturan **utfärdas** (se [Fakturor](/hjalp/forsaljning#fakturor)), inte när den skapas som utkast.
+Serien **Offert** numrerar nya offerter; när en offert bekräftas får den nästa nummer ur **Kundorder** och offertnumret följer med som referens (se [Offerter](/hjalp/forsaljning#offerter)). Prefix, **nästa nummer** och antal siffror (nollutfyllnad) kan ändras per serie. Nästa nummer delas ut när posten skapas — utom fakturanumret, som delas ut när fakturan **utfärdas** (se [Fakturor](/hjalp/forsaljning#fakturor)), inte när den skapas som utkast.
 
 **Artikelnummer** är standardserien för nya artiklar som saknar artikelnummer (se [Artikelnummer ur en nummerserie](/hjalp/artiklar#artikelnummer-ur-en-nummerserie)). Till skillnad från orderserierna hoppar artikelserierna över nummer som redan finns, så du kan låta serien börja mitt bland importerade artikelnummer.
 
@@ -161,7 +162,7 @@ Varje klient får bara göra det du ger den rätt till. Välj rättigheter med k
 |---|---|
 | **Läsa konfiguratorn** | Läsa publicerade mallar och räkna fram pris på ett val |
 | **Läsa priser** | Fråga vad en artikel kostar för en kund (`GET /price-quote`), och räkna fram en konfiguration med kundens pris (`customerId` i `…/evaluate`) — utan den rättigheten räknar konfiguratorn bara mallens eget pris |
-| **Skapa offert** | Lägga offerter (`POST /quotes`) |
+| **Skapa offert** | Lägga offerter (`POST /quotes`) — en offert utan `confirm` får ett offertnummer (OF-…) och ordern ett KO-nummer först när den bekräftas; med `confirm: true` får den KO-nummer direkt |
 | **Bekräfta order** | Lägga bekräftade order (`confirm: true`) och bekräfta en offert (`POST /sales-orders/{id}/confirm`) |
 | **Läsa struktur** | Läsa en artikels struktur (`GET /articles/{id}/bom`) |
 
@@ -278,7 +279,7 @@ POST /api/v1/quotes
 - **Kod på pallkort** — om pallkortet får en kod för artikelnumret och ordernumret: **Ingen** (standard), **Streckkod** (Code 128) eller **QR-kod**. Valet sparas direkt. Gäller interna pallkort och kunder vars kundkort har **Systemets förval** i fältet **Kod på pallkort**; en kund kan ha ett eget val. Se [Pallkort](/hjalp/tillverkning#pallkort).
 - **Orimligt mycket tid på en operation (veckor)** — när en operations återstående tid ensam skulle fylla sin resurs i fler vanliga veckor än så varnar **Planera**, **Flytta** och en ny tillverkningsorder (se [Planera](/hjalp/tillverkning#planera)). **4** är standard, decimaler går bra och **0** stänger av varningen. Fältet sparas när du lämnar det.
 - **Aviseringar** — kortet längre ned med fyra fält som sparas när du lämnar dem (se [Aviseringar](/hjalp/aviseringar)): **Navs adress** (t.ex. https://erp.foretag.se, behövs för länkarna i den dagliga sammanställningen; tom = mejlet skickas utan länkar), **Skicka sammanställningen klockan** (förval 07:00, svensk tid) och **Leverantörsfakturor att betala inom (dagar)** (0–60, förval 7; 0 = förfallna fakturor och de som förfaller i dag) samt **Offerter att följa upp inom (dagar)** (0–60, förval 7; 0 = offerter som har gått ut och de som går ut i dag).
-- **Offertens giltighetstid (dagar)** — hur länge en ny offert gäller: **Giltig t.o.m.** förifylls med dagens datum plus så många dagar (0–365, förval 30). **0** = ingen giltighetstid. Gäller även offerter som skapas via konfiguratorns API; datumet kan alltid ändras per offert (se [Offert och kundorder](/hjalp/forsaljning#giltighetstid-och-forlorade-offerter)).
+- **Offertens giltighetstid (dagar)** — hur länge en ny offert gäller: **Giltig t.o.m.** förifylls med dagens datum plus så många dagar (0–365, förval 30). **0** = ingen giltighetstid. Gäller även offerter som skapas via konfiguratorns API; datumet kan alltid ändras per offert (se [Offerter](/hjalp/forsaljning#giltighetstid-och-forlorade-offerter)).
 
 ### Leveransdagar
 

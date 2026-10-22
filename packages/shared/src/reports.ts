@@ -174,7 +174,14 @@ export interface QuoteFollowupLossReason {
 
 export interface QuoteFollowupQuote {
   id: string;
+  // Offerter (0138): the Offert column — the quote's OF- number, or the
+  // KO- number of a quote created before the OF- series (coalesce).
+  quoteNumber: string;
+  // The record's current number: equals quoteNumber until an OF- numbered
+  // quote is won and takes a KO- number (the Order column when it differs).
   orderNumber: string;
+  // Which card the row links to (Offerter or Kundorder).
+  documentKind: "quote" | "order";
   customerId: string;
   customerNumber: string;
   customerName: string;

@@ -22,8 +22,32 @@ export const salesOrderStatusSchema = z.enum([
 ]);
 export type SalesOrderStatus = z.infer<typeof salesOrderStatusSchema>;
 
+// Offerter (migration 0138): quotes and orders share sales_orders, and which
+// one a row is gets DERIVED, never stored. A quote is status quote/lost, or a
+// cancelled row that still carries its own OF- number (cancelled as a quote).
+// Everything else is an order — including older quotes cancelled with a KO-
+// number (accepted). Mirrored by apps/web/lib and by the sales repository's
+// SQL expression (documentKindSql).
+export const salesDocumentKindSchema = z.enum(["quote", "order"]);
+export type SalesDocumentKind = z.infer<typeof salesDocumentKindSchema>;
+
+export function salesDocumentKind(order: {
+  status: SalesOrderStatus;
+  orderNumber: string;
+  quoteNumber: string | null;
+}): SalesDocumentKind {
+  if (order.status === "quote" || order.status === "lost") return "quote";
+  if (order.status === "cancelled" && order.quoteNumber !== null && order.orderNumber === order.quoteNumber) {
+    return "quote";
+  }
+  return "order";
+}
+
 export const listSalesOrdersQuerySchema = listQuerySchema.extend({
   status: statusListParam(salesOrderStatusSchema.options),
+  // Offerter vs Kundorder — filters on the derived document kind; the
+  // status filter still applies on top.
+  kind: salesDocumentKindSchema.optional(),
   // Adds openRowCount (rows still short of their ordered quantity) to each
   // row — an extra correlated subquery, so it's opt-in. Mirrors
   // listPurchaseOrdersQuerySchema's withOpenRows (see its comment for the

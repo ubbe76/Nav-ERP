@@ -258,6 +258,13 @@ export const salesOrders = pgTable("sales_orders", {
   // KO-5001, KO-5002, ... (Kundorder) — issued by number-series.ts's
   // getNextOrderNumber (key "sales_order") at insert time.
   orderNumber: varchar("order_number", { length: 20 }).notNull().unique(),
+  // Offerter (migration 0138): a quote created as such gets an OF- number
+  // (key "quote") written to BOTH order_number and quote_number; when it
+  // becomes an order, updateStatus gives order_number the next KO- number and
+  // quote_number stays as the reference. Null for orders created confirmed
+  // (Ny kundorder) and for quotes created before 0138 (they keep their KO-).
+  // Whether a row is a quote or an order is derived (salesDocumentKind).
+  quoteNumber: varchar("quote_number", { length: 20 }).unique(),
   customerId: uuid("customer_id")
     .notNull()
     .references(() => customers.id, { onDelete: "restrict" }),

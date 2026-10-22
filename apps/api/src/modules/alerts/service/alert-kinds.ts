@@ -41,7 +41,8 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     label: "Offerter att följa upp",
     severity: "red",
     rule: ["forsaljning"],
-    listHref: "/forsaljning/ordrar?status=quote",
+    // Offerter (0138): quotes have their own list and card.
+    listHref: "/forsaljning/offerter?status=quote",
   },
   {
     kind: "einvoice_failed",

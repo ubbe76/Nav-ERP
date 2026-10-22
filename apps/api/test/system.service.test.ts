@@ -616,7 +616,7 @@ describe("system service — settings", () => {
 });
 
 describe("system service — number series admin API", () => {
-  it("lists the sixteen configured series", async () => {
+  it("lists the seventeen configured series", async () => {
     const rows = await systemService.listNumberSeries();
     // The migration-seeded series only — own article series (generated keys)
     // come and go with the users of the table.
@@ -635,6 +635,7 @@ describe("system service — number series admin API", () => {
       "manufacturing_order",
       "payment_batch",
       "purchase_order",
+      "quote",
       "sales_order",
       "shipment",
       "stock_count",

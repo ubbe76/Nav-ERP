@@ -6,14 +6,14 @@ Försäljningsmodulen i Nav|ERP omfattar kundregistret och flödet offert → ku
 
 Menyvalet **Försäljning** öppnar modulens sida, där alla försäljningsfunktioner ligger grupperade i ett rutnät:
 
-- **Order** — **Kundorder**, **Utleverans** och **Försändelser**.
+- **Order** — **Offerter**, **Kundorder**, **Utleverans**, **Leveranstidskontroll** och **Försändelser**.
 - **Fakturering** — **Fakturor** och **Prislistor**.
 - **Reskontra** — **Öppna poster** och **Betalningar**.
 - **Register** — **Kunder** och **Grunddata**.
 
-Knappen **+ Ny kundorder** leder till orderlistan där ordern registreras. Nyckeltal och bevakningslistor för hela verksamheten finns på **Översikt**, startsidan.
+Knappen **+ Ny kundorder** leder till orderlistan där ordern registreras; offerter registreras i **Offerter**. Nyckeltal och bevakningslistor för hela verksamheten finns på **Översikt**, startsidan.
 
-Kundorderlistan och orderkorten ligger under **Försäljning → Kundorder** (`/forsaljning/ordrar`). Gamla länkar och bokmärken till ett orderkort på den tidigare adressen skickas vidare automatiskt.
+Offertlistan och offertkorten ligger under **Försäljning → Offerter** (`/forsaljning/offerter`), kundorderlistan och orderkorten under **Försäljning → Kundorder** (`/forsaljning/ordrar`). Gamla länkar och bokmärken till ett orderkort på den tidigare adressen skickas vidare automatiskt.
 
 ## Kunder
 
@@ -21,7 +21,7 @@ Kundorderlistan och orderkorten ligger under **Försäljning → Kundorder** (`/
 
 Klicka på kundens namn för att öppna **kundkortet** med fem flikar — samma upplägg som leverantörskortet, plus en adressflik och en prisflik:
 
-- **Allmänt** — **Kundnummer** (unikt; kan skrivas över i efterhand, upptagna nummer avvisas), namn, aktiv och **Besöksadress** med postnummer/postort/**Land** (ISO-2-kod, t.ex. "SE"; standardvärde "SE"). Kundnumret skrivs ut som **Kundnr** på offert och orderbekräftelse, och fryses på fakturan när den utfärdas — en senare omnumrering ändrar inte redan utfärdade fakturor. Landet skrivs bara ut på dokumenten när det avviker från Sverige. **Vårt leverantörsnummer** (fritext) är det nummer kunden själv har på oss som leverantör i sitt system — det skrivs ut på offert, orderbekräftelse och faktura som "Vårt leverantörsnr hos er: …" och hämtas alltid från kundkortets aktuella värde, även på en redan utfärdad faktura. **Webbsida** visas på kundkortet som en klickbar länk; saknas protokoll läggs `https://` till automatiskt. Fältet **Kod på pallkort** (**Systemets förval**, **Ingen**, **Streckkod**, **QR-kod**) styr om kundens pallkort får en kod; **Systemets förval** följer systeminställningen. Kryssrutan **Visa tilläggspriser** styr förvalet när offert och orderbekräftelse med konfigurerade rader skrivs ut eller mejlas (varje vals tillägg skrivs då ut efter valet) och vad fakturan visar när den utfärdas — se [Offert och kundorder](#offert-och-kundorder).
+- **Allmänt** — **Kundnummer** (unikt; kan skrivas över i efterhand, upptagna nummer avvisas), namn, aktiv och **Besöksadress** med postnummer/postort/**Land** (ISO-2-kod, t.ex. "SE"; standardvärde "SE"). Kundnumret skrivs ut som **Kundnr** på offert och orderbekräftelse, och fryses på fakturan när den utfärdas — en senare omnumrering ändrar inte redan utfärdade fakturor. Landet skrivs bara ut på dokumenten när det avviker från Sverige. **Vårt leverantörsnummer** (fritext) är det nummer kunden själv har på oss som leverantör i sitt system — det skrivs ut på offert, orderbekräftelse och faktura som "Vårt leverantörsnr hos er: …" och hämtas alltid från kundkortets aktuella värde, även på en redan utfärdad faktura. **Webbsida** visas på kundkortet som en klickbar länk; saknas protokoll läggs `https://` till automatiskt. Fältet **Kod på pallkort** (**Systemets förval**, **Ingen**, **Streckkod**, **QR-kod**) styr om kundens pallkort får en kod; **Systemets förval** följer systeminställningen. Kryssrutan **Visa tilläggspriser** styr förvalet när offert och orderbekräftelse med konfigurerade rader skrivs ut eller mejlas (varje vals tillägg skrivs då ut efter valet) och vad fakturan visar när den utfärdas — se [Kundorder](#kundorder).
 - **Adresser** — kundens övriga adresser:
   - **Fakturaadress** med ett eget **Fakturanamn** (töms fältet används kundens namn i stället), postnummer/postort/**Land** samt **E-post för faktura**.
   - **Leveransadresser** — en lista med valbara leveransadresser (**+ Ny leveransadress**), var och en med **Benämning** (t.ex. "Huvudlager"), adress, postnummer, postort och **Land**. Knappen **Kopiera från besöksadressen** i dialogen fyller i adressfälten från Allmänt-flikens besöksadress (visas bara när en besöksadress finns). En adress kan markeras som **Förvald** — den förifylls då på nya kundordrar. Max en adress åt gången är förvald; markeras en ny flyttas markeringen automatiskt. Landkolumnen visas bara i listan när adressen avviker från Sverige.
@@ -159,14 +159,38 @@ Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Impo
 - **Rabatten räknas in i priset.** En prisregel är antingen ett pris eller en rabatt, så importen sparar nettopriset Pris × (1 − Rabatt/100) och varnar på raden att rabatten bakats in.
 - Har kunden redan en regel för artikeln (från antal 1) uppdateras den till det nya priset — även en regel som var en rabatt blir då ett specialpris. Med **Hoppa över rader som redan finns** lämnas den orörd. Samma kund och artikel två gånger i filen är ett fel.
 
-## Offert och kundorder
+## Offerter
 
-Kundordrar och offerter är samma flöde: en offert är en order i status **Offert** som blir kundorder när den bekräftas.
+**Försäljning → Offerter** är offertlistan: alla offerter med status **Offert**, **Förlorad** eller **Avbruten**. Sökrutan matchar offertnummer och kund, statusfiltret har just de tre statusarna, och kolumnen **Giltig t.o.m.** visar märkningen **Utgången** när datumet har passerat. **+ Ny offert** (även på kundkortet) öppnar formuläret [Ny offert](#kundorder) och landar på offertkortet.
 
-- **+ Ny offert** skapar ordern i status Offert — används när kunden ska ta ställning till pris först.
-- **+ Ny kundorder** skapar och bekräftar i samma steg — används när affären redan är klar.
+En offert är en kundorder i status **Offert** — raderna, konfigurationen, fraktpriset, revisionen och offertuppföljningen fungerar som på en order — men den har ett **eget nummer** ur serien **Offert** (**OF-1001**, se [Nummerserier](/hjalp/system#nummerserier)) och sin egen lista och sitt eget kort, med rubriken **Offert OF-1001**. Offert-PDF:en och offertmejlet använder offertnumret.
 
-Båda finns på **Försäljning → Kundorder** och på kundkortet. I formuläret väljer du kund (förvald från kortet), ev. förväntat leveransdatum, anteckning samt orderrader: artikel via artikelväljaren, antal, enhet, **Á-pris** och **Rabatt (%)**. Ordern får ett KO-nummer.
+Knappen **Orderbekräftelse (PDF)** visas inte på en offert med OF-nummer — den har inget ordernummer ännu.
+
+**Bekräfta** (eller **Skicka orderbekräftelse**, som bekräftar offerten när mejlet har gått iväg) gör offerten till kundorder: den får nästa **KO-nummer** ur serien Kundorder, offertnumret finns kvar som referens och du hamnar på orderkortet, som visar *Från offert OF-1001* under rubriken **Kundorder KO-1043**. Orderbekräftelsen skriver **Vår offert: OF-1001** i huvudet, och orderkortets **Historik** visar även händelserna från tiden som offert. Ett KO-nummer tas när offerten bekräftas, eller när **Skicka orderbekräftelse** gör orderbekräftelsen (den måste ha ordernumret). Går mejlet inte iväg är offerten fortfarande en offert men behåller KO-numret till nästa försök, och listan och kortet visar fortfarande offertnumret. Förloras eller avbryts en sådan offert får den tillbaka sitt OF-nummer och KO-numret blir oanvänt. En offert som sätts tillbaka till status Offert behåller sitt KO-nummer och får inget nytt när den bekräftas igen.
+
+**+ Ny kundorder** (på [Kundorder](#kundorder)) skapar och bekräftar i ett steg och får ett KO-nummer direkt utan att förbruka något offertnummer. **Offerter som skapades före offertnumreringen behåller sina KO-nummer** — de står kvar i offertlistan så länge de har status Offert eller Förlorad, men saknar OF-nummer.
+
+Öppnar du en offert på orderkortets adress, eller en order på offertkortets, flyttas du automatiskt till rätt kort.
+
+### Giltighetstid och förlorade offerter
+
+**Giltig t.o.m.** är sista dagen offerten gäller. Fältet finns i formuläret **Ny offert** (inte i **Ny kundorder**), förifyllt med dagens datum plus inställningen **Offertens giltighetstid (dagar)** (förval 30, se [Inställningar](/hjalp/system#installningar)); töm fältet för en offert utan giltighetstid. På en befintlig offert ändras datumet i **Ändra orderhuvud** och visas i orderhuvudet; ändringen höjer revisionen eftersom datumet skrivs ut. Offert-PDF:en och offertmejlet skriver *Offerten gäller till och med 2026-11-20.* under huvudet; orderbekräftelsen skriver inte ut det.
+
+Passerar datumet markeras offerten **Utgången** i orderhuvudet och i offertlistan, som har en egen kolumn **Giltig t.o.m.**. En utgången offert byter aldrig status av sig själv: den står kvar som offert tills du bekräftar den, markerar den som förlorad eller ändrar datumet. Offerter som snart går ut eller har gått ut dyker upp bland [Aviseringarna](/hjalp/aviseringar) som **Offerter att följa upp**.
+
+**Förlorad…** (bara i status Offert) öppnar dialogen **Markera offerten som förlorad**. Välj **Orsak** (obligatorisk, ur de aktiva [förlustorsakerna](/hjalp/grunddata#forlustorsaker)), skriv ev. en **Kommentar** och klicka **Markera som förlorad**. Offerten får status **Förlorad** och orderhuvudet visar **Förlustorsak**, **Markerad förlorad** (när och av vem) och **Kommentar**. En förlorad offert är låst som en avbruten: inga rad- eller huvudändringar och ingen PDF eller e-post. Skillnaden mot **Avbryt order** är att en förlorad offert räknas i [Offertuppföljningen](/hjalp/rapporter#offertuppfoljning), medan en avbruten offert ses som felregistrerad och inte räknas i hit rate.
+
+**Öppna igen** (bara i status Förlorad) frågar först och gör sedan ordern till en vanlig offert igen; förlustorsaken rensas men finns kvar i orderns historik. Giltigheten rörs inte, så ändra **Giltig t.o.m.** om den har gått ut. Sätter du status Förlorad med [Ändra status manuellt](#manuell-statusandring) blir det utan orsak (rapporten visar *Ingen orsak angiven*), och byter du från Förlorad till annan status rensas orsaken.
+
+## Kundorder
+
+En kundorder skapas på två sätt:
+
+- **+ Ny kundorder** (på **Försäljning → Kundorder** och kundkortet) skapar och bekräftar i samma steg — används när affären redan är klar. Ordern får ett KO-nummer direkt.
+- **+ Ny offert** (på **Försäljning → Offerter**, se [Offerter](#offerter)) skapar en offert som blir kundorder när den bekräftas — används när kunden ska ta ställning till pris först.
+
+Båda använder samma formulär: du väljer kund (förvald från kortet), ev. förväntat leveransdatum, anteckning samt orderrader: artikel via artikelväljaren, antal, enhet, **Á-pris** och **Rabatt (%)**. **Kundorder**-listan visar bara ordrar (statusfiltret har inte Offert eller Förlorad); offerterna finns i sin egen lista.
 
 **Konfigurerbara artiklar:** en mall (se [Artiklar](/hjalp/artiklar#konfigurator)) visas i artikelväljaren med märkningen **Konfigurerbar** och öppnar dialogen **Konfigurera** med mallens valgrupper, giltighetsfel per grupp och priset för valet (kundens pris när kunden är vald, på det antal raden har). I läget **Variantartiklar** hämtar **Lägg in** varianten om den finns och skapar den annars, och raden får variantartikeln — därefter är det en vanlig rad med [variantens priskedja](/hjalp/artiklar#varianter); under artikelfältet står *Varianten 63000-B-1200 skapades* respektive *fanns redan*. I läget **Beställningsvara** stannar mallen som radens artikel: **Lägg in** lägger valen på raden, valraderna (t.ex. *Lock: Lock B*, *Bredd: 1 200 mm*) visas under artikelfältet, **Á-pris** och **Rabatt (%)** förifylls från konfigurationens pris (kundens pris på mallen plus tilläggen, kundens rabatt) och kan skrivas över, och **Konfigurera om** öppnar dialogen igen innan raden sparas. Samma mall får ligga flera gånger på en order med olika val. **Avbryt** (eller Esc) tömmer artikelfältet. Själva mallen kan aldrig sparas utan konfiguration; via API:t svarar systemet att artikeln är en beställningsvara och ska konfigureras. Samma dialog finns på **Lägg till rad** på orderkortet.
 
@@ -186,7 +210,7 @@ Kundens ordernummer och referens skrivs ut som **Ert ordernummer** / **Er refere
 
 Ordern får automatiskt kundens **Leveransvillkor**, **Betalningsvillkor** och **Speditör** från kundkortets flik Villkor & frakt, och de skrivs ut på offerten och orderbekräftelsen när de är satta.
 
-**Orderhuvudet.** Orderkortet inleds med ett kort som visar status, **Rev**, valuta (och fakturanummer när ordern är fakturerad) tillsammans med orderns uppgifter: **Kund** (klickbar till kundkortet), **Kundens ordernummer**, **Referens**, **Leveransdatum**, de tre villkoren, **Leveransadress** och **Notering**. Knappen **Ändra** öppnar dialogen **Ändra orderhuvud**, där kundens ordernummer, referens, villkoren och leveransadressen redigeras på ett ställe och sparas i ett svep, så länge ordern är i status Offert, Bekräftad eller Under tillverkning. Leveransdatum och notering sätts när offerten skapas och visas bara.
+**Orderhuvudet.** Orderkortet (och offertkortet) inleds med ett kort som visar status, **Rev**, valuta (och fakturanummer när ordern är fakturerad) tillsammans med orderns uppgifter: **Kund** (klickbar till kundkortet), **Kundens ordernummer**, **Referens**, **Leveransdatum**, de tre villkoren, **Leveransadress** och **Notering**. Knappen **Ändra** öppnar dialogen **Ändra orderhuvud**, där kundens ordernummer, referens, villkoren och leveransadressen redigeras på ett ställe och sparas i ett svep, så länge ordern är i status Offert, Bekräftad eller Under tillverkning. Leveransdatum och notering sätts när offerten skapas och visas bara.
 
 ### Leveransdatum per rad
 
@@ -212,7 +236,7 @@ På en konfigurerad beställningsvarurad mäts täckningsbidraget i stället mot
 
 Rader vars artikel saknar förkalkyl kan inte mätas. De ingår i orderns summa men **inte** i täckningsbidraget, och texten säger hur många de är — en saknad kalkyl räknas alltså aldrig som kostnad noll, vilket hade överdrivit marginalen. Saknar samtliga rader kalkyl visas ingen siffra alls.
 
-1. **Bekräfta** — offerten blir kundorder. Rader kan läggas till (**Lägg till rad** i knappraden), ändras (**Ändra** — antal, enhet, á-pris och rabatt) och tas bort (**Ta bort**) så länge ordern är i status Offert, Bekräftad eller Under tillverkning; antalet kan aldrig sättas under det som redan är levererat, och en rad med levererat gods eller en kopplad tillverkningsorder kan inte tas bort — kopplingen blockerar borttagning även om tillverkningsordern har avbrutits, men en avbruten TO räknas inte längre med i kolumnen **I tillverkning**.
+1. **Bekräfta** — offerten blir kundorder och får sitt KO-nummer; du flyttas till orderkortet. Rader kan läggas till (**Lägg till rad** i knappraden), ändras (**Ändra** — antal, enhet, á-pris och rabatt) och tas bort (**Ta bort**) så länge ordern är i status Offert, Bekräftad eller Under tillverkning; antalet kan aldrig sättas under det som redan är levererat, och en rad med levererat gods eller en kopplad tillverkningsorder kan inte tas bort — kopplingen blockerar borttagning även om tillverkningsordern har avbrutits, men en avbruten TO räknas inte längre med i kolumnen **I tillverkning**.
 2. **Starta tillverkning** — markerar att tillverkning pågår. En rad med en tillverkningsartikel kan i stället kopplas till en riktig tillverkningsorder med knappen **Skapa tillverkningsorder** direkt på raden (kräver status Bekräftad eller Under tillverkning) — se [Skapa från kundorder](/hjalp/tillverkning#skapa-fran-kundorder). Det flyttar automatiskt ordern till **Under tillverkning** om den inte redan är det, och raden får kolumnen **I tillverkning** med det kopplade antalet och, för varje tillverkningsorder, TO-numret som länk och dess status (t.ex. **Frisläppt**, **Pågår**, **Klar**). När raden har en tillverkningsorder men inte är helt täckt heter knappen **Skapa TO för resten (N st)**; när tillverkningsordrarna täcker hela radens antal, eller raden är helt levererad, visas ingen knapp — en extra tillverkningsorder skapas då med **+ Ny tillverkningsorder**. På en konfigurerad beställningsvarurad finns knappen också; tillverkningsordern får radens val (se [Tillverkningsorder för beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara)).
 3. **Leverera** — ange rad, lagerplats och antal i dialogen; ett utleveranssaldo bokförs i lagret och en följesedel skapas (se [Följesedel](#foljesedel)). Delleveranser stöds. Hela ordern rapporteras smidigast i rutinen [Utleverans](#utleverans), som nås direkt med knappen **Utleveransrutinen**. En felrapporterad leverans ångras rad för rad (se [Ångra utleverans](#angra-utleverans)); en **Levererad** order går då tillbaka till **Under tillverkning**.
 4. **Fakturera** — synlig när ordern är **Levererad**; knappen tar dig till **Försäljning → Fakturor** med skapa-dialogen förifylld på ordern (se [Fakturor](#fakturor)). Knappen tilldelar inget fakturanummer själv — det sker när fakturan **utfärdas** i fakturamodulen — och ordern blir automatiskt **Fakturerad** först när alla dess rader är fullt fakturerade.
@@ -230,16 +254,6 @@ Rader vars artikel saknar förkalkyl kan inte mätas. De ingår i orderns summa 
 | Avbruten | Avbruten |
 | Förlorad | Offerten gick inte hem; orsak registrerad, låst som en avbruten |
 
-### Giltighetstid och förlorade offerter
-
-**Giltig t.o.m.** är sista dagen offerten gäller. Fältet finns i formuläret **Ny offert** (inte i **Ny kundorder**), förifyllt med dagens datum plus inställningen **Offertens giltighetstid (dagar)** (förval 30, se [Inställningar](/hjalp/system#installningar)); töm fältet för en offert utan giltighetstid. På en befintlig offert ändras datumet i **Ändra orderhuvud** och visas i orderhuvudet; ändringen höjer revisionen eftersom datumet skrivs ut. Offert-PDF:en och offertmejlet skriver *Offerten gäller till och med 2026-11-20.* under huvudet; orderbekräftelsen skriver inte ut det.
-
-Passerar datumet markeras offerten **Utgången** i orderhuvudet och i orderlistan, som har en egen kolumn **Giltig t.o.m.** för offerter. En utgången offert byter aldrig status av sig själv: den står kvar som offert tills du bekräftar den, markerar den som förlorad eller ändrar datumet. Offerter som snart går ut eller har gått ut dyker upp bland [Aviseringarna](/hjalp/aviseringar) som **Offerter att följa upp**.
-
-**Förlorad…** (bara i status Offert) öppnar dialogen **Markera offerten som förlorad**. Välj **Orsak** (obligatorisk, ur de aktiva [förlustorsakerna](/hjalp/grunddata#forlustorsaker)), skriv ev. en **Kommentar** och klicka **Markera som förlorad**. Offerten får status **Förlorad** och orderhuvudet visar **Förlustorsak**, **Markerad förlorad** (när och av vem) och **Kommentar**. En förlorad offert är låst som en avbruten: inga rad- eller huvudändringar och ingen PDF eller e-post. Skillnaden mot **Avbryt order** är att en förlorad offert räknas i [Offertuppföljningen](/hjalp/rapporter#offertuppfoljning), medan en avbruten offert ses som felregistrerad och inte räknas i hit rate.
-
-**Öppna igen** (bara i status Förlorad) frågar först och gör sedan ordern till en vanlig offert igen; förlustorsaken rensas men finns kvar i orderns historik. Giltigheten rörs inte, så ändra **Giltig t.o.m.** om den har gått ut. Sätter du status Förlorad med [Ändra status manuellt](#manuell-statusandring) blir det utan orsak (rapporten visar *Ingen orsak angiven*), och byter du från Förlorad till annan status rensas orsaken.
-
 ### Manuell statusändring
 
 Knappen **Ändra status manuellt** längst till höger i orderkortets knapprad låter dig sätta vilken status som helst, åt vilket håll som helst — även från Avbruten eller Fakturerad. Välj status i dialogen och klicka **Byt status**; en bekräftelsedialog visas eftersom ändringen hoppar över orderflödets regler:
@@ -255,11 +269,11 @@ Ordern har ett revisionsnummer (**Rev** i orderkortets huvud) som börjar på 1.
 
 Orderns detaljsida har en sektion **E-post** längst ner (kräver att SMTP är konfigurerat under [System → Inställningar](/hjalp/system)):
 
-- **Skicka offert** (endast i status Offert) mejlar offerten som PDF-bilaga utan att ändra status.
-- **Skicka orderbekräftelse** mejlar orderbekräftelsen som PDF-bilaga. På en offert är det detta som bekräftar den — status blir **Bekräftad**, men bara om utskicket lyckas. Från senare statusar skickas bekräftelsen om utan statusändring. Avbrutna ordrar kan inte mejlas.
+- **Skicka offert** (endast i status Offert) mejlar offerten (med offertnumret) som PDF-bilaga utan att ändra status.
+- **Skicka orderbekräftelse** mejlar orderbekräftelsen som PDF-bilaga. På en offert är det detta som bekräftar den — status blir **Bekräftad**, offerten får sitt KO-nummer och du flyttas till orderkortet, men bara om utskicket lyckas. Från senare statusar skickas bekräftelsen om utan statusändring. Avbrutna ordrar kan inte mejlas.
 - Dialogen förifyller **Mottagare** (kundens huvudkontakts e-post; saknas den används en eventuell e-postadress från kundimporten eller en äldre registrering), **Ämne** och **Meddelande** — alla redigerbara.
 - Har någon av orderns artiklar uppladdade ritningar visas kryssrutan **Bifoga ritningar (N filer)**, ikryssad från början — bocka ur den för att bara skicka dokumentet (se fliken Filer i [Artiklar](/hjalp/artiklar)).
-- Har ordern konfigurerade rader (se [Beställningsvara](#offert-och-kundorder)) visas kryssrutan **Visa tilläggspriser** bredvid PDF-länkarna — ikryssad enligt kundkortets inställning **Visa tilläggspriser**. Med kryss skrivs varje vals tillägg ut efter valet, t.ex. *Lock: Lock B (+ 240,00)*; utan kryss bara valet. Valet gäller både **Offert (PDF)**/**Orderbekräftelse (PDF)** och mejlets bilaga, sparas i e-postloggen och används oförändrat av **Skicka om**.
+- Har ordern konfigurerade rader (se [Beställningsvara](#kundorder)) visas kryssrutan **Visa tilläggspriser** bredvid PDF-länkarna — ikryssad enligt kundkortets inställning **Visa tilläggspriser**. Med kryss skrivs varje vals tillägg ut efter valet, t.ex. *Lock: Lock B (+ 240,00)*; utan kryss bara valet. Valet gäller både **Offert (PDF)**/**Orderbekräftelse (PDF)** och mejlets bilaga, sparas i e-postloggen och används oförändrat av **Skicka om**.
 - **Offert (PDF)**, **Orderbekräftelse (PDF)** och **Plocklista (PDF)** (se [Plocklista](#plocklista)) laddar ner dokumenten utan att skicka något. Offertens och orderbekräftelsens radtabell har en egen kolumn **Rabatt**; cellen är tom för rader utan rabatt.
 - Kortets utskickshistorik visas under knapparna; hela loggen finns i [System → E-postlogg](/hjalp/system).
 

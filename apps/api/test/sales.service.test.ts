@@ -170,7 +170,7 @@ describe("sales service — quote lifecycle", () => {
     const { order, row } = await makeQuoteWithRow(10);
 
     expect(order.status).toBe("quote");
-    expect(order.orderNumber.startsWith("KO-")).toBe(true);
+    expect(order.orderNumber.startsWith("OF-")).toBe(true);
     expect(row.quantityOrdered).toBe("10.0000");
     expect(row.quantityDelivered).toBe("0.0000");
   });
@@ -613,7 +613,9 @@ describe("sales service — document email", () => {
     expect(updated?.status).toBe("confirmed");
 
     expect(sentMails).toHaveLength(1);
-    expect(sentMails[0]?.attachments?.[0]?.filename).toBe(`Orderbekraftelse-${order.orderNumber}.pdf`);
+    // Offerter (0138): the confirmation carries the KO- number the quote got.
+    expect(updated?.orderNumber).toMatch(/^KO-/);
+    expect(sentMails[0]?.attachments?.[0]?.filename).toBe(`Orderbekraftelse-${updated?.orderNumber}.pdf`);
     expect(sentMails[0]?.attachments?.[0]?.content.subarray(0, 4).toString()).toBe("%PDF");
 
     const log = await mailService.listEmailLog({ documentId: order.id, limit: 50, offset: 0 });
@@ -972,12 +974,12 @@ describe("sales service — C3 kundpriser: row pricing", () => {
 describe("sales service — pick list", () => {
   it("renders a pick list PDF for the remaining quantities", async () => {
     const { order, row, location, user } = await makeQuoteWithRow(10);
-    await salesService.confirm(order.id);
+    const confirmed = await salesService.confirm(order.id);
     await salesService.startProduction(order.id);
     await salesService.deliverGoods(order.id, row.id, { locationId: location.id, quantity: 4 }, user.id);
 
     const { filename, content } = await salesService.getPickListPdf(order.id);
-    expect(filename).toBe(`Plocklista-${order.orderNumber}.pdf`);
+    expect(filename).toBe(`Plocklista-${confirmed.orderNumber}.pdf`);
     expect(content.subarray(0, 4).toString()).toBe("%PDF");
     expect(content.length).toBeGreaterThan(1000);
   });
@@ -1694,17 +1696,20 @@ async function auditRows(entityType: string, action: string) {
 describe("sales service — audit trail", () => {
   it("logs status transitions with the acting user", async () => {
     const { order, user } = await makeQuoteWithRow(5);
-    await salesService.confirm(order.id, user.id);
+    const order2 = await salesService.confirm(order.id, user.id);
     await salesService.startProduction(order.id, user.id);
 
+    // Offerter (0138): the confirmation is logged under the quote's OF-
+    // number with the new KO- number in the detail; later events under KO-.
     const confirmed = await auditRows("sales_order", "confirmed");
     expect(confirmed).toHaveLength(1);
     expect(confirmed[0]!.entityId).toBe(order.orderNumber);
+    expect(confirmed[0]!.detail).toEqual({ orderNumber: order2.orderNumber });
     expect(confirmed[0]!.userId).toBe(user.id);
 
     const started = await auditRows("sales_order", "production_started");
     expect(started).toHaveLength(1);
-    expect(started[0]!.entityId).toBe(order.orderNumber);
+    expect(started[0]!.entityId).toBe(order2.orderNumber);
   });
 
   it("logs cancel and setStatus with before/after", async () => {
@@ -1755,14 +1760,14 @@ describe("sales service — audit trail", () => {
 
   it("logs a delivered delivery under its own FS-number", async () => {
     const { order, row, location, user } = await makeQuoteWithRow(10);
-    await salesService.confirm(order.id, user.id);
+    const confirmed = await salesService.confirm(order.id, user.id);
     await salesService.startProduction(order.id, user.id);
     const result = await salesService.deliverGoods(order.id, row.id, { locationId: location.id, quantity: 4 }, user.id);
 
     const delivered = await auditRows("delivery", "delivered");
     expect(delivered).toHaveLength(1);
     expect(delivered[0]!.entityId).toBe(result.deliveryNumber);
-    expect(delivered[0]!.detail).toMatchObject({ orderNumber: order.orderNumber });
+    expect(delivered[0]!.detail).toMatchObject({ orderNumber: confirmed.orderNumber });
   });
 
   it("logs price list create/row CRUD and customer price CRUD", async () => {

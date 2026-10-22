@@ -9,68 +9,81 @@ import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { NewQuoteForm } from "./NewQuoteForm";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
-import { SALES_ORDER_STATUS_PILL, type Paged, type SalesOrder } from "../../lib/types";
+import { SALES_ORDER_STATUS_PILL, type Paged, type SalesOrder, type SalesOrderStatus } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/forsaljning/ordrar/page.module.css";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
 import { HelpLink } from "../ui/HelpLink";
 
+// One list component for both routines: kind "quote" = /forsaljning/offerter,
+// "order" = /forsaljning/ordrar (the page passes kind to the API as ?kind=).
+const QUOTE_STATUSES: SalesOrderStatus[] = ["quote", "lost", "cancelled"];
+const ORDER_STATUSES: SalesOrderStatus[] = ["confirmed", "in_production", "delivered", "invoiced", "cancelled"];
+
 export function SalesOrdersPageClient({
   orders,
   pageSize,
+  kind,
 }: {
   orders: Paged<SalesOrder>;
   pageSize: number;
+  kind: "quote" | "order";
 }) {
-  const [modalMode, setModalMode] = useState<"quote" | "order" | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const isQuote = kind === "quote";
+  const detailBase = isQuote ? "/forsaljning/offerter" : "/forsaljning/ordrar";
+  const statuses = isQuote ? QUOTE_STATUSES : ORDER_STATUSES;
 
   return (
     <>
       <div className={shellStyles.topbar}>
         <div>
-          <div className={shellStyles.title}>Säljordrar</div>
-          <div className={shellStyles.meta}>{orders.total.toLocaleString("sv-SE")} ordrar</div>
+          <div className={shellStyles.title}>{isQuote ? "Offerter" : "Kundorder"}</div>
+          <div className={shellStyles.meta}>
+            {orders.total.toLocaleString("sv-SE")} {isQuote ? "offerter" : "ordrar"}
+          </div>
         </div>
         <div className={shellStyles.topbarActions}>
           <Link href="/kunder" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Kunder
           </Link>
-          <Button type="button" variant="secondary" onClick={() => setModalMode("quote")}>
-            + Ny offert
+          <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
+            {isQuote ? "+ Ny offert" : "+ Ny kundorder"}
           </Button>
-          <Button type="button" variant="primary" onClick={() => setModalMode("order")}>
-            + Ny kundorder
-          </Button>
-          <HelpLink chapter="forsaljning" anchor="offert-och-kundorder" label="Hjälp om offert och kundorder" />
+          <HelpLink
+            chapter="forsaljning"
+            anchor={isQuote ? "offerter" : "kundorder"}
+            label={isQuote ? "Hjälp om offerter" : "Hjälp om kundorder"}
+          />
         </div>
       </div>
 
-      <ListToolbar placeholder="Sök ordernummer eller kund…">
+      <ListToolbar placeholder={isQuote ? "Sök offertnummer eller kund…" : "Sök ordernummer eller kund…"}>
         <ListFilterSelect
           param="status"
           allLabel="Alla statusar"
           ariaLabel="Filtrera på status"
-          options={Object.entries(SALES_ORDER_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
+          options={statuses.map((value) => ({ value, label: SALES_ORDER_STATUS_PILL[value].label }))}
         />
-        <ListExportLink endpoint="/api/v1/sales-orders/csv" />
+        <ListExportLink endpoint={`/api/v1/sales-orders/csv?kind=${kind}`} />
       </ListToolbar>
 
       <Table<SalesOrder>
         columns={[
-          { key: "orderNumber", label: "Ordernummer", width: "140px" },
+          { key: "orderNumber", label: isQuote ? "Offert" : "Ordernummer", width: "140px" },
           { key: "customerName", label: "Kund", width: "1fr" },
           { key: "status", label: "Status", width: "160px" },
           { key: "expectedDeliveryDate", label: "Leveransdatum", width: "150px" },
-          { key: "quoteValidUntil", label: "Giltig t.o.m.", width: "170px" },
+          ...(isQuote ? [{ key: "quoteValidUntil", label: "Giltig t.o.m.", width: "170px" }] : []),
         ]}
         rows={orders.rows}
-        emptyText="Inga ordrar matchar sökningen"
+        emptyText={isQuote ? "Inga offerter matchar sökningen" : "Inga ordrar matchar sökningen"}
         renderCell={(order, key) => {
           switch (key) {
             case "orderNumber":
               return (
-                <Link href={`/forsaljning/ordrar/${order.id}`} className={styles.rowLink}>
-                  {order.orderNumber}
+                <Link href={`${detailBase}/${order.id}`} className={styles.rowLink}>
+                  {isQuote ? (order.quoteNumber ?? order.orderNumber) : order.orderNumber}
                 </Link>
               );
             case "customerName":
@@ -99,11 +112,11 @@ export function SalesOrdersPageClient({
       <Pagination total={orders.total} pageSize={pageSize} />
 
       <Modal
-        open={modalMode !== null}
-        onClose={() => setModalMode(null)}
-        title={modalMode === "order" ? "Ny kundorder" : "Ny offert"}
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={isQuote ? "Ny offert" : "Ny kundorder"}
       >
-        {modalMode !== null && <NewQuoteForm mode={modalMode} />}
+        {modalOpen && <NewQuoteForm mode={kind} />}
       </Modal>
     </>
   );

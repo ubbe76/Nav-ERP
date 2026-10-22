@@ -47,7 +47,9 @@ interface QuoteFollowupReport {
   lossReasons: { reasonId: string | null; code: string | null; name: string; count: number; value: number; share: number | null }[];
   quotes: {
     id: string;
+    quoteNumber: string;
     orderNumber: string;
+    documentKind: "quote" | "order";
     customerId: string;
     customerNumber: string;
     customerName: string;
@@ -305,7 +307,8 @@ export function QuoteFollowupPageClient({ defaults }: { defaults: QuoteFollowupD
           <Scroller>
             <Table
               columns={[
-                { key: "orderNumber", label: "Offert", width: "100px" },
+                { key: "quoteNumber", label: "Offert", width: "100px" },
+                { key: "orderNumber", label: "Order", width: "100px" },
                 { key: "customer", label: "Kund", width: "minmax(140px, 1fr)" },
                 { key: "createdDate", label: "Skapad", width: "95px" },
                 { key: "validUntil", label: "Giltig t.o.m.", width: "105px" },
@@ -317,11 +320,20 @@ export function QuoteFollowupPageClient({ defaults }: { defaults: QuoteFollowupD
               emptyText="Inga offerter i urvalet."
               renderCell={(q, key) => {
                 switch (key) {
-                  case "orderNumber":
+                  case "quoteNumber":
                     return (
+                      <GatedLink href={`/forsaljning/offerter/${q.id}`} className={styles.orderLink}>
+                        {q.quoteNumber}
+                      </GatedLink>
+                    );
+                  case "orderNumber":
+                    // Only a won quote that got its own KO number has an order column.
+                    return q.documentKind === "order" && q.orderNumber !== q.quoteNumber ? (
                       <GatedLink href={`/forsaljning/ordrar/${q.id}`} className={styles.orderLink}>
                         {q.orderNumber}
                       </GatedLink>
+                    ) : (
+                      "–"
                     );
                   case "customer":
                     return `${q.customerNumber} ${q.customerName}`;

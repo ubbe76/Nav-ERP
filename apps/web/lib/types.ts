@@ -1044,6 +1044,10 @@ export const SALES_ORDER_STATUS_PILL: Record<SalesOrderStatus, { status: "runnin
 export interface SalesOrder extends DocumentTermsFields {
   id: string;
   orderNumber: string;
+  // Offerter: OF-… number kept after the quote becomes an order (null for
+  // direct orders and older quotes); documentKind is derived by the API.
+  quoteNumber?: string | null;
+  documentKind?: "quote" | "order";
   customerId: string;
   customerName: string;
   status: SalesOrderStatus;
@@ -2470,11 +2474,13 @@ export type NumberSeriesKey =
   | "payment_batch"
   | "delivery"
   | "shipment"
-  | "stock_count";
+  | "stock_count"
+  | "quote";
 
 export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
   article: "Artikelnummer",
   purchase_order: "Inköpsorder",
+  quote: "Offert",
   sales_order: "Kundorder",
   manufacturing_order: "Tillverkningsorder",
   inquiry: "Förfrågan",

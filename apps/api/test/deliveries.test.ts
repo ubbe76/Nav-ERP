@@ -116,12 +116,13 @@ async function makeOrderWithTwoRows(quantityA = 10, quantityB = 5) {
     },
     user.id
   );
-  await salesService.confirm(order.id);
+  // Offerter (0138): confirming gives the quote its KO- number.
+  const confirmed = await salesService.confirm(order.id);
   await salesService.startProduction(order.id);
 
   const rowA = rows.find((r) => r.articleId === articleA.id)!;
   const rowB = rows.find((r) => r.articleId === articleB.id)!;
-  return { user, customer, articleA, articleB, location, order, rowA, rowB };
+  return { user, customer, articleA, articleB, location, order: { ...order, orderNumber: confirmed.orderNumber }, rowA, rowB };
 }
 
 describe("delivery occasions — batch delivery", () => {

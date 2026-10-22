@@ -15,6 +15,10 @@ import { listQuerySchema } from "./list.js";
 export const listAuditLogQuerySchema = listQuerySchema.extend({
   entityType: z.string().trim().max(50).optional(),
   entityId: z.string().trim().max(100).optional(),
+  // A second exact id matched alongside entityId (entity_id IN (both)) — the
+  // sales order card passes its offert number so the history spans both the
+  // quote's OF- and the order's KO- number.
+  alsoEntityId: z.string().trim().max(100).optional(),
   userId: z.string().uuid().optional(),
   from: z.string().date().optional(),
   to: z.string().date().optional(),

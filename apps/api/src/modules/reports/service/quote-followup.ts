@@ -8,13 +8,15 @@
 //   cancelled  = status cancelled — listed, never in the hit rate
 //   hit rate   = won / (won + lost), by count and by value; null when the
 //                denominator is 0 (shown as –)
-import type {
-  QuoteFollowupCustomer,
-  QuoteFollowupFigures,
-  QuoteFollowupLossReason,
-  QuoteFollowupMonth,
-  QuoteFollowupQuote,
-  QuoteOutcome,
+import {
+  salesDocumentKind,
+  type QuoteFollowupCustomer,
+  type QuoteFollowupFigures,
+  type QuoteFollowupLossReason,
+  type QuoteFollowupMonth,
+  type QuoteFollowupQuote,
+  type QuoteOutcome,
+  type SalesOrderStatus,
 } from "@navet/shared";
 import type { QuoteFollowupSourceRow } from "../repository/quote-followup.repository.js";
 
@@ -109,7 +111,13 @@ export function buildQuoteFollowup(
     const outcome = quoteOutcome(r.status);
     return {
       id: r.id,
+      quoteNumber: r.quoteNumber ?? r.orderNumber,
       orderNumber: r.orderNumber,
+      documentKind: salesDocumentKind({
+        status: r.status as SalesOrderStatus,
+        orderNumber: r.orderNumber,
+        quoteNumber: r.quoteNumber,
+      }),
       customerId: r.customerId,
       customerNumber: r.customerNumber,
       customerName: r.customerName,

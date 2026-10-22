@@ -386,7 +386,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     setActionPending(action);
     try {
       await apiFetch(`/api/v1/sales-orders/${order.id}/${action}`, { method: "POST" });
-      router.refresh();
+      // Bekräfta gives the offert its KO number — continue on the order card.
+      if (action === "confirm") router.push(`/forsaljning/ordrar/${order.id}`);
+      else router.refresh();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Åtgärden misslyckades");
     } finally {

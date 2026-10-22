@@ -967,6 +967,13 @@
       "when": 1792684965036,
       "tag": "0137_personal_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1792695138348,
+      "tag": "0138_quote_number",
+      "breakpoints": true
     }
   ]
 }
