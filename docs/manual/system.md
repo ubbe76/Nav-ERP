@@ -24,7 +24,7 @@ Att stänga av ett konto (status **Avstängd**) räcker för de flesta fall — 
 
 ### Endast läsning
 
-Kryssrutan **Endast läsning** på användaren gör kontot till ett läskonto: det kan öppna allt som behörighetsgruppen ger, men inte ändra något — till exempel ett demokonto eller ett konto för revisorn. Varje försök att spara, skapa, ta bort, stämpla, ladda upp en fil eller skicka e-post avvisas med meddelandet "Kontot kan bara läsa — ändringar är avstängda.", och överst på varje sida står "Du är inloggad med ett konto som bara kan läsa. Ändringar är avstängda." Kontots egna inställningar, som **Rader per sida**, går inte heller att ändra. Knapparna för att ändra visas fortfarande — det är systemet som säger nej när de används.
+Kryssrutan **Endast läsning** på användaren gör kontot till ett läskonto: det kan öppna allt som behörighetsgruppen ger, men inte ändra något — till exempel ett demokonto eller ett konto för revisorn. Varje försök att spara, skapa, ta bort, stämpla, ladda upp en fil eller skicka e-post avvisas med meddelandet "Kontot kan bara läsa — ändringar är avstängda.", och överst på varje sida står "Du är inloggad med ett konto som bara kan läsa. Ändringar är avstängda, och systeminställningarna (menyn System) visas bara för administratörer." Kontots egna inställningar, som **Rader per sida**, går inte heller att ändra. Knapparna för att ändra visas fortfarande — det är systemet som säger nej när de används.
 
 Det som bara räknar och visar ett svar fungerar som vanligt: **Leveranstidskontroll** (men inte att skapa tillverkningsordrarna efteråt), förkalkyl och efterkalkyl som inte sparas, samt konfiguratorns förhandsgranskning och prisberäkning. Utloggning fungerar alltid.
 

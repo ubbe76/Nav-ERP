@@ -8,7 +8,7 @@ export function ReadOnlyBanner({ readOnly, flush }: { readOnly: boolean; flush?:
   if (!readOnly) return null;
   return (
     <div className={flush ? `${styles.banner} ${styles.flush}` : styles.banner} role="status">
-      Du är inloggad med ett konto som bara kan läsa. Ändringar är avstängda.
+      Du är inloggad med ett konto som bara kan läsa. Ändringar är avstängda, och systeminställningarna (menyn System) visas bara för administratörer.
     </div>
   );
 }
