@@ -510,7 +510,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.4.1-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.4.2-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -518,12 +518,15 @@ Stock, grundläggande auth (sessionscookie), Purchase, Sales, Manufacturing,
 TimeReport (inkl. stämpling/närvaro), Payroll (frånvaro, övertid/OB, tidattest
 och löneunderlag/PAXml-export), Costing, Economy (grundbokföring,
 automatkontering, kund-/leverantörsreskontra, moms och ekonomirapporter),
-Import (CSV-/Excel-import av register), System, Mail (SMTP-utskick +
+Import (CSV-/Excel-import av register, med nedladdningsbara Excelmallar och
+förklaring per kolumn), System, Mail (SMTP-utskick +
 PDF-generering) samt ett publikt OAuth2 client-credentials-API för en extern
 konfigurator. Frontend har in-/utloggning
 (inkl. engångsregistrering av första admin-kontot på `/register`), en
 Översikt-dashboard byggd kring materialflödet (inköp → lager → tillverkning →
-försäljning) med bevakningslista, sidomeny med undermenyer per modul,
+försäljning) med bevakningslista, sidan **Aviseringar** (negativa saldon,
+försenade ordrar, förfallna fakturor, offerter att följa upp m.fl., med
+valfri daglig sammanställning per e-post), sidomeny med undermenyer per modul,
 modulhubbar med grupperade listkort, och modul-UI för hela byggordningen.
 Alla registerlistor har serversidig fritextsökning, filtrering och
 paginering (`?search/filter/limit/offset` → `{ rows, total }`), så
@@ -585,7 +588,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   lagerplatssaldon per artikel), **pallkort** per följesedel (streck- eller
   QR-kod, eget antal per kolli) och möjlighet att **ångra en utleverans**
   per leveransrad så länge den inte är fakturerad; ny offert eller kundorder (skapas
-  direkt som bekräftad) från kundkortet eller listan; kundfakturor med
+  direkt som bekräftad) från kundkortet eller listan; offerter med
+  **giltighetstid** som kan markeras **Förlorad** med förlustorsak; kundfakturor med
   prislistor/kundpriser, och **utfärdade fakturor och påminnelser
   arkiveras som PDF** exakt som de skickades; **e-faktura via Peppol**
   (Peppol BIS Billing 3, faktura och kreditfaktura till svenska kunder,
@@ -619,7 +623,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
 - **Tidrapportering & personal** — **stämpelterminal** (helskärmsvy för en
   delad skärm i verkstaden: närvarostämpling kom/gå med sifferknappsats,
   in-/utstämpling på order/operationer som materialiserar tidrapporter,
-  ATF-uttag; gå hem pausar pågående arbeten så att bortavaron inte
+  ATF-uttag; valfritt krav på **anledning vid sen ankomst och tidig
+  hemgång** och val mellan utbetald och sparad övertid vid Gå hem; gå hem pausar pågående arbeten så att bortavaron inte
   räknas in i rapporterad tid; planerat, klart och **kvar** visas per
   operation), manuella
   tidrapporter, personalregister med personalkort (kontakt-, anställnings-
@@ -672,7 +677,7 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   omskick av misslyckade utskick
 - **Rapporter** — bland annat **orderförteckning** för kundorder och
   inköp (ordervärde och restvärde per order eller rad, som PDF och CSV),
-  marginal och kalkylutfall
+  **offertuppföljning** (hit rate i antal och värde), marginal och kalkylutfall
 - **System** (admin) — företagsinformation med logotyp, nummerserier
   (även för **artikelnummer**, med egna serier per artikelgrupp),
   användare och behörighetsgrupper (med konton för **endast läsning**),
