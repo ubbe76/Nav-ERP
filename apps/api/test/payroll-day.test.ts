@@ -6,6 +6,7 @@ import {
   periodDates,
   periodRange,
   subtractIntervals,
+  overlapsScheduleWindow,
   type DayComputationInput,
 } from "../src/modules/payroll/service/payroll-day.js";
 import { normalizePayrollDay } from "../src/modules/payroll/service/payroll.service.js";
@@ -273,6 +274,50 @@ describe("payroll day engine — sen ankomst och tidig hemgång", () => {
     });
     expect(day.lateMinutes).toBe(0);
     expect(day.earlyLeaveMinutes).toBe(0);
+  });
+
+  it("16b. a night stint ending before the schedule neither hides the lateness nor counts as leaving early", () => {
+    // Yesterday's session runs to 02:00, today's arrival is 07:30.
+    const late = computeEmployeeDay({
+      ...scheduled,
+      date: NEXT_DAY,
+      attendance: [
+        { start: clockToMs(DAY, "22:00"), end: clockToMs(NEXT_DAY, "02:00") },
+        iv(NEXT_DAY, "07:30", "16:00"),
+      ],
+    });
+    expect([late.lateMinutes, late.earlyLeaveMinutes]).toEqual([30, 0]);
+
+    // Only the night stint — absent from the schedule, not 14 hours early.
+    const nightOnly = computeEmployeeDay({
+      ...scheduled,
+      date: NEXT_DAY,
+      attendance: [{ start: clockToMs(DAY, "22:00"), end: clockToMs(NEXT_DAY, "02:00") }],
+    });
+    expect([nightOnly.lateMinutes, nightOnly.earlyLeaveMinutes]).toEqual([0, 0]);
+
+    // A stint of today's own after midnight, then the day shift leaving early.
+    const sameDay = computeEmployeeDay({
+      ...scheduled,
+      attendance: [iv(DAY, "00:30", "02:00"), iv(DAY, "07:05", "15:00")],
+    });
+    expect([sameDay.lateMinutes, sameDay.earlyLeaveMinutes]).toEqual([5, 60]);
+  });
+
+  it("16c. presence after the schedule's end does not hide an early departure from it", () => {
+    const day = computeEmployeeDay({
+      ...scheduled,
+      attendance: [iv(DAY, "07:00", "15:00"), iv(DAY, "17:00", "19:00")],
+    });
+    expect([day.lateMinutes, day.earlyLeaveMinutes]).toEqual([0, 60]);
+  });
+
+  it("16d. overlapsScheduleWindow: any positive overlap, touching is not", () => {
+    const window = { start: clockToMs(DAY, "07:00"), end: clockToMs(DAY, "16:00") };
+    expect(overlapsScheduleWindow(iv(DAY, "05:00", "07:00"), window)).toBe(false);
+    expect(overlapsScheduleWindow(iv(DAY, "16:00", "18:00"), window)).toBe(false);
+    expect(overlapsScheduleWindow(iv(DAY, "05:00", "07:01"), window)).toBe(true);
+    expect(overlapsScheduleWindow(iv(DAY, "15:59", "18:00"), window)).toBe(true);
   });
 
   it("17. snapshots locked before the fields existed normalize to 0", () => {

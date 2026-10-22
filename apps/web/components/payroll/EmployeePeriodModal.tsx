@@ -110,9 +110,9 @@ export function EmployeePeriodModal({
 }
 
 // "Kom 07:12 (12 min sent) — Trafik/resa: kö på E4" / "Gick 15:20 (40 min
-// tidigt) — Läkar-/tandläkarbesök". The day's lateness belongs to its first
-// session and the early leave to its last; a reason is shown wherever it is
-// stored, even without minutes.
+// tidigt) — Läkar-/tandläkarbesök". The server says which stamp the day's
+// minutes were measured on (the first/last session overlapping the
+// schedule); a reason is shown wherever it is stored, even without minutes.
 function sessionDeviationLines(
   session: PeriodAttendanceSession,
   day: DayComputation,
@@ -123,10 +123,11 @@ function sessionDeviationLines(
     return parts.length === 0 ? "" : ` — ${reason && note ? `${reason.name}: ${note}` : parts[0]}`;
   };
   const lines: { key: string; text: string }[] = [];
+  // Older API responses lack the per-session minutes: first/last of the day.
   const isFirst = daySessions[0]?.id === session.id;
   const isLast = daySessions[daySessions.length - 1]?.id === session.id;
-  const late = isFirst ? (day.lateMinutes ?? 0) : 0;
-  const early = isLast && session.stoppedAt ? (day.earlyLeaveMinutes ?? 0) : 0;
+  const late = session.lateMinutes ?? (isFirst ? (day.lateMinutes ?? 0) : 0);
+  const early = session.stoppedAt ? (session.earlyLeaveMinutes ?? (isLast ? (day.earlyLeaveMinutes ?? 0) : 0)) : 0;
   if (late > 0 || session.startReason || session.startNote) {
     lines.push({
       key: "start",

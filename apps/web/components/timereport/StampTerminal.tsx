@@ -47,21 +47,36 @@ type Step =
       employee: EmployeeDirectoryEntry;
       body: AttendanceInputRequiredBody;
       pending: PendingAttendanceAction;
+      // Answers already given to an earlier 409 of the same request: they
+      // are kept (pre-selected) and always sent again, so a second question
+      // never drops the first answer.
+      answers: DeviationAnswers;
     };
 
 // The request the server answered with 409 attendance-input-required, sent
 // again with the person's answers (the terminal never computes deviations).
 type PendingAttendanceAction =
-  | { kind: "attendanceIn" }
-  | { kind: "stampIn"; operations: TerminalOperation[] }
+  // forgottenStoppedAt: Spara och stämpla in after a forgotten Gå hem — the
+  // server closes yesterday's attendance and opens today's in one request.
+  | { kind: "attendanceIn"; forgottenStoppedAt?: string }
+  // earlierFailed: operations of the same batch that already failed for
+  // another reason before the question came — they stay checked afterwards.
+  | { kind: "stampIn"; operations: TerminalOperation[]; earlierFailed: TerminalOperation[] }
   | { kind: "goHome"; attendanceId: string }
   | { kind: "atf"; attendanceId: string; atfTransactionId: string; hours: number };
+
+type DeviationAnswers = { reason?: AttendanceReasonInput; overtimeDisposition?: OvertimeCompensation };
 
 function inputRequiredBody(err: unknown): AttendanceInputRequiredBody | null {
   if (err instanceof ApiError && err.code === "attendance-input-required" && err.body) {
     return err.body as AttendanceInputRequiredBody;
   }
   return null;
+}
+
+// The chosen reason was inactivated (or removed) since the list was loaded.
+function isReasonInvalid(err: unknown) {
+  return err instanceof ApiError && err.code === "attendance-reason-invalid";
 }
 
 function minutesText(minutes: number) {
@@ -113,7 +128,8 @@ export function StampTerminal({
   const [scrapReason, setScrapReason] = useState("");
   const [atfHours, setAtfHours] = useState("");
   const [forgottenStop, setForgottenStop] = useState("");
-  // Avvikelseorsaker for the deviation step: loaded on first need.
+  // Avvikelseorsaker for the deviation step: fetched again every time the
+  // step opens, so a reason an administrator just added or inactivated shows.
   const [reasons, setReasons] = useState<AttendanceDeviationReason[] | null>(null);
   const [devReasonId, setDevReasonId] = useState("");
   const [devNote, setDevNote] = useState("");
@@ -151,6 +167,7 @@ export function StampTerminal({
     setForgottenStop("");
     setDevReasonId("");
     setDevNote("");
+    setDevOvertime("payout");
     setSelectedOperationIds(new Set());
     setStationIds([]);
     setMaterialId("");
@@ -161,14 +178,36 @@ export function StampTerminal({
     setMaterials([]);
     setListError(null);
   }, []);
+  // What the idle timeout does — normally back to the keypad, but after Ta
+  // ut ATF the withdrawal is already registered, so the deviation step
+  // finishes the stop with the defaults first (set further down, where the
+  // request functions exist; read through a ref so the timer sees the
+  // latest state).
+  const onIdleRef = useRef<() => void>(resetToKeypad);
+  const onIdle = useCallback(() => onIdleRef.current(), []);
   useEffect(() => {
     if (step.name === "keypad") return;
     if (idleTimer.current) clearTimeout(idleTimer.current);
-    idleTimer.current = setTimeout(resetToKeypad, IDLE_RESET_MS);
+    idleTimer.current = setTimeout(onIdle, IDLE_RESET_MS);
     return () => {
       if (idleTimer.current) clearTimeout(idleTimer.current);
     };
-  }, [step, entry, note, markDone, search, stationIds, materialId, sort, onlyReady, selectedOperationIds, resetToKeypad]);
+  }, [
+    step,
+    entry,
+    note,
+    markDone,
+    search,
+    stationIds,
+    materialId,
+    sort,
+    onlyReady,
+    selectedOperationIds,
+    devReasonId,
+    devNote,
+    devOvertime,
+    onIdle,
+  ]);
 
   // Browsing a long operation list (scroll/touch) counts as activity, so the
   // operator isn't sent back to the keypad mid-scroll.
@@ -177,12 +216,12 @@ export function StampTerminal({
     if (!listActive) return;
     const bump = () => {
       if (idleTimer.current) clearTimeout(idleTimer.current);
-      idleTimer.current = setTimeout(resetToKeypad, IDLE_RESET_MS);
+      idleTimer.current = setTimeout(onIdle, IDLE_RESET_MS);
     };
     const events = ["scroll", "pointerdown", "touchmove", "wheel", "keydown"] as const;
     events.forEach((name) => window.addEventListener(name, bump, { passive: true, capture: true }));
     return () => events.forEach((name) => window.removeEventListener(name, bump, { capture: true }));
-  }, [listActive, resetToKeypad]);
+  }, [listActive, onIdle]);
 
   const refresh = useCallback(async () => {
     const [sessions, attendance] = await Promise.all([
@@ -300,25 +339,9 @@ export function StampTerminal({
       setError("Ange när du gick hem.");
       return;
     }
-    setBusy(true);
-    try {
-      await apiFetch("/api/v1/attendance-sessions", {
-        method: "POST",
-        body: JSON.stringify({ employeeId: employee.id, forgottenStoppedAt: stop.toISOString() }),
-      });
-      await refresh();
-      setError(null);
-      setNotice(`Närvaron är rättad och du är instämplad igen, ${employee.name.split(" ")[0]}.`);
-      setStep({ name: "home", employee });
-    } catch (err) {
-      setError(
-        err instanceof ApiError && err.code === "invalid-attendance-interval"
-          ? "Ange en tid den dagen du glömde stämpla ut — efter att du kom och före midnatt."
-          : apiErrorMessage(err, "Kunde inte spara tiden.")
-      );
-    } finally {
-      setBusy(false);
-    }
+    // Closes yesterday's attendance and opens today's in one request — which
+    // can need today's sen ankomst reason (attendanceIn asks and resends).
+    return attendanceIn(employee, { forgottenStoppedAt: stop.toISOString() });
   }
 
   // Open the operation list: the employee's own default stations (only those
@@ -348,39 +371,62 @@ export function StampTerminal({
     });
   }
 
-  // Open the deviation step from a 409 attendance-input-required body.
-  async function openDeviation(
-    employee: EmployeeDirectoryEntry,
-    body: AttendanceInputRequiredBody,
-    pending: PendingAttendanceAction
-  ) {
-    setDevReasonId("");
-    setDevNote("");
-    setDevOvertime(body.overtime?.current ?? "payout");
-    setError(null);
-    setStep({ name: "deviation", employee, body, pending });
-    if (body.reason && reasons === null) {
-      try {
-        setReasons(await apiFetch<AttendanceDeviationReason[]>("/api/v1/attendance-deviation-reasons"));
-      } catch (err) {
-        setError(apiErrorMessage(err, "Kunde inte hämta anledningarna."));
-      }
+  // The active Avvikelseorsaker, fetched again on every need. A chosen
+  // reason that is no longer offered is unselected.
+  async function loadReasons() {
+    try {
+      const list = await apiFetch<AttendanceDeviationReason[]>("/api/v1/attendance-deviation-reasons");
+      setReasons(list);
+      setDevReasonId((id) => (list.some((r) => r.id === id) ? id : ""));
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte hämta anledningarna."));
     }
   }
 
-  // Send the pending request again with the answers from the deviation step.
+  // Open the deviation step from a 409 attendance-input-required body.
+  // `answers` are what this request already sent: kept and sent again.
+  async function openDeviation(
+    employee: EmployeeDirectoryEntry,
+    body: AttendanceInputRequiredBody,
+    pending: PendingAttendanceAction,
+    answers: DeviationAnswers = {},
+    errorMessage: string | null = null
+  ) {
+    setDevReasonId(answers.reason?.reasonId ?? "");
+    setDevNote(answers.reason?.note ?? "");
+    setDevOvertime(answers.overtimeDisposition ?? body.overtime?.current ?? "payout");
+    setError(errorMessage);
+    setStep({ name: "deviation", employee, body, pending, answers });
+    if (body.reason || answers.reason) await loadReasons();
+  }
+
+  // A resend refused because the chosen reason is gone: fresh list, no
+  // reason selected, and the message on the deviation step.
+  async function reasonInvalid(err: unknown) {
+    setDevReasonId("");
+    await loadReasons();
+    setError(apiErrorMessage(err, "Anledningen finns inte längre — välj en annan."));
+  }
+
+  // Send the pending request again with the answers from the deviation step
+  // — and the answers given to an earlier question of the same request.
   async function submitDeviation(
     employee: EmployeeDirectoryEntry,
     body: AttendanceInputRequiredBody,
-    pending: PendingAttendanceAction
+    pending: PendingAttendanceAction,
+    answers: DeviationAnswers
   ) {
-    const reason: AttendanceReasonInput | undefined = body.reason
+    if (body.reason && !devReasonId) return;
+    const reason: AttendanceReasonInput | undefined = devReasonId
       ? { reasonId: devReasonId, ...(devNote.trim() ? { note: devNote.trim() } : {}) }
       : undefined;
-    if (body.reason && !devReasonId) return;
-    const overtimeDisposition = body.overtime ? devOvertime : undefined;
-    if (pending.kind === "attendanceIn") return attendanceIn(employee, reason);
-    if (pending.kind === "stampIn") return startSelectedOperations(employee, pending.operations, reason);
+    const overtimeDisposition = body.overtime ? devOvertime : answers.overtimeDisposition;
+    if (pending.kind === "attendanceIn") {
+      return attendanceIn(employee, { reason, forgottenStoppedAt: pending.forgottenStoppedAt });
+    }
+    if (pending.kind === "stampIn") {
+      return startSelectedOperations(employee, pending.operations, reason, pending.earlierFailed);
+    }
     if (pending.kind === "goHome") {
       return goHome(employee, pending.attendanceId, { reason, overtimeDisposition });
     }
@@ -389,15 +435,18 @@ export function StampTerminal({
 
   // "Starta valda": stamps in every checked operation, one POST per
   // operation. A failure on one doesn't roll back the others — those stay
-  // stamped in, and the failed ones stay checked so the row can be retried.
+  // stamped in, and the failed ones stay checked in the operation list so
+  // the row can be retried. `earlierFailed` are the batch's failures from
+  // before a deviation question interrupted it.
   async function startSelectedOperations(
     employee: EmployeeDirectoryEntry,
     operations: TerminalOperation[],
-    attendanceReason?: AttendanceReasonInput
+    attendanceReason?: AttendanceReasonInput,
+    earlierFailed: TerminalOperation[] = []
   ) {
     if (operations.length === 0) return;
     setBusy(true);
-    const failed: TerminalOperation[] = [];
+    const failed: TerminalOperation[] = [...earlierFailed];
     let attendanceStarted = false;
     let reasonPending = attendanceReason;
     try {
@@ -420,10 +469,24 @@ export function StampTerminal({
           const required = inputRequiredBody(err);
           if (required) {
             await refresh();
-            return void (await openDeviation(employee, required, {
-              kind: "stampIn",
-              operations: operations.slice(i),
-            }));
+            return void (await openDeviation(
+              employee,
+              required,
+              { kind: "stampIn", operations: operations.slice(i), earlierFailed: failed },
+              { reason: reasonPending }
+            ));
+          }
+          // The reason sent with the stamp that opens the attendance is gone:
+          // ask again for this and the remaining operations.
+          // (Only a resend from the deviation step carries a reason.)
+          if (reasonPending && isReasonInvalid(err) && step.name === "deviation") {
+            return void (await openDeviation(
+              employee,
+              step.body,
+              { kind: "stampIn", operations: operations.slice(i), earlierFailed: failed },
+              {},
+              apiErrorMessage(err, "Anledningen finns inte längre — välj en annan.")
+            ));
           }
           failed.push(operation);
         }
@@ -435,42 +498,64 @@ export function StampTerminal({
         if (attendanceStarted) setNotice("Närvaron stämplades in.");
         setStep({ name: "home", employee });
       } else {
+        // Back to the operation list (also from the deviation step, whose
+        // button would otherwise resend operations already started) with
+        // only the failed ones checked.
         setSelectedOperationIds(new Set(failed.map((op) => op.operationId)));
         const names = failed.map((op) => `${op.orderNumber} op ${op.sequenceNo}`).join(", ");
         setError(
-          failed.length === operations.length
+          failed.length === earlierFailed.length + operations.length
             ? `Instämpling misslyckades: ${names}.`
             : `Instämpling misslyckades för: ${names}. Övriga är instämplade.`
         );
+        setStep({ name: "pickOperations", employee });
       }
     } finally {
       setBusy(false);
     }
   }
 
-  async function attendanceIn(employee: EmployeeDirectoryEntry, reason?: AttendanceReasonInput) {
+  async function attendanceIn(
+    employee: EmployeeDirectoryEntry,
+    answers: { reason?: AttendanceReasonInput; forgottenStoppedAt?: string } = {}
+  ) {
+    const { reason, forgottenStoppedAt } = answers;
     setBusy(true);
     try {
       await apiFetch("/api/v1/attendance-sessions", {
         method: "POST",
-        body: JSON.stringify({ employeeId: employee.id, ...(reason ? { reason } : {}) }),
+        body: JSON.stringify({
+          employeeId: employee.id,
+          ...(reason ? { reason } : {}),
+          ...(forgottenStoppedAt ? { forgottenStoppedAt } : {}),
+        }),
       });
       await refresh();
       setError(null);
-      if (reason) {
+      if (forgottenStoppedAt) {
+        setNotice(`Närvaron är rättad och du är instämplad igen, ${employee.name.split(" ")[0]}.`);
+        setStep({ name: "home", employee });
+      } else if (reason) {
         setNotice(`Välkommen ${employee.name.split(" ")[0]} — närvaron är instämplad.`);
         resetToKeypad();
       }
     } catch (err) {
       const required = inputRequiredBody(err);
-      if (required) return void (await openDeviation(employee, required, { kind: "attendanceIn" }));
+      if (required) {
+        return void (await openDeviation(employee, required, { kind: "attendanceIn", forgottenStoppedAt }, { reason }));
+      }
+      if (reason && isReasonInvalid(err)) return void (await reasonInvalid(err));
       if (err instanceof ApiError && err.code === "attendance-open-from-earlier-day") {
         const body = err.body as { attendanceSessionId?: string; startedAt?: string } | undefined;
         if (body?.attendanceSessionId && body.startedAt) {
           return void openForgotten(employee, body.attendanceSessionId, body.startedAt);
         }
       }
-      setError(err instanceof Error ? err.message : "Närvarostämplingen misslyckades.");
+      setError(
+        forgottenStoppedAt && err instanceof ApiError && err.code === "invalid-attendance-interval"
+          ? "Ange en tid den dagen du glömde stämpla ut — efter att du kom och före midnatt."
+          : apiErrorMessage(err, forgottenStoppedAt ? "Kunde inte spara tiden." : "Närvarostämplingen misslyckades.")
+      );
     } finally {
       setBusy(false);
     }
@@ -499,7 +584,8 @@ export function StampTerminal({
       resetToKeypad();
     } catch (err) {
       const required = inputRequiredBody(err);
-      if (required) return void (await openDeviation(employee, required, { kind: "goHome", attendanceId }));
+      if (required) return void (await openDeviation(employee, required, { kind: "goHome", attendanceId }, answers ?? {}));
+      if (answers?.reason && isReasonInvalid(err)) return void (await reasonInvalid(err));
       setError(apiErrorMessage(err, "Utstämplingen misslyckades."));
     } finally {
       setBusy(false);
@@ -524,7 +610,7 @@ export function StampTerminal({
       setError(null);
       setStep({ name: "atf", employee, atf, scheduledMinutes });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte hämta ATF-saldot.");
+      setError(apiErrorMessage(err, "Kunde inte hämta ATF-saldot."));
     } finally {
       setBusy(false);
     }
@@ -555,19 +641,19 @@ export function StampTerminal({
       }
       await finishAtf(employee, { kind: "atf", attendanceId: attendance.id, atfTransactionId: transaction.id, hours });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "ATF-uttaget misslyckades.");
+      setError(apiErrorMessage(err, "ATF-uttaget misslyckades."));
     } finally {
       setBusy(false);
     }
   }
 
-  // Second half of Ta ut ATF: stop the attendance, naming the withdrawal so
-  // the server doesn't ask for a reason (the withdrawal explains leaving
-  // early). It can still ask about overtime.
+  // Second half of Ta ut ATF: stop the attendance. The withdrawal explains
+  // leaving early (the server never asks for a reason on a day with one;
+  // the id is still sent for older servers), but overtime can be asked.
   async function finishAtf(
     employee: EmployeeDirectoryEntry,
     pending: Extract<PendingAttendanceAction, { kind: "atf" }>,
-    answers?: AttendanceOutInput
+    answers?: DeviationAnswers
   ) {
     setBusy(true);
     try {
@@ -582,12 +668,67 @@ export function StampTerminal({
       resetToKeypad();
     } catch (err) {
       const required = inputRequiredBody(err);
-      if (required) return void (await openDeviation(employee, required, pending));
-      setError(err instanceof Error ? err.message : "ATF-uttaget misslyckades.");
+      if (required) return void (await openDeviation(employee, required, pending, answers ?? {}));
+      if (answers?.reason && isReasonInvalid(err)) return void (await reasonInvalid(err));
+      setError(apiErrorMessage(err, "ATF-uttaget misslyckades."));
     } finally {
       setBusy(false);
     }
   }
+
+  // Avbryt — or the idle timeout — on the deviation step after Ta ut ATF:
+  // the withdrawal is already registered, so the attendance must not stay
+  // open. The stop is completed with the day's current overtime choice (the
+  // pre-selected one, not an unsaved toggle) and any reason already given.
+  async function completeAtfWithDefaults(
+    employee: EmployeeDirectoryEntry,
+    body: AttendanceInputRequiredBody,
+    pending: Extract<PendingAttendanceAction, { kind: "atf" }>,
+    answers: DeviationAnswers
+  ) {
+    const reason: AttendanceReasonInput | undefined = devReasonId
+      ? { reasonId: devReasonId, ...(devNote.trim() ? { note: devNote.trim() } : {}) }
+      : answers.reason;
+    const overtimeDisposition = body.overtime?.current ?? answers.overtimeDisposition;
+    const first = employee.name.split(" ")[0];
+    if (busy) return; // a double tap on Avbryt must not stop twice
+    setBusy(true);
+    try {
+      await apiFetch(`/api/v1/attendance-sessions/${pending.attendanceId}/stop`, {
+        method: "POST",
+        body: JSON.stringify({
+          ...(reason ? { reason } : {}),
+          ...(overtimeDisposition ? { overtimeDisposition } : {}),
+          atfTransactionId: pending.atfTransactionId,
+        }),
+      });
+      try {
+        await refresh();
+      } catch {
+        // keep the cached lists
+      }
+      resetToKeypad();
+      setNotice(`${formatHours(Math.round(pending.hours * 60))} ATF uttaget för ${first} — närvaron är utstämplad.`);
+    } catch (err) {
+      resetToKeypad();
+      setNotice(
+        `ATF-uttaget är registrerat, men närvaron kunde inte stämplas ut (${apiErrorMessage(err, "okänt fel")}). Tryck Gå hem.`
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Every render: the idle timer must act on the latest step and answers.
+  useEffect(() => {
+    onIdleRef.current = () => {
+      if (step.name === "deviation" && step.pending.kind === "atf") {
+        void completeAtfWithDefaults(step.employee, step.body, step.pending, step.answers);
+      } else {
+        resetToKeypad();
+      }
+    };
+  });
 
   async function stampOut(employee: EmployeeDirectoryEntry, session: StampSession) {
     if (Number(quantityScrapped) > 0 && scrapReason.trim() === "") {
@@ -823,12 +964,13 @@ export function StampTerminal({
             overtime={devOvertime}
             onOvertime={setDevOvertime}
             busy={busy}
-            onSubmit={() => submitDeviation(step.employee, step.body, step.pending)}
+            onSubmit={() => submitDeviation(step.employee, step.body, step.pending, step.answers)}
             onCancel={() => {
               if (step.pending.kind === "atf") {
-                setNotice("ATF-uttaget är registrerat, men närvaron är inte utstämplad.");
+                void completeAtfWithDefaults(step.employee, step.body, step.pending, step.answers);
+              } else {
+                resetToKeypad();
               }
-              resetToKeypad();
             }}
           />
         )}

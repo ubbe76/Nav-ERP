@@ -29,53 +29,58 @@ const at = (clock: string, date = DAY, offset = "+02:00") => new Date(`${date}T$
 
 describe("assessArrival — sen ankomst", () => {
   it("measures the first attendance against the schedule's start and asks beyond the tolerance", () => {
-    const late = assessArrival({ date: DAY, schedule, at: at("07:12:00"), firstOfDay: true, settings: on });
+    const late = assessArrival({ date: DAY, schedule, at: at("07:12:00"), earlierPresenceInWindow: false, settings: on });
     expect(late).toEqual({ kind: "late", minutes: 12, scheduledTime: "07:00", requiresReason: true });
   });
 
   it("asks nothing exactly at the tolerance (strictly greater), and counts whole minutes", () => {
-    expect(assessArrival({ date: DAY, schedule, at: at("07:05:00"), firstOfDay: true, settings: on })).toMatchObject({
+    expect(assessArrival({ date: DAY, schedule, at: at("07:05:00"), earlierPresenceInWindow: false, settings: on })).toMatchObject({
       minutes: 5,
       requiresReason: false,
     });
     // 5 min 59 s is still 5 whole minutes.
-    expect(assessArrival({ date: DAY, schedule, at: at("07:05:59"), firstOfDay: true, settings: on })).toMatchObject({
+    expect(assessArrival({ date: DAY, schedule, at: at("07:05:59"), earlierPresenceInWindow: false, settings: on })).toMatchObject({
       minutes: 5,
       requiresReason: false,
     });
-    expect(assessArrival({ date: DAY, schedule, at: at("07:06:00"), firstOfDay: true, settings: on })).toMatchObject({
+    expect(assessArrival({ date: DAY, schedule, at: at("07:06:00"), earlierPresenceInWindow: false, settings: on })).toMatchObject({
       minutes: 6,
       requiresReason: true,
     });
   });
 
   it("an arrival on time or early is no deviation", () => {
-    expect(assessArrival({ date: DAY, schedule, at: at("06:45:00"), firstOfDay: true, settings: on })).toBeNull();
-    expect(assessArrival({ date: DAY, schedule, at: at("07:00:30"), firstOfDay: true, settings: on })).toBeNull();
+    expect(assessArrival({ date: DAY, schedule, at: at("06:45:00"), earlierPresenceInWindow: false, settings: on })).toBeNull();
+    expect(assessArrival({ date: DAY, schedule, at: at("07:00:30"), earlierPresenceInWindow: false, settings: on })).toBeNull();
   });
 
-  it("a return after an early departure (not the day's first attendance) asks nothing", () => {
-    expect(assessArrival({ date: DAY, schedule, at: at("13:30:00"), firstOfDay: false, settings: on })).toBeNull();
+  it("a return after an early departure (an earlier presence already in the window) asks nothing", () => {
+    expect(assessArrival({ date: DAY, schedule, at: at("13:30:00"), earlierPresenceInWindow: true, settings: on })).toBeNull();
+  });
+
+  it("an arrival at or after the schedule's end never meets the schedule and asks nothing", () => {
+    expect(assessArrival({ date: DAY, schedule, at: at("16:00:00"), earlierPresenceInWindow: false, settings: on })).toBeNull();
+    expect(assessArrival({ date: DAY, schedule, at: at("18:30:00"), earlierPresenceInWindow: false, settings: on })).toBeNull();
   });
 
   it("a free day (no day schedule — also a red day) asks nothing", () => {
-    expect(assessArrival({ date: DAY, schedule: null, at: at("10:00:00"), firstOfDay: true, settings: on })).toBeNull();
+    expect(assessArrival({ date: DAY, schedule: null, at: at("10:00:00"), earlierPresenceInWindow: false, settings: on })).toBeNull();
   });
 
   it("a day schedule without net time is a free day too", () => {
     const empty = { startTime: "00:00", endTime: "00:00", netMinutes: 0 };
-    expect(assessArrival({ date: DAY, schedule: empty, at: at("10:00:00"), firstOfDay: true, settings: on })).toBeNull();
+    expect(assessArrival({ date: DAY, schedule: empty, at: at("10:00:00"), earlierPresenceInWindow: false, settings: on })).toBeNull();
   });
 
   it("a short day on a holiday's day schedule is measured against that schedule", () => {
     const eve = "2026-12-23"; // winter time
     const shortDay = { startTime: "07:00", endTime: "12:00", netMinutes: 300 };
-    const late = assessArrival({ date: eve, schedule: shortDay, at: at("07:20:00", eve, "+01:00"), firstOfDay: true, settings: on });
+    const late = assessArrival({ date: eve, schedule: shortDay, at: at("07:20:00", eve, "+01:00"), earlierPresenceInWindow: false, settings: on });
     expect(late).toMatchObject({ kind: "late", minutes: 20, scheduledTime: "07:00", requiresReason: true });
   });
 
   it("with the setting off the deviation is reported but never requires a reason", () => {
-    expect(assessArrival({ date: DAY, schedule, at: at("08:00:00"), firstOfDay: true, settings: off })).toEqual({
+    expect(assessArrival({ date: DAY, schedule, at: at("08:00:00"), earlierPresenceInWindow: false, settings: off })).toEqual({
       kind: "late",
       minutes: 60,
       scheduledTime: "07:00",
@@ -87,19 +92,19 @@ describe("assessArrival — sen ankomst", () => {
     // 2026-03-29: clocks jump 02:00 → 03:00 (UTC+1 → UTC+2).
     const spring = "2026-03-29";
     expect(
-      assessArrival({ date: spring, schedule, at: new Date("2026-03-29T05:12:00Z"), firstOfDay: true, settings: on })
+      assessArrival({ date: spring, schedule, at: new Date("2026-03-29T05:12:00Z"), earlierPresenceInWindow: false, settings: on })
     ).toMatchObject({ minutes: 12 });
     // 2026-10-25: clocks fall back 03:00 → 02:00 (UTC+2 → UTC+1).
     const autumn = "2026-10-25";
     expect(
-      assessArrival({ date: autumn, schedule, at: new Date("2026-10-25T06:12:00Z"), firstOfDay: true, settings: on })
+      assessArrival({ date: autumn, schedule, at: new Date("2026-10-25T06:12:00Z"), earlierPresenceInWindow: false, settings: on })
     ).toMatchObject({ minutes: 12 });
   });
 });
 
 describe("assessDeparture — tidig hemgång", () => {
   it("measures the stop against the schedule's end", () => {
-    expect(assessDeparture({ date: DAY, schedule, at: at("15:20:00"), atfWithdrawal: false, settings: on })).toEqual({
+    expect(assessDeparture({ date: DAY, startedAt: at("07:00:00"), schedule, at: at("15:20:00"), atfWithdrawal: false, settings: on })).toEqual({
       kind: "early",
       minutes: 40,
       scheduledTime: "16:00",
@@ -108,19 +113,34 @@ describe("assessDeparture — tidig hemgång", () => {
   });
 
   it("exactly at the tolerance asks nothing; after the end is no deviation", () => {
-    expect(assessDeparture({ date: DAY, schedule, at: at("15:55:00"), atfWithdrawal: false, settings: on })).toMatchObject({
+    expect(assessDeparture({ date: DAY, startedAt: at("07:00:00"), schedule, at: at("15:55:00"), atfWithdrawal: false, settings: on })).toMatchObject({
       minutes: 5,
       requiresReason: false,
     });
-    expect(assessDeparture({ date: DAY, schedule, at: at("16:10:00"), atfWithdrawal: false, settings: on })).toBeNull();
+    expect(assessDeparture({ date: DAY, startedAt: at("07:00:00"), schedule, at: at("16:10:00"), atfWithdrawal: false, settings: on })).toBeNull();
   });
 
   it("a departure through Ta ut ATF is never a deviation", () => {
-    expect(assessDeparture({ date: DAY, schedule, at: at("12:00:00"), atfWithdrawal: true, settings: on })).toBeNull();
+    expect(assessDeparture({ date: DAY, startedAt: at("07:00:00"), schedule, at: at("12:00:00"), atfWithdrawal: true, settings: on })).toBeNull();
+  });
+
+  it("a stint that ended before the schedule began is no departure from it", () => {
+    // In at 05:00, out at 06:50 — nothing of it overlaps 07:00–16:00.
+    expect(
+      assessDeparture({ date: DAY, schedule, startedAt: at("05:00:00"), at: at("06:50:00"), atfWithdrawal: false, settings: on })
+    ).toBeNull();
+    // A night stint after midnight, home at 02:00 before a 07:00 start.
+    expect(
+      assessDeparture({ date: DAY, schedule, startedAt: at("00:30:00"), at: at("02:00:00"), atfWithdrawal: false, settings: on })
+    ).toBeNull();
+    // Overlapping by a minute is a departure from the schedule.
+    expect(
+      assessDeparture({ date: DAY, schedule, startedAt: at("05:00:00"), at: at("07:01:00"), atfWithdrawal: false, settings: on })
+    ).toMatchObject({ kind: "early", minutes: 539 });
   });
 
   it("a free day asks nothing", () => {
-    expect(assessDeparture({ date: DAY, schedule: null, at: at("12:00:00"), atfWithdrawal: false, settings: on })).toBeNull();
+    expect(assessDeparture({ date: DAY, startedAt: at("07:00:00"), schedule: null, at: at("12:00:00"), atfWithdrawal: false, settings: on })).toBeNull();
   });
 });
 

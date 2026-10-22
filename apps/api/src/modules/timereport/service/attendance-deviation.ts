@@ -7,7 +7,13 @@
 // so the terminal's question and the attestation's Avvikelser column measure
 // the same Stockholm day the same way — the only thing this file adds is the
 // policy: which stamp is asked about, and when the tolerance is exceeded.
-import { earlyLeaveMinutesOf, lateMinutesOf } from "../../payroll/service/payroll-day.js";
+import {
+  clockToMs,
+  earlyLeaveMinutesOf,
+  lateMinutesOf,
+  overlapsScheduleWindow,
+  type Interval,
+} from "../../payroll/service/payroll-day.js";
 
 // The slice of the schedule's ResolvedDay this file reads. A day without a
 // day schedule is ledig (no schedule, or a red day); a holiday WITH a day
@@ -51,36 +57,59 @@ function deviation(
   };
 }
 
+/** The schedule window [start, end) the deviations are measured in — the payroll day engine's clocks. */
+export function scheduleWindow(date: string, schedule: DeviationDaySchedule): Interval {
+  return { start: clockToMs(date, schedule.startTime), end: clockToMs(date, schedule.endTime) };
+}
+
+/** The day's schedule window when the day is scheduled, else null (ledig: nothing is ever asked). */
+export function scheduledWindow(date: string, schedule: DeviationDaySchedule | null): Interval | null {
+  return isScheduled(schedule) ? scheduleWindow(date, schedule) : null;
+}
+
 /**
- * Sen ankomst for an attendance-in at `at` on the Stockholm day `date`. Only
- * the day's FIRST attendance is asked about: coming back after an early
- * departure needs no new reason, the reason already sits on that departure.
+ * Sen ankomst for an attendance-in at `at` on the Stockholm day `date`.
+ * Payroll measures lateness on the first presence that overlaps the
+ * schedule window (payroll-day.ts), so the terminal asks exactly when this
+ * attendance becomes that presence: it starts before the window's end, and
+ * no earlier attendance of the day already overlaps the window
+ * (`earlierPresenceInWindow`). Coming back after an early departure needs
+ * no new reason — the reason sits on that departure — while a night shift
+ * that ended before the schedule's start hides nothing.
  */
 export function assessArrival(input: {
   date: string;
   schedule: DeviationDaySchedule | null;
   at: Date;
-  firstOfDay: boolean;
+  earlierPresenceInWindow: boolean;
   settings: DeviationSettings;
 }): AttendanceDeviation | null {
-  if (!input.firstOfDay || !isScheduled(input.schedule)) return null;
+  if (input.earlierPresenceInWindow || !isScheduled(input.schedule)) return null;
+  const window = scheduleWindow(input.date, input.schedule);
+  if (input.at.getTime() >= window.end) return null; // the new presence never meets the schedule
   const minutes = lateMinutesOf(input.date, input.schedule.startTime, input.at.getTime());
   return deviation("late", minutes, input.schedule.startTime, input.settings);
 }
 
 /**
- * Tidig hemgång for a Gå hem at `at` on the Stockholm day `date`. A
- * departure through Ta ut ATF is explained by the withdrawal (and payroll
- * already counts its minutes), so it is never one.
+ * Tidig hemgång for a Gå hem at `at` on the Stockholm day `date`, closing an
+ * attendance that started at `startedAt`. A departure on a day with a Ta ut
+ * ATF withdrawal is explained by the withdrawal (and payroll already counts
+ * its minutes), so it is never one. Like payroll, only a presence that
+ * overlaps the schedule window can leave early — a stint that ended before
+ * the schedule began is not a departure from it.
  */
 export function assessDeparture(input: {
   date: string;
   schedule: DeviationDaySchedule | null;
+  startedAt: Date;
   at: Date;
   atfWithdrawal: boolean;
   settings: DeviationSettings;
 }): AttendanceDeviation | null {
   if (input.atfWithdrawal || !isScheduled(input.schedule)) return null;
+  const window = scheduleWindow(input.date, input.schedule);
+  if (!overlapsScheduleWindow({ start: input.startedAt.getTime(), end: input.at.getTime() }, window)) return null;
   const minutes = earlyLeaveMinutesOf(input.date, input.schedule.endTime, input.at.getTime());
   return deviation("early", minutes, input.schedule.endTime, input.settings);
 }

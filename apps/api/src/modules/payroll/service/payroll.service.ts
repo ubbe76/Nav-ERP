@@ -22,9 +22,11 @@ import { EmployeeNotFoundError } from "../../timereport/service/timereport.servi
 import type { TimeReportRepository } from "../../timereport/repository/timereport.repository.js";
 import type { ResolvedDay } from "../../timereport/service/schedule.service.js";
 import {
+  clockToMs,
   computeEmployeeDay,
   dayBounds,
   periodDates,
+  overlapsScheduleWindow,
   periodRange,
   type DayComputation,
   type Interval,
@@ -176,30 +178,61 @@ function groupIntervalsByDate(sessions: AttendanceRow[]): Map<string, Interval[]
   return byDate;
 }
 
-// Avvikelser column: per day, the late arrival is the first presence's stamp
-// and the early departure the last one's (the same sessions the engine
-// measured — those touching the day, by start/stop). A day with an ATF
-// withdrawal never misses a reason for leaving early (Ta ut ATF explains it).
+// The sessions a day's sen ankomst / tidig hemgång were measured on: the
+// first and last closed session overlapping the schedule window — the same
+// segments the engine measures (overlapsScheduleWindow in payroll-day.ts).
+// Null without a schedule.
+function measuredSessionsOf<T extends Pick<AttendanceRow, "startedAt" | "stoppedAt">>(
+  date: string,
+  schedule: { startTime: string; endTime: string } | null | undefined,
+  sessions: T[]
+): { first: T | null; last: T | null } | null {
+  if (!schedule) return null;
+  const window = { start: clockToMs(date, schedule.startTime), end: clockToMs(date, schedule.endTime) };
+  const touching = sessions.filter(
+    (s) => s.stoppedAt !== null && overlapsScheduleWindow({ start: s.startedAt.getTime(), end: s.stoppedAt.getTime() }, window)
+  );
+  return {
+    first: touching.reduce<T | null>((a, b) => (a && a.startedAt <= b.startedAt ? a : b), null),
+    last: touching.reduce<T | null>((a, b) => (a && a.stoppedAt! >= b.stoppedAt! ? a : b), null),
+  };
+}
+
+// Avvikelser column: per day, the late arrival is the stamp of the first
+// session overlapping the schedule window and the early departure the last
+// one's (measuredSessionsOf). A day with an ATF withdrawal never misses a
+// reason for leaving early (Ta ut ATF explains it; the terminal never asks
+// then either).
 function countDeviationDays(
   days: DayComputation[],
   sessions: AttendanceRow[],
+  calendar: ResolvedDay[],
   toleranceMinutes: number
 ): { deviationDays: number; missingReasonDays: number } {
-  const closed = sessions.filter((s) => s.stoppedAt !== null);
+  const scheduleByDate = new Map(calendar.map((d) => [d.date, d.daySchedule]));
   let deviationDays = 0;
   let missingReasonDays = 0;
   for (const day of days) {
     if (day.lateMinutes <= 0 && day.earlyLeaveMinutes <= 0) continue;
     deviationDays++;
-    const bounds = dayBounds(day.date);
-    const touching = closed.filter((s) => s.startedAt.getTime() < bounds.end && s.stoppedAt!.getTime() > bounds.start);
-    const first = touching.reduce<AttendanceRow | null>((a, b) => (a && a.startedAt <= b.startedAt ? a : b), null);
-    const last = touching.reduce<AttendanceRow | null>((a, b) => (a && a.stoppedAt! >= b.stoppedAt! ? a : b), null);
-    const lateMissing = day.lateMinutes > toleranceMinutes && !first?.startReasonId;
-    const earlyMissing = day.earlyLeaveMinutes > toleranceMinutes && day.atfMinutes === 0 && !last?.stopReasonId;
+    const measured = measuredSessionsOf(day.date, scheduleByDate.get(day.date), sessions);
+    const lateMissing = day.lateMinutes > toleranceMinutes && !measured?.first?.startReasonId;
+    const earlyMissing = day.earlyLeaveMinutes > toleranceMinutes && day.atfMinutes === 0 && !measured?.last?.stopReasonId;
     if (lateMissing || earlyMissing) missingReasonDays++;
   }
   return { deviationDays, missingReasonDays };
+}
+
+// The register's unique code/name constraints as the same 409 the
+// pre-checks give (they only narrow the race, the constraint decides).
+function duplicateDeviationReason(err: unknown, input: { code?: string; name?: string }) {
+  if (isUniqueViolation(err, "attendance_deviation_reasons_code_unique")) {
+    return new DuplicatePayrollCodeError("code", input.code ?? "");
+  }
+  if (isUniqueViolation(err, "attendance_deviation_reasons_name_unique")) {
+    return new DuplicatePayrollCodeError("name", input.name ?? "");
+  }
+  return null;
 }
 
 function sumBy<T>(items: T[], selector: (item: T) => number): number {
@@ -687,7 +720,7 @@ export function createPayrollService(
           ),
           atfMinutes: sumBy(days, (d) => d.atfMinutes),
           unaccountedMinutes: sumBy(days, (d) => d.unaccountedMinutes),
-          ...countDeviationDays(days, employeeSessions, settingsRow.attendanceReasonToleranceMinutes ?? 5),
+          ...countDeviationDays(days, employeeSessions, calendar, settingsRow.attendanceReasonToleranceMinutes ?? 5),
           // Already scoped to sessions started before the period's end by
           // the range query itself, so any open one here counts.
           openAttendance: employeeSessions.some((s) => s.stoppedAt === null),
@@ -762,7 +795,13 @@ export function createPayrollService(
       if (await repo.findAttendanceDeviationReasonByName(input.name)) {
         throw new DuplicatePayrollCodeError("name", input.name);
       }
-      return repo.createAttendanceDeviationReason(input);
+      try {
+        return await repo.createAttendanceDeviationReason(input);
+      } catch (err) {
+        // Two admins saving the same code/name at once: the pre-checks above
+        // both passed, the unique constraint decides — same 409.
+        throw duplicateDeviationReason(err, input) ?? err;
+      }
     },
 
     async updateAttendanceDeviationReason(id: string, input: UpdateAttendanceDeviationReasonInput) {
@@ -774,7 +813,12 @@ export function createPayrollService(
         const byName = await repo.findAttendanceDeviationReasonByName(input.name);
         if (byName && byName.id !== id) throw new DuplicatePayrollCodeError("name", input.name);
       }
-      const row = await repo.updateAttendanceDeviationReason(id, input);
+      let row;
+      try {
+        row = await repo.updateAttendanceDeviationReason(id, input);
+      } catch (err) {
+        throw duplicateDeviationReason(err, input) ?? err;
+      }
       if (!row) throw new AttendanceDeviationReasonNotFoundError(id);
       return row;
     },
@@ -1263,6 +1307,19 @@ export function createPayrollService(
             dispositionByDate,
           });
 
+      // Which stamp each day's deviation minutes belong to — the sessions
+      // the engine measured, so a night stint never carries the morning's
+      // lateness in the day view.
+      const scheduleByDate = new Map(calendar.map((d) => [d.date, d.daySchedule]));
+      const lateBySession = new Map<string, number>();
+      const earlyBySession = new Map<string, number>();
+      for (const day of days) {
+        if (day.lateMinutes <= 0 && day.earlyLeaveMinutes <= 0) continue;
+        const measured = measuredSessionsOf(day.date, scheduleByDate.get(day.date), sessions);
+        if (measured?.first && day.lateMinutes > 0) lateBySession.set(measured.first.id, day.lateMinutes);
+        if (measured?.last && day.earlyLeaveMinutes > 0) earlyBySession.set(measured.last.id, day.earlyLeaveMinutes);
+      }
+
       return {
         days,
         sessions: sessions.map((s) => ({
@@ -1270,6 +1327,8 @@ export function createPayrollService(
           date: localDateString(s.startedAt),
           startedAt: s.startedAt.toISOString(),
           stoppedAt: s.stoppedAt ? s.stoppedAt.toISOString() : null,
+          lateMinutes: lateBySession.get(s.id) ?? 0,
+          earlyLeaveMinutes: earlyBySession.get(s.id) ?? 0,
           startReason: reasonOf(s.startReasonId),
           startNote: s.startNote ?? null,
           stopReason: reasonOf(s.stopReasonId),

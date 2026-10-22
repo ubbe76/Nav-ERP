@@ -64,6 +64,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "attendance-input-required": "Ange anledning eller hur övertiden ska ersättas innan stämplingen sparas.",
   "attendance-reason-invalid": "Anledningen finns inte eller är inaktiv — välj en annan.",
   "atf-transaction-mismatch": "ATF-uttaget hör inte till den här medarbetaren i dag.",
+  "attendance-session-changed":
+    "Närvaron ändrades under tiden (till exempel stämplades den ut i terminalen). Öppna den igen och gör om ändringen.",
   "invalid-stop-time": "Sluttiden måste vara efter instämplingen och inte i framtiden.",
   "stamp-session-already-stopped":
     "Stämplingen är redan utstämplad — operationen kan ha blivit klar. Rapportera antalet på tillverkningsordern.",

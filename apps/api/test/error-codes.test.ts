@@ -64,6 +64,7 @@ import {
   InvalidStopTimeError,
   StampSessionAlreadyStoppedError,
   StopTimeNotAllowedError,
+  AttendanceSessionChangedError,
 } from "../src/modules/timereport/service/timereport.service.js";
 import {
   AtfTransactionMismatchError,
@@ -301,6 +302,7 @@ const cases: Array<[Error, string]> = [
   [new AttendanceInputRequiredError(null, null), ERROR_CODES.ATTENDANCE_INPUT_REQUIRED],
   [new AttendanceReasonInvalidError("x"), ERROR_CODES.ATTENDANCE_REASON_INVALID],
   [new AtfTransactionMismatchError("x"), ERROR_CODES.ATF_TRANSACTION_MISMATCH],
+  [new AttendanceSessionChangedError("x"), ERROR_CODES.ATTENDANCE_SESSION_CHANGED],
   [new InvalidStopTimeError(), ERROR_CODES.INVALID_STOP_TIME],
   [new StampSessionAlreadyStoppedError(), ERROR_CODES.STAMP_SESSION_ALREADY_STOPPED],
   [new StopTimeNotAllowedError(), ERROR_CODES.STOP_TIME_NOT_ALLOWED],

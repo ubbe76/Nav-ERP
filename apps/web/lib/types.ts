@@ -2649,6 +2649,10 @@ export interface PeriodAttendanceSession {
   startNote: string | null;
   stopReason: { id: string; code: string; name: string } | null;
   stopNote: string | null;
+  // The day's sen ankomst / tidig hemgång minutes on the stamp they were
+  // measured on (the first/last session overlapping the schedule), else 0.
+  lateMinutes?: number;
+  earlyLeaveMinutes?: number;
 }
 
 export interface PeriodAbsenceRow {

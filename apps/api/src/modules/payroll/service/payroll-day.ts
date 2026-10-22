@@ -57,8 +57,8 @@ export interface DayComputation {
   overtimeOffScheduleMinutes: number; // any work on schedule-free days
   atfMinutes: number;
   unaccountedMinutes: number; // scheduled not covered by work/absence/ATF
-  // Sen ankomst / tidig hemgång: the day's first presence after the
-  // schedule's start, and its last presence before the schedule's end — no
+  // Sen ankomst / tidig hemgång: the day's first presence overlapping the
+  // schedule window after its start, and the last one before its end — no
   // tolerance (the terminal's question has one, the attestation shows the
   // fact). 0 without a schedule, without presence, or when on time.
   lateMinutes: number;
@@ -174,6 +174,18 @@ export function earlyLeaveMinutesOf(date: string, scheduleEnd: string, leftAt: n
   return Math.max(0, Math.floor((clockToMs(date, scheduleEnd) - leftAt) / 60000));
 }
 
+/**
+ * Does a presence segment overlap the schedule window by any time at all
+ * (both half-open)? Sen ankomst and tidig hemgång are measured only on such
+ * segments: a night stint 00:00–02:00 before a 07:00 start neither hides
+ * the lateness of the day's real arrival nor counts as leaving 14 hours
+ * early. The terminal's questions (attendance-deviation.ts) use the same
+ * rule.
+ */
+export function overlapsScheduleWindow(segment: Interval, window: Interval): boolean {
+  return segment.start < window.end && segment.end > window.start;
+}
+
 function clip(iv: Interval, bounds: Interval): Interval {
   return { start: Math.max(iv.start, bounds.start), end: Math.min(iv.end, bounds.end) };
 }
@@ -242,14 +254,23 @@ export function computeEmployeeDay(input: DayComputationInput): DayComputation {
   const unaccountedMinutes = Math.max(0, scheduledMinutes - workedMinutes - absenceTotal - input.atfMinutes);
 
   // Measured on the presence (before break subtraction): coming back from an
-  // unpaid lunch is not a late arrival. Only scheduled days (net time > 0).
-  const first = presence[0];
-  const last = presence[presence.length - 1];
-  const scheduled = input.schedule !== null && scheduledMinutes > 0;
-  const lateMinutes =
-    scheduled && first && input.schedule!.startTime ? lateMinutesOf(input.date, input.schedule!.startTime, first.start) : 0;
-  const earlyLeaveMinutes =
-    scheduled && last && input.schedule!.endTime ? earlyLeaveMinutesOf(input.date, input.schedule!.endTime, last.end) : 0;
+  // unpaid lunch is not a late arrival. Only scheduled days (net time > 0),
+  // and only on the presence segments that overlap the schedule window —
+  // the first one's start and the last one's end. No such segment (absent,
+  // or only there outside the schedule) is no deviation: that time is
+  // unaccounted, not late.
+  let lateMinutes = 0;
+  let earlyLeaveMinutes = 0;
+  const startTime = input.schedule?.startTime;
+  const endTime = input.schedule?.endTime;
+  if (scheduledMinutes > 0 && startTime && endTime) {
+    const window = { start: clockToMs(input.date, startTime), end: clockToMs(input.date, endTime) };
+    const inWindow = presence.filter((segment) => overlapsScheduleWindow(segment, window));
+    const first = inWindow[0];
+    const last = inWindow[inWindow.length - 1];
+    if (first) lateMinutes = lateMinutesOf(input.date, startTime, first.start);
+    if (last) earlyLeaveMinutes = earlyLeaveMinutesOf(input.date, endTime, last.end);
+  }
 
   return {
     date: input.date,

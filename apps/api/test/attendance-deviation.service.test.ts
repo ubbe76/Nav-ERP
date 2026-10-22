@@ -27,6 +27,7 @@ import { createTimeReportRepository } from "../src/modules/timereport/repository
 import { createScheduleService } from "../src/modules/timereport/service/schedule.service.js";
 import {
   AttendanceSessionAlreadyStoppedError,
+  AttendanceSessionChangedError,
   createTimeReportService,
   type AttendanceDeviationDeps,
 } from "../src/modules/timereport/service/timereport.service.js";
@@ -220,6 +221,63 @@ describe("sen ankomst", () => {
     await expect(service.attendanceIn({ employeeId: other.id }, user.id)).resolves.toBeDefined();
   });
 
+  it("a night stint that ended before the schedule does not hide today's late arrival", async () => {
+    const { user, employee, traffic } = await setup();
+    settings.attendanceReasonRequired = true;
+    // In at 00:30 and home at 02:00 — nothing of it overlaps 07:00–16:00.
+    now = at("00:30:00");
+    const night = await service.attendanceIn({ employeeId: employee.id }, user.id);
+    now = at("02:00:00");
+    await service.attendanceOut(night.id, user.id);
+    now = at("07:30:00");
+    const err = await expectInputRequired(service.attendanceIn({ employeeId: employee.id }, user.id));
+    expect(err.reason).toEqual({ kind: "late", minutes: 30, scheduledTime: "07:00" });
+    const day = await service.attendanceIn({ employeeId: employee.id, reason: { reasonId: traffic.id } }, user.id);
+    now = at("16:00:00");
+    await service.attendanceOut(day.id, user.id);
+
+    // The attestation measures the same arrival, on the same stamp.
+    const days = await payrollService.getEmployeePeriodDays(employee.id, 2026, 6);
+    expect(days.days.find((d) => d.date === DAY)!.lateMinutes).toBe(30);
+    expect(days.sessions.map((x) => [x.id, x.lateMinutes])).toEqual([
+      [night.id, 0],
+      [day.id, 30],
+    ]);
+    const summary = await payrollService.getPeriodSummary(2026, 6);
+    const row = summary.employees.find((e) => e.employeeId === employee.id)!;
+    expect([row.deviationDays, row.missingReasonDays]).toEqual([1, 0]);
+  });
+
+  it("a failing schedule lookup skips the question instead of failing the stamp", async () => {
+    const { user, employee } = await setup();
+    settings.attendanceReasonRequired = true;
+    const logged: string[] = [];
+    const broken = createTimeReportService(
+      timeReportRepository,
+      mfgService,
+      periodLocks,
+      audit,
+      deps({
+        calendar: {
+          resolveEmployeeCalendar: async () => {
+            throw new Error("calendar down");
+          },
+        },
+        previewDay: async () => {
+          throw new Error("payroll down");
+        },
+        log: (msg) => logged.push(msg),
+      })
+    );
+    settings.terminalOvertimeChoice = true;
+    now = at("09:00:00");
+    const opened = await broken.attendanceIn({ employeeId: employee.id }, user.id);
+    now = at("12:00:00");
+    const { session: closed } = await broken.attendanceOut(opened.id, user.id);
+    expect(closed.stoppedAt).toEqual(at("12:00:00"));
+    expect(logged).toHaveLength(3); // sen ankomst, tidig hemgång, övertid
+  });
+
   it("refuses an unknown or inactive reason with 400 attendance-reason-invalid", async () => {
     const { user, employee, traffic } = await setup();
     await db.update(attendanceDeviationReasons).set({ active: false }).where(eq(attendanceDeviationReasons.id, traffic.id));
@@ -326,6 +384,34 @@ describe("tidig hemgång", () => {
     const own = await atfRepository.createAtfTransaction(employee.id, { date: DAY, type: "withdrawal", minutes: 180 }, user.id);
     const { session: closed } = await service.attendanceOut(opened.id, user.id, { atfTransactionId: own.id });
     expect([closed.stoppedAt, closed.stopReasonId]).toEqual([at("12:00:00"), null]);
+  });
+
+  it("any ATF withdrawal today explains leaving early — also without its id, as in the attestation", async () => {
+    const { user, employee } = await setup();
+    settings.attendanceReasonRequired = true;
+    const opened = await service.attendanceIn({ employeeId: employee.id }, user.id);
+    now = at("12:00:00");
+    // Registered earlier in the day (e.g. by the supervisor), not via Ta ut ATF now.
+    await atfRepository.createAtfTransaction(employee.id, { date: DAY, type: "withdrawal", minutes: 240 }, user.id);
+    const { session: closed } = await service.attendanceOut(opened.id, user.id);
+    expect([closed.stoppedAt, closed.stopReasonId]).toEqual([at("12:00:00"), null]);
+
+    const summary = await payrollService.getPeriodSummary(2026, 6);
+    const row = summary.employees.find((e) => e.employeeId === employee.id)!;
+    expect([row.deviationDays, row.missingReasonDays]).toEqual([1, 0]);
+  });
+
+  it("a Gå hem closing an attendance from an earlier day asks for no reason", async () => {
+    const { user, employee } = await setup();
+    Object.assign(settings, { attendanceReasonRequired: true, terminalOvertimeChoice: true });
+    // Worked through the night: in yesterday 22:00, home today 15:00 —
+    // before the schedule's 16:00 end, but not a departure from today.
+    now = at("22:00:00", PREV);
+    const opened = await service.attendanceIn({ employeeId: employee.id }, user.id);
+    now = at("15:00:00");
+    const { session: closed } = await service.attendanceOut(opened.id, user.id);
+    expect([closed.stoppedAt, closed.stopReasonId]).toEqual([at("15:00:00"), null]);
+    expect(await db.select().from(overtimeDispositions)).toHaveLength(0);
   });
 });
 
@@ -484,6 +570,37 @@ describe("attesteringen", () => {
 
     const cleared = await service.updateAttendanceSession(opened.id, { startReasonId: null, startNote: null }, user.id);
     expect([cleared.startReasonId, cleared.startNote, cleared.stopReasonId]).toEqual([null, null, doctor.id]);
+  });
+
+  it("a correction that loses the race against Gå hem writes nothing and answers 409", async () => {
+    const { user, employee, traffic } = await setup();
+    const opened = await service.attendanceIn({ employeeId: employee.id }, user.id);
+    // The supervisor reads the still-open session; Gå hem lands before the
+    // correction is written.
+    const racing = createTimeReportService(
+      {
+        ...timeReportRepository,
+        async correctAttendanceWithWork(...args: Parameters<typeof timeReportRepository.correctAttendanceWithWork>) {
+          now = at("15:00:00");
+          await service.attendanceOut(opened.id, user.id);
+          return timeReportRepository.correctAttendanceWithWork(...args);
+        },
+      },
+      mfgService,
+      periodLocks,
+      audit,
+      deps()
+    );
+    await expect(
+      racing.updateAttendanceSession(opened.id, { startReasonId: traffic.id }, user.id)
+    ).rejects.toBeInstanceOf(AttendanceSessionChangedError);
+    const stored = await session(opened.id);
+    // Still stopped by Gå hem — not reopened by the stale read — and no reason written.
+    expect([stored.stoppedAt, stored.startReasonId]).toEqual([at("15:00:00"), null]);
+
+    // Made again on the fresh session it goes through and only touches the reason.
+    const updated = await service.updateAttendanceSession(opened.id, { startReasonId: traffic.id }, user.id);
+    expect([updated.stoppedAt, updated.startReasonId]).toEqual([at("15:00:00"), traffic.id]);
   });
 
   it("shows the deviations and the reasons in the period", async () => {

@@ -31,6 +31,7 @@ import {
   AttendanceReasonInvalidError,
   assessArrival,
   assessDeparture,
+  scheduledWindow,
   type DeviationDaySchedule,
   type OvertimeQuestion,
 } from "./attendance-deviation.js";
@@ -110,6 +111,16 @@ export class AttendanceSessionAlreadyStoppedError extends Error {
   }
 }
 
+// A supervisor's correction lost the race against a stamp (typically Gå hem
+// at the terminal) that changed the session's stop time after it was read —
+// nothing is written; the correction is made again on the fresh session.
+export class AttendanceSessionChangedError extends Error {
+  constructor(id: string) {
+    super(`Attendance session ${id} was changed while it was being corrected`);
+    this.name = "AttendanceSessionChangedError";
+  }
+}
+
 export class InvalidAttendanceIntervalError extends Error {
   constructor() {
     super("Stopped time must be after started time");
@@ -185,6 +196,9 @@ export interface AttendanceDeviationDeps {
   // Test seam (like the planning service's `today`): the instant attendance
   // stamps happen at. Defaults to the wall clock.
   now?: () => Date;
+  // Where a failing deviation check is reported (app.log in app.ts;
+  // console.error when left out). The check never fails a stamp.
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
 
 const toStampReason = (reason: AttendanceReasonInput | undefined): StampReason =>
@@ -211,17 +225,48 @@ export function createTimeReportService(
     return day?.daySchedule ?? null;
   }
 
+  // A stamp must never fail because the deviation check did: a failing
+  // lookup (schedule, payroll preview, settings) is logged and the question
+  // is skipped — the attestation still shows the deviation afterwards.
+  async function deviationCheck<T>(what: string, employeeId: string, fallback: T, check: () => Promise<T>): Promise<T> {
+    try {
+      return await check();
+    } catch (err) {
+      const extra = { employeeId, err: err instanceof Error ? { name: err.name, message: err.message } : String(err) };
+      if (deviations?.log) deviations.log(`Närvaroavvikelser: ${what} failed — question skipped`, extra);
+      else console.error(`Närvaroavvikelser: ${what} failed — question skipped`, extra);
+      return fallback;
+    }
+  }
+
   // Sen ankomst: asked before anything is written. Only with the setting on,
-  // no reason sent, an open payroll period and the day's first attendance.
-  async function assertArrivalReason(employeeId: string, at: Date, reason: AttendanceReasonInput | undefined) {
+  // no reason sent, an open payroll period, and only when this attendance
+  // becomes the day's first presence in the schedule window (payroll's
+  // rule — assessArrival). `closing` is the forgotten attendance that
+  // closeForgottenAndBegin closes at `stop` in the same transaction: it is
+  // judged with that stop time instead of as still open.
+  async function assertArrivalReason(
+    employeeId: string,
+    at: Date,
+    reason: AttendanceReasonInput | undefined,
+    closing?: { id: string; startedAt: Date; stop: Date }
+  ) {
     if (!deviations || reason) return;
-    const settings = await deviations.settings.getSettings();
-    if (!settings.attendanceReasonRequired) return;
     const date = localDateOf(at);
-    if (await periodLocks.isDateLocked(date)) return;
-    const firstOfDay = !(await repo.hasAttendanceStartedOnDay(employeeId, date));
-    if (!firstOfDay) return;
-    const late = assessArrival({ date, schedule: await scheduleOn(employeeId, date), at, firstOfDay, settings });
+    const late = await deviationCheck("sen ankomst", employeeId, null, async () => {
+      const settings = await deviations.settings.getSettings();
+      if (!settings.attendanceReasonRequired) return null;
+      if (await periodLocks.isDateLocked(date)) return null;
+      const schedule = await scheduleOn(employeeId, date);
+      const window = scheduledWindow(date, schedule);
+      if (!window || at.getTime() >= window.end) return null;
+      const from = new Date(window.start);
+      const to = new Date(window.end);
+      const earlierPresenceInWindow =
+        (closing !== undefined && closing.startedAt < to && closing.stop > from) ||
+        (await repo.hasAttendanceInWindow(employeeId, from, to, closing?.id));
+      return assessArrival({ date, schedule, at, earlierPresenceInWindow, settings });
+    });
     if (late?.requiresReason) {
       throw new AttendanceInputRequiredError({ kind: late.kind, minutes: late.minutes, scheduledTime: late.scheduledTime }, null);
     }
@@ -497,7 +542,7 @@ export function createTimeReportService(
       }
       // The forgotten stop time is an estimate and asks for no reason;
       // today's new attendance is judged like any other.
-      await assertArrivalReason(input.employeeId, now, input.reason);
+      await assertArrivalReason(input.employeeId, now, input.reason, { id: open.id, startedAt: open.startedAt, stop });
       const session = await repo.closeForgottenAndBegin(
         input.employeeId,
         open.id,
@@ -541,7 +586,9 @@ export function createTimeReportService(
 
       if (input.reason) await assertActiveReason(input.reason.reasonId);
       if (input.atfTransactionId) {
-        // Today's withdrawal by this employee — Ta ut ATF made it just now.
+        // Kept for older terminals: the id Ta ut ATF sends must be today's
+        // withdrawal by this employee. The exemption itself no longer needs
+        // it — any withdrawal that day explains leaving early (below).
         const atf = await repo.findAtfTransactionById(input.atfTransactionId);
         if (!atf || atf.employeeId !== session.employeeId || atf.type !== "withdrawal" || atf.date !== date) {
           throw new AtfTransactionMismatchError(input.atfTransactionId);
@@ -550,33 +597,43 @@ export function createTimeReportService(
 
       let disposition: OvertimeDisposition | null = null;
       if (deviations && !(await periodLocks.isDateLocked(date))) {
-        const settings = await deviations.settings.getSettings();
+        const settings = await deviationCheck("settings", session.employeeId, null, () => deviations.settings.getSettings());
         let reasonQuestion: { kind: "late" | "early"; minutes: number; scheduledTime: string } | null = null;
         let overtimeQuestion: OvertimeQuestion | null = null;
 
-        if (settings.attendanceReasonRequired && !input.reason) {
-          const early = assessDeparture({
-            date,
-            schedule: await scheduleOn(session.employeeId, date),
-            at,
-            atfWithdrawal: input.atfTransactionId !== undefined,
-            settings,
-          });
+        // An attendance open since an earlier day is a forgotten Gå hem (or a
+        // night shift past midnight): its stop time is not a departure from
+        // today's schedule and its "overtime" is the night, which the
+        // supervisor corrects — asking about either would only store a
+        // meaningless answer.
+        const sameDay = localDateOf(session.startedAt) === date;
+
+        if (settings?.attendanceReasonRequired && !input.reason && sameDay) {
+          const early = await deviationCheck("tidig hemgång", session.employeeId, null, async () =>
+            assessDeparture({
+              date,
+              schedule: await scheduleOn(session.employeeId, date),
+              startedAt: session.startedAt,
+              at,
+              // Ta ut ATF: the same rule as the attestation's Avvikelser.
+              atfWithdrawal:
+                input.atfTransactionId !== undefined || (await repo.hasAtfWithdrawalOnDay(session.employeeId, date)),
+              settings,
+            })
+          );
           if (early?.requiresReason) {
             reasonQuestion = { kind: early.kind, minutes: early.minutes, scheduledTime: early.scheduledTime };
           }
         }
 
-        // An attendance open since an earlier day is a forgotten Gå hem — its
-        // "overtime" is the night, which the supervisor corrects; asking the
-        // employee about it would only store a meaningless choice.
-        const sameDay = localDateOf(session.startedAt) === date;
-        if (settings.terminalOvertimeChoice && !input.overtimeDisposition && sameDay) {
-          const day = await deviations.previewDay(session.employeeId, date, { closeOpenAt: at });
-          const minutes = day.overtimeMinutes + day.overtimeOffScheduleMinutes;
-          if (minutes > 0) {
-            overtimeQuestion = { minutes, offSchedule: day.overtimeOffScheduleMinutes > 0, current: day.overtimeDisposition };
-          }
+        if (settings?.terminalOvertimeChoice && !input.overtimeDisposition && sameDay) {
+          overtimeQuestion = await deviationCheck("övertid", session.employeeId, null, async () => {
+            const day = await deviations.previewDay(session.employeeId, date, { closeOpenAt: at });
+            const minutes = day.overtimeMinutes + day.overtimeOffScheduleMinutes;
+            return minutes > 0
+              ? { minutes, offSchedule: day.overtimeOffScheduleMinutes > 0, current: day.overtimeDisposition }
+              : null;
+          });
         }
 
         if (reasonQuestion || overtimeQuestion) throw new AttendanceInputRequiredError(reasonQuestion, overtimeQuestion);
@@ -683,11 +740,23 @@ export function createTimeReportService(
           : existing.stoppedAt !== null && newStoppedAt !== null && newStoppedAt.getTime() !== existing.stoppedAt.getTime()
             ? { kind: "move" as const, employeeId: existing.employeeId, from: existing.stoppedAt, to: newStoppedAt }
             : null;
+      // Only what the supervisor changed is written, and only while the stop
+      // time is still the one read above (a Gå hem in between ⇒ 409).
+      const patch = {
+        ...(input.startedAt !== undefined ? { startedAt: newStartedAt } : {}),
+        ...(input.stoppedAt !== undefined ? { stoppedAt: newStoppedAt } : {}),
+        ...(input.startReasonId !== undefined ? { startReasonId: reasons.startReasonId } : {}),
+        ...(input.startNote !== undefined ? { startNote: reasons.startNote } : {}),
+        ...(input.stopReasonId !== undefined ? { stopReasonId: reasons.stopReasonId } : {}),
+        ...(input.stopNote !== undefined ? { stopNote: reasons.stopNote } : {}),
+      };
       const { session: updated, pausedWorkSessions, movedPauses } = await repo.correctAttendanceWithWork(
         id,
-        { startedAt: newStartedAt, stoppedAt: newStoppedAt, ...reasons },
+        patch,
+        existing.stoppedAt,
         effect
       );
+      if (!updated) throw new AttendanceSessionChangedError(id);
 
       await audit.log({
         entityType: "attendance_session",
@@ -707,7 +776,7 @@ export function createTimeReportService(
         },
         userId,
       });
-      return { ...updated!, pausedWorkSessions, movedPauses };
+      return { ...updated, pausedWorkSessions, movedPauses };
     },
 
     // Deleting does NOT touch stamp sessions — work stamps are independent

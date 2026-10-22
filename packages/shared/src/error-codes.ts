@@ -33,6 +33,8 @@ export const ERROR_CODES = {
   ATTENDANCE_INPUT_REQUIRED: "attendance-input-required",
   ATTENDANCE_REASON_INVALID: "attendance-reason-invalid",
   ATF_TRANSACTION_MISMATCH: "atf-transaction-mismatch",
+  // A supervisor's correction raced a stamp that changed the session
+  ATTENDANCE_SESSION_CHANGED: "attendance-session-changed",
   INVALID_STOP_TIME: "invalid-stop-time",
   STAMP_SESSION_ALREADY_STOPPED: "stamp-session-already-stopped",
   STOP_TIME_NOT_ALLOWED: "stop-time-not-allowed",

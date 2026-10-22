@@ -18,6 +18,7 @@ import {
   AlreadyStampedInError,
   AttendanceOpenFromEarlierDayError,
   AttendanceSessionAlreadyStoppedError,
+  AttendanceSessionChangedError,
   AttendanceSessionNotFoundError,
   DuplicateEmployeeNumberError,
   EmployeeNotFoundError,
@@ -242,7 +243,11 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
         if (err instanceof InvalidAttendanceIntervalError || err instanceof AttendanceReasonInvalidError) {
           return reply.code(400).send(errorBody(err));
         }
-        if (err instanceof AlreadyPresentError || err instanceof PayrollPeriodLockedError) {
+        if (
+          err instanceof AlreadyPresentError ||
+          err instanceof PayrollPeriodLockedError ||
+          err instanceof AttendanceSessionChangedError
+        ) {
           return reply.code(409).send(errorBody(err));
         }
         throw err;

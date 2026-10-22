@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, or, sql, getTableColumns } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, ne, or, sql, getTableColumns } from "drizzle-orm";
 import {
   absences,
   articles,
@@ -337,17 +337,22 @@ export function createTimeReportRepository(db: Db) {
       return row!;
     },
 
-    // "The day's first attendance" for sen ankomst: has any attendance of
-    // the employee started on this Stockholm day already (closed or not)?
-    // The zone is explicit, like localDateOf — the container may run UTC.
-    async hasAttendanceStartedOnDay(employeeId: string, date: string) {
+    // Sen ankomst: does an attendance of the employee already overlap the
+    // schedule window [from, to) — closed or still open? The arrival is only
+    // asked about when it becomes the day's first presence in the window
+    // (overlapsScheduleWindow, the payroll rule). `excludeId` leaves out the
+    // forgotten attendance closeForgottenAndBegin is about to close (its
+    // stop time is judged by the caller).
+    async hasAttendanceInWindow(employeeId: string, from: Date, to: Date, excludeId?: string) {
       const [row] = await db
         .select({ id: attendanceSessions.id })
         .from(attendanceSessions)
         .where(
           and(
             eq(attendanceSessions.employeeId, employeeId),
-            sql`(${attendanceSessions.startedAt} at time zone 'Europe/Stockholm')::date = ${date}::date`
+            lt(attendanceSessions.startedAt, to),
+            or(isNull(attendanceSessions.stoppedAt), gt(attendanceSessions.stoppedAt, from)),
+            excludeId ? ne(attendanceSessions.id, excludeId) : undefined
           )
         )
         .limit(1);
@@ -368,6 +373,24 @@ export function createTimeReportRepository(db: Db) {
     async findAtfTransactionById(id: string) {
       const [row] = await db.select().from(atfTransactions).where(eq(atfTransactions.id, id));
       return row ?? null;
+    },
+
+    // Tidig hemgång: any ATF withdrawal by the employee dated this day
+    // explains leaving early — the same rule as the attestation's
+    // Avvikelser (a day with ATF minutes never misses a reason).
+    async hasAtfWithdrawalOnDay(employeeId: string, date: string) {
+      const [row] = await db
+        .select({ id: atfTransactions.id })
+        .from(atfTransactions)
+        .where(
+          and(
+            eq(atfTransactions.employeeId, employeeId),
+            eq(atfTransactions.type, "withdrawal"),
+            eq(atfTransactions.date, date)
+          )
+        )
+        .limit(1);
+      return row !== undefined;
     },
 
     async findAttendanceSessionById(id: string) {
@@ -463,27 +486,42 @@ export function createTimeReportRepository(db: Db) {
     // work still paused since the old stop (2 s tolerance: Gå hem used to
     // stamp the pause and the stop with separate clocks) follows to the new
     // one. Work resumed since is never touched.
+    //
+    // The patch carries only the columns the supervisor changed, and the
+    // write is conditional on the stop time the service read
+    // (`expectedStoppedAt`, compared to the millisecond like the freight
+    // module's optimistic writes — JS dates have ms, Postgres µs): a Gå hem
+    // at the terminal in between would otherwise be undone by a correction
+    // that only meant to change a reason (it would write the stale
+    // "still open" back). A miss returns `session: null` with nothing
+    // written; the service answers 409.
     async correctAttendanceWithWork(
       id: string,
-      patch: {
+      patch: Partial<{
         startedAt: Date;
         stoppedAt: Date | null;
         startReasonId: string | null;
         startNote: string | null;
         stopReasonId: string | null;
         stopNote: string | null;
-      },
+      }>,
+      expectedStoppedAt: Date | null,
       effect:
         | { kind: "pause"; employeeId: string; at: Date }
         | { kind: "move"; employeeId: string; from: Date; to: Date }
         | null
     ) {
       return db.transaction(async (tx) => {
-        const [session] = await tx
-          .update(attendanceSessions)
-          .set(patch)
-          .where(eq(attendanceSessions.id, id))
-          .returning();
+        const unchangedStop =
+          expectedStoppedAt === null
+            ? isNull(attendanceSessions.stoppedAt)
+            : sql`abs(extract(epoch from (${attendanceSessions.stoppedAt} - ${expectedStoppedAt.toISOString()}::timestamptz))) < 0.001`;
+        const where = and(eq(attendanceSessions.id, id), unchangedStop);
+        const [session] =
+          Object.keys(patch).length === 0
+            ? await tx.select().from(attendanceSessions).where(where).for("update")
+            : await tx.update(attendanceSessions).set(patch).where(where).returning();
+        if (!session) return { session: null, pausedWorkSessions: 0, movedPauses: 0 };
         let pausedWorkSessions = 0;
         let movedPauses = 0;
         if (effect?.kind === "pause") {
@@ -516,7 +554,7 @@ export function createTimeReportRepository(db: Db) {
             .returning({ id: stampSessions.id });
           movedPauses = rows.length;
         }
-        return { session: session ?? null, pausedWorkSessions, movedPauses };
+        return { session, pausedWorkSessions, movedPauses };
       });
     },
 

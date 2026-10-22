@@ -607,6 +607,7 @@ export function buildApp(database: Db = db) {
       calendar: scheduleService,
       previewDay: (employeeId, date, opts) => payrollService.previewDay(employeeId, date, opts),
       dispositionWriter: { upsert: upsertOvertimeDispositionInTx },
+      log: (msg, extra) => app.log.error(extra ?? {}, msg),
     }
   );
   // Grundbokföring (B1): kontoplan, seeded from BAS. Reuses the same audit
