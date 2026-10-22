@@ -50,10 +50,15 @@ export type PayrollDay = DayComputation & {
 
 // Pre-feature snapshots (locked before overtime dispositions existed) lack
 // the decoration fields — read them as payout/default so old exports stay
-// byte-identical.
-function normalizePayrollDay(day: DayComputation & Partial<PayrollDay>): PayrollDay {
+// byte-identical. Snapshots locked before närvaroavvikelser lack the
+// late/early minutes — read as 0.
+export function normalizePayrollDay(
+  day: Omit<DayComputation, "lateMinutes" | "earlyLeaveMinutes"> & Partial<PayrollDay>
+): PayrollDay {
   return {
     ...day,
+    lateMinutes: day.lateMinutes ?? 0,
+    earlyLeaveMinutes: day.earlyLeaveMinutes ?? 0,
     overtimeDisposition: day.overtimeDisposition ?? "payout",
     overtimeDispositionSource: day.overtimeDispositionSource ?? "default",
   };
@@ -67,6 +72,11 @@ export interface AttendanceRow {
   employeeId: string;
   startedAt: Date;
   stoppedAt: Date | null;
+  // Avvikelseorsaker on the stamps (optional: test stubs may leave them out).
+  startReasonId?: string | null;
+  startNote?: string | null;
+  stopReasonId?: string | null;
+  stopNote?: string | null;
 }
 
 export interface AtfRow {
@@ -91,6 +101,12 @@ export interface PeriodEmployeeSummary {
   overtimeOffScheduleCompMinutes: number;
   atfMinutes: number;
   unaccountedMinutes: number;
+  // Närvaroavvikelser: days with a late arrival or early departure, and the
+  // ones among them beyond the reason tolerance whose stamp has no reason
+  // (the setting was off, or the time was corrected). Optional: snapshots
+  // locked before the feature lack them.
+  deviationDays?: number;
+  missingReasonDays?: number;
   openAttendance: boolean; // unstopped session started before period end
   attested: boolean;
   attestedAt: string | null;
@@ -158,6 +174,32 @@ function groupIntervalsByDate(sessions: AttendanceRow[]): Map<string, Interval[]
     }
   }
   return byDate;
+}
+
+// Avvikelser column: per day, the late arrival is the first presence's stamp
+// and the early departure the last one's (the same sessions the engine
+// measured — those touching the day, by start/stop). A day with an ATF
+// withdrawal never misses a reason for leaving early (Ta ut ATF explains it).
+function countDeviationDays(
+  days: DayComputation[],
+  sessions: AttendanceRow[],
+  toleranceMinutes: number
+): { deviationDays: number; missingReasonDays: number } {
+  const closed = sessions.filter((s) => s.stoppedAt !== null);
+  let deviationDays = 0;
+  let missingReasonDays = 0;
+  for (const day of days) {
+    if (day.lateMinutes <= 0 && day.earlyLeaveMinutes <= 0) continue;
+    deviationDays++;
+    const bounds = dayBounds(day.date);
+    const touching = closed.filter((s) => s.startedAt.getTime() < bounds.end && s.stoppedAt!.getTime() > bounds.start);
+    const first = touching.reduce<AttendanceRow | null>((a, b) => (a && a.startedAt <= b.startedAt ? a : b), null);
+    const last = touching.reduce<AttendanceRow | null>((a, b) => (a && a.stoppedAt! >= b.stoppedAt! ? a : b), null);
+    const lateMissing = day.lateMinutes > toleranceMinutes && !first?.startReasonId;
+    const earlyMissing = day.earlyLeaveMinutes > toleranceMinutes && day.atfMinutes === 0 && !last?.stopReasonId;
+    if (lateMissing || earlyMissing) missingReasonDays++;
+  }
+  return { deviationDays, missingReasonDays };
 }
 
 function sumBy<T>(items: T[], selector: (item: T) => number): number {
@@ -231,7 +273,12 @@ function computeDaysForEmployee(inputs: EmployeeDayInputs): PayrollDay[] {
       date,
       isHoliday: inputs.holidaySet.has(date),
       schedule: calendarDay?.daySchedule
-        ? { netMinutes: calendarDay.daySchedule.netMinutes, breaks: calendarDay.daySchedule.breaks }
+        ? {
+            netMinutes: calendarDay.daySchedule.netMinutes,
+            breaks: calendarDay.daySchedule.breaks,
+            startTime: calendarDay.daySchedule.startTime,
+            endTime: calendarDay.daySchedule.endTime,
+          }
         : null,
       attendance: attendanceByDate.get(date) ?? [],
       absences: absencesByDate.get(date) ?? [],
@@ -516,6 +563,9 @@ export function createPayrollService(
       // Overridden per day when that day's overtime is disposed as comp time.
       paxmlCodeOvertimeComp: string;
       paxmlCodeOvertimeOffScheduleComp: string;
+      // Närvaroavvikelser: the reason tolerance behind missingReasonDays
+      // (optional for stubs — the system default 5 applies).
+      attendanceReasonToleranceMinutes?: number;
     }>;
   },
   audit: AuditWriter,
@@ -637,6 +687,7 @@ export function createPayrollService(
           ),
           atfMinutes: sumBy(days, (d) => d.atfMinutes),
           unaccountedMinutes: sumBy(days, (d) => d.unaccountedMinutes),
+          ...countDeviationDays(days, employeeSessions, settingsRow.attendanceReasonToleranceMinutes ?? 5),
           // Already scoped to sessions started before the period's end by
           // the range query itself, so any open one here counts.
           openAttendance: employeeSessions.some((s) => s.stoppedAt === null),
@@ -845,6 +896,52 @@ export function createPayrollService(
         detail: { employeeId, date, disposition: row.disposition },
         userId,
       });
+    },
+
+    // --- Förhandsvisning av en dag (terminalens övertidsfråga) ---
+
+    // The payroll day as it would be with the employee's open attendance
+    // closed at `closeOpenAt` — computeDaysForEmployee with the day's own
+    // calendar, absences, ATF and overtime threshold. Writes nothing; the
+    // terminal's Gå hem asks for an overtime choice from it.
+    async previewDay(employeeId: string, date: string, opts: { closeOpenAt: Date }): Promise<PayrollDay> {
+      const employee = await requireEmployee(employeeId);
+      const window = attendanceWindow([date]);
+      const [calendar, holidayRows, obRuleRows, settingsRow, allSessions, allAtf, employeeAbsences, dispositionRows] =
+        await Promise.all([
+          schedule.resolveEmployeeCalendar(employeeId, date, date),
+          schedule.listHolidaysInRange(date, date),
+          repo.listObRules(),
+          settings.getSettings(),
+          attendance.listAttendanceSessionsInRange(window.from, window.to),
+          atf.listWithdrawalsInRange(date, date),
+          repo.listEmployeeAbsences(employeeId, date, date),
+          repo.listEmployeeOvertimeDispositions(employeeId, date, date),
+        ]);
+      const sessions = allSessions
+        .filter((s) => s.employeeId === employeeId)
+        .map((s) =>
+          s.stoppedAt === null && s.startedAt < opts.closeOpenAt ? { ...s, stoppedAt: opts.closeOpenAt } : s
+        );
+      const [day] = computeDaysForEmployee({
+        dates: [date],
+        holidaySet: new Set(holidayRows.map((h) => h.date)),
+        obRuleInputs: obRuleRows.map((r) => ({
+          code: r.code,
+          paxmlCode: r.paxmlCode,
+          dayKind: r.dayKind,
+          startTime: r.startTime,
+          endTime: r.endTime,
+        })),
+        overtimeThresholdMinutes: settingsRow.payrollOvertimeThresholdMinutes,
+        calendar,
+        sessions,
+        atfRows: allAtf.filter((a) => a.employeeId === employeeId),
+        absenceRows: employeeAbsences,
+        defaultDisposition: employee.overtimeCompensation,
+        dispositionByDate: new Map(dispositionRows.map((r) => [r.date, r.disposition])),
+      });
+      return day!;
     },
 
     // --- Löneperiod-sammanställning (period summary) ---
@@ -1116,7 +1213,7 @@ export function createPayrollService(
           ? (periodRow.summary as PeriodSummary)
           : null;
 
-      const [calendar, holidayRows, obRuleRows, settingsRow, allSessions, allAtf, employeeAbsences, dispositionRows] =
+      const [calendar, holidayRows, obRuleRows, settingsRow, allSessions, allAtf, employeeAbsences, dispositionRows, reasonRows] =
         await Promise.all([
           schedule.resolveEmployeeCalendar(employeeId, from, to),
           schedule.listHolidaysInRange(from, to),
@@ -1126,8 +1223,12 @@ export function createPayrollService(
           atf.listWithdrawalsInRange(from, to),
           repo.listEmployeeAbsences(employeeId, from, to),
           repo.listEmployeeOvertimeDispositions(employeeId, from, to),
+          // Inactive too: a session keeps the reason it was given.
+          repo.listAttendanceDeviationReasons(true),
         ]);
       const dispositionByDate = new Map(dispositionRows.map((r) => [r.date, r.disposition]));
+      const reasonById = new Map(reasonRows.map((r) => [r.id, { id: r.id, code: r.code, name: r.name }]));
+      const reasonOf = (id: string | null | undefined) => (id ? (reasonById.get(id) ?? null) : null);
 
       // The range readers cover every employee — no per-employee variant
       // exists (see the two new repo methods), so filter down here.
@@ -1169,6 +1270,10 @@ export function createPayrollService(
           date: localDateString(s.startedAt),
           startedAt: s.startedAt.toISOString(),
           stoppedAt: s.stoppedAt ? s.stoppedAt.toISOString() : null,
+          startReason: reasonOf(s.startReasonId),
+          startNote: s.startNote ?? null,
+          stopReason: reasonOf(s.stopReasonId),
+          stopNote: s.stopNote ?? null,
         })),
         absences: employeeAbsences.map((a) => ({
           id: a.id,

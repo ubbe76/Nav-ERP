@@ -58,7 +58,10 @@ import { requireAuthOrClient } from "./modules/oauth/middleware/oauth.middleware
 import { oauthRoutes } from "./modules/oauth/routes/oauth.routes.js";
 import { apiClientRoutes } from "./modules/oauth/routes/api-client.routes.js";
 import { configuratorRoutes } from "./modules/oauth/routes/configurator.routes.js";
-import { createPayrollRepository } from "./modules/payroll/repository/payroll.repository.js";
+import {
+  createPayrollRepository,
+  upsertOvertimeDispositionInTx,
+} from "./modules/payroll/repository/payroll.repository.js";
 import { createPlanningRepository } from "./modules/planning/repository/planning.repository.js";
 import { createReportsRepository } from "./modules/reports/repository/reports.repository.js";
 import { createReportsService } from "./modules/reports/service/reports.service.js";
@@ -560,14 +563,7 @@ export function buildApp(database: Db = db) {
   const oauthService = createOAuthService(createOAuthRepository(database), jwtSecret);
   // auditRepository is constructed earlier (ahead of purchase/sales) — see
   // that declaration's comment. Payroll/timereport reuse the same instance.
-  // Stamp in/out needs MO status transitions (auto-start, complete operation).
   const timeReportRepository = createTimeReportRepository(database);
-  const timeReportService = createTimeReportService(
-    timeReportRepository,
-    manufacturingService,
-    periodLockChecker,
-    auditRepository
-  );
   // Schedules and ATF share the employee register with the timereport
   // service; ATF also reads the system-wide accrual setting.
   const scheduleService = createScheduleService(
@@ -595,6 +591,23 @@ export function buildApp(database: Db = db) {
     auditRepository,
     systemService,
     documentPdfService
+  );
+  // Stamp in/out needs MO status transitions (auto-start, complete operation).
+  // Built after payroll (which never needs it) so Närvaroavvikelser can read
+  // the schedule and payroll's own day directly: the terminal's reason and
+  // overtime questions, and the overtime choice written in Gå hem's
+  // transaction.
+  const timeReportService = createTimeReportService(
+    timeReportRepository,
+    manufacturingService,
+    periodLockChecker,
+    auditRepository,
+    {
+      settings: systemService,
+      calendar: scheduleService,
+      previewDay: (employeeId, date, opts) => payrollService.previewDay(employeeId, date, opts),
+      dispositionWriter: { upsert: upsertOvertimeDispositionInTx },
+    }
   );
   // Grundbokföring (B1): kontoplan, seeded from BAS. Reuses the same audit
   // repository instance as payroll (not used by the account CRUD in this

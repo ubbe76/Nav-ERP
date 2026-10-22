@@ -9,6 +9,7 @@ import {
   payrollPeriods,
   users,
   type Db,
+  type Tx,
 } from "@navet/db";
 import type {
   CreateAbsenceInput,
@@ -26,6 +27,27 @@ const hhmm = (t: string) => t.slice(0, 5);
 
 function mapObRule(row: typeof obRules.$inferSelect) {
   return { ...row, startTime: hhmm(row.startTime), endTime: hhmm(row.endTime) };
+}
+
+// The day's overtime choice (Övertid ersätts som), one row per employee and
+// day. Db | Tx so the terminal's Gå hem writes it in the transaction that
+// closes the attendance (OvertimeDispositionWriter in timereport.service.ts).
+export async function upsertOvertimeDispositionInTx(
+  dbc: Db | Tx,
+  employeeId: string,
+  date: string,
+  disposition: OvertimeDisposition,
+  createdBy: string
+) {
+  const [row] = await dbc
+    .insert(overtimeDispositions)
+    .values({ employeeId, date, disposition, createdBy })
+    .onConflictDoUpdate({
+      target: [overtimeDispositions.employeeId, overtimeDispositions.date],
+      set: { disposition, createdBy },
+    })
+    .returning();
+  return row!;
 }
 
 // The absence-type/OB-rule tables carry extra columns beyond the base-data
@@ -215,15 +237,7 @@ export function createPayrollRepository(db: Db) {
       disposition: OvertimeDisposition,
       createdBy: string
     ) {
-      const [row] = await db
-        .insert(overtimeDispositions)
-        .values({ employeeId, date, disposition, createdBy })
-        .onConflictDoUpdate({
-          target: [overtimeDispositions.employeeId, overtimeDispositions.date],
-          set: { disposition, createdBy },
-        })
-        .returning();
-      return row!;
+      return upsertOvertimeDispositionInTx(db, employeeId, date, disposition, createdBy);
     },
 
     async deleteOvertimeDisposition(employeeId: string, date: string) {

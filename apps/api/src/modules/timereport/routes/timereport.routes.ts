@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
   attendanceInSchema,
+  attendanceOutSchema,
   createEmployeeSchema,
   createTimeReportSchema,
   listQuerySchema,
@@ -43,6 +44,12 @@ import { MaterialShortageError } from "../../manufacturing/service/manufacturing
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { timeReportExportColumns } from "../service/export-columns.js";
 import { errorBody } from "../../system/service/error-body.js";
+import {
+  AtfTransactionMismatchError,
+  AttendanceInputRequiredError,
+  AttendanceReasonInvalidError,
+  attendanceInputRequiredBody,
+} from "../service/attendance-deviation.js";
 
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
@@ -142,6 +149,9 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
       ) {
         return reply.code(409).send(errorBody(err));
       }
+      // Regel 5 can open the attendance, so it can need a sen ankomst reason.
+      if (err instanceof AttendanceInputRequiredError) return reply.code(409).send(attendanceInputRequiredBody(err));
+      if (err instanceof AttendanceReasonInvalidError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });
@@ -192,17 +202,26 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
       }
       if (err instanceof InvalidAttendanceIntervalError) return reply.code(400).send(errorBody(err));
       if (err instanceof PayrollPeriodLockedError) return reply.code(409).send(errorBody(err));
+      if (err instanceof AttendanceInputRequiredError) return reply.code(409).send(attendanceInputRequiredBody(err));
+      if (err instanceof AttendanceReasonInvalidError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });
 
+  // Gå hem. The body is optional (older terminals send none): an early
+  // departure's reason, the day's overtime choice, Ta ut ATF's withdrawal.
   app.post<{ Params: { id: string } }>("/attendance-sessions/:id/stop", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {
+    const input = attendanceOutSchema.parse(req.body ?? {});
     try {
-      return await service.attendanceOut(req.params.id, req.user!.id);
+      return await service.attendanceOut(req.params.id, req.user!.id, input);
     } catch (err) {
       if (err instanceof AttendanceSessionNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof AttendanceSessionAlreadyStoppedError || err instanceof InvalidStatusTransitionError) {
         return reply.code(409).send(errorBody(err));
+      }
+      if (err instanceof AttendanceInputRequiredError) return reply.code(409).send(attendanceInputRequiredBody(err));
+      if (err instanceof AttendanceReasonInvalidError || err instanceof AtfTransactionMismatchError) {
+        return reply.code(400).send(errorBody(err));
       }
       throw err;
     }
@@ -220,7 +239,9 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
         return await service.updateAttendanceSession(req.params.id, input, req.user!.id);
       } catch (err) {
         if (err instanceof AttendanceSessionNotFoundError) return reply.code(404).send(errorBody(err));
-        if (err instanceof InvalidAttendanceIntervalError) return reply.code(400).send(errorBody(err));
+        if (err instanceof InvalidAttendanceIntervalError || err instanceof AttendanceReasonInvalidError) {
+          return reply.code(400).send(errorBody(err));
+        }
         if (err instanceof AlreadyPresentError || err instanceof PayrollPeriodLockedError) {
           return reply.code(409).send(errorBody(err));
         }

@@ -8,6 +8,7 @@ import {
   subtractIntervals,
   type DayComputationInput,
 } from "../src/modules/payroll/service/payroll-day.js";
+import { normalizePayrollDay } from "../src/modules/payroll/service/payroll.service.js";
 
 // Pure unit tests for the day engine — no DB, no fixtures. This file still
 // runs inside the shared vitest suite (global-setup migrates the test DB),
@@ -213,5 +214,75 @@ describe("payroll day engine — interval helpers", () => {
   it("12. periodDates and periodRange build calendar-local month boundaries", () => {
     expect(periodDates(2026, 2)).toHaveLength(28);
     expect(periodRange(2026, 6)).toEqual({ from: "2026-06-01", to: "2026-06-30" });
+  });
+});
+
+describe("payroll day engine — sen ankomst och tidig hemgång", () => {
+  const scheduled: DayComputationInput = {
+    date: DAY,
+    isHoliday: false,
+    schedule: {
+      netMinutes: 480,
+      breaks: [{ type: "unpaid", startTime: "12:00", endTime: "13:00" }],
+      startTime: "07:00",
+      endTime: "16:00",
+    },
+    attendance: [],
+    absences: [],
+    atfMinutes: 0,
+    obRules: [],
+    overtimeThresholdMinutes: 0,
+  };
+
+  it("13. late from the first presence, early from the last — no tolerance", () => {
+    const day = computeEmployeeDay({
+      ...scheduled,
+      attendance: [iv(DAY, "07:12", "11:00"), iv(DAY, "13:00", "15:20")],
+    });
+    expect(day.lateMinutes).toBe(12);
+    expect(day.earlyLeaveMinutes).toBe(40);
+  });
+
+  it("14. on time (or early in, late out) is 0; a gap in the middle is neither", () => {
+    const day = computeEmployeeDay({
+      ...scheduled,
+      attendance: [iv(DAY, "06:50", "10:00"), iv(DAY, "10:30", "16:05")],
+    });
+    expect(day.lateMinutes).toBe(0);
+    expect(day.earlyLeaveMinutes).toBe(0);
+  });
+
+  it("15. 0 without a schedule, without presence, or without the schedule's clocks", () => {
+    const free = computeEmployeeDay({ ...scheduled, schedule: null, attendance: [iv(DAY, "10:00", "12:00")] });
+    expect([free.lateMinutes, free.earlyLeaveMinutes]).toEqual([0, 0]);
+    const absent = computeEmployeeDay(scheduled);
+    expect([absent.lateMinutes, absent.earlyLeaveMinutes]).toEqual([0, 0]);
+    const noClocks = computeEmployeeDay({
+      ...scheduled,
+      schedule: { netMinutes: 480, breaks: [] },
+      attendance: [iv(DAY, "09:00", "12:00")],
+    });
+    expect([noClocks.lateMinutes, noClocks.earlyLeaveMinutes]).toEqual([0, 0]);
+  });
+
+  it("16. an overnight session clipped at midnight is not late on the next day", () => {
+    const day = computeEmployeeDay({
+      ...scheduled,
+      date: NEXT_DAY,
+      attendance: [{ start: clockToMs(DAY, "22:00"), end: clockToMs(NEXT_DAY, "16:00") }],
+    });
+    expect(day.lateMinutes).toBe(0);
+    expect(day.earlyLeaveMinutes).toBe(0);
+  });
+
+  it("17. snapshots locked before the fields existed normalize to 0", () => {
+    const { lateMinutes: _late, earlyLeaveMinutes: _early, ...old } = computeEmployeeDay({
+      ...scheduled,
+      attendance: [iv(DAY, "07:30", "16:00")],
+    });
+    const normalized = normalizePayrollDay(old);
+    expect(normalized.lateMinutes).toBe(0);
+    expect(normalized.earlyLeaveMinutes).toBe(0);
+    expect(normalized.overtimeDisposition).toBe("payout");
   });
 });

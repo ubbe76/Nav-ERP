@@ -1,5 +1,8 @@
 import type {
   AttendanceInInput,
+  AttendanceOutInput,
+  AttendanceReasonInput,
+  OvertimeDisposition,
   CreateEmployeeInput,
   CreateTimeReportInput,
   ListQuery,
@@ -9,7 +12,8 @@ import type {
   UpdateEmployeeInput,
   UpdateTimeReportInput,
 } from "@navet/shared";
-import type { TimeReportRepository } from "../repository/timereport.repository.js";
+import type { Tx } from "@navet/db";
+import type { StampReason, TimeReportRepository } from "../repository/timereport.repository.js";
 import { localDateOf, stampedHours } from "../repository/stamp-close.js";
 import type { ManufacturingService } from "../../manufacturing/service/manufacturing.service.js";
 import {
@@ -21,6 +25,15 @@ import {
 import { PayrollPeriodLockedError, type PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
+import {
+  AtfTransactionMismatchError,
+  AttendanceInputRequiredError,
+  AttendanceReasonInvalidError,
+  assessArrival,
+  assessDeparture,
+  type DeviationDaySchedule,
+  type OvertimeQuestion,
+} from "./attendance-deviation.js";
 
 export class EmployeeNotFoundError extends Error {
   constructor(id: string) {
@@ -135,17 +148,90 @@ export class WeekScheduleNotFoundError extends Error {
   }
 }
 
+// The day's overtime choice, written inside Gå hem's own transaction — the
+// payroll repository's upsertOvertimeDispositionInTx (Db | Tx).
+export interface OvertimeDispositionWriter {
+  upsert(tx: Tx, employeeId: string, date: string, disposition: OvertimeDisposition, createdBy: string): Promise<{ id: string }>;
+}
+
+// Närvaroavvikelser: what the attendance stamps need to ask for a reason and
+// an overtime choice. Optional — without it nothing is checked or asked
+// (the fixtures and older callers keep today's behaviour). Wired in app.ts:
+// settings = systemService, calendar = scheduleService, previewDay =
+// payrollService.previewDay, dispositionWriter = the payroll repository.
+export interface AttendanceDeviationDeps {
+  settings: {
+    getSettings(): Promise<{
+      attendanceReasonRequired: boolean;
+      attendanceReasonToleranceMinutes: number;
+      terminalOvertimeChoice: boolean;
+    }>;
+  };
+  calendar: {
+    resolveEmployeeCalendar(
+      employeeId: string,
+      from: string,
+      to: string
+    ): Promise<{ date: string; daySchedule: DeviationDaySchedule | null }[]>;
+  };
+  // The payroll day as it would be with the open attendance closed at
+  // `closeOpenAt` — lönens egen computeEmployeeDay, nothing written.
+  previewDay(
+    employeeId: string,
+    date: string,
+    opts: { closeOpenAt: Date }
+  ): Promise<{ overtimeMinutes: number; overtimeOffScheduleMinutes: number; overtimeDisposition: OvertimeDisposition }>;
+  dispositionWriter: OvertimeDispositionWriter;
+  // Test seam (like the planning service's `today`): the instant attendance
+  // stamps happen at. Defaults to the wall clock.
+  now?: () => Date;
+}
+
+const toStampReason = (reason: AttendanceReasonInput | undefined): StampReason =>
+  reason ? { reasonId: reason.reasonId, note: reason.note ? reason.note : null } : { reasonId: null, note: null };
+
 export function createTimeReportService(
   repo: TimeReportRepository,
   manufacturing: ManufacturingService,
   periodLocks: PeriodLockChecker,
-  audit: AuditWriter
+  audit: AuditWriter,
+  deviations?: AttendanceDeviationDeps
 ) {
+  const clock = deviations?.now ?? (() => new Date());
+
+  // A reason must exist and be active to be chosen at the terminal
+  // (inactive ones stay on old sessions as history).
+  async function assertActiveReason(reasonId: string) {
+    const reason = await repo.findAttendanceDeviationReason(reasonId);
+    if (!reason || !reason.active) throw new AttendanceReasonInvalidError(reasonId);
+  }
+
+  async function scheduleOn(employeeId: string, date: string) {
+    const [day] = await deviations!.calendar.resolveEmployeeCalendar(employeeId, date, date);
+    return day?.daySchedule ?? null;
+  }
+
+  // Sen ankomst: asked before anything is written. Only with the setting on,
+  // no reason sent, an open payroll period and the day's first attendance.
+  async function assertArrivalReason(employeeId: string, at: Date, reason: AttendanceReasonInput | undefined) {
+    if (!deviations || reason) return;
+    const settings = await deviations.settings.getSettings();
+    if (!settings.attendanceReasonRequired) return;
+    const date = localDateOf(at);
+    if (await periodLocks.isDateLocked(date)) return;
+    const firstOfDay = !(await repo.hasAttendanceStartedOnDay(employeeId, date));
+    if (!firstOfDay) return;
+    const late = assessArrival({ date, schedule: await scheduleOn(employeeId, date), at, firstOfDay, settings });
+    if (late?.requiresReason) {
+      throw new AttendanceInputRequiredError({ kind: late.kind, minutes: late.minutes, scheduledTime: late.scheduledTime }, null);
+    }
+  }
+
   // Regel 5 shares this with attendanceIn: resume work paused by the
-  // previous Gå hem, then open the attendance.
-  async function beginAttendance(employeeId: string, createdBy: string) {
-    await repo.resumeStampSessions(employeeId, new Date());
-    return repo.createAttendanceSession(employeeId, createdBy);
+  // previous Gå hem, then open the attendance (with its sen ankomst reason).
+  async function beginAttendance(employeeId: string, createdBy: string, at: Date, reason?: AttendanceReasonInput) {
+    await repo.resumeStampSessions(employeeId, at);
+    return repo.createAttendanceSession(employeeId, createdBy, toStampReason(reason), at);
   }
 
   // Stämpla ut: closes the session, materializes the time report and
@@ -323,16 +409,23 @@ export function createTimeReportService(
         throw new AlreadyStampedInError();
       }
 
+      // Regel 5: stamping in on work means the employee is here — without
+      // an open attendance the stamp clocks them in too (and resumes work
+      // paused by the previous Gå hem, exactly like Kom). That can need a
+      // sen ankomst reason, asked before anything (the order's start) is
+      // written.
+      const startsAttendance = !(await repo.hasOpenAttendanceSession(input.employeeId));
+      const at = clock();
+      if (input.attendanceReason) await assertActiveReason(input.attendanceReason.reasonId);
+      if (startsAttendance) await assertArrivalReason(input.employeeId, at, input.attendanceReason);
+
       if (order.status === "released") {
         await manufacturing.start(order.id);
       }
 
-      // Regel 5: stamping in on work means the employee is here — without
-      // an open attendance the stamp clocks them in too (and resumes work
-      // paused by the previous Gå hem, exactly like Kom).
       let attendanceStarted = false;
-      if (!(await repo.hasOpenAttendanceSession(input.employeeId))) {
-        await beginAttendance(input.employeeId, createdBy);
+      if (startsAttendance) {
+        await beginAttendance(input.employeeId, createdBy, at, input.attendanceReason);
         attendanceStarted = true;
       }
       const session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy);
@@ -381,13 +474,18 @@ export function createTimeReportService(
       const employee = await repo.findEmployeeById(input.employeeId);
       if (!employee) throw new EmployeeNotFoundError(input.employeeId);
       if (!employee.active) throw new InactiveEmployeeError();
+      if (input.reason) await assertActiveReason(input.reason.reasonId);
       const open = await repo.findOpenAttendanceSession(input.employeeId);
       // Resume any work paused by the previous going-home — the pause folds
       // into pausedSeconds and is excluded from reported hours.
-      if (!open) return beginAttendance(input.employeeId, createdBy);
+      const now = clock();
+      if (!open) {
+        await assertArrivalReason(input.employeeId, now, input.reason);
+        return beginAttendance(input.employeeId, createdBy, now, input.reason);
+      }
 
       // Stockholm days (localDateOf) — the container's own zone may be UTC.
-      const today = localDateOf(new Date());
+      const today = localDateOf(now);
       if (localDateOf(open.startedAt) >= today) throw new AlreadyPresentError();
       if (!input.forgottenStoppedAt) throw new AttendanceOpenFromEarlierDayError(open.id, open.startedAt);
 
@@ -397,7 +495,17 @@ export function createTimeReportService(
       for (const date of new Set([localDateOf(open.startedAt), localDateOf(stop)])) {
         if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
       }
-      const session = await repo.closeForgottenAndBegin(input.employeeId, open.id, stop, new Date(), createdBy);
+      // The forgotten stop time is an estimate and asks for no reason;
+      // today's new attendance is judged like any other.
+      await assertArrivalReason(input.employeeId, now, input.reason);
+      const session = await repo.closeForgottenAndBegin(
+        input.employeeId,
+        open.id,
+        stop,
+        now,
+        createdBy,
+        toStampReason(input.reason)
+      );
       // Someone else closed it in between (double tap, retry) — they also
       // opened today's attendance.
       if (!session) throw new AlreadyPresentError();
@@ -414,20 +522,106 @@ export function createTimeReportService(
     // Närvarostämpling gå: going home PAUSES any open work stamps — the
     // employee stays stamped in, but the away time is excluded from reported
     // hours and the work resumes at the next attendance-in.
-    async attendanceOut(sessionId: string, createdBy: string) {
+    //
+    // Närvaroavvikelser: before anything is written the stop is judged at
+    // `at` — tidig hemgång (unless Ta ut ATF explains it) and, when the day
+    // gets overtime by payroll's own rule, how it is compensated. A missing
+    // answer is a 409 the terminal turns into its questions; the answers are
+    // stored in the same transaction that closes the attendance.
+    async attendanceOut(sessionId: string, createdBy: string, input: AttendanceOutInput = {}) {
       const session = await repo.findAttendanceSessionById(sessionId);
       if (!session) throw new AttendanceSessionNotFoundError(sessionId);
       if (session.stoppedAt) throw new AttendanceSessionAlreadyStoppedError();
 
-      // Open work stays stamped in but pauses — the away time is excluded
-      // from reported hours, and the work resumes at the next attendance-in.
-      // One instant for both, so a later correction of the stop time (regel
-      // 7) finds the pause exactly where the attendance stopped.
-      const at = new Date();
-      const pausedWorkSessions = await repo.pauseOpenStampSessions(session.employeeId, at);
+      // One instant for the judgement, the stop and the paused work, so a
+      // later correction of the stop time (regel 7) finds the pause exactly
+      // where the attendance stopped.
+      const at = clock();
+      const date = localDateOf(at);
 
-      const closed = await repo.closeAttendanceSession(sessionId, at);
-      return { session: closed!, pausedWorkSessions };
+      if (input.reason) await assertActiveReason(input.reason.reasonId);
+      if (input.atfTransactionId) {
+        // Today's withdrawal by this employee — Ta ut ATF made it just now.
+        const atf = await repo.findAtfTransactionById(input.atfTransactionId);
+        if (!atf || atf.employeeId !== session.employeeId || atf.type !== "withdrawal" || atf.date !== date) {
+          throw new AtfTransactionMismatchError(input.atfTransactionId);
+        }
+      }
+
+      let disposition: OvertimeDisposition | null = null;
+      if (deviations && !(await periodLocks.isDateLocked(date))) {
+        const settings = await deviations.settings.getSettings();
+        let reasonQuestion: { kind: "late" | "early"; minutes: number; scheduledTime: string } | null = null;
+        let overtimeQuestion: OvertimeQuestion | null = null;
+
+        if (settings.attendanceReasonRequired && !input.reason) {
+          const early = assessDeparture({
+            date,
+            schedule: await scheduleOn(session.employeeId, date),
+            at,
+            atfWithdrawal: input.atfTransactionId !== undefined,
+            settings,
+          });
+          if (early?.requiresReason) {
+            reasonQuestion = { kind: early.kind, minutes: early.minutes, scheduledTime: early.scheduledTime };
+          }
+        }
+
+        // An attendance open since an earlier day is a forgotten Gå hem — its
+        // "overtime" is the night, which the supervisor corrects; asking the
+        // employee about it would only store a meaningless choice.
+        const sameDay = localDateOf(session.startedAt) === date;
+        if (settings.terminalOvertimeChoice && !input.overtimeDisposition && sameDay) {
+          const day = await deviations.previewDay(session.employeeId, date, { closeOpenAt: at });
+          const minutes = day.overtimeMinutes + day.overtimeOffScheduleMinutes;
+          if (minutes > 0) {
+            overtimeQuestion = { minutes, offSchedule: day.overtimeOffScheduleMinutes > 0, current: day.overtimeDisposition };
+          }
+        }
+
+        if (reasonQuestion || overtimeQuestion) throw new AttendanceInputRequiredError(reasonQuestion, overtimeQuestion);
+        // A choice sent is stored (the last Gå hem of the day wins); in a
+        // locked period nothing is asked and nothing written.
+        disposition = input.overtimeDisposition ?? null;
+      }
+
+      let dispositionId: string | null = null;
+      const stopped = await repo.stopAttendance(sessionId, session.employeeId, at, toStampReason(input.reason), async (tx) => {
+        if (disposition) {
+          const row = await deviations!.dispositionWriter.upsert(tx, session.employeeId, date, disposition, createdBy);
+          dispositionId = row.id;
+        }
+      });
+      if (!stopped) throw new AttendanceSessionAlreadyStoppedError();
+
+      // Plain Gå hem was never logged (the session is the record); the log
+      // gets the answers the terminal collected.
+      if (input.reason || disposition || input.atfTransactionId) {
+        await audit.log({
+          entityType: "attendance_session",
+          entityId: sessionId,
+          action: "attendance_stopped",
+          detail: {
+            employeeId: session.employeeId,
+            stoppedAt: at,
+            stopReasonId: input.reason?.reasonId ?? null,
+            stopNote: input.reason?.note || null,
+            overtimeDisposition: disposition,
+            atfTransactionId: input.atfTransactionId ?? null,
+          },
+          userId: createdBy,
+        });
+      }
+      if (disposition && dispositionId) {
+        await audit.log({
+          entityType: "overtime_disposition",
+          entityId: dispositionId,
+          action: "set",
+          detail: { employeeId: session.employeeId, date, disposition, source: "terminal" },
+          userId: createdBy,
+        });
+      }
+      return stopped;
     },
 
     // Supervisor correction: merges the given fields onto the existing
@@ -466,6 +660,22 @@ export function createTimeReportService(
         if (await periodLocks.isDateLocked(date)) throw new PayrollPeriodLockedError(date);
       }
 
+      // The stamps' reasons: null clears, undefined keeps. A new reason must
+      // be active; the one already on the session may have been inactivated
+      // since and is kept as it is.
+      const reasons = {
+        startReasonId: input.startReasonId === undefined ? existing.startReasonId : input.startReasonId,
+        startNote: input.startNote === undefined ? existing.startNote : input.startNote || null,
+        stopReasonId: input.stopReasonId === undefined ? existing.stopReasonId : input.stopReasonId,
+        stopNote: input.stopNote === undefined ? existing.stopNote : input.stopNote || null,
+      };
+      if (reasons.startReasonId && reasons.startReasonId !== existing.startReasonId) {
+        await assertActiveReason(reasons.startReasonId);
+      }
+      if (reasons.stopReasonId && reasons.stopReasonId !== existing.stopReasonId) {
+        await assertActiveReason(reasons.stopReasonId);
+      }
+
       // Regel 7: the correction carries over to the employee's work stamps.
       const effect =
         existing.stoppedAt === null && newStoppedAt !== null
@@ -475,7 +685,7 @@ export function createTimeReportService(
             : null;
       const { session: updated, pausedWorkSessions, movedPauses } = await repo.correctAttendanceWithWork(
         id,
-        { startedAt: newStartedAt, stoppedAt: newStoppedAt },
+        { startedAt: newStartedAt, stoppedAt: newStoppedAt, ...reasons },
         effect
       );
 
@@ -485,8 +695,15 @@ export function createTimeReportService(
         action: "updated",
         detail: {
           employeeId: existing.employeeId,
-          before: { startedAt: existing.startedAt, stoppedAt: existing.stoppedAt },
-          after: { startedAt: newStartedAt, stoppedAt: newStoppedAt },
+          before: {
+            startedAt: existing.startedAt,
+            stoppedAt: existing.stoppedAt,
+            startReasonId: existing.startReasonId,
+            startNote: existing.startNote,
+            stopReasonId: existing.stopReasonId,
+            stopNote: existing.stopNote,
+          },
+          after: { startedAt: newStartedAt, stoppedAt: newStoppedAt, ...reasons },
         },
         userId,
       });

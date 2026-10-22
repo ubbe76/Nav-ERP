@@ -2126,6 +2126,33 @@ export interface AttendanceSession {
   employeeNumber: string;
   startedAt: string;
   stoppedAt: string | null;
+  // Avvikelseorsaker on the stamps (late start / early stop).
+  startReasonId: string | null;
+  startNote: string | null;
+  stopReasonId: string | null;
+  stopNote: string | null;
+}
+
+// 409 attendance-input-required from Stämpla in närvaro, Stämpla in (when it
+// opens the attendance) and Gå hem — the questions the terminal must ask
+// before sending the request again. Either or both can be set.
+export interface AttendanceInputRequiredBody {
+  error: string;
+  code: "attendance-input-required";
+  reason: { kind: "late" | "early"; minutes: number; scheduledTime: string } | null;
+  overtime: { minutes: number; offSchedule: boolean; current: OvertimeCompensation } | null;
+}
+
+// The answers: `reason` on POST /attendance-sessions, `attendanceReason` on
+// POST /stamp-sessions, and this body on POST /attendance-sessions/:id/stop.
+export interface AttendanceReasonInput {
+  reasonId: string;
+  note?: string;
+}
+export interface AttendanceOutInput {
+  reason?: AttendanceReasonInput;
+  overtimeDisposition?: OvertimeCompensation;
+  atfTransactionId?: string;
 }
 
 export interface TimeReport {
@@ -2564,6 +2591,10 @@ export interface DayComputation {
   // Optional: pre-feature locked snapshots lack the fields — read as payout.
   overtimeDisposition?: OvertimeCompensation;
   overtimeDispositionSource?: "default" | "override";
+  // Sen ankomst / tidig hemgång in minutes, no tolerance. Optional:
+  // snapshots locked before närvaroavvikelser lack them — read as 0.
+  lateMinutes?: number;
+  earlyLeaveMinutes?: number;
 }
 
 // Mirrors PeriodEmployeeSummary in payroll.service.ts. Note `absence`
@@ -2590,6 +2621,10 @@ export interface PeriodEmployeeSummary {
   // pre-feature locked snapshots lack them — read as 0.
   overtimeCompMinutes?: number;
   overtimeOffScheduleCompMinutes?: number;
+  // Avvikelser: days with late/early, and those beyond the tolerance whose
+  // stamp lacks a reason. Optional: older locked snapshots lack them.
+  deviationDays?: number;
+  missingReasonDays?: number;
 }
 
 // Mirrors PeriodSummary in payroll.service.ts — GET /periods/:year/:month.
@@ -2610,6 +2645,10 @@ export interface PeriodAttendanceSession {
   date: string; // local date of startedAt
   startedAt: string; // ISO instant
   stoppedAt: string | null; // null = still clocked in
+  startReason: { id: string; code: string; name: string } | null;
+  startNote: string | null;
+  stopReason: { id: string; code: string; name: string } | null;
+  stopNote: string | null;
 }
 
 export interface PeriodAbsenceRow {
@@ -3568,6 +3607,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",
   set: "Satt",
+  attendance_stopped: "Gick hem",
   cleared: "Rensad",
   attested: "Attesterad",
   unattested: "Attestering borttagen",

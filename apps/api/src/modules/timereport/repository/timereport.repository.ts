@@ -2,6 +2,8 @@ import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, o
 import {
   absences,
   articles,
+  atfTransactions,
+  attendanceDeviationReasons,
   attendanceSessions,
   employeeWorkCenters,
   employees,
@@ -12,6 +14,7 @@ import {
   weekSchedules,
   workCenters,
   type Db,
+  type Tx,
 } from "@navet/db";
 import {
   ilikePattern,
@@ -34,7 +37,33 @@ const timeReportListColumns = {
   source: sql<"terminal" | "manual">`case when ${stampSessions.id} is null then 'manual' else 'terminal' end`,
 };
 
+// A stamp's Avvikelseorsak as stored (null = none).
+export type StampReason = { reasonId: string | null; note: string | null };
+const NO_REASON: StampReason = { reasonId: null, note: null };
+
 export function createTimeReportRepository(db: Db) {
+  // Conditional: only a still-open attendance is closed, so two Gå hem at
+  // once (double tap, two terminals) close it once — null tells the caller.
+  async function closeAttendanceSession(id: string, stoppedAt: Date, reason: StampReason = NO_REASON, dbc: Db | Tx = db) {
+    const [row] = await dbc
+      .update(attendanceSessions)
+      .set({ stoppedAt, stopReasonId: reason.reasonId, stopNote: reason.note })
+      .where(and(eq(attendanceSessions.id, id), isNull(attendanceSessions.stoppedAt)))
+      .returning();
+    return row ?? null;
+  }
+
+  // Going home: open work stays stamped in but pauses — the away time is
+  // excluded from reported hours. Already-paused sessions are left as-is.
+  async function pauseOpenStampSessions(employeeId: string, at: Date, dbc: Db | Tx = db) {
+    const rows = await dbc
+      .update(stampSessions)
+      .set({ pausedAt: at })
+      .where(and(eq(stampSessions.employeeId, employeeId), isNull(stampSessions.stoppedAt), isNull(stampSessions.pausedAt)))
+      .returning({ id: stampSessions.id });
+    return rows.length;
+  }
+
   return {
     async createEmployee(input: CreateEmployeeInput) {
       const [row] = await db.insert(employees).values(input).returning();
@@ -300,9 +329,45 @@ export function createTimeReportRepository(db: Db) {
       });
     },
 
-    async createAttendanceSession(employeeId: string, createdBy: string) {
-      const [row] = await db.insert(attendanceSessions).values({ employeeId, createdBy }).returning();
+    async createAttendanceSession(employeeId: string, createdBy: string, reason: StampReason = NO_REASON, startedAt?: Date) {
+      const [row] = await db
+        .insert(attendanceSessions)
+        .values({ employeeId, createdBy, startReasonId: reason.reasonId, startNote: reason.note, startedAt })
+        .returning();
       return row!;
+    },
+
+    // "The day's first attendance" for sen ankomst: has any attendance of
+    // the employee started on this Stockholm day already (closed or not)?
+    // The zone is explicit, like localDateOf — the container may run UTC.
+    async hasAttendanceStartedOnDay(employeeId: string, date: string) {
+      const [row] = await db
+        .select({ id: attendanceSessions.id })
+        .from(attendanceSessions)
+        .where(
+          and(
+            eq(attendanceSessions.employeeId, employeeId),
+            sql`(${attendanceSessions.startedAt} at time zone 'Europe/Stockholm')::date = ${date}::date`
+          )
+        )
+        .limit(1);
+      return row !== undefined;
+    },
+
+    async findAttendanceDeviationReason(id: string) {
+      const [row] = await db.select().from(attendanceDeviationReasons).where(eq(attendanceDeviationReasons.id, id));
+      return row ?? null;
+    },
+
+    async listAttendanceDeviationReasonsByIds(ids: string[]) {
+      if (ids.length === 0) return [];
+      return db.select().from(attendanceDeviationReasons).where(inArray(attendanceDeviationReasons.id, ids));
+    },
+
+    // Ta ut ATF's withdrawal, for the early-departure exemption.
+    async findAtfTransactionById(id: string) {
+      const [row] = await db.select().from(atfTransactions).where(eq(atfTransactions.id, id));
+      return row ?? null;
     },
 
     async findAttendanceSessionById(id: string) {
@@ -352,6 +417,10 @@ export function createTimeReportRepository(db: Db) {
           employeeId: attendanceSessions.employeeId,
           startedAt: attendanceSessions.startedAt,
           stoppedAt: attendanceSessions.stoppedAt,
+          startReasonId: attendanceSessions.startReasonId,
+          startNote: attendanceSessions.startNote,
+          stopReasonId: attendanceSessions.stopReasonId,
+          stopNote: attendanceSessions.stopNote,
         })
         .from(attendanceSessions)
         .where(
@@ -363,13 +432,27 @@ export function createTimeReportRepository(db: Db) {
         .orderBy(attendanceSessions.startedAt);
     },
 
-    async closeAttendanceSession(id: string, stoppedAt: Date) {
-      const [row] = await db
-        .update(attendanceSessions)
-        .set({ stoppedAt })
-        .where(eq(attendanceSessions.id, id))
-        .returning();
-      return row ?? null;
+    closeAttendanceSession,
+
+    // Gå hem in one transaction: close the attendance (with its reason),
+    // pause the employee's open work at the same instant, then `inTx` — the
+    // day's overtime choice, written only after the close succeeded so a
+    // losing concurrent Gå hem writes nothing. Null when the attendance was
+    // already stopped.
+    async stopAttendance(
+      id: string,
+      employeeId: string,
+      at: Date,
+      reason: StampReason,
+      inTx: (tx: Tx) => Promise<void>
+    ) {
+      return db.transaction(async (tx) => {
+        const session = await closeAttendanceSession(id, at, reason, tx);
+        if (!session) return null;
+        const pausedWorkSessions = await pauseOpenStampSessions(employeeId, at, tx);
+        await inTx(tx);
+        return { session, pausedWorkSessions };
+      });
     },
 
     // Regel 7: a supervisor's attendance correction carries over to the work
@@ -382,7 +465,14 @@ export function createTimeReportRepository(db: Db) {
     // one. Work resumed since is never touched.
     async correctAttendanceWithWork(
       id: string,
-      patch: { startedAt: Date; stoppedAt: Date | null },
+      patch: {
+        startedAt: Date;
+        stoppedAt: Date | null;
+        startReasonId: string | null;
+        startNote: string | null;
+        stopReasonId: string | null;
+        stopNote: string | null;
+      },
       effect:
         | { kind: "pause"; employeeId: string; at: Date }
         | { kind: "move"; employeeId: string; from: Date; to: Date }
@@ -391,7 +481,7 @@ export function createTimeReportRepository(db: Db) {
       return db.transaction(async (tx) => {
         const [session] = await tx
           .update(attendanceSessions)
-          .set({ startedAt: patch.startedAt, stoppedAt: patch.stoppedAt })
+          .set(patch)
           .where(eq(attendanceSessions.id, id))
           .returning();
         let pausedWorkSessions = 0;
@@ -443,7 +533,8 @@ export function createTimeReportRepository(db: Db) {
       staleId: string,
       forgottenStoppedAt: Date,
       now: Date,
-      createdBy: string
+      createdBy: string,
+      reason: StampReason = NO_REASON
     ) {
       return db.transaction(async (tx) => {
         const closed = await tx
@@ -470,7 +561,10 @@ export function createTimeReportRepository(db: Db) {
             pausedAt: null,
           })
           .where(and(eq(stampSessions.employeeId, employeeId), isNull(stampSessions.stoppedAt), isNotNull(stampSessions.pausedAt)));
-        const [session] = await tx.insert(attendanceSessions).values({ employeeId, createdBy }).returning();
+        const [session] = await tx
+          .insert(attendanceSessions)
+          .values({ employeeId, createdBy, startReasonId: reason.reasonId, startNote: reason.note, startedAt: now })
+          .returning();
         return session!;
       });
     },
@@ -490,22 +584,7 @@ export function createTimeReportRepository(db: Db) {
       return rows.map((r) => r.id);
     },
 
-    // Going home: open work stays stamped in but pauses — the away time is
-    // excluded from reported hours. Already-paused sessions are left as-is.
-    async pauseOpenStampSessions(employeeId: string, at: Date) {
-      const rows = await db
-        .update(stampSessions)
-        .set({ pausedAt: at })
-        .where(
-          and(
-            eq(stampSessions.employeeId, employeeId),
-            isNull(stampSessions.stoppedAt),
-            isNull(stampSessions.pausedAt)
-          )
-        )
-        .returning({ id: stampSessions.id });
-      return rows.length;
-    },
+    pauseOpenStampSessions,
 
     // Attendance-in resumes paused work: the pause folds into pausedSeconds.
     async resumeStampSessions(employeeId: string, at: Date) {

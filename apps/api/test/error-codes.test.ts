@@ -65,6 +65,11 @@ import {
   StampSessionAlreadyStoppedError,
   StopTimeNotAllowedError,
 } from "../src/modules/timereport/service/timereport.service.js";
+import {
+  AtfTransactionMismatchError,
+  AttendanceInputRequiredError,
+  AttendanceReasonInvalidError,
+} from "../src/modules/timereport/service/attendance-deviation.js";
 
 import {
   AccountNotFoundError,
@@ -293,6 +298,9 @@ const cases: Array<[Error, string]> = [
   [new InvalidAttendanceIntervalError(), ERROR_CODES.INVALID_ATTENDANCE_INTERVAL],
   [new AlreadyPresentError(), ERROR_CODES.ALREADY_PRESENT],
   [new AttendanceOpenFromEarlierDayError("x", new Date()), ERROR_CODES.ATTENDANCE_OPEN_FROM_EARLIER_DAY],
+  [new AttendanceInputRequiredError(null, null), ERROR_CODES.ATTENDANCE_INPUT_REQUIRED],
+  [new AttendanceReasonInvalidError("x"), ERROR_CODES.ATTENDANCE_REASON_INVALID],
+  [new AtfTransactionMismatchError("x"), ERROR_CODES.ATF_TRANSACTION_MISMATCH],
   [new InvalidStopTimeError(), ERROR_CODES.INVALID_STOP_TIME],
   [new StampSessionAlreadyStoppedError(), ERROR_CODES.STAMP_SESSION_ALREADY_STOPPED],
   [new StopTimeNotAllowedError(), ERROR_CODES.STOP_TIME_NOT_ALLOWED],

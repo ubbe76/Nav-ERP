@@ -29,6 +29,10 @@ export const ERROR_CODES = {
   INVALID_ATTENDANCE_INTERVAL: "invalid-attendance-interval",
   ALREADY_PRESENT: "already-present",
   ATTENDANCE_OPEN_FROM_EARLIER_DAY: "attendance-open-from-earlier-day",
+  // Närvaroavvikelser: the terminal must ask for a reason / an overtime choice
+  ATTENDANCE_INPUT_REQUIRED: "attendance-input-required",
+  ATTENDANCE_REASON_INVALID: "attendance-reason-invalid",
+  ATF_TRANSACTION_MISMATCH: "atf-transaction-mismatch",
   INVALID_STOP_TIME: "invalid-stop-time",
   STAMP_SESSION_ALREADY_STOPPED: "stamp-session-already-stopped",
   STOP_TIME_NOT_ALLOWED: "stop-time-not-allowed",

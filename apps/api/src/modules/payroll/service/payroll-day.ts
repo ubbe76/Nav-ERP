@@ -21,6 +21,11 @@ export interface Interval {
 export interface DayScheduleInput {
   netMinutes: number;
   breaks: { type: "unpaid" | "paid"; startTime: string; endTime: string }[];
+  // The day schedule's clock times ("HH:MM") — sen ankomst / tidig hemgång
+  // are measured against them. Optional so callers that only need the
+  // worked/overtime arithmetic can leave them out (no deviation then).
+  startTime?: string;
+  endTime?: string;
 }
 
 export interface ObRuleInput {
@@ -52,6 +57,12 @@ export interface DayComputation {
   overtimeOffScheduleMinutes: number; // any work on schedule-free days
   atfMinutes: number;
   unaccountedMinutes: number; // scheduled not covered by work/absence/ATF
+  // Sen ankomst / tidig hemgång: the day's first presence after the
+  // schedule's start, and its last presence before the schedule's end — no
+  // tolerance (the terminal's question has one, the attestation shows the
+  // fact). 0 without a schedule, without presence, or when on time.
+  lateMinutes: number;
+  earlyLeaveMinutes: number;
 }
 
 /**
@@ -148,6 +159,21 @@ export function overlapMinutes(a: Interval[], b: Interval[]): number {
   return Math.floor(totalMs / 60000);
 }
 
+/**
+ * Sen ankomst: whole minutes from the schedule's start clock to `arrivedAt`
+ * (epoch ms), never negative. The single implementation — the terminal's
+ * question (timereport/service/attendance-deviation.ts) and the payroll day
+ * below both call it, so they can never disagree about a minute.
+ */
+export function lateMinutesOf(date: string, scheduleStart: string, arrivedAt: number): number {
+  return Math.max(0, Math.floor((arrivedAt - clockToMs(date, scheduleStart)) / 60000));
+}
+
+/** Tidig hemgång: whole minutes from `leftAt` (epoch ms) to the schedule's end clock, never negative. */
+export function earlyLeaveMinutesOf(date: string, scheduleEnd: string, leftAt: number): number {
+  return Math.max(0, Math.floor((clockToMs(date, scheduleEnd) - leftAt) / 60000));
+}
+
 function clip(iv: Interval, bounds: Interval): Interval {
   return { start: Math.max(iv.start, bounds.start), end: Math.min(iv.end, bounds.end) };
 }
@@ -215,6 +241,16 @@ export function computeEmployeeDay(input: DayComputationInput): DayComputation {
 
   const unaccountedMinutes = Math.max(0, scheduledMinutes - workedMinutes - absenceTotal - input.atfMinutes);
 
+  // Measured on the presence (before break subtraction): coming back from an
+  // unpaid lunch is not a late arrival. Only scheduled days (net time > 0).
+  const first = presence[0];
+  const last = presence[presence.length - 1];
+  const scheduled = input.schedule !== null && scheduledMinutes > 0;
+  const lateMinutes =
+    scheduled && first && input.schedule!.startTime ? lateMinutesOf(input.date, input.schedule!.startTime, first.start) : 0;
+  const earlyLeaveMinutes =
+    scheduled && last && input.schedule!.endTime ? earlyLeaveMinutesOf(input.date, input.schedule!.endTime, last.end) : 0;
+
   return {
     date: input.date,
     scheduledMinutes,
@@ -225,6 +261,8 @@ export function computeEmployeeDay(input: DayComputationInput): DayComputation {
     overtimeOffScheduleMinutes,
     atfMinutes: input.atfMinutes,
     unaccountedMinutes,
+    lateMinutes,
+    earlyLeaveMinutes,
   };
 }
 

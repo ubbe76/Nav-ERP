@@ -199,14 +199,35 @@ export function computeDayScheduleNetMinutes(schedule: {
   return gross - unpaid;
 }
 
-// Närvarostämpling (kom/gå) — clocking out needs no body.
+// Avvikelseorsak on a stamp: a reason from attendance_deviation_reasons plus
+// an optional comment. Asked for by the API (409 attendance-input-required)
+// when the stamp is late/early beyond the tolerance; stored whenever sent.
+export const attendanceReasonSchema = z.object({
+  reasonId: z.string().uuid(),
+  note: z.string().trim().max(500).optional(),
+});
+export type AttendanceReasonInput = z.infer<typeof attendanceReasonSchema>;
+
+// Närvarostämpling (kom/gå).
 export const attendanceInSchema = z.object({
   employeeId: z.string().uuid(),
   // Regel 8: when the employee went home on the day their still-open
   // attendance started (the terminal asks after a forgotten Gå hem).
   forgottenStoppedAt: z.string().datetime({ offset: true }).optional(),
+  // Sen ankomst: the reason for the new attendance's late start.
+  reason: attendanceReasonSchema.optional(),
 });
 export type AttendanceInInput = z.infer<typeof attendanceInSchema>;
+
+// Gå hem — the body is optional (older terminals send none): the reason for
+// an early departure, the day's overtime choice, and the ATF withdrawal a Ta
+// ut ATF just made (it explains the departure, so no reason is asked).
+export const attendanceOutSchema = z.object({
+  reason: attendanceReasonSchema.optional(),
+  overtimeDisposition: z.enum(overtimeDispositions).optional(),
+  atfTransactionId: z.string().uuid().optional(),
+});
+export type AttendanceOutInput = z.infer<typeof attendanceOutSchema>;
 
 export const createTimeReportSchema = z.object({
   employeeId: z.string().uuid(),
@@ -225,6 +246,11 @@ export const updateAttendanceSessionSchema = z
   .object({
     startedAt: z.string().datetime({ offset: true }).optional(),
     stoppedAt: z.string().datetime({ offset: true }).nullable().optional(),
+    // The stamps' reasons (Avvikelseorsaker) — null clears.
+    startReasonId: z.string().uuid().nullable().optional(),
+    startNote: z.string().trim().max(500).nullable().optional(),
+    stopReasonId: z.string().uuid().nullable().optional(),
+    stopNote: z.string().trim().max(500).nullable().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, "At least one field must be provided");
 export type UpdateAttendanceSessionInput = z.infer<typeof updateAttendanceSessionSchema>;
@@ -242,6 +268,9 @@ export type UpdateTimeReportInput = z.infer<typeof updateTimeReportSchema>;
 export const stampInSchema = z.object({
   employeeId: z.string().uuid(),
   moOperationId: z.string().uuid(),
+  // Regel 5: a stamp-in without attendance clocks the employee in, so it can
+  // need the same sen ankomst reason as Stämpla in närvaro.
+  attendanceReason: attendanceReasonSchema.optional(),
 });
 export type StampInInput = z.infer<typeof stampInSchema>;
 
