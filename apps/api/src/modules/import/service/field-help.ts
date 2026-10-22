@@ -14,6 +14,16 @@
 // made up (a stainless-steel catering furniture maker, like the demo data).
 import type { ImportEntity, ImportFieldHelp } from "@navet/shared";
 
+// The template-only extra: `text` columns get Excel's Text cell format in the
+// template (xlsx-writer's textColumns), because Excel would otherwise turn
+// what is typed there into a number or a date — 007 into 7, 0123 into 123, a
+// postal code or phone number into a number, 10 % into 0,1. Numbers, codes,
+// postal codes, phone numbers, org/VAT numbers and percentages. Not part of
+// the /fields answer (importFieldHelp strips it).
+export interface FieldHelpEntry extends ImportFieldHelp {
+  text?: boolean;
+}
+
 // Shared phrases — the planners' vocabularies are shared the same way.
 const DECIMAL = "decimalkomma eller punkt";
 const DECIMAL_CAP = "Decimalkomma eller punkt";
@@ -24,15 +34,16 @@ const UNTOUCHED = "Tom cell lämnar fältet orört på en befintlig post.";
 const ARTICLE_TYPE_WORDS =
   "Tillverkad (även M), Köpt (även P eller K), Tjänst (även Lego) eller Fiktiv (även F) — Fiktiv ger en tillverkad fantomartikel.";
 
-export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
+export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
   articles: [
     {
       field: "articleNumber",
       label: "Artikelnummer",
       required: true,
       header: "Artikelnummer",
+      text: true,
       description:
-        "Artikelns unika nummer, max 50 tecken. Finns numret redan uppdateras artikeln, annars skapas en ny. Textformatera kolumnen i Excel så att inledande nollor behålls.",
+        "Artikelns unika nummer, max 50 tecken. Finns numret redan uppdateras artikeln, annars skapas en ny. Mallens kolumn är textformaterad så att inledande nollor behålls.",
       example: "SB-1200",
     },
     {
@@ -56,6 +67,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Enhet",
       required: false,
       header: "Enhet",
+      text: true,
       description:
         "Grundenhetens kod, max 20 tecken (t.ex. st, kg, m). En okänd kod skapas i enhetsregistret med koden som namn; tom cell ger st för nya artiklar. Grundenheten ändras aldrig på befintliga artiklar.",
       example: "st",
@@ -65,6 +77,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Artikelgrupp (kod)",
       required: false,
       header: "Artikelgrupp (kod)",
+      text: true,
       description: `Artikelgruppens kod, 3–4 siffror. En kod som saknas i registret skapas med koden som namn. ${UNTOUCHED}`,
       example: "300",
     },
@@ -113,7 +126,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Beställningspunkt",
       required: false,
       header: "Beställningspunkt",
-      description: `Saldo i grundenhet där behovsberäkningen föreslår påfyllnad, ${DECIMAL}, aldrig negativt. 0 betyder ingen beställningspunkt och tömmer fältet; tom cell lämnar det orört.`,
+      description: `Nivån i grundenhet som behovsberäkningen fyller upp till: den jämför med det beräknade saldot (lager + inkommande − behov) och föreslår skillnaden när saldot ligger under. ${DECIMAL_CAP}, aldrig negativ. 0 betyder ingen beställningspunkt och tömmer fältet; tom cell lämnar det orört.`,
       example: "10",
     },
     {
@@ -122,7 +135,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "Orderkvantitet",
       description:
-        "Fast orderstorlek i grundenhet — förslag rundas upp till en multipel av den. Importeras bara när Partiformningsregel är Fast orderstorlek (eller den kolumnen inte är mappad). 0 tömmer fältet; tom cell lämnar det orört.",
+        "Fast orderstorlek i grundenhet — förslag rundas upp till en multipel av den. Importeras bara när Partiformningsregel är Fast orderstorlek eller den kolumnen saknas; finns kolumnen men är regeln något annat eller tom hoppas Orderkvantitet över med en varning. 0 tömmer fältet; tom cell lämnar det orört.",
       example: "25",
     },
     {
@@ -140,7 +153,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "Partiformningsregel",
       description:
-        "Lagras inte — styr bara om Orderkvantitet läses: Fast orderstorlek betyder att kvantiteten importeras, allt annat (t.ex. Mot behov) att den hoppas över på raden.",
+        "Lagras inte — styr bara om Orderkvantitet läses: Fast orderstorlek betyder att kvantiteten importeras, allt annat (t.ex. Mot behov) och tom cell att den hoppas över på raden, med en varning. Ta bort kolumnen för att alltid läsa Orderkvantitet.",
       example: "Fast orderstorlek",
     },
   ],
@@ -151,6 +164,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Artikelnummer",
       required: true,
       header: "Artikelnummer",
+      text: true,
       description: "Numret på en artikel som redan finns i artikelregistret.",
       example: "RS-12",
     },
@@ -159,6 +173,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Enhet",
       required: true,
       header: "Enhet",
+      text: true,
       description:
         "Den alternativa enhetens kod, max 20 tecken. En okänd kod skapas i enhetsregistret. Samma enhet och artikel får bara förekomma en gång i filen.",
       example: "m",
@@ -195,6 +210,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Artikelnummer",
       required: true,
       header: "Artikelnummer",
+      text: true,
       description:
         "Numret på en artikel som redan finns i artikelregistret. En artikel som inte är tillverkad importeras med en varning — operationen används inte vid tillverkning.",
       example: "SB-1200",
@@ -213,8 +229,9 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Resurs",
       required: true,
       header: "Resurs",
+      text: true,
       description:
-        "Resursens tresiffriga nummer i resursregistret (Tillverkning → Resurser) — resursen måste finnas. 1–2 siffror fylls på med nollor (7 blir 007). En legoresurs ger en lego-operation med tiderna 0.",
+        "Resursens tresiffriga nummer i resursregistret (Tillverkning → Resurser) — resursen måste finnas. 1–2 siffror fylls ut med nollor (7 blir 007). En legoresurs ger en lego-operation med tiderna 0.",
       example: "110",
     },
     {
@@ -239,7 +256,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "Tidsenhet",
       description:
-        "Enheten för Ställtid och Stycktid på raden: minuter/enhet (även min), antal/timme (även st/h — ställtiden då i timmar), timmar/enhet (även tim eller h) eller sekunder/enhet (även sek eller s). Tom cell betyder minuter; ett okänt ord ger ett fel. Lagringen är alltid minuter; antal/timme sparas med visningsenheten st/h.",
+        "Enheten för Ställtid och Stycktid på raden: minuter/enhet (även min), antal/timme (även st/h — ställtiden då i timmar), timmar/enhet (även tim eller h) eller sekunder/enhet (även sek eller s). Tom cell betyder minuter — även med Uppdatera befintliga operationer, där en befintlig operation då får tidsenheten minuter. Ett okänt ord ger ett fel. Lagringen är alltid minuter; antal/timme sparas med visningsenheten st/h.",
       example: "minuter/enhet",
     },
     {
@@ -247,7 +264,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Kalkyl",
       required: false,
       header: "Kalkyl",
-      description: `${YES_NO_X}; tom cell betyder Nej. Ja gör operationen till en kalkyloperation som bara räknas i förkalkylen och aldrig frisläpps eller rapporteras.`,
+      description: `${YES_NO_X}; tom cell betyder Nej — även med Uppdatera befintliga operationer, där en befintlig kalkyloperation då blir en vanlig operation. Ja gör operationen till en kalkyloperation som bara räknas i förkalkylen och aldrig frisläpps eller rapporteras.`,
       example: "Nej",
     },
     {
@@ -285,6 +302,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Artikelnummer",
       required: true,
       header: "Artikelnummer",
+      text: true,
       description:
         "Den överordnade (tillverkade) artikeln — måste redan finnas i artikelregistret; importera artiklarna först. En artikel som inte är tillverkad ger en varning.",
       example: "SB-1200",
@@ -294,6 +312,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Komponentnummer",
       required: true,
       header: "Komponentnummer",
+      text: true,
       description:
         "Den ingående artikeln. Måste finnas i artikelregistret om inte Skapa saknade artiklar är ikryssat — då skapas den ur radens egna kolumner. Samma komponent kan bara ligga en gång per artikel: finns den redan i strukturen blir raden ett fel (eller hoppas över med Hoppa över rader som redan finns). En artikel kan inte ingå i sin egen struktur, inte heller via flera led.",
       example: "PL-2-1500",
@@ -311,6 +330,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Enhet",
       required: false,
       header: "Enhet",
+      text: true,
       description:
         "En av komponentens enheter: grundenheten eller en upplagd alternativ enhet (annars ett fel). Tom cell betyder grundenheten. För en komponent som skapas av importen blir det i stället den nya artikelns grundenhet (tom = st; en okänd kod skapas).",
       example: "st",
@@ -321,7 +341,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "Operation",
       description:
-        "Sekvensnumret (heltal större än 0) på en av den överordnade artikelns operationer, som materialet dras vid. Tom cell, eller en operation som inte finns, ger ingen koppling — materialet dras vid slutrapporteringen (varning). En kalkyloperation ger ett fel.",
+        "Sekvensnumret (heltal större än 0) på en av den överordnade artikelns operationer, som materialet dras vid. Tom cell, eller en operation som inte finns, ger ingen koppling — materialet dras då i takt med inleveransen av färdiga varor (en operation som inte finns ger en varning). En kalkyloperation ger ett fel.",
       example: "10",
     },
     {
@@ -357,6 +377,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Artikelnummer",
       required: true,
       header: "Artikelnummer",
+      text: true,
       description: "Numret på en artikel som redan finns i artikelregistret.",
       example: "PL-2-1500",
     },
@@ -365,6 +386,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leverantörsnummer",
       required: true,
       header: "Leverantörsnummer",
+      text: true,
       description:
         "Numret på en leverantör som redan finns i leverantörsregistret. Alla rader med samma artikel och leverantör bildar en katalograd: den första raden ger pris och övriga uppgifter, varje rad kan bära ett staffelsteg.",
       example: "2001",
@@ -374,6 +396,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leverantörens artikelnummer",
       required: false,
       header: "Leverantörens artikelnummer",
+      text: true,
       description: `Leverantörens eget nummer på artikeln, max 100 tecken. ${UNTOUCHED}`,
       example: "LEV-4471",
     },
@@ -382,7 +405,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Pris",
       required: false,
       header: "Pris",
-      description: `Pris per grundenhet (antal 1) i leverantörens valuta, ${DECIMAL}, aldrig negativt; fyra decimaler sparas. Tom cell lämnar priset orört på en befintlig katalograd.`,
+      description: `Pris per grundenhet (antal 1) i katalogradens valuta — en ny katalograd får leverantörens valuta, en befintlig behåller sin. ${DECIMAL_CAP}, aldrig negativt; fyra decimaler sparas. Tom cell lämnar priset orört på en befintlig katalograd.`,
       example: "245,00",
     },
     {
@@ -390,8 +413,9 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Rabatt (%)",
       required: false,
       header: "Rabatt (%)",
+      text: true,
       description:
-        "Procentavdrag från 0 upp till (men inte med) 100 som bakas in i radens pris och staffelpris — Pris × (1 − Rabatt/100) — med en varning, eftersom katalogen saknar rabattfält. Tom cell betyder ingen rabatt.",
+        "Procentavdrag från 0 upp till (men inte med) 100 som bakas in i radens pris och staffelpris — Pris × (1 − Rabatt/100) — med en varning, eftersom katalogen saknar rabattfält. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. Tom cell betyder ingen rabatt.",
       example: "10",
     },
     {
@@ -399,7 +423,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Huvudleverantör (Förvald)",
       required: false,
       header: "Huvudleverantör",
-      description: `${YES_NO_X}; tom cell betyder Nej när kolumnen är mappad. Ja gör leverantören till artikelns huvudleverantör och tar bort markeringen från en tidigare — högst en per artikel i filen.`,
+      description: `${YES_NO_X}; tom cell betyder Nej. Ja gör leverantören till artikelns huvudleverantör och tar bort markeringen från en tidigare — högst en per artikel i filen. Tom cell tar bort markeringen från en befintlig katalograd — ta bort kolumnen för att lämna den orörd.`,
       example: "Ja",
     },
     {
@@ -408,7 +432,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "Staffel: från antal",
       description:
-        "Antalet i grundenhet där staffelpriset börjar gälla, större än 1 — ett gränsvärde på 1 eller lägre ignoreras med en varning (antal 1 är grundpriset). Är kolumnen mappad ersätts katalogradens staffel helt av filens steg (inga steg = staffeln tas bort); är den inte mappad rörs staffeln inte.",
+        "Antalet i grundenhet där staffelpriset börjar gälla, större än 1 — ett gränsvärde på 1 eller lägre ignoreras med en varning (antal 1 är grundpriset). Finns kolumnen ersätts katalogradens staffel helt av filens steg — tomma celler betyder att staffeln tas bort; ta bort kolumnen för att lämna staffeln orörd.",
       example: "100",
     },
     {
@@ -416,7 +440,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Staffel: pris",
       required: false,
       header: "Staffel: pris",
-      description: `Priset per grundenhet från och med gränsvärdet, ${DECIMAL}, aldrig negativt. Krävs på varje rad som har ett gränsvärde.`,
+      description: `Priset per grundenhet från och med gränsvärdet, ${DECIMAL}, aldrig negativt. Krävs på varje rad som har ett gränsvärde; utan Staffel: från antal läses kolumnen inte.`,
       example: "219,00",
     },
   ],
@@ -427,6 +451,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Artikelnummer",
       required: true,
       header: "Artikelnummer",
+      text: true,
       description: "Numret på en artikel som redan finns i artikelregistret.",
       example: "SB-1200",
     },
@@ -435,6 +460,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Kundnummer",
       required: true,
       header: "Kundnummer",
+      text: true,
       description:
         "Numret på en kund som redan finns i kundregistret. Samma kund och artikel får bara förekomma en gång i filen.",
       example: "1001",
@@ -452,8 +478,9 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Rabatt (%)",
       required: false,
       header: "Rabatt (%)",
+      text: true,
       description:
-        "Procentavdrag från 0 upp till (men inte med) 100 som bakas in i priset — Pris × (1 − Rabatt/100) — med en varning, eftersom kundpriset lagras som nettopris. Tom cell betyder ingen rabatt.",
+        "Procentavdrag från 0 upp till (men inte med) 100 som bakas in i priset — Pris × (1 − Rabatt/100) — med en varning, eftersom kundpriset lagras som nettopris. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. Tom cell betyder ingen rabatt.",
       example: "5",
     },
   ],
@@ -464,6 +491,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Kundnummer",
       required: true,
       header: "Kundnummer",
+      text: true,
       description:
         "Kundens unika nummer, max 50 tecken. Finns numret redan uppdateras kunden, annars skapas en ny. Nummerserien för kunder flyttas fram förbi filens högsta rent numeriska nummer.",
       example: "1001",
@@ -481,6 +509,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Organisationsnummer",
       required: false,
       header: "Organisationsnummer",
+      text: true,
       description: `Max 20 tecken. ${UNTOUCHED}`,
       example: "556123-4567",
     },
@@ -489,6 +518,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "VAT-nummer",
       required: false,
       header: "VAT-nummer",
+      text: true,
       description: `Momsregistreringsnummer, max 30 tecken. ${UNTOUCHED}`,
       example: "SE556123456701",
     },
@@ -507,7 +537,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "E-post",
       description:
-        "Kundens e-postadress, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning.",
+        "Kundens e-postadress, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning.",
       example: "info@example.com",
     },
     {
@@ -515,6 +545,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Telefon",
       required: false,
       header: "Telefon",
+      text: true,
       description: `Max 50 tecken. ${UNTOUCHED}`,
       example: "010-200 10 10",
     },
@@ -548,6 +579,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Postnummer",
       required: false,
       header: "Postnummer",
+      text: true,
       description: `Max 20 tecken. ${UNTOUCHED}`,
       example: "123 50",
     },
@@ -573,6 +605,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Betalningsvillkor",
       required: false,
       header: "Betalningsvillkor",
+      text: true,
       description:
         "Betalningsvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor; börjar namnet med ett antal dagar (30 dagar netto) blir dagarna villkorets kod.",
       example: "30 dagar netto",
@@ -582,6 +615,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leveransvillkor",
       required: false,
       header: "Leveransvillkor",
+      text: true,
       description:
         "Leveransvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor.",
       example: "Fritt vårt lager",
@@ -591,6 +625,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leveranssätt/speditör",
       required: false,
       header: "Leveranssätt/speditör",
+      text: true,
       description:
         "Speditörens kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som ny speditör.",
       example: "Exempelfrakt",
@@ -600,6 +635,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Prislista",
       required: false,
       header: "Prislista",
+      text: true,
       description:
         "Prislistans kod eller namn (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som ny prislista.",
       example: "Grossist",
@@ -609,7 +645,8 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Kundrabatt (%)",
       required: false,
       header: "Kundrabatt (%)",
-      description: `Kundens generella rabatt i procent, 0–100, ${DECIMAL}. ${UNTOUCHED}`,
+      text: true,
+      description: `Kundens generella rabatt i procent, 0–100, ${DECIMAL}. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. ${UNTOUCHED}`,
       example: "5",
     },
     {
@@ -617,7 +654,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Avviker från postadress",
       required: false,
       header: "Avvikande fakturaadress",
-      description: `${YES_NO_X}. Nej betyder att radens fakturaadresskolumner (namn, adress, postnummer, postort, land) ignoreras — kunden faktureras på besöksadressen; Ja eller tom cell använder dem som de är. Lagras inte.`,
+      description: `${YES_NO_X}. Nej betyder att radens fakturaadresskolumner (namn, adress, postnummer, postort, land) ignoreras — en ny kund får ingen fakturaadress och en befintlig kunds sparade fakturaadress ändras inte. Ja eller tom cell använder kolumnerna som de är. Lagras inte.`,
       example: "Ja",
     },
     {
@@ -658,6 +695,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Fakturapostnummer",
       required: false,
       header: "Fakturapostnummer",
+      text: true,
       description: `Max 20 tecken. ${UNTOUCHED}`,
       example: "123 51",
     },
@@ -683,7 +721,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "E-post för faktura",
       description:
-        "E-postadress som fakturor skickas till, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning.",
+        "E-postadress som fakturor skickas till, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning.",
       example: "faktura@example.com",
     },
     {
@@ -691,6 +729,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Vårt leverantörsnummer",
       required: false,
       header: "Vårt leverantörsnummer",
+      text: true,
       description:
         "Det nummer kunden har på oss som leverantör, max 50 tecken — skrivs ut på offert, orderbekräftelse och faktura.",
       example: "L-4711",
@@ -727,6 +766,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Kundnummer",
       required: true,
       header: "Kundnummer",
+      text: true,
       description: "Numret på en kund som redan finns i kundregistret — importera kunderna först.",
       example: "1001",
     },
@@ -752,6 +792,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Telefon",
       required: false,
       header: "Telefon",
+      text: true,
       description: "Max 50 tecken.",
       example: "010-200 10 11",
     },
@@ -760,6 +801,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Mobiltelefon",
       required: false,
       header: "Mobiltelefon",
+      text: true,
       description: "Max 50 tecken.",
       example: "070-000 00 01",
     },
@@ -769,7 +811,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "E-post",
       description:
-        "Max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning.",
+        "Max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning.",
       example: "anna@example.com",
     },
     {
@@ -785,6 +827,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Faxnummer",
       required: false,
       header: "Faxnummer",
+      text: true,
       description:
         "Max 50 tecken. Kontakten har inget eget faxfält — numret läggs i anmärkningen som Fax 010-200 10 19.",
       example: "010-200 10 19",
@@ -797,6 +840,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Kundnummer",
       required: true,
       header: "Kundnummer",
+      text: true,
       description: "Numret på en kund som redan finns i kundregistret — importera kunderna först.",
       example: "1001",
     },
@@ -839,6 +883,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Postnummer",
       required: false,
       header: "Postnummer",
+      text: true,
       description: "Max 20 tecken.",
       example: "123 42",
     },
@@ -866,6 +911,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leverantörsnummer",
       required: true,
       header: "Leverantörsnummer",
+      text: true,
       description:
         "Leverantörens unika nummer, max 50 tecken. Finns numret redan uppdateras leverantören, annars skapas en ny. Nummerserien för leverantörer flyttas fram förbi filens högsta rent numeriska nummer.",
       example: "2001",
@@ -883,6 +929,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Organisationsnummer",
       required: false,
       header: "Organisationsnummer",
+      text: true,
       description: `Max 20 tecken. ${UNTOUCHED}`,
       example: "556987-6543",
     },
@@ -891,6 +938,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "VAT-nummer",
       required: false,
       header: "VAT-nummer",
+      text: true,
       description: `Momsregistreringsnummer, max 30 tecken. ${UNTOUCHED}`,
       example: "SE556987654301",
     },
@@ -909,7 +957,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "E-post",
       description:
-        "Leverantörens e-postadress (dit förfrågningar och inköpsorder skickas), max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning.",
+        "Leverantörens e-postadress (dit förfrågningar och inköpsorder skickas), max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning.",
       example: "order@example.com",
     },
     {
@@ -917,6 +965,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Telefon",
       required: false,
       header: "Telefon",
+      text: true,
       description: `Max 50 tecken. ${UNTOUCHED}`,
       example: "010-100 10 10",
     },
@@ -950,6 +999,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Postnummer",
       required: false,
       header: "Postnummer",
+      text: true,
       description: `Max 20 tecken. ${UNTOUCHED}`,
       example: "123 45",
     },
@@ -966,8 +1016,9 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Valuta",
       required: false,
       header: "Valuta",
+      text: true,
       description:
-        "Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Leverantörens katalogpriser och inköpsorder anges i valutan. Tom cell ger SEK för nya leverantörer och lämnar befintliga orörda.",
+        "Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya inköpsorder och nya katalograder (även de som Inköpspriser-importen skapar) får leverantörens valuta; befintliga behåller sin. Tom cell ger SEK för nya leverantörer och lämnar befintliga orörda.",
       example: "SEK",
     },
     {
@@ -975,6 +1026,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Vårt kundnummer",
       required: false,
       header: "Vårt kundnummer",
+      text: true,
       description: `Det kundnummer leverantören har på oss, max 50 tecken — skrivs ut på förfrågan och inköpsorder. ${UNTOUCHED}`,
       example: "K-1234",
     },
@@ -983,6 +1035,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Betalningsvillkor",
       required: false,
       header: "Betalningsvillkor",
+      text: true,
       description:
         "Betalningsvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor; börjar namnet med ett antal dagar (30 dagar netto) blir dagarna villkorets kod och styr förfallodatum på leverantörsfakturor.",
       example: "30 dagar netto",
@@ -992,6 +1045,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leveransvillkor",
       required: false,
       header: "Leveransvillkor",
+      text: true,
       description:
         "Leveransvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor.",
       example: "Fritt vårt lager",
@@ -1001,6 +1055,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leveranssätt/speditör",
       required: false,
       header: "Leveranssätt/speditör",
+      text: true,
       description:
         "Speditörens kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som ny speditör.",
       example: "Exempelfrakt",
@@ -1010,6 +1065,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Kundnummer hos speditör",
       required: false,
       header: "Kundnummer hos speditör",
+      text: true,
       description: `Vårt kundnummer hos leverantörens speditör, max 50 tecken. ${UNTOUCHED}`,
       example: "F-98765",
     },
@@ -1021,6 +1077,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leverantörsnummer",
       required: true,
       header: "Leverantörsnummer",
+      text: true,
       description:
         "Numret på en leverantör som redan finns i leverantörsregistret — importera leverantörerna först.",
       example: "2001",
@@ -1047,6 +1104,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Telefon",
       required: false,
       header: "Telefon",
+      text: true,
       description: "Max 50 tecken.",
       example: "010-100 10 11",
     },
@@ -1055,6 +1113,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Mobiltelefon",
       required: false,
       header: "Mobiltelefon",
+      text: true,
       description: "Max 50 tecken.",
       example: "070-000 00 02",
     },
@@ -1064,7 +1123,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "E-post",
       description:
-        "Max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning.",
+        "Max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning.",
       example: "bo@example.com",
     },
     {
@@ -1080,6 +1139,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Faxnummer",
       required: false,
       header: "Faxnummer",
+      text: true,
       description:
         "Max 50 tecken. Kontakten har inget eget faxfält — numret läggs i anmärkningen som Fax 010-100 10 19.",
       example: "010-100 10 19",
@@ -1092,6 +1152,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leverantörsnummer",
       required: true,
       header: "Leverantörsnummer",
+      text: true,
       description:
         "Numret på en leverantör som redan finns i leverantörsregistret — importera leverantörerna först.",
       example: "2001",
@@ -1135,6 +1196,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Postnummer",
       required: false,
       header: "Postnummer",
+      text: true,
       description: "Max 20 tecken.",
       example: "234 56",
     },
@@ -1154,8 +1216,9 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Nummer",
       required: true,
       header: "Nummer",
+      text: true,
       description:
-        "Resursens nummer, exakt tre siffror (textformatera kolumnen i Excel så att 110 inte blir 110,0 och 007 inte 7). Finns numret redan uppdateras resursen; används det av en legoresurs blir raden ett fel — den importeras på fliken Legoresurser.",
+        "Resursens nummer, tre siffror. 1–2 siffror fylls ut med nollor (7 blir 007). Finns numret redan uppdateras resursen; används det av en legoresurs blir raden ett fel — den importeras på fliken Legoresurser.",
       example: "110",
     },
     {
@@ -1180,6 +1243,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Avdelning (produktionsgrupp)",
       required: false,
       header: "Avdelning",
+      text: true,
       description:
         "Koden på den produktionsgrupp resursen tillhör, max 20 tecken (skiftlägesokänsligt). En okänd kod skapas som ny produktionsgrupp, med Avdelningens namn eller koden som namn. Tom cell lämnar fältet orört.",
       example: "PV",
@@ -1214,7 +1278,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Gäller ställ",
       required: false,
       header: "Gäller ställ",
-      description: `${YES_NO_X} — om timkostnaden gäller ställtiden. Sparas på resursen som förvalsvärde; tom cell lämnar fältet orört.`,
+      description: `${YES_NO_X} — om timkostnaden gäller ställtiden. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. ${UNTOUCHED}`,
       example: "Ja",
     },
     {
@@ -1222,7 +1286,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Gäller styck",
       required: false,
       header: "Gäller styck",
-      description: `${YES_NO_X} — om timkostnaden gäller stycktiden. Sparas på resursen som förvalsvärde; tom cell lämnar fältet orört.`,
+      description: `${YES_NO_X} — om timkostnaden gäller stycktiden. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. ${UNTOUCHED}`,
       example: "Ja",
     },
     {
@@ -1230,7 +1294,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Förvald ställtid",
       required: false,
       header: "Förvald ställtid",
-      description: `Ställtid i minuter som föreslås för nya operationer på resursen, ${DECIMAL}, aldrig negativ. Sparas som förvalsvärde; tom cell lämnar fältet orört.`,
+      description: `Ställtid i minuter, ${DECIMAL}, aldrig negativ. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. ${UNTOUCHED}`,
       example: "15",
     },
     {
@@ -1239,7 +1303,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       required: false,
       header: "Förvald operationsbenämning",
       description:
-        "Operationsnamn som föreslås för nya operationer på resursen, max 100 tecken. Sparas som förvalsvärde; tom cell lämnar fältet orört.",
+        "Operationsnamn, max 100 tecken. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. Tom cell lämnar fältet orört på en befintlig post.",
       example: "Laserskärning",
     },
     {
@@ -1259,8 +1323,9 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Nummer",
       required: true,
       header: "Nummer",
+      text: true,
       description:
-        "Legoresursens nummer, exakt tre siffror (textformatera kolumnen i Excel). Finns numret redan uppdateras legoresursen; används det av en maskin- eller personalresurs blir raden ett fel.",
+        "Legoresursens nummer, tre siffror. 1–2 siffror fylls ut med nollor (7 blir 007). Finns numret redan uppdateras legoresursen; används det av en maskin- eller personalresurs blir raden ett fel.",
       example: "910",
     },
     {
@@ -1276,6 +1341,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Leverantörsnummer",
       required: false,
       header: "Leverantörsnummer",
+      text: true,
       description:
         "Numret på den leverantör som utför legoarbetet — måste finnas i leverantörsregistret, importera leverantörerna först. Tom cell lämnar fältet orört.",
       example: "2003",
@@ -1312,6 +1378,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
       label: "Kod",
       required: true,
       header: "Kod",
+      text: true,
       description:
         "Produktionsgruppens kod, max 20 tecken (skiftlägesokänsligt). Finns koden redan uppdateras gruppen, annars skapas en ny; en kod som upprepas i filen hoppas över efter första raden.",
       example: "PV",
@@ -1336,6 +1403,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, ImportFieldHelp[]> = {
   ],
 };
 
+// The wizard's view: everything but the template-only `text` flag.
 export function importFieldHelp(entity: ImportEntity): ImportFieldHelp[] {
-  return IMPORT_FIELD_HELP[entity];
+  return IMPORT_FIELD_HELP[entity].map(({ text: _text, ...help }) => help);
 }

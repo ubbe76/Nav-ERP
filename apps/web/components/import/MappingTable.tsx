@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Select } from "../ui/Field";
 import { FormHint } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
@@ -49,6 +49,8 @@ export function MappingTable({ entity, parsed, fields, mapping, onChange, compac
   // Explanations default to on for desktop and off on a phone, where they
   // would make the table very long.
   const [showHelp, setShowHelp] = useState(true);
+  // Prefix for the help texts' ids, so each Select can point at its own.
+  const helpIdPrefix = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -93,28 +95,35 @@ export function MappingTable({ entity, parsed, fields, mapping, onChange, compac
           <span>Exempel (rad 1)</span>
           <span>Importeras som</span>
         </div>
-        {parsed.headers.map((header, index) => (
-          <div key={header} className={styles.mappingRow}>
-            <span className={styles.mappingHeader}>{header}</span>
-            <span className={styles.mappingSample}>{parsed.rows[0]?.[index] ?? ""}</span>
-            <Select
-              aria-label={`Mappning för kolumnen ${header}`}
-              value={mapping[header] ?? ""}
-              onChange={(e) => onChange(header, e.target.value === "" ? null : e.target.value)}
-            >
-              <option value="">Importera inte</option>
-              {fields.map((f) => (
-                <option key={f.field} value={f.field}>
-                  {f.label}
-                  {f.required ? " *" : ""}
-                </option>
-              ))}
-            </Select>
-            {showHelp && mapping[header] && help[mapping[header]!] && (
-              <span className={styles.mappingHelp}>{help[mapping[header]!]}</span>
-            )}
-          </div>
-        ))}
+        {parsed.headers.map((header, index) => {
+          const helpText = showHelp && mapping[header] ? help[mapping[header]!] : undefined;
+          const helpId = `${helpIdPrefix}-help-${index}`;
+          return (
+            <div key={header} className={styles.mappingRow}>
+              <span className={styles.mappingHeader}>{header}</span>
+              <span className={styles.mappingSample}>{parsed.rows[0]?.[index] ?? ""}</span>
+              <Select
+                aria-label={`Mappning för kolumnen ${header}`}
+                aria-describedby={helpText ? helpId : undefined}
+                value={mapping[header] ?? ""}
+                onChange={(e) => onChange(header, e.target.value === "" ? null : e.target.value)}
+              >
+                <option value="">Importera inte</option>
+                {fields.map((f) => (
+                  <option key={f.field} value={f.field}>
+                    {f.label}
+                    {f.required ? " *" : ""}
+                  </option>
+                ))}
+              </Select>
+              {helpText && (
+                <span id={helpId} className={styles.mappingHelp}>
+                  {helpText}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </>
   );

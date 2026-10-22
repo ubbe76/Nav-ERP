@@ -412,6 +412,10 @@ export async function planArticleImport(
       else if (fixedLotSize) {
         planning.orderQuantity = parsed === 0 ? null : parsed;
         values["orderQuantity"] = planning.orderQuantity;
+      } else if (parsed > 0) {
+        // 0 is Monitor's "none" — nothing is lost by skipping it, so only a
+        // real quantity is worth a warning.
+        warnings.push("Orderkvantitet hoppades över — Partiformningsregel är inte Fast orderstorlek");
       }
     }
     const roundingCell = record["rounding"] ?? "";

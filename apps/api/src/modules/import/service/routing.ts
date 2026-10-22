@@ -18,6 +18,7 @@ import type { ImportCommitInput } from "@navet/shared";
 import { unitsPerHourToMinutesPerUnit } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle } from "./articles.js";
+import { padWorkCenterCode } from "./work-centers.js";
 import {
   ImportMappingError,
   normalizeHeader,
@@ -404,10 +405,8 @@ export async function planRoutingImport(
     if (rawCode === "") {
       errors.push("Resurs saknas");
     } else {
-      // Excel stores 007 as the NUMBER 7 unless the column is text-formatted,
-      // and the xlsx reader then hands us "7". Pad it back — that is the
-      // spreadsheet's doing, not the user's, so it warrants no warning.
-      const code = /^[0-9]{1,3}$/.test(rawCode) ? rawCode.padStart(3, "0") : rawCode;
+      // 7 from an unformatted Excel column is 007 (padWorkCenterCode).
+      const code = padWorkCenterCode(rawCode);
       if (!WORK_CENTER_CODE_PATTERN.test(code)) {
         errors.push(`Ogiltig resurskod: "${rawCode}" (ange tre siffror, t.ex. 110)`);
       } else {

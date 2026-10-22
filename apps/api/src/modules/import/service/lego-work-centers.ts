@@ -11,7 +11,7 @@ import {
   type ImportRowResult,
   type ImportSummary,
 } from "./import.service.js";
-import { parseNumberCell, type ExistingWorkCenter } from "./work-centers.js";
+import { padWorkCenterCode, parseNumberCell, type ExistingWorkCenter } from "./work-centers.js";
 
 export const LEGO_WORK_CENTER_IMPORT_FIELDS = [
   "code",
@@ -108,6 +108,7 @@ export async function planLegoWorkCenterImport(
     columns.forEach((field, i) => {
       if (field) record[field] = (row[i] ?? "").trim();
     });
+    if (record["code"] !== undefined) record["code"] = padWorkCenterCode(record["code"]);
     return record;
   });
 

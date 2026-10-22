@@ -4,7 +4,7 @@ import { validateXML } from "xmllint-wasm";
 import { db } from "@navet/db";
 import type { ImportEntity } from "@navet/shared";
 import { parseXlsxBuffer } from "../src/modules/import/service/xlsx.js";
-import { readStoredZipEntries, writeXlsx, xmlText } from "../src/modules/import/service/xlsx-writer.js";
+import { noteRows, readStoredZipEntries, writeXlsx, xmlText } from "../src/modules/import/service/xlsx-writer.js";
 import {
   buildImportTemplate,
   buildImportTemplateWorkbook,
@@ -112,6 +112,61 @@ describe("writeXlsx", () => {
         await assertWellFormed(`${entity}/${name}`, data.toString("utf8"));
       }
     }
+  });
+
+  it("drops a lone surrogate and U+FFFE but keeps astral characters", () => {
+    expect(xmlText("a\ud800b\udc00c\ufffed")).toBe("abcd");
+    expect(xmlText("\ud7ff\ue000\ufffd")).toBe("\ud7ff\ue000\ufffd");
+    expect(xmlText("rör 😀")).toBe("rör 😀");
+    expect(xmlText("tab\tny\nrad\r")).toBe("tab\tny\nrad\r");
+  });
+
+  it("formats the text columns as Text (numFmtId 49) and keeps the bold headings", async () => {
+    const entries = readStoredZipEntries(buildImportTemplate("articles"));
+    const styles = entries.get("xl/styles.xml")!.toString("utf8");
+    expect(styles).toContain('<cellXfs count="5">');
+    expect(styles).toContain('<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>');
+
+    const sheet1 = entries.get("xl/worksheets/sheet1.xml")!.toString("utf8");
+    const articles = IMPORT_FIELD_HELP.articles;
+    for (const [i, help] of articles.entries()) {
+      const col = new RegExp(`<col min="${i + 1}" max="${i + 1}"[^>]*/>`).exec(sheet1)![0];
+      if (help.text) expect(col, help.field).toContain('style="4"');
+      else expect(col, help.field).not.toContain("style=");
+    }
+    // Artikelnummer is a text column; its heading keeps the bold style.
+    expect(articles[0]!.text).toBe(true);
+    expect(sheet1).toContain('<c r="A1" s="1" t="inlineStr">');
+    // Standardpris is a number and stays General.
+    expect(articles.find((h) => h.field === "standardCost")!.text).toBeUndefined();
+
+    // A text column also works without a width, and the reader still reads
+    // the sheet back.
+    const buf = writeXlsx({
+      sheets: [{ name: "Import", textColumns: [1], rows: [["Nummer", "Postnummer"], ["007", "012 34"]] }],
+    });
+    const plain = readStoredZipEntries(buf).get("xl/worksheets/sheet1.xml")!.toString("utf8");
+    expect(plain).toContain('<cols><col min="2" max="2" width="9.140625" style="4"/></cols>');
+    const parsed = await parseXlsxBuffer(buf);
+    expect(parsed.headers).toEqual(["Nummer", "Postnummer"]);
+    expect(parsed.rows).toEqual([["007", "012 34"]]);
+    for (const [name, data] of readStoredZipEntries(buf)) {
+      await assertWellFormed(name, data.toString("utf8"));
+    }
+  });
+
+  it("grows the comment box with the text so long explanations are not clipped", () => {
+    expect(noteRows("kort")).toBe(6);
+    expect(noteRows("x".repeat(45 * 5))).toBe(6);
+    expect(noteRows("x".repeat(45 * 9))).toBe(10);
+    const longText = "y".repeat(45 * 12);
+    const vml = readStoredZipEntries(
+      writeXlsx({ sheets: [{ name: "Import", rows: [[{ value: "A", comment: "kort" }, { value: "B", comment: longText }]] }] })
+    )
+      .get("xl/drawings/vmlDrawing1.vml")!
+      .toString("utf8");
+    expect(vml).toContain("<x:Anchor>1, 15, 0, 2, 4, 15, 6, 10</x:Anchor>");
+    expect(vml).toContain("<x:Anchor>2, 15, 0, 2, 5, 15, 13, 10</x:Anchor>");
   });
 
   it("is deterministic — the same description gives the same bytes", () => {

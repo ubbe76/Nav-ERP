@@ -53,7 +53,7 @@ Kundimporten läser inte fälten — de sätts på kortet.
 
 **Försäljning → Kunder → Importera** öppnar en guide med tre flikar — **Kunder**, **Kontakter** och **Leveransadresser** — som tillsammans tar in en fullständig kundexport. Endast administratörer har åtkomst. Filer läses som CSV (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) eller Excel (.xlsx, bara det första bladet läses). Varje flik kör sin egen guide i fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kunder) (kontakter: [#kundkontakter](/hjalp/importmallar#kundkontakter), leveransadresser: [#kundernas-leveransadresser](/hjalp/importmallar#kundernas-leveransadresser)).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kunder) (kontakter: [Kundkontakter](/hjalp/importmallar#kundkontakter), leveransadresser: [Kundernas leveransadresser](/hjalp/importmallar#kundernas-leveransadresser)).
 
 Kundexporten består av flera separata filer. **Fliken Kunder** körs en gång per fil, alltid i den här ordningen:
 

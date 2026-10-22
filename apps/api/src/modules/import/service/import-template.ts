@@ -145,9 +145,16 @@ export function headerComment(help: { required: boolean; description: string }):
   return help.required ? `Obligatorisk. ${help.description}` : help.description;
 }
 
+// The columns where an EMPTY cell is a value rather than "leave it alone" —
+// the planners' rules (supplier-prices.ts, articles.ts, routing.ts), named
+// in the template and the chapter so nobody keeps such a column by accident.
+const EMPTY_MEANS_SOMETHING =
+  "Huvudleverantör och Staffel: från antal/Staffel: pris (Inköpspriser), Partiformningsregel (Artiklar) samt Kalkyl och Tidsenhet med Uppdatera befintliga operationer (Operationer)";
+
 const INSTRUCTION_LINES = [
   "Fyll i bladet Import — det är det enda bladet som läses in; det här bladet är bara en förklaring.",
-  "Kolumner du inte behöver kan tas bort eller lämnas tomma, och kolumnernas ordning spelar ingen roll.",
+  "Ta bort kolumner du inte använder. Kolumnernas ordning spelar ingen roll.",
+  `En tom cell lämnar normalt värdet orört på en befintlig post, utom i kolumner där tomt betyder något: ${EMPTY_MEANS_SOMETHING}. Vad tomt betyder står vid varje kolumn.`,
   "Tal skrivs med decimalkomma eller punkt. Obligatoriska kolumner måste finnas med och vara ifyllda på varje rad.",
 ];
 
@@ -159,6 +166,9 @@ export function buildImportTemplateWorkbook(entity: ImportEntity): XlsxWorkbook 
     name: "Import",
     freezeHeader: true,
     columnWidths: fields.map((f) => Math.min(40, Math.max(14, f.header.length + 4))),
+    // Numbers, codes, postal codes, phone numbers and percentages are Text,
+    // so Excel keeps 007 and 0123 as written (field-help.ts's `text`).
+    textColumns: fields.flatMap((f, i) => (f.text ? [i] : [])),
     rows: [fields.map((f): XlsxCell => ({ value: f.header, bold: true, comment: headerComment(f) }))],
   };
 
@@ -226,20 +236,20 @@ export function buildImportTemplateManual(): string {
   lines.push("Att känna till:");
   lines.push("");
   lines.push("- Importen läser bara det **första bladet** i en arbetsbok — låt **Import** ligga först.");
+  lines.push("- **Ta bort kolumner du inte använder.** Kolumnernas **ordning spelar ingen roll** — guiden känner igen rubrikerna och kopplar dem till rätt fält.");
   lines.push(
-    "- Kolumner du inte behöver kan **tas bort eller lämnas tomma**. En tom cell skriver aldrig över ett sparat värde på en befintlig post."
+    `- En **tom cell** lämnar normalt värdet orört på en befintlig post, **utom** i kolumner där tomt betyder något: ${EMPTY_MEANS_SOMETHING}. Vad tomt betyder står vid varje kolumn nedan.`
   );
-  lines.push("- Kolumnernas **ordning spelar ingen roll** — guiden känner igen rubrikerna och kopplar dem till rätt fält.");
   lines.push("- Tal skrivs med **decimalkomma eller punkt** (1 250,50 eller 1250.50).");
   lines.push(
     "- Ja/Nej-kolumner förstår **Ja/Nej**, **1/0** och **true/false** (de flesta även **X** för Ja); exakt vilka ord som gäller står vid kolumnen."
   );
   lines.push(
-    "- **Textformatera nummerkolumner** i Excel (artikelnummer, resursnummer, postnummer) så att inledande nollor inte försvinner."
+    "- Mallens nummer- och kodkolumner (artikelnummer, resursnummer, postnummer, telefonnummer, procent med flera) är **textformaterade**, så att Excel inte tar bort inledande nollor eller gör om värdet till ett tal eller datum. Bygger du en egen fil bör du textformatera samma kolumner."
   );
   lines.push("");
   lines.push(
-    "Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varje fält. Reglerna för själva importen — vad som skapas, uppdateras eller hoppas över — står i respektive kapitel, länkat från varje avsnitt."
+    "Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det fält kolumnen är kopplad till, när **Visa förklaringar** är ikryssad (av på smala skärmar). Reglerna för själva importen — vad som skapas, uppdateras eller hoppas över — står i respektive kapitel, länkat från varje avsnitt."
   );
 
   for (const info of IMPORT_TEMPLATES) {

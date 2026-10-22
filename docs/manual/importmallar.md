@@ -10,13 +10,13 @@ Varje import i Nav har en **Excelmall** att utgå från. Mallen laddas ned med *
 Att känna till:
 
 - Importen läser bara det **första bladet** i en arbetsbok — låt **Import** ligga först.
-- Kolumner du inte behöver kan **tas bort eller lämnas tomma**. En tom cell skriver aldrig över ett sparat värde på en befintlig post.
-- Kolumnernas **ordning spelar ingen roll** — guiden känner igen rubrikerna och kopplar dem till rätt fält.
+- **Ta bort kolumner du inte använder.** Kolumnernas **ordning spelar ingen roll** — guiden känner igen rubrikerna och kopplar dem till rätt fält.
+- En **tom cell** lämnar normalt värdet orört på en befintlig post, **utom** i kolumner där tomt betyder något: Huvudleverantör och Staffel: från antal/Staffel: pris (Inköpspriser), Partiformningsregel (Artiklar) samt Kalkyl och Tidsenhet med Uppdatera befintliga operationer (Operationer). Vad tomt betyder står vid varje kolumn nedan.
 - Tal skrivs med **decimalkomma eller punkt** (1 250,50 eller 1250.50).
 - Ja/Nej-kolumner förstår **Ja/Nej**, **1/0** och **true/false** (de flesta även **X** för Ja); exakt vilka ord som gäller står vid kolumnen.
-- **Textformatera nummerkolumner** i Excel (artikelnummer, resursnummer, postnummer) så att inledande nollor inte försvinner.
+- Mallens nummer- och kodkolumner (artikelnummer, resursnummer, postnummer, telefonnummer, procent med flera) är **textformaterade**, så att Excel inte tar bort inledande nollor eller gör om värdet till ett tal eller datum. Bygger du en egen fil bör du textformatera samma kolumner.
 
-Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varje fält. Reglerna för själva importen — vad som skapas, uppdateras eller hoppas över — står i respektive kapitel, länkat från varje avsnitt.
+Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det fält kolumnen är kopplad till, när **Visa förklaringar** är ikryssad (av på smala skärmar). Reglerna för själva importen — vad som skapas, uppdateras eller hoppas över — står i respektive kapitel, länkat från varje avsnitt.
 
 ## Artiklar
 
@@ -24,7 +24,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 
 | Kolumn | Obligatorisk | Förklaring | Exempel |
 | --- | --- | --- | --- |
-| **Artikelnummer** | Ja | Artikelns unika nummer, max 50 tecken. Finns numret redan uppdateras artikeln, annars skapas en ny. Textformatera kolumnen i Excel så att inledande nollor behålls. | SB-1200 |
+| **Artikelnummer** | Ja | Artikelns unika nummer, max 50 tecken. Finns numret redan uppdateras artikeln, annars skapas en ny. Mallens kolumn är textformaterad så att inledande nollor behålls. | SB-1200 |
 | **Benämning** | Nej | Artikelns namn, max 255 tecken. Krävs för nya artiklar. Tom cell lämnar fältet orört på en befintlig post. | Diskbänk 1200 mm, rostfri |
 | **Artikeltyp** | Nej | Tillverkad (även M), Köpt (även P eller K), Tjänst (även Lego) eller Fiktiv (även F) — Fiktiv ger en tillverkad fantomartikel. Tom cell ger guidens Standardtyp för nya artiklar. Typen och fantomflaggan ändras aldrig på befintliga artiklar — en avvikelse ger en varning. | Tillverkad |
 | **Enhet** | Nej | Grundenhetens kod, max 20 tecken (t.ex. st, kg, m). En okänd kod skapas i enhetsregistret med koden som namn; tom cell ger st för nya artiklar. Grundenheten ändras aldrig på befintliga artiklar. | st |
@@ -34,10 +34,10 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Ytbehandling** | Nej | Fritext, max 200 tecken. Tom cell lämnar fältet orört på en befintlig post. | Borstad |
 | **Färg** | Nej | Fritext, max 200 tecken. Tom cell lämnar fältet orört på en befintlig post. | Rostfri |
 | **Aktiv** | Nej | Ja/Nej, 1/0 eller true/false. Tom cell betyder aktiv för nya artiklar och lämnar befintliga orörda. | Ja |
-| **Beställningspunkt** | Nej | Saldo i grundenhet där behovsberäkningen föreslår påfyllnad, decimalkomma eller punkt, aldrig negativt. 0 betyder ingen beställningspunkt och tömmer fältet; tom cell lämnar det orört. | 10 |
-| **Orderkvantitet** | Nej | Fast orderstorlek i grundenhet — förslag rundas upp till en multipel av den. Importeras bara när Partiformningsregel är Fast orderstorlek (eller den kolumnen inte är mappad). 0 tömmer fältet; tom cell lämnar det orört. | 25 |
+| **Beställningspunkt** | Nej | Nivån i grundenhet som behovsberäkningen fyller upp till: den jämför med det beräknade saldot (lager + inkommande − behov) och föreslår skillnaden när saldot ligger under. Decimalkomma eller punkt, aldrig negativ. 0 betyder ingen beställningspunkt och tömmer fältet; tom cell lämnar det orört. | 10 |
+| **Orderkvantitet** | Nej | Fast orderstorlek i grundenhet — förslag rundas upp till en multipel av den. Importeras bara när Partiformningsregel är Fast orderstorlek eller den kolumnen saknas; finns kolumnen men är regeln något annat eller tom hoppas Orderkvantitet över med en varning. 0 tömmer fältet; tom cell lämnar det orört. | 25 |
 | **Avrundning** | Nej | Steg i grundenhet som orderantal rundas upp till, större än 0 och högst 3 decimaler (fler avrundas med en varning). 0 tömmer fältet; tom cell lämnar det orört. | 1 |
-| **Partiformningsregel** | Nej | Lagras inte — styr bara om Orderkvantitet läses: Fast orderstorlek betyder att kvantiteten importeras, allt annat (t.ex. Mot behov) att den hoppas över på raden. | Fast orderstorlek |
+| **Partiformningsregel** | Nej | Lagras inte — styr bara om Orderkvantitet läses: Fast orderstorlek betyder att kvantiteten importeras, allt annat (t.ex. Mot behov) och tom cell att den hoppas över på raden, med en varning. Ta bort kolumnen för att alltid läsa Orderkvantitet. | Fast orderstorlek |
 
 ## Alternativa enheter
 
@@ -59,11 +59,11 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | --- | --- | --- | --- |
 | **Artikelnummer** | Ja | Numret på en artikel som redan finns i artikelregistret. En artikel som inte är tillverkad importeras med en varning — operationen används inte vid tillverkning. | SB-1200 |
 | **Sekvensnr** | Ja | Operationens ordningsnummer på artikeln, heltal större än 0 (t.ex. 10, 20, 30). Artikel + sekvensnr är nyckeln: finns operationen redan blir raden ett fel, hoppas över med Hoppa över rader som redan finns, eller skrivs över med Uppdatera befintliga operationer. | 10 |
-| **Resurs** | Ja | Resursens tresiffriga nummer i resursregistret (Tillverkning → Resurser) — resursen måste finnas. 1–2 siffror fylls på med nollor (7 blir 007). En legoresurs ger en lego-operation med tiderna 0. | 110 |
+| **Resurs** | Ja | Resursens tresiffriga nummer i resursregistret (Tillverkning → Resurser) — resursen måste finnas. 1–2 siffror fylls ut med nollor (7 blir 007). En legoresurs ger en lego-operation med tiderna 0. | 110 |
 | **Ställtid** | Ja | Omställningstid per order i den enhet Tidsenhet anger — minuter när den kolumnen saknas eller är tom, timmar vid antal/timme. Decimalkomma eller punkt, aldrig negativ. Skriv 0 när momentet saknar ställtid; kolumnen måste finnas med. | 15 |
 | **Stycktid** | Ja | Tid per styck i den enhet Tidsenhet anger — minuter per styck när den kolumnen saknas; vid antal/timme är värdet i stället antal styck per timme (360 blir 0,1667 min/st). Decimalkomma eller punkt, aldrig negativ. Skriv 0 när momentet saknar stycktid; kolumnen måste finnas med. | 2,5 |
-| **Tidsenhet** | Nej | Enheten för Ställtid och Stycktid på raden: minuter/enhet (även min), antal/timme (även st/h — ställtiden då i timmar), timmar/enhet (även tim eller h) eller sekunder/enhet (även sek eller s). Tom cell betyder minuter; ett okänt ord ger ett fel. Lagringen är alltid minuter; antal/timme sparas med visningsenheten st/h. | minuter/enhet |
-| **Kalkyl** | Nej | Ja/Nej, 1/0, X eller true/false; tom cell betyder Nej. Ja gör operationen till en kalkyloperation som bara räknas i förkalkylen och aldrig frisläpps eller rapporteras. | Nej |
+| **Tidsenhet** | Nej | Enheten för Ställtid och Stycktid på raden: minuter/enhet (även min), antal/timme (även st/h — ställtiden då i timmar), timmar/enhet (även tim eller h) eller sekunder/enhet (även sek eller s). Tom cell betyder minuter — även med Uppdatera befintliga operationer, där en befintlig operation då får tidsenheten minuter. Ett okänt ord ger ett fel. Lagringen är alltid minuter; antal/timme sparas med visningsenheten st/h. | minuter/enhet |
+| **Kalkyl** | Nej | Ja/Nej, 1/0, X eller true/false; tom cell betyder Nej — även med Uppdatera befintliga operationer, där en befintlig kalkyloperation då blir en vanlig operation. Ja gör operationen till en kalkyloperation som bara räknas i förkalkylen och aldrig frisläpps eller rapporteras. | Nej |
 | **Kommentar** | Nej | Operationens instruktionstext, max 1 000 tecken. Kryssrutan Skriv ut kommentaren på arbetskortet i guiden avgör om den skrivs ut på TO-utskriften. Tom cell lämnar en befintlig kommentar orörd vid uppdatering. | Kontrollera måtten mot ritningen före kantpressning |
 | **Beskrivning** | Nej | Operationens namn, max 255 tecken (t.ex. Kantpressning). Tom cell lämnar ett befintligt namn orört vid uppdatering. | Laserskärning |
 | **Packinstruktion** | Nej | Packinstruktion för operationen, max 1 000 tecken. Tom cell lämnar en befintlig orörd vid uppdatering. | Mellanlägg av papp mellan varje enhet |
@@ -78,7 +78,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Komponentnummer** | Ja | Den ingående artikeln. Måste finnas i artikelregistret om inte Skapa saknade artiklar är ikryssat — då skapas den ur radens egna kolumner. Samma komponent kan bara ligga en gång per artikel: finns den redan i strukturen blir raden ett fel (eller hoppas över med Hoppa över rader som redan finns). En artikel kan inte ingå i sin egen struktur, inte heller via flera led. | PL-2-1500 |
 | **Antal** | Ja | Antal av komponenten per en enhet av den överordnade artikeln, större än 0, decimalkomma eller punkt. Anges i kolumnen Enhet (annars komponentens grundenhet) och lagras alltid i grundenheten. | 2 |
 | **Enhet** | Nej | En av komponentens enheter: grundenheten eller en upplagd alternativ enhet (annars ett fel). Tom cell betyder grundenheten. För en komponent som skapas av importen blir det i stället den nya artikelns grundenhet (tom = st; en okänd kod skapas). | st |
-| **Operation** | Nej | Sekvensnumret (heltal större än 0) på en av den överordnade artikelns operationer, som materialet dras vid. Tom cell, eller en operation som inte finns, ger ingen koppling — materialet dras vid slutrapporteringen (varning). En kalkyloperation ger ett fel. | 10 |
+| **Operation** | Nej | Sekvensnumret (heltal större än 0) på en av den överordnade artikelns operationer, som materialet dras vid. Tom cell, eller en operation som inte finns, ger ingen koppling — materialet dras då i takt med inleveransen av färdiga varor (en operation som inte finns ger en varning). En kalkyloperation ger ett fel. | 10 |
 | **Komponentbenämning** | Nej | Läses bara för komponenter som saknas i registret när Skapa saknade artiklar är ikryssat — då obligatorisk, max 255 tecken. Befintliga artiklar ändras aldrig av strukturimporten. | Plåt 2 mm 1500×3000 |
 | **Komponenttyp** | Nej | Artikeltyp för en komponent som skapas: Tillverkad (även M), Köpt (även P eller K), Tjänst (även Lego) eller Fiktiv (även F) — Fiktiv ger en tillverkad fantomartikel. Tom cell ger guidens Standardtyp, annars Köpt. Läses bara med Skapa saknade artiklar. | Köpt |
 | **Komponentens standardpris** | Nej | Standardkostnad per grundenhet för en komponent som skapas, decimalkomma eller punkt, aldrig negativ. Läses bara med Skapa saknade artiklar. | 890 |
@@ -92,11 +92,11 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Artikelnummer** | Ja | Numret på en artikel som redan finns i artikelregistret. | PL-2-1500 |
 | **Leverantörsnummer** | Ja | Numret på en leverantör som redan finns i leverantörsregistret. Alla rader med samma artikel och leverantör bildar en katalograd: den första raden ger pris och övriga uppgifter, varje rad kan bära ett staffelsteg. | 2001 |
 | **Leverantörens artikelnummer** | Nej | Leverantörens eget nummer på artikeln, max 100 tecken. Tom cell lämnar fältet orört på en befintlig post. | LEV-4471 |
-| **Pris** | Nej | Pris per grundenhet (antal 1) i leverantörens valuta, decimalkomma eller punkt, aldrig negativt; fyra decimaler sparas. Tom cell lämnar priset orört på en befintlig katalograd. | 245,00 |
-| **Rabatt (%)** | Nej | Procentavdrag från 0 upp till (men inte med) 100 som bakas in i radens pris och staffelpris — Pris × (1 − Rabatt/100) — med en varning, eftersom katalogen saknar rabattfält. Tom cell betyder ingen rabatt. | 10 |
-| **Huvudleverantör** | Nej | Ja/Nej, 1/0, X eller true/false; tom cell betyder Nej när kolumnen är mappad. Ja gör leverantören till artikelns huvudleverantör och tar bort markeringen från en tidigare — högst en per artikel i filen. | Ja |
-| **Staffel: från antal** | Nej | Antalet i grundenhet där staffelpriset börjar gälla, större än 1 — ett gränsvärde på 1 eller lägre ignoreras med en varning (antal 1 är grundpriset). Är kolumnen mappad ersätts katalogradens staffel helt av filens steg (inga steg = staffeln tas bort); är den inte mappad rörs staffeln inte. | 100 |
-| **Staffel: pris** | Nej | Priset per grundenhet från och med gränsvärdet, decimalkomma eller punkt, aldrig negativt. Krävs på varje rad som har ett gränsvärde. | 219,00 |
+| **Pris** | Nej | Pris per grundenhet (antal 1) i katalogradens valuta — en ny katalograd får leverantörens valuta, en befintlig behåller sin. Decimalkomma eller punkt, aldrig negativt; fyra decimaler sparas. Tom cell lämnar priset orört på en befintlig katalograd. | 245,00 |
+| **Rabatt (%)** | Nej | Procentavdrag från 0 upp till (men inte med) 100 som bakas in i radens pris och staffelpris — Pris × (1 − Rabatt/100) — med en varning, eftersom katalogen saknar rabattfält. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. Tom cell betyder ingen rabatt. | 10 |
+| **Huvudleverantör** | Nej | Ja/Nej, 1/0, X eller true/false; tom cell betyder Nej. Ja gör leverantören till artikelns huvudleverantör och tar bort markeringen från en tidigare — högst en per artikel i filen. Tom cell tar bort markeringen från en befintlig katalograd — ta bort kolumnen för att lämna den orörd. | Ja |
+| **Staffel: från antal** | Nej | Antalet i grundenhet där staffelpriset börjar gälla, större än 1 — ett gränsvärde på 1 eller lägre ignoreras med en varning (antal 1 är grundpriset). Finns kolumnen ersätts katalogradens staffel helt av filens steg — tomma celler betyder att staffeln tas bort; ta bort kolumnen för att lämna staffeln orörd. | 100 |
+| **Staffel: pris** | Nej | Priset per grundenhet från och med gränsvärdet, decimalkomma eller punkt, aldrig negativt. Krävs på varje rad som har ett gränsvärde; utan Staffel: från antal läses kolumnen inte. | 219,00 |
 
 ## Kundpriser
 
@@ -107,7 +107,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Artikelnummer** | Ja | Numret på en artikel som redan finns i artikelregistret. | SB-1200 |
 | **Kundnummer** | Ja | Numret på en kund som redan finns i kundregistret. Samma kund och artikel får bara förekomma en gång i filen. | 1001 |
 | **Pris** | Ja | Kundens pris per grundenhet i SEK, decimalkomma eller punkt, aldrig negativt. Sparas med fyra decimaler som kundens artikelpris från antal 1 och ersätter ett tidigare pris på samma artikel. | 1890,00 |
-| **Rabatt (%)** | Nej | Procentavdrag från 0 upp till (men inte med) 100 som bakas in i priset — Pris × (1 − Rabatt/100) — med en varning, eftersom kundpriset lagras som nettopris. Tom cell betyder ingen rabatt. | 5 |
+| **Rabatt (%)** | Nej | Procentavdrag från 0 upp till (men inte med) 100 som bakas in i priset — Pris × (1 − Rabatt/100) — med en varning, eftersom kundpriset lagras som nettopris. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. Tom cell betyder ingen rabatt. | 5 |
 
 ## Kunder
 
@@ -120,7 +120,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Organisationsnummer** | Nej | Max 20 tecken. Tom cell lämnar fältet orört på en befintlig post. | 556123-4567 |
 | **VAT-nummer** | Nej | Momsregistreringsnummer, max 30 tecken. Tom cell lämnar fältet orört på en befintlig post. | SE556123456701 |
 | **Kontaktperson** | Nej | Kontaktpersonens namn på kundkortets Allmänt-flik, max 255 tecken — kontaktregistret importeras separat som kundkontakter. | Anna Andersson |
-| **E-post** | Nej | Kundens e-postadress, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning. | info@example.com |
+| **E-post** | Nej | Kundens e-postadress, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning. | info@example.com |
 | **Telefon** | Nej | Max 50 tecken. Tom cell lämnar fältet orört på en befintlig post. | 010-200 10 10 |
 | **Adress** | Nej | Besöksadressens första rad. Adress, Adressrad 2 och Adressrad 3 slås ihop till en adress med radbrytningar; är alla tre tomma lämnas adressen orörd. | Storgatan 8 |
 | **Adressrad 2** | Nej | Besöksadressens andra rad, valfri — slås ihop med Adress. | Hus B |
@@ -132,8 +132,8 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Leveransvillkor** | Nej | Leveransvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor. | Fritt vårt lager |
 | **Leveranssätt/speditör** | Nej | Speditörens kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som ny speditör. | Exempelfrakt |
 | **Prislista** | Nej | Prislistans kod eller namn (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som ny prislista. | Grossist |
-| **Kundrabatt (%)** | Nej | Kundens generella rabatt i procent, 0–100, decimalkomma eller punkt. Tom cell lämnar fältet orört på en befintlig post. | 5 |
-| **Avvikande fakturaadress** | Nej | Ja/Nej, 1/0, X eller true/false. Nej betyder att radens fakturaadresskolumner (namn, adress, postnummer, postort, land) ignoreras — kunden faktureras på besöksadressen; Ja eller tom cell använder dem som de är. Lagras inte. | Ja |
+| **Kundrabatt (%)** | Nej | Kundens generella rabatt i procent, 0–100, decimalkomma eller punkt. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. Tom cell lämnar fältet orört på en befintlig post. | 5 |
+| **Avvikande fakturaadress** | Nej | Ja/Nej, 1/0, X eller true/false. Nej betyder att radens fakturaadresskolumner (namn, adress, postnummer, postort, land) ignoreras — en ny kund får ingen fakturaadress och en befintlig kunds sparade fakturaadress ändras inte. Ja eller tom cell använder kolumnerna som de är. Lagras inte. | Ja |
 | **Fakturanamn** | Nej | Namnet på fakturan när det skiljer sig från kundens namn, max 255 tecken. Tom cell lämnar fältet orört på en befintlig post. | Exempelkrogen AB, ekonomiavdelningen |
 | **Fakturaadress** | Nej | Fakturaadressens första rad. Fakturaadress, Fakturaadressrad 2 och Fakturaadressrad 3 slås ihop med radbrytningar; är alla tre tomma lämnas fakturaadressen orörd. | Box 100 |
 | **Fakturaadressrad 2** | Nej | Fakturaadressens andra rad, valfri — slås ihop med Fakturaadress. | Att: Ekonomi |
@@ -141,7 +141,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Fakturapostnummer** | Nej | Max 20 tecken. Tom cell lämnar fältet orört på en befintlig post. | 123 51 |
 | **Fakturapostort** | Nej | Max 100 tecken. Tom cell lämnar fältet orört på en befintlig post. | Exempelby |
 | **Fakturaland** | Nej | Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Tom cell lämnar fältet orört på en befintlig post. | SE |
-| **E-post för faktura** | Nej | E-postadress som fakturor skickas till, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning. | faktura@example.com |
+| **E-post för faktura** | Nej | E-postadress som fakturor skickas till, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning. | faktura@example.com |
 | **Vårt leverantörsnummer** | Nej | Det nummer kunden har på oss som leverantör, max 50 tecken — skrivs ut på offert, orderbekräftelse och faktura. | L-4711 |
 | **Samlingsfaktura** | Nej | Ja/Nej, 1/0, X eller true/false — Ja gör att kundens leveranser faktureras genom samlingsfakturering; ett värde som börjar med Per (t.ex. Per kund) räknas också som Ja. Tom cell lämnar fältet orört på en befintlig post. | Nej |
 | **Privatperson** | Nej | Ja/Nej, 1/0, X eller true/false — Ja visar priser inklusive moms på kundens offerter, orderbekräftelser och fakturor. Tom cell lämnar fältet orört på en befintlig post. | Nej |
@@ -158,7 +158,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Förvald** | Nej | Ja/Nej, 1/0, X eller true/false; tom cell betyder Nej. Ja gör kontakten till kundens huvudkontakt; har kunden redan en importeras kontakten som vanlig kontakt med en varning. | Ja |
 | **Telefon** | Nej | Max 50 tecken. | 010-200 10 11 |
 | **Mobiltelefon** | Nej | Max 50 tecken. | 070-000 00 01 |
-| **E-post** | Nej | Max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning. | anna@example.com |
+| **E-post** | Nej | Max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning. | anna@example.com |
 | **Anmärkning** | Nej | Fritext om kontakten. | Beställer för köket |
 | **Faxnummer** | Nej | Max 50 tecken. Kontakten har inget eget faxfält — numret läggs i anmärkningen som Fax 010-200 10 19. | 010-200 10 19 |
 
@@ -188,14 +188,14 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Organisationsnummer** | Nej | Max 20 tecken. Tom cell lämnar fältet orört på en befintlig post. | 556987-6543 |
 | **VAT-nummer** | Nej | Momsregistreringsnummer, max 30 tecken. Tom cell lämnar fältet orört på en befintlig post. | SE556987654301 |
 | **Kontaktperson** | Nej | Kontaktpersonens namn på leverantörskortets Allmänt-flik, max 255 tecken — kontaktregistret importeras separat som leverantörskontakter. | Bo Bengtsson |
-| **E-post** | Nej | Leverantörens e-postadress (dit förfrågningar och inköpsorder skickas), max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning. | order@example.com |
+| **E-post** | Nej | Leverantörens e-postadress (dit förfrågningar och inköpsorder skickas), max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning. | order@example.com |
 | **Telefon** | Nej | Max 50 tecken. Tom cell lämnar fältet orört på en befintlig post. | 010-100 10 10 |
 | **Adress** | Nej | Postadressens första rad. Adress, Adressrad 2 och Adressrad 3 slås ihop till en adress med radbrytningar; är alla tre tomma lämnas adressen orörd. | Valsverksgatan 4 |
 | **Adressrad 2** | Nej | Postadressens andra rad, valfri — slås ihop med Adress. | Port C |
 | **Adressrad 3** | Nej | Postadressens tredje rad, valfri — slås ihop med Adress. | Godsmottagningen |
 | **Postnummer** | Nej | Max 20 tecken. Tom cell lämnar fältet orört på en befintlig post. | 123 45 |
 | **Postort** | Nej | Max 100 tecken. Tom cell lämnar fältet orört på en befintlig post. | Exempelby |
-| **Valuta** | Nej | Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Leverantörens katalogpriser och inköpsorder anges i valutan. Tom cell ger SEK för nya leverantörer och lämnar befintliga orörda. | SEK |
+| **Valuta** | Nej | Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya inköpsorder och nya katalograder (även de som Inköpspriser-importen skapar) får leverantörens valuta; befintliga behåller sin. Tom cell ger SEK för nya leverantörer och lämnar befintliga orörda. | SEK |
 | **Vårt kundnummer** | Nej | Det kundnummer leverantören har på oss, max 50 tecken — skrivs ut på förfrågan och inköpsorder. Tom cell lämnar fältet orört på en befintlig post. | K-1234 |
 | **Betalningsvillkor** | Nej | Betalningsvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor; börjar namnet med ett antal dagar (30 dagar netto) blir dagarna villkorets kod och styr förfallodatum på leverantörsfakturor. | 30 dagar netto |
 | **Leveransvillkor** | Nej | Leveransvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor. | Fritt vårt lager |
@@ -213,7 +213,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 | **Förvald** | Nej | Ja/Nej, 1/0, X eller true/false; tom cell betyder Nej. Ja gör kontakten till leverantörens huvudkontakt; har leverantören redan en importeras kontakten som vanlig kontakt med en varning. | Ja |
 | **Telefon** | Nej | Max 50 tecken. | 010-100 10 11 |
 | **Mobiltelefon** | Nej | Max 50 tecken. | 070-000 00 02 |
-| **E-post** | Nej | Max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt med en varning. | bo@example.com |
+| **E-post** | Nej | Max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning. | bo@example.com |
 | **Anmärkning** | Nej | Fritext om kontakten. | Säljare, plåt och profiler |
 | **Faxnummer** | Nej | Max 50 tecken. Kontakten har inget eget faxfält — numret läggs i anmärkningen som Fax 010-100 10 19. | 010-100 10 19 |
 
@@ -237,17 +237,17 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 
 | Kolumn | Obligatorisk | Förklaring | Exempel |
 | --- | --- | --- | --- |
-| **Nummer** | Ja | Resursens nummer, exakt tre siffror (textformatera kolumnen i Excel så att 110 inte blir 110,0 och 007 inte 7). Finns numret redan uppdateras resursen; används det av en legoresurs blir raden ett fel — den importeras på fliken Legoresurser. | 110 |
+| **Nummer** | Ja | Resursens nummer, tre siffror. 1–2 siffror fylls ut med nollor (7 blir 007). Finns numret redan uppdateras resursen; används det av en legoresurs blir raden ett fel — den importeras på fliken Legoresurser. | 110 |
 | **Namn** | Nej | Resursens namn, max 100 tecken. Krävs för nya resurser. Tom cell lämnar fältet orört på en befintlig post. | Laserskärning |
 | **Typ** | Nej | Maskin eller Personal (även Manuellt arbete). Lego, Underleverantör eller Extern hoppar över raden med hänvisning till fliken Legoresurser. Ett okänt ord ger Maskin för nya resurser och lämnar befintliga orörda, med en varning; tom cell likaså utan varning. | Maskin |
 | **Avdelning** | Nej | Koden på den produktionsgrupp resursen tillhör, max 20 tecken (skiftlägesokänsligt). En okänd kod skapas som ny produktionsgrupp, med Avdelningens namn eller koden som namn. Tom cell lämnar fältet orört. | PV |
 | **Avdelningens namn** | Nej | Produktionsgruppens namn, max 100 tecken — används bara när gruppen skapas av importen; en befintlig grupp byter inte namn. | Plåtverkstad |
 | **Timkostnad** | Nej | Resursens kostnad per timme i SEK, decimalkomma eller punkt, aldrig negativ — används i för- och efterkalkylen. Tom cell lämnar fältet orört på en befintlig post. | 950 |
 | **Kalkylpris 1** | Nej | Alternativt timpris i SEK, decimalkomma eller punkt, aldrig negativt. Sparas på resursen men används inte av kalkylen ännu. | 900 |
-| **Gäller ställ** | Nej | Ja/Nej, 1/0, X eller true/false — om timkostnaden gäller ställtiden. Sparas på resursen som förvalsvärde; tom cell lämnar fältet orört. | Ja |
-| **Gäller styck** | Nej | Ja/Nej, 1/0, X eller true/false — om timkostnaden gäller stycktiden. Sparas på resursen som förvalsvärde; tom cell lämnar fältet orört. | Ja |
-| **Förvald ställtid** | Nej | Ställtid i minuter som föreslås för nya operationer på resursen, decimalkomma eller punkt, aldrig negativ. Sparas som förvalsvärde; tom cell lämnar fältet orört. | 15 |
-| **Förvald operationsbenämning** | Nej | Operationsnamn som föreslås för nya operationer på resursen, max 100 tecken. Sparas som förvalsvärde; tom cell lämnar fältet orört. | Laserskärning |
+| **Gäller ställ** | Nej | Ja/Nej, 1/0, X eller true/false — om timkostnaden gäller ställtiden. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. Tom cell lämnar fältet orört på en befintlig post. | Ja |
+| **Gäller styck** | Nej | Ja/Nej, 1/0, X eller true/false — om timkostnaden gäller stycktiden. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. Tom cell lämnar fältet orört på en befintlig post. | Ja |
+| **Förvald ställtid** | Nej | Ställtid i minuter, decimalkomma eller punkt, aldrig negativ. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. Tom cell lämnar fältet orört på en befintlig post. | 15 |
+| **Förvald operationsbenämning** | Nej | Operationsnamn, max 100 tecken. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. Tom cell lämnar fältet orört på en befintlig post. | Laserskärning |
 | **Kostnadsrad** | Nej | Styrkolumn för filer med flera kostnadsrader per resurs: bara raden vars värde börjar med Ordinarie importeras; saknar resursen en sådan tas dess första rad med en varning. Lagras inte — ta bort kolumnen när filen har en rad per resurs. | Ordinarie |
 
 ## Legoresurser
@@ -256,7 +256,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under varj
 
 | Kolumn | Obligatorisk | Förklaring | Exempel |
 | --- | --- | --- | --- |
-| **Nummer** | Ja | Legoresursens nummer, exakt tre siffror (textformatera kolumnen i Excel). Finns numret redan uppdateras legoresursen; används det av en maskin- eller personalresurs blir raden ett fel. | 910 |
+| **Nummer** | Ja | Legoresursens nummer, tre siffror. 1–2 siffror fylls ut med nollor (7 blir 007). Finns numret redan uppdateras legoresursen; används det av en maskin- eller personalresurs blir raden ett fel. | 910 |
 | **Namn** | Nej | Legoresursens namn, max 100 tecken. Krävs för nya legoresurser. Tom cell lämnar fältet orört på en befintlig post. | Pulverlackering, extern |
 | **Leverantörsnummer** | Nej | Numret på den leverantör som utför legoarbetet — måste finnas i leverantörsregistret, importera leverantörerna först. Tom cell lämnar fältet orört. | 2003 |
 | **Ledtid (dagar)** | Nej | Arbetsdagar hos leverantören från avsändning till retur, decimalkomma eller punkt, aldrig negativ — används av planeringen och leveranstidskontrollen. Tom cell lämnar fältet orört. | 5 |

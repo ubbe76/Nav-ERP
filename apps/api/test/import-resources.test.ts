@@ -261,13 +261,31 @@ describe("planWorkCenterImport", () => {
     expect(plan.creates[2]).not.toHaveProperty("type");
   });
 
-  it("errors when the resource number is not exactly three digits", async () => {
+  it("errors when the resource number is not three digits", async () => {
     const plan = await planWorkCenterImport(
-      { mapping: BASE_MAPPING, rows: [["12", "Kort nummer", "Maskin"]] },
+      { mapping: BASE_MAPPING, rows: [["1234", "Långt nummer", "Maskin"], ["1A", "Bokstav", "Maskin"]] },
       workCenterDeps()
     );
     expect(plan.rows[0]!.errors).toEqual(["Resursnumret ska vara exakt tre siffror"]);
+    expect(plan.rows[1]!.errors).toEqual(["Resursnumret ska vara exakt tre siffror"]);
     expect(plan.hasErrors).toBe(true);
+  });
+
+  it("pads a one- or two-digit number to three (Excel turns 007 into 7), like the routing import", async () => {
+    const plan = await planWorkCenterImport(
+      { mapping: BASE_MAPPING, rows: [["7", "Kort nummer", "Maskin"], ["12", "Tvåsiffrigt", "Maskin"]] },
+      workCenterDeps()
+    );
+    expect(plan.hasErrors).toBe(false);
+    expect(plan.rows.map((r) => r.warnings)).toEqual([[], []]);
+    expect(plan.creates.map((c) => c.code)).toEqual(["007", "012"]);
+
+    // A padded number matches the existing resource.
+    const update = await planWorkCenterImport(
+      { mapping: BASE_MAPPING, rows: [["7", "Kapning", "Maskin"]] },
+      workCenterDeps({ "007": { id: "wc-7", code: "007", type: "machine" } })
+    );
+    expect(update.rows[0]!.action).toBe("update");
   });
 
   describe("Kostnader shape: only the Ordinarie cost row counts", () => {
@@ -408,6 +426,15 @@ describe("planLegoWorkCenterImport", () => {
       legoWorkCenterDeps()
     );
     expect(plan.rows[0]!.errors[0]).toContain("finns inte — importera leverantörerna först");
+  });
+
+  it("pads a one- or two-digit number to three, like the resource import", async () => {
+    const plan = await planLegoWorkCenterImport(
+      { mapping: MAPPING, rows: [["83", "Övriga kostnader", "51005262", "0", "1", "2"]] },
+      legoWorkCenterDeps({}, { "51005262": { id: "sup-1" } })
+    );
+    expect(plan.hasErrors).toBe(false);
+    expect(plan.creates[0]!.code).toBe("083");
   });
 
   it("parses the lead/queue time numbers", () => {

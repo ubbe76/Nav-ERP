@@ -2,3 +2,9 @@
 # (Git for Windows' core.autocrlf would otherwise convert them to CRLF and
 # bash in WSL refuses to run them).
 *.sh text eol=lf
+
+# The generated manual chapter is compared with the generator's output
+# (import-templates-generated.test.ts), so it must keep LF everywhere; the
+# generated Excel templates are binary and must never be converted.
+docs/manual/importmallar.md text eol=lf
+*.xlsx binary

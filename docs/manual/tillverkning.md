@@ -56,7 +56,7 @@ Så hänger legoflödet ihop:
 
 **Tillverkning → Resurser → Importera** (`/tillverkning/resurser/import`) öppnar en guide med tre flikar — **Produktionsgrupper**, **Resurser** och **Legoresurser** — som tillsammans tar in en fullständig resursexport. Endast administratörer har åtkomst. Filer läses som CSV (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) eller Excel (.xlsx, bara det första bladet läses). Varje flik kör sin egen guide i fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#resurser) (legoresurser: [#legoresurser](/hjalp/importmallar#legoresurser), produktionsgrupper: [#produktionsgrupper](/hjalp/importmallar#produktionsgrupper)).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#resurser) (legoresurser: [Legoresurser](/hjalp/importmallar#legoresurser), produktionsgrupper: [Produktionsgrupper](/hjalp/importmallar#produktionsgrupper)).
 
 **Begreppen skiljer sig mellan exportfilerna och Nav:** filernas **Produktionsgrupp** är det Nav kallar en **resurs** (tresiffrigt nummer — en maskin eller en personalresurs), och filernas **Avdelning** är det Nav kallar en **produktionsgrupp**. Håll isär de två när du läser rubrikerna nedan — en kolumn som heter "Prod.grupp" mappas alltså mot Navs fält **Nummer**, inte mot produktionsgrupp.
 
@@ -83,7 +83,7 @@ Läser exportens **Kostnader**-fil. Kolumner som känns igen automatiskt: "Avdel
 
 Läser exportens **Kostnader**- och **Lista**-fil. Kolumner som känns igen automatiskt:
 
-- "Prod.grupp" → **Nummer** — måste vara exakt tre siffror.
+- "Prod.grupp" → **Nummer** — tre siffror; ett nummer med en eller två siffror fylls ut med nollor (7 blir 007), eftersom Excel gör om 007 till talet 7 i en kolumn som inte är textformaterad.
 - "Namn" → **Namn**.
 - "Typ" → **Typ**: "Maskin" ger maskin, "Manuellt arbete" ger personal. Ett okänt värde ger maskin och en varning på raden; ett värde som innehåller "lego" hoppas över med en hänvisning till fliken **Legoresurser**.
 - "Avdelning" → **produktionsgrupp**. Finns produktionsgruppen inte skapas den automatiskt — med namn från "Benämning" när den kolumnen är mappad, annars koden.
@@ -101,7 +101,7 @@ Kolumner som medvetet lämnas omappade: Lagerställe, Planerare namn, Kategori, 
 
 ### Fliken Legoresurser
 
-Läser exportens **Lego**-fil. Kolumner som känns igen automatiskt: "Prod.grupp" → **Nummer**, "Namn" → **Namn**, "Leverantör" → **Leverantörsnummer**, "Ledtid" → **Ledtid (dagar)**, "Kötid" → **Kötid (dagar)**, "Ledtid beställning" → **Ledtid beställning (dagar)**.
+Läser exportens **Lego**-fil. Kolumner som känns igen automatiskt: "Prod.grupp" → **Nummer** (tre siffror, en eller två siffror fylls ut med nollor som på fliken Resurser), "Namn" → **Namn**, "Leverantör" → **Leverantörsnummer**, "Ledtid" → **Ledtid (dagar)**, "Kötid" → **Kötid (dagar)**, "Ledtid beställning" → **Ledtid beställning (dagar)**.
 
 Leverantörens namn-/kontaktkolumner ("Namn (2)"/"Namn (3)") samt "Skapa inte fakturaunderlag" och "Skapa I-order" saknar motsvarighet och lämnas omappade.
 

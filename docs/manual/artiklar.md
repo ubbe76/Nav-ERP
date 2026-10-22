@@ -354,7 +354,7 @@ En operation som material är kopplat till kan inte märkas **Kalkyl** — mater
 Varje komponent kan kopplas till en av artikelns egna operationer i fältet **Operation** (välj **— ingen —** för att lämna den okopplad). Kopplingen styr **när materialet dras från lagret**:
 
 - **Kopplad komponent** dras automatiskt när operationen avrapporteras klar på tillverkningsordern, i det antal som det avrapporterade antalet kräver (se [Tillverkning](/hjalp/tillverkning)).
-- **Okopplad komponent** dras när hela ordern slutrapporteras.
+- **Okopplad komponent** dras i takt med att färdiga varor levereras in på ordern, alltså när den sista operationen rapporteras eller ordern slutförs.
 
 Kopplingen fastställs när tillverkningsordern frisläpps — senare ändringar i beredningen påverkar inte redan frisläppta ordrar. Samma komponent kan bara ligga en gång i en artikels struktur — kopplingen till operation väljs alltså per komponent, inte per operationsrad. Komponenter under en fantomartikel ärver fantomradens operation om de inte har en egen.
 
@@ -491,7 +491,7 @@ Regler att känna till:
 - Samma artikelnummer två gånger i filen ger fel på den andra raden.
 - **Textformatera nummerkolumner i Excel.** Ett artikelnummer som `0042` lagras annars som talet 42 och importeras med den stavningen.
 - **Delexporter av artikellistan** (utan benämningskolumn) importeras med samma flik som rena uppdateringar: matchningen sker på artikelnummer och bara de mappade kolumnerna skrivs.
-  - **Planering** (rubrikerna **Nettovikt**, **Beställningspunkt**, **Orderkvantitet**, **Avrundningsantal**, **Partiformningsregel** känns igen): vikten går till **Vikt (kg)** och de tre planeringsfälten till Lager-flikens [Planering](#lager). Ett **0** i filen betyder "ingen" och tömmer fältet. **Orderkvantitet importeras bara på rader där Partiformningsregel är "Fast orderstorlek"** — med "Mot behov" är planeringen rent behovsstyrd, och en importerad orderkvantitet skulle göra artikeln till en multipelköpare här; är kolumnen Partiformningsregel inte mappad tas orderkvantiteten som den är. **Avrundningsantal** med fler än 3 decimaler avrundas med en varning. **Min. kvantitet**, **Säkerhetslager**, **Ledtid** och de övriga planeringskolumnerna importeras inte (orderkvantiteten fungerar redan som minsta antal).
+  - **Planering** (rubrikerna **Nettovikt**, **Beställningspunkt**, **Orderkvantitet**, **Avrundningsantal**, **Partiformningsregel** känns igen): vikten går till **Vikt (kg)** och de tre planeringsfälten till Lager-flikens [Planering](#lager). Ett **0** i filen betyder "ingen" och tömmer fältet. **Orderkvantitet importeras bara på rader där Partiformningsregel är "Fast orderstorlek"** — med "Mot behov" är planeringen rent behovsstyrd, och en importerad orderkvantitet skulle göra artikeln till en multipelköpare här; en orderkvantitet som hoppas över (regeln är något annat eller tom) ger varningen "Orderkvantitet hoppades över — Partiformningsregel är inte Fast orderstorlek" på raden. Är kolumnen Partiformningsregel inte mappad tas orderkvantiteten som den är. **Avrundningsantal** med fler än 3 decimaler avrundas med en varning. **Min. kvantitet**, **Säkerhetslager**, **Ledtid** och de övriga planeringskolumnerna importeras inte (orderkvantiteten fungerar redan som minsta antal).
   - **Extra benämning** (rubrikerna **Artikelnummer**, **Extra benämning**, **Färg**): färgen går till **Färg**; extra benämning har inget fält och importeras inte.
 
 ## Importera alternativa enheter

@@ -46,7 +46,10 @@ export const config = {
   // register calls), the brand/PWA assets — browsers fetch these on the
   // login page too, and a 307 to /login would break the favicon and manifest
   // — and the Excel import templates (public/importmallar, generated files
-  // with nothing sensitive, linked from the manual and the website).
+  // with nothing sensitive). A path without a row in lib/pageAccess.ts is
+  // admin-only, so without the exemption the page guard below would send a
+  // non-admin following the manual's Ladda ned mallen link to
+  // /ingen-behorighet (and a visitor from the website to /login).
   matcher: [
     "/((?!api/v1|_next/static|_next/image|importmallar/|favicon.ico|favicon-16x16.png|favicon-32x32.png|apple-icon.png|manifest.webmanifest|android-chrome-192x192.png|android-chrome-512x512.png).*)",
   ],

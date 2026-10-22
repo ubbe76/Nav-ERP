@@ -499,7 +499,7 @@ describe("planBomImport", () => {
 
     expect(plan.rows[0]!.errors).toEqual([]);
     expect(plan.rows[0]!.warnings).toContain(
-      "Operation 99 finns inte på artikel A-1 — materialet kopplas inte till någon operation och dras vid slutrapporteringen"
+      "Operation 99 finns inte på artikel A-1 — materialet kopplas inte till någon operation och dras i takt med inleveransen av färdiga varor"
     );
     expect(plan.hasErrors).toBe(false);
     // The row is imported, just without the link.
@@ -515,7 +515,7 @@ describe("planBomImport", () => {
     );
 
     expect(plan.rows[0]!.warnings).toContain(
-      "Artikel A-1 har ingen rutt — materialet kopplas inte till någon operation och dras vid slutrapporteringen"
+      "Artikel A-1 har ingen rutt — materialet kopplas inte till någon operation och dras i takt med inleveransen av färdiga varor"
     );
     expect(plan.hasErrors).toBe(false);
   });

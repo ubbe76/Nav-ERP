@@ -64,7 +64,7 @@ En **förfrågan** får varken förslag eller varning. Leverantörsimporten läs
 
 **Inköp → Leverantörer → Importera** öppnar en guide med tre flikar — **Leverantörer**, **Kontakter** och **Leveransadresser** — som tillsammans tar in en fullständig leverantörsexport. Endast administratörer har åtkomst. Filer läses som CSV (semikolon, komma och tabb känns alla igen — även teckenkodningen identifieras automatiskt) eller Excel (.xlsx, bara det första bladet läses). Varje flik kör sin egen guide i fyra steg: **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat**.
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#leverantorer) (kontakter: [#leverantorskontakter](/hjalp/importmallar#leverantorskontakter), leveransadresser: [#leverantorernas-leveransadresser](/hjalp/importmallar#leverantorernas-leveransadresser)).
+Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#leverantorer) (kontakter: [Leverantörskontakter](/hjalp/importmallar#leverantorskontakter), leveransadresser: [Leverantörernas leveransadresser](/hjalp/importmallar#leverantorernas-leveransadresser)).
 
 Leverantörsexporten består av flera separata filer. **Fliken Leverantörer** körs en gång per fil, alltid i den här ordningen:
 
@@ -118,9 +118,9 @@ Läser exportens **Leveransadress**-fil. Mappningsbara fält (filens rubriker "L
 
 ## Importera inköpspriser
 
-Fliken **Inköpspriser** på **Artiklar → Importera** läser in artiklarnas leverantörskatalog (fliken **Inköp** på artikelkortet, se [Artiklar](/hjalp/artiklar#inkop)) från exporten **Prislista Inköp**. Två exportfiler läses med samma flik:
+Fliken **Inköpspriser** på **Artiklar → Importera** läser in artiklarnas leverantörskatalog (fliken **Inköp** på artikelkortet, se [Artiklar](/hjalp/artiklar#inkop)) från exporten **Prislista Inköp**. Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#inkopspriser).
 
-Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#inkopspriser).
+Två exportfiler läses med samma flik:
 
 - **Prislista-Inköp (Lista)** — en rad per artikel och leverantör med rubrikerna **Förvald**, **Leverantör** (leverantörsnumret), **Lev. art.nr**, **Pris** och **Rabatt**, som alla känns igen automatiskt. **Förvald** = Ja gör leverantören till artikelns **huvudleverantör**.
 - **Prislista-Inköp (stafflat)** — samma rader men en rad per **staffelsteg**: kolumnen **Gränsvärde antal** och en andra **Pris**-kolumn (guiden visar den som **Pris (2)** och mappar den till **Staffel: pris**). Grundpriset upprepas på varje rad. Filen saknar Förvald, så huvudleverantören lämnas orörd när den läses in.
@@ -132,7 +132,8 @@ Regler att känna till:
 - Artikeln och leverantören måste redan finnas (leverantören matchas på **leverantörsnummer**, se [Importera leverantörer](#importera-leverantorer)).
 - **Rabatten räknas in i priset.** Filens Pris är bruttopriset och Rabatt en procentsats på det; katalogen har inget rabattfält, så importen sparar nettopriset Pris × (1 − Rabatt/100) — för grundpriset och varje staffelsteg — och varnar på raden att rabatten bakats in. Tomt Pris ger en katalograd utan pris.
 - **Staffeln ersätts som helhet** per artikel och leverantör när kolumnen Gränsvärde är mappad — den stafflade filen är en fullständig lista, så en leverantör utan staffelrader i filen får sin staffel rensad. Läser du den vanliga listan (utan Gränsvärde) rörs stegen inte alls. Ett gränsvärde på 1 eller lägre ignoreras med en varning (antal 1 är grundpriset), ett gränsvärde utan pris eller samma gränsvärde två gånger är ett fel.
-- **Huvudleverantör**: när kolumnen Förvald är mappad blir raden med Ja huvudleverantör och en tidigare huvudleverantör avmarkeras; två Ja på samma artikel i filen är ett fel.
+- **Huvudleverantör**: när kolumnen Förvald är mappad blir raden med Ja huvudleverantör och en tidigare huvudleverantör avmarkeras; Nej eller en tom cell tar bort markeringen från en befintlig katalograd. Två Ja på samma artikel i filen är ett fel.
+- **Valuta**: en ny katalograd får leverantörens valuta (som när raden läggs upp på artikelkortet), och priset tolkas i den; en befintlig katalograd behåller sin valuta.
 - En leverantör som redan finns i artikelns katalog uppdateras (pris, artikelnummer, huvudleverantör och staffel); med **Hoppa över rader som redan finns** lämnas hela katalograden orörd, staffel inräknad. Se [Hoppa över befintliga rader](/hjalp/artiklar#hoppa-over-befintliga-rader).
 - Förhandsgranskningen räknar rader; resultatet räknar katalograder — en artikel-leverantör med tre staffelsteg är fyra rader men en katalogpost.
 

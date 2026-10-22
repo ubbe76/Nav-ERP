@@ -63,6 +63,14 @@ const MAX_LENGTHS = { name: 100, defaultOperationName: 100, productionGroupCode:
 // Same rule as routing.ts / workCenterCodeSchema: exactly three digits.
 const WORK_CENTER_CODE_PATTERN = /^[0-9]{3}$/;
 
+// Excel stores 007 as the NUMBER 7 unless the column is text-formatted, and
+// the xlsx reader then hands us "7". Pad 1–2 digits back to three — that is
+// the spreadsheet's doing, not the user's, so it warrants no warning. Shared
+// by the resource, lego resource and routing imports.
+export function padWorkCenterCode(raw: string): string {
+  return /^[0-9]{1,2}$/.test(raw) ? raw.padStart(3, "0") : raw;
+}
+
 // Normalized header -> target field (see import.service.ts's normalizeHeader:
 // "Prod.grupp" -> "prodgrupp", "Aktuell, STD" -> "aktuellstd", "Förv. ställ"
 // -> "forvstall", "Op. benämning" -> "opbenamning"). "Benämning" is the
@@ -209,6 +217,7 @@ export async function planWorkCenterImport(
     columns.forEach((field, i) => {
       if (field) record[field] = (row[i] ?? "").trim();
     });
+    if (record["code"] !== undefined) record["code"] = padWorkCenterCode(record["code"]);
     return record;
   });
 

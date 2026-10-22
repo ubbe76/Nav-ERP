@@ -1046,6 +1046,19 @@ export function createImportRepository(db: Db) {
             .where(and(inArray(articleSuppliers.articleId, part), eq(articleSuppliers.isPrimary, true)));
         }
 
+        // A new catalog row takes the supplier's currency, as the catalog
+        // dialog does; existing rows keep theirs (the price column is in the
+        // row's currency).
+        const currencyBySupplier = new Map<string, string>();
+        for (const part of chunk([...new Set(plan.creates.map((create) => create.supplierId))])) {
+          if (part.length === 0) continue;
+          const rows = await tx
+            .select({ id: suppliers.id, currency: suppliers.currency })
+            .from(suppliers)
+            .where(inArray(suppliers.id, part));
+          for (const row of rows) currencyBySupplier.set(row.id, row.currency);
+        }
+
         const createdIds: { id: string; breaks: SupplierPriceImportPlan["creates"][number]["breaks"] }[] = [];
         for (const part of chunk(plan.creates)) {
           if (part.length === 0) continue;
@@ -1057,6 +1070,7 @@ export function createImportRepository(db: Db) {
                 supplierId: create.supplierId,
                 supplierArticleNumber: create.supplierArticleNumber,
                 price: create.price !== null ? String(create.price) : null,
+                currency: currencyBySupplier.get(create.supplierId) ?? "SEK",
                 isPrimary: create.isPrimary,
               }))
             )

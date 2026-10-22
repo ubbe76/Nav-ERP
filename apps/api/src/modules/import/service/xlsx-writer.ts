@@ -29,6 +29,13 @@ export interface XlsxSheet {
   name: string;
   /** Column widths in characters, by column index; missing = Excel default. */
   columnWidths?: number[];
+  /**
+   * Column indexes formatted as Text (numFmtId 49), so what the user types
+   * there — 007, 0123, 556123-4567, 10 % — is kept as written instead of
+   * turned into a number or a date. Cells with their own style (the bold
+   * headings) keep it.
+   */
+  textColumns?: number[];
   /** Freeze row 1 so the headings stay visible while scrolling. */
   freezeHeader?: boolean;
   /** Row heights in points, by row index; missing = default. */
@@ -122,7 +129,7 @@ function zipStored(entries: ZipEntry[]): Buffer {
 // [#x10000-#x10FFFF]; a control character or lone surrogate in a text would
 // make the part unparseable, so it is dropped rather than escaped.
 // eslint-disable-next-line no-control-regex
-const INVALID_XML_CHARS = /[^\u0009\u000a\u000d -퟿-�\u{10000}-\u{10ffff}]/gu;
+const INVALID_XML_CHARS = /[^\u0009\u000a\u000d\u0020-\ud7ff\ue000-\ufffd\u{10000}-\u{10ffff}]/gu;
 
 export function xmlText(value: string): string {
   return value
@@ -150,10 +157,12 @@ const NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationsh
 const NS_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
 const REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
-// cellXfs index: bit 0 = bold, bit 1 = wrap (top-aligned). Four styles.
+// cellXfs index: bit 0 = bold, bit 1 = wrap (top-aligned) — styles 0–3 —
+// plus TEXT_STYLE, the Text number format a text column carries.
 function styleIndex(cell: XlsxCell): number {
   return (cell.bold ? 1 : 0) + (cell.wrap ? 2 : 0);
 }
+const TEXT_STYLE = 4;
 
 function toCell(raw: XlsxCell | string | null): XlsxCell | null {
   if (raw === null) return null;
@@ -166,12 +175,18 @@ function sheetXml(sheet: XlsxSheet, hasComments: boolean): string {
     : `<sheetViews><sheetView workbookViewId="0"/></sheetViews>`;
 
   const widths = sheet.columnWidths ?? [];
-  const cols =
-    widths.length > 0
-      ? `<cols>${widths
-          .map((width, i) => `<col min="${i + 1}" max="${i + 1}" width="${width}" customWidth="1"/>`)
-          .join("")}</cols>`
-      : "";
+  const textColumns = new Set(sheet.textColumns ?? []);
+  const colCount = Math.max(widths.length, ...[...textColumns].map((i) => i + 1));
+  const colElements: string[] = [];
+  for (let i = 0; i < colCount; i++) {
+    const width = widths[i];
+    const isText = textColumns.has(i);
+    if (width === undefined && !isText) continue;
+    const widthAttrs = width !== undefined ? ` width="${width}" customWidth="1"` : ` width="9.140625"`;
+    const styleAttr = isText ? ` style="${TEXT_STYLE}"` : "";
+    colElements.push(`<col min="${i + 1}" max="${i + 1}"${widthAttrs}${styleAttr}/>`);
+  }
+  const cols = colElements.length > 0 ? `<cols>${colElements.join("")}</cols>` : "";
 
   const rows = sheet.rows
     .map((cells, rowIndex) => {
@@ -227,6 +242,12 @@ function commentsXml(comments: CommentRef[], author: string): string {
   return `${XML_HEADER}<comments xmlns="${NS_MAIN}"><authors><author>${xmlText(author)}</author></authors><commentList>${list}</commentList></comments>`;
 }
 
+// How many rows a note spans: about 45 characters fit on a line of the
+// three-column-wide box, plus one row of margin; never fewer than six.
+export function noteRows(text: string): number {
+  return Math.max(6, Math.ceil(text.length / 45) + 1);
+}
+
 // The legacy drawing Excel requires to render classic comments: one hidden
 // note shape per comment, anchored beside its cell. This is the shape Excel
 // itself writes (ECMA-376 Part 4, VML), trimmed to what the readers use.
@@ -236,10 +257,11 @@ function vmlDrawing(comments: CommentRef[], shapeBase: number): string {
     .map((c, i) => {
       // Anchor: left col, left offset, top row, top offset, right col, right
       // offset, bottom row, bottom offset — the note sits to the right of the
-      // cell and spans a few rows.
-      const anchor = `${c.column + 1}, 15, ${c.row}, 2, ${c.column + 4}, 15, ${c.row + 6}, 10`;
+      // cell, three columns wide, and grows downwards with the text so a
+      // long explanation is not clipped.
+      const anchor = `${c.column + 1}, 15, ${c.row}, 2, ${c.column + 4}, 15, ${c.row + noteRows(c.text)}, 10`;
       return (
-        `<v:shape id="_x0000_s${shapeBase + i + 1}" type="#_x0000_t202" style="position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:216pt;height:96pt;z-index:${i + 1};visibility:hidden" fillcolor="#ffffe1" o:insetmode="auto">` +
+        `<v:shape id="_x0000_s${shapeBase + i + 1}" type="#_x0000_t202" style="position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:216pt;height:${noteRows(c.text) * 16}pt;z-index:${i + 1};visibility:hidden" fillcolor="#ffffe1" o:insetmode="auto">` +
         `<v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>` +
         `<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"></div></v:textbox>` +
         `<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/><x:Anchor>${anchor}</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>${c.row}</x:Row><x:Column>${c.column}</x:Column></x:ClientData>` +
@@ -262,12 +284,14 @@ const STYLES_XML =
   `<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>` +
   `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
   `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
-  // 0 plain, 1 bold, 2 wrap, 3 bold + wrap (see styleIndex).
-  `<cellXfs count="4">` +
+  // 0 plain, 1 bold, 2 wrap, 3 bold + wrap (see styleIndex), 4 Text
+  // (numFmtId 49 = "@", TEXT_STYLE — the text columns' style).
+  `<cellXfs count="5">` +
   `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
   `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
   `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>` +
   `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>` +
+  `<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
   `</cellXfs>` +
   `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
   `</styleSheet>`;

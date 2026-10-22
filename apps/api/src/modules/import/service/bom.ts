@@ -499,8 +499,8 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
           // routing is not in the operations export.
           warnings.push(
             perArticle === undefined
-              ? `Artikel ${articleNumber} har ingen rutt — materialet kopplas inte till någon operation och dras vid slutrapporteringen`
-              : `Operation ${parsed} finns inte på artikel ${articleNumber} — materialet kopplas inte till någon operation och dras vid slutrapporteringen`
+              ? `Artikel ${articleNumber} har ingen rutt — materialet kopplas inte till någon operation och dras i takt med inleveransen av färdiga varor`
+              : `Operation ${parsed} finns inte på artikel ${articleNumber} — materialet kopplas inte till någon operation och dras i takt med inleveransen av färdiga varor`
           );
         } else if (operation.costingOnly) {
           // Same rule as assertOperationBelongsToArticle's

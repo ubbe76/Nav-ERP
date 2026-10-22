@@ -650,6 +650,26 @@ describe("planArticleImport", () => {
       );
       expect(demand.hasErrors).toBe(false);
       expect(demand.updates[0]!.patch).toEqual({ rounding: 1 });
+      expect(demand.rows[0]!.warnings).toEqual([
+        "Orderkvantitet hoppades över — Partiformningsregel är inte Fast orderstorlek",
+      ]);
+
+      // A mapped but empty rule skips the quantity too, with the same warning.
+      const emptyRule = await planArticleImport(
+        { mapping: PLANNING_MAPPING, rows: [["A-1", "", "100", "", "", ""]] },
+        fakeDeps([existing()])
+      );
+      expect(emptyRule.updates[0]!.patch).toEqual({});
+      expect(emptyRule.rows[0]!.warnings).toEqual([
+        "Orderkvantitet hoppades över — Partiformningsregel är inte Fast orderstorlek",
+      ]);
+
+      // 0 is "none" — skipping it loses nothing, so no warning.
+      const zeroSkipped = await planArticleImport(
+        { mapping: PLANNING_MAPPING, rows: [["A-1", "Mot behov", "0", "", "", ""]] },
+        fakeDeps([existing()])
+      );
+      expect(zeroSkipped.rows[0]!.warnings).toEqual([]);
 
       // Unmapped rule column: the quantity is taken as-is.
       const noRule = await planArticleImport(

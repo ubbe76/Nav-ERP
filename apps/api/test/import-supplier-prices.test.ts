@@ -319,10 +319,10 @@ async function seedArticle(articleNumber: string) {
   return row!.id;
 }
 
-async function seedSupplier(supplierNumber: string) {
+async function seedSupplier(supplierNumber: string, currency = "SEK") {
   const [row] = await db
     .insert(suppliers)
-    .values({ supplierNumber, name: `Leverantör ${supplierNumber}` })
+    .values({ supplierNumber, name: `Leverantör ${supplierNumber}`, currency })
     .returning({ id: suppliers.id });
   return row!.id;
 }
@@ -371,5 +371,26 @@ describe("supplier price import — repository and service", () => {
     // Re-running the plain list never touches the staffel.
     await importService.commit("supplierPrices", { mapping: MAPPING, rows: [["A", "2", "X-1", "100", "10", "true"]] });
     expect(await db.select().from(articleSupplierPriceBreaks)).toHaveLength(2);
+  });
+
+  it("gives a new catalog row the supplier's currency and leaves an existing row's currency alone", async () => {
+    const articleId = await seedArticle("A");
+    const otherArticleId = await seedArticle("B");
+    const eurSupplier = await seedSupplier("3", "EUR");
+    // An existing row in SEK on the same EUR supplier keeps SEK.
+    await db.insert(articleSuppliers).values({ articleId: otherArticleId, supplierId: eurSupplier, price: "10", currency: "SEK" });
+
+    const result = await importService.commit("supplierPrices", {
+      mapping: MAPPING,
+      rows: [
+        ["A", "3", "E-1", "12,50", "", "false"],
+        ["B", "3", "E-2", "11", "", "false"],
+      ],
+    });
+    expect(result).toMatchObject({ created: 1, updated: 1 });
+    const [created] = await db.select().from(articleSuppliers).where(eq(articleSuppliers.articleId, articleId));
+    expect(created).toMatchObject({ currency: "EUR", price: "12.5000" });
+    const [existing] = await db.select().from(articleSuppliers).where(eq(articleSuppliers.articleId, otherArticleId));
+    expect(existing).toMatchObject({ currency: "SEK", price: "11.0000" });
   });
 });
