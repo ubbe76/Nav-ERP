@@ -9,7 +9,12 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import type {
   AtfStatus,
+  AttendanceInputRequiredBody,
+  AttendanceOutInput,
+  AttendanceReasonInput,
   AttendanceSession,
+  AttendanceDeviationReason,
+  OvertimeCompensation,
   EmployeeDirectoryEntry,
   ResolvedCalendarDay,
   StampSession,
@@ -36,7 +41,39 @@ type Step =
   | { name: "pickOperations"; employee: EmployeeDirectoryEntry }
   | { name: "stampOut"; employee: EmployeeDirectoryEntry; session: StampSession }
   | { name: "atf"; employee: EmployeeDirectoryEntry; atf: AtfStatus; scheduledMinutes: number | null }
-  | { name: "forgotten"; employee: EmployeeDirectoryEntry; attendanceId: string; startedAt: string };
+  | { name: "forgotten"; employee: EmployeeDirectoryEntry; attendanceId: string; startedAt: string }
+  | {
+      name: "deviation";
+      employee: EmployeeDirectoryEntry;
+      body: AttendanceInputRequiredBody;
+      pending: PendingAttendanceAction;
+    };
+
+// The request the server answered with 409 attendance-input-required, sent
+// again with the person's answers (the terminal never computes deviations).
+type PendingAttendanceAction =
+  | { kind: "attendanceIn" }
+  | { kind: "stampIn"; operations: TerminalOperation[] }
+  | { kind: "goHome"; attendanceId: string }
+  | { kind: "atf"; attendanceId: string; atfTransactionId: string; hours: number };
+
+function inputRequiredBody(err: unknown): AttendanceInputRequiredBody | null {
+  if (err instanceof ApiError && err.code === "attendance-input-required" && err.body) {
+    return err.body as AttendanceInputRequiredBody;
+  }
+  return null;
+}
+
+function minutesText(minutes: number) {
+  return minutes === 1 ? "1 minut" : `${minutes} minuter`;
+}
+
+function durationText(minutes: number) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return minutesText(m);
+  return m === 0 ? `${h} tim` : `${h} tim ${m} min`;
+}
 
 const IDLE_RESET_MS = 60_000;
 
@@ -76,6 +113,11 @@ export function StampTerminal({
   const [scrapReason, setScrapReason] = useState("");
   const [atfHours, setAtfHours] = useState("");
   const [forgottenStop, setForgottenStop] = useState("");
+  // Avvikelseorsaker for the deviation step: loaded on first need.
+  const [reasons, setReasons] = useState<AttendanceDeviationReason[] | null>(null);
+  const [devReasonId, setDevReasonId] = useState("");
+  const [devNote, setDevNote] = useState("");
+  const [devOvertime, setDevOvertime] = useState<OvertimeCompensation>("payout");
   // pickOperations: the operation list and its station/material/sort/search state.
   const [stationIds, setStationIds] = useState<string[]>([]);
   const [materialId, setMaterialId] = useState("");
@@ -107,6 +149,8 @@ export function StampTerminal({
     setMarkDone(false);
     setAtfHours("");
     setForgottenStop("");
+    setDevReasonId("");
+    setDevNote("");
     setSelectedOperationIds(new Set());
     setStationIds([]);
     setMaterialId("");
@@ -304,23 +348,83 @@ export function StampTerminal({
     });
   }
 
+  // Open the deviation step from a 409 attendance-input-required body.
+  async function openDeviation(
+    employee: EmployeeDirectoryEntry,
+    body: AttendanceInputRequiredBody,
+    pending: PendingAttendanceAction
+  ) {
+    setDevReasonId("");
+    setDevNote("");
+    setDevOvertime(body.overtime?.current ?? "payout");
+    setError(null);
+    setStep({ name: "deviation", employee, body, pending });
+    if (body.reason && reasons === null) {
+      try {
+        setReasons(await apiFetch<AttendanceDeviationReason[]>("/api/v1/attendance-deviation-reasons"));
+      } catch (err) {
+        setError(apiErrorMessage(err, "Kunde inte hämta anledningarna."));
+      }
+    }
+  }
+
+  // Send the pending request again with the answers from the deviation step.
+  async function submitDeviation(
+    employee: EmployeeDirectoryEntry,
+    body: AttendanceInputRequiredBody,
+    pending: PendingAttendanceAction
+  ) {
+    const reason: AttendanceReasonInput | undefined = body.reason
+      ? { reasonId: devReasonId, ...(devNote.trim() ? { note: devNote.trim() } : {}) }
+      : undefined;
+    if (body.reason && !devReasonId) return;
+    const overtimeDisposition = body.overtime ? devOvertime : undefined;
+    if (pending.kind === "attendanceIn") return attendanceIn(employee, reason);
+    if (pending.kind === "stampIn") return startSelectedOperations(employee, pending.operations, reason);
+    if (pending.kind === "goHome") {
+      return goHome(employee, pending.attendanceId, { reason, overtimeDisposition });
+    }
+    return finishAtf(employee, pending, { reason, overtimeDisposition });
+  }
+
   // "Starta valda": stamps in every checked operation, one POST per
   // operation. A failure on one doesn't roll back the others — those stay
   // stamped in, and the failed ones stay checked so the row can be retried.
-  async function startSelectedOperations(employee: EmployeeDirectoryEntry, operations: TerminalOperation[]) {
+  async function startSelectedOperations(
+    employee: EmployeeDirectoryEntry,
+    operations: TerminalOperation[],
+    attendanceReason?: AttendanceReasonInput
+  ) {
     if (operations.length === 0) return;
     setBusy(true);
     const failed: TerminalOperation[] = [];
     let attendanceStarted = false;
+    let reasonPending = attendanceReason;
     try {
-      for (const operation of operations) {
+      for (let i = 0; i < operations.length; i++) {
+        const operation = operations[i]!;
         try {
           const res = await apiFetch<{ attendanceStarted?: boolean }>("/api/v1/stamp-sessions", {
             method: "POST",
-            body: JSON.stringify({ employeeId: employee.id, moOperationId: operation.operationId }),
+            body: JSON.stringify({
+              employeeId: employee.id,
+              moOperationId: operation.operationId,
+              ...(reasonPending ? { attendanceReason: reasonPending } : {}),
+            }),
           });
+          reasonPending = undefined;
           if (res?.attendanceStarted === true) attendanceStarted = true;
-        } catch {
+        } catch (err) {
+          // The stamp would start the attendance and the server wants an
+          // answer first: ask, then send this and the remaining ones again.
+          const required = inputRequiredBody(err);
+          if (required) {
+            await refresh();
+            return void (await openDeviation(employee, required, {
+              kind: "stampIn",
+              operations: operations.slice(i),
+            }));
+          }
           failed.push(operation);
         }
       }
@@ -344,16 +448,22 @@ export function StampTerminal({
     }
   }
 
-  async function attendanceIn(employee: EmployeeDirectoryEntry) {
+  async function attendanceIn(employee: EmployeeDirectoryEntry, reason?: AttendanceReasonInput) {
     setBusy(true);
     try {
       await apiFetch("/api/v1/attendance-sessions", {
         method: "POST",
-        body: JSON.stringify({ employeeId: employee.id }),
+        body: JSON.stringify({ employeeId: employee.id, ...(reason ? { reason } : {}) }),
       });
       await refresh();
       setError(null);
+      if (reason) {
+        setNotice(`Välkommen ${employee.name.split(" ")[0]} — närvaron är instämplad.`);
+        resetToKeypad();
+      }
     } catch (err) {
+      const required = inputRequiredBody(err);
+      if (required) return void (await openDeviation(employee, required, { kind: "attendanceIn" }));
       if (err instanceof ApiError && err.code === "attendance-open-from-earlier-day") {
         const body = err.body as { attendanceSessionId?: string; startedAt?: string } | undefined;
         if (body?.attendanceSessionId && body.startedAt) {
@@ -370,12 +480,12 @@ export function StampTerminal({
   // pauses — the away time is excluded from reported hours, and the work
   // resumes at the next attendance-in. Also the forgotten view's Gå hem nu:
   // worked past midnight, so the attendance open since yesterday stops now.
-  async function goHome(employee: EmployeeDirectoryEntry, attendanceId: string) {
+  async function goHome(employee: EmployeeDirectoryEntry, attendanceId: string, answers?: AttendanceOutInput) {
     setBusy(true);
     try {
       const result = await apiFetch<{ pausedWorkSessions: number }>(
         `/api/v1/attendance-sessions/${attendanceId}/stop`,
-        { method: "POST" }
+        { method: "POST", ...(answers ? { body: JSON.stringify(answers) } : {}) }
       );
       await refresh();
       setError(null);
@@ -388,6 +498,8 @@ export function StampTerminal({
       );
       resetToKeypad();
     } catch (err) {
+      const required = inputRequiredBody(err);
+      if (required) return void (await openDeviation(employee, required, { kind: "goHome", attendanceId }));
       setError(apiErrorMessage(err, "Utstämplingen misslyckades."));
     } finally {
       setBusy(false);
@@ -426,7 +538,7 @@ export function StampTerminal({
     }
     setBusy(true);
     try {
-      await apiFetch(`/api/v1/employees/${employee.id}/atf-transactions`, {
+      const transaction = await apiFetch<{ id: string }>(`/api/v1/employees/${employee.id}/atf-transactions`, {
         method: "POST",
         body: JSON.stringify({
           date: new Date().toLocaleDateString("sv-SE"),
@@ -435,19 +547,42 @@ export function StampTerminal({
           note: "ATF via stämpelterminalen",
         }),
       });
-      let closedAttendance = false;
-      if (attendance) {
-        await apiFetch(`/api/v1/attendance-sessions/${attendance.id}/stop`, { method: "POST" });
-        closedAttendance = true;
+      if (!attendance) {
+        await refresh();
+        setNotice(`${formatHours(Math.round(hours * 60))} ATF uttaget för ${employee.name.split(" ")[0]}.`);
+        resetToKeypad();
+        return;
       }
+      await finishAtf(employee, { kind: "atf", attendanceId: attendance.id, atfTransactionId: transaction.id, hours });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ATF-uttaget misslyckades.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Second half of Ta ut ATF: stop the attendance, naming the withdrawal so
+  // the server doesn't ask for a reason (the withdrawal explains leaving
+  // early). It can still ask about overtime.
+  async function finishAtf(
+    employee: EmployeeDirectoryEntry,
+    pending: Extract<PendingAttendanceAction, { kind: "atf" }>,
+    answers?: AttendanceOutInput
+  ) {
+    setBusy(true);
+    try {
+      await apiFetch(`/api/v1/attendance-sessions/${pending.attendanceId}/stop`, {
+        method: "POST",
+        body: JSON.stringify({ ...answers, atfTransactionId: pending.atfTransactionId }),
+      });
       await refresh();
       setNotice(
-        `${formatHours(Math.round(hours * 60))} ATF uttaget för ${employee.name.split(" ")[0]}${
-          closedAttendance ? " — närvaron är utstämplad." : "."
-        }`
+        `${formatHours(Math.round(pending.hours * 60))} ATF uttaget för ${employee.name.split(" ")[0]} — närvaron är utstämplad.`
       );
       resetToKeypad();
     } catch (err) {
+      const required = inputRequiredBody(err);
+      if (required) return void (await openDeviation(employee, required, pending));
       setError(err instanceof Error ? err.message : "ATF-uttaget misslyckades.");
     } finally {
       setBusy(false);
@@ -674,6 +809,28 @@ export function StampTerminal({
             </button>
             <BackRow label="Avbryt" onBack={resetToKeypad} />
           </section>
+        )}
+
+        {step.name === "deviation" && (
+          <DeviationStep
+            body={step.body}
+            pending={step.pending}
+            reasons={reasons}
+            reasonId={devReasonId}
+            onReasonId={setDevReasonId}
+            note={devNote}
+            onNote={setDevNote}
+            overtime={devOvertime}
+            onOvertime={setDevOvertime}
+            busy={busy}
+            onSubmit={() => submitDeviation(step.employee, step.body, step.pending)}
+            onCancel={() => {
+              if (step.pending.kind === "atf") {
+                setNotice("ATF-uttaget är registrerat, men närvaron är inte utstämplad.");
+              }
+              resetToKeypad();
+            }}
+          />
         )}
 
         {step.name === "pickOperations" && (
@@ -944,6 +1101,109 @@ function HomeStep({
       </button>
 
       <BackRow label="Klar" onBack={onDone} />
+    </section>
+  );
+}
+
+// Avvikelseorsaker and/or the overtime choice, exactly as the 409 body asks.
+function DeviationStep({
+  body,
+  pending,
+  reasons,
+  reasonId,
+  onReasonId,
+  note,
+  onNote,
+  overtime,
+  onOvertime,
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  body: AttendanceInputRequiredBody;
+  pending: PendingAttendanceAction;
+  reasons: AttendanceDeviationReason[] | null;
+  reasonId: string;
+  onReasonId: (id: string) => void;
+  note: string;
+  onNote: (note: string) => void;
+  overtime: OvertimeCompensation;
+  onOvertime: (value: OvertimeCompensation) => void;
+  busy: boolean;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const isStop = pending.kind === "goHome" || pending.kind === "atf";
+  const heading = body.reason
+    ? body.reason.kind === "late"
+      ? `Du kom in ${minutesText(body.reason.minutes)} efter schemat (${body.reason.scheduledTime})`
+      : `Du går ${minutesText(body.reason.minutes)} före schemat (${body.reason.scheduledTime})`
+    : null;
+  return (
+    <section className={styles.listStep} aria-label="Anledning och övertid">
+      {heading && (
+        <>
+          <div className={styles.prompt}>{heading}</div>
+          <div className={styles.choiceList} role="radiogroup" aria-label="Anledning">
+            {reasons === null && <p className={styles.hint}>Hämtar anledningar…</p>}
+            {reasons?.length === 0 && <p className={styles.hint}>Det finns inga anledningar. Be en administratör lägga till dem.</p>}
+            {reasons?.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                role="radio"
+                aria-checked={reasonId === r.id}
+                className={`${styles.choice} ${reasonId === r.id ? styles.choiceSelected : ""}`}
+                disabled={busy}
+                onClick={() => onReasonId(r.id)}
+              >
+                <span className={styles.choicePrimary}>{r.name}</span>
+              </button>
+            ))}
+          </div>
+          <input
+            className={styles.note}
+            type="text"
+            maxLength={500}
+            aria-label="Kommentar (valfritt)"
+            placeholder="Kommentar (valfritt)"
+            value={note}
+            onChange={(e) => onNote(e.target.value)}
+          />
+        </>
+      )}
+      {body.overtime && (
+        <>
+          <div className={styles.prompt}>Du har arbetat {durationText(body.overtime.minutes)} övertid i dag</div>
+          <div className={styles.choiceList} role="radiogroup" aria-label="Övertidsersättning">
+            {([
+              ["payout", "Övertid utbetald"],
+              ["comp", "Övertid sparad"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={overtime === value}
+                className={`${styles.choice} ${overtime === value ? styles.choiceSelected : ""}`}
+                disabled={busy}
+                onClick={() => onOvertime(value)}
+              >
+                <span className={styles.choicePrimary}>{label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <button
+        type="button"
+        className={styles.bigAction}
+        disabled={busy || (body.reason !== null && reasonId === "")}
+        onClick={onSubmit}
+      >
+        {isStop ? "Spara och gå hem" : "Spara och stämpla in"}
+      </button>
+      <BackRow label="Avbryt" onBack={onCancel} />
     </section>
   );
 }

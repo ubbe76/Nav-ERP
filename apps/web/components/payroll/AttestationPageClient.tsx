@@ -183,6 +183,7 @@ export function AttestationPageClient({
           { key: "ob", label: "OB", width: "80px", align: "right" },
           { key: "atfMinutes", label: "ATF", width: "80px", align: "right" },
           { key: "unaccountedMinutes", label: "Ofördelat", width: "110px", align: "right" },
+          { key: "deviations", label: "Avvikelser", width: "130px" },
           { key: "status", label: "Status", width: "160px" },
           { key: "actions", label: "", width: "230px", align: "right" },
         ]}
@@ -226,6 +227,21 @@ export function AttestationPageClient({
                   {formatHours(employee.unaccountedMinutes)}
                 </span>
               );
+            case "deviations": {
+              const days = employee.deviationDays ?? 0;
+              if (days === 0) return <span>–</span>;
+              const missing = employee.missingReasonDays ?? 0;
+              return (
+                <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span className="num">{days === 1 ? "1 dag" : `${days} dagar`}</span>
+                  {missing > 0 && (
+                    <span style={{ color: "var(--status-stopped-text)", fontWeight: 600, fontSize: 12 }}>
+                      {missing} utan anledning
+                    </span>
+                  )}
+                </span>
+              );
+            }
             case "status":
               return statusCell(employee);
             case "actions":

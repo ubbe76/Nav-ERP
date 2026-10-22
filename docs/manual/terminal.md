@@ -15,6 +15,18 @@ Knappa in ditt **anställningsnummer** på sifferknappsatsen och tryck Enter/OK.
 
 Närvarostämplingarna är underlaget för framtida löneunderlag och jämförs mot ditt schema (se [Personal & tid](/hjalp/personal-tid)).
 
+## Anledning och övertid
+
+Är inställningarna **Kräv anledning vid sen ankomst och tidig hemgång** och **Fråga om övertidsersättning i terminalen** påslagna (administratören ställer in dem under **System → Inställningar → Lön & PAXml**) kan terminalen ställa en eller två frågor innan stämplingen sparas. Vyn visar bara det servern ber om — terminalen räknar inget själv.
+
+- **Sen ankomst.** Stämplar du in närvaron senare än schemats start, med mer än inställningen **Marginal (minuter)**, visas till exempel "Du kom in 12 minuter efter schemat (07:00)". Samma fråga kommer när du stämplar in direkt på ett arbete utan att ha stämplat in närvaron. Den gäller bara dagens första instämpling: kommer du tillbaka efter en tidig hemgång behövs ingen ny anledning. Dagar utan schema och röda dagar ger ingen fråga.
+- **Tidig hemgång.** Trycker du **Gå hem** mer än marginalen före schemats slut visas till exempel "Du går 40 minuter före schemat (16:00)".
+- **Övertid.** Ger dagen övertid enligt lönens regel när du trycker **Gå hem** visas "Du har arbetat 45 minuter övertid i dag" med valen **Övertid utbetald** och **Övertid sparad**. Det val som gäller för dagen är förvalt (annars ditt eget förval från personalkortet). Valet gäller precis som när arbetsledaren ändrar **Övertid ersätts som** i Attesteringen.
+
+Välj en av anledningarna (stora knappar) och skriv vid behov en **Kommentar (valfritt)**, välj övertidsval om det frågas, och tryck **Spara och stämpla in** eller **Spara och gå hem** — knappen är grå tills en anledning är vald. **Avbryt** stämplar ingenting.
+
+**Ta ut ATF** kräver ingen anledning — uttaget förklarar att du går tidigt — men övertidsfrågan kan komma ändå. En tid i en redan låst löneperiod ger ingen fråga. Anledningarna syns för arbetsledaren i Attesteringen (se [Lön](/hjalp/lon#detaljer-och-korrigeringar)).
+
 ## Stämpla på order
 
 1. Välj **Stämpla in på arbete** i hemvyn. Vyn **Välj operationer** öppnas direkt — en rad per operation som går att stämpla in på, över alla frisläppta och pågående ordrar. Lego-operationer visas aldrig i terminalen (de köps via inköpsorder och avrapporteras automatiskt vid inleverans, se [Tillverkning](/hjalp/tillverkning#legoresurser)).

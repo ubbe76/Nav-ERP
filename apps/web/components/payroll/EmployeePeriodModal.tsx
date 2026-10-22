@@ -15,6 +15,7 @@ import {
   MONTH_NAMES_SV,
   OVERTIME_COMPENSATION_LABELS,
   type AbsenceType,
+  type AttendanceDeviationReason,
   type DayComputation,
   type EmployeePeriodDays,
   type OvertimeCompensation,
@@ -108,6 +109,39 @@ export function EmployeePeriodModal({
   );
 }
 
+// "Kom 07:12 (12 min sent) — Trafik/resa: kö på E4" / "Gick 15:20 (40 min
+// tidigt) — Läkar-/tandläkarbesök". The day's lateness belongs to its first
+// session and the early leave to its last; a reason is shown wherever it is
+// stored, even without minutes.
+function sessionDeviationLines(
+  session: PeriodAttendanceSession,
+  day: DayComputation,
+  daySessions: PeriodAttendanceSession[]
+) {
+  const reasonText = (reason: { name: string } | null, note: string | null) => {
+    const parts = [reason?.name, note].filter((part): part is string => !!part);
+    return parts.length === 0 ? "" : ` — ${reason && note ? `${reason.name}: ${note}` : parts[0]}`;
+  };
+  const lines: { key: string; text: string }[] = [];
+  const isFirst = daySessions[0]?.id === session.id;
+  const isLast = daySessions[daySessions.length - 1]?.id === session.id;
+  const late = isFirst ? (day.lateMinutes ?? 0) : 0;
+  const early = isLast && session.stoppedAt ? (day.earlyLeaveMinutes ?? 0) : 0;
+  if (late > 0 || session.startReason || session.startNote) {
+    lines.push({
+      key: "start",
+      text: `Kom ${toClock(session.startedAt)}${late > 0 ? ` (${late} min sent)` : ""}${reasonText(session.startReason, session.startNote)}`,
+    });
+  }
+  if (session.stoppedAt && (early > 0 || session.stopReason || session.stopNote)) {
+    lines.push({
+      key: "stop",
+      text: `Gick ${toClock(session.stoppedAt)}${early > 0 ? ` (${early} min tidigt)` : ""}${reasonText(session.stopReason, session.stopNote)}`,
+    });
+  }
+  return lines;
+}
+
 function PeriodDetail({
   employeeId,
   year,
@@ -136,7 +170,17 @@ function PeriodDetail({
     stoppedAt: string;
     initialStartedAt: string;
     initialStoppedAt: string;
+    // Avvikelseorsaker on the stamps ("" = ingen).
+    startReasonId: string;
+    startNote: string;
+    stopReasonId: string;
+    stopNote: string;
+    initialStartReasonId: string;
+    initialStartNote: string;
+    initialStopReasonId: string;
+    initialStopNote: string;
   } | null>(null);
+  const [reasons, setReasons] = useState<AttendanceDeviationReason[]>([]);
 
   // Quick-add frånvaro (open period only) — prefilled from the first day with
   // unaccounted time on every (re)load.
@@ -146,12 +190,16 @@ function PeriodDetail({
   const [absenceNote, setAbsenceNote] = useState("");
 
   const load = useCallback(async () => {
-    const [detail, types] = await Promise.all([
+    const [detail, types, reasonList] = await Promise.all([
       apiFetch<EmployeePeriodDays>(`/api/v1/periods/${year}/${month}/employees/${employeeId}/days`),
       periodLocked ? Promise.resolve<AbsenceType[]>([]) : apiFetch<AbsenceType[]>("/api/v1/absence-types"),
+      periodLocked
+        ? Promise.resolve<AttendanceDeviationReason[]>([])
+        : apiFetch<AttendanceDeviationReason[]>("/api/v1/attendance-deviation-reasons?includeInactive=true"),
     ]);
     setData(detail);
     setAbsenceTypes(types);
+    setReasons(reasonList);
     setEditing(null);
     const firstUnaccounted = detail.days.find((day) => day.unaccountedMinutes > 0);
     setAbsenceDate(firstUnaccounted?.date ?? detail.days[0]?.date ?? "");
@@ -199,7 +247,19 @@ function PeriodDetail({
     // Only changed fields are sent: the inputs are minute-resolution, so
     // resending an untouched startedAt would silently truncate the stored
     // seconds.
-    const body: { startedAt?: string; stoppedAt?: string | null } = {};
+    const body: {
+      startedAt?: string;
+      stoppedAt?: string | null;
+      startReasonId?: string | null;
+      startNote?: string | null;
+      stopReasonId?: string | null;
+      stopNote?: string | null;
+    } = {};
+
+    if (editing.startReasonId !== editing.initialStartReasonId) body.startReasonId = editing.startReasonId || null;
+    if (editing.startNote.trim() !== editing.initialStartNote.trim()) body.startNote = editing.startNote.trim() || null;
+    if (editing.stopReasonId !== editing.initialStopReasonId) body.stopReasonId = editing.stopReasonId || null;
+    if (editing.stopNote.trim() !== editing.initialStopNote.trim()) body.stopNote = editing.stopNote.trim() || null;
 
     if (editing.startedAt !== editing.initialStartedAt) {
       const startedAt = new Date(editing.startedAt);
@@ -463,6 +523,53 @@ function PeriodDetail({
                         onChange={(e) => setEditing({ ...editing, stoppedAt: e.target.value })}
                         style={{ maxWidth: 210 }}
                       />
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, flexBasis: "100%" }}>
+                        {(
+                          [
+                            ["start", "Anledning vid ankomst", editing.startReasonId, editing.startNote],
+                            ["stop", "Anledning vid hemgång", editing.stopReasonId, editing.stopNote],
+                          ] as const
+                        ).map(([which, label, reasonId, note]) => (
+                          <div key={which} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                            <Select
+                              aria-label={label}
+                              value={reasonId}
+                              onChange={(e) =>
+                                setEditing({
+                                  ...editing,
+                                  ...(which === "start"
+                                    ? { startReasonId: e.target.value }
+                                    : { stopReasonId: e.target.value }),
+                                })
+                              }
+                            >
+                              <option value="">{`${label}: — Ingen —`}</option>
+                              {reasons
+                                .filter((r) => r.active || r.id === reasonId)
+                                .map((r) => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.name}
+                                    {r.active ? "" : " (inaktiv)"}
+                                  </option>
+                                ))}
+                            </Select>
+                            <Input
+                              type="text"
+                              maxLength={500}
+                              aria-label={`Kommentar, ${label.toLowerCase()}`}
+                              placeholder="Kommentar"
+                              value={note}
+                              onChange={(e) =>
+                                setEditing({
+                                  ...editing,
+                                  ...(which === "start" ? { startNote: e.target.value } : { stopNote: e.target.value }),
+                                })
+                              }
+                              style={{ maxWidth: 260 }}
+                            />
+                          </div>
+                        ))}
+                      </div>
                       <Button type="button" variant="secondary" size="small" disabled={pending} onClick={saveSession}>
                         Spara
                       </Button>
@@ -473,6 +580,11 @@ function PeriodDetail({
                         {toClock(session.startedAt)}–{session.stoppedAt ? toClock(session.stoppedAt) : ""}
                       </span>
                       {session.stoppedAt === null && <span style={mutedStyle}>Öppen närvaro</span>}
+                      {sessionDeviationLines(session, day, daySessions).map((line) => (
+                        <span key={line.key} style={mutedStyle}>
+                          {line.text}
+                        </span>
+                      ))}
                       {!periodLocked && (
                         <Button
                           type="button"
@@ -487,6 +599,14 @@ function PeriodDetail({
                               stoppedAt,
                               initialStartedAt: startedAt,
                               initialStoppedAt: stoppedAt,
+                              startReasonId: session.startReason?.id ?? "",
+                              startNote: session.startNote ?? "",
+                              stopReasonId: session.stopReason?.id ?? "",
+                              stopNote: session.stopNote ?? "",
+                              initialStartReasonId: session.startReason?.id ?? "",
+                              initialStartNote: session.startNote ?? "",
+                              initialStopReasonId: session.stopReason?.id ?? "",
+                              initialStopNote: session.stopNote ?? "",
                             });
                           }}
                         >
