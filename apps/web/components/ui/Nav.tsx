@@ -17,6 +17,7 @@ import {
   LedgerIcon,
   MonitorIcon,
   TrendingUpIcon,
+  UsersIcon,
 } from "./NavIcons";
 import { canOpen } from "../../lib/pageAccess";
 import type { Permission } from "../../lib/permissions";
@@ -36,6 +37,7 @@ const NAV_ITEMS = [
   "Försäljning",
   "Tillverkning",
   "Lager",
+  "Personal & lön",
   "Ekonomi",
   "Rapporter",
   "System",
@@ -54,6 +56,7 @@ const NAV_LINKS: Partial<Record<NavItem, string>> = {
   Försäljning: "/forsaljning",
   Tillverkning: "/tillverkning",
   Lager: "/lager",
+  "Personal & lön": "/personal",
   Ekonomi: "/ekonomi",
   Rapporter: "/rapporter",
   System: "/system",
@@ -68,6 +71,7 @@ const NAV_ICONS: Record<NavItem, ReactNode> = {
   Försäljning: <TrendingUpIcon />,
   Tillverkning: <FactoryIcon />,
   Lager: <LayersIcon />,
+  "Personal & lön": <UsersIcon />,
   Ekonomi: <LedgerIcon />,
   Rapporter: <BarChartIcon />,
   System: <MonitorIcon />,

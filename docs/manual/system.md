@@ -36,16 +36,16 @@ En administratör kan inte ha **Endast läsning** — kryssrutan visas bara för
 
 Rättigheterna är en fast lista:
 
-- Under **Menyer**: **Artiklar**, **Inköp**, **Försäljning**, **Tillverkning**, **Lager**, **Ekonomi** och **Rapporter**. En meny ger rätt att ändra i hela modulen — utom för ett konto med [Endast läsning](#endast-lasning), som bara kan läsa i de menyer gruppen ger. Dessutom kan alla som har minst en meny *läsa* i andra moduler när de behöver det — artikelval, kunder, leverantörer och uppgifter på andra modulers ordrar. Sidorna i en annan modul öppnas däremot bara med den modulens meny: en länk till en sida du inte får öppna (t.ex. ett ordernummer från en annan modul på ett kort eller på **Översikt**) visas som vanlig text, och knappar som skulle ändra i en annan modul — t.ex. **Skapa tillverkningsorder** på kundorderraden, som kräver **Tillverkning** — visas inte. **Ekonomi** och **Rapporter** kan därmed ges till andra än administratörer, och länkarna **Verifikat F-…**/**L-…** på faktura- och betalningskort visas för den som kan öppna Ekonomi.
+- Under **Menyer**: **Artiklar**, **Inköp**, **Försäljning**, **Tillverkning**, **Lager**, **Personal & lön**, **Ekonomi** och **Rapporter**. En meny ger rätt att ändra i hela modulen — utom för ett konto med [Endast läsning](#endast-lasning), som bara kan läsa i de menyer gruppen ger. Dessutom kan alla som har minst en meny *läsa* i andra moduler när de behöver det — artikelval, kunder, leverantörer och uppgifter på andra modulers ordrar. Sidorna i en annan modul öppnas däremot bara med den modulens meny: en länk till en sida du inte får öppna (t.ex. ett ordernummer från en annan modul på ett kort eller på **Översikt**) visas som vanlig text, och knappar som skulle ändra i en annan modul — t.ex. **Skapa tillverkningsorder** på kundorderraden, som kräver **Tillverkning** — visas inte. **Ekonomi** och **Rapporter** kan därmed ges till andra än administratörer, och länkarna **Verifikat F-…**/**L-…** på faktura- och betalningskort visas för den som kan öppna Ekonomi.
 - Under **Verkstad**: **Stämpelterminal**, **Artikelöversikt** och **Tillverkningsorder (läsläge)**. De är verkstadsprofilen — för den som bara ska stämpla och titta. Den som enbart har verkstadsrättigheter ser inga priser: standardkostnad, försäljningspris och legopriser döljs. Den som har minst en meny ser dem som vanligt.
 
 Vissa rättigheter ingår i en meny: **Tillverkning** innefattar **Stämpelterminal** och **Tillverkningsorder (läsläge)**, och **Artiklar** innefattar **Artikelöversikt**. Formuläret visar dem som "ingår i ...".
 
-Vid uppgraderingen skapades två grupper. **Alla moduler** (kod ALLA: Artiklar, Inköp, Försäljning, Tillverkning och Lager) fick alla befintliga användare som inte är administratörer, så ingen tappade åtkomst. **Verkstad** (kod VERKSTAD) är den färdiga verkstadsprofilen med de tre verkstadsrättigheterna.
+Vid uppgraderingen skapades två grupper. **Alla moduler** (kod ALLA: Artiklar, Inköp, Försäljning, Tillverkning, Lager och Personal & lön) fick alla befintliga användare som inte är administratörer, så ingen tappade åtkomst. **Verkstad** (kod VERKSTAD) är den färdiga verkstadsprofilen med de tre verkstadsrättigheterna.
 
 En ändring av en grupp gäller direkt — användarna behöver inte logga in igen.
 
-En användare utan grupp (**Ingen åtkomst**) når bara hjälpen och sidan **Ingen behörighet**. Rollen **Arbetsledare** ger inte i sig åtkomst till modulerna: för att nå **Attestering** och **Löneunderlag** måste arbetsledaren också ha en grupp med **Tillverkning**. Personalregistret (**Tillverkning → Personal**) och dess uppgifter är bara för administratörer och för arbetsledare vars grupp har **Tillverkning**; terminalen och TO-kortet ser bara anställningsnummer och namn.
+En användare utan grupp (**Ingen åtkomst**) når bara hjälpen och sidan **Ingen behörighet**. Rollen **Arbetsledare** ger inte i sig åtkomst till modulerna: för att nå **Attestering** och **Löneunderlag** måste arbetsledaren också ha en grupp med **Personal & lön**. Personalregistret (**Personal & lön → Anställda**) och dess uppgifter är bara för administratörer och för arbetsledare vars grupp har **Personal & lön**; terminalen och TO-kortet ser bara anställningsnummer och namn.
 
 ### Ta bort grupp
 
@@ -300,7 +300,7 @@ I panelen **Lön & PAXml** ställs tidkoderna som skrivs ut i löneunderlagsexpo
 - **Tidkod övertid – komptid** — löneartskoden för övertid på schemalagd arbetsdag som ersätts som komptid i stället för utbetalning. Standard: **ÖK1**.
 - **Tidkod övertid helg – komptid** — löneartskoden för övertid utanför schemat som ersätts som komptid. Standard: **ÖK2**.
 - **Övertidströskel (minuter per dag)** — hur många minuter arbetad tid får överstiga schemat innan det räknas som övertid en schemalagd dag. 0 = varje minut utöver schemat räknas som övertid.
-- **Kräv anledning vid sen ankomst och tidig hemgång** — av som förval. På: stämpelterminalen kräver en anledning (ur registret Avvikelseorsaker under Lönekoder) när närvaron stämplas in senare än schemats start, eller ut tidigare än schemats slut, med mer än marginalen.
+- **Kräv anledning vid sen ankomst och tidig hemgång** — av som förval. På: stämpelterminalen kräver en anledning (ur registret **Personal & lön → Lönekoder → Avvikelseorsaker**) när närvaron stämplas in senare än schemats start, eller ut tidigare än schemats slut, med mer än marginalen.
 - **Marginal (minuter)** — förval 5, 0–120. Avvikelser upp till och med marginalen kräver ingen anledning.
 - **Fråga om övertidsersättning i terminalen** — av som förval. På: terminalen frågar vid **Gå hem** om övertiden ska betalas ut eller sparas som komptid när dagen ger övertid enligt lönens regel.
 

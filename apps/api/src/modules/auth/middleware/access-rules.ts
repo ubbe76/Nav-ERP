@@ -19,6 +19,18 @@ export const MO_READ: AccessRule = ["office", "terminal", "tillverkningsorder_la
 export const OVERVIEW_READ: AccessRule = ["office", "artikeloversikt"];
 // Names/numbers only — the shop floor's view of the personnel register.
 export const DIRECTORY_READ: AccessRule = ["office", "terminal", "tillverkningsorder_las"];
+// Personal & lön: the personnel register, frånvaro, attestering, the payroll
+// period and the supervisor's attendance corrections. Deliberately NOT an
+// office read — this is personal data (personnummer, wage, health) and the
+// Personal & lön menu is the only legitimate path to it. The routes' own
+// requireRole("admin", "supervisor") still runs after the gate.
+export const PERSONAL: AccessRule = ["personal"];
+// The personnel card's Schema and ATF tabs write registers that stayed under
+// Tillverkning (scheman, ATF-saldon): either menu may write them, so moving
+// the card to Personal & lön takes nothing away from a Tillverkning group.
+export const PERSONNEL_CARD_WRITE: AccessRule = ["personal", "tillverkning"];
+// Ta ut ATF: the terminal's withdrawal, also made from the personnel card.
+export const ATF_WITHDRAW: AccessRule = [...TERMINAL_WRITE, "personal"];
 // Konfigurera på orderraden: sales, planning and the article card all resolve variants.
 export const CONFIGURE_ROW_WRITE: AccessRule = ["forsaljning", "tillverkning", "artiklar"];
 // Leveranstidskontroll: a POST that only reads — sales and planning both run

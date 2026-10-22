@@ -37,7 +37,7 @@ function firstOfMonthMonthsBack(date: string, monthsBack: number) {
 // same pattern as the article card. Admin/supervisor only: this is a
 // supervisor tool (users↔employees have no self-link, so a plain user has
 // no legitimate own-data path here) and the Frånvaro tab shows health data —
-// same guard as the /tillverkning/personal list and /tillverkning/attestering.
+// same guard as the /personal/anstallda list and /personal/attestering.
 export default async function EmployeeDetailPage(props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
@@ -45,7 +45,7 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
 
   if (!user || !["admin", "supervisor"].includes(user.role)) {
     return (
-      <AppShell active="Tillverkning">
+      <AppShell active="Personal & lön">
         <p>Endast arbetsledare och administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -79,13 +79,13 @@ export default async function EmployeeDetailPage(props: { params: Promise<{ id: 
     ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell active="Personal & lön">
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>{employee.name}</div>
           <div className={`${shellStyles.meta} num`}>Anställningsnr {employee.employeeNumber}</div>
         </div>
-        <HelpLink chapter="personal-tid" anchor="personal" label="Hjälp om personalkortet" />
+        <HelpLink chapter="lon" anchor="anstallda" label="Hjälp om personalkortet" />
       </div>
 
       <EmployeeTabs

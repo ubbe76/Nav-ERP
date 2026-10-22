@@ -34,6 +34,7 @@ const NOT_IN_NAV = new Set([
   "/forsaljning",
   "/tillverkning",
   "/lager",
+  "/personal",
   "/ekonomi",
   "/rapporter",
   "/system",

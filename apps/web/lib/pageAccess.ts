@@ -30,6 +30,7 @@ const ENTRIES: readonly Entry[] = [
   { path: "/forsaljning", rule: ["forsaljning"] },
   { path: "/kunder", rule: ["forsaljning"] },
   { path: "/lager", rule: ["lager"] },
+  { path: "/personal", rule: ["personal"] },
   { path: "/tillverkning", exact: true, rule: ["tillverkning", "terminal", "tillverkningsorder_las"] },
   { path: "/tillverkning/terminal", rule: ["terminal"] },
   { path: "/tillverkning/ordrar", rule: ["tillverkningsorder_las"] },

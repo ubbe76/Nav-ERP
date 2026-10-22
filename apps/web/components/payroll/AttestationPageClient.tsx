@@ -158,13 +158,13 @@ export function AttestationPageClient({
     <>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         <Link
-          href={`/tillverkning/attestering?year=${previous.year}&month=${previous.month}`}
+          href={`/personal/attestering?year=${previous.year}&month=${previous.month}`}
           className={`${buttonStyles.button} ${buttonStyles.ghost}`}
         >
           ◀ Föregående
         </Link>
         <Link
-          href={`/tillverkning/attestering?year=${next.year}&month=${next.month}`}
+          href={`/personal/attestering?year=${next.year}&month=${next.month}`}
           className={`${buttonStyles.button} ${buttonStyles.ghost}`}
         >
           Nästa ▶

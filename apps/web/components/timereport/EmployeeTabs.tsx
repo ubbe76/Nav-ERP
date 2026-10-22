@@ -31,6 +31,7 @@ import { FranvaroTab } from "./FranvaroTab";
 import styles from "./EmployeeTabs.module.css";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
+import { GatedLink } from "../ui/GatedLink";
 
 const TABS = ["Allmänt", "Anställning", "Schema", "Frånvaro", "ATF"] as const;
 type Tab = (typeof TABS)[number];
@@ -499,7 +500,7 @@ function SchemaTab({
             </Select>
             <FormHint>
               Gäller alla veckor som inte har en avvikelse i kalendern nedan. Scheman underhålls i registret{" "}
-              <a href="/tillverkning/scheman">Scheman</a>.
+              <GatedLink href="/tillverkning/scheman">Scheman</GatedLink>.
             </FormHint>
           </Field>
           <FormActions>

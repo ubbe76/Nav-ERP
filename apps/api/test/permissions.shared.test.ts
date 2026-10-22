@@ -14,9 +14,9 @@ import {
 import * as web from "../../web/lib/permissions.js";
 
 describe("permission catalog", () => {
-  it("has exactly the ten agreed codes", () => {
+  it("has exactly the eleven agreed codes", () => {
     expect([...PERMISSIONS]).toEqual([
-      "artiklar", "inkop", "forsaljning", "tillverkning", "lager", "ekonomi", "rapporter",
+      "artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "ekonomi", "rapporter",
       "terminal", "artikeloversikt", "tillverkningsorder_las",
     ]);
     expect([...MENU_PERMISSIONS, ...WORKSHOP_PERMISSIONS]).toEqual([...PERMISSIONS]);
@@ -47,6 +47,8 @@ describe("effectivePermissions", () => {
       "tillverkning", "terminal", "tillverkningsorder_las",
     ]);
     expect(effectivePermissions("user", ["artiklar"])).toEqual(["artiklar", "artikeloversikt"]);
+    // Personal & lön implies nothing — in particular not Tillverkning's terminal.
+    expect(effectivePermissions("supervisor", ["personal"])).toEqual(["personal"]);
   });
 
   it("drops codes that are not in the catalog (a removed permission left in a group)", () => {
@@ -71,6 +73,7 @@ describe("satisfiesRule", () => {
 
   it("treats office as 'has at least one menu permission'", () => {
     expect(satisfiesRule(sales, ["office"])).toBe(true);
+    expect(satisfiesRule({ role: "supervisor", permissions: ["personal"] }, ["office"])).toBe(true);
     expect(satisfiesRule(workshop, ["office"])).toBe(false);
     expect(satisfiesRule(nobody, ["office"])).toBe(false);
   });

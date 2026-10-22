@@ -43,7 +43,8 @@ describe("migration seed", () => {
     );
     // Spread: postgres-js returns a RowList (Array subclass with count/command).
     expect([...rows]).toEqual([
-      { code: "ALLA", permissions: ["artiklar", "inkop", "forsaljning", "tillverkning", "lager"] },
+      // 0137 gave every group with Tillverkning the new Personal & lön.
+      { code: "ALLA", permissions: ["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal"] },
       { code: "VERKSTAD", permissions: ["terminal", "artikeloversikt", "tillverkningsorder_las"] },
     ]);
   });
@@ -81,8 +82,39 @@ describe("migration seed", () => {
     });
     // And the sessions now carry ALLA's effective permissions.
     expect((await authService.verifyToken(tokenFor(user.id, "user")))!.permissions).toEqual([
-      "artiklar", "inkop", "forsaljning", "tillverkning", "lager", "terminal", "artikeloversikt", "tillverkningsorder_las",
+      "artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "terminal", "artikeloversikt", "tillverkningsorder_las",
     ]);
+  });
+
+  // Personal & lön: re-run 0137's UPDATE — read from the migration file — on
+  // groups as they looked before it: Tillverkning gains personal exactly once,
+  // nothing else changes.
+  it("gives personal to every group with tillverkning and to no other (0137's own UPDATE)", async () => {
+    const migration = readFileSync(
+      new URL("../../../packages/db/drizzle/0137_personal_permission.sql", import.meta.url),
+      "utf8"
+    );
+    const updateSql = migration.slice(migration.search(/^UPDATE "permission_groups"/m));
+    expect(updateSql.startsWith("UPDATE"), "0137 must contain the UPDATE").toBe(true);
+
+    const prod = await makeGroup("M-PROD", ["inkop", "tillverkning"]);
+    const already = await makeGroup("M-BOTH", ["tillverkning", "personal"]);
+    const sales = await makeGroup("M-SALES", ["forsaljning"]);
+    const workshop = await makeGroup("M-SHOP", ["terminal", "tillverkningsorder_las"]);
+
+    await db.execute(sql.raw(updateSql));
+    // Idempotent: a second run adds nothing.
+    await db.execute(sql.raw(updateSql));
+
+    const rows = await db.execute<{ id: string; permissions: string[] }>(sql`
+      SELECT id, permissions FROM permission_groups WHERE id IN (${prod.id}, ${already.id}, ${sales.id}, ${workshop.id})
+    `);
+    expect(Object.fromEntries([...rows].map((r) => [r.id, r.permissions]))).toEqual({
+      [prod.id]: ["inkop", "tillverkning", "personal"],
+      [already.id]: ["tillverkning", "personal"],
+      [sales.id]: ["forsaljning"],
+      [workshop.id]: ["terminal", "tillverkningsorder_las"],
+    });
   });
 });
 
@@ -101,7 +133,7 @@ describe("permissions in the session", () => {
     const plain = await authService.createUser({ email: "n@example.com", password: "correcthorse", name: "N", role: "user" });
     expect((await authService.verifyToken(tokenFor(plain.id, "user")))!.permissions).toEqual([]);
     const admin = await authService.createUser({ email: "a@example.com", password: "correcthorse", name: "A", role: "admin" });
-    expect((await authService.verifyToken(tokenFor(admin.id, "admin")))!.permissions).toHaveLength(10);
+    expect((await authService.verifyToken(tokenFor(admin.id, "admin")))!.permissions).toHaveLength(11);
   });
 
   it("reflects a changed group on the very next request (no re-login)", async () => {

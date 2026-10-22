@@ -28,7 +28,7 @@ export function useCanOpen(): (href: string) => boolean {
 // link to it must pass both — canOpen alone would show it to plain users.
 export function useCanOpenPersonal(): boolean {
   const user = useContext(Ctx);
-  return !!user && canOpen(user, "/tillverkning/personal") && (user.role === "admin" || user.role === "supervisor");
+  return !!user && canOpen(user, "/personal/anstallda") && (user.role === "admin" || user.role === "supervisor");
 }
 
 // The signed-in role, for rules that are about who you are rather than which

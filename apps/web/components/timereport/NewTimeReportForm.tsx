@@ -49,9 +49,9 @@ export function NewTimeReportForm({
         </p>
         {canOpenPersonal && (
           <FormActions>
-            <Link href="/tillverkning/personal">
+            <Link href="/personal/anstallda">
               <Button type="button" variant="primary">
-                Till personal
+                Till anställda
               </Button>
             </Link>
           </FormActions>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
@@ -205,8 +206,11 @@ export function PayrollSettingsForm({ settings }: { settings: SystemSettings }) 
           />
         </Field>
         <FormHint attached>
-          Avvikelser upp till och med marginalen kräver ingen anledning. Anledningarna väljs ur registret
-          Avvikelseorsaker under Lönekoder.
+          Avvikelser upp till och med marginalen kräver ingen anledning. Anledningarna väljs ur registret{" "}
+          <Link href="/personal/lonekoder?flik=avvikelseorsaker">
+            Personal & lön → Lönekoder → Avvikelseorsaker
+          </Link>
+          .
         </FormHint>
 
         <div className={cardStyles.row}>

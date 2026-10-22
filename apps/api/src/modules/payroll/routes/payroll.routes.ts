@@ -80,9 +80,10 @@ function isStatusConflict(err: unknown): err is Error {
 }
 
 // Registered inside app.ts's protected route scope — requireAuth has run.
-// Löneunderlag base-data registers: frånvarokoder and OB-regler. GETs are
-// open to any logged-in user; writes (incl. the standard seeder) are
-// admin-only, same split as the system module.
+// The module is the Personal & lön menu (`personal`, reads included — see
+// app.ts); the requireRole guards below still run after that gate. The
+// register writes (frånvarokoder, OB-regler, avvikelseorsaker, incl. the
+// standard seeder) are admin-only, same split as the system module.
 export async function payrollRoutes(app: FastifyInstance, opts: { service: PayrollService }) {
   const { service } = opts;
 
@@ -135,7 +136,8 @@ export async function payrollRoutes(app: FastifyInstance, opts: { service: Payro
   });
 
   // Avvikelseorsaker: readable by office and the stamp terminal (which offers
-  // the active ones); writes are admin-only. No DELETE — sessions keep the
+  // the active ones) — the one read here outside Personal & lön; writes are
+  // admin-only. No DELETE — sessions keep the
   // reason as history, so a reason is only inactivated.
   app.get("/attendance-deviation-reasons", { config: { access: TERMINAL_READ } }, async (req) => {
     const { includeInactive } = listQuerySchema.parse(req.query);

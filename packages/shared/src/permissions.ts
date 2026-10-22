@@ -5,7 +5,16 @@ import type { UserRole } from "./auth.js";
 // whole main menu (writes in that module); workshop permissions are the narrow
 // shop-floor profile. Mirrored verbatim in apps/web/lib/permissions.ts (the web
 // can't import @navet/shared); permissions.shared.test.ts keeps them in sync.
-export const MENU_PERMISSIONS = ["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "ekonomi", "rapporter"] as const;
+export const MENU_PERMISSIONS = [
+  "artiklar",
+  "inkop",
+  "forsaljning",
+  "tillverkning",
+  "lager",
+  "personal",
+  "ekonomi",
+  "rapporter",
+] as const;
 export const WORKSHOP_PERMISSIONS = ["terminal", "artikeloversikt", "tillverkningsorder_las"] as const;
 export const PERMISSIONS = [...MENU_PERMISSIONS, ...WORKSHOP_PERMISSIONS] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -16,6 +25,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   forsaljning: "Försäljning",
   tillverkning: "Tillverkning",
   lager: "Lager",
+  personal: "Personal & lön",
   ekonomi: "Ekonomi",
   rapporter: "Rapporter",
   terminal: "Stämpelterminal",

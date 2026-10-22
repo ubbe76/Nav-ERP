@@ -65,7 +65,7 @@ async function counts(): Promise<Record<string, number>> {
 }
 
 // Every menu: what the demo account gets.
-const ALL_MENUS = ["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "ekonomi", "rapporter"];
+const ALL_MENUS = ["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "ekonomi", "rapporter"];
 const PASSWORD = "correcthorsebattery";
 
 let app: ReturnType<typeof buildApp>;

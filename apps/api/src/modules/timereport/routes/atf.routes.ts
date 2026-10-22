@@ -5,7 +5,7 @@ import { AtfTransactionNotFoundError } from "../service/atf.service.js";
 import { EmployeeNotFoundError } from "../service/timereport.service.js";
 import { PayrollPeriodLockedError } from "../../payroll/service/period-lock.js";
 import { errorBody } from "../../system/service/error-body.js";
-import { TERMINAL_READ, TERMINAL_WRITE } from "../../auth/middleware/access-rules.js";
+import { ATF_WITHDRAW, PERSONNEL_CARD_WRITE, TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 
 // Registered inside app.ts's protected route scope — requireAuth has run.
 export async function atfRoutes(app: FastifyInstance, opts: { service: AtfService }) {
@@ -20,7 +20,9 @@ export async function atfRoutes(app: FastifyInstance, opts: { service: AtfServic
     }
   });
 
-  app.post<{ Params: { id: string } }>("/employees/:id/atf-transactions", { config: { access: TERMINAL_WRITE } }, async (req, reply) => {
+  // Made from the terminal (Ta ut ATF) and from the personnel card's ATF tab
+  // (Personal & lön).
+  app.post<{ Params: { id: string } }>("/employees/:id/atf-transactions", { config: { access: ATF_WITHDRAW } }, async (req, reply) => {
     const input = createAtfTransactionSchema.parse(req.body);
     try {
       const transaction = await service.createAtfTransaction(req.params.id, input, req.user!.id);
@@ -34,6 +36,7 @@ export async function atfRoutes(app: FastifyInstance, opts: { service: AtfServic
 
   app.delete<{ Params: { id: string; transactionId: string } }>(
     "/employees/:id/atf-transactions/:transactionId",
+    { config: { access: PERSONNEL_CARD_WRITE } },
     async (req, reply) => {
       try {
         await service.deleteAtfTransaction(req.params.id, req.params.transactionId);

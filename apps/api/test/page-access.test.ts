@@ -56,6 +56,18 @@ describe("page access table", () => {
     );
   });
 
+  it("gives Personal & lön its own menu permission", () => {
+    const personal = { role: "user" as const, permissions: ["personal"] as const };
+    expect(canOpen(personal, "/personal")).toBe(true);
+    expect(canOpen(personal, "/personal/anstallda/x1")).toBe(true);
+    expect(canOpen(personal, "/personal/attestering")).toBe(true);
+    expect(canOpen(personal, "/tillverkning/scheman")).toBe(false);
+    expect(canOpen({ role: "user", permissions: ["tillverkning"] }, "/personal/attestering")).toBe(false);
+    expect(canOpen(sales, "/personal")).toBe(false);
+    // A menu permission counts as office, so the dashboard is the landing page.
+    expect(landingFor(personal)).toBe("/");
+  });
+
   it("keeps System admin-only and Ekonomi behind its permission", () => {
     expect(canOpen(sales, "/system/anvandare")).toBe(false);
     expect(canOpen(admin, "/system/behorighetsgrupper")).toBe(true);

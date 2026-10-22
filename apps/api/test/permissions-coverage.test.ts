@@ -281,7 +281,7 @@ async function clean() {
 
 // Logs in through the real app, so the cookie is signed with the app's own
 // JWT_SECRET whatever it is.
-async function sessionFor(permissions: string[] | null, role: "user" | "admin" = "user") {
+async function sessionFor(permissions: string[] | null, role: "user" | "admin" | "supervisor" = "user") {
   let permissionGroupId: string | null = null;
   if (permissions) {
     const [g] = await db
@@ -297,7 +297,7 @@ async function sessionFor(permissions: string[] | null, role: "user" | "admin" =
   return `session=${cookie.value}`;
 }
 
-async function status(cookie: string, method: "GET" | "POST" | "PATCH" | "DELETE", url: string, payload?: unknown) {
+async function status(cookie: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", url: string, payload?: unknown) {
   const res = await app.inject({ method, url: `/api/v1${url}`, headers: { cookie }, payload: payload as never });
   return res.statusCode;
 }
@@ -685,5 +685,90 @@ describe("profiles against the real app", () => {
     // ...while the terminal's employee subresources stay open to it.
     expect(await status(c, "GET", "/employees/directory")).toBe(200);
     expect(await status(c, "GET", `/employees/${NO_ID}/atf`)).not.toBe(403);
+  });
+
+  // Personal & lön (migration 0137): personnel and payroll left Tillverkning
+  // for the personal menu. Attesting takes the admin/supervisor role AND it.
+  it("Personal & lön: a supervisor with only personal reaches the personnel register, frånvaro and the payroll period", async () => {
+    const c = await sessionFor(["personal"], "supervisor");
+    // passes the gate (any status but 403 — 400/404 come from the handler)
+    expect(await status(c, "GET", "/employees")).toBe(200);
+    expect(await status(c, "GET", `/employees/${NO_ID}`)).toBe(404);
+    expect(await status(c, "POST", "/employees", {})).toBe(400);
+    expect(await status(c, "PATCH", `/employees/${NO_ID}`, { name: "X" })).toBe(404);
+    expect(await status(c, "GET", `/employees/${NO_ID}/absences`)).toBe(404);
+    expect(await status(c, "POST", `/employees/${NO_ID}/absences`, {})).toBe(400);
+    expect(await status(c, "DELETE", `/absences/${NO_ID}`)).toBe(404);
+    expect(await status(c, "PUT", `/employees/${NO_ID}/overtime-disposition/2026-01-05`, {})).toBe(400);
+    expect(await status(c, "DELETE", `/employees/${NO_ID}/overtime-disposition/2026-01-05`)).not.toBe(403);
+    expect(await status(c, "GET", "/absence-types")).toBe(200);
+    expect(await status(c, "GET", "/ob-rules")).toBe(200);
+    expect(await status(c, "GET", "/attendance-deviation-reasons?includeInactive=true")).toBe(200);
+    expect(await status(c, "GET", "/periods/2026/1")).toBe(200);
+    expect(await status(c, "GET", `/periods/2026/1/employees/${NO_ID}/days`)).toBe(404);
+    expect(await status(c, "GET", "/periods/2026/1/csv")).toBe(200);
+    expect(await status(c, "POST", "/periods/2026/1/attest", {})).toBe(400);
+    expect(await status(c, "POST", "/periods/2026/1/attest", { employeeId: NO_ID })).not.toBe(403);
+    expect(await status(c, "DELETE", `/periods/2026/1/attest/${NO_ID}`)).not.toBe(403);
+    // The supervisor's corrections on the attestation's day view.
+    expect(await status(c, "PATCH", `/attendance-sessions/${NO_ID}`, {})).not.toBe(403);
+    expect(await status(c, "DELETE", `/attendance-sessions/${NO_ID}`)).toBe(404);
+    // The personnel card's Schema and ATF tabs.
+    expect(await status(c, "GET", `/employees/${NO_ID}/schedule-overrides`)).not.toBe(403);
+    expect(await status(c, "POST", `/employees/${NO_ID}/week-overrides`, {})).toBe(400);
+    expect(await status(c, "DELETE", `/employees/${NO_ID}/day-overrides/${NO_ID}`)).not.toBe(403);
+    expect(await status(c, "POST", `/employees/${NO_ID}/atf-transactions`, {})).toBe(400);
+    expect(await status(c, "DELETE", `/employees/${NO_ID}/atf-transactions/${NO_ID}`)).toBe(404);
+    // Still admin-only: locking and the lönekod registers.
+    expect(await status(c, "POST", "/periods/2026/1/lock")).toBe(403);
+    expect(await status(c, "POST", "/absence-types", {})).toBe(403);
+    // Personal & lön is not Tillverkning: stamping is still the terminal's.
+    expect(await status(c, "POST", "/stamp-sessions", {})).toBe(403);
+  });
+
+  it("Personal & lön: a supervisor with only tillverkning is refused personnel and payroll, but keeps the workshop", async () => {
+    const c = await sessionFor(["tillverkning"], "supervisor");
+    expect(await status(c, "GET", "/employees")).toBe(403);
+    expect(await status(c, "GET", `/employees/${NO_ID}`)).toBe(403);
+    expect(await status(c, "POST", "/employees", {})).toBe(403);
+    expect(await status(c, "PATCH", `/employees/${NO_ID}`, { name: "X" })).toBe(403);
+    expect(await status(c, "GET", `/employees/${NO_ID}/absences`)).toBe(403);
+    expect(await status(c, "POST", `/employees/${NO_ID}/absences`, {})).toBe(403);
+    expect(await status(c, "DELETE", `/absences/${NO_ID}`)).toBe(403);
+    expect(await status(c, "PUT", `/employees/${NO_ID}/overtime-disposition/2026-01-05`, {})).toBe(403);
+    expect(await status(c, "GET", "/absence-types")).toBe(403);
+    expect(await status(c, "GET", "/ob-rules")).toBe(403);
+    expect(await status(c, "GET", "/periods/2026/1")).toBe(403);
+    expect(await status(c, "GET", `/periods/2026/1/employees/${NO_ID}/days`)).toBe(403);
+    expect(await status(c, "GET", "/periods/2026/1/paxml")).toBe(403);
+    expect(await status(c, "POST", "/periods/2026/1/attest", { employeeId: NO_ID })).toBe(403);
+    expect(await status(c, "PATCH", `/attendance-sessions/${NO_ID}`, {})).toBe(403);
+    expect(await status(c, "DELETE", `/attendance-sessions/${NO_ID}`)).toBe(403);
+    // The workshop pages keep working: terminal, Pågående arbete (incl. the
+    // supervisor's Sluttid), Tidrapporter, Scheman and the terminal's reads.
+    expect(await status(c, "GET", "/employees/directory")).toBe(200);
+    expect(await status(c, "GET", "/attendance-deviation-reasons")).toBe(200);
+    expect(await status(c, "GET", "/stamp-sessions?open=true")).toBe(200);
+    expect(await status(c, "GET", "/attendance-sessions?open=true")).toBe(200);
+    expect(await status(c, "POST", `/stamp-sessions/${NO_ID}/stop`, { stoppedAt: new Date().toISOString() })).not.toBe(403);
+    expect(await status(c, "GET", "/time-reports")).toBe(200);
+    expect(await status(c, "POST", "/time-reports", {})).toBe(400);
+    expect(await status(c, "GET", "/day-schedules")).toBe(200);
+    expect(await status(c, "POST", "/holidays", {})).toBe(400);
+    expect(await status(c, "GET", `/employees/${NO_ID}/schedule-calendar?from=2026-01-01&to=2026-01-02`)).not.toBe(403);
+    expect(await status(c, "GET", `/employees/${NO_ID}/atf`)).not.toBe(403);
+    // The overrides and ATF stay writable from Tillverkning (their registers did not move).
+    expect(await status(c, "POST", `/employees/${NO_ID}/week-overrides`, {})).toBe(400);
+    expect(await status(c, "POST", `/employees/${NO_ID}/atf-transactions`, {})).toBe(400);
+    expect(await status(c, "DELETE", `/employees/${NO_ID}/atf-transactions/${NO_ID}`)).toBe(404);
+  });
+
+  it("Personal & lön: the permission alone is not the role — a plain user with personal is refused the register", async () => {
+    const c = await sessionFor(["personal"]);
+    expect(await status(c, "GET", "/employees")).toBe(403);
+    expect(await status(c, "GET", "/periods/2026/1")).toBe(403);
+    expect(await status(c, "POST", "/periods/2026/1/attest", { employeeId: NO_ID })).toBe(403);
+    // ...but it is a menu permission, so it counts as office.
+    expect(await status(c, "GET", "/articles")).toBe(200);
   });
 });

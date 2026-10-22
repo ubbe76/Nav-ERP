@@ -13,29 +13,37 @@ import { EMPLOYMENT_TYPE_LABELS, type Employee } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/tillverkning/tidrapporter/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { useCanOpen } from "../PermissionsProvider";
 
 export function EmployeesPageClient({ employees }: { employees: Employee[] }) {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
+  // Scheman and Tidrapporter live under Tillverkning — a Personal & lön-only
+  // group can't open them, so the shortcuts are left out.
+  const canOpen = useCanOpen();
 
   return (
     <>
       <div className={shellStyles.topbar}>
         <div>
-          <div className={shellStyles.title}>Personal</div>
+          <div className={shellStyles.title}>Anställda</div>
           <div className={shellStyles.meta}>{employees.length} anställda</div>
         </div>
         <div className={shellStyles.topbarActions}>
-          <Link href="/tillverkning/scheman" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Scheman
-          </Link>
-          <Link href="/tillverkning/tidrapporter" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Tidrapporter
-          </Link>
+          {canOpen("/tillverkning/scheman") && (
+            <Link href="/tillverkning/scheman" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Scheman
+            </Link>
+          )}
+          {canOpen("/tillverkning/tidrapporter") && (
+            <Link href="/tillverkning/tidrapporter" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Tidrapporter
+            </Link>
+          )}
           <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
             + Ny anställd
           </Button>
-          <HelpLink chapter="personal-tid" anchor="personal" label="Hjälp om personal" />
+          <HelpLink chapter="lon" anchor="anstallda" label="Hjälp om anställda" />
         </div>
       </div>
 
@@ -52,13 +60,13 @@ export function EmployeesPageClient({ employees }: { employees: Employee[] }) {
           switch (key) {
             case "employeeNumber":
               return (
-                <Link href={`/tillverkning/personal/${employee.id}`} className={styles.rowLink}>
+                <Link href={`/personal/anstallda/${employee.id}`} className={styles.rowLink}>
                   {employee.employeeNumber}
                 </Link>
               );
             case "name":
               return (
-                <Link href={`/tillverkning/personal/${employee.id}`} className={styles.rowLink}>
+                <Link href={`/personal/anstallda/${employee.id}`} className={styles.rowLink}>
                   <strong>{employee.name}</strong>
                 </Link>
               );

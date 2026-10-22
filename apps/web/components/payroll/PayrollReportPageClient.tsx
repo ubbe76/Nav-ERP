@@ -189,13 +189,13 @@ export function PayrollReportPageClient({
     <>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         <Link
-          href={`/tillverkning/loneunderlag?year=${previous.year}&month=${previous.month}`}
+          href={`/personal/loneunderlag?year=${previous.year}&month=${previous.month}`}
           className={`${buttonStyles.button} ${buttonStyles.ghost}`}
         >
           ◀ Föregående
         </Link>
         <Link
-          href={`/tillverkning/loneunderlag?year=${next.year}&month=${next.month}`}
+          href={`/personal/loneunderlag?year=${next.year}&month=${next.month}`}
           className={`${buttonStyles.button} ${buttonStyles.ghost}`}
         >
           Nästa ▶

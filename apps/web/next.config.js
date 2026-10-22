@@ -16,7 +16,15 @@ const nextConfig = {
   // covers running `npm run dev:web` directly on the host.
   // "Maskiner" was renamed to "Resurser" — keep old bookmarks working.
   async redirects() {
-    return [{ source: "/tillverkning/maskiner", destination: "/tillverkning/resurser", permanent: true }];
+    return [
+      { source: "/tillverkning/maskiner", destination: "/tillverkning/resurser", permanent: true },
+      // Personal & lön became its own main menu — keep old bookmarks working.
+      { source: "/tillverkning/personal", destination: "/personal/anstallda", permanent: false },
+      { source: "/tillverkning/personal/:id", destination: "/personal/anstallda/:id", permanent: false },
+      { source: "/tillverkning/attestering", destination: "/personal/attestering", permanent: false },
+      { source: "/tillverkning/loneunderlag", destination: "/personal/loneunderlag", permanent: false },
+      { source: "/tillverkning/lonekoder", destination: "/personal/lonekoder", permanent: false },
+    ];
   },
   async rewrites() {
     const apiUrl = process.env.INTERNAL_API_URL ?? "http://localhost:4000";

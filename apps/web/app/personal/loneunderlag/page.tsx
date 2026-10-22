@@ -1,13 +1,13 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
-import { AttestationPageClient } from "../../../components/payroll/AttestationPageClient";
+import { PayrollReportPageClient } from "../../../components/payroll/PayrollReportPageClient";
 import { apiGet, getCurrentUser } from "../../../lib/api";
 import { MONTH_NAMES_SV, type PeriodSummary } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
-// The month before the current one, in the server's local time — the period a
-// supervisor normally attests (the running month isn't finished yet).
+// The month before the current one, in the server's local time — same
+// default as Attestering (the running month isn't finished yet).
 function previousMonth(): { year: number; month: number } {
   const now = new Date();
   // getMonth() is 0-indexed, so it already *is* the previous month's number.
@@ -27,10 +27,10 @@ function resolvePeriod(params: { year?: string; month?: string }): { year: numbe
   return { year, month };
 }
 
-// Attestering — the supervisor's monthly workspace: review each employee's
-// löneunderlag, correct stamps/absences, attest, and (as admin) lock the
-// period. Admin/supervisor only, same audience as the API endpoints.
-export default async function AttestationPage(props: {
+// Löneunderlag — the read-only monthly payroll report: the same underlag as
+// Attestering, grouped by anställningsform, with CSV/PDF/PAXml downloads.
+// Admin/supervisor only, same audience as the API endpoints.
+export default async function PayrollReportPage(props: {
   searchParams: Promise<{ year?: string; month?: string }>;
 }) {
   const searchParams = await props.searchParams;
@@ -39,7 +39,7 @@ export default async function AttestationPage(props: {
 
   if (!user || !["admin", "supervisor"].includes(user.role)) {
     return (
-      <AppShell active="Tillverkning">
+      <AppShell active="Personal & lön">
         <p>Endast arbetsledare och administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -51,18 +51,18 @@ export default async function AttestationPage(props: {
   const monthLabel = `${monthName.charAt(0).toUpperCase()}${monthName.slice(1)}`;
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell active="Personal & lön">
       <div className={shellStyles.topbar}>
         <div>
-          <div className={shellStyles.title}>Attestering</div>
+          <div className={shellStyles.title}>Löneunderlag</div>
           <div className={shellStyles.meta}>
             {monthLabel} {year} · {summary.status === "locked" ? "Låst" : "Öppen"}
           </div>
         </div>
-        <HelpLink chapter="lon" anchor="attestering" label="Hjälp om attestering" />
+        <HelpLink chapter="lon" anchor="loneunderlag" label="Hjälp om löneunderlag" />
       </div>
 
-      <AttestationPageClient summary={summary} userRole={user.role} year={year} month={month} />
+      <PayrollReportPageClient summary={summary} year={year} month={month} />
     </AppShell>
   );
 }

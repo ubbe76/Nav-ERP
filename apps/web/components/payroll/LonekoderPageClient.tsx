@@ -20,7 +20,7 @@ import styles from "./LonekoderPageClient.module.css";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
 const TABS = ["Frånvarokoder", "OB-tillägg", "Avvikelseorsaker"] as const;
-type Tab = (typeof TABS)[number];
+export type Tab = (typeof TABS)[number];
 
 // Same free-form "HH:MM" normalization as SchedulesPageClient's ClockInput
 // (apps/web/components/timereport/SchedulesPageClient.tsx) — that helper
@@ -105,12 +105,15 @@ export function LonekoderPageClient({
   absenceTypes,
   obRules,
   deviationReasons,
+  initialTab,
 }: {
   absenceTypes: AbsenceType[];
   obRules: ObRule[];
   deviationReasons: AttendanceDeviationReason[];
+  // ?flik=avvikelseorsaker — the settings panel links straight to the register.
+  initialTab?: Tab;
 }) {
-  const [activeTab, setActiveTab] = useState<Tab>("Frånvarokoder");
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "Frånvarokoder");
 
   return (
     <>

@@ -1,10 +1,24 @@
-# Lön & attestering
+# Personal & lön
 
-Löneblocket i Nav|ERP täcker flödet frånvaro → attestering → låsning → export: frånvaro och OB registreras löpande, varje anställds underlag attesteras för en löneperiod, perioden låses och löneunderlaget exporteras till lönesystemet (PAXml). Kapitlet byggs ut i takt med att rutinerna färdigställs — hittills finns grundregistren löneunderlaget bygger på (**Lönekoder**), frånvaroregistreringen på personalkortet, arbetsledarens månadsvy **Attestering** och rapportsidan **Löneunderlag** med export till PAXml.
+Menyn **Personal & lön** samlar personalregistret och lönen. Menyvalet öppnar en sida med tre grupper: **Personal** (**Anställda**), **Löneperiod** (**Attestering** och **Löneunderlag**) och **Inställningar** (**Lönekoder** samt **Lön & PAXml**, som öppnar panelen under System → Inställningar och bara visas för administratörer). Menyn kräver rättigheten **Personal & lön** i behörighetsgruppen (se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)); **Anställda**, **Attestering** och **Löneunderlag** är dessutom bara för administratörer och arbetsledare, **Lönekoder** bara för administratörer.
+
+Löneblocket i Nav|ERP täcker flödet frånvaro → attestering → låsning → export: frånvaro och OB registreras löpande, varje anställds underlag attesteras för en löneperiod, perioden låses och löneunderlaget exporteras till lönesystemet (PAXml). Kapitlet byggs ut i takt med att rutinerna färdigställs — hittills finns personalregistret (**Anställda**), grundregistren löneunderlaget bygger på (**Lönekoder**), frånvaroregistreringen på personalkortet, arbetsledarens månadsvy **Attestering** och rapportsidan **Löneunderlag** med export till PAXml.
+
+## Anställda
+
+**Personal & lön → Anställda** kräver rollen administratör, eller rollen arbetsledare tillsammans med en behörighetsgrupp som har **Personal & lön** (menyvalet syns inte för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)) — personalkortet visar bland annat frånvaro, som räknas som hälsodata. Sidan listar de anställda; klicka på namnet för att öppna **personalkortet** med fem flikar:
+
+- **Allmänt** — anställningsnummer (används i stämpelterminalen), namn, aktiv, telefon, e-post och adress med postnummer/postort samt **Förvalda stationer** — de resurser den anställde brukar arbeta vid. Stämpelterminalen väljer dem när personen identifierar sig, se [Stämpelterminalen](/hjalp/terminal).
+- **Anställning** — personnummer, anställd från/till, anställningsform (timlön/månadslön), lön och veckoarbetstid.
+- **Schema** — standardschema och kalenderöverstyrningar, se [Personal & tid](/hjalp/personal-tid#schema-per-anstalld).
+- **Frånvaro** — registrering av frånvaro (sjukfrånvaro, semester m.m.), se [Frånvaro på personalkortet](#franvaro-pa-personalkortet) nedan.
+- **ATF** — arbetstidsförkortning, se [Personal & tid](/hjalp/personal-tid#atf-arbetstidsforkortning).
+
+> **Övertidsersättning** anger hur den anställdas övertid ersätts som standard: **Utbetalning** (förvalt) eller **Komptid**. Valet styr vilka tidkoder övertiden får i löneunderlaget och PAXml-exporten, och kan frångås för enskilda dagar i Attesteringens dagdetalj — se [Utbetalning eller komptid](#utbetalning-eller-komptid).
 
 ## Lönekoder
 
-**Tillverkning → Lön → Lönekoder** har tre flikar: **Frånvarokoder**, **OB-tillägg** och **Avvikelseorsaker**.
+**Personal & lön → Lönekoder** har tre flikar: **Frånvarokoder**, **OB-tillägg** och **Avvikelseorsaker**.
 
 ### Frånvarokoder
 
@@ -32,7 +46,7 @@ Orsaker kan inte raderas, eftersom stämplingar som redan sparats pekar på dem.
 
 ## Frånvaro på personalkortet
 
-Personalkortets flik **Frånvaro** (se [Personal & tid](/hjalp/personal-tid)) registrerar frånvaro per anställd och datum.
+Personalkortets flik **Frånvaro** (se [Anställda](#anstallda)) registrerar frånvaro per anställd och datum.
 
 Kortet **Registrera frånvaro** har fälten **Frånvarokod** (en av frånvarokoderna ovan), **Datum**, **Timmar** och en valfri **Anteckning**. Knappen **Hämta ur schema** fyller i Timmar med den schemalagda nettotiden för valt datum — en hel dag frånvaro motsvarar alltså schemats nettotid, inte alltid 8 timmar. Saknas ett schema för dagen visas ett felmeddelande i stället.
 
@@ -44,7 +58,7 @@ Hela personalkortet — inklusive Frånvaro-fliken och listan **Registrerad frå
 
 ## Attestering
 
-**Tillverkning → Lön → Attestering** är arbetsledarens månadsvy: granska varje anställds underlag, korrigera det som blivit fel, attestera per anställd och låsa perioden. Sidan är öppen för arbetsledare och administratörer.
+**Personal & lön → Attestering** är arbetsledarens månadsvy: granska varje anställds underlag, korrigera det som blivit fel, attestera per anställd och låsa perioden. Sidan är öppen för arbetsledare och administratörer.
 
 Sidan öppnas på föregående månad — den period som normalt ska attesteras. Perioden byts med **◀ Föregående** och **Nästa ▶**, och rubriken visar period och status, t.ex. "Juni 2026 · Öppen" eller "Juni 2026 · Låst".
 
@@ -104,7 +118,7 @@ Byte av **Övertidsersättning** på personalkortet slår igenom direkt på alla
 
 ## Löneunderlag
 
-**Tillverkning → Lön → Löneunderlag** visar samma underlag som Attestering, men som en läsbar rapport med nedladdningsbara filer i stället för en granskningsvy — sidan är öppen för arbetsledare och administratörer.
+**Personal & lön → Löneunderlag** visar samma underlag som Attestering, men som en läsbar rapport med nedladdningsbara filer i stället för en granskningsvy — sidan är öppen för arbetsledare och administratörer.
 
 Sidan öppnas på föregående månad och byts precis som Attestering med **◀ Föregående** och **Nästa ▶**; rubriken visar period och status.
 

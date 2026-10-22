@@ -960,6 +960,13 @@
       "when": 1792661486619,
       "tag": "0136_attendance_deviations",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1792684965036,
+      "tag": "0137_personal_permission",
+      "breakpoints": true
     }
   ]
 }

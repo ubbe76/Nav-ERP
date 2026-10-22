@@ -308,17 +308,6 @@ export const TILLVERKNING_SECTIONS: ModuleNavSection[] = [
     ],
   },
   {
-    title: "Personal",
-    items: [
-      {
-        href: "/tillverkning/personal",
-        title: "Personal",
-        description: "Anställda med kontakt- och anställningsuppgifter, scheman och ATF.",
-        roles: ["admin", "supervisor"],
-      },
-    ],
-  },
-  {
     title: "Resurser",
     items: [
       {
@@ -338,25 +327,51 @@ export const TILLVERKNING_SECTIONS: ModuleNavSection[] = [
       },
     ],
   },
+];
+
+export const PERSONAL_SECTIONS: ModuleNavSection[] = [
   {
-    title: "Lön",
+    title: "Personal",
     items: [
       {
-        href: "/tillverkning/attestering",
+        href: "/personal/anstallda",
+        title: "Anställda",
+        description: "Anställda med kontakt- och anställningsuppgifter, scheman, frånvaro och ATF.",
+        roles: ["admin", "supervisor"],
+      },
+    ],
+  },
+  {
+    title: "Löneperiod",
+    items: [
+      {
+        href: "/personal/attestering",
         title: "Attestering",
         description: "Gå igenom och attestera personalens närvaro, frånvaro och tid per löneperiod.",
         roles: ["admin", "supervisor"],
       },
       {
-        href: "/tillverkning/loneunderlag",
+        href: "/personal/loneunderlag",
         title: "Löneunderlag",
         description: "Periodens löneunderlag per anställd med lönekoder och PAXml-export.",
         roles: ["admin", "supervisor"],
       },
+    ],
+  },
+  {
+    title: "Inställningar",
+    items: [
       {
-        href: "/tillverkning/lonekoder",
+        href: "/personal/lonekoder",
         title: "Lönekoder",
-        description: "Frånvarokoder och OB-tillägg för löneunderlaget.",
+        description: "Frånvarokoder, OB-tillägg och avvikelseorsaker för löneunderlaget och stämpelterminalen.",
+        roles: ["admin"],
+      },
+      {
+        // The panel lives under System → Inställningar (admin-only end to end).
+        href: "/system/installningar",
+        title: "Lön & PAXml",
+        description: "Tidkoder för PAXml-exporten, övertidsregler och anledning vid sen ankomst — panelen Lön & PAXml under System → Inställningar.",
         roles: ["admin"],
       },
     ],

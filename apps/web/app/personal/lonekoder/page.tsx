@@ -9,13 +9,14 @@ import { HelpLink } from "../../../components/ui/HelpLink";
 // Lönekoder: frånvarokoder och OB-tillägg, the base-data registers the
 // löneunderlag/PAXml export is built from. Admin-only, same gate as the rest
 // of the payroll settings (System → Inställningar → Lön & PAXml).
-export default async function LonekoderPage() {
+export default async function LonekoderPage(props: { searchParams: Promise<{ flik?: string }> }) {
+  const { flik } = await props.searchParams;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const user = await getCurrentUser(cookieHeader);
 
   if (!user || user.role !== "admin") {
     return (
-      <AppShell active="Tillverkning">
+      <AppShell active="Personal & lön">
         <p>Endast administratörer har åtkomst till den här sidan.</p>
       </AppShell>
     );
@@ -28,7 +29,7 @@ export default async function LonekoderPage() {
   ]);
 
   return (
-    <AppShell active="Tillverkning">
+    <AppShell active="Personal & lön">
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Lönekoder</div>
@@ -37,7 +38,12 @@ export default async function LonekoderPage() {
         <HelpLink chapter="lon" anchor="franvarokoder" label="Hjälp om lönekoder" />
       </div>
 
-      <LonekoderPageClient absenceTypes={absenceTypes} obRules={obRules} deviationReasons={deviationReasons} />
+      <LonekoderPageClient
+        absenceTypes={absenceTypes}
+        obRules={obRules}
+        deviationReasons={deviationReasons}
+        initialTab={flik === "avvikelseorsaker" ? "Avvikelseorsaker" : undefined}
+      />
     </AppShell>
   );
 }

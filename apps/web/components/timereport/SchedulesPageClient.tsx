@@ -129,8 +129,8 @@ export function SchedulesPageClient({
         </div>
         <div className={shellStyles.topbarActions}>
           {canOpenPersonal && (
-            <Link href="/tillverkning/personal" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-              Personal
+            <Link href="/personal/anstallda" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Anställda
             </Link>
           )}
           <HelpLink chapter="personal-tid" anchor="scheman" label="Hjälp om scheman" />

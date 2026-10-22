@@ -730,7 +730,10 @@ export function buildApp(database: Db = db) {
         await registerModule(protectedRoutes, timeReportRoutes, { service: timeReportService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, scheduleRoutes, { service: scheduleService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, atfRoutes, { service: atfService }, { read: office, write: ["tillverkning"] });
-        await registerModule(protectedRoutes, payrollRoutes, { service: payrollService }, { read: office, write: ["tillverkning"] });
+        // Personal & lön: the whole payroll module (lönekoder, frånvaro,
+        // övertidsval, löneperiod, attest, export) is the personal menu, reads
+        // included; GET /attendance-deviation-reasons keeps its terminal rule.
+        await registerModule(protectedRoutes, payrollRoutes, { service: payrollService }, { read: ["personal"], write: ["personal"] });
         await registerModule(
           protectedRoutes,
           economyRoutes,

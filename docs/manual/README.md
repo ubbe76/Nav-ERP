@@ -16,7 +16,7 @@ Filerna i den här mappen är källan. Ändra här, så följer appen och webbpl
 - [Artiklar](https://naverp.se/hjalp/artiklar/) ([källfil](artiklar.md)) — Artikelregistret, artikelkortet, struktur/beredning, import från CSV och artikelgrupper.
 - [Grunddata](https://naverp.se/hjalp/grunddata/) ([källfil](grunddata.md)) — Leveransvillkor, betalningsvillkor och speditörer.
 - [Importmallar](https://naverp.se/hjalp/importmallar/) ([källfil](importmallar.md), genererad av `npm run generate:import-templates -w apps/api`) — Excelmallar för alla importer, med förklaring och exempel per kolumn.
-- [Personal & tid](https://naverp.se/hjalp/personal-tid/) ([källfil](personal-tid.md)) — Personal, scheman, kalendrar, ATF och tidrapporter.
+- [Personal & tid](https://naverp.se/hjalp/personal-tid/) ([källfil](personal-tid.md)) — Scheman, kalendrar, ATF och tidrapporter (personalregistret finns i Personal & lön).
 
 ## Flöden
 
@@ -25,7 +25,7 @@ Filerna i den här mappen är källan. Ändra här, så följer appen och webbpl
 - [Försäljning](https://naverp.se/hjalp/forsaljning/) ([källfil](forsaljning.md)) — Kunder med import från CSV, offert, kundorder, leverans och fakturering.
 - [Tillverkning](https://naverp.se/hjalp/tillverkning/) ([källfil](tillverkning.md)) — Tillverkningsorder, resurser, produktionsgrupper och efterkalkyl.
 - [Stämpelterminalen](https://naverp.se/hjalp/terminal/) ([källfil](terminal.md)) — Närvarostämpling, orderstämpling och ATF-uttag i verkstaden.
-- [Lön & attestering](https://naverp.se/hjalp/lon/) ([källfil](lon.md)) — Frånvaro, OB, attestering, löneunderlag och PAXml-export.
+- [Personal & lön](https://naverp.se/hjalp/lon/) ([källfil](lon.md)) — Anställda, frånvaro, OB, attestering, löneunderlag och PAXml-export.
 - [Lager](https://naverp.se/hjalp/lager/) ([källfil](lager.md)) — Saldon, transaktionslogg, lagerplatser, lagerflytt, inventering, justeringar och lagervärdering.
 - [Ekonomi](https://naverp.se/hjalp/ekonomi/) ([källfil](ekonomi.md)) — Kontoplan, räkenskapsår och perioder, verifikat, huvudboken, momsrapporten, automatkontering, konteringsregler, balansräkning, resultaträkning och SIE-filer.
 - [Rapporter](https://naverp.se/hjalp/rapporter/) ([källfil](rapporter.md)) — Leveransprecision, försäljnings- och inköpsstatistik, kassationsstatistik och kalkylutfall.

@@ -62,7 +62,7 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
     slug: "personal-tid",
     title: "Personal & tid",
     file: "personal-tid.md",
-    description: "Personal, scheman, kalendrar, ATF och tidrapporter.",
+    description: "Scheman, kalendrar, ATF och tidrapporter.",
     group: "Register",
   },
   {
@@ -102,9 +102,9 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
   },
   {
     slug: "lon",
-    title: "Lön & attestering",
+    title: "Personal & lön",
     file: "lon.md",
-    description: "Frånvaro, OB, attestering, löneunderlag och PAXml-export.",
+    description: "Anställda, frånvaro, OB, attestering, löneunderlag och PAXml-export.",
     group: "Flöden",
   },
   {

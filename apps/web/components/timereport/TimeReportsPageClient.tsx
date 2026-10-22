@@ -37,8 +37,8 @@ export function TimeReportsPageClient({
         </div>
         <div className={shellStyles.topbarActions}>
           {canOpenPersonal && (
-            <Link href="/tillverkning/personal" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-              Personal
+            <Link href="/personal/anstallda" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+              Anställda
             </Link>
           )}
           <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>

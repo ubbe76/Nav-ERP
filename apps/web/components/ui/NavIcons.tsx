@@ -76,6 +76,17 @@ export function FactoryIcon() {
   );
 }
 
+export function UsersIcon() {
+  return (
+    <Icon>
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" />
+      <path d="M16 5.2a3.1 3.1 0 0 1 0 5.6" />
+      <path d="M17.5 14.6c2 .6 3.5 2.3 3.5 5.4" />
+    </Icon>
+  );
+}
+
 export function CalendarIcon() {
   return (
     <Icon>

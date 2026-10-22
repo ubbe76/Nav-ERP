@@ -9,11 +9,9 @@ Menyvalet **Tillverkning** öppnar modulens sida, där alla tillverkningsfunktio
 - **Ordrar** — **Tillverkningsordrar**.
 - **Verkstad** — **Stämpelterminal**, **Pågående arbete** och **Tidrapporter**.
 - **Planering** — **Behovsberäkning**, **Beläggning** och **Scheman**.
-- **Personal** — **Personal** (administratör, eller arbetsledare vars behörighetsgrupp ger Tillverkning).
 - **Resurser** — **Resurser** och **Produktionsgrupper**.
-- **Lön** — **Attestering** och **Löneunderlag** (administratör, eller arbetsledare vars behörighetsgrupp ger Tillverkning) samt **Lönekoder** (endast administratör).
 
-Grupperna **Personal** och **Lön** visas bara för de roller som har åtkomst — som användare ser du dem inte alls. Nyckeltal för pågående tillverkning finns på **Översikt**, startsidan.
+Personal och lön har en egen meny, **Personal & lön** (se kapitlet [Personal & lön](/hjalp/lon)). Nyckeltal för pågående tillverkning finns på **Översikt**, startsidan.
 
 ## Resurser
 

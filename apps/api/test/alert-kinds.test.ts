@@ -71,7 +71,7 @@ describe("visibleKinds", () => {
   });
 
   it("Utskick som misslyckades is admin-only: every menu together still does not give it", () => {
-    const all = user(["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "ekonomi", "rapporter"]);
+    const all = user(["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "ekonomi", "rapporter"]);
     expect(visibleKinds(all)).toEqual(ALERT_KIND_CATALOG.map((d) => d.kind).filter((k) => k !== "email_failed"));
   });
 

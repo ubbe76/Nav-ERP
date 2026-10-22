@@ -629,7 +629,7 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   per vecka eller enskild dag), **ATF** (arbetstidsförkortning med
   intjäning i minuter/vecka, tidbank eller veckouttag per anställd),
   **produktionsgrupper** som kopplar personal och resurser samt, under
-  **Tillverkning → Lön**, **löneunderlaget**: frånvarohantering
+  **Personal & lön**, **löneunderlaget**: frånvarohantering
   (frånvarokoder mappade mot lönearter, registrering per anställd/dag),
   automatisk beräkning av övertid/mertid och OB ur schema mot närvaro,
   **tidattest med periodlåsning** (arbetsledaren attesterar per anställd
