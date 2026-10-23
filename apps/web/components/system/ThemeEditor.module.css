@@ -1,0 +1,177 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 440px) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.previewColumn {
+  position: sticky;
+  top: var(--space-4);
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .previewColumn {
+    position: static;
+  }
+}
+
+.colorField {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.colorInput {
+  width: 44px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-input-surface);
+  cursor: pointer;
+}
+
+.colorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 640px) {
+  .colorGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.hex {
+  min-width: 0;
+  max-width: 110px;
+}
+
+.hint {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.failures {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: 13px;
+}
+
+.ok {
+  font-size: 13px;
+  color: var(--status-done-text);
+}
+
+.advanced {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.group {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: var(--space-3);
+}
+
+.tokenRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  gap: var(--space-2);
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .tokenRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tokenLabel {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  min-width: 0;
+}
+
+.tokenName {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.tokenValue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.tokenInput {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.changed {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--status-delayed-bg);
+  color: var(--status-delayed-text);
+}
+
+.invalid {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--status-stopped-text);
+}
+
+.summary {
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.issues {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}

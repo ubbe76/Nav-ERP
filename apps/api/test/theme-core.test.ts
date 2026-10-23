@@ -311,7 +311,7 @@ describe("the catalogue's fallbacks", () => {
     for (const scheme of ["light", "dark"] as const) {
       const empty = validateTheme({ name: "Tom", scheme, tokens: {} });
       expect(empty.errors).toEqual([]);
-      expect(empty.warnings).toHaveLength(THEME_TOKENS.length);
+      expect(empty.warnings.map((w) => w.message)).toEqual([`${THEME_TOKENS.length} av ${THEME_TOKENS.length} färger saknas i filen och fylls i automatiskt.`]);
     }
   });
 });

@@ -854,10 +854,11 @@ export function validateTheme(input: unknown): ThemeValidationResult {
   const given = isRecord(input.tokens) ? input.tokens : null;
   if (!given) errors.push(issue(null, "Temat saknar tokens."));
   const tokens: Record<string, string> = {};
+  const missing: ThemeToken[] = [];
   for (const token of THEME_TOKENS) {
     if (!given || !(token.name in given)) {
       tokens[token.name] = fallbackValue(token, scheme);
-      if (given) warnings.push(issue(token.name, "saknas i filen och fylls i automatiskt."));
+      if (given) missing.push(token);
       continue;
     }
     const check = checkTokenValue(token.kind, given[token.name]);
@@ -866,6 +867,12 @@ export function validateTheme(input: unknown): ThemeValidationResult {
       errors.push(issue(token.name, check.message));
       tokens[token.name] = fallbackValue(token, scheme);
     }
+  }
+  // One line, not one per token: a hand-written file may set only a few.
+  if (missing.length > 3) {
+    warnings.push(issue(null, `${missing.length} av ${THEME_TOKENS.length} färger saknas i filen och fylls i automatiskt.`));
+  } else {
+    for (const token of missing) warnings.push(issue(token.name, "saknas i filen och fylls i automatiskt."));
   }
   if (given) {
     for (const name of Object.keys(given)) {

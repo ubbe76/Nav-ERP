@@ -656,6 +656,11 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
         description: "Systembeteenden, t.ex. parallella stämplingar, ATF-intjäning och e-post (SMTP).",
       },
       {
+        href: "/system/teman",
+        title: "Teman",
+        description: "Förvalt tema, lås och egna färgteman — ladda upp en temafil eller skapa ett tema i redigeraren.",
+      },
+      {
         href: "/system/kalkyler",
         title: "Kalkyler",
         description: "Var materialkostnaden hämtas och påslagen som ger försäljningspriset i för- och efterkalkylen.",

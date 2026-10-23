@@ -309,6 +309,59 @@ I panelen **Lön & PAXml** ställs tidkoderna som skrivs ut i löneunderlagsexpo
 
 Tidkoderna måste matcha lönesystemets egen löneartstabell — stäm av dem med er lönekonsult innan första löneunderlagsexporten. Ett tomt fält sparas som systemets standardkod.
 
+## Teman
+
+**System → Teman** styr färgtemana. Förutom de inbyggda temana **Ljust**, **Mörkt** och **Dracula** kan du installera egna teman, och varje tema är samma sak: en uppsättning färger som gäller på alla sidor, även stämpelterminalen och inloggningen. Bara färger ingår — inte typsnitt eller logotyp.
+
+### Förval och lås
+
+- **Förvalt tema för företaget** är temat som visas för alla som inte själva valt något, och på inloggningssidan innan någon loggat in.
+- **Lås temat för alla användare** döljer temaväljaren för alla och tvingar fram det förvalda temat.
+
+Varje användares eget val sparas på användaren, så det följer med mellan datorer. Väljaren uppe till höger visar alla teman — en segmenterad kontroll när det finns högst tre, annars en lista märkt **Tema**. Ett tema som tas bort ersätts för dess användare av det förvalda. Konton med **Endast läsning** kan inte spara sitt val på användaren; då gäller valet bara i den webbläsaren.
+
+### Temalistan
+
+Tabellen visar **Namn**, **Typ** (Ljust eller Mörkt), **Skapat** (Inbyggt, Uppladdat eller Redigerare) och **Används av** (antal användare som valt temat). Märkena **Förval** och **Behöver ses över** visas vid namnet.
+
+- **Redigera** öppnar temat i redigeraren.
+- **Exportera** laddar ned temat som en temafil (`.json`).
+- **Ta bort** tar bort ett eget tema efter en bekräftelse. Företagets förvalda tema kan inte tas bort — välj först ett annat förval.
+- De inbyggda temana har bara **Exportera** och **Skapa kopia**, som öppnar redigeraren med det inbyggda temats alla färger som utgångspunkt.
+
+Det får finnas högst 50 egna teman.
+
+### Ladda upp tema
+
+Klicka på **Ladda upp tema…** och välj en temafil (`.json`, högst 64 kB). Nav läser filen i webbläsaren och kontrollerar den på servern innan något sparas. Dialogen visar **Namn**, typ, en förhandsvisning med appens riktiga knappar, tabell och formulär, samt varningar och fel. **Installera** är avstängd så länge det finns fel; om namnet redan är taget ändrar du fältet **Namn**.
+
+- En färg som saknar i filen fylls i automatiskt (en varning visas). En okänd färg ignoreras med en varning — filen kan komma från en nyare version av Nav.
+- Ett ogiltigt färgvärde är ett fel. Filen kan aldrig innehålla annat än färgvärden.
+- Temat måste klara kontrastkravet nedan, annars kan det inte installeras.
+
+### Redigeraren
+
+**Nytt tema** (eller **Redigera** på ett eget tema) öppnar redigeraren: inställningarna till vänster och en levande förhandsvisning till höger (under inställningarna på mobil). Välj grundfärgerna så räknar Nav fram alla övriga färger:
+
+- **Namn** och **Utgå från** (Ljust eller Mörkt — väljer mall för skuggor och överlägg; att byta frågar först om du redan gjort ändringar under Avancerat).
+- **Bakgrund**, **Ytor** (kort och tabeller), **Text** och **Accentfärg** (knappar, aktiv meny och länkar). Varje färg väljs med färgväljaren eller skrivs som hex (`#rrggbb`).
+- **Rubrikfärg** är valfri — tom betyder accentfärgen som text.
+- **Statusfärger**: **Standard** använder mallens kulörer, **Egna** ger fyra färger för Pågår, Försenad, Stoppad och Klar.
+
+**Exportera** i redigeraren laddar ned det aktuella, även osparade, läget som temafil. **Spara** lägger temat i listan och i temaväljaren direkt, utan ombyggnad.
+
+#### Kontrastkravet och Justera
+
+Varje textfärg måste ha kontrasten 4,5:1 mot de ytor den ligger på (WCAG AA), precis som de inbyggda temana. Nav väljer själv läsbara textfärger, men en kombination kan vara omöjlig, och en färg du ändrar för hand kan bryta kravet. Brister listas under **Kontrast**, till exempel "Dämpad text på Indataytor: 3,9:1, kräver 4,5:1". **Justera** flyttar förgrundens ljushet tills kravet klaras (behåller kulören) och lägger resultatet som en egen ändring. **Spara** är avstängd så länge brister finns, och servern kontrollerar alltid kravet igen.
+
+#### Avancerat
+
+Under **Avancerat** (hopfällt) finns alla färger, grupperade och med sina namn. En färg du ändrar för hand markeras **Ändrad** och följer inte längre grundfärgerna; **Återställ** låter Nav räkna fram den igen. Ett uppladdat tema saknar grundfärger från redigeraren, så det öppnas med alla färger under Avancerat som egna ändringar och grundfärgerna hämtade ur temat.
+
+### Behöver ses över
+
+När en ny version av Nav lägger till en färg saknar redan sparade teman den. Nav fyller i den automatiskt och kontrollerar kontrasten på nytt, och temat märks **Behöver ses över**. Inget tema slutar fungera — öppna det i redigeraren, kontrollera förhandsvisningen och spara om det.
+
 ## Kalkyler
 
 **System → Kalkyler** styr hur för- och efterkalkylen räknar. Inställningarna är systemomfattande och gäller alla artiklar. Kalkylerna körs från artikelkortets flik **Kalkyl** och från tillverkningsordern (se [Artiklar](/hjalp/artiklar) och [Tillverkning](/hjalp/tillverkning)).

@@ -3,6 +3,7 @@ import type { Permission } from "./permissions";
 import type { VatBox, VatBoxSetting } from "./vatBoxes";
 import type { FixedAssetDisposalType, FixedAssetStatus } from "./fixedAssets";
 import type { YearEndAccrualKind, YearEndRole, YearEndStep } from "./yearEnd";
+import type { ThemeContrastFailure, ThemeIssue, ThemeScheme, ThemeSource, ThemeValidationResult } from "./themeCore";
 // Paginated list envelope — every unbounded register endpoint answers with this.
 export interface Paged<T> {
   rows: T[];
@@ -2212,6 +2213,10 @@ export interface StampSession {
 }
 
 export interface SystemSettings {
+  // Egna teman: the company's default theme (a built-in id or a custom
+  // theme's key) and whether users may pick their own.
+  defaultTheme: string;
+  themeChoiceLocked: boolean;
   allowMultipleStamps: boolean;
   // Print active article/drawing revisions per row on external documents.
   showRevisionsOnDocuments: boolean;
@@ -4376,3 +4381,46 @@ export interface DeliveryTimeCheckResult {
   // Shortage batches of manufactured articles; empty/absent = nothing to create.
   batches?: DtcBatch[];
 }
+
+// --- Egna teman (mirror of packages/shared/src/themes.ts) -------------------
+
+export interface ThemeBootEntry {
+  id: string;
+  label: string;
+  scheme: ThemeScheme;
+  builtIn: boolean;
+}
+
+// GET /theme-boot — userTheme only with a session (null = company default).
+export interface ThemeBoot {
+  css: string;
+  themes: ThemeBootEntry[];
+  defaultTheme: string;
+  locked: boolean;
+  userTheme?: string | null;
+}
+
+export type ThemeOrigin = "builtin" | "uploaded" | "editor";
+
+export interface ThemeListRow {
+  id: string;
+  key: string;
+  name: string;
+  scheme: ThemeScheme;
+  builtIn: boolean;
+  origin: ThemeOrigin;
+  needsReview: boolean;
+  usedBy: number;
+  isDefault: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ThemeDetail extends ThemeListRow {
+  tokens: Record<string, string>;
+  source: ThemeSource | null;
+  warnings: ThemeIssue[];
+  contrastFailures: ThemeContrastFailure[];
+}
+
+export type { ThemeContrastFailure, ThemeIssue, ThemeScheme, ThemeSource, ThemeValidationResult };

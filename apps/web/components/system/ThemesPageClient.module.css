@@ -1,0 +1,72 @@
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-5);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  padding-bottom: 10px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.name {
+  font-weight: 600;
+}
+
+.marks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: var(--space-2);
+}
+
+.mark {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
+}
+
+.markReview {
+  background: var(--status-delayed-bg);
+  color: var(--status-delayed-text);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.hidden {
+  display: none;
+}
+
+.issues {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.dialogBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}

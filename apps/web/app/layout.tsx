@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, Figtree } from "next/font/google";
 import "./globals.css";
-import { themeBootScript } from "../lib/themes";
+import { headers } from "next/headers";
+import { fetchThemeBoot, themeBootScript } from "../lib/themes";
+import { ThemeBootProvider } from "../components/ThemeBootProvider";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -31,21 +33,26 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Custom themes (System → Teman) + the company default/lock + the user's
+  // own choice. Never fails: see fetchThemeBoot.
+  const boot = await fetchThemeBoot((await headers()).get("cookie") ?? undefined);
   return (
     // suppressHydrationWarning: the boot script sets data-theme on <html>
     // before React hydrates — this element's own attributes only.
     <html lang="sv" suppressHydrationWarning>
       <head>
         {/* Applies the stored colour theme before first paint (lib/themes.ts). */}
-        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+        {/* Server-built CSS for the custom themes (validated tokens only). */}
+        {boot.css && <style id="nav-themes" dangerouslySetInnerHTML={{ __html: boot.css }} />}
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript(boot) }} />
       </head>
       {/* Browser extensions inject attributes on <body> before React hydrates
           (ColorZilla's cz-shortcut-listen, for one), which otherwise reports a
           hydration mismatch we can neither cause nor fix. This suppresses the
           warning for this element's own attributes only — never the tree. */}
       <body suppressHydrationWarning className={`${spaceGrotesk.variable} ${figtree.variable}`}>
-        {children}
+        <ThemeBootProvider boot={boot}>{children}</ThemeBootProvider>
       </body>
     </html>
   );

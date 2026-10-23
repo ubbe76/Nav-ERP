@@ -46,6 +46,7 @@ const NOT_IN_NAV = new Set([
   "/kunder/import", // "Importera" on the customer list
   "/leverantorer/import", // ditto, supplier list
   "/lager/inventering/ny", // "+ Ny inventering" on the count list
+  "/system/teman/ny", // "Nytt tema" on the themes list
   "/tillverkning/resurser/import", // "Importera" on the resource, lego resource and production group lists
   // Legacy redirect stub, deliberately unlisted.
   "/lager/inventera",
