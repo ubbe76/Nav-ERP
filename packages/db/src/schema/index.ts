@@ -19,3 +19,4 @@ export * from "./timereport";
 export * from "./configurator";
 export * from "./einvoice";
 export * from "./alerts";
+export * from "./themes";

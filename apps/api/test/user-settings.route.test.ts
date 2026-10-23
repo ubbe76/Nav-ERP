@@ -90,7 +90,7 @@ describe("GET /me/settings", () => {
 
     const res = await app.inject({ url: "/me/settings", headers: { cookie } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
+    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
     await app.close();
   });
 });
@@ -114,10 +114,10 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 100 },
     });
     expect(patchRes.statusCode).toBe(200);
-    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
+    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
 
     const getRes = await app.inject({ url: "/me/settings", headers: { cookie } });
-    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
+    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
 
     // Upsert, not insert-only: a second PATCH overwrites the first value
     // rather than erroring on the composite PK.
@@ -128,7 +128,7 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 25 },
     });
     expect(secondPatch.statusCode).toBe(200);
-    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
+    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
     await app.close();
   });
 
@@ -166,7 +166,7 @@ describe("PATCH /me/settings", () => {
     const cookieB = await registerAndLogin(app);
 
     const patch = await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie: cookieA }, payload: { hideOnboarding: true } });
-    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null });
+    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null, theme: null });
     const other = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
     expect(other.json().hideOnboarding).toBe(false);
     await app.close();
@@ -211,7 +211,7 @@ describe("PATCH /me/settings", () => {
     });
 
     const resB = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
-    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null });
+    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
     await app.close();
   });
 });

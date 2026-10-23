@@ -148,6 +148,9 @@ import { createDemoDataService } from "./modules/demo/service/demo-data.service.
 import { demoDataRoutes } from "./modules/demo/routes/demo-data.routes.js";
 import { createOnboardingService } from "./modules/system/service/onboarding.service.js";
 import { onboardingRoutes } from "./modules/system/routes/onboarding.routes.js";
+import { createThemesRepository } from "./modules/system/repository/themes.repository.js";
+import { createThemesService } from "./modules/system/service/themes.service.js";
+import { themeBootRoutes, themeRoutes } from "./modules/system/routes/themes.routes.js";
 import { createAlertsRepository } from "./modules/alerts/repository/alerts.repository.js";
 import { createAlertsService } from "./modules/alerts/service/alerts.service.js";
 import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
@@ -238,6 +241,8 @@ export function buildApp(database: Db = db) {
   // referenced from both customers and suppliers.
   const registerService = createRegisterService(createRegisterRepository(database));
   const systemService = createSystemService(createSystemRepository(database), auditRepository);
+  // Egna teman: holds the custom themes' CSS in memory (one cache per app).
+  const themesService = createThemesService({ repo: createThemesRepository(database), audit: auditRepository, settings: systemService });
   // Automatkontering (B2) — wired into the sales/purchase services that post
   // invoices; readPostingSettings (system module leaf) supplies the 14
   // standard posting accounts, read through the poster's own transaction.
@@ -669,6 +674,10 @@ export function buildApp(database: Db = db) {
       await v1.register(authRoutes, { service: authService, settings: userSettingsService, throttles: credentialThrottles });
       // Public: this route IS the OAuth2 client-credentials authentication mechanism.
       await v1.register(oauthRoutes, { service: oauthService, throttles: credentialThrottles });
+      // Public: the theme CSS and picker data every page (login and the stamp
+      // terminal included) reads before first paint; reads the session
+      // cookie itself, only to add the user's own choice.
+      await v1.register(themeBootRoutes, { service: themesService, auth: authService, userSettings: userSettingsService });
 
       // Behörighetsgrupper: enforceAccess runs after authentication and
       // resolves each route's rule — its own config.access, else the module
@@ -751,6 +760,8 @@ export function buildApp(database: Db = db) {
         await registerModule(protectedRoutes, demoDataRoutes, { service: createDemoDataService(database) }, adminOnly);
         // System → Kom igång: the setup checklist on Översikten, admin only.
         await registerModule(protectedRoutes, onboardingRoutes, { service: createOnboardingService(database) }, adminOnly);
+        // System → Teman: install, edit and export colour themes, admin only.
+        await registerModule(protectedRoutes, themeRoutes, { service: themesService }, adminOnly);
         await registerModule(
           protectedRoutes,
           mailRoutes,

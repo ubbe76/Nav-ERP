@@ -12,8 +12,9 @@ import { resendAccessRule } from "../src/modules/mail/service/resend-access.js";
 
 // Routes deliberately outside the permission gate: they authenticate
 // themselves (login/register/logout, the OAuth token endpoint), answer for the
-// session user only (/auth/me, /me/settings), or are the health probe and
-// @fastify/cors's preflight catch-all.
+// session user only (/auth/me, /me/settings), or are the health probe,
+// the theme boot data every page (login included) reads before first paint,
+// and @fastify/cors's preflight catch-all.
 const PUBLIC = new Set([
   "POST /api/v1/auth/register",
   "POST /api/v1/auth/login",
@@ -26,6 +27,7 @@ const PUBLIC = new Set([
   "PATCH /api/v1/auth/users/:id",
   "DELETE /api/v1/auth/users/:id",
   "POST /api/v1/oauth/token",
+  "GET /api/v1/theme-boot",
   "GET /health",
   "OPTIONS *",
 ]);

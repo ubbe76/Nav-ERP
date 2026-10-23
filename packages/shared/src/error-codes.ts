@@ -166,6 +166,12 @@ export const ERROR_CODES = {
   QUOTE_FOLLOWUP_TOO_LARGE: "quote-followup-too-large",
   QUOTE_LOSS_REASON_INVALID: "quote-loss-reason-invalid",
   DEMO_DATA_NOT_AVAILABLE: "demo-data-not-available",
+  // Egna teman
+  UNKNOWN_THEME: "unknown-theme",
+  THEME_INVALID: "theme-invalid",
+  THEME_NAME_TAKEN: "theme-name-taken",
+  THEME_IS_DEFAULT: "theme-is-default",
+  THEME_LIMIT: "theme-limit",
   // auth
   INVALID_CREDENTIALS: "invalid-credentials",
   CLIENT_SCOPE_MISSING: "client-scope-missing",

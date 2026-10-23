@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { alertKindSchema } from "./alerts.js";
+import { themeIdSchema } from "./themes.js";
 
 // Per-user preferences (auth module, `user_settings` KV table) — distinct
 // from the system-wide system_settings module. First (and so far only) key
@@ -29,6 +30,9 @@ export const userSettingsSchema = z.object({
   // the permission may change afterwards.
   alertDigest: z.boolean(),
   alertDigestKinds: z.array(alertKindSchema).nullable(),
+  // Egna teman: the user's chosen theme (a built-in id or a custom theme's
+  // key); null = the company default. Checked to exist on PATCH.
+  theme: themeIdSchema.nullable(),
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 

@@ -2,6 +2,15 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  BUILTIN_THEME_VALUES,
+  BUILTIN_THEMES,
+  contrastRatio,
+  THEME_CONTRAST_PAIRS,
+  THEME_MIN_CONTRAST,
+  THEME_TOKENS,
+  validateTheme,
+} from "@navet/shared";
 
 // Guards the web's colour-theme contract (see the header of
 // apps/web/styles/tokens.css): every colour is a theme token declared in
@@ -50,21 +59,6 @@ for (const b of tokenBlocks) {
 }
 const sharedRoot = declarations(tokenBlocks.filter((b) => b.selector === ":root").map((b) => b.body).join("\n"));
 
-// WCAG 2 contrast ratio of two opaque #rrggbb colours.
-function contrast(a: string, b: string): number {
-  const luminance = (hex: string) => {
-    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
-    if (!m) throw new Error(`contrast() needs an opaque #rrggbb colour, got ${hex}`);
-    const [r, g, b] = m.slice(1).map((h) => {
-      const c = parseInt(h, 16) / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-  };
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi! + 0.05) / (lo! + 0.05);
-}
-
 const RAW_COLOUR =/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/;
 
 describe("colour themes", () => {
@@ -89,32 +83,9 @@ describe("colour themes", () => {
 
   it("every text token clears WCAG AA (4.5:1) on every surface, in every theme", () => {
     // Text tokens × the surfaces they're drawn on, plus the fixed
-    // foreground/background pairs. The plain --status-* tokens are absent on
-    // purpose: they're for dots, bars and strokes, never text.
-    const texts = [
-      "--color-text-primary",
-      "--color-text-secondary",
-      "--color-text-label",
-      "--color-text-muted",
-      "--accent-fg",
-      "--color-heading-accent",
-      "--status-running-text",
-      "--status-delayed-text",
-      "--status-stopped-text",
-      "--status-done-text",
-      "--status-draft-text",
-    ];
-    const surfaces = ["--color-bg", "--color-surface", "--color-elevated", "--color-input-surface", "--color-divider"];
-    const pairs: [string, string][] = [
-      ...texts.flatMap((t) => surfaces.map((s): [string, string] => [t, s])),
-      ["--status-running-text", "--status-running-bg"],
-      ["--status-delayed-text", "--status-delayed-bg"],
-      ["--status-stopped-text", "--status-stopped-bg"],
-      ["--status-done-text", "--status-done-bg"],
-      ["--status-draft-text", "--status-draft-bg"],
-      ["--accent-text", "--accent"],
-      ["--btn-primary-text", "--btn-primary-bg"],
-    ];
+    // foreground/background pairs — THEME_CONTRAST_PAIRS, the same rule the
+    // server applies to custom themes. The plain --status-* tokens are absent
+    // on purpose: they're for dots, bars and strokes, never text.
     const failures: string[] = [];
     for (const [id, decls] of themeBlocks) {
       const resolve = (name: string): string => {
@@ -123,12 +94,54 @@ describe("colour themes", () => {
         const ref = /^var\((--[\w-]+)\)$/.exec(value);
         return ref ? resolve(ref[1]!) : value;
       };
-      for (const [fg, bg] of pairs) {
-        const ratio = contrast(resolve(fg), resolve(bg));
-        if (ratio < 4.5) failures.push(`${id}: ${fg} on ${bg} = ${ratio.toFixed(2)}`);
+      for (const [fg, bg] of THEME_CONTRAST_PAIRS) {
+        const ratio = contrastRatio(resolve(`--${fg}`), resolve(`--${bg}`));
+        if (ratio < THEME_MIN_CONTRAST) failures.push(`${id}: --${fg} on --${bg} = ${ratio.toFixed(2)}`);
       }
     }
     expect(failures).toEqual([]);
+  });
+
+  // Egna teman: the catalogue in packages/shared/src/theme-core.ts is the
+  // other half of the contract — custom themes are validated and built
+  // against it, and BUILTIN_THEME_VALUES serves the built-in themes' export
+  // and the editor's templates.
+  it("every theme block declares exactly the catalogue's tokens", () => {
+    const catalogue = THEME_TOKENS.map((t) => `--${t.name}`).sort();
+    for (const [id, decls] of themeBlocks) {
+      expect({ theme: id, tokens: [...decls.keys()].sort() }).toEqual({ theme: id, tokens: catalogue });
+    }
+  });
+
+  it("BUILTIN_THEME_VALUES and BUILTIN_THEMES are exactly the theme blocks", () => {
+    expect(BUILTIN_THEMES.map((t) => t.id).sort()).toEqual([...themeBlocks.keys()].sort());
+    for (const [id, decls] of themeBlocks) {
+      const values = Object.fromEntries([...decls.entries()].map(([name, value]) => [name.slice(2), value]));
+      expect({ theme: id, values: BUILTIN_THEME_VALUES[id as keyof typeof BUILTIN_THEME_VALUES] }).toEqual({ theme: id, values });
+    }
+  });
+
+  it("each built-in theme's color-scheme matches BUILTIN_THEMES", () => {
+    for (const b of tokenBlocks) {
+      for (const m of b.selector.matchAll(/\[data-theme="([\w-]+)"\]/g)) {
+        const scheme = /color-scheme:\s*(\w+)/.exec(b.body)?.[1];
+        expect({ theme: m[1], scheme }).toEqual({ theme: m[1], scheme: BUILTIN_THEMES.find((t) => t.id === m[1])!.scheme });
+      }
+    }
+  });
+
+  it("the built-in themes pass validateTheme, values unchanged", () => {
+    for (const theme of BUILTIN_THEMES) {
+      const result = validateTheme({ name: theme.label, scheme: theme.scheme, tokens: BUILTIN_THEME_VALUES[theme.id] });
+      expect({ theme: theme.id, ok: result.ok, errors: result.errors, warnings: result.warnings, contrast: result.contrastFailures }).toEqual({
+        theme: theme.id,
+        ok: true,
+        errors: [],
+        warnings: [],
+        contrast: [],
+      });
+      expect(result.tokens).toEqual(BUILTIN_THEME_VALUES[theme.id]);
+    }
   });
 
   it("no token is declared both per theme and in the shared :root block", () => {

@@ -6,6 +6,8 @@ import type {
   UpdateCompanyInfoInput,
   UpdateNumberSeriesInput,
 } from "@navet/shared";
+import { DEFAULT_THEME_KEY } from "../service/theme-settings.js";
+import { lockThemeForSetting } from "./themes.repository.js";
 
 // Never selects `logo` (bytea) as part of a normal row — that would put
 // binary data in a JSON response. Callers that need the actual bytes use
@@ -109,6 +111,19 @@ export function createSystemRepository(db: Db) {
         .insert(systemSettings)
         .values({ key, value })
         .onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+    },
+
+    // Egna teman: Förvalt tema för företaget, written only while the theme
+    // exists — false (nothing written) for an unknown id.
+    async setDefaultTheme(id: string): Promise<boolean> {
+      return db.transaction(async (tx) => {
+        if (!(await lockThemeForSetting(tx, id))) return false;
+        await tx
+          .insert(systemSettings)
+          .values({ key: DEFAULT_THEME_KEY, value: id })
+          .onConflictDoUpdate({ target: systemSettings.key, set: { value: id } });
+        return true;
+      });
     },
 
     // --- Company carrier accounts (Företagsinformation → Speditörer) ---

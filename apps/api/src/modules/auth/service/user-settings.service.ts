@@ -7,6 +7,8 @@ import {
   type UserSettings,
 } from "@navet/shared";
 import type { UserSettingsRepository } from "../repository/user-settings.repository.js";
+import { decodeUserTheme, USER_THEME_SETTING_KEY } from "../../system/service/theme-settings.js";
+import { UnknownThemeError } from "../../system/service/themes.errors.js";
 
 const LIST_PAGE_SIZE_KEY = "list_page_size";
 const HIDE_ONBOARDING_KEY = "hide_onboarding";
@@ -54,6 +56,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       hideOnboarding: byKey.get(HIDE_ONBOARDING_KEY) === "true",
       alertDigest: byKey.get(ALERT_DIGEST_KEY) === "true",
       alertDigestKinds: decodeAlertDigestKinds(byKey.get(ALERT_DIGEST_KINDS_KEY)),
+      theme: decodeUserTheme(byKey.get(USER_THEME_SETTING_KEY)),
     };
   }
 
@@ -61,6 +64,11 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
     getSettings,
 
     async updateSettings(userId: string, input: UpdateUserSettingsInput): Promise<UserSettings> {
+      // First, so an unknown theme refuses the request before anything else
+      // is written.
+      if (input.theme !== undefined && !(await repo.setTheme(userId, input.theme))) {
+        throw new UnknownThemeError(input.theme!);
+      }
       if (input.listPageSize !== undefined) {
         await repo.upsert(userId, LIST_PAGE_SIZE_KEY, String(input.listPageSize));
       }

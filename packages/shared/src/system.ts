@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { costingMaterialSourceSchema, costingSupplierPriceTierSchema } from "./costing.js";
 import { deliveryDayModeSchema, transitDaysSchema } from "./delivery.js";
+import { themeIdSchema } from "./themes.js";
 
 // Materialbrist vid rapportering — see updateSystemSettingsSchema below.
 export const manufacturingMaterialShortageSchema = z.enum(["none", "warn", "block"]);
@@ -171,6 +172,11 @@ const systemSettingsFieldsSchema = z.object({
     // Offertens giltighetstid (dagar): the default Giltig t.o.m. of a new
     // quote = today + N; 0 = no validity date.
     quoteValidityDays: z.number().int().min(0).max(365).optional(),
+    // Egna teman: the company's default theme (a built-in id or a custom
+    // theme's key — the service checks it exists) and Lås temat för alla
+    // användare.
+    defaultTheme: themeIdSchema.optional(),
+    themeChoiceLocked: z.boolean().optional(),
     publicBaseUrl: z
       .union([
         z.literal(""),

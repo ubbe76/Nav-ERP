@@ -189,6 +189,11 @@ const MESSAGES: Record<string, MessageEntry> = {
   "order-register-too-large": "Urvalet har fler än 10 000 orderrader — avgränsa med datum, status eller kund/leverantör.",
   "quote-followup-too-large": "Urvalet har fler än 10 000 offerter — korta ned perioden eller välj en kund.",
   "quote-loss-reason-invalid": "Förlustorsaken finns inte eller är inaktiv — välj en annan orsak.",
+  "unknown-theme": "Temat finns inte längre — välj ett annat tema.",
+  "theme-invalid": "Temat innehåller fel eller klarar inte kontrastkravet (4,5:1) och kan inte sparas.",
+  "theme-name-taken": "Det finns redan ett tema med det namnet — välj ett annat namn.",
+  "theme-is-default": "Temat är företagets förvalda tema — välj ett annat förval innan det tas bort.",
+  "theme-limit": "Det får finnas högst 50 egna teman — ta bort ett innan du lägger till ett nytt.",
   "demo-data-not-available": (err) => {
     const blockers = (err.body as { blockers?: string[] } | undefined)?.blockers ?? [];
     return blockers.length

@@ -13,6 +13,7 @@ import { MO_READ, TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 import { contentDisposition } from "../service/content-disposition.js";
 import { errorBody } from "../service/error-body.js";
 import type { SystemService } from "../service/system.service.js";
+import { UnknownThemeError } from "../service/themes.errors.js";
 import {
   BuiltInNumberSeriesError,
   CarrierNotFoundError,
@@ -85,9 +86,14 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
     return service.getSettings();
   });
 
-  app.patch("/settings", { preHandler: requireRole("admin") }, async (req) => {
+  app.patch("/settings", { preHandler: requireRole("admin") }, async (req, reply) => {
     const input = updateSystemSettingsSchema.parse(req.body);
-    return service.updateSettings(input, req.user!.id);
+    try {
+      return await service.updateSettings(input, req.user!.id);
+    } catch (err) {
+      if (err instanceof UnknownThemeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
   });
 
   // Ekonomi → Konteringsregler's standard accounts and kundreskontra

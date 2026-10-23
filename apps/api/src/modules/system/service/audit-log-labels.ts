@@ -43,6 +43,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   bank_file: "Bankfil",
   bank_settings: "Bankinställningar",
   einvoice_settings: "E-fakturainställningar",
+  theme: "Tema",
 };
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
@@ -97,6 +98,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   entry_restored: "Post återställd",
   einvoice_sent: "E-faktura skickad",
   einvoice_failed: "E-faktura misslyckad",
+  theme_created: "Tema skapat",
+  theme_updated: "Tema ändrat",
+  theme_deleted: "Tema borttaget",
 };
 
 export function auditEntityTypeLabel(entityType: string): string {

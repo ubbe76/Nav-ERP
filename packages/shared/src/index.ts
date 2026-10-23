@@ -36,3 +36,5 @@ export * from "./vat.js";
 export * from "./configurator.js";
 export * from "./einvoice.js";
 export * from "./alerts.js";
+export * from "./theme-core.js";
+export * from "./themes.js";

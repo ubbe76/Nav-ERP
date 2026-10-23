@@ -1,7 +1,10 @@
 // Colour themes. Each id here must have a matching :root[data-theme="<id>"]
 // block in styles/tokens.css defining the full colour-token set — adding a
 // theme is that block plus one entry below (theme-tokens.test.ts in
-// apps/api/test checks the two stay in sync).
+// apps/api/test checks the two stay in sync). The token set itself is the
+// catalogue THEME_TOKENS in lib/themeCore.ts (a copy of
+// packages/shared/src/theme-core.ts), with the built-in themes' values in
+// BUILTIN_THEME_VALUES; custom themes are installed under System → Teman.
 export const THEMES = [
   { id: "light", label: "Ljust" },
   { id: "dark", label: "Mörkt" },

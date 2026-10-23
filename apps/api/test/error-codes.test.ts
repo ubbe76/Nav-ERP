@@ -9,6 +9,13 @@ import {
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
+import {
+  ThemeInvalidError,
+  ThemeIsDefaultError,
+  ThemeLimitError,
+  ThemeNameTakenError,
+  UnknownThemeError,
+} from "../src/modules/system/service/themes.errors.js";
 import { errorBody } from "../src/modules/system/service/error-body.js";
 import { OrderRegisterTooLargeError } from "../src/modules/reports/service/order-register.service.js";
 import { QuoteFollowupTooLargeError } from "../src/modules/reports/service/quote-followup.service.js";
@@ -431,6 +438,11 @@ const cases: Array<[Error, string]> = [
   [new OrderRegisterTooLargeError(), ERROR_CODES.ORDER_REGISTER_TOO_LARGE],
   [new QuoteFollowupTooLargeError(), ERROR_CODES.QUOTE_FOLLOWUP_TOO_LARGE],
   [new QuoteLossReasonInvalidError("x"), ERROR_CODES.QUOTE_LOSS_REASON_INVALID],
+  [new UnknownThemeError("egen-00000000"), ERROR_CODES.UNKNOWN_THEME],
+  [new ThemeInvalidError([], []), ERROR_CODES.THEME_INVALID],
+  [new ThemeNameTakenError("Fabriksblå"), ERROR_CODES.THEME_NAME_TAKEN],
+  [new ThemeIsDefaultError("Fabriksblå"), ERROR_CODES.THEME_IS_DEFAULT],
+  [new ThemeLimitError(50), ERROR_CODES.THEME_LIMIT],
   // auth
   [new InvalidCredentialsError(), ERROR_CODES.INVALID_CREDENTIALS],
   [new ClientScopeMissingError("prices:read"), ERROR_CODES.CLIENT_SCOPE_MISSING],

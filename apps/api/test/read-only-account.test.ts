@@ -368,6 +368,7 @@ describe("Endast läsning — the allowlist", () => {
         "POST /api/v1/articles/:id/configurator/variants/preview",
         "POST /api/v1/configurator/:articleId/derive",
         "POST /api/v1/configurator/:articleId/evaluate",
+        "POST /api/v1/themes/validate",
       ].sort()
     );
   });

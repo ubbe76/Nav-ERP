@@ -52,6 +52,8 @@ import {
   PUBLIC_BASE_URL_KEY,
 } from "./alert-settings.js";
 import { decodeQuoteValidityDays, QUOTE_VALIDITY_DAYS_KEY } from "./quote-settings.js";
+import { decodeDefaultTheme, DEFAULT_THEME_KEY, THEME_CHOICE_LOCKED_KEY } from "./theme-settings.js";
+import { UnknownThemeError } from "./themes.errors.js";
 // G1: append-only audit trail. system_settings/company_info are singletons —
 // entityId is null (no natural per-row id); number_series/company_carrier
 // use their own readable key/code. updateSettings NEVER logs values — only
@@ -294,6 +296,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       publicBaseUrl: decodePublicBaseUrl(get(PUBLIC_BASE_URL_KEY)),
       // Uppföljning av offerter — quote-settings.ts owns the key and default.
       quoteValidityDays: decodeQuoteValidityDays(get(QUOTE_VALIDITY_DAYS_KEY)),
+      // Egna teman — theme-settings.ts owns the keys and defaults.
+      defaultTheme: decodeDefaultTheme(get(DEFAULT_THEME_KEY)),
+      themeChoiceLocked: get(THEME_CHOICE_LOCKED_KEY) === "true",
       // Automatic accounting (Ekonomi → automatkontering) — the 14 posting
       // accounts + the 2 kundreskontra amounts, decoded by the leaf that owns
       // their keys/defaults (posting-settings.js).
@@ -507,6 +512,15 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         changedKeys.push(key);
         await repo.setSetting(key, value);
       };
+
+      // Egna teman: first, so an unknown theme refuses the whole request
+      // before anything is written. The write locks the theme row against a
+      // concurrent delete (themes.repository's lockThemeForSetting).
+      if (input.defaultTheme !== undefined) {
+        if (!(await repo.setDefaultTheme(input.defaultTheme))) throw new UnknownThemeError(input.defaultTheme);
+        changedKeys.push(DEFAULT_THEME_KEY);
+      }
+      if (input.themeChoiceLocked !== undefined) await set(THEME_CHOICE_LOCKED_KEY, String(input.themeChoiceLocked));
 
       if (input.allowMultipleStamps !== undefined) {
         await set(ALLOW_MULTIPLE_STAMPS_KEY, String(input.allowMultipleStamps));

@@ -19,6 +19,10 @@ describe("händelseloggens etiketter", () => {
     ["action", "einvoice_failed"],
     ["action", "lost"],
     ["action", "reopened"],
+    ["entity", "theme"],
+    ["action", "theme_created"],
+    ["action", "theme_updated"],
+    ["action", "theme_deleted"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);

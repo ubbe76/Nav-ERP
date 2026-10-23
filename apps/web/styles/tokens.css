@@ -7,6 +7,14 @@
    :root[data-theme="<id>"] block defining the full set, plus an entry in
    lib/themes.ts. theme-tokens.test.ts (apps/api/test) enforces both rules.
 
+   The token set is also a catalogue: THEME_TOKENS in
+   packages/shared/src/theme-core.ts (copied to lib/themeCore.ts), which
+   custom themes (System → Teman) are validated and built against, and
+   BUILTIN_THEME_VALUES there mirrors the values below. A new token is
+   therefore a declaration in EVERY block below AND a catalogue entry with a
+   fallback (so themes saved before it keep working); a changed value here
+   is changed there too. The test compares both.
+
    Background tokens come with their text pair (--status-*-bg/-text,
    --accent/--accent-text, …): put text on a tinted background with its
    pair, or with the theme's own text tokens — both are legible in every

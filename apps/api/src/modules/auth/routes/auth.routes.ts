@@ -22,6 +22,7 @@ import {
 import type { UserSettingsService } from "../service/user-settings.service.js";
 import { requireAuth, requireRole, SESSION_COOKIE } from "../middleware/auth.middleware.js";
 import { errorBody } from "../../system/service/error-body.js";
+import { UnknownThemeError } from "../../system/service/themes.errors.js";
 import { LoginThrottledError, type LoginThrottle } from "../service/login-throttle.js";
 
 const COOKIE_MAX_AGE_SECONDS = 8 * 60 * 60; // matches the JWT's 8h expiry
@@ -127,9 +128,14 @@ export async function authRoutes(
     return settings.getSettings(req.user!.id);
   });
 
-  app.patch("/me/settings", { preHandler: requireAuth(service) }, async (req) => {
+  app.patch("/me/settings", { preHandler: requireAuth(service) }, async (req, reply) => {
     const input = updateUserSettingsSchema.parse(req.body);
-    return settings.updateSettings(req.user!.id, input);
+    try {
+      return await settings.updateSettings(req.user!.id, input);
+    } catch (err) {
+      if (err instanceof UnknownThemeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
   });
 
   // Admin-only: create additional users (any role) once the first admin exists.
