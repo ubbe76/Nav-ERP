@@ -26,6 +26,11 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "orderQuantity", label: "Orderkvantitet" },
   { field: "rounding", label: "Avrundning" },
   { field: "lotSizingRule", label: "Partiformningsregel" },
+  // Revisioner: the article's active revision and a drawing number with its
+  // active revision.
+  { field: "articleRevision", label: "Artikelrevision" },
+  { field: "drawingNumber", label: "Ritningsnummer" },
+  { field: "drawingRevision", label: "Ritningsrevision" },
 ];
 
 // Mirrors ARTICLE_UNIT_IMPORT_FIELDS in

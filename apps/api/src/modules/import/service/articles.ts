@@ -36,6 +36,12 @@ export const ARTICLE_IMPORT_FIELDS = [
   "orderQuantity",
   "rounding",
   "lotSizingRule",
+  // Revisionsregistren on the card's Revisioner tab — the cell names the
+  // revision (or drawing number) that should be there and active; see
+  // planArticleImport.
+  "articleRevision",
+  "drawingNumber",
+  "drawingRevision",
 ] as const;
 
 // Normalized header -> target field (see normalizeHeader: "Benämning" ->
@@ -77,6 +83,16 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   kulor: "colour",
   aktiv: "active",
   status: "active",
+  artikelrevision: "articleRevision",
+  revision: "articleRevision",
+  rev: "articleRevision",
+  ritningsnummer: "drawingNumber",
+  ritningsnr: "drawingNumber",
+  ritnnr: "drawingNumber",
+  ritning: "drawingNumber",
+  ritningsrevision: "drawingRevision",
+  ritningsrev: "drawingRevision",
+  ritnrev: "drawingRevision",
 };
 
 export function suggestArticleMapping(headers: string[]): Record<string, string | null> {
@@ -101,6 +117,9 @@ export interface ExistingArticle {
   surfaceTreatment: string | null;
   colour: string | null;
   active: boolean;
+  // The article's active revision (article_revisions), null when none is
+  // active. Optional: only the article import reads it.
+  activeRevision?: string | null;
 }
 
 // Narrow lookups the builder runs against — implemented by
@@ -114,6 +133,17 @@ export interface ArticleImportDeps {
   // The same fallbacks createArticle uses ("st" + the "***" location),
   // resolved ONCE before rows are built.
   resolveDefaults(): Promise<{ unitId: string; locationId: string }>;
+}
+
+// The Revisioner tab's registers, set by one row: the article's active
+// revision, and a drawing number with (optionally) its active revision.
+// Absent = the row touches no register. executeArticlePlan applies it
+// idempotently: a missing revision or drawing is added, an inactive revision
+// is activated, and nothing is ever removed.
+export interface ArticleRevisionPlan {
+  articleRevision: string | null;
+  drawingNumber: string | null;
+  drawingRevision: string | null;
 }
 
 export interface ArticleCreatePlan {
@@ -132,6 +162,7 @@ export interface ArticleCreatePlan {
   reorderPoint: number | null;
   orderQuantity: number | null;
   rounding: number | null;
+  revisions?: ArticleRevisionPlan;
 }
 
 export interface ArticleUpdatePlan {
@@ -151,6 +182,7 @@ export interface ArticleUpdatePlan {
     orderQuantity?: number | null;
     rounding?: number | null;
   };
+  revisions?: ArticleRevisionPlan;
 }
 
 export interface ArticleImportPlan {
@@ -165,6 +197,11 @@ export interface ArticleImportPlan {
 }
 
 const GROUP_CODE_PATTERN = /^[0-9]{3,4}$/;
+
+// The registers' own limits (article_revisions/article_drawing_revisions.revision
+// varchar(20), article_drawings.drawing_number varchar(50)).
+const REVISION_MAX = 20;
+const DRAWING_NUMBER_MAX = 50;
 
 // Monitor writes types in several shapes ("Tillverkad", "M", "Köpt", "P",
 // "K", "Legoartikel"...). The ascii variants (tjanst/kop) also catch
@@ -433,6 +470,44 @@ export async function planArticleImport(
       }
     }
 
+    // Revisioner. Artikelrevision becomes the article's active revision
+    // (added when missing; the previous one stays, inactive) and is only
+    // staged when it differs from the active one, so re-importing a file
+    // writes nothing. Ritningsnummer is added when the article lacks it —
+    // its other drawing numbers stay — and Ritningsrevision becomes the
+    // active revision of THAT drawing, so it needs the number on its row.
+    const articleRevision = record["articleRevision"] ?? "";
+    const drawingNumber = record["drawingNumber"] ?? "";
+    const drawingRevision = record["drawingRevision"] ?? "";
+    if (articleRevision.length > REVISION_MAX) {
+      errors.push(`Artikelrevisionen är för lång (max ${REVISION_MAX} tecken)`);
+    } else if (articleRevision !== "") {
+      values["articleRevision"] = articleRevision;
+      const active = existing?.activeRevision ?? null;
+      if (active !== null && active !== articleRevision) {
+        warnings.push(`Aktiv artikelrevision byts från ${active} till ${articleRevision}`);
+      }
+    }
+    if (drawingNumber.length > DRAWING_NUMBER_MAX) {
+      errors.push(`Ritningsnumret är för långt (max ${DRAWING_NUMBER_MAX} tecken)`);
+    } else if (drawingNumber !== "") {
+      values["drawingNumber"] = drawingNumber;
+    }
+    if (drawingRevision.length > REVISION_MAX) {
+      errors.push(`Ritningsrevisionen är för lång (max ${REVISION_MAX} tecken)`);
+    } else if (drawingRevision !== "") {
+      if (drawingNumber === "") errors.push("Ritningsrevision kräver ett ritningsnummer på samma rad");
+      values["drawingRevision"] = drawingRevision;
+    }
+    const revisionPlan: ArticleRevisionPlan = {
+      articleRevision:
+        articleRevision !== "" && articleRevision !== (existing?.activeRevision ?? null) ? articleRevision : null,
+      drawingNumber: drawingNumber !== "" ? drawingNumber : null,
+      drawingRevision: drawingRevision !== "" ? drawingRevision : null,
+    };
+    const revisions =
+      revisionPlan.articleRevision !== null || revisionPlan.drawingNumber !== null ? revisionPlan : undefined;
+
     rows.push({ rowNumber, action, errors, warnings, values });
     if (errors.length > 0) return;
 
@@ -458,6 +533,7 @@ export async function planArticleImport(
         reorderPoint: planning.reorderPoint ?? null,
         orderQuantity: planning.orderQuantity ?? null,
         rounding: planning.rounding ?? null,
+        ...(revisions ? { revisions } : {}),
       });
     } else {
       // Empty cell on update = leave the existing value untouched (never
@@ -486,7 +562,7 @@ export async function planArticleImport(
       if (planning.reorderPoint !== undefined) patch.reorderPoint = planning.reorderPoint;
       if (planning.orderQuantity !== undefined) patch.orderQuantity = planning.orderQuantity;
       if (planning.rounding !== undefined) patch.rounding = planning.rounding;
-      updates.push({ id: existing.id, patch });
+      updates.push({ id: existing.id, patch, ...(revisions ? { revisions } : {}) });
     }
   });
 

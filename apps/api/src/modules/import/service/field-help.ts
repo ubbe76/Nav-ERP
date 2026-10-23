@@ -156,6 +156,36 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
         "Lagras inte — styr bara om Orderkvantitet läses: Fast orderstorlek betyder att kvantiteten importeras, allt annat (t.ex. Mot behov) och tom cell att den hoppas över på raden, med en varning. Ta bort kolumnen för att alltid läsa Orderkvantitet.",
       example: "Fast orderstorlek",
     },
+    {
+      field: "articleRevision",
+      label: "Artikelrevision",
+      required: false,
+      header: "Artikelrevision",
+      description:
+        "Artikelns aktiva revision, max 20 tecken. Saknar artikeln revisionen läggs den till; den blir aktiv och den tidigare aktiva ligger kvar som inaktiv (förhandsgranskningen varnar när den aktiva byts). Importen tar aldrig bort en revision. Tom cell lämnar revisionerna orörda.",
+      example: "B",
+      text: true,
+    },
+    {
+      field: "drawingNumber",
+      label: "Ritningsnummer",
+      required: false,
+      header: "Ritningsnummer",
+      description:
+        "Ett ritningsnummer på artikeln, max 50 tecken. Saknar artikeln numret läggs det till — artikelns andra ritningsnummer ligger kvar, importen tar aldrig bort något. Varje rad ger ett ritningsnummer, och ett artikelnummer får bara förekomma en gång per fil — har en artikel flera ritningar importeras de övriga i en ny körning. Tom cell lämnar ritningarna orörda.",
+      example: "R-63010",
+      text: true,
+    },
+    {
+      field: "drawingRevision",
+      label: "Ritningsrevision",
+      required: false,
+      header: "Ritningsrevision",
+      description:
+        "Den aktiva revisionen för ritningsnumret på samma rad, max 20 tecken — kräver Ritningsnummer på raden. Saknas revisionen läggs den till; den blir aktiv och den tidigare aktiva ligger kvar som inaktiv. Tom cell lämnar ritningens revisioner orörda.",
+      example: "C",
+      text: true,
+    },
   ],
 
   articleUnits: [

@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   articleGroups,
+  articleRevisions,
   articleSuppliers,
   articleUnits,
   articles,
@@ -26,6 +27,7 @@ import {
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
 import { recordStandardCostHistory } from "../../article/repository/article.repository.js";
 import type { ArticleImportPlan, ExistingArticle } from "../service/articles.js";
+import { applyImportedRevisions, type ImportedRevisions } from "./article-revisions.js";
 import {
   assignRegisterCodes,
   generatePaymentTermCode,
@@ -383,10 +385,13 @@ export function createImportRepository(db: Db) {
             surfaceTreatment: articles.surfaceTreatment,
             colour: articles.colour,
             active: articles.active,
+            activeRevision: articleRevisions.revision,
           })
           .from(articles)
           .innerJoin(units, eq(units.id, articles.unitId))
           .leftJoin(articleGroups, eq(articleGroups.id, articles.groupId))
+          // At most one active revision per article (partial unique index).
+          .leftJoin(articleRevisions, and(eq(articleRevisions.articleId, articles.id), eq(articleRevisions.isActive, true)))
           .where(inArray(articles.articleNumber, part));
         for (const row of rows) map.set(row.articleNumber, row);
       }
@@ -450,6 +455,8 @@ export function createImportRepository(db: Db) {
         const groupRows = await tx.select({ id: articleGroups.id, code: articleGroups.code }).from(articleGroups);
         const groupIds = new Map(groupRows.map((row) => [row.code, row.id]));
 
+        // Revisioner, applied once every article exists (applyImportedRevisions).
+        const revisionRows: ImportedRevisions[] = [];
         for (const part of chunk(plan.creates)) {
           if (part.length === 0) continue;
           // RETURNING id + articleNumber (not just id) so the history rows
@@ -482,6 +489,9 @@ export function createImportRepository(db: Db) {
             )
             .returning({ id: articles.id, articleNumber: articles.articleNumber });
           const idByNumber = new Map(inserted.map((row) => [row.articleNumber, row.id]));
+          for (const create of part) {
+            if (create.revisions) revisionRows.push({ articleId: idByNumber.get(create.articleNumber)!, ...create.revisions });
+          }
           const historyRows = part
             .filter((create) => create.standardCost !== null)
             .map((create) => ({ articleId: idByNumber.get(create.articleNumber)!, cost: create.standardCost! }));
@@ -499,6 +509,7 @@ export function createImportRepository(db: Db) {
         const costHistoryRows: { articleId: string; cost: number }[] = [];
         for (const update of plan.updates) {
           updated++;
+          if (update.revisions) revisionRows.push({ articleId: update.id, ...update.revisions });
           if (Object.keys(update.patch).length === 0) continue;
           if (update.patch.standardCost !== undefined) {
             costHistoryRows.push({ articleId: update.id, cost: update.patch.standardCost });
@@ -531,6 +542,7 @@ export function createImportRepository(db: Db) {
         for (const part of chunk(costHistoryRows)) {
           await recordStandardCostHistory(tx, part);
         }
+        await applyImportedRevisions(tx, revisionRows);
 
         return {
           created: plan.creates.length,
