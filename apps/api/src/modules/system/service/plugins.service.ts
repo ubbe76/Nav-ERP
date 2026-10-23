@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import {
   effectivePermissions,
   normalizePluginBaseUrl,
+  PERMISSIONS,
   PLUGIN_API_KEY_DISPLAY_LENGTH,
   PLUGIN_MANIFEST_MAX_BYTES,
   PLUGIN_MANIFEST_PATH,
@@ -76,6 +77,9 @@ export interface PluginViewer {
 }
 
 const iso = (date: Date | null | undefined) => (date ? date.toISOString() : null);
+
+// The group's stored codes that are still in the catalogue, in catalogue order.
+const grantedPermissions = (stored: readonly string[]): Permission[] => PERMISSIONS.filter((p) => stored.includes(p));
 
 function deliveryRow(row: DeliveryRow): PluginDeliveryRow {
   return {
@@ -209,7 +213,8 @@ export function createPluginsService(deps: {
       manifest: plugin.manifest as PluginManifest,
       userId: plugin.userId,
       permissionGroupId: plugin.permissionGroupId,
-      permissions: effectivePermissions("user", found.groupPermissions),
+      permissions: grantedPermissions(found.groupPermissions),
+      effectivePermissions: effectivePermissions("user", found.groupPermissions),
       readOnly: found.readOnly,
       apiKeyPrefix: plugin.apiKeyPrefix,
       installedBy: plugin.installedBy,

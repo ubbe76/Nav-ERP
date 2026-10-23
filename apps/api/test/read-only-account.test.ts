@@ -369,6 +369,10 @@ describe("Endast läsning — the allowlist", () => {
         "POST /api/v1/configurator/:articleId/derive",
         "POST /api/v1/configurator/:articleId/evaluate",
         "POST /api/v1/themes/validate",
+        // Tillägg: the manifest preview (admin only) and the context token a
+        // plugin page or tab is opened with — computed and signed, nothing written.
+        "POST /api/v1/plugins/preview",
+        "POST /api/v1/plugins/:id/context",
       ].sort()
     );
   });

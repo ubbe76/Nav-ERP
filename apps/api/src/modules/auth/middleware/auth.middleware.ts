@@ -86,8 +86,9 @@ export function pluginKeyOf(req: FastifyRequest): string | null {
   return token.startsWith(PLUGIN_API_KEY_PREFIX) ? token : null;
 }
 
-// The plugin-key branch shared by requireAuth and requireAuthOrClient.
-// Returns true when it handled the request (authenticated or answered).
+// The plugin-key branch shared by requireAuth and requireAuthOrClient:
+// either authenticates the request as the plugin's technical user or
+// answers it (400/401/403).
 export async function authenticatePluginKey(
   authService: AuthService,
   key: string,

@@ -14,6 +14,7 @@ import { resendAccessRule } from "../src/modules/mail/service/resend-access.js";
 // themselves (login/register/logout, the OAuth token endpoint), answer for the
 // session user only (/auth/me, /me/settings), or are the health probe,
 // the theme boot data every page (login included) reads before first paint,
+// the plugin kit CSS an embedded plugin page links from its own origin,
 // and @fastify/cors's preflight catch-all.
 const PUBLIC = new Set([
   "POST /api/v1/auth/register",
@@ -28,6 +29,7 @@ const PUBLIC = new Set([
   "DELETE /api/v1/auth/users/:id",
   "POST /api/v1/oauth/token",
   "GET /api/v1/theme-boot",
+  "GET /api/v1/plugin-kit.css",
   "GET /health",
   "OPTIONS *",
 ]);

@@ -662,13 +662,12 @@ export function createSalesRepository(db: Db) {
           )
           .returning();
 
-        // Tillägg: a quote (quote.created) or Ny kundorder, which is born
-        // confirmed (sales_order.confirmed).
-        await pluginEvents.emit(tx, {
-          type: input.confirm ? "sales_order.confirmed" : "quote.created",
-          entityId: order!.id,
-          entityNumber: order!.orderNumber,
-        });
+        // Tillägg: quote.created. Ny kundorder (confirm) is confirmed by the
+        // service right after, through updateStatus, which sends
+        // sales_order.confirmed.
+        if (!input.confirm) {
+          await pluginEvents.emit(tx, { type: "quote.created", entityId: order!.id, entityNumber: order!.orderNumber });
+        }
 
         return { order: withDocumentKind(order!), rows };
       });

@@ -170,7 +170,7 @@ describe("System → Tillägg: preview and install", () => {
     const { plugin, apiKey, webhookSecret } = await install();
     expect(apiKey).toMatch(/^nav_plg_lagerstatistik_[A-Za-z0-9]{32}$/);
     expect(webhookSecret).toMatch(/^[0-9a-f]{64}$/);
-    expect(plugin).toMatchObject({ key: "lagerstatistik", name: "Lagerstatistik", status: "active", baseUrl, permissions: ["artiklar", "lager", "artikeloversikt"], readOnly: false, apiKeyPrefix: apiKey.slice(0, 12) });
+    expect(plugin).toMatchObject({ key: "lagerstatistik", name: "Lagerstatistik", status: "active", baseUrl, permissions: ["artiklar", "lager"], effectivePermissions: ["artiklar", "lager", "artikeloversikt"], readOnly: false, apiKeyPrefix: apiKey.slice(0, 12) });
 
     const [user] = await db.select().from(users).where(eq(users.id, plugin.userId));
     expect(user).toMatchObject({ kind: "plugin", role: "user", name: "Tillägg: Lagerstatistik", email: "lagerstatistik@tillagg.invalid", active: true });
@@ -331,7 +331,7 @@ describe("changing and removing a plugin", () => {
     const { plugin } = await install();
     const updated = await asAdmin("PATCH", `/plugins/${plugin.id}`, { manifest: manifest({ name: "Lagerstatistik 2", permissions: ["lager", "artiklar", "ekonomi"] }) });
     expect(updated.statusCode).toBe(200);
-    expect(updated.json()).toMatchObject({ name: "Lagerstatistik 2", permissions: ["artiklar", "lager", "artikeloversikt"] });
+    expect(updated.json()).toMatchObject({ name: "Lagerstatistik 2", permissions: ["artiklar", "lager"] });
     expect(updated.json().manifest.permissions).toEqual(["lager", "artiklar", "ekonomi"]);
     const [user] = await db.select().from(users).where(eq(users.id, plugin.userId));
     expect(user!.name).toBe("Tillägg: Lagerstatistik 2");

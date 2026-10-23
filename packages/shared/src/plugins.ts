@@ -515,8 +515,10 @@ export interface PluginDetail extends PluginListRow {
   manifest: PluginManifest;
   userId: string;
   permissionGroupId: string;
-  // The group's permissions (what the plugin may do now) and Endast läsning.
+  // The group's permissions as granted (the checkboxes, like Behörighetsgrupper)
+  // and expanded (what the plugin may do now), and Endast läsning.
   permissions: Permission[];
+  effectivePermissions: Permission[];
   readOnly: boolean;
   apiKeyPrefix: string;
   installedBy: string | null;
