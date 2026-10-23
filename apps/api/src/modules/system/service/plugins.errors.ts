@@ -1,6 +1,6 @@
 // Tillägg. Codes are derived from the class names (error-body.ts):
 // plugin-not-found, plugin-manifest-invalid, plugin-manifest-unreachable,
-// plugin-key-taken, plugin-same-origin, plugin-delivery-not-found,
+// plugin-key-taken, plugin-same-host, plugin-delivery-not-found,
 // plugin-delivery-not-retryable, plugin-access-denied.
 
 export class PluginNotFoundError extends Error {
@@ -37,12 +37,14 @@ export class PluginKeyTakenError extends Error {
   }
 }
 
-// The plugin's origin equals Nav's own: allow-same-origin + allow-scripts in
-// the iframe would then be no sandbox at all.
-export class PluginSameOriginError extends Error {
+// The plugin runs on one of Nav's own host names. Cookies ignore the port,
+// so a plugin there (any port, either scheme) would receive Nav's session
+// cookie — and with Nav's origin, allow-same-origin + allow-scripts in the
+// iframe would be no sandbox at all.
+export class PluginSameHostError extends Error {
   constructor() {
-    super("Tillägget måste ha en annan adress (ursprung) än Nav.");
-    this.name = "PluginSameOriginError";
+    super("Tillägget måste köras på en annan värd än Nav — samma värd med en annan port räcker inte.");
+    this.name = "PluginSameHostError";
   }
 }
 

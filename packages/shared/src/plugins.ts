@@ -522,6 +522,8 @@ export interface PluginDetail extends PluginListRow {
   readOnly: boolean;
   apiKeyPrefix: string;
   installedBy: string | null;
+  // The installer's name (also after their account was removed), null when unknown.
+  installedByName: string | null;
   updatedAt: string;
   pendingDeliveries: number;
 }

@@ -26,9 +26,9 @@ import {
   PluginManifestInvalidError,
   PluginManifestUnreachableError,
   PluginNotFoundError,
-  PluginSameOriginError,
+  PluginSameHostError,
 } from "../src/modules/system/service/plugins.errors.js";
-import { PluginKeyWithSessionError, PluginRouteForbiddenError } from "../src/modules/auth/middleware/auth.middleware.js";
+import { CrossSiteRequestError, PluginKeyWithSessionError, PluginRouteForbiddenError } from "../src/modules/auth/middleware/auth.middleware.js";
 import { PermissionGroupOwnedByPluginError, PluginUserManagedError } from "../src/modules/auth/service/auth.service.js";
 import { OrderRegisterTooLargeError } from "../src/modules/reports/service/order-register.service.js";
 import { QuoteFollowupTooLargeError } from "../src/modules/reports/service/quote-followup.service.js";
@@ -460,7 +460,7 @@ const cases: Array<[Error, string]> = [
   [new PluginManifestInvalidError([]), ERROR_CODES.PLUGIN_MANIFEST_INVALID],
   [new PluginManifestUnreachableError("x"), ERROR_CODES.PLUGIN_MANIFEST_UNREACHABLE],
   [new PluginKeyTakenError("x"), ERROR_CODES.PLUGIN_KEY_TAKEN],
-  [new PluginSameOriginError(), ERROR_CODES.PLUGIN_SAME_ORIGIN],
+  [new PluginSameHostError(), ERROR_CODES.PLUGIN_SAME_HOST],
   [new PluginInvalidAddressError(), ERROR_CODES.PLUGIN_INVALID_ADDRESS],
   [new PluginDeliveryNotFoundError("x"), ERROR_CODES.PLUGIN_DELIVERY_NOT_FOUND],
   [new PluginDeliveryNotRetryableError(), ERROR_CODES.PLUGIN_DELIVERY_NOT_RETRYABLE],
@@ -471,6 +471,7 @@ const cases: Array<[Error, string]> = [
   [new PermissionGroupOwnedByPluginError(), ERROR_CODES.PERMISSION_GROUP_OWNED_BY_PLUGIN],
   // auth
   [new InvalidCredentialsError(), ERROR_CODES.INVALID_CREDENTIALS],
+  [new CrossSiteRequestError(), ERROR_CODES.CROSS_SITE_REQUEST],
   [new ClientScopeMissingError("prices:read"), ERROR_CODES.CLIENT_SCOPE_MISSING],
   [new ClientCustomerMismatchError(), ERROR_CODES.CLIENT_CUSTOMER_MISMATCH],
   [new ClientPriceNotAllowedError(), ERROR_CODES.CLIENT_PRICE_NOT_ALLOWED],

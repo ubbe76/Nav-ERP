@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthService } from "../../auth/service/auth.service.js";
-import { authenticatePluginKey, pluginKeyOf, readOnlyGuard, SESSION_COOKIE } from "../../auth/middleware/auth.middleware.js";
+import { authenticatePluginKey, pluginKeyOf, SESSION_COOKIE, sessionGuards } from "../../auth/middleware/auth.middleware.js";
 import type { OAuthService, PublicApiClient } from "../service/oauth.service.js";
 
 declare module "fastify" {
@@ -21,8 +21,9 @@ export function requireAuthOrClient(authService: AuthService, oauthService: OAut
     const user = sessionToken ? await authService.verifyToken(sessionToken) : null;
     if (user) {
       req.user = user;
-      // Endast läsning holds here too (POST /quotes from a read-only session).
-      return readOnlyGuard(req, reply);
+      // The cross-site guard and Endast läsning hold here too (POST /quotes
+      // from a session).
+      return sessionGuards(req, reply);
     }
 
     const authHeader = req.headers.authorization;

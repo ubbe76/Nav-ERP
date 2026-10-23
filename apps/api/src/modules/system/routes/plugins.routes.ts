@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   createPluginSchema,
   PLUGIN_MANIFEST_MAX_BYTES,
@@ -19,7 +19,7 @@ import {
   PluginManifestInvalidError,
   PluginManifestUnreachableError,
   PluginNotFoundError,
-  PluginSameOriginError,
+  PluginSameHostError,
 } from "../service/plugins.errors.js";
 
 // A manifest is at most 64 kB; slack for the JSON wrapping around it.
@@ -29,12 +29,34 @@ function mapPluginError(reply: FastifyReply, err: unknown) {
   if (err instanceof PluginManifestInvalidError) {
     return reply.code(400).send({ ...errorBody(err), errors: err.errors, warnings: err.warnings });
   }
-  if (err instanceof PluginInvalidAddressError || err instanceof PluginSameOriginError) return reply.code(400).send(errorBody(err));
+  if (err instanceof PluginInvalidAddressError || err instanceof PluginSameHostError) return reply.code(400).send(errorBody(err));
   if (err instanceof PluginAccessDeniedError) return reply.code(403).send(errorBody(err));
   if (err instanceof PluginNotFoundError || err instanceof PluginDeliveryNotFoundError) return reply.code(404).send(errorBody(err));
   if (err instanceof PluginKeyTakenError || err instanceof PluginDeliveryNotRetryableError) return reply.code(409).send(errorBody(err));
   if (err instanceof PluginManifestUnreachableError) return reply.code(502).send(errorBody(err));
   throw err;
+}
+
+// The host name the user opened Nav on: the request's Origin (the browser
+// sets it on every POST), else the forwarded host (Next's rewrite, a proxy),
+// else Host. null when none parses.
+export function requestNavHost(req: FastifyRequest): string | null {
+  const parse = (url: string) => {
+    try {
+      return new URL(url).hostname.toLowerCase().replace(/\.+$/, "") || null;
+    } catch {
+      return null;
+    }
+  };
+  const origin = req.headers.origin;
+  if (typeof origin === "string" && origin !== "null") {
+    const host = parse(origin);
+    if (host) return host;
+  }
+  const forwarded = req.headers["x-forwarded-host"];
+  const first = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0]?.trim();
+  const host = first || req.headers.host;
+  return host ? parse(`http://${host}`) : null;
 }
 
 // GET /plugin-kit.css — public: an embedded plugin page links it (from the
@@ -155,8 +177,11 @@ export async function pluginRoutes(app: FastifyInstance, opts: { service: Plugin
     async (req, reply) => {
       const input = pluginContextSchema.parse(req.body ?? {});
       try {
-        return await service.context(req.params.id, input, req.user!);
+        return await service.context(req.params.id, input, req.user!, requestNavHost(req));
       } catch (err) {
+        // The address is valid but the plugin shares the host the user opened
+        // Nav on: a conflict with how Nav is reached, not a bad request.
+        if (err instanceof PluginSameHostError) return reply.code(409).send(errorBody(err));
         return mapPluginError(reply, err);
       }
     }

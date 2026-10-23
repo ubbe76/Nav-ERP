@@ -8,13 +8,23 @@
 //   4. API-anrop         – läser lagersaldo med tilläggets API-nyckel
 //
 // Starta:  NAV_URL=http://localhost:4000 NAV_API_KEY=nav_plg_... NAV_WEBHOOK_SECRET=... node server.mjs
+//
+// Tillägget måste köras på en ANNAN VÄRD än Nav (inte bara en annan port): webbläsaren
+// skickar Navs inloggningscookie till alla portar på samma värd. Förvalet är därför
+// 127.0.0.1:4300 medan Nav öppnas på http://localhost:3000.
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { createServer } from "node:http";
+import { pathToFileURL } from "node:url";
 
+const HOST = process.env.HOST ?? "127.0.0.1";
 const PORT = Number(process.env.PORT ?? 4300);
-// Navs API (server till server). Nav-adressen webbläsaren använder för CSS:en kan skilja sig.
+// Navs API (server till server).
 const NAV_URL = (process.env.NAV_URL ?? "http://localhost:4000").replace(/\/+$/, "");
-const NAV_PUBLIC_URL = (process.env.NAV_PUBLIC_URL ?? NAV_URL).replace(/\/+$/, "");
+// Navs adress i webbläsaren: stilmallen hämtas därifrån, bara Nav får rama in sidorna
+// (frame-ancestors) och bara meddelanden därifrån godtas.
+const NAV_PUBLIC_URL = (process.env.NAV_PUBLIC_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+const NAV_ORIGIN = new URL(NAV_PUBLIC_URL).origin;
 const NAV_API_KEY = process.env.NAV_API_KEY ?? "";
 const NAV_WEBHOOK_SECRET = process.env.NAV_WEBHOOK_SECRET ?? "";
 // Sätt FAIL_WEBHOOKS=1 för att svara 500 på alla händelser (prova Skicka igen i Nav).
@@ -90,6 +100,9 @@ export function verifyContextToken(secret, token, nowSeconds = Date.now() / 1000
 
 // --- HTML ---
 
+// Ett värde som JSON inne i <script> (aldrig "</script>" i texten).
+const scriptJson = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
+
 const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -107,9 +120,10 @@ function layout(claims, body) {
 <body>
 ${body}
 <script>
-  // Fråga Nav om aktuellt tema, och följ det när användaren byter.
+  const NAV_ORIGIN = ${scriptJson(NAV_ORIGIN)};
+  // Ta bara emot meddelanden från Nav: rätt fönster OCH rätt ursprung.
   window.addEventListener("message", (event) => {
-    if (event.source !== window.parent) return;
+    if (event.source !== window.parent || event.origin !== NAV_ORIGIN) return;
     const msg = event.data;
     if (msg && msg.type === "nav:theme") {
       document.documentElement.setAttribute("data-theme", msg.id);
@@ -118,9 +132,12 @@ ${body}
       style.textContent = msg.css;
     }
   });
-  window.parent.postMessage({ type: "nav:theme" }, "*");
+  // Skicka bara till Nav (aldrig "*").
+  const toNav = (message) => window.parent.postMessage(message, NAV_ORIGIN);
+  // Fråga Nav om aktuellt tema, och följ det när användaren byter.
+  toNav({ type: "nav:theme" });
   // Berätta hur hög sidan är (används av flikar; sidor fyller ytan).
-  const report = () => window.parent.postMessage({ type: "nav:resize", height: Math.ceil(document.body.getBoundingClientRect().height) }, "*");
+  const report = () => toNav({ type: "nav:resize", height: Math.ceil(document.body.getBoundingClientRect().height) });
   new ResizeObserver(report).observe(document.body);
   report();
 </script>
@@ -144,7 +161,7 @@ function pageHtml(claims) {
     `<h1>Hej ${escapeHtml(claims.name)}</h1>
 <p class="nav-muted">Du har ${claims.readOnly ? "endast läsrätt" : "skrivrätt"} i Nav. Tillägget ser det på kontexttokenet men får inga API-rättigheter av det.</p>
 <div class="nav-card"><h2>Senaste händelserna</h2>${eventsTable()}</div>
-<p><button class="nav-button" onclick="window.parent.postMessage({ type: 'nav:navigate', path: '/artiklar' }, '*')">Gå till artiklarna</button></p>`
+<p><button class="nav-button" onclick="toNav({ type: 'nav:navigate', path: '/artiklar' })">Gå till artiklarna</button></p>`
   );
 }
 
@@ -192,7 +209,10 @@ function readBody(req) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://tillagg.local");
   const send = (status, type, body) => {
-    res.writeHead(status, { "content-type": `${type}; charset=utf-8` });
+    const headers = { "content-type": `${type}; charset=utf-8` };
+    // Sidorna får bara visas inramade i Nav — ingen annan webbplats kan rama in dem.
+    if (type === "text/html") headers["content-security-policy"] = `frame-ancestors ${NAV_ORIGIN}`;
+    res.writeHead(status, headers);
     res.end(body);
   };
   try {
@@ -225,10 +245,20 @@ const server = createServer(async (req, res) => {
   }
 });
 
-// Importerad av ett test? Starta bara när filen körs direkt.
-if (import.meta.url === `file://${process.argv[1]}`) {
-  server.listen(PORT, () => {
-    console.log(`Exempeltillägget lyssnar på http://localhost:${PORT} (manifest: /nav-plugin.json)`);
+// Importerad av ett test? Starta bara när filen körs direkt. pathToFileURL + realpath
+// klarar Windows-sökvägar, mellanslag och symlänkar.
+function runDirectly() {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return false;
+  }
+}
+
+if (runDirectly()) {
+  server.listen(PORT, HOST, () => {
+    console.log(`Exempeltillägget lyssnar på http://${HOST}:${PORT} (manifest: /nav-plugin.json), inramas av ${NAV_ORIGIN}`);
     if (!NAV_API_KEY || !NAV_WEBHOOK_SECRET) console.log("OBS: NAV_API_KEY och NAV_WEBHOOK_SECRET saknas – ange dem efter installationen och starta om.");
   });
 }

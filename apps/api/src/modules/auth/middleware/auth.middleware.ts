@@ -54,6 +54,63 @@ export async function readOnlyGuard(req: FastifyRequest, reply: FastifyReply) {
   if (readOnlyBlocks(req)) return reply.code(403).send(errorBody(new ReadOnlyAccountError()));
 }
 
+// CSRF: the session cookie is SameSite=Lax, which stops other SITES but not
+// another host of the same site — a plugin on a sibling subdomain (or any
+// page there) could fire a credentialed POST. The browser says where a
+// request comes from in Sec-Fetch-Site; Nav's own web is same-origin (it
+// proxies /api/v1). Swedish message: it can reach screens that show it raw.
+export class CrossSiteRequestError extends Error {
+  constructor() {
+    super("Anropet kom från en annan webbplats och vägrades.");
+    this.name = "CrossSiteRequestError";
+  }
+}
+
+const FOREIGN_FETCH_SITES = new Set(["same-site", "cross-site"]);
+
+// The web's own origin(s) (WEB_ORIGIN, as for CORS): a deployment where the
+// web calls the API on its own host (NEXT_PUBLIC_API_URL) is same-site, not
+// same-origin, and must still work.
+function trustedWebOrigins(): Set<string> {
+  const out = new Set<string>();
+  for (const raw of (process.env.WEB_ORIGIN ?? "http://localhost:3000").split(",")) {
+    try {
+      out.add(new URL(raw.trim()).origin);
+    } catch {
+      // not a URL — trusts nothing
+    }
+  }
+  return out;
+}
+
+// True when a request that may change something (any method but
+// GET/HEAD/OPTIONS) is marked by the browser as coming from another site or
+// another host of this site, and not from the web's own origin. Requests
+// without the header (server to server, old clients, tests) pass: the guard
+// is about browsers, which always send it.
+export function crossSiteBlocks(req: Pick<FastifyRequest, "method" | "headers">): boolean {
+  if (READ_METHODS.has(req.method)) return false;
+  const site = req.headers["sec-fetch-site"];
+  if (typeof site !== "string" || !FOREIGN_FETCH_SITES.has(site.toLowerCase())) return false;
+  const origin = req.headers.origin;
+  return !(typeof origin === "string" && trustedWebOrigins().has(origin));
+}
+
+// Every request authenticated with the session cookie (requireAuth and
+// requireAuthOrClient, right after req.user is set) — and login, register
+// and logout as a preHandler of their own (login CSRF). Never the plugin key
+// or an OAuth client's bearer token: those aren't sent by a browser on its own.
+export async function crossSiteGuard(req: FastifyRequest, reply: FastifyReply) {
+  if (crossSiteBlocks(req)) return reply.code(403).send(errorBody(new CrossSiteRequestError()));
+}
+
+// The checks every session-authenticated request passes: cross-site first,
+// then Endast läsning.
+export async function sessionGuards(req: FastifyRequest, reply: FastifyReply) {
+  if (crossSiteBlocks(req)) return reply.code(403).send(errorBody(new CrossSiteRequestError()));
+  return readOnlyGuard(req, reply);
+}
+
 // Tillägg: a plugin key in the same request as a session cookie is refused —
 // a browser with a signed-in user must never be mixed up with a plugin.
 export class PluginKeyWithSessionError extends Error {
@@ -121,7 +178,7 @@ export function requireAuth(authService: AuthService) {
       return reply.code(401).send({ error: "Authentication required" });
     }
     req.user = user;
-    return readOnlyGuard(req, reply);
+    return sessionGuards(req, reply);
   };
 }
 

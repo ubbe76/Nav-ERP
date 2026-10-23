@@ -137,3 +137,13 @@
 .hidden {
   display: none;
 }
+
+/* A positive result (Skicka testhändelse) — the green of FormSaved ("Sparat"). */
+.success {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--status-running-text);
+  background: var(--status-running-bg);
+  border-radius: var(--radius-control-sm);
+  padding: 9px 12px;
+}

@@ -41,6 +41,8 @@ Rättigheterna är en fast lista:
 
 Vissa rättigheter ingår i en meny: **Tillverkning** innefattar **Stämpelterminal** och **Tillverkningsorder (läsläge)**, och **Artiklar** innefattar **Artikelöversikt**. Formuläret visar dem som "ingår i ...".
 
+Ett tilläggs egen grupp (**Tillägg: \<namn\>**, kod `plg-…`) syns också i listan, märkt **Tillägg** med en länk till tilläggets kort. Den ändras och tas bort bara där (se [Tillägg](/hjalp/tillagg#rattigheter-och-endast-lasning)) och kan inte väljas för en användare.
+
 Vid uppgraderingen skapades två grupper. **Alla moduler** (kod ALLA: Artiklar, Inköp, Försäljning, Tillverkning, Lager och Personal & lön) fick alla befintliga användare som inte är administratörer, så ingen tappade åtkomst. **Verkstad** (kod VERKSTAD) är den färdiga verkstadsprofilen med de tre verkstadsrättigheterna.
 
 En ändring av en grupp gäller direkt — användarna behöver inte logga in igen.

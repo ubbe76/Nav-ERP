@@ -116,7 +116,7 @@ export function PermissionGroupForm({
           <Select id="pg-replacement" value={replacementId} onChange={(e) => setReplacementId(e.target.value)}>
             <option value="">— Välj grupp —</option>
             {allGroups
-              .filter((g) => g.id !== group.id)
+              .filter((g) => g.id !== group.id && !g.pluginId)
               .map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.code} — {g.name}

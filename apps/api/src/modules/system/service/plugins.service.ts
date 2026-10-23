@@ -44,7 +44,7 @@ import {
   PluginManifestInvalidError,
   PluginManifestUnreachableError,
   PluginNotFoundError,
-  PluginSameOriginError,
+  PluginSameHostError,
 } from "./plugins.errors.js";
 
 // Tillägg — System → Tillägg (admin) and the two reads every user's web
@@ -77,6 +77,17 @@ export interface PluginViewer {
 }
 
 const iso = (date: Date | null | undefined) => (date ? date.toISOString() : null);
+
+// A URL's host name as cookies see it: lower case, without port or a
+// trailing dot. null when it doesn't parse.
+export function hostNameOf(url: string): string | null {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/\.+$/, "");
+    return hostname || null;
+  } catch {
+    return null;
+  }
+}
 
 // The group's stored codes that are still in the catalogue, in catalogue order.
 const grantedPermissions = (stored: readonly string[]): Permission[] => PERMISSIONS.filter((p) => stored.includes(p));
@@ -129,7 +140,7 @@ export function createPluginsService(deps: {
   audit: AuditWriter;
   settings: PluginSettingsReader;
   dispatcher: PluginDispatcher;
-  // Nav's own web origin(s) — a plugin may never share one.
+  // Nav's own web origin(s) — a plugin may never share their host name.
   webOrigins: string[];
   fetch?: WebhookFetch;
   now?: () => Date;
@@ -140,21 +151,25 @@ export function createPluginsService(deps: {
 
   const failedSince = () => new Date(now().getTime() - FAILED_WINDOW_DAYS * 86_400_000);
 
-  async function navOrigins(): Promise<Set<string>> {
-    const origins = new Set<string>();
+  // The host names Nav is configured to be reached on (Navs adress and the
+  // web origin).
+  async function navHosts(): Promise<Set<string>> {
+    const hosts = new Set<string>();
     for (const url of [await settings.publicBaseUrl(), ...deps.webOrigins]) {
-      const origin = url ? pluginOrigin(url) : null;
-      if (origin) origins.add(origin);
+      const host = url ? hostNameOf(url) : null;
+      if (host) hosts.add(host);
     }
-    return origins;
+    return hosts;
   }
 
-  // The address an administrator entered: normalised, and never Nav's own
-  // origin (the iframe sandbox would be void).
+  // The address an administrator entered: normalised, and never on one of
+  // Nav's own host names — whatever the port or scheme: cookies ignore the
+  // port, so the plugin would receive Nav's session cookie (and with the same
+  // origin, the iframe sandbox would be void).
   async function checkedBaseUrl(raw: string): Promise<string> {
     const baseUrl = normalizePluginBaseUrl(raw);
     if (!baseUrl) throw new PluginInvalidAddressError();
-    if ((await navOrigins()).has(pluginOrigin(baseUrl)!)) throw new PluginSameOriginError();
+    if ((await navHosts()).has(hostNameOf(baseUrl)!)) throw new PluginSameHostError();
     return baseUrl;
   }
 
@@ -218,6 +233,7 @@ export function createPluginsService(deps: {
       readOnly: found.readOnly,
       apiKeyPrefix: plugin.apiKeyPrefix,
       installedBy: plugin.installedBy,
+      installedByName: found.installedByName,
       updatedAt: plugin.updatedAt.toISOString(),
       pendingDeliveries: stats.pending,
     };
@@ -458,10 +474,23 @@ export function createPluginsService(deps: {
     // POST /plugins/:id/context — the short-lived token an embedded page
     // gets: who is looking, with what rights, at which post. Signed with the
     // key derived from the webhook secret; it gives the plugin no API rights.
-    async context(id: string, input: PluginContextInput, viewer: PluginViewer): Promise<PluginContextResponse> {
+    // `navHost` is the host name the user opened Nav on (the request's
+    // Origin, else its forwarded/own Host): a plugin on that host — or on a
+    // configured Nav host — is refused, also when Navs adress and WEB_ORIGIN
+    // are unset or Nav answers to several names.
+    async context(
+      id: string,
+      input: PluginContextInput,
+      viewer: PluginViewer,
+      navHost: string | null = null
+    ): Promise<PluginContextResponse> {
       const found = await repo.get(id);
       if (!found || found.plugin.status !== "active") throw new PluginNotFoundError(id);
       const { plugin } = found;
+      const pluginHost = hostNameOf(plugin.baseUrl);
+      const hosts = await navHosts();
+      if (navHost) hosts.add(navHost.toLowerCase().replace(/\.+$/, ""));
+      if (pluginHost && hosts.has(pluginHost)) throw new PluginSameHostError();
       const manifest = plugin.manifest as PluginManifest;
       let path: string;
       let entity: PluginContextClaims["entity"];

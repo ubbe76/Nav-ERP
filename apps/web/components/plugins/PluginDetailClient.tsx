@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { formatStockholmDateTime } from "../../lib/date";
@@ -73,6 +73,14 @@ export function PluginDetailClient({
   const [secrets, setSecrets] = useState<{ apiKey?: string; webhookSecret?: string } | null>(null);
   const [testResult, setTestResult] = useState<PluginTestEventResult | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
+  // Skicka igen's second look at the deliveries, cleared on unmount.
+  const repollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (repollTimer.current) clearTimeout(repollTimer.current);
+    },
+    []
+  );
 
   const permissionsDirty = useMemo(() => {
     const saved = new Set(normalizePermissions(plugin.permissions));
@@ -99,10 +107,15 @@ export function PluginDetailClient({
     }
   }
 
-  function adopt(next: PluginDetail) {
+  // The checkboxes under Rättigheter are a draft: only Spara rättigheter
+  // resets them to what was saved, so Pausa/Aktivera, a new key or secret
+  // and Uppdatera manifest never throw away unsaved ticks.
+  function adopt(next: PluginDetail, { resetDraft = false }: { resetDraft?: boolean } = {}) {
     setPlugin(next);
-    setPermissions(new Set(normalizePermissions(next.permissions)));
-    setReadOnly(next.readOnly);
+    if (resetDraft) {
+      setPermissions(new Set(normalizePermissions(next.permissions)));
+      setReadOnly(next.readOnly);
+    }
     router.refresh();
   }
 
@@ -111,10 +124,20 @@ export function PluginDetailClient({
     setPlugin(await apiFetch<PluginDetail>(`/api/v1/plugins/${plugin.id}`));
   }
 
-  async function patch(body: Record<string, unknown>, fallback: string) {
+  // Uppdatera: shows a failure instead of swallowing it.
+  async function refreshDeliveries() {
+    setError(null);
+    try {
+      await reloadDeliveries();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte hämta leveranserna"));
+    }
+  }
+
+  async function patch(body: Record<string, unknown>, fallback: string, opts: { resetDraft?: boolean } = {}) {
     const next = await run(() => apiFetch<PluginDetail>(`/api/v1/plugins/${plugin.id}`, { method: "PATCH", body: JSON.stringify(body) }), fallback);
     if (next) {
-      adopt(next);
+      adopt(next, opts);
       setSaved(true);
     }
     return next;
@@ -122,6 +145,12 @@ export function PluginDetailClient({
 
   async function toggleStatus() {
     await patch({ status: plugin.status === "active" ? "paused" : "active" }, "Kunde inte ändra status");
+  }
+
+  // The new key/secret is shown once: closing without Klar asks first.
+  async function requestCloseSecrets() {
+    if (!(await confirmDialog("Nyckeln visas inte igen. Har du kopierat den?", { confirmLabel: "Stäng" }))) return;
+    setSecrets(null);
   }
 
   async function rotateKey() {
@@ -174,7 +203,11 @@ export function PluginDetailClient({
     if (row) {
       await reloadDeliveries().catch(() => {});
       // The delivery job picks the row up shortly; look again once.
-      setTimeout(() => void reloadDeliveries().catch(() => {}), 4000);
+      if (repollTimer.current) clearTimeout(repollTimer.current);
+      repollTimer.current = setTimeout(() => {
+        repollTimer.current = null;
+        void reloadDeliveries().catch(() => {});
+      }, 4000);
     }
   }
 
@@ -215,6 +248,7 @@ export function PluginDetailClient({
             <span className={styles.factLabel}>Installerat</span>
             <span className={styles.factValue}>
               {formatStockholmDateTime(plugin.installedAt)}
+              {plugin.installedByName ? ` av ${plugin.installedByName}` : ""}
             </span>
           </div>
           <div className={styles.fact}>
@@ -244,13 +278,16 @@ export function PluginDetailClient({
             Tillägget är pausat: dess sidor och flikar visas inte och händelserna väntar tills du väljer Aktivera.
           </FormNotice>
         )}
-        {testResult && (
-          <FormNotice>
-            {testResult.delivered
-              ? `Testhändelsen levererades (svarskod ${testResult.statusCode ?? "–"}).`
-              : `Testhändelsen levererades inte${testResult.statusCode ? ` (svarskod ${testResult.statusCode})` : ""}${testResult.error ? `: ${testResult.error}` : ""}.`}
-          </FormNotice>
-        )}
+        {testResult &&
+          (testResult.delivered ? (
+            <div className={styles.success} role="status">
+              Testhändelsen levererades (svarskod {testResult.statusCode ?? "–"}).
+            </div>
+          ) : (
+            <FormError>
+              {`Testhändelsen levererades inte${testResult.statusCode ? ` (svarskod ${testResult.statusCode})` : ""}${testResult.error ? `: ${testResult.error}` : ""}.`}
+            </FormError>
+          ))}
       </div>
 
       <div className={styles.section}>
@@ -278,7 +315,7 @@ export function PluginDetailClient({
             type="button"
             variant="primary"
             disabled={busy || !permissionsDirty}
-            onClick={() => patch({ permissions: [...permissions], readOnly }, "Kunde inte spara rättigheterna")}
+            onClick={() => patch({ permissions: [...permissions], readOnly }, "Kunde inte spara rättigheterna", { resetDraft: true })}
           >
             Spara rättigheter
           </Button>
@@ -289,7 +326,7 @@ export function PluginDetailClient({
       <div className={styles.section}>
         <SectionHeading
           actions={
-            <Button type="button" variant="secondary" size="small" onClick={() => void reloadDeliveries()}>
+            <Button type="button" variant="secondary" size="small" onClick={() => void refreshDeliveries()}>
               Uppdatera
             </Button>
           }
@@ -354,7 +391,7 @@ export function PluginDetailClient({
         </div>
       </div>
 
-      <Modal open={secrets !== null} onClose={() => setSecrets(null)} title="Ny nyckel" wide>
+      <Modal open={secrets !== null} onClose={() => void requestCloseSecrets()} title="Ny nyckel" wide>
         {secrets && (
           <div className={styles.body}>
             <SecretsPanel apiKey={secrets.apiKey} webhookSecret={secrets.webhookSecret} />

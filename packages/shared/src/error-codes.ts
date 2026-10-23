@@ -177,7 +177,7 @@ export const ERROR_CODES = {
   PLUGIN_MANIFEST_INVALID: "plugin-manifest-invalid",
   PLUGIN_MANIFEST_UNREACHABLE: "plugin-manifest-unreachable",
   PLUGIN_KEY_TAKEN: "plugin-key-taken",
-  PLUGIN_SAME_ORIGIN: "plugin-same-origin",
+  PLUGIN_SAME_HOST: "plugin-same-host",
   PLUGIN_INVALID_ADDRESS: "plugin-invalid-address",
   PLUGIN_DELIVERY_NOT_FOUND: "plugin-delivery-not-found",
   PLUGIN_DELIVERY_NOT_RETRYABLE: "plugin-delivery-not-retryable",
@@ -188,6 +188,7 @@ export const ERROR_CODES = {
   PERMISSION_GROUP_OWNED_BY_PLUGIN: "permission-group-owned-by-plugin",
   // auth
   INVALID_CREDENTIALS: "invalid-credentials",
+  CROSS_SITE_REQUEST: "cross-site-request",
   CLIENT_SCOPE_MISSING: "client-scope-missing",
   CLIENT_CUSTOMER_MISMATCH: "client-customer-mismatch",
   CLIENT_PRICE_NOT_ALLOWED: "client-price-not-allowed",

@@ -22,7 +22,7 @@ import {
   UserNotFoundError,
 } from "../service/auth.service.js";
 import type { UserSettingsService } from "../service/user-settings.service.js";
-import { requireAuth, requireRole, SESSION_COOKIE } from "../middleware/auth.middleware.js";
+import { crossSiteGuard, requireAuth, requireRole, SESSION_COOKIE } from "../middleware/auth.middleware.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { UnknownThemeError } from "../../system/service/themes.errors.js";
 import { LoginThrottledError, type LoginThrottle } from "../service/login-throttle.js";
@@ -75,7 +75,9 @@ export async function authRoutes(
     });
   }
 
-  app.post("/auth/register", async (req, reply) => {
+  // Register, login and logout set or clear the cookie: no other site (or
+  // other host of this site) may do that for the browser (login CSRF).
+  app.post("/auth/register", { preHandler: crossSiteGuard }, async (req, reply) => {
     const input = registerSchema.parse(req.body);
     try {
       const { user, token } = await service.register(input);
@@ -89,7 +91,7 @@ export async function authRoutes(
     }
   });
 
-  app.post("/auth/login", async (req, reply) => {
+  app.post("/auth/login", { preHandler: crossSiteGuard }, async (req, reply) => {
     const input = loginSchema.parse(req.body);
     const accountKey = [`login:${input.email.trim().toLowerCase()}`];
     const ipKey = [`login-ip:${req.ip}`];
@@ -114,7 +116,7 @@ export async function authRoutes(
   });
 
   // Never behind requireAuth, so a read-only account can always log out.
-  app.post("/auth/logout", async (_req, reply) => {
+  app.post("/auth/logout", { preHandler: crossSiteGuard }, async (_req, reply) => {
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
     return reply.code(204).send();
   });

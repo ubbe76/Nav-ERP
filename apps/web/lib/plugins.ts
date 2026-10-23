@@ -53,6 +53,8 @@ export interface PluginDetail extends PluginListRow {
   readOnly: boolean;
   apiKeyPrefix: string;
   installedBy: string | null;
+  // The installer's name (also after their account was removed), null when unknown.
+  installedByName: string | null;
   updatedAt: string;
   pendingDeliveries: number;
 }
@@ -168,18 +170,6 @@ export const PLUGIN_TAB_TARGET_LABELS: Record<PluginTabTarget, string> = {
   supplier: "Leverantörskortet",
 };
 
-// The page a module's hub lives on (a plugin page is listed there).
-export const PLUGIN_MODULE_HUBS: Record<PluginPageModule, string> = {
-  artiklar: "/artiklar",
-  inkop: "/inkop",
-  forsaljning: "/forsaljning",
-  tillverkning: "/tillverkning",
-  lager: "/lager",
-  personal: "/personal",
-  ekonomi: "/ekonomi",
-  rapporter: "/rapporter",
-};
-
 // The sidebar entry (AppShell `active`) of a module.
 export const PLUGIN_MODULE_NAV: Record<PluginPageModule, string> = {
   artiklar: "Artiklar",
@@ -196,18 +186,41 @@ export function pluginPageHref(pluginKey: string, pageKey: string): string {
   return `/tillagg/${encodeURIComponent(pluginKey)}/${encodeURIComponent(pageKey)}`;
 }
 
+// Paths that are not pages: the API proxy and Next's own files.
+const NON_PAGE_PREFIXES = ["/api", "/_next"];
+
 // postMessage "nav:navigate": only an internal path of this app — it starts
-// with a single "/" and has no backslash, scheme or control characters — so
-// a plugin can never send the browser to another site.
+// with a single "/" and has no backslash, scheme or control characters, so
+// a plugin can never send the browser to another site; and never to the API
+// or Next's files.
 export function isInternalNavigationPath(path: unknown): path is string {
   if (typeof path !== "string" || path.length === 0 || path.length > 500) return false;
   if (!path.startsWith("/") || path.startsWith("//")) return false;
   if (/[\\\u0000-\u001f\u007f]/.test(path)) return false;
   try {
     const url = new URL(path, "http://nav.invalid");
-    return url.origin === "http://nav.invalid";
+    if (url.origin !== "http://nav.invalid") return false;
+    // A page, never the API or Next's own files ("/./api/…" and "%2F" too).
+    let pathname = url.pathname.toLowerCase();
+    try {
+      pathname = new URL(decodeURIComponent(pathname), "http://nav.invalid").pathname;
+    } catch {
+      return false;
+    }
+    return !NON_PAGE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   } catch {
     return false;
+  }
+}
+
+// The plugin's origin has the same host name as the page Nav runs on —
+// cookies ignore the port, so such a plugin would receive Nav's session.
+export function pluginSharesHost(pluginOrigin: string, navHostname: string): boolean {
+  const host = (h: string) => h.toLowerCase().replace(/\.+$/, "");
+  try {
+    return host(new URL(pluginOrigin).hostname) === host(navHostname);
+  } catch {
+    return true;
   }
 }
 

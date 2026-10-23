@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
 import { Modal } from "../ui/Modal";
@@ -42,6 +43,18 @@ export function PermissionGroupsPageClient({ groups }: { groups: PermissionGroup
         renderCell={(group, key) => {
           switch (key) {
             case "code":
+              // Tillägg: the plugin's own group is changed on the plugin's
+              // card (System → Tillägg), never here.
+              if (group.pluginId) {
+                return (
+                  <span>
+                    <strong>{group.code}</strong>{" "}
+                    <Link href={`/system/tillagg/${group.pluginId}`} style={{ fontSize: 12.5, color: "var(--accent-fg)" }}>
+                      Tillägg
+                    </Link>
+                  </span>
+                );
+              }
               return (
                 <button
                   type="button"

@@ -40,6 +40,9 @@ export function createPermissionGroupService(repo: PermissionGroupRepository) {
 
     async update(id: string, input: UpdatePermissionGroupInput) {
       await existing(id);
+      // Tillägg: a plugin's group changes on the plugin's card (System →
+      // Tillägg), where the change is logged as the plugin's.
+      if (await repo.ownedByPlugin(id)) throw new PermissionGroupOwnedByPluginError();
       try {
         return (await repo.update(id, input))!;
       } catch (err) {

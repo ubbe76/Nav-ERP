@@ -2,15 +2,19 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch } from "../../lib/api";
+import { apiFetch, ApiError } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { isInternalNavigationPath, tokenRefreshDelay, type PluginContextResponse } from "../../lib/plugins";
+import { isInternalNavigationPath, pluginSharesHost, tokenRefreshDelay, type PluginContextResponse } from "../../lib/plugins";
 import { THEME_TOKENS } from "../../lib/themeCore";
 import { useThemeBoot } from "../ThemeBootProvider";
 import { FormError } from "../ui/Form";
 import styles from "./PluginFrame.module.css";
 
 export type PluginFrameRequest = { page: string } | { tab: string; entityId: string };
+
+// A refresh answered with one of these will never succeed by retrying: the
+// session ended, the user lost the right, or the plugin was paused/removed.
+const FINAL_REFRESH_STATUSES = new Set([401, 403, 404, 409]);
 
 const MIN_TAB_HEIGHT = 120;
 const MAX_TAB_HEIGHT = 6000;
@@ -54,6 +58,8 @@ export function PluginFrame({
   const [src, setSrc] = useState<string | null>(null);
   const [origin, setOrigin] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A later token refresh failed for good; the running page stays but is told.
+  const [stale, setStale] = useState<string | null>(null);
   const [height, setHeight] = useState(360);
 
   themeRef.current = theme;
@@ -83,6 +89,12 @@ export function PluginFrame({
           body: requestKey,
         });
         if (cancelled) return;
+        if (first && pluginSharesHost(ctx.origin, window.location.hostname)) {
+          // Nav's session cookie ignores ports: a plugin on this host would
+          // receive it. The server refuses such an address too.
+          setError("Tillägget körs på samma värd som Nav och visas därför inte. Be administratören flytta tillägget till en egen värd (helst en egen domän).");
+          return;
+        }
         ctxRef.current = ctx;
         if (first) {
           first = false;
@@ -94,9 +106,16 @@ export function PluginFrame({
         timer = setTimeout(() => void load(), tokenRefreshDelay(ctx.expiresAt));
       } catch (err) {
         if (cancelled) return;
-        // A failed refresh leaves the running page alone; only the first load shows an error.
+        // A failed refresh leaves the running page alone; only the first load
+        // shows an error. A refresh that can never succeed stops retrying.
         if (first) setError(apiErrorMessage(err, "Kunde inte öppna tillägget"));
-        else timer = setTimeout(() => void load(), 30_000);
+        else if (err instanceof ApiError && FINAL_REFRESH_STATUSES.has(err.status)) {
+          setStale(
+            err.status === 401
+              ? "Sessionen har gått ut — ladda om sidan."
+              : "Tillägget kan inte längre visas med din behörighet — ladda om sidan."
+          );
+        } else timer = setTimeout(() => void load(), 30_000);
       }
     }
     void load();
@@ -146,6 +165,7 @@ export function PluginFrame({
 
   return (
     <div className={styles.wrap}>
+      {stale && <FormError margin="below">{stale}</FormError>}
       <iframe
         ref={iframeRef}
         src={src}

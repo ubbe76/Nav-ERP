@@ -198,7 +198,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "plugin-manifest-invalid": "Manifestet innehåller fel — se listan.",
   "plugin-manifest-unreachable": "Manifestet kunde inte hämtas från tilläggets adress.",
   "plugin-key-taken": "Ett tillägg med samma nyckel är redan installerat.",
-  "plugin-same-origin": "Tillägget måste ha en annan adress (ursprung) än Nav.",
+  "plugin-same-host":
+    "Tillägget måste köras på en annan värd än Nav — samma värd med en annan port räcker inte, eftersom inloggningen då skulle följa med till tillägget.",
   "plugin-invalid-address": "Adressen måste vara en http- eller https-adress utan användarnamn, frågedel eller fragment.",
   "plugin-delivery-not-found": "Leveransen finns inte (längre).",
   "plugin-delivery-not-retryable": "Bara misslyckade leveranser kan skickas igen.",
@@ -206,6 +207,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "plugin-route-forbidden": "Tilläggets API-nyckel kan inte användas mot den här adressen.",
   "plugin-key-with-session": "En tilläggsnyckel kan inte skickas tillsammans med en inloggning.",
   "plugin-user-managed": "Tilläggets användare hanteras under System → Tillägg.",
+  "cross-site-request": "Anropet kom från en annan webbplats och vägrades. Öppna Nav direkt och försök igen.",
   "permission-group-owned-by-plugin": "Behörighetsgruppen hör till ett tillägg och ändras under System → Tillägg.",
   "demo-data-not-available": (err) => {
     const blockers = (err.body as { blockers?: string[] } | undefined)?.blockers ?? [];

@@ -14,6 +14,8 @@ export interface PluginWithAccess {
   groupPermissions: string[];
   readOnly: boolean;
   userActive: boolean;
+  // The installer's name (soft-deleted users keep theirs), null when unknown.
+  installedByName: string | null;
 }
 
 export interface ClaimedDelivery {
@@ -114,6 +116,8 @@ export function createPluginsRepository(db: Db) {
         groupPermissions: permissionGroups.permissions,
         readOnly: users.readOnly,
         userActive: users.active,
+        // users is joined as the technical user; the installer is looked up apart.
+        installedByName: sql<string | null>`(select ib.name from ${users} ib where ib.id = "plugins"."installed_by")`,
       })
       .from(plugins)
       .innerJoin(users, eq(users.id, plugins.userId))

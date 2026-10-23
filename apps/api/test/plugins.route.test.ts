@@ -156,14 +156,20 @@ describe("System → Tillägg: preview and install", () => {
     expect(closed.json().error).toBe("Manifestet kunde inte hämtas: kunde inte ansluta");
   });
 
-  it("refuses Nav's own origin (400 plugin-same-origin) and an address that is not http(s)", async () => {
-    const web = await asAdmin("POST", "/plugins/preview", { baseUrl: "http://localhost:3000/tillagg" });
-    expect(web.statusCode).toBe(400);
-    expect(web.json().code).toBe("plugin-same-origin");
+  it("refuses Nav's own host whatever the port or scheme (400 plugin-same-host) and an address that is not http(s)", async () => {
+    // WEB_ORIGIN is http://localhost:3000 here: another port on the same host
+    // would still get Nav's cookie.
+    for (const url of ["http://localhost:3000/tillagg", "http://localhost:4300", "https://LOCALHOST"]) {
+      const web = await asAdmin("POST", "/plugins/preview", { baseUrl: url });
+      expect({ url, status: web.statusCode, code: web.json().code }).toEqual({ url, status: 400, code: "plugin-same-host" });
+    }
     await asAdmin("PATCH", "/settings", { publicBaseUrl: "https://nav.example.com" });
-    expect((await asAdmin("POST", "/plugins", { baseUrl: "https://nav.example.com", manifest: manifest(), permissions: [], readOnly: false })).json().code).toBe(
-      "plugin-same-origin"
-    );
+    for (const url of ["https://nav.example.com", "http://nav.example.com:8443"]) {
+      const res = await asAdmin("POST", "/plugins", { baseUrl: url, manifest: manifest(), permissions: [], readOnly: false });
+      expect({ url, code: res.json().code }).toEqual({ url, code: "plugin-same-host" });
+    }
+    const { plugin } = await install();
+    expect((await asAdmin("PATCH", `/plugins/${plugin.id}`, { baseUrl: "https://nav.example.com:9000" })).json().code).toBe("plugin-same-host");
     expect((await asAdmin("POST", "/plugins/preview", { baseUrl: "file:///etc/passwd" })).json().code).toBe("plugin-invalid-address");
   });
 
@@ -171,7 +177,7 @@ describe("System → Tillägg: preview and install", () => {
     const { plugin, apiKey, webhookSecret } = await install();
     expect(apiKey).toMatch(/^nav_plg_lagerstatistik_[A-Za-z0-9]{32}$/);
     expect(webhookSecret).toMatch(/^[0-9a-f]{64}$/);
-    expect(plugin).toMatchObject({ key: "lagerstatistik", name: "Lagerstatistik", status: "active", baseUrl, permissions: ["artiklar", "lager"], effectivePermissions: ["artiklar", "lager", "artikeloversikt"], readOnly: false, apiKeyPrefix: apiKey.slice(0, 12) });
+    expect(plugin).toMatchObject({ key: "lagerstatistik", name: "Lagerstatistik", status: "active", baseUrl, permissions: ["artiklar", "lager"], effectivePermissions: ["artiklar", "lager", "artikeloversikt"], readOnly: false, apiKeyPrefix: apiKey.slice(0, 12), installedByName: "Admin" });
 
     const [user] = await db.select().from(users).where(eq(users.id, plugin.userId));
     expect(user).toMatchObject({ kind: "plugin", role: "user", name: "Tillägg: Lagerstatistik", email: "lagerstatistik@tillagg.invalid", active: true });
@@ -324,6 +330,11 @@ describe("the API key", () => {
     const removeGroup = await asAdmin("DELETE", `/permission-groups/${plugin.permissionGroupId}`);
     expect(removeGroup.statusCode).toBe(409);
     expect(removeGroup.json().code).toBe("permission-group-owned-by-plugin");
+    // Nor changed there: the plugin's card owns its permissions.
+    const editGroup = await asAdmin("PATCH", `/permission-groups/${plugin.permissionGroupId}`, { permissions: ["ekonomi"] });
+    expect([editGroup.statusCode, editGroup.json().code]).toEqual([409, "permission-group-owned-by-plugin"]);
+    const [group] = await db.select().from(permissionGroups).where(eq(permissionGroups.id, plugin.permissionGroupId));
+    expect(group!.permissions.sort()).toEqual(["artiklar", "lager"]);
     const groups = (await asAdmin("GET", "/permission-groups")).json() as { id: string; pluginId: string | null }[];
     expect(groups.find((g) => g.id === plugin.permissionGroupId)?.pluginId).toBe(plugin.id);
     const intoPluginGroup = await asAdmin("POST", "/auth/users", {
@@ -481,6 +492,20 @@ describe("GET /plugin-ui and the context token", () => {
     expect(jwt.decode(tab.json().token)).toMatchObject({ entity: { type: "article", id: articleId } });
     // The token gives the plugin no API rights.
     expect((await call("GET", "/articles", { authorization: `Bearer ${tab.json().token}` })).statusCode).toBe(401);
+  });
+
+  it("refuses to open a plugin on the host the user opened Nav on (409 plugin-same-host), whatever the port", async () => {
+    const { plugin } = await install();
+    const lager = await addUser("lager@example.com", ["lager", "artiklar"]);
+    const open = (headers: Record<string, string>) => call("POST", `/plugins/${plugin.id}/context`, { cookie: lager.cookie, ...headers }, { page: "oversikt" });
+    // The plugin runs on 127.0.0.1 (another port): Nav reached on 127.0.0.1 too.
+    for (const headers of [{ origin: "http://127.0.0.1:3000" }, { "x-forwarded-host": "127.0.0.1:3100" }, { host: "127.0.0.1:4000" }]) {
+      const res = await open(headers);
+      expect({ headers, status: res.statusCode, code: res.json().code }).toEqual({ headers, status: 409, code: "plugin-same-host" });
+    }
+    // Origin wins over the hosts; another host is fine.
+    expect((await open({ origin: "http://localhost:3000", host: "127.0.0.1:4000" })).statusCode).toBe(200);
+    expect((await open({ host: "nav.example.com" })).statusCode).toBe(200);
   });
 
   it("refuses a page or tab the user (or the plugin) may not see", async () => {

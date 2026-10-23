@@ -2711,6 +2711,9 @@ export interface PermissionGroup {
   name: string;
   permissions: Permission[];
   userCount: number;
+  // Tillägg: the plugin that owns the group (its technical user's group) —
+  // managed under System → Tillägg, never assigned to a person.
+  pluginId: string | null;
 }
 
 // --- Ekonomi (B1 grundbokföring): kontoplan, räkenskapsår och perioder ---

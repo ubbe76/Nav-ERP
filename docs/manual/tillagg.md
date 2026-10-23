@@ -15,7 +15,7 @@ Ett tillägg ändrar aldrig sig självt: nyckeln kan inte användas mot inloggni
 ## Installera
 
 1. Gå till **System → Tillägg** och välj **Installera tillägg…**.
-2. Ange tilläggets **Adress** — den adress där tillägget körs, till exempel `https://tillagg.example.se`. Adressen måste vara en http- eller https-adress (utan användarnamn, frågedel eller fragment) och **ha ett annat ursprung än Nav** (annan värd eller port), annars skulle tilläggets sidor inte vara avskilda från Nav.
+2. Ange tilläggets **Adress** — den adress där tillägget körs, till exempel `https://tillagg.example.net`. Adressen måste vara en http- eller https-adress (utan användarnamn, frågedel eller fragment) och **ha en annan värd än Nav**. En annan port på samma värd räcker inte: webbläsaren skickar Navs inloggningscookie till alla portar på samma värd, så tillägget skulle kunna agera som den som tittar. Låt tillägget ha en egen domän, inte en underdomän till Navs (se [Säkerhet](#sakerhet)).
 3. Välj **Hämta manifest**. Nav hämtar `<adress>/nav-plugin.json`. Kan tillägget inte nås härifrån väljer du i stället **Ladda upp manifest…** och pekar ut manifestfilen (adressen anges ändå).
 4. Granska vad tillägget säger om sig självt: namn, beskrivning, utgivare, **Begärda rättigheter**, händelser, sidor och flikar. Eventuella varningar (till exempel okända fält) står överst.
 5. Under **Rättigheter att ge tillägget** är kryssrutorna förifyllda med det tillägget begär. Det är du som bestämmer — ta bort det tillägget inte behöver. Kryssa i **Endast läsning** om tillägget inte ska få ändra något.
@@ -128,12 +128,12 @@ Nav skickar en händelse som en `POST` till `<adress><webhook.path>` när något
 | `supplier.updated` | Leverantör ändrad | Inköp | |
 | `quote.created` | Offert skapad | Försäljning | en offert skapas |
 | `sales_order.confirmed` | Kundorder bekräftad | Försäljning | varje övergång från offert till order (även från Förlorad), och när en ny kundorder läggs |
-| `sales_order.delivered` | Utleverans | Försäljning | varje följesedel (`deliveryId` finns i `data`) |
+| `sales_order.delivered` | Utleverans | Försäljning | varje följesedel (`deliveryId` och `deliveryNumber` finns i `data`) |
 | `sales_order.cancelled` | Kundorder makulerad | Försäljning | en order makuleras (inte en offert) |
 | `invoice.issued` | Faktura utfärdad | Försäljning | kund- och kreditfaktura |
 | `invoice.paid` | Faktura betald | Försäljning | fakturan blir betald |
 | `purchase_order.created` | Inköpsorder skapad | Inköp | |
-| `purchase_order.received` | Inköpsorder inlevererad | Inköp | inleverans per rad |
+| `purchase_order.received` | Inköpsorder inlevererad | Inköp | inleverans per rad (`receiptId` och `rowId` finns i `data`) |
 | `manufacturing_order.created` | Tillverkningsorder skapad | Tillverkning | |
 | `manufacturing_order.completed` | Tillverkningsorder klar | Tillverkning | |
 
@@ -151,7 +151,7 @@ Händelsen skrivs i samma transaktion som ändringen, så den skickas aldrig fö
 }
 ```
 
-`data.id` är postens id och `data.number` dess nummer. Vissa händelser har fler referenser (`deliveryId`), aldrig belopp eller personuppgifter. Rubrikerna `Nav-Event-Id` och `Nav-Event-Type` upprepar `id` och `type`. Samma händelse kan komma mer än en gång — använd `id` för att hoppa över dubbletter — och ordningen garanteras inte.
+`data.id` är postens id och `data.number` dess nummer — artikelnummer, kund- eller leverantörsnummer, ordernummer (offertens OF-nummer för `quote.created`, kundorderns nummer för de övriga `sales_order.*`), fakturanummer eller tillverkningsorderns nummer. Utleverans och inleverans gäller ordern (`id`/`number` är orderns) och har fler referenser: `sales_order.delivered` har `deliveryId` (följesedelns id) och `deliveryNumber` (följesedelns nummer), `purchase_order.received` har `receiptId` (inleveransens id) och `rowId` (orderradens id). Testhändelsen `plugin.test` pekar på tillägget självt. Ingen händelse har belopp eller personuppgifter. Rubrikerna `Nav-Event-Id` och `Nav-Event-Type` upprepar `id` och `type`. Samma händelse kan komma mer än en gång — använd `id` för att hoppa över dubbletter — och ordningen garanteras inte.
 
 ### Signaturen
 
@@ -186,7 +186,7 @@ Innehållet ritas i en iframe hos tillägget:
         referrerpolicy="no-referrer">
 ```
 
-Att tilläggets ursprung måste skilja sig från Navs är det som gör att `allow-same-origin` tillsammans med `allow-scripts` ändå är en avskild sandlåda.
+Att tillägget måste köras på en annan värd än Nav är det som gör att `allow-same-origin` tillsammans med `allow-scripts` ändå är en avskild sandlåda. Nav kontrollerar det tre gånger: när adressen anges (mot **Navs adress** under System → Inställningar och webbens adress), när en sida eller flik öppnas (mot adressen användaren har öppnat Nav på — annars 409 `plugin-same-host`), och i webbläsaren, som vägrar visa iframen om tillägget har samma värd som sidan.
 
 ### Kontexttokenet
 
@@ -208,12 +208,21 @@ Verifiera signaturen med den härledda nyckeln och kontrollera `aud` och `exp` i
 
 ### postMessage
 
-Tillägget och Nav pratar via `window.parent.postMessage`. Nav lyssnar bara på meddelanden som kommer från iframens eget fönster **och** tilläggets ursprung; ta på samma sätt bara emot meddelanden från `window.parent`.
+Tillägget och Nav pratar via `window.parent.postMessage`. Nav lyssnar bara på meddelanden som kommer från iframens eget fönster **och** tilläggets ursprung. Gör likadant i tillägget: ta bara emot meddelanden där `event.source === window.parent` **och** `event.origin` är Navs ursprung, och skicka med Navs ursprung som mål i stället för `"*"`:
+
+```js
+const NAV_ORIGIN = "https://erp.example.se";
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent || event.origin !== NAV_ORIGIN) return;
+  // …
+});
+window.parent.postMessage({ type: "nav:theme" }, NAV_ORIGIN);
+```
 
 | Tillägget skickar | Nav gör |
 |---|---|
 | `{ "type": "nav:resize", "height": 640 }` | Sätter flikens höjd (pixlar). Sidor fyller ytan och ignorerar den. |
-| `{ "type": "nav:navigate", "path": "/artiklar" }` | Går till en sida i Nav. Bara interna sökvägar som börjar med `/` (aldrig `//`) godtas. |
+| `{ "type": "nav:navigate", "path": "/artiklar" }` | Går till en sida i Nav. Bara interna sökvägar som börjar med `/` (aldrig `//`) godtas, och aldrig `/api/` eller `/_next/`. |
 | `{ "type": "nav:theme" }` | Svarar `{ "type": "nav:theme", "id": "dark", "css": "…" }` med användarens tema, och skickar samma meddelande igen när temat byts. |
 | `{ "type": "nav:context" }` | Svarar `{ "type": "nav:context", "token": "…", "expiresAt": "…" }` med ett giltigt token; Nav skickar också ett nytt strax före utgång. |
 
@@ -227,6 +236,14 @@ Länka Navs stilmall så ser tillägget ut som Nav i alla teman:
 
 Sätt `data-theme` på `<html>` från `theme` i tokenet (och uppdatera det vid `nav:theme`). Stilmallen innehåller alla teman och en liten basstil som bara använder Navs färgtokens: klasserna `nav-card`, `nav-button` och `nav-button--primary`, `nav-table`, `nav-field`, `nav-badge` (med `--running`, `--delayed`, `--stopped`, `--done`) och `nav-muted`. Den är offentlig och kräver ingen inloggning.
 
+## Säkerhet
+
+- **Egen värd, helst egen domän.** Tillägget måste köras på en annan värd än Nav — en annan port räcker inte, eftersom webbläsarens cookies inte skiljer på portar. I drift bör tillägget ha en **egen domän** (till exempel `tillagg.example.net` när Nav är `erp.example.se`), inte en underdomän till Navs (`tillagg.example.se`): en underdomän räknas som samma webbplats och kan bland annat sätta cookies för hela domänen. För lokala prov går det att öppna Nav på `http://localhost:3000` och köra tillägget på `http://127.0.0.1:4300` — två olika värdar.
+- **Bara Nav får rama in sidorna.** Låt tilläggets sidor skicka `Content-Security-Policy: frame-ancestors <Navs adress>` (till exempel `frame-ancestors https://erp.example.se`), så kan ingen annan webbplats visa dem i en iframe. Exempeltillägget gör det.
+- **Kontrollera avsändaren av meddelanden.** Se [postMessage](#postmessage): både `event.source` och `event.origin`, och skicka aldrig till `"*"`.
+- **Skrivanrop från andra webbplatser vägras.** Nav vägrar (403 `cross-site-request`) varje ändrande anrop (allt utom GET, HEAD och OPTIONS) som görs med en inloggningscookie och som webbläsaren märkt som kommande från en annan webbplats eller en annan värd på samma webbplats (rubriken `Sec-Fetch-Site` är `same-site` eller `cross-site`), om det inte kommer från webbens egen adress (`WEB_ORIGIN`). Det gäller även inloggning, registrering och utloggning. Ett tillägg på en grannunderdomän kan alltså inte ändra något i Nav i användarens namn. Anrop med tilläggets API-nyckel, OAuth-klienter och anrop utan rubriken (server till server) berörs inte.
+- **Kontexttokenet ger inga rättigheter.** Det berättar bara vem som tittar; tillägget når API:t enbart med sin egen nyckel och sina egna rättigheter.
+
 ## Exempeltillägget
 
-I repot finns `examples/nav-plugin-exempel/`: en enda fil, `server.mjs`, utan beroenden. Den serverar ett manifest, tar emot och verifierar händelser, visar en sida under **Lager** och en flik på artikelkortet som läser artikelns saldo med tilläggets API-nyckel. Läs `README.md` där för hur den startas och installeras — den är tänkt som utgångspunkt för ditt eget tillägg.
+I repot finns `examples/nav-plugin-exempel/`: en enda fil, `server.mjs`, utan beroenden. Den serverar ett manifest, tar emot och verifierar händelser, visar en sida under **Lager** och en flik på artikelkortet som läser artikelns saldo med tilläggets API-nyckel. Som förval lyssnar den på `http://127.0.0.1:4300` och räknar med att Nav öppnas på `http://localhost:3000` (ändras med `NAV_PUBLIC_URL`); därifrån tar den emot meddelanden och bara den adressen får rama in sidorna. Läs `README.md` där för hur den startas och installeras — den är tänkt som utgångspunkt för ditt eget tillägg.

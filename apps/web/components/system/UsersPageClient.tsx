@@ -22,6 +22,8 @@ export function UsersPageClient({ users, groups, currentUserId }: { users: Admin
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<AdminUser | null>(null);
+  // A plugin's own group is never assigned to a person (the API answers 409).
+  const personGroups = groups.filter((g) => !g.pluginId);
 
   return (
     <>
@@ -90,7 +92,7 @@ export function UsersPageClient({ users, groups, currentUserId }: { users: Admin
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Ny användare">
         <UserForm
-          groups={groups}
+          groups={personGroups}
           onSuccess={() => {
             setModalOpen(false);
             router.refresh();
@@ -101,7 +103,7 @@ export function UsersPageClient({ users, groups, currentUserId }: { users: Admin
       <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing ? `Redigera ${editing.name}` : ""}>
         {editing && (
           <UserForm
-            groups={groups}
+            groups={personGroups}
             user={editing}
             currentUserId={currentUserId}
             onSuccess={() => {

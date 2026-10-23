@@ -48,6 +48,7 @@ export async function permissionGroupRoutes(app: FastifyInstance, opts: { servic
     } catch (err) {
       if (err instanceof PermissionGroupNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicatePermissionGroupCodeError) return reply.code(409).send(errorBody(err));
+      if (err instanceof PermissionGroupOwnedByPluginError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
