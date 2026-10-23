@@ -8,6 +8,7 @@ import {
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { makeArticle, makeVariantService, resetConfigurator, testCostingSettings } from "./helpers/configurator.js";
+import { insertTestPlugin, outboxEvents, removeTestPlugins } from "./helpers/plugins.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 
 // Delprojekt 4a: resolveVariant — fetch-or-create one variant for a selection,
@@ -69,6 +70,23 @@ describe("resolveVariant", () => {
     expect(ops.map((o) => o.sequenceNo)).toEqual([10]);
     // Standard cost = TVK/st at calc quantity 10: 8 × 2 = 16 material + (5 + 10)/60 × 600 = 150 ⇒ 310 / 10 = 31.
     expect(Number(res.article.standardCost)).toBe(31);
+  });
+
+  it("sends article.created (Tillägg) for each variant it creates — resolveVariant and createVariants — and nothing for an existing one", async () => {
+    const s = await build({ orderQuantity: 10 });
+    await insertTestPlugin({ key: "varianter", events: ["article.created"], permissions: ["artiklar"] });
+    try {
+      const res = await service.resolveVariant(s.article.id, SEL, null);
+      expect((await service.resolveVariant(s.article.id, SEL, null)).created).toBe(false);
+      const [row] = await service.createVariants(s.article.id, { sets: { LOCK: ["B"], BREDD: [1200] }, calcQuantity: 1 }, null);
+      expect(row!.status).toBe("created");
+      expect(await outboxEvents()).toEqual([
+        { type: "article.created", entityId: res.article.id, entityNumber: res.article.articleNumber },
+        { type: "article.created", entityId: row!.articleId, entityNumber: row!.articleNumber },
+      ]);
+    } finally {
+      await removeTestPlugins();
+    }
   });
 
   it("uses calc quantity 1 when the template has no order quantity", async () => {

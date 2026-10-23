@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, max, notExists, or, sql } from "drizzle-orm";
-import { permissionGroups, pluginDeliveries, pluginEvents, plugins, users, type Db, type Tx } from "@navet/db";
+import { permissionGroups, pluginDeliveries, pluginEvents, plugins, userSettings, users, type Db, type Tx } from "@navet/db";
 import { PLUGIN_TEST_EVENT_TYPE, type Permission, type PluginManifest, type PluginStatus } from "@navet/shared";
 
 // Tillägg — the plugins, their technical users and groups, and the webhook
@@ -94,8 +94,9 @@ async function freeGroupCode(tx: Tx, key: string): Promise<string> {
 }
 
 // The technical user's e-mail: <key>@tillagg.invalid (a reserved TLD — mail
-// can never go there), suffixed when an earlier install of the same key left
-// its deactivated user behind.
+// can never go there). An uninstall soft-deletes the user, which frees the
+// address (the unique index is partial on deleted_at); the suffix is only a
+// guard for a live user that holds it anyway.
 async function freeUserEmail(tx: Tx, key: string): Promise<string> {
   const preferred = `${key}@tillagg.invalid`;
   const [taken] = await tx
@@ -212,7 +213,10 @@ export function createPluginsRepository(db: Db) {
     },
 
     // One transaction under the plugin row's lock: the plugin, its user's
-    // name/Endast läsning and its group's name/permissions together.
+    // name/Endast läsning and its group's name/permissions together. FOR NO
+    // KEY UPDATE, not FOR UPDATE: it doesn't conflict with the FOR KEY SHARE
+    // that emit (and the delivery FK) takes, so a business transaction is
+    // never held up by an edit of a plugin — only an uninstall waits.
     async update(
       id: string,
       fields: {
@@ -225,7 +229,7 @@ export function createPluginsRepository(db: Db) {
       }
     ): Promise<PluginRow | null> {
       return db.transaction(async (tx) => {
-        const [current] = await tx.select().from(plugins).where(eq(plugins.id, id)).for("update");
+        const [current] = await tx.select().from(plugins).where(eq(plugins.id, id)).for("no key update");
         if (!current) return null;
         const now = new Date();
         const [row] = await tx
@@ -279,8 +283,11 @@ export function createPluginsRepository(db: Db) {
 
     // Avinstallera, in one transaction: the plugin goes (its deliveries
     // cascade), events no other plugin waits for go, the technical user is
-    // deactivated — never deleted, audit rows and created_by point at it —
-    // and loses the group, which then goes too.
+    // soft-deleted like System → Användare's Ta bort (deleted_at, inactive,
+    // its user_settings gone — never a hard delete: audit rows and
+    // created_by point at it and keep resolving its name) and loses the
+    // group, which then goes too. The FOR UPDATE on the plugin row waits for
+    // business transactions whose emit holds it FOR KEY SHARE.
     async uninstall(id: string): Promise<PluginRow | null> {
       return db.transaction(async (tx) => {
         const [current] = await tx.select().from(plugins).where(eq(plugins.id, id)).for("update");
@@ -299,9 +306,11 @@ export function createPluginsRepository(db: Db) {
               )
             );
         }
+        await tx.delete(userSettings).where(eq(userSettings.userId, current.userId));
+        const now = new Date();
         await tx
           .update(users)
-          .set({ active: false, permissionGroupId: null, updatedAt: new Date() })
+          .set({ active: false, deletedAt: now, permissionGroupId: null, updatedAt: now })
           .where(eq(users.id, current.userId));
         await tx.delete(permissionGroups).where(eq(permissionGroups.id, current.permissionGroupId));
         return current;
@@ -445,25 +454,42 @@ export function createPluginsRepository(db: Db) {
       return rows.length > 0;
     },
 
-    // Rensning: delivered events older than the retention go (deliveries
-    // cascade) — an event is kept while any of its deliveries is pending or
-    // failed. Deliveries of other kinds stay for Leveranser.
+    // Rensning, one transaction: failed deliveries (refusals included) whose
+    // last attempt is older than the retention go first, then every event
+    // older than the retention that no pending or failed delivery waits for
+    // (its delivered deliveries cascade) — events left without deliveries
+    // included. Returns the number of events removed.
     async cleanup(before: Date): Promise<number> {
-      const rows = await db
-        .delete(pluginEvents)
-        .where(
-          and(
-            lt(pluginEvents.occurredAt, before),
-            notExists(
-              db
-                .select({ one: sql`1` })
-                .from(pluginDeliveries)
-                .where(and(eq(pluginDeliveries.eventId, pluginEvents.id), or(eq(pluginDeliveries.status, "pending"), eq(pluginDeliveries.status, "failed"))))
+      return db.transaction(async (tx) => {
+        await tx
+          .delete(pluginDeliveries)
+          .where(
+            and(
+              eq(pluginDeliveries.status, "failed"),
+              sql`coalesce(${pluginDeliveries.lastAttemptAt}, ${pluginDeliveries.createdAt}) < ${before.toISOString()}::timestamptz`
+            )
+          );
+        const rows = await tx
+          .delete(pluginEvents)
+          .where(
+            and(
+              lt(pluginEvents.occurredAt, before),
+              notExists(
+                tx
+                  .select({ one: sql`1` })
+                  .from(pluginDeliveries)
+                  .where(
+                    and(
+                      eq(pluginDeliveries.eventId, pluginEvents.id),
+                      or(eq(pluginDeliveries.status, "pending"), eq(pluginDeliveries.status, "failed"))
+                    )
+                  )
+              )
             )
           )
-        )
-        .returning({ id: pluginEvents.id });
-      return rows.length;
+          .returning({ id: pluginEvents.id });
+        return rows.length;
+      });
     },
   };
 }

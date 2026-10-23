@@ -1,4 +1,5 @@
-import { db, permissionGroups, plugins, users } from "@navet/db";
+import { asc, sql } from "drizzle-orm";
+import { db, permissionGroups, pluginEvents as pluginEventsTable, plugins, users } from "@navet/db";
 import { validatePluginManifest, type Permission, type PluginEventType, type PluginManifest } from "@navet/shared";
 import { sha256Hex } from "../../src/modules/auth/service/auth.service.js";
 import { pluginEvents } from "../../src/modules/system/service/plugin-events.js";
@@ -74,4 +75,21 @@ export async function insertTestPlugin(opts: {
     .returning();
   pluginEvents.invalidate();
   return { id: plugin!.id, key: opts.key, userId: user!.id, groupId: group!.id, apiKey, secret, baseUrl };
+}
+
+// Removes every plugin and its outbox, groups and technical users — for
+// suites outside the plugin tests that install one for a single case.
+export async function removeTestPlugins(): Promise<void> {
+  await db.execute(sql`TRUNCATE plugin_deliveries, plugin_events, plugins CASCADE`);
+  await db.execute(sql`DELETE FROM users WHERE kind = 'plugin'`);
+  await db.execute(sql`DELETE FROM permission_groups WHERE code LIKE 'plg-%'`);
+  pluginEvents.invalidate();
+}
+
+// The events in the outbox, oldest first.
+export async function outboxEvents(): Promise<{ type: string; entityId: string; entityNumber: string | null }[]> {
+  return db
+    .select({ type: pluginEventsTable.type, entityId: pluginEventsTable.entityId, entityNumber: pluginEventsTable.entityNumber })
+    .from(pluginEventsTable)
+    .orderBy(asc(pluginEventsTable.occurredAt));
 }

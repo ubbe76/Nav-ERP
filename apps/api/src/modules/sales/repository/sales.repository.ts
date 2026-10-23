@@ -839,13 +839,19 @@ export function createSalesRepository(db: Db) {
           )
           .where(eq(salesOrders.id, id))
           .returning();
-        // Tillägg: every way from a quote to an order status runs through
-        // here (Bekräfta, the order confirmation mail, a manual status), and
-        // so does every cancellation.
-        if (row && current.status === "quote" && ORDER_STATUSES.includes(status)) {
+        // Tillägg: every way from an offert to an order status runs through
+        // here (Bekräfta, the order confirmation mail, a manual status — also
+        // from Förlorad or a cancelled offert), and so does every
+        // cancellation. The document kind before the change decides
+        // (salesDocumentKind): an offert reaching an order status is
+        // confirmed; only an ORDER being cancelled is a cancelled order —
+        // a cancelled offert is not, and an order already cancelled sends
+        // nothing again.
+        const kindBefore = salesDocumentKind(current);
+        if (row && kindBefore === "quote" && ORDER_STATUSES.includes(status)) {
           await pluginEvents.emit(tx, { type: "sales_order.confirmed", entityId: row.id, entityNumber: row.orderNumber });
         }
-        if (row && status === "cancelled" && current.status !== "cancelled") {
+        if (row && status === "cancelled" && current.status !== "cancelled" && kindBefore === "order") {
           await pluginEvents.emit(tx, { type: "sales_order.cancelled", entityId: row.id, entityNumber: row.orderNumber });
         }
         return row ? withDocumentKind(row) : null;

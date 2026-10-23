@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { eq, sql } from "drizzle-orm";
@@ -198,6 +199,16 @@ describe("System → Tillägg: preview and install", () => {
     expect(bad.json()).toMatchObject({ code: "plugin-manifest-invalid", errors: [expect.stringMatching(/^Nyckeln/)] });
   });
 
+  it("answers 409 plugin-key-taken (never 500) to the loser of two simultaneous installs of the same key", async () => {
+    const body = { baseUrl, manifest: manifest(), permissions: ["lager"], readOnly: false };
+    const results = await Promise.all([asAdmin("POST", "/plugins", body), asAdmin("POST", "/plugins", body), asAdmin("POST", "/plugins", body)]);
+    const codes = results.map((r) => r.statusCode).sort();
+    expect(codes.filter((c) => c === 409)).toHaveLength(2);
+    expect(codes.filter((c) => c !== 409).every((c) => c >= 200 && c < 300)).toBe(true);
+    for (const r of results.filter((r) => r.statusCode === 409)) expect(r.json().code).toBe("plugin-key-taken");
+    expect(await db.select().from(plugins)).toHaveLength(1);
+  });
+
   it("leaves nothing behind when the install transaction fails", async () => {
     // The plugin insert (last in the transaction) collides on the key: the
     // group and the user written before it must go too.
@@ -346,9 +357,11 @@ describe("changing and removing a plugin", () => {
     expect(otherKey.json().errors).toEqual(["Nyckeln kan inte ändras (installerat som lagerstatistik)."]);
   });
 
-  it("uninstalls: plugin, deliveries and group go, the technical user is deactivated but kept", async () => {
+  it("uninstalls: plugin, deliveries and group go, the technical user is soft-deleted — gone from the register, still named in the log", async () => {
     const { plugin } = await install();
     await pluginEvents.emit(db, { type: "article.created", entityId: plugin.id, entityNumber: "1" });
+    // Something the plugin did, in the event log.
+    await db.insert(auditLog).values({ entityType: "article", entityId: "1001", action: "created", userId: plugin.userId });
     expect(await db.select().from(pluginDeliveries)).toHaveLength(1);
     expect((await asAdmin("DELETE", `/plugins/${plugin.id}`)).statusCode).toBe(204);
     expect(await db.select().from(plugins)).toEqual([]);
@@ -356,11 +369,20 @@ describe("changing and removing a plugin", () => {
     expect(await db.execute(sql`SELECT 1 FROM plugin_events`)).toHaveLength(0);
     expect(await db.select().from(permissionGroups).where(eq(permissionGroups.id, plugin.permissionGroupId))).toEqual([]);
     const [user] = await db.select().from(users).where(eq(users.id, plugin.userId));
-    expect(user).toMatchObject({ active: false, permissionGroupId: null, deletedAt: null });
+    expect(user).toMatchObject({ active: false, permissionGroupId: null });
+    expect(user!.deletedAt).not.toBeNull();
     expect((await asAdmin("GET", `/plugins/${plugin.id}`)).statusCode).toBe(404);
-    // The same key can be installed again (the old user keeps its e-mail).
+    // Gone from System → Användare …
+    const listed = (await asAdmin("GET", "/auth/users")).json() as { id: string }[];
+    expect(listed.map((u) => u.id)).not.toContain(plugin.userId);
+    // … but the log still says who did it.
+    const log = (await asAdmin("GET", "/audit-log?entityType=article")).json() as { rows: { userName: string | null }[] };
+    expect(log.rows.map((r) => r.userName)).toEqual(["Tillägg: Lagerstatistik"]);
+    // The same key can be installed again, with the same e-mail (freed by the soft delete).
     const again = await install();
     expect(again.plugin.userId).not.toBe(plugin.userId);
+    const [newUser] = await db.select().from(users).where(eq(users.id, again.plugin.userId));
+    expect(newUser!.email).toBe(user!.email);
     const actions = (await db.select({ action: auditLog.action }).from(auditLog).where(eq(auditLog.entityType, "plugin"))).map((r) => r.action);
     expect(actions).toContain("plugin_uninstalled");
   });
@@ -383,16 +405,24 @@ describe("Skicka testhändelse and Leveranser", () => {
     expect(list.json()).toMatchObject([{ eventType: "plugin.test", status: "delivered", lastStatusCode: 200 }]);
   });
 
-  it("shows a failed test, lets Skicka igen restart a failed delivery, and raises the alert for the admin", async () => {
+  it("shows a failed test, lets Skicka igen restart a failed delivery, and raises the alert for a delivery that failed for good", async () => {
     const { plugin } = await install();
     webhookStatus = 500;
     const res = await asAdmin("POST", `/plugins/${plugin.id}/test-event`);
     expect(res.json()).toMatchObject({ delivered: false, statusCode: 500, error: "Svarade 500", delivery: { status: "failed" } });
-
-    const alerts = (await asAdmin("GET", "/alerts")).json() as { groups: { kind: string; count: number; items: { primary: string; href: string }[] }[] };
-    const group = alerts.groups.find((g) => g.kind === "plugin_delivery_failed");
-    expect(group).toMatchObject({ count: 1, items: [{ primary: "Lagerstatistik", href: `/system/tillagg/${plugin.id}` }] });
+    type Alerts = { groups: { kind: string; count: number; items: { primary: string; href: string }[] }[] };
+    const alertGroup = async () => ((await asAdmin("GET", "/alerts")).json() as Alerts).groups.find((g) => g.kind === "plugin_delivery_failed");
+    // The administrator saw the failed test: no alert for it.
+    expect((await alertGroup())?.count ?? 0).toBe(0);
     expect((await asAdmin("GET", "/plugins")).json()[0].failedLast7Days).toBe(1);
+
+    // A real event whose delivery failed for good raises it.
+    await pluginEvents.emit(db, { type: "article.created", entityId: plugin.id, entityNumber: "1" });
+    await db
+      .update(pluginDeliveries)
+      .set({ status: "failed", attempts: 7, lastAttemptAt: new Date(), lastStatusCode: 500, lastError: "Svarade 500", nextAttemptAt: null })
+      .where(eq(pluginDeliveries.status, "pending"));
+    expect(await alertGroup()).toMatchObject({ count: 1, items: [{ primary: "Lagerstatistik", href: `/system/tillagg/${plugin.id}` }] });
 
     const deliveryId = res.json().delivery.id as string;
     const retried = await asAdmin("POST", `/plugins/${plugin.id}/deliveries/${deliveryId}/retry`);
@@ -425,7 +455,7 @@ describe("GET /plugin-ui and the context token", () => {
     expect((await call("GET", "/plugin-ui", { cookie: lager.cookie })).json()).toEqual({ pages: [], tabs: [] });
   });
 
-  it("signs a 5-minute token with the webhook secret carrying who looks, their rights and the post", async () => {
+  it("signs a 5-minute token with the key derived from the webhook secret, carrying who looks, their rights and the post", async () => {
     const { plugin, webhookSecret } = await install();
     await asAdmin("PATCH", "/settings", { publicBaseUrl: "https://nav.example.com" });
     const lager = await addUser("lager@example.com", ["lager", "artiklar"], { readOnly: true });
@@ -436,7 +466,11 @@ describe("GET /plugin-ui and the context token", () => {
     const { token, url, origin } = page.json();
     expect(url).toBe(`${baseUrl}/nav/oversikt?nav_context=${encodeURIComponent(token)}`);
     expect(origin).toBe(baseUrl);
-    const claims = jwt.verify(token, webhookSecret, { algorithms: ["HS256"], audience: "lagerstatistik", issuer: "https://nav.example.com" }) as Record<string, unknown>;
+    // HMAC-SHA256(secret, "nav-context") as lowercase hex is the HS256 key —
+    // the secret itself (the webhook signature's key) is not.
+    const contextKey = createHmac("sha256", webhookSecret).update("nav-context").digest("hex");
+    expect(() => jwt.verify(token, webhookSecret, { algorithms: ["HS256"] })).toThrow();
+    const claims = jwt.verify(token, contextKey, { algorithms: ["HS256"], audience: "lagerstatistik", issuer: "https://nav.example.com" }) as Record<string, unknown>;
     expect(claims).toMatchObject({ sub: lager.id, name: "lager@example.com", readOnly: true, theme: "dracula", permissions: ["artiklar", "lager", "artikeloversikt"] });
     expect(claims).not.toHaveProperty("entity");
     expect((claims.exp as number) - (claims.iat as number)).toBe(300);

@@ -9,6 +9,7 @@ import {
   paymentBatchItems,
   paymentTerms,
   pluginDeliveries,
+  pluginEvents,
   plugins,
   purchaseOrderRows,
   purchaseOrders,
@@ -19,9 +20,11 @@ import {
   suppliers,
   type Db,
 } from "@navet/db";
+import { PLUGIN_TEST_EVENT_TYPE } from "@navet/shared";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "../../planning/repository/effective-dates.js";
 import { openAmountSql as invoiceOpenAmountSql } from "../../sales/repository/open-amounts.js";
 import { openAmountSql as supplierInvoiceOpenAmountSql } from "../../purchase/repository/open-amounts.js";
+import { PLUGIN_REFUSAL_ERRORS } from "../../system/service/plugin-webhook.js";
 
 // Aviseringar — one reader per kind, every one a question against the
 // current state (nothing is stored). The readers reuse the expressions the
@@ -349,6 +352,10 @@ export function createAlertsRepository(db: Db) {
 
     // Tillägg som inte tar emot händelser: plugins with failed deliveries
     // since `since` that have had no successful delivery after the failure.
+    // Refusals (the group or manifest no longer covers the event — nothing
+    // was sent) and Skicka testhändelse's plugin.test don't count: the
+    // first isn't the plugin failing to answer, the second the
+    // administrator already saw.
     async failedPluginDeliveries(since: Date): Promise<FailedPluginRow[]> {
       const rows = await db.execute<{
         plugin_id: string;
@@ -362,8 +369,14 @@ export function createAlertsRepository(db: Db) {
           (array_agg(d.last_error ORDER BY d.last_attempt_at DESC))[1] AS last_error
         FROM ${pluginDeliveries} d
         JOIN ${plugins} p ON p.id = d.plugin_id
+        JOIN ${pluginEvents} e ON e.id = d.event_id
         WHERE d.status = 'failed'
           AND d.last_attempt_at >= ${since.toISOString()}::timestamptz
+          AND e.type <> ${PLUGIN_TEST_EVENT_TYPE}
+          AND coalesce(d.last_error, '') NOT IN (${sql.join(
+            PLUGIN_REFUSAL_ERRORS.map((error) => sql`${error}`),
+            sql`, `
+          )})
           AND NOT EXISTS (
             SELECT 1 FROM ${pluginDeliveries} ok
             WHERE ok.plugin_id = d.plugin_id AND ok.status = 'delivered' AND ok.delivered_at > d.last_attempt_at

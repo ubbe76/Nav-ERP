@@ -18,6 +18,10 @@ export const RETENTION_DAYS = 30;
 
 export const MISSING_PERMISSION_ERROR = "Saknar rättighet";
 export const NO_WEBHOOK_ERROR = "Tillägget tar inte emot händelsen";
+// The refusals: failed without being sent, because of the plugin's own
+// group or manifest — never a sign that the plugin doesn't answer, so they
+// don't raise the alert Tillägg som inte tar emot händelser.
+export const PLUGIN_REFUSAL_ERRORS: readonly string[] = [MISSING_PERMISSION_ERROR, NO_WEBHOOK_ERROR];
 
 // The delay before the next attempt after `attempts` failed ones, or null
 // when the delivery has failed for good.
@@ -50,6 +54,23 @@ export function signWebhook(secret: string, body: string, at: Date): string {
   const t = Math.floor(at.getTime() / 1000);
   const v1 = createHmac("sha256", secret).update(`${t}.${body}`, "utf8").digest("hex");
   return `t=${t},v1=${v1}`;
+}
+
+// The key the context token (POST /plugins/:id/context) is signed with —
+// derived from the webhook secret so the two never share a key: a webhook
+// signature can never pass as a context token or the other way round.
+//
+// Exactly: HMAC-SHA256 with the webhook secret as the key (its 64-character
+// hex text taken as UTF-8 bytes, as for the webhook signature) over the
+// UTF-8 message "nav-context", written as LOWERCASE HEX — and that
+// 64-character hex text, as UTF-8 bytes, is the HS256 key. In Node:
+//   const key = createHmac("sha256", secret).update("nav-context").digest("hex");
+//   jwt.verify(token, key, { algorithms: ["HS256"], audience: "<plugin key>" });
+// The webhook signature itself keeps using the secret directly.
+export const PLUGIN_CONTEXT_KEY_LABEL = "nav-context";
+
+export function pluginContextKey(webhookSecret: string): string {
+  return createHmac("sha256", webhookSecret).update(PLUGIN_CONTEXT_KEY_LABEL, "utf8").digest("hex");
 }
 
 // What a plugin does with the header (documented for plugin authors and

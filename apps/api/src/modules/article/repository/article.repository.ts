@@ -256,8 +256,9 @@ export function createArticleRepository(db: Db) {
         const changed = previousCost === null || Number(previousCost) !== standardCost;
         if (row && changed) {
           await recordStandardCostHistory(tx, [{ articleId: id, cost: standardCost }]);
+          // Tillägg: article.updated only when the cost really changed.
+          await pluginEvents.emit(tx, { type: "article.updated", entityId: row.id, entityNumber: row.articleNumber });
         }
-        if (row) await pluginEvents.emit(tx, { type: "article.updated", entityId: row.id, entityNumber: row.articleNumber });
         return row ?? null;
       });
     },

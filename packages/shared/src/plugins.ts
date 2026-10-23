@@ -588,7 +588,8 @@ export interface PluginContextResponse {
   expiresAt: string;
 }
 
-// The context token's claims (HS256, signed with the webhook secret).
+// The context token's claims (HS256, signed with HMAC-SHA256(webhook secret,
+// "nav-context") as lowercase hex — see the API's pluginContextKey).
 export interface PluginContextClaims {
   iss: string;
   aud: string;

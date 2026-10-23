@@ -88,8 +88,8 @@ const paymentService = createPaymentService(createPaymentRepository(db), poster,
 const TRUNCATE = sql`TRUNCATE plugin_deliveries, plugin_events, plugins, posting_rules, verification_rows, verifications,
   verification_counters, verification_series, accounting_periods, fiscal_years, accounts, customer_payment_rows, customer_payments,
   invoice_rows, invoices, delivery_rows, deliveries, sales_order_rows, sales_orders, customers, purchase_receipts, purchase_order_rows,
-  purchase_orders, suppliers, mo_reports, mo_material_consumptions, mo_operations, manufacturing_orders, stock_transactions,
-  stock_locations, warehouses, articles, audit_log, users CASCADE`;
+  purchase_orders, suppliers, mo_reports, mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders,
+  routing_operations, bom_components, work_centers, stock_transactions, stock_locations, warehouses, articles, audit_log, users CASCADE`;
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'plg-%'`;
 const TODAY = new Date().toLocaleDateString("sv-SE");
 
@@ -152,6 +152,8 @@ describe("every catalogue event is sent by its path", () => {
     const article = await makeArticle();
     await articleService.updateArticle(article.id, { name: "Ny benämning" });
     await articleService.updateStandardCost(article.id, 12.5);
+    // The same cost again changes nothing: no event.
+    await articleService.updateStandardCost(article.id, 12.5);
     await expectEvents([
       { type: "article.created", entityId: article.id, entityNumber: article.articleNumber },
       { type: "article.updated", entityId: article.id, entityNumber: article.articleNumber },
@@ -197,6 +199,43 @@ describe("every catalogue event is sent by its path", () => {
       { type: "sales_order.cancelled", entityId: direct.order.id, entityNumber: direct.order.orderNumber },
     ]);
     expect(confirmed!.orderNumber).not.toBe(quote.order.orderNumber);
+  });
+
+  it("sales_order.confirmed from Förlorad too; sales_order.cancelled only for an order, once — never for an offert or a stale transition", async () => {
+    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    const article = await makeArticle();
+    const rows = [{ articleId: article.id, quantity: 1, unitPrice: 10 }];
+    await clear();
+
+    // Förlorad → an order status (the manual status) is a confirmation.
+    const lost = (await salesService.createQuote({ customerId: customer.id, rows }, userId)).order;
+    await salesService.setStatus(lost.id, "lost", userId);
+    await salesService.setStatus(lost.id, "confirmed", userId);
+    const lostConfirmed = (await salesService.getSalesOrder(lost.id))!;
+
+    // Bekräfta racing Förlorad: the stale fromStatus writes nothing and sends nothing.
+    const raced = (await salesService.createQuote({ customerId: customer.id, rows }, userId)).order;
+    await salesService.setStatus(raced.id, "lost", userId);
+    expect(await salesRepository.updateStatus(raced.id, "confirmed", null, "quote")).toBeNull();
+
+    // A cancelled offert is not a cancelled order.
+    const quote = (await salesService.createQuote({ customerId: customer.id, rows }, userId)).order;
+    await salesService.cancel(quote.id, userId);
+
+    // An order cancelled twice (Makulera, then the manual status) sends once.
+    const order = (await salesService.createQuote({ customerId: customer.id, confirm: true, rows }, userId)).order;
+    await salesService.cancel(order.id, userId);
+    await salesService.setStatus(order.id, "cancelled", userId);
+
+    await expectEvents([
+      { type: "quote.created", entityId: lost.id, entityNumber: lost.orderNumber },
+      { type: "sales_order.confirmed", entityId: lost.id, entityNumber: lostConfirmed.orderNumber },
+      { type: "quote.created", entityId: raced.id, entityNumber: raced.orderNumber },
+      { type: "quote.created", entityId: quote.id, entityNumber: quote.orderNumber },
+      { type: "sales_order.confirmed", entityId: order.id, entityNumber: order.orderNumber },
+      { type: "sales_order.cancelled", entityId: order.id, entityNumber: order.orderNumber },
+    ]);
+    expect(lostConfirmed.orderNumber).not.toBe(lost.orderNumber);
   });
 
   it("sales_order.delivered per följesedel, with the delivery as data — and nothing for a delivery that was rolled back", async () => {
@@ -268,6 +307,47 @@ describe("every catalogue event is sent by its path", () => {
       { type: "manufacturing_order.created", entityId: mo.id, entityNumber: mo.orderNumber },
       { type: "manufacturing_order.completed", entityId: mo.id, entityNumber: mo.orderNumber },
     ]);
+  });
+
+  it("manufacturing_order.completed when the last operation's report finishes the order (Slutför operation, the terminal's path)", async () => {
+    const article = await makeArticle("manufactured");
+    const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
+    await makeLocation();
+    await clear();
+    const mo = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 2 }, userId);
+    const [first, last] = (await mfgService.listOperations(mo.id)).sort((a, b) => a.sequenceNo - b.sequenceNo);
+    await mfgService.completeOperation(first!.id, {}, userId);
+    // A partial report on the last operation receives goods but doesn't finish.
+    await mfgService.completeOperation(last!.id, { quantityCompleted: 1, quantityScrapped: 0 }, userId);
+    await mfgService.completeOperation(last!.id, { quantityCompleted: 1, quantityScrapped: 0 }, userId);
+    await expectEvents([
+      { type: "manufacturing_order.created", entityId: mo.id, entityNumber: mo.orderNumber },
+      { type: "manufacturing_order.completed", entityId: mo.id, entityNumber: mo.orderNumber },
+    ]);
+  });
+
+  it("manufacturing_order.completed when a lego receipt reports the last operation", async () => {
+    const supplier = await purchaseService.createSupplier({ name: "Lego AB", active: true });
+    const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
+    const lego = await mfgService.createWorkCenter({ code: "900", name: "Ytbehandling AB", type: "subcontract", supplierId: supplier.id, active: true });
+    const article = await makeArticle("manufactured");
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: machine.id, setupTime: 0, runTimePerUnit: 1 });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, unitPrice: 100 });
+    const location = await makeLocation();
+    const mo = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 4 }, userId);
+    const legoOp = (await mfgService.listOperations(mo.id)).find((op) => op.sequenceNo === 20)!;
+    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, userId);
+    const row = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 4, unitPrice: 100, moOperationId: legoOp.id });
+    await purchaseService.confirm(order.id);
+    await clear();
+    const received = await purchaseService.receiveGoods(order.id, row.id, { locationId: location.id, quantity: 4 }, userId);
+    expect(received.operationReport).toEqual({ ok: true });
+    const types = await typesOf();
+    expect(types.sort()).toEqual(["manufacturing_order.completed", "purchase_order.received"]);
+    const completed = (await events()).find((e) => e.type === "manufacturing_order.completed")!;
+    expect(completed).toMatchObject({ entityId: mo.id, entityNumber: mo.orderNumber });
   });
 
   it("covers the whole catalogue", () => {

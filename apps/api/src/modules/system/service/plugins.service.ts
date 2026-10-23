@@ -34,7 +34,7 @@ import { sha256Hex } from "../../auth/service/auth.service.js";
 import { isUniqueViolation } from "./db-errors.js";
 import type { PluginDispatcher, WebhookFetch } from "./plugin-dispatcher.js";
 import { pluginEvents } from "./plugin-events.js";
-import { CLAIM_MS, newPluginApiKey, newWebhookSecret, WEBHOOK_TIMEOUT_MS } from "./plugin-webhook.js";
+import { CLAIM_MS, newPluginApiKey, newWebhookSecret, pluginContextKey, WEBHOOK_TIMEOUT_MS } from "./plugin-webhook.js";
 import {
   PluginAccessDeniedError,
   PluginDeliveryNotFoundError,
@@ -293,7 +293,10 @@ export function createPluginsService(deps: {
           `!plugin:${randomBytes(16).toString("hex")}`
         );
       } catch (err) {
-        if (isUniqueViolation(err, "plugins_key_unique")) throw new PluginKeyTakenError(manifest.key);
+        // A concurrent install of the same key loses on whichever unique
+        // index it reaches first (the group code or the user's e-mail can
+        // collide before plugins_key_unique does) — re-check the key.
+        if (isUniqueViolation(err) && (await repo.keyExists(manifest.key))) throw new PluginKeyTakenError(manifest.key);
         throw err;
       }
       pluginEvents.invalidate();
@@ -413,7 +416,7 @@ export function createPluginsService(deps: {
     },
 
     // Avinstallera: the plugin and its outbox rows go, the technical user is
-    // deactivated (never deleted) and the key stops working at once.
+    // soft-deleted (never hard-deleted) and the key stops working at once.
     async uninstall(id: string, userId: string | null): Promise<void> {
       const removed = await repo.uninstall(id);
       if (!removed) throw new PluginNotFoundError(id);
@@ -454,7 +457,7 @@ export function createPluginsService(deps: {
 
     // POST /plugins/:id/context — the short-lived token an embedded page
     // gets: who is looking, with what rights, at which post. Signed with the
-    // webhook secret; it gives the plugin no API rights.
+    // key derived from the webhook secret; it gives the plugin no API rights.
     async context(id: string, input: PluginContextInput, viewer: PluginViewer): Promise<PluginContextResponse> {
       const found = await repo.get(id);
       if (!found || found.plugin.status !== "active") throw new PluginNotFoundError(id);
@@ -491,7 +494,9 @@ export function createPluginsService(deps: {
         exp: issuedAt + CONTEXT_TOKEN_SECONDS,
       };
       // iat and exp are in the claims (the injected clock), so jsonwebtoken adds neither.
-      const token = jwt.sign(claims, plugin.webhookSecret, { algorithm: "HS256" });
+      // Signed with the key derived from the webhook secret (pluginContextKey
+      // documents the derivation exactly), never with the secret itself.
+      const token = jwt.sign(claims, pluginContextKey(plugin.webhookSecret), { algorithm: "HS256" });
       return {
         token,
         url: contextUrl(plugin.baseUrl, path, token),

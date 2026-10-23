@@ -62,3 +62,12 @@ export function isBookkeepingLockViolation(err: unknown): boolean {
     (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "NV001")
   );
 }
+
+// Postgres serialization failure (40001) — a repeatable-read transaction
+// locking or changing a row another transaction changed or deleted after
+// its snapshot. Same two-level code/cause check as above.
+export function isSerializationFailure(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, cause } = err as { code?: string; cause?: unknown };
+  return code === "40001" || (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "40001");
+}

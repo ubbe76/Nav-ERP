@@ -43,6 +43,7 @@ import {
 import { expandCombinations, MAX_VARIANT_COMBINATIONS, TooManyCombinationsError, VariantSetError, type VariantSets } from "./variant-expand.js";
 import { selectionEntries, selectionFromEntries, variantArticleFields, variantIdentity, type VariantArticleFields } from "./variant-identity.js";
 import { mergeVariantMaterials, variantRoutingRows, type VariantBomRow, type VariantRoutingRow } from "./variant-structure.js";
+import { pluginEvents } from "../../system/service/plugin-events.js";
 
 // Produktkonfigurator — the service owns every template mutation. Each write
 // runs in ONE transaction that first locks the template row (FOR UPDATE) and
@@ -847,6 +848,10 @@ export function createConfiguratorService(deps: {
       articleId: created.id, templateArticleId: articleId, configKey: row.key!, selection: row.identitySelection,
       calcQuantity, createdBy: userId,
     });
+    // Tillägg: a variant is a new article like POST /articles' — in the
+    // template transaction (insertArticle itself sends nothing, so imports
+    // and the demo data stay without events).
+    await pluginEvents.emit(tx, { type: "article.created", entityId: created.id, entityNumber: row.articleNumber! });
     return created;
   }
 
