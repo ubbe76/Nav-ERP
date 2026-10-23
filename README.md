@@ -38,8 +38,10 @@ utvecklingskonventioner.
 
 ### Fler vyer och teman
 
-Webben har tre färgteman — **Ljust**, **Mörkt** och **Dracula** — som väljs
-uppe till höger och sparas per webbläsare. Bilderna visar påhittade
+Webben har tre inbyggda färgteman — **Ljust**, **Mörkt** och **Dracula** — som väljs
+uppe till höger och sparas på användaren. Under System → Teman kan
+administratören skapa egna teman i temaredigeraren eller ladda upp en
+temafil, välja förvalt tema och låsa valet. Bilderna visar påhittade
 exempeldata. Klicka på en bild för full storlek.
 
 <table>
@@ -302,7 +304,8 @@ POSTGRES_PASSWORD måste sättas i .env — se .env.example
 - **`WEB_ORIGIN`** — sätt till adressen användarna öppnar i webbläsaren
   (t.ex. `https://erp.example.se` eller `http://din-server-ip:3000`), inte
   `localhost`. API:et validerar CORS mot den, så fel värde ger inloggning
-  som blockeras av CORS.
+  som blockeras av CORS. Ändringsanrop med en inloggad session som kommer
+  från en annan webbplats vägras (403), utom från den här adressen.
 - **`TRUST_PROXY`** — lämna tom om webben nås direkt. Inloggningen spärras
   ändå i 15 minuter efter 10 misslyckade försök på samma konto (och
   OAuth2-tokenanropet efter 10 på samma klient). Står en omvänd proxy som
@@ -510,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.4.2-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.5.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -681,12 +684,15 @@ Alla register och strukturer är fullt redigerbara i efterhand:
 - **System** (admin) — företagsinformation med logotyp, nummerserier
   (även för **artikelnummer**, med egna serier per artikelgrupp),
   användare och behörighetsgrupper (med konton för **endast läsning**),
-  API-klienter (OAuth2) för integrationer, e-postlogg, samt
+  API-klienter (OAuth2) för integrationer, **tillägg** (externa
+  program med egen API-nyckel som får signerade webhooks och kan visa
+  egna sidor och flikar i Nav, se [exemplet](examples/nav-plugin-exempel/)),
+  **egna färgteman**, e-postlogg, samt
   systeminställningar (t.ex. parallella stämplingar, ATF-intjäning och
   E-post/SMTP)
 - **Gränssnitt** — svenskt webbgränssnitt med färgtemana **Ljust**,
-  **Mörkt** och **Dracula** (all text klarar WCAG AA i alla teman; nya
-  teman läggs till som ett token-block), mobilanpassat
+  **Mörkt** och **Dracula** och egna teman (all text klarar WCAG AA i
+  alla teman — även egna teman kontrolleras), mobilanpassat
 - **Hjälp** — inbyggd användarmanual på `/hjalp` (renderad från
   [`docs/manual/`](docs/manual/) och publicerad på
   [naverp.se/hjalp](https://naverp.se/hjalp/)) med kapitel för alla rutiner
