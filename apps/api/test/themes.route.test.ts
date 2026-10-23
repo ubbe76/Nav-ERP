@@ -358,16 +358,10 @@ describe("the default theme, the lock and the user's choice", () => {
     expect((await call("PATCH", "/me/settings", admin, { theme: null })).json().theme).toBeNull();
   });
 
-  it("a read-only account can't store a choice (403) but still reads the boot data", async () => {
+  it("a read-only account stores its choice like everyone else (its personal settings are the exception)", async () => {
     const reader = await addUser("reader@example.com", { readOnly: true });
     const res = await call("PATCH", "/me/settings", reader.cookie, { theme: "dark" });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().code).toBe("read-only-account");
-    expect((await call("GET", "/theme-boot", reader.cookie)).json().userTheme).toBeNull();
-    // A choice stored before the account became read-only is not answered
-    // either: the browser's own choice decides, as the manual says.
-    await db.insert(userSettings).values({ userId: reader.id, key: "theme", value: "dracula" });
-    expect((await call("GET", "/me/settings", reader.cookie)).json().theme).toBe("dracula");
-    expect((await call("GET", "/theme-boot", reader.cookie)).json().userTheme).toBeNull();
+    expect([res.statusCode, res.json().theme]).toEqual([200, "dark"]);
+    expect((await call("GET", "/theme-boot", reader.cookie)).json().userTheme).toBe("dark");
   });
 });

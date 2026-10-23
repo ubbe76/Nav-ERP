@@ -17,7 +17,9 @@ declare module "fastify" {
     // Endast läsning: a non-GET route that only computes and answers (a
     // preview, a check) and writes nothing — open to a read-only account.
     // A function decides per request (e.g. "only without save"); it runs
-    // after body parsing. Absent = the route writes (fail closed).
+    // after body parsing. Absent = the route writes (fail closed). The one
+    // writing exception is PATCH /me/settings: the account's own
+    // preferences, never business data.
     readOnlySafe?: true | ((req: FastifyRequest) => boolean);
   }
 }

@@ -29,7 +29,7 @@ export default async function ManualHubPage(props: { searchParams: Promise<{ q?:
 
       <ManualSearch query={query} />
 
-      {!query.trim() && <HubSections sections={sections} icons={false} />}
+      {!query.trim() && <HubSections sections={sections} icons={false} favorites={false} />}
     </AppShell>
   );
 }

@@ -44,6 +44,11 @@
   list-style: none;
 }
 
+/* Anchors the row's favourite star. */
+.item {
+  position: relative;
+}
+
 .row {
   display: block;
   padding: 12px 18px 14px;
@@ -81,6 +86,52 @@
   min-width: 0;
 }
 
+/* Room on the right for the star, so a long description never runs under it. */
+.rowWithStar {
+  padding-right: 48px;
+}
+
+/* Favoriter: the star shows on hover or keyboard focus, always once the row
+   is a favourite, and always on touch screens (they have no hover). */
+.star {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-control-sm);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+.item:hover .star,
+.item:focus-within .star,
+.star[aria-pressed="true"] {
+  opacity: 1;
+}
+.star[aria-pressed="true"] {
+  color: var(--accent-fg);
+}
+.star:hover {
+  background: var(--color-surface);
+  color: var(--accent-fg);
+}
+.star:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+@media (hover: none) {
+  .star {
+    opacity: 1;
+  }
+}
+
 .rowTitle {
   display: block;
   font-family: var(--font-display);
@@ -101,7 +152,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .row,
-  .icon {
+  .icon,
+  .star {
     transition: none;
   }
 }

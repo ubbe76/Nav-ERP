@@ -49,8 +49,7 @@ export function ThemeBootProvider({ boot, children }: { boot: ThemeBootClient; c
       // Storage blocked — the choice still holds for this page view.
     }
     // Saved on the user so it follows them between computers. Errors are
-    // ignored (403 for Endast läsning: the choice then lives in the browser,
-    // and GET /theme-boot answers userTheme null for such an account).
+    // ignored: the choice then lives in this browser.
     apiFetch("/api/v1/me/settings", { method: "PATCH", body: JSON.stringify({ theme: id }) }).catch(() => {});
   }, []);
 

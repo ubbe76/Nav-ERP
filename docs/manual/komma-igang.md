@@ -12,12 +12,23 @@ Efter 10 misslyckade inloggningsförsök på samma konto spärras kontot i 15 mi
 
 ## Navigering
 
-- **Sidomenyn** till vänster har ett menyval per modul och inga undermenyer: Översikt, Artiklar, Inköp, Försäljning, Tillverkning, Lager, Ekonomi, Rapporter, System (endast administratörer) och Hjälp — du ser bara de moduler din behörighetsgrupp ger dig (se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)). Klickar du på en modul öppnas **modulens egen sida**, där alla dess funktioner ligger grupperade i ett rutnät med en kort förklaring under varje. Därifrån går du vidare till rutinen du ska arbeta i. Funktioner som du inte har behörighet till visas inte i rutnätet.
+- **Sidomenyn** till vänster har ett menyval per modul och inga undermenyer: Översikt, Aviseringar, Artiklar, Inköp, Försäljning, Tillverkning, Lager, Personal & lön, Ekonomi, Rapporter, System (endast administratörer) och Hjälp — du ser bara de moduler din behörighetsgrupp ger dig (se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper)). Klickar du på en modul öppnas **modulens egen sida**, där alla dess funktioner ligger grupperade i ett rutnät med en kort förklaring under varje. Därifrån går du vidare till rutinen du ska arbeta i. Funktioner som du inte har behörighet till visas inte i rutnätet. Det du använder ofta kan du lägga som genvägar under [Favoriter](#favoriter) överst i sidomenyn.
 - **Sök i manualen:** på **Hjälp** finns fältet **Sök i manualen…** (och ovanför varje kapitel). Skriv ett eller flera ord och tryck **Sök**; träffarna visar kapitel, avsnittsrubrik och ett utdrag med sökorden markerade, och ett klick tar dig direkt till avsnittet. Alla ord måste finnas i samma avsnitt, och stora/små bokstäver samt å/ä/ö spelar ingen roll.
 - Rutnätet är indelat i grupper med en rubrik över de funktioner som hör ihop. Under **Tillverkning** ligger till exempel **Behovsberäkning**, **Beläggning** och **Scheman** i gruppen **Planering**.
 - Längst ned i sidomenyn står ditt namn, din roll och vilken version av Nav|ERP du använder, t.ex. **Version 0.2.4-alpha**. Klickar du på versionen öppnas versionssidan på naverp.se med vad som är nytt i varje version. Versionen syns också i API:ets `GET /health`.
 - Med **pilknappen** överst i sidomenyn fäller du ihop menyn till enbart ikoner. Valet sparas i webbläsaren och gäller tills du fäller ut den igen.
 - Uppe till höger finns **Logga ut** och väljaren för färgtema: **Ljust**, **Mörkt** och **Dracula** (ett mörkt tema i lila och rosa efter [Dracula](https://draculatheme.com), som används under MIT-licensen). Valet sparas på användaren och följer med mellan datorer, och gäller på alla sidor, även stämpelterminalen och inloggningen. Administratören kan välja ett förvalt tema för företaget, låsa valet (då döljs väljaren) och installera egna teman under **System → Teman** — de syns i väljaren bredvid de tre inbyggda.
+
+## Favoriter
+
+Överst i sidomenyn finns gruppen **Favoriter** med dina egna genvägar — till exempel **Kundorder**, **Inköpsorder** eller en lista med ett visst urval. Favoriterna sparas på användaren, så de följer med mellan datorer och till mobilen, och ingen annan ser dem. Så länge du inte har några står det en kort förklaring under rubriken.
+
+- **Lägg till en funktion:** för musen över en rad på en modulsida, till exempel **Försäljning**, och klicka på stjärnan till höger på raden. Funktionen läggs sist under **Favoriter** med samma namn som i rutnätet. Ett klick på den ifyllda stjärnan tar bort den igen. På en pekskärm syns stjärnorna hela tiden.
+- **Lägg till sidan du står på:** klicka på **Favorit** uppe till höger, bredvid **Logga ut**. Skriv ett **Namn** — förslaget är sidans rubrik — och klicka på **Lägg till**. Sidan sparas med sina filter och sin sökning, så en favorit som "Bekräftade kundordrar" öppnar listan med samma urval (vilken sida i listan du stod på sparas inte). Det går också att spara ett kort, till exempel en kund du ofta arbetar med. När sidan redan är en favorit är stjärnan på **Favorit** ifylld, och ett klick tar bort den.
+- **Ändra:** klicka på **Ändra** vid rubriken **Favoriter** för att byta namn, flytta favoriterna upp och ned med pilarna eller **Ta bort** dem. Ändringarna sparas när du klickar på **Spara**.
+- Du kan ha högst 20 favoriter, och ett namn får vara högst 60 tecken.
+- När sidomenyn är ihopfälld visas favoriterna som ikoner — för musen över en ikon för att se namnet.
+- En favorit till en sida som din behörighetsgrupp inte längre ger dig visas inte, men den finns kvar och kommer tillbaka om du får behörigheten igen. Under **Ändra** syns alla dina favoriter.
 
 ## Översikten
 

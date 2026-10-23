@@ -24,7 +24,7 @@ Att stänga av ett konto (status **Avstängd**) räcker för de flesta fall — 
 
 ### Endast läsning
 
-Kryssrutan **Endast läsning** på användaren gör kontot till ett läskonto: det kan öppna allt som behörighetsgruppen ger, men inte ändra något — till exempel ett demokonto eller ett konto för revisorn. Varje försök att spara, skapa, ta bort, stämpla, ladda upp en fil eller skicka e-post avvisas med meddelandet "Kontot kan bara läsa — ändringar är avstängda.", och överst på varje sida står "Du är inloggad med ett konto som bara kan läsa. Ändringar är avstängda, och systeminställningarna (menyn System) visas bara för administratörer." Kontots egna inställningar, som **Rader per sida**, går inte heller att ändra. Knapparna för att ändra visas fortfarande — det är systemet som säger nej när de används.
+Kryssrutan **Endast läsning** på användaren gör kontot till ett läskonto: det kan öppna allt som behörighetsgruppen ger, men inte ändra något — till exempel ett demokonto eller ett konto för revisorn. Varje försök att spara, skapa, ta bort, stämpla, ladda upp en fil eller skicka e-post avvisas med meddelandet "Kontot kan bara läsa — ändringar är avstängda.", och överst på varje sida står "Du är inloggad med ett konto som bara kan läsa. Ändringar är avstängda, och systeminställningarna (menyn System) visas bara för administratörer." Knapparna för att ändra visas fortfarande — det är systemet som säger nej när de används. Undantaget är kontots egna inställningar, som bara gäller den egna användaren: [Favoriter](/hjalp/komma-igang#favoriter), färgtemat, **Rader per sida** och den [dagliga sammanställningen](/hjalp/aviseringar#daglig-sammanstallning-via-e-post) av aviseringar går att ändra som vanligt.
 
 Det som bara räknar och visar ett svar fungerar som vanligt: **Leveranstidskontroll** (men inte att skapa tillverkningsordrarna efteråt), förkalkyl och efterkalkyl som inte sparas, samt konfiguratorns förhandsgranskning och prisberäkning. Utloggning fungerar alltid.
 
@@ -322,7 +322,7 @@ Tidkoderna måste matcha lönesystemets egen löneartstabell — stäm av dem me
 - **Förvalt tema för företaget** är temat som visas för alla som inte själva valt något, och på inloggningssidan innan någon loggat in.
 - **Lås temat för alla användare** döljer temaväljaren för alla och tvingar fram det förvalda temat.
 
-Varje användares eget val sparas på användaren, så det följer med mellan datorer. Väljaren uppe till höger visar alla teman — en segmenterad kontroll när det finns högst tre, annars en rullgardinslista med temanas namn. Ett tema som tas bort ersätts för dess användare av det förvalda. Konton med **Endast läsning** kan inte spara sitt val på användaren; då gäller valet bara i den webbläsaren.
+Varje användares eget val sparas på användaren, så det följer med mellan datorer. Väljaren uppe till höger visar alla teman — en segmenterad kontroll när det finns högst tre, annars en rullgardinslista med temanas namn. Ett tema som tas bort ersätts för dess användare av det förvalda.
 
 ### Temalistan
 

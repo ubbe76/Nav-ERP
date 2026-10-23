@@ -18,14 +18,13 @@ interface Props {
   initial: AlertsResponse;
   digest: { enabled: boolean; kinds: AlertKind[] | null };
   email: string;
-  readOnly: boolean;
   /** HH:MM, or null when the user may not read the system setting. */
   digestTime: string | null;
   /** Only ever true for an administrator (the SMTP settings are admin data). */
   smtpMissing: boolean;
 }
 
-export function AlertsPageClient({ initial, digest, email, readOnly, digestTime, smtpMissing }: Props) {
+export function AlertsPageClient({ initial, digest, email, digestTime, smtpMissing }: Props) {
   const [alerts, setAlerts] = useState(initial);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -102,7 +101,7 @@ export function AlertsPageClient({ initial, digest, email, readOnly, digestTime,
         <label className={styles.check}>
           <Checkbox
             checked={enabled}
-            disabled={readOnly || saving}
+            disabled={saving}
             onChange={(e) => void saveDigest({ alertDigest: e.target.checked })}
           />
           <span>Skicka mig en sammanställning varje arbetsdag</span>
@@ -111,9 +110,6 @@ export function AlertsPageClient({ initial, digest, email, readOnly, digestTime,
           Sammanställningen skickas till {email || "din e-postadress"}
           {digestTime ? ` klockan ${digestTime}` : ""} på arbetsdagar, och bara när det finns något att bevaka.
         </p>
-        {readOnly && (
-          <p className={styles.hint}>Ditt konto har Endast läsning, så sammanställningen kan inte ändras.</p>
-        )}
         {!email && (
           <p className={styles.warning}>Ditt konto saknar e-postadress, så ingen sammanställning kan skickas.</p>
         )}
@@ -123,7 +119,7 @@ export function AlertsPageClient({ initial, digest, email, readOnly, digestTime,
             Inställningar → E-post (SMTP).
           </p>
         )}
-        <fieldset className={styles.kinds} disabled={readOnly || saving || !enabled}>
+        <fieldset className={styles.kinds} disabled={saving || !enabled}>
           <legend className={styles.legend}>Ta med</legend>
           {alerts.groups.map((g) => (
             <label key={g.kind} className={styles.check}>

@@ -3,10 +3,10 @@ import { alertKindSchema } from "./alerts.js";
 import { themeIdSchema } from "./themes.js";
 
 // Per-user preferences (auth module, `user_settings` KV table) — distinct
-// from the system-wide system_settings module. First (and so far only) key
-// is listPageSize: how many rows the register lists (Table + Pagination)
-// show per page, a Monitor-style personal preference rather than a
-// system-wide setting.
+// from the system-wide system_settings module. The first key was
+// listPageSize: how many rows the register lists (Table + Pagination) show
+// per page, a Monitor-style personal preference rather than a system-wide
+// setting.
 export const LIST_PAGE_SIZE_OPTIONS = [25, 50, 100, 250] as const;
 export const DEFAULT_LIST_PAGE_SIZE: (typeof LIST_PAGE_SIZE_OPTIONS)[number] = 50;
 
@@ -18,6 +18,35 @@ const listPageSizeSchema = z.union(
     z.ZodLiteral<250>,
   ]
 );
+
+// Favoriter: the user's own shortcuts at the top of the sidebar — any page
+// inside Nav (a function, a filtered list, a card) under the name the user
+// gave it, in the order shown. PATCH replaces the whole list.
+export const MAX_FAVORITES = 20;
+export const FAVORITE_TITLE_MAX = 60;
+
+// A path inside Nav only: one leading slash — never "//host" or "/\host",
+// which a browser resolves to another site — and no whitespace, backslash or
+// control characters.
+const favoriteHrefSchema = z
+  .string()
+  .max(500)
+  .regex(/^\/(?![/\\])[^\s\\\p{Cc}]*$/u);
+
+export const favoriteSchema = z
+  .object({
+    href: favoriteHrefSchema,
+    title: z.string().trim().min(1).max(FAVORITE_TITLE_MAX),
+  })
+  .strict();
+export type Favorite = z.infer<typeof favoriteSchema>;
+
+export const favoritesSchema = z
+  .array(favoriteSchema)
+  .max(MAX_FAVORITES)
+  .refine((list) => new Set(list.map((f) => f.href)).size === list.length, {
+    message: "Samma sida kan bara vara favorit en gång",
+  });
 
 // GET /me/settings — always returns every known key, defaults filled in.
 export const userSettingsSchema = z.object({
@@ -33,6 +62,8 @@ export const userSettingsSchema = z.object({
   // Egna teman: the user's chosen theme (a built-in id or a custom theme's
   // key); null = the company default. Checked to exist on PATCH.
   theme: themeIdSchema.nullable(),
+  // Favoriter (see favoriteSchema); [] = none yet.
+  favorites: favoritesSchema,
 });
 export type UserSettings = z.infer<typeof userSettingsSchema>;
 

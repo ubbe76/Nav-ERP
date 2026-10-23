@@ -18,7 +18,8 @@ import { multipartFile } from "./helpers/banking.js";
 // its permission group gives but change nothing. requireAuth (and the
 // configurator scope's requireAuthOrClient) refuse every non-GET request from
 // it with 403 read-only-account, except the routes marked readOnlySafe —
-// POSTs that only compute and answer. Everything goes through the real app.
+// POSTs that only compute and answer, and the account's own personal
+// settings. Everything goes through the real app.
 
 const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
 const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
@@ -189,9 +190,8 @@ describe("Endast läsning — writes are refused", () => {
       { method: "POST", url: "/api/v1/stock/transactions", payload: { articleId: f.part.id, quantityDelta: 5 } },
       // DELETE, even of something that does not exist
       { method: "DELETE", url: `/api/v1/time-reports/${crypto.randomUUID()}` },
-      // Own account: password and personal settings
+      // Own account: the password (personal settings are the exception, below)
       { method: "PATCH", url: `/api/v1/auth/users/${user.id}`, payload: { password: "ett-nytt-losenord" } },
-      { method: "PATCH", url: "/api/v1/me/settings", payload: { listPageSize: 25 } },
       // Konfigurera på orderraden creates a variant article
       { method: "POST", url: `/api/v1/configurator/${f.template.id}/variant`, payload: { selection: { LOCK: "A" } } },
       // Saving a calculation
@@ -290,6 +290,26 @@ describe("Endast läsning — reads and side-effect-free POSTs work", () => {
     expect(await counts()).toEqual(before);
   });
 
+  // The deliberate exception: the account's own preferences (favoriter,
+  // tema, rader per sida) are not business data.
+  it("stores its own personal settings and nothing else", async () => {
+    const { cookie: adminCookie } = await adminSession();
+    const { cookie } = await readOnlySession(adminCookie);
+    const before = await counts();
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/me/settings",
+      headers: { cookie },
+      payload: { listPageSize: 25, favorites: [{ href: "/forsaljning/ordrar", title: "Kundorder" }] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ listPageSize: 25, favorites: [{ href: "/forsaljning/ordrar", title: "Kundorder" }] });
+    expect((await app.inject({ method: "GET", url: "/api/v1/me/settings", headers: { cookie } })).json().favorites).toHaveLength(1);
+
+    expect(await counts()).toEqual({ ...before, user_settings: before.user_settings + 2 });
+  });
+
   it("can always log out", async () => {
     const { cookie: adminCookie } = await adminSession();
     const { cookie } = await readOnlySession(adminCookie);
@@ -347,7 +367,8 @@ describe("Endast läsning — never an administrator", () => {
 
 describe("Endast läsning — the allowlist", () => {
   // Pinned so a new readOnlySafe route is a reviewed decision: each must only
-  // compute and answer (see docs/manual/system.md, Endast läsning).
+  // compute and answer, PATCH /me/settings excepted (see docs/manual/system.md,
+  // Endast läsning).
   it("is exactly these routes", async () => {
     const routes: RouteOptions[] = [];
     const inventory = buildApp();
@@ -373,6 +394,8 @@ describe("Endast läsning — the allowlist", () => {
         // plugin page or tab is opened with — computed and signed, nothing written.
         "POST /api/v1/plugins/preview",
         "POST /api/v1/plugins/:id/context",
+        // The one route that writes: the account's own preferences.
+        "PATCH /api/v1/me/settings",
       ].sort()
     );
   });

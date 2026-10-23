@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { HUB_ICONS, PLUGIN_PAGE_ICON } from "../../lib/hubIcons";
+import { FavoriteStar } from "./FavoriteStar";
 import styles from "./HubSections.module.css";
 
 export interface HubSection {
@@ -10,8 +11,17 @@ export interface HubSection {
 // Module hub layout: one card per function group, each card a compact list
 // of clickable rows. Scales to many functions without the clutter of a flat
 // grid of large cards. Rows get an icon from HUB_ICONS (keyed on href) unless
-// `icons` is false (the manual's chapter list has none).
-export function HubSections({ sections, icons = true }: { sections: HubSection[]; icons?: boolean }) {
+// `icons` is false (the manual's chapter list has none), and a star that adds
+// the function to Favoriter unless `favorites` is false (the manual again).
+export function HubSections({
+  sections,
+  icons = true,
+  favorites = true,
+}: {
+  sections: HubSection[];
+  icons?: boolean;
+  favorites?: boolean;
+}) {
   return (
     <div className={styles.grid}>
       {sections.map((section) => (
@@ -22,8 +32,11 @@ export function HubSections({ sections, icons = true }: { sections: HubSection[]
               // Tillägg pages (/tillagg/<plugin>/<page>) are not in the static table.
               const Icon = icons ? (HUB_ICONS[item.href] ?? (item.href.startsWith("/tillagg/") ? PLUGIN_PAGE_ICON : undefined)) : undefined;
               return (
-                <li key={item.href}>
-                  <Link href={item.href} className={Icon ? `${styles.row} ${styles.rowWithIcon}` : styles.row}>
+                <li key={item.href} className={styles.item}>
+                  <Link
+                    href={item.href}
+                    className={[styles.row, Icon && styles.rowWithIcon, favorites && styles.rowWithStar].filter(Boolean).join(" ")}
+                  >
                     {Icon && (
                       <span className={styles.icon}>
                         <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
@@ -34,6 +47,8 @@ export function HubSections({ sections, icons = true }: { sections: HubSection[]
                       <span className={styles.rowDescription}>{item.description}</span>
                     </span>
                   </Link>
+                  {/* Beside the link, not inside it: a button within <a> is invalid. */}
+                  {favorites && <FavoriteStar href={item.href} title={item.title} className={styles.star} />}
                 </li>
               );
             })}

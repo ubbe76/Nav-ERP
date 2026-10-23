@@ -126,13 +126,16 @@ export async function authRoutes(
   });
 
   // Per-user preferences (Monitor-style, not the system-wide system_settings)
-  // — first key is "rader per sida" for the register lists. GET always
+  // — "rader per sida", favoriter, tema and the alert digest. GET always
   // answers with every known key, defaults filled in.
   app.get("/me/settings", { preHandler: requireAuth(service) }, async (req) => {
     return settings.getSettings(req.user!.id);
   });
 
-  app.patch("/me/settings", { preHandler: requireAuth(service) }, async (req, reply) => {
+  // readOnlySafe although it writes — a deliberate exception: these are the
+  // account's own preferences (favoriter, tema, rader per sida, the alert
+  // digest), never business data, so an Endast läsning account keeps them.
+  app.patch("/me/settings", { preHandler: requireAuth(service), config: { readOnlySafe: true } }, async (req, reply) => {
     const input = updateUserSettingsSchema.parse(req.body);
     try {
       return await settings.updateSettings(req.user!.id, input);

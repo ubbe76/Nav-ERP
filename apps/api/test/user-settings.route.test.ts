@@ -90,7 +90,7 @@ describe("GET /me/settings", () => {
 
     const res = await app.inject({ url: "/me/settings", headers: { cookie } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
+    expect(res.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [] });
     await app.close();
   });
 });
@@ -114,10 +114,10 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 100 },
     });
     expect(patchRes.statusCode).toBe(200);
-    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
+    expect(patchRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [] });
 
     const getRes = await app.inject({ url: "/me/settings", headers: { cookie } });
-    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
+    expect(getRes.json()).toEqual({ listPageSize: 100, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [] });
 
     // Upsert, not insert-only: a second PATCH overwrites the first value
     // rather than erroring on the composite PK.
@@ -128,7 +128,7 @@ describe("PATCH /me/settings", () => {
       payload: { listPageSize: 25 },
     });
     expect(secondPatch.statusCode).toBe(200);
-    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
+    expect(secondPatch.json()).toEqual({ listPageSize: 25, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [] });
     await app.close();
   });
 
@@ -166,7 +166,7 @@ describe("PATCH /me/settings", () => {
     const cookieB = await registerAndLogin(app);
 
     const patch = await app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie: cookieA }, payload: { hideOnboarding: true } });
-    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null, theme: null });
+    expect(patch.json()).toEqual({ listPageSize: 50, hideOnboarding: true, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [] });
     const other = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
     expect(other.json().hideOnboarding).toBe(false);
     await app.close();
@@ -198,6 +198,72 @@ describe("PATCH /me/settings", () => {
     await app.close();
   });
 
+  it("replaces the favourites list in order, trims titles and 400s anything that isn't a path inside Nav", async () => {
+    const app = buildApp();
+    const cookie = await registerAndLogin(app);
+    const patch = (favorites: unknown) =>
+      app.inject({ method: "PATCH", url: "/me/settings", headers: { cookie }, payload: { favorites } });
+
+    const set = await patch([
+      { href: "/forsaljning/ordrar", title: "Kundorder" },
+      { href: "/forsaljning/ordrar?status=confirmed", title: "  Bekräftade kundordrar  " },
+      { href: "/kunder/0b8f9c1e-1111-4a6e-9f00-000000000001", title: "Storköket AB" },
+    ]);
+    expect(set.statusCode).toBe(200);
+    expect(set.json().favorites).toEqual([
+      { href: "/forsaljning/ordrar", title: "Kundorder" },
+      { href: "/forsaljning/ordrar?status=confirmed", title: "Bekräftade kundordrar" },
+      { href: "/kunder/0b8f9c1e-1111-4a6e-9f00-000000000001", title: "Storköket AB" },
+    ]);
+    // The whole list is replaced — a reorder or a removal is just a new list.
+    const reordered = await patch([{ href: "/kunder/0b8f9c1e-1111-4a6e-9f00-000000000001", title: "Storköket AB" }, { href: "/forsaljning/ordrar", title: "Kundorder" }]);
+    expect(reordered.json().favorites.map((f: { href: string }) => f.href)).toEqual(["/kunder/0b8f9c1e-1111-4a6e-9f00-000000000001", "/forsaljning/ordrar"]);
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json().favorites).toHaveLength(2);
+    expect((await patch([])).json().favorites).toEqual([]);
+
+    for (const bad of [
+      [{ href: "https://example.com", title: "Extern" }],
+      [{ href: "//example.com/x", title: "Protokollrelativ" }],
+      [{ href: "/\\example.com", title: "Snedstreck" }],
+      [{ href: "javascript:alert(1)", title: "Skript" }],
+      [{ href: "/lager saldon", title: "Mellanslag" }],
+      [{ href: "/lager", title: "   " }],
+      [{ href: "/lager", title: "x".repeat(61) }],
+      [{ href: "/lager", title: "Lager", extra: true }],
+      [{ href: "/lager", title: "Lager" }, { href: "/lager", title: "Lager igen" }],
+      Array.from({ length: 21 }, (_, i) => ({ href: `/lager/${i}`, title: `Lager ${i}` })),
+    ]) {
+      const res = await patch(bad);
+      expect([JSON.stringify(bad).slice(0, 60), res.statusCode]).toEqual([JSON.stringify(bad).slice(0, 60), 400]);
+    }
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json().favorites).toEqual([]);
+    await app.close();
+  });
+
+  it("reads a stored favourites list entry by entry, dropping what no longer passes", async () => {
+    const app = buildApp();
+    const cookie = await registerAndLogin(app);
+    const me = (await app.inject({ url: "/auth/me", headers: { cookie } })).json();
+    await settingsRepo.upsert(
+      me.id,
+      "favorites",
+      JSON.stringify([
+        { href: "/lager/saldon", title: "Lagersaldon" },
+        { href: "//example.com", title: "Extern" },
+        "skräp",
+        { href: "/lager/saldon", title: "Dubblett" },
+        { href: "/inkop/ordrar", title: "Inköpsorder" },
+      ])
+    );
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json().favorites).toEqual([
+      { href: "/lager/saldon", title: "Lagersaldon" },
+      { href: "/inkop/ordrar", title: "Inköpsorder" },
+    ]);
+    await settingsRepo.upsert(me.id, "favorites", "{inte json");
+    expect((await app.inject({ url: "/me/settings", headers: { cookie } })).json().favorites).toEqual([]);
+    await app.close();
+  });
+
   it("keeps each user's setting isolated from another user's", async () => {
     const app = buildApp();
     const cookieA = await registerAndLogin(app);
@@ -211,7 +277,7 @@ describe("PATCH /me/settings", () => {
     });
 
     const resB = await app.inject({ url: "/me/settings", headers: { cookie: cookieB } });
-    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null });
+    expect(resB.json()).toEqual({ listPageSize: 50, hideOnboarding: false, alertDigest: false, alertDigestKinds: null, theme: null, favorites: [] });
     await app.close();
   });
 });

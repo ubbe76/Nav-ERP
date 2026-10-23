@@ -1,0 +1,30 @@
+/* A failed favourite save: a stars click has no form to show the error in,
+   so it surfaces here, above the mobile drawer (45–50). */
+.toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 55;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 12px 14px;
+  border-radius: var(--radius-control-sm);
+  background: var(--status-stopped-bg);
+  color: var(--status-stopped-text);
+  box-shadow: var(--shadow-popover);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.close {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}

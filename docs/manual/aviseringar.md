@@ -56,7 +56,7 @@ Längst ned på sidan, under **Daglig sammanställning via e-post**, kan du få 
 - Kryssrutorna under **Ta med** väljer vilka typer mejlet innehåller. Du ser bara typerna du får se, och har du kryssat i alla följer mejlet också nya typer.
 - Texten under kryssrutan visar vilken e-postadress mejlet går till och, om du får läsa inställningen, klockan hur dags det skickas. Saknar ditt konto e-postadress varnar sidan, och då kan inget mejl skickas (adressen anges under **System → Användare**).
 - Är SMTP inte konfigurerat varnar sidan administratörer, eftersom inga mejl skickas då (se [E-post (SMTP)](/hjalp/system#e-post-smtp)).
-- Ett konto med **Endast läsning** ser avsnittet men kan inte ändra det.
+- Även ett konto med **Endast läsning** kan slå på och ändra sin egen sammanställning.
 
 Så fungerar utskicket:
 

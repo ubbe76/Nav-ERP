@@ -47,7 +47,6 @@ export default async function AlertsPage() {
         initial={alerts}
         digest={{ enabled: settings.alertDigest, kinds: settings.alertDigestKinds }}
         email={user.email}
-        readOnly={user.readOnly}
         digestTime={system?.alertDigestTime ?? null}
         smtpMissing={user.role === "admin" && system !== null && !system.smtpHost}
       />

@@ -176,3 +176,17 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
 
 // Icon for a plugin's page in a module hub (the pages are dynamic, not rows in HUB_ICONS).
 export const PLUGIN_PAGE_ICON = Puzzle;
+
+// Icon for any address inside Nav (Favoriter in the sidebar): the row's own
+// icon, else the icon of the row the address lies under (a card under its
+// register, /kunder/<id> under /kunder), a plugin page's icon, or undefined.
+// The query string never matters — a filtered list keeps its list's icon.
+export function hubIconFor(href: string): LucideIcon | undefined {
+  const path = href.split("?")[0]!;
+  if (HUB_ICONS[path]) return HUB_ICONS[path];
+  const parent = Object.keys(HUB_ICONS)
+    .filter((key) => path.startsWith(`${key}/`))
+    .sort((a, b) => b.length - a.length)[0];
+  if (parent) return HUB_ICONS[parent];
+  return path.startsWith("/tillagg/") ? PLUGIN_PAGE_ICON : undefined;
+}

@@ -1,8 +1,11 @@
 import {
   ALERT_KINDS,
   DEFAULT_LIST_PAGE_SIZE,
+  favoriteSchema,
   LIST_PAGE_SIZE_OPTIONS,
+  MAX_FAVORITES,
   type AlertKind,
+  type Favorite,
   type UpdateUserSettingsInput,
   type UserSettings,
 } from "@navet/shared";
@@ -16,6 +19,8 @@ const HIDE_ONBOARDING_KEY = "hide_onboarding";
 // kind keys; absent or "null" = every kind the user may see).
 const ALERT_DIGEST_KEY = "alert_digest";
 const ALERT_DIGEST_KINDS_KEY = "alert_digest_kinds";
+// Favoriter: a JSON array of { href, title }, in the order shown.
+const FAVORITES_KEY = "favorites";
 
 const LIST_PAGE_SIZE_VALUES: readonly number[] = LIST_PAGE_SIZE_OPTIONS;
 const KNOWN_ALERT_KINDS: ReadonlySet<string> = new Set(ALERT_KINDS);
@@ -40,6 +45,28 @@ export function decodeAlertDigestKinds(raw: string | undefined): AlertKind[] | n
   }
 }
 
+// A stored list is read entry by entry: anything that no longer passes the
+// schema is dropped (and a repeated href kept once) rather than failing the
+// whole settings read; unparseable = none.
+export function decodeFavorites(raw: string | undefined): Favorite[] {
+  if (raw === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    const favorites: Favorite[] = [];
+    for (const entry of parsed) {
+      const result = favoriteSchema.safeParse(entry);
+      if (!result.success || seen.has(result.data.href)) continue;
+      seen.add(result.data.href);
+      favorites.push(result.data);
+    }
+    return favorites.slice(0, MAX_FAVORITES);
+  } catch {
+    return [];
+  }
+}
+
 export function createUserSettingsService(repo: UserSettingsRepository) {
   // Typed view over the user_settings KV rows for one user — mirrors
   // system.service.ts's getSettings() pattern, just per-user instead of
@@ -57,6 +84,7 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
       alertDigest: byKey.get(ALERT_DIGEST_KEY) === "true",
       alertDigestKinds: decodeAlertDigestKinds(byKey.get(ALERT_DIGEST_KINDS_KEY)),
       theme: decodeUserTheme(byKey.get(USER_THEME_SETTING_KEY)),
+      favorites: decodeFavorites(byKey.get(FAVORITES_KEY)),
     };
   }
 
@@ -84,6 +112,9 @@ export function createUserSettingsService(repo: UserSettingsRepository) {
           ALERT_DIGEST_KINDS_KEY,
           input.alertDigestKinds === null ? "null" : JSON.stringify([...new Set(input.alertDigestKinds)])
         );
+      }
+      if (input.favorites !== undefined) {
+        await repo.upsert(userId, FAVORITES_KEY, JSON.stringify(input.favorites));
       }
       return getSettings(userId);
     },

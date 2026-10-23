@@ -149,13 +149,72 @@
   flex-shrink: 0;
 }
 
+/* A long favourite name ends in an ellipsis instead of widening the menu. */
 .label {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .item[data-active="true"] {
   background: var(--accent);
   color: var(--accent-text);
+  font-weight: 600;
+}
+
+/* Favoriter, above the modules: a quiet uppercase header (with Ändra) and a
+   rule underneath that separates the user's own list from the module list. */
+.favorites {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 6px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.groupAction {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  margin-right: -4px;
+  border-radius: var(--radius-control-sm);
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+.groupAction:hover {
+  text-decoration: underline;
+}
+
+.favoritesHint {
+  margin: 0;
+  padding: 0 12px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+/* The open page among the favourites: emphasised without the accent fill,
+   which stays the module's. */
+.item[aria-current="page"] {
+  color: var(--color-text-primary);
   font-weight: 600;
 }
 
@@ -199,6 +258,15 @@
     padding: 10px 0;
   }
   .sidebar[data-collapsed="true"] .label {
+    display: none;
+  }
+
+  /* Icons only: the favourites keep their icons, the header and hint go. */
+  .sidebar[data-collapsed="true"] .groupHeader,
+  .sidebar[data-collapsed="true"] .favoritesHint {
+    display: none;
+  }
+  .sidebar[data-collapsed="true"] .favorites:not(:has(.list)) {
     display: none;
   }
 

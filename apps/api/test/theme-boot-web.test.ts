@@ -27,7 +27,7 @@ describe("selectTheme", () => {
     expect(selectTheme(IDS, "egen-deadbeef", true, "dark", "dark")).toBe("light");
   });
 
-  it("a read-only account (GET /theme-boot answers userTheme null) gets the browser's choice", () => {
+  it("no choice saved on the user (userTheme null) ⇒ the browser's choice", () => {
     expect(selectTheme(IDS, "light", false, null, "dracula")).toBe("dracula");
   });
 });

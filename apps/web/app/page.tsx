@@ -14,7 +14,9 @@ import { OrdersCard } from "../components/dashboard/OrdersCard";
 import { StockActivityCard } from "../components/dashboard/StockActivityCard";
 import { OnboardingCard } from "../components/onboarding/OnboardingCard";
 import { ConfirmDialogHost } from "../components/ui/ConfirmDialogHost";
+import { FavoritesProvider } from "../components/FavoritesProvider";
 import { getCurrentUser, apiGet } from "../lib/api";
+import { loadFavorites } from "../lib/favorites";
 import type { AlertKind, AlertsResponse } from "../lib/alerts";
 import { satisfiesRule } from "../lib/permissions";
 import type {
@@ -45,6 +47,7 @@ export default async function OverviewPage() {
     balancesPage,
     recentTransactionsPage,
     alerts,
+    favorites,
   ] = await Promise.all([
       apiGet<Paged<PurchaseOrder>>(
         "/api/v1/purchase-orders?status=draft,confirmed,partially_received&limit=1000",
@@ -63,6 +66,8 @@ export default async function OverviewPage() {
       // Aviseringar feed both the flow strip's signals and "Att bevaka"; a
       // failing call must not take Översikten down.
       apiGet<AlertsResponse>("/api/v1/alerts", cookieHeader).catch((): AlertsResponse | null => null),
+      // The sidebar's Favoriter (null on failure — the group then stays hidden).
+      loadFavorites(cookieHeader),
     ]);
   // System → Kom igång: administrators see the setup checklist until it is
   // complete or hidden. Never lets a failing call take Översikten down, and
@@ -181,6 +186,7 @@ export default async function OverviewPage() {
   const todayLabel = new Date().toLocaleDateString("sv-SE", { weekday: "long", day: "numeric", month: "long" });
 
   return (
+    <FavoritesProvider initial={favorites}>
     <div className={styles.frame}>
       <Nav
         active="Översikt"
@@ -236,5 +242,6 @@ export default async function OverviewPage() {
         <ConfirmDialogHost />
       </main>
     </div>
+    </FavoritesProvider>
   );
 }

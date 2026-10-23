@@ -1,0 +1,4 @@
+/* A favourite page shows a filled star in the accent's text colour. */
+.toggle[aria-pressed="true"] {
+  color: var(--accent-fg);
+}
