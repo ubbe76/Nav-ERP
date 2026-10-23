@@ -35,6 +35,7 @@ import {
 } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { computeOcrNumber } from "../../system/service/ocr.js";
+import { pluginEvents } from "../../system/service/plugin-events.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
 import { computeOpenAmounts } from "./open-amounts.js";
 import { ShipmentNotBillableError } from "../service/sales.errors.js";
@@ -1015,6 +1016,8 @@ export function createInvoiceRepository(db: Db) {
             .returning();
 
           await recomputeOrderInvoiceStatus(tx, id);
+          // Tillägg: invoice.issued (customer and credit invoices alike).
+          await pluginEvents.emit(tx, { type: "invoice.issued", entityId: id, entityNumber: invoiceNumber });
           return { ok: true as const, invoice: posted! };
         });
       } catch (err) {

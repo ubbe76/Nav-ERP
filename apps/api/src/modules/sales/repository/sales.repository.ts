@@ -58,6 +58,7 @@ import {
   type UpdateSalesOrderRowInput,
 } from "@navet/shared";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
+import { pluginEvents } from "../../system/service/plugin-events.js";
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
@@ -315,12 +316,16 @@ export function createSalesRepository(db: Db) {
       // guard updateCustomer already applies below.
       const { discountPercent, ...rest } = input;
       const values = discountPercent === undefined ? rest : { ...rest, discountPercent: String(discountPercent) };
+      // Tillägg: customer.created commits with the customer.
       const insert = (customerNumber: string) =>
-        db
-          .insert(customers)
-          .values({ ...values, customerNumber })
-          .returning()
-          .then(([row]) => row!);
+        db.transaction(async (tx) => {
+          const [row] = await tx
+            .insert(customers)
+            .values({ ...values, customerNumber })
+            .returning();
+          await pluginEvents.emit(tx, { type: "customer.created", entityId: row!.id, entityNumber: row!.customerNumber });
+          return row!;
+        });
       return input.customerNumber !== undefined
         ? insert(input.customerNumber)
         : insertWithSeriesNumber(db, "customer", insert);
@@ -329,8 +334,11 @@ export function createSalesRepository(db: Db) {
     async updateCustomer(id: string, input: UpdateCustomerInput) {
       const { discountPercent, ...rest } = input;
       const set = discountPercent === undefined ? rest : { ...rest, discountPercent: String(discountPercent) };
-      const [row] = await db.update(customers).set(set).where(eq(customers.id, id)).returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const [row] = await tx.update(customers).set(set).where(eq(customers.id, id)).returning();
+        if (row) await pluginEvents.emit(tx, { type: "customer.updated", entityId: row.id, entityNumber: row.customerNumber });
+        return row ?? null;
+      });
     },
 
     // Fasta leveransdagar: the system defaults + full-day holidays in the
@@ -654,6 +662,14 @@ export function createSalesRepository(db: Db) {
           )
           .returning();
 
+        // Tillägg: a quote (quote.created) or Ny kundorder, which is born
+        // confirmed (sales_order.confirmed).
+        await pluginEvents.emit(tx, {
+          type: input.confirm ? "sales_order.confirmed" : "quote.created",
+          entityId: order!.id,
+          entityNumber: order!.orderNumber,
+        });
+
         return { order: withDocumentKind(order!), rows };
       });
     },
@@ -824,6 +840,15 @@ export function createSalesRepository(db: Db) {
           )
           .where(eq(salesOrders.id, id))
           .returning();
+        // Tillägg: every way from a quote to an order status runs through
+        // here (Bekräfta, the order confirmation mail, a manual status), and
+        // so does every cancellation.
+        if (row && current.status === "quote" && ORDER_STATUSES.includes(status)) {
+          await pluginEvents.emit(tx, { type: "sales_order.confirmed", entityId: row.id, entityNumber: row.orderNumber });
+        }
+        if (row && status === "cancelled" && current.status !== "cancelled") {
+          await pluginEvents.emit(tx, { type: "sales_order.cancelled", entityId: row.id, entityNumber: row.orderNumber });
+        }
         return row ? withDocumentKind(row) : null;
       });
     },
@@ -1265,6 +1290,14 @@ export function createSalesRepository(db: Db) {
               .set({ status: orderStatus, updatedAt: new Date() })
               .where(eq(salesOrders.id, orderId));
           }
+
+          // Tillägg: one event per följesedel, on the order.
+          await pluginEvents.emit(tx, {
+            type: "sales_order.delivered",
+            entityId: orderId,
+            entityNumber: order.orderNumber,
+            data: { deliveryId: delivery!.id, deliveryNumber },
+          });
 
           return { ok: true, deliveryId: delivery!.id, deliveryNumber, orderStatus, rows: updatedRows };
         });

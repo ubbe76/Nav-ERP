@@ -28,6 +28,7 @@ import {
 } from "@navet/db";
 import { applyPaymentTolerance, ilikePattern, round2, type ListOpenInvoicesQuery, type ListPaymentsQuery } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+import { pluginEvents } from "../../system/service/plugin-events.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
 // Type-only (erased at compile time), so declaring the poster interface at the
 // consuming service does not create a runtime import cycle — same seam as
@@ -579,7 +580,7 @@ export function createPaymentRepository(db: Db) {
       const settled = writes.filter((write) => write.settles);
       if (settled.length > 0) {
         const paidAt = new Date();
-        await tx
+        const paid = await tx
           .update(invoices)
           .set({ status: "paid", paidAt, updatedAt: paidAt })
           .where(
@@ -590,7 +591,12 @@ export function createPaymentRepository(db: Db) {
               ),
               eq(invoices.status, "issued")
             )
-          );
+          )
+          .returning({ id: invoices.id, invoiceNumber: invoices.invoiceNumber });
+        // Tillägg: invoice.paid for each invoice this registration settled.
+        for (const invoice of paid) {
+          await pluginEvents.emit(tx, { type: "invoice.paid", entityId: invoice.id, entityNumber: invoice.invoiceNumber });
+        }
       }
 
       return { paymentId: payment!.id };

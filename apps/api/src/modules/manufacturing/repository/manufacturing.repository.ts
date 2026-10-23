@@ -51,6 +51,7 @@ import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js"
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
 import { lockProductionPlan } from "../../planning/repository/plan-lock.js";
+import { pluginEvents } from "../../system/service/plugin-events.js";
 // Regel 10 — a leaf that imports only the schema, so no module cycle.
 import { closeStampSessionsInTx } from "../../timereport/repository/stamp-close.js";
 // Materialbrist vid rapportering — a leaf like count-guard, called inside
@@ -570,6 +571,10 @@ async function reportOperationQuantitiesInTx(
     .set({ status: completed ? "done" : "in_progress", updatedAt: new Date() })
     .where(eq(manufacturingOrders.id, order.id))
     .returning();
+  // Tillägg: the last operation's report made the order done.
+  if (completed) {
+    await pluginEvents.emit(tx, { type: "manufacturing_order.completed", entityId: order.id, entityNumber: order.orderNumber });
+  }
   return {
     ok: true,
     operation: updatedOperation!,
@@ -1336,6 +1341,8 @@ export function createManufacturingRepository(db: Db) {
       // transaction (the horizon only adds a warning, never a refusal).
       const planWarnings = plan ? await plan(tx, row!.id) : [];
       if (linkedSalesOrder) await linkedSalesOrder.markInProduction(tx, linkedSalesOrder.salesOrderId);
+      // Tillägg: every way a TO is created ends here, in its transaction.
+      await pluginEvents.emit(tx, { type: "manufacturing_order.created", entityId: row!.id, entityNumber: row!.orderNumber });
       return { ok: true, order: released.order, warnings: [...released.warnings, ...planWarnings] };
     },
 
@@ -1825,6 +1832,8 @@ export function createManufacturingRepository(db: Db) {
           .where(eq(manufacturingOrders.id, moId))
           .returning();
         await autoCloseStamps(tx, { orderId: moId }, moId, input.createdBy);
+        // Tillägg: Slutför order.
+        await pluginEvents.emit(tx, { type: "manufacturing_order.completed", entityId: moId, entityNumber: order.orderNumber });
 
         await insertReport(
           tx,

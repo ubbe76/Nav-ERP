@@ -56,6 +56,7 @@ import {
   type UpdateSupplierInput,
 } from "@navet/shared";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
+import { pluginEvents } from "../../system/service/plugin-events.js";
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
@@ -167,20 +168,27 @@ export function createPurchaseRepository(db: Db) {
     // taken number instead of failing — see number-series.ts's
     // insertWithSeriesNumber for why and how.
     async createSupplier(input: CreateSupplierInput) {
+      // Tillägg: supplier.created commits with the supplier.
       const insert = (supplierNumber: string) =>
-        db
-          .insert(suppliers)
-          .values({ ...input, supplierNumber })
-          .returning()
-          .then(([row]) => row!);
+        db.transaction(async (tx) => {
+          const [row] = await tx
+            .insert(suppliers)
+            .values({ ...input, supplierNumber })
+            .returning();
+          await pluginEvents.emit(tx, { type: "supplier.created", entityId: row!.id, entityNumber: row!.supplierNumber });
+          return row!;
+        });
       return input.supplierNumber !== undefined
         ? insert(input.supplierNumber)
         : insertWithSeriesNumber(db, "supplier", insert);
     },
 
     async updateSupplier(id: string, input: UpdateSupplierInput) {
-      const [row] = await db.update(suppliers).set(input).where(eq(suppliers.id, id)).returning();
-      return row ?? null;
+      return db.transaction(async (tx) => {
+        const [row] = await tx.update(suppliers).set(input).where(eq(suppliers.id, id)).returning();
+        if (row) await pluginEvents.emit(tx, { type: "supplier.updated", entityId: row.id, entityNumber: row.supplierNumber });
+        return row ?? null;
+      });
     },
 
     async findSupplierById(id: string) {
@@ -636,6 +644,8 @@ export function createPurchaseRepository(db: Db) {
           .set({ status: "ordered", purchaseOrderId: order!.id, updatedAt: new Date() })
           .where(eq(inquiries.id, inquiryId));
 
+        // Tillägg: a purchase order made from an inquiry is created too.
+        await pluginEvents.emit(tx, { type: "purchase_order.created", entityId: order!.id, entityNumber: order!.orderNumber });
         return order!;
       });
     },
@@ -662,6 +672,8 @@ export function createPurchaseRepository(db: Db) {
             createdBy,
           })
           .returning();
+        // Tillägg: purchase_order.created, with the order.
+        await pluginEvents.emit(tx, { type: "purchase_order.created", entityId: row!.id, entityNumber: row!.orderNumber });
         return row!;
       });
     },
@@ -1038,6 +1050,13 @@ export function createPurchaseRepository(db: Db) {
           .returning({ id: purchaseReceipts.id });
 
         const orderStatus = await recomputeReceiptStatus(tx, orderId);
+        // Tillägg: one event per received row, on the order.
+        await pluginEvents.emit(tx, {
+          type: "purchase_order.received",
+          entityId: orderId,
+          entityNumber: order.orderNumber,
+          data: { receiptId: receipt!.id, rowId },
+        });
         return { ok: true, row: updatedRow!, orderStatus, receiptId: receipt!.id };
       });
     },

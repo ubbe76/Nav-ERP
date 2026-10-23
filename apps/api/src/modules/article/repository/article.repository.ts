@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { pluginEvents } from "../../system/service/plugin-events.js";
 import {
   claimArticleNumber,
   findArticleNumberSeries,
@@ -134,6 +135,52 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
   return row!;
 }
 
+// The article UPDATE and its article.updated event (Tillägg), in the
+// caller's transaction.
+async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleInput): Promise<typeof articles.$inferSelect | null> {
+  // numeric(…) columns take strings — convert weight/dimensions/qty-per-kolli
+  // (null clears), salesPrice (null clears) and vatRate. packageTypeId
+  // (uuid) passes through in ...rest.
+  const {
+    weight,
+    length,
+    width,
+    height,
+    quantityPerPackage,
+    salesPrice,
+    vatRate,
+    reorderPoint,
+    orderQuantity,
+    rounding,
+    palletSpaces,
+    loadingMeters,
+    ...rest
+  } = input;
+  const numeric = (v: number | null | undefined) => (v === undefined ? undefined : v === null ? null : String(v));
+  const [row] = await dbc
+    .update(articles)
+    .set({
+      ...rest,
+      weight: numeric(weight),
+      length: numeric(length),
+      width: numeric(width),
+      height: numeric(height),
+      quantityPerPackage: numeric(quantityPerPackage),
+      reorderPoint: numeric(reorderPoint),
+      orderQuantity: numeric(orderQuantity),
+      rounding: numeric(rounding),
+      palletSpaces: numeric(palletSpaces),
+      loadingMeters: numeric(loadingMeters),
+      salesPrice: numeric(salesPrice),
+      vatRate: vatRate !== undefined ? String(vatRate) : undefined,
+      updatedAt: new Date(),
+    })
+    .where(eq(articles.id, id))
+    .returning();
+  if (row) await pluginEvents.emit(dbc, { type: "article.updated", entityId: row.id, entityNumber: row.articleNumber });
+  return row ?? null;
+}
+
 export function createArticleRepository(db: Db) {
   return {
     // New articles get the "***" fallback location unless one is chosen.
@@ -148,7 +195,14 @@ export function createArticleRepository(db: Db) {
     // Returns null when the copy source no longer exists.
     async create(input: InsertArticleInput) {
       return db.transaction(
-        (tx) => insertArticle(tx, input),
+        async (tx) => {
+          const created = await insertArticle(tx, input);
+          // Tillägg: article.created, in the article's own transaction.
+          if (created) {
+            await pluginEvents.emit(tx, { type: "article.created", entityId: created.id, entityNumber: created.articleNumber });
+          }
+          return created;
+        },
         input.copyFrom ? { isolationLevel: "repeatable read" } : undefined
       );
     },
@@ -174,48 +228,11 @@ export function createArticleRepository(db: Db) {
     },
 
     // `ex` lets updateArticle write inside the transaction that holds the
-    // article row (lockArticle); every other caller leaves it at db.
-    async update(id: string, input: UpdateArticleInput, ex: Db | Tx = db) {
-      // numeric(…) columns take strings — convert weight/dimensions/qty-per-kolli
-      // (null clears), salesPrice (null clears) and vatRate. packageTypeId
-      // (uuid) passes through in ...rest.
-      const {
-        weight,
-        length,
-        width,
-        height,
-        quantityPerPackage,
-        salesPrice,
-        vatRate,
-        reorderPoint,
-        orderQuantity,
-        rounding,
-        palletSpaces,
-        loadingMeters,
-        ...rest
-      } = input;
-      const numeric = (v: number | null | undefined) => (v === undefined ? undefined : v === null ? null : String(v));
-      const [row] = await ex
-        .update(articles)
-        .set({
-          ...rest,
-          weight: numeric(weight),
-          length: numeric(length),
-          width: numeric(width),
-          height: numeric(height),
-          quantityPerPackage: numeric(quantityPerPackage),
-          reorderPoint: numeric(reorderPoint),
-          orderQuantity: numeric(orderQuantity),
-          rounding: numeric(rounding),
-          palletSpaces: numeric(palletSpaces),
-          loadingMeters: numeric(loadingMeters),
-          salesPrice: numeric(salesPrice),
-          vatRate: vatRate !== undefined ? String(vatRate) : undefined,
-          updatedAt: new Date(),
-        })
-        .where(eq(articles.id, id))
-        .returning();
-      return row ?? null;
+    // article row (lockArticle); every other caller leaves it at db, and the
+    // write then gets a transaction of its own — the change and its
+    // article.updated event (Tillägg) commit together.
+    async update(id: string, input: UpdateArticleInput, ex: Db | Tx = db): Promise<typeof articles.$inferSelect | null> {
+      return ex === db ? db.transaction((tx) => updateArticleRow(tx, id, input)) : updateArticleRow(ex, id, input);
     },
 
     // Wrapped in a transaction: the "did it actually change" comparison must
@@ -240,6 +257,7 @@ export function createArticleRepository(db: Db) {
         if (row && changed) {
           await recordStandardCostHistory(tx, [{ articleId: id, cost: standardCost }]);
         }
+        if (row) await pluginEvents.emit(tx, { type: "article.updated", entityId: row.id, entityNumber: row.articleNumber });
         return row ?? null;
       });
     },
