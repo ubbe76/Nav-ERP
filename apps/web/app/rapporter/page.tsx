@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../components/AppShell";
+import { withPluginPages } from "../../lib/pluginHub";
 import { HubSections } from "../../components/ui/HubSections";
 import { RAPPORTER_SECTIONS, sectionsForUser } from "../../lib/moduleNav";
 import { HelpLink } from "../../components/ui/HelpLink";
@@ -19,7 +20,7 @@ export default async function RapporterPage() {
     );
   }
 
-  const sections = sectionsForUser(RAPPORTER_SECTIONS, user);
+  const sections = await withPluginPages(sectionsForUser(RAPPORTER_SECTIONS, user), "rapporter", cookieHeader);
 
   return (
     <AppShell active="Rapporter">

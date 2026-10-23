@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../components/AppShell";
 import { HelpLink } from "../../components/ui/HelpLink";
+import { withPluginPages } from "../../lib/pluginHub";
 import { HubSections } from "../../components/ui/HubSections";
 import { EKONOMI_SECTIONS, sectionsForUser } from "../../lib/moduleNav";
 import { getCurrentUser } from "../../lib/api";
@@ -24,7 +25,7 @@ export default async function EconomyPage() {
     );
   }
 
-  const sections = sectionsForUser(EKONOMI_SECTIONS, user);
+  const sections = await withPluginPages(sectionsForUser(EKONOMI_SECTIONS, user), "ekonomi", cookieHeader);
 
   return (
     <AppShell active="Ekonomi">

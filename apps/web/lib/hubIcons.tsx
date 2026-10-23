@@ -55,6 +55,7 @@ import {
   Percent,
   Palette,
   Plug,
+  Puzzle,
   ReceiptText,
   Route,
   Scale,
@@ -159,6 +160,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/system/integrationer": Plug,
   "/system/frakt": Container,
   "/system/e-faktura": FileCheck,
+  "/system/tillagg": Puzzle,
   "/system/kom-igang": ListChecks,
   "/system/foretagsinfo": Building2,
   "/system/bank": CreditCard,
@@ -171,3 +173,6 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/system/sakerhetskopiering": DatabaseBackup,
   "/system/handelselogg": History,
 };
+
+// Icon for a plugin's page in a module hub (the pages are dynamic, not rows in HUB_ICONS).
+export const PLUGIN_PAGE_ICON = Puzzle;

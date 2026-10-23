@@ -1,0 +1,139 @@
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-bottom: var(--space-6);
+}
+
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.factLabel {
+  min-width: 120px;
+  color: var(--color-text-label);
+}
+
+.factValue {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px;
+}
+
+.check {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.secret {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.secretValue {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-input-surface);
+  color: var(--color-text-primary);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.diffAdd {
+  color: var(--status-running-text);
+}
+
+.diffRemove {
+  color: var(--status-stopped-text);
+}
+
+.marks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mark {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--status-delayed-bg);
+  color: var(--status-delayed-text);
+}
+
+.name {
+  font-weight: 600;
+}
+
+.mutedLine {
+  color: var(--color-text-secondary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.hidden {
+  display: none;
+}

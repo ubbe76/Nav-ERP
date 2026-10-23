@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
 import { Modal } from "../ui/Modal";
@@ -51,6 +52,17 @@ export function UsersPageClient({ users, groups, currentUserId }: { users: Admin
         renderCell={(user, key) => {
           switch (key) {
             case "name":
+              // A plugin's technical user is managed under System → Tillägg.
+              if (user.kind === "plugin") {
+                return (
+                  <span>
+                    <strong>{user.name}</strong>{" "}
+                    <Link href="/system/tillagg" style={{ fontSize: 12.5, color: "var(--accent-fg)" }}>
+                      Tillägg
+                    </Link>
+                  </span>
+                );
+              }
               return (
                 <button
                   type="button"
@@ -63,8 +75,10 @@ export function UsersPageClient({ users, groups, currentUserId }: { users: Admin
             case "email":
               return user.email;
             case "role":
+              if (user.kind === "plugin") return "Tillägg";
               return user.readOnly ? `${ROLE_LABELS[user.role]} · Endast läsning` : ROLE_LABELS[user.role];
             case "group":
+              if (user.kind === "plugin") return user.permissionGroupName ?? "—";
               return user.role === "admin" ? "Alla (administratör)" : (user.permissionGroupName ?? "Ingen åtkomst");
             case "active":
               return <StatusPill status={user.active ? "done" : "stopped"} label={user.active ? "Aktiv" : "Avstängd"} />;

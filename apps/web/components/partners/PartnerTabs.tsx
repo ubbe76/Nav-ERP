@@ -21,6 +21,7 @@ import type {
   Supplier,
   SupplierDeliveryAddress,
 } from "../../lib/types";
+import { PluginTabContent, pluginTabId, usePluginTabs } from "../plugins/PluginTabs";
 import styles from "./PartnerTabs.module.css";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
@@ -90,8 +91,11 @@ export function PartnerTabs({
   articleGroups,
   deliveryDayDefaults = null,
 }: PartnerTabsProps) {
-  const [activeTab, setActiveTab] = useState<Tab>("Allmänt");
+  const [activeTab, setActiveTab] = useState<string>("Allmänt");
   const isCustomer = kind === "customer";
+  // Tillägg add their own tabs last.
+  const pluginTabs = usePluginTabs(isCustomer ? "customer" : "supplier");
+  const activePluginTab = pluginTabs.find((t) => pluginTabId(t) === activeTab);
   const showAddresses = deliveryAddresses !== undefined;
   const tabs: Tab[] = [
     "Allmänt",
@@ -113,6 +117,18 @@ export function PartnerTabs({
             onClick={() => setActiveTab(tab)}
           >
             {tab}
+          </button>
+        ))}
+        {pluginTabs.map((tab) => (
+          <button
+            key={pluginTabId(tab)}
+            type="button"
+            className={styles.tab}
+            data-active={pluginTabId(tab) === activeTab}
+            title={`Tillägget ${tab.pluginName}`}
+            onClick={() => setActiveTab(pluginTabId(tab))}
+          >
+            {tab.title}
           </button>
         ))}
       </div>
@@ -148,6 +164,7 @@ export function PartnerTabs({
           articleGroups={articleGroups ?? []}
         />
       )}
+      {activePluginTab && <PluginTabContent key={pluginTabId(activePluginTab)} tab={activePluginTab} entityId={partner.id} />}
     </div>
   );
 }

@@ -2701,6 +2701,8 @@ export interface AdminUser {
   permissionGroupName: string | null;
   // Endast läsning (never on an administrator).
   readOnly: boolean;
+  // "plugin" = a Tillägg's technical user (managed under System → Tillägg).
+  kind?: "person" | "plugin";
 }
 
 export interface PermissionGroup {

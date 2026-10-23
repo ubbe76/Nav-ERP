@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../components/AppShell";
 import { HelpLink } from "../../components/ui/HelpLink";
+import { withPluginPages } from "../../lib/pluginHub";
 import { HubSections } from "../../components/ui/HubSections";
 import { TILLVERKNING_SECTIONS, sectionsForUser } from "../../lib/moduleNav";
 import { getCurrentUser } from "../../lib/api";
@@ -16,7 +17,7 @@ export default async function ManufacturingPage() {
   const user = await getCurrentUser(cookieHeader);
   // AppShell redirects an unauthenticated visitor to /login before this
   // renders; "user" as the fallback role is simply the least-privileged one.
-  const sections = sectionsForUser(TILLVERKNING_SECTIONS, user ?? { role: "user", permissions: [] });
+  const sections = await withPluginPages(sectionsForUser(TILLVERKNING_SECTIONS, user ?? { role: "user", permissions: [] }), "tillverkning", cookieHeader);
 
   return (
     <AppShell active="Tillverkning">

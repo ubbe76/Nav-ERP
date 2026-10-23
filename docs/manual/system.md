@@ -18,7 +18,7 @@
 
 ## Användare
 
-**System → Användare** hanterar inloggningskonton. Det första kontot skapas via `/register` (se [Komma igång](/hjalp/komma-igang)); därefter skapar en administratör nya konton här med namn, e-post, lösenord och roll (**Administratör** eller **Användare**) och **Behörighetsgrupp** (se [Behörighetsgrupper](#behorighetsgrupper)). Endast administratörer ser System-menyn. Listans kolumn **Behörighetsgrupp** visar gruppens namn, **Alla (administratör)** för administratörer och **Ingen åtkomst** för den som saknar grupp.
+**System → Användare** hanterar inloggningskonton. Det första kontot skapas via `/register` (se [Komma igång](/hjalp/komma-igang)); därefter skapar en administratör nya konton här med namn, e-post, lösenord och roll (**Administratör** eller **Användare**) och **Behörighetsgrupp** (se [Behörighetsgrupper](#behorighetsgrupper)). Endast administratörer ser System-menyn. Ett tilläggs tekniska användare syns också i listan, märkt **Tillägg**; den kan inte redigeras här utan hanteras under [Tillägg](/hjalp/tillagg). Listans kolumn **Behörighetsgrupp** visar gruppens namn, **Alla (administratör)** för administratörer och **Ingen åtkomst** för den som saknar grupp.
 
 Att stänga av ett konto (status **Avstängd**) räcker för de flesta fall — kontot kan inte logga in men syns kvar i listan. För att helt bli av med ett konto finns knappen **Ta bort användare** längst ned när man redigerar en användare (dold för det egna kontot — man kan inte ta bort sig själv). Ett bekräftelsemeddelande visas: "Ta bort användaren \<namn\>? Kontot försvinner ur listan och kan inte logga in, men historiken (ordrar, verifikat m.m.) behåller sin signatur." Raderingen är mjuk: kontot försvinner ur listan och kan inte längre logga in, men allt kontot en gång skapat eller attesterat behåller sin signatur, och e-postadressen kan återanvändas för ett nytt konto. Den sista aktiva administratören kan varken stängas av eller tas bort.
 
@@ -153,6 +153,8 @@ Exempeldata kan bara skapas på en tom installation: så fort det finns artiklar
 ## Integrationer
 
 **System → Integrationer** hanterar **API-klienter** för externa system, t.ex. en produktkonfigurator som skapar offerter programmatiskt. Skapa en klient så genereras klient-ID och en **hemlighet som bara visas en gång** — kopiera den direkt. Klienten autentiserar med OAuth2 client credentials mot API:t.
+
+Program som ska ligga *inne i* Nav — med egna sidor, flikar på korten och händelser — installeras i stället som [tillägg](/hjalp/tillagg).
 
 ### Rättigheter och kund
 

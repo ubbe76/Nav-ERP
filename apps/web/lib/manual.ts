@@ -136,6 +136,13 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
     group: "System",
   },
   {
+    slug: "tillagg",
+    title: "Tillägg",
+    file: "tillagg.md",
+    description: "Installera externa tillägg, rättigheter, nycklar, händelser och leveranser, sidor och flikar samt utvecklarsidan.",
+    group: "System",
+  },
+  {
     slug: "drift-utveckling",
     title: "Drift & utveckling",
     file: "drift-utveckling.md",

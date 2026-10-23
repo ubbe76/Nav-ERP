@@ -615,6 +615,11 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
         title: "E-faktura",
         description: "B2Brouter-koppling för Peppol — nyckel, miljö, testa anslutningen och se vilka företagsuppgifter som skickas.",
       },
+      {
+        href: "/system/tillagg",
+        title: "Tillägg",
+        description: "Installera externa program som läser Nav via API:t, tar emot händelser och visar egna sidor och flikar.",
+      },
     ],
   },
   {

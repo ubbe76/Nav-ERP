@@ -20,6 +20,7 @@ import { KalkylTab } from "./KalkylTab";
 import { KonfiguratorTab } from "./KonfiguratorTab";
 import { FilerTab } from "./FilerTab";
 import { RevisionerTab } from "./RevisionerTab";
+import { PluginTabContent, pluginTabId, usePluginTabs } from "../plugins/PluginTabs";
 import styles from "./ArticleTabs.module.css";
 
 type Tab = "Allmänt" | "Konfigurator" | "Beredning" | "Inköp" | "Lager" | "Kalkyl" | "Revisioner" | "Filer";
@@ -61,7 +62,10 @@ export function ArticleTabs({
   groups,
 }: ArticleTabsProps) {
   const tabs = tabsForType(article.type);
-  const [activeTab, setActiveTab] = useState<Tab>("Allmänt");
+  const [activeTab, setActiveTab] = useState<string>("Allmänt");
+  // Tillägg add their own tabs last.
+  const pluginTabs = usePluginTabs("article");
+  const activePluginTab = pluginTabs.find((t) => pluginTabId(t) === activeTab);
 
   return (
     <div>
@@ -75,6 +79,18 @@ export function ArticleTabs({
             onClick={() => setActiveTab(tab)}
           >
             {tab}
+          </button>
+        ))}
+        {pluginTabs.map((tab) => (
+          <button
+            key={pluginTabId(tab)}
+            type="button"
+            className={styles.tab}
+            data-active={pluginTabId(tab) === activeTab}
+            title={`Tillägget ${tab.pluginName}`}
+            onClick={() => setActiveTab(pluginTabId(tab))}
+          >
+            {tab.title}
           </button>
         ))}
       </div>
@@ -98,6 +114,7 @@ export function ArticleTabs({
       )}
       {activeTab === "Revisioner" && <RevisionerTab articleId={article.id} />}
       {activeTab === "Filer" && <FilerTab articleId={article.id} />}
+      {activePluginTab && <PluginTabContent key={pluginTabId(activePluginTab)} tab={activePluginTab} entityId={article.id} />}
     </div>
   );
 }

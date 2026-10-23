@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../components/AppShell";
 import { HelpLink } from "../../components/ui/HelpLink";
+import { withPluginPages } from "../../lib/pluginHub";
 import { HubSections } from "../../components/ui/HubSections";
 import { LAGER_SECTIONS, sectionsForUser } from "../../lib/moduleNav";
 import { getCurrentUser } from "../../lib/api";
@@ -16,7 +17,7 @@ export default async function StockPage() {
   // to a page that just answers "Endast administratörer …".
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const user = await getCurrentUser(cookieHeader);
-  const sections = sectionsForUser(LAGER_SECTIONS, user ?? { role: "user", permissions: [] });
+  const sections = await withPluginPages(sectionsForUser(LAGER_SECTIONS, user ?? { role: "user", permissions: [] }), "lager", cookieHeader);
 
   return (
     <AppShell active="Lager">

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { HUB_ICONS } from "../../lib/hubIcons";
+import { HUB_ICONS, PLUGIN_PAGE_ICON } from "../../lib/hubIcons";
 import styles from "./HubSections.module.css";
 
 export interface HubSection {
@@ -19,7 +19,8 @@ export function HubSections({ sections, icons = true }: { sections: HubSection[]
           <h2 className={styles.groupTitle}>{section.title}</h2>
           <ul className={styles.list}>
             {section.items.map((item) => {
-              const Icon = icons ? HUB_ICONS[item.href] : undefined;
+              // Tillägg pages (/tillagg/<plugin>/<page>) are not in the static table.
+              const Icon = icons ? (HUB_ICONS[item.href] ?? (item.href.startsWith("/tillagg/") ? PLUGIN_PAGE_ICON : undefined)) : undefined;
               return (
                 <li key={item.href}>
                   <Link href={item.href} className={Icon ? `${styles.row} ${styles.rowWithIcon}` : styles.row}>
