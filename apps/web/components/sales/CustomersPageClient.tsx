@@ -27,7 +27,7 @@ export function CustomersPageClient({ customers, pageSize }: { customers: Paged<
         </div>
         <div className={shellStyles.topbarActions}>
           <Link href="/forsaljning/ordrar" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Säljordrar
+            Kundordrar
           </Link>
           <Link href="/kunder/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Importera
