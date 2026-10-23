@@ -87,3 +87,50 @@
   color: var(--color-text-primary);
   cursor: pointer;
 }
+
+/* Schema tab, Kommande 4 veckor: date | schedule | source. In a narrow card
+   (a phone, or beside the side menu) the outer columns would leave the
+   schedule a few pixels wide, so the row stacks: date and source on top, the
+   schedule on its own line below. Measured on the list, not the viewport. */
+.calendarList {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  container-type: inline-size;
+}
+
+.calendarRow {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) 160px;
+  grid-template-areas: "date schedule source";
+  gap: 8px;
+  align-items: baseline;
+}
+.calendarDate {
+  grid-area: date;
+}
+.calendarSchedule {
+  grid-area: schedule;
+  overflow-wrap: anywhere;
+}
+.calendarSource {
+  grid-area: source;
+}
+
+@container (max-width: 560px) {
+  .calendarRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "date source"
+      "schedule schedule";
+    gap: 2px 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--color-divider);
+  }
+  .calendarRow:last-child {
+    border-bottom: none;
+  }
+  .calendarSource {
+    text-align: right;
+  }
+}

@@ -656,31 +656,18 @@ function SchemaTab({
       <Card>
         <strong>Kommande 4 veckor</strong>
         <FormHint>Så här löses schemat upp per dag, med kalenderns avvikelser och helgdagar inräknade.</FormHint>
-        <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+        <div className={styles.calendarList}>
           {calendar.map((day) => (
-            <div
-              key={day.date}
-              style={{
-                display: "grid",
-                // minmax caps: keeps the desktop look (up to 150px/160px)
-                // but lets the outer columns shrink instead of forcing a
-                // fixed 326px+gap floor that overflowed on narrow viewports.
-                gridTemplateColumns: "minmax(84px,150px) minmax(0,1fr) minmax(96px,160px)",
-                gap: 8,
-                alignItems: "baseline",
-              }}
-            >
-              <span className="num">
+            <div key={day.date} className={styles.calendarRow}>
+              <span className={`num ${styles.calendarDate}`}>
                 {WEEKDAY_SHORT[day.weekday - 1]} {day.date}
               </span>
-              <span>
+              <span className={styles.calendarSchedule}>
                 {day.daySchedule
                   ? `${day.daySchedule.code} · ${day.daySchedule.name} (${day.daySchedule.startTime}–${day.daySchedule.endTime}, ${formatHours(day.daySchedule.netMinutes)})`
                   : "Ledig"}
               </span>
-              <FormHint>
-                {sourceLabel(day)}
-              </FormHint>
+              <FormHint className={styles.calendarSource}>{sourceLabel(day)}</FormHint>
             </div>
           ))}
         </div>
