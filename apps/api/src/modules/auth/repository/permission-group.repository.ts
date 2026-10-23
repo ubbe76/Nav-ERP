@@ -1,5 +1,5 @@
 import { and, asc, count, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { permissionGroups, users, type Db } from "@navet/db";
+import { permissionGroups, plugins, users, type Db } from "@navet/db";
 
 export function createPermissionGroupRepository(db: Db) {
   // userCount: live accounts only — a soft-deleted user can't log in, so it
@@ -20,6 +20,9 @@ export function createPermissionGroupRepository(db: Db) {
           name: permissionGroups.name,
           permissions: permissionGroups.permissions,
           userCount: liveUserCount,
+          // Tillägg: the plugin that owns the group (its technical user's
+          // group), null for an ordinary group.
+          pluginId: sql<string | null>`(select p.id from ${plugins} p where p.permission_group_id = "permission_groups"."id")`,
         })
         .from(permissionGroups)
         .orderBy(asc(permissionGroups.code));
@@ -42,6 +45,11 @@ export function createPermissionGroupRepository(db: Db) {
         .where(eq(permissionGroups.id, id))
         .returning();
       return row ?? null;
+    },
+
+    async ownedByPlugin(id: string) {
+      const [row] = await db.select({ id: plugins.id }).from(plugins).where(eq(plugins.permissionGroupId, id));
+      return row !== undefined;
     },
 
     async liveUsers(id: string) {

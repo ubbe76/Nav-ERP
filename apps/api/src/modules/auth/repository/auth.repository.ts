@@ -1,5 +1,5 @@
 import { and, asc, eq, getTableColumns, isNull } from "drizzle-orm";
-import { permissionGroups, userSettings, users, type Db } from "@navet/db";
+import { permissionGroups, plugins, userSettings, users, type Db } from "@navet/db";
 import type { UserRole } from "@navet/shared";
 
 // Every user read carries the group's raw permission list (expanded in the
@@ -53,6 +53,22 @@ export function createAuthRepository(db: Db) {
         .leftJoin(permissionGroups, eq(users.permissionGroupId, permissionGroups.id))
         .where(eq(users.id, id));
       return row ?? null;
+    },
+
+    // Tillägg: the technical user behind an API key, with its plugin.
+    async findByPluginKeyHash(hash: string) {
+      const [row] = await db
+        .select({ ...userWithGroup, pluginId: plugins.id, pluginKey: plugins.key, pluginStatus: plugins.status })
+        .from(plugins)
+        .innerJoin(users, eq(users.id, plugins.userId))
+        .leftJoin(permissionGroups, eq(users.permissionGroupId, permissionGroups.id))
+        .where(eq(plugins.apiKeyHash, hash));
+      return row ?? null;
+    },
+
+    async groupOwnedByPlugin(id: string) {
+      const [row] = await db.select({ id: plugins.id }).from(plugins).where(eq(plugins.permissionGroupId, id));
+      return row !== undefined;
     },
 
     async groupExists(id: string) {

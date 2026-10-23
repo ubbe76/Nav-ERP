@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import type { CreateUserInput, LoginInput, RegisterInput, UpdateUserInput, UserRole } from "@navet/shared";
+import type { CreateUserInput, LoginInput, RegisterInput, UpdateUserInput, UserKind, UserRole } from "@navet/shared";
 import { effectivePermissions, type Permission } from "@navet/shared";
 import type { AuthRepository } from "../repository/auth.repository.js";
 // G1: append-only audit trail. entityId is the affected user's email rather
@@ -85,6 +86,24 @@ export class ReadOnlyAdminError extends Error {
   }
 }
 
+// Tillägg: a plugin's technical user is managed under System → Tillägg —
+// never edited or deleted through the user register.
+export class PluginUserManagedError extends Error {
+  constructor() {
+    super("Tilläggets användare hanteras under System → Tillägg.");
+    this.name = "PluginUserManagedError";
+  }
+}
+
+// Tillägg: a plugin's permission group belongs to that plugin alone — no
+// person is placed in it, and it goes only with the plugin.
+export class PermissionGroupOwnedByPluginError extends Error {
+  constructor() {
+    super("Behörighetsgruppen hör till ett tillägg och ändras under System → Tillägg.");
+    this.name = "PermissionGroupOwnedByPluginError";
+  }
+}
+
 export interface AuthTokenPayload {
   sub: string;
   role: UserRole;
@@ -100,6 +119,15 @@ export interface PublicUser {
   permissions: Permission[];
   // Endast läsning: every write is refused (requireAuth's readOnlyGuard).
   readOnly: boolean;
+  // Tillägg: "plugin" = an installed plugin's technical user, authenticated
+  // by the plugin's API key (never a session).
+  kind: UserKind;
+}
+
+// The plugin behind an API-key request (req.plugin).
+export interface RequestPlugin {
+  id: string;
+  key: string;
 }
 
 type UserRow = {
@@ -108,6 +136,7 @@ type UserRow = {
   name: string;
   role: UserRole;
   readOnly: boolean;
+  kind: UserKind;
   groupPermissions: string[] | null;
 };
 
@@ -119,7 +148,12 @@ function toPublicUser(row: UserRow): PublicUser {
     role: row.role,
     permissions: effectivePermissions(row.role, row.groupPermissions),
     readOnly: row.readOnly,
+    kind: row.kind,
   };
+}
+
+export function sha256Hex(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 // The user-administration view also exposes account status — unlike
@@ -204,6 +238,9 @@ export function createAuthService(
       if (input.permissionGroupId && !(await repo.groupExists(input.permissionGroupId))) {
         throw new PermissionGroupNotFoundError(input.permissionGroupId);
       }
+      if (input.permissionGroupId && (await repo.groupOwnedByPlugin(input.permissionGroupId))) {
+        throw new PermissionGroupOwnedByPluginError();
+      }
       const readOnly = input.readOnly ?? false;
       if (readOnly && input.role === "admin") throw new ReadOnlyAdminError();
       const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
@@ -242,6 +279,7 @@ export function createAuthService(
     async updateUser(id: string, input: UpdateUserInput, actingUserId: string | null = null): Promise<AdminUserView> {
       const existing = await repo.findById(id);
       if (!existing || existing.deletedAt) throw new UserNotFoundError(id);
+      if (existing.kind === "plugin") throw new PluginUserManagedError();
 
       if (input.email && input.email !== existing.email && (await repo.findByEmail(input.email))) {
         throw new DuplicateEmailError(input.email);
@@ -257,6 +295,9 @@ export function createAuthService(
 
       if (input.permissionGroupId && !(await repo.groupExists(input.permissionGroupId))) {
         throw new PermissionGroupNotFoundError(input.permissionGroupId);
+      }
+      if (input.permissionGroupId && (await repo.groupOwnedByPlugin(input.permissionGroupId))) {
+        throw new PermissionGroupOwnedByPluginError();
       }
 
       // Judged on the resulting account: making a read-only user admin is as
@@ -327,6 +368,7 @@ export function createAuthService(
     async deleteUser(id: string, actingUserId: string): Promise<void> {
       const existing = await repo.findById(id);
       if (!existing || existing.deletedAt) throw new UserNotFoundError(id);
+      if (existing.kind === "plugin") throw new PluginUserManagedError();
 
       if (id === actingUserId) throw new SelfDeleteError();
 
@@ -347,7 +389,8 @@ export function createAuthService(
 
     async login(input: LoginInput) {
       const user = await repo.findByEmail(input.email);
-      if (!user || !user.active) throw new InvalidCredentialsError();
+      // A plugin's technical user has no usable password and never logs in.
+      if (!user || !user.active || user.kind !== "person") throw new InvalidCredentialsError();
 
       const valid = await bcrypt.compare(input.password, user.passwordHash);
       if (!valid) throw new InvalidCredentialsError();
@@ -364,8 +407,18 @@ export function createAuthService(
         return null;
       }
       const user = await repo.findById(payload.sub);
-      if (!user || !user.active) return null;
+      if (!user || !user.active || user.kind !== "person") return null;
       return toPublicUser(user);
+    },
+
+    // Tillägg: Authorization: Bearer nav_plg_… — the key's sha256 is looked
+    // up; the plugin must be active and its technical user active. null for
+    // anything else (unknown, rotated, paused, uninstalled).
+    async verifyPluginKey(key: string): Promise<{ user: PublicUser; plugin: RequestPlugin } | null> {
+      const found = await repo.findByPluginKeyHash(sha256Hex(key));
+      if (!found || found.pluginStatus !== "active") return null;
+      if (!found.active || found.deletedAt || found.kind !== "plugin") return null;
+      return { user: toPublicUser(found), plugin: { id: found.pluginId, key: found.pluginKey } };
     },
   };
 }

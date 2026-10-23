@@ -20,3 +20,4 @@ export * from "./configurator";
 export * from "./einvoice";
 export * from "./alerts";
 export * from "./themes";
+export * from "./plugins";

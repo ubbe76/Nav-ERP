@@ -17,6 +17,19 @@ import {
   UnknownThemeError,
 } from "../src/modules/system/service/themes.errors.js";
 import { errorBody } from "../src/modules/system/service/error-body.js";
+import {
+  PluginAccessDeniedError,
+  PluginDeliveryNotFoundError,
+  PluginDeliveryNotRetryableError,
+  PluginInvalidAddressError,
+  PluginKeyTakenError,
+  PluginManifestInvalidError,
+  PluginManifestUnreachableError,
+  PluginNotFoundError,
+  PluginSameOriginError,
+} from "../src/modules/system/service/plugins.errors.js";
+import { PluginKeyWithSessionError, PluginRouteForbiddenError } from "../src/modules/auth/middleware/auth.middleware.js";
+import { PermissionGroupOwnedByPluginError, PluginUserManagedError } from "../src/modules/auth/service/auth.service.js";
 import { OrderRegisterTooLargeError } from "../src/modules/reports/service/order-register.service.js";
 import { QuoteFollowupTooLargeError } from "../src/modules/reports/service/quote-followup.service.js";
 import {
@@ -443,6 +456,19 @@ const cases: Array<[Error, string]> = [
   [new ThemeNameTakenError("Fabriksblå"), ERROR_CODES.THEME_NAME_TAKEN],
   [new ThemeIsDefaultError("Fabriksblå"), ERROR_CODES.THEME_IS_DEFAULT],
   [new ThemeLimitError(50), ERROR_CODES.THEME_LIMIT],
+  [new PluginNotFoundError("x"), ERROR_CODES.PLUGIN_NOT_FOUND],
+  [new PluginManifestInvalidError([]), ERROR_CODES.PLUGIN_MANIFEST_INVALID],
+  [new PluginManifestUnreachableError("x"), ERROR_CODES.PLUGIN_MANIFEST_UNREACHABLE],
+  [new PluginKeyTakenError("x"), ERROR_CODES.PLUGIN_KEY_TAKEN],
+  [new PluginSameOriginError(), ERROR_CODES.PLUGIN_SAME_ORIGIN],
+  [new PluginInvalidAddressError(), ERROR_CODES.PLUGIN_INVALID_ADDRESS],
+  [new PluginDeliveryNotFoundError("x"), ERROR_CODES.PLUGIN_DELIVERY_NOT_FOUND],
+  [new PluginDeliveryNotRetryableError(), ERROR_CODES.PLUGIN_DELIVERY_NOT_RETRYABLE],
+  [new PluginAccessDeniedError(), ERROR_CODES.PLUGIN_ACCESS_DENIED],
+  [new PluginRouteForbiddenError(), ERROR_CODES.PLUGIN_ROUTE_FORBIDDEN],
+  [new PluginKeyWithSessionError(), ERROR_CODES.PLUGIN_KEY_WITH_SESSION],
+  [new PluginUserManagedError(), ERROR_CODES.PLUGIN_USER_MANAGED],
+  [new PermissionGroupOwnedByPluginError(), ERROR_CODES.PERMISSION_GROUP_OWNED_BY_PLUGIN],
   // auth
   [new InvalidCredentialsError(), ERROR_CODES.INVALID_CREDENTIALS],
   [new ClientScopeMissingError("prices:read"), ERROR_CODES.CLIENT_SCOPE_MISSING],

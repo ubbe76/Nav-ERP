@@ -1,6 +1,6 @@
 import type { CreatePermissionGroupInput, UpdatePermissionGroupInput } from "@navet/shared";
 import type { PermissionGroupRepository } from "../repository/permission-group.repository.js";
-import { PermissionGroupNotFoundError } from "./auth.service.js";
+import { PermissionGroupNotFoundError, PermissionGroupOwnedByPluginError } from "./auth.service.js";
 import { InvalidReplacementError } from "../../register/service/register.errors.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 
@@ -55,9 +55,13 @@ export function createPermissionGroupService(repo: PermissionGroupRepository) {
 
     async remove(id: string, replacementId?: string) {
       await existing(id);
+      // Tillägg: a plugin's group goes with the plugin (Avinstallera), and
+      // no person is moved into one.
+      if (await repo.ownedByPlugin(id)) throw new PermissionGroupOwnedByPluginError();
       if (replacementId !== undefined) {
         if (replacementId === id) throw new InvalidReplacementError("same");
         if (!(await repo.get(replacementId))) throw new InvalidReplacementError("unknown");
+        if (await repo.ownedByPlugin(replacementId)) throw new PermissionGroupOwnedByPluginError();
       }
       const removed = await repo.removeWithReplacement(id, replacementId);
       if (!removed) throw new PermissionGroupInUseError(await repo.liveUsers(id));

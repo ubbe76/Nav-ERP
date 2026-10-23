@@ -28,6 +28,7 @@ describe("the catalog", () => {
       "quote_followup",
       "einvoice_failed",
       "email_failed",
+      "plugin_delivery_failed",
       "sales_order_late",
       "purchase_order_late",
       "manufacturing_order_late",
@@ -70,9 +71,11 @@ describe("visibleKinds", () => {
     expect(visibleKinds(user(["lager"]))).toEqual(["stock_negative"]);
   });
 
-  it("Utskick som misslyckades is admin-only: every menu together still does not give it", () => {
+  it("Utskick som misslyckades and Tillägg are admin-only: every menu together still does not give them", () => {
     const all = user(["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "ekonomi", "rapporter"]);
-    expect(visibleKinds(all)).toEqual(ALERT_KIND_CATALOG.map((d) => d.kind).filter((k) => k !== "email_failed"));
+    expect(visibleKinds(all)).toEqual(
+      ALERT_KIND_CATALOG.map((d) => d.kind).filter((k) => k !== "email_failed" && k !== "plugin_delivery_failed")
+    );
   });
 
   it("the supervisor role is not admin", () => {

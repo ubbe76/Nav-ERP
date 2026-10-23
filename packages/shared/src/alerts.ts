@@ -18,6 +18,7 @@ export const ALERT_KINDS = [
   "quote_followup",
   "einvoice_failed",
   "email_failed",
+  "plugin_delivery_failed",
 ] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export const alertKindSchema = z.enum(ALERT_KINDS);

@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthService } from "../../auth/service/auth.service.js";
-import { readOnlyGuard, SESSION_COOKIE } from "../../auth/middleware/auth.middleware.js";
+import { authenticatePluginKey, pluginKeyOf, readOnlyGuard, SESSION_COOKIE } from "../../auth/middleware/auth.middleware.js";
 import type { OAuthService, PublicApiClient } from "../service/oauth.service.js";
 
 declare module "fastify" {
@@ -14,6 +14,9 @@ declare module "fastify" {
 // small set of routes both audiences need — see configurator.routes.ts.
 export function requireAuthOrClient(authService: AuthService, oauthService: OAuthService) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
+    // Tillägg: a plugin key acts as its technical user, like a session.
+    const pluginKey = pluginKeyOf(req);
+    if (pluginKey) return authenticatePluginKey(authService, pluginKey, req, reply);
     const sessionToken = req.cookies[SESSION_COOKIE];
     const user = sessionToken ? await authService.verifyToken(sessionToken) : null;
     if (user) {

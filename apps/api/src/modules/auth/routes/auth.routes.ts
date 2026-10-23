@@ -14,6 +14,8 @@ import {
   InvalidSetupCodeError,
   LastAdminError,
   PermissionGroupNotFoundError,
+  PermissionGroupOwnedByPluginError,
+  PluginUserManagedError,
   ReadOnlyAdminError,
   RegistrationClosedError,
   SelfDeleteError,
@@ -151,6 +153,8 @@ export async function authRoutes(
         if (err instanceof DuplicateEmailError) return reply.code(409).send(errorBody(err));
         if (err instanceof PermissionGroupNotFoundError) return reply.code(400).send(errorBody(err));
         if (err instanceof ReadOnlyAdminError) return reply.code(400).send(errorBody(err));
+        if (err instanceof PermissionGroupOwnedByPluginError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PluginUserManagedError) return reply.code(409).send(errorBody(err));
         throw err;
       }
     }
@@ -180,6 +184,8 @@ export async function authRoutes(
         if (err instanceof LastAdminError) return reply.code(409).send(errorBody(err));
         if (err instanceof PermissionGroupNotFoundError) return reply.code(400).send(errorBody(err));
         if (err instanceof ReadOnlyAdminError) return reply.code(400).send(errorBody(err));
+        if (err instanceof PermissionGroupOwnedByPluginError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PluginUserManagedError) return reply.code(409).send(errorBody(err));
         throw err;
       }
     }
@@ -199,6 +205,7 @@ export async function authRoutes(
         if (err instanceof UserNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof SelfDeleteError) return reply.code(409).send(errorBody(err));
         if (err instanceof LastAdminError) return reply.code(409).send(errorBody(err));
+        if (err instanceof PluginUserManagedError) return reply.code(409).send(errorBody(err));
         throw err;
       }
     }

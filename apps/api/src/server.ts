@@ -8,8 +8,11 @@ const app = buildApp();
 // Fastify refuses addHook once listening, so the hook is registered up front
 // and reads the scheduler through a reference assigned after listen succeeds.
 let scheduler: ReturnType<typeof startScheduler> | null = null;
+let pluginScheduler: ReturnType<typeof startScheduler> | null = null;
 app.addHook("onClose", async () => {
-  await scheduler?.stop();
+  app.pluginDispatcher.disableKick();
+  await Promise.all([scheduler?.stop(), pluginScheduler?.stop()]);
+  await app.pluginDispatcher.idle();
 });
 
 // A fresh installation: print the one-time code /register asks for. Plain
@@ -53,6 +56,13 @@ app
       ],
       { log: (msg, extra) => app.log.error(extra ?? {}, msg) }
     );
+    // Tillägg: the webhook outbox, on its own 15-second tick; an emit also
+    // nudges a run shortly after its commit.
+    pluginScheduler = startScheduler(
+      [{ name: "plugin_webhooks", run: () => app.pluginDispatcher.run() }],
+      { intervalMs: 15_000, firstDelayMs: 15_000, log: (msg, extra) => app.log.error(extra ?? {}, msg) }
+    );
+    app.pluginDispatcher.enableKick();
     return printSetupCode();
   })
   .catch((err) => {

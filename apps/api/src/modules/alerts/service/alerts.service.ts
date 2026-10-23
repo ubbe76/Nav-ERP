@@ -47,6 +47,8 @@ export interface AlertSettingsReader {
 
 // Utskick som misslyckades looks this far back.
 export const EMAIL_FAILED_DAYS = 14;
+// Tillägg som inte tar emot händelser looks this far back.
+export const PLUGIN_FAILED_DAYS = 7;
 
 const DAY_MS = 86_400_000;
 
@@ -266,6 +268,19 @@ export function createAlertsService(deps: {
         primary: `${EMAIL_DOCUMENT_TEXT[r.documentType] ?? r.documentType}: ${r.subject}`,
         secondary: r.error ? `Till ${r.recipient} · ${r.error}` : `Till ${r.recipient}`,
         date: stockholmNow(r.createdAt).date,
+      }));
+    },
+
+    async plugin_delivery_failed() {
+      const since = new Date(nowFn().getTime() - PLUGIN_FAILED_DAYS * DAY_MS);
+      const rows = await repo.failedPluginDeliveries(since);
+      return rows.map((r) => ({
+        key: r.pluginId,
+        severity: "red",
+        href: `/system/tillagg/${r.pluginId}`,
+        primary: r.pluginName,
+        secondary: `${r.failed === 1 ? "1 misslyckad leverans" : `${r.failed} misslyckade leveranser`}${r.lastError ? ` · ${r.lastError}` : ""}`,
+        date: stockholmNow(r.lastFailedAt).date,
       }));
     },
   };

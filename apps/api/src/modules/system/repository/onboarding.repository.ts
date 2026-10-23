@@ -50,7 +50,8 @@ export async function readOnboardingFacts(db: Db): Promise<OnboardingFacts> {
     db
       .select({ n: count() })
       .from(users)
-      .where(and(eq(users.active, true), isNull(users.deletedAt))),
+      // People only — a plugin's technical user is not "a user" here.
+      .where(and(eq(users.active, true), isNull(users.deletedAt), eq(users.kind, "person"))),
     db
       .select()
       .from(systemSettings)

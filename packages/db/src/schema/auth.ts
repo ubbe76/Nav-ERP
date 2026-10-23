@@ -5,6 +5,11 @@ import { boolean, check, index, pgEnum, pgTable, primaryKey, text, timestamp, un
 // user. What a non-admin may open is decided by their permission group.
 export const userRoleEnum = pgEnum("user_role", ["admin", "supervisor", "user"]);
 
+// Tillägg (0141): person = a human account; plugin = the technical user of an
+// installed plugin (System → Tillägg), which authenticates with the plugin's
+// API key only and is never an administrator.
+export const userKindEnum = pgEnum("user_kind", ["person", "plugin"]);
+
 // Behörighetsgrupper: a user belongs to one group, whose permission list
 // (codes from @navet/shared's catalog, validated in the API layer — no DB
 // CHECK, so adding a permission needs no schema change) decides which main
@@ -37,6 +42,7 @@ export const users = pgTable(
     // admin: System's own reads (users with e-mails, API clients) would stay
     // open, so the combination is refused in the service and here.
     readOnly: boolean("read_only").notNull().default(false),
+    kind: userKindEnum("kind").notNull().default("person"),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -45,6 +51,7 @@ export const users = pgTable(
     uniqueIndex("users_email_unique").on(table.email).where(sql`${table.deletedAt} is null`),
     index("users_permission_group_idx").on(table.permissionGroupId),
     check("users_read_only_not_admin", sql`not (${table.readOnly} and ${table.role} = 'admin')`),
+    check("users_plugin_not_admin", sql`${table.kind} = 'person' or ${table.role} <> 'admin'`),
   ]
 );
 

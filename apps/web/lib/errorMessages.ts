@@ -194,6 +194,19 @@ const MESSAGES: Record<string, MessageEntry> = {
   "theme-name-taken": "Det finns redan ett tema med det namnet — välj ett annat namn.",
   "theme-is-default": "Temat är företagets förvalda tema — välj ett annat förval innan det tas bort.",
   "theme-limit": "Det får finnas högst 50 egna teman — ta bort ett innan du lägger till ett nytt.",
+  "plugin-not-found": "Tillägget finns inte (längre).",
+  "plugin-manifest-invalid": "Manifestet innehåller fel — se listan.",
+  "plugin-manifest-unreachable": "Manifestet kunde inte hämtas från tilläggets adress.",
+  "plugin-key-taken": "Ett tillägg med samma nyckel är redan installerat.",
+  "plugin-same-origin": "Tillägget måste ha en annan adress (ursprung) än Nav.",
+  "plugin-invalid-address": "Adressen måste vara en http- eller https-adress utan användarnamn, frågedel eller fragment.",
+  "plugin-delivery-not-found": "Leveransen finns inte (längre).",
+  "plugin-delivery-not-retryable": "Bara misslyckade leveranser kan skickas igen.",
+  "plugin-access-denied": "Du har inte behörighet till den här delen av tillägget.",
+  "plugin-route-forbidden": "Tilläggets API-nyckel kan inte användas mot den här adressen.",
+  "plugin-key-with-session": "En tilläggsnyckel kan inte skickas tillsammans med en inloggning.",
+  "plugin-user-managed": "Tilläggets användare hanteras under System → Tillägg.",
+  "permission-group-owned-by-plugin": "Behörighetsgruppen hör till ett tillägg och ändras under System → Tillägg.",
   "demo-data-not-available": (err) => {
     const blockers = (err.body as { blockers?: string[] } | undefined)?.blockers ?? [];
     return blockers.length

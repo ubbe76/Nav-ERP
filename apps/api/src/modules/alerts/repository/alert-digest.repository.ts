@@ -49,6 +49,8 @@ export function createAlertDigestRepository(db: Db) {
           and(
             eq(users.active, true),
             isNull(users.deletedAt),
+            // Tillägg: a plugin's technical user never gets the digest.
+            eq(users.kind, "person"),
             ne(users.email, ""),
             digestSetting,
             notExists(

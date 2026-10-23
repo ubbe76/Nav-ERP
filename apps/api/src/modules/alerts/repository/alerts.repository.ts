@@ -8,6 +8,8 @@ import {
   manufacturingOrders,
   paymentBatchItems,
   paymentTerms,
+  pluginDeliveries,
+  plugins,
   purchaseOrderRows,
   purchaseOrders,
   salesOrderRows,
@@ -88,6 +90,14 @@ export interface FailedEinvoiceRow {
   status: "failed" | "rejected";
   errorMessage: string | null;
   startedAt: Date;
+}
+
+export interface FailedPluginRow {
+  pluginId: string;
+  pluginName: string;
+  failed: number;
+  lastFailedAt: Date;
+  lastError: string | null;
 }
 
 export interface FailedEmailRow {
@@ -335,6 +345,38 @@ export function createAlertsRepository(db: Db) {
           )
         )
         .orderBy(asc(emailLog.createdAt), desc(emailLog.id));
+    },
+
+    // Tillägg som inte tar emot händelser: plugins with failed deliveries
+    // since `since` that have had no successful delivery after the failure.
+    async failedPluginDeliveries(since: Date): Promise<FailedPluginRow[]> {
+      const rows = await db.execute<{
+        plugin_id: string;
+        plugin_name: string;
+        failed: number;
+        last_failed_at: string;
+        last_error: string | null;
+      }>(sql`
+        SELECT p.id AS plugin_id, p.name AS plugin_name, count(*)::int AS failed,
+          max(d.last_attempt_at) AS last_failed_at,
+          (array_agg(d.last_error ORDER BY d.last_attempt_at DESC))[1] AS last_error
+        FROM ${pluginDeliveries} d
+        JOIN ${plugins} p ON p.id = d.plugin_id
+        WHERE d.status = 'failed'
+          AND d.last_attempt_at >= ${since.toISOString()}::timestamptz
+          AND NOT EXISTS (
+            SELECT 1 FROM ${pluginDeliveries} ok
+            WHERE ok.plugin_id = d.plugin_id AND ok.status = 'delivered' AND ok.delivered_at > d.last_attempt_at
+          )
+        GROUP BY p.id, p.name
+        ORDER BY max(d.last_attempt_at), p.name`);
+      return rows.map((r) => ({
+        pluginId: r.plugin_id,
+        pluginName: r.plugin_name,
+        failed: r.failed,
+        lastFailedAt: new Date(r.last_failed_at),
+        lastError: r.last_error,
+      }));
     },
   };
 }

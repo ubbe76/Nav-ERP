@@ -23,6 +23,14 @@ describe("händelseloggens etiketter", () => {
     ["action", "theme_created"],
     ["action", "theme_updated"],
     ["action", "theme_deleted"],
+    ["entity", "plugin"],
+    ["action", "plugin_installed"],
+    ["action", "plugin_updated"],
+    ["action", "plugin_paused"],
+    ["action", "plugin_activated"],
+    ["action", "plugin_key_rotated"],
+    ["action", "plugin_secret_rotated"],
+    ["action", "plugin_uninstalled"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);

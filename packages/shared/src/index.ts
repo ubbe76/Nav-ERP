@@ -38,3 +38,4 @@ export * from "./einvoice.js";
 export * from "./alerts.js";
 export * from "./theme-core.js";
 export * from "./themes.js";
+export * from "./plugins.js";

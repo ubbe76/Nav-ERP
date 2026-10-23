@@ -5,7 +5,7 @@ import {
   updatePermissionGroupSchema,
 } from "@navet/shared";
 import { requireRole } from "../middleware/auth.middleware.js";
-import { PermissionGroupNotFoundError } from "../service/auth.service.js";
+import { PermissionGroupNotFoundError, PermissionGroupOwnedByPluginError } from "../service/auth.service.js";
 import {
   DuplicatePermissionGroupCodeError,
   PermissionGroupInUseError,
@@ -69,6 +69,7 @@ export async function permissionGroupRoutes(app: FastifyInstance, opts: { servic
     } catch (err) {
       if (err instanceof PermissionGroupNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof PermissionGroupInUseError) return reply.code(409).send(errorBody(err));
+      if (err instanceof PermissionGroupOwnedByPluginError) return reply.code(409).send(errorBody(err));
       if (err instanceof InvalidReplacementError) return reply.code(400).send(errorBody(err));
       throw err;
     }

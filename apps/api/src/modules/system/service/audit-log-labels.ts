@@ -44,6 +44,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   bank_settings: "Bankinställningar",
   einvoice_settings: "E-fakturainställningar",
   theme: "Tema",
+  plugin: "Tillägg",
 };
 
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
@@ -101,6 +102,13 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   theme_created: "Tema skapat",
   theme_updated: "Tema ändrat",
   theme_deleted: "Tema borttaget",
+  plugin_installed: "Tillägg installerat",
+  plugin_updated: "Tillägg ändrat",
+  plugin_paused: "Tillägg pausat",
+  plugin_activated: "Tillägg aktiverat",
+  plugin_key_rotated: "Ny API-nyckel",
+  plugin_secret_rotated: "Ny webbhookshemlighet",
+  plugin_uninstalled: "Tillägg avinstallerat",
 };
 
 export function auditEntityTypeLabel(entityType: string): string {

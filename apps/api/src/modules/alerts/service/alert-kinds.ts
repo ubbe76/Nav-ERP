@@ -53,6 +53,14 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
   },
   // The e-mail log is an admin page, so only administrators see this kind.
   { kind: "email_failed", label: "Utskick som misslyckades", severity: "red", rule: ["admin"], listHref: "/system/e-postlogg" },
+  // Tillägg: System → Tillägg is an admin page.
+  {
+    kind: "plugin_delivery_failed",
+    label: "Tillägg som inte tar emot händelser",
+    severity: "red",
+    rule: ["admin"],
+    listHref: "/system/tillagg",
+  },
   {
     kind: "sales_order_late",
     label: "Försenade kundordrar",

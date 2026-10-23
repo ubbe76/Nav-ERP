@@ -3,6 +3,11 @@ import { z } from "zod";
 export const userRoleSchema = z.enum(["admin", "supervisor", "user"]);
 export type UserRole = z.infer<typeof userRoleSchema>;
 
+// Tillägg (0141): a technical user owned by an installed plugin — never an
+// admin, never logs in with a password, managed under System → Tillägg.
+export const USER_KINDS = ["person", "plugin"] as const;
+export type UserKind = (typeof USER_KINDS)[number];
+
 // Bootstrap: skapar den allra första användaren (blir alltid admin). Stängs
 // automatiskt av service-lagret så snart minst en användare finns.
 export const registerSchema = z.object({

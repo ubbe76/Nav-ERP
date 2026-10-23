@@ -151,6 +151,10 @@ import { onboardingRoutes } from "./modules/system/routes/onboarding.routes.js";
 import { createThemesRepository } from "./modules/system/repository/themes.repository.js";
 import { createThemesService } from "./modules/system/service/themes.service.js";
 import { themeBootRoutes, themeRoutes } from "./modules/system/routes/themes.routes.js";
+import { createPluginsRepository } from "./modules/system/repository/plugins.repository.js";
+import { createPluginDispatcher } from "./modules/system/service/plugin-dispatcher.js";
+import { createPluginsService } from "./modules/system/service/plugins.service.js";
+import { pluginKitRoutes, pluginRoutes } from "./modules/system/routes/plugins.routes.js";
 import { createAlertsRepository } from "./modules/alerts/repository/alerts.repository.js";
 import { createAlertsService } from "./modules/alerts/service/alerts.service.js";
 import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
@@ -243,6 +247,29 @@ export function buildApp(database: Db = db) {
   const systemService = createSystemService(createSystemRepository(database), auditRepository);
   // Egna teman: holds the custom themes' CSS in memory (one cache per app).
   const themesService = createThemesService({ repo: createThemesRepository(database), audit: auditRepository, settings: systemService });
+  // Tillägg: installed plugins, their technical users and the webhook
+  // outbox. The dispatcher is decorated for server.ts's own 15-second job
+  // (never run from buildApp); the services emit into the outbox through
+  // the pluginEvents leaf inside their own transactions.
+  const pluginsRepository = createPluginsRepository(database);
+  const pluginDispatcher = createPluginDispatcher({
+    repo: pluginsRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
+  app.decorate("pluginDispatcher", pluginDispatcher);
+  const pluginsService = createPluginsService({
+    repo: pluginsRepository,
+    audit: auditRepository,
+    dispatcher: pluginDispatcher,
+    webOrigins: [process.env.WEB_ORIGIN ?? "http://localhost:3000"],
+    settings: {
+      publicBaseUrl: async () => (await systemService.getSettings()).publicBaseUrl,
+      themeFor: async (userId) => {
+        const boot = await themesService.boot((await userSettingsService.getSettings(userId)).theme);
+        return boot.userTheme ?? boot.defaultTheme;
+      },
+    },
+  });
   // Automatkontering (B2) — wired into the sales/purchase services that post
   // invoices; readPostingSettings (system module leaf) supplies the 14
   // standard posting accounts, read through the poster's own transaction.
@@ -678,6 +705,9 @@ export function buildApp(database: Db = db) {
       // terminal included) reads before first paint; reads the session
       // cookie itself, only to add the user's own choice.
       await v1.register(themeBootRoutes, { service: themesService, auth: authService, userSettings: userSettingsService });
+      // Public: the plugin kit (theme tokens + base style) an embedded plugin
+      // page links from its own origin.
+      await v1.register(pluginKitRoutes, { themes: themesService });
 
       // Behörighetsgrupper: enforceAccess runs after authentication and
       // resolves each route's rule — its own config.access, else the module
@@ -762,6 +792,9 @@ export function buildApp(database: Db = db) {
         await registerModule(protectedRoutes, onboardingRoutes, { service: createOnboardingService(database) }, adminOnly);
         // System → Teman: install, edit and export colour themes, admin only.
         await registerModule(protectedRoutes, themeRoutes, { service: themesService }, adminOnly);
+        // System → Tillägg: admin only, except GET /plugin-ui and POST
+        // /plugins/:id/context (office, set on the routes).
+        await registerModule(protectedRoutes, pluginRoutes, { service: pluginsService }, adminOnly);
         await registerModule(
           protectedRoutes,
           mailRoutes,
