@@ -993,6 +993,58 @@ export function themeSourceFromTokens(scheme: ThemeScheme, tokens: Readonly<Reco
   };
 }
 
+// The source with exactly the overrides that make deriveTheme reproduce
+// `tokens` (complete and canonical, as validateTheme returns them): every
+// token the base colours derive differently becomes an override, an
+// existing override that still holds its value stays, and one the
+// derivation reproduces anyway is dropped. Literal values go before
+// references so a reference never meets a not-yet-overridden token. null
+// when the result still doesn't reproduce `tokens` (a reference chain
+// deriveTheme's one-at-a-time check refuses) — the caller then has no
+// usable source. The server stores sources this way, and the editor opens
+// themes this way, so neither a hand-edited theme file nor a later change
+// to deriveTheme can change a saved theme's colours.
+export function alignThemeSource(source: ThemeSource, tokens: Readonly<Record<string, string>>): ThemeSource | null {
+  const derived = deriveTheme({ ...source, overrides: {} }).tokens;
+  const literals: Record<string, string> = {};
+  const references: Record<string, string> = {};
+  for (const token of THEME_TOKENS) {
+    const want = tokens[token.name];
+    if (want === undefined) continue;
+    if (want !== derived[token.name] || source.overrides[token.name] === want) {
+      (REF.test(want) ? references : literals)[token.name] = want;
+    }
+  }
+  const aligned: ThemeSource = { ...source, overrides: { ...literals, ...references } };
+  const check = deriveTheme(aligned).tokens;
+  return THEME_TOKENS.every((token) => tokens[token.name] === undefined || check[token.name] === tokens[token.name]) ? aligned : null;
+}
+
+// The editor's starting point for a theme without base colours (an uploaded
+// one, a copy of a built-in one): the base colours read from its tokens —
+// own status colours and heading colour too when that leaves fewer tokens
+// overridden — and only what they don't reproduce as overrides, so the
+// Grundfärger fields work wherever they can.
+export function editableThemeSource(scheme: ThemeScheme, tokens: Readonly<Record<string, string>>): ThemeSource {
+  const filled = fillThemeTokens(scheme, tokens).tokens;
+  const all = themeSourceFromTokens(scheme, filled);
+  const resolved = resolveThemeTokens(filled);
+  const hues = (["running", "delayed", "stopped", "done"] as const).map((key) => resolved[`status-${key}`]);
+  const status: ThemeStatusColors | null = hues.every(isHexColor)
+    ? { running: hues[0]!, delayed: hues[1]!, stopped: hues[2]!, done: hues[3]! }
+    : null;
+  const heading = isHexColor(resolved["color-heading-accent"]) ? resolved["color-heading-accent"]! : null;
+  let best: ThemeSource | null = null;
+  // Standard status colours and "Som accent" first: they win a tie.
+  for (const candidateStatus of status ? [null, status] : [null]) {
+    for (const candidateHeading of heading ? [null, heading] : [null]) {
+      const aligned = alignThemeSource({ ...all, status: candidateStatus, heading: candidateHeading, overrides: {} }, filled);
+      if (aligned && (!best || Object.keys(aligned.overrides).length < Object.keys(best.overrides).length)) best = aligned;
+    }
+  }
+  return best ?? all;
+}
+
 // Every token from the editor's base colours. Computed in OKLCH: mixes for
 // borders and tints, ensureContrast for every text colour, the template
 // (Ljust/Mörkt) for overlays, shadows and the logo's brand greens. The

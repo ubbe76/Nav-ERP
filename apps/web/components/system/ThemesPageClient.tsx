@@ -39,7 +39,7 @@ export function ThemesPageClient({
   const [defaultKey, setDefaultKey] = useState(defaultTheme);
   const [locked, setLocked] = useState(themeChoiceLocked);
   const [error, setError] = useState<string | null>(null);
-  const [upload, setUpload] = useState<{ result: ThemeValidationResult; fileName: string } | null>(null);
+  const [upload, setUpload] = useState<{ result: ThemeValidationResult; input: unknown; fileName: string } | null>(null);
 
   async function reload() {
     setThemes(await apiFetch<ThemeListRow[]>("/api/v1/themes"));
@@ -78,7 +78,7 @@ export function ThemesPageClient({
         method: "POST",
         body: JSON.stringify(parsed.input),
       });
-      setUpload({ result, fileName: file.name });
+      setUpload({ result, input: parsed.input, fileName: file.name });
     } catch (err) {
       setError(apiErrorMessage(err, "Kunde inte läsa temafilen"));
     }

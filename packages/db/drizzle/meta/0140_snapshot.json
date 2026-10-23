@@ -1,5 +1,5 @@
 {
-  "id": "66df0ed5-5c21-4e4b-a23a-e3f503b34cf4",
+  "id": "905d50df-1805-4d0c-b514-ac6e6bb6da6b",
   "prevId": "8aa764fe-fead-4a0f-8fef-7fdcc67e9b1a",
   "version": "7",
   "dialect": "postgresql",
@@ -17685,7 +17685,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "themes_name_unique": {
+          "name": "themes_name_unique",
+          "columns": [
+            {
+              "expression": "lower(\"name\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "themes_created_by_users_id_fk": {
           "name": "themes_created_by_users_id_fk",
@@ -17721,13 +17737,6 @@
           "nullsNotDistinct": false,
           "columns": [
             "key"
-          ]
-        },
-        "themes_name_unique": {
-          "name": "themes_name_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "name"
           ]
         }
       },

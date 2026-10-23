@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { auditLog, db, systemSettings, themes, userSettings } from "@navet/db";
-import { BUILTIN_THEME_VALUES, MAX_CUSTOM_THEMES, validateTheme } from "@navet/shared";
+import { BUILTIN_THEME_VALUES, deriveTheme, MAX_CUSTOM_THEMES, THEME_FILE_MAX_BYTES, validateTheme, type ThemeSource } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 
 // Egna teman through the real app: GET /theme-boot (public), the admin
@@ -173,14 +173,40 @@ describe("System → Teman (admin)", () => {
 
   it("refuses a taken name, a built-in label included (409 theme-name-taken)", async () => {
     await createTheme();
-    for (const name of ["Fabriksblå", "mörkt"]) {
+    // Regardless of case — the database's unique index is on lower(name).
+    for (const name of ["Fabriksblå", "fabriksBLÅ", "mörkt"]) {
       const res = await call("POST", "/themes", admin, blue(name));
       expect(res.statusCode).toBe(409);
       expect(res.json().code).toBe("theme-name-taken");
     }
     const other = await createTheme("Annat");
-    const rename = await call("PATCH", `/themes/${other.id}`, admin, { name: "Fabriksblå" });
+    const rename = await call("PATCH", `/themes/${other.id}`, admin, { name: "FABRIKSBLÅ" });
     expect(rename.statusCode).toBe(409);
+    expect(rename.json().code).toBe("theme-name-taken");
+  });
+
+  it("stores a source that reproduces the stored tokens (a hand-edited editor file)", async () => {
+    const source: ThemeSource = { base: "dark", bg: "#15171b", surface: "#1b1e24", text: "#edeef1", accent: "#2f5f9e", heading: null, status: null, overrides: {} };
+    const derived = deriveTheme(source).tokens;
+    // Exported from the editor, then one colour edited by hand in the file.
+    const tokens = { ...derived, "color-border": "#3a3f48" };
+    const created = await call("POST", "/themes", admin, { name: "Handredigerad", scheme: "dark", tokens, source });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().source.overrides).toEqual({ "color-border": "#3a3f48" });
+    expect(deriveTheme(created.json().source).tokens).toEqual(created.json().tokens);
+
+    // PATCH aligns too: new tokens against the stored source.
+    const patched = await call("PATCH", `/themes/${created.json().id}`, admin, { tokens: { ...derived, "color-border-control": "#4a505a" } });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json().source.overrides).toEqual({ "color-border-control": "#4a505a" });
+    expect(deriveTheme(patched.json().source).tokens).toEqual(patched.json().tokens);
+  });
+
+  it("refuses a body over the theme file limit (413)", async () => {
+    const res = await call("POST", "/themes/validate", admin, { ...blue(), padding: "x".repeat(THEME_FILE_MAX_BYTES + 8192) });
+    expect(res.statusCode).toBe(413);
+    expect((await call("POST", "/themes", admin, { ...blue(), padding: "x".repeat(THEME_FILE_MAX_BYTES + 8192) })).statusCode).toBe(413);
+    expect(await db.select().from(themes)).toEqual([]);
   });
 
   it("validates without saving (the upload preview)", async () => {
@@ -258,6 +284,22 @@ describe("System → Teman (admin)", () => {
     // All 50 in the CSS.
     expect((await call("GET", "/theme-boot", null)).json().themes).toHaveLength(MAX_CUSTOM_THEMES + 3);
   });
+
+  it(`lets exactly one of two simultaneous uploads in as number ${MAX_CUSTOM_THEMES}`, async () => {
+    const tokens = validateTheme(blue()).tokens;
+    await db.insert(themes).values(
+      Array.from({ length: MAX_CUSTOM_THEMES - 1 }, (_, i) => ({
+        key: `egen-${i.toString(16).padStart(8, "0")}`,
+        name: `Tema ${i}`,
+        scheme: "dark" as const,
+        tokens,
+      }))
+    );
+    const results = await Promise.all([call("POST", "/themes", admin, blue("Först")), call("POST", "/themes", admin, blue("Också först"))]);
+    expect(results.map((r) => r.statusCode).sort()).toEqual([201, 409]);
+    expect(results.find((r) => r.statusCode === 409)!.json().code).toBe("theme-limit");
+    expect(await db.select().from(themes)).toHaveLength(MAX_CUSTOM_THEMES);
+  });
 });
 
 describe("the default theme, the lock and the user's choice", () => {
@@ -321,6 +363,11 @@ describe("the default theme, the lock and the user's choice", () => {
     const res = await call("PATCH", "/me/settings", reader.cookie, { theme: "dark" });
     expect(res.statusCode).toBe(403);
     expect(res.json().code).toBe("read-only-account");
+    expect((await call("GET", "/theme-boot", reader.cookie)).json().userTheme).toBeNull();
+    // A choice stored before the account became read-only is not answered
+    // either: the browser's own choice decides, as the manual says.
+    await db.insert(userSettings).values({ userId: reader.id, key: "theme", value: "dracula" });
+    expect((await call("GET", "/me/settings", reader.cookie)).json().theme).toBe("dracula");
     expect((await call("GET", "/theme-boot", reader.cookie)).json().userTheme).toBeNull();
   });
 });

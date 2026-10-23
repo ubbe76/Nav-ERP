@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  alignThemeSource,
   BUILTIN_THEME_VALUES,
   BUILTIN_THEMES,
   buildThemeCss,
@@ -127,11 +128,16 @@ export function createThemesService(deps: { repo: ThemesRepository; audit: Audit
     }
   }
 
+  // The stored source always reproduces the stored tokens (alignThemeSource):
+  // a hand-edited theme file, or tokens saved before deriveTheme was tuned,
+  // reopen in the editor with exactly their colours. A source that can't be
+  // made to is not stored at all.
   function validated(input: unknown): ThemeValidationResult & { scheme: ThemeScheme } {
     const result = validateTheme(input);
     if (!result.ok || !result.scheme) throw new ThemeInvalidError(result.errors, result.contrastFailures);
     assertNameFree(result.name);
-    return result as ThemeValidationResult & { scheme: ThemeScheme };
+    const source = result.source ? alignThemeSource(result.source, result.tokens) : null;
+    return { ...result, scheme: result.scheme, source };
   }
 
   return {

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatContrastFailure } from "../../lib/themeCore";
+import { formatContrastFailure, validateTheme } from "../../lib/themeCore";
 import type { ThemeIssue, ThemeValidationResult } from "../../lib/types";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
@@ -13,7 +13,8 @@ import { ThemePreview } from "./ThemePreview";
 import styles from "./ThemesPageClient.module.css";
 
 interface UploadThemeDialogProps {
-  upload: { result: ThemeValidationResult; fileName: string } | null;
+  // result: the server's check of the parsed file (input).
+  upload: { result: ThemeValidationResult; input: unknown; fileName: string } | null;
   onClose: () => void;
   onInstalled: () => void | Promise<void>;
 }
@@ -21,27 +22,38 @@ interface UploadThemeDialogProps {
 export function UploadThemeDialog({ upload, onClose, onInstalled }: UploadThemeDialogProps) {
   return (
     <Modal open={upload !== null} onClose={onClose} title="Ladda upp tema" wide>
-      {upload && <UploadBody result={upload.result} onClose={onClose} onInstalled={onInstalled} />}
+      {upload && <UploadBody result={upload.result} input={upload.input} onClose={onClose} onInstalled={onInstalled} />}
     </Modal>
   );
 }
 
 function UploadBody({
-  result,
+  result: fileResult,
+  input,
   onClose,
   onInstalled,
 }: {
   result: ThemeValidationResult;
+  input: unknown;
   onClose: () => void;
   onInstalled: () => void | Promise<void>;
 }) {
-  const [name, setName] = useState(result.name);
+  const [name, setName] = useState(fileResult.name);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [serverIssues, setServerIssues] = useState<string[]>([]);
 
+  // A file without a usable name (missing, too long, odd characters) is
+  // fixed in the Namn field: the file is checked again with the typed name —
+  // validateTheme is the server's own check (lib/themeCore.ts is a copy),
+  // and POST /themes runs it once more on Installera.
+  const result = useMemo(() => {
+    if (name === fileResult.name || typeof input !== "object" || input === null || Array.isArray(input)) return fileResult;
+    return validateTheme({ ...input, name });
+  }, [name, fileResult, input]);
+
   const scheme = result.scheme ?? "light";
-  const canInstall = result.ok && name.trim().length > 0 && !pending;
+  const canInstall = result.ok && !pending;
 
   async function install() {
     setPending(true);

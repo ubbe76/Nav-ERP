@@ -21,7 +21,10 @@ const THEME_BODY_LIMIT = THEME_FILE_MAX_BYTES + 4096;
 // GET /theme-boot — public: the web's root layout reads it on every page,
 // /login and the stamp terminal included, so it is registered outside the
 // authenticated scope. A valid session cookie adds the user's own choice;
-// without one (or with an expired one) the answer simply leaves it out.
+// without one (or with an expired one) the answer simply leaves it out. An
+// Endast läsning account can't store a choice (PATCH /me/settings is a 403),
+// so it answers null: the choice it made in this browser (localStorage)
+// then decides, instead of an older stored one overriding it on every load.
 export async function themeBootRoutes(
   app: FastifyInstance,
   opts: { service: ThemesService; auth: AuthService; userSettings: UserSettingsService }
@@ -31,7 +34,7 @@ export async function themeBootRoutes(
   app.get("/theme-boot", async (req, reply) => {
     const token = req.cookies[SESSION_COOKIE];
     const user = token ? await auth.verifyToken(token) : null;
-    const userTheme = user ? (await userSettings.getSettings(user.id)).theme : undefined;
+    const userTheme = !user ? undefined : user.readOnly ? null : (await userSettings.getSettings(user.id)).theme;
     reply.header("Cache-Control", "no-store");
     return service.boot(userTheme);
   });

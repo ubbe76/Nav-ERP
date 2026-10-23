@@ -9,9 +9,11 @@ import {
   BUILTIN_THEMES,
   BUILTIN_THEME_VALUES,
   THEME_TOKENS,
+  alignThemeSource,
   buildThemeFile,
   checkTokenValue,
   deriveTheme,
+  editableThemeSource,
   fixContrast,
   formatContrastFailure,
   isBuiltinThemeId,
@@ -62,22 +64,42 @@ interface Initial {
   advancedOpen: boolean;
 }
 
+// Whether a source is exactly the template's base colours for its base —
+// nothing chosen yet, so switching Utgå från loses nothing.
+function isTemplateSource(source: ThemeSource): boolean {
+  const template = templateSource(source.base);
+  return (
+    source.bg === template.bg &&
+    source.surface === template.surface &&
+    source.text === template.text &&
+    source.accent === template.accent &&
+    source.heading === null &&
+    source.status === null &&
+    Object.keys(source.overrides).length === 0
+  );
+}
+
+const withAdvanced = (name: string, source: ThemeSource): Initial => ({
+  name,
+  source,
+  advancedOpen: Object.keys(source.overrides).length > 0,
+});
+
 function initialState(theme: ThemeDetail | null, copyOf: string | null): Initial {
   if (theme) {
-    // An uploaded theme (no source): base colours from its tokens, every
-    // token an override.
-    if (!theme.source) {
-      return { name: theme.name, source: themeSourceFromTokens(theme.scheme, theme.tokens), advancedOpen: true };
-    }
-    return { name: theme.name, source: theme.source, advancedOpen: false };
+    // A saved source: every token the base colours don't reproduce becomes
+    // an override, so the editor shows — and Spara keeps — exactly the
+    // stored colours (a hand-edited theme file, or a theme saved before
+    // deriveTheme was tuned). The server stores sources the same way.
+    const aligned = theme.source ? alignThemeSource(theme.source, theme.tokens) : null;
+    if (aligned) return { name: theme.name, source: aligned, advancedOpen: false };
+    // An uploaded theme (no source): base colours from its tokens, only what
+    // they don't reproduce as overrides.
+    return withAdvanced(theme.name, editableThemeSource(theme.scheme, theme.tokens));
   }
   if (copyOf && isBuiltinThemeId(copyOf)) {
     const builtin = BUILTIN_THEMES.find((t) => t.id === copyOf)!;
-    return {
-      name: `${builtin.label} (kopia)`,
-      source: themeSourceFromTokens(builtin.scheme, BUILTIN_THEME_VALUES[copyOf]),
-      advancedOpen: true,
-    };
+    return withAdvanced(`${builtin.label} (kopia)`, editableThemeSource(builtin.scheme, BUILTIN_THEME_VALUES[copyOf]));
   }
   return { name: "", source: templateSource("light"), advancedOpen: false };
 }
@@ -204,7 +226,7 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
   async function changeBase(next: ThemeScheme) {
     if (next === source.base) return;
     if (
-      Object.keys(source.overrides).length > 0 &&
+      !isTemplateSource(source) &&
       !(await confirmDialog("Att byta utgångspunkt återställer grundfärgerna och tar bort alla ändringar under Avancerat. Fortsätta?", {
         confirmLabel: "Byt utgångspunkt",
       }))
@@ -281,6 +303,7 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
 
   const customStatus = source.status !== null;
   const base = source.base;
+  const overrideCount = Object.keys(source.overrides).length;
 
   return (
     <div className={styles.layout}>
@@ -288,6 +311,13 @@ export function ThemeEditor({ theme, copyOf }: { theme: ThemeDetail | null; copy
         <Card maxWidth="none">
           <SectionHeading>Grundfärger</SectionHeading>
           <div className={styles.settings}>
+            {overrideCount > 0 && (
+              <FormHint>
+                {overrideCount === 1
+                  ? "1 färg är ändrad under Avancerat och följer inte grundfärgerna."
+                  : `${overrideCount} färger är ändrade under Avancerat och följer inte grundfärgerna.`}
+              </FormHint>
+            )}
             <Field label="Namn" htmlFor="theme-name">
               <Input id="theme-name" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />
             </Field>

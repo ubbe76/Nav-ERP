@@ -1,4 +1,5 @@
-import { jsonb, pgEnum, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { jsonb, pgEnum, pgTable, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { users } from "./auth";
 
 // Egna teman (migration 0140): colour themes installed by an administrator
@@ -14,7 +15,10 @@ export const themes = pgTable("themes", {
   // taken from a file — so the CSS selector can't be steered by input, and
   // can never collide with a built-in id.
   key: varchar("key", { length: 40 }).notNull().unique(),
-  name: varchar("name", { length: 60 }).notNull().unique(),
+  // Unique regardless of case (themes_name_unique on lower(name)): the
+  // service compares the built-in labels the same way, and "Fabriksblå" and
+  // "fabriksblå" would be indistinguishable in the picker.
+  name: varchar("name", { length: 60 }).notNull(),
   scheme: themeSchemeEnum("scheme").notNull(),
   // Token values without "--", validated.
   tokens: jsonb("tokens").$type<Record<string, string>>().notNull(),
@@ -24,4 +28,4 @@ export const themes = pgTable("themes", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [uniqueIndex("themes_name_unique").on(sql`lower(${table.name})`)]);

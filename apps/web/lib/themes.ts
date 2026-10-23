@@ -6,7 +6,7 @@
 // packages/shared/src/theme-core.ts), with the built-in themes' values in
 // BUILTIN_THEME_VALUES; custom themes are installed under System → Teman.
 import { API_URL } from "./api";
-import type { ThemeBoot } from "./types";
+import type { ThemeBoot, ThemeBootClient } from "./types";
 
 export const THEMES = [
   { id: "light", label: "Ljust" },
@@ -35,12 +35,16 @@ export const FALLBACK_THEME_BOOT: ThemeBoot = {
 // Server-side read of GET /theme-boot with the request's cookie (so the
 // user's own choice comes along). No page may stop working because themes
 // couldn't be read: a slow or failing API gives the fallback after ~1 s.
-export async function fetchThemeBoot(cookieHeader: string | undefined): Promise<ThemeBoot> {
+// fetchImpl/timeoutMs are for the tests.
+export async function fetchThemeBoot(
+  cookieHeader: string | undefined,
+  { fetchImpl = fetch, timeoutMs = 1000 }: { fetchImpl?: typeof fetch; timeoutMs?: number } = {}
+): Promise<ThemeBoot> {
   try {
-    const res = await fetch(`${process.env.INTERNAL_API_URL ?? API_URL}/api/v1/theme-boot`, {
+    const res = await fetchImpl(`${process.env.INTERNAL_API_URL ?? API_URL}/api/v1/theme-boot`, {
       headers: cookieHeader ? { cookie: cookieHeader } : {},
       cache: "no-store",
-      signal: AbortSignal.timeout(1000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) return FALLBACK_THEME_BOOT;
     const body = (await res.json()) as ThemeBoot;
@@ -48,6 +52,43 @@ export async function fetchThemeBoot(cookieHeader: string | undefined): Promise<
     return body;
   } catch {
     return FALLBACK_THEME_BOOT;
+  }
+}
+
+// THE rule for which theme is shown — the boot script runs it before first
+// paint (as source text, see themeBootScript) and ThemeBootProvider runs it
+// again whenever the boot data changes on the client (a client-side login,
+// a new default, the lock, a deleted theme). Order: locked ⇒ the company
+// default; else the user's saved choice ⇒ this browser's stored choice ⇒
+// the default; an id that isn't in the list (a removed theme) falls
+// through, and finally to light.
+//
+// Self-contained and plain ES5 on purpose: its source is inlined into the
+// script, so it may not use anything from its module or need a helper.
+export function selectTheme(
+  ids: readonly string[],
+  defaultTheme: string,
+  locked: boolean,
+  userTheme: string | null | undefined,
+  stored: string | null
+): string {
+  var ok = function (id: unknown) {
+    return typeof id === "string" && ids.indexOf(id) >= 0;
+  };
+  if (!locked) {
+    if (ok(userTheme)) return userTheme as string;
+    if (ok(stored)) return stored as string;
+  }
+  return ok(defaultTheme) ? defaultTheme : "light";
+}
+
+// This browser's stored choice; localStorage can throw (private mode,
+// blocked site data).
+export function readStoredTheme(): string | null {
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
   }
 }
 
@@ -59,12 +100,8 @@ function embedJson(value: unknown): string {
 
 // Inlined into <head> by the root layout so the chosen theme is applied
 // before first paint — on every page, including those without the toggle
-// (stämpelterminalen, login). Order: locked ⇒ the company default; else the
-// user's saved choice ⇒ this browser's localStorage ⇒ the default; an
-// unknown id (a removed theme) falls through to the default, and finally to
-// light. localStorage can throw (private mode, blocked site data), hence
-// the try.
-export function themeBootScript(boot: ThemeBoot): string {
+// (stämpelterminalen, login). The rule is selectTheme's own source.
+export function themeBootScript(boot: ThemeBootClient): string {
   const data = {
     ids: boot.themes.map((t) => t.id),
     def: boot.defaultTheme,
@@ -72,5 +109,5 @@ export function themeBootScript(boot: ThemeBoot): string {
     user: boot.userTheme ?? null,
     key: THEME_STORAGE_KEY,
   };
-  return `(function(){var d=${embedJson(data)};var ok=function(t){return typeof t==="string"&&d.ids.indexOf(t)>=0};var t=null;if(!d.locked){if(ok(d.user))t=d.user;else{try{var s=localStorage.getItem(d.key);if(ok(s))t=s}catch(e){}}}if(!t)t=ok(d.def)?d.def:"light";document.documentElement.setAttribute("data-theme",t)})();`;
+  return `(function(){var d=${embedJson(data)};var s=null;try{s=localStorage.getItem(d.key)}catch(e){}document.documentElement.setAttribute("data-theme",(${selectTheme.toString()})(d.ids,d.def,d.locked,d.user,s))})();`;
 }

@@ -52,7 +52,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           hydration mismatch we can neither cause nor fix. This suppresses the
           warning for this element's own attributes only — never the tree. */}
       <body suppressHydrationWarning className={`${spaceGrotesk.variable} ${figtree.variable}`}>
-        <ThemeBootProvider boot={boot}>{children}</ThemeBootProvider>
+        {/* Without the CSS: it is already in <head> above. */}
+        <ThemeBootProvider
+          boot={{ themes: boot.themes, defaultTheme: boot.defaultTheme, locked: boot.locked, userTheme: boot.userTheme }}
+        >
+          {children}
+        </ThemeBootProvider>
       </body>
     </html>
   );

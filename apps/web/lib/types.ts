@@ -4400,6 +4400,10 @@ export interface ThemeBoot {
   userTheme?: string | null;
 }
 
+// What the root layout hands the client (ThemeBootProvider): the boot
+// without its CSS, which is already in <head> — serialised once, not twice.
+export type ThemeBootClient = Omit<ThemeBoot, "css">;
+
 export type ThemeOrigin = "builtin" | "uploaded" | "editor";
 
 export interface ThemeListRow {

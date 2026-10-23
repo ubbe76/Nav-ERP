@@ -318,7 +318,7 @@ Tidkoderna måste matcha lönesystemets egen löneartstabell — stäm av dem me
 - **Förvalt tema för företaget** är temat som visas för alla som inte själva valt något, och på inloggningssidan innan någon loggat in.
 - **Lås temat för alla användare** döljer temaväljaren för alla och tvingar fram det förvalda temat.
 
-Varje användares eget val sparas på användaren, så det följer med mellan datorer. Väljaren uppe till höger visar alla teman — en segmenterad kontroll när det finns högst tre, annars en lista märkt **Tema**. Ett tema som tas bort ersätts för dess användare av det förvalda. Konton med **Endast läsning** kan inte spara sitt val på användaren; då gäller valet bara i den webbläsaren.
+Varje användares eget val sparas på användaren, så det följer med mellan datorer. Väljaren uppe till höger visar alla teman — en segmenterad kontroll när det finns högst tre, annars en rullgardinslista med temanas namn. Ett tema som tas bort ersätts för dess användare av det förvalda. Konton med **Endast läsning** kan inte spara sitt val på användaren; då gäller valet bara i den webbläsaren.
 
 ### Temalistan
 
@@ -327,15 +327,15 @@ Tabellen visar **Namn**, **Typ** (Ljust eller Mörkt), **Skapat** (Inbyggt, Uppl
 - **Redigera** öppnar temat i redigeraren.
 - **Exportera** laddar ned temat som en temafil (`.json`).
 - **Ta bort** tar bort ett eget tema efter en bekräftelse. Företagets förvalda tema kan inte tas bort — välj först ett annat förval.
-- De inbyggda temana har bara **Exportera** och **Skapa kopia**, som öppnar redigeraren med det inbyggda temats alla färger som utgångspunkt.
+- De inbyggda temana har bara **Exportera** och **Skapa kopia**, som öppnar redigeraren med det inbyggda temats färger som utgångspunkt.
 
 Det får finnas högst 50 egna teman.
 
 ### Ladda upp tema
 
-Klicka på **Ladda upp tema…** och välj en temafil (`.json`, högst 64 kB). Nav läser filen i webbläsaren och kontrollerar den på servern innan något sparas. Dialogen visar **Namn**, typ, en förhandsvisning med appens riktiga knappar, tabell och formulär, samt varningar och fel. **Installera** är avstängd så länge det finns fel; om namnet redan är taget ändrar du fältet **Namn**.
+Klicka på **Ladda upp tema…** och välj en temafil (`.json`, högst 64 kB). Nav läser filen i webbläsaren och kontrollerar den på servern innan något sparas. Dialogen visar **Namn**, typ, en förhandsvisning med appens riktiga knappar, tabell och formulär, samt varningar och fel. **Installera** är avstängd så länge det finns fel. Saknar filen namn, är namnet för långt eller redan taget ändrar du fältet **Namn** — filen kontrolleras igen med det nya namnet.
 
-- En färg som saknar i filen fylls i automatiskt (en varning visas). En okänd färg ignoreras med en varning — filen kan komma från en nyare version av Nav.
+- En färg som saknas i filen fylls i automatiskt (en varning visas — saknas fler än tre blir det en enda rad, till exempel "40 av 45 färger saknas i filen och fylls i automatiskt."). En okänd färg ignoreras med en varning — filen kan komma från en nyare version av Nav.
 - Ett ogiltigt färgvärde är ett fel. Filen kan aldrig innehålla annat än färgvärden.
 - Temat måste klara kontrastkravet nedan, annars kan det inte installeras.
 
@@ -343,7 +343,7 @@ Klicka på **Ladda upp tema…** och välj en temafil (`.json`, högst 64 kB). N
 
 **Nytt tema** (eller **Redigera** på ett eget tema) öppnar redigeraren: inställningarna till vänster och en levande förhandsvisning till höger (under inställningarna på mobil). Välj grundfärgerna så räknar Nav fram alla övriga färger:
 
-- **Namn** och **Utgå från** (Ljust eller Mörkt — väljer mall för skuggor och överlägg; att byta frågar först om du redan gjort ändringar under Avancerat).
+- **Namn** och **Utgå från** (Ljust eller Mörkt — mallen som grundfärgerna, skuggor och överlägg utgår från). Att byta återställer grundfärgerna till mallens och tar bort ändringarna under Avancerat, så Nav frågar först om du har ändrat något.
 - **Bakgrund**, **Ytor** (kort och tabeller), **Text** och **Accentfärg** (knappar, aktiv meny och länkar). Varje färg väljs med färgväljaren eller skrivs som hex (`#rrggbb`).
 - **Rubrikfärg** är valfri — tom betyder accentfärgen som text.
 - **Statusfärger**: **Standard** använder mallens kulörer, **Egna** ger fyra färger för Pågår, Försenad, Stoppad och Klar.
@@ -356,7 +356,7 @@ Varje textfärg måste ha kontrasten 4,5:1 mot de ytor den ligger på (WCAG AA),
 
 #### Avancerat
 
-Under **Avancerat** (hopfällt) finns alla färger, grupperade och med sina namn. En färg du ändrar för hand markeras **Ändrad** och följer inte längre grundfärgerna; **Återställ** låter Nav räkna fram den igen. Ett uppladdat tema saknar grundfärger från redigeraren, så det öppnas med alla färger under Avancerat som egna ändringar och grundfärgerna hämtade ur temat.
+Under **Avancerat** (hopfällt) finns alla färger, grupperade och med sina namn. En färg du ändrar för hand markeras **Ändrad** och följer inte längre grundfärgerna; **Återställ** låter Nav räkna fram den igen. Ett uppladdat tema och en kopia av ett inbyggt tema saknar grundfärger från redigeraren. Då hämtas grundfärgerna ur temats färger, och bara de färger som grundfärgerna inte räknar fram likadant blir egna ändringar under Avancerat — övriga följer grundfärgerna. Finns det ändrade färger visas "N färger är ändrade under Avancerat och följer inte grundfärgerna" överst under **Grundfärger**. Ett sparat tema öppnas alltid med exakt sina sparade färger.
 
 ### Behöver ses över
 

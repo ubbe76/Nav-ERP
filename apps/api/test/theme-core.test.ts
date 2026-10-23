@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  alignThemeSource,
   BUILTIN_THEME_VALUES,
+  BUILTIN_THEMES,
   buildThemeCss,
   buildThemeFile,
   checkTokenValue,
   contrastRatio,
   deriveTheme,
+  editableThemeSource,
   ensureContrast,
   fillThemeTokens,
   fixContrast,
@@ -453,5 +456,48 @@ describe("the editor's helpers", () => {
     const fixed = fixContrast(tokens, "color-text-muted")!;
     expect(themeContrastFailures({ ...tokens, "color-text-muted": fixed })).toEqual([]);
     expect(fixContrast(tokens, "color-bg")).toBeNull();
+  });
+});
+
+describe("alignThemeSource / editableThemeSource", () => {
+  const template = (scheme: ThemeScheme): ThemeSource => ({ ...themeSourceFromTokens(scheme, BUILTIN_THEME_VALUES[scheme]), overrides: {} });
+
+  it("turns every token the base colours derive differently into an override, so the source reproduces the tokens", () => {
+    const source = template("light");
+    // A hand-edited exported file: one colour changed, one reference added.
+    const tokens = { ...deriveTheme(source).tokens, "color-border": "#123456", "btn-primary-text": "var(--color-bg)" };
+    const aligned = alignThemeSource(source, tokens)!;
+    expect(aligned.overrides).toEqual({ "color-border": "#123456", "btn-primary-text": "var(--color-bg)" });
+    expect(deriveTheme(aligned).tokens).toEqual(tokens);
+    // The base colours are untouched.
+    expect(aligned).toMatchObject({ base: "light", bg: source.bg, surface: source.surface, text: source.text, accent: source.accent });
+  });
+
+  it("keeps an override that still holds its value and drops one the tokens no longer carry", () => {
+    const source = { ...template("dark"), overrides: { "color-border": "#333333", "color-divider": "#444444" } };
+    const tokens = { ...deriveTheme({ ...source, overrides: {} }).tokens, "color-border": "#333333" };
+    const aligned = alignThemeSource(source, tokens)!;
+    expect(aligned.overrides).toEqual({ "color-border": "#333333" });
+    expect(deriveTheme(aligned).tokens).toEqual(tokens);
+  });
+
+  it("is a no-op for tokens the source derives itself", () => {
+    const source = { ...template("light"), accent: "#2f5f9e" };
+    expect(alignThemeSource(source, deriveTheme(source).tokens)).toEqual(source);
+  });
+
+  it("editableThemeSource reproduces every built-in theme with only the tokens its base colours can't derive as overrides", () => {
+    for (const theme of BUILTIN_THEMES) {
+      const tokens = fillThemeTokens(theme.scheme, BUILTIN_THEME_VALUES[theme.id]).tokens;
+      const source = editableThemeSource(theme.scheme, tokens);
+      expect(deriveTheme(source).tokens).toEqual(tokens);
+      expect(Object.keys(source.overrides).length).toBeLessThan(THEME_TOKENS.length);
+      // The base colours themselves never need an override.
+      for (const name of ["color-bg", "color-surface", "accent"]) expect(source.overrides).not.toHaveProperty(name);
+    }
+    // Dracula's own status hues and heading colour become base colours rather than overrides.
+    const dracula = editableThemeSource("dark", BUILTIN_THEME_VALUES.dracula);
+    expect(dracula.status).not.toBeNull();
+    expect(dracula.overrides).not.toHaveProperty("status-running");
   });
 });
