@@ -485,7 +485,8 @@ export function createPluginsService(deps: {
         iat: issuedAt,
         exp: issuedAt + CONTEXT_TOKEN_SECONDS,
       };
-      const token = jwt.sign(claims, plugin.webhookSecret, { algorithm: "HS256", noTimestamp: true });
+      // iat and exp are in the claims (the injected clock), so jsonwebtoken adds neither.
+      const token = jwt.sign(claims, plugin.webhookSecret, { algorithm: "HS256" });
       return {
         token,
         url: contextUrl(plugin.baseUrl, path, token),
