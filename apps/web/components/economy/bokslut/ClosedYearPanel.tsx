@@ -32,7 +32,15 @@ export function ClosedYearPanel({ closing }: { closing: YearEndClosingDetail }) 
         <p>
           Lagerförändring: <VerificationLink verification={steps.inventory.verification} />
           {!steps.inventory.verification && "inget verifikat"} · Periodiseringar: <VerificationLink verification={steps.accruals.verification} />
-          {!steps.accruals.verification && "inga"} · Resultatöverföring: <VerificationLink verification={steps.resultTransfer.verification} />
+          {!steps.accruals.verification && "inga"}
+          {steps.fxRevaluation.bookedAt && (
+            <>
+              {" "}
+              · Valutaomvärdering: <VerificationLink verification={steps.fxRevaluation.verification} />
+              {!steps.fxRevaluation.verification && "inget verifikat"}
+            </>
+          )}{" "}
+          · Resultatöverföring: <VerificationLink verification={steps.resultTransfer.verification} />
           {!steps.resultTransfer.verification && "inget verifikat"}
         </p>
       </Card>
@@ -144,7 +152,7 @@ function ReopenCard({ closing }: { closing: YearEndClosingDetail }) {
   return (
     <Card maxWidth="none">
       <SectionHeading>Öppna året igen</SectionHeading>
-      <FormHint>Resultatöverföringen omförs och bokslutsmånaden låses upp. Lagerförändring, avskrivningar och periodiseringar ligger kvar.</FormHint>
+      <FormHint>Resultatöverföringen omförs och bokslutsmånaden låses upp. Lagerförändring, avskrivningar, periodiseringar och valutaomvärdering ligger kvar.</FormHint>
       {dispositionActive && <FormHint>Vinstdispositionen är bokförd — ångra den först för att kunna öppna året igen.</FormHint>}
       <FormActions className={styles.actions}>
         <Button type="button" variant="danger" disabled={dispositionActive} onClick={() => setOpen(true)}>

@@ -13,3 +13,20 @@
 .actions {
   flex-wrap: wrap;
 }
+
+/* The fx step's invoice list: a native disclosure, summary styled like the
+   import wizard's. */
+.details {
+  margin-top: 12px;
+}
+
+.details > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  padding: 4px 0;
+}
+
+.details[open] > summary {
+  margin-bottom: 10px;
+}

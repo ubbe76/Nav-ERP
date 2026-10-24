@@ -3,8 +3,8 @@
 // sync by apps/api/test/year-end.shared.test.ts. No imports: vitest loads it.
 
 export type YearEndAccrualKind = "prepaid_expense" | "accrued_income" | "accrued_expense" | "prepaid_income";
-export type YearEndStep = "inventory" | "accruals" | "result_transfer" | "profit_disposition";
-export type YearEndRole = "booking" | "accrual_reversal" | "cancellation";
+export type YearEndStep = "inventory" | "accruals" | "result_transfer" | "profit_disposition" | "fx_revaluation";
+export type YearEndRole = "booking" | "accrual_reversal" | "cancellation" | "fx_reversal";
 export type PillStatus = "done" | "delayed" | "draft" | "stopped";
 
 export const YEAR_END_ACCRUAL_KIND_LABELS: Record<YearEndAccrualKind, string> = {
@@ -26,12 +26,14 @@ export const YEAR_END_STEP_LABELS: Record<YearEndStep, string> = {
   accruals: "Periodiseringar",
   result_transfer: "Resultatöverföring",
   profit_disposition: "Vinstdisposition",
+  fx_revaluation: "Valutaomvärdering",
 };
 
 export const YEAR_END_ROLE_LABELS: Record<YearEndRole, string> = {
   booking: "Bokföring",
   accrual_reversal: "Återföring",
   cancellation: "Omföring",
+  fx_reversal: "Återföring",
 };
 
 // Förvalt balanskonto när typen väljs.

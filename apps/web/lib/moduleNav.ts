@@ -466,7 +466,7 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
       {
         href: "/ekonomi/bokslut",
         title: "Bokslut",
-        description: "Årsbokslut steg för steg — lager, avskrivningar, periodiseringar, resultatöverföring och stängning av räkenskapsåret.",
+        description: "Årsbokslut steg för steg — lager, avskrivningar, periodiseringar, valutaomvärdering, resultatöverföring och stängning av räkenskapsåret.",
       },
     ],
   },

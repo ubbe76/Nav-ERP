@@ -4310,6 +4310,18 @@ export interface YearEndClosingDetail {
       bookedAt: string | null;
     };
     resultTransfer: { status: "not_done" | "done" | "stale"; net: number; yearResult: number; verification: YearEndVerificationRef | null };
+    // Valutaomvärdering (valuta steg 4). `required` = open invoices in another
+    // currency than SEK per the closing date; false + not_done = "Inga
+    // valutaposter" (the step can still be marked done and blocks nothing).
+    fxRevaluation: {
+      status: "not_done" | "done" | "stale";
+      required: boolean;
+      verification: YearEndVerificationRef | null;
+      reversalVerification: YearEndVerificationRef | null;
+      bookedAt: string | null;
+      bookedRates: YearEndFxRate[] | null;
+      preview: YearEndFxPreview;
+    };
   };
   checks: {
     stepBlockers: YearEndCheck[];
@@ -4370,6 +4382,91 @@ export interface ProfitDispositionPreview {
 export interface YearEndBookResult {
   unchanged: boolean;
   verification: YearEndVerificationRef | null;
+}
+
+// Valutaomvärdering: a rate as stored on the booking. `source` "step" = typed
+// in the step (no rate day, date null).
+export type YearEndFxRateSource = "riksbank" | "manual" | "step";
+
+export interface YearEndFxRate {
+  currency: string;
+  rate: number;
+  date: string | null;
+  source: YearEndFxRateSource;
+}
+
+// A rate as the step shows it: null while no source has one for the currency,
+// fromBooking = the live booking's rate (kept as the default on a re-run).
+export interface YearEndFxRateView {
+  currency: string;
+  rate: number | null;
+  date: string | null;
+  source: YearEndFxRateSource | null;
+  fromBooking: boolean;
+}
+
+export interface YearEndFxCurrencySummary {
+  currency: string;
+  rate: number | null;
+  invoiceCount: number;
+  openAmount: number;
+  bookedSek: number;
+  revaluedSek: number | null;
+  difference: number | null;
+}
+
+// One reskontra side. Differences follow the reskontra's sign: + on a
+// receivable is a kursvinst, + on a payable a kursförlust.
+export interface YearEndFxSide {
+  accountNumber: string;
+  invoiceCount: number;
+  bookedSek: number;
+  revaluedSek: number | null;
+  difference: number | null;
+  currencies: YearEndFxCurrencySummary[];
+}
+
+export interface YearEndFxPreview {
+  asOf: string;
+  rates: YearEndFxRateView[];
+  missingCurrencies: string[];
+  receivable: YearEndFxSide;
+  payable: YearEndFxSide;
+  // Receivable difference − payable difference (+ = net kursvinst); null while
+  // a rate is missing.
+  resultEffect: number | null;
+  rows: YearEndPostingRow[];
+  unchanged: boolean;
+}
+
+export interface YearEndFxInvoice {
+  side: "receivable" | "payable";
+  id: string;
+  number: string;
+  partnerName: string;
+  currency: string;
+  exchangeRate: number | null;
+  openAmount: number;
+  bookedSek: number;
+  rate: number | null;
+  revaluedSek: number | null;
+  difference: number | null;
+}
+
+// GET /year-end-closings/:id/fx-revaluation-preview
+export interface YearEndFxPreviewWithInvoices extends YearEndFxPreview {
+  invoices: YearEndFxInvoice[];
+}
+
+// POST /year-end-closings/:id/fx-revaluation
+export interface YearEndFxBookResult {
+  unchanged: boolean;
+  verification: YearEndVerificationRef | null;
+  reversalVerification: YearEndVerificationRef | null;
+  cancelled: YearEndVerificationRef[];
+  nextFiscalYearCreated: boolean;
+  rates: YearEndFxRate[];
+  revaluation: { receivable: Omit<YearEndFxSide, "accountNumber">; payable: Omit<YearEndFxSide, "accountNumber">; resultEffect: number | null };
 }
 
 // Bankfiler: GET /bank-settings (bank-settings.service.ts BankSettingsView).

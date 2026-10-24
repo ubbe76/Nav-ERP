@@ -33,9 +33,15 @@ import styles from "./Bokslut.module.css";
 
 type PillKey = keyof typeof STEP_STATUS_PILL;
 
-export function StepHeader({ number, title, status }: { number: number; title: string; status: PillKey }) {
+// A step without a number (Valutaomvärdering sits between steg 4 and 5 and
+// leaves the others' numbers alone) shows just its title.
+export function StepHeader({ number, title, status }: { number?: number; title: string; status: PillKey }) {
   const pill = STEP_STATUS_PILL[status];
-  return <SectionHeading actions={<StatusPill status={pill.status} label={pill.label} compact />}>{`${number}. ${title}`}</SectionHeading>;
+  return (
+    <SectionHeading actions={<StatusPill status={pill.status} label={pill.label} compact />}>
+      {number === undefined ? title : `${number}. ${title}`}
+    </SectionHeading>
+  );
 }
 
 export function VerificationLink({ verification }: { verification: YearEndVerificationRef | null }) {
@@ -286,10 +292,15 @@ export function ResultTransferCard({
 }) {
   const step = closing.steps.resultTransfer;
   const blocked = closing.checks.stepBlockers.length > 0;
+  const fx = closing.steps.fxRevaluation;
+  // Valutaomvärdering must be done first only when there are foreign open
+  // invoices (the API's year-end-step-order says the same).
+  const fxPending = fx.required && fx.status === "not_done";
   const earlierDone =
     closing.steps.inventory.status !== "not_done" &&
     closing.steps.depreciation.status === "done" &&
-    closing.steps.accruals.status === "done";
+    closing.steps.accruals.status === "done" &&
+    !fxPending;
   const action = useStepAction();
   return (
     <Card maxWidth="none">
@@ -306,7 +317,7 @@ export function ResultTransferCard({
       ) : (
         <PostingTable rows={preview?.rows ?? []} empty="Resultatet är 0,00 — inget att överföra." />
       )}
-      {!earlierDone && <FormHint>Gör stegen 2–4 först.</FormHint>}
+      {!earlierDone && <FormHint>{fx.required ? "Gör stegen 2–4 och Valutaomvärdering först." : "Gör stegen 2–4 först."}</FormHint>}
       <FormError>{action.error}</FormError>
       {action.notice && <FormHint>{action.notice}</FormHint>}
       <FormActions className={styles.actions}>

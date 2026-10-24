@@ -212,7 +212,18 @@ const MESSAGES: Record<string, MessageEntry> = {
   "inventory-account-conflict": "Lager och Lagerförändring kan inte vara samma konto — ändra under Konteringsregler",
   "invalid-accrual-account": "Kontot passar inte för den typen av periodisering — balanskontot ska ligga på rätt sida och resultatkontot i klass 3–8",
   "next-fiscal-year-missing": "Nästa räkenskapsår kunde inte skapas automatiskt — lägg upp det under Räkenskapsår",
-  "year-end-step-order": "Gör stegen Lagerförändring, Avskrivningar och Periodiseringar före resultatöverföringen",
+  "year-end-step-order":
+    "Gör stegen Lagerförändring, Avskrivningar och Periodiseringar — och Valutaomvärdering när det finns öppna fakturor i annan valuta — före resultatöverföringen",
+  // The server names the currencies and the day: body.currencies (ISO codes),
+  // body.date (the closing date).
+  "fx-revaluation-rate-missing": (err) => {
+    const body = err.body as { currencies?: unknown; date?: unknown } | undefined;
+    const currencies = Array.isArray(body?.currencies) ? (body!.currencies as string[]) : [];
+    const date = typeof body?.date === "string" ? ` per ${body.date}` : "";
+    return currencies.length > 0
+      ? `Kurs saknas för ${currencies.join(", ")}${date} — skriv kursen i fältet Kurs i steget Valutaomvärdering.`
+      : "Kurs saknas — skriv kursen i fältet Kurs i steget Valutaomvärdering.";
+  },
   "year-end-closing-not-closed": "Bokslutet är inte stängt",
   "next-fiscal-year-closed": "Nästa räkenskapsår är stängt — öppna det först",
   "profit-disposition-active": "Vinstdispositionen är bokförd — ångra den först",

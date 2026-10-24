@@ -13,6 +13,7 @@ import type { Account, FiscalYear, ResultTransferPreview, YearEndClosingDetail }
 import { YEAR_END_ROLE_LABELS, YEAR_END_STEP_LABELS } from "../../lib/yearEnd";
 import { AccrualsCard } from "./bokslut/AccrualsCard";
 import { ClosedYearPanel } from "./bokslut/ClosedYearPanel";
+import { FxRevaluationCard } from "./bokslut/FxRevaluationCard";
 import { ChecksCard, CloseCard, DepreciationCard, InventoryCard, ResultTransferCard, VerificationLink } from "./bokslut/StepCards";
 import { useStepAction } from "./bokslut/useStepAction";
 
@@ -69,6 +70,7 @@ export function BokslutPageClient({
             closing={closing}
             accounts={accounts}
           />
+          <FxRevaluationCard key={closing.id} closing={closing} />
           <ResultTransferCard closing={closing} preview={resultTransferPreview} accountsMissing={resultTransferAccountsMissing} />
           <CloseCard closing={closing} />
         </>
