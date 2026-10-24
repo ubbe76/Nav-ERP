@@ -26,7 +26,9 @@ export function vatCodeBook(rows: { id: string; code: string; name: string; invo
   const byId = new Map<string, DocumentVatCodeRow>();
   const byCode = new Map<VatCode, DocumentVatCodeRow>();
   for (const row of rows) {
-    // vat_codes.code is CHECKed against the catalog; anything else is ignored.
+    // vat_codes holds one row per catalog code (seeded by migration 0142; no
+    // create route exists). There is no CHECK on the column, so a row outside
+    // the catalog — only a manual DB edit could make one — is ignored here.
     if (!isVatCode(row.code)) continue;
     const entry: DocumentVatCodeRow = { id: row.id, code: row.code, name: row.name, invoiceText: row.invoiceText, active: row.active };
     byId.set(row.id, entry);

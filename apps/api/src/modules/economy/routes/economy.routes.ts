@@ -80,11 +80,13 @@ import {
   VatFileOrgNumberMissingError,
   VatPeriodAlreadySettledError,
   VatPeriodNotCoveredError,
+  VatReportingContactInvalidError,
   type VatReportService,
 } from "../service/vat-report.service.js";
 import {
   ImportVatCodeError,
   VatCodeAccountInvalidError,
+  VatCodeRequiredError,
   VatCodeSlotNotUsedError,
   type VatCodeService,
 } from "../service/vat-code.service.js";
@@ -103,6 +105,7 @@ import {
 import { SieParseError } from "../service/sie-parse.js";
 import {
   PeriodicSummaryEmptyError,
+  PeriodicSummaryNoValidRowsError,
   PeriodicSummaryReporterIncompleteError,
   type PeriodicSummaryService,
 } from "../service/periodic-summary.service.js";
@@ -576,14 +579,16 @@ export async function economyRoutes(
   // The list is read by the invoice card and the supplier invoice dialog as
   // well, so it is open to every office user like /account-options (the
   // codes' account numbers are BAS labels, no amounts); editing and the
-  // importmoms posting need Ekonomi.
+  // importmoms posting need Ekonomi. Deactivating a domestic code (the one
+  // every automatic choice falls back on) is 400 vat-code-required.
 
   function vatCodeError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
     if (err instanceof VatCodeNotFoundError) return reply.code(404).send(errorBody(err));
     if (
       err instanceof VatCodeSlotNotUsedError ||
       err instanceof VatCodeAccountInvalidError ||
-      err instanceof VatCodeAccountConflictError
+      err instanceof VatCodeAccountConflictError ||
+      err instanceof VatCodeRequiredError
     ) {
       return reply.code(400).send(errorBody(err));
     }
@@ -627,13 +632,19 @@ export async function economyRoutes(
   });
 
   // Redovisningsperiod för moms + the periodisk sammanställning's contact:
-  // read by every office user (the report page's default period), written
-  // with Ekonomi.
-  app.get("/settings/vat-reporting", { config: { access: ["office"] } }, async () => vatReport.getReportingSettings());
+  // Ekonomi both ways (the module's own rule — only the Momsrapport and
+  // Periodisk sammanställning pages read it). A contact name or phone the
+  // file cannot carry is 400 vat-reporting-contact-invalid with `field`.
+  app.get("/settings/vat-reporting", async () => vatReport.getReportingSettings());
 
-  app.patch("/settings/vat-reporting", { preHandler: requirePermission("ekonomi") }, async (req) => {
+  app.patch("/settings/vat-reporting", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
     const input = updateVatReportingSettingsSchema.parse(req.body);
-    return vatReport.updateReportingSettings(input, req.user!.id);
+    try {
+      return await vatReport.updateReportingSettings(input, req.user!.id);
+    } catch (err) {
+      if (err instanceof VatReportingContactInvalidError) return reply.code(400).send({ ...errorBody(err), field: err.field });
+      throw err;
+    }
   });
 
   // --- Momsrapport (B5) ---
@@ -703,7 +714,9 @@ export async function economyRoutes(
     if (err instanceof PeriodicSummaryReporterIncompleteError) {
       return reply.code(409).send({ ...errorBody(err), missing: err.missing });
     }
-    if (err instanceof PeriodicSummaryEmptyError) return reply.code(409).send(errorBody(err));
+    if (err instanceof PeriodicSummaryEmptyError || err instanceof PeriodicSummaryNoValidRowsError) {
+      return reply.code(409).send(errorBody(err));
+    }
     throw err;
   }
 

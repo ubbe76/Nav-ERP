@@ -22,6 +22,7 @@ import { createSystemService } from "../src/modules/system/service/system.servic
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import {
   PeriodicSummaryEmptyError,
+  PeriodicSummaryNoValidRowsError,
   PeriodicSummaryReporterIncompleteError,
   createPeriodicSummaryService,
 } from "../src/modules/economy/service/periodic-summary.service.js";
@@ -307,14 +308,39 @@ describe("GET summary — reconciliation against ruta 35 and 39", () => {
     const after = await service.getSummary(THIS_MONTH);
     // 1200.50 rounds half away from zero.
     expect(after.ledger).toEqual({ box35: 0, box39: 1201 });
+    // The öre difference (−200.50) rounded half away from zero.
     expect(after.differences).toEqual({ goods: 0, services: -201 });
     expect(after.warnings).toEqual([
       {
         kind: "ledger_difference",
         message:
-          "Tjänster: sammanställningen 1 000 kr, bokfört i ruta 39 1 201 kr (skillnad -201 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
+          "Tjänster: sammanställningen 1 000,00 kr, bokfört i ruta 39 1 200,50 kr (skillnad -200,50 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
         invoices: [],
       },
+    ]);
+  });
+
+  it("compares öre: per-row rounding invents no difference, and a few öre beside the invoices are not hidden", async () => {
+    await issuedInvoice((await makeCustomer()).id, [{ description: "Bänkskiva", quantity: 1, unitPrice: 0.5 }]);
+    await issuedInvoice((await makeCustomer({ name: "Andra GmbH", vatNumber: "DE987654321" })).id, [
+      { description: "Bänkskiva", quantity: 1, unitPrice: 0.5 },
+    ]);
+    const rounded = await service.getSummary(THIS_MONTH);
+    // Each row rounds 0.50 up to 1 kr (2 kr in all), the booked 1.00 kr is
+    // 1 kr — the öre agree, so nothing to warn about.
+    expect(rounded.totals).toEqual({ goods: 2, services: 0 });
+    expect(rounded.ledger).toEqual({ box35: 1, box39: 0 });
+    expect(rounded.differences).toEqual({ goods: 0, services: 0 });
+    expect(rounded.warnings).toEqual([]);
+
+    // 30 öre booked by hand on 3108: rounds away in whole kronor, but is a
+    // real difference.
+    await bookManualSale("3108", 0.3);
+    const after = await service.getSummary(THIS_MONTH);
+    expect(after.ledger).toEqual({ box35: 1, box39: 0 });
+    expect(after.differences).toEqual({ goods: 0, services: 0 });
+    expect(after.warnings.map((warning) => warning.message)).toEqual([
+      "Varor: sammanställningen 1,00 kr, bokfört i ruta 35 1,30 kr (skillnad -0,30 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
     ]);
   });
 });
@@ -380,5 +406,19 @@ describe("the reporter and the file", () => {
     await issuedInvoice(se.id, [{ description: "Bänkskiva", quantity: 1, unitPrice: 100 }]);
     expect((await service.getSummary(THIS_MONTH)).rows).toEqual([]);
     await expect(service.getFile(THIS_MONTH)).rejects.toBeInstanceOf(PeriodicSummaryEmptyError);
+  });
+
+  it("refuses a file with its own error when there are EU sales but none with a valid buyer number", async () => {
+    await setContact();
+    const de = await makeCustomer();
+    const invoice = await issuedInvoice(de.id, [{ description: "Bänkskiva", quantity: 1, unitPrice: 100 }]);
+    // An invoice from before Utfärda required the number.
+    await db.update(invoices).set({ vatNumber: null }).where(eq(invoices.id, invoice.id));
+    const summary = await service.getSummary(THIS_MONTH);
+    expect(summary.rows).toEqual([]);
+    expect(summary.warnings.map((warning) => warning.kind)).toEqual(["missing_vat_number", "ledger_difference"]);
+    const err = await service.getFile(THIS_MONTH).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PeriodicSummaryNoValidRowsError);
+    expect((err as Error).message).toBe("Alla EU-fakturor i perioden saknar giltigt momsnummer — rätta kunderna");
   });
 });

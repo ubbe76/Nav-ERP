@@ -6,8 +6,10 @@
 //     Swedish supplier (Peppol SE-R-006, fatal),
 //   * MF ⇒ E (exempt) with the reason text BT-120 required by BR-E-10,
 //   * OB (omvänd betalningsskyldighet, Sverige) ⇒ AE (reverse charge) with
-//     BT-120 = the code's invoice text (BR-AE-10) and the buyer's VAT number
-//     (BR-AE-02).
+//     BT-121 = VATEX-EU-AE (the CEF VATEX code "Reverse charge", only for
+//     category AE — PEPPOL-EN16931-P0107) next to BT-120 = the code's invoice
+//     text (BR-AE-10 asks for either; both together are allowed, its test is
+//     presence only) and the buyer's VAT number (BR-AE-02).
 // Every other code (EU sales, export) cannot occur in etapp 1 — foreign
 // customers are refused before the document is built — and ubl-check refuses
 // it for safety. A line without a code (documents built before the momskoder,
@@ -19,11 +21,15 @@ export interface VatCategory {
   percent: number;
   // BT-120, only for E and AE.
   exemptionReason?: string;
+  // BT-121 (CEF VATEX code list), only for AE.
+  exemptionReasonCode?: string;
 }
 
 export const VAT_EXEMPTION_REASON = "Undantagen från mervärdesskatt";
 // BT-120 for AE when the code has no invoice text of its own.
 export const REVERSE_CHARGE_REASON = "Omvänd betalningsskyldighet";
+// BT-121 for AE.
+export const REVERSE_CHARGE_REASON_CODE = "VATEX-EU-AE";
 
 export const STANDARD_RATED_PERCENTS: readonly number[] = [25, 12, 6];
 
@@ -67,7 +73,12 @@ export function lineVatCategory(line: LineVatFacts): VatCategory {
     throw new Error(`Unsupported VAT code ${line.vatCode} — ubl-check refuses it before the builder runs`);
   }
   if (line.vatCode === "OB") {
-    return { id: "AE", percent: 0, exemptionReason: line.vatExemptionText?.trim() || REVERSE_CHARGE_REASON };
+    return {
+      id: "AE",
+      percent: 0,
+      exemptionReasonCode: REVERSE_CHARGE_REASON_CODE,
+      exemptionReason: line.vatExemptionText?.trim() || REVERSE_CHARGE_REASON,
+    };
   }
   return vatCategoryFor(line.vatRate);
 }

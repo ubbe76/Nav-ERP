@@ -217,6 +217,24 @@ describe("invoice rows — derived momskod (create/addRow)", () => {
       user.id
     );
     expect(priv!.rows[0]!.vatCode.code).toBe("MP12");
+
+    // A private person outside the EU: goods are export whoever buys them
+    // (artikel 146), a service is svensk moms.
+    const privateNo = await makeCustomer({ name: "Privat Norge", country: "NO", privatePerson: true });
+    const privExport = await invoiceService.create(
+      {
+        customerId: privateNo.id,
+        rows: [
+          { articleId: goods.id, description: "Bänkskiva", quantity: 1, unitPrice: 100 },
+          { articleId: service.id, description: "Montage", quantity: 1, unitPrice: 100 },
+        ],
+      },
+      user.id
+    );
+    expect(privExport!.rows.map((r) => [r.vatCode.code, r.vatAmount])).toEqual([
+      ["EXV", "0.00"],
+      ["MP25", "25.00"],
+    ]);
   });
 
   it("counts the freight article as goods even when it is a service article", async () => {
@@ -354,6 +372,82 @@ describe("invoice rows — leveransdatum", () => {
   });
 });
 
+describe("Utfärda — leveransdatum of a delivery undone after the draft row was made", () => {
+  it("moves the date to the last live delivery day, keeps one that still stands and one set by hand", async () => {
+    const customer = await makeCustomer();
+    const goods = await makeArticle("purchased");
+    const { order, row, location } = await deliveredOrder(customer.id, goods.id, 6, 2);
+    await db.update(deliveries).set({ deliveredAt: new Date("2026-03-02T09:00:00Z") });
+    const second = await salesService.deliverBatch(order.id, { locationId: location.id, rows: [{ rowId: row.id, quantity: 2 }] }, user.id);
+    await db.update(deliveries).set({ deliveredAt: new Date("2026-03-10T09:00:00Z") }).where(eq(deliveries.id, second.deliveryId));
+
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ articleId: goods.id, salesOrderRowId: row.id, description: "Bänkskiva", quantity: 2, unitPrice: 100 }] },
+      user.id
+    );
+    expect(draft!.rows[0]!.deliveryDate).toBe("2026-03-10");
+
+    // The later delivery is undone — still 2 delivered, so the draft's 2 do
+    // not stop the undo — and the draft row now points at a day without a
+    // delivery.
+    const [secondRow] = await db.select().from(deliveryRows).where(eq(deliveryRows.deliveryId, second.deliveryId));
+    await salesService.undoDeliveryRow(order.id, second.deliveryId, secondRow!.id, user.id);
+    expect((await invoiceService.getInvoice(draft!.id))!.rows[0]!.deliveryDate).toBe("2026-03-10");
+
+    const issued = await invoiceService.issue(draft!.id, user.id);
+    expect(issued!.rows[0]!.deliveryDate).toBe("2026-03-02");
+    expect(pdfText((await invoiceService.renderPdf(issued!.id)).content)).toContain("Levererad 2026-03-02");
+
+    // A date that is still a live delivery day stays as it is.
+    const third = await salesService.deliverBatch(order.id, { locationId: location.id, rows: [{ rowId: row.id, quantity: 2 }] }, user.id);
+    await db.update(deliveries).set({ deliveredAt: new Date("2026-03-15T09:00:00Z") }).where(eq(deliveries.id, third.deliveryId));
+    const kept = await invoiceService.create(
+      { customerId: customer.id, rows: [{ articleId: goods.id, salesOrderRowId: row.id, description: "Bänkskiva", quantity: 1, unitPrice: 100 }] },
+      user.id
+    );
+    await invoiceService.updateRow(kept!.id, kept!.rows[0]!.id, { deliveryDate: "2026-03-02" }, user.id);
+    expect((await invoiceService.issue(kept!.id, user.id))!.rows[0]!.deliveryDate).toBe("2026-03-02");
+
+    // So does a date set by hand that never was a delivery day of the row.
+    const manual = await invoiceService.create(
+      { customerId: customer.id, rows: [{ articleId: goods.id, salesOrderRowId: row.id, description: "Bänkskiva", quantity: 1, unitPrice: 100 }] },
+      user.id
+    );
+    await invoiceService.updateRow(manual!.id, manual!.rows[0]!.id, { deliveryDate: "2026-03-05" }, user.id);
+    expect((await invoiceService.issue(manual!.id, user.id))!.rows[0]!.deliveryDate).toBe("2026-03-05");
+
+    // A free row (no order link) is never touched.
+    const free = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "Fri", quantity: 1, unitPrice: 10, deliveryDate: "2026-01-05" }] },
+      user.id
+    );
+    expect((await invoiceService.issue(free!.id, user.id))!.rows[0]!.deliveryDate).toBe("2026-01-05");
+  });
+
+  it("clears the date when the order row has no live delivery left", async () => {
+    const customer = await makeCustomer();
+    const goods = await makeArticle("purchased");
+    const { order, row, location } = await deliveredOrder(customer.id, goods.id, 4, 2);
+    // The draft is made against the order row before anything else
+    // happens; then the only delivery is undone and the row redelivered
+    // later than the invoice date can see (a future day).
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ articleId: goods.id, salesOrderRowId: row.id, description: "Bänkskiva", quantity: 1, unitPrice: 100 }] },
+      user.id
+    );
+    expect(draft!.rows[0]!.deliveryDate).not.toBeNull();
+    const second = await salesService.deliverBatch(order.id, { locationId: location.id, rows: [{ rowId: row.id, quantity: 2 }] }, user.id);
+    const [first] = await db
+      .select()
+      .from(deliveryRows)
+      .where(and(eq(deliveryRows.salesOrderRowId, row.id), sql`${deliveryRows.deliveryId} <> ${second.deliveryId}`));
+    await salesService.undoDeliveryRow(order.id, first!.deliveryId, first!.id, user.id);
+    await db.update(deliveries).set({ deliveredAt: new Date("2099-01-01T09:00:00Z") }).where(eq(deliveries.id, second.deliveryId));
+
+    expect((await invoiceService.issue(draft!.id, user.id))!.rows[0]!.deliveryDate).toBeNull();
+  });
+});
+
 describe("credit notes — mirror the source row's momskod and leveransdatum", () => {
   it("copies vat_code_id and delivery_date, even when the code was deactivated since", async () => {
     const eu = await makeCustomer({ country: "DE", vatNumber: "DE123456789" });
@@ -435,6 +529,53 @@ describe("Utfärda — the buyer's momsregistreringsnummer", () => {
       .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
       .where(and(eq(verificationRows.verificationId, issued!.verificationId!), sql`${verificationRows.credit} > 0`));
     expect(posted).toEqual([{ number: "3231", credit: "100.00" }]);
+  });
+
+  it("accepts another member state's number for an EU sale, with a warning on the draft (artikel 138)", async () => {
+    const de = await makeCustomer({ country: "DE", vatNumber: "ATU12345678" });
+    const draft = await invoiceService.create({ customerId: de.id, rows: [{ description: "Bänkskiva", quantity: 1, unitPrice: 100 }] }, user.id);
+    expect(draft!.rows[0]!.vatCode.code).toBe("EUV");
+    const view = await invoiceService.getInvoice(draft!.id);
+    expect(view!.vatNumberProblem).toBeNull();
+    expect(view!.vatNumberWarning).toEqual({ reason: "eu_country_mismatch", code: "EUV", prefix: "AT", expectedPrefix: "DE" });
+    const issued = await invoiceService.issue(draft!.id, user.id);
+    expect(issued!.status).toBe("issued");
+    // Only drafts carry the problem/warning.
+    expect(issued!.vatNumberWarning).toBeNull();
+
+    // A Swedish number is never an EU sale's.
+    const se = await makeCustomer({ country: "DE", vatNumber: "SE556677889901" });
+    const seDraft = await invoiceService.create({ customerId: se.id, rows: [{ description: "Bänkskiva", quantity: 1, unitPrice: 100 }] }, user.id);
+    await expect(invoiceService.issue(seDraft!.id, user.id)).rejects.toMatchObject({ reason: "eu_format" });
+  });
+
+  it("a credit note is checked against, and stamps, the credited invoice's number — not the customer's current one", async () => {
+    const de = await makeCustomer({ country: "DE", vatNumber: "DE123456789" });
+    const draft = await invoiceService.create({ customerId: de.id, rows: [{ description: "Bänkskiva", quantity: 1, unitPrice: 100 }] }, user.id);
+    const issued = await invoiceService.issue(draft!.id, user.id);
+    expect(issued!.vatNumber).toBe("DE123456789");
+
+    // The customer loses its number: a new invoice could not be an EU sale,
+    // but the credit of the one issued to DE123456789 can.
+    await salesService.updateCustomer(de.id, { vatNumber: null });
+    const credit = await invoiceService.createCredit(issued!.id, {}, user.id);
+    const creditView = await invoiceService.getInvoice(credit!.id);
+    expect(creditView!.buyerVatNumber).toBe("DE123456789");
+    expect(creditView!.vatNumberProblem).toBeNull();
+    const issuedCredit = await invoiceService.issue(credit!.id, user.id);
+    expect(issuedCredit!.status).toBe("issued");
+    expect(issuedCredit!.vatNumber).toBe("DE123456789");
+
+    // And the other way round: a new number on the customer does not reach
+    // the credit of an invoice issued without one.
+    const plain = await makeCustomer({ country: "SE" });
+    const plainIssued = await invoiceService.issue(
+      (await invoiceService.create({ customerId: plain.id, rows: [{ description: "Rad", quantity: 1, unitPrice: 100 }] }, user.id))!.id,
+      user.id
+    );
+    await salesService.updateCustomer(plain.id, { vatNumber: "SE556677889901" });
+    const plainCredit = await invoiceService.createCredit(plainIssued!.id, {}, user.id);
+    expect((await invoiceService.issue(plainCredit!.id, user.id))!.vatNumber).toBeNull();
   });
 
   it("issues an EU sale with a well-formed number", async () => {

@@ -494,10 +494,13 @@ function articleDomesticCode(articleRate: number): DomesticVatCode {
 export function salesVatCode(input: { customer: SalesVatCustomer; isGoods: boolean; articleRate: number }): VatCode {
   const { customer, isGoods } = input;
   const domestic = articleDomesticCode(input.articleRate);
-  // 1. Privatperson, whatever the country — distansförsäljning/OSS is not
-  //    part of etapp 1, the customer card warns instead.
-  if (customer.privatePerson) return domestic;
   const country = customer.country.trim().toUpperCase();
+  // 1. Privatperson: goods leaving the EU are exempt whoever buys them
+  //    (export, artikel 146 i mervärdesskattedirektivet) ⇒ EXV; a service to
+  //    a private person outside the EU, and anything to a private person in
+  //    the EU (Sweden included), is svensk moms — distansförsäljning/OSS is
+  //    not part of etapp 1, the customer card warns instead.
+  if (customer.privatePerson) return isGoods && !isEuCountry(country) ? "EXV" : domestic;
   // 2. Sweden: svensk moms, except a service to a customer with omvänd
   //    betalningsskyldighet för byggtjänster.
   if (country === "SE") return customer.reverseChargeConstruction && !isGoods ? "OB" : domestic;
@@ -513,7 +516,14 @@ export function salesVatCode(input: { customer: SalesVatCustomer; isGoods: boole
 
 // Momsbehandling on the customer card (spec 4.6) — the same rules as
 // salesVatCode, said about the customer instead of a row.
-export const CUSTOMER_VAT_TREATMENTS = ["domestic", "domestic_no_vat_number", "eu", "export", "private_eu"] as const;
+export const CUSTOMER_VAT_TREATMENTS = [
+  "domestic",
+  "domestic_no_vat_number",
+  "eu",
+  "export",
+  "private_eu",
+  "private_export",
+] as const;
 export type CustomerVatTreatment = (typeof CUSTOMER_VAT_TREATMENTS)[number];
 
 export const CUSTOMER_VAT_TREATMENT_LABELS: Record<CustomerVatTreatment, string> = {
@@ -522,11 +532,15 @@ export const CUSTOMER_VAT_TREATMENT_LABELS: Record<CustomerVatTreatment, string>
   eu: "EU — utan moms",
   export: "Export — utan moms",
   private_eu: "Privatperson i annat EU-land — svensk moms",
+  private_export: "Privatperson utanför EU — export utan moms för varor",
 };
 
 export function customerVatTreatment(customer: SalesVatCustomer): CustomerVatTreatment {
   const country = customer.country.trim().toUpperCase();
-  if (customer.privatePerson) return country !== "SE" && isEuCountry(country) ? "private_eu" : "domestic";
+  if (customer.privatePerson) {
+    if (country === "SE") return "domestic";
+    return isEuCountry(country) ? "private_eu" : "private_export";
+  }
   if (country === "SE") return "domestic";
   if (isEuCountry(country)) return hasVatNumber(customer.vatNumber) ? "eu" : "domestic_no_vat_number";
   return "export";
@@ -550,10 +564,26 @@ export function normalizeVatNumber(raw: string | null | undefined): string {
   return (raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+// The VAT number prefixes of the OTHER member states (Greece EL).
+const FOREIGN_EU_VAT_PREFIXES: readonly string[] = EU_COUNTRY_CODES.filter((country) => country !== "SE").map(vatNumberPrefix);
+const FOREIGN_EU_VAT_NUMBER = new RegExp(`^(${FOREIGN_EU_VAT_PREFIXES.join("|")})[A-Z0-9]{2,12}$`);
+
+// The member-state prefix of a (normalized) number that is a well-formed VAT
+// number of ANOTHER member state than Sweden, else null.
+function foreignEuVatPrefix(normalized: string): string | null {
+  return FOREIGN_EU_VAT_NUMBER.test(normalized) ? normalized.slice(0, 2) : null;
+}
+
 // Utfärda (spec 4.2): codes that require the buyer's momsregistreringsnummer
 // (EU sales, omvänd betalningsskyldighet) need one on the invoice, in the
-// right form — EU: the buyer's own country prefix (Greece EL), OB: SE + ten
-// digits + 01. null = in order. `country` is the customer's own country.
+// right form — EU: a VAT number of ANOTHER member state than Sweden (any of
+// them: artikel 138 asks for the buyer's number from another member state,
+// not necessarily the one of the buyer's address; a prefix that differs from
+// the customer's country is only a warning, buyerVatNumberWarning), OB: SE +
+// ten digits + 01. null = in order. `country` is the customer's own country;
+// `prefix` on eu_format is the prefix the customer's own country would have
+// (null when the customer is not in another member state) — the hint the
+// refusal texts give.
 export type BuyerVatNumberProblem =
   | { reason: "missing"; code: VatCode }
   | { reason: "eu_format"; code: VatCode; prefix: string | null }
@@ -571,9 +601,8 @@ export function buyerVatNumberProblem(input: {
   const country = input.country.trim().toUpperCase();
   for (const entry of requiring) {
     if (entry.kind === "eu_sale") {
-      // An EU sale is to a buyer in ANOTHER member state.
-      const prefix = country !== "SE" && isEuCountry(country) ? vatNumberPrefix(country) : null;
-      if (prefix === null || !new RegExp(`^${prefix}[A-Z0-9]{2,12}$`).test(number)) {
+      if (foreignEuVatPrefix(number) === null) {
+        const prefix = country !== "SE" && isEuCountry(country) ? vatNumberPrefix(country) : null;
         return { reason: "eu_format", code: entry.code, prefix };
       }
     } else if (!/^SE\d{10}01$/.test(number)) {
@@ -581,6 +610,47 @@ export function buyerVatNumberProblem(input: {
     }
   }
   return null;
+}
+
+// The warning that goes with an accepted EU-sale number (never a refusal):
+// the number is another member state's, but not the one of the customer's
+// own country — allowed (artikel 138), worth a second look.
+export type BuyerVatNumberWarning = {
+  reason: "eu_country_mismatch";
+  code: VatCode;
+  // The number's prefix and the one the customer's country would have.
+  prefix: string;
+  expectedPrefix: string;
+};
+
+export function buyerVatNumberWarning(input: {
+  codes: readonly VatCode[];
+  vatNumber: string | null;
+  country: string;
+}): BuyerVatNumberWarning | null {
+  const euSale = VAT_CODE_CATALOG.find((entry) => entry.kind === "eu_sale" && input.codes.includes(entry.code));
+  if (!euSale) return null;
+  const prefix = foreignEuVatPrefix(normalizeVatNumber(input.vatNumber));
+  const expectedPrefix = vatNumberPrefix(input.country.trim());
+  if (prefix === null || prefix === expectedPrefix) return null;
+  return { reason: "eu_country_mismatch", code: euSale.code, prefix, expectedPrefix };
+}
+
+// The customer card's warning about the momsregistreringsnummer of a company
+// customer in another member state (Momsbehandling "EU — utan moms"): a
+// number that is no other member state's (EU sales with it cannot be issued)
+// or one of another member state than the customer's country (allowed, a
+// warning). null = nothing to say, also for every other treatment.
+export type CustomerVatNumberWarning =
+  | { reason: "eu_format"; expectedPrefix: string }
+  | { reason: "eu_country_mismatch"; prefix: string; expectedPrefix: string };
+
+export function customerVatNumberWarning(customer: SalesVatCustomer): CustomerVatNumberWarning | null {
+  if (customerVatTreatment(customer) !== "eu") return null;
+  const expectedPrefix = vatNumberPrefix(customer.country.trim());
+  const prefix = foreignEuVatPrefix(normalizeVatNumber(customer.vatNumber));
+  if (prefix === null) return { reason: "eu_format", expectedPrefix };
+  return prefix === expectedPrefix ? null : { reason: "eu_country_mismatch", prefix, expectedPrefix };
 }
 
 // --- API contracts ---

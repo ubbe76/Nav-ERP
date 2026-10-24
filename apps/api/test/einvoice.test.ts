@@ -800,14 +800,15 @@ describe("momskoder (spec 4.5)", () => {
     expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EUT") }, ok, company)).toBe("vat-code-unsupported");
   });
 
-  it("sends omvänd betalningsskyldighet as AE with the code's text and the buyer's VAT number", async () => {
+  it("sends omvänd betalningsskyldighet as AE with VATEX-EU-AE, the code's text and the buyer's normalized VAT number", async () => {
     const service = await articleService.createArticle({
       articleNumber: `EINV-OB-${crypto.randomUUID().slice(0, 8)}`,
       name: "Montage",
       type: "service",
       active: true,
     });
-    const bygg = await makeCustomer({ name: "Bygg AB", reverseChargeConstruction: true, vatNumber: "SE556555555301" });
+    // Written with spaces and a hyphen: BT-48 goes out normalized.
+    const bygg = await makeCustomer({ name: "Bygg AB", reverseChargeConstruction: true, vatNumber: "se 556555-5553 01" });
     const draft = await invoiceService.create(
       { customerId: bygg.id, rows: [{ articleId: service.id, description: "Montage", quantity: 2, unitPrice: 800 }] },
       userId
@@ -817,7 +818,9 @@ describe("momskoder (spec 4.5)", () => {
     // BuyerReference falls back to the customer number (no order link).
     await einvoice.send(issued!.id, userId);
     const xml = fake.state.submitted[0]!.xml.toString("utf8");
-    expect(xml).toContain("<cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason>");
+    expect(xml).toContain(
+      "<cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReasonCode>VATEX-EU-AE</cbc:TaxExemptionReasonCode><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason>"
+    );
     expect(xml).toContain("<cac:PartyTaxScheme><cbc:CompanyID>SE556555555301</cbc:CompanyID>");
   });
 

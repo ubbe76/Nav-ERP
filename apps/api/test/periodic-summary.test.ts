@@ -3,6 +3,8 @@ import {
   aggregatePeriodicSummary,
   buyerVatNumber,
   formatKronor,
+  formatOre,
+  ledgerDifference,
   ledgerDifferenceWarnings,
   oreToKronor,
   periodicSummaryPeriod,
@@ -193,21 +195,38 @@ describe("aggregatePeriodicSummary", () => {
   });
 });
 
-describe("ledgerDifferenceWarnings", () => {
-  it("is silent when the summary matches ruta 35 and 39", () => {
-    expect(ledgerDifferenceWarnings({ goods: 1000, services: 500 }, { box35: 1000, box39: 500 })).toEqual([]);
+describe("ledgerDifferenceWarnings / ledgerDifference (öre)", () => {
+  it("is silent when the rows' öre match ruta 35 and 39", () => {
+    expect(ledgerDifferenceWarnings({ goods: 100025, services: 50000 }, { box35: 100025, box39: 50000 })).toEqual([]);
+    expect(ledgerDifference(100025, 100025)).toBe(0);
   });
 
-  it("warns per column that differs", () => {
-    const warnings = ledgerDifferenceWarnings({ goods: 10000, services: 500 }, { box35: 12000, box39: 500 });
+  it("warns per column that differs, in kronor and öre", () => {
+    const warnings = ledgerDifferenceWarnings({ goods: 1000000, services: 50000 }, { box35: 1200050, box39: 50000 });
     expect(warnings).toEqual([
       {
         kind: "ledger_difference",
         message:
-          "Varor: sammanställningen 10 000 kr, bokfört i ruta 35 12 000 kr (skillnad -2 000 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
+          "Varor: sammanställningen 10 000,00 kr, bokfört i ruta 35 12 000,50 kr (skillnad -2 000,50 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
         invoices: [],
       },
     ]);
-    expect(ledgerDifferenceWarnings({ goods: 0, services: 700 }, { box35: 0, box39: 500 })[0]!.message).toContain("Tjänster");
+    expect(ledgerDifferenceWarnings({ goods: 0, services: 70000 }, { box35: 0, box39: 50000 })[0]!.message).toContain("Tjänster");
+  });
+
+  it("warns about a few öre that round away, and rounds the difference half away from zero", () => {
+    expect(ledgerDifferenceWarnings({ goods: 100000, services: 0 }, { box35: 100030, box39: 0 })).toHaveLength(1);
+    expect(ledgerDifference(100000, 100030)).toBe(0);
+    expect(ledgerDifference(100000, 100050)).toBe(-1);
+    expect(ledgerDifference(100050, 100000)).toBe(1);
+  });
+});
+
+describe("formatOre", () => {
+  it("writes kronor with two decimals, a space per thousand and an ASCII minus", () => {
+    expect(formatOre(123456789)).toBe("1 234 567,89");
+    expect(formatOre(-30)).toBe("-0,30");
+    expect(formatOre(5)).toBe("0,05");
+    expect(formatOre(0)).toBe("0,00");
   });
 });

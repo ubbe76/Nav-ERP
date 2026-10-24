@@ -547,11 +547,12 @@ describe("profiles against the real app", () => {
     expect(await status(inkop, "PATCH", "/settings/posting", { postingDefaultCost: "" })).toBe(403);
   });
 
-  it("momskoder: every office user reads the codes and the VAT reporting settings, only Ekonomi edits", async () => {
+  it("momskoder: every office user reads the codes, only Ekonomi reads the VAT reporting settings and edits", async () => {
     const inkop = await sessionFor(["inkop"]);
     const ekonomi = await sessionFor(["ekonomi"]);
     expect(await status(inkop, "GET", "/vat-codes")).toBe(200);
-    expect(await status(inkop, "GET", "/settings/vat-reporting")).toBe(200);
+    expect(await status(inkop, "GET", "/settings/vat-reporting")).toBe(403);
+    expect(await status(ekonomi, "GET", "/settings/vat-reporting")).toBe(200);
     const id = "00000000-0000-0000-0000-000000000000";
     expect(await status(inkop, "PATCH", `/vat-codes/${id}`, { name: "X" })).toBe(403);
     expect(await status(inkop, "PATCH", "/settings/vat-reporting", { period: "month" })).toBe(403);

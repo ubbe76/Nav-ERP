@@ -12,6 +12,7 @@ import {
   type UpdateSupplierInvoiceHeaderInput,
   type UpdateSupplierInvoiceRowInput,
 } from "@navet/shared";
+import { supplierInvoiceWarnings } from "./supplier-invoice-warnings.js";
 import type {
   SupplierInvoiceRepository,
   SupplierInvoiceRowWrite,
@@ -292,6 +293,9 @@ export function createSupplierInvoiceService(
     // vatCode (null = follows the header) and reverseVat — the förhandsvisning
     // of the omvänd moms the attest will book (reverseVatPreview, the same
     // function the poster books with): [{ code, base, vat }] per reverse code.
+    // warnings: string[] — supplierInvoiceWarnings (a domestic code with VAT
+    // but no momsbelopp, a non-SEK supplier with land Sverige); never a
+    // refusal.
     async getInvoice(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
@@ -302,7 +306,7 @@ export function createSupplierInvoiceService(
         repo.listFiles(id),
         repo.listPaymentBatchesForInvoice(id),
       ]);
-      const { vatCodeCode, vatCodeName, ...headerFields } = header;
+      const { vatCodeCode, vatCodeName, supplierCountry, supplierCurrency, ...headerFields } = header;
       const rows = rawRows.map((row) => {
         const { vatCodeCode: rowCode, vatCodeName: rowName, ...rowFields } = withVariance(row);
         return {
@@ -320,10 +324,24 @@ export function createSupplierInvoiceService(
             })),
           })
         : [];
+      const warnings = isVatCode(vatCodeCode)
+        ? supplierInvoiceWarnings({
+            headerCode: vatCodeCode,
+            netAmount: Number(header.netAmount),
+            vatAmount: Number(header.vatAmount),
+            rows: rawRows.map((row) => ({
+              code: row.vatCodeCode !== null && isVatCode(row.vatCodeCode) ? row.vatCodeCode : null,
+              lineAmount: Number(row.lineAmount),
+            })),
+            supplierCountry,
+            supplierCurrency,
+          })
+        : [];
       return {
         ...headerFields,
         vatCode: vatCodeRef({ id: header.vatCodeId, code: vatCodeCode, name: vatCodeName }),
         reverseVat,
+        warnings,
         rows,
         openAmount,
         payments,

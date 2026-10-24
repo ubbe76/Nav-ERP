@@ -6,6 +6,7 @@ import { bucketMovements, roundToKronor } from "./vat-report.service.js";
 import {
   PeriodicSummaryPeriodInvalidError,
   aggregatePeriodicSummary,
+  ledgerDifference,
   ledgerDifferenceWarnings,
   periodicSummaryPeriod,
   type PeriodicSummaryAggregateRow,
@@ -42,6 +43,15 @@ export class PeriodicSummaryEmptyError extends Error {
   }
 }
 
+// There were EU sales, but none of them carries a valid buyer number — the
+// file would be empty although something is to be reported.
+export class PeriodicSummaryNoValidRowsError extends Error {
+  constructor() {
+    super("Alla EU-fakturor i perioden saknar giltigt momsnummer — rätta kunderna");
+    this.name = "PeriodicSummaryNoValidRowsError";
+  }
+}
+
 const blankToNull = (value: string | null | undefined) => (value === null || value === undefined || value.trim() === "" ? null : value.trim());
 
 export function createPeriodicSummaryService(deps: {
@@ -56,9 +66,12 @@ export function createPeriodicSummaryService(deps: {
     const period = periodicSummaryPeriod(from, to);
     if (!period) throw new PeriodicSummaryPeriodInvalidError(from, to);
 
-    const { rows, warnings } = aggregatePeriodicSummary(await readEuSalesLines(db, from, to));
+    const { rows, warnings, totalsOre, lineCount } = aggregatePeriodicSummary(await readEuSalesLines(db, from, to));
     const boxes = bucketMovements(await readVatAccountMovements(db, from, to));
     const ledger = { box35: roundToKronor(boxes["35"]), box39: roundToKronor(boxes["39"]) };
+    // The booked boxes in öre — the reconciliation's unit (round2 amounts,
+    // so Math.round only removes float noise).
+    const ledgerOre = { box35: Math.round(boxes["35"] * 100), box39: Math.round(boxes["39"] * 100) };
     const totals = {
       goods: rows.reduce((sum, row) => sum + row.goods, 0),
       services: rows.reduce((sum, row) => sum + row.services, 0),
@@ -77,7 +90,7 @@ export function createPeriodicSummaryService(deps: {
     if (contactNameField(settings.contactName) === null) missing.push("contactName");
     if (normalizeContactPhone(settings.contactPhone) === null) missing.push("contactPhone");
 
-    return { period, rows, warnings, ledger, totals, reporter, missing };
+    return { period, rows, warnings, ledger, ledgerOre, totals, totalsOre, lineCount, reporter, missing };
   }
 
   // The internal row without its column-usage flags — the API shape.
@@ -85,7 +98,7 @@ export function createPeriodicSummaryService(deps: {
 
   return {
     async getSummary(query: { from: string; to: string }): Promise<PeriodicSummary> {
-      const { period, rows, warnings, ledger, totals, reporter, missing } = await compute(query);
+      const { period, rows, warnings, ledger, ledgerOre, totals, totalsOre, reporter, missing } = await compute(query);
       return {
         from: query.from,
         to: query.to,
@@ -94,19 +107,26 @@ export function createPeriodicSummaryService(deps: {
         rows: rows.map(publicRow),
         totals,
         ledger,
-        differences: { goods: totals.goods - ledger.box35, services: totals.services - ledger.box39 },
-        warnings: [...warnings, ...ledgerDifferenceWarnings(totals, ledger)],
+        // The öre difference rounded to whole kronor — 0 exactly when the
+        // rows' öre sum equals the booked box (ledgerDifference).
+        differences: {
+          goods: ledgerDifference(totalsOre.goods, ledgerOre.box35),
+          services: ledgerDifference(totalsOre.services, ledgerOre.box39),
+        },
+        warnings: [...warnings, ...ledgerDifferenceWarnings(totalsOre, ledgerOre)],
         reporter,
         missing,
       };
     },
 
     // Skatteverket's file for exactly the summary's rows. No EU sales ⇒ no
-    // file (none is to be submitted); the reporter's fields are checked
-    // before the amounts.
+    // file (none is to be submitted); EU sales without a single valid buyer
+    // number ⇒ its own refusal (something IS to be reported — the customers
+    // need fixing); the reporter's fields are checked before the amounts.
     async getFile(query: { from: string; to: string }): Promise<{ filename: string; content: Buffer }> {
-      const { period, rows, reporter, missing } = await compute(query);
-      if (rows.length === 0) throw new PeriodicSummaryEmptyError();
+      const { period, rows, lineCount, reporter, missing } = await compute(query);
+      if (lineCount === 0) throw new PeriodicSummaryEmptyError();
+      if (rows.length === 0) throw new PeriodicSummaryNoValidRowsError();
       if (missing.length > 0) throw new PeriodicSummaryReporterIncompleteError(missing);
       const content = buildPeriodicSummaryFile({
         reporterVatDigits: reporterVatDigits(reporter.vatNumber)!,

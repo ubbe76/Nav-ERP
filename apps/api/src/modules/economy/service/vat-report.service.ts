@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { postingRules, type Db } from "@navet/db";
 import {
   VAT_BOXES,
+  VAT_CODES,
   VAT_CODE_SLOTS,
   VAT_SETTLED_BOXES,
   isVatCode,
@@ -18,6 +19,7 @@ import type { PostingAccountNumbers, PostingSettingsReader, VerificationPoster }
 import { findAccountsByNumbers, readVatAccountMovements, type VatAccountMovement } from "./vat-account-movements.js";
 import { boxText } from "./vat-code.service.js";
 import { buildVatDeclarationFile, formatVatFileOrgNumber, vatFilePeriod } from "./vat-file.js";
+import { contactNameField, normalizeContactPhone } from "./periodic-summary-file.js";
 import { listVatCodeRows } from "../repository/vat-codes.js";
 import {
   findPeriodsInRange,
@@ -76,10 +78,38 @@ export class VatFileOrgNumberMissingError extends Error {
   }
 }
 
-// Inköp (20–24), the import base (50) and the ingående moms (48) are debit
-// balances; everything else — sales, the bases of exempt sales and every
-// utgående moms — is a credit balance.
-const DEBIT_POSITIVE_BOXES = new Set<VatBox>(["20", "21", "22", "23", "24", "48", "50"]);
+// PATCH /settings/vat-reporting: the contact the periodisk sammanställning's
+// file names must fit Skatteverket's format — checked when it is saved, not
+// first when the file is downloaded. Swedish message (it differs per field
+// and the web shows it as is).
+export class VatReportingContactInvalidError extends Error {
+  constructor(public readonly field: "contactName" | "contactPhone") {
+    super(
+      field === "contactName"
+        ? "Kontaktpersonens namn får vara högst 35 tecken och bara innehålla tecken som finns i ISO-8859-1 (latin1) — Skatteverkets fil kan inte bära andra tecken"
+        : "Telefonnumret ska vara siffror med högst ett bindestreck efter riktnumret (till exempel 08-123456), eller börja med + för ett utländskt nummer — högst 17 tecken utan mellanslag"
+    );
+    this.name = "VatReportingContactInvalidError";
+  }
+}
+
+const isLatin1 = (text: string) => [...text].every((ch) => ch.codePointAt(0)! <= 0xff);
+
+// Exported for its unit test.
+export function assertVatReportingContact(input: Pick<UpdateVatReportingSettingsInput, "contactName" | "contactPhone">): void {
+  if (input.contactName != null && (contactNameField(input.contactName) === null || !isLatin1(input.contactName))) {
+    throw new VatReportingContactInvalidError("contactName");
+  }
+  if (input.contactPhone != null && normalizeContactPhone(input.contactPhone) === null) {
+    throw new VatReportingContactInvalidError("contactPhone");
+  }
+}
+
+// Inköp (20–24, and 37 — the mellanman's purchase in a trepartshandel), the
+// import base (50) and the ingående moms (48) are debit balances; everything
+// else — sales, the bases of exempt sales and every utgående moms — is a
+// credit balance.
+const DEBIT_POSITIVE_BOXES = new Set<VatBox>(["20", "21", "22", "23", "24", "37", "48", "50"]);
 const OUTPUT_VAT_BOXES = ["10", "11", "12", "30", "31", "32", "60", "61", "62"] as const satisfies readonly VatBox[];
 const SETTLED_BOXES = new Set<string>(VAT_SETTLED_BOXES);
 
@@ -211,14 +241,27 @@ export function findVatCodeBoxMismatches(codes: VatCodeRowLike[], chart: Account
   });
 }
 
+// Purchase bases (inköp med omvänd moms, trepartsinköp, importunderlag):
+// a cost account for svensk moms must carry none of them, or a domestic
+// purchase would be declared as an EU/omvänd/import purchase.
+const PURCHASE_BASE_BOXES = new Set<string>(["20", "21", "22", "23", "24", "37", "50"]);
+
 export type PostingRuleBoxMismatch = {
   ruleId: string;
   groupCode: string;
   groupName: string;
-  code: VatCode;
+  // null = the group's rule for "Alla momskoder".
+  code: VatCode | null;
+  slot: "revenue" | "cost";
   accountNumber: string;
-  expectedBox: VatBoxSetting;
+  // The one box the account should carry — null when several would do
+  // (expectedBoxes) or the problem is a forbidden purchase box.
+  expectedBox: VatBoxSetting | null;
+  // Every box that would be in order; empty for "purchase_box" (anything
+  // but 20–24, 37 and 50 is).
+  expectedBoxes: VatBoxSetting[];
   actualBox: VatBoxSetting | null;
+  problem: "box_mismatch" | "purchase_box";
   message: string;
 };
 
@@ -233,35 +276,83 @@ type RuleLike = {
   costAccountVatBox: string | null;
 };
 
-// A rule for exactly a foreign/omvänd code replaces the code's own account,
-// so its account must carry the code's box: the revenue account for a sales
-// code (EUV/EUT/EXV/EXT/OB), the cost account for an omvänd-moms purchase.
+const boxList = (boxes: VatBoxSetting[]) => boxes.map(boxText).join(" eller ");
+
+// A konteringsregel replaces a code's own account, so the account it names
+// must land in the right box:
+//   * exact foreign/omvänd code — the code's box: the revenue account for a
+//     sales code (EUV/EUT/EXV/EXT/OB), the cost account for an omvänd-moms
+//     purchase;
+//   * exact MP25/MP12/MP6 — a revenue account with ruta 05, MF ruta 42;
+//   * "Alla momskoder" (applies to the domestic codes) — ruta 05 or 42;
+//   * the cost account of a domestic code, of IUTV and of "Alla momskoder" —
+//     none of the purchase-base boxes (20–24, 37, 50).
+// Importmoms codes are never posted through a rule.
 export function findRuleBoxMismatches(rules: RuleLike[], codes: VatCodeRowLike[]): PostingRuleBoxMismatch[] {
   const codeById = new Map(codes.map((row) => [row.id, row] as const));
   return rules.flatMap((rule): PostingRuleBoxMismatch[] => {
-    const row = rule.vatCodeId === null ? undefined : codeById.get(rule.vatCodeId);
-    if (!row || !isVatCode(row.code)) return [];
-    const code = row.code;
+    let code: VatCode | null = null;
+    if (rule.vatCodeId !== null) {
+      const row = codeById.get(rule.vatCodeId);
+      if (!row || !isVatCode(row.code)) return [];
+      code = row.code;
+    }
+    const label = `Konteringsregel ${rule.groupCode} ${rule.groupName} / ${code ?? "Alla momskoder"}`;
+    const revenue = { number: rule.revenueAccountNumber, box: rule.revenueAccountVatBox as VatBoxSetting | null };
+    const cost = { number: rule.costAccountNumber, box: rule.costAccountVatBox as VatBoxSetting | null };
+    const found: PostingRuleBoxMismatch[] = [];
+    const base = { ruleId: rule.id, groupCode: rule.groupCode, groupName: rule.groupName, code };
+
+    // The account must carry one of `allowed`.
+    const expectBox = (slot: "revenue" | "cost", account: typeof revenue, allowed: VatBoxSetting[]) => {
+      if (account.number === null || (account.box !== null && allowed.includes(account.box))) return;
+      found.push({
+        ...base,
+        slot,
+        accountNumber: account.number,
+        expectedBox: allowed.length === 1 ? allowed[0]! : null,
+        expectedBoxes: allowed,
+        actualBox: account.box,
+        problem: "box_mismatch",
+        message: `${label}: konto ${account.number} har ${boxText(account.box)} men ska ha ${boxList(allowed)}`,
+      });
+    };
+    // A cost account for svensk moms (or goods from outside the EU) must
+    // carry no purchase-base box.
+    const forbidPurchaseBox = (account: typeof cost) => {
+      if (account.number === null || account.box === null || !PURCHASE_BASE_BOXES.has(account.box)) return;
+      found.push({
+        ...base,
+        slot: "cost",
+        accountNumber: account.number,
+        expectedBox: null,
+        expectedBoxes: [],
+        actualBox: account.box,
+        problem: "purchase_box",
+        message: `${label}: kostnadskonto ${account.number} har ${boxText(account.box)} men ska inte ha någon av inköpsrutorna 20–24, 37 eller 50 (de gäller omvänd moms och import)`,
+      });
+    };
+
+    if (code === null) {
+      expectBox("revenue", revenue, ["05", "42"]);
+      forbidPurchaseBox(cost);
+      return found;
+    }
     const entry = vatCodeEntry(code);
-    if (entry.kind === "domestic" || entry.kind === "non_eu_goods" || entry.kind === "import") return [];
-    const slot: VatCodeSlot = entry.direction === "sales" ? "revenue" : "cost";
+    if (entry.kind === "import") return [];
+    if (entry.kind === "domestic") {
+      expectBox("revenue", revenue, [entry.slots.revenue!.box]);
+      forbidPurchaseBox(cost);
+      return found;
+    }
+    if (entry.kind === "non_eu_goods") {
+      forbidPurchaseBox(cost);
+      return found;
+    }
+    const slot = entry.direction === "sales" ? "revenue" : "cost";
     const expected = entry.slots[slot];
-    const accountNumber = slot === "revenue" ? rule.revenueAccountNumber : rule.costAccountNumber;
-    if (!expected || accountNumber === null) return [];
-    const actualBox = (slot === "revenue" ? rule.revenueAccountVatBox : rule.costAccountVatBox) as VatBoxSetting | null;
-    if (actualBox === expected.box) return [];
-    return [
-      {
-        ruleId: rule.id,
-        groupCode: rule.groupCode,
-        groupName: rule.groupName,
-        code,
-        accountNumber,
-        expectedBox: expected.box,
-        actualBox,
-        message: `Konteringsregel ${rule.groupCode} ${rule.groupName} / ${code}: konto ${accountNumber} har ${boxText(actualBox)} men ska ha ${boxText(expected.box)}`,
-      },
-    ];
+    if (expected) expectBox(slot, slot === "revenue" ? revenue : cost, [expected.box]);
+    return found;
   });
 }
 
@@ -298,16 +389,46 @@ function settledMovements(movements: VatAccountMovement[]) {
     .filter((movement) => movement.net !== 0);
 }
 
-// The redovisningskonto and the öres account outside the settled boxes.
-// Exported for its unit test.
+// The redovisningskonto and the öres account outside the settled boxes:
+// the report (GET) lists a problem as a warning, only the momsomföring
+// itself refuses (assertSettlementAccountsOutsideBoxes) — a misconfigured
+// account must not hide the declaration. Exported for the unit test.
+export type SettlementAccountProblem = {
+  // settlement = redovisningskonto för moms, rounding = öres- och kronutjämning.
+  role: "settlement" | "rounding";
+  accountNumber: string;
+  vatBox: VatBoxSetting;
+  message: string;
+};
+
+export function findSettlementAccountProblems(
+  settings: Pick<PostingAccountNumbers, "postingVatSettlement" | "postingPaymentWriteOff">,
+  chart: { number: string; vatBox: string | null }[]
+): SettlementAccountProblem[] {
+  const roles = [
+    { role: "settlement" as const, number: settings.postingVatSettlement, label: "Redovisningskontot för moms" },
+    { role: "rounding" as const, number: settings.postingPaymentWriteOff, label: "Kontot för öres- och kronutjämning" },
+  ];
+  return roles.flatMap(({ role, number, label }) => {
+    const box = chart.find((account) => account.number === number)?.vatBox ?? null;
+    if (box === null || !SETTLED_BOXES.has(box)) return [];
+    return [
+      {
+        role,
+        accountNumber: number,
+        vatBox: box as VatBoxSetting,
+        message: `${label} ${number} har ${boxText(box as VatBoxSetting)}, som momsomföringen tömmer — momsomföringen kan inte bokföras förrän kontot har en annan ruta eller ett annat konto har valts under Konteringsregler`,
+      },
+    ];
+  });
+}
+
 export function assertSettlementAccountsOutsideBoxes(
   settings: Pick<PostingAccountNumbers, "postingVatSettlement" | "postingPaymentWriteOff">,
   chart: { number: string; vatBox: string | null }[]
 ): void {
-  for (const number of [settings.postingVatSettlement, settings.postingPaymentWriteOff]) {
-    const box = chart.find((account) => account.number === number)?.vatBox ?? null;
-    if (box !== null && SETTLED_BOXES.has(box)) throw new VatAccountsNotDistinctError(number);
-  }
+  const [problem] = findSettlementAccountProblems(settings, chart);
+  if (problem) throw new VatAccountsNotDistinctError(problem.accountNumber);
 }
 
 export type VatSettlementPreviewRow = {
@@ -355,18 +476,22 @@ export function createVatReportService(deps: {
       const chart = await findAccountsByNumbers(db, [
         ...new Set([...slotNumbers, postingAccounts.postingVatSettlement, postingAccounts.postingPaymentWriteOff]),
       ]);
-      assertSettlementAccountsOutsideBoxes(postingAccounts, chart);
 
-      const rules = await db.execute<RuleLike>(sql`
+      // Every rule, "Alla momskoder" included; the catch-all first within a
+      // group, then the exact codes in catalog order.
+      const rules = [
+        ...(await db.execute<RuleLike>(sql`
         SELECT r.id, g.code AS "groupCode", g.name AS "groupName", r.vat_code_id AS "vatCodeId",
                ra.number AS "revenueAccountNumber", ra.vat_box AS "revenueAccountVatBox",
                ca.number AS "costAccountNumber", ca.vat_box AS "costAccountVatBox"
         FROM ${postingRules} r
         JOIN article_groups g ON g.id = r.article_group_id
         LEFT JOIN accounts ra ON ra.id = r.revenue_account_id
-        LEFT JOIN accounts ca ON ca.id = r.cost_account_id
-        WHERE r.vat_code_id IS NOT NULL
-        ORDER BY g.code`);
+        LEFT JOIN accounts ca ON ca.id = r.cost_account_id`)),
+      ];
+      const codeIndex = new Map(codes.map((row) => [row.id, isVatCode(row.code) ? VAT_CODES.indexOf(row.code) : VAT_CODES.length] as const));
+      const ruleOrder = (rule: RuleLike) => (rule.vatCodeId === null ? -1 : (codeIndex.get(rule.vatCodeId) ?? VAT_CODES.length));
+      rules.sort((a, b) => (a.groupCode < b.groupCode ? -1 : a.groupCode > b.groupCode ? 1 : ruleOrder(a) - ruleOrder(b)));
 
       const settled = settledMovements(movements);
       const emptied = round2(settled.reduce((sum, movement) => sum - movement.net, 0));
@@ -410,7 +535,11 @@ export function createVatReportService(deps: {
         warnings: {
           unassignedAccounts: findUnassignedAccounts(movements),
           vatCodeBoxMismatches: findVatCodeBoxMismatches(codes, chart),
-          ruleBoxMismatches: findRuleBoxMismatches([...rules], codes),
+          ruleBoxMismatches: findRuleBoxMismatches(rules, codes),
+          // The redovisningskonto / öres account carrying a box the
+          // omföring empties: the report still shows, Bokför momsomföring
+          // refuses (409 vat-accounts-not-distinct).
+          settlementAccountProblems: findSettlementAccountProblems(postingAccounts, chart),
         },
       };
     },
@@ -497,6 +626,7 @@ export function createVatReportService(deps: {
     },
 
     async updateReportingSettings(input: UpdateVatReportingSettingsInput, userId: string) {
+      assertVatReportingContact(input);
       const changedKeys = await writeVatReportingSettings(db, input);
       if (changedKeys.length > 0) {
         await audit.log({ entityType: "system_settings", entityId: null, action: "updated", detail: { changedKeys }, userId });

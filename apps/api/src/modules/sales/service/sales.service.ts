@@ -41,7 +41,9 @@ import { RegisterEntryNotFoundError } from "../../register/service/register.serv
 import type { MailService } from "../../mail/service/mail.service.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import {
+  customerVatNumberWarning,
   customerVatTreatment,
+  type SalesVatCustomer,
   roundUpToMultiple,
   salesRowIsGoods,
   salesVatCode,
@@ -775,12 +777,16 @@ export function createSalesService(
     });
   }
 
+  function withVatTreatment<T extends SalesVatCustomer>(customer: T) {
+    return { ...customer, vatTreatment: customerVatTreatment(customer), vatNumberWarning: customerVatNumberWarning(customer) };
+  }
+
   return {
     async createCustomer(input: CreateCustomerInput) {
       await validateRegisterRefs(input);
       try {
         const created = await repo.createCustomer(input);
-        return { ...created, vatTreatment: customerVatTreatment(created) };
+        return withVatTreatment(created);
       } catch (err) {
         // customers' only unique constraint is customer_number, so a 23505
         // here can mean nothing else.
@@ -799,14 +805,16 @@ export function createSalesService(
         throw err;
       }
       if (!row) throw new CustomerNotFoundError(id);
-      return { ...row, vatTreatment: customerVatTreatment(row) };
+      return withVatTreatment(row);
     },
 
     // Momskoder: vatTreatment is the customer card's Momsbehandling — the
-    // same rules as the rows' derived momskod (customerVatTreatment).
+    // same rules as the rows' derived momskod (customerVatTreatment) — and
+    // vatNumberWarning what the card says about the VAT number of an EU
+    // company customer (customerVatNumberWarning, never a refusal).
     async getCustomer(id: string) {
       const customer = await repo.findCustomerById(id);
-      return customer ? { ...customer, vatTreatment: customerVatTreatment(customer) } : null;
+      return customer ? withVatTreatment(customer) : null;
     },
 
     // Fasta leveransdagar: the earliest Förväntat leveransdatum (the day the

@@ -4,6 +4,7 @@ import {
   VAT_CODES,
   VAT_CODE_ACCOUNT_FIELDS,
   VAT_CODE_SLOTS,
+  isDomesticVatCode,
   isVatCode,
   vatCodeEntry,
   type ImportVatInput,
@@ -48,6 +49,32 @@ export class VatCodeAccountInvalidError extends Error {
     this.name = "VatCodeAccountInvalidError";
   }
 }
+
+// The domestic codes are what Nav falls back on whenever it picks a code by
+// itself (every Swedish customer row, an article's own rate, a bare vatRate
+// from an integration) — without them no invoice row could be derived.
+export class VatCodeRequiredError extends Error {
+  constructor(public readonly vatCode: string) {
+    super("Momskoden används när Nav väljer momskod automatiskt och kan inte inaktiveras");
+    this.name = "VatCodeRequiredError";
+  }
+}
+
+// The other codes Nav picks by itself (salesVatCode, supplierDefaultVatCode):
+// deactivating one is allowed, but documents that would have derived it
+// must then get a code by hand — the PATCH answer says so.
+const AUTO_SELECTED_VAT_CODES: Partial<Record<VatCode, { when: string; documents: string }>> = {
+  EUV: { when: "för varor till företagskunder i andra EU-länder", documents: "nya fakturarader för sådana kunder" },
+  EUT: { when: "för tjänster till företagskunder i andra EU-länder", documents: "nya fakturarader för sådana kunder" },
+  EXV: { when: "för varor till kunder utanför EU", documents: "nya fakturarader för sådana kunder" },
+  EXT: { when: "för tjänster till företagskunder utanför EU", documents: "nya fakturarader för sådana kunder" },
+  OB: {
+    when: "för tjänster till kunder med omvänd betalningsskyldighet för byggtjänster",
+    documents: "nya fakturarader för sådana kunder",
+  },
+  IEUV25: { when: "som förval för leverantörer i andra EU-länder", documents: "nya leverantörsfakturor för sådana leverantörer" },
+  IUTV: { when: "som förval för leverantörer utanför EU", documents: "nya leverantörsfakturor för sådana leverantörer" },
+};
 
 // An importmoms row whose code is unknown, inactive or not an import code.
 export class ImportVatCodeError extends Error {
@@ -187,6 +214,7 @@ export function createVatCodeService(deps: { db: Db; poster: VerificationPoster;
       if (!existing || !isVatCode(existing.code)) throw new VatCodeNotFoundError(id);
       const code = existing.code;
       const entry = vatCodeEntry(code);
+      if (input.active === false && existing.active && isDomesticVatCode(code)) throw new VatCodeRequiredError(code);
 
       const patch: Partial<VatCodeRow> = {};
       if (input.name !== undefined) patch.name = input.name;
@@ -249,6 +277,12 @@ export function createVatCodeService(deps: { db: Db; poster: VerificationPoster;
       if (!result.active && result.ruleCount > 0) {
         warnings.push(
           `Momskoden ${code} är inaktiv men används av ${result.ruleCount} ${result.ruleCount === 1 ? "konteringsregel" : "konteringsregler"}`
+        );
+      }
+      const autoSelected = AUTO_SELECTED_VAT_CODES[code];
+      if (!result.active && autoSelected) {
+        warnings.push(
+          `Momskoden ${code} väljs automatiskt ${autoSelected.when} — ${autoSelected.documents} måste då få en momskod för hand`
         );
       }
       for (const account of result.accounts) {

@@ -299,6 +299,10 @@ export function createSupplierInvoiceRepository(db: Db) {
         .select({
           ...getTableColumns(supplierInvoices),
           supplierName: suppliers.name,
+          // Momskoder: the supplier's live country and currency for the
+          // card's warnings (supplierInvoiceWarnings).
+          supplierCountry: suppliers.country,
+          supplierCurrency: suppliers.currency,
           purchaseOrderNumber: purchaseOrders.orderNumber,
           verificationDisplayNumber: verificationDisplayNumberSql,
           // Momskoder: the header's code (NOT NULL).

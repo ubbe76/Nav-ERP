@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buyerVatNumberProblem,
+  buyerVatNumberWarning,
   CUSTOMER_VAT_TREATMENT_LABELS,
   CUSTOMER_VAT_TREATMENTS,
+  customerVatNumberWarning,
   customerVatTreatment,
   normalizeVatNumber,
   salesRowIsGoods,
@@ -27,13 +29,23 @@ const customer = (overrides: Partial<SalesVatCustomer> = {}): SalesVatCustomer =
 });
 
 describe("salesVatCode", () => {
-  it("1. a private person gets the article's domestic code in any country", () => {
-    for (const country of ["SE", "DE", "NO", "US"]) {
+  it("1. a private person in the EU (Sweden included) gets the article's domestic code", () => {
+    for (const country of ["SE", "DE", " fi ", "GR"]) {
       const c = customer({ country, privatePerson: true, vatNumber: "DE123456789", reverseChargeConstruction: true });
       expect(salesVatCode({ customer: c, isGoods: true, articleRate: 25 })).toBe("MP25");
       expect(salesVatCode({ customer: c, isGoods: false, articleRate: 12 })).toBe("MP12");
       expect(salesVatCode({ customer: c, isGoods: true, articleRate: 6 })).toBe("MP6");
       expect(salesVatCode({ customer: c, isGoods: true, articleRate: 0 })).toBe("MF");
+    }
+  });
+
+  it("1. a private person outside the EU: goods are export (EXV, artikel 146), services svensk moms", () => {
+    for (const country of ["NO", "US", " ch "]) {
+      const c = customer({ country, privatePerson: true, reverseChargeConstruction: true });
+      expect(salesVatCode({ customer: c, isGoods: true, articleRate: 25 })).toBe("EXV");
+      expect(salesVatCode({ customer: c, isGoods: true, articleRate: 0 })).toBe("EXV");
+      expect(salesVatCode({ customer: c, isGoods: false, articleRate: 25 })).toBe("MP25");
+      expect(salesVatCode({ customer: c, isGoods: false, articleRate: 6 })).toBe("MP6");
     }
   });
 
@@ -92,13 +104,42 @@ describe("customerVatTreatment", () => {
     expect(customerVatTreatment(customer({ country: "CH", vatNumber: "CHE-123" }))).toBe("export");
     expect(customerVatTreatment(customer({ country: "DK", privatePerson: true }))).toBe("private_eu");
     expect(customerVatTreatment(customer({ country: "SE", privatePerson: true }))).toBe("domestic");
-    expect(customerVatTreatment(customer({ country: "US", privatePerson: true }))).toBe("domestic");
+    expect(customerVatTreatment(customer({ country: "US", privatePerson: true }))).toBe("private_export");
+    expect(customerVatTreatment(customer({ country: " no ", privatePerson: true, vatNumber: "NO123" }))).toBe("private_export");
   });
 
   it("has a Swedish label for every treatment", () => {
     expect(Object.keys(CUSTOMER_VAT_TREATMENT_LABELS).sort()).toEqual([...CUSTOMER_VAT_TREATMENTS].sort());
     expect(CUSTOMER_VAT_TREATMENT_LABELS.domestic_no_vat_number).toBe("Svensk moms (saknar momsnummer)");
     expect(CUSTOMER_VAT_TREATMENT_LABELS.private_eu).toBe("Privatperson i annat EU-land — svensk moms");
+    expect(CUSTOMER_VAT_TREATMENT_LABELS.private_export).toBe("Privatperson utanför EU — export utan moms för varor");
+  });
+});
+
+describe("customerVatNumberWarning", () => {
+  it("is null for every treatment but an EU company customer, and for a number of the customer's own country", () => {
+    expect(customerVatNumberWarning(customer({ vatNumber: "DE123456789" }))).toBeNull();
+    expect(customerVatNumberWarning(customer({ country: "DE" }))).toBeNull();
+    expect(customerVatNumberWarning(customer({ country: "NO", vatNumber: "DE123456789" }))).toBeNull();
+    expect(customerVatNumberWarning(customer({ country: "DE", vatNumber: "DE123456789", privatePerson: true }))).toBeNull();
+    expect(customerVatNumberWarning(customer({ country: "DE", vatNumber: "de 123.456.789" }))).toBeNull();
+    expect(customerVatNumberWarning(customer({ country: "GR", vatNumber: "EL123456789" }))).toBeNull();
+  });
+
+  it("warns about another member state's number (allowed) and about a number that is no other member state's", () => {
+    expect(customerVatNumberWarning(customer({ country: "DE", vatNumber: "ATU12345678" }))).toEqual({
+      reason: "eu_country_mismatch",
+      prefix: "AT",
+      expectedPrefix: "DE",
+    });
+    expect(customerVatNumberWarning(customer({ country: "GR", vatNumber: "CY12345678X" }))).toEqual({
+      reason: "eu_country_mismatch",
+      prefix: "CY",
+      expectedPrefix: "EL",
+    });
+    for (const vatNumber of ["123456789", "SE556677889901", "NO123456789", "GR123456789"]) {
+      expect(customerVatNumberWarning(customer({ country: "GR", vatNumber }))).toEqual({ reason: "eu_format", expectedPrefix: "EL" });
+    }
   });
 });
 
@@ -128,9 +169,13 @@ describe("buyerVatNumberProblem", () => {
     expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: null, country: "SE" })).toEqual({ reason: "missing", code: "OB" });
   });
 
-  it("eu_format: the number must start with the buyer's own prefix (Greece EL)", () => {
+  it("eu_format: the number must be ANOTHER member state's than Sweden — any of them (Greece EL)", () => {
     expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "de 123456789", country: "DE" })).toBeNull();
     expect(buyerVatNumberProblem({ codes: ["EUT"], vatNumber: "EL123456789", country: "GR" })).toBeNull();
+    // Artikel 138 asks for another member state's number, not necessarily
+    // the one of the customer's address — a warning, not a refusal.
+    expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "ATU12345678", country: "DE" })).toBeNull();
+    expect(buyerVatNumberProblem({ codes: ["EUT"], vatNumber: "DE123456789", country: "NO" })).toBeNull();
     expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "123456789", country: "DE" })).toEqual({
       reason: "eu_format",
       code: "EUV",
@@ -141,19 +186,60 @@ describe("buyerVatNumberProblem", () => {
       code: "EUT",
       prefix: "EL",
     });
-    // A Swedish or non-EU customer can never be an EU sale.
+    // A Swedish number is never an EU sale's, whoever the customer is.
     expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "SE556677889901", country: "SE" })).toEqual({
       reason: "eu_format",
       code: "EUV",
       prefix: null,
     });
-    expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "NO123456789", country: "NO" })?.reason).toBe("eu_format");
+    expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "SE556677889901", country: "DE" })).toEqual({
+      reason: "eu_format",
+      code: "EUV",
+      prefix: "DE",
+    });
+    expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "NO123456789", country: "NO" })).toEqual({
+      reason: "eu_format",
+      code: "EUV",
+      prefix: null,
+    });
+    // Too short / too long after the prefix.
+    expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "DE1", country: "DE" })?.reason).toBe("eu_format");
+    expect(buyerVatNumberProblem({ codes: ["EUV"], vatNumber: "DE1234567890123", country: "DE" })?.reason).toBe("eu_format");
+  });
+
+  it("OB is unchanged by the EU rule: a foreign number is no Swedish reverse-charge number", () => {
+    expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: "DE123456789", country: "SE" })).toEqual({ reason: "ob_format", code: "OB" });
   });
 
   it("ob_format: SE + ten digits + 01", () => {
     expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: "SE 556677-8899 01", country: "SE" })).toBeNull();
     expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: "SE556677889902", country: "SE" })).toEqual({ reason: "ob_format", code: "OB" });
     expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: "5566778899", country: "SE" })).toEqual({ reason: "ob_format", code: "OB" });
+  });
+});
+
+describe("buyerVatNumberWarning", () => {
+  it("is null without an EU-sale code, for an invalid number and for the customer's own prefix", () => {
+    expect(buyerVatNumberWarning({ codes: ["MP25", "OB"], vatNumber: "ATU12345678", country: "DE" })).toBeNull();
+    expect(buyerVatNumberWarning({ codes: ["EUV"], vatNumber: "123456789", country: "DE" })).toBeNull();
+    expect(buyerVatNumberWarning({ codes: ["EUV"], vatNumber: null, country: "DE" })).toBeNull();
+    expect(buyerVatNumberWarning({ codes: ["EUV"], vatNumber: "de123456789", country: " de " })).toBeNull();
+    expect(buyerVatNumberWarning({ codes: ["EUT"], vatNumber: "EL123456789", country: "GR" })).toBeNull();
+  });
+
+  it("warns when the number belongs to another member state than the customer's country", () => {
+    expect(buyerVatNumberWarning({ codes: ["MP25", "EUV"], vatNumber: "ATU12345678", country: "DE" })).toEqual({
+      reason: "eu_country_mismatch",
+      code: "EUV",
+      prefix: "AT",
+      expectedPrefix: "DE",
+    });
+    expect(buyerVatNumberWarning({ codes: ["EUT"], vatNumber: "DE123456789", country: "NO" })).toEqual({
+      reason: "eu_country_mismatch",
+      code: "EUT",
+      prefix: "DE",
+      expectedPrefix: "NO",
+    });
   });
 });
 
@@ -172,9 +258,10 @@ describe("momskod derivations — web mirror", () => {
     )
   );
 
-  it("derives the same salesVatCode and Momsbehandling for every customer", () => {
-    for (const c of customers) {
+  it("derives the same salesVatCode, Momsbehandling and VAT number warning for every customer", () => {
+    for (const c of [...customers, { country: "DE", vatNumber: "ATU12345678", privatePerson: false, reverseChargeConstruction: false }]) {
       expect(webCodes.customerVatTreatment(c)).toBe(customerVatTreatment(c));
+      expect(webCodes.customerVatNumberWarning(c)).toEqual(customerVatNumberWarning(c));
       expect(webCodes.hasVatNumber(c.vatNumber)).toBe(hasVatNumber(c.vatNumber));
       for (const isGoods of [true, false]) {
         for (const articleRate of [25, 12, 6, 0, 19]) {
@@ -207,7 +294,7 @@ describe("momskod derivations — web mirror", () => {
   });
 
   it("answers buyerVatNumberProblem like @navet/shared", () => {
-    const numbers = [null, " ", "de 123456789", "DE123456789", "123456789", "EL123456789", "GR123456789", "SE556677889901", "SE556677889902", "NO123456789"];
+    const numbers = [null, " ", "de 123456789", "DE123456789", "123456789", "EL123456789", "GR123456789", "SE556677889901", "SE556677889902", "NO123456789", "ATU12345678"];
     const countries = ["SE", "DE", "GR", "NO"];
     const codeSets = [["MP25"], ["EUV"], ["EUT"], ["OB"], ["EUV", "OB"], ["MP25", "EXV"], [...VAT_CODES]] as const;
     for (const codes of codeSets) {

@@ -204,8 +204,8 @@ export class VatNumberRequiredError extends Error {
         ? "Kunden saknar momsregistreringsnummer — det krävs för EU-försäljning och omvänd betalningsskyldighet"
         : reason === "eu_format"
           ? prefix
-            ? `Kundens momsregistreringsnummer ska börja med landskoden ${prefix} — det krävs för EU-försäljning`
-            : "EU-försäljning kräver en kund i ett annat EU-land med momsregistreringsnummer"
+            ? `Kundens momsregistreringsnummer ska vara ett momsnummer från ett annat EU-land än Sverige, med landskoden först (till exempel ${prefix}) — det krävs för EU-försäljning`
+            : "EU-försäljning kräver ett momsregistreringsnummer från ett annat EU-land än Sverige, med landskoden först"
           : "Kundens momsregistreringsnummer ska ha formen SE + tio siffror + 01 för omvänd betalningsskyldighet"
     );
     this.name = "VatNumberRequiredError";

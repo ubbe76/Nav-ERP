@@ -12,6 +12,7 @@ import type {
 } from "@navet/shared";
 import {
   buyerVatNumberProblem,
+  buyerVatNumberWarning,
   DEFAULT_VAT_RATE,
   domesticVatCodeForRate,
   isVatCode,
@@ -759,6 +760,22 @@ export function createInvoiceService(
     return { filename: archived.filename, content: archived.data };
   }
 
+  // The köparens momsregistreringsnummer a draft is checked against and
+  // stamps at Utfärda: the customer's current one, except on a credit note,
+  // which keeps the number of the invoice it credits (the supply it reverses
+  // was made to that number). A credit note whose source is gone falls back
+  // to the customer's.
+  async function issueVatNumber(
+    invoice: { type: InvoiceType; creditedInvoiceId: string | null },
+    customer: { vatNumber: string | null }
+  ): Promise<string | null> {
+    if (invoice.type === "credit" && invoice.creditedInvoiceId) {
+      const source = await repo.findRawById(invoice.creditedInvoiceId);
+      if (source) return source.vatNumber;
+    }
+    return customer.vatNumber;
+  }
+
   const service = {
     async list(query: ListInvoicesQuery) {
       return repo.list(query);
@@ -781,9 +798,13 @@ export function createInvoiceService(
     //
     // Momskoder: each row carries vatCode { id, code, name, rate,
     // invoiceText }. buyerVatNumber is the köparens momsregistreringsnummer
-    // the invoice shows — the customer's current one on a draft, the issue
+    // the invoice shows — on a draft the number issuing would stamp (the
+    // customer's current one; a credit note's source invoice's), the issue
     // snapshot afterwards — and vatNumberProblem (drafts only) is what
     // Utfärda would refuse, so the card can warn ahead of it.
+    // vatNumberWarning (drafts only) is the non-blocking remark on an EU
+    // sale whose number belongs to another member state than the
+    // customer's country (buyerVatNumberWarning).
     async getInvoice(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
@@ -796,21 +817,27 @@ export function createInvoiceService(
       ]);
       let buyerVatNumber = header.vatNumber;
       let vatNumberProblem: ReturnType<typeof buyerVatNumberProblem> = null;
+      let vatNumberWarning: ReturnType<typeof buyerVatNumberWarning> = null;
       if (header.status === "draft") {
         const customer = await repo.findCustomerById(header.customerId);
-        buyerVatNumber = customer?.vatNumber ?? null;
         if (customer) {
-          vatNumberProblem = buyerVatNumberProblem({
+          buyerVatNumber = await issueVatNumber(header, customer);
+          const check = {
             codes: rows.flatMap((row) => (isVatCode(row.vatCode.code) ? [row.vatCode.code] : [])),
-            vatNumber: customer.vatNumber,
+            vatNumber: buyerVatNumber,
             country: customer.country,
-          });
+          };
+          vatNumberProblem = buyerVatNumberProblem(check);
+          vatNumberWarning = vatNumberProblem ? null : buyerVatNumberWarning(check);
+        } else {
+          buyerVatNumber = null;
         }
       }
       return {
         ...header,
         buyerVatNumber,
         vatNumberProblem,
+        vatNumberWarning,
         rows: rows.map((row) => ({ ...row, vatCode: { ...vatCodeRef(row.vatCode), invoiceText: row.vatCode.invoiceText } })),
         openAmount,
         payments,
@@ -1273,6 +1300,11 @@ export function createInvoiceService(
       const paymentTermId = invoice.paymentTermId ?? customer.paymentTermId;
       const paymentTerm = paymentTermId ? await repo.findPaymentTermById(paymentTermId) : null;
 
+      // Köparens momsregistreringsnummer: a credit note carries (and is
+      // checked against) the number of the invoice it credits — the supply
+      // it reverses was made to that number, whatever the customer's is now.
+      const buyerVatNumber = await issueVatNumber(invoice, customer);
+
       const now = new Date();
       // Invoice address with fallback to the visiting address — same rule as
       // renderInvoicePdf in sales.service.ts.
@@ -1289,7 +1321,7 @@ export function createInvoiceService(
         invoiceCity: useInvoiceAddress ? customer.invoiceCity : customer.city,
         invoiceCountry: useInvoiceAddress ? (customer.invoiceCountry ?? customer.country) : customer.country,
         orgNumber: customer.orgNumber,
-        vatNumber: customer.vatNumber,
+        vatNumber: buyerVatNumber,
         privatePerson: customer.privatePerson,
         paymentTermCode: paymentTerm?.code ?? null,
         paymentTermName: paymentTerm?.name ?? null,
@@ -1302,7 +1334,7 @@ export function createInvoiceService(
       // Momskoder: the rows' codes are checked against the number being
       // stamped and the customer's own country inside the transaction.
       const result = await repo.issueInvoice(id, stamp, invoice.type, userId, poster, {
-        vatNumber: customer.vatNumber,
+        vatNumber: buyerVatNumber,
         country: customer.country,
       });
       // ok:false covers two distinct rejections from inside the transaction:

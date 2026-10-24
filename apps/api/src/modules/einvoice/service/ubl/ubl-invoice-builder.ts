@@ -286,6 +286,9 @@ function taxCategory(name: string, category: VatCategory, withReason: boolean): 
   return el(name, [
     el("cbc:ID", category.id),
     el("cbc:Percent", formatDecimal(category.percent, 2)),
+    // UBL order: TaxExemptionReasonCode (BT-121) before TaxExemptionReason
+    // (BT-120); the line-level ClassifiedTaxCategory carries neither.
+    withReason ? text("cbc:TaxExemptionReasonCode", category.exemptionReasonCode) : null,
     withReason ? text("cbc:TaxExemptionReason", category.exemptionReason) : null,
     taxScheme("VAT"),
   ]);

@@ -139,6 +139,13 @@ describe("0142 — accounts", () => {
       { number: "2645", name: "Beräknad ingående moms" },
       { number: "4531", name: "Inköp tjänster från annat EU-land 25 %" },
       { number: "4515", name: "Inköp från EU (egen benämning)" },
+      // 0102's forced values — 'none' for 26xx, '05' for 3000–3799 — are not
+      // an own choice: the catalog's box replaces them.
+      { number: "2624", name: "Utgående moms omvänd 12 %", vatBox: "none" },
+      { number: "3231", name: "Försäljning byggtjänster", vatBox: "05" },
+      // An own box that is not the forced value for the number stays.
+      { number: "2615", name: "Utgående moms import 25 % (egen)", vatBox: "10" },
+      { number: "3308", name: "Försäljning tjänster EU (egen)", vatBox: "42" },
     ]);
 
     await run(db, "vat-codes-accounts");
@@ -150,10 +157,15 @@ describe("0142 — accounts", () => {
     expect(rows.get("4515")).toMatchObject({ name: "Inköp från EU (egen benämning)", vatBox: "20" });
     expect(rows.get("4531")).toMatchObject({ name: "Inköp av tjänster från ett land utanför EU, 25 % moms", vatBox: "22" });
     expect(rows.get("1510")!.vatBox).toBeNull();
+    // 0102's forced value is replaced; an own value is not.
+    expect(rows.get("2624")).toMatchObject({ name: "Utgående moms omvänd 12 %", vatBox: "31" });
+    expect(rows.get("3231")).toMatchObject({ name: "Försäljning byggtjänster", vatBox: "41" });
+    expect(rows.get("2615")!.vatBox).toBe("10");
+    expect(rows.get("3308")!.vatBox).toBe("42");
 
     // Every account added is exactly the seed's (BAS_STANDARD_ACCOUNTS).
     const seed = new Map(BAS_STANDARD_ACCOUNTS.map((account) => [account.number, account] as const));
-    for (const number of catalogNumbers.filter((n) => !["2614", "2645", "4515", "4531"].includes(n))) {
+    for (const number of catalogNumbers.filter((n) => !["2614", "2645", "4515", "4531", "2624", "3231", "2615", "3308"].includes(n))) {
       const added = rows.get(number);
       if (!["2610", "2620", "2630", "2640", "3001", "3002", "3003", "3004"].includes(number)) {
         expect({ number, name: added?.name, vatBox: added?.vatBox }).toEqual({
@@ -163,6 +175,56 @@ describe("0142 — accounts", () => {
         });
       }
     }
+  });
+
+  it("keeps 0102's forced box on an account with booked verification rows (declared periods must not change)", async () => {
+    await inRolledBackTx(async (tx) => {
+      await tx.execute(sql`TRUNCATE accounts CASCADE`);
+      await tx.insert(accounts).values([
+        { number: "1930", name: "Bank" },
+        { number: "2634", name: "Utgående moms omvänd 6 %", vatBox: "none" },
+        { number: "2625", name: "Utgående moms import 12 %", vatBox: "none" },
+        { number: "3305", name: "Försäljning tjänster utanför EU", vatBox: "05" },
+        { number: "3308", name: "Försäljning tjänster EU", vatBox: "05" },
+      ]);
+      const ids = Object.fromEntries((await tx.select().from(accounts)).map((row) => [row.number, row.id] as const));
+      const [year] = await tx.execute<{ id: string }>(
+        sql`INSERT INTO fiscal_years (label, start_date, end_date) VALUES ('MIG-0142', '2031-01-01', '2031-12-31') RETURNING id`
+      );
+      const [series] = await tx.execute<{ id: string }>(
+        sql`INSERT INTO verification_series (code, name) VALUES ('MIG', 'Migreringstest') RETURNING id`
+      );
+      const verification = async (status: "draft" | "booked", rows: [string, number, number][]) => {
+        const [ver] = await tx.execute<{ id: string }>(sql`INSERT INTO verifications (series_id, fiscal_year_id, date, description, status)
+          VALUES (${series!.id}, ${year!.id}, '2031-03-15', 'Före 0142', ${status}::verification_status) RETURNING id`);
+        for (const [number, debit, credit] of rows) {
+          await tx.execute(sql`INSERT INTO verification_rows (verification_id, account_id, debit, credit)
+            VALUES (${ver!.id}, ${ids[number]!}, ${debit}, ${credit})`);
+        }
+      };
+      // Booked in this transaction (the lock exempts rows booked with it).
+      await verification("booked", [
+        ["1930", 1060, 0],
+        ["3305", 0, 1000],
+        ["2634", 0, 60],
+      ]);
+      // A draft is not bookkeeping — it does not hold the box back.
+      await verification("draft", [
+        ["1930", 112, 0],
+        ["3308", 0, 100],
+        ["2625", 0, 12],
+      ]);
+
+      for (const statement of block("vat-codes-accounts")) await tx.execute(sql.raw(statement));
+
+      const boxes = Object.fromEntries((await tx.select().from(accounts)).map((row) => [row.number, row.vatBox] as const));
+      expect({ "2634": boxes["2634"], "3305": boxes["3305"], "2625": boxes["2625"], "3308": boxes["3308"] }).toEqual({
+        "2634": "none",
+        "3305": "05",
+        "2625": "61",
+        "3308": "39",
+      });
+    });
   });
 
   it("leaves a 4531 with another name alone", async () => {
@@ -184,6 +246,41 @@ describe("0142 — accounts", () => {
         });
       }
     }
+  });
+});
+
+describe("0142 — suppliers' country", () => {
+  it("reads the country off the VAT number's prefix (EL ⇒ GR, XI ⇒ GB), else the IBAN's, else SE", async () => {
+    await inRolledBackTx(async (tx) => {
+      const cases: [string, string | null, string | null, string][] = [
+        ["MIG-DE", "de 123 456 789", null, "DE"],
+        ["MIG-EL", "EL123456789", "DE89370400440532013000", "GR"],
+        ["MIG-XI", "XI123456789", null, "GB"],
+        ["MIG-CH", "CHE-123.456.789 MWST", null, "CH"],
+        ["MIG-NO", "NO 923 456 789 MVA", null, "NO"],
+        ["MIG-SE", "SE556677889901", "DE89370400440532013000", "SE"],
+        // Digits first: not a prefix — the IBAN decides.
+        ["MIG-ORG", "556677-8899", "FI2112345600000785", "FI"],
+        // Two letters that are no ISO code: the IBAN decides.
+        ["MIG-ZZ", "ZZ123", "NL91ABNA0417164300", "NL"],
+        ["MIG-IBAN", null, " dk50 0040 0440 1162 43 ", "DK"],
+        ["MIG-NONE", null, null, "SE"],
+        ["MIG-BAD", "QQ1", "XX12", "SE"],
+      ];
+      for (const [number, vatNumber, iban] of cases) {
+        await tx.execute(sql`INSERT INTO suppliers (supplier_number, name, vat_number, iban, country)
+          VALUES (${number}, ${number}, ${vatNumber}, ${iban}, 'SE')`);
+      }
+
+      for (const statement of block("vat-codes-supplier-country")) await tx.execute(sql.raw(statement));
+
+      const rows = await tx.execute<{ supplier_number: string; country: string }>(
+        sql`SELECT supplier_number, country FROM suppliers WHERE supplier_number LIKE 'MIG-%'`
+      );
+      expect(Object.fromEntries([...rows].map((row) => [row.supplier_number, row.country]))).toEqual(
+        Object.fromEntries(cases.map(([number, , , country]) => [number, country]))
+      );
+    });
   });
 });
 

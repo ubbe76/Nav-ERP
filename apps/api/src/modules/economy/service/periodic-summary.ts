@@ -117,6 +117,14 @@ export function formatKronor(kronor: number): string {
   return `${sign}${String(Math.abs(kronor)).replace(/\B(?=(\d{3})+(?!\d))/g, " ")}`;
 }
 
+// An öre amount as kronor with two decimals, Swedish style ("1 234,50",
+// "-0,30") — the reconciliation compares öre, so its warning shows them.
+export function formatOre(ore: number): string {
+  const sign = ore < 0 ? "-" : "";
+  const magnitude = Math.abs(ore);
+  return `${sign}${formatKronor(Math.floor(magnitude / 100))},${String(magnitude % 100).padStart(2, "0")}`;
+}
+
 const byInvoiceNumber = (a: PeriodicSummaryInvoiceRef, b: PeriodicSummaryInvoiceRef) =>
   a.invoiceNumber.localeCompare(b.invoiceNumber, "sv");
 
@@ -142,9 +150,14 @@ function invoiceRefs(invoices: Map<string, string>): PeriodicSummaryInvoiceRef[]
 // customers and invoices carry it), credit notes negative, öre summed and
 // rounded to whole kronor per row. Lines without a usable number stay out of
 // the rows and become warnings, as does a customer outside the EU.
+// `totalsOre` is the rows' exact öre sum per column (what the
+// reconciliation compares with the booked ruta 35/39), `lineCount` how many
+// EU-sale lines there were at all — with or without a usable number.
 export function aggregatePeriodicSummary(lines: EuSalesLine[]): {
   rows: PeriodicSummaryAggregateRow[];
   warnings: PeriodicSummaryWarning[];
+  totalsOre: { goods: number; services: number };
+  lineCount: number;
 } {
   const rows = new Map<string, Accumulator>();
   const warnings = new Map<string, WarningGroup>();
@@ -217,8 +230,14 @@ export function aggregatePeriodicSummary(lines: EuSalesLine[]): {
     rows.set(buyer.vatNumber, row);
   }
 
+  const accumulated = [...rows.values()];
   return {
-    rows: [...rows.values()]
+    totalsOre: {
+      goods: accumulated.reduce((sum, row) => sum + row.goodsOre, 0),
+      services: accumulated.reduce((sum, row) => sum + row.servicesOre, 0),
+    },
+    lineCount: lines.length,
+    rows: accumulated
       .sort((a, b) => (a.vatNumber < b.vatNumber ? -1 : a.vatNumber > b.vatNumber ? 1 : 0))
       .map((row) => ({
         vatNumber: row.vatNumber,
@@ -241,16 +260,25 @@ export function aggregatePeriodicSummary(lines: EuSalesLine[]): {
   };
 }
 
-// The summary against the VAT report's booked boxes: a difference is
-// typically a manual verification on 3108/3308 or an invoice row with the
-// wrong code — one warning per column that differs.
+// The summary's rows against the VAT report's booked ruta 35/39, both in
+// ÖRE: the rows sum exactly the invoice rows the poster booked on 3108/3308,
+// so any öre of difference is real — typically a manual verification on
+// those accounts, an invoice row with the wrong code or an invoice left out
+// for its VAT number. Comparing the per-row rounded kronor with the rounded
+// boxes instead would both invent differences (rounding) and hide small
+// ones. One warning per column that differs; `differences` is the öre
+// difference rounded to whole kronor (0 exactly when the öre agree).
+export function ledgerDifference(totalOre: number, bookedOre: number): number {
+  return oreToKronor(totalOre - bookedOre);
+}
+
 export function ledgerDifferenceWarnings(
-  totals: { goods: number; services: number },
-  ledger: { box35: number; box39: number }
+  totalsOre: { goods: number; services: number },
+  ledgerOre: { box35: number; box39: number }
 ): PeriodicSummaryWarning[] {
   const columns = [
-    { label: "Varor", total: totals.goods, box: "35", booked: ledger.box35 },
-    { label: "Tjänster", total: totals.services, box: "39", booked: ledger.box39 },
+    { label: "Varor", total: totalsOre.goods, box: "35", booked: ledgerOre.box35 },
+    { label: "Tjänster", total: totalsOre.services, box: "39", booked: ledgerOre.box39 },
   ];
   return columns.flatMap(({ label, total, box, booked }) => {
     const difference = total - booked;
@@ -258,7 +286,7 @@ export function ledgerDifferenceWarnings(
     return [
       {
         kind: "ledger_difference" as const,
-        message: `${label}: sammanställningen ${formatKronor(total)} kr, bokfört i ruta ${box} ${formatKronor(booked)} kr (skillnad ${formatKronor(difference)} kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod`,
+        message: `${label}: sammanställningen ${formatOre(total)} kr, bokfört i ruta ${box} ${formatOre(booked)} kr (skillnad ${formatOre(difference)} kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod`,
         invoices: [],
       },
     ];

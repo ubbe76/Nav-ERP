@@ -70,6 +70,8 @@ export const ERROR_CODES = {
   VAT_CODE_ACCOUNT_CONFLICT: "vat-code-account-conflict",
   VAT_CODE_AMOUNT_MISMATCH: "vat-code-amount-mismatch",
   VAT_CODE_NOT_APPLICABLE: "vat-code-not-applicable",
+  // PATCH /vat-codes/:id { active: false } on MP25/MP12/MP6/MF (400)
+  VAT_CODE_REQUIRED: "vat-code-required",
   POSTING_RULE_VAT_CODE: "posting-rule-vat-code",
   IMPORT_VAT_CODE: "import-vat-code",
   VAT_FILE_ORG_NUMBER_MISSING: "vat-file-org-number-missing",
@@ -85,6 +87,11 @@ export const ERROR_CODES = {
   // and an amount over 12 characters (400)
   PERIODIC_SUMMARY_PERIOD_INVALID: "periodic-summary-period-invalid",
   PERIODIC_SUMMARY_EMPTY: "periodic-summary-empty",
+  // the file: EU sales in the period, but none with a valid buyer VAT number (409)
+  PERIODIC_SUMMARY_NO_VALID_ROWS: "periodic-summary-no-valid-rows",
+  // PATCH /settings/vat-reporting: a contact name/phone the file cannot carry
+  // (400, body.field contactName|contactPhone; the message says which rule)
+  VAT_REPORTING_CONTACT_INVALID: "vat-reporting-contact-invalid",
   PERIODIC_SUMMARY_REPORTER_INCOMPLETE: "periodic-summary-reporter-incomplete",
   PERIODIC_SUMMARY_AMOUNT_TOO_LARGE: "periodic-summary-amount-too-large",
   // årsbokslut

@@ -695,8 +695,17 @@ export function createPurchaseService(
 
   // A supplier's own Momskod (förval) must be an active purchase code (both
   // or purchase direction) — the code a new supplier invoice starts from.
-  async function validateDefaultVatCode(defaultVatCodeId: string | null | undefined, book: VatCodeBook) {
-    if (defaultVatCodeId) documentVatCode(book, { id: defaultVatCodeId }, "purchase");
+  // `current` is the supplier's stored code on an update: re-sending it
+  // unchanged (the card saves the whole form) is allowed even when the code
+  // has been deactivated since — the same rule as the supplier invoice's
+  // header PATCH — so deactivating a code never locks a supplier card.
+  async function validateDefaultVatCode(
+    defaultVatCodeId: string | null | undefined,
+    book: VatCodeBook,
+    current: string | null = null
+  ) {
+    if (!defaultVatCodeId) return;
+    documentVatCode(book, { id: defaultVatCodeId }, "purchase", { allowInactive: defaultVatCodeId === current });
   }
 
   return {
@@ -720,12 +729,16 @@ export function createPurchaseService(
     async updateSupplier(id: string, input: UpdateSupplierInput) {
       await validateRegisterRefs(input);
       const book = await repo.vatCodeBook();
-      await validateDefaultVatCode(input.defaultVatCodeId, book);
+      // Read only when it matters: a code is being sent (unchanged may be
+      // inactive) or the payment details need the merged state below.
+      const needsExisting =
+        Boolean(input.defaultVatCodeId) || SUPPLIER_PAYMENT_DETAIL_KEYS.some((key) => input[key] !== undefined);
+      const existing = needsExisting ? await repo.findSupplierById(id) : null;
+      await validateDefaultVatCode(input.defaultVatCodeId, book, existing?.defaultVatCodeId ?? null);
       const normalized = normalizeSupplierPaymentDetails(input);
       // The check runs on the MERGED state (stored row + patch), so a PATCH
       // that only switches the method is held against the stored numbers.
       if (SUPPLIER_PAYMENT_DETAIL_KEYS.some((key) => normalized[key] !== undefined)) {
-        const existing = await repo.findSupplierById(id);
         if (!existing) throw new SupplierNotFoundError(id);
         const merged = paymentDetailsOf({ ...paymentDetailsOf(existing), ...stripUndefined(normalized) });
         const problems = supplierPaymentDetailsProblems(merged);

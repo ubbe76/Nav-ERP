@@ -114,6 +114,7 @@ import {
 import {
   ImportVatCodeError,
   VatCodeAccountInvalidError,
+  VatCodeRequiredError,
   VatCodeSlotNotUsedError,
 } from "../src/modules/economy/service/vat-code.service.js";
 import { InvalidVatCodeError } from "../src/modules/economy/service/document-vat-code.js";
@@ -152,11 +153,13 @@ import {
   VatAccountsNotDistinctError,
   VatPeriodAlreadySettledError,
   VatPeriodNotCoveredError,
+  VatReportingContactInvalidError,
 } from "../src/modules/economy/service/vat-report.service.js";
 import { PeriodicSummaryPeriodInvalidError } from "../src/modules/economy/service/periodic-summary.js";
 import { PeriodicSummaryAmountTooLargeError } from "../src/modules/economy/service/periodic-summary-file.js";
 import {
   PeriodicSummaryEmptyError,
+  PeriodicSummaryNoValidRowsError,
   PeriodicSummaryReporterIncompleteError,
 } from "../src/modules/economy/service/periodic-summary.service.js";
 
@@ -378,6 +381,7 @@ const cases: Array<[Error, string]> = [
   [new VatCodeAccountConflictError("IEUV25", "2614"), ERROR_CODES.VAT_CODE_ACCOUNT_CONFLICT],
   [new VatCodeAmountMismatchError("EUV", "VAT on a 0 % code"), ERROR_CODES.VAT_CODE_AMOUNT_MISMATCH],
   [new VatCodeNotApplicableError("IEUV25", "sales"), ERROR_CODES.VAT_CODE_NOT_APPLICABLE],
+  [new VatCodeRequiredError("MP25"), ERROR_CODES.VAT_CODE_REQUIRED],
   [new PostingRuleVatCodeError("IMP25"), ERROR_CODES.POSTING_RULE_VAT_CODE],
   [new ImportVatCodeError("vc-1", "inactive"), ERROR_CODES.IMPORT_VAT_CODE],
   [new VatFileOrgNumberMissingError(), ERROR_CODES.VAT_FILE_ORG_NUMBER_MISSING],
@@ -386,6 +390,8 @@ const cases: Array<[Error, string]> = [
   [new VatNumberRequiredError("missing", "EUV"), ERROR_CODES.VAT_NUMBER_REQUIRED],
   [new PeriodicSummaryPeriodInvalidError("2026-10-02", "2026-10-31"), ERROR_CODES.PERIODIC_SUMMARY_PERIOD_INVALID],
   [new PeriodicSummaryEmptyError(), ERROR_CODES.PERIODIC_SUMMARY_EMPTY],
+  [new PeriodicSummaryNoValidRowsError(), ERROR_CODES.PERIODIC_SUMMARY_NO_VALID_ROWS],
+  [new VatReportingContactInvalidError("contactPhone"), ERROR_CODES.VAT_REPORTING_CONTACT_INVALID],
   [new PeriodicSummaryReporterIncompleteError(["contactPhone"]), ERROR_CODES.PERIODIC_SUMMARY_REPORTER_INCOMPLETE],
   [new PeriodicSummaryAmountTooLargeError("DE123456789", 1e12), ERROR_CODES.PERIODIC_SUMMARY_AMOUNT_TOO_LARGE],
   [new FiscalYearClosedError("2024"), ERROR_CODES.FISCAL_YEAR_CLOSED],

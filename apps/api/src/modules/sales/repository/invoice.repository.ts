@@ -1049,6 +1049,50 @@ export function createInvoiceRepository(db: Db) {
             .set({ entityId: invoiceNumber })
             .where(and(eq(auditLog.entityType, "invoice"), eq(auditLog.entityId, id)));
 
+          // Leveransdatum (spec 4.4, ML 17 kap. 24 § p. 7): a row billed
+          // against an order row carries the day of a delivery that still
+          // stands. When the delivery its date came from was undone (Ångra
+          // utleverans) after the draft row was made — the date is the day of
+          // an undone delivery of the order row and no live one falls on it —
+          // it moves to the last live delivery day up to the invoice date, or
+          // null when there is none. A date set by hand (rad-PATCH, any day
+          // that never was a delivery of the row) and a null are left alone.
+          // Credit notes keep their source row's date (the supply they
+          // reverse).
+          if (type === "invoice") {
+            await tx.execute(sql`
+              WITH deliveries_of_rows AS (
+                SELECT dr.sales_order_row_id,
+                       (d.delivered_at AT TIME ZONE 'Europe/Stockholm')::date AS day,
+                       dr.undone_at IS NULL AS live
+                FROM delivery_rows dr
+                JOIN deliveries d ON d.id = dr.delivery_id
+                WHERE dr.sales_order_row_id IN (
+                  SELECT sales_order_row_id FROM invoice_rows WHERE invoice_id = ${id} AND sales_order_row_id IS NOT NULL
+                )
+              ),
+              target AS (
+                SELECT ir.id,
+                       (SELECT max(x.day) FROM deliveries_of_rows x
+                        WHERE x.sales_order_row_id = ir.sales_order_row_id AND x.live AND x.day <= ${stamp.invoiceDate}::date) AS day
+                FROM invoice_rows ir
+                WHERE ir.invoice_id = ${id}
+                  AND ir.sales_order_row_id IS NOT NULL
+                  AND ir.delivery_date IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM deliveries_of_rows x
+                    WHERE x.sales_order_row_id = ir.sales_order_row_id AND NOT x.live AND x.day = ir.delivery_date
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM deliveries_of_rows x
+                    WHERE x.sales_order_row_id = ir.sales_order_row_id AND x.live AND x.day = ir.delivery_date
+                  )
+              )
+              UPDATE invoice_rows SET delivery_date = target.day
+              FROM target
+              WHERE invoice_rows.id = target.id`);
+          }
+
           // The article's group decides which konteringsregel applies; a
           // free row (no article) and an article without a group both come
           // back null and fall through to the settings default. Amounts are

@@ -158,7 +158,7 @@ describe("GET /periodic-summary", () => {
         {
           kind: "ledger_difference",
           message:
-            "Varor: sammanställningen 1 501 kr, bokfört i ruta 35 0 kr (skillnad 1 501 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
+            "Varor: sammanställningen 1 500,50 kr, bokfört i ruta 35 0,00 kr (skillnad 1 500,50 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
           invoices: [],
         },
       ],
@@ -231,6 +231,21 @@ describe("GET /periodic-summary/file", () => {
     const res = await app.inject({ url: `/periodic-summary/file?from=${MAY.from}&to=${MAY.to}` });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("periodic-summary-empty");
+    await app.close();
+  });
+
+  it("409s periodic-summary-no-valid-rows when every EU invoice lacks a valid buyer number", async () => {
+    await setContact();
+    const kunde = await customer("Kunde GmbH", "DE");
+    await issued({ customerId: kunde, number: "FA9001", vatNumber: null, code: "EUV", amount: "100.00" });
+    await issued({ customerId: kunde, number: "FA9002", vatNumber: "SE556677889901", code: "EUT", amount: "50.00" });
+    const app = buildApp();
+    const res = await app.inject({ url: `/periodic-summary/file?from=${MAY.from}&to=${MAY.to}` });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({
+      error: "Alla EU-fakturor i perioden saknar giltigt momsnummer — rätta kunderna",
+      code: "periodic-summary-no-valid-rows",
+    });
     await app.close();
   });
 

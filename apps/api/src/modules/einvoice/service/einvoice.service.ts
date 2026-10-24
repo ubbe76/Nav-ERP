@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { toUnitPrice, toUnitQuantity, type EinvoiceBlockedReason, type EinvoiceStatus, type PeppolLookupInput } from "@navet/shared";
+import { normalizeVatNumber, toUnitPrice, toUnitQuantity, type EinvoiceBlockedReason, type EinvoiceStatus, type PeppolLookupInput } from "@navet/shared";
 import { configurationLines } from "../../configurator/service/configuration-lines.js";
 import { InvoiceNotFoundError } from "../../sales/service/invoice.service.js";
 import { CustomerNotFoundError } from "../../sales/service/sales.service.js";
@@ -298,7 +298,10 @@ export function buildUblInput(args: {
       name: invoice.customerName ?? customer.name,
       address: addressOf(invoice.invoiceAddress, invoice.invoicePostalCode, invoice.invoiceCity, "SE"),
       orgNumber: orgNumberDigits(invoice.orgNumber ?? customer.orgNumber),
-      vatNumber: (invoice.vatNumber ?? customer.vatNumber)?.replace(/\s/g, "").toUpperCase() || null,
+      // BT-48 as compared and reported everywhere (normalizeVatNumber):
+      // upper case, letters and digits only — "SE 559000-1235 01" would
+      // otherwise reach the access point with its hyphen.
+      vatNumber: normalizeVatNumber(invoice.vatNumber ?? customer.vatNumber) || null,
       customerNumber: invoice.customerNumber ?? customer.customerNumber,
     },
     payment: {

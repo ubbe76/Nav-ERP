@@ -109,6 +109,21 @@ describe("customers — Omvänd betalningsskyldighet för byggtjänster and Moms
     expect((await salesService.updateCustomer(created.id, { vatNumber: "DE123456789" })).vatTreatment).toBe("eu");
     expect((await salesService.updateCustomer(created.id, { country: "US" })).vatTreatment).toBe("export");
     expect((await salesService.updateCustomer(created.id, { country: "DK", privatePerson: true })).vatTreatment).toBe("private_eu");
+    expect((await salesService.updateCustomer(created.id, { country: "NO" })).vatTreatment).toBe("private_export");
+  });
+
+  it("answers vatNumberWarning for an EU company customer whose number is another member state's, or no member state's", async () => {
+    const created = await salesService.createCustomer({ name: "Kunde GmbH", active: true, country: "DE", vatNumber: "DE123456789" } as never);
+    expect(created.vatNumberWarning).toBeNull();
+    const other = await salesService.updateCustomer(created.id, { vatNumber: "ATU12345678" });
+    expect(other.vatNumberWarning).toEqual({ reason: "eu_country_mismatch", prefix: "AT", expectedPrefix: "DE" });
+    expect((await salesService.getCustomer(created.id))!.vatNumberWarning).toEqual(other.vatNumberWarning);
+    expect((await salesService.updateCustomer(created.id, { vatNumber: "123456789" })).vatNumberWarning).toEqual({
+      reason: "eu_format",
+      expectedPrefix: "DE",
+    });
+    // Not an EU company customer: nothing to say.
+    expect((await salesService.updateCustomer(created.id, { country: "SE" })).vatNumberWarning).toBeNull();
   });
 
   it("defaults reverseChargeConstruction to false", async () => {
@@ -143,6 +158,33 @@ describe("suppliers — Land and Momskod (förval)", () => {
     expect(supplier.defaultVatCode).toMatchObject({ code: "IUTT", rate: 25, derived: false });
     const cleared = await purchaseService.updateSupplier(supplier.id, { defaultVatCodeId: null });
     expect(cleared.defaultVatCode).toMatchObject({ code: "IUTV", derived: true });
+  });
+
+  it("keeps an own förval that was deactivated since when a PATCH leaves it unchanged, but refuses choosing it anew", async () => {
+    const ieut = await vatCodeId("IEUT");
+    const supplier = await purchaseService.createSupplier({
+      name: "Tjänst GmbH",
+      currency: "EUR",
+      country: "DE",
+      defaultVatCodeId: ieut,
+      active: true,
+    } as never);
+    const other = await purchaseService.createSupplier({ name: "Annan GmbH", currency: "EUR", country: "DE", active: true } as never);
+    await db.update(vatCodes).set({ active: false }).where(eq(vatCodes.code, "IEUT"));
+
+    // The card sends the whole form back — the unchanged code must not lock it.
+    const renamed = await purchaseService.updateSupplier(supplier.id, { name: "Tjänst GmbH & Co", defaultVatCodeId: ieut });
+    expect(renamed.name).toBe("Tjänst GmbH & Co");
+    expect(renamed.defaultVatCode).toMatchObject({ code: "IEUT", derived: false });
+    // Another supplier cannot pick the inactive code.
+    await expect(purchaseService.updateSupplier(other.id, { defaultVatCodeId: ieut })).rejects.toMatchObject({
+      name: "InvalidVatCodeError",
+      reason: "inactive",
+    });
+    // Nor can an unknown supplier id slip past the check.
+    await expect(purchaseService.updateSupplier(crypto.randomUUID(), { defaultVatCodeId: ieut })).rejects.toMatchObject({
+      reason: "inactive",
+    });
   });
 
   it("refuses a sales, import, inactive or unknown code as the supplier's förval", async () => {
@@ -223,6 +265,57 @@ describe("supplier invoices — momskoder", () => {
       userId
     );
     expect(domestic!.reverseVat).toEqual([]);
+  });
+
+  it("warns (never refuses) about a domestic code with VAT but no momsbelopp, and a non-SEK supplier with land Sverige", async () => {
+    // A German supplier wrongly left on Sverige: MP25 is derived, no VAT typed.
+    const misfiled = await supplier({ name: "Lieferant GmbH", currency: "EUR" });
+    const invoice = await supplierInvoiceService.create(
+      { supplierId: misfiled.id, invoiceNumber: "W-1", invoiceDate: TODAY, netAmount: 1000, vatAmount: 0, grossAmount: 1000, rows: [] } as never,
+      userId
+    );
+    expect(invoice!.vatCode.code).toBe("MP25");
+    expect(invoice!.warnings).toEqual([
+      "Momskoden MP25 har 25 % moms men fakturan har inget momsbelopp — kontrollera momskoden (utlandsköp ska ha en omvänd kod)",
+      "Leverantören har annan valuta än SEK men land Sverige — kontrollera landet",
+    ]);
+
+    // A row with its own MP12 and the header on an omvänd code: the row is
+    // what lacks VAT.
+    const se = await supplier();
+    const rowCoded = await supplierInvoiceService.create(
+      {
+        supplierId: se.id,
+        invoiceNumber: "W-2",
+        invoiceDate: TODAY,
+        vatCodeId: await vatCodeId("IOBV"),
+        netAmount: 1000,
+        vatAmount: 0,
+        grossAmount: 1000,
+        rows: [
+          { description: "Bygg", quantity: 1, unitPrice: 800 },
+          { description: "Livsmedel", quantity: 1, unitPrice: 200, vatCodeId: await vatCodeId("MP12") },
+        ],
+      } as never,
+      userId
+    );
+    expect(rowCoded!.warnings).toEqual([
+      "Momskoden MP12 har 12 % moms men fakturan har inget momsbelopp — kontrollera momskoden (utlandsköp ska ha en omvänd kod)",
+    ]);
+
+    // In order: VAT typed, an omvänd code, MF, a zero net.
+    for (const [number, extra] of [
+      ["W-3", { netAmount: 1000, vatAmount: 250, grossAmount: 1250 }],
+      ["W-4", { netAmount: 1000, vatAmount: 0, grossAmount: 1000, vatCodeId: await vatCodeId("IEUV25") }],
+      ["W-5", { netAmount: 1000, vatAmount: 0, grossAmount: 1000, vatCodeId: await vatCodeId("MF") }],
+      ["W-6", { netAmount: 0, vatAmount: 0, grossAmount: 0 }],
+    ] as const) {
+      const ok = await supplierInvoiceService.create(
+        { supplierId: se.id, invoiceNumber: number, invoiceDate: TODAY, rows: [], ...extra } as never,
+        userId
+      );
+      expect([number, ok!.warnings]).toEqual([number, []]);
+    }
   });
 
   it("changes the header code in draft only and the rows' codes through the row endpoints", async () => {

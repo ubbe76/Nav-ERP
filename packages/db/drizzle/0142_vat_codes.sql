@@ -112,6 +112,26 @@ FROM (VALUES
   ('4531', '22'), ('4535', '21'), ('4545', '50'), ('4546', '50'), ('4547', '50'), ('4549', 'none')
 ) AS v(number, box)
 WHERE "accounts"."number" = v.number AND "accounts"."vat_box" IS NULL;--> statement-breakpoint
+-- Migration 0102 could only hand out the boxes that existed then, so it
+-- gave every 26xx account 'none' and every account 3000–3799 '05'. A catalog
+-- account still carrying exactly that forced value gets the catalog's box —
+-- but only while no booked verification row touches it: moving a box under
+-- booked rows would change the report of periods already declared (those
+-- accounts are flagged by the Momskoder page and the VAT report instead).
+-- 3105/3108 are not here: 0102 already gave them 36/35.
+UPDATE "accounts" SET "vat_box" = v.box
+FROM (VALUES
+  ('2614', 'none', '30'), ('2615', 'none', '60'), ('2624', 'none', '31'), ('2625', 'none', '61'),
+  ('2634', 'none', '32'), ('2635', 'none', '62'), ('2645', 'none', '48'), ('2647', 'none', '48'),
+  ('3231', '05', '41'), ('3305', '05', '40'), ('3308', '05', '39')
+) AS v(number, forced, box)
+WHERE "accounts"."number" = v.number
+  AND "accounts"."vat_box" = v.forced
+  AND NOT EXISTS (
+    SELECT 1 FROM "verification_rows"
+    JOIN "verifications" ON "verifications"."id" = "verification_rows"."verification_id"
+    WHERE "verification_rows"."account_id" = "accounts"."id" AND "verifications"."status" = 'booked'
+  );--> statement-breakpoint
 -- BAS: 4531 is tjänster från land UTANFÖR EU (the old seed called it EU).
 -- Renamed only when it still carries exactly the old seed name.
 UPDATE "accounts" SET "name" = 'Inköp av tjänster från ett land utanför EU, 25 % moms'
@@ -152,6 +172,58 @@ WHERE "invoice_rows"."vat_code_id" IS NULL
 ALTER TABLE "invoice_rows" ALTER COLUMN "vat_code_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "customers" ADD COLUMN "reverse_charge_construction" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "suppliers" ADD COLUMN "country" varchar(2) DEFAULT 'SE' NOT NULL;--> statement-breakpoint
+-- vat-codes-supplier-country:start
+-- An existing supplier's country is read off its momsregistreringsnummer
+-- (the prefix, when its first two characters are letters forming an ISO
+-- 3166-1 alpha-2 code; the VAT prefixes EL = Greece and XI = Northern
+-- Ireland map to GR/GB), else off its IBAN's country code, else Sverige —
+-- so a foreign supplier's momskod (förval) is derived as omvänd moms or
+-- import instead of svensk moms. Uppercased, separators ignored.
+WITH iso(code) AS (VALUES
+    ('AD'), ('AE'), ('AF'), ('AG'), ('AI'), ('AL'), ('AM'), ('AO'), ('AQ'), ('AR'), ('AS'), ('AT'), ('AU'), ('AW'), ('AX'), ('AZ'),
+    ('BA'), ('BB'), ('BD'), ('BE'), ('BF'), ('BG'), ('BH'), ('BI'), ('BJ'), ('BL'), ('BM'), ('BN'), ('BO'), ('BQ'), ('BR'), ('BS'), ('BT'), ('BV'), ('BW'), ('BY'), ('BZ'),
+    ('CA'), ('CC'), ('CD'), ('CF'), ('CG'), ('CH'), ('CI'), ('CK'), ('CL'), ('CM'), ('CN'), ('CO'), ('CR'), ('CU'), ('CV'), ('CW'), ('CX'), ('CY'), ('CZ'),
+    ('DE'), ('DJ'), ('DK'), ('DM'), ('DO'), ('DZ'),
+    ('EC'), ('EE'), ('EG'), ('EH'), ('ER'), ('ES'), ('ET'),
+    ('FI'), ('FJ'), ('FK'), ('FM'), ('FO'), ('FR'),
+    ('GA'), ('GB'), ('GD'), ('GE'), ('GF'), ('GG'), ('GH'), ('GI'), ('GL'), ('GM'), ('GN'), ('GP'), ('GQ'), ('GR'), ('GS'), ('GT'), ('GU'), ('GW'), ('GY'),
+    ('HK'), ('HM'), ('HN'), ('HR'), ('HT'), ('HU'),
+    ('ID'), ('IE'), ('IL'), ('IM'), ('IN'), ('IO'), ('IQ'), ('IR'), ('IS'), ('IT'),
+    ('JE'), ('JM'), ('JO'), ('JP'),
+    ('KE'), ('KG'), ('KH'), ('KI'), ('KM'), ('KN'), ('KP'), ('KR'), ('KW'), ('KY'), ('KZ'),
+    ('LA'), ('LB'), ('LC'), ('LI'), ('LK'), ('LR'), ('LS'), ('LT'), ('LU'), ('LV'), ('LY'),
+    ('MA'), ('MC'), ('MD'), ('ME'), ('MF'), ('MG'), ('MH'), ('MK'), ('ML'), ('MM'), ('MN'), ('MO'), ('MP'), ('MQ'), ('MR'), ('MS'), ('MT'), ('MU'), ('MV'), ('MW'), ('MX'), ('MY'), ('MZ'),
+    ('NA'), ('NC'), ('NE'), ('NF'), ('NG'), ('NI'), ('NL'), ('NO'), ('NP'), ('NR'), ('NU'), ('NZ'),
+    ('OM'),
+    ('PA'), ('PE'), ('PF'), ('PG'), ('PH'), ('PK'), ('PL'), ('PM'), ('PN'), ('PR'), ('PS'), ('PT'), ('PW'), ('PY'),
+    ('QA'),
+    ('RE'), ('RO'), ('RS'), ('RU'), ('RW'),
+    ('SA'), ('SB'), ('SC'), ('SD'), ('SE'), ('SG'), ('SH'), ('SI'), ('SJ'), ('SK'), ('SL'), ('SM'), ('SN'), ('SO'), ('SR'), ('SS'), ('ST'), ('SV'), ('SX'), ('SY'), ('SZ'),
+    ('TC'), ('TD'), ('TF'), ('TG'), ('TH'), ('TJ'), ('TK'), ('TL'), ('TM'), ('TN'), ('TO'), ('TR'), ('TT'), ('TV'), ('TW'), ('TZ'),
+    ('UA'), ('UG'), ('UM'), ('US'), ('UY'), ('UZ'),
+    ('VA'), ('VC'), ('VE'), ('VG'), ('VI'), ('VN'), ('VU'),
+    ('WF'), ('WS'),
+    ('YE'), ('YT'),
+    ('ZA'), ('ZM'), ('ZW')
+),
+candidates AS (
+  SELECT
+    s.id,
+    CASE upper(substr(regexp_replace(coalesce(s.vat_number, ''), '[^A-Za-z0-9]', '', 'g'), 1, 2))
+      WHEN 'EL' THEN 'GR' WHEN 'XI' THEN 'GB'
+      ELSE upper(substr(regexp_replace(coalesce(s.vat_number, ''), '[^A-Za-z0-9]', '', 'g'), 1, 2))
+    END AS from_vat,
+    upper(substr(regexp_replace(coalesce(s.iban, ''), '[^A-Za-z0-9]', '', 'g'), 1, 2)) AS from_iban
+  FROM "suppliers" s
+)
+UPDATE "suppliers" SET "country" = COALESCE(
+  (SELECT iso.code FROM iso WHERE iso.code = candidates.from_vat),
+  (SELECT iso.code FROM iso WHERE iso.code = candidates.from_iban),
+  'SE'
+)
+FROM candidates
+WHERE candidates.id = "suppliers"."id";--> statement-breakpoint
+-- vat-codes-supplier-country:end
 ALTER TABLE "suppliers" ADD COLUMN "default_vat_code_id" uuid;--> statement-breakpoint
 ALTER TABLE "suppliers" ADD CONSTRAINT "suppliers_default_vat_code_id_vat_codes_id_fk" FOREIGN KEY ("default_vat_code_id") REFERENCES "public"."vat_codes"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "supplier_invoices" ADD COLUMN "vat_code_id" uuid;--> statement-breakpoint

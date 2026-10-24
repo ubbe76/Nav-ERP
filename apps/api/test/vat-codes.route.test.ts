@@ -183,7 +183,10 @@ describe("PATCH /vat-codes/:id", () => {
     const body = res.json();
     expect(body.vatCode).toMatchObject({ code: "EUV", name: "EU-varor", invoiceText: "Intra-EU supply", active: false, ruleCount: 1 });
     expect(body.vatCode.accounts[0]).toMatchObject({ accountNumber: "3109", defaultAccountNumber: "3108", warning: null });
-    expect(body.warnings).toEqual(["Momskoden EUV är inaktiv men används av 1 konteringsregel"]);
+    expect(body.warnings).toEqual([
+      "Momskoden EUV är inaktiv men används av 1 konteringsregel",
+      "Momskoden EUV väljs automatiskt för varor till företagskunder i andra EU-länder — nya fakturarader för sådana kunder måste då få en momskod för hand",
+    ]);
 
     expect(audited).toHaveLength(1);
     expect(audited[0]).toMatchObject({
@@ -201,6 +204,47 @@ describe("PATCH /vat-codes/:id", () => {
     expect(reset.statusCode).toBe(200);
     expect(reset.json().vatCode.accounts[0].accountNumber).toBe("3108");
     expect(reset.json().vatCode.invoiceText).toBeNull();
+    await app.close();
+  });
+
+  it("refuses to deactivate a domestic code (400 vat-code-required) and warns about every other automatically chosen code", async () => {
+    const { user } = await setupEconomy();
+    const app = buildApp(user.id);
+    for (const code of ["MP25", "MP12", "MP6", "MF"] as const) {
+      const res = await app.inject({ method: "PATCH", url: `/vat-codes/${await vatCodeId(code)}`, payload: { active: false } });
+      expect([res.statusCode, res.json().code, res.json().error]).toEqual([
+        400,
+        "vat-code-required",
+        "Momskoden används när Nav väljer momskod automatiskt och kan inte inaktiveras",
+      ]);
+    }
+    const [mp25] = await db.select().from(vatCodes).where(eq(vatCodes.code, "MP25"));
+    expect(mp25!.active).toBe(true);
+    // Other edits of a domestic code are fine, active: true too.
+    const renamed = await app.inject({ method: "PATCH", url: `/vat-codes/${mp25!.id}`, payload: { name: "Moms 25", active: true } });
+    expect(renamed.statusCode).toBe(200);
+
+    const expected: Record<string, string> = {
+      EUV: "Momskoden EUV väljs automatiskt för varor till företagskunder i andra EU-länder — nya fakturarader för sådana kunder måste då få en momskod för hand",
+      EUT: "Momskoden EUT väljs automatiskt för tjänster till företagskunder i andra EU-länder — nya fakturarader för sådana kunder måste då få en momskod för hand",
+      EXV: "Momskoden EXV väljs automatiskt för varor till kunder utanför EU — nya fakturarader för sådana kunder måste då få en momskod för hand",
+      EXT: "Momskoden EXT väljs automatiskt för tjänster till företagskunder utanför EU — nya fakturarader för sådana kunder måste då få en momskod för hand",
+      OB: "Momskoden OB väljs automatiskt för tjänster till kunder med omvänd betalningsskyldighet för byggtjänster — nya fakturarader för sådana kunder måste då få en momskod för hand",
+      IEUV25:
+        "Momskoden IEUV25 väljs automatiskt som förval för leverantörer i andra EU-länder — nya leverantörsfakturor för sådana leverantörer måste då få en momskod för hand",
+      IUTV: "Momskoden IUTV väljs automatiskt som förval för leverantörer utanför EU — nya leverantörsfakturor för sådana leverantörer måste då få en momskod för hand",
+    };
+    for (const [code, warning] of Object.entries(expected)) {
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/vat-codes/${await vatCodeId(code as (typeof VAT_CODES)[number])}`,
+        payload: { active: false },
+      });
+      expect([code, res.statusCode, res.json().warnings]).toEqual([code, 200, [warning]]);
+    }
+    // A code Nav never picks by itself deactivates without a warning.
+    const ieut = await app.inject({ method: "PATCH", url: `/vat-codes/${await vatCodeId("IEUT")}`, payload: { active: false } });
+    expect(ieut.json().warnings).toEqual([]);
     await app.close();
   });
 
@@ -359,6 +403,33 @@ describe("/settings/vat-reporting", () => {
     for (const payload of [{}, { period: "week" }, { contactEmail: "not-an-email" }, { contactName: "x".repeat(36) }, { other: 1 }]) {
       expect((await app.inject({ method: "PATCH", url: "/settings/vat-reporting", payload })).statusCode).toBe(400);
     }
+    await app.close();
+  });
+
+  it("refuses a contact name or phone Skatteverket's file cannot carry (400 vat-reporting-contact-invalid, nothing saved)", async () => {
+    const { user } = await setupEconomy();
+    const app = buildApp(user.id);
+    const patch = (payload: object) => app.inject({ method: "PATCH", url: "/settings/vat-reporting", payload });
+
+    for (const [payload, field] of [
+      [{ contactName: "Łukasz Kowalski" }, "contactName"],
+      [{ contactName: "Anna €uro" }, "contactName"],
+      [{ contactPhone: "08-123-456" }, "contactPhone"],
+      [{ contactPhone: "08/123456" }, "contactPhone"],
+      [{ contactPhone: "tel 0812345" }, "contactPhone"],
+      [{ contactPhone: "0046-123+45" }, "contactPhone"],
+    ] as const) {
+      const res = await patch({ period: "month", ...payload });
+      expect([res.statusCode, res.json().code, res.json().field]).toEqual([400, "vat-reporting-contact-invalid", field]);
+    }
+    expect((await patch({ contactPhone: "08 / 123" })).json().error).toMatch(/^Telefonnumret ska vara siffror/);
+    // Nothing of a refused PATCH is saved — not even its valid period.
+    expect((await app.inject({ url: "/settings/vat-reporting" })).json().period).toBe("quarter");
+
+    // Latin-1 letters and the file's own formats are fine.
+    const ok = await patch({ contactName: "Åsa Öberg-Müller", contactPhone: "+46 8 123 456" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({ contactName: "Åsa Öberg-Müller", contactPhone: "+46 8 123 456" });
     await app.close();
   });
 });

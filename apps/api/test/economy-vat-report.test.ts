@@ -373,18 +373,80 @@ describe("vat report — box computation", () => {
 
     const report = await vatReport.getReport(MAR);
     expect(report.boxes["10"]).toBe(125);
-    expect(report.warnings).toEqual({ unassignedAccounts: [], vatCodeBoxMismatches: [], ruleBoxMismatches: [] });
+    expect(report.warnings).toEqual({
+      unassignedAccounts: [],
+      vatCodeBoxMismatches: [],
+      ruleBoxMismatches: [],
+      settlementAccountProblems: [],
+    });
 
     const result = await vatReport.settle(MAR, user.id);
     expect(await ledgerNet("2611", MAR.from, MAR.to)).toBe(0);
     expect(result.verification.displayNumber).toBe(`M-${CURRENT_YEAR}-1`);
   });
 
-  it("rejects a redovisningskonto that itself carries a box the omföring empties", async () => {
-    await setupEconomy();
-    postingSettings = { ...postingSettings, postingVatSettlement: "2640" };
+  it("still shows the report when the redovisningskonto carries a box the omföring empties — a warning, only the settle refuses", async () => {
+    const { user } = await setupEconomy();
+    await bookSale(user.id, `${CURRENT_YEAR}-03-05`, 1000, "2610", 25);
+    postingSettings = { ...postingSettings, postingVatSettlement: "2640", postingPaymentWriteOff: "2610" };
 
-    await expect(vatReport.getReport(MAR)).rejects.toBeInstanceOf(VatAccountsNotDistinctError);
+    const report = await vatReport.getReport(MAR);
+    expect(report.boxes["10"]).toBe(250);
+    expect(report.warnings.settlementAccountProblems).toEqual([
+      {
+        role: "settlement",
+        accountNumber: "2640",
+        vatBox: "48",
+        message:
+          "Redovisningskontot för moms 2640 har ruta 48, som momsomföringen tömmer — momsomföringen kan inte bokföras förrän kontot har en annan ruta eller ett annat konto har valts under Konteringsregler",
+      },
+      {
+        role: "rounding",
+        accountNumber: "2610",
+        vatBox: "10",
+        message:
+          "Kontot för öres- och kronutjämning 2610 har ruta 10, som momsomföringen tömmer — momsomföringen kan inte bokföras förrän kontot har en annan ruta eller ett annat konto har valts under Konteringsregler",
+      },
+    ]);
+    await expect(vatReport.settle(MAR, user.id)).rejects.toBeInstanceOf(VatAccountsNotDistinctError);
+  });
+
+  it("warns about konteringsregler whose account lands in the wrong box — domestic codes and Alla momskoder included", async () => {
+    await setupEconomy();
+    await service.createAccount({ number: "3011", name: "Försäljning Diskbänkar EU", vatBox: "35" });
+    await service.createAccount({ number: "4012", name: "Inköp Diskbänkar", vatBox: "20" });
+    const groups: Record<string, string> = {};
+    for (const [code, name] of [
+      ["310", "Diskbänkar"],
+      ["320", "Underreden"],
+    ]) {
+      const [group] = await db.execute<{ id: string }>(sql`INSERT INTO article_groups (code, name) VALUES (${code}, ${name}) RETURNING id`);
+      groups[code] = group!.id;
+    }
+    const codeId = async (code: string) => (await db.select().from(vatCodes).where(eq(vatCodes.code, code)))[0]!.id;
+    // Alla momskoder: a revenue account with ruta 35, a cost account with ruta 20.
+    await service.createPostingRule({
+      articleGroupId: groups["310"]!,
+      vatCodeId: null,
+      revenueAccountId: await accountId("3011"),
+      costAccountId: await accountId("4012"),
+    });
+    // MF on a 05 account; MP25 on 3001 (ruta 05) is in order.
+    await service.createPostingRule({ articleGroupId: groups["310"]!, vatCodeId: await codeId("MF"), revenueAccountId: await accountId("3001"), costAccountId: null });
+    await service.createPostingRule({ articleGroupId: groups["320"]!, vatCodeId: await codeId("MP25"), revenueAccountId: await accountId("3001"), costAccountId: null });
+    await service.createPostingRule({ articleGroupId: groups["320"]!, vatCodeId: null, revenueAccountId: await accountId("3004"), costAccountId: await accountId("4010") });
+
+    const report = await vatReport.getReport(MAR);
+    expect(report.warnings.ruleBoxMismatches.map((mismatch) => [mismatch.code, mismatch.slot, mismatch.problem, mismatch.message])).toEqual([
+      [null, "revenue", "box_mismatch", "Konteringsregel 310 Diskbänkar / Alla momskoder: konto 3011 har ruta 35 men ska ha ruta 05 eller ruta 42"],
+      [
+        null,
+        "cost",
+        "purchase_box",
+        "Konteringsregel 310 Diskbänkar / Alla momskoder: kostnadskonto 4012 har ruta 20 men ska inte ha någon av inköpsrutorna 20–24, 37 eller 50 (de gäller omvänd moms och import)",
+      ],
+      ["MF", "revenue", "box_mismatch", "Konteringsregel 310 Diskbänkar / MF: konto 3001 har ruta 05 men ska ha ruta 42"],
+    ]);
   });
 
   it("exposes every moved account with a settled box, ruta 49 in kronor and the öresutjämning as the settlement preview", async () => {

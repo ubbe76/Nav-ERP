@@ -69,6 +69,7 @@ function assertSumRules(xml: string): void {
       expect(tax).toBe(0);
       expect(percent).toBe(0);
       expect(textAt(category, "TaxExemptionReason")).not.toBeNull();
+      expect(textAt(category, "TaxExemptionReasonCode")).toBe("VATEX-EU-AE");
     } else {
       expect(Math.abs(tax - round2(taxable * (percent / 100)))).toBeLessThan(1);
       expect(child(category, "TaxExemptionReason")).toBeNull();
@@ -129,14 +130,16 @@ describe("UBL builder — momskoder", () => {
     );
   });
 
-  it("OB ⇒ AE with the code's text as BT-120, its own subtotal next to E, the buyer's VAT number on the party", () => {
+  it("OB ⇒ AE with VATEX-EU-AE as BT-121 and the code's text as BT-120, its own subtotal next to E, the buyer's VAT number on the party", () => {
     const xml = buildUblInvoice(invoiceReverseCharge());
     expect(xml).toContain(
       '<cac:TaxSubtotal><cbc:TaxableAmount currencyID="SEK">180.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="SEK">0.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>E</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReason>Undantagen från mervärdesskatt</cbc:TaxExemptionReason>'
     );
     expect(xml).toContain(
-      '<cac:TaxSubtotal><cbc:TaxableAmount currencyID="SEK">6000.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="SEK">0.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>'
+      '<cac:TaxSubtotal><cbc:TaxableAmount currencyID="SEK">6000.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="SEK">0.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReasonCode>VATEX-EU-AE</cbc:TaxExemptionReasonCode><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>'
     );
+    // E keeps only its text (BT-121 is AE's alone here).
+    expect(xml.split("TaxExemptionReasonCode>VATEX-EU-AE<").length).toBe(2);
     // S 25 → E 0 → AE 0.
     expect(xml.indexOf("<cbc:ID>S</cbc:ID>")).toBeLessThan(xml.indexOf("<cbc:ID>E</cbc:ID>"));
     expect(xml.indexOf("<cbc:ID>E</cbc:ID>")).toBeLessThan(xml.indexOf("<cbc:ID>AE</cbc:ID>"));
@@ -149,7 +152,9 @@ describe("UBL builder — momskoder", () => {
     expect(buildUblInvoice(ownText)).toContain("<cbc:TaxExemptionReason>Omvänd betalningsskyldighet för byggtjänster</cbc:TaxExemptionReason>");
     const noText = invoiceReverseCharge();
     noText.lines[0] = { ...noText.lines[0]!, vatExemptionText: null };
-    expect(buildUblInvoice(noText)).toContain("<cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason>");
+    expect(buildUblInvoice(noText)).toContain(
+      "<cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReasonCode>VATEX-EU-AE</cbc:TaxExemptionReasonCode><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason>"
+    );
   });
 
   it("ubl-check refuses codes without a Peppol category, OB without the buyer's VAT number and an OB row with VAT", () => {
