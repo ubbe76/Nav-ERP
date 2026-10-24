@@ -6,6 +6,20 @@ import {
   PlanWeekInPastError,
   SalesOrderNotOpenError,
 } from "../src/modules/planning/service/planning.service.js";
+import {
+  VerificationTemplateAccountMissingError,
+  VerificationTemplateInUseError,
+  VerificationTemplateNameTakenError,
+  VerificationTemplateNotFoundError,
+} from "../src/modules/economy/service/verification-template.service.js";
+import {
+  RecurringTemplateIncompleteError,
+  RecurringVerificationNotFoundError,
+} from "../src/modules/economy/service/recurring-verification.service.js";
+import {
+  SieFileAlreadyImportedError,
+  SieVerificationImportBlockedError,
+} from "../src/modules/economy/service/sie-verification-import.service.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
@@ -663,6 +677,15 @@ const cases: Array<[Error, string]> = [
     ERROR_CODES.DELIVERY_TIME_CHANGED,
   ],
   [new NothingToReserveError(), ERROR_CODES.NOTHING_TO_RESERVE],
+  // Snabbare manuell bokföring (etapp 3)
+  [new VerificationTemplateNotFoundError("t-1"), ERROR_CODES.VERIFICATION_TEMPLATE_NOT_FOUND],
+  [new VerificationTemplateNameTakenError("Hyra"), ERROR_CODES.VERIFICATION_TEMPLATE_NAME_TAKEN],
+  [new VerificationTemplateAccountMissingError(["9999"]), ERROR_CODES.VERIFICATION_TEMPLATE_ACCOUNT_MISSING],
+  [new VerificationTemplateInUseError("t-1"), ERROR_CODES.VERIFICATION_TEMPLATE_IN_USE],
+  [new RecurringVerificationNotFoundError("r-1"), ERROR_CODES.RECURRING_VERIFICATION_NOT_FOUND],
+  [new RecurringTemplateIncompleteError("saknar belopp"), ERROR_CODES.RECURRING_TEMPLATE_INCOMPLETE],
+  [new SieFileAlreadyImportedError("2026-10-24T10:00:00.000Z", "Ekonom"), ERROR_CODES.SIE_FILE_ALREADY_IMPORTED],
+  [new SieVerificationImportBlockedError(["x"]), ERROR_CODES.SIE_VERIFICATION_IMPORT_BLOCKED],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

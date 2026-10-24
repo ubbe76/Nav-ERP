@@ -61,6 +61,15 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["admin"],
     listHref: "/system/tillagg",
   },
+  // Återkommande verifikat: a month the job could not create (locked
+  // period, inactive account …) — fixed and retried with Kör nu.
+  {
+    kind: "recurring_verification_failed",
+    label: "Återkommande verifikat som misslyckats",
+    severity: "red",
+    rule: ["ekonomi"],
+    listHref: "/ekonomi/aterkommande-verifikat",
+  },
   {
     kind: "sales_order_late",
     label: "Försenade kundordrar",

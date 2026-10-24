@@ -9,9 +9,10 @@ const app = buildApp();
 // and reads the scheduler through a reference assigned after listen succeeds.
 let scheduler: ReturnType<typeof startScheduler> | null = null;
 let pluginScheduler: ReturnType<typeof startScheduler> | null = null;
+let recurringScheduler: ReturnType<typeof startScheduler> | null = null;
 app.addHook("onClose", async () => {
   app.pluginDispatcher.disableKick();
-  await Promise.all([scheduler?.stop(), pluginScheduler?.stop()]);
+  await Promise.all([scheduler?.stop(), pluginScheduler?.stop(), recurringScheduler?.stop()]);
   await app.pluginDispatcher.idle();
 });
 
@@ -63,6 +64,13 @@ app
       { intervalMs: 15_000, firstDelayMs: 15_000, log: (msg, extra) => app.log.error(extra ?? {}, msg) }
     );
     app.pluginDispatcher.enableKick();
+    // Återkommande verifikat: once an hour, every active post's due months.
+    // The run log's unique (post, month) is the reservation, so a second
+    // process ticking at the same time creates nothing twice.
+    recurringScheduler = startScheduler(
+      [{ name: "recurring_verifications", run: () => app.recurringVerifications.runDue() }],
+      { intervalMs: 60 * 60_000, firstDelayMs: 90_000, log: (msg, extra) => app.log.error(extra ?? {}, msg) }
+    );
     return printSetupCode();
   })
   .catch((err) => {

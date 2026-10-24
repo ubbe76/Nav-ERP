@@ -1,11 +1,12 @@
 // Fördela över perioder: the monthly amounts of an allocation, mirroring the
-// server (recurring allocation): amount / months rounded to öre, the LAST
-// month takes the remainder so the parts always add up to the amount. No
+// server (recurring-schedule.ts allocationAmounts): amount / months rounded
+// DOWN to öre, the LAST month takes the remainder so the parts always add up
+// to the amount (never a negative last month). No
 // imports — pure, like splitVat.ts.
 export function allocationAmounts(amount: number, months: number): number[] {
   if (!Number.isFinite(amount) || !Number.isInteger(months) || months < 1) return [];
   const cents = Math.round(amount * 100);
-  const part = Math.round(cents / months);
+  const part = Math.floor(cents / months);
   const amounts: number[] = [];
   for (let i = 0; i < months - 1; i++) amounts.push(part / 100);
   amounts.push((cents - part * (months - 1)) / 100);

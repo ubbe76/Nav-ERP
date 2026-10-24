@@ -41,6 +41,12 @@ import { createPeriodicSummaryService } from "./modules/economy/service/periodic
 import { createVatCodeService } from "./modules/economy/service/vat-code.service.js";
 import { createFinancialReportsService } from "./modules/economy/service/financial-reports.service.js";
 import { createSieService } from "./modules/economy/service/sie.service.js";
+import { createVerificationTemplateRepository } from "./modules/economy/repository/verification-template.repository.js";
+import { createVerificationTemplateService } from "./modules/economy/service/verification-template.service.js";
+import { createRecurringVerificationRepository } from "./modules/economy/repository/recurring-verification.repository.js";
+import { createRecurringVerificationService } from "./modules/economy/service/recurring-verification.service.js";
+import { createSieVerificationImportService } from "./modules/economy/service/sie-verification-import.service.js";
+import { manualBookkeepingRoutes } from "./modules/economy/routes/manual-bookkeeping.routes.js";
 import { economyRoutes } from "./modules/economy/routes/economy.routes.js";
 import { createFixedAssetService } from "./modules/economy/service/fixed-asset.service.js";
 import { createYearEndClosingService } from "./modules/economy/service/year-end-closing.service.js";
@@ -708,6 +714,30 @@ export function buildApp(database: Db = db) {
     poster: verificationPoster,
     programVersion: "1.0",
   });
+  // Snabbare manuell bokföring (etapp 3): verifikatmallar, återkommande
+  // verifikat (the hourly job runs from server.ts, never from here) and the
+  // SIE verification import.
+  const verificationTemplateRepository = createVerificationTemplateRepository(database);
+  const verificationTemplateService = createVerificationTemplateService({
+    repo: verificationTemplateRepository,
+    economy: economyRepository,
+    audit: auditRepository,
+  });
+  const recurringVerificationService = createRecurringVerificationService({
+    repo: createRecurringVerificationRepository(database),
+    templates: verificationTemplateRepository,
+    economy: economyRepository,
+    economyService,
+    audit: auditRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
+  app.decorate("recurringVerifications", recurringVerificationService);
+  const sieVerificationImportService = createSieVerificationImportService({
+    db: database,
+    repo: economyRepository,
+    economy: economyService,
+    audit: auditRepository,
+  });
   // Anläggningsregister (ekonomi etapp 2, delprojekt 2): tillgångsgrupper,
   // anläggningar, avskrivningskörningar (serie AV via the shared poster),
   // avyttring and the avskrivningsplan PDF/CSV.
@@ -823,6 +853,17 @@ export function buildApp(database: Db = db) {
             sie: sieService,
             vatCodes: vatCodeService,
             periodicSummary: periodicSummaryService,
+          },
+          { read: ["ekonomi"], write: ["ekonomi"] }
+        );
+        await registerModule(
+          protectedRoutes,
+          manualBookkeepingRoutes,
+          {
+            economy: economyService,
+            templates: verificationTemplateService,
+            recurring: recurringVerificationService,
+            sieImport: sieVerificationImportService,
           },
           { read: ["ekonomi"], write: ["ekonomi"] }
         );

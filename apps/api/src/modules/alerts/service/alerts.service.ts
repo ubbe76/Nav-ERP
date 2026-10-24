@@ -246,6 +246,19 @@ export function createAlertsService(deps: {
       });
     },
 
+    async recurring_verification_failed() {
+      const rows = await repo.failedRecurringRuns();
+      return rows.map((r) => ({
+        key: r.runId,
+        severity: "red" as const,
+        // No detail page: the list shows each post's runs.
+        href: "/ekonomi/aterkommande-verifikat",
+        primary: `${r.templateName} ${r.month}`,
+        secondary: r.error ? `Kunde inte skapas: ${r.error}` : "Kunde inte skapas",
+        date: `${r.month}-01`,
+      }));
+    },
+
     async einvoice_failed() {
       const rows = await repo.failedEinvoices();
       return rows.map((r) => ({

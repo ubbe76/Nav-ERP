@@ -86,6 +86,30 @@ class NoPeriodAtBookingError extends Error {
   }
 }
 
+// Maps the booking body's internal signals to the discriminated failure
+// result bookVerification() returns — null for any other error. Exported for
+// the service's in-transaction compositions (create + book), which catch
+// around their own db.transaction() the same way bookVerification does.
+export type BookFailure =
+  | { ok: false; reason: "race" }
+  | { ok: false; reason: "too_few_rows" }
+  | { ok: false; reason: "unbalanced"; totalDebit: number; totalCredit: number }
+  | { ok: false; reason: "inactive_account"; accountId: string }
+  | { ok: false; reason: "locked_period"; date: string }
+  | { ok: false; reason: "no_period"; date: string };
+
+export function bookFailureReason(err: unknown): BookFailure | null {
+  if (err instanceof BookRaceError) return { ok: false, reason: "race" };
+  if (err instanceof TooFewRowsAtBookingError) return { ok: false, reason: "too_few_rows" };
+  if (err instanceof UnbalancedAtBookingError) {
+    return { ok: false, reason: "unbalanced", totalDebit: err.totalDebit, totalCredit: err.totalCredit };
+  }
+  if (err instanceof InactiveAccountAtBookingError) return { ok: false, reason: "inactive_account", accountId: err.accountId };
+  if (err instanceof LockedPeriodAtBookingError) return { ok: false, reason: "locked_period", date: err.date };
+  if (err instanceof NoPeriodAtBookingError) return { ok: false, reason: "no_period", date: err.date };
+  return null;
+}
+
 // A verification header ready to write — fiscalYearId is always resolved by
 // the SERVICE from `date` (findFiscalYearForDate), never accepted from the
 // client, same division of labor as invoiceRepository's InvoiceHeaderWrite.
@@ -138,7 +162,114 @@ export type PostingRulePatch = Partial<PostingRuleWrite>;
 // schema/economy.ts: BAS legitimately repeats names across accounts, so only
 // the 4-digit number is unique, and listing sorts by number rather than name.
 export function createEconomyRepository(db: Db) {
+  // The booking body itself, composable into a caller's transaction (Spara
+  // och bokför, a recurring run and the SIE verification import all create
+  // and book in ONE transaction). Throws the internal signals; the caller
+  // maps them with bookFailureReason() — a throw is what rolls the caller's
+  // whole transaction back, including the create.
+  async function bookVerificationInTx(tx: Tx, id: string, userId: string | null) {
+    const [existing] = await tx.select().from(verifications).where(eq(verifications.id, id)).for("update");
+    if (!existing || existing.status !== "draft") throw new BookRaceError();
+
+    const lockedRows = await tx
+      .select({ accountId: verificationRows.accountId, debit: verificationRows.debit, credit: verificationRows.credit })
+      .from(verificationRows)
+      .where(eq(verificationRows.verificationId, id));
+    if (lockedRows.length < 2) throw new TooFewRowsAtBookingError();
+
+    const totalDebit = round2(lockedRows.reduce((sum, row) => sum + Number(row.debit), 0));
+    const totalCredit = round2(lockedRows.reduce((sum, row) => sum + Number(row.credit), 0));
+    if (totalDebit !== totalCredit) throw new UnbalancedAtBookingError(totalDebit, totalCredit);
+
+    const accountIds = [...new Set(lockedRows.map((row) => row.accountId))];
+    const lockedAccounts = await tx
+      .select({ id: accounts.id, active: accounts.active })
+      .from(accounts)
+      .where(inArray(accounts.id, accountIds));
+    const accountById = new Map(lockedAccounts.map((account) => [account.id, account] as const));
+    for (const accountId of accountIds) {
+      const account = accountById.get(accountId);
+      if (!account || !account.active) throw new InactiveAccountAtBookingError(accountId);
+    }
+
+    // Fourth re-check, under the same lock: `existing.date` is the ONLY
+    // value proven fresh at this point — a concurrent header PATCH could
+    // have moved the draft's date to a different period between the
+    // service's fast path and here, and that fresh date was never
+    // period-checked at all until now. Same query shape as
+    // getPeriodStatusForDate, but via `tx` so it sees the locked row.
+    const [periodRow] = await tx
+      .select({ status: accountingPeriods.status })
+      .from(accountingPeriods)
+      .where(and(lte(accountingPeriods.startDate, existing.date), gte(accountingPeriods.endDate, existing.date)));
+    const periodStatus = periodRow?.status ?? null;
+    if (periodStatus === null) throw new NoPeriodAtBookingError(existing.date);
+    if (periodStatus === "locked") throw new LockedPeriodAtBookingError(existing.date);
+
+    const verificationNumber = await allocateVerificationNumber(tx, existing.seriesId, existing.fiscalYearId);
+
+    const [row] = await tx
+      .update(verifications)
+      .set({
+        verificationNumber,
+        status: "booked",
+        bookedAt: new Date(),
+        bookedBy: userId,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(verifications.id, id), eq(verifications.status, "draft")))
+      .returning();
+    if (!row) throw new BookRaceError();
+    return { ok: true as const, verification: row };
+  }
+
+  // The header + row insert itself, composable into a caller's transaction
+  // (see bookVerificationInTx). No number allocation here — the
+  // verifikatnummer is assigned at booking.
+  async function createVerificationInTx(tx: Tx, header: VerificationHeaderWrite, rows: VerificationRowWrite[], createdBy: string | null) {
+    const [verification] = await tx
+      .insert(verifications)
+      .values({
+        seriesId: header.seriesId,
+        fiscalYearId: header.fiscalYearId,
+        date: header.date,
+        description: header.description,
+        reversesVerificationId: header.reversesVerificationId ?? null,
+        createdBy,
+      })
+      .returning();
+    if (rows.length > 0) {
+      // createdAt is stamped explicitly, one tick per row, instead of
+      // relying on the column's now()-default: Postgres evaluates now()
+      // once per transaction, so every row in this single multi-row INSERT
+      // would otherwise share the exact same timestamp — leaving the row
+      // listing's `ORDER BY createdAt` with nothing to break the tie, so
+      // ties resolve however the planner's access path happens to visit
+      // them (occasionally NOT insertion order). Explicit, strictly
+      // increasing timestamps make that order deterministic and match input
+      // order (same fix as invoiceRepository.create).
+      const now = Date.now();
+      await tx.insert(verificationRows).values(
+        rows.map((r, i) => ({
+          verificationId: verification!.id,
+          accountId: r.accountId,
+          debit: String(r.debit),
+          credit: String(r.credit),
+          description: r.description,
+          createdAt: new Date(now + i),
+        }))
+      );
+    }
+    return verification!;
+  }
+
   return {
+    // For the service's own compositions (create + book in one transaction)
+    // — the service never imports the db client itself.
+    transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+      return db.transaction(fn);
+    },
+
     async listAccounts(query: ListAccountsQuery) {
       const conditions = [];
       if (!query.includeInactive) conditions.push(eq(accounts.active, true));
@@ -676,114 +807,39 @@ export function createEconomyRepository(db: Db) {
     // IssueInvoiceResult.
     async bookVerification(id: string, userId: string) {
       try {
-        return await db.transaction(async (tx) => {
-          const [existing] = await tx.select().from(verifications).where(eq(verifications.id, id)).for("update");
-          if (!existing || existing.status !== "draft") throw new BookRaceError();
-
-          const lockedRows = await tx
-            .select({ accountId: verificationRows.accountId, debit: verificationRows.debit, credit: verificationRows.credit })
-            .from(verificationRows)
-            .where(eq(verificationRows.verificationId, id));
-          if (lockedRows.length < 2) throw new TooFewRowsAtBookingError();
-
-          const totalDebit = round2(lockedRows.reduce((sum, row) => sum + Number(row.debit), 0));
-          const totalCredit = round2(lockedRows.reduce((sum, row) => sum + Number(row.credit), 0));
-          if (totalDebit !== totalCredit) throw new UnbalancedAtBookingError(totalDebit, totalCredit);
-
-          const accountIds = [...new Set(lockedRows.map((row) => row.accountId))];
-          const lockedAccounts = await tx
-            .select({ id: accounts.id, active: accounts.active })
-            .from(accounts)
-            .where(inArray(accounts.id, accountIds));
-          const accountById = new Map(lockedAccounts.map((account) => [account.id, account] as const));
-          for (const accountId of accountIds) {
-            const account = accountById.get(accountId);
-            if (!account || !account.active) throw new InactiveAccountAtBookingError(accountId);
-          }
-
-          // Fourth re-check, under the same lock: `existing.date` is the
-          // ONLY value proven fresh at this point — a concurrent header PATCH
-          // could have moved the draft's date to a different period between
-          // the service's fast path and here, and that fresh date was never
-          // period-checked at all until now. Same query shape as
-          // getPeriodStatusForDate, but via `tx` so it sees the locked row.
-          const [periodRow] = await tx
-            .select({ status: accountingPeriods.status })
-            .from(accountingPeriods)
-            .where(and(lte(accountingPeriods.startDate, existing.date), gte(accountingPeriods.endDate, existing.date)));
-          const periodStatus = periodRow?.status ?? null;
-          if (periodStatus === null) throw new NoPeriodAtBookingError(existing.date);
-          if (periodStatus === "locked") throw new LockedPeriodAtBookingError(existing.date);
-
-          const verificationNumber = await allocateVerificationNumber(tx, existing.seriesId, existing.fiscalYearId);
-
-          const [row] = await tx
-            .update(verifications)
-            .set({
-              verificationNumber,
-              status: "booked",
-              bookedAt: new Date(),
-              bookedBy: userId,
-              updatedAt: new Date(),
-            })
-            .where(and(eq(verifications.id, id), eq(verifications.status, "draft")))
-            .returning();
-          if (!row) throw new BookRaceError();
-          return { ok: true as const, verification: row };
-        });
+        return await db.transaction(async (tx) => bookVerificationInTx(tx, id, userId));
       } catch (err) {
-        if (err instanceof BookRaceError) return { ok: false as const, reason: "race" as const };
-        if (err instanceof TooFewRowsAtBookingError) return { ok: false as const, reason: "too_few_rows" as const };
-        if (err instanceof UnbalancedAtBookingError) {
-          return {
-            ok: false as const,
-            reason: "unbalanced" as const,
-            totalDebit: err.totalDebit,
-            totalCredit: err.totalCredit,
-          };
-        }
-        if (err instanceof InactiveAccountAtBookingError) {
-          return { ok: false as const, reason: "inactive_account" as const, accountId: err.accountId };
-        }
-        if (err instanceof LockedPeriodAtBookingError) {
-          return { ok: false as const, reason: "locked_period" as const, date: err.date };
-        }
-        if (err instanceof NoPeriodAtBookingError) {
-          return { ok: false as const, reason: "no_period" as const, date: err.date };
-        }
+        const failure = bookFailureReason(err);
+        if (failure) return failure;
         throw err;
       }
     },
 
+    bookVerificationInTx,
+
     // Header + rows in one transaction — no number allocation here (the
     // verifikatnummer is assigned at booking, Task 7).
     async createVerification(header: VerificationHeaderWrite, rows: VerificationRowWrite[], createdBy: string) {
+      return db.transaction(async (tx) => createVerificationInTx(tx, header, rows, createdBy));
+    },
+
+    createVerificationInTx,
+
+    // Replace-the-set (PUT /verifications/:id/rows): every row out, the new
+    // ones in, under the verification's row lock and only while it is a
+    // draft — null when it no longer is (same convention as addRow). The
+    // explicit createdAt ticks keep the card's row order = input order, as
+    // in createVerificationInTx.
+    async replaceRows(verificationId: string, rows: VerificationRowWrite[]) {
       return db.transaction(async (tx) => {
-        const [verification] = await tx
-          .insert(verifications)
-          .values({
-            seriesId: header.seriesId,
-            fiscalYearId: header.fiscalYearId,
-            date: header.date,
-            description: header.description,
-            reversesVerificationId: header.reversesVerificationId ?? null,
-            createdBy,
-          })
-          .returning();
+        const [verification] = await tx.select().from(verifications).where(eq(verifications.id, verificationId)).for("update");
+        if (!verification || verification.status !== "draft") return null;
+        await tx.delete(verificationRows).where(eq(verificationRows.verificationId, verificationId));
         if (rows.length > 0) {
-          // createdAt is stamped explicitly, one tick per row, instead of
-          // relying on the column's now()-default: Postgres evaluates now()
-          // once per transaction, so every row in this single multi-row
-          // INSERT would otherwise share the exact same timestamp — leaving
-          // the row listing's `ORDER BY createdAt` with nothing to break the
-          // tie, so ties resolve however the planner's access path happens
-          // to visit them (occasionally NOT insertion order). Explicit,
-          // strictly-increasing timestamps make that order deterministic and
-          // match input order (same fix as invoiceRepository.create).
           const now = Date.now();
           await tx.insert(verificationRows).values(
             rows.map((r, i) => ({
-              verificationId: verification!.id,
+              verificationId,
               accountId: r.accountId,
               debit: String(r.debit),
               credit: String(r.credit),
@@ -792,8 +848,63 @@ export function createEconomyRepository(db: Db) {
             }))
           );
         }
-        return verification!;
+        await tx.update(verifications).set({ updatedAt: new Date() }).where(eq(verifications.id, verificationId));
+        return verification;
       });
+    },
+
+    // Tx-scoped siblings for the compositions that create verifications
+    // inside their own transaction (recurring runs, the SIE import): the
+    // fiscal year for a date, and account rows by number — through the
+    // caller's tx so an account created a statement earlier is seen.
+    async findFiscalYearForDateTx(tx: Tx, date: string) {
+      const [year] = await tx
+        .select()
+        .from(fiscalYears)
+        .where(and(lte(fiscalYears.startDate, date), gte(fiscalYears.endDate, date)));
+      return year ?? null;
+    },
+
+    async accountsByNumbers(executor: Db | Tx | null, numbers: string[]) {
+      if (numbers.length === 0) return new Map<string, { id: string; number: string; name: string; active: boolean }>();
+      const rows = await (executor ?? db)
+        .select({ id: accounts.id, number: accounts.number, name: accounts.name, active: accounts.active })
+        .from(accounts)
+        .where(inArray(accounts.number, [...new Set(numbers)]));
+      return new Map(rows.map((row) => [row.number, row] as const));
+    },
+
+    // Get-or-create a series inside the caller's transaction — the same
+    // self-healing shape as the poster's F/L/K series (a concurrent creator
+    // wins the unique index; this one re-selects).
+    async ensureSeriesTx(tx: Tx, series: { code: string; name: string }) {
+      const find = () => tx.select().from(verificationSeries).where(eq(verificationSeries.code, series.code));
+      let [row] = await find();
+      if (!row) {
+        await tx.insert(verificationSeries).values(series).onConflictDoNothing({ target: verificationSeries.code });
+        [row] = await find();
+      }
+      if (!row) throw new Error(`verification series ${series.code} could not be materialized`);
+      return row;
+    },
+
+    // Underlag written inside the caller's transaction (the SIE import
+    // attaches the file to every verification it creates). Never returns data.
+    async addVerificationFileTx(
+      tx: Tx,
+      input: {
+        verificationId: string;
+        filename: string;
+        contentType: string;
+        sizeBytes: number;
+        sha256: string;
+        data: Buffer;
+        uploadedBy: string | null;
+      }
+    ) {
+      const { data: _data, ...columns } = getTableColumns(verificationFiles);
+      const [row] = await tx.insert(verificationFiles).values(input).returning(columns);
+      return row!;
     },
 
     // Row-locks the verification and re-checks status = "draft" in the same

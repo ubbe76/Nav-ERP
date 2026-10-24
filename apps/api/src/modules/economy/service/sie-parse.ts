@@ -1,6 +1,8 @@
-// SIE file reader for the opening-balance import. Deliberately narrow: it
-// reads #RAR, #KONTO and #IB and ignores everything else, including whole
-// #VER/#TRANS blocks — B6b imports opening balances, not a full ledger.
+// SIE file reader. Two consumers: the opening-balance import (parseSieFile:
+// #RAR, #KONTO, #IB — B6b) and the verification import (parseSieVerifications:
+// #VER with #TRANS — etapp 3). Both read the same document model built by
+// parseSieDocument; the narrowing and the "this file has what I need" checks
+// are each consumer's own.
 import { decodeCp437 } from "./sie-encoding.js";
 
 export class SieParseError extends Error {
@@ -16,6 +18,35 @@ export interface ParsedSieFile {
   accounts: { number: string; name: string }[];
   // Year 0 only, debit-positive (the spec's own sign convention).
   openingBalances: { accountNumber: string; amount: number }[];
+}
+
+// A #TRANS row: debit-positive amount, the object list ({dimension object}
+// pairs) kept but not used until kostnadsställen (etapp 5).
+export interface ParsedSieTransaction {
+  accountNumber: string;
+  objects: { dimension: string; object: string }[];
+  amount: number;
+  transDate: string | null;
+  description: string | null;
+}
+
+// A #VER block. series/number are the file's own (text — SIE allows letters
+// in both); the importer assigns Nav's series and number.
+export interface ParsedSieVerification {
+  series: string;
+  number: string;
+  date: string;
+  text: string;
+  rows: ParsedSieTransaction[];
+}
+
+export interface ParsedSieDocument {
+  program: string | null;
+  companyName: string | null;
+  fiscalYears: { index: number; startDate: string; endDate: string }[];
+  accounts: { number: string; name: string }[];
+  openingBalances: { accountNumber: string; amount: number }[];
+  verifications: ParsedSieVerification[];
 }
 
 // The spec mandates CP437, but real exporters emit UTF-8 too (php-sie ships
@@ -37,12 +68,16 @@ function decode(buffer: Buffer): string {
 }
 
 // Splits one record into fields: whitespace-separated, double quotes group,
-// backslash escapes the next character inside a quoted field.
-function splitFields(line: string): string[] {
+// backslash escapes the next character inside a quoted field, and a brace
+// list `{…}` outside quotes is ONE field (the #TRANS object list — it may
+// itself hold spaces and quoted strings). The braces are kept so the caller
+// can tell a list from a plain field.
+export function splitFields(line: string): string[] {
   const fields: string[] = [];
   let current = "";
   let inQuotes = false;
   let started = false;
+  let braceDepth = 0;
 
   for (let i = 0; i < line.length; i++) {
     const ch = line[i]!;
@@ -54,6 +89,9 @@ function splitFields(line: string): string[] {
       }
       if (ch === '"') {
         inQuotes = false;
+        // Inside a brace list the quote characters are kept for the inner
+        // split; outside they just delimit the field.
+        if (braceDepth > 0) current += ch;
         continue;
       }
       current += ch;
@@ -62,9 +100,30 @@ function splitFields(line: string): string[] {
     if (ch === '"') {
       inQuotes = true;
       started = true;
+      if (braceDepth > 0) current += ch;
       continue;
     }
-    if (ch === " " || ch === "\t") {
+    if (ch === "{") {
+      if (braceDepth === 0 && started) {
+        fields.push(current);
+        current = "";
+      }
+      braceDepth++;
+      started = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "}" && braceDepth > 0) {
+      braceDepth--;
+      current += ch;
+      if (braceDepth === 0) {
+        fields.push(current);
+        current = "";
+        started = false;
+      }
+      continue;
+    }
+    if ((ch === " " || ch === "\t") && braceDepth === 0) {
       if (started) {
         fields.push(current);
         current = "";
@@ -92,28 +151,101 @@ function amount(raw: string): number {
   return Number(raw);
 }
 
-export function parseSieFile(buffer: Buffer): ParsedSieFile {
+// "{1 "100" 2 "Avd"}" → [{dimension: "1", object: "100"}, …]. An empty list
+// {} is the common case.
+function parseObjectList(raw: string): { dimension: string; object: string }[] {
+  const inner = raw.slice(1, -1).trim();
+  if (inner === "") return [];
+  const parts = splitFields(inner);
+  const objects: { dimension: string; object: string }[] = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    objects.push({ dimension: parts[i]!, object: parts[i + 1]! });
+  }
+  return objects;
+}
+
+function isObjectList(field: string | undefined): field is string {
+  return field !== undefined && field.startsWith("{") && field.endsWith("}");
+}
+
+// #TRANS kontonr {objektlista} belopp [transdat] [transtext] [kvantitet] [sign]
+// The object list is optional in practice (older exporters omit it), so the
+// amount is the first field after the account that is not a brace list.
+function parseTrans(fields: string[]): ParsedSieTransaction {
+  const accountNumber = fields[1];
+  if (!accountNumber) throw new SieParseError("#TRANS utan kontonummer");
+  let next = 2;
+  let objects: { dimension: string; object: string }[] = [];
+  if (isObjectList(fields[next])) {
+    objects = parseObjectList(fields[next]!);
+    next++;
+  }
+  const rawAmount = fields[next];
+  if (rawAmount === undefined) throw new SieParseError(`#TRANS ${accountNumber} utan belopp`);
+  const transDateRaw = fields[next + 1];
+  const description = fields[next + 2];
+  return {
+    accountNumber,
+    objects,
+    amount: amount(rawAmount),
+    transDate: transDateRaw !== undefined && transDateRaw !== "" ? isoDate(transDateRaw) : null,
+    description: description !== undefined && description !== "" ? description : null,
+  };
+}
+
+export function parseSieDocument(buffer: Buffer): ParsedSieDocument {
   const text = decode(buffer);
+  let program: string | null = null;
   let companyName: string | null = null;
-  let fiscalYear: { startDate: string; endDate: string } | null = null;
+  const fiscalYears: ParsedSieDocument["fiscalYears"] = [];
   const accounts: { number: string; name: string }[] = [];
   const openingBalances: { accountNumber: string; amount: number }[] = [];
+  const verifications: ParsedSieVerification[] = [];
+
+  // The #VER block being read: its header, then `{`, its #TRANS rows, `}`.
+  let current: ParsedSieVerification | null = null;
+  let inBlock = false;
 
   for (const rawLine of text.split(/\r\n|\n|\r/)) {
     const line = rawLine.trim();
-    if (line === "" || !line.startsWith("#")) continue;
+    if (line === "") continue;
+
+    if (line === "{") {
+      if (current) inBlock = true;
+      continue;
+    }
+    if (line === "}") {
+      if (current && inBlock) {
+        verifications.push(current);
+        current = null;
+        inBlock = false;
+      }
+      continue;
+    }
+    if (!line.startsWith("#")) continue;
+
     const fields = splitFields(line);
     const label = fields[0];
 
+    // Inside a #VER block only the transaction records matter. #RTRANS is a
+    // row's original (the spec says a #TRANS with the same content follows
+    // for backwards compatibility) and #BTRANS a removed row — neither is a
+    // booked row.
+    if (current && inBlock) {
+      if (label === "#TRANS") current.rows.push(parseTrans(fields));
+      continue;
+    }
+
     switch (label) {
+      case "#PROGRAM":
+        program = fields.slice(1).filter((f) => f !== "").join(" ") || null;
+        break;
       case "#FNAMN":
         companyName = fields[1] ?? null;
         break;
       case "#RAR":
-        // Year index 0 is the year the balances belong to; -1 and further
-        // back are comparison years we do not import.
-        if (fields[1] === "0" && fields[2] && fields[3]) {
-          fiscalYear = { startDate: isoDate(fields[2]), endDate: isoDate(fields[3]) };
+        if (fields[1] !== undefined && fields[2] && fields[3]) {
+          fiscalYears.push({ index: Number(fields[1]), startDate: isoDate(fields[2]), endDate: isoDate(fields[3]) });
         }
         break;
       case "#KONTO":
@@ -124,18 +256,46 @@ export function parseSieFile(buffer: Buffer): ParsedSieFile {
           openingBalances.push({ accountNumber: fields[2], amount: amount(fields[3]) });
         }
         break;
+      case "#VER": {
+        // #VER serie vernr verdatum [vertext] [regdatum] [sign]
+        const dateRaw = fields[3];
+        if (!dateRaw) throw new SieParseError(`#VER ${fields[1] ?? ""} ${fields[2] ?? ""} saknar datum`);
+        current = {
+          series: fields[1] ?? "",
+          number: fields[2] ?? "",
+          date: isoDate(dateRaw),
+          text: fields[4] ?? "",
+          rows: [],
+        };
+        inBlock = false;
+        break;
+      }
       default:
-        // Everything else — #VER, #TRANS, braces, #UB, #RES — is ignored.
+        // #UB, #RES, #FLAGGA, #FORMAT, #GEN, #SIETYP, #ORGNR, #DIM, #OBJEKT …
         break;
     }
   }
+  if (current && inBlock) throw new SieParseError("Filen slutar mitt i ett #VER-block");
 
-  if (!fiscalYear) {
+  return { program, companyName, fiscalYears, accounts, openingBalances, verifications };
+}
+
+// The opening-balance import's view: #RAR 0 and at least one #IB 0.
+export function parseSieFile(buffer: Buffer): ParsedSieFile {
+  const document = parseSieDocument(buffer);
+  // Year index 0 is the year the balances belong to; -1 and further back are
+  // comparison years we do not import.
+  const year0 = document.fiscalYears.find((year) => year.index === 0);
+  if (!year0) {
     throw new SieParseError("Filen saknar #RAR 0 — vilket räkenskapsår balanserna gäller går inte att avgöra");
   }
-  if (openingBalances.length === 0) {
+  if (document.openingBalances.length === 0) {
     throw new SieParseError("Filen innehåller inga ingående balanser (#IB) för år 0");
   }
-
-  return { companyName, fiscalYear, accounts, openingBalances };
+  return {
+    companyName: document.companyName,
+    fiscalYear: { startDate: year0.startDate, endDate: year0.endDate },
+    accounts: document.accounts,
+    openingBalances: document.openingBalances,
+  };
 }

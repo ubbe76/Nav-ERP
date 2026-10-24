@@ -13,11 +13,14 @@ import {
   plugins,
   purchaseOrderRows,
   purchaseOrders,
+  recurringVerificationRuns,
+  recurringVerifications,
   salesOrderRows,
   salesOrders,
   stockTransactions,
   supplierInvoices,
   suppliers,
+  verificationTemplates,
   type Db,
 } from "@navet/db";
 import { PLUGIN_TEST_EVENT_TYPE } from "@navet/shared";
@@ -105,6 +108,15 @@ export interface FailedPluginRow {
   failed: number;
   lastFailedAt: Date;
   lastError: string | null;
+}
+
+export interface FailedRecurringRunRow {
+  runId: string;
+  recurringId: string;
+  templateName: string;
+  month: string;
+  error: string | null;
+  createdAt: Date;
 }
 
 export interface FailedEmailRow {
@@ -316,6 +328,27 @@ export function createAlertsRepository(db: Db) {
         )
         .orderBy(sql`(SELECT t.started_at ${latest}) asc`, asc(invoices.invoiceNumber));
       return rows.map((r) => ({ ...r, startedAt: new Date(r.startedAt) }));
+    },
+
+    // Återkommande verifikat som misslyckats: every failed run of a post
+    // that still exists. Kör nu replaces a failed row with the retry's
+    // outcome, so a month later created successfully has no failed row —
+    // "not followed by a success" is the row's existence.
+    async failedRecurringRuns(): Promise<FailedRecurringRunRow[]> {
+      return db
+        .select({
+          runId: recurringVerificationRuns.id,
+          recurringId: recurringVerifications.id,
+          templateName: verificationTemplates.name,
+          month: recurringVerificationRuns.month,
+          error: recurringVerificationRuns.error,
+          createdAt: recurringVerificationRuns.createdAt,
+        })
+        .from(recurringVerificationRuns)
+        .innerJoin(recurringVerifications, eq(recurringVerifications.id, recurringVerificationRuns.recurringId))
+        .innerJoin(verificationTemplates, eq(verificationTemplates.id, recurringVerifications.templateId))
+        .where(eq(recurringVerificationRuns.status, "failed"))
+        .orderBy(asc(recurringVerificationRuns.month), asc(verificationTemplates.name));
     },
 
     // Utskick som misslyckades: failed rows since `since`, without a later

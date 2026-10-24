@@ -185,6 +185,9 @@ export const createVerificationSchema = z.object({
   date: z.string().date(),
   description: z.string().trim().min(1).max(255),
   rows: z.array(verificationRowInputSchema).default([]),
+  // Snabbare manuell bokföring: Spara och bokför — create and book in one
+  // transaction (refused like Bokför when unbalanced / locked period).
+  book: z.boolean().default(false),
 });
 export type CreateVerificationInput = z.infer<typeof createVerificationSchema>;
 
@@ -431,3 +434,125 @@ export type SieExportQuery = z.infer<typeof sieExportQuerySchema>;
 
 export const sieImportQuerySchema = z.object({ fiscalYearId: z.string().uuid() });
 export type SieImportQuery = z.infer<typeof sieImportQuerySchema>;
+
+// --- Snabbare manuell bokföring (bokföringsgranskningen etapp 3) ---
+
+// PUT /verifications/:id/rows: the whole row set, replace-the-set (an empty
+// list clears the draft).
+export const replaceVerificationRowsSchema = z.object({ rows: z.array(verificationRowInputSchema) });
+export type ReplaceVerificationRowsInput = z.infer<typeof replaceVerificationRowsSchema>;
+
+// Spara som mall of an existing verification.
+export const saveVerificationTemplateSchema = z.object({ name: z.string().trim().min(1).max(100) });
+export type SaveVerificationTemplateInput = z.infer<typeof saveVerificationTemplateSchema>;
+
+// Verifikatmallar. Rows carry account NUMBERS (the template outlives chart
+// edits) and optional amounts — null/omitted/0 all mean "fill in on the
+// verification"; a row may not carry both sides.
+const templateAmountSchema = blankSafe(z.coerce.number().nonnegative()).nullable().optional();
+export const verificationTemplateRowInputSchema = z
+  .object({
+    accountNumber: z.string().regex(/^[0-9]{4}$/, "Account number must be exactly 4 digits"),
+    description: z.string().trim().max(255).nullable().optional(),
+    debit: templateAmountSchema,
+    credit: templateAmountSchema,
+  })
+  .refine((row) => !((row.debit ?? 0) > 0 && (row.credit ?? 0) > 0), {
+    message: "A template row cannot have both debit and credit",
+    path: ["debit"],
+  });
+export type VerificationTemplateRowInput = z.infer<typeof verificationTemplateRowInputSchema>;
+
+export const createVerificationTemplateSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  seriesId: z.string().uuid(),
+  description: z.string().trim().min(1).max(255),
+  rows: z.array(verificationTemplateRowInputSchema).default([]),
+});
+export type CreateVerificationTemplateInput = z.infer<typeof createVerificationTemplateSchema>;
+
+// `rows` replaces the whole set.
+export const updateVerificationTemplateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    seriesId: z.string().uuid().optional(),
+    description: z.string().trim().min(1).max(255).optional(),
+    active: z.boolean().optional(),
+    rows: z.array(verificationTemplateRowInputSchema).optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
+export type UpdateVerificationTemplateInput = z.infer<typeof updateVerificationTemplateSchema>;
+
+// NOT z.coerce.boolean() (same pitfall as listAccountsQuerySchema).
+export const listVerificationTemplatesQuerySchema = z.object({
+  includeInactive: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => value === "true"),
+});
+export type ListVerificationTemplatesQuery = z.infer<typeof listVerificationTemplatesQuerySchema>;
+
+// Återkommande verifikat. Months are "YYYY-MM"; the day is 1–28 (every
+// month has it) or "last" (the month's last day).
+export const yearMonthSchema = z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/, "Month must be YYYY-MM");
+export const recurringDayOfMonthSchema = z.union([z.literal("last"), z.number().int().min(1).max(28)]);
+export type RecurringDayOfMonth = z.infer<typeof recurringDayOfMonthSchema>;
+export const RECURRING_VERIFICATION_MODES = ["draft", "book"] as const;
+export const recurringVerificationModeSchema = z.enum(RECURRING_VERIFICATION_MODES);
+export type RecurringVerificationMode = z.infer<typeof recurringVerificationModeSchema>;
+
+export const createRecurringVerificationSchema = z
+  .object({
+    templateId: z.string().uuid(),
+    dayOfMonth: recurringDayOfMonthSchema,
+    startMonth: yearMonthSchema,
+    endMonth: yearMonthSchema.nullable().optional(),
+    mode: recurringVerificationModeSchema.default("draft"),
+  })
+  .refine((data) => !data.endMonth || data.endMonth >= data.startMonth, {
+    message: "endMonth must not be before startMonth",
+    path: ["endMonth"],
+  });
+export type CreateRecurringVerificationInput = z.infer<typeof createRecurringVerificationSchema>;
+
+export const updateRecurringVerificationSchema = z
+  .object({
+    active: z.boolean().optional(),
+    dayOfMonth: recurringDayOfMonthSchema.optional(),
+    endMonth: yearMonthSchema.nullable().optional(),
+    mode: recurringVerificationModeSchema.optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
+export type UpdateRecurringVerificationInput = z.infer<typeof updateRecurringVerificationSchema>;
+
+// Fördela över perioder: amount / months per month (round2, the last month
+// takes the rest), cost = debit result account / credit balance account,
+// revenue the other way round.
+export const ALLOCATION_KINDS = ["cost", "revenue"] as const;
+export type AllocationKind = (typeof ALLOCATION_KINDS)[number];
+const allocationAccountSchema = z.string().regex(/^[0-9]{4}$/, "Account number must be exactly 4 digits");
+export const createAllocationSchema = z.object({
+  amount: blankSafe(z.coerce.number().positive()),
+  kind: z.enum(ALLOCATION_KINDS),
+  balanceAccount: allocationAccountSchema,
+  resultAccount: allocationAccountSchema,
+  firstMonth: yearMonthSchema,
+  months: z.coerce.number().int().min(2).max(120),
+  description: z.string().trim().min(1).max(200),
+  seriesId: z.string().uuid().optional(),
+  sourceVerificationId: z.string().uuid().optional(),
+});
+export type CreateAllocationInput = z.infer<typeof createAllocationSchema>;
+
+// SIE-import av verifikat: the multipart fields beside `file` (strings, as
+// form fields arrive). Omitted seriesId = the LÖ series "Lönejournal".
+export const sieVerificationImportFieldsSchema = z.object({
+  // An empty form field = omitted.
+  seriesId: z.preprocess((value) => (value === "" ? undefined : value), z.string().uuid().optional()),
+  mode: recurringVerificationModeSchema.default("draft"),
+  createMissingAccounts: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => value === "true"),
+});
+export type SieVerificationImportFields = z.infer<typeof sieVerificationImportFieldsSchema>;

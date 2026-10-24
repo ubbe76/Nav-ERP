@@ -130,6 +130,22 @@ export const ERROR_CODES = {
   VAT_REPORTING_CONTACT_INVALID: "vat-reporting-contact-invalid",
   PERIODIC_SUMMARY_REPORTER_INCOMPLETE: "periodic-summary-reporter-incomplete",
   PERIODIC_SUMMARY_AMOUNT_TOO_LARGE: "periodic-summary-amount-too-large",
+  // Snabbare manuell bokföring (bokföringsgranskningen etapp 3)
+  VERIFICATION_TEMPLATE_NOT_FOUND: "verification-template-not-found",
+  // POST/PATCH /verification-templates with a name another template has (409)
+  VERIFICATION_TEMPLATE_NAME_TAKEN: "verification-template-name-taken",
+  // A template/fördelning row names an account the chart lacks (400, body.accounts)
+  VERIFICATION_TEMPLATE_ACCOUNT_MISSING: "verification-template-account-missing",
+  // DELETE on a template a recurring post uses (409)
+  VERIFICATION_TEMPLATE_IN_USE: "verification-template-in-use",
+  RECURRING_VERIFICATION_NOT_FOUND: "recurring-verification-not-found",
+  // POST /recurring-verifications on a template without amounts on every row
+  // or that does not balance (400, the message says which)
+  RECURRING_TEMPLATE_INCOMPLETE: "recurring-template-incomplete",
+  // SIE verification import: the same file again (409, body.importedAt/importedBy)
+  SIE_FILE_ALREADY_IMPORTED: "sie-file-already-imported",
+  // ...or something that stops the whole file (409, body.blockers)
+  SIE_VERIFICATION_IMPORT_BLOCKED: "sie-verification-import-blocked",
   // årsbokslut
   FISCAL_YEAR_CLOSED: "fiscal-year-closed",
   YEAR_END_CLOSING_NOT_FOUND: "year-end-closing-not-found",

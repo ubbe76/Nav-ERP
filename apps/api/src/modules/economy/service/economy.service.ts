@@ -15,11 +15,15 @@ import type {
   VerificationRowInput,
 } from "@navet/shared";
 import { isVatCode, round2, vatCodeEntry } from "@navet/shared";
-import type {
-  EconomyRepository,
-  PostingRulePatch,
-  VerificationRowWrite,
+import type { Tx } from "@navet/db";
+import {
+  bookFailureReason,
+  type BookFailure,
+  type EconomyRepository,
+  type PostingRulePatch,
+  type VerificationRowWrite,
 } from "../repository/economy.repository.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 // Append-only audit trail (same interface payroll/timereport already write
 // to) — wired for Task 4's fiscal year period locking (lock/unlock).
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
@@ -377,6 +381,37 @@ async function requireActiveAccount(repo: EconomyRepository, accountId: string):
   if (!account.active) throw new InactiveAccountError(accountId);
 }
 
+// The repository's discriminated booking failure → this module's error
+// classes. Shared by book() and every create-and-book composition (Spara och
+// bokför, recurring runs, the SIE import) so a locked period or an inactive
+// account reads the same whichever path found it. `race` = no longer a draft.
+export function bookFailureError(id: string, failure: BookFailure): Error {
+  switch (failure.reason) {
+    case "too_few_rows":
+      return new TooFewVerificationRowsError(id);
+    case "unbalanced":
+      return new UnbalancedVerificationError(failure.totalDebit, failure.totalCredit);
+    case "inactive_account":
+      return new InactiveAccountError(failure.accountId);
+    case "locked_period":
+      return new AccountingPeriodLockedError(failure.date);
+    case "no_period":
+      return new NoAccountingPeriodError(failure.date);
+    case "race":
+      return new InvalidVerificationStateError(`Cannot book verification ${id}: it is no longer a draft`);
+  }
+}
+
+// What a create-and-book composition hands in: the header without the fiscal
+// year (resolved from `date` inside the transaction) and rows already
+// validated by the caller (accounts exist and are active, amounts round2:ed).
+export type VerificationComposeInput = {
+  seriesId: string;
+  date: string;
+  description: string;
+  rows: VerificationRowWrite[];
+};
+
 export function createEconomyService(repo: EconomyRepository, audit: AuditWriter) {
   // A rule's momskod must exist and be usable on an invoice (not an import
   // code). An inactive code is allowed — the Momskoder page warns about it.
@@ -661,12 +696,123 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
         rows.push(await resolveVerificationRow(repo, r));
       }
 
+      // Spara och bokför: create + book in one transaction, so a refused
+      // booking (unbalanced, locked period) leaves no draft behind.
+      if (input.book) {
+        const { id } = await repo.transaction((tx) =>
+          service.createVerificationInTx(tx, { seriesId: input.seriesId, date: input.date, description: input.description, rows }, createdBy, {
+            book: true,
+          })
+        );
+        const booked = await service.findVerificationById(id);
+        await audit.log({ entityType: "verification", entityId: booked.displayNumber, action: "booked", userId: createdBy });
+        return booked;
+      }
+
       const header = await repo.createVerification(
         { seriesId: input.seriesId, fiscalYearId: year.id, date: input.date, description: input.description },
         rows,
         createdBy
       );
       return service.findVerificationById(header.id);
+    },
+
+    // The one create-and-book composition, inside the CALLER's transaction:
+    // Spara och bokför above, a recurring post's monthly run and the SIE
+    // verification import all go through here, so "created and booked at
+    // once" has exactly one implementation — the repo's create followed by
+    // the repo's booking body with all of its in-tx re-checks. The fiscal
+    // year is resolved through the tx; rows are the caller's (validated)
+    // VerificationRowWrite[]. A refused booking throws this module's own
+    // error (bookFailureError), which rolls the caller's transaction back.
+    async createVerificationInTx(
+      tx: Tx,
+      input: VerificationComposeInput,
+      // null for a recurring post's job run (no user behind it).
+      createdBy: string | null,
+      opts: { book: boolean }
+    ): Promise<{ id: string; verificationNumber: number | null }> {
+      const year = await repo.findFiscalYearForDateTx(tx, input.date);
+      if (!year) throw new NoFiscalYearForDateError(input.date);
+      if (year.status === "closed") throw new FiscalYearClosedError(year.label);
+
+      const header = await repo.createVerificationInTx(
+        tx,
+        { seriesId: input.seriesId, fiscalYearId: year.id, date: input.date, description: input.description },
+        input.rows,
+        createdBy
+      );
+      if (!opts.book) return { id: header.id, verificationNumber: null };
+
+      try {
+        const result = await repo.bookVerificationInTx(tx, header.id, createdBy);
+        return { id: header.id, verificationNumber: result.verification.verificationNumber };
+      } catch (err) {
+        const failure = bookFailureReason(err);
+        if (failure) throw bookFailureError(header.id, failure);
+        throw err;
+      }
+    },
+
+    // PUT /verifications/:id/rows — replace-the-set in one transaction under
+    // the verification's row lock (the table editor saves every row at
+    // once). Draft only; an empty list clears the rows. Same per-row
+    // validation as addRow.
+    async replaceRows(id: string, input: VerificationRowInput[]) {
+      const existing = await repo.findRawById(id);
+      if (!existing) throw new VerificationNotFoundError(id);
+      if (existing.status !== "draft") {
+        throw new InvalidVerificationStateError(`Cannot change rows on verification ${id}: it is not a draft`);
+      }
+      const rows: VerificationRowWrite[] = [];
+      for (const r of input) rows.push(await resolveVerificationRow(repo, r));
+
+      const replaced = await repo.replaceRows(id, rows);
+      if (!replaced) throw new InvalidVerificationStateError(`Cannot change rows on verification ${id}: it is no longer a draft`);
+      return service.findVerificationById(id);
+    },
+
+    // Kopiera: a new draft with the source's series, description and rows,
+    // dated today (Stockholm). Works from every status. A row on an account
+    // that has since been deactivated is left out and reported in
+    // `warnings` — the copy must be bookable, and silently keeping the row
+    // would only move the refusal to Bokför.
+    async copy(id: string, userId: string) {
+      const source = await service.findVerificationById(id);
+      const today = stockholmToday();
+      const year = await repo.findFiscalYearForDate(today);
+      if (!year) throw new NoFiscalYearForDateError(today);
+      if (year.status === "closed") throw new FiscalYearClosedError(year.label);
+
+      const warnings: string[] = [];
+      const rows: VerificationRowWrite[] = [];
+      for (const row of source.rows) {
+        const account = await repo.findAccountById(row.accountId);
+        if (!account || !account.active) {
+          warnings.push(`Konto ${row.accountNumber} ${row.accountName} är inaktivt — raden utelämnades`);
+          continue;
+        }
+        rows.push({
+          accountId: row.accountId,
+          debit: round2(Number(row.debit)),
+          credit: round2(Number(row.credit)),
+          description: row.description,
+        });
+      }
+
+      const header = await repo.createVerification(
+        { seriesId: source.seriesId, fiscalYearId: year.id, date: today, description: source.description },
+        rows,
+        userId
+      );
+      await audit.log({
+        entityType: "verification",
+        entityId: source.displayNumber,
+        action: "copied",
+        detail: { copyId: header.id, rows: rows.length, skippedRows: warnings.length },
+        userId,
+      });
+      return { verification: await service.findVerificationById(header.id), warnings };
     },
 
     // Header edits are allowed only in draft. A date change re-resolves
@@ -799,18 +945,11 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       if (periodStatus === "locked") throw new AccountingPeriodLockedError(verification.date);
 
       const result = await repo.bookVerification(id, userId);
-      if (!result.ok) {
-        if (result.reason === "too_few_rows") throw new TooFewVerificationRowsError(id);
-        if (result.reason === "unbalanced") throw new UnbalancedVerificationError(result.totalDebit, result.totalCredit);
-        if (result.reason === "inactive_account") throw new InactiveAccountError(result.accountId);
-        // Fourth in-tx re-check (see repo.bookVerification): the period for
-        // `existing.date` under the FOR UPDATE lock — catches both an admin
-        // lock landing mid-booking and a concurrent header PATCH moving
-        // `date` to a period this fast path above never saw at all.
-        if (result.reason === "locked_period") throw new AccountingPeriodLockedError(result.date);
-        if (result.reason === "no_period") throw new NoAccountingPeriodError(result.date);
-        throw new InvalidVerificationStateError(`Cannot book verification ${id}: it is no longer a draft`);
-      }
+      // The in-tx re-checks (see repo.bookVerificationInTx) — including the
+      // period for `existing.date` under the FOR UPDATE lock, which catches
+      // both an admin lock landing mid-booking and a concurrent header PATCH
+      // moving `date` to a period the fast path above never saw at all.
+      if (!result.ok) throw bookFailureError(id, result);
 
       const booked = await service.findVerificationById(result.verification.id);
       await audit.log({ entityType: "verification", entityId: booked.displayNumber, action: "booked", userId });

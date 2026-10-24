@@ -129,12 +129,12 @@ Utskriften skriver ingenting till databasen — den kan tas fram hur många gån
 - **Startmånad** och **Slutmånad** (valfri — tom betyder tills vidare).
 - **Läge** — **Utkast** (förval) skapar ett utkast som du granskar och bokför själv; **Bokför direkt** bokför verifikatet med samma regler som ett manuellt verifikat. Utkast är förvalet eftersom en bokföring ska spegla en verklig händelse — välj **Bokför direkt** först när beloppet är fast.
 
-**Så körs det:** ett jobb kontrollerar posterna en gång i timmen. För varje aktiv post skapas ett verifikat för varje månad vars dag har passerat och som saknar körning, daterat på månadens dag. Hoppar servern över en tid hämtas de missade månaderna ikapp vid nästa körning, och en månad körs aldrig två gånger. Går något fel — perioden är låst, ett konto har inaktiverats — skapas inget verifikat för månaden, körningen markeras **Misslyckades** med orsaken, och posten visas som aviseringen **Återkommande verifikat som misslyckats** (se [Aviseringar](/hjalp/aviseringar)). Rätta orsaken (lås upp perioden, byt konto i mallen) och klicka **Kör nu**.
+**Så körs det:** ett jobb kontrollerar posterna en gång i timmen. För varje aktiv post skapas ett verifikat för varje månad vars dag har passerat och som saknar körning, daterat på månadens dag. Hoppar servern över en tid hämtas de missade månaderna ikapp vid nästa körning, och en månad körs aldrig två gånger. Går något fel — perioden är låst, ett konto har inaktiverats — skapas inget verifikat för månaden, körningen markeras **Misslyckades** med orsaken, och posten visas som aviseringen **Återkommande verifikat som misslyckats** (se [Aviseringar](/hjalp/aviseringar)). Jobbet försöker inte igen med en misslyckad månad — annars kom samma fel varje timme. Rätta orsaken (lås upp perioden, byt konto i mallen) och klicka **Kör nu**, som försöker igen med de misslyckade månaderna. När du skapar en post (eller en fördelning) skapas månader vars dag redan har passerat direkt, utan att vänta på jobbet.
 
 Knapparna på varje post:
 
 - **Körningar** visar historiken: **Månad**, **Status**, **Verifikat** (länk till det skapade verifikatet) och **Orsak** för misslyckade körningar.
-- **Kör nu** kör posten ikapp direkt, på samma sätt som jobbet, och meddelar hur många verifikat som skapades och hur många som misslyckades.
+- **Kör nu** kör posten ikapp direkt, på samma sätt som jobbet (även en pausad post, och även misslyckade månader), och meddelar hur många verifikat som skapades och hur många som misslyckades.
 - **Pausa** / **Aktivera** stoppar och återupptar posten. En pausad post skapar inga verifikat.
 - **Ta bort** raderar posten efter bekräftelse; verifikat som redan skapats ligger kvar.
 

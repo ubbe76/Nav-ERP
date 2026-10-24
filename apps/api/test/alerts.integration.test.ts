@@ -4,6 +4,10 @@ import {
   customers,
   db,
   einvoiceTransmissions,
+  recurringVerificationRuns,
+  recurringVerifications,
+  verificationSeries,
+  verificationTemplates,
   emailLog,
   invoiceRows,
   invoices,
@@ -65,7 +69,8 @@ const alerts = createAlertsService({
   today: () => TODAY,
 });
 
-const TRUNCATE = sql`TRUNCATE email_log, einvoice_transmissions, invoice_rows, invoices, payment_batch_items, payment_batches,
+const TRUNCATE = sql`TRUNCATE recurring_verification_runs, recurring_verifications, verification_template_rows, verification_templates, verification_series,
+  email_log, einvoice_transmissions, invoice_rows, invoices, payment_batch_items, payment_batches,
   supplier_invoices, purchase_order_rows, purchase_orders, sales_order_rows, sales_orders, customers, suppliers, payment_terms,
   mo_operation_plan_weeks, mo_reports, mo_report_materials, mo_operation_scrap, mo_material_consumptions, mo_operations,
   manufacturing_orders, routing_operations, work_centers, production_groups, stock_transactions, stock_locations, warehouses,
@@ -612,6 +617,41 @@ describe("email_failed", () => {
     const g = await group("email_failed");
     expect(g.items.map((i) => [i.key, i.href])).toEqual([[toA.id, "/system/e-postlogg"]]);
     expect(g.items[0]!.primary).toBe(`Daglig sammanställning: ${toA.subject}`);
+  });
+});
+
+describe("recurring_verification_failed", () => {
+  async function recurringPost(templateName: string) {
+    const [series] = await db.insert(verificationSeries).values({ code: `S${crypto.randomUUID().slice(0, 4)}`, name: "Serie" }).returning();
+    const [template] = await db.insert(verificationTemplates).values({ name: templateName, seriesId: series!.id, description: "x" }).returning();
+    const [post] = await db
+      .insert(recurringVerifications)
+      .values({ templateId: template!.id, dayOfMonth: 1, startMonth: "2030-01", mode: "draft" })
+      .returning();
+    return post!;
+  }
+
+  it("lists every failed month of a post with the reason, oldest month first; created months and deleted posts never", async () => {
+    const hyra = await recurringPost("Hyra");
+    const leasing = await recurringPost("Leasing");
+    const [feb] = await db
+      .insert(recurringVerificationRuns)
+      .values({ recurringId: hyra.id, month: "2030-02", status: "failed", error: "Perioden är låst (2030-02-01)" })
+      .returning();
+    const [jan] = await db
+      .insert(recurringVerificationRuns)
+      .values({ recurringId: leasing.id, month: "2030-01", status: "failed", error: "Ett konto på mallen är inaktivt" })
+      .returning();
+    // An unlinked failed row (its post was deleted) and a successful month
+    // are not matters to attend to.
+    await db.insert(recurringVerificationRuns).values({ recurringId: null, month: "2030-01", status: "failed", error: "x" });
+    const g = await group("recurring_verification_failed");
+    expect(g.label).toBe("Återkommande verifikat som misslyckats");
+    expect(g.listHref).toBe("/ekonomi/aterkommande-verifikat");
+    expect(g.items.map((i) => [i.key, i.href, i.severity, i.primary, i.secondary, i.date])).toEqual([
+      [jan!.id, "/ekonomi/aterkommande-verifikat", "red", "Leasing 2030-01", "Kunde inte skapas: Ett konto på mallen är inaktivt", "2030-01-01"],
+      [feb!.id, "/ekonomi/aterkommande-verifikat", "red", "Hyra 2030-02", "Kunde inte skapas: Perioden är låst (2030-02-01)", "2030-02-01"],
+    ]);
   });
 });
 

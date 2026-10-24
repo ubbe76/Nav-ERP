@@ -26,6 +26,8 @@ const APP_DIR = new URL("../../web/app/", import.meta.url);
 const NOT_IN_NAV = new Set([
   // Where the proxy sends a refused page — never linked.
   "/ingen-behorighet",
+  // Reached from + Nytt verifikat on the verification list.
+  "/ekonomi/verifikat/nytt",
   // The sidebar's own entries — module roots ARE the grids.
   "/",
   "/aviseringar",

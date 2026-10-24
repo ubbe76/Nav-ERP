@@ -29,6 +29,7 @@ describe("the catalog", () => {
       "einvoice_failed",
       "email_failed",
       "plugin_delivery_failed",
+      "recurring_verification_failed",
       "sales_order_late",
       "purchase_order_late",
       "manufacturing_order_late",
@@ -69,6 +70,7 @@ describe("visibleKinds", () => {
     ]);
     expect(visibleKinds(user(["tillverkning"]))).toEqual(["manufacturing_order_late", "manufacture_needed"]);
     expect(visibleKinds(user(["lager"]))).toEqual(["stock_negative"]);
+    expect(visibleKinds(user(["ekonomi"]))).toEqual(["recurring_verification_failed"]);
   });
 
   it("Utskick som misslyckades and Tillägg are admin-only: every menu together still does not give them", () => {

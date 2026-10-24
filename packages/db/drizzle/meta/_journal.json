@@ -1030,6 +1030,13 @@
       "when": 1792850289267,
       "tag": "0146_valuta_year_end",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1792864986795,
+      "tag": "0147_manuell_bokforing",
+      "breakpoints": true
     }
   ]
 }
