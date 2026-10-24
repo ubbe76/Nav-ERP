@@ -11,7 +11,7 @@ import type { InvoiceRate } from "../../lib/useExchangeRate";
 // where the rate comes from — "Källa: Sveriges Riksbank" for a fetched one
 // (Riksbankens villkor).
 export function InvoiceRateField({ id, currency, invoiceRate }: { id: string; currency: string; invoiceRate: InvoiceRate }) {
-  const { rate, sourceText, fromRiksbank, loading, problem, touched, setRate, resetToLookup } = invoiceRate;
+  const { rate, sourceText, fromRiksbank, loading, problem, canReset, setRate, resetToLookup } = invoiceRate;
   return (
     <>
       <Field label={`Kurs (SEK per 1 ${currency})`} htmlFor={id}>
@@ -26,7 +26,7 @@ export function InvoiceRateField({ id, currency, invoiceRate }: { id: string; cu
           inträffar (oftast leveransen) — ändra kursen om leveransdagen skiljer sig från fakturadatumet.
         </FormHint>
       </Field>
-      {touched && (
+      {canReset && (
         <div>
           <Button type="button" variant="ghost" size="small" onClick={resetToLookup}>
             Använd kursen för fakturadatumet

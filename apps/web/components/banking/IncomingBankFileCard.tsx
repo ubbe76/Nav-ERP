@@ -308,7 +308,7 @@ function AllocationEditor({
               row.applied,
               // The tolerance is kronor: on a foreign invoice what it is worth
               // in the invoice's currency at its rate.
-              toleranceInCurrency(tolerance, invoice.exchangeRate === null ? 1 : Number(invoice.exchangeRate), invoice.currency),
+              toleranceInCurrency(tolerance, invoice.exchangeRate ?? 1, invoice.currency),
               currencyLabel(invoice.currency)
             )
           : null;

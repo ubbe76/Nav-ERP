@@ -104,7 +104,7 @@ export function OpenInvoicesPageClient({
                 </span>
               );
             case "openAmountSek":
-              return row.openAmountSek == null ? "–" : `${formatMoney(row.openAmountSek)} kr`;
+              return row.openAmountSek === null ? "–" : `${formatMoney(row.openAmountSek)} kr`;
             case "reminders":
               // Nivå (antal skickade påminnelser) + avgiftsmarkering (om
               // någon av dem någonsin tog ut en avgift) — both real columns

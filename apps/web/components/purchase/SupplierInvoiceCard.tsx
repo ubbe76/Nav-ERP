@@ -143,10 +143,13 @@ export function SupplierInvoiceCard({
       <FormError>{error}</FormError>
 
       {/* Valuta: a foreign draft saved before rates existed and never given one
-          cannot be approved. */}
+          cannot be approved until the rate is confirmed — the form fetches the
+          one for the invoice date (Spara faktura saves it) or takes an own. */}
       {foreign && invoice.exchangeRateMissing && invoice.status !== "cancelled" && (
         <FormNotice style={{ marginBottom: 20 }}>
-          Fakturan är i {invoice.currency} men saknar kurs — ange Kurs och spara innan fakturan godkänns.
+          {editable
+            ? `Fakturan är i ${invoice.currency} men kursen är inte bekräftad (ett äldre utkast utan kurs), och fakturan kan inte godkännas före dess. Kursen för fakturadatumet visas i Kurs nedan — Spara faktura bekräftar den, eller skriv in en egen kurs.`
+            : `Fakturan är i ${invoice.currency} men saknar kurs.`}
         </FormNotice>
       )}
 
@@ -389,7 +392,9 @@ function MatchCell({ row }: { row: SupplierInvoiceRow }) {
 
 // The picker only needs id + label; the invoice carries the supplier's name
 // but not its number, so the initial value is shown by name alone.
-type SupplierOption = { id: string; name: string; supplierNumber?: string };
+// `currency` comes with the supplier rows the picker searches (not with the
+// invoice's own supplier, whose currency is the invoice's).
+type SupplierOption = { id: string; name: string; supplierNumber?: string; currency?: string };
 
 function HeaderForm({
   invoice,
@@ -419,27 +424,36 @@ function HeaderForm({
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Valuta: the Kurs follows the lookup for the Fakturadatum until it is typed
-  // in — a changed date looks it up again, but not over a rate that was typed
-  // on the invoice earlier (source manual: the API leaves it alone on a date
-  // change too). A foreign draft that never got a rate is looked up at once.
-  // An untouched rate is not sent: the API does the same lookup on save and
-  // records where the rate came from.
+  // Valuta: the Kurs shows what a save records. The saved rate stays until the
+  // API would look it up again (a changed Fakturadatum, unless the saved rate
+  // was typed in); a rate that is missing (an older draft) starts as the
+  // lookup for the date. Only a rate typed in here is sent as a rate — never
+  // a looked-up or saved one — and "Använd kursen för fakturadatumet" on a
+  // saved own rate sends exchangeRate: null (back to the automatic rate).
   const foreign = invoice.currency !== SEK;
   const invoiceRate = useInvoiceRate({
     currency: foreign ? invoice.currency : null,
     date: invoiceDate,
-    lookupEnabled:
-      foreign && (invoice.exchangeRateMissing || (invoiceDate !== invoice.invoiceDate && invoice.exchangeRateSource !== "manual")),
-    initial: {
-      rate: invoice.exchangeRateMissing ? "" : String(Number(invoice.exchangeRate)),
-      source: invoice.exchangeRateSource,
-      date: invoice.exchangeRateDate,
-    },
+    stored: foreign
+      ? {
+          rate: invoice.exchangeRateMissing ? "" : String(Number(invoice.exchangeRate)),
+          source: invoice.exchangeRateSource,
+          sourceDate: invoice.exchangeRateDate,
+          invoiceDate: invoice.invoiceDate,
+        }
+      : undefined,
   });
+  // Another supplier with another currency: the invoice gets that currency on
+  // save and the API looks the rate up for it — a rate typed here is for the
+  // old currency, so the field gives way to a note instead of silently
+  // dropping what was typed. The same currency keeps the rate (and a rate
+  // typed in this very save is sent along).
+  const supplierChanged = supplier !== null && supplier.id !== invoice.supplierId;
+  const newCurrency = supplierChanged ? (supplier.currency?.trim().toUpperCase() ?? null) : null;
+  const currencyChanging = supplierChanged && newCurrency !== invoice.currency;
   const rateNumber = Number(invoiceRate.rate.replace(",", "."));
   const sekPreview =
-    foreign && Number.isFinite(rateNumber) && rateNumber > 0
+    foreign && !currencyChanging && Number.isFinite(rateNumber) && rateNumber > 0
       ? documentSekAmounts({ rate: rateNumber, grossAmount: Number(grossAmount) || 0, vatAmount: Number(vatAmount) || 0, rows: [] })
       : null;
 
@@ -447,6 +461,10 @@ function HeaderForm({
     e.preventDefault();
     if (!supplier) {
       setError("Välj leverantören som fakturan ska betalas till");
+      return;
+    }
+    if (foreign && !currencyChanging && invoiceRate.typedInvalid) {
+      setError("Ange en kurs större än 0 — eller välj Använd kursen för fakturadatumet");
       return;
     }
     setError(null);
@@ -466,15 +484,11 @@ function HeaderForm({
           grossAmount: Number(grossAmount),
           // Only sent when changed (the stored code may even be inactive now).
           vatCodeId: vatCodeId !== invoice.vatCodeId ? vatCodeId : undefined,
-          // A rate typed in — or the looked-up one for a draft that had none
-          // (the API only looks up again when the date or currency changes).
-          exchangeRate:
-            foreign &&
-            supplier.id === invoice.supplierId &&
-            invoiceRate.rate.trim() !== "" &&
-            (invoiceRate.touched || invoice.exchangeRateMissing)
-              ? rateNumber
-              : undefined,
+          // number = a rate typed in, null = back to the automatic rate, left
+          // out = the API's own rules (it looks the rate up again for a new
+          // currency or date, and for a rate that is missing). Not sent when
+          // the supplier change gives the invoice another currency.
+          exchangeRate: foreign && !currencyChanging ? invoiceRate.patchValue : undefined,
           note: note.trim() || null,
         }),
       });
@@ -502,9 +516,12 @@ function HeaderForm({
             emptyText="Inga leverantörer matchar sökningen"
           />
         </Field>
-        {supplier && supplier.id !== invoice.supplierId && (
+        {supplierChanged && currencyChanging && (
           <FormNotice>
-            Fakturans valuta följer den nya leverantörens när du sparar, och kursen hämtas på nytt för fakturadatumet.
+            {newCurrency
+              ? `Fakturans valuta byts från ${invoice.currency} till ${newCurrency} när du sparar och kursen hämtas för fakturadatumet — kontrollera beloppen, som då gäller ${newCurrency}.`
+              : `Fakturans valuta byts till den nya leverantörens när du sparar och kursen hämtas för fakturadatumet — kontrollera beloppen, som då gäller den valutan.`}
+            {foreign && ` Fakturans nuvarande kurs gäller bara ${invoice.currency} och ersätts — en kurs du skrivit in här sparas inte.`}
           </FormNotice>
         )}
         <FormRow>
@@ -523,7 +540,7 @@ function HeaderForm({
             <Input id="hdrNet" type="number" step="0.01" size="sm" value={netAmount} onChange={(e) => setNetAmount(e.target.value)} />
           </Field>
         </FormRow>
-        {foreign && <InvoiceRateField id="hdrRate" currency={invoice.currency} invoiceRate={invoiceRate} />}
+        {foreign && !currencyChanging && <InvoiceRateField id="hdrRate" currency={invoice.currency} invoiceRate={invoiceRate} />}
         <FormRow>
           <Field label={`Momsbelopp${foreign ? ` (${invoice.currency})` : ""}`} htmlFor="hdrVat">
             <Input id="hdrVat" type="number" step="0.01" size="sm" value={vatAmount} onChange={(e) => setVatAmount(e.target.value)} />

@@ -202,7 +202,6 @@ export function NewSupplierInvoiceForm({
   const invoiceRate = useInvoiceRate({
     currency: foreignCurrency ? invoiceCurrency : null,
     date: invoiceDate,
-    lookupEnabled: foreignCurrency && invoiceDate !== "",
   });
   const [note, setNote] = useState("");
   // Underlag — the supplier's invoice as PDF/scan, uploaded right after the

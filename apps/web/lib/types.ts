@@ -765,7 +765,9 @@ export interface ExchangeRateFetchResult {
   from: string;
   to: string;
   fetched: number;
-  rates: ExchangeRateEntry[];
+  // The Riksbank days in the interval, oldest first (exchange-rates.ts's
+  // StoredRate — no id/audit columns, unlike the register list's rows).
+  rates: { date: string; rate: number; source: ExchangeRateSourceValue }[];
 }
 
 // GET/PATCH /exchange-rate-settings (admin). The API key is write-only.
@@ -1507,9 +1509,10 @@ export interface InvoicePaymentEntry {
   paymentDate: string;
   appliedAmount: string;
   writeOffAmount: string;
-  // Valuta: the SEK the row released from the invoice's booked receivable.
-  appliedAmountSek?: string;
-  writeOffAmountSek?: string;
+  // Valuta: the SEK the row released from the invoice's booked receivable
+  // (frigjort SEK, numbers — equal to the amounts for a SEK invoice).
+  appliedAmountSek: number;
+  writeOffAmountSek: number;
   cancelledAt: string | null;
   verificationId: string | null;
   verificationDisplayNumber: string | null;
@@ -1653,13 +1656,13 @@ export interface OpenInvoiceRow {
   grossAmount: number;
   openAmount: number;
   // Valuta: grossAmount/openAmount are in `currency`; exchangeRate is the
-  // invoice's (null on a draft-like row; the OCR lookup sends it as a numeric
-  // string), grossAmountSek the receivable booked at Utfärda and openAmountSek
-  // what is left of it (signed like the amounts; the list only).
+  // invoice's (null on a draft-like row), grossAmountSek the receivable booked
+  // at Utfärda and openAmountSek what is left of it (signed like the amounts).
+  // The OCR lookup returns the same shape as the list.
   currency: string;
-  exchangeRate: number | string | null;
-  grossAmountSek?: number | null;
-  openAmountSek?: number | null;
+  exchangeRate: number | null;
+  grossAmountSek: number | null;
+  openAmountSek: number | null;
   reminderCount: number;
   reminderFeeCharged: boolean;
 }

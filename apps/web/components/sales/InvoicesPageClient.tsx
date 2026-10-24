@@ -253,6 +253,12 @@ export function NewInvoiceForm({
   const [orders, setOrders] = useState<InvoiceableOrder[]>([]);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [shipments, setShipments] = useState<InvoiceableShipment[]>([]);
+  // The customer's orders have been fetched (or failed) — the freight is not
+  // ticked before that, since a prefilled order decides which currency it is.
+  const [ordersLoaded, setOrdersLoaded] = useState(false);
+  // Shipments that have been ticked automatically once, so an untick by hand
+  // sticks.
+  const autoTickedRef = useRef<Set<string>>(new Set());
   const [rowsByKey, setRowsByKey] = useState<Map<string, PreviewRow>>(new Map());
   const [note, setNote] = useState("");
   // Valuta: an invoice has one currency. The ticked orders and freight decide
@@ -286,6 +292,8 @@ export function NewInvoiceForm({
   useEffect(() => {
     setOrders([]);
     setShipments([]);
+    setOrdersLoaded(false);
+    autoTickedRef.current = new Set();
     setCurrencyChoice(null);
     setSelectedOrderIds(new Set());
     setRowsByKey((prev) => {
@@ -307,27 +315,19 @@ export function NewInvoiceForm({
           if (order) selectOrder(order);
         }
         pendingOrderRef.current = null;
+        setOrdersLoaded(true);
       })
       .catch(() => {
-        if (!cancelled) setOrders([]);
+        if (cancelled) return;
+        setOrders([]);
+        setOrdersLoaded(true);
       });
-    // Billable freight: every booked, not-yet-invoiced shipment starts
-    // ticked (own fetch/catch so a failure never hides the orders).
+    // Billable freight: every booked, not-yet-invoiced shipment (own
+    // fetch/catch so a failure never hides the orders). What starts ticked is
+    // decided by the effect below, once the orders are known.
     apiFetch<InvoiceableShipment[]>(`/api/v1/invoiceable-shipments?customerId=${customerId}`)
       .then((res) => {
-        if (cancelled) return;
-        setShipments(res);
-        setRowsByKey((prev) => {
-          const next = new Map(prev);
-          // Valuta: starts ticked only what can go on one invoice — the
-          // shipments in the customer's own currency (and with a price: no
-          // rate for the currency means no unit price). The others are ticked
-          // by hand, which the currency lock then allows one currency at a time.
-          for (const s of res) {
-            if (s.unitPrice !== null && s.currency === customer?.currency) next.set(`ship-${s.shipmentId}`, shipmentRow(s));
-          }
-          return next;
-        });
+        if (!cancelled) setShipments(res);
       })
       .catch(() => {
         if (!cancelled) setShipments([]);
@@ -407,6 +407,30 @@ export function NewInvoiceForm({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrderIds, orders, shipments, rowsByKey]);
+
+  // Valuta: freight starts ticked when it can go on the invoice — booked,
+  // priced (no rate for its currency means no unit price) and in the currency
+  // the invoice will be in: the picked order's, else the customer's. Waits for
+  // the orders so a prefilled order (Fakturera on the order card) is known
+  // first, and ticks each shipment only once so an untick by hand sticks.
+  // Freight in another currency is ticked by hand, which the currency lock
+  // then allows one currency at a time.
+  useEffect(() => {
+    if (!ordersLoaded || shipments.length === 0) return;
+    const target = selectedOrders[0]?.currency ?? customer?.currency.trim().toUpperCase();
+    if (!target || tickedShipments.some((s) => s.currency !== target)) return;
+    const toTick = shipments.filter(
+      (s) => !autoTickedRef.current.has(s.shipmentId) && s.unitPrice !== null && s.currency === target
+    );
+    if (toTick.length === 0) return;
+    for (const s of toTick) autoTickedRef.current.add(s.shipmentId);
+    setRowsByKey((prev) => {
+      const next = new Map(prev);
+      for (const s of toTick) next.set(`ship-${s.shipmentId}`, shipmentRow(s));
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordersLoaded, shipments, selectedOrderIds, orders, customer]);
 
   function toggleOrder(order: InvoiceableOrder) {
     if (selectedOrderIds.has(order.orderId)) deselectOrder(order);

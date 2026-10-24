@@ -528,9 +528,7 @@ export function InvoiceCard({
                 case "writeOffAmount":
                   return Number(row.writeOffAmount) !== 0 ? `${formatMoney(row.writeOffAmount)} ${invoice.currency}` : "–";
                 case "settledSek":
-                  return row.appliedAmountSek === undefined
-                    ? "–"
-                    : `${formatMoney(Number(row.appliedAmountSek) + Number(row.writeOffAmountSek ?? 0))} kr`;
+                  return `${formatMoney(Number(row.appliedAmountSek) + Number(row.writeOffAmountSek))} kr`;
                 case "verificationId":
                   if (row.verificationId === null) {
                     return <span title="Kvittning (inget verifikat)">– (kvittning)</span>;

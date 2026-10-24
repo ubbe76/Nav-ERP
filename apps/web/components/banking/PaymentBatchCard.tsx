@@ -499,7 +499,9 @@ function ForeignSekFields({
       </FormRow>
       <FormHint>
         Skriv av beloppet från kontoutdraget; avgiften ingår i det och bokförs som bankkostnad.
-        {lookup.status === "ok" && !touched && ` Förifyllt med kursen ${formatRate(lookup.lookup.rate)} för ${lookup.lookup.date}.`}
+        {lookup.status === "ok" &&
+          !touched &&
+          ` Förifyllt med kursen ${formatRate(lookup.lookup.rate)} för ${lookup.lookup.date}.${lookup.lookup.source === "riksbank" ? " Källa: Sveriges Riksbank." : ""}`}
       </FormHint>
       {lookup.status === "error" && !touched && <FormNotice>{lookup.message}</FormNotice>}
       {sek !== null && fee !== null && fee > sek && <FormError>Bankavgiften kan inte vara större än beloppet i SEK.</FormError>}

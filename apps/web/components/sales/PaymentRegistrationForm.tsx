@@ -190,13 +190,11 @@ export function PaymentRegistrationForm({
         pendingPreselectRef.current = invoice.id;
         setCustomerId(invoice.customerId);
       } else {
-        // The listed row carries the SEK figures the lookup leaves out.
-        const listed = rows.find((r) => r.id === invoice.id) ?? invoice;
-        if (paymentCurrency !== null && listed.currency !== paymentCurrency && !includedIds.has(listed.id)) {
-          setOcrError(`Fakturan är i ${listed.currency} men valda poster är i ${paymentCurrency} — en betalning kan inte blanda valutor`);
+        if (paymentCurrency !== null && invoice.currency !== paymentCurrency && !includedIds.has(invoice.id)) {
+          setOcrError(`Fakturan är i ${invoice.currency} men valda poster är i ${paymentCurrency} — en betalning kan inte blanda valutor`);
           return;
         }
-        includeRow(listed);
+        includeRow(invoice);
       }
       setOcrValue("");
     } catch (err) {
@@ -245,7 +243,7 @@ export function PaymentRegistrationForm({
     for (const row of includedRows) {
       const applied = round2(Number(amounts[row.id]) || 0);
       if (applied === 0) continue;
-      const rate = row.exchangeRate === null ? 1 : Number(row.exchangeRate);
+      const rate = row.exchangeRate ?? 1;
       const result = applyPaymentTolerance(row.openAmount, applied, toleranceInCurrency(tolerance, rate, row.currency));
       if (!result.ok) return null;
       const grossSek = row.grossAmountSek ?? toSek(row.grossAmount, rate);
@@ -253,7 +251,7 @@ export function PaymentRegistrationForm({
         currency: row.currency,
         grossAmount: row.grossAmount,
         grossAmountSek: grossSek,
-        previouslyReleasedSek: row.openAmountSek == null || row.grossAmountSek == null ? 0 : round2(grossSek - row.openAmountSek),
+        previouslyReleasedSek: row.openAmountSek === null || row.grossAmountSek === null ? 0 : round2(grossSek - row.openAmountSek),
         appliedAmount: applied,
         writeOffAmount: result.writeOffAmount,
         settles: result.settles,
@@ -409,7 +407,7 @@ export function PaymentRegistrationForm({
                       </span>
                       <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
                         {row.exchangeRate !== null && <>kurs {formatRate(row.exchangeRate)}</>}
-                        {row.openAmountSek != null && <> · {formatMoney(row.openAmountSek)} kr bokfört</>}
+                        {row.openAmountSek !== null && <> · {formatMoney(row.openAmountSek)} kr bokfört</>}
                       </span>
                     </span>
                   );
@@ -432,7 +430,7 @@ export function PaymentRegistrationForm({
                     amounts[row.id] ?? String(row.openAmount),
                     // The tolerance is kronor: on a foreign invoice what it is
                     // worth in the invoice's currency at its rate.
-                    toleranceInCurrency(tolerance, row.exchangeRate === null ? 1 : Number(row.exchangeRate), row.currency),
+                    toleranceInCurrency(tolerance, row.exchangeRate ?? 1, row.currency),
                     currencyLabel(row.currency)
                   );
                   return <span style={{ color: PREVIEW_TONE_COLOR[preview.tone] }}>{preview.text}</span>;
@@ -494,7 +492,7 @@ export function PaymentRegistrationForm({
                   Skriv av beloppet från kontoutdraget.
                   {rateLookup.status === "ok" &&
                     !amountSekTouched &&
-                    ` Förifyllt med kursen ${formatRate(rateLookup.lookup.rate)} för ${rateLookup.lookup.date} × ${formatMoney(totalAmount)} ${paymentCurrency}.`}
+                    ` Förifyllt med kursen ${formatRate(rateLookup.lookup.rate)} för ${rateLookup.lookup.date} × ${formatMoney(totalAmount)} ${paymentCurrency}.${rateLookup.lookup.source === "riksbank" ? " Källa: Sveriges Riksbank." : ""}`}
                 </FormHint>
               </Field>
               <Field label="Bankavgift" htmlFor="paymentBankFee">

@@ -437,7 +437,7 @@ export function SupplierPaymentRegistrationForm({
                   Skriv av beloppet från kontoutdraget.
                   {rateLookup.status === "ok" &&
                     !amountSekTouched &&
-                    ` Förifyllt med kursen ${formatRate(rateLookup.lookup.rate)} för ${rateLookup.lookup.date} × ${formatMoney(totalAmount)} ${paymentCurrency}.`}
+                    ` Förifyllt med kursen ${formatRate(rateLookup.lookup.rate)} för ${rateLookup.lookup.date} × ${formatMoney(totalAmount)} ${paymentCurrency}.${rateLookup.lookup.source === "riksbank" ? " Källa: Sveriges Riksbank." : ""}`}
                 </FormHint>
               </Field>
               <Field label="Bankavgift" htmlFor="supplierPaymentBankFee">
