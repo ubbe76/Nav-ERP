@@ -22,6 +22,52 @@ import { parseSieDocument, type ParsedSieDocument, type ParsedSieVerification } 
 
 export const SIE_IMPORT_SERIES = { code: "LÖ", name: "Lönejournal" } as const;
 
+// An account the chart lacks can only be created when it fits the chart:
+// accounts.number is four digits (varchar(4)), names are 100 characters.
+const ACCOUNT_NUMBER_RE = /^\d{4}$/;
+const ACCOUNT_NAME_MAX = 100;
+const ROW_TEXT_MAX = 255;
+
+// The file is stored as underlag on EVERY verification it creates (each
+// verification must carry its own räkenskapsinformation), so a big file with
+// many verifications multiplies: the preview warns above 50 MB in all and
+// the import is refused above 500 MB — split the file instead.
+export const UNDERLAG_WARN_BYTES = 50 * 1024 * 1024;
+export const UNDERLAG_BLOCK_BYTES = 500 * 1024 * 1024;
+export interface UnderlagLimits {
+  warnBytes: number;
+  blockBytes: number;
+}
+const DEFAULT_UNDERLAG_LIMITS: UnderlagLimits = { warnBytes: UNDERLAG_WARN_BYTES, blockBytes: UNDERLAG_BLOCK_BYTES };
+
+function megabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toLocaleString("sv-SE", { maximumFractionDigits: 1 })} MB`;
+}
+
+// Pure: the warning or blocker the duplicated underlag deserves, or null.
+export function underlagSizeProblem(
+  verificationCount: number,
+  fileBytes: number,
+  limits: UnderlagLimits = DEFAULT_UNDERLAG_LIMITS
+): { kind: "warning" | "blocker"; message: string } | null {
+  if (verificationCount <= 0 || fileBytes <= 0) return null;
+  const total = verificationCount * fileBytes;
+  const size = `${verificationCount} verifikat × ${megabytes(fileBytes)} ≈ ${megabytes(total)}`;
+  if (total > limits.blockBytes) {
+    return {
+      kind: "blocker",
+      message: `Filen sparas som underlag på varje verifikat, och ${size} överstiger gränsen ${megabytes(limits.blockBytes)} — dela upp filen i mindre delar`,
+    };
+  }
+  if (total > limits.warnBytes) {
+    return {
+      kind: "warning",
+      message: `Filen sparas som underlag på varje verifikat: ${size} lagras i databasen`,
+    };
+  }
+  return null;
+}
+
 // A SIE file has no registered MIME type and is CP437 as often as UTF-8 —
 // stored as octet-stream so the browser downloads rather than renders it.
 const SIE_FILE_CONTENT_TYPE = "application/octet-stream";
@@ -89,8 +135,11 @@ export function createSieVerificationImportService(deps: {
   repo: EconomyRepository;
   economy: EconomyService;
   audit: AuditWriter;
+  // Tests lower the underlag thresholds; production uses the constants.
+  underlagLimits?: UnderlagLimits;
 }) {
   const { db, repo, economy, audit } = deps;
+  const underlagLimits = deps.underlagLimits ?? DEFAULT_UNDERLAG_LIMITS;
 
   // Period + fiscal-year status for every distinct date, one query — through
   // the caller's executor so the import sees what its transaction sees.
@@ -110,7 +159,7 @@ export function createSieVerificationImportService(deps: {
   // The checks preview and import share. `createMissingAccounts` decides
   // whether a missing account is a blocker (import) or a warning (preview /
   // import with the box ticked).
-  async function checkDocument(executor: Db | Tx, document: ParsedSieDocument, createMissingAccounts: boolean): Promise<CheckResult> {
+  async function checkDocument(executor: Db | Tx, document: ParsedSieDocument, fileBytes: number, createMissingAccounts: boolean): Promise<CheckResult> {
     const blockers: string[] = [];
     const warnings: string[] = [];
     if (document.verifications.length === 0) blockers.push("Filen innehåller inga verifikat (#VER)");
@@ -119,13 +168,22 @@ export function createSieVerificationImportService(deps: {
     const accounts = await repo.accountsByNumbers(executor, numbers);
     const fileNames = new Map(document.accounts.map((a) => [a.number, a.name] as const));
     const missingNumbers = [...new Set(numbers.filter((n) => !accounts.has(n)))].sort();
-    const missingAccounts = missingNumbers.map((number) => ({ number, name: fileNames.get(number) ?? null }));
+    // A missing account that does not fit the chart can never be created —
+    // a blocker whatever the box says (it used to reach Postgres as a 500).
+    const uncreatable = missingNumbers.filter((n) => !ACCOUNT_NUMBER_RE.test(n));
+    const creatable = missingNumbers.filter((n) => ACCOUNT_NUMBER_RE.test(n));
+    const missingAccounts = creatable.map((number) => ({ number, name: fileNames.get(number)?.slice(0, ACCOUNT_NAME_MAX) ?? null }));
     const inactive = [...new Set(numbers.filter((n) => accounts.get(n)?.active === false))].sort();
-    if (missingNumbers.length > 0) {
-      if (createMissingAccounts) warnings.push(`${missingNumbers.length} konton saknas i kontoplanen och skapas: ${missingNumbers.join(", ")}`);
-      else blockers.push(`Kontot ${missingNumbers.join(", ")} finns inte i kontoplanen — välj Skapa saknade konton eller lägg upp dem först`);
+    for (const number of uncreatable) blockers.push(`Kontot ${number} har inte fyra siffror och kan inte skapas`);
+    if (creatable.length > 0) {
+      if (createMissingAccounts) warnings.push(`${creatable.length} konton saknas i kontoplanen och skapas: ${creatable.join(", ")}`);
+      else blockers.push(`Kontot ${creatable.join(", ")} finns inte i kontoplanen — välj Skapa saknade konton eller lägg upp dem först`);
     }
     if (inactive.length > 0) blockers.push(`Kontot ${inactive.join(", ")} är inaktivt`);
+
+    const underlag = underlagSizeProblem(document.verifications.length, fileBytes, underlagLimits);
+    if (underlag?.kind === "blocker") blockers.push(underlag.message);
+    else if (underlag) warnings.push(underlag.message);
 
     const statuses = await dateStatuses(
       executor,
@@ -171,7 +229,7 @@ export function createSieVerificationImportService(deps: {
           accountNumber: r.accountNumber,
           accountName: accounts.get(r.accountNumber)?.name ?? null,
           amount: r.amount,
-          description: r.description,
+          description: rowText(r.description),
           transDate: r.transDate,
         })),
         debit,
@@ -197,6 +255,12 @@ export function createSieVerificationImportService(deps: {
     return createHash("sha256").update(file).digest("hex");
   }
 
+  // A row's text within its column (255), like the header's description —
+  // the preview shows what the import will store.
+  function rowText(description: string | null): string | null {
+    return description === null ? null : description.slice(0, ROW_TEXT_MAX);
+  }
+
   // "<text> (SIE-import ver <serie> <nr>)", within the column.
   function importDescription(v: ParsedSieVerification): string {
     const suffix = ` (SIE-import ver ${v.series} ${v.number})`.replace(/\s+/g, " ");
@@ -208,7 +272,7 @@ export function createSieVerificationImportService(deps: {
     async preview(file: Buffer, fileName: string): Promise<SiePreview> {
       const document = parseSieDocument(file);
       const sha256 = sha(file);
-      const [alreadyImported, check] = await Promise.all([findImport(sha256), checkDocument(db, document, true)]);
+      const [alreadyImported, check] = await Promise.all([findImport(sha256), checkDocument(db, document, file.length, true)]);
       // At preview a missing account is information (the box decides at
       // import), so it is a warning here and the blockers hold the rest.
       return { sha256, fileName, program: document.program, alreadyImported, ...check };
@@ -236,7 +300,7 @@ export function createSieVerificationImportService(deps: {
           throw err;
         }
 
-        const check = await checkDocument(tx, document, fields.createMissingAccounts);
+        const check = await checkDocument(tx, document, file.length, fields.createMissingAccounts);
         if (check.blockers.length > 0) throw new SieVerificationImportBlockedError(check.blockers);
 
         for (const missing of check.missingAccounts) {
@@ -264,7 +328,7 @@ export function createSieVerificationImportService(deps: {
               accountId: accounts.get(r.accountNumber)!.id,
               debit: r.amount > 0 ? round2(r.amount) : 0,
               credit: r.amount < 0 ? round2(-r.amount) : 0,
-              description: r.description,
+              description: rowText(r.description),
             }));
           const description = importDescription(v);
           const { id, verificationNumber } = await economy.createVerificationInTx(

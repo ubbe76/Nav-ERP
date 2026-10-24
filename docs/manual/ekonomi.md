@@ -67,7 +67,7 @@ Sparar du en tabell med en rad som saknar konto, har både debet och kredit elle
 
 Kolumnen **Momskod** låter Nav dela upp ett belopp i netto och moms åt dig. Den visar de aktiva momskoderna som kan delas upp — svensk moms 25, 12 och 6 % samt de omvända inköpskoderna (till exempel *Inköp varor från EU 25 %*). Momsfria koder, försäljningskoder för EU och export samt importmoms har ingen moms att dela upp och erbjuds inte.
 
-- **Svensk moms (Moms 25/12/6 %):** radens belopp tolkas som **inklusive moms**. När du lämnar fältet (eller beloppet) får raden nettot, och en momsrad med momskodens konto läggs direkt under: **ingående moms** i debet om raden står i debet, **utgående moms** i kredit om raden står i kredit. Momsraden tar öresresten, så netto plus moms alltid blir exakt det belopp du skrev. Exempel: 125,00 i debet på 5410 med *Moms 25 %* blir 100,00 på 5410 och 25,00 på ingående moms (2640).
+- **Svensk moms (Moms 25/12/6 %):** radens belopp tolkas som **inklusive moms**. När du lämnar fältet (eller beloppet) får raden nettot, och en momsrad med momskodens konto läggs direkt under: **ingående moms** i debet om raden står i debet, **utgående moms** i kredit om raden står i kredit. Momsraden tar öresresten, så netto plus moms alltid blir exakt det belopp du skrev. Exempel: 125,00 i debet på 5410 med *Moms 25 %* blir 100,00 på 5410 och 25,00 på ingående moms (2640). Momsraden följer alltså **radens sida**, inte kontots art: en rad i debet ger alltid ingående moms. En kreditering av en försäljning (ett intäktskonto i debet, som ska minska den utgående momsen) delas därför inte rätt av momshjälpen — boka den för hand med en rad på utgående moms i debet.
 - **Omvända koder:** radens belopp är **nettot** och står kvar. Nav lägger till både en **utgående** och en **ingående** momsrad på momskodens konton med den beräknade momsen (de tar ut varandra, så verifikatet balanserar som förut).
 - Momskoden sparas inte — servern ser bara vanliga rader, och fältet töms när raden har delats. Redigerar du beloppet efteråt delas det inte om; ändra raderna för hand.
 - Momskontona kommer från **Ekonomi → Momskoder**. Saknas kontot eller är det inaktivt visas en varning och momsraden måste få ett giltigt konto innan du sparar.
@@ -124,18 +124,18 @@ Utskriften skriver ingenting till databasen — den kan tas fram hur många gån
 
 **+ Ny återkommande post** frågar efter:
 
-- **Mall** — mallen bär kontona och beloppen. Alla rader måste ha belopp och mallen måste balansera, annars nekas posten (*"Mallen måste ha belopp på alla rader och balansera"*).
+- **Mall** — mallen bär kontona och beloppen. Alla rader måste ha belopp och mallen måste balansera, annars nekas posten med vilken rad som saknar belopp (*"Mallens rad för konto 5010 saknar belopp"*) eller med summorna (*"Mallen balanserar inte (debet 8 000, kredit 7 000)"*).
 - **Dag i månaden** — 1–28, eller **Sista dagen** (månadens sista dag, även i februari).
 - **Startmånad** och **Slutmånad** (valfri — tom betyder tills vidare).
 - **Läge** — **Utkast** (förval) skapar ett utkast som du granskar och bokför själv; **Bokför direkt** bokför verifikatet med samma regler som ett manuellt verifikat. Utkast är förvalet eftersom en bokföring ska spegla en verklig händelse — välj **Bokför direkt** först när beloppet är fast.
 
-**Så körs det:** ett jobb kontrollerar posterna en gång i timmen. För varje aktiv post skapas ett verifikat för varje månad vars dag har passerat och som saknar körning, daterat på månadens dag. Hoppar servern över en tid hämtas de missade månaderna ikapp vid nästa körning, och en månad körs aldrig två gånger. Går något fel — perioden är låst, ett konto har inaktiverats — skapas inget verifikat för månaden, körningen markeras **Misslyckades** med orsaken, och posten visas som aviseringen **Återkommande verifikat som misslyckats** (se [Aviseringar](/hjalp/aviseringar)). Jobbet försöker inte igen med en misslyckad månad — annars kom samma fel varje timme. Rätta orsaken (lås upp perioden, byt konto i mallen) och klicka **Kör nu**, som försöker igen med de misslyckade månaderna. När du skapar en post (eller en fördelning) skapas månader vars dag redan har passerat direkt, utan att vänta på jobbet.
+**Så körs det:** ett jobb kontrollerar posterna en gång i timmen. För varje aktiv post skapas ett verifikat för varje månad vars dag har passerat och som saknar körning, daterat på månadens dag. Hoppar servern över en tid hämtas de missade månaderna ikapp vid nästa körning, och en månad körs aldrig två gånger. Går något fel skapas inget verifikat för månaden, körningen markeras **Misslyckades** med orsaken, och varje sådan månad visas som aviseringen **Återkommande verifikat som misslyckats** (se [Aviseringar](/hjalp/aviseringar)). Vad som räknas som fel beror på läget: ett konto i mallen som har inaktiverats eller tagits bort stoppar båda lägena, och ett **stängt räkenskapsår** stoppar båda — men en **låst period** stoppar bara **Bokför direkt**. I läget **Utkast** skapas utkastet även i en låst period (ett utkast är ingen bokföring), och låset slår till först när du försöker bokföra det. Jobbet försöker inte igen med en misslyckad månad — annars kom samma fel varje timme. Rätta orsaken (lås upp perioden, byt konto i mallen) och klicka **Kör nu**, som försöker igen med de misslyckade månaderna. När du skapar en post (eller en fördelning) skapas månader vars dag redan har passerat direkt, utan att vänta på jobbet.
 
 Knapparna på varje post:
 
-- **Körningar** visar historiken: **Månad**, **Status**, **Verifikat** (länk till det skapade verifikatet) och **Orsak** för misslyckade körningar.
-- **Kör nu** kör posten ikapp direkt, på samma sätt som jobbet (även en pausad post, och även misslyckade månader), och meddelar hur många verifikat som skapades och hur många som misslyckades.
-- **Pausa** / **Aktivera** stoppar och återupptar posten. En pausad post skapar inga verifikat.
+- **Körningar** visar historiken: **Månad**, **Status** (**Skapad**, **Misslyckades** eller **Hoppades över (pausad)**), **Verifikat** (länk till det skapade verifikatet) och **Orsak** för misslyckade körningar.
+- **Kör nu** kör posten ikapp direkt, på samma sätt som jobbet (även en pausad post, och även misslyckade månader), och meddelar hur många verifikat som skapades och hur många som misslyckades. Månader som hoppats över vid en aktivering körs däremot inte.
+- **Pausa** / **Aktivera** stoppar och återupptar posten. En pausad post skapar inga verifikat, och de månader vars dag passerar medan posten är pausad **hoppas över** — de skapas inte i efterhand när posten aktiveras. Vid **Aktivera** säger bekräftelsen hur många månader som hoppas över (*"Aktivera posten? 3 månader (2026-02 – 2026-04) förföll medan posten var pausad och hoppas över …"*); de får statusen **Hoppades över (pausad)** i historiken och ger ingen avisering. Vill du ha verifikaten för pausen ändå, klicka **Kör nu** medan posten är pausad — det skapar de förfallna månaderna — och aktivera sedan.
 - **Ta bort** raderar posten efter bekräftelse; verifikat som redan skapats ligger kvar.
 
 ### Fördela över perioder
@@ -373,7 +373,7 @@ Välj **Räkenskapsår**, välj filen och klicka **Importera**. Resultatet visar
 
 Regler att känna till:
 
-- **Konton som saknas skapas automatiskt** med namnet ur filens `#KONTO`-rader.
+- **Konton som saknas skapas automatiskt** med namnet ur filens `#KONTO`-rader (längre än 100 tecken kortas). Ett konto som inte har fyra siffror kan inte läggas upp — då avvisas filen (*"Kontot 19350 har inte fyra siffror och kan inte skapas"*) och ingenting skrivs.
 - **Balanserna måste summera till noll.** Gör de inte det avbryts importen med differensen angiven — systemet uppfinner aldrig en motpost, eftersom det skulle dölja ett fel i källdatat.
 - **Filens räkenskapsår måste stämma** med det du valt, annars avbryts importen. Annars skulle fjolårets balanser kunna hamna på fel år utan att någon märkte det.
 - **Bara en gång per räkenskapsår.** Ett andra försök avvisas — annars skulle varje balans dubbleras.
@@ -393,7 +393,7 @@ Välj sedan:
 
 - **Serie** — förvalet är **LÖ — Lönejournal**, som skapas automatiskt första gången den behövs. Du kan välja en annan serie.
 - **Läge** — **Utkast** (förval) lägger verifikaten som utkast att granska och bokföra, **Bokför** bokför dem direkt.
-- **Skapa saknade konton** — kryssrutan visas när filen använder konton som inte finns. Utan den kan filen inte importeras; med den läggs kontona upp med namnen ur filens `#KONTO`-rader.
+- **Skapa saknade konton** — kryssrutan visas när filen använder konton som inte finns. Utan den kan filen inte importeras; med den läggs kontona upp med namnen ur filens `#KONTO`-rader (ett namn längre än 100 tecken kortas). Ett konto som inte har **fyra siffror** kan inte läggas upp i Navs kontoplan — det stoppar importen (*"Kontot 12345 har inte fyra siffror och kan inte skapas"*) oavsett kryssrutan; lägg upp det för hand under ett fyrsiffrigt nummer eller rätta filen.
 
 Klicka **Importera**. Resultatet listar de nya verifikaten med länkar.
 
@@ -401,7 +401,9 @@ Regler att känna till:
 
 - **Allt eller inget.** Är något verifikat obalanserat, saknas ett konto utan att du valt **Skapa saknade konton**, eller ligger ett datum i en låst period, importeras ingenting (*"Ingenting importerades: …"* med orsakerna).
 - **Samma fil kan bara importeras en gång.** Filen känns igen på sitt innehåll (kontrollsumma), inte på filnamnet — en andra import avvisas med *"Filen har redan importerats … av …"*, så ingen löneperiod bokförs två gånger.
-- Varje verifikat får filens text och hänvisningen *(SIE-import ver LÖ 12)* som beskrivning, och **filen sparas som underlag** på varje verifikat (se [Underlag på verifikat](#underlag-pa-verifikat)). Är serien eller räkenskapsåret fel kan du ta bort ett utkast och importera om först när du rättat — den redan importerade filen kan inte läsas in igen, så rätta i stället utkasten för hand.
+- Varje verifikat får filens text och hänvisningen *(SIE-import ver LÖ 12)* som beskrivning (radtexter längre än 255 tecken kortas), och **filen sparas som underlag** på varje verifikat (se [Underlag på verifikat](#underlag-pa-verifikat)). Är serien eller räkenskapsåret fel kan du ta bort ett utkast och importera om först när du rättat — den redan importerade filen kan inte läsas in igen, så rätta i stället utkasten för hand.
+- Eftersom filen sparas en gång per verifikat tar en stor fil med många verifikat plats: förhandsgranskningen varnar när antal verifikat × filens storlek överstiger **50 MB** (*"Filen sparas som underlag på varje verifikat: 60 verifikat × 1 MB ≈ 60 MB lagras i databasen"*), och över **500 MB** stoppas importen — dela då upp filen i mindre delar.
+- Ett datum som inte finns i kalendern (till exempel 30 februari) eller ett `#VER` utan sitt `{ … }`-block gör att filen avvisas som felaktig innan något förhandsgranskas.
 - `#RTRANS` och `#BTRANS` (rättade och borttagna rader) hoppas över, i enlighet med SIE-standarden.
 - Importen läser alltid filens egna belopp: positiva belopp blir debet och negativa kredit.
 

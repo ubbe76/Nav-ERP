@@ -38,6 +38,24 @@ describe("Fördela över perioder: web preview mirrors the server", () => {
       }
     }
   });
+
+  it("rounds an amount with three decimals exactly like the server before splitting", () => {
+    // 100.005 → round2 → 100.01 (EPSILON nudges the half up): the web must
+    // not read 100.005 as 10000 öre while the server books 10001.
+    for (const [amount, months] of [
+      [100.005, 3],
+      [0.015, 1],
+      [1234.565, 7],
+      [99.995, 4],
+      [10.004, 2],
+    ] as const) {
+      const server = allocationAmounts(amount, months);
+      expect(webAllocation.allocationAmounts(amount, months)).toEqual(server);
+    }
+    expect(webAllocation.allocationAmounts(100.005, 3)).toEqual([33.33, 33.33, 33.35]);
+    // Too small for an öre per month: the server refuses, the web shows nothing.
+    expect(webAllocation.allocationAmounts(0.02, 3)).toEqual([]);
+  });
 });
 
 describe("splitVat (momshjälp)", () => {

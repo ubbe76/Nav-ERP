@@ -98,6 +98,7 @@ import {
   SieAlreadyImportedError,
   SieFiscalYearMismatchError,
   SieFiscalYearNotFoundError,
+  SieInvalidAccountNumberError,
   SiePriorBookkeepingError,
   SieUnbalancedError,
   type SieService,
@@ -872,7 +873,8 @@ export async function economyRoutes(
     if (
       err instanceof SieParseError ||
       err instanceof SieFiscalYearMismatchError ||
-      err instanceof SieUnbalancedError
+      err instanceof SieUnbalancedError ||
+      err instanceof SieInvalidAccountNumberError
     ) {
       return reply.code(400).send(errorBody(err));
     }

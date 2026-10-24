@@ -20,6 +20,7 @@ import {
   SieFileAlreadyImportedError,
   SieVerificationImportBlockedError,
 } from "../src/modules/economy/service/sie-verification-import.service.js";
+import { SieInvalidAccountNumberError } from "../src/modules/economy/service/sie.service.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
@@ -686,6 +687,7 @@ const cases: Array<[Error, string]> = [
   [new RecurringTemplateIncompleteError("saknar belopp"), ERROR_CODES.RECURRING_TEMPLATE_INCOMPLETE],
   [new SieFileAlreadyImportedError("2026-10-24T10:00:00.000Z", "Ekonom"), ERROR_CODES.SIE_FILE_ALREADY_IMPORTED],
   [new SieVerificationImportBlockedError(["x"]), ERROR_CODES.SIE_VERIFICATION_IMPORT_BLOCKED],
+  [new SieInvalidAccountNumberError(["12345"]), ERROR_CODES.SIE_INVALID_ACCOUNT_NUMBER],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

@@ -3129,7 +3129,9 @@ export interface VerificationTemplate {
 export interface RecurringRun {
   id: string;
   month: string;
-  status: "created" | "failed";
+  // skipped: the month fell due while the post was paused and was marked
+  // on Aktivera — never created.
+  status: "created" | "failed" | "skipped";
   error: string | null;
   verificationId: string | null;
   verificationDisplayNumber: string | null;
@@ -3160,10 +3162,18 @@ export interface RecurringVerification {
   } | null;
   lastRun: RecurringRun | null;
   failedCount: number;
+  // A paused post: the months Aktivera would mark skipped right now ([] when active).
+  skippedOnActivate: string[];
 }
 
 export interface RecurringVerificationDetail extends RecurringVerification {
   runs: RecurringRun[];
+}
+
+// PATCH /recurring-verifications/:id — the detail plus the months the
+// activation just marked skipped.
+export interface RecurringVerificationUpdateResult extends RecurringVerificationDetail {
+  skippedMonths: string[];
 }
 
 // POST /verifications/:id/copy

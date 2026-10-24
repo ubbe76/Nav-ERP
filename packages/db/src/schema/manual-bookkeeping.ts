@@ -120,16 +120,18 @@ export const recurringVerifications = pgTable(
   ]
 );
 
-export const recurringRunStatusEnum = pgEnum("recurring_run_status", ["created", "failed"]);
+export const recurringRunStatusEnum = pgEnum("recurring_run_status", ["created", "failed", "skipped"]);
 
 // One row per (post, month) — the unique index IS the reservation: the row is
 // inserted in the same transaction as the verification it creates (ON
 // CONFLICT DO NOTHING, so a second process or tick gets nothing), and a
 // failure writes a `failed` row afterwards that blocks automatic retries
-// until Kör nu replaces it. recurring_id is nullable with ON DELETE SET NULL:
-// deleting the post keeps the rows that point at a verification (the
-// verification's only link to its origin), the service removes the failed
-// ones first.
+// until Kör nu replaces it. A `skipped` row is a month whose day passed while
+// the post was paused: written when the post is activated again, so the
+// month is never created afterwards (neither by the job nor by Kör nu).
+// recurring_id is nullable with ON DELETE SET NULL: deleting the post keeps
+// the rows that point at a verification (the verification's only link to its
+// origin), the service removes the failed and skipped ones first.
 export const recurringVerificationRuns = pgTable(
   "recurring_verification_runs",
   {
@@ -147,7 +149,7 @@ export const recurringVerificationRuns = pgTable(
     check("recurring_run_month", sql`${table.month} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`),
     check(
       "recurring_run_outcome",
-      sql`(${table.status} = 'created' AND ${table.verificationId} IS NOT NULL AND ${table.error} IS NULL) OR (${table.status} = 'failed' AND ${table.verificationId} IS NULL AND ${table.error} IS NOT NULL)`
+      sql`(${table.status} = 'created' AND ${table.verificationId} IS NOT NULL AND ${table.error} IS NULL) OR (${table.status} = 'failed' AND ${table.verificationId} IS NULL AND ${table.error} IS NOT NULL) OR (${table.status} = 'skipped' AND ${table.verificationId} IS NULL AND ${table.error} IS NULL)`
     ),
   ]
 );

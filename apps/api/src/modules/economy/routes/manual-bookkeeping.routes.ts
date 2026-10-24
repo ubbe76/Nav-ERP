@@ -50,8 +50,16 @@ import {
 // in app.ts; each route keeps its own requirePermission("ekonomi") like
 // economy.routes.ts so the guard also holds in mini-app tests.
 
-// 20 MB like every other upload; multipart truncates instead of throwing.
+// 20 MB like every other upload. @fastify/multipart's toBuffer() THROWS
+// FST_REQ_FILE_TOO_LARGE (413) once the limit is hit (throwFileSizeLimit is
+// on by default) — readMultipart catches it so the Swedish message below is
+// what the user sees, instead of the framework's "request file too large".
 const MAX_SIE_FILE_BYTES = 20 * 1024 * 1024;
+const FILE_TOO_LARGE = "Filen är för stor — max 20 MB";
+
+function isFileTooLarge(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "FST_REQ_FILE_TOO_LARGE";
+}
 
 type Reply = { code: (n: number) => { send: (b: unknown) => unknown } };
 
@@ -271,29 +279,36 @@ export async function manualBookkeepingRoutes(
   // The whole multipart body, in order: the file (`file`) and the text
   // fields beside it, whichever came first. req.parts() reads to the end,
   // unlike req.file(), whose `fields` only holds what preceded the file.
+  // `tooLarge` is the 413 from toBuffer() (see MAX_SIE_FILE_BYTES); the
+  // `truncated` flag is kept as the belt to that brace.
   async function readMultipart(req: FastifyRequest) {
     let file: { filename: string; data: Buffer; truncated: boolean } | null = null;
     const fields: Record<string, string> = {};
-    for await (const part of req.parts({ limits: { fileSize: MAX_SIE_FILE_BYTES } })) {
-      if (part.type === "file") {
-        if (part.fieldname === "file" && file === null) {
-          const data = await part.toBuffer();
-          file = { filename: part.filename, data, truncated: part.file.truncated };
-        } else {
-          // Drain anything unexpected so the stream finishes.
-          await part.toBuffer();
+    try {
+      for await (const part of req.parts({ limits: { fileSize: MAX_SIE_FILE_BYTES } })) {
+        if (part.type === "file") {
+          if (part.fieldname === "file" && file === null) {
+            const data = await part.toBuffer();
+            file = { filename: part.filename, data, truncated: part.file.truncated };
+          } else {
+            // Drain anything unexpected so the stream finishes.
+            await part.toBuffer();
+          }
+        } else if (typeof part.value === "string") {
+          fields[part.fieldname] = part.value;
         }
-      } else if (typeof part.value === "string") {
-        fields[part.fieldname] = part.value;
       }
+    } catch (err) {
+      if (isFileTooLarge(err)) return { file: null, fields, tooLarge: true as const };
+      throw err;
     }
-    return { file, fields };
+    return { file, fields, tooLarge: file?.truncated === true };
   }
 
   app.post("/sie/verifications/preview", ekonomi, async (req, reply) => {
-    const { file } = await readMultipart(req);
+    const { file, tooLarge } = await readMultipart(req);
+    if (tooLarge) return reply.code(400).send({ error: FILE_TOO_LARGE });
     if (!file) return reply.code(400).send({ error: "Ingen fil bifogad" });
-    if (file.truncated) return reply.code(400).send({ error: "Filen är för stor — max 20 MB" });
     try {
       return await sieImport.preview(file.data, file.filename);
     } catch (err) {
@@ -302,9 +317,9 @@ export async function manualBookkeepingRoutes(
   });
 
   app.post("/sie/verifications/import", ekonomi, async (req, reply) => {
-    const { file, fields } = await readMultipart(req);
+    const { file, fields, tooLarge } = await readMultipart(req);
+    if (tooLarge) return reply.code(400).send({ error: FILE_TOO_LARGE });
     if (!file) return reply.code(400).send({ error: "Ingen fil bifogad" });
-    if (file.truncated) return reply.code(400).send({ error: "Filen är för stor — max 20 MB" });
     // The options may also travel in the query string (seriesId, mode,
     // createMissingAccounts); a form field wins.
     const options = sieVerificationImportFieldsSchema.parse({ ...(req.query as Record<string, unknown>), ...fields });

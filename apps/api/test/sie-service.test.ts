@@ -236,6 +236,26 @@ describe("SIE-import av ingående balanser", () => {
     expect((await repo.findAccountByNumber("1935"))!.name).toBe("Sparkonto");
   });
 
+  it("refuses an #IB account that is not four digits (it cannot be created), creating nothing", async () => {
+    const { user, year } = await setupEconomy();
+    const file = sieFile([YEAR_RAR, '#KONTO 1935 "Sparkonto"', "#IB 0 1935 4000.00", "#IB 0 19350 1.00", "#IB 0 2081 -4001.00"]);
+    await expect(sie.importOpeningBalances(year.id, file, user.id)).rejects.toMatchObject({
+      name: "SieInvalidAccountNumberError",
+      accounts: ["19350"],
+      message: "Kontot 19350 har inte fyra siffror och kan inte skapas",
+    });
+    // The transaction rolled back: not even the creatable 1935 was kept.
+    expect(await repo.findAccountByNumber("1935")).toBeNull();
+    expect(await repo.findOpeningBalanceVerification(year.id)).toBeNull();
+  });
+
+  it("fits a created account's name to its column", async () => {
+    const { user, year } = await setupEconomy();
+    const file = sieFile([YEAR_RAR, `#KONTO 1935 "${"S".repeat(130)}"`, "#IB 0 1935 4000.00", "#IB 0 2081 -4000.00"]);
+    await sie.importOpeningBalances(year.id, file, user.id);
+    expect((await repo.findAccountByNumber("1935"))!.name).toBe("S".repeat(100));
+  });
+
   it("rejects a file whose balances do not sum to zero, writing nothing", async () => {
     const { user, year } = await setupEconomy();
     const file = sieFile([YEAR_RAR, "#IB 0 1930 25000.00", "#IB 0 2081 -20000.00"]);

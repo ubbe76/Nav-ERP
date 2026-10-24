@@ -1,6 +1,6 @@
 "use client";
 
-import { confirmDelete } from "../../lib/confirm";
+import { confirmDelete, confirmDialog } from "../../lib/confirm";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,6 +20,7 @@ import type {
   RecurringRun,
   RecurringVerification,
   RecurringVerificationDetail,
+  RecurringVerificationUpdateResult,
   VerificationTemplate,
 } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
@@ -27,19 +28,30 @@ import { AllocateDialog } from "./AllocateDialog";
 
 const MODE_LABELS = { draft: "Utkast", book: "Bokför direkt" } as const;
 
+// A run's status as the user reads it. `skipped` is a month that fell due
+// while the post was paused and was marked on Aktivera — never a problem,
+// so it never shows as an alert, only here.
+const RUN_STATUS: Record<RecurringRun["status"], { pill: "done" | "stopped" | "draft"; label: string }> = {
+  created: { pill: "done", label: "Skapad" },
+  failed: { pill: "stopped", label: "Misslyckades" },
+  skipped: { pill: "draft", label: "Hoppades över (pausad)" },
+};
+
 function dayLabel(day: number | "last"): string {
   return day === "last" ? "Sista dagen" : String(day);
+}
+
+// "2031-02" or "2031-02 – 2031-05".
+function monthSpan(months: string[]): string {
+  if (months.length === 0) return "";
+  return months.length === 1 ? months[0]! : `${months[0]} – ${months[months.length - 1]}`;
 }
 
 function RunStatus({ run }: { run: RecurringRun | null }) {
   if (!run) return <span>–</span>;
   return (
     <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-      <StatusPill
-        status={run.status === "created" ? "done" : "stopped"}
-        label={run.status === "created" ? "Skapad" : "Misslyckades"}
-        compact
-      />
+      <StatusPill status={RUN_STATUS[run.status].pill} label={RUN_STATUS[run.status].label} compact />
       <span>{run.month}</span>
     </span>
   );
@@ -84,12 +96,29 @@ export function AterkommandeVerifikatPageClient({
     }
   }
 
-  function toggleActive(post: RecurringVerification) {
-    return act(async () => {
-      await apiFetch(`/api/v1/recurring-verifications/${post.id}`, {
+  // Aktivera skips the months that fell due during the pause (the server
+  // marks them in the same transaction as the flag); the user is told how
+  // many before it happens, and Kör nu is the way to create them instead.
+  async function toggleActive(post: RecurringVerification) {
+    const toSkip = post.active ? [] : post.skippedOnActivate;
+    if (toSkip.length > 0) {
+      const count = toSkip.length === 1 ? "1 månad" : `${toSkip.length} månader`;
+      const ok = await confirmDialog(
+        `Aktivera posten? ${count} (${monthSpan(toSkip)}) förföll medan posten var pausad och hoppas över — inga verifikat skapas för dem. Vill du ha dem skapade, välj Kör nu i stället innan du aktiverar.`,
+        { confirmLabel: "Aktivera" }
+      );
+      if (!ok) return;
+    }
+    await act(async () => {
+      const result = await apiFetch<RecurringVerificationUpdateResult>(`/api/v1/recurring-verifications/${post.id}`, {
         method: "PATCH",
         body: JSON.stringify({ active: !post.active }),
       });
+      if (result.skippedMonths.length > 0) {
+        setMessage(
+          `Posten aktiverades. ${result.skippedMonths.length === 1 ? "1 månad" : `${result.skippedMonths.length} månader`} (${monthSpan(result.skippedMonths)}) hoppades över.`
+        );
+      }
       router.refresh();
     }, "Åtgärden misslyckades");
   }
@@ -281,13 +310,7 @@ function RunHistory({ post, onClose }: { post: RecurringVerificationDetail; onCl
             case "month":
               return run.month;
             case "status":
-              return (
-                <StatusPill
-                  status={run.status === "created" ? "done" : "stopped"}
-                  label={run.status === "created" ? "Skapad" : "Misslyckades"}
-                  compact
-                />
-              );
+              return <StatusPill status={RUN_STATUS[run.status].pill} label={RUN_STATUS[run.status].label} compact />;
             case "verification":
               return run.verificationId ? (
                 <Link href={`/ekonomi/verifikat/${run.verificationId}`}>{run.verificationDisplayNumber ?? "Verifikat"}</Link>

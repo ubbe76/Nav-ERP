@@ -642,9 +642,10 @@ describe("recurring_verification_failed", () => {
       .insert(recurringVerificationRuns)
       .values({ recurringId: leasing.id, month: "2030-01", status: "failed", error: "Ett konto på mallen är inaktivt" })
       .returning();
-    // An unlinked failed row (its post was deleted) and a successful month
-    // are not matters to attend to.
+    // An unlinked failed row (its post was deleted), a successful month and
+    // a month skipped during a pause are not matters to attend to.
     await db.insert(recurringVerificationRuns).values({ recurringId: null, month: "2030-01", status: "failed", error: "x" });
+    await db.insert(recurringVerificationRuns).values({ recurringId: hyra.id, month: "2030-03", status: "skipped" });
     const g = await group("recurring_verification_failed");
     expect(g.label).toBe("Återkommande verifikat som misslyckats");
     expect(g.listHref).toBe("/ekonomi/aterkommande-verifikat");

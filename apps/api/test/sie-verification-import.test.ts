@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { accountingPeriods, accounts, db, sieVerificationImports, verificationFiles, verificationSeries, verifications } from "@navet/db";
+import { accountingPeriods, accounts, db, sieVerificationImports, verificationFiles, verificationRows, verificationSeries, verifications } from "@navet/db";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import { createEconomyService } from "../src/modules/economy/service/economy.service.js";
@@ -10,6 +10,9 @@ import {
   createSieVerificationImportService,
   SieFileAlreadyImportedError,
   SieVerificationImportBlockedError,
+  UNDERLAG_BLOCK_BYTES,
+  UNDERLAG_WARN_BYTES,
+  underlagSizeProblem,
 } from "../src/modules/economy/service/sie-verification-import.service.js";
 
 // SIE-import av verifikat against Postgres: preview, all-or-nothing import,
@@ -230,6 +233,97 @@ describe("import", () => {
     await economy.lockPeriod(period!.id, user.id);
     await expect(sieImport.import(journal(), "lon.se", fields(), user.id)).rejects.toMatchObject({
       blockers: [`Ver LÖ 1: perioden för ${YEAR}-01-25 är låst`],
+    });
+    expect(await db.select().from(verifications)).toEqual([]);
+  });
+
+  it("blocks a missing account that is not four digits — it can never be created — whatever the box says", async () => {
+    const { user } = await setup(["7210", "1930"]);
+    const file = journal([
+      `#VER "LÖ" "3" ${YEAR}0325 "Konstigt konto"`,
+      "{",
+      "#TRANS 12345 {} 100.00",
+      "#TRANS 1930 {} -100.00",
+      "}",
+    ]);
+    const preview = await sieImport.preview(file, "lon.se");
+    expect(preview.blockers).toEqual(["Kontot 12345 har inte fyra siffror och kan inte skapas"]);
+    // 2710 is still creatable and listed as such; 12345 never is.
+    expect(preview.missingAccounts.map((a) => a.number)).toEqual(["2710"]);
+    expect(preview.warnings).toEqual(["1 konton saknas i kontoplanen och skapas: 2710"]);
+    await expect(sieImport.import(file, "lon.se", fields({ createMissingAccounts: true }), user.id)).rejects.toMatchObject({
+      blockers: ["Kontot 12345 har inte fyra siffror och kan inte skapas"],
+    });
+    expect(await db.select().from(verifications)).toEqual([]);
+    expect(await db.select().from(accounts).where(eq(accounts.number, "2710"))).toEqual([]);
+  });
+
+  it("fits a created account's name and a row's text to their columns instead of failing the import", async () => {
+    const { user } = await setup(["7210", "1930"]);
+    const longName = "N".repeat(140);
+    const longText = "T".repeat(300);
+    const file = encodeCp437(
+      [
+        "#FLAGGA 0",
+        `#RAR 0 ${YEAR}0101 ${YEAR}1231`,
+        `#KONTO 2710 "${longName}"`,
+        `#VER "LÖ" "1" ${YEAR}0125 "Lön januari"`,
+        "{",
+        `#TRANS 7210 {} 30000.00 "" "${longText}"`,
+        "#TRANS 2710 {} -30000.00",
+        "}",
+        "",
+      ].join("\r\n")
+    );
+    const preview = await sieImport.preview(file, "lon.se");
+    expect(preview.missingAccounts).toEqual([{ number: "2710", name: "N".repeat(100) }]);
+    expect(preview.verifications[0]!.rows[0]!.description).toBe("T".repeat(255));
+
+    const result = await sieImport.import(file, "lon.se", fields({ createMissingAccounts: true }), user.id);
+    expect(result.imported).toBe(1);
+    const [account] = await db.select().from(accounts).where(eq(accounts.number, "2710"));
+    expect(account!.name).toBe("N".repeat(100));
+    const rows = await db.select().from(verificationRows).where(eq(verificationRows.verificationId, result.verifications[0]!.id));
+    expect(rows.map((r) => r.description ?? "").sort()).toEqual(["", "T".repeat(255)]);
+  });
+
+  it("warns when the duplicated underlag grows large and blocks when it grows huge", async () => {
+    // Pure rule first.
+    expect(underlagSizeProblem(2, 10 * 1024 * 1024)).toBeNull();
+    expect(underlagSizeProblem(0, 10 * 1024 * 1024)).toBeNull();
+    expect(underlagSizeProblem(6, 10 * 1024 * 1024)).toEqual({
+      kind: "warning",
+      message: "Filen sparas som underlag på varje verifikat: 6 verifikat × 10 MB ≈ 60 MB lagras i databasen",
+    });
+    expect(underlagSizeProblem(60, 10 * 1024 * 1024)).toMatchObject({ kind: "blocker" });
+    expect(underlagSizeProblem(60, 10 * 1024 * 1024)!.message).toContain("överstiger gränsen 500 MB — dela upp filen");
+    expect(underlagSizeProblem(5, UNDERLAG_WARN_BYTES / 5)).toBeNull();
+    expect(underlagSizeProblem(5, UNDERLAG_WARN_BYTES / 5 + 1)).toMatchObject({ kind: "warning" });
+    expect(underlagSizeProblem(5, UNDERLAG_BLOCK_BYTES / 5 + 1)).toMatchObject({ kind: "blocker" });
+
+    // Through the service, with the thresholds lowered to the test file's size
+    // (two verifications in the journal): the warning never stops the import,
+    // the blocker stops it like any other blocker.
+    const { user } = await setup();
+    const size = journal().length;
+    const warning = createSieVerificationImportService({
+      db, repo, economy, audit: { log: async () => {} },
+      underlagLimits: { warnBytes: size * 2 - 1, blockBytes: size * 1000 },
+    });
+    const warned = await warning.preview(journal(), "lon.se");
+    expect(warned.blockers).toEqual([]);
+    expect(warned.warnings).toEqual([expect.stringMatching(/^Filen sparas som underlag på varje verifikat: 2 verifikat × .* lagras i databasen$/)]);
+    await expect(warning.import(journal(), "lon.se", fields(), user.id)).resolves.toMatchObject({ imported: 2 });
+
+    await db.execute(sql`TRUNCATE sie_verification_imports, verification_files, verification_rows, verifications CASCADE`);
+    const blocking = createSieVerificationImportService({
+      db, repo, economy, audit: { log: async () => {} },
+      underlagLimits: { warnBytes: 1, blockBytes: size * 2 - 1 },
+    });
+    const blocked = await blocking.preview(journal(), "lon.se");
+    expect(blocked.blockers).toEqual([expect.stringContaining("dela upp filen")]);
+    await expect(blocking.import(journal(), "lon.se", fields(), user.id)).rejects.toMatchObject({
+      blockers: [expect.stringContaining("dela upp filen")],
     });
     expect(await db.select().from(verifications)).toEqual([]);
   });

@@ -35,6 +35,16 @@ export class SieUnbalancedError extends Error {
   }
 }
 
+// An #IB account the chart lacks is created on the fly — but only when it
+// fits the chart (four digits). Anything else used to reach Postgres as a
+// value-too-long error (a 500); now the file is refused with the account.
+export class SieInvalidAccountNumberError extends Error {
+  constructor(public readonly accounts: string[]) {
+    super(`Kontot ${accounts.join(", ")} har inte fyra siffror och kan inte skapas`);
+    this.name = "SieInvalidAccountNumberError";
+  }
+}
+
 // Opening balances are for migrating INTO the system. If the system already
 // holds bookkeeping dated before the fiscal year starts, the opening balance
 // is already derivable from it (the ledger carries forward automatically) and
@@ -218,20 +228,27 @@ export function createSieService(deps: {
 
       return db.transaction(async (tx) => {
         const created: string[] = [];
+        const uncreatable: string[] = [];
         for (const balance of parsed.openingBalances) {
           const account = await repo.findAccountByNumberTx(tx, balance.accountNumber);
           if (account) continue;
+          if (!/^\d{4}$/.test(balance.accountNumber)) {
+            uncreatable.push(balance.accountNumber);
+            continue;
+          }
           await repo.createAccountTx(tx, {
             number: balance.accountNumber,
-            // #KONTO carries the name; fall back to the number when the file
-            // omits the account from its chart.
-            name: nameByNumber.get(balance.accountNumber) ?? balance.accountNumber,
+            // #KONTO carries the name (within its column); fall back to the
+            // number when the file omits the account from its chart.
+            name: (nameByNumber.get(balance.accountNumber) ?? balance.accountNumber).slice(0, 100),
             // BAS default or null — an imported unknown VAT account must not
             // get a guessed box; the VAT report warns on its movement.
             vatBox: defaultVatBox(balance.accountNumber),
           });
           created.push(balance.accountNumber);
         }
+        // Thrown inside the transaction: the accounts created above go too.
+        if (uncreatable.length > 0) throw new SieInvalidAccountNumberError([...new Set(uncreatable)]);
 
         const resolved = await Promise.all(
           parsed.openingBalances.map(async (balance) => {

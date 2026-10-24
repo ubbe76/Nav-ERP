@@ -49,7 +49,7 @@ export interface MonthPlanInput {
   dayOfMonth: RecurringDayOfMonth;
   // Today's Stockholm date.
   today: string;
-  // Months that already have a run row (created or failed).
+  // Months that already have a run row (created, failed or skipped).
   doneMonths: ReadonlySet<string>;
 }
 

@@ -14,6 +14,7 @@ import type {
   RecurringPatch,
   RecurringRow,
   RecurringRunRow,
+  RecurringRunStatus,
   RecurringVerificationRepository,
 } from "../repository/recurring-verification.repository.js";
 import type { TemplateRowWrite, VerificationTemplateRepository, VerificationTemplateView } from "../repository/verification-template.repository.js";
@@ -50,6 +51,14 @@ import { VerificationTemplateAccountMissingError, VerificationTemplateNotFoundEr
 // automatically — Kör nu is the retry, so a locked period or an inactive
 // account does not produce an hourly stream of identical failures.
 //
+// A paused post skips: the months whose day passes while it is paused are
+// written as `skipped` rows when it is activated again (same transaction),
+// so neither the job nor Kör nu creates them afterwards — the alternative,
+// a flood of back-dated verifications on Aktivera, is never what a pause
+// meant. Kör nu on a paused post still creates every due month: that is an
+// explicit request. The view's `skippedOnActivate` tells the web beforehand
+// which months Aktivera would skip.
+//
 // Fördela över perioder is a post with its own template (the two accounts,
 // no amounts) and a stored schedule (amount / months, the last month takes
 // the rest), mode book, an end month — every month books exactly its share.
@@ -77,7 +86,7 @@ class RunClaimedError extends Error {}
 export interface RecurringRunView {
   id: string;
   month: string;
-  status: "created" | "failed";
+  status: RecurringRunStatus;
   error: string | null;
   verificationId: string | null;
   verificationDisplayNumber: string | null;
@@ -100,9 +109,19 @@ export interface RecurringView {
   allocation: (RecurringAllocation & { scheduleAmounts: number[] }) | null;
   lastRun: RecurringRunView | null;
   failedCount: number;
+  // A paused post: the months whose day has passed without a run, which
+  // Aktivera will mark `skipped`. Always [] for an active post.
+  skippedOnActivate: string[];
 }
 
 export type RecurringDetailView = RecurringView & { runs: RecurringRunView[] };
+
+// PATCH's answer: the detail plus the months the activation just skipped.
+export type RecurringUpdateView = RecurringDetailView & { skippedMonths: string[] };
+
+// What a failed month stores when the error is none of the known refusals:
+// the real error goes to the server log, never to the card or the alert.
+export const UNEXPECTED_RUN_ERROR = "Ett oväntat fel inträffade — se serverloggen";
 
 export interface RecurringRunOutcome {
   created: RecurringRunView[];
@@ -110,8 +129,9 @@ export interface RecurringRunOutcome {
 }
 
 // Why a month could not be created, in the user's language — shown on the
-// card and in the alert.
-export function runErrorMessage(err: unknown): string {
+// card and in the alert. null for an error this module does not know: the
+// caller stores UNEXPECTED_RUN_ERROR and logs the real one.
+export function runErrorMessage(err: unknown): string | null {
   if (err instanceof FiscalYearClosedError) return "Räkenskapsåret är stängt";
   if (err instanceof AccountingPeriodLockedError) return `Perioden är låst (${err.message.replace(/^Accounting period for (\S+) is locked$/, "$1")})`;
   if (err instanceof NoFiscalYearForDateError) return "Inget räkenskapsår täcker datumet";
@@ -122,7 +142,7 @@ export function runErrorMessage(err: unknown): string {
   if (err instanceof TooFewVerificationRowsError) return "Mallen har färre än två rader";
   if (err instanceof RecurringTemplateIncompleteError) return err.reason;
   if (isBookkeepingLockViolation(err)) return "Bokföringen är låst för datumet";
-  return err instanceof Error ? err.message : String(err);
+  return null;
 }
 
 function dayOf(row: RecurringRow): RecurringDayOfMonth {
@@ -155,6 +175,13 @@ export function createRecurringVerificationService(deps: {
   const today = deps.today ?? stockholmToday;
   const log = deps.log ?? ((msg: string, extra?: unknown) => console.error(msg, extra));
 
+  // The months a paused post would skip on Aktivera: exactly what the job
+  // would create for it today — one rule, monthsDue.
+  function skippedOnActivate(row: RecurringRow, doneMonths: ReadonlySet<string>): string[] {
+    if (row.active) return [];
+    return monthsDue({ startMonth: row.startMonth, endMonth: row.endMonth, dayOfMonth: dayOf(row), today: today(), doneMonths });
+  }
+
   function toView(row: RecurringRow, runs: RecurringRunRow[]): RecurringView {
     const doneMonths = new Set(runs.map((r) => r.month));
     const next = row.active ? nextRunMonth({ startMonth: row.startMonth, endMonth: row.endMonth, dayOfMonth: dayOf(row), doneMonths }) : null;
@@ -176,6 +203,7 @@ export function createRecurringVerificationService(deps: {
       allocation: row.allocation && row.scheduleAmounts ? { ...row.allocation, scheduleAmounts: row.scheduleAmounts } : null,
       lastRun: last ? toRunView(last) : null,
       failedCount: runs.filter((r) => r.status === "failed").length,
+      skippedOnActivate: skippedOnActivate(row, doneMonths),
     };
   }
 
@@ -270,8 +298,11 @@ export function createRecurringVerificationService(deps: {
         outcome.created.push(toRunView(run));
       } catch (err) {
         if (err instanceof RunClaimedError) continue;
-        const message = runErrorMessage(err);
-        log(`Recurring verification ${post.templateName} ${month} failed`, { error: message });
+        const known = runErrorMessage(err);
+        // An unknown error is logged in full (stack and all) and stored as
+        // the generic text — its message may name internals.
+        log(`Recurring verification ${post.templateName} ${month} failed`, known ? { error: known } : { error: err });
+        const message = known ?? UNEXPECTED_RUN_ERROR;
         const runId = await repo.recordFailure(post.id, month, message);
         if (runId) outcome.failed.push({ id: runId, month, status: "failed", error: message, verificationId: null, verificationDisplayNumber: null, createdAt: new Date().toISOString() });
       }
@@ -345,7 +376,11 @@ export function createRecurringVerificationService(deps: {
       return detail(id);
     },
 
-    async update(id: string, input: UpdateRecurringVerificationInput, userId: string) {
+    // Aktivera (active false → true) marks the months that fell due during
+    // the pause as skipped, in the same transaction as the flag — a job tick
+    // between the two would otherwise create them all. The response names
+    // them (skippedMonths); the list's skippedOnActivate showed them before.
+    async update(id: string, input: UpdateRecurringVerificationInput, userId: string): Promise<RecurringUpdateView> {
       const existing = await repo.findById(id);
       if (!existing) throw new RecurringVerificationNotFoundError(id);
       if (input.endMonth !== undefined && input.endMonth !== null && input.endMonth < existing.startMonth) {
@@ -359,14 +394,33 @@ export function createRecurringVerificationService(deps: {
       if (input.dayOfMonth !== undefined) patch.dayOfMonth = input.dayOfMonth === "last" ? null : input.dayOfMonth;
       if (input.endMonth !== undefined) patch.endMonth = input.endMonth;
       if (input.mode !== undefined) patch.mode = input.mode;
-      if (!(await repo.update(id, patch))) throw new RecurringVerificationNotFoundError(id);
-      await audit.log({ entityType: "recurring_verification", entityId: id, action: "updated", detail: { fields: Object.keys(input) }, userId });
-      return detail(id);
+      const activating = input.active === true && !existing.active;
+      const skippedMonths = await economy.transaction(async (tx) => {
+        let skipped: string[] = [];
+        if (activating) {
+          const runs = (await repo.runsFor([id], tx)).get(id) ?? [];
+          // The post as it is NOW (the day may be patched in the same call):
+          // the schedule that applies after this update decides what is due.
+          const after: RecurringRow = { ...existing, ...patch, active: false };
+          const due = skippedOnActivate(after, new Set(runs.map((r) => r.month)));
+          skipped = await repo.insertSkippedRunsInTx(tx, id, due);
+        }
+        if (!(await repo.update(id, patch, tx))) throw new RecurringVerificationNotFoundError(id);
+        return skipped;
+      });
+      await audit.log({
+        entityType: "recurring_verification",
+        entityId: id,
+        action: "updated",
+        detail: { fields: Object.keys(input), ...(skippedMonths.length > 0 ? { skippedMonths } : {}) },
+        userId,
+      });
+      return { ...(await detail(id)), skippedMonths };
     },
 
     // Deletes the post. The verifications it created stay (räkenskaps-
     // information); their run rows stay too, unlinked (ON DELETE SET NULL),
-    // so a verification can always be traced back; failed run rows go.
+    // so a verification can always be traced back; failed and skipped rows go.
     async delete(id: string, userId: string) {
       const existing = await repo.findById(id);
       if (!existing) throw new RecurringVerificationNotFoundError(id);
@@ -377,7 +431,8 @@ export function createRecurringVerificationService(deps: {
 
     // Kör nu: the failed months are tried again and every due month
     // created — the one place a failed month is retried. Runs whether the
-    // post is paused or not: the user asked for it.
+    // post is paused or not: the user asked for it. Skipped months stay
+    // skipped (they have a row).
     async run(id: string, userId: string): Promise<RecurringRunOutcome> {
       const post = await repo.findById(id);
       if (!post) throw new RecurringVerificationNotFoundError(id);

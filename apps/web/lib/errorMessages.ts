@@ -532,6 +532,7 @@ const MESSAGES: Record<string, MessageEntry> = {
     const who = typeof body?.importedBy === "string" && body.importedBy ? body.importedBy : null;
     return `Filen har redan importerats${when ? ` ${when}` : ""}${who ? ` av ${who}` : ""}.`;
   },
+  "sie-invalid-account-number": serverMessage("Ett konto i filen har inte fyra siffror och kan inte skapas."),
   "sie-verification-import-blocked": (err) => {
     const body = err.body as { blockers?: unknown } | undefined;
     const blockers = Array.isArray(body?.blockers) ? body!.blockers.map(String) : [];

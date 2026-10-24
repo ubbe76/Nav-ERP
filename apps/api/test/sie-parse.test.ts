@@ -192,6 +192,29 @@ describe("parseSieDocument — verifications", () => {
     expect(() => parseSieDocument(Buffer.from(["#VER A 1 20260301", "{", "#TRANS 1930 {} 1,5", "}"].join("\n")))).toThrow(SieParseError);
   });
 
+  it("refuses a date that is eight digits but no calendar day (a 400, never a Postgres 500)", () => {
+    const block = ["{", "#TRANS 1930 {} 100.00", "#TRANS 3001 {} -100.00", "}"];
+    expect(() => parseSieDocument(Buffer.from(["#VER A 1 20260230", ...block].join("\n")))).toThrow(/Ogiltigt datum i SIE-filen: 20260230/);
+    expect(() => parseSieDocument(Buffer.from(["#VER A 1 20261301", ...block].join("\n")))).toThrow(SieParseError);
+    expect(() => parseSieDocument(Buffer.from(["#VER A 1 20260301", "{", "#TRANS 1930 {} 100.00 20260431", "#TRANS 3001 {} -100.00", "}"].join("\n")))).toThrow(SieParseError);
+    expect(() => parseSieDocument(Buffer.from(["#RAR 0 20260101 20260931"].join("\n")))).toThrow(SieParseError);
+    // A leap day in a leap year is a day; in a common year it is not.
+    expect(parseSieDocument(Buffer.from(["#VER A 1 20280229", ...block].join("\n"))).verifications[0]!.date).toBe("2028-02-29");
+    expect(() => parseSieDocument(Buffer.from(["#VER A 1 20270229", ...block].join("\n")))).toThrow(SieParseError);
+  });
+
+  it("refuses a #VER header without its { … } block instead of dropping it silently", () => {
+    // Followed by another record …
+    expect(() => parseSieDocument(Buffer.from(["#VER A 1 20260301 \"x\"", "#VER A 2 20260302 \"y\"", "{", "}"].join("\n")))).toThrow(
+      /#VER A 1 saknar sitt \{ … \}-block/
+    );
+    expect(() => parseSieDocument(Buffer.from(["#VER A 1 20260301", "#UB 0 1930 100.00"].join("\n")))).toThrow(SieParseError);
+    // … or by the end of the file.
+    expect(() => parseSieDocument(Buffer.from(["#VER A 1 20260301 \"x\""].join("\n")))).toThrow(SieParseError);
+    // Blank lines between the header and its brace are fine.
+    expect(parseSieDocument(Buffer.from(["#VER A 1 20260301", "", "{", "#TRANS 1930 {} 1.00", "}"].join("\n"))).verifications).toHaveLength(1);
+  });
+
   it("still serves the opening-balance reader unchanged", () => {
     const result = parseSieFile(encodeCp437(FILE));
     expect(result.openingBalances).toHaveLength(2);

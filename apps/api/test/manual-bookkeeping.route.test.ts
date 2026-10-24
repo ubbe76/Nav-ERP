@@ -286,7 +286,14 @@ describe("recurring verifications", () => {
 
     const patched = await c.patch(`/recurring-verifications/${post.id}`, { active: false, dayOfMonth: "last", mode: "book", endMonth: null });
     expect(patched.statusCode).toBe(200);
-    expect(patched.json()).toMatchObject({ active: false, dayOfMonth: "last", mode: "book", nextRunMonth: null });
+    expect(patched.json()).toMatchObject({ active: false, dayOfMonth: "last", mode: "book", nextRunMonth: null, skippedMonths: [] });
+    // Paused: the view says what Aktivera would skip (this month's last day
+    // is still ahead, last month is already created — nothing).
+    expect(patched.json().skippedOnActivate).toEqual([]);
+    const activated = await c.patch(`/recurring-verifications/${post.id}`, { active: true });
+    expect(activated.statusCode).toBe(200);
+    expect(activated.json()).toMatchObject({ active: true, skippedMonths: [], skippedOnActivate: [] });
+    expect(list.json().rows[0].skippedOnActivate).toEqual([]);
 
     const run = await c.post(`/recurring-verifications/${post.id}/run`);
     expect(run.statusCode).toBe(200);
@@ -409,6 +416,30 @@ describe("SIE verification import", () => {
 
     const noFile = await app.inject({ method: "POST", url: "/api/v1/sie/verifications/preview", headers: { cookie, "content-type": "multipart/form-data; boundary=x" }, payload: "--x--\r\n" });
     expect(noFile.statusCode).toBe(400);
+  });
+
+  it("answers a file over 20 MB with the Swedish 400, not the framework's 413", async () => {
+    await setupEconomy();
+    const cookie = await ekonomiCookie();
+    const huge = multipart({ mode: "draft" }, { name: "stor.se", data: Buffer.alloc(20 * 1024 * 1024 + 1, 0x20) });
+    for (const url of ["/api/v1/sie/verifications/preview", "/api/v1/sie/verifications/import"]) {
+      const res = await app.inject({ method: "POST", url, headers: { cookie, ...huge.headers }, payload: huge.payload });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({ error: "Filen är för stor — max 20 MB" });
+    }
+  });
+
+  it("answers a broken SIE file (impossible date, header without block) with 400", async () => {
+    await setupEconomy();
+    const cookie = await ekonomiCookie();
+    const bad = multipart({}, { name: "fel.se", data: encodeCp437([`#RAR 0 ${YEAR}0101 ${YEAR}1231`, `#VER "LÖ" "1" ${YEAR}0230 "x"`, "{", "#TRANS 1930 {} 1.00", "#TRANS 1930 {} -1.00", "}", ""].join("\r\n")) });
+    const res = await app.inject({ method: "POST", url: "/api/v1/sie/verifications/preview", headers: { cookie, ...bad.headers }, payload: bad.payload });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: "sie-parse", error: expect.stringContaining(`${YEAR}0230`) });
+    const noBlock = multipart({}, { name: "fel.se", data: encodeCp437([`#VER "LÖ" "1" ${YEAR}0301 "x"`, "#UB 0 1930 1.00", ""].join("\r\n")) });
+    const res2 = await app.inject({ method: "POST", url: "/api/v1/sie/verifications/preview", headers: { cookie, ...noBlock.headers }, payload: noBlock.payload });
+    expect(res2.statusCode).toBe(400);
+    expect(res2.json().error).toContain("saknar sitt { … }-block");
   });
 });
 

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import {
   fiscalYears,
   recurringVerificationRuns,
@@ -17,8 +17,10 @@ import type { RecurringVerificationMode } from "@navet/shared";
 // (recurring_id, month) is the job's reservation: insertRunInTx writes the
 // `created` row in the SAME transaction as the verification it points at
 // (a concurrent writer's insert blocks on the uncommitted row and then does
-// nothing), and recordFailure writes a `failed` row afterwards that blocks
-// automatic retries until Kör nu removes it.
+// nothing), recordFailure writes a `failed` row afterwards that blocks
+// automatic retries until Kör nu removes it, and insertSkippedRunsInTx writes
+// the `skipped` rows for the months that passed while the post was paused —
+// in the same transaction as the activation, so the job never creates them.
 
 export interface RecurringRow {
   id: string;
@@ -38,11 +40,13 @@ export interface RecurringRow {
   updatedAt: Date;
 }
 
+export type RecurringRunStatus = "created" | "failed" | "skipped";
+
 export interface RecurringRunRow {
   id: string;
   recurringId: string | null;
   month: string;
-  status: "created" | "failed";
+  status: RecurringRunStatus;
   error: string | null;
   verificationId: string | null;
   // Built here (series code + year label + number), null for a draft.
@@ -104,10 +108,10 @@ export function createRecurringVerificationRepository(db: Db) {
 
     // Every run of the given posts, newest month first, with the booked
     // verification's number when there is one.
-    async runsFor(recurringIds: string[]): Promise<Map<string, RecurringRunRow[]>> {
+    async runsFor(recurringIds: string[], executor: Db | Tx = db): Promise<Map<string, RecurringRunRow[]>> {
       const byRecurring = new Map<string, RecurringRunRow[]>();
       if (recurringIds.length === 0) return byRecurring;
-      const rows = await db
+      const rows = await executor
         .select({
           id: recurringVerificationRuns.id,
           recurringId: recurringVerificationRuns.recurringId,
@@ -158,8 +162,8 @@ export function createRecurringVerificationRepository(db: Db) {
       return run(tx ?? db);
     },
 
-    async update(id: string, patch: RecurringPatch): Promise<boolean> {
-      const [row] = await db
+    async update(id: string, patch: RecurringPatch, executor: Db | Tx = db): Promise<boolean> {
+      const [row] = await executor
         .update(recurringVerifications)
         .set({ ...patch, updatedAt: new Date() })
         .where(eq(recurringVerifications.id, id))
@@ -169,18 +173,27 @@ export function createRecurringVerificationRepository(db: Db) {
 
     // Removes the post. Runs that created a verification keep their row
     // (recurring_id → null, the verification's only link to its origin);
-    // failed runs carry nothing and go with the post.
-    // deleteTemplate: a fördelning's own template goes with the post.
+    // failed and skipped runs carry nothing and go with the post.
+    // deleteTemplate: a fördelning's own template goes with the post — unless
+    // another post has come to use it (the template is editable), in which
+    // case it stays: the restrict FK would otherwise fail the whole delete.
     async delete(id: string, deleteTemplate = false): Promise<boolean> {
       return db.transaction(async (tx) => {
         await tx
           .delete(recurringVerificationRuns)
-          .where(and(eq(recurringVerificationRuns.recurringId, id), eq(recurringVerificationRuns.status, "failed")));
+          .where(and(eq(recurringVerificationRuns.recurringId, id), ne(recurringVerificationRuns.status, "created")));
         const [row] = await tx
           .delete(recurringVerifications)
           .where(eq(recurringVerifications.id, id))
           .returning({ id: recurringVerifications.id, templateId: recurringVerifications.templateId });
-        if (row && deleteTemplate) await tx.delete(verificationTemplates).where(eq(verificationTemplates.id, row.templateId));
+        if (row && deleteTemplate) {
+          const [other] = await tx
+            .select({ one: sql`1` })
+            .from(recurringVerifications)
+            .where(eq(recurringVerifications.templateId, row.templateId))
+            .limit(1);
+          if (!other) await tx.delete(verificationTemplates).where(eq(verificationTemplates.id, row.templateId));
+        }
         return row !== undefined;
       });
     },
@@ -209,8 +222,22 @@ export function createRecurringVerificationRepository(db: Db) {
       return row?.id ?? null;
     },
 
+    // Activation after a pause: the months that fell due meanwhile get a
+    // `skipped` row so neither the job nor Kör nu creates them. ON CONFLICT
+    // DO NOTHING — a month a concurrent Kör nu already created keeps its row.
+    // Returns the months actually marked.
+    async insertSkippedRunsInTx(tx: Tx, recurringId: string, months: string[]): Promise<string[]> {
+      if (months.length === 0) return [];
+      const rows = await tx
+        .insert(recurringVerificationRuns)
+        .values(months.map((month) => ({ recurringId, month, status: "skipped" as const })))
+        .onConflictDoNothing({ target: [recurringVerificationRuns.recurringId, recurringVerificationRuns.month] })
+        .returning({ month: recurringVerificationRuns.month });
+      return rows.map((r) => r.month);
+    },
+
     // Kör nu: the failed months are tried again — their rows go, the months
-    // become due again.
+    // become due again. Skipped months stay skipped.
     async deleteFailedRuns(recurringId: string): Promise<number> {
       const rows = await db
         .delete(recurringVerificationRuns)

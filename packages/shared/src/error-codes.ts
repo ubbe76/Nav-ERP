@@ -146,6 +146,9 @@ export const ERROR_CODES = {
   SIE_FILE_ALREADY_IMPORTED: "sie-file-already-imported",
   // ...or something that stops the whole file (409, body.blockers)
   SIE_VERIFICATION_IMPORT_BLOCKED: "sie-verification-import-blocked",
+  // SIE opening-balance import: an #IB account the chart lacks that is not
+  // four digits and so cannot be created (400, body.accounts)
+  SIE_INVALID_ACCOUNT_NUMBER: "sie-invalid-account-number",
   // årsbokslut
   FISCAL_YEAR_CLOSED: "fiscal-year-closed",
   YEAR_END_CLOSING_NOT_FOUND: "year-end-closing-not-found",

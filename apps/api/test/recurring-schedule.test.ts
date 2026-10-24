@@ -47,9 +47,12 @@ describe("monthsDue", () => {
     expect(monthsDue({ ...base, today: "2026-03-24" })).toEqual(["2026-01", "2026-02"]);
   });
 
-  it("skips months that already have a run — created or failed alike", () => {
+  it("skips months that already have a run — created, failed or skipped alike", () => {
     expect(monthsDue({ ...base, today: "2026-03-25", doneMonths: new Set(["2026-01", "2026-02"]) })).toEqual(["2026-03"]);
     expect(monthsDue({ ...base, today: "2026-03-25", doneMonths: new Set(["2026-02"]) })).toEqual(["2026-01", "2026-03"]);
+    // The set is status-blind: a month skipped during a pause is a done month.
+    const skipped = new Set(["2026-01", "2026-02", "2026-03"]);
+    expect(monthsDue({ ...base, today: "2026-04-25", doneMonths: skipped })).toEqual(["2026-04"]);
   });
 
   it("stops at the end month", () => {

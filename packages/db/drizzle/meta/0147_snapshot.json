@@ -18989,7 +18989,7 @@
         },
         "recurring_run_outcome": {
           "name": "recurring_run_outcome",
-          "value": "(\"recurring_verification_runs\".\"status\" = 'created' AND \"recurring_verification_runs\".\"verification_id\" IS NOT NULL AND \"recurring_verification_runs\".\"error\" IS NULL) OR (\"recurring_verification_runs\".\"status\" = 'failed' AND \"recurring_verification_runs\".\"verification_id\" IS NULL AND \"recurring_verification_runs\".\"error\" IS NOT NULL)"
+          "value": "(\"recurring_verification_runs\".\"status\" = 'created' AND \"recurring_verification_runs\".\"verification_id\" IS NOT NULL AND \"recurring_verification_runs\".\"error\" IS NULL) OR (\"recurring_verification_runs\".\"status\" = 'failed' AND \"recurring_verification_runs\".\"verification_id\" IS NULL AND \"recurring_verification_runs\".\"error\" IS NOT NULL) OR (\"recurring_verification_runs\".\"status\" = 'skipped' AND \"recurring_verification_runs\".\"verification_id\" IS NULL AND \"recurring_verification_runs\".\"error\" IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -19977,7 +19977,8 @@
       "schema": "public",
       "values": [
         "created",
-        "failed"
+        "failed",
+        "skipped"
       ]
     },
     "public.recurring_verification_mode": {

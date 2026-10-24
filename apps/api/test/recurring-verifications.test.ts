@@ -12,6 +12,7 @@ import {
   createRecurringVerificationService,
   RecurringTemplateIncompleteError,
   RecurringVerificationNotFoundError,
+  UNEXPECTED_RUN_ERROR,
 } from "../src/modules/economy/service/recurring-verification.service.js";
 import { createVerificationTemplateService } from "../src/modules/economy/service/verification-template.service.js";
 
@@ -175,9 +176,84 @@ describe("recurring verifications — create and the job", () => {
     expect(await recurring.runDue()).toEqual({ posts: 1, created: 0, failed: 0 });
     expect((await recurring.findById(paused.id)).runs).toEqual([]);
     expect((await recurring.findById(paused.id)).nextRunMonth).toBeNull();
-    // … until it is activated again.
-    await recurring.update(paused.id, { active: true }, user.id);
-    expect(await recurring.runDue()).toEqual({ posts: 2, created: 5, failed: 0 });
+    // … and when it is activated again the months that passed meanwhile are
+    // skipped, not created: the job finds nothing new for it.
+    const activated = await recurring.update(paused.id, { active: true }, user.id);
+    expect(activated.skippedMonths).toEqual([`${YEAR}-02`, `${YEAR}-03`, `${YEAR}-04`, `${YEAR}-05`, `${YEAR}-06`]);
+    expect(await recurring.runDue()).toEqual({ posts: 2, created: 0, failed: 0 });
+    expect((await recurring.findById(paused.id)).nextRunMonth).toBe(`${YEAR}-07`);
+  });
+
+  it("Aktivera skips the months that fell due during the pause; the view shows them beforehand; Kör nu still creates", async () => {
+    const { user, template } = await setup();
+    today = `${YEAR}-01-10`;
+    const post = await recurring.create({ templateId: template.id, dayOfMonth: 5, startMonth: `${YEAR}-01`, endMonth: null, mode: "draft" }, user.id);
+    expect(post.skippedOnActivate).toEqual([]);
+    const paused = await recurring.update(post.id, { active: false }, user.id);
+    expect(paused.skippedMonths).toEqual([]);
+    expect(paused.skippedOnActivate).toEqual([]);
+
+    // Three months pass. The paused post's view says what Aktivera would skip
+    // — this month's 5th has passed, so April counts too.
+    today = `${YEAR}-04-20`;
+    const view = (await recurring.list()).rows.find((r) => r.id === post.id)!;
+    expect(view.active).toBe(false);
+    expect(view.skippedOnActivate).toEqual([`${YEAR}-02`, `${YEAR}-03`, `${YEAR}-04`]);
+    expect(view.nextRunMonth).toBeNull();
+
+    const activated = await recurring.update(post.id, { active: true }, user.id);
+    expect(activated.skippedMonths).toEqual([`${YEAR}-02`, `${YEAR}-03`, `${YEAR}-04`]);
+    expect(activated.active).toBe(true);
+    expect(activated.skippedOnActivate).toEqual([]);
+    expect(activated.runs.map((r) => [r.month, r.status, r.error, r.verificationId])).toEqual([
+      [`${YEAR}-04`, "skipped", null, null],
+      [`${YEAR}-03`, "skipped", null, null],
+      [`${YEAR}-02`, "skipped", null, null],
+      [`${YEAR}-01`, "created", null, expect.any(String)],
+    ]);
+    expect(activated.failedCount).toBe(0);
+    expect(activated.lastRun?.status).toBe("skipped");
+    expect(activated.nextRunMonth).toBe(`${YEAR}-05`);
+    // Only January's verification exists.
+    expect((await allVerifications()).map((v) => v.date)).toEqual([`${YEAR}-01-05`]);
+
+    // Neither the job nor Kör nu creates a skipped month; the alert never
+    // lists one (it is not a failure).
+    expect(await recurring.runDue()).toEqual({ posts: 1, created: 0, failed: 0 });
+    const run = await recurring.run(post.id, user.id);
+    expect(run).toEqual({ created: [], failed: [] });
+    expect(await alerts.failedRecurringRuns()).toEqual([]);
+    expect((await allVerifications()).map((v) => v.date)).toEqual([`${YEAR}-01-05`]);
+
+    // Activating an already active post skips nothing; so does a pause.
+    expect((await recurring.update(post.id, { active: true }, user.id)).skippedMonths).toEqual([]);
+
+    // Kör nu on a PAUSED post is the explicit way to create the due months.
+    await recurring.update(post.id, { active: false }, user.id);
+    today = `${YEAR}-06-20`;
+    const explicit = await recurring.run(post.id, user.id);
+    expect(explicit.created.map((r) => r.month)).toEqual([`${YEAR}-05`, `${YEAR}-06`]);
+    expect((await recurring.update(post.id, { active: true }, user.id)).skippedMonths).toEqual([]);
+
+    // Delete takes the skipped rows with the post (they carry nothing).
+    await recurring.delete(post.id, user.id);
+    const left = await db.select().from(recurringVerificationRuns);
+    expect(left.every((r) => r.status === "created" && r.recurringId === null)).toBe(true);
+    expect(left).toHaveLength(3);
+  });
+
+  it("Aktivera with a changed day skips by the day that applies after the update, in one transaction", async () => {
+    const { user, template } = await setup();
+    today = `${YEAR}-01-01`;
+    const post = await recurring.create({ templateId: template.id, dayOfMonth: 28, startMonth: `${YEAR}-02`, endMonth: null, mode: "draft" }, user.id);
+    await recurring.update(post.id, { active: false }, user.id);
+    // On the 10th of April: with day 28, February and March are due; with
+    // day 5 (patched in the same call) April is due too.
+    today = `${YEAR}-04-10`;
+    const activated = await recurring.update(post.id, { active: true, dayOfMonth: 5 }, user.id);
+    expect(activated.skippedMonths).toEqual([`${YEAR}-02`, `${YEAR}-03`, `${YEAR}-04`]);
+    expect(activated.dayOfMonth).toBe(5);
+    expect(activated.nextRunDate).toBe(`${YEAR}-05-05`);
   });
 
   it("two concurrent runs never create a month twice", async () => {
@@ -242,6 +318,38 @@ describe("recurring verifications — failures and Kör nu", () => {
       [`${YEAR}-01`, "created"],
     ]);
     expect(await alerts.failedRecurringRuns()).toEqual([]);
+  });
+
+  it("stores a generic text for an unknown error and logs the real one", async () => {
+    const { user, template } = await setup();
+    const logged: unknown[] = [];
+    // The template read inside the month's transaction blows up with an
+    // error this module does not know; the reading outside (the completeness
+    // check at create) is left alone.
+    const broken = createRecurringVerificationService({
+      repo: recurringRepo,
+      templates: {
+        ...templateRepo,
+        findById: async (id, tx) => {
+          if (tx) throw new Error("connection to internal-db-7 refused");
+          return templateRepo.findById(id);
+        },
+      },
+      economy: economyRepo,
+      economyService: economy,
+      audit: { log: async () => {} },
+      today: () => today,
+      log: (_msg, extra) => logged.push(extra),
+    });
+    today = `${YEAR}-01-02`;
+    const post = await broken.create({ templateId: template.id, dayOfMonth: 1, startMonth: `${YEAR}-01`, endMonth: null, mode: "draft" }, user.id);
+    expect(post.runs.map((r) => [r.status, r.error])).toEqual([["failed", UNEXPECTED_RUN_ERROR]]);
+    expect(post.runs[0]!.error).not.toContain("internal-db-7");
+    expect(logged).toHaveLength(1);
+    expect((logged[0] as { error: unknown }).error).toBeInstanceOf(Error);
+    expect(((logged[0] as { error: Error }).error).message).toContain("internal-db-7");
+    // A known refusal is still stored as its own sentence.
+    expect((await alerts.failedRecurringRuns()).map((r) => r.error)).toEqual([UNEXPECTED_RUN_ERROR]);
   });
 
   it("an inactive account on the template fails the month, and the draft is rolled back with it", async () => {
@@ -325,6 +433,34 @@ describe("fördela över perioder", () => {
     const totalCredit = round2(rows.reduce((a, r) => a + Number(r.credit), 0));
     expect(totalDebit).toBe(10000);
     expect(totalCredit).toBe(10000);
+  });
+
+  it("deleting a fördelning leaves its template when another post has come to use it", async () => {
+    const { user } = await setup();
+    today = `${YEAR}-01-01`;
+    const allocation = await recurring.createAllocation(
+      { amount: 1200, kind: "cost", balanceAccount: "1790", resultAccount: "5010", firstMonth: `${YEAR}-02`, months: 3, description: "Försäkring" },
+      user.id
+    );
+    // A second post on the fördelning's own template (the template is
+    // editable, so this can happen through the API after adding amounts).
+    const otherId = await recurringRepo.create(
+      { templateId: allocation.templateId, dayOfMonth: 1, startMonth: `${YEAR}-02`, endMonth: null, mode: "draft", scheduleAmounts: null, allocation: null },
+      user.id
+    );
+    await recurring.delete(allocation.id, user.id);
+    await expect(recurring.findById(allocation.id)).rejects.toThrow(RecurringVerificationNotFoundError);
+    expect((await recurring.findById(otherId)).templateId).toBe(allocation.templateId);
+    expect(await templateRepo.findById(allocation.templateId)).not.toBeNull();
+
+    // Without the other post the template goes with the fördelning.
+    await recurring.delete(otherId, user.id);
+    const again = await recurring.createAllocation(
+      { amount: 1200, kind: "cost", balanceAccount: "1790", resultAccount: "5010", firstMonth: `${YEAR}-02`, months: 3, description: "Hyra" },
+      user.id
+    );
+    await recurring.delete(again.id, user.id);
+    expect(await templateRepo.findById(again.templateId)).toBeNull();
   });
 
   it("revenue runs the other way, a second fördelning of the same text gets its own template name, and bad input is refused", async () => {

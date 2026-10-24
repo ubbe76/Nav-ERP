@@ -138,8 +138,18 @@ export function splitFields(line: string): string[] {
   return fields;
 }
 
+// YYYYMMDD → ISO. The shape alone is not enough: 20260230 is eight digits
+// and would reach Postgres as an invalid date (a 500) — a UTC round trip
+// catches it here, as a 400 with the offending value.
 function isoDate(sieDate: string): string {
   if (!/^\d{8}$/.test(sieDate)) throw new SieParseError(`Ogiltigt datum i SIE-filen: ${sieDate}`);
+  const year = Number(sieDate.slice(0, 4));
+  const month = Number(sieDate.slice(4, 6));
+  const day = Number(sieDate.slice(6, 8));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    throw new SieParseError(`Ogiltigt datum i SIE-filen: ${sieDate}`);
+  }
   return `${sieDate.slice(0, 4)}-${sieDate.slice(4, 6)}-${sieDate.slice(6, 8)}`;
 }
 
@@ -206,6 +216,15 @@ export function parseSieDocument(buffer: Buffer): ParsedSieDocument {
   let current: ParsedSieVerification | null = null;
   let inBlock = false;
 
+  // A #VER header must be followed by its `{ … }` block (SIE 4: the rows ARE
+  // the verification). A header with no block is a broken file, refused
+  // rather than dropped silently.
+  function assertNoOpenHeader(where: string) {
+    if (current && !inBlock) {
+      throw new SieParseError(`#VER ${current.series} ${current.number} saknar sitt { … }-block (${where})`);
+    }
+  }
+
   for (const rawLine of text.split(/\r\n|\n|\r/)) {
     const line = rawLine.trim();
     if (line === "") continue;
@@ -226,6 +245,8 @@ export function parseSieDocument(buffer: Buffer): ParsedSieDocument {
 
     const fields = splitFields(line);
     const label = fields[0];
+    // Any record between a #VER header and its `{` means the block is missing.
+    assertNoOpenHeader(`följs av ${label ?? "en annan post"}`);
 
     // Inside a #VER block only the transaction records matter. #RTRANS is a
     // row's original (the spec says a #TRANS with the same content follows
@@ -276,6 +297,7 @@ export function parseSieDocument(buffer: Buffer): ParsedSieDocument {
     }
   }
   if (current && inBlock) throw new SieParseError("Filen slutar mitt i ett #VER-block");
+  assertNoOpenHeader("filen slutar");
 
   return { program, companyName, fiscalYears, accounts, openingBalances, verifications };
 }

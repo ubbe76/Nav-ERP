@@ -5,7 +5,7 @@
 -- över perioder (schedule_amounts), samt dubblettspärren för SIE-importen av
 -- verifikat (sha256 unik). Inga ändringar i verifications/verification_rows —
 -- mallkörningar och importen skapar vanliga verifikat via create/book.
-CREATE TYPE "public"."recurring_run_status" AS ENUM('created', 'failed');--> statement-breakpoint
+CREATE TYPE "public"."recurring_run_status" AS ENUM('created', 'failed', 'skipped');--> statement-breakpoint
 CREATE TYPE "public"."recurring_verification_mode" AS ENUM('draft', 'book');--> statement-breakpoint
 CREATE TABLE "recurring_verification_runs" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE "recurring_verification_runs" (
 	"verification_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "recurring_run_month" CHECK ("recurring_verification_runs"."month" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'),
-	CONSTRAINT "recurring_run_outcome" CHECK (("recurring_verification_runs"."status" = 'created' AND "recurring_verification_runs"."verification_id" IS NOT NULL AND "recurring_verification_runs"."error" IS NULL) OR ("recurring_verification_runs"."status" = 'failed' AND "recurring_verification_runs"."verification_id" IS NULL AND "recurring_verification_runs"."error" IS NOT NULL))
+	CONSTRAINT "recurring_run_outcome" CHECK (("recurring_verification_runs"."status" = 'created' AND "recurring_verification_runs"."verification_id" IS NOT NULL AND "recurring_verification_runs"."error" IS NULL) OR ("recurring_verification_runs"."status" = 'failed' AND "recurring_verification_runs"."verification_id" IS NULL AND "recurring_verification_runs"."error" IS NOT NULL) OR ("recurring_verification_runs"."status" = 'skipped' AND "recurring_verification_runs"."verification_id" IS NULL AND "recurring_verification_runs"."error" IS NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "recurring_verifications" (
