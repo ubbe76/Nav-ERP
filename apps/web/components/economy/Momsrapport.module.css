@@ -1,0 +1,86 @@
+/* Momsrapport: colours are semantic tokens only. */
+
+/* Boxes with no amount stay in the table (it is the declaration form) but
+   step back. */
+.dim {
+  color: var(--color-text-muted);
+}
+
+.heading {
+  color: var(--color-heading-accent);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.toolbarTitle {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The Redovisningsperiod för moms setting: select and Spara on one line,
+   bottom-aligned against the select. */
+.settingRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.settingField {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.divider {
+  border: 0;
+  border-top: 1px solid var(--color-divider);
+  margin: var(--space-4) 0;
+}
+
+.warningList {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.warningBlock + .warningBlock {
+  margin-top: var(--space-3);
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: var(--space-3) 0 0;
+  font-size: 13.5px;
+}
+
+.summaryLine {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.summaryLabel {
+  color: var(--color-text-secondary);
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}

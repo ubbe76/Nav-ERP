@@ -1,6 +1,7 @@
-// Mirror of @navet/shared's VAT_BOXES/VAT_BOX_LABELS (the web cannot import
+// Mirror of @navet/shared's VAT_BOXES/VAT_BOX_LABELS, VAT_BOX_49_LABEL,
+// VAT_SETTLED_BOXES and VAT_REPORTING_PERIODS (the web cannot import
 // @navet/shared — Turbopack vs .js-suffix imports). Kept in sync by
-// apps/api/test/vat-box.shared.test.ts.
+// apps/api/test/vat-box.shared.test.ts and vat-codes.shared.test.ts.
 export const VAT_BOXES = [
   "05",
   "06",
@@ -70,3 +71,21 @@ export function vatBoxLabel(value: VatBoxSetting | null): string {
   if (value === "none") return "Ingen ruta";
   return `${value} · ${VAT_BOX_LABELS[value]}`;
 }
+
+// The declaration as reported: every stored box plus the computed ruta 49.
+export type VatDeclarationBox = VatBox | "49";
+export const VAT_BOX_49_LABEL = "Moms att betala eller få tillbaka";
+export type VatDeclarationBoxes = Record<VatDeclarationBox, number>;
+
+// Boxes whose accounts the momsomföring empties.
+export const VAT_SETTLED_BOXES = ["10", "11", "12", "30", "31", "32", "48", "60", "61", "62"] as const satisfies readonly VatBox[];
+
+// Redovisningsperiod för moms (system_settings vat_reporting_period).
+export const VAT_REPORTING_PERIODS = ["month", "quarter", "year"] as const;
+export type VatReportingPeriod = (typeof VAT_REPORTING_PERIODS)[number];
+
+export const VAT_REPORTING_PERIOD_LABELS: Record<VatReportingPeriod, string> = {
+  month: "Månad",
+  quarter: "Kvartal",
+  year: "Helår",
+};

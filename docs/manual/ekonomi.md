@@ -1,8 +1,8 @@
 # Ekonomi
 
-Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan, och **momsrapporten** sammanställer momsdeklarationens rutor per period, se [Momsrapport](#momsrapport). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
+Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
 
-Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, Huvudbok, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
+Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, Huvudbok, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
 
 ## Kontoplan
 
@@ -118,33 +118,102 @@ Till skillnad från balansräkningen är resultaträkningen strikt periodavgrän
 
 Bara bokförda verifikat räknas med. Rapporten skriver ingenting och kan köras om obegränsat, även på låsta perioder. **Ladda ner PDF** och **Ladda ner CSV** laddar ner rapporten.
 
+## Momskoder
+
+**Ekonomi → Momskoder** visar de momskoder systemet bokför med. En **momskod** beskriver hur en rad beskattas: vilken sats den har, vilka konton den bokförs mot — och därmed vilken ruta i momsdeklarationen beloppen hamnar i — och vilken text fakturan ska bära. Koderna är en fast katalog, eftersom lagen avgör vilka som finns: du kan inte lägga upp nya koder eller ta bort någon. Det som är företagets eget är **kontonumren**, **fakturatexten**, **benämningen** och om koden är **Aktiv**.
+
+Tabellen har kolumnerna **Kod**, **Benämning**, **Typ**, **Sats**, **Konton**, **Fakturatext** och **Status** (**Aktiv** eller **Inaktiv**, med knappen **Ändra** under). Under benämningen står hur många konteringsregler som använder koden. Kolumnen **Konton** visar varje konto koden bokför mot med sin roll (**Intäkt**, **Utg. moms**, **Ing. moms**, **Kostnad**, **Underlag** och **Motkonto**), kontots namn och den momsruta koden förväntar sig, t.ex. **Intäkt 3108 Försäljning varor till annat EU-land · ruta 35**. Under **Ändra** heter rollerna **Intäktskonto**, **Utgående moms**, **Ingående moms**, **Kostnadskonto**, **Underlag** och **Motkonto underlag**. Stämmer inte kontots momsruta i [kontoplanen](#kontoplan) med den koden förväntar sig visas en varning under kontot — **Kontot har ruta 05 men ska ha ruta 35**, **Kontot är inaktivt** eller **Kontot finns inte i kontoplanen** — och rörelserna skulle då hamna i fel ruta. Klicka på varningen för att öppna kontot i kontoplanen och rätta rutan.
+
+| Kod | Benämning | Sats | Konton (förval) och ruta |
+| --- | --- | --- | --- |
+| MP25 | Moms 25 % | 25 % | Intäkt 3001 (05), utgående moms 2610 (10), ingående moms 2640 (48) |
+| MP12 | Moms 12 % | 12 % | Intäkt 3002 (05), utgående moms 2620 (11), ingående moms 2640 (48) |
+| MP6 | Moms 6 % | 6 % | Intäkt 3003 (05), utgående moms 2630 (12), ingående moms 2640 (48) |
+| MF | Momsfri | 0 % | Intäkt 3004 (42) |
+| EUV | Varor till annat EU-land | 0 % | Intäkt 3108 (35) |
+| EUT | Tjänster till annat EU-land | 0 % | Intäkt 3308 (39) |
+| EXV | Export av varor | 0 % | Intäkt 3105 (36) |
+| EXT | Tjänster till land utanför EU | 0 % | Intäkt 3305 (40) |
+| OB | Omvänd betalningsskyldighet, Sverige | 0 % | Intäkt 3231 (41) |
+| IEUV25 / IEUV12 / IEUV6 | Inköp varor från EU 25 / 12 / 6 % | 25 / 12 / 6 % | Kostnad 4515 / 4516 / 4517 (20), utgående moms 2614 / 2624 / 2634 (30 / 31 / 32), ingående moms 2645 (48) |
+| IEUT | Inköp tjänster från EU 25 % | 25 % | Kostnad 4535 (21), utgående moms 2614 (30), ingående moms 2645 (48) |
+| IUTT | Inköp tjänster utanför EU 25 % | 25 % | Kostnad 4531 (22), utgående moms 2614 (30), ingående moms 2645 (48) |
+| IOBV | Inköp varor i Sverige, omvänd betalningsskyldighet | 25 % | Kostnad 4415 (23), utgående moms 2614 (30), ingående moms 2647 (48) |
+| IOBT | Inköp tjänster i Sverige, omvänd betalningsskyldighet | 25 % | Kostnad 4425 (24), utgående moms 2614 (30), ingående moms 2647 (48) |
+| IUTV | Inköp varor utanför EU (importmoms separat) | 0 % | Inga egna konton — kostnadskontot följer konteringsreglerna och standardkontot |
+| IMP25 / IMP12 / IMP6 | Importmoms 25 / 12 / 6 % | 25 / 12 / 6 % | Underlag 4545 / 4546 / 4547 (50), motkonto 4549 (ingen ruta), utgående moms 2615 / 2625 / 2635 (60 / 61 / 62), ingående moms 2645 (48) |
+
+Koderna **EUV**, **EUT** och **OB** kräver köparens momsregistreringsnummer på fakturan. Momsrutorna 06, 07, 08, 37 och 38 (uttag, vinstmarginalbeskattning, frivillig skattskyldighet för hyra och trepartshandel) har ingen momskod — de redovisas via konton med rätt momsruta och manuella verifikat.
+
+**Ändra** öppnar en dialog med:
+
+- **Benämning** — namnet som visas i listor och på fakturan.
+- **Fakturatext** — skrivs en gång på fakturan under momssammanställningen när någon rad har koden. Tomt fält betyder ingen text. **Återställ till förvald text** sätter tillbaka katalogens text (t.ex. *Unionsintern leverans (artikel 138 i mervärdesskattedirektivet)* för **EUV**).
+- **Aktiv** — en inaktiv kod kan inte väljas på nya fakturor och konteringsregler. Används koden av en konteringsregel är det tillåtet att inaktivera den, men du får en varning.
+- Ett konto per roll koden använder, som en lista över aktiva konton i formatet **"3108 Försäljning varor till annat EU-land"**. Överst i listan står **Återställ till standard (3108)**, som tar bort ett eget val. Under varje fält står den momsruta kontot förväntas ha.
+
+Kontot måste finnas i kontoplanen och vara aktivt, och en kod får inte använda samma konto för två roller — då skulle bokföringen ta ut sig själv (**"Momskoden använder samma konto för två roller — bokföringen skulle ta ut sig själv. Välj olika konton."**). Efter **Spara** visar dialogen eventuella varningar — t.ex. att ett valt konto har en annan momsruta än koden förväntar sig — innan du stänger den. Varje ändring loggas i händelseloggen som **Momskod ändrad**.
+
+Momsrapporten läser fortfarande **kontona**, inte fakturorna. Momskoden är bara vägen till rätt konto: ett manuellt verifikat på kontot 3108 hamnar i ruta 35 på samma sätt som en EU-faktura.
+
 ## Momsrapport
 
-**Ekonomi → Momsrapport** sammanställer momsdeklarationens rutor för en vald redovisningsperiod, direkt ur de bokförda verifikaten. Välj **Räkenskapsår** och **Period** — en enskild månad (t.ex. **Januari 2026**) eller ett helt kalenderkvartal (t.ex. **Kvartal 1 2026 (jan–mar)**). Kvartal erbjuds bara när räkenskapsåret innehåller kvartalets alla tre månader. Rapporten hämtas om automatiskt så fort periodvalet ändras, och bara **bokförda** verifikat räknas — utkast syns aldrig.
+**Ekonomi → Momsrapport** sammanställer momsdeklarationens alla rutor för en vald redovisningsperiod, direkt ur de bokförda verifikaten. Välj **Räkenskapsår** och **Period** — en enskild månad (t.ex. **Januari 2026**), ett helt kalenderkvartal (t.ex. **Kvartal 1 2026 (jan–mar)**) eller hela räkenskapsåret (**Helår 2026**; ett brutet räkenskapsår heter t.ex. **Helår 2025/2026**). Kvartal erbjuds bara när räkenskapsåret innehåller kvartalets alla tre månader. Rapporten hämtas om automatiskt så fort periodvalet ändras, och bara **bokförda** verifikat räknas — utkast syns aldrig.
 
-Rutorna följer Skatteverkets momsdeklaration:
+Under periodvalet står inställningen **Redovisningsperiod för moms** (**Månad**, **Kvartal** eller **Helår**) — den period Skatteverket har bestämt för företaget. Den styr vilken period sidan förväljer när du öppnar den: den senast avslutade månaden eller det senast avslutade kvartalet, eller hela året. Ändra den och klicka **Spara**.
 
-| Ruta | Innehåll | Hämtas från |
+Rutorna visas grupperade som Skatteverkets blankett, med kolumnerna **Ruta**, **Beskrivning**, **Belopp** och **Att deklarera (hela kr)**. Rutor utan belopp visas nedtonade — de finns kvar så att tabellen är hela deklarationen.
+
+| Grupp | Rutor | Hämtas från |
 | --- | --- | --- |
-| 05 | Momspliktig försäljning | Konton med momsruta **05** |
-| 35 | Varor till annat EU-land | Konton med momsruta **35** |
-| 36 | Export av varor utanför EU | Konton med momsruta **36** |
-| 42 | Momsfri försäljning | Konton med momsruta **42** |
-| 10/11/12 | Utgående moms 25/12/6 % | Konton med momsruta **10**/**11**/**12** |
-| 48 | Ingående moms att dra av | Konton med momsruta **48** |
-| 49 | Moms att betala eller få tillbaka | (10 + 11 + 12) − 48 — negativt belopp visas som **"Moms att få tillbaka"** |
+| A · Momspliktig försäljning eller uttag exklusive moms | 05, 06, 07, 08 | Konton med momsruta **05**–**08** |
+| B · Utgående moms på försäljning eller uttag i ruta 05–08 | 10, 11, 12 | Konton med momsruta **10**/**11**/**12** (25/12/6 %) |
+| C · Momspliktiga inköp vid omvänd skattskyldighet | 20, 21, 22, 23, 24 | Konton med momsruta **20**–**24** |
+| D · Utgående moms på inköp i ruta 20–24 | 30, 31, 32 | Konton med momsruta **30**/**31**/**32** (25/12/6 %) |
+| H · Import | 50, 60, 61, 62 | Konton med momsruta **50** (beskattningsunderlag) och **60**/**61**/**62** (utgående moms 25/12/6 %) |
+| E · Försäljning m.m. som är undantagen från moms | 35, 36, 37, 38, 39, 40, 41, 42 | Konton med momsruta **35**–**42** |
+| F · Ingående moms | 48 | Konton med momsruta **48** |
+| G · Moms att betala eller få tillbaka | 49 | (10 + 11 + 12 + 30 + 31 + 32 + 60 + 61 + 62) − 48 — negativt belopp visas som **"Moms att få tillbaka"** |
 
-Momsrutorna läser **kontona**, inte fakturorna — varje konto redovisas i den **Momsruta** som är angiven i [kontoplanen](#kontoplan), så även ett manuellt verifikat räknas med. Har ett intäktskonto (kontoklass 3) eller ett momskonto (26xx) rörelser i perioden men momsrutan **Ej angiven**, visar rapporten varningen **Konton utan momsruta** med en länk till kontot — de beloppen ingår inte i någon ruta förrän rutan är angiven. Rapporten varnar också om ett av standardkontona för moms eller försäljning (se [Standardkonton](#standardkonton)) har en annan momsruta än sin roll — t.ex. om **Försäljning momsfri** pekar på ett konto med ruta 05: då hamnar rörelserna inte i rätt ruta. För momskontona tömmer **Bokför momsomföring** ändå kontot. Avyttringsverifikat från [Anläggningsregistret](#avyttring) (serie AV) utesluts ur rapporten på samma sätt som momsomföringarna — försäljningen av en tillgång räknas via kundfakturan, inte via avyttringsverifikatet. Rapporten visar beloppen med ören för att stämma mot huvudboken — deklarationen avrundas till hela kronor först i e-tjänsten.
+Momsrutorna läser **kontona**, inte fakturorna — varje konto redovisas i den **Momsruta** som är angiven i [kontoplanen](#kontoplan), så även ett manuellt verifikat räknas med. Vilket konto en fakturarad bokförs mot avgörs av dess [momskod](#momskoder). Avyttringsverifikat från [Anläggningsregistret](#avyttring) (serie AV) utesluts ur rapporten på samma sätt som momsomföringarna — försäljningen av en tillgång räknas via kundfakturan, inte via avyttringsverifikatet.
+
+**Hela kronor.** Deklarationen anges i hela kronor. **Belopp** visar öresbeloppen, så att rapporten stämmer mot huvudboken, och **Att deklarera (hela kr)** visar närmaste hela krona per ruta (en halv krona avrundas bort från noll). Ruta 49 räknas på de **avrundade** rutorna — den summa Skatteverket kontrollerar.
+
+**Varningar.** Överst på rapporten visas varningar när något gör att rutorna inte stämmer:
+
+- **Konton utan momsruta** — ett intäktskonto (kontoklass 3), ett momskonto (26xx) eller ett inköpskonto (44xx/45xx) har rörelser i perioden men momsrutan **Ej angiven**. Beloppen ingår inte i någon ruta förrän rutan är angiven; länken öppnar kontot i kontoplanen.
+- **Momskoder med fel momsruta** — en aktiv momskods konto har en annan momsruta i kontoplanen än koden förväntar sig (t.ex. *Momskod EUV: konto 3108 har ruta 05 men ska ha ruta 35*), eller kontot saknas. Länkarna öppnar **Momskoder** respektive kontot.
+- **Konteringsregler med fel momsruta** — en konteringsregel för exakt en utrikes- eller omvänd momskod ersätter kodens eget konto, så regelns konto måste ha kodens momsruta. Länkarna öppnar **Konteringsregler** respektive kontot.
+
+**Ladda ned fil till Skatteverket** skapar momsdeklarationen som en XML-fil för periodens rutor i hela kronor (ISO-8859-1, filnamnet **momsdeklaration-ÅÅÅÅMM.xml** där ÅÅÅÅMM är periodens sista månad — för ett kvartal eller helår alltså den sista månaden i det). Filen laddar du själv upp i Skatteverkets e-tjänst för momsdeklaration via fil; Nav skickar ingenting. Rutor utan belopp utelämnas utom ruta 49. Filen kräver att företagets organisationsnummer är ifyllt med tio siffror under **System → Företagsuppgifter** — annars visas **"Företagets organisationsnummer saknas eller har inte tio siffror — ange det under Företagsuppgifter."** med länken **Öppna Företagsuppgifter**.
+
+Knappen **Bokför importmoms** bokför importmomsen på ett tullbeslut, se [Importmoms](#importmoms).
 
 ### Bokför momsomföring
 
-Kortet **Momsomföring** visar de fyra momskontonas rörelser i perioden (**Debet**, **Kredit**, **Netto**) — underlaget för omföringen. Knappen **Bokför momsomföring** öppnar en bekräftelsedialog som visar exakt vad som kommer att bokföras: varje momskonto nollställs för perioden och nettot läggs på standardkontot **Redovisningskonto för moms** (2650) — kredit när moms ska betalas, debet vid moms att få tillbaka. Verifikatet bokförs i serien **M** (Momsredovisning) med **periodens sista dag** som datum.
+Kortet **Momsomföring** visar alla momskonton som rört sig i perioden — konton med momsruta 10, 11, 12, 30, 31, 32, 48, 60, 61 eller 62 — med deras **Ruta**, **Debet**, **Kredit** och **Netto**: underlaget för omföringen. Under tabellen visas hur omföringen avslutas: ruta 49 **i hela kronor** på **Redovisningskonto för moms** (kredit när moms ska betalas, debet vid moms att få tillbaka) och den **öresdifferens** som hela-kronorsavrundningen lämnar på **Öres- och kronutjämning**.
+
+Knappen **Bokför momsomföring** öppnar en bekräftelsedialog som visar exakt vad som kommer att bokföras, rad för rad med **Debet**, **Kredit** och **Summa**: varje momskonto nollställs för perioden, ruta 49 bokförs på redovisningskontot och öresdifferensen på öres- och kronutjämning. Verifikatet bokförs i serien **M** (Momsredovisning) med **periodens sista dag** som datum. Redovisningskontot och öres- och kronutjämning får inte själva ha en momsruta som omföringen tömmer — annars nekas omföringen (**"Redovisningskontot för moms eller Öres- och kronutjämning har en momsruta som momsomföringen tömmer — välj ett konto utan momsruta under Konteringsregler."**).
 
 Arbetsgången är: **granska rapporten → Bokför momsomföring → lås perioden** under Räkenskapsår. Är periodens sista månad redan låst nekas omföringen — lås upp månaden (med motivering) först. En period utan momsrörelser går inte att omföra (**"Ingen moms att omföra i perioden."**).
 
-När omföringen är bokförd visar kortet **Deklarerad** med en länk till verifikatet (**Verifikat M-…**), och perioden kan inte deklareras igen — inte heller som del av ett kvartal som överlappar den. Rapportens rutor står stilla efter omföringen: själva M-verifikatet räknas aldrig med i rutorna, så deklarationsunderlaget går alltid att ta fram igen i efterhand.
+När omföringen är bokförd visar kortet **Deklarerad** med en länk till verifikatet (**Verifikat M-…**), och perioden kan inte deklareras igen — inte heller som del av ett kvartal eller helår som överlappar den. Rapportens rutor står stilla efter omföringen: själva M-verifikatet räknas aldrig med i rutorna, så deklarationsunderlaget går alltid att ta fram igen i efterhand.
 
 **Ångra:** öppna M-verifikatet via länken och använd **Omför** (se [Bokfört](#bokfort) ovan), och bokför omföringsutkastet. Perioden blir då deklarerbar igen, och en ny momsomföring tar med både de ursprungliga rörelserna och allt som bokförts i perioden sedan dess. Betalningen av momsskulden mot skattekontot (och en eventuell flytt av momsfordran till 1650) bokförs manuellt som vanligt verifikat.
+
+## Importmoms
+
+Vid import av varor från ett land utanför EU (momskoden **IUTV**, *Inköp varor utanför EU (importmoms separat)*) bokförs ingen moms på leverantörsfakturan. Importmomsen är en egen händelse som bokförs på **tullbeslutet**: beskattningsunderlaget är tullvärdet + tull + frakt till gränsen enligt tullbeslutet — inte leverantörens fakturabelopp — och momsen kvittas direkt som ingående moms. Importmomsen kopplas därför inte till någon leverantörsfaktura.
+
+Knappen **Bokför importmoms** på [Momsrapport](#momsrapport) öppnar en dialog med:
+
+- **Datum** — förvalt till i dag; verifikatet får det datumet och datumet måste ligga i en öppen period.
+- **Beskrivning** — t.ex. *Tullbeslut 2026-10-01* (obligatorisk).
+- En eller flera rader med **Momssats** (**25 %**, **12 %** eller **6 %** — koderna **IMP25**, **IMP12** och **IMP6**) och **Beskattningsunderlag** (större än 0), eftersom ett tullbeslut kan ha flera satser. **+ Lägg till rad** lägger till en rad, **Ta bort rad** tar bort en.
+
+Medan du fyller i visar dialogen **Kontering**: per rad **debet** underlagskontot (4545/4546/4547, ruta 50) och **kredit** motkontot 4549 (ingen ruta) med beskattningsunderlaget, samt **debet** ingående moms 2645 (ruta 48) och **kredit** utgående moms 2615/2625/2635 (ruta 60/61/62) med underlaget gånger satsen, avrundat till ören. Kontona kommer från momskoderna — de ändras under [Momskoder](#momskoder). Finns ingen aktiv importmomskod visar dialogen **"Det finns ingen aktiv importmomskod. Aktivera Importmoms 25, 12 eller 6 % under Momskoder."**
+
+Klicka **Bokför importmoms** så bokförs ett verifikat i serien **IM** (Importmoms) och du kommer direkt till verifikatet. Ladda upp tullbeslutet som underlag där, se [Underlag på verifikat](#underlag-pa-verifikat). Importmomsen hamnar i momsrapporten via kontonas momsrutor: underlaget i ruta 50, utgående moms i ruta 60/61/62 och ingående moms i ruta 48 — de två momsbeloppen tar ut varandra i ruta 49.
 
 ## SIE-filer
 
@@ -279,19 +348,20 @@ Kund- och leverantörsfakturor bokförs automatiskt — du behöver aldrig knapp
 - **K** (Kundreskontra) — bokförs när en **betalning registreras** (bankbeloppet mot betalkontot, kundfordran mot det som stängs, mellanskillnaden mot öres-/kronutjämning vid en avskrivning inom toleransen), när en **betalningspåminnelse** skickas med avgift ikryssad (avgiften mot kundfordran respektive kontot för påminnelseavgifter) och som en **omföring** när en betalning **makuleras**. En ren kvittning mellan en fakturas och en kreditfakturas öppna poster flyttar inget saldo och bokför därför inget verifikat — se [Kvittning av kreditfaktura](/hjalp/forsaljning#registrera-betalning) i kapitlet Försäljning.
 - **U** (Leverantörsreskontra) — bokförs när en **utbetalning registreras** i leverantörsreskontran (bankbeloppet mot betalkontot, leverantörsskulden mot det som stängs, mellanskillnaden mot öres-/kronutjämning vid en avskrivning inom toleransen), och som en **omföring** när en betalning **makuleras**. Delar betalkontots standardvärde och betalningstoleransen med kundreskontran. Se [Leverantörsreskontra](/hjalp/inkop#leverantorsreskontra) i kapitlet Inköp för hela flödet, inklusive kvittning mot leverantörens kreditfaktura.
 - **M** (Momsredovisning) — bokförs när momsrapportens **momsomföring** bokförs, se [Momsrapport](#momsrapport) ovan.
+- **IM** (Importmoms) — bokförs när du **bokför importmoms** på ett tullbeslut, se [Importmoms](#importmoms).
 - **AV** (Anläggningar) — avskrivningskörningar, deras omföringar (**Ångra senaste körning**) och avyttringsverifikat från [Anläggningsregistret](#anlaggningsregister).
 
-Serierna skapas bara om de saknas. Finns redan en verifikatserie med koden **F**, **L**, **K**, **U**, **M**, **AV** eller **BS** — t.ex. en du lagt upp själv för något annat — återanvänder automatkonteringen den serien utan att säga till, och fakturaverifikaten hamnar alltså i din befintliga serie. Vill du hålla dem åtskilda, använd andra koder än F, L, K, U, M, AV och BS för egna serier.
+Serierna skapas bara om de saknas. Finns redan en verifikatserie med koden **F**, **L**, **K**, **U**, **M**, **IM**, **AV** eller **BS** — t.ex. en du lagt upp själv för något annat — återanvänder automatkonteringen den serien utan att säga till, och fakturaverifikaten hamnar alltså i din befintliga serie. Vill du hålla dem åtskilda, använd andra koder än F, L, K, U, M, IM, AV och BS för egna serier.
 
 Fakturanumret/attesten/BET-numret/UTB-numret och verifikatet skapas i ett och samma steg — antingen blir båda av, eller ingetdera. På respektive faktura-/betalningskort visas en länk till verifikatet (**Verifikat F-…** / **Verifikat L-…** / **Verifikat K-…** / **Verifikat U-…**), synlig bara för den som kan öppna Ekonomi.
 
 **Vilket konto en rad bokförs mot avgörs i den här ordningen:**
 
-1. En **konteringsregel** för radens artikelgrupp och exakta momssats.
-2. Annars en konteringsregel för artikelgruppen med momssats **"Alla satser"** (en katalog-regel som gäller oavsett moms).
-3. Annars ett av **standardkontona**.
+1. En **konteringsregel** för radens artikelgrupp och exakta [momskod](#momskoder).
+2. Annars en konteringsregel för artikelgruppen med momskod **"Alla momskoder"** (en katalog-regel som gäller oavsett moms) — men bara för svensk moms, momsfritt och *Inköp varor utanför EU*. En katalog-regel som skickar en artikelgrupp till ett konto med ruta 05 får inte tyst ta en EU-försäljning, som ska till ruta 35.
+3. Annars kontot på **momskoden** — intäktskontot för en försäljning, kostnadskontot för ett inköp med omvänd moms — och för en kostnad med svensk moms eller momsfritt standardkontot **Kostnad, standard**.
 
-Regler och standardkonton läggs upp under [Konteringsregler](#konteringsregler) nedan. Rader utan artikelgrupp (t.ex. artiklar utan grupp, eller fria rader utan artikel på en leverantörsfaktura) hoppar direkt till standardkontot.
+Momskoden avgör också momsen: utgående moms bokförs på kodens konto för utgående moms, och vid **omvänd moms** på ett inköp (t.ex. **IEUV25**) beräknas momsen på leverantörsfakturan och bokförs både som utgående och ingående moms. Regler, standardkonton och momskoder läggs upp under [Konteringsregler](#konteringsregler) och [Momskoder](#momskoder). Rader utan artikelgrupp (t.ex. artiklar utan grupp, eller fria rader utan artikel på en leverantörsfaktura) hoppar direkt till kontot på momskoden respektive standardkontot.
 
 ## Konteringsregler
 
@@ -299,7 +369,7 @@ Regler och standardkonton läggs upp under [Konteringsregler](#konteringsregler)
 
 ### Standardkonton
 
-Sektionen **Standardkonton** listar de femton konton automatkonteringen faller tillbaka på: **Kundfordringar**, **Utgående moms 25 %**, **Utgående moms 12 %**, **Utgående moms 6 %**, **Försäljning 25 %**, **Försäljning 12 %**, **Försäljning 6 %**, **Försäljning momsfri**, **Leverantörsskulder**, **Ingående moms**, **Kostnad, standard**, **Bank/betalkonto**, **Påminnelseavgifter**, **Öres- och kronutjämning** och **Redovisningskonto för moms** (momsomföringens motkonto, standard 2650), samt bokslutets två konton **Lager** och **Lagerförändring** (se nedan). Varje fält är en lista över aktiva konton i formatet **"1510 Kundfordringar"**; det förvalda värdet är kontot som gäller just nu (eget val eller BAS-standard). Välj **"Återställ till standard (…)"** överst i listan för att ta bort ett eget val och gå tillbaka till standardkontot. Klicka **Spara** — bara de fält du faktiskt ändrat skickas.
+Sektionen **Standardkonton** listar de nio konton automatkonteringen faller tillbaka på: **Kundfordringar**, **Leverantörsskulder**, **Kostnad, standard**, **Bank/betalkonto**, **Påminnelseavgifter**, **Öres- och kronutjämning** och **Redovisningskonto för moms** (momsomföringens motkonto, standard 2650), samt bokslutets två konton **Lager** och **Lagerförändring** (se nedan). **Intäktskontona och momskontona** (utgående och ingående moms) ligger inte här längre utan på [momskoderna](#momskoder) — en länk till **Momskoder** står under rubriken. De värden som tidigare låg i standardkontona flyttades till momskoderna **MP25**, **MP12**, **MP6** och **MF** när funktionen infördes. Varje fält är en lista över aktiva konton i formatet **"1510 Kundfordringar"**; det förvalda värdet är kontot som gäller just nu (eget val eller BAS-standard). Välj **"Återställ till standard (…)"** överst i listan för att ta bort ett eget val och gå tillbaka till standardkontot. Klicka **Spara** — bara de fält du faktiskt ändrat skickas.
 
 **Öres- och kronutjämning** måste vara ett eget konto, skilt från **Kundfordringar** och **Leverantörsskulder** — pekar det på något av dem nekar betalningsregistreringen (kundreskontran respektive leverantörsreskontran) med ett konfliktfel, eftersom kontot då skulle både öppna och stänga samma post i en och samma bokning.
 
@@ -311,10 +381,10 @@ Sektionen **Kundreskontra** styr två belopp: **Betalningstolerans (kr)** — hu
 
 ### Regler per artikelgrupp
 
-Sektionen **Konteringsregler** listar reglerna i en tabell: **Artikelgrupp**, **Momssats**, **Intäktskonto** och **Kostnadskonto**. **+ Ny regel** öppnar ett formulär med:
+Sektionen **Konteringsregler** listar reglerna i en tabell: **Artikelgrupp**, **Momskod**, **Intäktskonto** och **Kostnadskonto**. Under varje konto står kontots momsruta i kontoplanen, och en regel för exakt en utrikes- eller omvänd momskod vars konto har fel momsruta får en varning med länk till kontot. **+ Ny regel** öppnar ett formulär med:
 
 - **Artikelgrupp** — obligatorisk.
-- **Momssats** — **25 %**, **12 %**, **6 %**, **0 %** eller **Alla satser** (katalog-regeln, se ovan).
-- **Intäktskonto** och **Kostnadskonto** — samma kontoformat som standardkontona, tom lista visas som **"—"**. Minst ett av de två måste anges — en regel kan styra bara intäkt, bara kostnad, eller båda.
+- **Momskod** — **Alla momskoder** (katalog-regeln, se ovan) eller en av koderna, grupperade som *Svensk moms och momsfritt*, *Försäljning till utlandet och omvänd betalningsskyldighet* och *Inköp från utlandet och omvänd moms*. Importmomskoderna kan inte väljas — importmomsen har ingen artikelgrupp. **Alla momskoder** gäller bara svensk moms, momsfritt och *Inköp varor utanför EU*: utrikes- och omvända koder (t.ex. **Varor till annat EU-land**) tar kodens eget konto om det inte finns en regel för exakt den koden.
+- **Intäktskonto** och **Kostnadskonto** — samma kontoformat som standardkontona, tom lista visas som **"—"**. Minst ett av de två måste anges — en regel kan styra bara intäkt, bara kostnad, eller båda. Vill du ha ett eget intäktskonto för EU-försäljning av en artikelgrupp lägger du en regel för exakt **EUV**; kontot bör ha ruta 35, annars varnar [momsrapporten](#momsrapport).
 
-En kombination av artikelgrupp och momssats kan bara ha **en** regel — försöker du lägga upp en till för samma kombination avvisas det. Klicka **Ändra** på en rad för att redigera regeln, eller **Ta bort** för att radera den (bekräftas innan den tas bort).
+En kombination av artikelgrupp och momskod kan bara ha **en** regel — försöker du lägga upp en till för samma kombination avvisas det. Regler som fanns innan momskoderna infördes är flyttade: momssats 25 % blev **Moms 25 %**, 12 % blev **Moms 12 %**, 6 % blev **Moms 6 %**, 0 % blev **Momsfri** och **Alla satser** blev **Alla momskoder**. Klicka **Ändra** på en rad för att redigera regeln, eller **Ta bort** för att radera den (bekräftas innan den tas bort).

@@ -3,6 +3,7 @@ import { AppShell } from "../../../components/AppShell";
 import { KonteringsreglerPageClient } from "../../../components/economy/KonteringsreglerPageClient";
 import { apiGet, getCurrentUser } from "../../../lib/api";
 import type { Account, ArticleGroup, Paged, PostingRule, SystemSettings } from "../../../lib/types";
+import type { VatCodeView } from "../../../lib/vatCodes";
 import { canOpen } from "../../../lib/pageAccess";
 
 // Automatkontering (B2). Gated by the Ekonomi permission like the rest of
@@ -24,11 +25,12 @@ export default async function KonteringsreglerPage() {
   // Neither /posting-rules nor /article-groups is paginated — both answer
   // with a plain array (economy.repository.ts's listPostingRules,
   // article.repository.ts's listArticleGroups).
-  const [settings, postingRules, accounts, articleGroups] = await Promise.all([
+  const [settings, postingRules, accounts, articleGroups, vatCodes] = await Promise.all([
     apiGet<SystemSettings>("/api/v1/settings", cookieHeader),
     apiGet<PostingRule[]>("/api/v1/posting-rules", cookieHeader),
     apiGet<Paged<Account>>("/api/v1/accounts?limit=1000", cookieHeader),
     apiGet<ArticleGroup[]>("/api/v1/article-groups", cookieHeader),
+    apiGet<VatCodeView[]>("/api/v1/vat-codes", cookieHeader),
   ]);
 
   return (
@@ -38,6 +40,7 @@ export default async function KonteringsreglerPage() {
         postingRules={postingRules}
         accounts={accounts.rows}
         articleGroups={articleGroups}
+        vatCodes={vatCodes}
       />
     </AppShell>
   );

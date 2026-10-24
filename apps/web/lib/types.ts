@@ -1,6 +1,7 @@
 import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./configurator";
 import type { Permission } from "./permissions";
-import type { VatBox, VatBoxSetting } from "./vatBoxes";
+import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
+import type { VatCode, VatCodeSlot } from "./vatCodes";
 import type { FixedAssetDisposalType, FixedAssetStatus } from "./fixedAssets";
 import type { YearEndAccrualKind, YearEndRole, YearEndStep } from "./yearEnd";
 import type { ThemeContrastFailure, ThemeIssue, ThemeScheme, ThemeSource, ThemeValidationResult } from "./themeCore";
@@ -2281,20 +2282,13 @@ export interface SystemSettings {
   // quantity. null = no limit, 0 (the default) = never past the ordered
   // quantity.
   purchaseOverReceiptPercent: number | null;
-  // Automatkontering (B2): standardkonton for the 14 posting roles, always a
-  // 4-digit account number — never null/empty on GET (posting-settings.ts's
-  // codeSetting falls back to the BAS default when unset). PATCH accepts ""
-  // to reset a field back to its default.
+  // Automatkontering (B2): standardkonton, always a 4-digit account number —
+  // never null/empty on GET (posting-settings.ts's codeSetting falls back to
+  // the BAS default when unset). PATCH accepts "" to reset a field back to
+  // its default. The revenue and VAT accounts moved to the momskoder
+  // (Ekonomi → Momskoder) in migration 0142.
   postingAccountsReceivable: string;
-  postingVatOut25: string;
-  postingVatOut12: string;
-  postingVatOut6: string;
-  postingRevenue25: string;
-  postingRevenue12: string;
-  postingRevenue6: string;
-  postingRevenue0: string;
   postingAccountsPayable: string;
-  postingVatIn: string;
   postingDefaultCost: string;
   // Kundreskontra (B3): bank/betalkonto, reminder-fee account, and the
   // öres-/kronutjämning (payment write-off) account — same 4-digit/""-to-reset
@@ -2899,13 +2893,16 @@ export interface LedgerResponse {
 // --- Automatkontering (B2): konteringsregler ---
 // GET /posting-rules row — postingRules table columns plus the joined
 // artikelgrupp/konto names (economy.repository.ts's listPostingRules), a
-// plain array (no pagination). vatRate is a numeric(5,2) column, so it comes
-// back as a string ("25.00") or null — null is the catch-all rule ("Alla
-// satser" in the UI), applied when no rate-specific rule matches the row.
+// plain array (no pagination). vatCodeId null is the catch-all rule ("Alla
+// momskoder" in the UI): the poster applies it to svensk moms, momsfritt and
+// goods from outside the EU only. revenue-/costAccountVatBox are the chart's
+// momsruta on the rule's accounts.
 export interface PostingRule {
   id: string;
   articleGroupId: string;
-  vatRate: string | null;
+  vatCodeId: string | null;
+  vatCode: string | null;
+  vatCodeName: string | null;
   revenueAccountId: string | null;
   costAccountId: string | null;
   createdAt: string;
@@ -2913,8 +2910,10 @@ export interface PostingRule {
   groupName: string;
   revenueAccountNumber: string | null;
   revenueAccountName: string | null;
+  revenueAccountVatBox: VatBoxSetting | null;
   costAccountNumber: string | null;
   costAccountName: string | null;
+  costAccountVatBox: VatBoxSetting | null;
 }
 
 // --- Anläggningsregister (ekonomi etapp 2, delprojekt 2) ---
@@ -3108,36 +3107,38 @@ export interface FixedAssetPlan {
   }[];
 }
 
-// Swedish label for a posting rule's momssats — null = the catch-all rule.
-export function postingVatRateLabel(rate: string | number | null): string {
-  if (rate === null) return "Alla satser";
-  return `${Number(rate)} %`;
+// Swedish label for a posting rule's momskod — null = the catch-all rule.
+export function postingVatCodeLabel(rule: Pick<PostingRule, "vatCode" | "vatCodeName">): string {
+  if (rule.vatCode === null) return "Alla momskoder";
+  return rule.vatCodeName ? `${rule.vatCode} · ${rule.vatCodeName}` : rule.vatCode;
 }
 
-// --- Momsrapport (B5) ---
-// GET /vat-report?from=&to= — Skatteverkets deklarationsrutor för en månad
-// eller ett kvartal, härledda ur bokförda verifikat.
-export interface VatReportBoxes {
-  sales05: number;
-  salesEu35: number;
-  salesExport36: number;
-  salesExempt42: number;
-  vatOut25_10: number;
-  vatOut12_11: number;
-  vatOut6_12: number;
-  vatIn48: number;
-  vatToPay49: number;
-}
+// --- Momsrapport (B5, alla rutor i etapp 1 av momskoderna) ---
+// GET /vat-report?from=&to= — Skatteverkets deklarationsrutor för en månad, ett
+// kvartal eller ett helår, härledda ur bokförda verifikat. boxes är öresbelopp
+// (för avstämning mot huvudboken), roundedBoxes samma rutor i hela kronor —
+// ruta 49 räknad på de avrundade rutorna, den summa Skatteverket kontrollerar.
+export type VatReportBoxes = VatDeclarationBoxes;
 
-// The four configured VAT accounts' movements — the momsomföring preview.
-export interface VatAccountPreview {
-  role: "vatOut25" | "vatOut12" | "vatOut6" | "vatIn";
+// One account the momsomföring empties (a box entering ruta 49 with a
+// movement in the period).
+export interface VatSettlementPreviewRow {
   accountId: string;
   accountNumber: string;
   accountName: string;
+  vatBox: VatBoxSetting | null;
   debit: number;
   credit: number;
   net: number;
+}
+
+// Redovisningskontot (ruta 49 in whole kronor) and öres- och kronutjämning
+// (what the whole-krona declaration leaves of the öre balances). Positive =
+// kredit, negative = debet.
+export interface VatSettlementAccount {
+  number: string;
+  name: string | null;
+  amount: number;
 }
 
 export interface VatReportSettlement {
@@ -3152,29 +3153,64 @@ export interface VatReportSettlement {
   reversedBy: { id: string; displayNumber: string } | null;
 }
 
-// Momsruta per konto: accounts the report could not place in a box, and a
-// configured VAT account whose box does not match its role.
+// Momsruta per konto: accounts the report could not place in a box.
 export interface VatUnassignedAccount {
   accountNumber: string;
   accountName: string;
   net: number;
 }
 
-export interface VatRoleBoxMismatch {
-  role: "vatOut25" | "vatOut12" | "vatOut6" | "vatIn" | "revenue25" | "revenue12" | "revenue6" | "revenue0";
+// An active momskod whose account carries another box than the code expects
+// (or is missing from the chart).
+export interface VatCodeBoxMismatch {
+  code: VatCode;
+  slot: VatCodeSlot;
   accountNumber: string;
-  expectedBox: VatBox;
-  actualBox: string | null;
+  expectedBox: VatBoxSetting;
+  actualBox: VatBoxSetting | null;
+  problem: "box_mismatch" | "missing_account";
+  message: string;
+}
+
+// A konteringsregel for exactly a utrikes-/omvänd code whose account does
+// not carry the code's box.
+export interface VatRuleBoxMismatch {
+  ruleId: string;
+  groupCode: string;
+  groupName: string;
+  code: VatCode;
+  accountNumber: string;
+  expectedBox: VatBoxSetting;
+  actualBox: VatBoxSetting | null;
+  message: string;
 }
 
 export interface VatReportResponse {
   from: string;
   to: string;
   boxes: VatReportBoxes;
-  vatAccounts: VatAccountPreview[];
+  roundedBoxes: VatReportBoxes;
+  settlement: {
+    rows: VatSettlementPreviewRow[];
+    settlementAccount: VatSettlementAccount;
+    roundingAccount: VatSettlementAccount;
+  };
   settlements: VatReportSettlement[];
   periods: { id: string; startDate: string; endDate: string; status: AccountingPeriodStatus }[];
-  warnings: { unassignedAccounts: VatUnassignedAccount[]; roleBoxMismatches: VatRoleBoxMismatch[] };
+  warnings: {
+    unassignedAccounts: VatUnassignedAccount[];
+    vatCodeBoxMismatches: VatCodeBoxMismatch[];
+    ruleBoxMismatches: VatRuleBoxMismatch[];
+  };
+}
+
+// GET/PATCH /settings/vat-reporting — Redovisningsperiod för moms and the
+// contact for the periodisk sammanställning.
+export interface VatReportingSettings {
+  period: VatReportingPeriod;
+  contactName: string | null;
+  contactPhone: string | null;
+  contactEmail: string | null;
 }
 
 // --- Ekonomirapporter (B6a) ---
@@ -3594,6 +3630,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   time_report: "Tidrapport",
   accounting_period: "Bokföringsperiod",
   verification: "Verifikat",
+  vat_code: "Momskod",
   sales_order: "Kundorder",
   sales_order_row: "Kundorderrad",
   invoice: "Faktura",
@@ -3628,6 +3665,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   demo_data_created: "Exempeldata skapad",
   created: "Skapad",
   updated: "Ändrad",
+  vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",
   set: "Satt",

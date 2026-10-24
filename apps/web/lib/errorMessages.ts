@@ -78,7 +78,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "fiscal-year-before-closed-year": "Räkenskapsåret ligger före ett stängt räkenskapsår — ett år kan inte läggas upp före ett stängt år",
   "vat-period-not-covered": "Intervallet täcker inte hela redovisningsperioder.",
   "vat-period-already-settled": "Perioden är redan deklarerad — omför momsomföringen först.",
-  "vat-accounts-not-distinct": "Två momsroller pekar på samma konto i standardkontona.",
+  "vat-accounts-not-distinct":
+    "Redovisningskontot för moms eller Öres- och kronutjämning har en momsruta som momsomföringen tömmer — välj ett konto utan momsruta under Konteringsregler.",
   "accounting-period-locked": "Perioden för det här datumet är låst för bokföring",
   "zero-amount-posting": "Ingen moms att omföra i perioden.",
   "no-accounting-period": "Ingen period täcker det valda datumet",
@@ -93,8 +94,23 @@ const MESSAGES: Record<string, MessageEntry> = {
   "inactive-account": "Ett av kontona på raderna är inaktivt",
   "already-reversed": "Verifikatet är redan omfört",
   "invalid-verification-state": "Verifikatet är i fel status för åtgärden",
-  "duplicate-posting-rule": "Det finns redan en regel för den artikelgruppen och momssatsen",
+  "duplicate-posting-rule": "Det finns redan en regel för den artikelgruppen och momskoden",
   "posting-rule-no-accounts": "Minst ett konto (intäkt eller kostnad) måste anges",
+  // momskoder
+  "vat-code-not-found": "Momskoden hittades inte — ladda om sidan.",
+  "vat-code-slot-not-used": "Momskoden använder inte den kontoroll du angav.",
+  "vat-code-account-invalid": "Kontot finns inte i kontoplanen eller är inaktivt.",
+  "vat-code-account-conflict":
+    "Momskoden använder samma konto för två roller — bokföringen skulle ta ut sig själv. Välj olika konton.",
+  "posting-rule-vat-code": "Importmomskoder kan inte ha en konteringsregel — de används bara för importmomsen.",
+  "import-vat-code": "Varje rad måste ha en aktiv importmomskod (Importmoms 25, 12 eller 6 %).",
+  "vat-file-org-number-missing":
+    "Företagets organisationsnummer saknas eller har inte tio siffror — ange det under Företagsuppgifter.",
+  "vat-code-amount-mismatch":
+    "Fakturaraden har moms trots att momskoden är momsfri, eller en annan sats än momskoden — rätta raden.",
+  "vat-code-not-applicable": "Momskoden kan inte användas på den här typen av dokument.",
+  "supplier-invoice-vat-code":
+    "Fakturan har moms, men momskoden tar ingen debiterad moms (omvänd moms, momsfritt eller import) — välj en svensk momskod eller ange momsbelopp 0.",
   "fiscal-year-closed": "Räkenskapsåret är stängt — öppna det igen under Bokslut",
   "year-end-closing-not-found": "Bokslutet hittades inte",
   "year-end-closing-exists": "Räkenskapsåret har redan ett bokslut",

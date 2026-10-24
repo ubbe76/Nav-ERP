@@ -6,13 +6,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Field, Select } from "../ui/Field";
-import { FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
+import { FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 import { Modal } from "../ui/Modal";
 import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
-import { ApiError, apiFetch } from "../../lib/api";
+import { API_URL, ApiError, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, round2 } from "../../lib/format";
 import { GatedLink } from "../ui/GatedLink";
 import { stockholmToday } from "../../lib/date";
 import {
@@ -20,12 +20,29 @@ import {
   type AccountingPeriod,
   type FiscalYear,
   type FiscalYearDetail,
+  type VatReportingSettings,
   type VatReportResponse,
+  type VatSettlementAccount,
 } from "../../lib/types";
+import {
+  VAT_BOX_49_LABEL,
+  VAT_BOX_LABELS,
+  VAT_REPORTING_PERIODS,
+  VAT_REPORTING_PERIOD_LABELS,
+  type VatBox,
+  type VatBoxSetting,
+  type VatDeclarationBox,
+  type VatReportingPeriod,
+} from "../../lib/vatBoxes";
+import type { VatCodeView } from "../../lib/vatCodes";
+import { ImportVatDialog } from "./ImportVatDialog";
+import styles from "./Momsrapport.module.css";
 
-// One selectable redovisningsperiod — a month (one accounting period) or a
-// complete calendar quarter (three). The value IS the range: "from|to".
+// One selectable redovisningsperiod — a month (one accounting period), a
+// complete calendar quarter (three) or the whole fiscal year. The value IS
+// the range: "from|to".
 type PeriodOption = { value: string; label: string };
+type PeriodOptions = { months: PeriodOption[]; quarters: PeriodOption[]; years: PeriodOption[] };
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -41,11 +58,19 @@ function monthOptionLabel(period: AccountingPeriod): string {
   return `${capitalize(MONTH_NAMES_SV[monthIndex(period.startDate)]!)} ${period.startDate.slice(0, 4)}`;
 }
 
-// Month and quarter options from the fiscal year's period list. Quarters are
-// CALENDAR quarters (Skatteverket's redovisningsperioder), offered only when
-// the year contains all three months — a brutet år's clipped edge quarters
-// are simply not offered.
-function buildPeriodOptions(periods: AccountingPeriod[]): { months: PeriodOption[]; quarters: PeriodOption[] } {
+// "Helår 2026", or "Helår 2025/2026" for a brutet räkenskapsår.
+function yearOptionLabel(first: AccountingPeriod, last: AccountingPeriod): string {
+  const from = first.startDate.slice(0, 4);
+  const to = last.endDate.slice(0, 4);
+  return from === to ? `Helår ${from}` : `Helår ${from}/${to}`;
+}
+
+// Month, quarter and whole-year options from the fiscal year's period list.
+// Quarters are CALENDAR quarters (Skatteverket's redovisningsperioder),
+// offered only when the year contains all three months — a brutet år's
+// clipped edge quarters are simply not offered. The year option is the whole
+// fiscal year: the API accepts any exact run of accounting periods.
+function buildPeriodOptions(periods: AccountingPeriod[]): PeriodOptions {
   const months = periods.map((period) => ({
     value: `${period.startDate}|${period.endDate}`,
     label: monthOptionLabel(period),
@@ -67,7 +92,29 @@ function buildPeriodOptions(periods: AccountingPeriod[]): { months: PeriodOption
       label: `Kvartal ${quarterNumber} ${year} (${shortNames[0]}–${shortNames[2]})`,
     });
   }
-  return { months, quarters };
+
+  const first = periods[0];
+  const last = periods[periods.length - 1];
+  const years =
+    first && last ? [{ value: `${first.startDate}|${last.endDate}`, label: yearOptionLabel(first, last) }] : [];
+  return { months, quarters, years };
+}
+
+// The option to preselect for the company's Redovisningsperiod för moms: the
+// most recently ENDED month/quarter (the one you are about to declare), else
+// the first; the whole fiscal year for helår. A year without quarters falls
+// back to months.
+function defaultRange(options: PeriodOptions, preferred: VatReportingPeriod | null, today: string): string {
+  const latestEnded = (list: PeriodOption[]) => {
+    const ended = list.filter((option) => option.value.split("|")[1]! < today);
+    return ended[ended.length - 1] ?? list[0];
+  };
+  if (preferred === "year" && options.years[0]) return options.years[0].value;
+  if (preferred === "quarter") {
+    const quarter = latestEnded(options.quarters);
+    if (quarter) return quarter.value;
+  }
+  return latestEnded(options.months)?.value ?? "";
 }
 
 // Fixed Swedish copy for the API's 400/409s, from the shared error-code
@@ -82,43 +129,119 @@ function formatVatReportError(err: unknown): string {
   return apiErrorMessage(err, "Något gick fel.");
 }
 
-// The declaration rows, in Skatteverkets order. `heading` rows group the
-// table; `box` rows read their amount from the report.
+// The declaration laid out like Skatteverkets blankett (SKV 4700): the groups
+// in the form's own order — import (H) sits between D and E — and, inside a
+// group, the boxes in numeric order. Each box exactly once: the compile-time
+// check below fails when a box is missing from the layout.
+const BLANKETT = [
+  { id: "A", heading: "A · Momspliktig försäljning eller uttag exklusive moms", boxes: ["05", "06", "07", "08"] },
+  { id: "B", heading: "B · Utgående moms på försäljning eller uttag i ruta 05–08", boxes: ["10", "11", "12"] },
+  { id: "C", heading: "C · Momspliktiga inköp vid omvänd skattskyldighet", boxes: ["20", "21", "22", "23", "24"] },
+  { id: "D", heading: "D · Utgående moms på inköp i ruta 20–24", boxes: ["30", "31", "32"] },
+  { id: "H", heading: "H · Import", boxes: ["50", "60", "61", "62"] },
+  {
+    id: "E",
+    heading: "E · Försäljning m.m. som är undantagen från moms",
+    boxes: ["35", "36", "37", "38", "39", "40", "41", "42"],
+  },
+  { id: "F", heading: "F · Ingående moms", boxes: ["48"] },
+  { id: "G", heading: "G · Moms att betala eller få tillbaka", boxes: ["49"] },
+] as const;
+
+type LayoutBox = (typeof BLANKETT)[number]["boxes"][number];
+const everyBoxIsInTheLayout: Exclude<VatDeclarationBox, LayoutBox> extends never ? true : never = true;
+void everyBoxIsInTheLayout;
+
 type RutaRow =
   | { id: string; kind: "heading"; label: string }
-  | { id: string; kind: "box"; ruta: string; label: string; boxKey: keyof VatReportResponse["boxes"]; highlight?: boolean };
+  | { id: string; kind: "box"; box: VatDeclarationBox; label: string; highlight: boolean };
 
-const RUTA_ROWS: RutaRow[] = [
-  { id: "h-sales", kind: "heading", label: "Försäljning" },
-  { id: "05", kind: "box", ruta: "05", label: "Momspliktig försäljning", boxKey: "sales05" },
-  { id: "35", kind: "box", ruta: "35", label: "Varor till annat EU-land", boxKey: "salesEu35" },
-  { id: "36", kind: "box", ruta: "36", label: "Export av varor utanför EU", boxKey: "salesExport36" },
-  { id: "42", kind: "box", ruta: "42", label: "Momsfri försäljning", boxKey: "salesExempt42" },
-  { id: "h-out", kind: "heading", label: "Utgående moms" },
-  { id: "10", kind: "box", ruta: "10", label: "Utgående moms 25 %", boxKey: "vatOut25_10" },
-  { id: "11", kind: "box", ruta: "11", label: "Utgående moms 12 %", boxKey: "vatOut12_11" },
-  { id: "12", kind: "box", ruta: "12", label: "Utgående moms 6 %", boxKey: "vatOut6_12" },
-  { id: "h-in", kind: "heading", label: "Ingående moms" },
-  { id: "48", kind: "box", ruta: "48", label: "Ingående moms att dra av", boxKey: "vatIn48" },
-  { id: "h-sum", kind: "heading", label: "Summa" },
-  { id: "49", kind: "box", ruta: "49", label: "Moms att betala eller få tillbaka", boxKey: "vatToPay49", highlight: true },
-];
+const RUTA_ROWS: RutaRow[] = BLANKETT.flatMap((group): RutaRow[] => [
+  { id: `h-${group.id}`, kind: "heading", label: group.heading },
+  ...group.boxes.map(
+    (box): RutaRow => ({
+      id: box,
+      kind: "box",
+      box,
+      label: box === "49" ? VAT_BOX_49_LABEL : VAT_BOX_LABELS[box as VatBox],
+      highlight: box === "49",
+    })
+  ),
+]);
 
-const VAT_ROLE_LABELS: Record<string, string> = {
-  vatOut25: "Utgående moms 25 %",
-  vatOut12: "Utgående moms 12 %",
-  vatOut6: "Utgående moms 6 %",
-  vatIn: "Ingående moms",
-};
+// Whole kronor as the declaration states them.
+function formatKronor(amount: number): string {
+  return amount.toLocaleString("sv-SE", { maximumFractionDigits: 0 });
+}
+
+// "ruta 35" / "ingen ruta" / "ingen ruta angiven".
+function boxPhrase(box: VatBoxSetting | null): string {
+  if (box === null) return "ingen ruta angiven";
+  if (box === "none") return "ingen ruta";
+  return `ruta ${box}`;
+}
+
+// "YYYY-MM-DD" -> "YYYYMM" — the file's period, named after the LAST month.
+function filePeriod(date: string): string {
+  return `${date.slice(0, 4)}${date.slice(5, 7)}`;
+}
+
+type PostingLine = { id: string; account: string; debit: number; credit: number };
+
+// What the momsomföring books: every emptied account reversed, ruta 49 in
+// whole kronor on the redovisningskonto and the öre difference on öres- och
+// kronutjämning. Positive account amounts are kredit, negative debet.
+function settlementLines(report: VatReportResponse): PostingLine[] {
+  const lines: PostingLine[] = report.settlement.rows.map((row) => ({
+    id: row.accountId,
+    account: `${row.accountNumber} · ${row.accountName}`,
+    // row.net = debit − credit of the period: the omföring books the opposite.
+    debit: row.net < 0 ? -row.net : 0,
+    credit: row.net > 0 ? row.net : 0,
+  }));
+  const add = (id: string, account: VatSettlementAccount) => {
+    if (account.amount === 0) return;
+    lines.push({
+      id,
+      account: `${account.number} · ${account.name ?? "Konto saknas i kontoplanen"}`,
+      debit: account.amount < 0 ? -account.amount : 0,
+      credit: account.amount > 0 ? account.amount : 0,
+    });
+  };
+  add("settlement-account", report.settlement.settlementAccount);
+  add("rounding-account", report.settlement.roundingAccount);
+  return lines;
+}
+
+function money(amount: number): string {
+  return amount === 0 ? "" : formatMoney(amount);
+}
+
+function toDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function MomsrapportPageClient({
   fiscalYears,
   defaultFrom,
   defaultTo,
+  reporting,
+  vatCodes,
 }: {
   fiscalYears: FiscalYear[];
   defaultFrom: string | undefined;
   defaultTo: string | undefined;
+  // null when the settings could not be read — the page then falls back to
+  // months and hides the setting.
+  reporting: VatReportingSettings | null;
+  vatCodes: VatCodeView[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -146,9 +269,12 @@ export function MomsrapportPageClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [settling, setSettling] = useState(false);
   const [settleError, setSettleError] = useState<string | null>(null);
   const [settledNumber, setSettledNumber] = useState<string | null>(null);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileError, setFileError] = useState<{ message: string; code?: string } | null>(null);
 
   // Load the selected year's periods (GET /fiscal-years/:id is the only
   // source of period rows).
@@ -169,19 +295,17 @@ export function MomsrapportPageClient({
   }, [yearId]);
 
   const options = useMemo(
-    () => (yearDetail ? buildPeriodOptions(yearDetail.periods) : { months: [], quarters: [] }),
+    () => (yearDetail ? buildPeriodOptions(yearDetail.periods) : { months: [], quarters: [], years: [] }),
     [yearDetail]
   );
 
   // Default period once the year's periods arrive and nothing is selected:
-  // the most recently ENDED month (the one you are about to declare), else
-  // the year's first month.
+  // the company's Redovisningsperiod för moms decides whether that is a
+  // month, a quarter or the whole year.
   useEffect(() => {
     if (!yearDetail || range !== "") return;
-    const today = stockholmToday();
-    const ended = yearDetail.periods.filter((period) => period.endDate < today);
-    const fallback = ended[ended.length - 1] ?? yearDetail.periods[0];
-    if (fallback) setRange(`${fallback.startDate}|${fallback.endDate}`);
+    const fallback = defaultRange(options, reporting?.period ?? null, stockholmToday());
+    if (fallback) setRange(fallback);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run when periods land
   }, [yearDetail]);
 
@@ -195,6 +319,7 @@ export function MomsrapportPageClient({
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setFileError(null);
     setSettledNumber(null);
     apiFetch<VatReportResponse>(`/api/v1/vat-report?${params.toString()}`)
       .then((data) => {
@@ -217,8 +342,9 @@ export function MomsrapportPageClient({
 
   const activeSettlement = report?.settlements.find((settlement) => !settlement.reversed) ?? null;
   const reversedSettlements = report?.settlements.filter((settlement) => settlement.reversed) ?? [];
-  const hasMovement = report?.vatAccounts.some((row) => row.net !== 0) ?? false;
+  const hasMovement = (report?.settlement.rows.length ?? 0) > 0;
   const endPeriodLocked = report ? report.periods[report.periods.length - 1]?.status === "locked" : false;
+  const lines = useMemo(() => (report ? settlementLines(report) : []), [report]);
 
   async function settle() {
     if (!report) return;
@@ -245,6 +371,39 @@ export function MomsrapportPageClient({
       setSettling(false);
     }
   }
+
+  // The declaration as Skatteverket's file. A plain <a download> would save
+  // the API's JSON error body as the file, so the request goes through fetch
+  // and a refusal (409 vat-file-org-number-missing) is shown on the page.
+  async function downloadFile() {
+    if (!report) return;
+    setFileBusy(true);
+    setFileError(null);
+    try {
+      const params = new URLSearchParams({ from: report.from, to: report.to });
+      const res = await fetch(`${API_URL}/api/v1/vat-report/file?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(body.error ?? `Request failed (${res.status})`, res.status, body.code, body);
+      }
+      const named = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1];
+      toDownload(await res.blob(), named ?? `momsdeklaration-${filePeriod(report.to)}.xml`);
+    } catch (err) {
+      setFileError({
+        message: apiErrorMessage(err, "Kunde inte skapa filen."),
+        code: err instanceof ApiError ? err.code : undefined,
+      });
+    } finally {
+      setFileBusy(false);
+    }
+  }
+
+  const warnings = report?.warnings;
+  const hasWarnings =
+    warnings !== undefined &&
+    (warnings.unassignedAccounts.length > 0 ||
+      warnings.vatCodeBoxMismatches.length > 0 ||
+      warnings.ruleBoxMismatches.length > 0);
 
   return (
     <>
@@ -289,6 +448,15 @@ export function MomsrapportPageClient({
                   ))}
                 </optgroup>
               )}
+              {options.years.length > 0 && (
+                <optgroup label="Helår">
+                  {options.years.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </Select>
           </Field>
         </FormRow>
@@ -296,6 +464,12 @@ export function MomsrapportPageClient({
           <FormNotice>
             Perioden överlappar en deklarerad månad — omför momsomföringen först om du vill deklarera om.
           </FormNotice>
+        )}
+        {reporting && (
+          <>
+            <hr className={styles.divider} />
+            <ReportingPeriodSetting initial={reporting.period} />
+          </>
         )}
       </Card>
 
@@ -305,14 +479,14 @@ export function MomsrapportPageClient({
 
       {report && !loading && (
         <>
-          {(report.warnings.unassignedAccounts.length > 0 || report.warnings.roleBoxMismatches.length > 0) && (
+          {hasWarnings && warnings && (
             <FormNotice style={{ marginBottom: 20 }}>
-              {report.warnings.unassignedAccounts.length > 0 && (
-                <>
+              {warnings.unassignedAccounts.length > 0 && (
+                <div className={styles.warningBlock}>
                   <strong>Konton utan momsruta</strong> — rörelserna räknas inte in i någon ruta. Ange momsruta i
                   kontoplanen:
-                  <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-                    {report.warnings.unassignedAccounts.map((account) => (
+                  <ul className={styles.warningList}>
+                    {warnings.unassignedAccounts.map((account) => (
                       <li key={account.accountNumber}>
                         <GatedLink href={{ pathname: "/ekonomi/kontoplan", query: { search: account.accountNumber } }}>
                           {account.accountNumber} · {account.accountName}
@@ -321,50 +495,117 @@ export function MomsrapportPageClient({
                       </li>
                     ))}
                   </ul>
-                </>
-              )}
-              {report.warnings.roleBoxMismatches.map((mismatch) => (
-                <div key={mismatch.role} style={{ marginTop: 6 }}>
-                  Standardkontot{" "}
-                  <GatedLink href={{ pathname: "/ekonomi/kontoplan", query: { search: mismatch.accountNumber } }}>
-                    {mismatch.accountNumber}
-                  </GatedLink>{" "}
-                  har momsruta{" "}
-                  <strong>
-                    {mismatch.actualBox === null
-                      ? "Ej angiven"
-                      : mismatch.actualBox === "none"
-                        ? "Ingen ruta"
-                        : mismatch.actualBox}
-                  </strong>{" "}
-                  i kontoplanen men används för ruta {mismatch.expectedBox} — rörelserna hamnar inte i ruta{" "}
-                  {mismatch.expectedBox}
-                  {mismatch.role.startsWith("revenue") ? "." : ", men momsomföringen tömmer kontot."}
                 </div>
-              ))}
+              )}
+              {warnings.vatCodeBoxMismatches.length > 0 && (
+                <div className={styles.warningBlock}>
+                  <strong>Momskoder med fel momsruta</strong> — rörelserna hamnar inte i rätt ruta. Rätta momsrutan i
+                  kontoplanen eller kontot på momskoden:
+                  <ul className={styles.warningList}>
+                    {warnings.vatCodeBoxMismatches.map((mismatch) => (
+                      <li key={`${mismatch.code}-${mismatch.slot}`}>
+                        Momskod <GatedLink href="/ekonomi/momskoder">{mismatch.code}</GatedLink>: konto{" "}
+                        <GatedLink href={{ pathname: "/ekonomi/kontoplan", query: { search: mismatch.accountNumber } }}>
+                          {mismatch.accountNumber}
+                        </GatedLink>{" "}
+                        {mismatch.problem === "missing_account" ? (
+                          <>finns inte i kontoplanen</>
+                        ) : (
+                          <>
+                            har <strong>{boxPhrase(mismatch.actualBox)}</strong> men ska ha{" "}
+                            <strong>{boxPhrase(mismatch.expectedBox)}</strong>
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {warnings.ruleBoxMismatches.length > 0 && (
+                <div className={styles.warningBlock}>
+                  <strong>Konteringsregler med fel momsruta</strong> — regeln ersätter momskodens eget konto, så kontot
+                  måste ha kodens momsruta:
+                  <ul className={styles.warningList}>
+                    {warnings.ruleBoxMismatches.map((mismatch) => (
+                      <li key={mismatch.ruleId}>
+                        Konteringsregel{" "}
+                        <GatedLink href="/ekonomi/konteringsregler">
+                          {mismatch.groupCode} {mismatch.groupName} / {mismatch.code}
+                        </GatedLink>
+                        : konto{" "}
+                        <GatedLink href={{ pathname: "/ekonomi/kontoplan", query: { search: mismatch.accountNumber } }}>
+                          {mismatch.accountNumber}
+                        </GatedLink>{" "}
+                        har <strong>{boxPhrase(mismatch.actualBox)}</strong> men ska ha{" "}
+                        <strong>{boxPhrase(mismatch.expectedBox)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </FormNotice>
           )}
+
           <Card maxWidth="none" style={{ marginBottom: 20 }}>
+            <div className={styles.toolbar}>
+              <div className={styles.toolbarTitle}>
+                Momsdeklaration {report.from} – {report.to}
+              </div>
+              <div className={styles.toolbarActions}>
+                <Button type="button" variant="secondary" onClick={downloadFile} disabled={fileBusy}>
+                  {fileBusy ? "Skapar filen…" : "Ladda ned fil till Skatteverket"}
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => setImportOpen(true)}>
+                  Bokför importmoms
+                </Button>
+              </div>
+            </div>
+            <FormError margin="below">
+              {fileError && (
+                <>
+                  {fileError.message}
+                  {fileError.code === "vat-file-org-number-missing" && (
+                    <>
+                      {" "}
+                      <GatedLink href="/system/foretagsinfo">Öppna Företagsuppgifter</GatedLink>
+                    </>
+                  )}
+                </>
+              )}
+            </FormError>
             <Table<RutaRow>
               columns={[
-                { key: "ruta", label: "Ruta", width: "70px" },
-                { key: "label", label: "Beskrivning", width: "1.6fr" },
-                { key: "amount", label: "Belopp", width: "160px", align: "right" },
+                { key: "ruta", label: "Ruta", width: "60px" },
+                { key: "label", label: "Beskrivning", width: "1.8fr" },
+                { key: "amount", label: "Belopp", width: "150px", align: "right" },
+                { key: "rounded", label: "Att deklarera (hela kr)", width: "170px", align: "right" },
               ]}
               rows={RUTA_ROWS}
               renderCell={(row, key) => {
                 if (row.kind === "heading") {
-                  return key === "label" ? <strong>{row.label}</strong> : "";
+                  return key === "label" ? <strong className={styles.heading}>{row.label}</strong> : "";
                 }
+                const amount = report.boxes[row.box];
+                const rounded = report.roundedBoxes[row.box];
+                // A declaration form lists every box; the ones without an
+                // amount step back so the used ones stand out.
+                const dim = row.highlight || (amount !== 0 || rounded !== 0) ? undefined : styles.dim;
+                const strong = row.highlight ? { fontWeight: 600 } : undefined;
                 switch (key) {
                   case "ruta":
-                    return row.ruta;
+                    return <span className={dim}>{row.box}</span>;
                   case "label":
-                    return row.highlight && report.boxes[row.boxKey] < 0 ? "Moms att få tillbaka" : row.label;
+                    return <span className={dim}>{row.highlight && rounded < 0 ? "Moms att få tillbaka" : row.label}</span>;
                   case "amount":
                     return (
-                      <span className="num" style={row.highlight ? { fontWeight: 600 } : undefined}>
-                        {formatMoney(report.boxes[row.boxKey])}
+                      <span className={["num", dim].filter(Boolean).join(" ")} style={strong}>
+                        {formatMoney(amount)}
+                      </span>
+                    );
+                  case "rounded":
+                    return (
+                      <span className={["num", dim].filter(Boolean).join(" ")} style={strong}>
+                        {formatKronor(rounded)}
                       </span>
                     );
                   default:
@@ -373,25 +614,29 @@ export function MomsrapportPageClient({
               }}
             />
             <FormHint>
-              Beloppen visas med ören för att stämma mot huvudboken — Skatteverkets deklaration avrundas till hela
-              kronor.
+              <em>Belopp</em> visas med ören för att stämma mot huvudboken. Deklarationen och filen till Skatteverket
+              anges i hela kronor — närmaste hela krona per ruta. Ruta 49 räknas på de avrundade rutorna.
             </FormHint>
           </Card>
 
           <Card maxWidth="none">
             <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 8 }}>Momsomföring</div>
-            <Table<VatReportResponse["vatAccounts"][number] & { id: string }>
+            <Table<VatReportResponse["settlement"]["rows"][number] & { id: string }>
               columns={[
-                { key: "account", label: "Konto", width: "1.4fr" },
+                { key: "account", label: "Konto", width: "1.6fr" },
+                { key: "box", label: "Ruta", width: "70px" },
                 { key: "debit", label: "Debet", width: "130px", align: "right" },
                 { key: "credit", label: "Kredit", width: "130px", align: "right" },
                 { key: "net", label: "Netto", width: "130px", align: "right" },
               ]}
-              rows={report.vatAccounts.map((row) => ({ ...row, id: row.role }))}
+              rows={report.settlement.rows.map((row) => ({ ...row, id: row.accountId }))}
+              emptyText="Inga momskonton har rört sig i perioden"
               renderCell={(row, key) => {
                 switch (key) {
                   case "account":
                     return `${row.accountNumber} · ${row.accountName}`;
+                  case "box":
+                    return row.vatBox ?? "—";
                   case "debit":
                     return <span className="num">{formatMoney(row.debit)}</span>;
                   case "credit":
@@ -403,6 +648,23 @@ export function MomsrapportPageClient({
                 }
               }}
             />
+            {hasMovement && (
+              <div className={styles.summary}>
+                <div className={styles.summaryLine}>
+                  <span className={styles.summaryLabel}>
+                    Redovisningskonto för moms ({accountLabel(report.settlement.settlementAccount)}) — ruta 49 i hela
+                    kronor
+                  </span>
+                  <span className="num">{settlementAmountText(report.settlement.settlementAccount)}</span>
+                </div>
+                <div className={styles.summaryLine}>
+                  <span className={styles.summaryLabel}>
+                    Öres- och kronutjämning ({accountLabel(report.settlement.roundingAccount)}) — öresdifferensen
+                  </span>
+                  <span className="num">{settlementAmountText(report.settlement.roundingAccount)}</span>
+                </div>
+              </div>
+            )}
 
             {settledNumber && (
               <FormHint>
@@ -455,22 +717,30 @@ export function MomsrapportPageClient({
 
           <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Bokför momsomföring">
             <p>
-              Momskontona nollställs för perioden {report.from} – {report.to} och nettot bokförs på redovisningskontot
-              för moms. Verifikatet bokförs i serie M med datum <strong>{report.to}</strong>.
+              Momskontona nollställs för perioden {report.from} – {report.to}. Ruta 49 bokförs i hela kronor på
+              redovisningskontot för moms och öresdifferensen på öres- och kronutjämning. Verifikatet bokförs i serie
+              M med datum <strong>{report.to}</strong>.
             </p>
-            <Table<VatReportResponse["vatAccounts"][number] & { id: string }>
+            <Table<PostingLine>
               columns={[
-                { key: "account", label: "Konto", width: "1.4fr" },
-                { key: "movement", label: "Omföring", width: "160px", align: "right" },
+                { key: "account", label: "Konto", width: "1.6fr" },
+                { key: "debit", label: "Debet", width: "110px", align: "right" },
+                { key: "credit", label: "Kredit", width: "110px", align: "right" },
               ]}
-              rows={report.vatAccounts.filter((row) => row.net !== 0).map((row) => ({ ...row, id: row.role }))}
-              renderCell={(row, key) => {
+              rows={lines}
+              footer={{
+                account: <strong>Summa</strong>,
+                debit: <span className="num">{formatMoney(round2(lines.reduce((sum, line) => sum + line.debit, 0)))}</span>,
+                credit: <span className="num">{formatMoney(round2(lines.reduce((sum, line) => sum + line.credit, 0)))}</span>,
+              }}
+              renderCell={(line, key) => {
                 switch (key) {
                   case "account":
-                    return `${row.accountNumber} · ${row.accountName}`;
-                  case "movement":
-                    // The settlement books the OPPOSITE of the period net.
-                    return <span className="num">{formatMoney(-row.net)}</span>;
+                    return line.account;
+                  case "debit":
+                    return <span className="num">{money(line.debit)}</span>;
+                  case "credit":
+                    return <span className="num">{money(line.credit)}</span>;
                   default:
                     return null;
                 }
@@ -478,8 +748,8 @@ export function MomsrapportPageClient({
             />
             <p>
               <strong>
-                {report.boxes.vatToPay49 >= 0 ? "Moms att betala: " : "Moms att få tillbaka: "}
-                {formatMoney(Math.abs(report.boxes.vatToPay49))}
+                {report.roundedBoxes["49"] >= 0 ? "Moms att betala: " : "Moms att få tillbaka: "}
+                {formatMoney(Math.abs(report.roundedBoxes["49"]))}
               </strong>
             </p>
             {endPeriodLocked && (
@@ -499,6 +769,85 @@ export function MomsrapportPageClient({
           </Modal>
         </>
       )}
+
+      <ImportVatDialog open={importOpen} onClose={() => setImportOpen(false)} vatCodes={vatCodes} />
+    </>
+  );
+}
+
+// "2650 · Momsredovisning" — the number alone when the account is not in the chart.
+function accountLabel(account: VatSettlementAccount): string {
+  return account.name ? `${account.number} · ${account.name}` : account.number;
+}
+
+// "Kredit 12 345,00" / "Debet 0,47" / "0,00" — how an account's side of the
+// omföring reads.
+function settlementAmountText(account: VatSettlementAccount): string {
+  if (account.amount === 0) return formatMoney(0);
+  return `${account.amount > 0 ? "Kredit" : "Debet"} ${formatMoney(Math.abs(account.amount))}`;
+}
+
+// Redovisningsperiod för moms: which period the page preselects (and which
+// the periodisk sammanställning follows). Saved on its own, independent of the
+// report above.
+function ReportingPeriodSetting({ initial }: { initial: VatReportingPeriod }) {
+  const [saved, setSaved] = useState<VatReportingPeriod>(initial);
+  const [value, setValue] = useState<VatReportingPeriod>(initial);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  async function save() {
+    setPending(true);
+    setError(null);
+    setDone(false);
+    try {
+      const result = await apiFetch<VatReportingSettings>("/api/v1/settings/vat-reporting", {
+        method: "PATCH",
+        body: JSON.stringify({ period: value }),
+      });
+      setSaved(result.period);
+      setValue(result.period);
+      setDone(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte spara redovisningsperioden"));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <>
+      <div className={styles.settingRow}>
+        <div className={styles.settingField}>
+          <Field label="Redovisningsperiod för moms" htmlFor="vatReportingPeriod">
+            <Select
+              id="vatReportingPeriod"
+              size="md"
+              value={value}
+              onChange={(e) => {
+                setDone(false);
+                setValue(e.target.value as VatReportingPeriod);
+              }}
+            >
+              {VAT_REPORTING_PERIODS.map((period) => (
+                <option key={period} value={period}>
+                  {VAT_REPORTING_PERIOD_LABELS[period]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <Button type="button" variant="secondary" onClick={save} disabled={pending || value === saved}>
+          {pending ? "Sparar…" : "Spara"}
+        </Button>
+        {done && <FormSaved>Sparat</FormSaved>}
+      </div>
+      <FormError margin="above">{error}</FormError>
+      <FormHint>
+        Den period Skatteverket har bestämt för företaget. Den förvalda perioden när sidan öppnas följer den: månad,
+        kvartal eller helår.
+      </FormHint>
     </>
   );
 }

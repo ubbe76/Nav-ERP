@@ -11,27 +11,25 @@ import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { VAT_RATES, postingVatRateLabel } from "../../lib/types";
+import { postingVatCodeLabel } from "../../lib/types";
 import type { Account, ArticleGroup, PostingRule, SystemSettings } from "../../lib/types";
+import { VAT_CODE_CATALOG, isVatCode, vatCodeEntry, type VatCodeView } from "../../lib/vatCodes";
+import type { VatBoxSetting } from "../../lib/vatBoxes";
 import shellStyles from "../AppShell.module.css";
+import { GatedLink } from "../ui/GatedLink";
 import { HelpLink } from "../ui/HelpLink";
+import styles from "./Momskoder.module.css";
 
-// The 14 posting-account fields on SystemSettings, in the same order the API
+// The posting-account fields on SystemSettings, in the same order the API
 // resolves them (verification-poster.ts's PostingAccountNumbers). label is
 // what the account is used for; defaultNumber is only shown on the "reset"
 // option — the API decides the real default (posting-settings.ts's
-// codeSetting), this is just so the option text isn't a bare blank.
+// codeSetting), this is just so the option text isn't a bare blank. The
+// revenue and VAT accounts are not here any more: they belong to the
+// momskoder (Ekonomi → Momskoder).
 type PostingAccountFieldKey =
   | "postingAccountsReceivable"
-  | "postingVatOut25"
-  | "postingVatOut12"
-  | "postingVatOut6"
-  | "postingRevenue25"
-  | "postingRevenue12"
-  | "postingRevenue6"
-  | "postingRevenue0"
   | "postingAccountsPayable"
-  | "postingVatIn"
   | "postingDefaultCost"
   | "postingBank"
   | "postingReminderFeeAccount"
@@ -42,15 +40,7 @@ type PostingAccountFieldKey =
 
 const POSTING_FIELDS: { key: PostingAccountFieldKey; label: string; defaultNumber: string }[] = [
   { key: "postingAccountsReceivable", label: "Kundfordringar", defaultNumber: "1510" },
-  { key: "postingVatOut25", label: "Utgående moms 25 %", defaultNumber: "2610" },
-  { key: "postingVatOut12", label: "Utgående moms 12 %", defaultNumber: "2620" },
-  { key: "postingVatOut6", label: "Utgående moms 6 %", defaultNumber: "2630" },
-  { key: "postingRevenue25", label: "Försäljning 25 %", defaultNumber: "3001" },
-  { key: "postingRevenue12", label: "Försäljning 12 %", defaultNumber: "3002" },
-  { key: "postingRevenue6", label: "Försäljning 6 %", defaultNumber: "3003" },
-  { key: "postingRevenue0", label: "Försäljning momsfri", defaultNumber: "3004" },
   { key: "postingAccountsPayable", label: "Leverantörsskulder", defaultNumber: "2440" },
-  { key: "postingVatIn", label: "Ingående moms", defaultNumber: "2640" },
   { key: "postingDefaultCost", label: "Kostnad, standard", defaultNumber: "4010" },
   { key: "postingBank", label: "Bank/betalkonto", defaultNumber: "1930" },
   { key: "postingReminderFeeAccount", label: "Påminnelseavgifter", defaultNumber: "3540" },
@@ -69,12 +59,66 @@ const POSTING_AMOUNT_FIELDS: { key: PostingAmountFieldKey; label: string }[] = [
   { key: "reminderFee", label: "Påminnelseavgift (kr)" },
 ];
 
-// Derived from the shared VAT_RATES mirror so the web has exactly one
-// literal copy of the rate set (B5).
-const VAT_RATE_OPTIONS = [
-  ...VAT_RATES.map((rate) => ({ value: String(rate), label: `${rate} %` })),
-  { value: "all", label: "Alla satser" },
+// The codes a konteringsregel can be for, grouped the way the select shows
+// them. Import codes are left out — the importmoms posting has no article
+// group, so a rule for one could never apply (the API answers 400
+// posting-rule-vat-code).
+const RULE_CODE_GROUPS: { label: string; kinds: readonly string[] }[] = [
+  { label: "Svensk moms och momsfritt", kinds: ["domestic"] },
+  { label: "Försäljning till utlandet och omvänd betalningsskyldighet", kinds: ["eu_sale", "export", "reverse_sale"] },
+  { label: "Inköp från utlandet och omvänd moms", kinds: ["reverse_purchase", "non_eu_goods"] },
 ];
+
+// "ruta 05" / "ingen ruta" / "ingen ruta angiven".
+function boxPhrase(box: VatBoxSetting | null): string {
+  if (box === null) return "ingen ruta angiven";
+  if (box === "none") return "ingen ruta";
+  return `ruta ${box}`;
+}
+
+// A rule for exactly a utrikes-/omvänd code replaces the code's own account,
+// so the account must carry the code's box (the revenue account for a sales
+// code, the cost account for an omvänd-moms purchase) — the same check the
+// Momsrapport warns about (vat-report.service.ts's findRuleBoxMismatches).
+function ruleBoxProblem(rule: PostingRule): { slot: "revenue" | "cost"; text: string } | null {
+  if (rule.vatCode === null || !isVatCode(rule.vatCode)) return null;
+  const entry = vatCodeEntry(rule.vatCode);
+  if (entry.kind === "domestic" || entry.kind === "non_eu_goods" || entry.kind === "import") return null;
+  const slot = entry.direction === "sales" ? "revenue" : "cost";
+  const expected = entry.slots[slot]?.box;
+  const accountNumber = slot === "revenue" ? rule.revenueAccountNumber : rule.costAccountNumber;
+  const actual = slot === "revenue" ? rule.revenueAccountVatBox : rule.costAccountVatBox;
+  if (expected === undefined || accountNumber === null || actual === expected) return null;
+  return { slot, text: `Kontot har ${boxPhrase(actual)} men ska ha ${boxPhrase(expected)} för ${rule.vatCode}` };
+}
+
+// One account cell of the rules table: number and name, the chart's momsruta
+// under it, and the problem line when a utrikes-/omvänd rule's account has the
+// wrong box.
+function RuleAccount({
+  number,
+  name,
+  box,
+  problem,
+}: {
+  number: string | null;
+  name: string | null;
+  box: VatBoxSetting | null;
+  problem: string | null;
+}) {
+  if (number === null) return <>—</>;
+  return (
+    <span>
+      {number} {name}
+      <span className={styles.sub}>{boxPhrase(box)}</span>
+      {problem && (
+        <span className={styles.warning}>
+          <GatedLink href={{ pathname: "/ekonomi/kontoplan", query: { search: number } }}>{problem}</GatedLink>
+        </span>
+      )}
+    </span>
+  );
+}
 
 // DuplicatePostingRuleError / PostingRuleNoAccountsError translated to fixed
 // Swedish copy by the shared error-code dictionary — same idiom as
@@ -88,11 +132,13 @@ export function KonteringsreglerPageClient({
   postingRules,
   accounts,
   articleGroups,
+  vatCodes,
 }: {
   settings: SystemSettings;
   postingRules: PostingRule[];
   accounts: Account[];
   articleGroups: ArticleGroup[];
+  vatCodes: VatCodeView[];
 }) {
   return (
     <>
@@ -109,7 +155,12 @@ export function KonteringsreglerPageClient({
         <KundreskontraSection settings={settings} />
       </div>
       <div style={{ marginTop: 20 }}>
-        <PostingRulesSection postingRules={postingRules} accounts={accounts} articleGroups={articleGroups} />
+        <PostingRulesSection
+          postingRules={postingRules}
+          accounts={accounts}
+          articleGroups={articleGroups}
+          vatCodes={vatCodes}
+        />
       </div>
     </>
   );
@@ -213,8 +264,13 @@ function StandardAccountsSection({ settings, accounts }: { settings: SystemSetti
     <Card maxWidth="none">
       <div style={{ fontWeight: 600, fontSize: 15 }}>Standardkonton</div>
       <FormHint>
-        Konton automatkonteringen bokför mot när ingen konteringsregel matchar fakturaraden. Välj &quot;Återställ
-        till standard&quot; för att ta bort en egen inställning.
+        Konton automatkonteringen bokför mot: reskontrorna, banken, avgifter, utjämning, momsomföringen, bokslutet och
+        kostnadskontot när ingen konteringsregel matchar en leverantörsfakturarad. Välj &quot;Återställ till
+        standard&quot; för att ta bort en egen inställning.
+      </FormHint>
+      <FormHint style={{ marginTop: 6 }}>
+        Intäktskontona och momskontona (utgående och ingående moms) ligger på momskoderna — ändra dem under{" "}
+        <GatedLink href="/ekonomi/momskoder">Momskoder</GatedLink>.
       </FormHint>
 
       <Form onSubmit={handleSave}>
@@ -354,10 +410,12 @@ function PostingRulesSection({
   postingRules,
   accounts,
   articleGroups,
+  vatCodes,
 }: {
   postingRules: PostingRule[];
   accounts: Account[];
   articleGroups: ArticleGroup[];
+  vatCodes: VatCodeView[];
 }) {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
@@ -365,7 +423,7 @@ function PostingRulesSection({
   const [error, setError] = useState<string | null>(null);
 
   async function remove(rule: PostingRule) {
-    if (!(await confirmDelete(`Ta bort konteringsregeln för ${rule.groupName} (${postingVatRateLabel(rule.vatRate)})?`))) {
+    if (!(await confirmDelete(`Ta bort konteringsregeln för ${rule.groupName} (${postingVatCodeLabel(rule)})?`))) {
       return;
     }
     setError(null);
@@ -393,9 +451,15 @@ function PostingRulesSection({
         </Button>
       </div>
       <FormHint>
-        Styr vilket intäkts- eller kostnadskonto en fakturarad bokförs mot, per artikelgrupp och momssats. En regel
-        med momssats &quot;Alla satser&quot; gäller när ingen regel finns för radens exakta momssats — annars
-        används standardkontot.
+        Styr vilket intäkts- eller kostnadskonto en fakturarad bokförs mot, per artikelgrupp och momskod. En regel
+        med momskod &quot;Alla momskoder&quot; gäller när ingen regel finns för radens exakta momskod — annars
+        används kontot på momskoden (intäkter) eller standardkontot Kostnad, standard (kostnader).
+      </FormHint>
+      <FormHint style={{ marginTop: 6 }}>
+        &quot;Alla momskoder&quot; gäller bara svensk moms, momsfritt och Inköp varor utanför EU. Utrikes- och omvända
+        koder (till exempel Varor till annat EU-land eller Inköp varor från EU 25 %) tar kodens eget konto om det inte
+        finns en regel för exakt den koden — så att en försäljning till ett annat EU-land hamnar i rätt momsruta
+        oavsett vad en katalogregel säger.
       </FormHint>
 
       <FormError margin="below">{error}</FormError>
@@ -403,9 +467,9 @@ function PostingRulesSection({
       <Table<PostingRule>
         columns={[
           { key: "group", label: "Artikelgrupp", width: "1.3fr" },
-          { key: "vatRate", label: "Momssats", width: "0.9fr" },
-          { key: "revenue", label: "Intäktskonto", width: "1.3fr" },
-          { key: "cost", label: "Kostnadskonto", width: "1.3fr" },
+          { key: "vatCode", label: "Momskod", width: "1.1fr" },
+          { key: "revenue", label: "Intäktskonto", width: "1.4fr" },
+          { key: "cost", label: "Kostnadskonto", width: "1.4fr" },
           { key: "actions", label: "", width: "170px", align: "right" },
         ]}
         rows={postingRules}
@@ -418,12 +482,30 @@ function PostingRulesSection({
                   {rule.groupCode} · {rule.groupName}
                 </strong>
               );
-            case "vatRate":
-              return postingVatRateLabel(rule.vatRate);
-            case "revenue":
-              return rule.revenueAccountNumber ? `${rule.revenueAccountNumber} ${rule.revenueAccountName}` : "—";
-            case "cost":
-              return rule.costAccountNumber ? `${rule.costAccountNumber} ${rule.costAccountName}` : "—";
+            case "vatCode":
+              return postingVatCodeLabel(rule);
+            case "revenue": {
+              const problem = ruleBoxProblem(rule);
+              return (
+                <RuleAccount
+                  number={rule.revenueAccountNumber}
+                  name={rule.revenueAccountName}
+                  box={rule.revenueAccountVatBox}
+                  problem={problem?.slot === "revenue" ? problem.text : null}
+                />
+              );
+            }
+            case "cost": {
+              const problem = ruleBoxProblem(rule);
+              return (
+                <RuleAccount
+                  number={rule.costAccountNumber}
+                  name={rule.costAccountName}
+                  box={rule.costAccountVatBox}
+                  problem={problem?.slot === "cost" ? problem.text : null}
+                />
+              );
+            }
             case "actions":
               return (
                 <span style={{ display: "inline-flex", gap: 8 }}>
@@ -458,6 +540,7 @@ function PostingRulesSection({
           rule={editing}
           accounts={accounts}
           articleGroups={articleGroups}
+          vatCodes={vatCodes}
           onSuccess={() => {
             setModalOpen(false);
             router.refresh();
@@ -472,15 +555,18 @@ function PostingRuleForm({
   rule,
   accounts,
   articleGroups,
+  vatCodes,
   onSuccess,
 }: {
   rule: PostingRule | null;
   accounts: Account[];
   articleGroups: ArticleGroup[];
+  vatCodes: VatCodeView[];
   onSuccess: () => void;
 }) {
   const [articleGroupId, setArticleGroupId] = useState(rule?.articleGroupId ?? "");
-  const [vatRate, setVatRate] = useState(rule ? (rule.vatRate === null ? "all" : String(Number(rule.vatRate))) : "all");
+  // "" = Alla momskoder (vatCodeId null on the wire).
+  const [vatCodeId, setVatCodeId] = useState(rule?.vatCodeId ?? "");
   const [revenueAccountId, setRevenueAccountId] = useState(rule?.revenueAccountId ?? "");
   const [costAccountId, setCostAccountId] = useState(rule?.costAccountId ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -504,7 +590,7 @@ function PostingRuleForm({
 
     const body = {
       articleGroupId,
-      vatRate: vatRate === "all" ? null : Number(vatRate),
+      vatCodeId: vatCodeId === "" ? null : vatCodeId,
       revenueAccountId: revenueAccountId || null,
       costAccountId: costAccountId || null,
     };
@@ -537,15 +623,36 @@ function PostingRuleForm({
         </Select>
       </Field>
 
-      <Field label="Momssats" htmlFor="postingRuleVatRate">
-        <Select id="postingRuleVatRate" size="sm" value={vatRate} onChange={(e) => setVatRate(e.target.value)}>
-          {VAT_RATE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
+      <Field label="Momskod" htmlFor="postingRuleVatCode">
+        <Select id="postingRuleVatCode" value={vatCodeId} onChange={(e) => setVatCodeId(e.target.value)}>
+          <option value="">Alla momskoder</option>
+          {RULE_CODE_GROUPS.map((group) => {
+            // Active codes, plus the rule's own code if it has been
+            // deactivated since — so editing does not silently change it.
+            const options = VAT_CODE_CATALOG.flatMap((entry) => {
+              const code = vatCodes.find((candidate) => candidate.code === entry.code);
+              if (!code || !group.kinds.includes(code.kind)) return [];
+              if (!code.active && code.id !== rule?.vatCodeId) return [];
+              return [code];
+            });
+            if (options.length === 0) return null;
+            return (
+              <optgroup key={group.label} label={group.label}>
+                {options.map((code) => (
+                  <option key={code.id} value={code.id}>
+                    {code.code} · {code.name}
+                    {code.active ? "" : " (inaktiv)"}
+                  </option>
+                ))}
+              </optgroup>
+            );
+          })}
         </Select>
       </Field>
+      <FormHint attached>
+        &quot;Alla momskoder&quot; gäller bara svensk moms, momsfritt och Inköp varor utanför EU — utrikes- och omvända
+        koder tar kodens eget konto om ingen regel för exakt koden finns.
+      </FormHint>
 
       <FormRow>
         <Field label="Intäktskonto" htmlFor="postingRuleRevenue">

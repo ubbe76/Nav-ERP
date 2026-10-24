@@ -486,7 +486,7 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
       {
         href: "/ekonomi/momsrapport",
         title: "Momsrapport",
-        description: "Skatteverkets momsrutor per månad eller kvartal, med momsomföring i serie M.",
+        description: "Momsdeklarationens alla rutor per månad, kvartal eller helår — med fil till Skatteverket, momsomföring i serie M och importmoms.",
       },
       {
         href: "/ekonomi/avskrivningsplan",
@@ -511,7 +511,12 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
       {
         href: "/ekonomi/konteringsregler",
         title: "Konteringsregler",
-        description: "Styr vilket konto en rad hamnar på, per artikelgrupp och momssats.",
+        description: "Styr vilket konto en rad hamnar på, per artikelgrupp och momskod.",
+      },
+      {
+        href: "/ekonomi/momskoder",
+        title: "Momskoder",
+        description: "Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms och import — med konton, momsrutor och fakturatext.",
       },
       {
         href: "/ekonomi/anlaggningsgrupper",

@@ -1,0 +1,78 @@
+/* Momskoder table and dialog. Colours are semantic tokens only. */
+.accounts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* One account per line: role, number and name, the expected box — flowing
+   text, so a code stays two or three lines tall. A warning goes on its own
+   line under the account. */
+.account {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.slot {
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  margin-right: 4px;
+}
+
+.box {
+  color: var(--color-text-muted);
+}
+
+/* The chart's box differs from the one the code expects, or the account is
+   missing/inactive. Amber for a wrong box (the report still adds up, just
+   in the wrong place), red where the posting would fail. */
+.warning {
+  display: block;
+  font-size: 12px;
+  color: var(--status-delayed-text);
+}
+
+.warningError {
+  display: block;
+  font-size: 12px;
+  color: var(--status-stopped-text);
+}
+
+.sub {
+  display: block;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* Long Swedish compounds ("betalningsskyldighet", "mervärdesskattedirektivet")
+   must not push the table past the page — anywhere lowers the cell's minimum
+   width, the words only break when the column really is that narrow. */
+.wrap {
+  overflow-wrap: anywhere;
+}
+
+.dim {
+  color: var(--color-text-muted);
+}
+
+.invoiceText {
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+
+.warnings {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* The Status column: the pill, and Ändra under it. */
+.status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
