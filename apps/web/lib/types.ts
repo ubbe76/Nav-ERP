@@ -5081,3 +5081,181 @@ export interface ThemeDetail extends ThemeListRow {
 }
 
 export type { ThemeContrastFailure, ThemeIssue, ThemeScheme, ThemeSource, ThemeValidationResult };
+
+// --- Bankavstämning (bokföringsgranskningen etapp 4) -------------------------
+// Mirror of the banking module's reconciliation routes. Amounts are numbers,
+// signed from the bank account's point of view (+ = in on the account), dates
+// "YYYY-MM-DD".
+
+export interface BankCsvMapping {
+  delimiter?: ";" | "," | "\t";
+  dateColumn: string;
+  amountColumn: string;
+  textColumn: string;
+  balanceColumn?: string;
+  valueDateColumn?: string;
+  referenceColumn?: string;
+  decimalComma?: boolean;
+  skipRows?: number;
+}
+
+export interface BankAccount {
+  id: string;
+  name: string;
+  identifier: string;
+  ledgerAccount: string;
+  ledgerAccountName: string | null;
+  currency: string;
+  active: boolean;
+  csvMapping: BankCsvMapping | null;
+  reconciledThrough: string | null;
+  lastStatementDate: string | null;
+  unmatchedCount: number;
+}
+
+export interface BankRuleSuggestion {
+  ruleId: string;
+  accountNumber: string;
+  description: string | null;
+  vatCode: string | null;
+}
+
+export interface BankStatementEntry {
+  id: string;
+  bookingDate: string;
+  valueDate: string | null;
+  amount: number;
+  text: string;
+  reference: string | null;
+  counterparty: string | null;
+  details: unknown;
+  reversal: boolean;
+  bankFileId: string;
+  ruleSuggestion: BankRuleSuggestion | null;
+}
+
+export interface BankLedgerRow {
+  // verification_row_id
+  id: string;
+  verificationId: string;
+  verificationDisplayNumber: string;
+  date: string;
+  description: string;
+  // debet − kredit on the bank account's ledger account
+  amount: number;
+}
+
+export type BankMatchKind = "auto" | "manual" | "created";
+
+export interface BankMatch {
+  id: string;
+  kind: BankMatchKind;
+  createdAt: string;
+  createdBy: string | null;
+  entries: BankStatementEntry[];
+  rows: BankLedgerRow[];
+}
+
+export interface BankMatchProposal {
+  entryIds: string[];
+  rowIds: string[];
+  basis: "reference" | "amount_date";
+  ambiguous: boolean;
+}
+
+export interface BankReconciliationRecord {
+  id: string;
+  throughDate: string;
+  statementBalance: number;
+  ledgerBalance: number;
+  createdAt: string;
+  createdBy: string | null;
+}
+
+export interface BankReconciliationSummary {
+  statementBalance: number | null;
+  statementBalanceDate: string | null;
+  ledgerBalance: number;
+  unmatchedEntriesSum: number;
+  unmatchedRowsSum: number;
+  difference: number | null;
+  explained: boolean;
+}
+
+export interface BankReconciliationView {
+  bankAccount: BankAccount;
+  from: string;
+  to: string;
+  statementEntries: BankStatementEntry[];
+  ledgerRows: BankLedgerRow[];
+  matches: BankMatch[];
+  summary: BankReconciliationSummary;
+  reconciliations: BankReconciliationRecord[];
+  changedAfterReconciliation: { through: string; rows: number } | null;
+  proposals: BankMatchProposal[];
+}
+
+export interface BankStatementPreviewEntry {
+  bookingDate: string;
+  valueDate: string | null;
+  amount: number;
+  text: string;
+  reference: string | null;
+  counterparty: string | null;
+  duplicate: boolean;
+  ruleId: string | null;
+}
+
+export interface BankStatementPreviewStatement {
+  accountIdentifier: string | null;
+  bankAccountId: string | null;
+  from: string | null;
+  to: string | null;
+  openingBalance: number | null;
+  closingBalance: number | null;
+  entryCount: number;
+  newEntryCount: number;
+  duplicateCount: number;
+  entries: BankStatementPreviewEntry[];
+}
+
+export interface BankStatementPreview {
+  sha256: string;
+  format: "camt.053" | "csv";
+  statements: BankStatementPreviewStatement[];
+  csvHeaders: string[] | null;
+  needsMapping: boolean;
+  unknownAccounts: string[];
+  warnings: string[];
+  blockers: string[];
+}
+
+export interface BankStatementImportResult {
+  bankFileId: string;
+  statements: { id: string; bankAccountId: string; from: string | null; to: string | null }[];
+  imported: number;
+  duplicates: number;
+  autoMatched: number;
+  autoBooked: number;
+  warnings: string[];
+}
+
+export type BankRuleDirection = "in" | "out" | "both";
+
+export interface BankRule {
+  id: string;
+  textContains: string;
+  direction: BankRuleDirection;
+  accountNumber: string;
+  accountName: string | null;
+  vatCode: string | null;
+  description: string | null;
+  autoBook: boolean;
+  active: boolean;
+  sortOrder: number;
+}
+
+export interface BankBookByRuleResult {
+  booked: { entryId: string; verificationId: string; displayNumber: string }[];
+  failed: { entryId: string; error: string }[];
+}

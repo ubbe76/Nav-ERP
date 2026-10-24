@@ -469,6 +469,11 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
         description: "Bokförda transaktioner per konto med ingående och utgående balans.",
       },
       {
+        href: "/ekonomi/bankavstamning",
+        title: "Bankavstämning",
+        description: "Importera kontoutdrag från banken, matcha posterna mot bokföringen, bokför det som saknas och markera kontot som avstämt.",
+      },
+      {
         href: "/ekonomi/anlaggningar",
         title: "Anläggningsregister",
         description: "Anläggningstillgångar med planenlig avskrivning i serie AV.",
@@ -532,6 +537,16 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
         href: "/ekonomi/momskoder",
         title: "Momskoder",
         description: "Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms och import — med konton, momsrutor och fakturatext.",
+      },
+      {
+        href: "/ekonomi/bankkonton",
+        title: "Bankkonton",
+        description: "Företagets bankkonton med IBAN eller kontonummer, huvudbokskonto och sparad CSV-mappning.",
+      },
+      {
+        href: "/ekonomi/bankregler",
+        title: "Bankregler",
+        description: "Känner igen återkommande poster på kontoutdraget — avgifter, ränta, skattekonto — och föreslår konto och momskod.",
       },
       {
         href: "/ekonomi/valutakurser",

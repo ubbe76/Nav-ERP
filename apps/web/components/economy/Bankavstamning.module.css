@@ -1,0 +1,220 @@
+/* Ekonomi → Bankavstämning. Only semantic tokens (theme-tokens.test.ts). */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: flex-end;
+  margin-bottom: var(--space-4);
+}
+
+.controlAccount {
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.tile {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.tileLabel {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+}
+
+.tileValue {
+  margin-top: 4px;
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.tileSub {
+  margin-top: 2px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.verdict {
+  font-family: var(--font-body);
+  font-size: 13px;
+  border-radius: var(--radius-control-sm);
+  padding: 9px 12px;
+  margin-bottom: var(--space-4);
+}
+
+.verdictOk {
+  color: var(--status-running-text);
+  background: var(--status-running-bg);
+}
+
+.verdictBad {
+  color: var(--status-stopped-text);
+  background: var(--status-stopped-bg);
+}
+
+.verdictNeutral {
+  color: var(--status-draft-text);
+  background: var(--status-draft-bg);
+}
+
+.matchBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  padding: 10px 14px;
+  margin: 16px 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.matchBarSums {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  flex: 1 1 280px;
+}
+
+.differs {
+  color: var(--status-stopped-text);
+}
+
+.balanced {
+  color: var(--status-running-text);
+}
+
+.listActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badgeProposal {
+  color: var(--status-running-text);
+  background: var(--status-running-bg);
+}
+
+.badgeAmbiguous {
+  color: var(--status-delayed-text);
+  background: var(--status-delayed-bg);
+}
+
+.badgeRule {
+  color: var(--status-draft-text);
+  background: var(--status-draft-bg);
+}
+
+.sub {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.match {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  margin-bottom: 8px;
+}
+
+.match > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: center;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.matchBody {
+  border-top: 1px solid var(--color-divider);
+  padding: 10px 14px 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 24px;
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.matchLine {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.matchLineText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.matchLineAmount {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.matchColumnTitle {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.matchActions {
+  grid-column: 1 / -1;
+}
+
+.reconcile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-end;
+}
+
+@media (max-width: 640px) {
+  .matchBody {
+    grid-template-columns: 1fr;
+  }
+}

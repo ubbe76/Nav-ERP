@@ -20,6 +20,7 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 | **Utskick som misslyckades** | röd | Mejl med status **Misslyckat** de senaste 14 dagarna, utan ett senare lyckat utskick av samma dokument. Testmejl räknas inte. Bara administratörer ser typen. |
 | **Tillägg som inte tar emot händelser** | röd | Tillägg som har misslyckade leveranser de senaste 7 dagarna utan en lyckad leverans efter det. Raden länkar till [Tillägg](/hjalp/tillagg#leveranser-och-felsokning). Bara administratörer ser typen. |
 | **Återkommande verifikat som misslyckats** | röd | En rad för **varje** månad som en återkommande post inte kunde skapa och som ännu inte rättats — till exempel en låst period (i läget Bokför direkt) eller ett inaktiverat konto i mallen — med orsaken. Månader som hoppats över medan posten var pausad räknas inte. Raden länkar till [Återkommande verifikat](/hjalp/ekonomi#aterkommande-verifikat), där **Kör nu** försöker igen; aviseringen försvinner när månaden skapats eller posten tagits bort. |
+| **Omatchade bankposter** | röd | Poster på ett kontoutdrag som är äldre än 10 dagar och ännu inte är matchade mot bokföringen. Raden länkar till [Bankavstämning](/hjalp/ekonomi#bankavstamning), där posterna matchas eller bokförs; aviseringen försvinner när posten matchats. |
 | **Försenade kundordrar** | gul | Order med status bekräftad eller under tillverkning där en rad med rest har ett leveransdatum som har passerat. Offerter och levererade ordrar räknas aldrig. |
 | **Försenade inköpsordrar** | gul | Order med status utkast, bekräftad eller delvis mottagen där en rad med rest har ett ankomstdatum som har passerat. Bekräftat leveransdatum gäller före önskat. |
 | **Sena tillverkningsordrar** | gul | Frisläppta tillverkningsordrar och pågående tillverkningsordrar som är **Sena** enligt produktionsplaneringen, alltså samma **Sen** som tillverkningsorderlistan och tillverkningsordern visar. |
@@ -36,7 +37,7 @@ Du ser bara de typer som din behörighetsgrupp ger:
 - **Förfallna kundfakturor**, **E-fakturor som inte gick fram**, **Offerter att följa upp** och **Försenade kundordrar**: menyn **Försäljning**.
 - **Leverantörsfakturor att betala**, **Försenade inköpsordrar** och **Behöver beställas**: menyn **Inköp**.
 - **Sena tillverkningsordrar** och **Behöver tillverkas**: menyn **Tillverkning**.
-- **Återkommande verifikat som misslyckats**: menyn **Ekonomi**.
+- **Återkommande verifikat som misslyckats** och **Omatchade bankposter**: menyn **Ekonomi**.
 - **Utskick som misslyckades**: bara administratörer.
 
 Administratörer ser allt. Sidan kräver minst en meny. Även ett konto med **Endast läsning** ser aviseringarna.

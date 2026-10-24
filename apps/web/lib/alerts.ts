@@ -14,6 +14,7 @@ export const ALERT_KINDS = [
   "email_failed",
   "plugin_delivery_failed",
   "recurring_verification_failed",
+  "bank_unreconciled",
 ] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 

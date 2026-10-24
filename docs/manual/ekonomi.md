@@ -1,8 +1,8 @@
 # Ekonomi
 
-Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Manuella verifikat registreras direkt i en tabell med kontosök, automatisk motrad och momshjälp, och återkommande bokningar och kostnader som ska fördelas över flera månader sköts med **Verifikatmallar** och **Återkommande verifikat**, se [Verifikat](#verifikat), [Verifikatmallar](#verifikatmallar) och [Återkommande verifikat](#aterkommande-verifikat). Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Har du sålt till företag i andra EU-länder sammanställer **Periodisk sammanställning** försäljningen per köparens momsnummer och ger dig filen till Skatteverket, se [Periodisk sammanställning](#periodisk-sammanstallning). Leverantörsfakturor och utbetalningar i utländsk valuta räknas om till kronor med **valutakurser** från Riksbanken eller egna kurser, se [Valutakurser](#valutakurser). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
+Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Manuella verifikat registreras direkt i en tabell med kontosök, automatisk motrad och momshjälp, och återkommande bokningar och kostnader som ska fördelas över flera månader sköts med **Verifikatmallar** och **Återkommande verifikat**, se [Verifikat](#verifikat), [Verifikatmallar](#verifikatmallar) och [Återkommande verifikat](#aterkommande-verifikat). Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Har du sålt till företag i andra EU-länder sammanställer **Periodisk sammanställning** försäljningen per köparens momsnummer och ger dig filen till Skatteverket, se [Periodisk sammanställning](#periodisk-sammanstallning). **Bankavstämning** stämmer av bankkontot mot kontoutdraget från banken och visar vad som saknas i bokföringen, se [Bankavstämning](#bankavstamning). Leverantörsfakturor och utbetalningar i utländsk valuta räknas om till kronor med **valutakurser** från Riksbanken eller egna kurser, se [Valutakurser](#valutakurser). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
 
-Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, **Verifikatmallar**, **Återkommande verifikat**, Huvudbok, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, **Periodisk sammanställning**, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, **Valutakurser**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
+Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, **Verifikatmallar**, **Återkommande verifikat**, Huvudbok, **Bankavstämning**, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, **Periodisk sammanställning**, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, **Bankkonton**, **Bankregler**, **Valutakurser**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
 
 ## Kontoplan
 
@@ -407,6 +407,93 @@ Regler att känna till:
 - `#RTRANS` och `#BTRANS` (rättade och borttagna rader) hoppas över, i enlighet med SIE-standarden.
 - Importen läser alltid filens egna belopp: positiva belopp blir debet och negativa kredit.
 
+## Bankavstämning
+
+**Ekonomi → Bankavstämning** stämmer av bankkontot i bokföringen (till exempel 1930) mot **kontoutdraget** från banken. Du importerar kontoutdraget, matchar varje post mot en rad i bokföringen och bokför det som saknas — bankavgifter, ränta, kortköp, överföringar. När allt är matchat och saldona stämmer markerar du kontot som avstämt. Hela sidan kräver rättigheten **Ekonomi**.
+
+Välj **Bankkonto**, **Från** och **Till** överst — valen ligger i adressen, så du kan spara eller skicka länken. Förvalt är det första aktiva bankkontot och innevarande år t.o.m. i dag.
+
+**Sammanställningen** överst jämför de två sidorna:
+
+- **Saldo enligt kontoutdraget** — kontoutdragets utgående saldo, med datumet det gäller. Saknas kontoutdrag står det **Saknas**.
+- **Saldo i bokföringen** — bankkontots saldo i huvudboken per samma dag.
+- **Omatchade poster** och **Omatchade rader** — summan och antalet av det som ännu inte är matchat på respektive sida.
+- **Skillnad** — kontoutdragets saldo minus bokföringens.
+
+Skillnaden ska precis motsvara de omatchade posterna minus de omatchade raderna: en insättning som står på kontoutdraget men ännu inte är bokförd förklarar skillnaden, och försvinner så fort den matchats eller bokförts. Stämmer det visas **Skillnaden är förklarad**. Stämmer det inte visas en röd **Avvikelse** — oftast saknas ett kontoutdrag för en del av perioden, eller så har något ändrats efter importen.
+
+### Bankkonton
+
+**Ekonomi → Bankkonton** är registret över bankkonton som kan stämmas av. **+ Nytt bankkonto** öppnar ett formulär med **Namn**, **IBAN eller kontonummer** (versaler och mellanslag spelar ingen roll, numret måste vara unikt) och **Huvudbokskonto** — kontot i kontoplanen som bankens saldo ska stämma mot, vanligtvis 1930. Kontoutdraget känns igen på det nummer du anger här. Listan visar även **Avstämd t.o.m.**, **Senaste kontoutdrag** och antalet **Omatchade** poster, och en länk **Stäm av** som öppnar bankavstämningen för kontot. **Ändra** ändrar uppgifterna och **Inaktivera** tar bort kontot ur valet på avstämningssidan utan att något raderas.
+
+Första gången du öppnar registret läggs ett bankkonto upp åt dig ur IBAN under **Företagsuppgifter** och standardkontot **Bank/betalkonto** under [Konteringsregler](#standardkonton), om IBAN är ifyllt.
+
+### Importera kontoutdrag
+
+Klicka **Importera kontoutdrag** och välj filen. Nav läser den och visar en **förhandsgranskning** — inget sparas förrän du klickar **Importera**.
+
+- **camt.053** är kontoutdraget som XML-fil, som Handelsbanken, SEB, Swedbank och Nordea kan lämna via filöverföring eller internetbanken. Filen innehåller kontots nummer, perioden, **Ingående saldo** och **Utgående saldo** samt varje post. Känner Nav inte igen kontonumret (det är inte angivet på något bankkonto) frågar dialogen **Bankkonto** vilket konto det är, och numret sparas på kontot.
+- **CSV** är den export som internetbanken ger för den som inte har något filöverföringsavtal. En CSV-fil saknar kontonummer, så välj **Bankkonto**. Under **Kolumnmappning för CSV-filen** anger du **Avgränsare**, hur många **Rader att hoppa över överst** och vilka kolumner som är **Bokföringsdag**, **Belopp** och **Text** (och valfritt **Saldo**, **Valutadag** och **Referens**), samt om beloppen skrivs med decimalkomma. Ett positivt belopp är en insättning och ett negativt ett uttag. Är avgränsaren fel visas rubrikerna som en enda kolumn — ändra **Avgränsare** och klicka **Läs om rubriker**. Klicka **Förhandsgranska** när mappningen stämmer. Mappningen sparas på bankkontot, så nästa fil från samma bank behöver bara ett klick.
+
+Förhandsgranskningen visar per kontoutdrag konto, period, saldon och antalet poster, **nya** och **dubbletter**, och de första posterna med status **Ny** eller **Dubblett** (**Ny · regel** när en [bankregel](#bankregler) känner igen posten). Varningar visas i gult och fel som stoppar importen i rött.
+
+**Dubbletter.** Samma post importeras aldrig två gånger: en post som redan finns (samma bankreferens, eller samma dag, belopp och text) hoppas över och räknas som dubblett. Du kan alltså importera överlappande perioder eller samma fil igen utan risk — är alla poster dubbletter står det **Alla posterna är redan importerade** och **Importera** är avstängd.
+
+Med kryssrutan **Matcha automatiskt efter import** (förvald) matchas posterna direkt när de lagts in. Efteråt visar sidan hur många poster som importerades, hur många dubbletter som hoppades över, hur många som matchades automatiskt och hur många som bokfördes direkt enligt en bankregel.
+
+### Matchning
+
+En **matchning** knyter ihop en eller flera poster på kontoutdraget med en eller flera rader i bokföringen på bankkontot. Summorna måste vara lika. Tre listor visar läget: **Omatchade poster på kontoutdraget**, **Omatchade rader i bokföringen** och **Matchat**.
+
+**Automatisk matchning** sker vid import och med knappen **Matcha automatiskt**. Den matchar bara när det är entydigt, i den här ordningen:
+
+1. **Referens** — posten bär en betalningsreferens som en inläst bankfil redan har bokfört som kund- eller leverantörsbetalning, och matchas mot betalningens verifikatrad.
+2. **Belopp och datum** — exakt samma belopp och en verifikatrad vars datum ligger högst tre dagar från bokföringsdagen, och ingen annan omatchad post eller rad med samma belopp i det fönstret.
+
+Är det inte entydigt matchas ingenting automatiskt. Raderna får i stället en markering: **Förslag · referens** eller **Förslag · belopp och datum** för ett säkert förslag, och **Flera möjliga** när flera rader eller poster passar. **Markera förslaget** (eller **Markera kandidaterna**) kryssar i de ingående posterna och raderna, så att du kan kontrollera och klicka **Matcha**.
+
+**Manuell matchning.** Kryssa i en eller flera poster och en eller flera rader. Fältet över listorna visar de **Markerade posterna**, **Markerade raderna** och **Skillnad**. När skillnaden är 0,00 aktiveras **Matcha**. En post kan matchas mot flera rader (och tvärtom) — till exempel en utbetalning som bokförts som två leverantörsbetalningar.
+
+**Ångra.** Under **Matchat** fäller du ut en matchning och klickar **Ångra**, efter en bekräftelse. Posterna och raderna blir omatchade igen; matchningen raderas aldrig utan sparas som ångrad. Är matchningen **Bokförd från posten** ligger verifikatet kvar — rätta det med en omföring om det var fel.
+
+### Bokföra en post som saknas
+
+Står en post på kontoutdraget utan motsvarighet i bokföringen klickar du **Bokför** på posten. Dialogen **Bokför posten** visar verifikattabellen förifylld:
+
+- rad 1 är bankkontot med postens belopp — debet för en insättning, kredit för ett uttag,
+- rad 2 är motkontot från en [bankregel](#bankregler) när någon känner igen texten, annars tom — välj konto själv,
+- datumet är bokföringsdagen och beskrivningen är texten på posten.
+
+Tabellen fungerar som när du bokför ett vanligt [verifikat](#nytt-verifikat), inklusive **Momskod** (ett kortköp med moms bokförs med momsraden utbruten) och tangentbordet. Raden på bankkontot måste ha exakt postens belopp på rätt sida. **Bokför** skapar verifikatet i serien **B** (Bank), bokför det och matchar det mot posten i samma steg; verifikatet länkas i bekräftelsen.
+
+Med flera poster som en regel känner igen kryssar du i dem och klickar **Bokför enligt regel**. Det blir ett verifikat per post — aldrig ihopslaget, eftersom varje post har sitt eget underlag i kontoutdraget. Poster som inte kunde bokföras (till exempel för att perioden är låst) listas med orsak och ligger kvar omatchade.
+
+### Bankregler
+
+**Ekonomi → Bankregler** innehåller reglerna som känner igen återkommande poster. Nav lägger upp några förslag första gången: avgifter mot 6570, ränta mot 8310 (in) och 8410 (ut), och Skatteverket/skattekontot mot 1630. Ta bort eller ändra dem som du vill. **+ Ny regel** (eller **Ändra**) har fälten:
+
+- **Texten innehåller** — texten som ska finnas i postens text (skiftläge spelar ingen roll).
+- **Riktning** — **In** (insättningar), **Ut** (uttag) eller **Båda**.
+- **Konto** — motkontot som föreslås när posten bokförs.
+- **Momskod** — valfri; beloppet tolkas då som inklusive moms och momsraden läggs till.
+- **Beskrivning** — texten på motkontots rad; tom ⇒ postens egen text.
+- **Bokför direkt** — poster som regeln träffar bokförs direkt vid import. Det gäller bara när regeln är entydig och kontot är aktivt; träffar flera regler samma post lämnas den till dig. **Bokför direkt är avstängt som förval** — slå på det först när du litar på regeln.
+- **Aktiv** — en inaktiv regel används inte men finns kvar.
+
+I listan över omatchade poster visas regelns förslag under posten (*Regel: konto 6570 …*).
+
+### Avstämd t.o.m.
+
+När allt till och med ett datum är matchat och kontoutdragets saldo stämmer med bokföringens kan du markera bankkontot som avstämt. Under **Avstämd t.o.m.** står när kontot senast stämdes av. Välj **Datum** (förvalt är kontoutdragets saldodag) och klicka **Markera som avstämd**. Nav vägrar när det finns omatchade poster eller rader till och med datumet, när kontoutdragets saldo saknas för datumet eller när saldona inte stämmer — meddelandet säger vilket. Varje avstämning sparas och syns under **Tidigare avstämningar**; den kan inte ändras i efterhand.
+
+Bokförs något på bankkontot i efterhand med ett datum som redan är avstämt visar sidan en gul varning: **Bokföringen har ändrats efter avstämningen** med datum och antal rader. Matcha eller bokför raden och stäm av igen.
+
+Avstämningen är ingen spärr — du kan fortfarande bokföra — men [årsbokslutet](#kontroller) varnar när bankkontot inte är avstämt till bokslutsdagen.
+
+### Aviseringen
+
+[Aviseringen](/hjalp/aviseringar) **Omatchade bankposter** (rättighet **Ekonomi**) listar poster på kontoutdraget som är äldre än 10 dagar och ännu inte matchade, så att inget glöms bort mellan avstämningarna.
+
 ## Anläggningsregister
 
 **Ekonomi → Anläggningsregister** håller företagets anläggningstillgångar (maskiner, inventarier, bilar, datorer, byggnader) och bokför de planenliga avskrivningarna. Registret bokför **inte** själva anskaffningen — den är redan bokförd via leverantörsfakturan eller ett manuellt verifikat på tillgångskontot. Registret bokför avskrivningar och avyttringar, i verifikatserien **AV** (Anläggningar), som skapas automatiskt första gången den behövs.
@@ -470,6 +557,7 @@ Steg 1 visar spärrar och varningar. **Spärrar** hindrar stegen 2–5: verifika
 - Momsen är inte omförd för alla månader. Omför momsen för december (och övriga månader) *innan* året stängs — efteråt kan den inte bokföras i året.
 - Kund- eller leverantörsreskontran stämmer inte mot kundfordrings- respektive leverantörsskuldkontot per räkenskapsårets sista dag (även när bokslutsdatumet ligger tidigare). Vanliga orsaker: ett manuellt verifikat på kontot, ett standardkonto som bytts under året, eller fakturor från innan automatkonteringen. Den bokförda [valutaomvärderingen](#valutaomvardering) räknas med — huvudboken förväntas vara reskontran plus omvärderingen, och meddelandet anger i så fall båda beloppen.
 - Anläggningsregistret stämmer inte mot tillgångskontona (samma avstämning som i [Avskrivningsplan](#avskrivningsplan)).
+- Bankkontot är inte avstämt t.o.m. bokslutsdagen. Stäm av och markera kontot som avstämt under [Bankavstämning](#bankavstamning) innan året stängs — varningen hindrar inget, men en avstämning är det som visar att bokföringens saldo på bankkontot stämmer med bankens.
 - Intäkter på konton utan momsruta.
 - Lagerkontots saldo stämmer inte med den bokförda lagervärderingen.
 - De öppna valutaposterna har ändrats sedan valutaomvärderingen bokfördes — gör om steget [Valutaomvärdering](#valutaomvardering).

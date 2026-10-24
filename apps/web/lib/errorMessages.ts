@@ -540,6 +540,40 @@ const MESSAGES: Record<string, MessageEntry> = {
       ? `Ingenting importerades: ${blockers.join(" ")}`
       : "Ingenting importerades — filen har fel som måste rättas först.";
   },
+  // Bankavstämning (bankkonton, matchning, Bokför på en post, Avstämd t.o.m.)
+  "bank-account-identifier-taken": "Ett bankkonto med den IBAN eller det kontonumret finns redan.",
+  "bank-account-ledger-missing": "Huvudbokskontot finns inte i kontoplanen — välj ett befintligt konto.",
+  "bank-match-sum-mismatch": (err) => {
+    const body = err.body as { entriesSum?: unknown; rowsSum?: unknown } | undefined;
+    const money = (value: unknown) =>
+      typeof value === "number" || (typeof value === "string" && value !== "" && Number.isFinite(Number(value)))
+        ? Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : null;
+    const entries = money(body?.entriesSum);
+    const rows = money(body?.rowsSum);
+    return entries !== null && rows !== null
+      ? `Summorna är olika: posterna på kontoutdraget ${entries} kr, raderna i bokföringen ${rows} kr. En matchning kräver lika summor.`
+      : "Posterna på kontoutdraget och raderna i bokföringen har olika summor — en matchning kräver lika summor.";
+  },
+  "bank-match-already-matched": "En av posterna eller raderna är redan matchad — ladda om sidan.",
+  "bank-match-wrong-account": "Posterna och raderna hör till olika bankkonton.",
+  "bank-entry-book-mismatch":
+    "Verifikatet ska ha en rad på bankkontots huvudbokskonto med exakt postens belopp, på rätt sida (debet för en inbetalning, kredit för en utbetalning).",
+  "bank-reconciliation-incomplete": (err) => {
+    const reason = (err.body as { reason?: unknown } | undefined)?.reason;
+    switch (reason) {
+      case "no-statement-balance":
+        return "Kontoutdragets saldo saknas för det datumet — importera ett kontoutdrag som sträcker sig till datumet.";
+      case "unmatched-entries":
+        return "Det finns omatchade poster på kontoutdraget till och med datumet — matcha eller bokför dem först.";
+      case "unmatched-rows":
+        return "Det finns omatchade rader i bokföringen till och med datumet — matcha dem först.";
+      case "balance-mismatch":
+        return "Kontoutdragets saldo stämmer inte med bokföringens saldo per datumet.";
+      default:
+        return "Allt till och med datumet måste vara matchat och kontoutdragets saldo måste stämma med bokföringens innan perioden kan markeras som avstämd.";
+    }
+  },
   // generic (thrown by the zod/body-parsing layer, not a named domain error)
   "validation-failed": "Ogiltiga uppgifter — kontrollera fälten.",
   "invalid-request-body": "Ogiltig förfrågan.",
