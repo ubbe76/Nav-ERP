@@ -90,8 +90,14 @@ export function VerificationRowsEditor({
     : ["account", "description", "debit", "credit"];
   const splittable = (vatCodes ?? []).filter((c) => c.active && splitVatApplies(c));
 
+  // Cells are addressed by row INDEX, not by the row's key: the keys come from
+  // a client-side counter, so a server-rendered page hydrates with other keys
+  // in its attributes (React does not patch attributes on hydration) and a
+  // key-based lookup would find nothing.
   function focusCell(key: string, col: ColKey) {
-    const el = containerRef.current?.querySelector<HTMLElement>(`[data-cell="${key}:${col}"]`);
+    const index = rowsRef.current.findIndex((r) => r.key === key);
+    if (index < 0) return;
+    const el = containerRef.current?.querySelector<HTMLElement>(`[data-cell="${index}:${col}"]`);
     if (!el) return;
     el.focus();
     if (el instanceof HTMLInputElement && col !== "account") el.select();
@@ -215,7 +221,8 @@ export function VerificationRowsEditor({
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       const active = document.activeElement?.getAttribute("data-cell");
-      if (active) applySplit(active.split(":")[0]!);
+      const activeRow = active ? rowsRef.current[Number(active.split(":")[0])] : undefined;
+      if (activeRow) applySplit(activeRow.key);
       // After React has applied the split (the parent's handler is the latest).
       setTimeout(() => onSaveRef.current?.(), 0);
     }
@@ -248,7 +255,7 @@ export function VerificationRowsEditor({
               <div className={`${styles.cell} ${styles.cellAccount}`}>
                 <span className={styles.mobileLabel}>Konto</span>
                 <AccountCell
-                  cellId={`${row.key}:account`}
+                  cellId={`${rowIndex}:account`}
                   row={row}
                   accounts={accounts}
                   disabled={disabled}
@@ -260,7 +267,7 @@ export function VerificationRowsEditor({
               <div className={`${styles.cell} ${styles.cellDescription}`}>
                 <span className={styles.mobileLabel}>Beskrivning</span>
                 <input
-                  data-cell={`${row.key}:description`}
+                  data-cell={`${rowIndex}:description`}
                   className={styles.input}
                   aria-label={`Beskrivning, rad ${n}`}
                   maxLength={255}
@@ -275,7 +282,7 @@ export function VerificationRowsEditor({
                 <div className={`${styles.cell} ${styles.cellVat}`}>
                   <span className={styles.mobileLabel}>Momskod</span>
                   <select
-                    data-cell={`${row.key}:vatCode`}
+                    data-cell={`${rowIndex}:vatCode`}
                     className={styles.input}
                     aria-label={`Momskod, rad ${n}`}
                     disabled={disabled}
@@ -297,7 +304,7 @@ export function VerificationRowsEditor({
               <div className={`${styles.cell} ${styles.cellDebit}`}>
                 <span className={styles.mobileLabel}>Debet</span>
                 <input
-                  data-cell={`${row.key}:debit`}
+                  data-cell={`${rowIndex}:debit`}
                   className={`${styles.input} ${styles.amount}`}
                   type="number"
                   min="0"
@@ -317,7 +324,7 @@ export function VerificationRowsEditor({
               <div className={`${styles.cell} ${styles.cellCredit}`}>
                 <span className={styles.mobileLabel}>Kredit</span>
                 <input
-                  data-cell={`${row.key}:credit`}
+                  data-cell={`${rowIndex}:credit`}
                   className={`${styles.input} ${styles.amount}`}
                   type="number"
                   min="0"
