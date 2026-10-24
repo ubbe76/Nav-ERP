@@ -13,6 +13,8 @@ import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
 import { formatMoney, round2 } from "../../lib/format";
+import { chargedVatRate, supplierDefaultVatCode, vatCodeOptionLabel, vatCodesFor } from "../../lib/vatCodes";
+import { useVatCodes } from "../../lib/useVatCodes";
 import {
   PURCHASE_ORDER_STATUS_PILL,
   SUPPLIER_INVOICE_STATUS_PILL,
@@ -151,10 +153,16 @@ export function NewSupplierInvoiceForm({
   // Momsen förifylls: Momsbelopp = Nettobelopp × Momssats and Bruttobelopp =
   // netto + moms, until the field is typed in by hand (manuellt vinner).
   // Picking another Momssats is an explicit request, so it recomputes the
-  // VAT again. Foreign-currency suppliers start at 0 % — they invoice
-  // without Swedish VAT.
+  // VAT again — and so does picking another Momskod: a domestic code states
+  // its rate, an omvänd/momsfri/import code carries no VAT on the supplier's
+  // invoice (Momssats 0 %, Momsbelopp 0).
   const [vatRate, setVatRate] = useState<number>(25);
   const [vatTouched, setVatTouched] = useState(false);
+  // Momskod för fakturan (every row without a code of its own and the
+  // remainder follow it). Starts as the supplier's Momskod (förval), else the
+  // one derived from its country; "" = the API picks that itself.
+  const { codes: vatCodes } = useVatCodes();
+  const [vatCodeId, setVatCodeId] = useState("");
   const [grossTouched, setGrossTouched] = useState(false);
   const [note, setNote] = useState("");
   // Underlag — the supplier's invoice as PDF/scan, uploaded right after the
@@ -181,12 +189,31 @@ export function NewSupplierInvoiceForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const invoiceCurrency = invoiceSupplier?.currency;
+  // The invoice's supplier decides the Momskod: its own förval when it has
+  // one that can still be used, else the code derived from its country
+  // (Sverige ⇒ svensk moms, annat EU-land ⇒ omvänd moms på varor, övriga ⇒
+  // varor utanför EU). The Momssats follows the code.
+  const invoiceSupplierId = invoiceSupplier?.id;
   useEffect(() => {
-    if (!invoiceCurrency) return;
-    setVatRate(invoiceCurrency === "SEK" ? 25 : 0);
+    if (!invoiceSupplier || vatCodes.length === 0) {
+      setVatCodeId("");
+      return;
+    }
+    const usable = vatCodesFor(vatCodes, "purchase");
+    const own = invoiceSupplier.defaultVatCodeId
+      ? usable.find((code) => code.id === invoiceSupplier.defaultVatCodeId)
+      : undefined;
+    const derived = usable.find((code) => code.code === supplierDefaultVatCode(invoiceSupplier.country || "SE"));
+    const next = own ?? derived;
+    setVatCodeId(next?.id ?? "");
+    setVatRate(next ? chargedVatRate(next.code) : 25);
     setVatTouched(false);
-  }, [invoiceCurrency]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceSupplierId, vatCodes]);
+
+  const pickedVatCode = vatCodes.find((code) => code.id === vatCodeId);
+  // Omvänd moms and goods from outside the EU: the supplier charges no VAT.
+  const noChargedVat = pickedVatCode !== undefined && pickedVatCode.kind !== "domestic";
 
   useEffect(() => {
     const net = Number(netAmount);
@@ -301,14 +328,14 @@ export function NewSupplierInvoiceForm({
           grossAmount: grossAmount.trim() ? Number(grossAmount) : 0,
           note: note.trim() || undefined,
           purchaseOrderId: previewRows.length > 0 ? selectedOrderId : undefined,
+          vatCodeId: vatCodeId || undefined,
           rows: previewRows.map((r) => ({
             description: r.description,
             articleId: r.articleId,
             quantity: r.quantity,
             unitPrice: r.unitPrice,
-            // The row's rate only steers the konteringsregel lookup; the
+            // No code of its own: the row follows the invoice's Momskod. The
             // header's Momsbelopp is what is booked.
-            vatRate,
             purchaseOrderRowId: r.purchaseOrderRowId,
           })),
         }),
@@ -459,6 +486,32 @@ export function NewSupplierInvoiceForm({
           <Input id="netAmount" type="number" step="0.01" size="sm" value={netAmount} onChange={(e) => setNetAmount(e.target.value)} />
         </Field>
       </FormRow>
+
+      <Field label="Momskod" htmlFor="vatCodeId">
+        <Select
+          id="vatCodeId"
+          value={vatCodeId}
+          onChange={(e) => {
+            const picked = vatCodes.find((code) => code.id === e.target.value);
+            setVatCodeId(e.target.value);
+            if (picked) setVatRate(chargedVatRate(picked.code));
+            setVatTouched(false);
+          }}
+        >
+          <option value="">Leverantörens förval</option>
+          {vatCodesFor(vatCodes, "purchase", vatCodeId).map((code) => (
+            <option key={code.id} value={code.id}>
+              {vatCodeOptionLabel(code)}
+            </option>
+          ))}
+        </Select>
+        {noChargedVat && (
+          <FormHint>
+            Leverantören debiterar ingen moms med den här momskoden — Nav beräknar momsen när fakturan godkänns och
+            bokför den som både utgående och ingående moms.
+          </FormHint>
+        )}
+      </Field>
 
       <FormRow>
         <Field label="Momssats" htmlFor="vatRate">

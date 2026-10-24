@@ -24,11 +24,19 @@ import type {
 import { PluginTabContent, pluginTabId, usePluginTabs } from "../plugins/PluginTabs";
 import styles from "./PartnerTabs.module.css";
 import { Card } from "../ui/Card";
-import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 import { SupplierPaymentDetailsSection } from "../banking/SupplierPaymentDetailsSection";
 import { CustomerPricesTab } from "./CustomerPricesTab";
 import { PeppolFields } from "./PeppolFields";
 import { DeliveryDaysFields, type DeliveryDayDefaults, type DeliveryDaysValue } from "./DeliveryDaysFields";
+import {
+  CUSTOMER_VAT_TREATMENT_LABELS,
+  customerVatTreatment,
+  supplierDefaultVatCode,
+  vatCodeOptionLabel,
+  vatCodesFor,
+} from "../../lib/vatCodes";
+import { useVatCodes } from "../../lib/useVatCodes";
 
 // Prefixes https:// onto a bare domain (no "://" scheme) so the Webbsida
 // link always navigates instead of being treated as a relative path.
@@ -213,7 +221,9 @@ function AllmantTab({
   const [address, setAddress] = useState(partner.address ?? "");
   const [postalCode, setPostalCode] = useState(partner.postalCode ?? "");
   const [city, setCity] = useState(partner.city ?? "");
-  const [country, setCountry] = useState(isCustomer ? (partner as Customer).country : "SE");
+  // Besöksadressens land — a supplier has one too (momskoder: it picks the
+  // förvalda momskoden on its invoices).
+  const [country, setCountry] = useState(isCustomer ? (partner as Customer).country : (partner as Supplier).country);
   const [currency, setCurrency] = useState("currency" in partner ? partner.currency : "SEK");
   const [active, setActive] = useState(partner.active);
   const { error, setError, saved, setSaved, pending, setPending } = useSaveState();
@@ -238,7 +248,7 @@ function AllmantTab({
           address: orNull(address),
           postalCode: orNull(postalCode),
           city: orNull(city),
-          ...(isCustomer ? { country: country.trim().toUpperCase() || "SE" } : {}),
+          country: country.trim().toUpperCase() || "SE",
           ...(showCurrency ? { currency } : {}),
           active,
         }),
@@ -384,25 +394,28 @@ function AllmantTab({
           <Textarea id="address" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} />
         </Field>
 
-        <FormRow columns={isCustomer ? "postal" : 2}>
+        <FormRow columns="postal">
           <Field label="Postnummer" htmlFor="postalCode">
             <Input id="postalCode" size="sm" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} />
           </Field>
           <Field label="Postort" htmlFor="city">
             <Input id="city" value={city} onChange={(e) => setCity(e.target.value)} />
           </Field>
-          {isCustomer && (
-            <Field label="Land" htmlFor="country">
-              <Input
-                id="country"
-                size="xs"
-                maxLength={2}
-                value={country}
-                onChange={(e) => setCountry(e.target.value.toUpperCase())}
-              />
-            </Field>
-          )}
+          <Field label="Land" htmlFor="country">
+            <Input
+              id="country"
+              size="xs"
+              maxLength={2}
+              value={country}
+              onChange={(e) => setCountry(e.target.value.toUpperCase())}
+            />
+          </Field>
         </FormRow>
+        <FormHint attached>
+          {isCustomer
+            ? "Landskod enligt ISO (SE, DE, NO …). Landet och VAT-numret avgör om fakturan får svensk moms, EU-försäljning eller export."
+            : "Landskod enligt ISO (SE, DE, CN …). Landet avgör leverantörens förvalda momskod på leverantörsfakturan — Sverige svensk moms, annat EU-land omvänd moms."}
+        </FormHint>
 
         <FormActions>
           <Button type="submit" variant="primary" disabled={pending}>
@@ -779,6 +792,53 @@ function DeliveryAddressForm({
   );
 }
 
+// The momskod a supplier without one of its own gets: the API's own answer
+// (defaultVatCode.derived) while the country is unchanged, else derived here
+// from the saved country (supplierDefaultVatCode) against the company's codes.
+function derivedSupplierVatCodeName(supplier: Supplier, codes: { code: string; name: string }[]): string {
+  if (supplier.defaultVatCode?.derived) return supplier.defaultVatCode.name;
+  const derived = supplierDefaultVatCode(supplier.country);
+  return codes.find((code) => code.code === derived)?.name ?? derived;
+}
+
+// Momsbehandling (spec 4.6): how this customer's invoice rows are taxed,
+// worked out from country, VAT-nummer, Privatperson and the construction
+// flag — customerVatTreatment, the rules the rows' momskod follows. Reads the
+// fields as they stand in the form, so it is a preview until the card is saved.
+function CustomerVatTreatmentRow({
+  customer,
+}: {
+  customer: { country: string; vatNumber: string; privatePerson: boolean; reverseChargeConstruction: boolean };
+}) {
+  const treatment = customerVatTreatment(customer);
+  // Omvänd betalningsskyldighet för byggtjänster only applies to a Swedish
+  // company customer (a private person always gets svensk moms).
+  const constructionApplies =
+    customer.reverseChargeConstruction && !customer.privatePerson && customer.country.trim().toUpperCase() === "SE";
+  return (
+    <>
+      <Field label="Momsbehandling">
+        <div style={{ fontWeight: 600 }}>
+          {CUSTOMER_VAT_TREATMENT_LABELS[treatment]}
+          {constructionApplies && " · tjänster utan moms (byggtjänster)"}
+        </div>
+      </Field>
+      {treatment === "domestic_no_vat_number" && (
+        <FormNotice>
+          Kunden saknar momsregistreringsnummer — svensk moms debiteras. Ange VAT-numret med landskod (till exempel
+          DE123456789) för att kunna fakturera utan moms inom EU.
+        </FormNotice>
+      )}
+      {treatment === "private_eu" && (
+        <FormNotice>
+          Privatperson i annat EU-land — svensk moms debiteras. Distansförsäljning till privatpersoner i andra
+          EU-länder (OSS) ingår inte i Nav.
+        </FormNotice>
+      )}
+    </>
+  );
+}
+
 function RegisterSelect({
   id,
   value,
@@ -825,6 +885,13 @@ function VillkorTab({
   const [orgNumber, setOrgNumber] = useState(partner.orgNumber ?? "");
   const [vatNumber, setVatNumber] = useState(partner.vatNumber ?? "");
   const [privatePerson, setPrivatePerson] = useState(isCustomer ? (partner as Customer).privatePerson : false);
+  // Omvänd betalningsskyldighet för byggtjänster (momskoder).
+  const [reverseChargeConstruction, setReverseChargeConstruction] = useState(
+    isCustomer ? (partner as Customer).reverseChargeConstruction : false
+  );
+  // Supplier: its own Momskod (förval); "" = derived from the country.
+  const [defaultVatCodeId, setDefaultVatCodeId] = useState(!isCustomer ? ((partner as Supplier).defaultVatCodeId ?? "") : "");
+  const { codes: vatCodes } = useVatCodes({ enabled: !isCustomer });
   const [collectiveInvoicing, setCollectiveInvoicing] = useState(
     isCustomer ? (partner as Customer).collectiveInvoicing : false
   );
@@ -901,7 +968,8 @@ function VillkorTab({
           ...(isCustomer
             ? { discountPercent: discountPercent.trim() === "" ? 0 : Number(discountPercent) }
             : {}),
-          ...(isCustomer ? { privatePerson, collectiveInvoicing } : {}),
+          ...(isCustomer ? { privatePerson, collectiveInvoicing, reverseChargeConstruction } : {}),
+          ...(!isCustomer ? { defaultVatCodeId: defaultVatCodeId || null } : {}),
           // E-faktura: a private person never gets Peppol invoices, so the
           // fields are hidden — and what is sent stays as it was saved.
           ...(isCustomer && !privatePerson ? { invoiceDelivery, peppolId: peppolId.trim() } : {}),
@@ -946,6 +1014,22 @@ function VillkorTab({
             Faktureras via Försäljning → Samlingsfakturering. &quot;Ny faktura&quot; är spärrad för kunden.
           </FormHint>
         )}
+        {isCustomer && (
+          <>
+            <Field label="Omvänd betalningsskyldighet för byggtjänster" htmlFor="reverseChargeConstruction">
+              <Toggle
+                id="reverseChargeConstruction"
+                checked={reverseChargeConstruction}
+                onChange={(e) => setReverseChargeConstruction(e.target.checked)}
+              />
+            </Field>
+            <FormHint attached>
+              Tjänsterader till en svensk kund som själv är byggföretag får momskoden Omvänd betalningsskyldighet,
+              Sverige — fakturan skrivs ut utan moms och kräver kundens VAT-nummer på formen SE + tio siffror + 01.
+              Varor påverkas inte.
+            </FormHint>
+          </>
+        )}
 
         <FormRow>
           <Field label={isCustomer && privatePerson ? "Personnummer" : "Organisationsnummer"} htmlFor="orgNumber">
@@ -955,6 +1039,48 @@ function VillkorTab({
             <Input id="vatNumber" size="md" value={vatNumber} onChange={(e) => setVatNumber(e.target.value)} />
           </Field>
         </FormRow>
+
+        {isCustomer && (
+          <CustomerVatTreatmentRow
+            customer={{
+              country: (partner as Customer).country,
+              vatNumber,
+              privatePerson,
+              reverseChargeConstruction,
+            }}
+          />
+        )}
+
+        {!isCustomer && (
+          <>
+            <Field label="Momskod (förval)" htmlFor="defaultVatCodeId">
+              <Select id="defaultVatCodeId" value={defaultVatCodeId} onChange={(e) => setDefaultVatCodeId(e.target.value)}>
+                <option value="">Härleds ur landet</option>
+                {vatCodesFor(vatCodes, "purchase", defaultVatCodeId).map((code) => (
+                  <option key={code.id} value={code.id}>
+                    {vatCodeOptionLabel(code)}
+                  </option>
+                ))}
+                {/* The list could not be read — keep the saved code visible. */}
+                {defaultVatCodeId !== "" && !vatCodes.some((code) => code.id === defaultVatCodeId) && (
+                  <option value={defaultVatCodeId}>{s.defaultVatCode?.name ?? "Vald momskod"}</option>
+                )}
+              </Select>
+            </Field>
+            <FormHint attached>
+              Förvald momskod på nya leverantörsfakturor.{" "}
+              {defaultVatCodeId === "" ? (
+                <>
+                  Tomt = härleds ur landet ({s.country}):{" "}
+                  <strong>{derivedSupplierVatCodeName(s, vatCodes)}</strong>. Sverige ger svensk moms 25 %, ett annat
+                  EU-land omvänd moms på EU-varor och övriga länder varor utanför EU (importmomsen bokförs separat).
+                </>
+              ) : (
+                <>Raderna på fakturan kan ändå få en egen momskod.</>
+              )}
+            </FormHint>
+          </>
+        )}
 
         {isCustomer && !privatePerson && (
           <PeppolFields

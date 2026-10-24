@@ -8,8 +8,11 @@ import {
   salesRowIsGoods,
   salesVatCode,
   supplierDefaultVatCode,
+  hasVatNumber,
+  VAT_CODES,
   type SalesVatCustomer,
 } from "@navet/shared";
+import * as webCodes from "../../web/lib/vatCodes.js";
 
 // Momskoder steg 2 (spec 4.1, 4.2, 4.6, 5): the pure derivations — the
 // sales row's momskod, the customer's Momsbehandling, the supplier's derived
@@ -151,5 +154,76 @@ describe("buyerVatNumberProblem", () => {
     expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: "SE 556677-8899 01", country: "SE" })).toBeNull();
     expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: "SE556677889902", country: "SE" })).toEqual({ reason: "ob_format", code: "OB" });
     expect(buyerVatNumberProblem({ codes: ["OB"], vatNumber: "5566778899", country: "SE" })).toEqual({ reason: "ob_format", code: "OB" });
+  });
+});
+
+// The web cannot import @navet/shared, so apps/web/lib/vatCodes.ts holds hand-
+// kept copies of the derivations — compared here over every customer shape,
+// so the previews on the customer card and the invoice forms never disagree
+// with what the server derives.
+describe("momskod derivations — web mirror", () => {
+  const countries = ["SE", "se", " DE ", "GR", "FI", "NO", "US", "GB"];
+  const vatNumbers = [null, "", "  ", "DE123456789", "SE556677889901"];
+  const customers: SalesVatCustomer[] = countries.flatMap((country) =>
+    vatNumbers.flatMap((vatNumber) =>
+      [false, true].flatMap((privatePerson) =>
+        [false, true].map((reverseChargeConstruction) => ({ country, vatNumber, privatePerson, reverseChargeConstruction }))
+      )
+    )
+  );
+
+  it("derives the same salesVatCode and Momsbehandling for every customer", () => {
+    for (const c of customers) {
+      expect(webCodes.customerVatTreatment(c)).toBe(customerVatTreatment(c));
+      expect(webCodes.hasVatNumber(c.vatNumber)).toBe(hasVatNumber(c.vatNumber));
+      for (const isGoods of [true, false]) {
+        for (const articleRate of [25, 12, 6, 0, 19]) {
+          expect(webCodes.salesVatCode({ customer: c, isGoods, articleRate })).toBe(salesVatCode({ customer: c, isGoods, articleRate }));
+        }
+      }
+    }
+  });
+
+  it("has the same treatments and labels", () => {
+    expect([...webCodes.CUSTOMER_VAT_TREATMENTS]).toEqual([...CUSTOMER_VAT_TREATMENTS]);
+    expect(webCodes.CUSTOMER_VAT_TREATMENT_LABELS).toEqual(CUSTOMER_VAT_TREATMENT_LABELS);
+  });
+
+  it("answers salesRowIsGoods, supplierDefaultVatCode and normalizeVatNumber like @navet/shared", () => {
+    const rows = [
+      { articleId: null, articleType: null, freightArticleId: null },
+      { articleId: "a", articleType: "manufactured", freightArticleId: null },
+      { articleId: "a", articleType: "service", freightArticleId: null },
+      { articleId: "f", articleType: "service", freightArticleId: "f" },
+      { articleId: "a", articleType: "service", freightArticleId: "other" },
+    ];
+    for (const row of rows) expect(webCodes.salesRowIsGoods(row)).toBe(salesRowIsGoods(row));
+    for (const country of ["SE", "de", "GR", "CN", " fr "]) {
+      expect(webCodes.supplierDefaultVatCode(country)).toBe(supplierDefaultVatCode(country));
+    }
+    for (const raw of [" de 123.456-789 ", null, undefined, "", "SE 556677-8899 01"]) {
+      expect(webCodes.normalizeVatNumber(raw)).toBe(normalizeVatNumber(raw));
+    }
+  });
+
+  it("answers buyerVatNumberProblem like @navet/shared", () => {
+    const numbers = [null, " ", "de 123456789", "DE123456789", "123456789", "EL123456789", "GR123456789", "SE556677889901", "SE556677889902", "NO123456789"];
+    const countries = ["SE", "DE", "GR", "NO"];
+    const codeSets = [["MP25"], ["EUV"], ["EUT"], ["OB"], ["EUV", "OB"], ["MP25", "EXV"], [...VAT_CODES]] as const;
+    for (const codes of codeSets) {
+      for (const vatNumber of numbers) {
+        for (const country of countries) {
+          const input = { codes: [...codes], vatNumber, country };
+          expect(webCodes.buyerVatNumberProblem(input)).toEqual(buyerVatNumberProblem(input));
+        }
+      }
+    }
+  });
+
+  it("has a sentence for every problem reason", () => {
+    expect(webCodes.buyerVatNumberProblemText({ reason: "missing", code: "EUV" })).toMatch(/saknar momsregistreringsnummer/);
+    expect(webCodes.buyerVatNumberProblemText({ reason: "eu_format", code: "EUV", prefix: "DE" })).toMatch(/landskoden DE/);
+    expect(webCodes.buyerVatNumberProblemText({ reason: "eu_format", code: "EUV", prefix: null })).toMatch(/annat EU-land/);
+    expect(webCodes.buyerVatNumberProblemText({ reason: "ob_format", code: "OB" })).toMatch(/SE \+ tio siffror \+ 01/);
   });
 });

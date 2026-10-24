@@ -25,11 +25,32 @@ Klicka på kundens namn för att öppna **kundkortet** med fem flikar — samma 
 - **Adresser** — kundens övriga adresser:
   - **Fakturaadress** med ett eget **Fakturanamn** (töms fältet används kundens namn i stället), postnummer/postort/**Land** samt **E-post för faktura**.
   - **Leveransadresser** — en lista med valbara leveransadresser (**+ Ny leveransadress**), var och en med **Benämning** (t.ex. "Huvudlager"), adress, postnummer, postort och **Land**. Knappen **Kopiera från besöksadressen** i dialogen fyller i adressfälten från Allmänt-flikens besöksadress (visas bara när en besöksadress finns). En adress kan markeras som **Förvald** — den förifylls då på nya kundordrar. Max en adress åt gången är förvald; markeras en ny flyttas markeringen automatiskt. Landkolumnen visas bara i listan när adressen avviker från Sverige.
-- **Villkor & frakt** — organisationsnummer, VAT-nummer, leveransvillkor, betalningsvillkor, speditör, kundnummer hos speditör (väljs ur [Grunddata](/hjalp/grunddata)-registren och visas med sitt namn, t.ex. "30 dagar netto"), **Prislista** — kopplar kunden till en registrerad prislista (se [Prislistor](#prislistor)); standardvalet är **Ingen prislista** — och **Kundrabatt (%)**, en generell rabatt som slår igenom sist i priskedjan, se [Priskedjan](#priskedjan) nedan. Kryssrutan **Privatperson** byter etiketten **Organisationsnummer** till **Personnummer** och gör att offert, orderbekräftelse och faktura till kunden visar priser inklusive moms — raden "Priser inklusive moms" ovanför radtabellen, à-pris och radsumma inklusive moms, och summablocket blir **Summa inkl. moms** (offert/orderbekräftelse) respektive **Att betala** (faktura) följt av **Varav moms**; bokföringen påverkas inte, fakturan bokförs precis som vanligt, och visningen fryses vid utfärdandet så att ett senare ändrat kryss inte ändrar en redan utfärdad faktura. Kryssrutan **Samlingsfaktura** gör att kunden faktureras via rutinen [Samlingsfakturering](#samlingsfakturering) i stället för från fakturadialogen — se nedan. **Förvald fraktprodukt** väljer kundens standardtransport, se [Förvald fraktprodukt](#forvald-fraktprodukt). Här anges också kundens **Leveransdagar**, **Dagarna avser** och **Transportdagar**, se [Leveransdagar](#leveransdagar). Under organisationsnummer och VAT-nummer väljer **Fakturaleverans** hur kunden vill ha sina fakturor — **E-post** (förvalet) eller **E-faktura (Peppol)** — och **Peppol-id** anger kundens adress i Peppol-nätet (`0007:5560000000`: schemat `0007` är svenskt organisationsnummer, sedan numret utan bindestreck). Tomt **Peppol-id** betyder `0007:` följt av kundens organisationsnummer. Knappen **Kontrollera** frågar Peppols katalog om id:t (det som står i fältet, även osparat) och svarar **Finns i Peppol** med företagets registrerade namn och vilka dokument det tar emot, **Finns inte i Peppol**, eller ett felmeddelande; i sandboxmiljön står det att svaret kommer därifrån. Fälten visas inte för **Privatperson**. Se [E-faktura (Peppol)](#e-faktura-peppol).
+- **Villkor & frakt** — organisationsnummer, VAT-nummer, leveransvillkor, betalningsvillkor, speditör, kundnummer hos speditör (väljs ur [Grunddata](/hjalp/grunddata)-registren och visas med sitt namn, t.ex. "30 dagar netto"), **Prislista** — kopplar kunden till en registrerad prislista (se [Prislistor](#prislistor)); standardvalet är **Ingen prislista** — och **Kundrabatt (%)**, en generell rabatt som slår igenom sist i priskedjan, se [Priskedjan](#priskedjan) nedan. Kryssrutan **Privatperson** byter etiketten **Organisationsnummer** till **Personnummer** och gör att offert, orderbekräftelse och faktura till kunden visar priser inklusive moms — raden "Priser inklusive moms" ovanför radtabellen, à-pris och radsumma inklusive moms, och summablocket blir **Summa inkl. moms** (offert/orderbekräftelse) respektive **Att betala** (faktura) följt av **Varav moms**; bokföringen påverkas inte, fakturan bokförs precis som vanligt, och visningen fryses vid utfärdandet så att ett senare ändrat kryss inte ändrar en redan utfärdad faktura. Kryssrutan **Samlingsfaktura** gör att kunden faktureras via rutinen [Samlingsfakturering](#samlingsfakturering) i stället för från fakturadialogen — se nedan. Kryssrutan **Omvänd betalningsskyldighet för byggtjänster** och raden **Momsbehandling** styr hur kundens fakturarader beskattas, se [Momsbehandling](#momsbehandling). **Förvald fraktprodukt** väljer kundens standardtransport, se [Förvald fraktprodukt](#forvald-fraktprodukt). Här anges också kundens **Leveransdagar**, **Dagarna avser** och **Transportdagar**, se [Leveransdagar](#leveransdagar). Under organisationsnummer och VAT-nummer väljer **Fakturaleverans** hur kunden vill ha sina fakturor — **E-post** (förvalet) eller **E-faktura (Peppol)** — och **Peppol-id** anger kundens adress i Peppol-nätet (`0007:5560000000`: schemat `0007` är svenskt organisationsnummer, sedan numret utan bindestreck). Tomt **Peppol-id** betyder `0007:` följt av kundens organisationsnummer. Knappen **Kontrollera** frågar Peppols katalog om id:t (det som står i fältet, även osparat) och svarar **Finns i Peppol** med företagets registrerade namn och vilka dokument det tar emot, **Finns inte i Peppol**, eller ett felmeddelande; i sandboxmiljön står det att svaret kommer därifrån. Fälten visas inte för **Privatperson**. Se [E-faktura (Peppol)](#e-faktura-peppol).
 - **Kontakter** — flera kontakter med namn, telefon, mobil, e-post, kommentar och möjlighet att markera en **Huvudkontakt**.
 - **Priser** — kundens egna prisregler, se [Kundpriser](#kundpriser) nedan.
 
 Uppe till höger på kortet finns **+ Ny offert** och **+ Ny kundorder** — båda skapas med kunden förvald.
+
+### Momsbehandling
+
+Hur en fakturarad beskattas avgörs av radens **Momskod** (se [Momskoder](/hjalp/ekonomi#momskoder) i kapitlet Ekonomi). Nav väljer koden åt dig utifrån kunden och artikeln — du kan alltid välja en annan kod på fakturaraden. Det är kundens egen **Land** på fliken **Allmänt** (besöksadressens land) som räknas, aldrig fakturaadressens eller leveransadressens.
+
+| Kunden | Varor | Tjänster |
+|---|---|---|
+| **Privatperson**, oavsett land | Artikelns svenska moms | Artikelns svenska moms |
+| Sverige | Artikelns svenska moms | Artikelns svenska moms — men **Omvänd betalningsskyldighet, Sverige** om kunden har **Omvänd betalningsskyldighet för byggtjänster** |
+| Annat EU-land, **med** VAT-nummer | **Varor till annat EU-land** | **Tjänster till annat EU-land** |
+| Annat EU-land, utan VAT-nummer | Artikelns svenska moms | Artikelns svenska moms |
+| Land utanför EU | **Export av varor** | **Tjänster till land utanför EU** |
+
+**Artikelns svenska moms** är momskoden för artikelns momssats: **Moms 25 %**, **Moms 12 %**, **Moms 6 %** eller **Momsfri**. **Varor** är alla artiklar utom tjänsteartiklar, fraktartikeln (frakt följer varuleveransen) och fria rader utan artikel.
+
+**Momsbehandling** på fliken **Villkor & frakt** visar vad kunden får: **Svensk moms**, **Svensk moms (saknar momsnummer)**, **EU — utan moms**, **Export — utan moms** eller **Privatperson i annat EU-land — svensk moms**. Raden räknas ut av landet, **VAT-nummer**, **Privatperson** och **Omvänd betalningsskyldighet för byggtjänster** och följer dina ändringar medan du fyller i — den gäller på fakturaraderna först när kortet är sparat. Två lägen ger en varning på kortet:
+
+- **Svensk moms (saknar momsnummer)** — *Kunden saknar momsregistreringsnummer — svensk moms debiteras.* Ange VAT-numret med landskod (t.ex. DE123456789) för att kunna fakturera utan moms inom EU.
+- **Privatperson i annat EU-land — svensk moms** — svensk moms debiteras; distansförsäljning till privatpersoner i andra EU-länder (OSS) ingår inte i Nav.
+
+**Omvänd betalningsskyldighet för byggtjänster** gäller en svensk kund som själv är byggföretag: tjänsterader till kunden får momskoden **Omvänd betalningsskyldighet, Sverige** och fakturan skrivs ut utan moms. Varor påverkas inte, och kryssrutan gör ingenting för en kund i ett annat land eller en privatperson. Momskoden kräver kundens VAT-nummer på formen SE + tio siffror + 01, se [Köparens momsnummer](#koparens-momsnummer).
 
 ### Leveransdagar
 
@@ -210,6 +231,8 @@ Formuläret har också fälten **Kundens förfrågan (valfritt)** i **Ny offert*
 
 Ordern får automatiskt kundens **Leveransvillkor**, **Betalningsvillkor** och **Speditör** från kundkortets flik Villkor & frakt, och de skrivs ut på offerten och orderbekräftelsen när de är satta.
 
+**Moms på offert och orderbekräftelse.** Momsen räknas per rad efter den momskod raden skulle få på fakturan — en EU-kund med VAT-nummer ser alltså 0 % redan på offerten — och kodernas fakturatexter skrivs ut under summeringen, precis som på fakturan. Se [Momsbehandling](#momsbehandling).
+
 **Orderhuvudet.** Orderkortet (och offertkortet) inleds med ett kort som visar status, **Rev**, valuta (och fakturanummer när ordern är fakturerad) tillsammans med orderns uppgifter: **Kund** (klickbar till kundkortet), **Kundens förfrågan** på en offert respektive **Kundens ordernummer** på en order (en order visar även **Kundens förfrågan** när den är ifylld, och en äldre offert som har ett ordernummer visar det), **Referens**, **Leveransdatum**, de tre villkoren, **Leveransadress** och **Notering**. Knappen **Ändra** öppnar dialogen **Ändra orderhuvud**, där kundens förfrågan, kundens ordernummer (på en offert bara när den redan har ett), referens, villkoren och leveransadressen redigeras på ett ställe och sparas i ett svep, så länge ordern är i status Offert, Bekräftad eller Under tillverkning. Leveransdatum och notering sätts när offerten skapas och visas bara.
 
 ### Leveransdatum per rad
@@ -355,17 +378,29 @@ Under resultatet kan noteringar visas när något i underlaget saknas. Gäller s
 
 ### Skapa en faktura
 
-**+ Ny faktura**. Välj **Kund** — då visas kundens **Ordrar att fakturera**: kundorder som är (helt eller delvis) levererade och har outfakturerat antal kvar. Kryssa i en eller flera ordrar för att hämta deras rader som en förhandsgranskning, grupperad per ordernummer. Antalet är förifyllt med resten men går att ändra, liksom **À-pris**, **Rabatt %** (förifylld från orderradens rabatt) och **Moms %** — momssatsen ärvs från artikeln men kan ändras per rad. Enskilda rader kan tas bort med **Ta bort**.
+**+ Ny faktura**. Välj **Kund** — då visas kundens **Ordrar att fakturera**: kundorder som är (helt eller delvis) levererade och har outfakturerat antal kvar. Kryssa i en eller flera ordrar för att hämta deras rader som en förhandsgranskning, grupperad per ordernummer. Antalet är förifyllt med resten men går att ändra, liksom **À-pris**, **Rabatt %** (förifylld från orderradens rabatt) och **Momskod** — koden är förvald efter kunden och artikeln, se [Momsbehandling](#momsbehandling), men kan ändras per rad (se [Momskod och leveransdatum på raden](#momskod-och-leveransdatum-pa-raden)). Under kundfältet står kundens **Momsbehandling**. Enskilda rader kan tas bort med **Ta bort**.
 
 Är kunden markerad **Samlingsfaktura** (se [Kunder](#kunder)) visar knappen **Ny faktura** i stället texten "Kunden faktureras med samlingsfaktura." med länken **Öppna Samlingsfakturering** — dialogen spärrar mot att skapa en vanlig faktura för kunden (API:et svarar 409 om det ändå försöks).
 
 Bokade, ofakturerade försändelser för kunden visas som förbockade fraktrader i gruppen **Frakt**, se [Frakt på fakturan](#frakt-pa-fakturan).
 
-Knappen **Lägg till fri rad** lägger till en rad utan artikelkoppling — **Beskrivning**, **Antal**, **À-pris** och **Moms %** skrivs in för hand (t.ex. frakt eller andra avgifter).
+Knappen **Lägg till fri rad** lägger till en rad utan artikelkoppling — **Beskrivning**, **Antal**, **À-pris** och **Momskod** skrivs in för hand (t.ex. frakt eller andra avgifter). Momskoden står som **Automatisk** med namnet på den kod kunden skulle få (t.ex. **Automatisk — Moms 25 %**) tills du väljer en annan.
 
 Klicka **Skapa faktura** för att spara som **Utkast**. Fakturan får sitt fakturanummer i FA-serien först när den utfärdas. Under varje fakturarad som är kopplad till en order skriver PDF:en ut "Order KO… · Ert ordernr …" (ordernumret alltid, kundens ordernummer när det finns) — det gäller alla fakturor, inte bara samlingsfakturor. Fria rader får ingen sådan rad.
 
 En fakturarad som hämtats från en konfigurerad orderrad bär en kopia av radens konfiguration: valen skrivs ut under benämningen på fakturan (och på en kreditfaktura som kopierar raden), med tilläggspriserna enligt kundens **Visa tilläggspriser** när fakturan utfärdas — eftersom fakturans PDF arkiveras då ändras utseendet inte efteråt. Samlingsfakturering gör likadant.
+
+### Momskod och leveransdatum på raden
+
+Varje fakturarad har en **Momskod** i stället för en bar momssats. Raderna som hämtas från en order får den kod Nav härleder för kunden och artikeln, se [Momsbehandling](#momsbehandling); en fri rad står som **Automatisk** och får samma härledning när fakturan sparas. I listan finns bara aktiva koder för försäljning (de svenska koderna och försäljningskoderna), och ändrar du raden på fakturakortet — **Ändra** på en rad i ett **Utkast**, eller fältet **Momskod** i **Lägg till rad** — gäller koden du väljer. Momsen räknas på kodens sats; ett EU-företag som valt en 0 %-kod får alltså aldrig svensk moms av misstag. På kortet visar kolumnen **Momskod** kodens namn.
+
+Fakturakortet har kolumnen **Leveransdatum**. Datumet fylls i när raden hämtas från en orderrad: det är den **senaste leveransdagen** för orderraden, utan leveranser som ångrats, och tomt om raden inte levererats. Du kan ändra eller tömma det i **Ändra** på raden eller ange det i **Leveransdatum (valfritt)** i **Lägg till rad**. En kreditfaktura kopierar källradens momskod och leveransdatum. På fakturan skrivs **Levererad ÅÅÅÅ-MM-DD** i radens underrad, bredvid orderreferensen, när datumet skiljer sig från fakturadatumet.
+
+### Köparens momsnummer
+
+Fakturakortet visar **Köparens momsnr** i huvudet, och PDF:en skriver **Ert momsreg.nr** — kundens VAT-nummer som det var när fakturan utfärdades (på ett utkast det nuvarande). Momskoderna **Varor till annat EU-land**, **Tjänster till annat EU-land** och **Omvänd betalningsskyldighet, Sverige** kräver att numret finns och har rätt form: för EU-försäljning kundens eget landsprefix (Grekland **EL**, t.ex. DE123456789), för omvänd betalningsskyldighet **SE** + tio siffror + **01**. Saknas det eller är det fel varnar ett **utkast** högst upp på kortet — t.ex. *Kunden saknar momsregistreringsnummer — fakturan kan inte utfärdas med EU-försäljning eller omvänd betalningsskyldighet.* — med länken **Öppna kundkortet**; rätta **VAT-nummer** under **Villkor & frakt**. **Utfärda** vägrar så länge felet finns och visar en egen text per fall: *Kunden saknar momsregistreringsnummer — det krävs för EU-försäljning och omvänd betalningsskyldighet*, *Kundens momsregistreringsnummer ska börja med landskoden DE — det krävs för EU-försäljning* eller *Kundens momsregistreringsnummer ska ha formen SE + tio siffror + 01 för omvänd betalningsskyldighet*. Fakturan förblir då ett **Utkast** och får inget fakturanummer.
+
+Under momssammanställningen på PDF:en skrivs **fakturatexten** för varje momskod som finns på fakturan, en gång per kod — t.ex. *Unionsintern leverans (artikel 138 i mervärdesskattedirektivet)* för **Varor till annat EU-land**, *Omvänd betalningsskyldighet* för **Omvänd betalningsskyldighet, Sverige** och *Momsfri omsättning* för **Momsfri**; texterna ställs in under [Momskoder](/hjalp/ekonomi#momskoder). Momssammanställningen grupperar per momskod, så en 0 %-rad med EU-försäljning och en med momsfritt blir två rader med kodens namn. Offerten och orderbekräftelsen räknar momsen per rad på samma sätt — en EU-kund ser 0 % redan där — och skriver samma texter. Redan arkiverade fakturor ändras aldrig — bara nya fakturor får texterna.
 
 ### Delfakturering
 
@@ -453,8 +488,8 @@ Statusen uppdateras automatiskt av ett bakgrundsjobb (intervallet ställs in und
 Konteringen ser ut så här:
 
 - **Kundfordran** debiteras med bruttobeloppet (standardkonto **1510 Kundfordringar**).
-- **Försäljningsintäkten** krediteras rad för rad. Har radens artikel en artikelgrupp med en konteringsregel styr regeln intäktskontot; annars används standardkontot för radens momssats — **3001** (25 %), **3002** (12 %), **3003** (6 %) eller **3004** (momsfritt).
-- **Utgående moms** krediteras per momssats: **2610** (25 %), **2620** (12 %) och **2630** (6 %). En rad med **0 %** ger ingen momsrad alls.
+- **Försäljningsintäkten** krediteras rad för rad, på ett konto som avgörs av radens [momskod](/hjalp/ekonomi#momskoder): först en konteringsregel för radens artikelgrupp och exakt den momskoden; annars en regel för artikelgruppen med **Alla momskoder** — men den gäller bara svensk moms och momsfritt, så att en EU-försäljning aldrig hamnar på ett konto med ruta 05; annars kontot på momskoden själv. För svensk moms är det **3001** (**Moms 25 %**), **3002** (12 %), **3003** (6 %) och **3004** (**Momsfri**); för EU-försäljning **3108** (varor) och **3308** (tjänster), export **3105** (varor) och **3305** (tjänster) och omvänd betalningsskyldighet **3231**. Kontona kan ändras under **Ekonomi → Momskoder**.
+- **Utgående moms** krediteras per rad på momskodens konto för utgående moms: **2610** (25 %), **2620** (12 %) och **2630** (6 %). En rad med en 0 %-kod ger ingen momsrad alls — och har en 0 %-rad ändå ett momsbelopp avvisas bokföringen.
 
 En **kreditfaktura** bokförs som en spegling av samma konton — kundfordran krediteras, intäkt och moms debiteras. Den är ett eget verifikat, inte en omföring av originalfakturans.
 
@@ -465,7 +500,8 @@ På fakturakortet visas **Verifikat F-…** med en länk till verifikatet (t.ex.
 - **Bokföringsperioden är låst** för fakturadatumet. Lås upp perioden under **Ekonomi → Räkenskapsår** (**Lås upp period**, motivering krävs) och utfärda igen.
 - **Inget räkenskapsår täcker fakturadatumet.** Lägg upp räkenskapsåret under **Ekonomi → Räkenskapsår** först — perioderna skapas automatiskt.
 - **Ett konto som konteringen behöver saknas eller är inaktivt** i kontoplanen. Lägg upp eller aktivera kontot under **Ekonomi → Kontoplan** (**Förifyll BAS-urval** lägger in hela standardurvalet på en gång).
-- **En rad har en momssats som inte går att bokföra.** Bara 25, 12, 6 och 0 % har konton.
+- **En rad har moms trots att momskoden är momsfri**, eller en annan sats än momskoden — rätta raden (*Fakturaraden har moms trots att momskoden är momsfri, eller en annan sats än momskoden — rätta raden.*).
+- **Köparens momsregistreringsnummer saknas eller har fel form** för en EU-försäljning eller omvänd betalningsskyldighet, se [Köparens momsnummer](#koparens-momsnummer).
 - **Fakturans totalbelopp är noll.** Det finns ingenting att bokföra, så fakturan kan inte utfärdas.
 
 ### Kreditfaktura

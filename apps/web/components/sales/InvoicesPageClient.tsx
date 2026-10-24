@@ -17,7 +17,6 @@ import { formatMoney, round2 } from "../../lib/format";
 import {
   INVOICE_STATUS_PILL,
   INVOICE_TYPE_LABELS,
-  VAT_RATES,
   type Customer,
   type InvoiceableShipment,
   type Invoice,
@@ -32,6 +31,14 @@ import { ConfigurationLines } from "../configurator/ConfigurationLines";
 import type { OrderRowConfiguration } from "../../lib/configurator";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
+import {
+  CUSTOMER_VAT_TREATMENT_LABELS,
+  customerVatTreatment,
+  salesVatCode,
+  vatCodeOptionLabel,
+  vatCodesFor,
+} from "../../lib/vatCodes";
+import { useVatCodes } from "../../lib/useVatCodes";
 
 export function InvoicesPageClient({
   invoices,
@@ -130,7 +137,7 @@ export function InvoicesPageClient({
 
 // One previewed invoice row — either linked to a sales order row (from an
 // invoiceable order, orderNumber set) or a free row (orderNumber null,
-// articleId/salesOrderRowId null). Quantity/unitPrice/vatRate are kept as
+// articleId/salesOrderRowId null). Quantity/unitPrice are kept as
 // strings while editing, same convention as the rest of the app's row forms
 // (PurchaseOrderDetail's row-edit dialog etc.) — converted to numbers only
 // at submit time. quantity/unitPrice are shown (and edited) in the row's own
@@ -149,7 +156,12 @@ type PreviewRow = {
   // C3: prefilled from the sales order row's discount (0 for free rows) —
   // percent, not unit-dependent, so no conversion needed either way.
   discountPercent: string;
-  vatRate: string;
+  // Momskod: the id the API derived for an order/freight row (explicit, the
+  // user may change it); "" = Automatisk — the API derives it on submit (free
+  // rows, and anything it could not name). vatCodeName keeps the derived
+  // code's name for the select while the code list is not loaded.
+  vatCodeId: string;
+  vatCodeName: string | null;
   unitFactor: string | null;
   unitCode: string | null;
   // Konfigurator 4b: the order row's choices, shown under the description (the server copies them on submit).
@@ -167,7 +179,8 @@ function shipmentRow(s: InvoiceableShipment): PreviewRow {
     quantity: "1",
     unitPrice: String(Number(s.customerPrice)),
     discountPercent: "0",
-    vatRate: String(Number(s.vatRate)),
+    vatCodeId: s.vatCodeId ?? "",
+    vatCodeName: s.vatCode?.name ?? null,
     unitFactor: null,
     unitCode: null,
     configuration: null,
@@ -182,7 +195,7 @@ const ROW_COLUMNS = [
   // C3: prefilled from the order row's discount, still editable here — same
   // "unitPrice is a prefilled starting point, not locked" treatment.
   { key: "discountPercent", label: "Rabatt %", width: "90px", align: "right" as const },
-  { key: "vatRate", label: "Moms %", width: "90px", align: "right" as const },
+  { key: "vatCode", label: "Momskod", width: "minmax(190px, 1fr)" },
   { key: "lineAmount", label: "Belopp", width: "110px", align: "right" as const },
   { key: "id", label: "", width: "90px", align: "right" as const },
 ];
@@ -201,6 +214,23 @@ export function NewInvoiceForm({
   const router = useRouter();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const customerId = customer?.id ?? "";
+  // Momskoder: the codes for each row's select, and what Automatisk gives a
+  // free row for this customer (goods at 25 % — salesVatCode, the same
+  // derivation the API runs when no code is sent).
+  const { codes: vatCodes } = useVatCodes();
+  const automaticCode = customer
+    ? salesVatCode({
+        customer: {
+          country: customer.country,
+          vatNumber: customer.vatNumber,
+          privatePerson: customer.privatePerson,
+          reverseChargeConstruction: customer.reverseChargeConstruction,
+        },
+        isGoods: true,
+        articleRate: 25,
+      })
+    : null;
+  const automaticName = automaticCode ? vatCodes.find((code) => code.code === automaticCode)?.name : undefined;
   const [orders, setOrders] = useState<InvoiceableOrder[]>([]);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [shipments, setShipments] = useState<InvoiceableShipment[]>([]);
@@ -299,7 +329,8 @@ export function NewInvoiceForm({
           // "12"/… — actually matches and shows the right selection.
           unitPrice: String(toUnitPrice(Number(r.unitPrice), r.unitFactor)),
           discountPercent: String(Number(r.discountPercent)),
-          vatRate: String(Number(r.vatRate)),
+          vatCodeId: r.vatCodeId ?? "",
+          vatCodeName: r.vatCode?.name ?? null,
           unitFactor: r.unitFactor,
           unitCode: r.unitCode,
           configuration: r.configuration,
@@ -351,7 +382,8 @@ export function NewInvoiceForm({
         quantity: "1",
         unitPrice: "0",
         discountPercent: "0",
-        vatRate: "25",
+        vatCodeId: "",
+        vatCodeName: null,
         unitFactor: null,
         unitCode: null,
         configuration: null,
@@ -433,19 +465,31 @@ export function NewInvoiceForm({
             onChange={(e) => updateRow(row.id, { discountPercent: e.target.value })}
           />
         );
-      case "vatRate":
+      case "vatCode":
         return (
           <Select
-            size="xs"
-            aria-label="Moms %"
-            value={row.vatRate}
-            onChange={(e) => updateRow(row.id, { vatRate: e.target.value })}
+            aria-label="Momskod"
+            value={row.vatCodeId}
+            onChange={(e) => {
+              const picked = vatCodes.find((code) => code.id === e.target.value);
+              updateRow(row.id, { vatCodeId: e.target.value, vatCodeName: picked?.name ?? null });
+            }}
           >
-            {VAT_RATES.map((v) => (
-              <option key={v} value={v}>
-                {v} %
+            {/* The named default is only right for a free row — an order or
+                freight row's code depends on its article. */}
+            <option value="">
+              {row.salesOrderRowId === null && row.shipmentId === null && automaticName
+                ? `Automatisk — ${automaticName}`
+                : "Automatisk"}
+            </option>
+            {vatCodesFor(vatCodes, "sales", row.vatCodeId).map((code) => (
+              <option key={code.id} value={code.id}>
+                {vatCodeOptionLabel(code)}
               </option>
             ))}
+            {row.vatCodeId !== "" && !vatCodes.some((code) => code.id === row.vatCodeId) && (
+              <option value={row.vatCodeId}>{row.vatCodeName ?? "Momskod"}</option>
+            )}
           </Select>
         );
       case "lineAmount":
@@ -496,7 +540,10 @@ export function NewInvoiceForm({
             unitPrice: toBasePrice(Number(r.unitPrice), r.unitFactor),
             // Percent, not unit-dependent — sent verbatim.
             discountPercent: Number(r.discountPercent),
-            vatRate: r.vatRate.trim() ? Number(r.vatRate) : undefined,
+            // The momskod decides the VAT (never a bare vatRate, which would
+            // give an EU customer svensk moms); Automatisk sends nothing and
+            // the API derives it from the customer and the article.
+            vatCodeId: r.vatCodeId || undefined,
           })),
         }),
       });
@@ -522,6 +569,22 @@ export function NewInvoiceForm({
           emptyText="Inga kunder matchar sökningen"
         />
       </Field>
+
+      {customer && (
+        <FormHint attached>
+          Momsbehandling:{" "}
+          {
+            CUSTOMER_VAT_TREATMENT_LABELS[
+              customerVatTreatment({
+                country: customer.country,
+                vatNumber: customer.vatNumber,
+                privatePerson: customer.privatePerson,
+                reverseChargeConstruction: customer.reverseChargeConstruction,
+              })
+            ]
+          }
+        </FormHint>
+      )}
 
       {customer?.collectiveInvoicing ? (
         <FormHint attached>

@@ -110,8 +110,18 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Fakturaraden har moms trots att momskoden är momsfri, eller en annan sats än momskoden — rätta raden.",
   "vat-code-not-applicable": "Momskoden kan inte användas på den här typen av dokument.",
   "invalid-vat-code": "Momskoden finns inte, är inaktiv eller kan inte användas här — välj en annan momskod.",
-  "vat-number-required":
-    "Kunden saknar ett giltigt momsregistreringsnummer — det krävs för EU-försäljning och omvänd betalningsskyldighet.",
+  // The server's sentence names which rule failed (missing number, wrong
+  // country prefix, not SE + ten digits + 01) — it is Swedish already.
+  "vat-number-required": serverMessage(
+    "Kunden saknar ett giltigt momsregistreringsnummer — det krävs för EU-försäljning och omvänd betalningsskyldighet."
+  ),
+  // Periodisk sammanställning
+  "periodic-summary-period-invalid": "Perioden måste vara exakt en kalendermånad eller ett kalenderkvartal.",
+  "periodic-summary-reporter-incomplete":
+    "Uppgifter saknas för filen — företagets momsregistreringsnummer (Företagsuppgifter) samt kontaktpersonens namn och telefonnummer måste vara ifyllda.",
+  "periodic-summary-amount-too-large":
+    "Ett belopp är för stort för filen (högst 12 tecken inklusive minustecken) — kontrollera fakturorna i perioden.",
+  "periodic-summary-empty": "Ingen EU-försäljning i perioden — ingen periodisk sammanställning ska lämnas.",
   "supplier-invoice-vat-code":
     "Fakturan har moms, men momskoden tar ingen debiterad moms (omvänd moms, momsfritt eller import) — välj en svensk momskod eller ange momsbelopp 0.",
   "fiscal-year-closed": "Räkenskapsåret är stängt — öppna det igen under Bokslut",

@@ -14,6 +14,7 @@ export function NewSupplierForm({ onSuccess }: { onSuccess: () => void }) {
   const [address, setAddress] = useState("");
   const [postalCode, setPostalCode] = useState("");
   const [city, setCity] = useState("");
+  const [country, setCountry] = useState("SE");
   const [currency, setCurrency] = useState("SEK");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -32,6 +33,7 @@ export function NewSupplierForm({ onSuccess }: { onSuccess: () => void }) {
           address: address || undefined,
           postalCode: postalCode || undefined,
           city: city || undefined,
+          country: country.trim() || undefined,
           currency,
         }),
       });
@@ -91,12 +93,21 @@ export function NewSupplierForm({ onSuccess }: { onSuccess: () => void }) {
         <Textarea id="address" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} />
       </Field>
 
-      <FormRow>
+      <FormRow columns="postal">
         <Field label="Postnummer" htmlFor="postalCode">
           <Input id="postalCode" size="sm" value={postalCode} onChange={(e) => setPostalCode(e.target.value)} />
         </Field>
         <Field label="Postort" htmlFor="city">
           <Input id="city" value={city} onChange={(e) => setCity(e.target.value)} />
+        </Field>
+        <Field label="Land" htmlFor="country">
+          <Input
+            id="country"
+            size="xs"
+            maxLength={2}
+            value={country}
+            onChange={(e) => setCountry(e.target.value.toUpperCase())}
+          />
         </Field>
       </FormRow>
 

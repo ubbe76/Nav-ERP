@@ -5,6 +5,7 @@ import { SupplierInvoiceCard } from "../../../../components/purchase/SupplierInv
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { canOpen } from "../../../../lib/pageAccess";
 import type { SupplierInvoiceDetail } from "../../../../lib/types";
+import type { VatCodeView } from "../../../../lib/vatCodes";
 import shellStyles from "../../../../components/AppShell.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
 
@@ -22,6 +23,9 @@ export default async function SupplierInvoiceDetailPage(props: { params: Promise
   // /ekonomi/verifikat/… is admin-only, both as a page and in the API (same
   // idiom as the customer invoice card).
   const user = await getCurrentUser(cookieHeader);
+  // Momskoder: the header's and the rows' Momskod selects. A failed read
+  // leaves the invoice's own codes in place.
+  const vatCodes = await apiGet<VatCodeView[]>("/api/v1/vat-codes", cookieHeader).catch(() => [] as VatCodeView[]);
 
   return (
     <AppShell active="Inköp">
@@ -33,7 +37,11 @@ export default async function SupplierInvoiceDetailPage(props: { params: Promise
         <HelpLink chapter="inkop" anchor="leverantorsfakturor" label="Hjälp om leverantörsfakturor" />
       </div>
 
-      <SupplierInvoiceCard invoice={invoice} canOpenVerifications={user ? canOpen(user, "/ekonomi/verifikat") : false} />
+      <SupplierInvoiceCard
+        invoice={invoice}
+        canOpenVerifications={user ? canOpen(user, "/ekonomi/verifikat") : false}
+        vatCodes={vatCodes}
+      />
     </AppShell>
   );
 }

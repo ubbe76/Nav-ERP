@@ -13,9 +13,9 @@ import { ArticlePicker } from "../ui/ArticlePicker";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
+import { isVatCode, vatCodeEntry, vatCodeOptionLabel, vatCodesFor, type VatCodeView } from "../../lib/vatCodes";
 import {
   SUPPLIER_INVOICE_STATUS_PILL,
-  VAT_RATES,
   type Article,
   type Paged,
   type PriceHistoryEntry,
@@ -24,7 +24,7 @@ import {
   type SupplierInvoiceRow,
 } from "../../lib/types";
 import { Card } from "../ui/Card";
-import { Form, FormActions, FormError, FormRow, FormStack } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
 import buttonStyles from "../ui/Button.module.css";
 import { AuditTrailSection } from "../system/AuditTrailSection";
 import { PaymentReferenceSection } from "../banking/PaymentReferenceSection";
@@ -33,8 +33,13 @@ import { UnderlagSection } from "../documents/UnderlagSection";
 export function SupplierInvoiceCard({
   invoice,
   canOpenVerifications,
+  vatCodes,
 }: {
   invoice: SupplierInvoiceDetail;
+  // Momskoder: the company's codes (GET /vat-codes) for the header's and the
+  // rows' Momskod selects. Empty when the list could not be read — the
+  // invoice's own codes still show.
+  vatCodes: VatCodeView[];
   // The whole /verifications surface (and the page behind the Verifikat
   // link) is admin-only in the API, so the link is only rendered for admins
   // — resolved server-side in page.tsx.
@@ -109,9 +114,18 @@ export function SupplierInvoiceCard({
 
       <FormError>{error}</FormError>
 
+      {/* The supplier charges VAT in the header but the code takes none —
+          approving would be refused (supplier-invoice-vat-code). */}
+      {editable && chargesNoVat(invoice) && Number(invoice.vatAmount) !== 0 && (
+        <FormNotice style={{ marginBottom: 20 }}>
+          Fakturan har momsbelopp, men momskoden {invoice.vatCode.name} tar ingen debiterad moms (omvänd moms,
+          momsfritt eller import). Välj en svensk momskod eller ange momsbelopp 0.
+        </FormNotice>
+      )}
+
       {/* Header — editable in draft, read-only otherwise. */}
       {editable ? (
-        <HeaderForm invoice={invoice} onSaved={() => router.refresh()} />
+        <HeaderForm invoice={invoice} vatCodes={vatCodes} onSaved={() => router.refresh()} />
       ) : (
         <Card maxWidth={520} style={{ marginBottom: 20 }}>
           <FormStack>
@@ -120,10 +134,13 @@ export function SupplierInvoiceCard({
               <div><strong>Momsbelopp</strong><br />{formatMoney(invoice.vatAmount)} {invoice.currency}</div>
             </FormRow>
             <div><strong>Bruttobelopp</strong><br />{formatMoney(invoice.grossAmount)} {invoice.currency}</div>
+            <div><strong>Momskod</strong><br />{invoice.vatCode.name}</div>
             {invoice.note && <div><strong>Notering</strong><br />{invoice.note}</div>}
           </FormStack>
         </Card>
       )}
+
+      <ReverseVatCard invoice={invoice} vatCodes={vatCodes} />
 
       {invoice.status !== "cancelled" && <PaymentReferenceSection key={`${invoice.paymentReferenceKind}-${invoice.paymentReference}-${invoice.status}-${invoice.paymentBatches.map((b) => `${b.endToEndId}:${b.itemStatus}`).join(",")}`} invoice={invoice} />}
       <UnderlagSection
@@ -144,6 +161,7 @@ export function SupplierInvoiceCard({
             { key: "quantity", label: "Antal", width: "90px", align: "right" },
             { key: "unitPrice", label: "À-pris", width: "110px", align: "right" },
             { key: "lineAmount", label: "Belopp", width: "120px", align: "right" },
+            { key: "vatCode", label: "Momskod", width: "minmax(170px, 1fr)" },
             { key: "poOrderNumber", label: "IO-matchning", width: "1fr" },
             { key: "id", label: "", width: "110px", align: "right" },
           ]}
@@ -158,6 +176,9 @@ export function SupplierInvoiceCard({
                 return formatMoney(row.unitPrice);
               case "lineAmount":
                 return formatMoney(row.lineAmount);
+              case "vatCode":
+                // null = the row follows the invoice's code.
+                return row.vatCode ? row.vatCode.name : <span style={{ opacity: 0.7 }}>Följer fakturan</span>;
               case "poOrderNumber":
                 return <MatchCell row={row} />;
               case "id":
@@ -231,6 +252,8 @@ export function SupplierInvoiceCard({
         {editable && (
           <AddRowForm
             invoiceId={invoice.id}
+            vatCodes={vatCodes}
+            headerVatCodeName={invoice.vatCode.name}
             supplierName={invoice.supplierName}
             purchaseOrderNumber={invoice.purchaseOrderNumber ?? null}
             onDone={() => router.refresh()}
@@ -288,7 +311,15 @@ function MatchCell({ row }: { row: SupplierInvoiceRow }) {
 // but not its number, so the initial value is shown by name alone.
 type SupplierOption = { id: string; name: string; supplierNumber?: string };
 
-function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSaved: () => void }) {
+function HeaderForm({
+  invoice,
+  vatCodes,
+  onSaved,
+}: {
+  invoice: SupplierInvoiceDetail;
+  vatCodes: VatCodeView[];
+  onSaved: () => void;
+}) {
   const [supplier, setSupplier] = useState<SupplierOption | null>({ id: invoice.supplierId, name: invoice.supplierName });
   const [invoiceNumber, setInvoiceNumber] = useState(invoice.invoiceNumber);
   const [invoiceDate, setInvoiceDate] = useState(invoice.invoiceDate);
@@ -296,6 +327,7 @@ function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSa
   const [netAmount, setNetAmount] = useState(invoice.netAmount);
   const [vatAmount, setVatAmount] = useState(invoice.vatAmount);
   const [grossAmount, setGrossAmount] = useState(invoice.grossAmount);
+  const [vatCodeId, setVatCodeId] = useState(invoice.vatCodeId);
   const [note, setNote] = useState(invoice.note ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -322,6 +354,8 @@ function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSa
           netAmount: Number(netAmount),
           vatAmount: Number(vatAmount),
           grossAmount: Number(grossAmount),
+          // Only sent when changed (the stored code may even be inactive now).
+          vatCodeId: vatCodeId !== invoice.vatCodeId ? vatCodeId : undefined,
           note: note.trim() || null,
         }),
       });
@@ -373,6 +407,23 @@ function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSa
             <Input id="hdrGross" type="number" step="0.01" size="sm" value={grossAmount} onChange={(e) => setGrossAmount(e.target.value)} />
           </Field>
         </FormRow>
+        <Field label="Momskod" htmlFor="hdrVatCode">
+          <Select id="hdrVatCode" value={vatCodeId} onChange={(e) => setVatCodeId(e.target.value)}>
+            {vatCodesFor(vatCodes, "purchase", invoice.vatCodeId).map((code) => (
+              <option key={code.id} value={code.id}>
+                {vatCodeOptionLabel(code)}
+              </option>
+            ))}
+            {/* The list could not be read — keep the invoice's own code. */}
+            {!vatCodes.some((code) => code.id === invoice.vatCodeId) && (
+              <option value={invoice.vatCodeId}>{invoice.vatCode.name}</option>
+            )}
+          </Select>
+          <FormHint>
+            Gäller alla rader utan egen momskod. Med omvänd moms, momsfritt eller import ska Momsbelopp vara 0 — Nav
+            beräknar den omvända momsen när fakturan godkänns.
+          </FormHint>
+        </Field>
         <Field label="Notering" htmlFor="hdrNote">
           <Input id="hdrNote" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
@@ -393,11 +444,15 @@ function HeaderForm({ invoice, onSaved }: { invoice: SupplierInvoiceDetail; onSa
 // when the invoice is paid to someone else. The API validates the match.
 function AddRowForm({
   invoiceId,
+  vatCodes,
+  headerVatCodeName,
   supplierName,
   purchaseOrderNumber,
   onDone,
 }: {
   invoiceId: string;
+  vatCodes: VatCodeView[];
+  headerVatCodeName: string;
   supplierName: string;
   purchaseOrderNumber: string | null;
   onDone: () => void;
@@ -406,7 +461,8 @@ function AddRowForm({
   const [article, setArticle] = useState<Article | null>(null);
   const [quantity, setQuantity] = useState("1");
   const [unitPrice, setUnitPrice] = useState("");
-  const [vatRate, setVatRate] = useState("");
+  // "" = the row follows the invoice's Momskod.
+  const [vatCodeId, setVatCodeId] = useState("");
   const [poRowId, setPoRowId] = useState("");
   const [matchOptions, setMatchOptions] = useState<PriceHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -446,7 +502,7 @@ function AddRowForm({
           articleId: article?.id ?? undefined,
           quantity: Number(quantity),
           unitPrice: unitPrice.trim() ? Number(unitPrice) : 0,
-          vatRate: vatRate.trim() ? Number(vatRate) : undefined,
+          vatCodeId: vatCodeId || undefined,
           purchaseOrderRowId: poRowId || undefined,
         }),
       });
@@ -454,7 +510,7 @@ function AddRowForm({
       setArticle(null);
       setQuantity("1");
       setUnitPrice("");
-      setVatRate("");
+      setVatCodeId("");
       setPoRowId("");
       setMatchOptions([]);
       onDone();
@@ -486,19 +542,18 @@ function AddRowForm({
           <Field label="À-pris" htmlFor="rowUnitPrice">
             <Input id="rowUnitPrice" type="number" step="0.01" size="sm" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
           </Field>
-          <Field label="Moms %" htmlFor="rowVatRate">
-            {/* Enum-locked to the Swedish set since B5 (same Select as the
-                customer invoice's rows); empty = no rate on the row. */}
-            <Select id="rowVatRate" size="xs" value={vatRate} onChange={(e) => setVatRate(e.target.value)}>
-              <option value="">— Ingen —</option>
-              {VAT_RATES.map((rate) => (
-                <option key={rate} value={String(rate)}>
-                  {rate} %
-                </option>
-              ))}
-            </Select>
-          </Field>
         </FormRow>
+
+        <Field label="Momskod" htmlFor="rowVatCode">
+          <Select id="rowVatCode" value={vatCodeId} onChange={(e) => setVatCodeId(e.target.value)}>
+            <option value="">Följer fakturan ({headerVatCodeName})</option>
+            {vatCodesFor(vatCodes, "purchase").map((code) => (
+              <option key={code.id} value={code.id}>
+                {vatCodeOptionLabel(code)}
+              </option>
+            ))}
+          </Select>
+        </Field>
 
         {article && matchOptions.length > 0 && (
           <Field label="Koppla till inköpsorderrad (valfritt)" htmlFor="rowPoMatch">
@@ -520,6 +575,57 @@ function AddRowForm({
         </FormActions>
       </Form>
     </Card>
+  );
+}
+
+// True when the invoice's Momskod takes no VAT charged by the supplier —
+// omvänd moms, momsfritt, goods from outside the EU, importmoms.
+function chargesNoVat(invoice: SupplierInvoiceDetail): boolean {
+  if (!isVatCode(invoice.vatCode.code)) return false;
+  const entry = vatCodeEntry(invoice.vatCode.code);
+  return entry.kind !== "domestic" || entry.rate === 0;
+}
+
+// Beräknad moms (omvänd): what approving books as both utgående and ingående
+// moms per omvänd momskod — the invoice's own preview (reverseVatPreview, the
+// function the poster books with), never calculated here.
+function ReverseVatCard({ invoice, vatCodes }: { invoice: SupplierInvoiceDetail; vatCodes: VatCodeView[] }) {
+  if (invoice.reverseVat.length === 0) return null;
+  const total = invoice.reverseVat.reduce((sum, line) => sum + line.vat, 0);
+  const nameOf = (code: string) =>
+    vatCodes.find((candidate) => candidate.code === code)?.name ?? (isVatCode(code) ? vatCodeEntry(code).label : code);
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <SectionHeading spaced>Beräknad moms (omvänd)</SectionHeading>
+      <Table<SupplierInvoiceDetail["reverseVat"][number] & { id: string }>
+        columns={[
+          { key: "code", label: "Momskod", width: "minmax(220px, 1.6fr)" },
+          { key: "base", label: "Underlag", width: "140px", align: "right" },
+          { key: "vat", label: "Moms", width: "140px", align: "right" },
+        ]}
+        rows={invoice.reverseVat.map((line) => ({ ...line, id: line.code }))}
+        footer={{
+          code: <strong>Summa</strong>,
+          vat: <strong>{formatMoney(total)} {invoice.currency}</strong>,
+        }}
+        renderCell={(line, key) => {
+          switch (key) {
+            case "code":
+              return `${line.code} · ${nameOf(line.code)}`;
+            case "base":
+              return `${formatMoney(line.base)} ${invoice.currency}`;
+            case "vat":
+              return `${formatMoney(line.vat)} ${invoice.currency}`;
+            default:
+              return null;
+          }
+        }}
+      />
+      <FormHint>
+        Leverantören har inte debiterat någon moms. Nav beräknar den och bokför den som både utgående och ingående moms
+        när fakturan godkänns — bruttobeloppet är det som ska betalas.
+      </FormHint>
+    </div>
   );
 }
 

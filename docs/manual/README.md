@@ -27,7 +27,7 @@ Filerna i den här mappen är källan. Ändra här, så följer appen och webbpl
 - [Stämpelterminalen](https://naverp.se/hjalp/terminal/) ([källfil](terminal.md)) — Närvarostämpling, orderstämpling och ATF-uttag i verkstaden.
 - [Personal & lön](https://naverp.se/hjalp/lon/) ([källfil](lon.md)) — Anställda, frånvaro, OB, attestering, löneunderlag och PAXml-export.
 - [Lager](https://naverp.se/hjalp/lager/) ([källfil](lager.md)) — Saldon, transaktionslogg, lagerplatser, lagerflytt, inventering, justeringar och lagervärdering.
-- [Ekonomi](https://naverp.se/hjalp/ekonomi/) ([källfil](ekonomi.md)) — Kontoplan, räkenskapsår och perioder, verifikat, huvudboken, momsrapporten, automatkontering, konteringsregler, balansräkning, resultaträkning och SIE-filer.
+- [Ekonomi](https://naverp.se/hjalp/ekonomi/) ([källfil](ekonomi.md)) — Kontoplan, räkenskapsår och perioder, verifikat, huvudboken, momskoder, momsrapporten med fil till Skatteverket, importmoms, periodisk sammanställning, automatkontering, konteringsregler, balansräkning, resultaträkning och SIE-filer.
 - [Rapporter](https://naverp.se/hjalp/rapporter/) ([källfil](rapporter.md)) — Leveransprecision, försäljnings- och inköpsstatistik, kassationsstatistik och kalkylutfall.
 
 ## System

@@ -118,7 +118,7 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
     slug: "ekonomi",
     title: "Ekonomi",
     file: "ekonomi.md",
-    description: "Kontoplan, räkenskapsår och perioder, verifikat, huvudboken, momskoder, momsrapporten med fil till Skatteverket, importmoms, automatkontering, konteringsregler, balansräkning, resultaträkning och SIE-filer.",
+    description: "Kontoplan, räkenskapsår och perioder, verifikat, huvudboken, momskoder, momsrapporten med fil till Skatteverket, importmoms, periodisk sammanställning, automatkontering, konteringsregler, balansräkning, resultaträkning och SIE-filer.",
     group: "Flöden",
   },
   {

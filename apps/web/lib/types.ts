@@ -1,7 +1,7 @@
 import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./configurator";
 import type { Permission } from "./permissions";
 import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
-import type { VatCode, VatCodeSlot } from "./vatCodes";
+import type { BuyerVatNumberProblem, CustomerVatTreatment, VatCode, VatCodeRef, VatCodeSlot } from "./vatCodes";
 import type { FixedAssetDisposalType, FixedAssetStatus } from "./fixedAssets";
 import type { YearEndAccrualKind, YearEndRole, YearEndStep } from "./yearEnd";
 import type { ThemeContrastFailure, ThemeIssue, ThemeScheme, ThemeSource, ThemeValidationResult } from "./themeCore";
@@ -460,6 +460,13 @@ export interface Supplier extends PartnerCardFields, SupplierPaymentFields {
   // Vårt kundnummer hos leverantören — printed on inquiry/PO.
   ourCustomerNumber: string | null;
   currency: string;
+  // Momskoder: the supplier's own country (ISO-2, default "SE") and its own
+  // Momskod (förval); null = derived from the country. `defaultVatCode` is
+  // the effective code ({ ..., derived: true } when it is the derived one) —
+  // on the detail/PATCH answers only, not in the list rows.
+  country: string;
+  defaultVatCodeId: string | null;
+  defaultVatCode?: (VatCodeRef & { derived: boolean }) | null;
   active: boolean;
   createdAt: string;
 }
@@ -754,6 +761,9 @@ export interface SupplierInvoice {
   // Bankfiler: how the payment file identifies the payment to the supplier.
   paymentReferenceKind: "ocr" | "message" | null;
   paymentReference: string | null;
+  // Momskoder: the header's code (every row without a code of its own and the
+  // remainder follow it). Not in the list rows' joins, so optional here.
+  vatCodeId?: string;
 }
 
 export interface SupplierInvoiceRow {
@@ -770,6 +780,9 @@ export interface SupplierInvoiceRow {
   lineAmount: string;
   vatAmount: string;
   vatRate: string | null;
+  // Momskoder: the row's own code; null = follows the invoice's.
+  vatCodeId: string | null;
+  vatCode: VatCodeRef | null;
   poOrderNumber?: string | null;
   poQuantityOrdered?: string | null;
   poQuantityReceived?: string | null;
@@ -783,7 +796,18 @@ export interface SupplierInvoiceRow {
 // above and the AR mirror InvoiceDetail's openAmount further down) —
 // meaningless for draft/cancelled, see supplier-invoice.service.ts's
 // getInvoice comment.
+// Förhandsvisning av beräknad (omvänd) moms — what approving books as both
+// utgående and ingående moms, per omvänd momskod.
+export interface SupplierInvoiceReverseVat {
+  code: VatCode;
+  base: number;
+  vat: number;
+}
+
 export interface SupplierInvoiceDetail extends SupplierInvoice {
+  vatCodeId: string;
+  vatCode: VatCodeRef;
+  reverseVat: SupplierInvoiceReverseVat[];
   rows: SupplierInvoiceRow[];
   openAmount: number;
   payments: SupplierInvoicePaymentEntry[];
@@ -945,6 +969,12 @@ export interface Customer extends PartnerCardFields {
   // Privatperson — styr etiketten Personnummer/Organisationsnummer på
   // Villkor & frakt.
   privatePerson: boolean;
+  // Omvänd betalningsskyldighet för byggtjänster (momskoder): a service row to
+  // this Swedish customer gets the momskod OB.
+  reverseChargeConstruction: boolean;
+  // Momsbehandling — derived by the API (customerVatTreatment); on the detail
+  // and PATCH answers, not in the list rows.
+  vatTreatment?: CustomerVatTreatment;
   // Visa tilläggspriser — förval för konfigurerade raders pristillägg på
   // offert/orderbekräftelse (och vad fakturan följer).
   showConfigurationPrices: boolean;
@@ -1312,7 +1342,14 @@ export interface InvoiceRow {
   // The row's display unit code — the linked/entered unit falling back to
   // the article's base unit, null for a free row (no article).
   unitCode: string | null;
+  // The rate is a snapshot of the code's rate — the momskod is what decides.
   vatRate: string;
+  // Momskoder: the row's code (name as the company calls it, invoiceText the
+  // text the PDF prints under the VAT summary).
+  vatCodeId: string;
+  vatCode: VatCodeRef & { invoiceText: string | null };
+  // Leveransdatum (ML 17 kap. 24 § p. 7) — null = not stated.
+  deliveryDate: string | null;
   lineAmount: string;
   vatAmount: string;
   createdAt: string;
@@ -1365,6 +1402,12 @@ export interface InvoiceReminderEntry {
 // invoice.service.ts's getInvoice comment.
 export interface InvoiceDetail extends InvoiceHeader {
   rows: InvoiceRow[];
+  // Köparens momsregistreringsnummer as the invoice shows it — the customer's
+  // current one on a draft, the issue snapshot afterwards.
+  buyerVatNumber: string | null;
+  // Drafts only: what Utfärda would refuse (null = in order, always null once
+  // issued) — so the card can warn ahead of it.
+  vatNumberProblem: BuyerVatNumberProblem | null;
   openAmount: number;
   payments: InvoicePaymentEntry[];
   reminders: InvoiceReminderEntry[];
@@ -1386,6 +1429,10 @@ export interface InvoiceableOrderRow {
   unitFactor: string | null;
   unitCode: string;
   vatRate: string;
+  // Momskoder: the code the row gets for this customer (null only if the
+  // code is missing from the company's list).
+  vatCodeId: string | null;
+  vatCode: VatCodeRef | null;
   // Delivered minus already invoiced (drafts included) — the max billable
   // quantity for this row right now.
   rest: number;
@@ -1408,6 +1455,9 @@ export interface InvoiceableShipment {
   articleNumber: string;
   articleName: string;
   vatRate: string;
+  // Momskoder: freight follows the goods.
+  vatCodeId: string | null;
+  vatCode: VatCodeRef | null;
   description: string;
 }
 
@@ -3211,6 +3261,59 @@ export interface VatReportingSettings {
   contactName: string | null;
   contactPhone: string | null;
   contactEmail: string | null;
+}
+
+// GET /periodic-summary?from&to — Periodisk sammanställning (EU-försäljning
+// per köparens momsnummer). Amounts are whole kronor; credit invoices count
+// negatively. `triangular` (trepartshandel) is always null — it has no code.
+export type PeriodicSummaryWarningKind =
+  | "missing_vat_number"
+  | "invalid_vat_number"
+  | "ledger_difference"
+  | "non_eu_country";
+
+export type PeriodicSummaryMissingField = "vatNumber" | "contactName" | "contactPhone";
+
+export interface PeriodicSummaryInvoiceRef {
+  id: string;
+  invoiceNumber: string;
+}
+
+export interface PeriodicSummaryRow {
+  vatNumber: string;
+  customers: { id: string; name: string }[];
+  goods: number;
+  triangular: number | null;
+  services: number;
+  invoices: PeriodicSummaryInvoiceRef[];
+}
+
+export interface PeriodicSummaryWarning {
+  kind: PeriodicSummaryWarningKind;
+  message: string;
+  invoices: PeriodicSummaryInvoiceRef[];
+}
+
+export interface PeriodicSummaryResponse {
+  from: string;
+  to: string;
+  kind: "month" | "quarter";
+  periodCode: string;
+  rows: PeriodicSummaryRow[];
+  totals: { goods: number; services: number };
+  // Momsrapportens bokföring för samma period: ruta 35 (varor) och ruta 39
+  // (tjänster), i hela kronor, och skillnaden mot sammanställningen.
+  ledger: { box35: number; box39: number };
+  differences: { goods: number; services: number };
+  warnings: PeriodicSummaryWarning[];
+  reporter: {
+    vatNumber: string | null;
+    contactName: string | null;
+    contactPhone: string | null;
+    contactEmail: string | null;
+  };
+  // What the file still needs (409 periodic-summary-reporter-incomplete).
+  missing: PeriodicSummaryMissingField[];
 }
 
 // --- Ekonomirapporter (B6a) ---

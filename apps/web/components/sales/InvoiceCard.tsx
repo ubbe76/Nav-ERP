@@ -16,9 +16,18 @@ import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import {
+  buyerVatNumberProblemText,
+  salesRowIsGoods,
+  salesVatCode,
+  vatCodeOptionLabel,
+  vatCodesFor,
+  type SalesVatCustomer,
+  type VatCodeView,
+} from "../../lib/vatCodes";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import {
   INVOICE_STATUS_PILL,
   INVOICE_TYPE_LABELS,
-  VAT_RATES,
   type Article,
   type InvoiceDetail,
   type InvoicePaymentEntry,
@@ -28,7 +37,7 @@ import {
 } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { GatedLink } from "../ui/GatedLink";
-import { Form, FormActions, FormError, FormRow, FormStack } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
 
@@ -39,6 +48,8 @@ export function InvoiceCard({
   canOpenVerifications,
   reminderDefaultTo,
   reminderFee,
+  vatCodes,
+  customerVat,
 }: {
   invoice: InvoiceDetail;
   paymentTerms: RegisterEntry[];
@@ -57,6 +68,12 @@ export function InvoiceCard({
   // → Konteringsregler → Kundreskontra → Påminnelseavgift).
   reminderDefaultTo: string;
   reminderFee: number;
+  // Momskoder: the company's codes (GET /vat-codes) for the rows' Momskod
+  // select, and the customer's VAT facts so a row that has no code of its own
+  // yet can show the one it will get (salesVatCode — the server derives the
+  // same). null when the customer could not be read.
+  vatCodes: VatCodeView[];
+  customerVat: SalesVatCustomer | null;
 }) {
   const router = useRouter();
   const pill = INVOICE_STATUS_PILL[invoice.status];
@@ -68,7 +85,8 @@ export function InvoiceCard({
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
   const [editUnitPrice, setEditUnitPrice] = useState("");
-  const [editVatRate, setEditVatRate] = useState("");
+  const [editVatCodeId, setEditVatCodeId] = useState("");
+  const [editDeliveryDate, setEditDeliveryDate] = useState("");
   const [reminderOpen, setReminderOpen] = useState(false);
 
   const netAmount = invoice.rows.reduce((sum, r) => sum + Number(r.lineAmount), 0);
@@ -88,7 +106,9 @@ export function InvoiceCard({
       await apiFetch(`/api/v1/invoices/${invoice.id}/${action}`, { method: "POST" });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Åtgärden misslyckades");
+      // vat-number-required (409) carries its own sentence per reason — which
+      // number is missing or in the wrong form — and apiErrorMessage keeps it.
+      setError(apiErrorMessage(err, "Åtgärden misslyckades"));
     } finally {
       setPending(false);
     }
@@ -119,7 +139,8 @@ export function InvoiceCard({
     // edited) in the row's own display unit, same as the sales order card.
     setEditQuantity(String(toUnitQuantity(Number(row.quantity), row.unitFactor)));
     setEditUnitPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
-    setEditVatRate(String(Number(row.vatRate)));
+    setEditVatCodeId(row.vatCodeId);
+    setEditDeliveryDate(row.deliveryDate ?? "");
   }
 
   async function saveRow(row: InvoiceRow) {
@@ -132,7 +153,10 @@ export function InvoiceCard({
           // Convert back from the display unit to the stored base unit.
           quantity: toBaseQuantity(Number(editQuantity), row.unitFactor),
           unitPrice: toBasePrice(Number(editUnitPrice), row.unitFactor),
-          vatRate: Number(editVatRate),
+          // The momskod decides the VAT — never the bare rate, which would
+          // give an EU customer svensk moms.
+          vatCodeId: editVatCodeId,
+          deliveryDate: editDeliveryDate.trim() || null,
         }),
       });
       setEditingRowId(null);
@@ -168,6 +192,7 @@ export function InvoiceCard({
         {invoice.invoiceDate && <span>Fakturadatum: {invoice.invoiceDate}</span>}
         {!editable && invoice.ocrNumber && <span>OCR-nummer: {invoice.ocrNumber}</span>}
         {!editable && invoice.dueDate && <span>Förfallodatum: {invoice.dueDate}</span>}
+        {invoice.buyerVatNumber && <span>Köparens momsnr: {invoice.buyerVatNumber}</span>}
         {/* openAmount is meaningless for draft/cancelled (see InvoiceDetail's
             own comment) — issued/paid only, same gate as the FA-number/OCR/
             due-date fields above. */}
@@ -211,6 +236,17 @@ export function InvoiceCard({
 
       <FormError>{error}</FormError>
 
+      {/* Utfärda refuses an EU sale / omvänd betalningsskyldighet without the
+          buyer's momsregistreringsnummer in the right form — warned about
+          here, ahead of the click. */}
+      {editable && invoice.vatNumberProblem && (
+        <FormNotice style={{ marginBottom: 20 }}>
+          {buyerVatNumberProblemText(invoice.vatNumberProblem)}{" "}
+          <GatedLink href={`/kunder/${invoice.customerId}`}>Öppna kundkortet</GatedLink> och ange momsnumret under
+          Villkor &amp; frakt.
+        </FormNotice>
+      )}
+
       {/* Header — editable in draft, read-only otherwise (snapshot address once issued). */}
       {editable ? (
         <HeaderForm invoice={invoice} paymentTerms={paymentTerms} onSaved={() => router.refresh()} />
@@ -253,8 +289,9 @@ export function InvoiceCard({
             { key: "quantity", label: "Antal", width: "90px", align: "right" },
             { key: "unitCode", label: "Enhet", width: "70px" },
             { key: "unitPrice", label: "À-pris", width: "110px", align: "right" },
-            { key: "vatRate", label: "Moms %", width: "90px", align: "right" },
+            { key: "vatCode", label: "Momskod", width: "minmax(190px, 1fr)" },
             { key: "lineAmount", label: "Belopp", width: "120px", align: "right" },
+            { key: "deliveryDate", label: "Leveransdatum", width: "140px" },
             { key: "salesOrderNumber", label: "Order", width: "110px" },
             ...(editable ? ([{ key: "id", label: "", width: "160px", align: "right" }] as const) : []),
           ]}
@@ -311,22 +348,37 @@ export function InvoiceCard({
                 ) : (
                   formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))
                 );
-              case "vatRate":
+              case "vatCode":
                 return isEditing ? (
                   <Select
-                    size="xs"
-                    aria-label="Moms %"
-                    value={editVatRate}
-                    onChange={(e) => setEditVatRate(e.target.value)}
+                    aria-label="Momskod"
+                    value={editVatCodeId}
+                    onChange={(e) => setEditVatCodeId(e.target.value)}
                   >
-                    {VAT_RATES.map((v) => (
-                      <option key={v} value={v}>
-                        {v} %
+                    {vatCodesFor(vatCodes, "sales", row.vatCodeId).map((code) => (
+                      <option key={code.id} value={code.id}>
+                        {vatCodeOptionLabel(code)}
                       </option>
                     ))}
+                    {/* The list could not be read — keep the row's own code. */}
+                    {!vatCodes.some((code) => code.id === row.vatCodeId) && (
+                      <option value={row.vatCodeId}>{row.vatCode.name}</option>
+                    )}
                   </Select>
                 ) : (
-                  Number(row.vatRate)
+                  row.vatCode.name
+                );
+              case "deliveryDate":
+                return isEditing ? (
+                  <Input
+                    type="date"
+                    size="sm"
+                    aria-label="Leveransdatum"
+                    value={editDeliveryDate}
+                    onChange={(e) => setEditDeliveryDate(e.target.value)}
+                  />
+                ) : (
+                  (row.deliveryDate ?? "–")
                 );
               case "lineAmount":
                 return formatMoney(row.lineAmount);
@@ -466,7 +518,14 @@ export function InvoiceCard({
       )}
 
       <div style={{ marginTop: 20, display: "flex", gap: 16, flexWrap: "wrap" }}>
-        {editable && <AddRowForm invoiceId={invoice.id} onDone={() => router.refresh()} />}
+        {editable && (
+          <AddRowForm
+            invoiceId={invoice.id}
+            vatCodes={vatCodes}
+            customerVat={customerVat}
+            onDone={() => router.refresh()}
+          />
+        )}
 
         <Card maxWidth={320}>
           <FormStack>
@@ -704,24 +763,45 @@ function HeaderForm({
 }
 
 // Adds a line — an article row (ArticlePicker) or a fri rad (no article).
-function AddRowForm({ invoiceId, onDone }: { invoiceId: string; onDone: () => void }) {
+function AddRowForm({
+  invoiceId,
+  vatCodes,
+  customerVat,
+  onDone,
+}: {
+  invoiceId: string;
+  vatCodes: VatCodeView[];
+  customerVat: SalesVatCustomer | null;
+  onDone: () => void;
+}) {
   const [description, setDescription] = useState("");
   const [article, setArticle] = useState<Article | null>(null);
   const [quantity, setQuantity] = useState("1");
   const [unitPrice, setUnitPrice] = useState("");
-  const [vatRate, setVatRate] = useState("25");
+  // "" = Automatisk: the API derives the code from the customer and the
+  // article (salesVatCode) — what the first option names below. Picking one
+  // sends that vatCodeId; the bare vatRate is never sent.
+  const [vatCodeId, setVatCodeId] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   function handleArticleChange(next: Article | null) {
     setArticle(next);
     if (next && !description.trim()) setDescription(`${next.articleNumber} — ${next.name}`);
-    // Inherit the picked article's own VAT rate — otherwise vatRate stays at
-    // the "25" default and is always sent explicitly, so the API's own
-    // article-vatRate inheritance (resolveRow in invoice.service.ts) never
-    // gets a chance to run. Same fix the create dialog already has.
-    if (next) setVatRate(String(Math.round(Number(next.vatRate))));
   }
+
+  // The code Automatisk gives this row: the picked article's rate and type
+  // (a free row is goods at 25 %), against the customer's country and
+  // momsnummer.
+  const automaticCode = customerVat
+    ? salesVatCode({
+        customer: customerVat,
+        isGoods: salesRowIsGoods({ articleId: article?.id ?? null, articleType: article?.type ?? null, freightArticleId: null }),
+        articleRate: article ? Number(article.vatRate) : 25,
+      })
+    : null;
+  const automaticName = automaticCode ? vatCodes.find((code) => code.code === automaticCode)?.name : undefined;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -739,14 +819,16 @@ function AddRowForm({ invoiceId, onDone }: { invoiceId: string; onDone: () => vo
           articleId: article?.id ?? undefined,
           quantity: Number(quantity),
           unitPrice: unitPrice.trim() ? Number(unitPrice) : 0,
-          vatRate: vatRate.trim() ? Number(vatRate) : undefined,
+          vatCodeId: vatCodeId || undefined,
+          deliveryDate: deliveryDate.trim() || undefined,
         }),
       });
       setDescription("");
       setArticle(null);
       setQuantity("1");
       setUnitPrice("");
-      setVatRate("25");
+      setVatCodeId("");
+      setDeliveryDate("");
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte lägga till raden");
@@ -776,16 +858,27 @@ function AddRowForm({ invoiceId, onDone }: { invoiceId: string; onDone: () => vo
           <Field label="À-pris" htmlFor="rowUnitPrice">
             <Input id="rowUnitPrice" type="number" step="0.01" size="sm" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
           </Field>
-          <Field label="Moms %" htmlFor="rowVatRate">
-            <Select id="rowVatRate" size="xs" value={vatRate} onChange={(e) => setVatRate(e.target.value)}>
-              {VAT_RATES.map((v) => (
-                <option key={v} value={v}>
-                  {v} %
+        </FormRow>
+
+        <FormRow>
+          <Field label="Momskod" htmlFor="rowVatCode">
+            <Select id="rowVatCode" value={vatCodeId} onChange={(e) => setVatCodeId(e.target.value)}>
+              <option value="">{automaticName ? `Automatisk — ${automaticName}` : "Automatisk"}</option>
+              {vatCodesFor(vatCodes, "sales").map((code) => (
+                <option key={code.id} value={code.id}>
+                  {vatCodeOptionLabel(code)}
                 </option>
               ))}
             </Select>
           </Field>
+          <Field label="Leveransdatum (valfritt)" htmlFor="rowDeliveryDate">
+            <Input id="rowDeliveryDate" type="date" size="sm" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+          </Field>
         </FormRow>
+        <FormHint>
+          Automatisk väljer momskod efter kundens land, momsnummer och artikeln. Leveransdatumet skrivs ut på fakturan
+          när det skiljer sig från fakturadatumet.
+        </FormHint>
 
         <FormActions>
           <Button type="submit" variant="secondary" disabled={pending}>

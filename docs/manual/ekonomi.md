@@ -1,8 +1,8 @@
 # Ekonomi
 
-Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
+Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Har du sålt till företag i andra EU-länder sammanställer **Periodisk sammanställning** försäljningen per köparens momsnummer och ger dig filen till Skatteverket, se [Periodisk sammanställning](#periodisk-sammanstallning). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
 
-Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, Huvudbok, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
+Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, Huvudbok, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, **Periodisk sammanställning**, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
 
 ## Kontoplan
 
@@ -214,6 +214,35 @@ Knappen **Bokför importmoms** på [Momsrapport](#momsrapport) öppnar en dialog
 Medan du fyller i visar dialogen **Kontering**: per rad **debet** underlagskontot (4545/4546/4547, ruta 50) och **kredit** motkontot 4549 (ingen ruta) med beskattningsunderlaget, samt **debet** ingående moms 2645 (ruta 48) och **kredit** utgående moms 2615/2625/2635 (ruta 60/61/62) med underlaget gånger satsen, avrundat till ören. Kontona kommer från momskoderna — de ändras under [Momskoder](#momskoder). Finns ingen aktiv importmomskod visar dialogen **"Det finns ingen aktiv importmomskod. Aktivera Importmoms 25, 12 eller 6 % under Momskoder."**
 
 Klicka **Bokför importmoms** så bokförs ett verifikat i serien **IM** (Importmoms) och du kommer direkt till verifikatet. Ladda upp tullbeslutet som underlag där, se [Underlag på verifikat](#underlag-pa-verifikat). Importmomsen hamnar i momsrapporten via kontonas momsrutor: underlaget i ruta 50, utgående moms i ruta 60/61/62 och ingående moms i ruta 48 — de två momsbeloppen tar ut varandra i ruta 49.
+
+## Periodisk sammanställning
+
+**Ekonomi → Periodisk sammanställning** sammanställer företagets försäljning av varor och tjänster till företag i andra EU-länder, per köparens momsnummer — det underlag Skatteverket kräver för all EU-försäljning. Sammanställningen bygger på de **utfärdade** kund- och kreditfakturorna, hämtas om automatiskt när perioden ändras och skriver ingenting.
+
+**Period.** Välj **Period** — en **Månad** (t.ex. **Oktober 2026**) eller ett **Kvartal** (t.ex. **Kvartal 3 2026 (jul–sep)**); en annan avgränsning än exakt en kalendermånad eller ett kalenderkvartal nekas (**"Perioden måste vara exakt en kalendermånad eller ett kalenderkvartal."**). Förvald är **föregående månad**. Varor till företag i andra EU-länder ska redovisas per kalendermånad; kvartal gäller bara om Skatteverket har beviljat det eller om du bara säljer tjänster — sidan påminner om det under periodvalet.
+
+**Vad som räknas.** Fakturor med fakturadatum i perioden. Rader med momskoden **Varor till annat EU-land** hamnar i kolumnen **Varor** och rader med **Tjänster till annat EU-land** i kolumnen **Tjänster** (se [Momskoder](#momskoder)); kreditfakturor räknas negativt. Beloppen summeras per **köparens momsnummer** så som det står på fakturan — versaler, bara bokstäver och siffror, med landsprefixet (Grekland skrivs **EL**; saknar en äldre faktura prefixet läggs kundens land till). Ett momsnummer förekommer bara en gång, även om flera kunder eller fakturor har det. Beloppen anges i hela kronor, avrundade per rad. **Trepartshandel** är alltid tom — Nav har ingen momskod för den.
+
+Tabellen har kolumnerna **Momsnummer**, **Kund** (länk till kundkortet), **Varor**, **Trepartshandel**, **Tjänster** och **Fakturor** (länkar till fakturakorten), med en rad **Summa** längst ner.
+
+**Avstämning mot momsrapporten.** Kortet **Avstämning mot momsrapporten** ställer sammanställningen mot ruta 35 (varor) och ruta 39 (tjänster) i [momsrapporten](#momsrapport) för samma period, i hela kronor, med kolumnerna **Ruta**, **Bokfört**, **Sammanställning** och **Skillnad**. Stämmer de står det **Stämmer**; annars visas skillnaden och en varning — oftast ett manuellt verifikat på 3108 eller 3308, eller en faktura med fel momskod.
+
+**Varningar.** Överst visas varningar, med länkar till de fakturor de gäller:
+
+- **Saknat momsnummer** — fakturor med EU-försäljning saknar köparens momsregistreringsnummer och kommer inte med i sammanställningen.
+- **Ogiltigt momsnummer** — numret är inte ett momsnummer i ett annat EU-land; fakturorna kommer inte med.
+- **Kund utanför EU** — en kund med EU-momskod har ett land som inte är ett EU-land; kontrollera momskoden på fakturorna.
+- **Skillnad mot bokföringen** — sammanställningen och ruta 35/39 stämmer inte, se avstämningen ovan.
+
+**Kontaktuppgifter i filen.** Kortet **Kontaktuppgifter i filen** visar **Företagets momsregistreringsnummer** (från **System → Företagsuppgifter**, länken **Öppna Företagsuppgifter**) och har fälten **Kontaktperson** (högst 35 tecken), **Telefon** (högst 17 tecken: siffror med bindestreck efter riktnumret, t.ex. 08-1234567, eller inledande + för ett utlandsnummer) och **E-post** (frivillig). **Spara** lägger dem i inställningarna, där de följer med varje fil; rättigheten **Ekonomi** räcker. Saknas något filen kräver visar kortet **Filen kan inte skapas än:** med vad som återstår — **Företagets momsregistreringsnummer saknas eller har fel form**, **Kontaktperson saknas** eller **Telefon saknas eller har fel form**.
+
+**Ladda ned fil** skapar Skatteverkets fil för periodisk sammanställning (SKV 574008; ISO-8859-1, filnamnet **PeriodiskSammanstallning** följt av periodens kod — **PeriodiskSammanstallning2610.txt** för oktober 2026, **PeriodiskSammanstallning26K3.txt** för tredje kvartalet). Filen laddar du själv upp i Skatteverkets e-tjänst; Nav skickar ingenting. Filen har företagets och kontaktpersonens uppgifter överst och en rad per köpare; en kolumn som inte används lämnas tom, och en köpare som nettar till noll får **0**. Går filen inte att skapa visas orsaken under knappen:
+
+- **"Ingen EU-försäljning i perioden — ingen periodisk sammanställning ska lämnas."** — inga rader, ingen fil.
+- **"Uppgifter saknas för filen — företagets momsregistreringsnummer (Företagsuppgifter) samt kontaktpersonens namn och telefonnummer måste vara ifyllda."**
+- **"Ett belopp är för stort för filen (högst 12 tecken inklusive minustecken) — kontrollera fakturorna i perioden."**
+
+Sidan kräver rättigheten **Ekonomi**, som resten av modulen.
 
 ## SIE-filer
 

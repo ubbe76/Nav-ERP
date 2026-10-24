@@ -413,6 +413,143 @@ export function vatNumberPrefix(country: string): string {
   return upper === "GR" ? "EL" : upper;
 }
 
+// --- Försäljningens momskod (spec 4.1) ---
+//
+// salesVatCode is the ONE implementation of which momskod a sales row gets by
+// default — the invoice rows, the quote/order confirmation PDFs and the
+// customer card all call the shared original; the web uses this mirror for
+// the previews (the customer card's Momsbehandling, the default shown for a
+// row that has no code of its own yet). The server always has the last word.
+
+const VAT_RATE_VALUES: readonly number[] = [25, 12, 6, 0];
+
+// The customer facts the derivation reads. `country` is the customer's own
+// country (customers.country), never the invoice address's.
+export type SalesVatCustomer = {
+  country: string;
+  vatNumber: string | null;
+  privatePerson: boolean;
+  reverseChargeConstruction: boolean;
+};
+
+export function hasVatNumber(vatNumber: string | null | undefined): boolean {
+  return (vatNumber ?? "").trim() !== "";
+}
+
+// Goods or service for the derivation: an article that is not a service is
+// goods, so is the freight article (frakt följer varuleveransen) and a free
+// row without an article.
+export function salesRowIsGoods(row: {
+  articleId: string | null;
+  articleType: string | null;
+  freightArticleId: string | null;
+}): boolean {
+  if (row.articleId === null) return true;
+  if (row.freightArticleId !== null && row.articleId === row.freightArticleId) return true;
+  return row.articleType !== "service";
+}
+
+function articleDomesticCode(articleRate: number): DomesticVatCode {
+  return domesticVatCodeForRate((VAT_RATE_VALUES.includes(articleRate) ? articleRate : 25) as VatRate);
+}
+
+export function salesVatCode(input: { customer: SalesVatCustomer; isGoods: boolean; articleRate: number }): VatCode {
+  const { customer, isGoods } = input;
+  const domestic = articleDomesticCode(input.articleRate);
+  if (customer.privatePerson) return domestic;
+  const country = customer.country.trim().toUpperCase();
+  if (country === "SE") return customer.reverseChargeConstruction && !isGoods ? "OB" : domestic;
+  if (isEuCountry(country)) {
+    if (!hasVatNumber(customer.vatNumber)) return domestic;
+    return isGoods ? "EUV" : "EUT";
+  }
+  return isGoods ? "EXV" : "EXT";
+}
+
+// Momsbehandling on the customer card (spec 4.6).
+export const CUSTOMER_VAT_TREATMENTS = ["domestic", "domestic_no_vat_number", "eu", "export", "private_eu"] as const;
+export type CustomerVatTreatment = (typeof CUSTOMER_VAT_TREATMENTS)[number];
+
+export const CUSTOMER_VAT_TREATMENT_LABELS: Record<CustomerVatTreatment, string> = {
+  domestic: "Svensk moms",
+  domestic_no_vat_number: "Svensk moms (saknar momsnummer)",
+  eu: "EU — utan moms",
+  export: "Export — utan moms",
+  private_eu: "Privatperson i annat EU-land — svensk moms",
+};
+
+export function customerVatTreatment(customer: SalesVatCustomer): CustomerVatTreatment {
+  const country = customer.country.trim().toUpperCase();
+  if (customer.privatePerson) return country !== "SE" && isEuCountry(country) ? "private_eu" : "domestic";
+  if (country === "SE") return "domestic";
+  if (isEuCountry(country)) return hasVatNumber(customer.vatNumber) ? "eu" : "domestic_no_vat_number";
+  return "export";
+}
+
+// Leverantörens förvalda momskod when the supplier has none of its own
+// (spec 5): Sweden ⇒ svensk moms 25 %, another EU country ⇒ omvänd moms on
+// EU goods, outside the EU ⇒ goods with the importmoms booked separately.
+export function supplierDefaultVatCode(country: string): "MP25" | "IEUV25" | "IUTV" {
+  const upper = country.trim().toUpperCase();
+  if (upper === "SE") return "MP25";
+  return isEuCountry(upper) ? "IEUV25" : "IUTV";
+}
+
+// A momsregistreringsnummer as compared and reported: upper case, letters and
+// digits only ("de 123.456.789" ⇒ "DE123456789").
+export function normalizeVatNumber(raw: string | null | undefined): string {
+  return (raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// Utfärda (spec 4.2): codes that require the buyer's momsregistreringsnummer
+// need one on the invoice, in the right form. null = in order.
+export type BuyerVatNumberProblem =
+  | { reason: "missing"; code: VatCode }
+  | { reason: "eu_format"; code: VatCode; prefix: string | null }
+  | { reason: "ob_format"; code: VatCode };
+
+export function buyerVatNumberProblem(input: {
+  codes: readonly VatCode[];
+  vatNumber: string | null;
+  country: string;
+}): BuyerVatNumberProblem | null {
+  const requiring = VAT_CODE_CATALOG.filter((entry) => entry.requiresBuyerVatNumber && input.codes.includes(entry.code));
+  if (requiring.length === 0) return null;
+  const number = normalizeVatNumber(input.vatNumber);
+  if (number === "") return { reason: "missing", code: requiring[0]!.code };
+  const country = input.country.trim().toUpperCase();
+  for (const entry of requiring) {
+    if (entry.kind === "eu_sale") {
+      const prefix = country !== "SE" && isEuCountry(country) ? vatNumberPrefix(country) : null;
+      if (prefix === null || !new RegExp(`^${prefix}[A-Z0-9]{2,12}$`).test(number)) {
+        return { reason: "eu_format", code: entry.code, prefix };
+      }
+    } else if (!/^SE\d{10}01$/.test(number)) {
+      return { reason: "ob_format", code: entry.code };
+    }
+  }
+  return null;
+}
+
+// The sentence the invoice card warns with (drafts) — the same wording the
+// API's 409 vat-number-required carries when Utfärda refuses.
+export function buyerVatNumberProblemText(problem: BuyerVatNumberProblem): string {
+  switch (problem.reason) {
+    case "missing":
+      return "Kunden saknar momsregistreringsnummer — fakturan kan inte utfärdas med EU-försäljning eller omvänd betalningsskyldighet.";
+    case "eu_format":
+      return problem.prefix
+        ? `Kundens momsregistreringsnummer ska börja med landskoden ${problem.prefix} — det krävs för EU-försäljning.`
+        : "EU-försäljning kräver en kund i ett annat EU-land med momsregistreringsnummer.";
+    case "ob_format":
+      return "Kundens momsregistreringsnummer ska ha formen SE + tio siffror + 01 för omvänd betalningsskyldighet.";
+  }
+}
+
+// A document row's/header's code as the detail GETs return it: the company's
+// own name, the catalog's rate.
+export type VatCodeRef = { id: string; code: string; name: string; rate: number };
+
 // The PATCH /vat-codes/:id field per slot.
 export const VAT_CODE_ACCOUNT_FIELDS = {
   revenue: "revenueAccount",
@@ -498,3 +635,31 @@ export const VAT_CODE_WARNING_LABELS: Record<NonNullable<VatCodeAccountView["war
   inactive: "Kontot är inaktivt",
   box_mismatch: "Kontot har fel momsruta",
 };
+
+// --- Pickers on the documents ---
+
+// The codes a document row/header may be given, in catalog order: those of
+// its direction that are active — plus the one the document already carries
+// (`keepId`) even when it has been deactivated since, so editing never
+// silently changes it.
+export function vatCodesFor(
+  codes: readonly VatCodeView[],
+  document: "sales" | "purchase",
+  keepId?: string | null
+): VatCodeView[] {
+  return codes.filter((code) => vatCodeAllowedOn(code.code, document) && (code.active || code.id === keepId));
+}
+
+// "EUV · Varor till annat EU-land (inaktiv)" — the option text of every
+// Momskod select.
+export function vatCodeOptionLabel(code: Pick<VatCodeView, "code" | "name" | "active">): string {
+  return `${code.code} · ${code.name}${code.active ? "" : " (inaktiv)"}`;
+}
+
+// Momssats (the VAT rate field next to the supplier invoice's Momskod): a
+// domestic code states its own rate; omvänd moms, momsfritt and import carry
+// no VAT on the supplier's invoice, so the rate to prefill is 0.
+export function chargedVatRate(code: VatCode): number {
+  const entry = vatCodeEntry(code);
+  return entry.kind === "domestic" ? entry.rate : 0;
+}

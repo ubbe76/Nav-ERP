@@ -8,6 +8,7 @@ import { AuditTrailSection } from "../../../../components/system/AuditTrailSecti
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { canOpen } from "../../../../lib/pageAccess";
 import { getDocumentEmails } from "../../../../lib/mail";
+import type { VatCodeView } from "../../../../lib/vatCodes";
 import {
   INVOICE_TYPE_LABELS,
   type Customer,
@@ -31,7 +32,7 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
   // The current user decides whether the Verifikat link is rendered at all —
   // /ekonomi/verifikat/… is admin-only, both as a page and in the API (same
   // idiom as /ekonomi/kontoplan's own gate).
-  const [customer, emails, creditedInvoice, user, settings] = await Promise.all([
+  const [customer, emails, creditedInvoice, user, settings, vatCodes] = await Promise.all([
     apiGet<Customer>(`/api/v1/customers/${invoice.customerId}`, cookieHeader).catch(() => null),
     getDocumentEmails(invoice.id, cookieHeader),
     invoice.creditedInvoiceId
@@ -42,6 +43,9 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
     // dialog's checkbox label — same plain-auth GET the betalningar page
     // already relies on for its own tolerance/betalkonto defaults.
     apiGet<SystemSettings>("/api/v1/settings", cookieHeader),
+    // Momskoder: the rows' Momskod select (GET /vat-codes is readable for
+    // every office user). A failed read leaves the rows' own codes in place.
+    apiGet<VatCodeView[]>("/api/v1/vat-codes", cookieHeader).catch(() => [] as VatCodeView[]),
   ]);
   const paymentTerms = await apiGet<RegisterEntry[]>("/api/v1/payment-terms", cookieHeader);
 
@@ -91,6 +95,17 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
         canOpenVerifications={user ? canOpen(user, "/ekonomi/verifikat") : false}
         reminderDefaultTo={reminderDefaultTo}
         reminderFee={settings.reminderFee}
+        vatCodes={vatCodes}
+        customerVat={
+          customer
+            ? {
+                country: customer.country,
+                vatNumber: customer.vatNumber,
+                privatePerson: customer.privatePerson,
+                reverseChargeConstruction: customer.reverseChargeConstruction,
+              }
+            : null
+        }
       />
 
       {canMail && invoice.invoiceNumber && (

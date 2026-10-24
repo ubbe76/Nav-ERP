@@ -489,6 +489,11 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
         description: "Momsdeklarationens alla rutor per månad, kvartal eller helår — med fil till Skatteverket, momsomföring i serie M och importmoms.",
       },
       {
+        href: "/ekonomi/periodisk-sammanstallning",
+        title: "Periodisk sammanställning",
+        description: "EU-försäljning per köparens momsnummer för månad eller kvartal, avstämd mot momsrapporten, med fil till Skatteverket.",
+      },
+      {
         href: "/ekonomi/avskrivningsplan",
         title: "Avskrivningsplan",
         description: "Anskaffningsvärden, årets avskrivningar och bokfört värde per grupp, med avstämning mot huvudboken.",
