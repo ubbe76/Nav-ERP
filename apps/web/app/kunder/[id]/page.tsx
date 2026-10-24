@@ -59,6 +59,7 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
         partner={customer}
         endpointBase="/api/v1/customers"
         kind="customer"
+        showCurrency
         registers={{ deliveryTerms, paymentTerms, carriers }}
         contacts={contacts}
         deliveryAddresses={deliveryAddresses}

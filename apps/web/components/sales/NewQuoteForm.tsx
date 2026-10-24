@@ -11,6 +11,12 @@ import type { ConfiguratorEvaluation, ResolveVariantResult, RowConfigurationDraf
 import { SearchPicker } from "../ui/SearchPicker";
 import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import { currencyLabel, SEK } from "../../lib/currency";
+import { parseRate, priceQuotePath } from "../../lib/priceQuote";
+import { useOrderRate } from "../../lib/useOrderRate";
+import { CurrencyInput } from "../ui/CurrencyInput";
+import { OrderRateField } from "./OrderRateField";
 import { addDaysIso, stockholmToday } from "../../lib/date";
 import { useCustomerDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
@@ -66,6 +72,22 @@ export function NewQuoteForm({
 }) {
   const router = useRouter();
   const [customer, setCustomer] = useState<Customer | null>(lockedCustomer ?? null);
+  // Valuta: the order's currency starts as the customer's (another can be
+  // chosen) and, for a foreign one, the Kurs follows today's rate until typed
+  // in. SEK always has rate 1.
+  const [currency, setCurrency] = useState(lockedCustomer?.currency ?? "SEK");
+  const customerKey = customer?.id ?? null;
+  useEffect(() => {
+    if (customer) setCurrency(customer.currency);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerKey]);
+  const orderCurrency = currency.trim().toUpperCase();
+  const foreign = /^[A-Z]{3}$/.test(orderCurrency) && orderCurrency !== SEK;
+  const orderRate = useOrderRate({ currency: orderCurrency });
+  // The rate the rows are priced at: 1 for SEK, the Kurs field's number for a
+  // foreign currency (null while it is empty — pricing then waits).
+  const exchangeRate = !foreign ? 1 : parseRate(orderRate.rate);
+  const pricingKnown = /^[A-Z]{3}$/.test(orderCurrency) && exchangeRate !== null;
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState("");
   // Fasta leveransdagar: the customer's earliest delivery date prefills the
   // field unless the operator has touched it ("manuellt vinner"); an
@@ -188,6 +210,14 @@ export function NewQuoteForm({
       setError("Välj artikel på alla rader");
       return;
     }
+    if (!/^[A-Z]{3}$/.test(orderCurrency)) {
+      setError("Ange valutan som tre bokstäver, t.ex. SEK eller EUR");
+      return;
+    }
+    if (foreign && exchangeRate === null) {
+      setError(`Ange kursen för ${orderCurrency} — ingen kurs hittades för dagen`);
+      return;
+    }
     setError(null);
     setPending(true);
     try {
@@ -195,6 +225,10 @@ export function NewQuoteForm({
         method: "POST",
         body: JSON.stringify({
           customerId: customer.id,
+          // Valuta: always sent — omitted, the API takes the customer's
+          // currency, which a SEK order for a EUR customer must not get.
+          currency: orderCurrency,
+          ...(foreign ? { exchangeRate } : {}),
           expectedDeliveryDate: expectedDeliveryDate || undefined,
           note: note || undefined,
           ...(mode === "order"
@@ -219,7 +253,7 @@ export function NewQuoteForm({
       });
       router.push(`${mode === "order" ? "/forsaljning/ordrar" : "/forsaljning/offerter"}/${result.order.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Kunde inte skapa ${nounSingular}en`);
+      setError(apiErrorMessage(err, `Kunde inte skapa ${nounSingular}en`));
       setPending(false);
     }
   }
@@ -244,6 +278,19 @@ export function NewQuoteForm({
             emptyText="Inga kunder matchar sökningen"
           />
         </Field>
+      )}
+
+      <FormRow>
+        <Field label="Valuta" htmlFor="quoteCurrency">
+          <CurrencyInput id="quoteCurrency" required value={currency} onValueChange={setCurrency} />
+          {customer && customer.currency !== orderCurrency && (
+            <FormHint>Kundens valuta är {customer.currency}.</FormHint>
+          )}
+        </Field>
+        {foreign && <OrderRateField id="quoteExchangeRate" currency={orderCurrency} orderRate={orderRate} quote={mode !== "order"} />}
+      </FormRow>
+      {foreign && rows.some((r) => r.priceTouched) && (
+        <FormHint attached>Priser som är inskrivna för hand räknas inte om när valuta eller kurs ändras.</FormHint>
       )}
 
       <FormRow>
@@ -336,6 +383,9 @@ export function NewQuoteForm({
               index={index}
               row={row}
               customerId={customer?.id ?? null}
+              currency={orderCurrency}
+              exchangeRate={exchangeRate}
+              pricingKnown={pricingKnown}
               canRemove={rows.length > 1}
               perRowDate={perRowDates}
               onChange={(patch) => updateRow(index, patch)}
@@ -393,6 +443,9 @@ function QuoteRowFields({
   index,
   row,
   customerId,
+  currency,
+  exchangeRate,
+  pricingKnown,
   canRemove,
   perRowDate,
   onChange,
@@ -401,6 +454,12 @@ function QuoteRowFields({
   index: number;
   row: QuoteRow;
   customerId: string | null;
+  // Valuta: the order's currency and rate (1 for SEK; null = a foreign rate
+  // that is not typed in yet, so nothing can be priced). pricingKnown is false
+  // while the currency code or the rate is unusable.
+  currency: string;
+  exchangeRate: number | null;
+  pricingKnown: boolean;
   canRemove: boolean;
   perRowDate: boolean;
   onChange: (patch: Partial<QuoteRow>) => void;
@@ -485,11 +544,9 @@ function QuoteRowFields({
   const selfCostPerUnit = row.configuration ? configuredSelfCost : templateSelfCost;
 
   useEffect(() => {
-    if (row.priceTouched || !articleId || !customerId || baseQuantity === null || row.configuration) return;
+    if (row.priceTouched || !articleId || !customerId || baseQuantity === null || row.configuration || !pricingKnown) return;
     const seq = ++requestSeq.current;
-    apiFetch<PriceQuote>(
-      `/api/v1/price-quote?customerId=${customerId}&articleId=${articleId}&quantity=${baseQuantity}`
-    )
+    apiFetch<PriceQuote>(priceQuotePath({ customerId, articleId, quantity: baseQuantity, currency, exchangeRate }))
       .then((quote) => {
         if (seq !== requestSeq.current) return; // superseded by a newer article/quantity edit
         if (!quote.price) return; // no chain match — leave the fields as they are, no error shown
@@ -506,17 +563,24 @@ function QuoteRowFields({
     // displayed in the new unit (toUnitPrice divides by whatever factor is
     // captured in this closure).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [articleId, baseQuantity, customerId, row.priceTouched, currentFactor, row.configuration !== null]);
+  }, [articleId, baseQuantity, customerId, row.priceTouched, currentFactor, row.configuration !== null, currency, exchangeRate, pricingKnown]);
 
   // A configured row is priced by the configurator: re-evaluate when the quantity or the customer changes
   // (staffel / customer price), unless the price was typed by hand.
   const configuredSelection = row.configuration?.selection ?? null;
   useEffect(() => {
-    if (!configuredSelection || !articleId || baseQuantity === null) return;
+    if (!configuredSelection || !articleId || baseQuantity === null || !pricingKnown) return;
     const seq = ++requestSeq.current;
     apiFetch<ConfiguratorEvaluation>(`/api/v1/configurator/${articleId}/evaluate`, {
       method: "POST",
-      body: JSON.stringify({ selection: configuredSelection, ...(customerId ? { customerId } : {}), quantity: baseQuantity }),
+      body: JSON.stringify({
+        selection: configuredSelection,
+        ...(customerId ? { customerId } : {}),
+        quantity: baseQuantity,
+        // Valuta: the order's currency (SEK too) and, for a foreign one, its rate.
+        currency,
+        ...(currency !== SEK && exchangeRate ? { exchangeRate } : {}),
+      }),
     })
       .then((evaluation) => {
         if (seq !== requestSeq.current) return;
@@ -530,7 +594,7 @@ function QuoteRowFields({
         // Best-effort, like the price-quote prefill.
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configuredSelection, articleId, baseQuantity, customerId, row.priceTouched, currentFactor]);
+  }, [configuredSelection, articleId, baseQuantity, customerId, row.priceTouched, currentFactor, currency, exchangeRate, pricingKnown]);
 
   return (
     <FormLineRow>
@@ -577,6 +641,8 @@ function QuoteRowFields({
         customerId={customerId}
         showPrice
         quantity={baseQuantity ?? 1}
+        currency={pricingKnown ? currency : undefined}
+        exchangeRate={exchangeRate}
         initialSelection={row.configuration?.selection}
         onConfigured={configureMode === "to_order" ? handleConfigured : undefined}
         onResolved={configureMode === "variants" ? handleResolved : undefined}
@@ -601,7 +667,7 @@ function QuoteRowFields({
         <Field label="Enhet" htmlFor={`unit-${index}`}>
           <UnitSelect id={`unit-${index}`} options={unitOptions} value={row.unitId} onChange={handleUnitChange} />
         </Field>
-        <Field label={unitCode ? `Á-pris (kr/${unitCode})` : "Á-pris"} htmlFor={`unitPrice-${index}`}>
+        <Field label={unitCode ? `Á-pris (${currencyLabel(currency)}/${unitCode})` : `Á-pris (${currencyLabel(currency)})`} htmlFor={`unitPrice-${index}`}>
           <Input
             id={`unitPrice-${index}`}
             type="number"
@@ -639,8 +705,13 @@ function QuoteRowFields({
       {/* Täckningsbidrag against the article's latest saved pre-calculation,
           recomputed locally as the price is typed. */}
       <FormHint>
-        {marginLabel(selfCostPerUnit, baseQuantity, toBasePrice(Number(row.unitPrice), currentFactor), Number(row.discountPercent)) ??
-          "TB —"}
+        {marginLabel(
+          selfCostPerUnit,
+          baseQuantity,
+          toBasePrice(Number(row.unitPrice), currentFactor),
+          Number(row.discountPercent),
+          exchangeRate
+        ) ?? "TB —"}
       </FormHint>
     </FormLineRow>
   );

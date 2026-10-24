@@ -12,7 +12,8 @@ import { apiFetch } from "../../lib/api";
 import type { Paged, PriceList } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
-import { Form, FormActions, FormError } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { CurrencyInput } from "../ui/CurrencyInput";
 
 // Prislistor — registerlistan (kopierad från kundlistans form, se
 // CustomersPageClient.tsx): URL-driven sök/sida via ListToolbar/Pagination,
@@ -45,6 +46,7 @@ export function PriceListsPageClient({ priceLists, pageSize }: { priceLists: Pag
           { key: "code", label: "Kod", width: "140px" },
           { key: "name", label: "Namn", width: "1fr" },
           { key: "description", label: "Beskrivning", width: "1.6fr" },
+          { key: "currency", label: "Valuta", width: "90px" },
           { key: "rowCount", label: "Antal rader", width: "120px", align: "right" },
         ]}
         rows={priceLists.rows}
@@ -65,6 +67,8 @@ export function PriceListsPageClient({ priceLists, pageSize }: { priceLists: Pag
               );
             case "description":
               return list.description ?? "–";
+            case "currency":
+              return list.currency;
             case "rowCount":
               return list.rowCount;
             default:
@@ -93,6 +97,7 @@ function NewPriceListForm({ onSuccess }: { onSuccess: () => void }) {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [currency, setCurrency] = useState("SEK");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -107,6 +112,7 @@ function NewPriceListForm({ onSuccess }: { onSuccess: () => void }) {
           code,
           name,
           description: description.trim() || undefined,
+          currency: currency.trim() || undefined,
         }),
       });
       onSuccess();
@@ -136,6 +142,13 @@ function NewPriceListForm({ onSuccess }: { onSuccess: () => void }) {
           onChange={(e) => setDescription(e.target.value)}
         />
       </Field>
+
+      <Field label="Valuta" htmlFor="priceListCurrency">
+        <CurrencyInput id="priceListCurrency" required value={currency} onValueChange={setCurrency} />
+      </Field>
+      <FormHint attached>
+        Listans priser anges i den. Priskedjan använder listan bara på ordrar i samma valuta.
+      </FormHint>
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

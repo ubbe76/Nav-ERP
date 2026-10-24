@@ -33,6 +33,11 @@ import { toBaseQuantity, toBasePrice, toUnitPrice, toUnitQuantity } from "../../
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
 import { computeLineMargin, sumMargins } from "../../lib/margin";
 import { formatMoney } from "../../lib/format";
+import { currencyLabel, formatRate, SEK, toSek } from "../../lib/currency";
+import { parseRate, priceQuotePath } from "../../lib/priceQuote";
+import { useOrderRate } from "../../lib/useOrderRate";
+import { CurrencyInput } from "../ui/CurrencyInput";
+import { OrderRateField } from "./OrderRateField";
 import { apiFetch } from "../../lib/api";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -145,6 +150,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   const editInitialBaseQuantityRef = useRef(0);
 
   const deliverable = rows.filter((r) => Number(r.quantityDelivered) < Number(r.quantityOrdered));
+  // Valuta: the order's prices are in its currency; the rate (SEK per 1 unit,
+  // 1 for SEK) converts them to SEK for the täckningsbidrag (the self cost is
+  // SEK) and the order value in SEK.
+  const orderRate = Number(order.exchangeRate);
+  const foreign = order.currency !== SEK;
   // Quantity and price are both stored in the article's base unit, so the
   // line amount is the same number whichever unit the row is displayed in.
   const total = rows.reduce(
@@ -158,7 +168,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     rows.map((r) =>
       computeLineMargin({
         quantity: Number(r.quantityOrdered),
-        unitPrice: Number(r.unitPrice),
+        // SEK: the price is converted with the order's rate before it is
+        // measured against the (SEK) self cost.
+        unitPrice: Number(r.unitPrice) * orderRate,
         discountPercent: Number(r.discountPercent),
         selfCostPerUnit: r.selfCostPerUnit,
       })
@@ -197,6 +209,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           selection: selectionFromEntries(editedRow.configuration.selection),
           customerId: order.customerId,
           quantity: baseQuantity,
+          // Valuta: the order's currency and rate.
+          currency: order.currency,
+          ...(foreign ? { exchangeRate: orderRate } : {}),
         }),
       })
         .then((evaluation) => {
@@ -208,7 +223,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       return;
     }
     apiFetch<PriceQuote>(
-      `/api/v1/price-quote?customerId=${order.customerId}&articleId=${editArticle.id}&quantity=${baseQuantity}`
+      // Valuta: salesOrderId — the order's own currency and rate decide.
+      priceQuotePath({ customerId: order.customerId, articleId: editArticle.id, quantity: baseQuantity, salesOrderId: order.id })
     )
       .then((quote) => {
         if (seq !== editRequestSeq.current) return;
@@ -403,7 +419,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         pill={pill}
         meta={
           <>
-            Rev {order.revision} · SEK
+            Rev {order.revision} · {order.currency}
             {order.invoiceNumber &&
               ` · Faktura ${order.invoiceNumber}${order.invoicedAt ? ` (${order.invoicedAt.slice(0, 10)})` : ""}`}
           </>
@@ -412,6 +428,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           { label: "Kund", value: order.customerName, href: `/kunder/${order.customerId}` },
           ...customerNumberFields(order),
           { label: "Referens", value: order.customerReference },
+          ...(foreign
+            ? [{ label: "Kurs", value: `1 ${order.currency} = ${formatRate(order.exchangeRate)} kr` }]
+            : []),
           { label: "Leveransdatum", value: order.expectedDeliveryDate },
           ...(order.status === "quote"
             ? [
@@ -480,7 +499,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             ...(rowsEditable ? ([{ key: "id", label: "", width: "220px", align: "right" }] as const) : []),
           ]}
           rows={rows}
-          footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(total)} SEK` }}
+          footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(total)} ${order.currency}` }}
           renderCell={(row, key) => {
             switch (key) {
               case "articleNumber":
@@ -577,7 +596,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                     }}
                   />
                 ) : (
-                  `${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} SEK`
+                  `${formatMoney(toUnitPrice(Number(row.unitPrice), row.unitFactor))} ${order.currency}`
                 );
               case "discountPercent":
                 return editingRowId === row.id ? (
@@ -661,11 +680,18 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         <p>Inga rader tillagda än.</p>
       )}
 
+      {rows.length > 0 && foreign && (
+        <FormHint>
+          Ordervärde i SEK: {formatMoney(toSek(total, orderRate))} kr (kurs {formatRate(order.exchangeRate)}). Priserna står
+          i {order.currency}; rapporterna räknar om dem till SEK med orderns kurs.
+        </FormHint>
+      )}
+
       {rows.length > 0 && (
         <FormHint>
           {orderMargin.contribution === null
             ? "Täckningsbidrag — ingen av raderna har en sparad förkalkyl att mäta mot."
-            : `Täckningsbidrag ${formatMoney(orderMargin.contribution)} SEK${
+            : `Täckningsbidrag ${formatMoney(orderMargin.contribution)} SEK${foreign ? " (räknat med orderns kurs)" : ""}${
                 orderMargin.marginPercent === null
                   ? ""
                   : ` · täckningsgrad ${orderMargin.marginPercent.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} %`
@@ -692,6 +718,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         template={reconfigure?.template ?? null}
         customerId={order.customerId}
         showPrice
+        currency={order.currency}
+        exchangeRate={orderRate}
         quantity={reconfigure ? Number(reconfigure.row.quantityOrdered) : 1}
         initialSelection={reconfigure?.initial}
         title="Ändra konfiguration"
@@ -823,6 +851,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
 
       <FreightQuoteDialog
         orderId={order.id}
+        currency={order.currency}
+        exchangeRate={order.exchangeRate}
         open={freightOpen}
         onClose={() => setFreightOpen(false)}
         onAdded={() => {
@@ -834,6 +864,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       <Modal open={modal === "header"} onClose={() => setModal(null)} title="Ändra orderhuvud">
         <EditHeaderForm
           order={order}
+          rowCount={rows.length}
           deliveryAddresses={deliveryAddresses}
           registers={registers}
           onDone={refresh}
@@ -849,6 +880,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         <AddRowForm
           orderId={order.id}
           customerId={order.customerId}
+          currency={order.currency}
+          exchangeRate={orderRate}
           revision={order.revision}
           orderDeliveryDate={order.expectedDeliveryDate}
           onDone={refresh}
@@ -965,12 +998,14 @@ function customerNumberFields(order: SalesOrder) {
 
 function EditHeaderForm({
   order,
+  rowCount,
   deliveryAddresses,
   registers,
   onDone,
   onCancel,
 }: {
   order: SalesOrder;
+  rowCount: number;
   deliveryAddresses: CustomerDeliveryAddress[];
   registers: TermsRegisters;
   onDone: () => void;
@@ -1000,11 +1035,36 @@ function EditHeaderForm({
       : null;
   const [terms, setTerms] = useState<TermsValue>(termsFrom(order));
   const [quoteValidUntil, setQuoteValidUntil] = useState(order.quoteValidUntil ?? "");
+  // Valuta and Kurs: changeable as a quote or a confirmed order (the API
+  // refuses it under tillverkning); another currency only while the order has
+  // no rows (their prices would stand in the wrong currency).
+  const canChangeCurrency = order.status === "quote" || order.status === "confirmed";
+  const [currency, setCurrency] = useState(order.currency);
+  const headerCurrency = currency.trim().toUpperCase();
+  const headerForeign = /^[A-Z]{3}$/.test(headerCurrency) && headerCurrency !== SEK;
+  const headerRate = useOrderRate({
+    currency: headerCurrency,
+    initial: { currency: order.currency, rate: order.currency === SEK ? "" : String(Number(order.exchangeRate)) },
+  });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   async function save(e: FormEvent) {
     e.preventDefault();
+    // Valuta/Kurs: only what changed is sent — a new currency (the API takes
+    // today's rate unless one is sent; the shown one is sent) and/or another
+    // rate on the same currency.
+    const currencyChanged = canChangeCurrency && headerCurrency !== order.currency;
+    const newRate = headerForeign ? parseRate(headerRate.rate) : 1;
+    if (canChangeCurrency && !/^[A-Z]{3}$/.test(headerCurrency)) {
+      setError("Ange valutan som tre bokstäver, t.ex. SEK eller EUR");
+      return;
+    }
+    if (canChangeCurrency && headerForeign && newRate === null) {
+      setError(`Ange kursen för ${headerCurrency} — ingen kurs hittades för dagen`);
+      return;
+    }
+    const rateChanged = canChangeCurrency && headerForeign && newRate !== null && newRate !== Number(order.exchangeRate);
     const bumpRevision = await askBumpRevision(order.revision);
     setError(null);
     setPending(true);
@@ -1012,6 +1072,8 @@ function EditHeaderForm({
       await apiFetch(`/api/v1/sales-orders/${order.id}`, {
         method: "PATCH",
         body: JSON.stringify({
+          ...(currencyChanged ? { currency: headerCurrency } : {}),
+          ...(headerForeign && (currencyChanged || rateChanged) ? { exchangeRate: newRate } : {}),
           ...(showOrderNumber ? { customerOrderNumber: customerOrderNumber.trim() || null } : {}),
           customerInquiryNumber: customerInquiryNumber.trim() || null,
           customerReference: customerReference.trim() || null,
@@ -1024,7 +1086,7 @@ function EditHeaderForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setPending(false);
     }
@@ -1071,6 +1133,36 @@ function EditHeaderForm({
         </Field>
       </FormRow>
 
+      {canChangeCurrency && (
+        <>
+          <FormRow>
+            <Field label="Valuta" htmlFor="headerCurrency">
+              <CurrencyInput
+                id="headerCurrency"
+                required
+                disabled={rowCount > 0}
+                value={currency}
+                onValueChange={setCurrency}
+              />
+            </Field>
+            {headerForeign && (
+              <OrderRateField
+                id="headerExchangeRate"
+                currency={headerCurrency}
+                orderRate={headerRate}
+                quote={order.status === "quote"}
+              />
+            )}
+          </FormRow>
+          {rowCount > 0 && (
+            <FormHint attached>
+              Valutan kan inte ändras när {order.status === "quote" ? "offerten" : "ordern"} har rader — ta bort raderna
+              först. Kursen kan ändras; raderna behåller sina priser.
+            </FormHint>
+          )}
+        </>
+      )}
+
       {order.status === "quote" && (
         <Field label="Giltig t.o.m." htmlFor="headerQuoteValidUntil">
           <Input
@@ -1112,6 +1204,8 @@ function EditHeaderForm({
 function AddRowForm({
   orderId,
   customerId,
+  currency,
+  exchangeRate,
   revision,
   orderDeliveryDate,
   onDone,
@@ -1119,6 +1213,9 @@ function AddRowForm({
 }: {
   orderId: string;
   customerId: string;
+  // Valuta: the order's currency and rate — the row is priced in it.
+  currency: string;
+  exchangeRate: number;
   revision: number;
   orderDeliveryDate: string | null;
   onDone: () => void;
@@ -1214,7 +1311,8 @@ function AddRowForm({
     if (priceTouched || !articleId || baseQuantity === null || rowConfiguration) return;
     const seq = ++requestSeq.current;
     apiFetch<PriceQuote>(
-      `/api/v1/price-quote?customerId=${customerId}&articleId=${articleId}&quantity=${baseQuantity}`
+      // Valuta: salesOrderId — the order's own currency and rate decide.
+      priceQuotePath({ customerId, articleId, quantity: baseQuantity, salesOrderId: orderId })
     )
       .then((quote) => {
         if (seq !== requestSeq.current) return;
@@ -1239,7 +1337,14 @@ function AddRowForm({
     const seq = ++requestSeq.current;
     apiFetch<ConfiguratorEvaluation>(`/api/v1/configurator/${articleId}/evaluate`, {
       method: "POST",
-      body: JSON.stringify({ selection: configuredSelection, customerId, quantity: baseQuantity }),
+      body: JSON.stringify({
+        selection: configuredSelection,
+        customerId,
+        quantity: baseQuantity,
+        // Valuta: the order's currency (SEK too) and rate.
+        currency,
+        ...(currency !== SEK ? { exchangeRate } : {}),
+      }),
     })
       .then((evaluation) => {
         if (seq !== requestSeq.current) return;
@@ -1282,7 +1387,7 @@ function AddRowForm({
       });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte lägga till raden");
+      setError(apiErrorMessage(err, "Kunde inte lägga till raden"));
     } finally {
       setPending(false);
     }
@@ -1322,6 +1427,8 @@ function AddRowForm({
         template={configureTemplate}
         customerId={customerId}
         showPrice
+        currency={currency}
+        exchangeRate={exchangeRate}
         quantity={baseQuantity ?? 1}
         initialSelection={rowConfiguration?.selection}
         onConfigured={configureMode === "to_order" ? handleConfigured : undefined}
@@ -1339,7 +1446,7 @@ function AddRowForm({
         <Field label="Enhet" htmlFor="rowUnit">
           <UnitSelect id="rowUnit" options={unitOptions} value={unitId} onChange={handleUnitChange} />
         </Field>
-        <Field label={unitCode ? `Á-pris (kr/${unitCode})` : "Á-pris"} htmlFor="unitPrice">
+        <Field label={unitCode ? `Á-pris (${currencyLabel(currency)}/${unitCode})` : `Á-pris (${currencyLabel(currency)})`} htmlFor="unitPrice">
           <Input
             id="unitPrice"
             type="number"
@@ -1390,7 +1497,8 @@ function AddRowForm({
           selfCostPerUnit,
           baseQuantity,
           toBasePrice(Number(unitPrice), currentFactor),
-          Number(discountPercent)
+          Number(discountPercent),
+          exchangeRate
         ) ?? "TB —"}
       </FormHint>
 

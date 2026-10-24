@@ -11,6 +11,7 @@ import { useCan } from "../PermissionsProvider";
 import { API_URL, apiFetch } from "../../lib/api";
 import { INCOMING_STATE } from "../../lib/banking";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { currencyLabel, formatRate, SEK, toleranceInCurrency } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
 import { paymentPreview, PREVIEW_TONE_COLOR, round2 } from "../../lib/paymentTolerance";
 import type { BankFileDetail, BankItemResult, Customer, IncomingEntryView, OpenInvoiceRow, Paged } from "../../lib/types";
@@ -27,6 +28,14 @@ const BASIS_TEXT: Record<string, string> = {
 };
 
 const EDITABLE = new Set(["matched", "suggested", "unmatched"]);
+
+// Valuta steg 3: an entry on the SEK account whose payer instructed another
+// currency (InstdAmt in EUR) is a payment in that currency — it is matched
+// against open items in it, allocated in it, and booked with the entry's own
+// SEK amount (what reached the account) and the charges the bank reports.
+const paidAmount = (e: IncomingEntryView) => (e.instructedAmount !== null && e.instructedCurrency ? e.instructedAmount : e.amount);
+const paidCurrency = (e: IncomingEntryView) => (e.instructedAmount !== null && e.instructedCurrency ? e.instructedCurrency : e.currency);
+const isForeignPayment = (e: IncomingEntryView) => paidCurrency(e) !== e.currency;
 
 function initialDraft(entry: IncomingEntryView): Draft {
   const p = entry.proposal;
@@ -88,7 +97,7 @@ function IncomingBankFileBody({
   }
 
   const bookable = (e: IncomingEntryView) =>
-    EDITABLE.has(e.state) && drafts[e.id]!.customerId !== "" && drafts[e.id]!.rows.length > 0 && allocated(e.id) === round2(e.amount);
+    EDITABLE.has(e.state) && drafts[e.id]!.customerId !== "" && drafts[e.id]!.rows.length > 0 && allocated(e.id) === round2(paidAmount(e));
   // A chosen entry whose allocation stops adding up (or that changes state)
   // is skipped, never a lock on the others: only chosen ∩ bookable is sent,
   // and its checkbox stays enabled so it can be unchecked.
@@ -155,7 +164,34 @@ function IncomingBankFileBody({
                     }
                   />
                 )}
-                <strong>{formatMoney(e.amount)} kr</strong>
+                {isForeignPayment(e) ? (
+                  // Another currency than the account's: the amount the payer
+                  // instructed, then what reached the account in SEK with the
+                  // bank's rate and charges.
+                  <span style={{ display: "inline-flex", flexDirection: "column", gap: 2 }}>
+                    <strong>
+                      {formatMoney(paidAmount(e))} {paidCurrency(e)}
+                    </strong>
+                    <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+                      {formatMoney(e.amount)} kr insatt på kontot
+                    </span>
+                    {e.currencyExchange && (
+                      <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+                        Bankens kurs {formatRate(e.currencyExchange.rate)}
+                        {e.currencyExchange.targetCurrency
+                          ? ` (${e.currencyExchange.sourceCurrency}→${e.currencyExchange.targetCurrency})`
+                          : ""}
+                      </span>
+                    )}
+                    {e.chargesAmount !== null && (
+                      <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+                        varav avgifter {formatMoney(e.chargesAmount)} kr
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <strong>{formatMoney(e.amount)} kr</strong>
+                )}
                 <span>{e.bookingDate}</span>
                 <span>{e.counterpartyName ?? "Okänd betalare"}</span>
                 <span style={{ color: "var(--color-text-secondary)" }}>
@@ -175,6 +211,15 @@ function IncomingBankFileBody({
                 <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>Fördelningen stämmer inte med beloppet — posten bokförs inte förrän den gör det.</div>
               )}
               {e.proposal?.reason && <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>{e.proposal.reason}</div>}
+              {editable && isForeignPayment(e) && (
+                <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                  Betalningen är i {paidCurrency(e)}: den bokförs mot fakturor i {paidCurrency(e)} med {formatMoney(e.amount)} kr
+                  som SEK-värde
+                  {e.chargesAmount !== null
+                    ? ` och bankavgiften ${formatMoney(e.chargesAmount)} kr som bankkostnad. Resten är kursvinst eller kursförlust.`
+                    : ". Banken anger ingen avgift — en eventuell avgift hamnar i kursdifferensen."}
+                </div>
+              )}
               {e.warning && <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{e.warning}</div>}
               {e.ignoreReason && <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{e.ignoreReason}</div>}
               {openEditor === e.id && (
@@ -242,6 +287,8 @@ function AllocationEditor({
   }, [draft.customerId]);
 
   const inDraft = new Set(draft.rows.map((r) => r.invoiceId));
+  const currency = paidCurrency(entry);
+  const paid = paidAmount(entry);
   return (
     <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       <Select value={draft.customerId} onChange={(ev) => onChange({ customerId: ev.target.value, rows: [] })} aria-label="Kund">
@@ -255,11 +302,25 @@ function AllocationEditor({
       {loadError && <FormError>{loadError}</FormError>}
       {open.map((invoice) => {
         const row = draft.rows.find((r) => r.invoiceId === invoice.id);
-        const preview = row ? paymentPreview(invoice.openAmount, row.applied, tolerance) : null;
+        const preview = row
+          ? paymentPreview(
+              invoice.openAmount,
+              row.applied,
+              // The tolerance is kronor: on a foreign invoice what it is worth
+              // in the invoice's currency at its rate.
+              toleranceInCurrency(tolerance, invoice.exchangeRate === null ? 1 : Number(invoice.exchangeRate), invoice.currency),
+              currencyLabel(invoice.currency)
+            )
+          : null;
+        // One payment, one currency: an invoice in another currency than the
+        // payment's cannot be settled by it.
+        const otherCurrency = invoice.currency !== currency;
         return (
           <div key={invoice.id} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <Checkbox
               aria-label={`Välj ${invoice.invoiceNumber}`}
+              title={otherCurrency ? `Fakturan är i ${invoice.currency} men betalningen är i ${currency}` : undefined}
+              disabled={otherCurrency && !inDraft.has(invoice.id)}
               checked={inDraft.has(invoice.id)}
               onChange={() =>
                 onChange({
@@ -272,14 +333,17 @@ function AllocationEditor({
                           invoiceId: invoice.id,
                           invoiceNumber: invoice.invoiceNumber ?? "",
                           openAmount: invoice.openAmount,
-                          applied: String(round2(Math.min(invoice.openAmount, entry.amount - allocated))),
+                          applied: String(round2(Math.min(invoice.openAmount, paid - allocated))),
                         },
                       ],
                 })
               }
             />
             <span>{invoice.invoiceNumber}</span>
-            <span>Öppet {formatMoney(invoice.openAmount)} kr</span>
+            <span>
+              Öppet {formatMoney(invoice.openAmount)} {currencyLabel(invoice.currency)}
+              {otherCurrency && ` — betalningen är i ${currency}`}
+            </span>
             {row && (
               <Input
                 type="number"
@@ -294,8 +358,9 @@ function AllocationEditor({
           </div>
         );
       })}
-      <div style={{ color: allocated === round2(entry.amount) ? "var(--status-running-text)" : "var(--status-stopped-text)" }}>
-        Fördelat {formatMoney(allocated)} av {formatMoney(entry.amount)}
+      <div style={{ color: allocated === round2(paid) ? "var(--status-running-text)" : "var(--status-stopped-text)" }}>
+        Fördelat {formatMoney(allocated)} av {formatMoney(paid)}
+        {currency !== SEK ? ` ${currency}` : ""}
       </div>
     </div>
   );

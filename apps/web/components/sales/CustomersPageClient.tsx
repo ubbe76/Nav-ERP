@@ -48,6 +48,7 @@ export function CustomersPageClient({ customers, pageSize }: { customers: Paged<
           { key: "customerNumber", label: "Kundnr", width: "110px" },
           { key: "name", label: "Namn", width: "1fr" },
           { key: "city", label: "Postort", width: "180px" },
+          { key: "currency", label: "Valuta", width: "90px" },
           { key: "active", label: "Status", width: "120px" },
         ]}
         rows={customers.rows}
@@ -64,6 +65,8 @@ export function CustomersPageClient({ customers, pageSize }: { customers: Paged<
               );
             case "city":
               return customer.city ?? "–";
+            case "currency":
+              return customer.currency;
             case "active":
               return customer.active ? (
                 <StatusPill status="running" label="Aktiv" compact />

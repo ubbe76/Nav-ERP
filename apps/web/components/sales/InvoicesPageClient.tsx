@@ -12,6 +12,9 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import { currencyLabel, SEK } from "../../lib/currency";
+import { CurrencyInput } from "../ui/CurrencyInput";
 import { EINVOICE_STATUS_LABELS } from "../../lib/einvoice";
 import { formatMoney, round2 } from "../../lib/format";
 import {
@@ -88,7 +91,7 @@ export function InvoicesPageClient({
           { key: "customerName", label: "Kund", width: "1.4fr" },
           { key: "invoiceDate", label: "Fakturadatum", width: "130px" },
           { key: "dueDate", label: "Förfallodatum", width: "130px" },
-          { key: "netAmount", label: "Belopp", width: "140px", align: "right" },
+          { key: "netAmount", label: "Belopp", width: "150px", align: "right" },
           { key: "status", label: "Status", width: "130px" },
           { key: "einvoiceStatus", label: "E-faktura", width: "100px" },
         ]}
@@ -113,7 +116,16 @@ export function InvoicesPageClient({
             case "netAmount":
               // Belopp is the gross (incl. moms) — what's actually owed —
               // not the net sum alone, same as the AP list's grossAmount.
-              return `${formatMoney(String(Number(invoice.netAmount) + Number(invoice.vatAmount)))} ${invoice.currency}`;
+              return invoice.currency === SEK || invoice.grossAmountSek === null ? (
+                `${formatMoney(String(Number(invoice.netAmount) + Number(invoice.vatAmount)))} ${invoice.currency}`
+              ) : (
+                // Valuta: an issued invoice in another currency also shows the
+                // receivable it booked in SEK.
+                <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                  <span>{formatMoney(String(Number(invoice.netAmount) + Number(invoice.vatAmount)))} {invoice.currency}</span>
+                  <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{formatMoney(invoice.grossAmountSek)} kr</span>
+                </span>
+              );
             case "status": {
               const pill = INVOICE_STATUS_PILL[invoice.status];
               return <StatusPill status={pill.status} label={pill.label} compact />;
@@ -180,7 +192,9 @@ function shipmentRow(s: InvoiceableShipment): PreviewRow {
     salesOrderRowId: null,
     description: s.description,
     quantity: "1",
-    unitPrice: String(Number(s.customerPrice)),
+    // Valuta: the kundpris in the shipment's own currency (the order's); SEK
+    // is the kundpris itself.
+    unitPrice: String(s.unitPrice ?? Number(s.customerPrice)),
     discountPercent: "0",
     vatCodeId: s.vatCodeId ?? "",
     vatCodeName: s.vatCode?.name ?? null,
@@ -190,16 +204,18 @@ function shipmentRow(s: InvoiceableShipment): PreviewRow {
   };
 }
 
-const ROW_COLUMNS = [
+// Valuta: the price and amount columns say what they are in (SEK reads as
+// before, "À-pris"/"Belopp").
+const rowColumns = (currency: string) => [
   { key: "description", label: "Beskrivning", width: "1.3fr" },
   { key: "quantity", label: "Antal", width: "90px", align: "right" as const },
   { key: "unitCode", label: "Enhet", width: "70px" },
-  { key: "unitPrice", label: "À-pris", width: "110px", align: "right" as const },
+  { key: "unitPrice", label: currency === SEK ? "À-pris" : `À-pris (${currency})`, width: "110px", align: "right" as const },
   // C3: prefilled from the order row's discount, still editable here — same
   // "unitPrice is a prefilled starting point, not locked" treatment.
   { key: "discountPercent", label: "Rabatt %", width: "90px", align: "right" as const },
   { key: "vatCode", label: "Momskod", width: "minmax(190px, 1fr)" },
-  { key: "lineAmount", label: "Belopp", width: "110px", align: "right" as const },
+  { key: "lineAmount", label: currency === SEK ? "Belopp" : `Belopp (${currency})`, width: "110px", align: "right" as const },
   { key: "id", label: "", width: "90px", align: "right" as const },
 ];
 
@@ -239,6 +255,10 @@ export function NewInvoiceForm({
   const [shipments, setShipments] = useState<InvoiceableShipment[]>([]);
   const [rowsByKey, setRowsByKey] = useState<Map<string, PreviewRow>>(new Map());
   const [note, setNote] = useState("");
+  // Valuta: an invoice has one currency. The ticked orders and freight decide
+  // it (lockedCurrency, below); with only free rows it is chosen here — null =
+  // the customer's.
+  const [currencyChoice, setCurrencyChoice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // Consumed once the matching order shows up in the fetched invoiceable
@@ -266,6 +286,7 @@ export function NewInvoiceForm({
   useEffect(() => {
     setOrders([]);
     setShipments([]);
+    setCurrencyChoice(null);
     setSelectedOrderIds(new Set());
     setRowsByKey((prev) => {
       // Keep free rows (they don't belong to any customer's order list);
@@ -298,7 +319,13 @@ export function NewInvoiceForm({
         setShipments(res);
         setRowsByKey((prev) => {
           const next = new Map(prev);
-          for (const s of res) next.set(`ship-${s.shipmentId}`, shipmentRow(s));
+          // Valuta: starts ticked only what can go on one invoice — the
+          // shipments in the customer's own currency (and with a price: no
+          // rate for the currency means no unit price). The others are ticked
+          // by hand, which the currency lock then allows one currency at a time.
+          for (const s of res) {
+            if (s.unitPrice !== null && s.currency === customer?.currency) next.set(`ship-${s.shipmentId}`, shipmentRow(s));
+          }
           return next;
         });
       })
@@ -355,6 +382,31 @@ export function NewInvoiceForm({
       return next;
     });
   }
+
+  // Valuta: the invoice's currency — what the ticked orders (else the ticked
+  // freight) are in. null while nothing is ticked: free rows then take the
+  // chosen currency, by default the customer's.
+  const selectedOrders = orders.filter((o) => selectedOrderIds.has(o.orderId));
+  const tickedShipments = shipments.filter((s) => rowsByKey.has(`ship-${s.shipmentId}`));
+  const lockedCurrency = selectedOrders[0]?.currency ?? tickedShipments[0]?.currency ?? null;
+  const currencyText = (currencyChoice ?? customer?.currency ?? SEK).trim().toUpperCase();
+  const invoiceCurrency = lockedCurrency ?? currencyText;
+  const foreign = invoiceCurrency !== SEK;
+  const columns = rowColumns(invoiceCurrency);
+
+  // An order picked after a shipment (or the other way round) in another
+  // currency cannot share its invoice: freight that no longer fits is unticked.
+  useEffect(() => {
+    if (selectedOrders.length === 0) return;
+    const stale = tickedShipments.filter((s) => s.currency !== selectedOrders[0]!.currency);
+    if (stale.length === 0) return;
+    setRowsByKey((prev) => {
+      const next = new Map(prev);
+      for (const s of stale) next.delete(`ship-${s.shipmentId}`);
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOrderIds, orders, shipments, rowsByKey]);
 
   function toggleOrder(order: InvoiceableOrder) {
     if (selectedOrderIds.has(order.orderId)) deselectOrder(order);
@@ -523,6 +575,10 @@ export function NewInvoiceForm({
       setError("Välj en kund");
       return;
     }
+    if (!/^[A-Z]{3}$/.test(invoiceCurrency)) {
+      setError("Ange valutan som tre bokstäver, t.ex. SEK eller EUR");
+      return;
+    }
     setError(null);
     setPending(true);
     try {
@@ -530,6 +586,9 @@ export function NewInvoiceForm({
         method: "POST",
         body: JSON.stringify({
           customerId,
+          // Valuta: always sent — omitted, the API takes the linked rows'
+          // currency, else the customer's.
+          currency: invoiceCurrency,
           note: note.trim() || undefined,
           rows: [...rowsByKey.values()].map((r) => ({
             articleId: r.articleId,
@@ -552,7 +611,7 @@ export function NewInvoiceForm({
       });
       router.push(`/forsaljning/fakturor/${invoice.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa fakturan");
+      setError(apiErrorMessage(err, "Kunde inte skapa fakturan"));
       setPending(false);
     }
   }
@@ -580,6 +639,27 @@ export function NewInvoiceForm({
         </>
       )}
 
+      {customer && (
+        <>
+          <Field label="Valuta" htmlFor="invoiceCurrency">
+            <CurrencyInput
+              id="invoiceCurrency"
+              required
+              disabled={lockedCurrency !== null}
+              value={lockedCurrency ?? currencyChoice ?? customer.currency}
+              onValueChange={setCurrencyChoice}
+            />
+          </Field>
+          <FormHint attached>
+            {lockedCurrency !== null
+              ? `Fakturan är i ${lockedCurrency} — valda orderrader och frakt avgör valutan, och en faktura har en valuta.`
+              : "Fakturans valuta. Valda orderrader och frakt avgör den; med bara fria rader väljer du den här, förvald är kundens."}
+            {foreign &&
+              " Kursen sätts när fakturan utfärdas (fakturadatumets kurs från Riksbanken eller Valutakurser) — eller skriv in en egen kurs på fakturautkastet."}
+          </FormHint>
+        </>
+      )}
+
       {customer?.collectiveInvoicing ? (
         <FormHint attached>
           Kunden faktureras med samlingsfaktura.{" "}
@@ -591,12 +671,31 @@ export function NewInvoiceForm({
             <div>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Ordrar att fakturera</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {orders.map((o) => (
-                  <label key={o.orderId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Checkbox checked={selectedOrderIds.has(o.orderId)} onChange={() => toggleOrder(o)} />
-                    {o.orderNumber} ({o.rows.length} rad{o.rows.length === 1 ? "" : "er"})
-                  </label>
-                ))}
+                {orders.map((o) => {
+                  // One invoice, one currency: once something is ticked, the
+                  // orders in other currencies cannot be.
+                  const otherCurrency =
+                    !selectedOrderIds.has(o.orderId) && lockedCurrency !== null && o.currency !== lockedCurrency;
+                  return (
+                    <label
+                      key={o.orderId}
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                      title={
+                        otherCurrency
+                          ? `En faktura har en valuta — välj bara poster i ${lockedCurrency}. Fakturera ordern på en egen faktura.`
+                          : undefined
+                      }
+                    >
+                      <Checkbox
+                        checked={selectedOrderIds.has(o.orderId)}
+                        disabled={otherCurrency}
+                        onChange={() => toggleOrder(o)}
+                      />
+                      {o.orderNumber} ({o.rows.length} rad{o.rows.length === 1 ? "" : "er"})
+                      {o.currency !== SEK && ` · ${o.currency}`}
+                    </label>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -614,7 +713,7 @@ export function NewInvoiceForm({
             return (
               <div key={orderId}>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>{order.orderNumber}</div>
-                <Table<PreviewRow> columns={ROW_COLUMNS} rows={groupRows} renderCell={renderRowCell} />
+                <Table<PreviewRow> columns={columns} rows={groupRows} renderCell={renderRowCell} />
               </div>
             );
           })}
@@ -623,17 +722,30 @@ export function NewInvoiceForm({
             <div>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Frakt</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {shipments.map((s) => (
-                  <label key={s.shipmentId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Checkbox checked={rowsByKey.has(`ship-${s.shipmentId}`)} onChange={() => toggleShipment(s)} />
-                    {s.shipmentNumber} — {s.carrierName} {s.productName}
-                    {s.deliveryNumbers.length > 0 ? ` · ${s.deliveryNumbers.join(", ")}` : ""}
-                  </label>
-                ))}
+                {shipments.map((s) => {
+                  const ticked = rowsByKey.has(`ship-${s.shipmentId}`);
+                  // No price without a rate for the shipment's currency; one
+                  // invoice, one currency.
+                  const noRate = s.unitPrice === null;
+                  const otherCurrency = !ticked && lockedCurrency !== null && s.currency !== lockedCurrency;
+                  const why = noRate
+                    ? `Ingen kurs för ${s.currency} — frakten kan inte prissättas i ${s.currency} förrän en kurs finns (Ekonomi → Valutakurser)`
+                    : otherCurrency
+                      ? `En faktura har en valuta — välj bara poster i ${lockedCurrency}. Fakturera frakten på en egen faktura.`
+                      : undefined;
+                  return (
+                    <label key={s.shipmentId} style={{ display: "flex", alignItems: "center", gap: 8 }} title={why}>
+                      <Checkbox checked={ticked} disabled={noRate || otherCurrency} onChange={() => toggleShipment(s)} />
+                      {s.shipmentNumber} — {s.carrierName} {s.productName}
+                      {s.deliveryNumbers.length > 0 ? ` · ${s.deliveryNumbers.join(", ")}` : ""}
+                      {s.currency !== SEK && ` · ${s.currency}`}
+                    </label>
+                  );
+                })}
               </div>
               {shipmentRows.length > 0 && (
                 <div style={{ marginTop: 8 }}>
-                  <Table<PreviewRow> columns={ROW_COLUMNS} rows={shipmentRows} renderCell={renderRowCell} />
+                  <Table<PreviewRow> columns={columns} rows={shipmentRows} renderCell={renderRowCell} />
                 </div>
               )}
             </div>
@@ -642,7 +754,7 @@ export function NewInvoiceForm({
           {freeRows.length > 0 && (
             <div>
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Fria rader</div>
-              <Table<PreviewRow> columns={ROW_COLUMNS} rows={freeRows} renderCell={renderRowCell} />
+              <Table<PreviewRow> columns={columns} rows={freeRows} renderCell={renderRowCell} />
             </div>
           )}
 

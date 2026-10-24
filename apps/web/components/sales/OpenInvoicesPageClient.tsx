@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Table } from "../ui/Table";
 import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
+import { currencyLabel, formatRate, SEK } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
 import { stockholmToday } from "../../lib/date";
 import { INVOICE_TYPE_LABELS, type Customer, type OpenInvoiceRow, type Paged } from "../../lib/types";
@@ -26,6 +27,9 @@ export function OpenInvoicesPageClient({
   customers: Customer[];
   pageSize: number;
 }) {
+  // Valuta: the SEK column only when the page has an item in another currency;
+  // for SEK it would repeat Öppet belopp.
+  const anyForeign = openInvoices.rows.some((r) => r.currency !== SEK);
   return (
     <>
       <div className={shellStyles.topbar}>
@@ -55,6 +59,8 @@ export function OpenInvoicesPageClient({
           { key: "dueDate", label: "Förfallodatum", width: "150px" },
           { key: "grossAmount", label: "Belopp", width: "130px", align: "right" },
           { key: "openAmount", label: "Öppet belopp", width: "130px", align: "right" },
+          // Valuta: the open amount's booked SEK value — the column to add up.
+          ...(anyForeign ? [{ key: "openAmountSek", label: "Öppet i SEK", width: "130px", align: "right" as const }] : []),
           { key: "reminders", label: "Påminnelser", width: "150px" },
         ]}
         rows={openInvoices.rows}
@@ -83,9 +89,22 @@ export function OpenInvoicesPageClient({
               );
             }
             case "grossAmount":
-              return `${formatMoney(row.grossAmount)} kr`;
+              return `${formatMoney(row.grossAmount)} ${currencyLabel(row.currency)}`;
             case "openAmount":
-              return `${formatMoney(row.openAmount)} kr`;
+              return row.currency === SEK ? (
+                `${formatMoney(row.openAmount)} kr`
+              ) : (
+                <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                  <span>
+                    {formatMoney(row.openAmount)} {row.currency}
+                  </span>
+                  {row.exchangeRate !== null && (
+                    <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>kurs {formatRate(row.exchangeRate)}</span>
+                  )}
+                </span>
+              );
+            case "openAmountSek":
+              return row.openAmountSek == null ? "–" : `${formatMoney(row.openAmountSek)} kr`;
             case "reminders":
               // Nivå (antal skickade påminnelser) + avgiftsmarkering (om
               // någon av dem någonsin tog ut en avgift) — both real columns

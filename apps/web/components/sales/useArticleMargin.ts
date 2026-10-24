@@ -75,19 +75,27 @@ export function useConfiguredSelfCost(
 
 // "TB 1 234,00 kr · TG 32,1 %" for one line being priced, in the article's BASE
 // unit — quantity and price are both converted by the caller, so the two agree.
+//
+// Valuta: the self cost is in SEK, so a price in another currency is converted
+// with the order's rate (`exchangeRate`, SEK per 1 unit; omitted = 1) before it
+// is measured against it — the figure is then SEK, which the label says.
 export function marginLabel(
   selfCostPerUnit: number | null,
   baseQuantity: number | null,
   baseUnitPrice: number,
-  discountPercent: number
+  discountPercent: number,
+  exchangeRate: number | null = 1
 ): string | null {
   if (baseQuantity === null || !Number.isFinite(baseUnitPrice)) return null;
-  return formatMargin(
+  // A foreign price without a usable rate cannot be compared with a SEK cost.
+  if (exchangeRate === null) return "TB — (kurs saknas)";
+  const label = formatMargin(
     computeLineMargin({
       quantity: baseQuantity,
-      unitPrice: baseUnitPrice,
+      unitPrice: baseUnitPrice * exchangeRate,
       discountPercent: Number.isFinite(discountPercent) ? discountPercent : 0,
       selfCostPerUnit,
     })
   );
+  return exchangeRate === 1 ? label : `${label} · räknat i SEK`;
 }

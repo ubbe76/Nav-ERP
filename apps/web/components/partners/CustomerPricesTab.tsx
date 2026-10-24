@@ -9,6 +9,7 @@ import { Modal } from "../ui/Modal";
 import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { apiFetch } from "../../lib/api";
+import { currencyLabel, SEK } from "../../lib/currency";
 import type { Article, ArticleGroup, CustomerPrice } from "../../lib/types";
 import { Form, FormActions, FormError } from "../ui/Form";
 
@@ -20,10 +21,13 @@ export function CustomerPricesTab({
   prices,
   pricesBase,
   articleGroups,
+  currency,
 }: {
   prices: CustomerPrice[];
   pricesBase: string;
   articleGroups: ArticleGroup[];
+  // Valuta: the customer's currency — a special price (Specialpris) is in it.
+  currency: string;
 }) {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
@@ -61,7 +65,7 @@ export function CustomerPricesTab({
         columns={[
           { key: "target", label: "Artikel/Grupp", width: "1.6fr" },
           { key: "fromQuantity", label: "Från antal", width: "120px" },
-          { key: "unitPrice", label: "Pris", width: "120px" },
+          { key: "unitPrice", label: currency === SEK ? "Pris" : `Pris (${currency})`, width: "120px" },
           { key: "discountPercent", label: "Rabatt %", width: "120px" },
           { key: "id", label: "", width: "160px", align: "right" },
         ]}
@@ -105,6 +109,7 @@ export function CustomerPricesTab({
         <CustomerPriceForm
           pricesBase={pricesBase}
           articleGroups={articleGroups}
+          currency={currency}
           onSuccess={() => {
             setModalOpen(false);
             router.refresh();
@@ -117,6 +122,7 @@ export function CustomerPricesTab({
           <CustomerPriceForm
             pricesBase={pricesBase}
             articleGroups={articleGroups}
+            currency={currency}
             price={editing}
             onSuccess={() => {
               setEditing(null);
@@ -139,11 +145,13 @@ type ValueType = "price" | "discount";
 function CustomerPriceForm({
   pricesBase,
   articleGroups,
+  currency,
   price,
   onSuccess,
 }: {
   pricesBase: string;
   articleGroups: ArticleGroup[];
+  currency: string;
   price?: CustomerPrice;
   onSuccess: () => void;
 }) {
@@ -296,7 +304,7 @@ function CustomerPriceForm({
               checked={valueType === "price"}
               onChange={() => setValueType("price")}
             />
-            Specialpris (kr)
+            Specialpris ({currencyLabel(currency)})
           </label>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <input
@@ -311,7 +319,7 @@ function CustomerPriceForm({
       </Field>
 
       {valueType === "price" ? (
-        <Field label="Specialpris (kr)" htmlFor="customerPriceUnitPrice">
+        <Field label={`Specialpris (${currencyLabel(currency)})`} htmlFor="customerPriceUnitPrice">
           <Input
             id="customerPriceUnitPrice"
             type="number"

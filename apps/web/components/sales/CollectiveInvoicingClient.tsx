@@ -11,6 +11,7 @@ import { HelpLink } from "../ui/HelpLink";
 import { FormError, FormHint } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
 import type { CollectiveInvoicingCandidate, CollectiveInvoicingResult } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
@@ -58,6 +59,9 @@ export function CollectiveInvoicingClient({
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<CollectiveInvoicingResult[] | null>(null);
 
+  // Valuta: the Valutor column only when some candidate sells in another
+  // currency than SEK (for SEK-only it would repeat "SEK" on every row).
+  const anyForeign = candidates.some((c) => c.currencies.some((currency) => currency !== "SEK"));
   const allSelected = candidates.length > 0 && selected.size === candidates.length;
   const someSelected = selected.size > 0 && !allSelected;
 
@@ -92,7 +96,7 @@ export function CollectiveInvoicingClient({
       setCandidates(fresh);
       setSelected(defaultSelection(fresh));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa samlingsfakturor");
+      setError(apiErrorMessage(err, "Kunde inte skapa samlingsfakturor"));
     } finally {
       setRunning(false);
     }
@@ -165,7 +169,9 @@ export function CollectiveInvoicingClient({
           { key: "orderCount", label: "Order", width: "90px", align: "right" },
           { key: "rowCount", label: "Rader", width: "90px", align: "right" },
           { key: "shipmentCount", label: "Frakter", width: "90px", align: "right" },
-          { key: "netAmount", label: "Belopp exkl. moms", width: "160px", align: "right" },
+          // Valuta: one invoice is made per currency a customer has orders in.
+          ...(anyForeign ? [{ key: "currencies", label: "Valutor", width: "110px" }] : []),
+          { key: "netAmount", label: anyForeign ? "Belopp exkl. moms (SEK)" : "Belopp exkl. moms", width: "170px", align: "right" },
         ]}
         rows={candidates}
         emptyText="Inga kunder med Samlingsfaktura har levererade, ofakturerade order."
@@ -193,6 +199,8 @@ export function CollectiveInvoicingClient({
               return candidate.rowCount.toLocaleString("sv-SE");
             case "shipmentCount":
               return candidate.shipmentCount.toLocaleString("sv-SE");
+            case "currencies":
+              return candidate.currencies.length > 0 ? candidate.currencies.join(", ") : "–";
             case "netAmount":
               return `${formatMoney(candidate.netAmount)} kr`;
             default:
@@ -205,6 +213,13 @@ export function CollectiveInvoicingClient({
             : undefined
         }
       />
+
+      {anyForeign && (
+        <FormHint>
+          En faktura har en valuta: en kund med order i flera valutor får en faktura per valuta. Beloppen i tabellen är
+          omräknade till SEK med orderns kurs; fakturans kurs sätts när den utfärdas.
+        </FormHint>
+      )}
 
       <div className={styles.actionBar}>
         <div>
@@ -223,8 +238,9 @@ export function CollectiveInvoicingClient({
           <SectionHeading>Resultat</SectionHeading>
           <ul style={{ margin: 0, paddingLeft: 20 }}>
             {results.map((r) => (
-              <li key={r.customerId} style={{ marginBottom: 6 }}>
-                {r.customerNumber ?? "–"} {r.name ?? ""} —{" "}
+              <li key={`${r.customerId}-${r.currency ?? ""}`} style={{ marginBottom: 6 }}>
+                {r.customerNumber ?? "–"} {r.name ?? ""}
+                {r.currency && r.currency !== "SEK" ? ` (${r.currency})` : ""} —{" "}
                 <StatusPill {...RESULT_STATUS[r.status]} compact />
                 {r.invoiceId && (
                   <>

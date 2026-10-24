@@ -166,6 +166,41 @@ const MESSAGES: Record<string, MessageEntry> = {
         return "Beloppet i SEK eller bankavgiften passar inte betalningen.";
     }
   },
+  // Valuta: försäljning
+  "sales-order-currency-locked": "Valutan kan inte ändras när ordern har rader — ta bort raderna först.",
+  "sales-order-exchange-rate": "En order i SEK har alltid kursen 1.",
+  "price-list-currency-locked": "Valutan kan inte ändras när prislistan har rader.",
+  "invoice-row-currency-mismatch": (err) => {
+    const body = err.body as { rowCurrency?: string; invoiceCurrency?: string } | undefined;
+    return body?.rowCurrency && body.invoiceCurrency
+      ? `Raden är i ${body.rowCurrency} men fakturan är i ${body.invoiceCurrency} — en faktura har en valuta. Fakturera ordrar i olika valutor på var sin faktura.`
+      : "Raden har en annan valuta än fakturan — en faktura har en valuta.";
+  },
+  "invoice-exchange-rate": (err) =>
+    (err.body as { reason?: string } | undefined)?.reason === "credit"
+      ? "En kreditfaktura har alltid den krediterade fakturans kurs."
+      : "En faktura i SEK har alltid kursen 1.",
+  "reminder-fee-currency": (err) => {
+    const currency = (err.body as { currency?: string } | undefined)?.currency;
+    return `Påminnelseavgift kan bara tas ut på fakturor i SEK${currency ? ` — fakturan är i ${currency}` : ""}. Skicka påminnelsen utan avgift.`;
+  },
+  "customer-payment-amount-sek": (err) => {
+    const body = err.body as { reason?: string; currency?: string } | undefined;
+    switch (body?.reason) {
+      case "required":
+        return `En betalning i ${body.currency ?? "utländsk valuta"} behöver beloppet i SEK som kom in på kontot.`;
+      case "sign":
+        return "Beloppet i SEK måste vara skilt från 0 och ha samma tecken som betalningen.";
+      case "fee":
+        return "Bankavgiften kan inte vara större än beloppet i SEK.";
+      case "kvittning":
+        return "En kvittning flyttar inga pengar — den har varken belopp i SEK eller bankavgift.";
+      case "sek":
+        return "En betalning i SEK har beloppet självt i SEK och ingen egen bankavgift.";
+      default:
+        return "Beloppet i SEK eller bankavgiften passar inte betalningen.";
+    }
+  },
   "fiscal-year-closed": "Räkenskapsåret är stängt — öppna det igen under Bokslut",
   "year-end-closing-not-found": "Bokslutet hittades inte",
   "year-end-closing-exists": "Räkenskapsåret har redan ett bokslut",

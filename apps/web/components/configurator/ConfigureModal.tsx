@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, formatSignedMoney } from "../../lib/format";
+import { formatRate, SEK } from "../../lib/currency";
 import { draftLines } from "../../lib/configurationLines";
 import type {
   ConfiguratorEvaluation,
@@ -34,6 +35,13 @@ interface Props {
   showPrice: boolean;
   /** Evaluate at this quantity (staffel); default 1. */
   quantity?: number;
+  /**
+   * Valuta: the order's currency and rate — the prices are asked for (and shown) in it. Omitted = the
+   * customer's currency (with a customer) or SEK; a foreign currency without a usable rate (null) is
+   * evaluated at today's rate by the server.
+   */
+  currency?: string;
+  exchangeRate?: number | null;
   /** Prefill (Ändra konfiguration / Konfigurera om). */
   initialSelection?: ConfiguratorSelection;
   /** Dialog title; default "Konfigurera". */
@@ -80,7 +88,7 @@ export function ConfigureModal(props: Props) {
   );
 }
 
-function ConfigureForm({ template, customerId, showPrice, quantity, initialSelection, notice, onConfigured, onResolved, onCancel }: Props & { template: Article }) {
+function ConfigureForm({ template, customerId, showPrice, quantity, currency, exchangeRate, initialSelection, notice, onConfigured, onResolved, onCancel }: Props & { template: Article }) {
   const [groups, setGroups] = useState<ConfiguratorGroupDetail[] | null>(null);
   const [raw, setRaw] = useState<RawConfiguration>({});
   const [result, setResult] = useState<ConfiguratorEvaluation | null>(null);
@@ -118,7 +126,13 @@ function ConfigureForm({ template, customerId, showPrice, quantity, initialSelec
     const timer = setTimeout(() => {
       apiFetch<ConfiguratorEvaluation>(`/api/v1/configurator/${template.id}/evaluate`, {
         method: "POST",
-        body: JSON.stringify({ selection, quantity: quantity ?? 1, ...(customerId ? { customerId } : {}) }),
+        body: JSON.stringify({
+          selection,
+          quantity: quantity ?? 1,
+          ...(customerId ? { customerId } : {}),
+          // Valuta: the order's currency (SEK too — the customer's would win when omitted) and, for a foreign one, its rate.
+          ...(currency ? { currency, ...(currency !== SEK && exchangeRate ? { exchangeRate } : {}) } : {}),
+        }),
       })
         .then((res) => {
           if (mine === seq.current) {
@@ -137,7 +151,7 @@ function ConfigureForm({ template, customerId, showPrice, quantity, initialSelec
     }, 250);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [raw, groups, customerId, template.id, quantity]);
+  }, [raw, groups, customerId, template.id, quantity, currency, exchangeRate]);
 
   async function insert() {
     if (!result) return;
@@ -191,6 +205,12 @@ function ConfigureForm({ template, customerId, showPrice, quantity, initialSelec
           {result.errors.map((m) => (
             <FormError key={m}>{m}</FormError>
           ))}
+          {showPrice && result.currency && result.currency !== SEK && (
+            <FormHint>
+              Priserna är i {result.currency}
+              {result.exchangeRate ? ` (kurs ${formatRate(result.exchangeRate)})` : ""}.
+            </FormHint>
+          )}
           {showPrice && (
             <dl className={styles.prices}>
               <dt>Grundpris</dt>

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { formatRate } from "../../lib/currency";
 import { formatMoney, formatSignedMoney, round2 } from "../../lib/format";
 import { formatQuantity } from "../../lib/stampSessions";
 import type { Customer } from "../../lib/types";
@@ -15,7 +16,7 @@ import type {
 } from "../../lib/configurator";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
-import { FormError, FormNotice } from "../ui/Form";
+import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { SearchPicker } from "../ui/SearchPicker";
 import { SectionHeading } from "../ui/SectionHeading";
 import { useCan } from "../PermissionsProvider";
@@ -177,6 +178,12 @@ export function TestConfigurationPanel({
                   <li key={m}>{m}</li>
                 ))}
               </ul>
+            )}
+            {result.currency && result.currency !== "SEK" && (
+              <FormHint>
+                Priserna är i {result.currency} — kundens valuta
+                {result.exchangeRate ? ` (kurs ${formatRate(result.exchangeRate)})` : ""}.
+              </FormHint>
             )}
             <dl className={styles.prices}>
               <dt>Grundpris</dt>

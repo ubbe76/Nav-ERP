@@ -60,7 +60,11 @@ interface QuoteFollowupReport {
     expired: boolean;
     lostReason: { id: string; code: string; name: string } | null;
     lostNote: string | null;
+    // SEK — Valuta: an offer in another currency is converted with its own rate.
     value: number;
+    // The offer's own currency and its value in it (= value for SEK).
+    currency: string;
+    currencyValue: number;
   }[];
 }
 
@@ -188,7 +192,7 @@ export function QuoteFollowupPageClient({ defaults }: { defaults: QuoteFollowupD
           </KpiRow>
           <FormHint>
             Hit rate = vunna / (vunna + förlorade); makulerade offerter räknas inte. Värdet är radernas nuvarande värde
-            exkl. moms.
+            exkl. moms i SEK; offerter i annan valuta är omräknade med offertens kurs och visar sitt eget värde under.
           </FormHint>
 
           <div className={styles.actions} style={{ margin: "16px 0 0" }}>
@@ -353,7 +357,16 @@ export function QuoteFollowupPageClient({ defaults }: { defaults: QuoteFollowupD
                       "–"
                     );
                   case "value":
-                    return <span className="num">{kr(q.value)}</span>;
+                    return q.currency === "SEK" ? (
+                      <span className="num">{kr(q.value)}</span>
+                    ) : (
+                      <div>
+                        <div className="num">{kr(q.value)}</div>
+                        <div className={styles.muted}>
+                          {formatMoney(q.currencyValue)} {q.currency}
+                        </div>
+                      </div>
+                    );
                   default:
                     return null;
                 }

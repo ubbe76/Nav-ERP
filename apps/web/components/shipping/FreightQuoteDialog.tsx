@@ -8,11 +8,28 @@ import { ParcelsTable, newParcelDraft, toParcelPayload, type ParcelDraft } from 
 import { RatesTable } from "./RatesDialog";
 import { apiFetch } from "../../lib/api";
 import { shippingErrorText } from "../../lib/shipping";
+import { formatRate } from "../../lib/currency";
 import type { ShipmentParcel, ShipmentRates } from "../../lib/types";
 
 // Fraktpris för en offert/kundorder: kolliförslaget från raderna (justerbart),
 // Sendifys priser och "Lägg till frakt" — fraktraden läggs till eller får nytt pris.
-export function FreightQuoteDialog({ orderId, open, onClose, onAdded }: { orderId: string; open: boolean; onClose: () => void; onAdded: () => void }) {
+export function FreightQuoteDialog({
+  orderId,
+  currency = "SEK",
+  exchangeRate,
+  open,
+  onClose,
+  onAdded,
+}: {
+  orderId: string;
+  // Valuta: the order's currency and rate — the freight prices are SEK, the
+  // freight row is added to the order converted with its rate.
+  currency?: string;
+  exchangeRate?: string;
+  open: boolean;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
   const [parcels, setParcels] = useState<ParcelDraft[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [rates, setRates] = useState<ShipmentRates | null>(null);
@@ -109,6 +126,12 @@ export function FreightQuoteDialog({ orderId, open, onClose, onAdded }: { orderI
     <Modal open={open} onClose={onClose} title="Fraktpris" wide>
       <FormError>{error}</FormError>
       {warnings.length > 0 && <FormHint>{warnings.join(" · ")}</FormHint>}
+      {currency !== "SEK" && (
+        <FormHint>
+          Fraktpriserna är i SEK. Fraktraden läggs på ordern omräknad till {currency}
+          {exchangeRate ? ` med orderns kurs (${formatRate(exchangeRate)})` : ""}.
+        </FormHint>
+      )}
       <ParcelsTable parcels={parcels} editable disabled={pending || loading} onChange={setParcels} />
       <div style={{ display: "flex", gap: 8, margin: "10px 0" }}>
         <Button type="button" variant="ghost" size="small" disabled={pending || loading} onClick={() => setParcels([...parcels, newParcelDraft()])}>

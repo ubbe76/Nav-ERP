@@ -4,7 +4,8 @@ import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input, Textarea } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
-import { Form, FormActions, FormError, FormRow } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
+import { CurrencyInput } from "../ui/CurrencyInput";
 
 // Creates a customer — editing happens on the customer card (/kunder/[id]).
 export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
@@ -14,6 +15,8 @@ export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
   const [postalCode, setPostalCode] = useState("");
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("SE");
+  // Valuta: new quotes and orders for the customer are made in it.
+  const [currency, setCurrency] = useState("SEK");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -31,6 +34,7 @@ export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
           postalCode: postalCode || undefined,
           city: city || undefined,
           country: country.trim() || undefined,
+          currency: currency.trim() || undefined,
         }),
       });
       onSuccess();
@@ -60,6 +64,13 @@ export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
       <Field label="Namn" htmlFor="name">
         <Input id="name" required value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
+
+      <Field label="Valuta" htmlFor="currency">
+        <CurrencyInput id="currency" required value={currency} onValueChange={setCurrency} />
+      </Field>
+      <FormHint attached>
+        Kundens valuta. Nya offerter och kundorder tas i den, och kundens särpriser anges i den.
+      </FormHint>
 
       <Field label="Adress" htmlFor="address">
         <Textarea id="address" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} />

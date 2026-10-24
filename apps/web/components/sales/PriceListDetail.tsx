@@ -12,7 +12,10 @@ import { ArticlePicker } from "../ui/ArticlePicker";
 import { apiFetch } from "../../lib/api";
 import type { Article, PriceListRow, PriceListWithRows } from "../../lib/types";
 import { Card } from "../ui/Card";
-import { Form, FormActions, FormError, FormRow, FormSaved } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
+import { CurrencyInput } from "../ui/CurrencyInput";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import { currencyLabel } from "../../lib/currency";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 
@@ -21,6 +24,9 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
   const [code, setCode] = useState(priceList.code);
   const [name, setName] = useState(priceList.name);
   const [description, setDescription] = useState(priceList.description ?? "");
+  // Valuta: the list's prices are in it; locked while the list has rows
+  // (409 price-list-currency-locked).
+  const [currency, setCurrency] = useState(priceList.currency);
   const [headerError, setHeaderError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -43,12 +49,17 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
       const trimmedDescription = description.trim();
       await apiFetch(`/api/v1/price-lists/${priceList.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ code, name, description: trimmedDescription === "" ? null : trimmedDescription }),
+        body: JSON.stringify({
+          code,
+          name,
+          description: trimmedDescription === "" ? null : trimmedDescription,
+          currency: currency.trim(),
+        }),
       });
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setHeaderError(err instanceof Error ? err.message : "Kunde inte spara");
+      setHeaderError(apiErrorMessage(err, "Kunde inte spara"));
     } finally {
       setSaving(false);
     }
@@ -134,6 +145,22 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
             />
           </Field>
 
+          <Field label="Valuta" htmlFor="priceListCurrency">
+            <CurrencyInput
+              id="priceListCurrency"
+              required
+              disabled={priceList.rows.length > 0}
+              value={currency}
+              onValueChange={setCurrency}
+            />
+          </Field>
+          <FormHint attached>
+            {priceList.rows.length > 0
+              ? "Valutan kan inte ändras när listan har prisrader — ta bort raderna först. "
+              : ""}
+            Priskedjan använder listan bara på ordrar i samma valuta; en prislista i SEK hoppas över på en order i EUR.
+          </FormHint>
+
           <FormActions>
             <Button type="submit" variant="primary" disabled={saving}>
               {saving ? "Sparar…" : "Spara"}
@@ -167,7 +194,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
         columns={[
           { key: "article", label: "Artikel", width: "1.4fr" },
           { key: "fromQuantity", label: "Från antal", width: "140px", align: "right" },
-          { key: "unitPrice", label: "À-pris (kr)", width: "140px", align: "right" },
+          { key: "unitPrice", label: `À-pris (${currencyLabel(priceList.currency)})`, width: "140px", align: "right" },
           { key: "id", label: "", width: "160px", align: "right" },
         ]}
         rows={priceList.rows}
@@ -219,6 +246,7 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
       >
         <PriceListRowForm
           priceListId={priceList.id}
+          currency={priceList.currency}
           existing={editing}
           onSuccess={() => {
             setModalOpen(false);
@@ -236,10 +264,12 @@ export function PriceListDetail({ priceList }: { priceList: PriceListWithRows })
 // ArticleSupplierForm.
 function PriceListRowForm({
   priceListId,
+  currency,
   existing,
   onSuccess,
 }: {
   priceListId: string;
+  currency: string;
   existing: PriceListRow | null;
   onSuccess: () => void;
 }) {
@@ -313,7 +343,7 @@ function PriceListRowForm({
             onChange={(e) => setFromQuantity(e.target.value)}
           />
         </Field>
-        <Field label="À-pris (kr)" htmlFor="priceListRowUnitPrice">
+        <Field label={`À-pris (${currencyLabel(currency)})`} htmlFor="priceListRowUnitPrice">
           <Input
             id="priceListRowUnitPrice"
             type="number"

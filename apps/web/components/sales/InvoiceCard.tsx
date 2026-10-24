@@ -14,6 +14,8 @@ import { ArticlePicker } from "../ui/ArticlePicker";
 import { Modal } from "../ui/Modal";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
+import { formatRate, SEK } from "../../lib/currency";
+import { SekAmountsLine } from "../purchase/InvoiceRateField";
 import { toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import {
   buyerVatNumberProblemText,
@@ -81,6 +83,10 @@ export function InvoiceCard({
   // Header and rows are only editable in Utkast.
   const editable = invoice.status === "draft";
   const isCredit = invoice.type === "credit";
+  // Valuta: an invoice in another currency than SEK carries a rate (SEK per 1
+  // unit) and is booked in SEK — the SEK figures below are what was/will be
+  // booked.
+  const foreign = invoice.currency !== SEK;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
@@ -100,7 +106,13 @@ export function InvoiceCard({
   const feeAlreadyCharged = invoice.reminders.some((r) => Number(r.fee) > 0);
 
   async function statusAction(action: "issue" | "cancel") {
-    if (action === "issue" && !(await confirmDialog("Fakturan får nummer och låses. Fortsätta?"))) return;
+    if (action === "issue") {
+      const rateNote =
+        foreign && !invoice.exchangeRateManual && !isCredit
+          ? ` Kursen sätts till fakturadatumets (dagens) kurs för ${invoice.currency}.`
+          : "";
+      if (!(await confirmDialog(`Fakturan får nummer och låses.${rateNote} Fortsätta?`))) return;
+    }
     setError(null);
     setPending(true);
     try {
@@ -129,7 +141,7 @@ export function InvoiceCard({
       });
       router.push(`/forsaljning/fakturor/${credit.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa kreditfakturan");
+      setError(apiErrorMessage(err, "Kunde inte skapa kreditfakturan"));
       setPending(false);
     }
   }
@@ -194,12 +206,33 @@ export function InvoiceCard({
         {!editable && invoice.ocrNumber && <span>OCR-nummer: {invoice.ocrNumber}</span>}
         {!editable && invoice.dueDate && <span>Förfallodatum: {invoice.dueDate}</span>}
         {invoice.buyerVatNumber && <span>Köparens momsnr: {invoice.buyerVatNumber}</span>}
+        {foreign && (
+          <span>
+            Valuta: <strong>{invoice.currency}</strong>
+          </span>
+        )}
+        {foreign && (
+          <span>
+            {invoice.exchangeRate === null
+              ? "Kurs: sätts vid utfärdandet"
+              : `Kurs: ${formatRate(invoice.exchangeRate)} (${
+                  isCredit
+                    ? "den krediterade fakturans"
+                    : invoice.exchangeRateManual
+                      ? "manuell"
+                      : invoice.status === "draft"
+                        ? "förhandsvisning"
+                        : "fakturadatumets"
+                })`}
+          </span>
+        )}
         {/* openAmount is meaningless for draft/cancelled (see InvoiceDetail's
             own comment) — issued/paid only, same gate as the FA-number/OCR/
             due-date fields above. */}
         {(invoice.status === "issued" || invoice.status === "paid") && (
           <span>
             Öppet belopp: {formatMoney(invoice.openAmount)} {invoice.currency}
+            {foreign && invoice.openAmountSek !== null && ` (${formatMoney(invoice.openAmountSek)} kr bokfört)`}
           </span>
         )}
         {isCredit && invoice.creditedInvoiceId && (
@@ -313,9 +346,9 @@ export function InvoiceCard({
             { key: "articleNumber", label: "Artikel", width: "1fr" },
             { key: "quantity", label: "Antal", width: "90px", align: "right" },
             { key: "unitCode", label: "Enhet", width: "70px" },
-            { key: "unitPrice", label: "À-pris", width: "110px", align: "right" },
+            { key: "unitPrice", label: foreign ? `À-pris (${invoice.currency})` : "À-pris", width: "110px", align: "right" },
             { key: "vatCode", label: "Momskod", width: "minmax(190px, 1fr)" },
-            { key: "lineAmount", label: "Belopp", width: "120px", align: "right" },
+            { key: "lineAmount", label: foreign ? `Belopp (${invoice.currency})` : "Belopp", width: "120px", align: "right" },
             { key: "deliveryDate", label: "Leveransdatum", width: "140px" },
             { key: "salesOrderNumber", label: "Order", width: "110px" },
             ...(editable ? ([{ key: "id", label: "", width: "160px", align: "right" }] as const) : []),
@@ -444,6 +477,19 @@ export function InvoiceCard({
         <span>Momsbelopp: {formatMoney(vatAmount)} {invoice.currency}</span>
         <span><strong>Bruttobelopp: {formatMoney(grossAmount)} {invoice.currency}</strong></span>
       </div>
+      {/* Valuta: what the invoice is (draft: would be) booked at in SEK. */}
+      {foreign &&
+        (invoice.sekAmounts ? (
+          <SekAmountsLine
+            amounts={invoice.sekAmounts}
+            label={invoice.status === "draft" ? "I SEK med kursen (förhandsvisning)" : "Bokfört i SEK"}
+          />
+        ) : (
+          <FormHint>
+            SEK-värdena visas när kursen är satt — den sätts vid utfärdandet till fakturadatumets kurs, eller skriv in en
+            egen kurs i utkastet.
+          </FormHint>
+        ))}
 
       {invoice.payments.length > 0 && (
         <>
@@ -454,6 +500,8 @@ export function InvoiceCard({
               { key: "paymentNumber", label: "Betalning", width: "160px" },
               { key: "appliedAmount", label: "Belopp", width: "130px", align: "right" },
               { key: "writeOffAmount", label: "Avskrivning", width: "140px", align: "right" },
+              // Valuta: what the row released of the booked receivable.
+              ...(foreign ? [{ key: "settledSek", label: "Avräknat i SEK", width: "140px", align: "right" as const }] : []),
               { key: "verificationId", label: "Verifikat", width: "130px" },
             ]}
             // Table requires a plain `id` — the wire shape only has
@@ -479,6 +527,10 @@ export function InvoiceCard({
                   return `${formatMoney(row.appliedAmount)} ${invoice.currency}`;
                 case "writeOffAmount":
                   return Number(row.writeOffAmount) !== 0 ? `${formatMoney(row.writeOffAmount)} ${invoice.currency}` : "–";
+                case "settledSek":
+                  return row.appliedAmountSek === undefined
+                    ? "–"
+                    : `${formatMoney(Number(row.appliedAmountSek) + Number(row.writeOffAmountSek ?? 0))} kr`;
                 case "verificationId":
                   if (row.verificationId === null) {
                     return <span title="Kvittning (inget verifikat)">– (kvittning)</span>;
@@ -546,6 +598,7 @@ export function InvoiceCard({
         {editable && (
           <AddRowForm
             invoiceId={invoice.id}
+            currency={invoice.currency}
             vatCodes={vatCodes}
             customerVat={customerVat}
             onDone={() => router.refresh()}
@@ -636,6 +689,9 @@ function ReminderDialog({
   // Never pre-checked — the fee is an explicit choice every time (mirrors
   // sendReminderSchema's own withFee default(false) in packages/shared),
   // and impossible to check at all once the statutory one-time fee is spent.
+  // Valuta: the fee is a Swedish statutory amount in kronor — only on SEK
+  // invoices (409 reminder-fee-currency otherwise).
+  const feeNotAllowed = invoice.currency !== SEK;
   const [withFee, setWithFee] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -651,7 +707,7 @@ function ReminderDialog({
       });
       onSent();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Påminnelsen kunde inte skickas");
+      setError(apiErrorMessage(err, "Påminnelsen kunde inte skickas"));
     } finally {
       setPending(false);
     }
@@ -688,13 +744,19 @@ function ReminderDialog({
           <input
             type="checkbox"
             checked={withFee}
-            disabled={feeAlreadyCharged}
+            disabled={feeAlreadyCharged || feeNotAllowed}
             onChange={(e) => setWithFee(e.target.checked)}
           />
           Lägg till påminnelseavgift ({formatMoney(reminderFee)} kr)
         </label>
         {feeAlreadyCharged && (
           <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>Avgift redan tillagd</p>
+        )}
+        {feeNotAllowed && (
+          <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
+            Påminnelseavgiften är ett belopp i kronor och kan bara tas ut på fakturor i SEK — fakturan är i{" "}
+            {invoice.currency}.
+          </p>
         )}
 
         {/* A snapshot at the moment it's opened — a later part-payment
@@ -733,6 +795,13 @@ function HeaderForm({
 }) {
   const [paymentTermId, setPaymentTermId] = useState(invoice.paymentTermId ?? "");
   const [note, setNote] = useState(invoice.note ?? "");
+  // Valuta: a rate typed in on the draft ("" = automatic: the invoice date's
+  // rate is fetched at Utfärda). A credit note has its source invoice's rate.
+  const foreign = invoice.currency !== SEK;
+  const isCredit = invoice.type === "credit";
+  const [rate, setRate] = useState(
+    invoice.exchangeRateManual && invoice.exchangeRate !== null ? String(Number(invoice.exchangeRate)) : ""
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -741,6 +810,11 @@ function HeaderForm({
     e.preventDefault();
     setError(null);
     setSaved(false);
+    const typedRate = rate.trim() === "" ? null : Number(rate.replace(",", "."));
+    if (foreign && !isCredit && typedRate !== null && !(Number.isFinite(typedRate) && typedRate > 0)) {
+      setError("Kursen måste vara ett positivt tal");
+      return;
+    }
     setPending(true);
     try {
       await apiFetch(`/api/v1/invoices/${invoice.id}`, {
@@ -748,12 +822,14 @@ function HeaderForm({
         body: JSON.stringify({
           paymentTermId: paymentTermId || null,
           note: note.trim() || null,
+          // null = automatic again (the invoice date's rate at Utfärda).
+          ...(foreign && !isCredit ? { exchangeRate: typedRate } : {}),
         }),
       });
       setSaved(true);
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara fakturan");
+      setError(apiErrorMessage(err, "Kunde inte spara fakturan"));
     } finally {
       setPending(false);
     }
@@ -776,6 +852,47 @@ function HeaderForm({
         <Field label="Notering" htmlFor="hdrNote">
           <Input id="hdrNote" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
+        {foreign && !isCredit && (
+          <>
+            <Field label={`Kurs (SEK per 1 ${invoice.currency})`} htmlFor="hdrExchangeRate">
+              <Input
+                id="hdrExchangeRate"
+                type="number"
+                min="0"
+                step="any"
+                size="sm"
+                placeholder="Automatisk"
+                value={rate}
+                onChange={(e) => setRate(e.target.value)}
+              />
+              <FormHint>
+                {rate.trim() === ""
+                  ? `Tomt = automatisk: kursen för fakturadatumet (dagens datum när du utfärdar) hämtas från Riksbanken eller Valutakurser.`
+                  : "Din kurs gäller fakturan och bokföringen i SEK."}{" "}
+                Momslagen kräver kursen när den beskattningsgrundande händelsen inträffar (oftast leveransen) — skriv in den
+                kursen om leveransdagen skiljer sig från fakturadatumet.
+              </FormHint>
+            </Field>
+            {rate.trim() !== "" && (
+              <div>
+                <Button type="button" variant="ghost" size="small" onClick={() => setRate("")}>
+                  Använd automatisk kurs
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+        {foreign && isCredit && (
+          <Field label={`Kurs (SEK per 1 ${invoice.currency})`} htmlFor="hdrExchangeRate">
+            <Input
+              id="hdrExchangeRate"
+              size="sm"
+              disabled
+              value={invoice.exchangeRate === null ? "–" : formatRate(invoice.exchangeRate)}
+            />
+            <FormHint>En kreditfaktura har alltid den krediterade fakturans kurs.</FormHint>
+          </Field>
+        )}
         <FormActions>
           <Button type="submit" variant="primary" disabled={pending}>
             {pending ? "Sparar…" : "Spara faktura"}
@@ -790,11 +907,14 @@ function HeaderForm({
 // Adds a line — an article row (ArticlePicker) or a fri rad (no article).
 function AddRowForm({
   invoiceId,
+  currency,
   vatCodes,
   customerVat,
   onDone,
 }: {
   invoiceId: string;
+  // Valuta: the invoice's currency — the unit price is typed in it.
+  currency: string;
   vatCodes: VatCodeView[];
   customerVat: SalesVatCustomer | null;
   onDone: () => void;
@@ -856,7 +976,7 @@ function AddRowForm({
       setDeliveryDate("");
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte lägga till raden");
+      setError(apiErrorMessage(err, "Kunde inte lägga till raden"));
     } finally {
       setPending(false);
     }
@@ -880,7 +1000,7 @@ function AddRowForm({
           <Field label="Antal" htmlFor="rowQuantity">
             <Input id="rowQuantity" type="number" min="0" step="any" size="sm" required value={quantity} onChange={(e) => setQuantity(e.target.value)} />
           </Field>
-          <Field label="À-pris" htmlFor="rowUnitPrice">
+          <Field label={currency === SEK ? "À-pris" : `À-pris (${currency})`} htmlFor="rowUnitPrice">
             <Input id="rowUnitPrice" type="number" step="0.01" size="sm" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
           </Field>
         </FormRow>

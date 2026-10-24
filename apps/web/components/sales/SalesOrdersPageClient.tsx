@@ -73,6 +73,7 @@ export function SalesOrdersPageClient({
           { key: "orderNumber", label: isQuote ? "Offert" : "Ordernummer", width: "140px" },
           { key: "customerName", label: "Kund", width: "1fr" },
           { key: "status", label: "Status", width: "160px" },
+          { key: "currency", label: "Valuta", width: "90px" },
           { key: "expectedDeliveryDate", label: "Leveransdatum", width: "150px" },
           ...(isQuote ? [{ key: "quoteValidUntil", label: "Giltig t.o.m.", width: "170px" }] : []),
         ]}
@@ -92,6 +93,8 @@ export function SalesOrdersPageClient({
               const pill = SALES_ORDER_STATUS_PILL[order.status];
               return <StatusPill status={pill.status} label={pill.label} compact />;
             }
+            case "currency":
+              return order.currency;
             case "expectedDeliveryDate":
               return order.nextDeliveryDate ?? order.expectedDeliveryDate ?? "–";
             case "quoteValidUntil":

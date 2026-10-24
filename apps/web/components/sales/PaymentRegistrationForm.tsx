@@ -7,12 +7,31 @@ import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { Card } from "../ui/Card";
-import { Form, FormActions, FormError, FormRow } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
+import {
+  currencyLabel,
+  exchangeDifferenceText,
+  formatRate,
+  receiptExchangeDifference,
+  releasedSek,
+  SEK,
+  toleranceInCurrency,
+  toSek,
+} from "../../lib/currency";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, round2 } from "../../lib/format";
 import { stockholmToday } from "../../lib/date";
-import { paymentPreview, PREVIEW_TONE_COLOR } from "../../lib/paymentTolerance";
-import { INVOICE_TYPE_LABELS, type AccountOption, type Customer, type OpenInvoiceRow, type Paged } from "../../lib/types";
+import { applyPaymentTolerance, paymentPreview, PREVIEW_TONE_COLOR } from "../../lib/paymentTolerance";
+import { useExchangeRateLookup } from "../../lib/useExchangeRate";
+import {
+  INVOICE_TYPE_LABELS,
+  type AccountOption,
+  type Customer,
+  type OpenInvoiceRow,
+  type Paged,
+  type PaymentDetail,
+} from "../../lib/types";
 import listStyles from "../../app/forsaljning/ordrar/page.module.css";
 
 function today(): string {
@@ -36,6 +55,13 @@ function accountOptionsWithCurrent(accounts: AccountOption[], current: string): 
 // off the open items this payment settles, and submit. The matching table
 // shows every open item for the selected customer — Monitor-style, so a
 // payment covering several invoices at once is one screen, not several.
+//
+// Valuta: the amounts are in the invoices' currency, and one payment never
+// mixes currencies (a ticked invoice locks out the other currencies). For an
+// invoice in another currency than SEK the payment also takes Belopp i SEK
+// (what actually reached the bank account, prefilled from the rate for the
+// payment date) and Bankavgift, and previews the kursdifferens the API will
+// book — the same arithmetic as the API (lib/currency.ts).
 export function PaymentRegistrationForm({
   customers,
   accounts,
@@ -49,7 +75,8 @@ export function PaymentRegistrationForm({
   defaultBankAccount: string;
   tolerance: number;
   initialInvoiceId?: string;
-  onDone: () => void;
+  // The registered payment (its kursdifferens is shown by the caller).
+  onDone: (payment: PaymentDetail) => void;
 }) {
   const [customerId, setCustomerId] = useState("");
   const [rows, setRows] = useState<OpenInvoiceRow[]>([]);
@@ -60,6 +87,11 @@ export function PaymentRegistrationForm({
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [bankAccountNumber, setBankAccountNumber] = useState(defaultBankAccount);
   const [paymentDate, setPaymentDate] = useState(today());
+  // Valuta: Belopp i SEK (insatt på kontot) follows the rate for the payment
+  // date until it is typed in (manuellt vinner), Bankavgift is part of it.
+  const [amountSek, setAmountSek] = useState("");
+  const [amountSekTouched, setAmountSekTouched] = useState(false);
+  const [bankFee, setBankFee] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -92,6 +124,9 @@ export function PaymentRegistrationForm({
     setRows([]);
     setIncludedIds(new Set());
     setAmounts({});
+    setAmountSek("");
+    setAmountSekTouched(false);
+    setBankFee("");
     if (!customerId) return;
     let cancelled = false;
     setRowsLoading(true);
@@ -155,7 +190,13 @@ export function PaymentRegistrationForm({
         pendingPreselectRef.current = invoice.id;
         setCustomerId(invoice.customerId);
       } else {
-        includeRow(invoice);
+        // The listed row carries the SEK figures the lookup leaves out.
+        const listed = rows.find((r) => r.id === invoice.id) ?? invoice;
+        if (paymentCurrency !== null && listed.currency !== paymentCurrency && !includedIds.has(listed.id)) {
+          setOcrError(`Fakturan är i ${listed.currency} men valda poster är i ${paymentCurrency} — en betalning kan inte blanda valutor`);
+          return;
+        }
+        includeRow(listed);
       }
       setOcrValue("");
     } catch (err) {
@@ -170,6 +211,61 @@ export function PaymentRegistrationForm({
   // what the POST below actually sends as `amount`.
   const roundedRows = includedRows.map((r) => ({ invoiceId: r.id, appliedAmount: round2(Number(amounts[r.id]) || 0) }));
   const totalAmount = round2(roundedRows.reduce((sum, r) => sum + r.appliedAmount, 0));
+
+  // Valuta: the payment's currency is the ticked invoices' (the others are
+  // locked out, so there is one).
+  const paymentCurrency = includedRows[0]?.currency ?? null;
+  const foreignPayment = paymentCurrency !== null && paymentCurrency !== SEK;
+  // A kvittning (the ticked items net to 0) moves no money: no SEK amount.
+  const needsSekAmount = foreignPayment && totalAmount !== 0;
+  const rateLookup = useExchangeRateLookup(needsSekAmount ? paymentCurrency : null, paymentDate);
+  useEffect(() => {
+    if (amountSekTouched) return;
+    if (!needsSekAmount) {
+      setAmountSek("");
+      return;
+    }
+    if (rateLookup.status === "ok") setAmountSek(String(toSek(totalAmount, rateLookup.lookup.rate)));
+    else if (rateLookup.status === "error") setAmountSek("");
+  }, [rateLookup, totalAmount, needsSekAmount, amountSekTouched]);
+
+  // The kursdifferens preview — what the API books on 3960/7960: the SEK that
+  // reached the account plus the fee the bank kept, less the SEK the settled
+  // rows release from the invoices' booked receivable (frigjort SEK).
+  // Positive = kursvinst. A kvittning (amount 0) moves no SEK at all, but two
+  // foreign invoices at different rates still leave a difference.
+  const exchangePreview = (() => {
+    if (!foreignPayment) return null;
+    const sek = needsSekAmount ? Number(amountSek.replace(",", ".")) : 0;
+    if (needsSekAmount && (amountSek.trim() === "" || !Number.isFinite(sek) || sek === 0)) return null;
+    const fee = !needsSekAmount || bankFee.trim() === "" ? 0 : Number(bankFee.replace(",", "."));
+    if (!Number.isFinite(fee) || fee < 0) return null;
+    const released: number[] = [];
+    let bookedReceivable = 0;
+    for (const row of includedRows) {
+      const applied = round2(Number(amounts[row.id]) || 0);
+      if (applied === 0) continue;
+      const rate = row.exchangeRate === null ? 1 : Number(row.exchangeRate);
+      const result = applyPaymentTolerance(row.openAmount, applied, toleranceInCurrency(tolerance, rate, row.currency));
+      if (!result.ok) return null;
+      const grossSek = row.grossAmountSek ?? toSek(row.grossAmount, rate);
+      const sekPart = releasedSek({
+        currency: row.currency,
+        grossAmount: row.grossAmount,
+        grossAmountSek: grossSek,
+        previouslyReleasedSek: row.openAmountSek == null || row.grossAmountSek == null ? 0 : round2(grossSek - row.openAmountSek),
+        appliedAmount: applied,
+        writeOffAmount: result.writeOffAmount,
+        settles: result.settles,
+      });
+      released.push(sekPart.appliedAmountSek);
+      bookedReceivable = round2(bookedReceivable + sekPart.appliedAmountSek + sekPart.writeOffAmountSek);
+    }
+    const difference = receiptExchangeDifference({ amountSek: sek, bankFeeSek: fee, appliedAmountsSek: released });
+    // The API's sign: positive = kursvinst (receiptExchangeDifference is
+    // positive for a kursförlust).
+    return { gain: difference === 0 ? 0 : -difference, bookedReceivable };
+  })();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -186,23 +282,34 @@ export function PaymentRegistrationForm({
       setError("Välj ett betalkonto");
       return;
     }
+    let sekFields: { amountSek: number; bankFeeSek: number } | undefined;
+    if (needsSekAmount) {
+      const sek = Number(amountSek.replace(",", "."));
+      if (amountSek.trim() === "" || !Number.isFinite(sek) || sek === 0) {
+        setError("Ange beloppet i SEK som kom in på kontot — skriv av det från kontoutdraget");
+        return;
+      }
+      sekFields = { amountSek: round2(sek), bankFeeSek: bankFee.trim() === "" ? 0 : round2(Number(bankFee.replace(",", "."))) };
+    }
     setError(null);
     setPending(true);
     try {
-      await apiFetch("/api/v1/payments", {
+      const payment = await apiFetch<PaymentDetail>("/api/v1/payments", {
         method: "POST",
         body: JSON.stringify({
           customerId,
           paymentDate,
           bankAccountNumber,
           amount: totalAmount,
+          ...(paymentCurrency !== null ? { currency: paymentCurrency } : {}),
+          ...sekFields,
           note: note.trim() || undefined,
           rows: rowsPayload,
         }),
       });
-      onDone();
+      onDone(payment);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte registrera betalningen");
+      setError(apiErrorMessage(err, "Kunde inte registrera betalningen"));
     } finally {
       setPending(false);
     }
@@ -267,14 +374,21 @@ export function PaymentRegistrationForm({
             renderCell={(row, key) => {
               const included = includedIds.has(row.id);
               switch (key) {
-                case "include":
+                case "include": {
+                  // One payment never mixes currencies: once an invoice is
+                  // ticked, the other currencies cannot be.
+                  const otherCurrency = !included && paymentCurrency !== null && row.currency !== paymentCurrency;
                   return (
-                    <Checkbox
-                      aria-label={`Ta med ${row.invoiceNumber ?? row.id}`}
-                      checked={included}
-                      onChange={() => toggleRow(row)}
-                    />
+                    <span title={otherCurrency ? `En betalning kan inte blanda valutor — välj bara fakturor i ${paymentCurrency}` : undefined}>
+                      <Checkbox
+                        aria-label={`Ta med ${row.invoiceNumber ?? row.id}`}
+                        checked={included}
+                        disabled={otherCurrency}
+                        onChange={() => toggleRow(row)}
+                      />
+                    </span>
                   );
+                }
                 case "invoiceNumber":
                   return (
                     <Link href={`/forsaljning/fakturor/${row.id}`} className={listStyles.rowLink}>
@@ -286,7 +400,19 @@ export function PaymentRegistrationForm({
                 case "dueDate":
                   return row.dueDate ?? "–";
                 case "openAmount":
-                  return `${formatMoney(row.openAmount)} kr`;
+                  return row.currency === SEK ? (
+                    `${formatMoney(row.openAmount)} kr`
+                  ) : (
+                    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                      <span>
+                        {formatMoney(row.openAmount)} {row.currency}
+                      </span>
+                      <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+                        {row.exchangeRate !== null && <>kurs {formatRate(row.exchangeRate)}</>}
+                        {row.openAmountSek != null && <> · {formatMoney(row.openAmountSek)} kr bokfört</>}
+                      </span>
+                    </span>
+                  );
                 case "amount":
                   return (
                     <Input
@@ -301,7 +427,14 @@ export function PaymentRegistrationForm({
                   );
                 case "preview": {
                   if (!included) return null;
-                  const preview = paymentPreview(row.openAmount, amounts[row.id] ?? String(row.openAmount), tolerance);
+                  const preview = paymentPreview(
+                    row.openAmount,
+                    amounts[row.id] ?? String(row.openAmount),
+                    // The tolerance is kronor: on a foreign invoice what it is
+                    // worth in the invoice's currency at its rate.
+                    toleranceInCurrency(tolerance, row.exchangeRate === null ? 1 : Number(row.exchangeRate), row.currency),
+                    currencyLabel(row.currency)
+                  );
                   return <span style={{ color: PREVIEW_TONE_COLOR[preview.tone] }}>{preview.text}</span>;
                 }
                 default:
@@ -332,9 +465,78 @@ export function PaymentRegistrationForm({
             />
           </Field>
           <Field label="Summa" htmlFor="paymentSum">
-            <Input id="paymentSum" size="sm" value={`${formatMoney(totalAmount)} kr`} disabled />
+            <Input
+              id="paymentSum"
+              size="sm"
+              value={`${formatMoney(totalAmount)} ${currencyLabel(paymentCurrency ?? SEK)}`}
+              disabled
+            />
           </Field>
         </FormRow>
+
+        {/* Valuta: what reached the bank account, and the kursdifferens it makes. */}
+        {needsSekAmount && (
+          <>
+            <FormRow>
+              <Field label="Belopp i SEK (insatt på kontot)" htmlFor="paymentAmountSek">
+                <Input
+                  id="paymentAmountSek"
+                  type="number"
+                  step="0.01"
+                  size="sm"
+                  value={amountSek}
+                  onChange={(e) => {
+                    setAmountSekTouched(true);
+                    setAmountSek(e.target.value);
+                  }}
+                />
+                <FormHint>
+                  Skriv av beloppet från kontoutdraget.
+                  {rateLookup.status === "ok" &&
+                    !amountSekTouched &&
+                    ` Förifyllt med kursen ${formatRate(rateLookup.lookup.rate)} för ${rateLookup.lookup.date} × ${formatMoney(totalAmount)} ${paymentCurrency}.`}
+                </FormHint>
+              </Field>
+              <Field label="Bankavgift" htmlFor="paymentBankFee">
+                <Input
+                  id="paymentBankFee"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  size="sm"
+                  value={bankFee}
+                  onChange={(e) => setBankFee(e.target.value)}
+                />
+                <FormHint>
+                  Bankens avgift i SEK, om banken tog en. Den ingår inte i beloppet som kom in på kontot och bokförs som
+                  bankkostnad i stället för kursdifferens.
+                </FormHint>
+              </Field>
+            </FormRow>
+            {rateLookup.status === "error" && !amountSekTouched && <FormNotice>{rateLookup.message}</FormNotice>}
+          </>
+        )}
+        {foreignPayment && totalAmount === 0 && (
+          <FormHint>Posterna kvittas mot varandra — inga pengar flyttas, så ingen SEK-uppgift behövs.</FormHint>
+        )}
+        {exchangePreview && (needsSekAmount || exchangePreview.gain !== 0) && (
+          <FormHint>
+            Avräknas mot fordran: {formatMoney(exchangePreview.bookedReceivable)} kr (bokfört värde).{" "}
+            <strong
+              style={{
+                color:
+                  exchangePreview.gain > 0
+                    ? "var(--status-running-text)"
+                    : exchangePreview.gain < 0
+                      ? "var(--status-stopped-text)"
+                      : "var(--color-text-secondary)",
+              }}
+            >
+              {exchangeDifferenceText(exchangePreview.gain, formatMoney)}
+            </strong>
+            {exchangePreview.gain !== 0 && " bokförs på kursdifferenskontot."}
+          </FormHint>
+        )}
 
         <Field label="Notering" htmlFor="paymentNote">
           <Input id="paymentNote" value={note} onChange={(e) => setNote(e.target.value)} />

@@ -81,6 +81,9 @@ export interface ConfiguratorEvaluation {
     source: PriceSource | null;
   };
   warnings: string[];
+  // Valuta: what the prices are in (set by evaluate/derive; SEK has rate 1).
+  currency?: string;
+  exchangeRate?: number;
 }
 
 export interface ConfiguratorValueDetail {

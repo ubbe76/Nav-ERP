@@ -1088,6 +1088,9 @@ export interface Customer extends PartnerCardFields {
   // Peppol-id ("0007:5560000000"; null = härleds ur organisationsnumret).
   invoiceDelivery: "email" | "peppol";
   peppolId: string | null;
+  // Valuta: the customer's currency (ISO 4217, "SEK" by default). New quotes
+  // and orders take it with today's rate; the customer's särpriser are in it.
+  currency: string;
   active: boolean;
   createdAt: string;
 }
@@ -1114,6 +1117,9 @@ export interface PriceList {
   code: string;
   name: string;
   description: string | null;
+  // Valuta: the list's prices are in this currency; the price chain only uses
+  // a list in the order's own currency.
+  currency: string;
   rowCount: number;
   createdAt: string;
 }
@@ -1134,6 +1140,7 @@ export interface PriceListWithRows {
   code: string;
   name: string;
   description: string | null;
+  currency: string;
   createdAt: string;
   rows: PriceListRow[];
 }
@@ -1186,6 +1193,11 @@ export interface SalesOrder extends DocumentTermsFields {
   customerId: string;
   customerName: string;
   status: SalesOrderStatus;
+  // Valuta: the order's currency and its rate (SEK per 1 unit, a numeric
+  // string with six decimals; "1" for SEK). Snapshotted at creation from the
+  // customer and today's rate; prices on the order are in `currency`.
+  currency: string;
+  exchangeRate: string;
   // List-only: earliest effective delivery date among open rows.
   nextDeliveryDate?: string | null;
   expectedDeliveryDate: string | null;
@@ -1241,8 +1253,12 @@ export interface CollectiveInvoicingCandidate {
   rowCount: number;
   shipmentCount: number;
   // SEK excl. VAT, plain number (not a decimal string like most money fields
-  // elsewhere — matches the API response).
+  // elsewhere — matches the API response). Valuta: orders in another currency
+  // are converted at their order's rate.
   netAmount: number;
+  // Valuta: the currencies the run will invoice this customer in — one invoice
+  // per currency (SEK first, then alphabetically).
+  currencies: string[];
 }
 
 // One row of POST /collective-invoicing/run's results array.
@@ -1255,6 +1271,9 @@ export interface CollectiveInvoicingResult {
   status: "draft" | "issued" | "skipped" | "failed";
   rowCount: number;
   error: string | null;
+  // Valuta: one result row per customer and currency (absent on a result for
+  // a customer that could not be read).
+  currency?: string;
 }
 
 // E3: linked manufacturing order shown in the row's "I tillverkning" column
@@ -1323,9 +1342,14 @@ export interface ArticleSelfCost {
 // answer ("nothing to charge beyond the base"/no chain match at all), not an
 // error — order-row forms leave their price/discount fields untouched then,
 // never zeroing a value the user might already have typed.
+//
+// Valuta: the quote is in the order's currency (salesOrderId, or the currency/
+// exchangeRate asked for, else the customer's with today's rate) and says which.
 export interface PriceQuote {
   articleNumber: string;
   price: { unitPrice: number; discountPercent: number; source: string } | null;
+  currency?: string;
+  exchangeRate?: number;
 }
 
 // Leveranstillfälle (delivery occasion) — C2. One row per utleverans event;
@@ -1388,6 +1412,13 @@ export interface InvoiceHeader {
   paymentTermId: string | null;
   status: InvoiceStatus;
   currency: string;
+  // Valuta: SEK per 1 unit of `currency` (numeric string; "1" for SEK, null on
+  // a foreign draft until Utfärda stamps the invoice date's rate — or a rate
+  // typed in on the draft, exchangeRateManual). The receivable in SEK is
+  // stamped at Utfärda (null on a draft).
+  exchangeRate: string | null;
+  exchangeRateManual: boolean;
+  grossAmountSek: string | null;
   invoiceDate: string | null;
   dueDate: string | null;
   ocrNumber: string | null;
@@ -1476,6 +1507,9 @@ export interface InvoicePaymentEntry {
   paymentDate: string;
   appliedAmount: string;
   writeOffAmount: string;
+  // Valuta: the SEK the row released from the invoice's booked receivable.
+  appliedAmountSek?: string;
+  writeOffAmountSek?: string;
   cancelledAt: string | null;
   verificationId: string | null;
   verificationDisplayNumber: string | null;
@@ -1517,6 +1551,12 @@ export interface InvoiceDetail extends InvoiceHeader {
   // a problem (the refusal comes first).
   vatNumberWarning: BuyerVatNumberWarning | null;
   openAmount: number;
+  // Valuta: the SEK figures at the invoice's rate (a draft's preview, the
+  // booked figures once issued; positive like the rows — the sign is `type`).
+  // null for a foreign draft without a rate yet. openAmountSek is the open
+  // amount's booked SEK value (null until issued).
+  sekAmounts: { grossAmount: number; vatAmount: number; netAmount: number } | null;
+  openAmountSek: number | null;
   payments: InvoicePaymentEntry[];
   reminders: InvoiceReminderEntry[];
   // Reverse of creditedInvoiceId — every non-cancelled credit note that
@@ -1556,7 +1596,14 @@ export interface InvoiceableShipment {
   customerId: string;
   carrierName: string | null;
   productName: string | null;
+  // Kundpriset in SEK (Sendify's price plus the markup). Valuta: unitPrice is
+  // the same price in `currency` — the currency of the order the shipment's
+  // first följesedel belongs to (SEK when none can be found), converted at that
+  // order's rate; null when no rate exists for the currency (the shipment
+  // cannot be billed until one does).
   customerPrice: string;
+  currency: string;
+  unitPrice: number | null;
   bookedAt: string | null;
   deliveryNumbers: string[];
   articleId: string;
@@ -1575,6 +1622,10 @@ export interface InvoiceableShipment {
 export interface InvoiceableOrder {
   orderId: string;
   orderNumber: string;
+  // Valuta: the order's currency and rate — an invoice takes one currency, the
+  // dialog groups on it. unitPrice on the rows is in this currency.
+  currency: string;
+  exchangeRate: string;
   rows: InvoiceableOrderRow[];
 }
 
@@ -1601,6 +1652,14 @@ export interface OpenInvoiceRow {
   ocrNumber: string | null;
   grossAmount: number;
   openAmount: number;
+  // Valuta: grossAmount/openAmount are in `currency`; exchangeRate is the
+  // invoice's (null on a draft-like row; the OCR lookup sends it as a numeric
+  // string), grossAmountSek the receivable booked at Utfärda and openAmountSek
+  // what is left of it (signed like the amounts; the list only).
+  currency: string;
+  exchangeRate: number | string | null;
+  grossAmountSek?: number | null;
+  openAmountSek?: number | null;
   reminderCount: number;
   reminderFeeCharged: boolean;
 }
@@ -1618,7 +1677,13 @@ export interface PaymentHeader {
   customerId: string;
   paymentDate: string;
   bankAccountNumber: string;
+  // In `currency` (the invoices' — one payment never mixes currencies).
   amount: string;
+  // Valuta: the SEK that reached the bank account (= amount for a SEK payment;
+  // for a refund what left it) and the bank's fee in SEK.
+  currency: string;
+  amountSek: string;
+  bankFeeSek: string;
   note: string | null;
   verificationId: string | null;
   cancelledAt: string | null;
@@ -1642,6 +1707,11 @@ export interface PaymentRow {
   invoiceId: string;
   appliedAmount: string;
   writeOffAmount: string;
+  // Valuta: the SEK each part released from the invoice's booked receivable
+  // (frigjort SEK) and the invoice's own rate.
+  appliedAmountSek: string;
+  writeOffAmountSek: string;
+  invoiceExchangeRate: string | null;
   createdAt: string;
   invoiceNumber: string | null;
   invoiceType: InvoiceType;
@@ -1650,6 +1720,8 @@ export interface PaymentRow {
 
 // GET /payments/:id — header plus its rows.
 export interface PaymentDetail extends PaymentHeader {
+  // Valuta: positive = kursvinst, negative = kursförlust (0 for SEK).
+  exchangeRateDifferenceSek: number;
   rows: PaymentRow[];
   // Bankfiler: the camt.054 entry this payment was booked from.
   bankFileEntry: { bankFileId: string; filename: string; dedupeKey: string } | null;
@@ -4539,8 +4611,17 @@ export interface IncomingProposal {
 export interface IncomingEntryView {
   id: string;
   position: number;
+  // The entry's own amount in the account's currency (SEK).
   amount: number;
   currency: string;
+  // Valuta steg 3: a payment instructed in another currency (InstdAmt) is
+  // matched against open items in that currency (the proposal's amounts are in
+  // it) and booked with `amount` as the SEK value; the bank's exchange details
+  // and the charges included in `amount`.
+  instructedAmount: number | null;
+  instructedCurrency: string | null;
+  currencyExchange: { sourceCurrency: string; targetCurrency: string | null; unitCurrency: string | null; rate: string } | null;
+  chargesAmount: number | null;
   bookingDate: string;
   counterpartyName: string | null;
   remittance: { type: string; value: string; amount: number | null }[];

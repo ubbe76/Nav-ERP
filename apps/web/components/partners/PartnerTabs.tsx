@@ -24,6 +24,7 @@ import type {
 import { PluginTabContent, pluginTabId, usePluginTabs } from "../plugins/PluginTabs";
 import styles from "./PartnerTabs.module.css";
 import { Card } from "../ui/Card";
+import { CurrencyInput } from "../ui/CurrencyInput";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 import { SupplierPaymentDetailsSection } from "../banking/SupplierPaymentDetailsSection";
 import { CustomerPricesTab } from "./CustomerPricesTab";
@@ -67,7 +68,8 @@ interface PartnerTabsProps {
   // the invoice-address section in AdresserTab, and the customer-only PATCH
   // fields on Allmänt/Villkor & frakt.
   kind: "customer" | "supplier";
-  // Suppliers carry a currency; customers don't.
+  // Both partner kinds carry a currency (Valuta): a supplier's is what its
+  // invoices are in, a customer's what new quotes/orders are made in.
   showCurrency?: boolean;
   registers: PartnerRegisters;
   contacts: PartnerContact[];
@@ -172,6 +174,7 @@ export function PartnerTabs({
           prices={customerPrices ?? []}
           pricesBase={`${endpointBase}/${partner.id}/prices`}
           articleGroups={articleGroups ?? []}
+          currency={(partner as Customer).currency}
         />
       )}
       {activePluginTab && <PluginTabContent key={pluginTabId(activePluginTab)} tab={activePluginTab} entityId={partner.id} />}
@@ -363,6 +366,17 @@ function AllmantTab({
               )}
             </Field>
           </FormRow>
+        )}
+        {isCustomer && showCurrency && (
+          <>
+            <Field label="Valuta" htmlFor="currency">
+              <CurrencyInput id="currency" required value={currency} onValueChange={setCurrency} />
+            </Field>
+            <FormHint attached>
+              Kundens valuta. Nya offerter och kundorder tas i den, med dagens kurs, och kundens särpriser (fliken Priser)
+              anges i den. Ordrar som redan finns behåller sin valuta. E-faktura (Peppol) går bara på SEK.
+            </FormHint>
+          </>
         )}
         {isCustomer && (
           <>
@@ -932,6 +946,7 @@ function VillkorTab({
     transitDays: partner.transitDays === null ? "" : String(partner.transitDays),
   });
   const [priceListId, setPriceListId] = useState(isCustomer ? ((partner as Customer).priceListId ?? "") : "");
+  const selectedPriceList = priceLists?.find((list) => list.id === priceListId) ?? null;
   // Kundrabatt (%) — blanket discount, price chain's last fallback. Stored as
   // a decimal string; edited as plain text like the other percentage inputs.
   const [discountPercent, setDiscountPercent] = useState(
@@ -1187,7 +1202,11 @@ function VillkorTab({
                   id="priceListId"
                   value={priceListId}
                   onChange={setPriceListId}
-                  entries={priceLists}
+                  // Valuta: a list in another currency than SEK says which.
+                  entries={priceLists.map((list) => ({
+                    ...list,
+                    name: list.currency === "SEK" ? list.name : `${list.name} (${list.currency})`,
+                  }))}
                   emptyLabel="Ingen prislista"
                 />
               </Field>
@@ -1205,6 +1224,16 @@ function VillkorTab({
               />
             </Field>
           </FormRow>
+        )}
+
+        {/* Valuta: the price chain only uses a list in the order's own
+            currency — a list in another currency than the customer's is
+            skipped on the customer's ordinary orders. */}
+        {isCustomer && selectedPriceList && selectedPriceList.currency !== (partner as Customer).currency && (
+          <FormNotice>
+            Prislistan är i {selectedPriceList.currency} men kundens valuta är {(partner as Customer).currency}. Listan
+            används bara på ordrar i {selectedPriceList.currency}; kundens vanliga ordrar prissätts utan den.
+          </FormNotice>
         )}
 
         <FormHint>
