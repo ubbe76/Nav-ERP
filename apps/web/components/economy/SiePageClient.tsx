@@ -9,6 +9,8 @@ import { API_URL } from "../../lib/api";
 import buttonStyles from "../ui/Button.module.css";
 import type { FiscalYear } from "../../lib/types";
 import { SectionHeading } from "../ui/SectionHeading";
+import { SieVerificationImport } from "./SieVerificationImport";
+import styles from "./Sie.module.css";
 
 // POST /sie/opening-balances's 201 body (economy.routes.ts's
 // "--- SIE (B6b) ---" section / sie.service.ts's importOpeningBalances).
@@ -19,7 +21,11 @@ interface OpeningBalanceImportResult {
   balanceCount: number;
 }
 
+type SieTab = "Export och ingående balanser" | "Importera verifikat";
+const SIE_TABS: SieTab[] = ["Export och ingående balanser", "Importera verifikat"];
+
 export function SiePageClient({ fiscalYears }: { fiscalYears: FiscalYear[] }) {
+  const [tab, setTab] = useState<SieTab>(SIE_TABS[0]!);
   // Two independent selections — export and import act on different years.
   const [exportYearId, setExportYearId] = useState(fiscalYears[0]?.id ?? "");
   const [importYearId, setImportYearId] = useState(fiscalYears[0]?.id ?? "");
@@ -57,96 +63,118 @@ export function SiePageClient({ fiscalYears }: { fiscalYears: FiscalYear[] }) {
 
   return (
     <>
-      <Card style={{ marginBottom: "var(--space-5)" }}>
-        <SectionHeading>Exportera</SectionHeading>
-        <FormStack>
-          <Field label="Räkenskapsår" htmlFor="sieExportYear">
-            <Select id="sieExportYear" value={exportYearId} onChange={(e) => setExportYearId(e.target.value)}>
-              {fiscalYears.length === 0 && <option value="">— Inga räkenskapsår —</option>}
-              {fiscalYears.map((year) => (
-                <option key={year.id} value={year.id}>
-                  {year.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <FormHint attached>
-            Filen innehåller räkenskapsårets kontoplan, saldon och samtliga bokförda verifikat.
-          </FormHint>
-          {fiscalYears.length > 0 && (
-            <FormActions>
-              <a
-                href={`${API_URL}/api/v1/sie/export?fiscalYearId=${exportYearId}`}
-                download
-                className={`${buttonStyles.button} ${buttonStyles.ghost}`}
-              >
-                Ladda ner SIE-fil
-              </a>
-            </FormActions>
-          )}
-        </FormStack>
-      </Card>
+      <div className={styles.tabStrip} role="tablist">
+        {SIE_TABS.map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={t === tab}
+            className={styles.tab}
+            data-active={t === tab}
+            onClick={() => setTab(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
 
-      <Card>
-        <SectionHeading>Importera ingående balanser</SectionHeading>
-        <FormStack>
-          <Field label="Räkenskapsår" htmlFor="sieImportYear">
-            <Select id="sieImportYear" value={importYearId} onChange={(e) => setImportYearId(e.target.value)}>
-              {fiscalYears.length === 0 && <option value="">— Inga räkenskapsår —</option>}
-              {fiscalYears.map((year) => (
-                <option key={year.id} value={year.id}>
-                  {year.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="SIE-fil" htmlFor="sieImportFile">
-            <input
-              id="sieImportFile"
-              type="file"
-              accept=".se,.si,.txt"
-              disabled={pending}
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </Field>
-          <FormHint attached>
-            Importen är till för att flytta in bokföring från ett annat system — den avvisas om det
-            redan finns bokförda verifikat före räkenskapsårets början.
-          </FormHint>
+      {tab === "Importera verifikat" && <SieVerificationImport />}
 
-          <FormActions>
-            <Button
-              type="button"
-              variant="primary"
-              disabled={pending || !importYearId || !file}
-              onClick={() => void runImport()}
-            >
-              {pending ? "Importerar…" : "Importera"}
-            </Button>
-          </FormActions>
-
-          {error && <FormError>{error}</FormError>}
-
-          {result && (
-            <div
-              style={{
-                fontFamily: "var(--font-body)",
-                fontSize: 13,
-                color: "var(--status-running-text)",
-                background: "var(--status-running-bg)",
-                borderRadius: "var(--radius-control-sm)",
-                padding: "9px 12px",
-              }}
-            >
-              <p style={{ margin: 0 }}>Ingående balanser importerade som verifikat {result.displayNumber}</p>
-              <p style={{ margin: 0 }}>{result.balanceCount} konton</p>
-              {result.accountsCreated.length > 0 && (
-                <p style={{ margin: 0 }}>Nya konton skapades: {result.accountsCreated.join(", ")}</p>
+      {tab === "Export och ingående balanser" && (
+        <>
+          <Card style={{ marginBottom: "var(--space-5)" }}>
+            <SectionHeading>Exportera</SectionHeading>
+            <FormStack>
+              <Field label="Räkenskapsår" htmlFor="sieExportYear">
+                <Select id="sieExportYear" value={exportYearId} onChange={(e) => setExportYearId(e.target.value)}>
+                  {fiscalYears.length === 0 && <option value="">— Inga räkenskapsår —</option>}
+                  {fiscalYears.map((year) => (
+                    <option key={year.id} value={year.id}>
+                      {year.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <FormHint attached>
+                Filen innehåller räkenskapsårets kontoplan, saldon och samtliga bokförda verifikat.
+              </FormHint>
+              {fiscalYears.length > 0 && (
+                <FormActions>
+                  <a
+                    href={`${API_URL}/api/v1/sie/export?fiscalYearId=${exportYearId}`}
+                    download
+                    className={`${buttonStyles.button} ${buttonStyles.ghost}`}
+                  >
+                    Ladda ner SIE-fil
+                  </a>
+                </FormActions>
               )}
-            </div>
-          )}
-        </FormStack>
-      </Card>
+            </FormStack>
+          </Card>
+
+          <Card>
+            <SectionHeading>Importera ingående balanser</SectionHeading>
+            <FormStack>
+              <Field label="Räkenskapsår" htmlFor="sieImportYear">
+                <Select id="sieImportYear" value={importYearId} onChange={(e) => setImportYearId(e.target.value)}>
+                  {fiscalYears.length === 0 && <option value="">— Inga räkenskapsår —</option>}
+                  {fiscalYears.map((year) => (
+                    <option key={year.id} value={year.id}>
+                      {year.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="SIE-fil" htmlFor="sieImportFile">
+                <input
+                  id="sieImportFile"
+                  type="file"
+                  accept=".se,.si,.txt"
+                  disabled={pending}
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+              </Field>
+              <FormHint attached>
+                Importen är till för att flytta in bokföring från ett annat system — den avvisas om det
+                redan finns bokförda verifikat före räkenskapsårets början.
+              </FormHint>
+
+              <FormActions>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={pending || !importYearId || !file}
+                  onClick={() => void runImport()}
+                >
+                  {pending ? "Importerar…" : "Importera"}
+                </Button>
+              </FormActions>
+
+              {error && <FormError>{error}</FormError>}
+
+              {result && (
+                <div
+                  style={{
+                    fontFamily: "var(--font-body)",
+                    fontSize: 13,
+                    color: "var(--status-running-text)",
+                    background: "var(--status-running-bg)",
+                    borderRadius: "var(--radius-control-sm)",
+                    padding: "9px 12px",
+                  }}
+                >
+                  <p style={{ margin: 0 }}>Ingående balanser importerade som verifikat {result.displayNumber}</p>
+                  <p style={{ margin: 0 }}>{result.balanceCount} konton</p>
+                  {result.accountsCreated.length > 0 && (
+                    <p style={{ margin: 0 }}>Nya konton skapades: {result.accountsCreated.join(", ")}</p>
+                  )}
+                </div>
+              )}
+            </FormStack>
+          </Card>
+        </>
+      )}
     </>
   );
 }

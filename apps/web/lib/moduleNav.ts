@@ -454,6 +454,16 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
         description: "Grundboken — manuella verifikat och alla automatkonterade verifikat per serie.",
       },
       {
+        href: "/ekonomi/verifikatmallar",
+        title: "Verifikatmallar",
+        description: "Färdiga uppsättningar rader för verifikat du bokför ofta — används av Ny från mall och återkommande verifikat.",
+      },
+      {
+        href: "/ekonomi/aterkommande-verifikat",
+        title: "Återkommande verifikat",
+        description: "Verifikat som skapas varje månad ur en mall, och kostnader eller intäkter som fördelas över flera perioder.",
+      },
+      {
         href: "/ekonomi/huvudbok",
         title: "Huvudbok",
         description: "Bokförda transaktioner per konto med ingående och utgående balans.",
@@ -536,7 +546,7 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
       {
         href: "/ekonomi/sie",
         title: "SIE-filer",
-        description: "Exportera räkenskapsåret som SIE 4 eller importera ingående balanser.",
+        description: "Exportera räkenskapsåret som SIE 4 eller importera ingående balanser och verifikat, till exempel lönejournalen.",
       },
     ],
   },

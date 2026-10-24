@@ -3100,6 +3100,118 @@ export interface VerificationFile {
   createdAt: string;
 }
 
+// --- Snabbare manuell bokföring (bokföringsgranskningen etapp 3) ---
+
+// GET /verification-templates — a template carries the series, description
+// and the rows; amounts are optional (null = filled in when used).
+export interface VerificationTemplateRow {
+  id: string;
+  accountNumber: string;
+  accountName: string | null;
+  description: string | null;
+  debit: number | null;
+  credit: number | null;
+  sortOrder: number;
+}
+
+export interface VerificationTemplate {
+  id: string;
+  name: string;
+  seriesId: string;
+  seriesCode: string;
+  description: string;
+  active: boolean;
+  rows: VerificationTemplateRow[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecurringRun {
+  id: string;
+  month: string;
+  status: "created" | "failed";
+  error: string | null;
+  verificationId: string | null;
+  verificationDisplayNumber: string | null;
+  createdAt: string;
+}
+
+// GET /recurring-verifications — `allocation` is set for the posts that
+// Fördela över perioder created (kind "allocation").
+export interface RecurringVerification {
+  id: string;
+  templateId: string;
+  templateName: string;
+  description: string;
+  dayOfMonth: number | "last";
+  startMonth: string;
+  endMonth: string | null;
+  mode: "draft" | "book";
+  active: boolean;
+  nextRunMonth: string | null;
+  nextRunDate: string | null;
+  kind: "template" | "allocation";
+  allocation: {
+    amount: number;
+    balanceAccount: string;
+    resultAccount: string;
+    months: number;
+    scheduleAmounts: number[];
+  } | null;
+  lastRun: RecurringRun | null;
+  failedCount: number;
+}
+
+export interface RecurringVerificationDetail extends RecurringVerification {
+  runs: RecurringRun[];
+}
+
+// POST /verifications/:id/copy
+export interface VerificationCopyResult {
+  verification: VerificationDetail;
+  warnings: string[];
+}
+
+// POST /sie/verifications/preview
+export interface SieVerificationPreviewRow {
+  accountNumber: string;
+  accountName: string | null;
+  // Positive = debit, negative = credit (SIE).
+  amount: number;
+  description: string | null;
+  transDate: string | null;
+}
+
+export interface SieVerificationPreviewItem {
+  index: number;
+  series: string | null;
+  number: string | null;
+  date: string;
+  text: string;
+  rows: SieVerificationPreviewRow[];
+  debit: number;
+  credit: number;
+  balanced: boolean;
+  warnings: string[];
+}
+
+export interface SieVerificationPreview {
+  sha256: string;
+  fileName: string;
+  program: string | null;
+  alreadyImported: { importedAt: string; importedBy: string | null } | null;
+  verifications: SieVerificationPreviewItem[];
+  missingAccounts: { number: string; name: string | null }[];
+  blockers: string[];
+  warnings: string[];
+}
+
+// POST /sie/verifications/import
+export interface SieVerificationImportResult {
+  imported: number;
+  verifications: { id: string; displayNumber: string | null; date: string; description: string }[];
+}
+
 // --- Huvudbok (B1 grundbokföring, general ledger) ---
 // GET /ledger?accountId=&from=&to= row — mirrors economy.service.ts's
 // getLedger: pure aggregation over BOOKED verifications only, re-derived on

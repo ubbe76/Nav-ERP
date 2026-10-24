@@ -30,7 +30,7 @@ export default async function SiePage() {
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>SIE-filer</div>
-          <div className={shellStyles.meta}>Export av räkenskapsår och import av ingående balanser</div>
+          <div className={shellStyles.meta}>Export av räkenskapsår, import av ingående balanser och import av verifikat</div>
         </div>
         <HelpLink chapter="ekonomi" anchor="sie-filer" label="Hjälp om SIE-filer" />
       </div>

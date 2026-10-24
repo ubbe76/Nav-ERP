@@ -504,6 +504,41 @@ const MESSAGES: Record<string, MessageEntry> = {
   "einvoice-provider-unauthorized": "B2Brouter nekade åtkomst — kontrollera API-nyckeln och miljön under System → E-faktura.",
   "einvoice-provider-unavailable": "B2Brouter svarar inte just nu — försök igen om en stund.",
   "einvoice-transmission-not-found": "Sändningen finns inte — ladda om sidan.",
+  // Snabbare manuell bokföring: verifikatmallar, återkommande verifikat, SIE-import av verifikat
+  "verification-template-not-found": "Mallen finns inte — ladda om sidan.",
+  "verification-template-name-taken": "Det finns redan en mall med det namnet — välj ett annat namn.",
+  "verification-template-account-missing": (err) => {
+    const body = err.body as { accounts?: unknown } | undefined;
+    const accounts = Array.isArray(body?.accounts)
+      ? body!.accounts.map((a) => (a && typeof a === "object" && "number" in a ? String((a as { number: unknown }).number) : String(a)))
+      : [];
+    return accounts.length > 0
+      ? `Konton som inte finns i kontoplanen: ${accounts.join(", ")}.`
+      : "Ett konto finns inte i kontoplanen.";
+  },
+  "verification-template-in-use":
+    "Mallen används av en återkommande post och kan inte tas bort — ta bort den återkommande posten först, eller inaktivera mallen.",
+  "recurring-verification-not-found": "Den återkommande posten finns inte — ladda om sidan.",
+  // The server's sentence says which rule failed (a row without amount, or a template that does not balance).
+  "recurring-template-incomplete": serverMessage(
+    "Mallen måste ha belopp på alla rader och balansera för att kunna användas som återkommande post."
+  ),
+  "sie-file-already-imported": (err) => {
+    const body = err.body as { importedAt?: unknown; importedBy?: unknown } | undefined;
+    const when =
+      typeof body?.importedAt === "string" && !Number.isNaN(Date.parse(body.importedAt))
+        ? new Date(body.importedAt).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
+        : null;
+    const who = typeof body?.importedBy === "string" && body.importedBy ? body.importedBy : null;
+    return `Filen har redan importerats${when ? ` ${when}` : ""}${who ? ` av ${who}` : ""}.`;
+  },
+  "sie-verification-import-blocked": (err) => {
+    const body = err.body as { blockers?: unknown } | undefined;
+    const blockers = Array.isArray(body?.blockers) ? body!.blockers.map(String) : [];
+    return blockers.length > 0
+      ? `Ingenting importerades: ${blockers.join(" ")}`
+      : "Ingenting importerades — filen har fel som måste rättas först.";
+  },
   // generic (thrown by the zod/body-parsing layer, not a named domain error)
   "validation-failed": "Ogiltiga uppgifter — kontrollera fälten.",
   "invalid-request-body": "Ogiltig förfrågan.",

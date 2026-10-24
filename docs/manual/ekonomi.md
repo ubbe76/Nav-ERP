@@ -1,8 +1,8 @@
 # Ekonomi
 
-Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Har du sålt till företag i andra EU-länder sammanställer **Periodisk sammanställning** försäljningen per köparens momsnummer och ger dig filen till Skatteverket, se [Periodisk sammanställning](#periodisk-sammanstallning). Leverantörsfakturor och utbetalningar i utländsk valuta räknas om till kronor med **valutakurser** från Riksbanken eller egna kurser, se [Valutakurser](#valutakurser). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
+Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Manuella verifikat registreras direkt i en tabell med kontosök, automatisk motrad och momshjälp, och återkommande bokningar och kostnader som ska fördelas över flera månader sköts med **Verifikatmallar** och **Återkommande verifikat**, se [Verifikat](#verifikat), [Verifikatmallar](#verifikatmallar) och [Återkommande verifikat](#aterkommande-verifikat). Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Har du sålt till företag i andra EU-länder sammanställer **Periodisk sammanställning** försäljningen per köparens momsnummer och ger dig filen till Skatteverket, se [Periodisk sammanställning](#periodisk-sammanstallning). Leverantörsfakturor och utbetalningar i utländsk valuta räknas om till kronor med **valutakurser** från Riksbanken eller egna kurser, se [Valutakurser](#valutakurser). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
 
-Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, Huvudbok, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, **Periodisk sammanställning**, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, **Valutakurser**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
+Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, **Verifikatmallar**, **Återkommande verifikat**, Huvudbok, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, **Periodisk sammanställning**, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, **Valutakurser**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
 
 ## Kontoplan
 
@@ -27,21 +27,63 @@ Ett stängt räkenskapsår visas med **Stängt**, och i stället för **Lås upp
 
 ## Verifikat
 
-**Ekonomi → Verifikat** listar företagets verifikat, med filter på **räkenskapsår**, **serie** och status (**Utkast**/**Bokförd**) samt fritextsökning på beskrivning. **+ Nytt verifikat** öppnar en dialog med **Serie**, **Datum** och **Beskrivning** — verifikatet skapas som ett utkast (visas som **Utkast** tills det bokförs) och du kommer direkt till verifikatkortet för att lägga till rader.
+**Ekonomi → Verifikat** listar företagets verifikat, med filter på **räkenskapsår**, **serie** och status (**Utkast**/**Bokförd**) samt fritextsökning på beskrivning. **+ Nytt verifikat** öppnar sidan **Nytt verifikat**, där huvudet och raderna fylls i direkt. Ett verifikat visas som **Utkast** tills det bokförs. Bredvid finns **Ny från mall** (se [Verifikatmallar](#verifikatmallar)) och **Fördela över perioder** (se [Fördela över perioder](#fordela-over-perioder)).
+
+### Nytt verifikat
+
+Sidan **Nytt verifikat** (**Ekonomi → Verifikat → + Nytt verifikat**) har ett huvud med **Serie**, **Datum** (förval i dag) och **Beskrivning**, och under det tabellen **Rader**. Verifikatet skapas först när du sparar:
+
+- **Spara** skapar ett utkast med raderna och tar dig till verifikatkortet.
+- **Spara och bokför** skapar och bokför verifikatet i ett steg. Knappen är aktiv först när verifikatet har minst två rader och **Differens** är 0. Går bokföringen inte igenom (till exempel för att perioden är låst) skapas inget verifikat alls.
+- **Ny från mall** överst väljer en [mall](#verifikatmallar) och fyller i serie, beskrivning och rader. Beloppen i mallen följer med och kan ändras.
+- **Underlag** (PDF, JPEG eller PNG) kan väljas redan här. Filerna laddas upp när verifikatet har skapats, och finns sedan under **Underlag** på verifikatkortet.
 
 ### Utkast
 
-Ett utkasts huvud (**Serie**, **Datum**, **Beskrivning**) är redigerbart tills det bokförs — ändra fälten och klicka **Spara verifikat**. Varje rad har ett **Konto** (endast aktiva konton, visade som t.ex. **"1930 · Företagskonto"**), en valfri **Beskrivning** och beloppen **Debet**/**Kredit**: fyller du i det ena nollställs det andra automatiskt, eftersom en rad aldrig får bokföras med belopp i båda samtidigt. Rader läggs till, ändras och tas bort löpande via **Lägg till rad**/**Ändra**/**Ta bort** på radtabellen.
+Ett utkasts huvud (**Serie**, **Datum**, **Beskrivning**) är redigerbart tills det bokförs — ändra fälten och klicka **Spara verifikat**. Raderna redigeras i tabellen **Rader** och sparas för hela verifikatet på en gång med knappen **Spara** (eller **Ctrl+Enter**). Ändrar du något och lämnar sidan innan du sparat frågar Nav först. **Bokför** sparar osparade rader innan verifikatet bokförs.
 
-Under raderna visar en **balansindikator** löpande summeringar — **∑ Debet**, **∑ Kredit** och **Differens** — där differensen visas i rött så länge den inte är noll.
+Tabellen har kolumnerna **Konto**, **Beskrivning**, **Momskod**, **Debet** och **Kredit**:
+
+- **Konto** är ett sökfält. Skriver du siffror matchas kontonumret från början (**5** visar alla konton som börjar på 5, **5410** går direkt till kontot), skriver du text matchas kontonamnet (**kontor** hittar *Kontorsmaterial*). Bara aktiva konton kan väljas. Piltangenterna flyttar i träfflistan och **Enter** väljer det markerade kontot.
+- **Debet** och **Kredit**: fyller du i det ena nollställs det andra, eftersom en rad aldrig får bokföras med belopp i båda samtidigt.
+- **Momskod** är valfri, se [Momskod på en rad](#momskod-pa-en-rad).
+
+Tangenterna i tabellen:
+
+| Tangent | Gör |
+| --- | --- |
+| **Tab** / **Enter** | Går till nästa fält. Från sista fältet på en rad går **Enter** till nästa rad. |
+| **Enter** i **Kredit** på sista raden | Lägger till en ny rad (se **Motrad** nedan) och flyttar markören till dess **Konto**. |
+| **Ctrl+Enter** | Sparar hela tabellen (**Spara**). |
+| **Esc** | Ångrar ändringen i det fält du står i, och stänger kontolistan. |
+
+**Motrad:** så länge verifikatet inte balanserar förifylls en ny rad med differensen på den sida som balanserar — har du bokat 1 000,00 i debet får den nya raden 1 000,00 i **Kredit**. Beloppet kan skrivas över. Inledande tomma rader räknas inte, och en rad utan konto och belopp sparas aldrig.
+
+Tabellen räknar löpande under raderna **∑ Debet**, **∑ Kredit** och **Differens** — differensen visas i rött så länge den inte är noll, i grönt när verifikatet balanserar. På en smal skärm (mobil) staplas varje rad som ett eget kort så att sidan aldrig behöver scrollas i sidled.
+
+Sparar du en tabell med en rad som saknar konto, har både debet och kredit eller saknar belopp visas vilken rad det gäller och ingenting sparas. Ett konto som har inaktiverats sedan raden skrevs visas som *(inaktivt)* och måste bytas innan verifikatet kan sparas.
+
+### Momskod på en rad
+
+Kolumnen **Momskod** låter Nav dela upp ett belopp i netto och moms åt dig. Den visar de aktiva momskoderna som kan delas upp — svensk moms 25, 12 och 6 % samt de omvända inköpskoderna (till exempel *Inköp varor från EU 25 %*). Momsfria koder, försäljningskoder för EU och export samt importmoms har ingen moms att dela upp och erbjuds inte.
+
+- **Svensk moms (Moms 25/12/6 %):** radens belopp tolkas som **inklusive moms**. När du lämnar fältet (eller beloppet) får raden nettot, och en momsrad med momskodens konto läggs direkt under: **ingående moms** i debet om raden står i debet, **utgående moms** i kredit om raden står i kredit. Momsraden tar öresresten, så netto plus moms alltid blir exakt det belopp du skrev. Exempel: 125,00 i debet på 5410 med *Moms 25 %* blir 100,00 på 5410 och 25,00 på ingående moms (2640).
+- **Omvända koder:** radens belopp är **nettot** och står kvar. Nav lägger till både en **utgående** och en **ingående** momsrad på momskodens konton med den beräknade momsen (de tar ut varandra, så verifikatet balanserar som förut).
+- Momskoden sparas inte — servern ser bara vanliga rader, och fältet töms när raden har delats. Redigerar du beloppet efteråt delas det inte om; ändra raderna för hand.
+- Momskontona kommer från **Ekonomi → Momskoder**. Saknas kontot eller är det inaktivt visas en varning och momsraden måste få ett giltigt konto innan du sparar.
+
+Beloppet delas först när det finns ett belopp på raden: väljer du momskod före beloppet delas raden när du lämnar **Debet** eller **Kredit**.
 
 - **Bokför** är inaktiv tills verifikatet har **minst två rader** och differensen är **0**. Ett bekräftelsemeddelande — **"Verifikatet får nummer och låses. Fortsätt?"** — visas innan bokföringen genomförs. Verifikatet får då sitt löpnummer (t.ex. **A-2026-17**: serie, räkenskapsår och löpnummer), blir **Bokfört** och raderna blir skrivskyddade.
 - **Ta bort** raderar utkastet permanent efter bekräftelse (**"Ta bort verifikatet permanent?"**). Bara utkast kan tas bort — ett bokfört verifikat är append-only och kan bara rättas genom en omföring.
+- **Kopiera** (finns på alla verifikat, även bokförda) skapar ett nytt **utkast** med samma serie, beskrivning och rader, daterat i dag, och tar dig till det. Har ett konto på en rad inaktiverats sedan dess utelämnas raden och kortet visar en varning om vilken. Kopiera är aktiv först när raderna är sparade.
+- **Spara som mall** frågar efter ett **Namn** och sparar verifikatets serie, beskrivning och rader — med belopp — som en [verifikatmall](#verifikatmallar). Namnet måste vara unikt (*"Det finns redan en mall med det namnet"*).
 
 ### Bokfört
 
 Ett bokfört verifikat visar sitt nummer, när och (om det går att slå upp) av vem det bokfördes, och raderna skrivskyddade.
 
+- **Kopiera** och **Spara som mall** finns även här, liksom **Fördela över perioder**, som gör om verifikatets kostnad eller intäkt till en fördelning över flera månader, se [Fördela över perioder](#fordela-over-perioder).
 - **Omför** skapar ett nytt utkast som speglar verifikatet med debet och kredit omvända rad för rad — samma konton och belopp, så källan och omföringen alltid nettar till noll tillsammans. Det nya utkastet bokförs inte automatiskt; du kommer direkt till det nya utkastet och bokför det separat via **Bokför** ovan, precis som vilket annat utkast som helst. En omföring visar **"Omföring av"** med en länk till källverifikatet på sitt eget kort, och källverifikatet visar i sin tur **"Omförd genom"** med en länk tillbaka (till **Utkast** om omföringen själv inte är bokförd än). Ett verifikat kan bara omföras en gång — så fort en omföring finns döljs **Omför**-knappen på källan. Verifikat som bokslutsguiden har bokfört (serie **BS**) kan inte omföras här — kortet visar i stället en länk **Bokslut 2024: Lagerförändring** (eller motsvarande steg), och steget görs om i guiden.
 
 ### Underlag på verifikat
@@ -66,6 +108,48 @@ Verifikat som skapas av automatkonteringen har sitt underlag på källdokumentet
 Knappen **Skriv ut lista (PDF)** överst på verifikatlistan — och **Ladda ner CSV** bredvid, för samma urval i Excel-vänligt format — skriver ut exakt det urval som råkar vara satt på sidan just då — **räkenskapsår**, **serie**, **status** och fritextsökningen — så en filtrering på **Bokförd** innan utskrift ger en ren grundbok utan utkast. Under varje verifikat listas dess konteringsrader med konto, text, debet och kredit, följt av en summerad debet-/kreditsumma för verifikatet. Utkast tas med om filtret tillåter det och skrivs då ut med numret **Utkast** i stället för ett löpnummer. Långa texter radbryts inom sina kolumner, och blir utskriften längre än en sida numreras varje sida med **Sida X av Y** nere till höger — samma sidnumrering finns på systemets övriga interna utskrifter (huvudbok, balans- och resultaträkning, plocklista, räknelista, TO-utskrift och löneunderlag).
 
 Utskriften skriver ingenting till databasen — den kan tas fram hur många gånger som helst, oavsett om perioden är låst eller ej.
+
+## Verifikatmallar
+
+**Ekonomi → Verifikatmallar** är registret över mallar för verifikat som du bokför ofta — hyra, leasing, avgifter, periodiseringar. En mall har ett **Namn** (unikt), en **Serie**, en **Beskrivning** och rader med konto, beskrivning och valfria belopp. Mallarna används av **Ny från mall** på verifikatlistan och på sidan **Nytt verifikat**, och som underlag för [återkommande verifikat](#aterkommande-verifikat). Ett verifikat kan också sparas som mall direkt från verifikatkortet med **Spara som mall**.
+
+- **+ Ny mall** och **Ändra** öppnar mallen i samma tabell som verifikaten (kontosök, tangenterna, **Spara mall** eller **Ctrl+Enter**). Här får **Debet** och **Kredit** lämnas tomma — beloppen fylls i när mallen används — men en rad kan inte ha belopp i båda, och en mall behöver minst en rad. Momskod och balansindikator finns inte i mallar.
+- **Använd** öppnar sidan **Nytt verifikat** ifylld från mallen.
+- **Inaktivera** döljer mallen i **Ny från mall** och när en återkommande post skapas; **Aktivera** tar tillbaka den. Posterna lagras med kontonummer, så en mall med ett konto som sedan har tagits bort ur kontoplanen kan inte sparas förrän kontot bytts (*"Konton som inte finns i kontoplanen: …"*).
+- **Ta bort** raderar mallen efter bekräftelse. Används mallen av en återkommande post nekas det (*"Mallen används av en återkommande post och kan inte tas bort"*) — ta bort posten först, eller inaktivera mallen. Verifikat som skapats ur mallen påverkas aldrig.
+
+## Återkommande verifikat
+
+**Ekonomi → Återkommande verifikat** skapar ett verifikat varje månad ur en [mall](#verifikatmallar) — hyra, leasing, prenumerationer. Listan visar för varje post **Dag**, **Period**, **Läge**, **Nästa körning**, **Senaste körning** (med månad och om den lyckades) och **Status**.
+
+**+ Ny återkommande post** frågar efter:
+
+- **Mall** — mallen bär kontona och beloppen. Alla rader måste ha belopp och mallen måste balansera, annars nekas posten (*"Mallen måste ha belopp på alla rader och balansera"*).
+- **Dag i månaden** — 1–28, eller **Sista dagen** (månadens sista dag, även i februari).
+- **Startmånad** och **Slutmånad** (valfri — tom betyder tills vidare).
+- **Läge** — **Utkast** (förval) skapar ett utkast som du granskar och bokför själv; **Bokför direkt** bokför verifikatet med samma regler som ett manuellt verifikat. Utkast är förvalet eftersom en bokföring ska spegla en verklig händelse — välj **Bokför direkt** först när beloppet är fast.
+
+**Så körs det:** ett jobb kontrollerar posterna en gång i timmen. För varje aktiv post skapas ett verifikat för varje månad vars dag har passerat och som saknar körning, daterat på månadens dag. Hoppar servern över en tid hämtas de missade månaderna ikapp vid nästa körning, och en månad körs aldrig två gånger. Går något fel — perioden är låst, ett konto har inaktiverats — skapas inget verifikat för månaden, körningen markeras **Misslyckades** med orsaken, och posten visas som aviseringen **Återkommande verifikat som misslyckats** (se [Aviseringar](/hjalp/aviseringar)). Rätta orsaken (lås upp perioden, byt konto i mallen) och klicka **Kör nu**.
+
+Knapparna på varje post:
+
+- **Körningar** visar historiken: **Månad**, **Status**, **Verifikat** (länk till det skapade verifikatet) och **Orsak** för misslyckade körningar.
+- **Kör nu** kör posten ikapp direkt, på samma sätt som jobbet, och meddelar hur många verifikat som skapades och hur många som misslyckades.
+- **Pausa** / **Aktivera** stoppar och återupptar posten. En pausad post skapar inga verifikat.
+- **Ta bort** raderar posten efter bekräftelse; verifikat som redan skapats ligger kvar.
+
+### Fördela över perioder
+
+**Fördela över perioder** (knapp på **Återkommande verifikat**, på verifikatlistan och på ett bokfört verifikat) periodiserar en kostnad eller intäkt som bokförts på en gång — en årsförsäkring, en förutbetald hyra. Dialogen frågar efter:
+
+- **Belopp** — det totala beloppet.
+- **Typ** — **Kostnad** eller **Intäkt**.
+- **Balanskonto** — förval **1790** (förutbetalda kostnader) för kostnad och **2990** (förutbetalda intäkter) för intäkt.
+- **Resultatkonto** — kostnads- respektive intäktskontot som beloppet ska hamna på.
+- **Första månad** och **Antal månader** (2–120).
+- **Text** — beskrivningen på verifikaten.
+
+**Förhandsvisning** visar beloppet för varje månad: totalbeloppet delat på antalet månader och avrundat till öre, där **sista månaden tar resten** så att delarna alltid summerar till beloppet. **Skapa fördelning** skapar en återkommande post med en egen mall som varje månad flyttar månadens belopp från balanskontot till resultatkontot — för en kostnad debet resultatkontot och kredit balanskontot, för en intäkt tvärtom. Posten körs i läget **Bokför direkt** på månadens sista dag och har en slutmånad, så den upphör av sig själv; den syns på **Återkommande verifikat** som *Fördelning* och kan pausas, köras och tas bort som andra poster. Själva ursprungsverifikatet — där kostnaden bokfördes på balanskontot — bokför du som vanligt; fördelningen gör bara de månatliga flytterna.
 
 ## Huvudbok
 
@@ -273,7 +357,7 @@ Hela sidan kräver rättigheten **Ekonomi**, som resten av modulen.
 
 ## SIE-filer
 
-**Ekonomi → SIE-filer** hanterar utbyte av bokföring med revisor eller ett annat bokföringsprogram, i det svenska SIE-formatet (typ 4). Kräver rättigheten **Ekonomi**, som resten av modulen.
+**Ekonomi → SIE-filer** hanterar utbyte av bokföring med revisor eller ett annat bokföringsprogram, i det svenska SIE-formatet (typ 4). Sidan har två flikar: **Export och ingående balanser** och **Importera verifikat**. Kräver rättigheten **Ekonomi**, som resten av modulen.
 
 ### Exportera
 
@@ -296,6 +380,30 @@ Regler att känna till:
 - **Finns det redan bokförda verifikat före räkenskapsårets början avvisas importen.** Då räknas den ingående balansen fram automatiskt ur den befintliga bokföringen, och en import ovanpå skulle dubblera den.
 - Är räkenskapsårets första period låst går det inte att bokföra — lås upp den under **Räkenskapsår** först.
 - Ingenting skrivs förrän hela filen är godkänd: en avvisad import lämnar inga spår.
+
+### Importera verifikat
+
+Fliken **Importera verifikat** läser själva verifikaten (`#VER` med `#TRANS`) ur en SIE-fil — framför allt **lönejournalen** från lönesystemet, som annars måste knappas in för hand varje månad. Välj filen så läser Nav den direkt och visar en **förhandsgranskning** innan något importeras:
+
+- Filens namn, vilket program som skrev den och antalet verifikat.
+- Varje verifikat som en rad som kan fällas ut: serie, nummer, datum, text, summa **Debet** och **Kredit** och dess rader med konto, text och belopp. Ett obalanserat verifikat markeras **Obalans**, och varningar (till exempel datum utanför räkenskapsåret eller en låst period) står under raden.
+- **Konton som saknas i kontoplanen**, och **Spärrar** — fel som stoppar hela importen — i rött. Har filen redan importerats visas när och av vem.
+
+Välj sedan:
+
+- **Serie** — förvalet är **LÖ — Lönejournal**, som skapas automatiskt första gången den behövs. Du kan välja en annan serie.
+- **Läge** — **Utkast** (förval) lägger verifikaten som utkast att granska och bokföra, **Bokför** bokför dem direkt.
+- **Skapa saknade konton** — kryssrutan visas när filen använder konton som inte finns. Utan den kan filen inte importeras; med den läggs kontona upp med namnen ur filens `#KONTO`-rader.
+
+Klicka **Importera**. Resultatet listar de nya verifikaten med länkar.
+
+Regler att känna till:
+
+- **Allt eller inget.** Är något verifikat obalanserat, saknas ett konto utan att du valt **Skapa saknade konton**, eller ligger ett datum i en låst period, importeras ingenting (*"Ingenting importerades: …"* med orsakerna).
+- **Samma fil kan bara importeras en gång.** Filen känns igen på sitt innehåll (kontrollsumma), inte på filnamnet — en andra import avvisas med *"Filen har redan importerats … av …"*, så ingen löneperiod bokförs två gånger.
+- Varje verifikat får filens text och hänvisningen *(SIE-import ver LÖ 12)* som beskrivning, och **filen sparas som underlag** på varje verifikat (se [Underlag på verifikat](#underlag-pa-verifikat)). Är serien eller räkenskapsåret fel kan du ta bort ett utkast och importera om först när du rättat — den redan importerade filen kan inte läsas in igen, så rätta i stället utkasten för hand.
+- `#RTRANS` och `#BTRANS` (rättade och borttagna rader) hoppas över, i enlighet med SIE-standarden.
+- Importen läser alltid filens egna belopp: positiva belopp blir debet och negativa kredit.
 
 ## Anläggningsregister
 

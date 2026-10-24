@@ -19,6 +19,7 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 | **E-fakturor som inte gick fram** | röd | Fakturor vars senaste sändning i produktion misslyckades eller avvisades och som inte har någon pågående sändning. Sändningar i sandlådan räknas aldrig. |
 | **Utskick som misslyckades** | röd | Mejl med status **Misslyckat** de senaste 14 dagarna, utan ett senare lyckat utskick av samma dokument. Testmejl räknas inte. Bara administratörer ser typen. |
 | **Tillägg som inte tar emot händelser** | röd | Tillägg som har misslyckade leveranser de senaste 7 dagarna utan en lyckad leverans efter det. Raden länkar till [Tillägg](/hjalp/tillagg#leveranser-och-felsokning). Bara administratörer ser typen. |
+| **Återkommande verifikat som misslyckats** | röd | Återkommande post vars senaste körning misslyckades — till exempel en låst period eller ett inaktiverat konto i mallen. Raden länkar till [Återkommande verifikat](/hjalp/ekonomi#aterkommande-verifikat), där orsaken står och **Kör nu** försöker igen. |
 | **Försenade kundordrar** | gul | Order med status bekräftad eller under tillverkning där en rad med rest har ett leveransdatum som har passerat. Offerter och levererade ordrar räknas aldrig. |
 | **Försenade inköpsordrar** | gul | Order med status utkast, bekräftad eller delvis mottagen där en rad med rest har ett ankomstdatum som har passerat. Bekräftat leveransdatum gäller före önskat. |
 | **Sena tillverkningsordrar** | gul | Frisläppta tillverkningsordrar och pågående tillverkningsordrar som är **Sena** enligt produktionsplaneringen, alltså samma **Sen** som tillverkningsorderlistan och tillverkningsordern visar. |
@@ -35,6 +36,7 @@ Du ser bara de typer som din behörighetsgrupp ger:
 - **Förfallna kundfakturor**, **E-fakturor som inte gick fram**, **Offerter att följa upp** och **Försenade kundordrar**: menyn **Försäljning**.
 - **Leverantörsfakturor att betala**, **Försenade inköpsordrar** och **Behöver beställas**: menyn **Inköp**.
 - **Sena tillverkningsordrar** och **Behöver tillverkas**: menyn **Tillverkning**.
+- **Återkommande verifikat som misslyckats**: menyn **Ekonomi**.
 - **Utskick som misslyckades**: bara administratörer.
 
 Administratörer ser allt. Sidan kräver minst en meny. Även ett konto med **Endast läsning** ser aviseringarna.

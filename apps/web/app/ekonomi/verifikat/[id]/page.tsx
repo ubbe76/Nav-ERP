@@ -56,7 +56,10 @@ export default async function VerificationDetailPage(props: { params: Promise<{ 
         <HelpLink chapter="ekonomi" anchor="verifikat" label="Hjälp om verifikat" />
       </div>
 
+      {/* key: Kopiera/Omför navigate between verifications on this same route — the
+          rows table keeps its own state, so each verification gets a fresh card. */}
       <VerificationCard
+        key={verification.id}
         verification={verification}
         accounts={accounts.rows}
         series={series}

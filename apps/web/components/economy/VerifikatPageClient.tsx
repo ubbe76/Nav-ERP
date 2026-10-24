@@ -1,37 +1,30 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
-import { Field, Input, Select } from "../ui/Field";
-import { Form, FormActions, FormError } from "../ui/Form";
+import { Field, Select } from "../ui/Field";
+import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
 import { API_URL, apiFetch } from "../../lib/api";
+import { AllocateDialog } from "./AllocateDialog";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import buttonStyles from "../ui/Button.module.css";
 import {
   VERIFICATION_STATUS_PILL,
   type FiscalYear,
   type Paged,
-  type VerificationDetail,
   type VerificationListRow,
   type VerificationSeries,
+  type VerificationTemplate,
 } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import listStyles from "../../app/ekonomi/page.module.css";
-
-// NoFiscalYearForDateError/VerificationSeriesNotFoundError translated to
-// fixed Swedish copy by the shared error-code dictionary — same idiom as
-// economy's own formatAccountError/formatFiscalYearError
-// (KontoplanPageClient/RakenskapsarPageClient).
-function formatVerificationError(err: unknown): string {
-  return apiErrorMessage(err, "Kunde inte skapa verifikatet");
-}
 
 export function VerifikatPageClient({
   verifications,
@@ -44,7 +37,8 @@ export function VerifikatPageClient({
   series: VerificationSeries[];
   pageSize: number;
 }) {
-  const [modalOpen, setModalOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [allocateOpen, setAllocateOpen] = useState(false);
   const searchParams = useSearchParams();
 
   // The printout mirrors exactly what the list shows: forward the page's own
@@ -77,9 +71,15 @@ export function VerifikatPageClient({
           >
             Ladda ner CSV
           </a>
-          <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
-            + Nytt verifikat
+          <Button type="button" variant="ghost" onClick={() => setAllocateOpen(true)}>
+            Fördela över perioder
           </Button>
+          <Button type="button" variant="secondary" onClick={() => setTemplateOpen(true)}>
+            Ny från mall
+          </Button>
+          <Link href="/ekonomi/verifikat/nytt" className={`${buttonStyles.button} ${buttonStyles.primary}`}>
+            + Nytt verifikat
+          </Link>
           <HelpLink chapter="ekonomi" anchor="verifikat" label="Hjälp om verifikat" />
         </div>
       </div>
@@ -145,75 +145,68 @@ export function VerifikatPageClient({
 
       <Pagination total={verifications.total} pageSize={pageSize} />
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Nytt verifikat">
-        <NewVerificationForm series={series} />
+      <Modal open={templateOpen} onClose={() => setTemplateOpen(false)} title="Ny från mall" compact>
+        <NewFromTemplateForm />
       </Modal>
+      <AllocateDialog open={allocateOpen} onClose={() => setAllocateOpen(false)} />
     </>
   );
 }
 
-function NewVerificationForm({ series }: { series: VerificationSeries[] }) {
+// Picks a template and opens the new-verification page filled from it.
+function NewFromTemplateForm() {
   const router = useRouter();
-  const [seriesId, setSeriesId] = useState(series[0]?.id ?? "");
-  const [date, setDate] = useState(() => new Date().toLocaleDateString("sv-SE"));
-  const [description, setDescription] = useState("");
+  const [templates, setTemplates] = useState<VerificationTemplate[] | null>(null);
+  const [templateId, setTemplateId] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    if (!seriesId) {
-      setError("Välj en serie");
-      return;
-    }
-    setError(null);
-    setPending(true);
-    try {
-      const verification = await apiFetch<VerificationDetail>("/api/v1/verifications", {
-        method: "POST",
-        body: JSON.stringify({ seriesId, date, description: description.trim(), rows: [] }),
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ rows: VerificationTemplate[] }>("/api/v1/verification-templates")
+      .then((page) => {
+        if (cancelled) return;
+        setTemplates(page.rows);
+        setTemplateId(page.rows[0]?.id ?? "");
+      })
+      .catch((err) => {
+        if (!cancelled) setError(apiErrorMessage(err, "Mallarna kunde inte hämtas"));
       });
-      router.push(`/ekonomi/verifikat/${verification.id}`);
-    } catch (err) {
-      setError(formatVerificationError(err));
-      setPending(false);
-    }
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
-    <Form onSubmit={submit}>
+    <Form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (templateId) router.push(`/ekonomi/verifikat/nytt?mall=${templateId}`);
+      }}
+    >
       <FormError>{error}</FormError>
-
-      <Field label="Serie" htmlFor="newVerificationSeries">
-        <Select id="newVerificationSeries" value={seriesId} onChange={(e) => setSeriesId(e.target.value)}>
-          <option value="">— Välj serie —</option>
-          {series.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.code} — {s.name}
-            </option>
-          ))}
-        </Select>
-      </Field>
-
-      <Field label="Datum" htmlFor="newVerificationDate">
-        <Input id="newVerificationDate" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
-      </Field>
-
-      <Field label="Beskrivning" htmlFor="newVerificationDescription">
-        <Input
-          id="newVerificationDescription"
-          required
-          maxLength={255}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </Field>
-
+      {templates !== null && templates.length === 0 && (
+        <FormHint>
+          Det finns inga mallar än. Spara ett verifikat som mall på verifikatkortet, eller skapa en under{" "}
+          <Link href="/ekonomi/verifikatmallar">Verifikatmallar</Link>.
+        </FormHint>
+      )}
+      {templates !== null && templates.length > 0 && (
+        <Field label="Mall" htmlFor="newFromTemplate">
+          <Select id="newFromTemplate" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
       <FormActions>
-        <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? "Skapar…" : "Skapa verifikat"}
+        <Button type="submit" variant="primary" disabled={!templateId}>
+          Öppna
         </Button>
       </FormActions>
     </Form>
   );
 }
+
