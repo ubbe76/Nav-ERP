@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after SEB's MIG camt.052/053/054 V2 (26.2.0.0): an outgoing EUR payment debited to a SEK account (not a copy). -->
+<!-- InstdAmt EUR, TxAmt SEK with CcyXchg (UnitCcy EUR: 1 EUR = XchgRate SEK), PrtryAmt IBS; then the bank's fee as an entry of its own, without our EndToEndId. -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>ESSESESS20261016DEBT0012</MsgId><CreDtTm>2026-10-16T06:10:00</CreDtTm><AddtlInf>/DEBT/</AddtlInf></GrpHdr>
+    <Ntfctn>
+      <Id>ESSESESS20261016DEBT0012-1</Id>
+      <CreDtTm>2026-10-16T06:10:00</CreDtTm>
+      <Acct><Id><IBAN>SE4550000000058398257466</IBAN></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <Amt Ccy="SEK">27385.40</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-10-15</Dt></BookgDt>
+        <ValDt><Dt>2026-10-15</Dt></ValDt>
+        <AcctSvcrRef>SEB-NTRY-88120</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>ESCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><MsgId>BO-12</MsgId><AcctSvcrRef>SEB-TX-88120-1</AcctSvcrRef><PmtInfId>BO-12-20261015S</PmtInfId><InstrId>BO-12-1</InstrId><EndToEndId>BO-12-1</EndToEndId></Refs>
+            <AmtDtls>
+              <InstdAmt><Amt Ccy="EUR">2480.00</Amt></InstdAmt>
+              <TxAmt>
+                <Amt Ccy="SEK">27385.40</Amt>
+                <CcyXchg><SrcCcy>EUR</SrcCcy><TrgtCcy>SEK</TrgtCcy><UnitCcy>EUR</UnitCcy><XchgRate>11.0425</XchgRate></CcyXchg>
+              </TxAmt>
+              <PrtryAmt><Tp>IBS</Tp><Amt Ccy="EUR">2480.00</Amt></PrtryAmt>
+            </AmtDtls>
+            <RltdPties><Cdtr><Nm>Exempel Metall SAS</Nm></Cdtr></RltdPties>
+            <RmtInf><Ustrd>Invoice 2026-0815</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt Ccy="SEK">50.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-10-15</Dt></BookgDt>
+        <AcctSvcrRef>SEB-NTRY-88121</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>CHRG</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">50.00</Amt></TxAmt></AmtDtls>
+            <RmtInf><Ustrd>Avgift utlandsbetalning</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

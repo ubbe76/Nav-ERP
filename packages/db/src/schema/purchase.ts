@@ -39,7 +39,7 @@ export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", [
 // Bankfiler: how a supplier is paid, and what kind of reference an invoice
 // carries. Defined here (not in banking.ts) because banking.ts imports this
 // file; an enum used at module load must not sit on the far side of a cycle.
-export const supplierPaymentMethodEnum = pgEnum("supplier_payment_method", ["bankgiro", "plusgiro", "bank_account", "iban"]);
+export const supplierPaymentMethodEnum = pgEnum("supplier_payment_method", ["bankgiro", "plusgiro", "bank_account", "iban", "foreign_account"]);
 export const paymentReferenceKindEnum = pgEnum("payment_reference_kind", ["ocr", "message"]);
 
 export const suppliers = pgTable("suppliers", {
@@ -86,6 +86,18 @@ export const suppliers = pgTable("suppliers", {
   bankAccountNumber: varchar("bank_account_number", { length: 15 }),
   iban: varchar("iban", { length: 34 }),
   bic: varchar("bic", { length: 11 }),
+  // Utlandsbetalningar (valuta steg 2, migration 0144). foreign_account: an
+  // account number in a country without IBAN, identified by the BIC and/or a
+  // national bank id (clearing_system USABA/CACPA/… + clearing_member_id);
+  // bank_name for the banks that want CdtrAgt/Nm with a bare bank id (Nordea).
+  foreignAccountNumber: varchar("foreign_account_number", { length: 34 }),
+  clearingSystem: varchar("clearing_system", { length: 5 }),
+  clearingMemberId: varchar("clearing_member_id", { length: 35 }),
+  bankName: varchar("bank_name", { length: 70 }),
+  // Avgiftsfördelning on an international payment (SEPA is always SLEV) and
+  // Skatteverkets betalningskod for KU81 (payments above 150 000 kr).
+  chargeBearer: varchar("charge_bearer", { length: 4 }).$type<"SHAR" | "DEBT">().notNull().default("SHAR"),
+  paymentReportingCode: varchar("payment_reporting_code", { length: 3 }).notNull().default("101"),
   // Fasta leveransdagar (delivery-days.ts): ISO weekdays 1–7, sorted, no
   // duplicates (normalized by zod); empty = no fixed days. Mode and transit
   // days null = the system default for the side (system_settings).
@@ -95,14 +107,23 @@ export const suppliers = pgTable("suppliers", {
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
+  // foreign_account is compared as ::text: 0144 adds the enum value in the
+  // same transaction, and a new enum value cannot be used as a literal
+  // before the transaction that added it commits.
   check(
     "suppliers_payment_method_details",
     sql`${table.paymentMethod} is null
       or (${table.paymentMethod} = 'bankgiro' and ${table.bankgiro} is not null)
       or (${table.paymentMethod} = 'plusgiro' and ${table.plusgiro} is not null)
       or (${table.paymentMethod} = 'bank_account' and ${table.bankClearing} is not null and ${table.bankAccountNumber} is not null)
-      or (${table.paymentMethod} = 'iban' and ${table.iban} is not null)`
+      or (${table.paymentMethod} = 'iban' and ${table.iban} is not null)
+      or (${table.paymentMethod}::text = 'foreign_account' and ${table.foreignAccountNumber} is not null
+          and (${table.bic} is not null or ${table.clearingSystem} is not null))`
   ),
+  // The bank id is a pair: the clearing system and the member id together.
+  check("suppliers_clearing_pair", sql`(${table.clearingSystem} is null) = (${table.clearingMemberId} is null)`),
+  check("suppliers_charge_bearer_valid", sql`${table.chargeBearer} in ('SHAR', 'DEBT')`),
+  check("suppliers_payment_reporting_code_format", sql`${table.paymentReportingCode} ~ '^[0-9]{3}$'`),
   check("suppliers_delivery_weekdays", sql`${table.deliveryWeekdays} <@ '{1,2,3,4,5,6,7}'::smallint[]`),
   check("suppliers_transit_days", sql`${table.transitDays} between 0 and 60`),
 ]);

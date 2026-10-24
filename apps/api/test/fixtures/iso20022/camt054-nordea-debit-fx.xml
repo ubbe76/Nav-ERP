@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Nordea's camt.054.001.02 Debit Notification v1.6 and the Sweden appendix (not a copy). -->
+<!-- GBP 3 400.00 from the SEK account (rate in base 1, no charges reported for Sweden), and a zero-amount entry ("Zero amount is possible"). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>NDEA2026101500044</MsgId><CreDtTm>2026-10-15T21:00:00</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>NDEA2026101500044-1</Id>
+      <CreDtTm>2026-10-15T21:00:00</CreDtTm>
+      <Acct><Id><IBAN>SE4550000000058398257466</IBAN></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <NtryRef>1</NtryRef>
+        <Amt Ccy="SEK">44438.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-10-15</Dt></BookgDt>
+        <ValDt><Dt>2026-10-15</Dt></ValDt>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>XBCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><MsgId>BO-9</MsgId><AcctSvcrRef>NDEA-D-7740</AcctSvcrRef><PmtInfId>BO-9-20261015I</PmtInfId><EndToEndId>BO-9-2</EndToEndId></Refs>
+            <AmtDtls>
+              <InstdAmt><Amt Ccy="GBP">3400.00</Amt></InstdAmt>
+              <TxAmt>
+                <Amt Ccy="SEK">44438.00</Amt>
+                <CcyXchg><SrcCcy>GBP</SrcCcy><TrgtCcy>SEK</TrgtCcy><XchgRate>13.07</XchgRate></CcyXchg>
+              </TxAmt>
+            </AmtDtls>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <NtryRef>2</NtryRef>
+        <Amt Ccy="SEK">0.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-10-15</Dt></BookgDt>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>XBCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><MsgId>BO-9</MsgId><AcctSvcrRef>NDEA-D-7741</AcctSvcrRef><EndToEndId>BO-9-7</EndToEndId></Refs>
+            <AmtDtls>
+              <InstdAmt><Amt Ccy="EUR">500.00</Amt></InstdAmt>
+              <TxAmt><Amt Ccy="SEK">0.00</Amt></TxAmt>
+            </AmtDtls>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

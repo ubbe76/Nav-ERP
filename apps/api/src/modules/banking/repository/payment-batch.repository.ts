@@ -27,8 +27,10 @@ export async function listItems(executor: Executor, batchId: string) {
       paymentReference: supplierInvoices.paymentReference,
       supplier: {
         name: suppliers.name,
+        address: suppliers.address,
         postalCode: suppliers.postalCode,
         city: suppliers.city,
+        country: suppliers.country,
         paymentMethod: suppliers.paymentMethod,
         bankgiro: suppliers.bankgiro,
         plusgiro: suppliers.plusgiro,
@@ -36,6 +38,12 @@ export async function listItems(executor: Executor, batchId: string) {
         bankAccountNumber: suppliers.bankAccountNumber,
         iban: suppliers.iban,
         bic: suppliers.bic,
+        foreignAccountNumber: suppliers.foreignAccountNumber,
+        clearingSystem: suppliers.clearingSystem,
+        clearingMemberId: suppliers.clearingMemberId,
+        bankName: suppliers.bankName,
+        chargeBearer: suppliers.chargeBearer,
+        paymentReportingCode: suppliers.paymentReportingCode,
       },
       paymentId: supplierPayments.id,
       paymentNumber: supplierPayments.paymentNumber,
@@ -115,7 +123,7 @@ export async function findItemByEndToEndId(executor: Executor, endToEndId: strin
 
 export async function livePaymentForItem(tx: Tx, itemId: string) {
   const [row] = await tx
-    .select({ id: supplierPayments.id, paymentDate: supplierPayments.paymentDate })
+    .select({ id: supplierPayments.id, paymentDate: supplierPayments.paymentDate, currency: supplierPayments.currency, amountSek: supplierPayments.amountSek })
     .from(supplierPayments)
     .where(and(eq(supplierPayments.paymentBatchItemId, itemId), isNull(supplierPayments.cancelledAt)));
   return row ?? null;
@@ -192,7 +200,13 @@ export function createPaymentBatchRepository(db: Db) {
             exportedAt: paymentBatches.exportedAt,
             itemCount: sql<number>`COUNT(${paymentBatchItems.id}) FILTER (WHERE ${paymentBatchItems.status} <> 'cancelled')`,
             confirmedCount: sql<number>`COUNT(${paymentBatchItems.id}) FILTER (WHERE ${paymentBatchItems.status} = 'confirmed')`,
-            totalAmount: sql<string>`COALESCE(SUM(${paymentBatchItems.amount}) FILTER (WHERE ${paymentBatchItems.status} <> 'cancelled'), 0)`,
+            // SEK rows only — rows in another currency are in totalsByCurrency.
+            totalAmount: sql<string>`COALESCE(SUM(${paymentBatchItems.amount}) FILTER (WHERE ${paymentBatchItems.status} <> 'cancelled' AND ${paymentBatchItems.currency} = 'SEK'), 0)`,
+            totalsByCurrency: sql<{ currency: string; amount: string }[] | null>`(
+              SELECT json_agg(json_build_object('currency', t.currency, 'amount', t.amount) ORDER BY t.currency)
+              FROM (SELECT i.currency, SUM(i.amount)::text AS amount FROM payment_batch_items i
+                    WHERE i.batch_id = "payment_batches"."id" AND i.status <> 'cancelled' GROUP BY i.currency) t
+            )`,
             earliestExecutionDate: min(paymentBatchItems.executionDate),
           })
           .from(paymentBatches)
@@ -205,7 +219,13 @@ export function createPaymentBatchRepository(db: Db) {
         db.select({ total: count() }).from(paymentBatches).where(where),
       ]);
       return {
-        rows: rows.map((r) => ({ ...r, itemCount: Number(r.itemCount), confirmedCount: Number(r.confirmedCount), totalAmount: Number(r.totalAmount) })),
+        rows: rows.map((r) => ({
+          ...r,
+          itemCount: Number(r.itemCount),
+          confirmedCount: Number(r.confirmedCount),
+          totalAmount: Number(r.totalAmount),
+          totalsByCurrency: (r.totalsByCurrency ?? []).map((t) => ({ currency: t.currency, amount: Number(t.amount) })),
+        })),
         total: totals[0]!.total,
       };
     },

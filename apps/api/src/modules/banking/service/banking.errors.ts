@@ -67,8 +67,6 @@ export interface NotPayableDetail {
   registrationNumber: string | null;
   reason: NotPayableReason;
   batchNumber?: string;
-  // not_sek: the invoice's currency.
-  currency?: string;
 }
 
 const NOT_PAYABLE_TEXT: Record<NotPayableReason, string> = {
@@ -76,12 +74,7 @@ const NOT_PAYABLE_TEXT: Record<NotPayableReason, string> = {
   not_approved: "är inte attesterad",
   not_open: "har inget öppet belopp",
   credit_note: "är en kreditfaktura — kvittas under Betalningar",
-  // Valuta steg 1: a foreign invoice is attested and paid in its own
-  // currency, but the payment file carries SEK payments only until
-  // utlandsbetalningar (steg 2) — it is paid with Registrera utbetalning.
-  not_sek: "är i utländsk valuta — betalfilen tar bara SEK än så länge; registrera utbetalningen under Betalningar",
   no_payment_details: "leverantören saknar betalningsuppgifter",
-  foreign_iban: "utlandsbetalningar stöds inte",
   already_in_batch: "ingår redan i en betalfil",
 };
 
@@ -94,11 +87,7 @@ export class SupplierInvoicesNotPayableError extends Error {
         .map(
           (d) =>
             `${d.registrationNumber ?? d.invoiceId} ${
-              d.reason === "already_in_batch" && d.batchNumber
-                ? `ingår redan i betalfil ${d.batchNumber}`
-                : d.reason === "not_sek" && d.currency
-                  ? `är i ${d.currency} — betalfilen tar bara SEK än så länge; registrera utbetalningen under Betalningar`
-                  : NOT_PAYABLE_TEXT[d.reason]
+              d.reason === "already_in_batch" && d.batchNumber ? `ingår redan i betalfil ${d.batchNumber}` : NOT_PAYABLE_TEXT[d.reason]
             }`
         )
         .join("; ")
@@ -188,15 +177,42 @@ export class BankEntryNotMatchedError extends Error {
 
 // A debit or a return for one of our payments with another amount than we
 // sent. 409 — check the internet bank and confirm or cancel by hand.
+// A payment in another currency is matched on the instructed amount
+// (InstdAmt) in the invoice's currency — `currency` says which (SEK for a
+// domestic payment); `actual` is null when the bank reported no instructed
+// amount in that currency.
 export class BankEntryAmountDiffersError extends Error {
   constructor(
     public endToEndId: string,
     public expected: number,
-    public actual: number,
-    verb: "debited" | "returned" = "debited"
+    public actual: number | null,
+    verb: "debited" | "returned" = "debited",
+    public currency: string = "SEK"
   ) {
-    super(`Payment ${endToEndId} was ${expected.toFixed(2)} but the bank ${verb} ${actual.toFixed(2)}`);
+    super(
+      actual === null
+        ? `Payment ${endToEndId} was ${expected.toFixed(2)} ${currency} but the bank reported no instructed amount in ${currency}`
+        : currency === "SEK"
+          ? `Payment ${endToEndId} was ${expected.toFixed(2)} but the bank ${verb} ${actual.toFixed(2)}`
+          : `Payment ${endToEndId} was ${expected.toFixed(2)} ${currency} but the bank ${verb} ${actual.toFixed(2)} ${currency}`
+    );
     this.name = "BankEntryAmountDiffersError";
+  }
+}
+
+// Valuta steg 2: the bank returned a payment in another currency with
+// another SEK amount than the payment took from the account (the rate moved
+// in between). Cancelling the UTB would reverse the original SEK amount and
+// leave the difference unbooked — 409: cancel the payment and book the
+// difference by hand instead.
+export class BankReturnSekDiffersError extends Error {
+  constructor(
+    public endToEndId: string,
+    public paidSek: number,
+    public returnedSek: number
+  ) {
+    super(`The return of ${endToEndId} is ${returnedSek.toFixed(2)} SEK but the payment took ${paidSek.toFixed(2)} SEK — cancel the payment and book the exchange difference by hand`);
+    this.name = "BankReturnSekDiffersError";
   }
 }
 

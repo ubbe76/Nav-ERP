@@ -113,7 +113,8 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       // through to the global 500 and the series-exhausted dictionary entry
       // was dead code.
       if (err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
-      if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send(errorBody(err));
+      // body.problems: field → Swedish problem (the supplier card marks the fields).
+      if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send({ ...errorBody(err), problems: err.problems });
       // Momskoder: Momskod (förval) unknown, inactive or not a purchase code.
       if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
       throw err;
@@ -128,7 +129,8 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       if (err instanceof SupplierNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicateSupplierNumberError) return reply.code(409).send(errorBody(err));
-      if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send(errorBody(err));
+      // body.problems: field → Swedish problem (the supplier card marks the fields).
+      if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send({ ...errorBody(err), problems: err.problems });
       if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
       throw err;
     }

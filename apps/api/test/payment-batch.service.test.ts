@@ -84,26 +84,23 @@ describe("skapa omgång", () => {
     const first = await service.create({ invoiceIds: [reserved.id] }, userId);
     const error = await failure(service.create({ invoiceIds: [credit.id, missing.id, abroad.id, reserved.id] }, userId));
     expect(error).toBeInstanceOf(SupplierInvoicesNotPayableError);
+    // Valuta steg 2: the foreign IBAN (LF-52) is payable now.
     expect((error as SupplierInvoicesNotPayableError).details).toEqual([
       { invoiceId: credit.id, registrationNumber: "LF-50", reason: "credit_note" },
       { invoiceId: missing.id, registrationNumber: "LF-51", reason: "no_payment_details" },
-      { invoiceId: abroad.id, registrationNumber: "LF-52", reason: "foreign_iban" },
       { invoiceId: reserved.id, registrationNumber: "LF-53", reason: "already_in_batch", batchNumber: first.batchNumber },
     ]);
   });
 
-  // Valuta steg 1: a foreign invoice is attested and paid manually; the
-  // payment file stays SEK until utlandsbetalningar (steg 2) — with a reason
-  // that says so.
-  it("refuses a foreign-currency invoice with the currency and where to pay it instead", async () => {
-    const ok = await swedbankSupplier();
-    const eur = await makeApprovedSupplierInvoice(ok.id, { registrationNumber: "LF-60", gross: 100 });
-    await db.update(supplierInvoices).set({ currency: "EUR", exchangeRate: "11.131", exchangeRateSource: "manual" }).where(eq(supplierInvoices.id, eur.id));
-    const error = await failure(service.create({ invoiceIds: [eur.id] }, userId));
-    expect((error as SupplierInvoicesNotPayableError).details).toEqual([
-      { invoiceId: eur.id, registrationNumber: "LF-60", reason: "not_sek", currency: "EUR" },
-    ]);
-    expect((error as Error).message).toBe("LF-60 är i EUR — betalfilen tar bara SEK än så länge; registrera utbetalningen under Betalningar");
+  // Valuta steg 2: an invoice in another currency goes into the batch in
+  // its own currency (utlandsbetalningar, foreign-payment-batch.test.ts).
+  it("takes a foreign-currency invoice and a foreign IBAN, in the invoice's currency", async () => {
+    const foreign = await makeSupplier({ name: "Nordic Fasteners GmbH", paymentMethod: "iban", iban: "DE89370400440532013000", bic: "COBADEFF", country: "DE" });
+    const eur = await makeApprovedSupplierInvoice(foreign.id, { registrationNumber: "LF-60", gross: 100, currency: "EUR" });
+    const batch = await service.create({ invoiceIds: [eur.id] }, userId);
+    expect(batch.items.map((i) => [i.registrationNumber, i.amount, i.currency, i.paymentKind])).toEqual([["LF-60", 100, "EUR", "sepa"]]);
+    expect(batch.totalAmount).toBe(0);
+    expect(batch.totalsByCurrency).toEqual([{ currency: "EUR", amount: 100 }]);
   });
 
   it("refuses without bank settings", async () => {

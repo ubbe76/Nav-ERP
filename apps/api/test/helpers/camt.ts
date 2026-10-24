@@ -11,6 +11,11 @@ export interface CamtTx {
   refs?: { type: "SCOR" | "CINV" | "CREN"; value: string; amount?: number }[];
   ustrd?: string;
   returnReason?: string;
+  // Valuta steg 2: a payment in another currency from the SEK account —
+  // InstdAmt in that currency, TxAmt/CcyXchg and charges included in TxAmt.
+  instructed?: { amount: number; currency: string };
+  exchange?: { source: string; target: string; unit: string; rate: string };
+  charges?: { amount: number; code?: string; proprietary?: string }[];
 }
 export interface CamtEntry {
   direction: "credit" | "debit";
@@ -50,7 +55,17 @@ function tx(entry: CamtEntry, t: CamtTx): string {
     : "";
   const remittance = t.refs?.length || t.ustrd ? `<RmtInf>${t.ustrd ? `<Ustrd>${t.ustrd}</Ustrd>` : ""}${(t.refs ?? []).map(strd).join("")}</RmtInf>` : "";
   const ret = t.returnReason ? `<RtrInf><Rsn><Cd>${t.returnReason}</Cd></Rsn></RtrInf>` : "";
-  return `<TxDtls>${refs ? `<Refs>${refs}</Refs>` : ""}<AmtDtls><TxAmt>${money(t.amount)}</TxAmt></AmtDtls>${party}${remittance}${ret}</TxDtls>`;
+  const instructed = t.instructed ? `<InstdAmt><Amt Ccy="${t.instructed.currency}">${t.instructed.amount.toFixed(2)}</Amt></InstdAmt>` : "";
+  const exchange = t.exchange
+    ? `<CcyXchg><SrcCcy>${t.exchange.source}</SrcCcy><TrgtCcy>${t.exchange.target}</TrgtCcy><UnitCcy>${t.exchange.unit}</UnitCcy><XchgRate>${t.exchange.rate}</XchgRate></CcyXchg>`
+    : "";
+  const charges = (t.charges ?? [])
+    .map(
+      (c) =>
+        `<Chrgs>${money(c.amount)}<CdtDbtInd>DBIT</CdtDbtInd>${c.code ? `<Tp><Cd>${c.code}</Cd></Tp>` : c.proprietary ? `<Tp><Prtry><Id>${c.proprietary}</Id></Prtry></Tp>` : ""}</Chrgs>`
+    )
+    .join("");
+  return `<TxDtls>${refs ? `<Refs>${refs}</Refs>` : ""}<AmtDtls>${instructed}<TxAmt>${money(t.amount)}${exchange}</TxAmt></AmtDtls>${charges}${party}${remittance}${ret}</TxDtls>`;
 }
 
 export function camtFile(input: { messageId: string; account?: string; entries: CamtEntry[] }): string {

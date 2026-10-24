@@ -73,6 +73,80 @@ describe("leverantörens betalningsuppgifter", () => {
   });
 });
 
+// Valuta steg 2: an IBAN of any country, a foreign account number with BIC
+// or bank id, avgiftsfördelning and betalningskod; a payee abroad needs
+// street, town and country.
+describe("leverantörens uppgifter för utlandsbetalning", () => {
+  const usPayee = {
+    name: "Lakeside Tooling Inc.",
+    currency: "USD",
+    active: true,
+    country: "US",
+    address: "400 Harbor Drive",
+    postalCode: "60601",
+    city: "Chicago",
+    paymentMethod: "foreign_account" as const,
+    foreignAccountNumber: "1234 5678 9012",
+    clearingSystem: "usaba",
+    clearingMemberId: "123-456-780",
+    bankName: "Example Bank N.A.",
+    chargeBearer: "DEBT" as const,
+    paymentReportingCode: "130",
+  };
+
+  it("stores a foreign account number with its bank id, normalized; förval SHAR and 101", async () => {
+    const us = await purchaseService.createSupplier(usPayee);
+    expect(us).toMatchObject({
+      paymentMethod: "foreign_account",
+      foreignAccountNumber: "123456789012",
+      clearingSystem: "USABA",
+      clearingMemberId: "123456780",
+      bankName: "Example Bank N.A.",
+      chargeBearer: "DEBT",
+      paymentReportingCode: "130",
+    });
+    const de = await purchaseService.createSupplier({
+      name: "Müller GmbH", currency: "EUR", active: true, country: "DE", address: "Hauptstraße 5", city: "Berlin", paymentMethod: "iban", iban: "DE89 3704 0044 0532 0130 00",
+    });
+    expect(de).toMatchObject({ paymentMethod: "iban", iban: "DE89370400440532013000", bic: null, chargeBearer: "SHAR", paymentReportingCode: "101" });
+  });
+
+  it("refuses a payee abroad without street and town, and a foreign account without BIC or bank id", async () => {
+    const error = await failure(purchaseService.createSupplier({ ...usPayee, address: undefined, city: undefined, clearingSystem: undefined, clearingMemberId: undefined }));
+    expect(error).toBeInstanceOf(InvalidSupplierPaymentDetailsError);
+    expect((error as InvalidSupplierPaymentDetailsError).problems).toEqual({
+      bic: "Ange BIC eller bank-id (t.ex. ABA routing number)",
+      address: "Gatuadress krävs för en utländsk mottagare",
+      city: "Ort krävs för en utländsk mottagare",
+    });
+    const bic = await failure(purchaseService.createSupplier({ name: "Ankara AŞ", currency: "TRY", active: true, country: "TR", address: "Cad. 1", city: "Ankara", paymentMethod: "iban", iban: "TR330006100519786457841326" }));
+    expect((bic as InvalidSupplierPaymentDetailsError).problems).toEqual({ bic: "BIC krävs för IBAN utanför SEPA-området" });
+  });
+
+  it("holds an address-only PATCH to the address rules, and the payment details to all of them", async () => {
+    const us = await purchaseService.createSupplier(usPayee);
+    const blank = await failure(purchaseService.updateSupplier(us.id, { address: "" }));
+    expect((blank as InvalidSupplierPaymentDetailsError).problems).toEqual({ address: "Gatuadress krävs för en utländsk mottagare" });
+    const sweden = await failure(purchaseService.updateSupplier(us.id, { country: "SE" }));
+    expect((sweden as InvalidSupplierPaymentDetailsError).problems).toEqual({ country: "Ett utländskt kontonummer kräver att leverantörens land inte är Sverige" });
+    // An older foreign payee without BIC (stored before the rule): an address
+    // edit is not locked by it, a payment-detail edit is.
+    const old = await makeSupplier({ name: "Old Ltd", country: "TR", paymentMethod: "iban", iban: "TR330006100519786457841326" });
+    expect((await purchaseService.updateSupplier(old.id, { address: "Cad. 1", city: "Ankara" })).address).toBe("Cad. 1");
+    const touched = await failure(purchaseService.updateSupplier(old.id, { chargeBearer: "DEBT" }));
+    expect((touched as InvalidSupplierPaymentDetailsError).problems).toEqual({ bic: "BIC krävs för IBAN utanför SEPA-området" });
+  });
+
+  it("the database keeps a foreign account's bank id together and refuses an unknown charge bearer", async () => {
+    await expect(makeSupplier({ name: "X", country: "US", paymentMethod: "foreign_account", foreignAccountNumber: "1" })).rejects.toThrow();
+    await expect(makeSupplier({ name: "Y", clearingSystem: "USABA" })).rejects.toThrow();
+    await expect(makeSupplier({ name: "Z", chargeBearer: "CRED" as never })).rejects.toThrow();
+    await expect(makeSupplier({ name: "W", paymentReportingCode: "1a1" })).rejects.toThrow();
+    const ok = await makeSupplier({ name: "V", country: "US", paymentMethod: "foreign_account", foreignAccountNumber: "1", clearingSystem: "USABA", clearingMemberId: "123456780" });
+    expect(ok.paymentMethod).toBe("foreign_account");
+  });
+});
+
 describe("fakturans betalningsreferens", () => {
   it("is set on an approved invoice and cleared with null", async () => {
     const supplier = await makeSupplier();

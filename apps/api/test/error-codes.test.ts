@@ -214,6 +214,7 @@ import {
   BankFileNotFoundError,
   BankFileParseError,
   BankReturnBeforePaymentError,
+  BankReturnSekDiffersError,
   BankSettingsIncompleteError,
   InvalidBankSettingError,
   InvalidPaymentBatchItemError,
@@ -564,6 +565,7 @@ const cases: Array<[Error, string]> = [
   [new BankEntryNotMatchedError(), ERROR_CODES.BANK_ENTRY_NOT_MATCHED],
   [new BankEntryAmountDiffersError("BO-1-1", 10, 9), ERROR_CODES.BANK_ENTRY_AMOUNT_DIFFERS],
   [new BankReturnBeforePaymentError("BO-1-1", "2024-10-15", "2024-10-14"), ERROR_CODES.BANK_RETURN_BEFORE_PAYMENT],
+  [new BankReturnSekDiffersError("BO-1-1", 11131, 11050), ERROR_CODES.BANK_RETURN_SEK_DIFFERS],
   // configurator
   [new ConfiguratorTemplateNotFoundError(), ERROR_CODES.CONFIGURATOR_TEMPLATE_NOT_FOUND],
   [new ConfiguratorTemplateExistsError(), ERROR_CODES.CONFIGURATOR_TEMPLATE_EXISTS],

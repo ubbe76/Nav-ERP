@@ -43,6 +43,11 @@ export interface BankReady {
   settings: BankSettings;
   company: CompanyBankFields;
   debitAccount: { kind: DebitAccountKind; value: string };
+  // Valuta steg 2: the account a payment abroad is drawn from — the first of
+  // the profile's foreign.debitAccountKinds the company has (the settings'
+  // own kind first when the bank takes it abroad too); null = none, and a
+  // batch with payments abroad cannot be exported (pain001-check).
+  foreignDebitAccount: { kind: DebitAccountKind; value: string } | null;
   // The initiating-party id the file carries: the stored one, else the
   // profile's fallback (org number), always normalized.
   initiatingPartyId: string;
@@ -55,11 +60,15 @@ export interface BankProfileView {
   initiatingPartyRequired: boolean;
   debtorAgreementLabel: string | null;
   debitAccountKinds: readonly DebitAccountKind[];
+  foreignDebitAccountKinds: readonly DebitAccountKind[];
 }
 export interface BankSettingsView extends BankSettings {
   profiles: BankProfileView[];
   company: CompanyBankFields;
   missing: string[];
+  // What payments abroad still need (not part of `missing` — a company that
+  // never pays abroad is ready without it); null = nothing.
+  foreignProblem: string | null;
 }
 
 // Hyphens, spaces and case never reach the file or the format checks — same
@@ -76,6 +85,25 @@ function companyValue(company: CompanyBankFields, kind: DebitAccountKind): strin
   const raw = company[kind];
   if (!raw || raw.trim() === "") return null;
   return kind === "iban" ? raw.replace(/\s/g, "").toUpperCase() : normalizeDigits(raw);
+}
+
+export function foreignDebitAccountFor(profile: BankProfile, settings: BankSettings, company: CompanyBankFields): { kind: DebitAccountKind; value: string } | null {
+  const kinds = profile.foreign.debitAccountKinds;
+  const own = settings.debitAccountKind;
+  const order = own && kinds.includes(own) ? [own, ...kinds.filter((kind) => kind !== own)] : [...kinds];
+  for (const kind of order) {
+    const value = companyValue(company, kind);
+    if (value) return { kind, value };
+  }
+  return null;
+}
+
+function foreignProblemOf(settings: BankSettings, company: CompanyBankFields): string | null {
+  if (!settings.profile) return null;
+  const profile = bankProfile(settings.profile);
+  if (foreignDebitAccountFor(profile, settings, company)) return null;
+  const kinds = profile.foreign.debitAccountKinds.map((kind) => KIND_LABEL[kind]).join(" eller ");
+  return `${profile.name} kräver ${kinds} i Företagsinformation för utlandsbetalningar`;
 }
 
 function resolveInitiatingPartyId(profile: BankProfile, settings: BankSettings, company: CompanyBankFields): string | null {
@@ -129,6 +157,7 @@ function profileView(profile: BankProfile): BankProfileView {
     initiatingPartyRequired: profile.initiatingParty.required,
     debtorAgreementLabel: profile.debtorIdentification?.label ?? null,
     debitAccountKinds: profile.debitAccountKinds,
+    foreignDebitAccountKinds: profile.foreign.debitAccountKinds,
   };
 }
 
@@ -155,6 +184,7 @@ export function createBankSettingsService(deps: { repo: BankSettingsRepository; 
         profiles: BANK_PROFILE_IDS.map((id) => profileView(BANK_PROFILES[id])),
         company,
         missing: bankSettingsProblems(settings, company),
+        foreignProblem: foreignProblemOf(settings, company),
       };
     },
 
@@ -206,6 +236,7 @@ export function createBankSettingsService(deps: { repo: BankSettingsRepository; 
         settings,
         company,
         debitAccount: { kind, value: companyValue(company, kind)! },
+        foreignDebitAccount: foreignDebitAccountFor(profile, settings, company),
         initiatingPartyId: resolveInitiatingPartyId(profile, settings, company)!,
       };
     },

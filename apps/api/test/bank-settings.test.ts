@@ -69,7 +69,7 @@ describe("bankSettingsProblems — initiating party length", () => {
     const hb = { ...base, profile: "handelsbanken" as const, debitAccountKind: "iban" as const };
     const company = { ...COMPANY, iban: "SE45 5000 0000 0583 9825 7466" };
     expect(bankSettingsProblems({ ...seb, initiatingPartyId: "A".repeat(35) }, company)).toEqual([]);
-    expect(bankSettingsProblems({ ...seb, initiatingPartyId: "A".repeat(36) }, company)).toEqual(["Avtals-ID / kund-ID hos SEB har fel format"]);
+    expect(bankSettingsProblems({ ...seb, initiatingPartyId: "A".repeat(36) }, company)).toEqual(["Kund-ID enligt avtalet med SEB (vanligen 14 eller 10 tecken) har fel format"]);
     expect(bankSettingsProblems({ ...hb, initiatingPartyId: "1".repeat(36) }, company)).toEqual([
       "Organisationsnummer eller Handelsbankens kundnummer har fel format",
     ]);
@@ -157,5 +157,31 @@ describe("bankinställningarna", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ profile: "seb", debitAccountKind: "bankgiro" });
     expect((await asAdmin.inject({ method: "PATCH", url: "/bank-settings", payload: { profile: "danskebank" } })).statusCode).toBe(400);
+  });
+});
+
+// Valuta steg 2: what payments abroad are drawn from — the profile's
+// foreign.debitAccountKinds — is reported apart from `missing` (a company
+// that never pays abroad is ready without it).
+describe("debiteringskonto för utlandsbetalningar", () => {
+  it("Swedbank pays abroad from the IBAN: foreignProblem until the company has one; assertReady resolves it", async () => {
+    await configureSwedbank();
+    const view = await service.read();
+    expect(view.missing).toEqual([]);
+    expect(view.foreignProblem).toBe("Swedbank kräver IBAN i Företagsinformation för utlandsbetalningar");
+    expect(view.profiles.find((p) => p.id === "swedbank")).toMatchObject({ debitAccountKinds: ["bankgiro"], foreignDebitAccountKinds: ["iban"] });
+    expect((await service.assertReady()).foreignDebitAccount).toBeNull();
+    await db.update(companyInfo).set({ iban: "se45 5000 0000 0583 9825 7466" });
+    expect((await service.read()).foreignProblem).toBeNull();
+    const ready = await service.assertReady();
+    expect(ready.debitAccount).toEqual({ kind: "bankgiro", value: "5512348" });
+    expect(ready.foreignDebitAccount).toEqual({ kind: "iban", value: "SE4550000000058398257466" });
+  });
+
+  it("a bank that draws abroad from the settings' own IBAN uses it for both", async () => {
+    await db.update(companyInfo).set({ ...COMPANY, iban: "SE4550000000058398257466" });
+    await service.update({ profile: "handelsbanken", debitAccountKind: "iban" }, userId);
+    const ready = await service.assertReady();
+    expect(ready.foreignDebitAccount).toEqual(ready.debitAccount);
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { auditLog, type BankEntryReference, type Db, type Tx } from "@navet/db";
+import { auditLog, type BankEntryCurrencyExchange, type BankEntryReference, type Db, type Tx } from "@navet/db";
 import {
   round2,
   type BookIncomingEntriesInput,
@@ -81,8 +81,15 @@ export interface OutgoingEntryView {
   position: number;
   direction: "credit" | "debit";
   reversal: boolean;
+  // The entry's own amount in the account's currency (SEK).
   amount: number;
   currency: string;
+  // Valuta steg 2: what was instructed in another currency (InstdAmt), the
+  // bank's exchange details and the charges included in `amount`.
+  instructedAmount: number | null;
+  instructedCurrency: string | null;
+  currencyExchange: BankEntryCurrencyExchange | null;
+  chargesAmount: number | null;
   bookingDate: string;
   endToEndId: string | null;
   counterpartyName: string | null;
@@ -94,7 +101,9 @@ export interface OutgoingEntryView {
     batchNumber: string;
     endToEndId: string;
     status: string;
+    // In the item's currency (the invoice's).
     amount: number;
+    currency: string;
     registrationNumber: string;
     // The row's live UTB, however it was booked (Redan bekräftad).
     paymentId: string | null;
@@ -111,6 +120,17 @@ const notSek = (currency: string) => `Posten är i ${currency} — bara SEK hant
 const ENTRY_LIVE_INDEXES = ["customer_payments_entry_live", "supplier_payments_entry_live"];
 
 const isOutgoing = (entry: { direction: "credit" | "debit"; reversal: boolean }) => entry.direction === "debit" || entry.reversal;
+
+// Is the bank's amount the batch row's? A SEK row: the entry's own amount
+// (as before). A row in another currency: the instructed amount in that
+// currency (InstdAmt) — the entry's own amount is the SEK it cost.
+function sameAmount(
+  item: { amount: string | number; currency: string },
+  entry: { amount: string | number; instructedAmount: string | number | null; instructedCurrency: string | null }
+): boolean {
+  if (item.currency === "SEK") return round2(Number(item.amount)) === round2(Number(entry.amount));
+  return entry.instructedCurrency === item.currency && entry.instructedAmount !== null && round2(Number(entry.instructedAmount)) === round2(Number(item.amount));
+}
 
 export function createBankFileService(deps: BankFileServiceDeps) {
   const { db, repo } = deps;
@@ -216,6 +236,10 @@ export function createBankFileService(deps: BankFileServiceDeps) {
               remittance: e.remittance,
               returnReason: e.returnReason?.slice(0, 10) ?? null,
               position: e.position,
+              instructedAmount: e.instructedAmount === null ? null : String(e.instructedAmount),
+              instructedCurrency: e.instructedCurrency,
+              currencyExchange: e.currencyExchange,
+              chargesAmount: e.chargesAmount === null ? null : String(e.chargesAmount),
             }))
           );
           await audit(tx, file.filename, "uploaded", { sha256, entries: fresh.length, skipped }, userId);
@@ -356,20 +380,23 @@ export function createBankFileService(deps: BankFileServiceDeps) {
               endToEndId: row.item.endToEndId!,
               status: row.item.status!,
               amount: Number(row.item.amount),
+              currency: row.item.currency!,
               registrationNumber: row.registrationNumber!,
               paymentId: row.itemPaymentId,
               paymentNumber: row.itemPaymentNumber,
             }
           : null;
         let state: OutgoingEntryView["state"];
+        const same = item ? sameAmount(item, e) : false;
         if (row.handled) state = "booked";
         else if (e.ignoredAt) state = "ignored";
-        // We only ever pay in SEK — another currency cannot be one of ours.
+        // Our payments are drawn from the SEK account — an entry in another
+        // account currency (a currency account) cannot be one of ours.
         else if (!item || e.currency !== "SEK") state = "unknown";
         // A return of another amount than we sent is checked by hand, like a
         // debit that differs — never cancelled or rejected automatically.
-        else if (e.reversal) state = item.status === "confirmed" || item.status === "exported" ? (round2(item.amount) === round2(amount) ? "return" : "amount_mismatch") : "not_waiting";
-        else if (item.status === "exported") state = round2(item.amount) === round2(amount) ? "matched" : "amount_mismatch";
+        else if (e.reversal) state = item.status === "confirmed" || item.status === "exported" ? (same ? "return" : "amount_mismatch") : "not_waiting";
+        else if (item.status === "exported") state = same ? "matched" : "amount_mismatch";
         else if (item.status === "confirmed") state = "already_confirmed";
         else state = "not_waiting";
         return {
@@ -379,6 +406,10 @@ export function createBankFileService(deps: BankFileServiceDeps) {
           reversal: e.reversal,
           amount,
           currency: e.currency,
+          instructedAmount: e.instructedAmount === null ? null : Number(e.instructedAmount),
+          instructedCurrency: e.instructedCurrency,
+          currencyExchange: e.currencyExchange,
+          chargesAmount: e.chargesAmount === null ? null : Number(e.chargesAmount),
           bookingDate: e.bookingDate,
           endToEndId: e.endToEndId,
           counterpartyName: e.counterpartyName,
@@ -402,17 +433,38 @@ export function createBankFileService(deps: BankFileServiceDeps) {
         if (entry.ignoredAt || (await repo.outgoingHandled(tx, entry.id))) throw new BankEntryAlreadyBookedError();
         const item = entry.endToEndId && entry.currency === "SEK" ? await findItemByEndToEndId(tx, entry.endToEndId) : null;
         if (!item) throw new BankEntryNotMatchedError();
-        // Debit or return, the bank's amount must be the row's (spec §6.2).
-        if (round2(Number(item.amount)) !== round2(Number(entry.amount))) {
-          throw new BankEntryAmountDiffersError(item.endToEndId, Number(item.amount), Number(entry.amount), entry.reversal ? "returned" : "debited");
+        // Debit or return, the bank's amount must be the row's (spec §6.2) —
+        // for a payment in another currency the instructed amount in it.
+        const foreign = item.currency !== "SEK";
+        if (!sameAmount(item, entry)) {
+          const actual = foreign ? (entry.instructedCurrency === item.currency && entry.instructedAmount !== null ? Number(entry.instructedAmount) : null) : Number(entry.amount);
+          throw new BankEntryAmountDiffersError(item.endToEndId, Number(item.amount), actual, entry.reversal ? "returned" : "debited", item.currency);
         }
         if (entry.reversal) {
-          await deps.batches.returnItemInTx(tx, item.id, { id: entry.id, bookingDate: entry.bookingDate, returnReason: entry.returnReason }, userId);
+          await deps.batches.returnItemInTx(
+            tx,
+            item.id,
+            { id: entry.id, bookingDate: entry.bookingDate, returnReason: entry.returnReason, ...(foreign ? { amountSek: Number(entry.amount) } : {}) },
+            userId
+          );
           await audit(tx, file.filename, "entry_booked", { dedupeKey: entry.dedupeKey, returned: item.endToEndId }, userId);
           // A return books no payment of its own: the row's EndToEndId stands in.
           return item.endToEndId;
         }
-        const done = await deps.batches.confirmItemInTx(tx, item.id, { paymentDate: entry.bookingDate, bankFileEntryId: entry.id }, userId);
+        // A payment in another currency books what left the SEK account
+        // (the entry's amount, charges included) and the charges the bank
+        // reports as included; a bank that reports none (Nordea) leaves the
+        // fee inside the exchange difference.
+        const done = await deps.batches.confirmItemInTx(
+          tx,
+          item.id,
+          {
+            paymentDate: entry.bookingDate,
+            bankFileEntryId: entry.id,
+            ...(foreign ? { amountSek: Number(entry.amount), bankFeeSek: entry.chargesAmount === null ? 0 : Number(entry.chargesAmount) } : {}),
+          },
+          userId
+        );
         await audit(tx, file.filename, "entry_booked", { dedupeKey: entry.dedupeKey, payment: done.paymentNumber }, userId);
         return done.paymentNumber;
       });

@@ -519,6 +519,8 @@ export function buildApp(database: Db = db) {
     repo: createPaymentBatchRepository(database),
     bankSettings: bankSettingsService,
     supplierPayments: supplierPaymentService,
+    // KU81: today's rate for the 150 000 kr threshold of a payment abroad.
+    exchangeRates: exchangeRateService,
   });
   // Bankfiler (camt.054) — declared after the payment services (C3): incoming
   // payments book through the customer payment registration's Tx seam,

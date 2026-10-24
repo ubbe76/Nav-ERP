@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BankEntryReference } from "@navet/db";
+import type { BankEntryCurrencyExchange, BankEntryReference } from "@navet/db";
 import { round2 } from "@navet/shared";
 import { addDays } from "../banking-dates.js";
 import { BankFileParseError, UnsupportedBankMessageError } from "../banking.errors.js";
@@ -26,6 +26,15 @@ export interface ParsedEntry {
   dedupeKey: string;
   dedupeSource: DedupeSource;
   position: number;
+  // Valuta steg 2. `amount`/`currency` are always the entry's own amount in
+  // the account's currency (TxAmt — for a payment in EUR from a SEK account,
+  // the SEK that left it). The instructed amount (InstdAmt) is kept when it
+  // is in another currency, with the bank's exchange details, and the
+  // charges the bank reports as included in the entry amount.
+  instructedAmount: number | null;
+  instructedCurrency: string | null;
+  currencyExchange: BankEntryCurrencyExchange | null;
+  chargesAmount: number | null;
 }
 
 export interface ParsedCamt054 {
@@ -100,6 +109,47 @@ function remittanceOf(rmtInf: XmlNode | null): BankEntryReference[] {
   return refs;
 }
 
+// TxAmt/CcyXchg (or InstdAmt/CcyXchg) as the bank wrote it — display only,
+// the booking never computes with the rate. A rate that is no decimal is
+// left out rather than failing the file.
+function currencyExchangeOf(...amountDetails: (XmlNode | null)[]): BankEntryCurrencyExchange | null {
+  for (const details of amountDetails) {
+    const xchg = child(details, "CcyXchg");
+    if (!xchg) continue;
+    const sourceCurrency = textAt(xchg, "SrcCcy");
+    const rate = textAt(xchg, "XchgRate");
+    if (!sourceCurrency || !rate || !DECIMAL.test(rate)) continue;
+    return { sourceCurrency: sourceCurrency.slice(0, 3), targetCurrency: textAt(xchg, "TrgtCcy")?.slice(0, 3) ?? null, unitCurrency: textAt(xchg, "UnitCcy")?.slice(0, 3) ?? null, rate: rate.slice(0, 20) };
+  }
+  return null;
+}
+
+// Charges debited separately (Handelsbanken's proprietary MCOM/QCOM/YCOM/
+// SCOM: "These code is used when the charges are debited separately") are
+// not part of the entry; everything else the bank reports in the entry's
+// TxDtls is (SEB: TxAmt is "the net amount of the underlying transaction
+// including charges expressed in the currency of the posting account";
+// Handelsbanken: Cd COMM "Used when charges is included in the entry
+// amount"). Only charges in the account's currency, debited, and not borne
+// by the creditor count.
+const SEPARATELY_DEBITED_CHARGES = new Set(["MCOM", "QCOM", "YCOM", "SCOM"]);
+function includedCharges(nodes: XmlNode[], accountCurrency: string): number | null {
+  let total = 0;
+  let found = false;
+  for (const charge of nodes) {
+    const money = amountOf(child(charge, "Amt"));
+    if (!money || money.currency !== accountCurrency || money.amount <= 0) continue;
+    const indicator = textAt(charge, "CdtDbtInd");
+    if (indicator && indicator !== "DBIT") continue;
+    if (textAt(charge, "Br") === "CRED") continue;
+    const proprietary = textAt(charge, "Tp", "Prtry", "Id");
+    if (proprietary && SEPARATELY_DEBITED_CHARGES.has(proprietary.toUpperCase())) continue;
+    total += money.amount;
+    found = true;
+  }
+  return found ? round2(total) : null;
+}
+
 // Spec §3.5: one ParsedEntry per TxDtls (an Ntry without TxDtls becomes one
 // entry). dedupe_key, first available: TxDtls/Refs/AcctSvcrRef → ClrSysRef →
 // Ntry/AcctSvcrRef#index → content hash #n. Always prefixed with the account.
@@ -146,15 +196,37 @@ export function parseCamt054(xml: string): ParsedCamt054 {
       }
       const txs = children(ntry, "NtryDtls").flatMap((details) => children(details, "TxDtls"));
       const units: (XmlNode | null)[] = txs.length > 0 ? txs : [null];
+      const single = units.length === 1;
       units.forEach((tx, txIndex) => {
-        const own = tx ? amountOf(path(tx, "AmtDtls", "TxAmt", "Amt")) ?? amountOf(path(tx, "AmtDtls", "InstdAmt", "Amt")) : null;
-        const money = own ?? (units.length === 1 ? ntryAmount : null);
+        // The amount details: the transaction's own, and — for an entry with
+        // one transaction — the entry's (Ntry/AmtDtls) as the fallback.
+        const txDetails = tx ? child(tx, "AmtDtls") : null;
+        const ntryDetails = single ? child(ntry, "AmtDtls") : null;
+        const txAmount = amountOf(path(txDetails, "TxAmt", "Amt")) ?? amountOf(path(ntryDetails, "TxAmt", "Amt"));
+        const instructed = amountOf(path(txDetails, "InstdAmt", "Amt")) ?? amountOf(path(ntryDetails, "InstdAmt", "Amt"));
+        // The entry's own amount is in the account's currency: TxAmt; the
+        // instructed amount only when it is in that same currency (a SEK
+        // payment); else the entry amount of a one-transaction entry. A
+        // multi-transaction entry with nothing but a foreign InstdAmt keeps
+        // that amount in its own currency (Annan valuta).
+        let money: { amount: number; currency: string } | null;
+        if (txAmount) money = txAmount;
+        else if (instructed && (!ntryAmount || instructed.currency === ntryAmount.currency)) money = instructed;
+        else if (single) money = ntryAmount;
+        else money = instructed;
         if (!money) {
           warnings.push(`Belopp saknas för transaktion ${txIndex + 1} i post ${ntryIndex + 1}`);
           return;
         }
+        const foreignInstructed = instructed && instructed.currency !== money.currency && instructed.amount > 0 ? instructed : null;
         if (money.amount <= 0) {
-          warnings.push(`Transaktion ${txIndex + 1} i post ${ntryIndex + 1} har ett belopp som är negativt eller 0 och hoppades över`);
+          // Nordea (Sweden): "Zero amount is possible" — unexplained, so the
+          // transaction is noted and skipped like any other zero.
+          warnings.push(
+            foreignInstructed
+              ? `Transaktion ${txIndex + 1} i post ${ntryIndex + 1} har belopp 0 i kontots valuta (instruerat ${foreignInstructed.amount.toFixed(2)} ${foreignInstructed.currency}) och hoppades över — kontrollera betalningen i internetbanken`
+              : `Transaktion ${txIndex + 1} i post ${ntryIndex + 1} har ett belopp som är negativt eller 0 och hoppades över`
+          );
           return;
         }
         const refs = tx ? child(tx, "Refs") : null;
@@ -211,6 +283,12 @@ export function parseCamt054(xml: string): ParsedCamt054 {
           dedupeKey,
           dedupeSource,
           position: position++,
+          instructedAmount: foreignInstructed?.amount ?? null,
+          instructedCurrency: foreignInstructed?.currency.slice(0, 3) ?? null,
+          currencyExchange: currencyExchangeOf(child(txDetails, "TxAmt"), child(txDetails, "InstdAmt"), child(ntryDetails, "TxAmt"), child(ntryDetails, "InstdAmt")),
+          // The transaction's charges; the entry's only for a one-transaction
+          // entry that reports none of its own (never both — no double count).
+          chargesAmount: includedCharges(tx && children(tx, "Chrgs").length > 0 ? children(tx, "Chrgs") : single ? children(ntry, "Chrgs") : [], money.currency),
         });
       });
     });

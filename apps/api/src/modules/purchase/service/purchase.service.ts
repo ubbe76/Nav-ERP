@@ -1,5 +1,7 @@
 import {
   normalizeSupplierPaymentDetails,
+  DEFAULT_PAYMENT_REPORTING_CODE,
+  type SupplierPaymentContext,
   roundUpToMultiple,
   supplierPaymentDetailsProblems,
   toBasePrice,
@@ -341,7 +343,16 @@ const SUPPLIER_PAYMENT_DETAIL_KEYS = [
   "bankAccountNumber",
   "iban",
   "bic",
+  "foreignAccountNumber",
+  "clearingSystem",
+  "clearingMemberId",
+  "bankName",
+  "chargeBearer",
+  "paymentReportingCode",
 ] as const;
+// A payee abroad needs street, town and country (valuta steg 2), so a PATCH
+// of those is checked against the payment details too.
+const SUPPLIER_PAYMENT_CONTEXT_KEYS = ["country", "address", "city"] as const;
 
 function paymentDetailsOf(row: Partial<SupplierPaymentDetails>): SupplierPaymentDetails {
   return {
@@ -352,7 +363,17 @@ function paymentDetailsOf(row: Partial<SupplierPaymentDetails>): SupplierPayment
     bankAccountNumber: row.bankAccountNumber ?? null,
     iban: row.iban ?? null,
     bic: row.bic ?? null,
+    foreignAccountNumber: row.foreignAccountNumber ?? null,
+    clearingSystem: row.clearingSystem ?? null,
+    clearingMemberId: row.clearingMemberId ?? null,
+    bankName: row.bankName ?? null,
+    chargeBearer: row.chargeBearer ?? "SHAR",
+    paymentReportingCode: row.paymentReportingCode ?? DEFAULT_PAYMENT_REPORTING_CODE,
   };
+}
+
+function paymentContextOf(row: { country?: string | null; address?: string | null; city?: string | null }): SupplierPaymentContext {
+  return { country: row.country ?? "SE", address: row.address ?? null, city: row.city ?? null };
 }
 
 function stripUndefined<T extends object>(value: T): Partial<T> {
@@ -714,7 +735,7 @@ export function createPurchaseService(
       const book = await repo.vatCodeBook();
       await validateDefaultVatCode(input.defaultVatCodeId, book);
       const normalized = normalizeSupplierPaymentDetails(input);
-      const problems = supplierPaymentDetailsProblems(paymentDetailsOf(normalized));
+      const problems = supplierPaymentDetailsProblems(paymentDetailsOf(normalized), paymentContextOf(normalized));
       if (Object.keys(problems).length > 0) throw new InvalidSupplierPaymentDetailsError(problems);
       try {
         return withDefaultVatCode(await repo.createSupplier(normalized), book);
@@ -731,17 +752,27 @@ export function createPurchaseService(
       const book = await repo.vatCodeBook();
       // Read only when it matters: a code is being sent (unchanged may be
       // inactive) or the payment details need the merged state below.
-      const needsExisting =
-        Boolean(input.defaultVatCodeId) || SUPPLIER_PAYMENT_DETAIL_KEYS.some((key) => input[key] !== undefined);
+      const touchesPayment =
+        SUPPLIER_PAYMENT_DETAIL_KEYS.some((key) => input[key] !== undefined) || SUPPLIER_PAYMENT_CONTEXT_KEYS.some((key) => input[key] !== undefined);
+      const needsExisting = Boolean(input.defaultVatCodeId) || touchesPayment;
       const existing = needsExisting ? await repo.findSupplierById(id) : null;
       await validateDefaultVatCode(input.defaultVatCodeId, book, existing?.defaultVatCodeId ?? null);
       const normalized = normalizeSupplierPaymentDetails(input);
       // The check runs on the MERGED state (stored row + patch), so a PATCH
       // that only switches the method is held against the stored numbers.
-      if (SUPPLIER_PAYMENT_DETAIL_KEYS.some((key) => normalized[key] !== undefined)) {
+      if (touchesPayment) {
         if (!existing) throw new SupplierNotFoundError(id);
-        const merged = paymentDetailsOf({ ...paymentDetailsOf(existing), ...stripUndefined(normalized) });
-        const problems = supplierPaymentDetailsProblems(merged);
+        const patch = stripUndefined(normalized);
+        const merged = paymentDetailsOf({ ...paymentDetailsOf(existing), ...patch });
+        const context = paymentContextOf({ ...paymentContextOf(existing), ...stripUndefined({ country: patch.country, address: patch.address, city: patch.city }) });
+        const all = supplierPaymentDetailsProblems(merged, context);
+        // A PATCH of only the address fields is held to the address rules
+        // (street, town, country of a payee abroad) — a stored problem in the
+        // payment details (an older, imported row) must not lock it.
+        const paymentTouched = SUPPLIER_PAYMENT_DETAIL_KEYS.some((key) => normalized[key] !== undefined);
+        const problems = paymentTouched
+          ? all
+          : Object.fromEntries(Object.entries(all).filter(([key]) => ["address", "city", "country", "paymentMethod"].includes(key)));
         if (Object.keys(problems).length > 0) throw new InvalidSupplierPaymentDetailsError(problems);
       }
       let row;

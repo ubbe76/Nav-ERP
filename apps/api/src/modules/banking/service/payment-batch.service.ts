@@ -2,8 +2,13 @@ import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { auditLog, bankFiles, paymentBatchItems, paymentBatches, type CreditorSnapshot, type Db, type Tx } from "@navet/db";
 import {
+  SEK,
+  exceedsPaymentReportingThreshold,
+  paymentKind,
   round2,
+  toSek,
   type AddPaymentBatchItemsInput,
+  type PaymentKind,
   type ConfirmPaymentBatchInput,
   type CreatePaymentBatchInput,
   type ListPaymentBatchesQuery,
@@ -22,6 +27,7 @@ import type { PaymentBatchRepository, BatchItemRow } from "../repository/payment
 import { addDays, stockholmDate } from "./banking-dates.js";
 import {
   BankReturnBeforePaymentError,
+  BankReturnSekDiffersError,
   InvalidPaymentBatchItemError,
   InvalidPaymentDateError,
   PaymentBatchItemNotConfirmableError,
@@ -31,11 +37,12 @@ import {
   SupplierInvoicesNotPayableError,
   type NotPayableDetail,
 } from "./banking.errors.js";
-import type { BankSettingsService } from "./bank-settings.service.js";
-import type { BankProfile } from "./iso20022/bank-profiles.js";
-import { buildPain001, defaultPaymentMessage, type Pain001Creditor, type Pain001Item } from "./iso20022/pain001-builder.js";
-import { checkPain001 } from "./iso20022/pain001-check.js";
-import { sanitizeText } from "./iso20022/sanitize.js";
+import type { ExchangeRateReader } from "../../system/service/exchange-rates.js";
+import type { BankReady, BankSettingsService } from "./bank-settings.service.js";
+import type { BankProfile, DomesticMethod } from "./iso20022/bank-profiles.js";
+import { buildPain001, defaultPaymentMessage, type Pain001Creditor, type Pain001Input, type Pain001Item } from "./iso20022/pain001-builder.js";
+import { checkPain001, type Pain001Violation } from "./iso20022/pain001-check.js";
+import { sanitizeText, type CharsetHolder } from "./iso20022/sanitize.js";
 
 // The slice of the purchase module's supplier payment service this module
 // books through — declared here, at the consumer (Task 3's Tx seam).
@@ -54,10 +61,20 @@ export interface PaymentBatchServiceDeps {
   repo: PaymentBatchRepository;
   bankSettings: Pick<BankSettingsService, "assertReady">;
   supplierPayments: SupplierPaymentRegistrar;
+  // KU81: today's rate for a payment abroad in another currency than SEK
+  // (the 150 000 kr threshold). Omitted = no rate is ever found, so every
+  // such payment is reported (the safe side).
+  exchangeRates?: Pick<ExchangeRateReader, "getRate">;
   now?: () => Date;
 }
 
 export type ItemResult = { itemId: string; ok: true; paymentNumber: string } | { itemId: string; ok: false; error: { error: string; code?: string } };
+
+// KU81 for one payment: the code sent and the SEK value it was judged on.
+// amountSek/rate null = no rate could be found for the currency, and the
+// payment is reported anyway (see reportingDecision).
+export type RegulatoryReportingDecision = { code: string; amountSek: number | null; rate: number | null; rateDate: string | null };
+type ReportingRates = Map<string, { rate: number; date: string } | null>;
 
 function creditorOf(row: BatchItemRow): Pain001Creditor {
   return {
@@ -71,29 +88,82 @@ function creditorOf(row: BatchItemRow): Pain001Creditor {
     account: row.supplier.bankAccountNumber,
     iban: row.supplier.iban,
     bic: row.supplier.bic,
+    street: row.supplier.address,
+    country: row.supplier.country,
+    foreignAccount: row.supplier.foreignAccountNumber,
+    clearingSystem: row.supplier.clearingSystem,
+    clearingMemberId: row.supplier.clearingMemberId,
+    bankName: row.supplier.bankName,
+    chargeBearer: row.supplier.chargeBearer,
   };
+}
+
+// The row's betalningstyp (null while the supplier has no payment details).
+function kindOf(row: BatchItemRow): PaymentKind | null {
+  if (!row.supplier.paymentMethod) return null;
+  return paymentKind({ currency: row.item.currency, method: row.supplier.paymentMethod, iban: row.supplier.iban });
+}
+
+// The length limits and character set of the row's texts: the domestic
+// rule for its method, or the profile's foreign rules.
+function rowRule(row: BatchItemRow, profile: BankProfile, kind: PaymentKind): { nameMax: number; messageMax: number; charset: CharsetHolder } {
+  if (kind === "domestic") {
+    const rule = profile.creditor[row.supplier.paymentMethod as DomesticMethod];
+    return { nameMax: rule.nameMax, messageMax: rule.messageMax, charset: profile };
+  }
+  return { nameMax: profile.foreign.nameMax, messageMax: profile.foreign.messageMax, charset: { charset: profile.foreign.charset } };
 }
 
 function referenceOf(row: BatchItemRow, profile: BankProfile): Pain001Item["reference"] {
   if (row.paymentReferenceKind && row.paymentReference) return { kind: row.paymentReferenceKind, value: row.paymentReference };
-  const max = profile.creditor[row.supplier.paymentMethod!].messageMax;
-  return { kind: "message", value: defaultPaymentMessage(row.invoiceNumber, max), generated: true };
+  const kind = kindOf(row) ?? "domestic";
+  const max = rowRule(row, profile, kind).messageMax;
+  return { kind: "message", value: defaultPaymentMessage(row.invoiceNumber, max, kind), generated: true };
 }
 
-function draftWarnings(row: BatchItemRow, profile: BankProfile | null): string[] {
-  if (!profile || !row.supplier.paymentMethod) return [];
-  const rule = profile.creditor[row.supplier.paymentMethod];
+function draftWarnings(row: BatchItemRow, profile: BankProfile | null, decision: RegulatoryReportingDecision | null): string[] {
+  const kind = kindOf(row);
+  if (!profile || !kind) return [];
+  const rule = rowRule(row, profile, kind);
   const warnings: string[] = [];
-  const name = sanitizeText(row.supplier.name, profile, rule.nameMax);
+  const name = sanitizeText(row.supplier.name, rule.charset, rule.nameMax);
   if (name.truncated) warnings.push(`Mottagarens namn kortas till ${rule.nameMax} tecken: "${name.value}"`);
   else if (name.changed) warnings.push(`Mottagarens namn skickas som "${name.value}"`);
   const ref = referenceOf(row, profile);
   if (ref.kind === "message" && !ref.generated) {
-    const message = sanitizeText(ref.value, profile, Number.MAX_SAFE_INTEGER);
+    const message = sanitizeText(ref.value, rule.charset, Number.MAX_SAFE_INTEGER);
     if (message.value.length > rule.messageMax) warnings.push(`Meddelandet får vara högst ${rule.messageMax} tecken`);
     else if (message.changed) warnings.push(`Meddelandet skickas som "${message.value}"`);
   }
+  if (decision && decision.amountSek === null) {
+    warnings.push(
+      `Kurs för ${row.item.currency} saknas — betalningen rapporteras till Skatteverket med betalningskod ${decision.code} för säkerhets skull (ange kursen under Ekonomi → Valutakurser)`
+    );
+  }
   return warnings;
+}
+
+// KU81 (spec §4): a payment abroad whose value EXCEEDS 150 000 kr carries
+// the supplier's betalningskod. SEK is its own value; another currency is
+// valued at today's rate (getRate). A missing rate counts as above the
+// threshold: an unneeded code is harmless (the element is optional and the
+// bank forwards it), a missing one is not — SEB then reports 793 "Other
+// capital transactions" on its own, and the customer must send an amendment.
+// Refusing the export instead would stop every payment in a currency
+// Riksbanken does not publish, or whenever Riksbanken does not answer.
+export function reportingDecision(
+  item: { amount: number; currency: string },
+  kind: PaymentKind | null,
+  code: string,
+  rates: ReportingRates
+): RegulatoryReportingDecision | null {
+  if (kind === null || kind === "domestic") return null;
+  const currency = item.currency.toUpperCase();
+  if (currency === SEK) return exceedsPaymentReportingThreshold(item.amount) ? { code, amountSek: round2(item.amount), rate: 1, rateDate: null } : null;
+  const rate = rates.get(currency) ?? null;
+  if (!rate) return { code, amountSek: null, rate: null, rateDate: null };
+  const amountSek = toSek(item.amount, rate.rate);
+  return exceedsPaymentReportingThreshold(amountSek) ? { code, amountSek, rate: rate.rate, rateDate: rate.date } : null;
 }
 
 export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
@@ -128,10 +198,11 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
       else if (invoice.status !== "approved") detail("not_approved");
       else if (round2(open.get(id) ?? 0) < 0) detail("credit_note");
       else if (round2(open.get(id) ?? 0) === 0) detail("not_open");
-      // Valuta: foreign invoices wait for utlandsbetalningar (steg 2).
-      else if (invoice.currency !== "SEK") detail("not_sek", { currency: invoice.currency });
+      // Valuta steg 2: an invoice in any currency, to an account in any
+      // country, goes into a batch — what a payment abroad still lacks
+      // (street, BIC, the company's debit IBAN) is shown on the draft and
+      // refused at export (pain001-check).
       else if (!invoice.paymentMethod) detail("no_payment_details");
-      else if (invoice.paymentMethod === "iban" && !(invoice.iban ?? "").startsWith("SE")) detail("foreign_iban");
       else if (reserved.has(id)) detail("already_in_batch", { batchNumber: reserved.get(id)! });
     }
     if (problems.length > 0) throw new SupplierInvoicesNotPayableError(problems);
@@ -156,6 +227,7 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
         supplierInvoiceId: id,
         supplierId: invoice.supplierId,
         amount: String(round2(open.get(id)!)),
+        currency: invoice.currency,
         executionDate: due > today() ? due : today(),
         createdAt: new Date(stamp + index),
       };
@@ -168,6 +240,61 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
       if (isUniqueViolation(err)) throw new SupplierInvoiceInPaymentBatchError("(okänd)");
       throw err;
     }
+  }
+
+  // Today's rate per currency of the rows paid abroad in another currency
+  // than SEK — looked up OUTSIDE any transaction (getRate may call
+  // Riksbanken). A currency without a rate maps to null.
+  async function reportingRates(rows: BatchItemRow[]): Promise<ReportingRates> {
+    const currencies = [...new Set(rows.filter((row) => (kindOf(row) ?? "domestic") !== "domestic").map((row) => row.item.currency.toUpperCase()))].filter(
+      (currency) => currency !== SEK
+    );
+    const rates: ReportingRates = new Map();
+    for (const currency of currencies) {
+      try {
+        if (!deps.exchangeRates) throw new Error("no exchange rate reader");
+        const found = await deps.exchangeRates.getRate(currency, today());
+        rates.set(currency, { rate: found.rate, date: found.date });
+      } catch {
+        rates.set(currency, null);
+      }
+    }
+    return rates;
+  }
+
+  const decisionOf = (row: BatchItemRow, rates: ReportingRates) =>
+    reportingDecision({ amount: Number(row.item.amount), currency: row.item.currency }, kindOf(row), row.supplier.paymentReportingCode, rates);
+
+  // The file's input, exactly as the export builds it: past execution dates
+  // move to today, and the KU81 decision per row. Rows without payment
+  // details are left out (the export refuses them before building).
+  function exportInput(batch: { batchNumber: string }, ready: BankReady, rows: BatchItemRow[], rates: ReportingRates): Pain001Input {
+    return {
+      messageId: batch.batchNumber,
+      createdAt: now(),
+      debtor: {
+        name: ready.company.name,
+        orgNumber: ready.company.orgNumber,
+        postalCode: ready.company.postalCode,
+        city: ready.company.city,
+        account: ready.debitAccount,
+        foreignAccount: ready.foreignDebitAccount,
+        // BankReady's resolved, normalized id — never the raw org number.
+        initiatingPartyId: ready.initiatingPartyId,
+        agreementId: ready.settings.debtorAgreementId,
+      },
+      items: rows
+        .filter((row) => row.supplier.paymentMethod)
+        .map((row) => ({
+          endToEndId: row.item.endToEndId,
+          amount: Number(row.item.amount),
+          currency: row.item.currency,
+          executionDate: row.item.executionDate < today() ? today() : row.item.executionDate,
+          creditor: creditorOf(row),
+          reference: referenceOf(row, ready.profile),
+          regulatoryReportingCode: decisionOf(row, rates)?.code ?? null,
+        })),
+    };
   }
 
   async function requireDraft(tx: Tx, id: string) {
@@ -186,50 +313,96 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
       const batch = await repo.findBatch(db, id);
       if (!batch) throw new PaymentBatchNotFoundError(id);
       const [rows, file] = await Promise.all([repo.listItems(db, id), repo.findFileMeta(db, id)]);
-      let profile: BankProfile | null = null;
-      if (batch.status === "draft") {
+      const draft = batch.status === "draft";
+      let ready: BankReady | null = null;
+      if (draft) {
         try {
-          profile = (await deps.bankSettings.assertReady()).profile;
+          ready = await deps.bankSettings.assertReady();
         } catch {
-          profile = null;
+          ready = null;
         }
       }
+      const profile = ready?.profile ?? null;
+      // The draft previews what the export would do: the KU81 decision per
+      // row (today's rate) and the structural check's verdict.
+      const rates = draft ? await reportingRates(rows) : (new Map() as ReportingRates);
+      // Rows whose supplier lost its payment details are left out of the
+      // preview (the export refuses them as not payable), so "no items" is
+      // never the preview's own verdict.
+      const preview = (draft && ready && rows.length > 0 ? checkPain001(exportInput(batch, ready, rows, rates), ready.profile, today()) : []).filter(
+        (v) => v.field !== "items"
+      );
+      const problemsFor = (endToEndId: string | null) => preview.filter((v) => v.endToEndId === endToEndId).map((v) => v.message);
       const items = rows.map((row) => {
         const live = row.supplier.paymentMethod ? creditorOf(row) : null;
+        const snapshot = row.item.creditorSnapshot;
+        const decision = draft ? decisionOf(row, rates) : snapshot?.regulatoryReporting ?? null;
         return {
           id: row.item.id,
           seq: row.item.seq,
           endToEndId: row.item.endToEndId,
           status: row.item.status,
           amount: Number(row.item.amount),
+          currency: row.item.currency,
+          // Betalningstyp: what the export sent (snapshot), else live.
+          paymentKind: (snapshot?.kind ?? kindOf(row)) as PaymentKind | null,
+          // KU81: reported to Skatteverket with this code (rateMissing = no
+          // rate was found, reported for safety).
+          regulatoryReporting: decision ? { code: decision.code, amountSek: decision.amountSek, rateMissing: decision.amountSek === null } : null,
           executionDate: row.item.executionDate,
           supplierInvoiceId: row.item.supplierInvoiceId,
           registrationNumber: row.registrationNumber,
           invoiceNumber: row.invoiceNumber,
           supplierId: row.item.supplierId,
           supplierName: row.supplier.name,
-          creditor: (row.item.creditorSnapshot ?? (live && {
+          creditor: (snapshot ?? (live && {
             method: live.method,
-            account: live.method === "bankgiro" ? live.bankgiro : live.method === "plusgiro" ? live.plusgiro : live.method === "iban" ? live.iban : live.account,
-            clearing: live.method === "bank_account" ? live.clearing : null,
-            bic: live.method === "iban" ? live.bic : null,
+            account:
+              live.method === "bankgiro"
+                ? live.bankgiro
+                : live.method === "plusgiro"
+                  ? live.plusgiro
+                  : live.method === "iban"
+                    ? live.iban
+                    : live.method === "foreign_account"
+                      ? live.foreignAccount
+                      : live.account,
+            clearing: live.method === "bank_account" ? live.clearing : live.method === "foreign_account" ? live.clearingMemberId ?? null : null,
+            bic: live.method === "iban" || live.method === "foreign_account" ? live.bic : null,
             name: live.name,
             postalCode: live.postalCode,
             city: live.city,
             referenceKind: row.paymentReferenceKind ?? "message",
             reference: row.paymentReference ?? "",
+            kind: kindOf(row) ?? undefined,
+            currency: row.item.currency,
+            street: live.street ?? null,
+            country: live.country,
+            clearingSystem: live.method === "foreign_account" ? live.clearingSystem ?? null : null,
+            bankName: live.method === "foreign_account" ? live.bankName ?? null : null,
+            chargeBearer: kindOf(row) === "sepa" ? "SLEV" : kindOf(row) === "international" ? live.chargeBearer : undefined,
           })) as CreditorSnapshot | null,
           rejectedReason: row.item.rejectedReason,
           payment: row.paymentId ? { id: row.paymentId, paymentNumber: row.paymentNumber!, cancelledAt: row.paymentCancelledAt } : null,
-          warnings: batch.status === "draft" ? draftWarnings(row, profile) : [],
+          warnings: draft ? draftWarnings(row, profile, decision) : [],
+          // What the export would refuse for this row (draft only).
+          problems: problemsFor(row.item.endToEndId),
         };
       });
       const live = items.filter((i) => i.status !== "cancelled");
+      const totals = new Map<string, number>();
+      for (const item of live) totals.set(item.currency, round2((totals.get(item.currency) ?? 0) + item.amount));
       return {
         ...batch,
-        totalAmount: round2(live.reduce((sum, i) => sum + i.amount, 0)),
+        // SEK rows only; every currency (SEK included) in totalsByCurrency.
+        totalAmount: round2(live.filter((i) => i.currency === SEK).reduce((sum, i) => sum + i.amount, 0)),
+        totalsByCurrency: [...totals.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([currency, amount]) => ({ currency, amount })),
         itemCount: live.length,
         confirmedCount: items.filter((i) => i.status === "confirmed").length,
+        // What the export would refuse for the batch as a whole (draft only):
+        // the bank settings' and the company's side, e.g. a missing debit
+        // IBAN for payments abroad.
+        problems: problemsFor(null),
         file,
         items,
       };
@@ -270,7 +443,8 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
           // zod's positive() lets 0.004 through; it rounds to 0 (a CHECK 500).
           if (round2(input.amount) <= 0) throw new InvalidPaymentBatchItemError("Beloppet måste vara större än 0");
           const open = round2((await computeOpenAmounts(tx, [item.supplierInvoiceId])).get(item.supplierInvoiceId) ?? 0);
-          if (round2(input.amount) > open) throw new InvalidPaymentBatchItemError(`Beloppet får vara högst det öppna beloppet (${open.toFixed(2)} kr)`);
+          const unit = item.currency === SEK ? "kr" : item.currency;
+          if (round2(input.amount) > open) throw new InvalidPaymentBatchItemError(`Beloppet får vara högst det öppna beloppet (${open.toFixed(2)} ${unit})`);
           patch.amount = String(round2(input.amount));
         }
         if (input.executionDate !== undefined) {
@@ -297,7 +471,11 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
     },
 
     // draft → exported: one transaction — check, build, snapshot, archive.
+    // The KU81 rates are looked up first, outside it (getRate may call
+    // Riksbanken; no transaction is held over HTTP). A row added in between
+    // in a new currency has no rate and is reported (the safe side).
     async export(id: string, userId: string) {
+      const rates = await reportingRates(await repo.listItems(db, id));
       await db.transaction(async (tx) => {
         const batch = await requireDraft(tx, id);
         const ready = await deps.bankSettings.assertReady(tx);
@@ -318,38 +496,21 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
         const movedDates = rows
           .filter((r) => r.item.executionDate < today())
           .map((r) => ({ endToEndId: r.item.endToEndId, from: r.item.executionDate, to: today() }));
-        const input = {
-          messageId: batch.batchNumber,
-          createdAt: now(),
-          debtor: {
-            name: ready.company.name,
-            orgNumber: ready.company.orgNumber,
-            postalCode: ready.company.postalCode,
-            city: ready.company.city,
-            account: ready.debitAccount,
-            // BankReady's resolved, normalized id — never the raw org number.
-            initiatingPartyId: ready.initiatingPartyId,
-            agreementId: ready.settings.debtorAgreementId,
-          },
-          items: rows.map((row) => ({
-            endToEndId: row.item.endToEndId,
-            amount: Number(row.item.amount),
-            executionDate: row.item.executionDate < today() ? today() : row.item.executionDate,
-            creditor: creditorOf(row),
-            reference: referenceOf(row, ready.profile),
-          })),
-        };
+        const input = exportInput(batch, ready, rows, rates);
         const violations = checkPain001(input, ready.profile, today());
         if (violations.length > 0) throw new PaymentFileInvalidError(violations);
         const { xml, items } = buildPain001(input, ready.profile);
 
         for (const built of items) {
           const row = rows.find((r) => r.item.endToEndId === built.endToEndId)!;
+          const decision = decisionOf(row, rates);
+          // The snapshot records the KU81 decision the file carries.
+          const snapshot: CreditorSnapshot = built.snapshot.kind === "domestic" ? built.snapshot : { ...built.snapshot, regulatoryReporting: decision };
           await tx
             .update(paymentBatchItems)
             .set({
               status: "exported",
-              creditorSnapshot: built.snapshot,
+              creditorSnapshot: snapshot,
               executionDate: input.items.find((i) => i.endToEndId === built.endToEndId)!.executionDate,
               updatedAt: now(),
             })
@@ -373,11 +534,26 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
           entryCount: rows.length,
           uploadedBy: userId,
         });
+        const foreignTotals = new Map<string, number>();
+        for (const item of input.items) {
+          const currency = item.currency ?? SEK;
+          if (currency !== SEK) foreignTotals.set(currency, round2((foreignTotals.get(currency) ?? 0) + item.amount));
+        }
+        const reported = input.items.filter((item) => item.regulatoryReportingCode).map((item) => item.endToEndId);
         await audit(
           tx,
           batch.batchNumber,
           "exported",
-          { profile: ready.profile.id, sha256, count: rows.length, amount: round2(input.items.reduce((s, i) => s + i.amount, 0)), movedDates },
+          {
+            profile: ready.profile.id,
+            sha256,
+            count: rows.length,
+            // SEK rows; the other currencies (valuta steg 2) and the KU81 rows only when there are any.
+            amount: round2(input.items.filter((i) => (i.currency ?? SEK) === SEK).reduce((s, i) => s + i.amount, 0)),
+            ...(foreignTotals.size > 0 ? { foreign: [...foreignTotals.entries()].map(([currency, amount]) => ({ currency, amount })) } : {}),
+            ...(reported.length > 0 ? { regulatoryReporting: reported } : {}),
+            movedDates,
+          },
           userId
         );
       });
@@ -391,7 +567,17 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
     },
 
     // Lock order (spec §4.4): batch → row → invoice (in createInTx) → payment.
-    async confirmItemInTx(tx: Tx, itemId: string, opts: { paymentDate: string; bankFileEntryId: string | null }, userId: string) {
+    // A row in another currency than SEK needs the SEK that left the account
+    // (amountSek, from camt.054's TxAmt or typed in Bekräfta utförd) and the
+    // bank's fee in SEK (bankFeeSek); the registration refuses it without
+    // (400 supplier-payment-amount-sek, reason required). A SEK row passes
+    // neither, exactly as before.
+    async confirmItemInTx(
+      tx: Tx,
+      itemId: string,
+      opts: { paymentDate: string; bankFileEntryId: string | null; amountSek?: number; bankFeeSek?: number },
+      userId: string
+    ) {
       const found = await repo.findItem(tx, itemId);
       if (!found) throw new PaymentBatchItemNotFoundError(itemId);
       const batch = (await repo.lockBatch(tx, found.batchId))!;
@@ -405,6 +591,8 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
           paymentDate: opts.paymentDate,
           bankAccountNumber: batch.bankAccountNumber,
           amount,
+          ...(opts.amountSek !== undefined ? { amountSek: opts.amountSek } : {}),
+          ...(opts.bankFeeSek !== undefined ? { bankFeeSek: opts.bankFeeSek } : {}),
           note: `Betalfil ${batch.batchNumber}, post ${item.endToEndId}`,
           rows: [{ supplierInvoiceId: item.supplierInvoiceId, appliedAmount: amount }],
         },
@@ -416,7 +604,13 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
         tx,
         batch.batchNumber,
         "item_confirmed",
-        { endToEndId: item.endToEndId, payment: result.paymentNumber, via: opts.bankFileEntryId ? "bank_file" : "manual", date: opts.paymentDate },
+        {
+          endToEndId: item.endToEndId,
+          payment: result.paymentNumber,
+          via: opts.bankFileEntryId ? "bank_file" : "manual",
+          date: opts.paymentDate,
+          ...(item.currency !== SEK ? { currency: item.currency, amount, amountSek: opts.amountSek ?? null, bankFeeSek: opts.bankFeeSek ?? 0 } : {}),
+        },
         userId
       );
       await closeIfDone(tx, batch, userId);
@@ -433,6 +627,7 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
       // rows (spec §4.4) — each chosen id that is not an exported row of
       // this batch is answered per row, never silently dropped.
       const chosen = input.itemIds ? new Set(input.itemIds) : null;
+      const sekAmounts = new Map((input.amounts ?? []).map((a) => [a.itemId, a]));
       const results: ItemResult[] = [];
       const refuse = (itemId: string, endToEndId: string, status: string) =>
         results.push({ itemId, ok: false, error: errorBody(new PaymentBatchItemNotConfirmableError(endToEndId, status)) });
@@ -445,7 +640,15 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
           continue;
         }
         try {
-          const done = await db.transaction((tx) => service.confirmItemInTx(tx, row.item.id, { paymentDate: input.paymentDate, bankFileEntryId: null }, userId));
+          const sek = sekAmounts.get(row.item.id);
+          const done = await db.transaction((tx) =>
+            service.confirmItemInTx(
+              tx,
+              row.item.id,
+              { paymentDate: input.paymentDate, bankFileEntryId: null, amountSek: sek?.amountSek, bankFeeSek: sek?.bankFeeSek },
+              userId
+            )
+          );
           results.push({ itemId: row.item.id, ok: true, paymentNumber: done.paymentNumber });
         } catch (err) {
           results.push({ itemId: row.item.id, ok: false, error: errorBody(err as Error) });
@@ -461,7 +664,12 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
     // cancelled with an omföring on the return's booking date; a row never
     // confirmed is simply rejected. Lock order: batch → row (→ payment →
     // invoices inside cancelInTx).
-    async returnItemInTx(tx: Tx, itemId: string, entry: { id: string | null; bookingDate: string; returnReason: string | null }, userId: string) {
+    async returnItemInTx(
+      tx: Tx,
+      itemId: string,
+      entry: { id: string | null; bookingDate: string; returnReason: string | null; amountSek?: number },
+      userId: string
+    ) {
       const found = await repo.findItem(tx, itemId);
       if (!found) throw new PaymentBatchItemNotFoundError(itemId);
       const batch = (await repo.lockBatch(tx, found.batchId))!;
@@ -473,6 +681,11 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
         if (!payment) throw new Error(`Payment batch row ${item.endToEndId} is confirmed but has no live payment`);
         // An omföring dated before the payment it reverses is never right.
         if (entry.bookingDate < payment.paymentDate) throw new BankReturnBeforePaymentError(item.endToEndId, payment.paymentDate, entry.bookingDate);
+        // A payment in another currency: the omföring reverses the SEK the
+        // payment took — only right when the bank returned exactly that.
+        if (payment.currency !== SEK && entry.amountSek !== undefined && round2(entry.amountSek) !== round2(Number(payment.amountSek))) {
+          throw new BankReturnSekDiffersError(item.endToEndId, Number(payment.amountSek), entry.amountSek);
+        }
         await deps.supplierPayments.cancelInTx(tx, payment.id, userId, { date: entry.bookingDate });
         await tx
           .update(paymentBatchItems)

@@ -38,6 +38,8 @@ import { BAS_STANDARD_ACCOUNTS } from "../../src/modules/economy/service/bas-acc
 import { rejectMalformedIds } from "../../src/modules/system/middleware/reject-malformed-ids.js";
 import { isBookkeepingLockViolation } from "../../src/modules/system/service/db-errors.js";
 import { computeOcrNumber } from "../../src/modules/system/service/ocr.js";
+import { ExchangeRateUnavailableError } from "../../src/modules/system/service/exchange-rates.js";
+import { toSek } from "@navet/shared";
 import { DEFAULT_POSTING_SETTINGS, testEconomyRepository, testEconomyService, testSystemService } from "./services.js";
 import { vatCodeId } from "./vat-codes.js";
 
@@ -137,8 +139,13 @@ export async function makeApprovedSupplierInvoice(
     invoiceNumber?: string;
     paymentReferenceKind?: "ocr" | "message" | null;
     paymentReference?: string | null;
+    // Valuta: an invoice in another currency, attested at `exchangeRate`.
+    currency?: string;
+    exchangeRate?: number;
   }
 ) {
+  const currency = input.currency ?? "SEK";
+  const rate = currency === "SEK" ? 1 : input.exchangeRate ?? 11.131;
   const [row] = await db
     .insert(supplierInvoices)
     .values({
@@ -148,13 +155,15 @@ export async function makeApprovedSupplierInvoice(
       vatCodeId: await vatCodeId("MP25"),
       invoiceDate: input.invoiceDate ?? `${BANK_YEAR}-09-15`,
       dueDate: input.dueDate === undefined ? `${BANK_YEAR}-10-15` : input.dueDate,
-      currency: "SEK",
+      currency,
+      exchangeRate: String(rate),
+      exchangeRateSource: currency === "SEK" ? null : "manual",
       status: "approved",
       netAmount: String(Math.round((input.gross / 1.25) * 100) / 100),
       vatAmount: String(Math.round((input.gross - input.gross / 1.25) * 100) / 100),
       grossAmount: String(input.gross),
       // Valuta: an attested invoice carries its SEK debt.
-      grossAmountSek: String(input.gross),
+      grossAmountSek: String(currency === "SEK" ? input.gross : toSek(input.gross, rate)),
       paymentReferenceKind: input.paymentReferenceKind ?? null,
       paymentReference: input.paymentReference ?? null,
     })
@@ -206,6 +215,10 @@ export async function makeBankEntry(input: {
   counterpartyName?: string | null;
   remittance?: BankEntryReference[];
   dedupeKey?: string;
+  // Valuta steg 2: a payment in another currency from the SEK account.
+  instructedAmount?: number;
+  instructedCurrency?: string;
+  chargesAmount?: number;
 }) {
   fixtureCounter += 1;
   const data = Buffer.from(`fixture-${fixtureCounter}-${crypto.randomUUID()}`);
@@ -238,6 +251,9 @@ export async function makeBankEntry(input: {
       counterpartyName: input.counterpartyName ?? null,
       remittance: input.remittance ?? [],
       position: 0,
+      instructedAmount: input.instructedAmount === undefined ? null : String(input.instructedAmount),
+      instructedCurrency: input.instructedCurrency ?? null,
+      chargesAmount: input.chargesAmount === undefined ? null : String(input.chargesAmount),
     })
     .returning();
   return { file: file!, entry: entry! };
@@ -303,14 +319,34 @@ export const testPoster = createVerificationPoster({ read: readPostingSettings }
 export const testSupplierPaymentService = createSupplierPaymentService(createSupplierPaymentRepository(db), testPoster, createAuditRepository(db));
 export const testBankSettingsService = createBankSettingsService({ repo: createBankSettingsRepository(db), audit: createAuditRepository(db) });
 
+// A fixed exchange rate table for the KU81 threshold — a currency missing
+// from it answers ExchangeRateUnavailableError, like the real reader when
+// Riksbanken has nothing.
+export function fakeExchangeRates(rates: Record<string, number>, date = TODAY) {
+  const asked: string[] = [];
+  return {
+    asked,
+    async getRate(currency: string, requestedDate: string) {
+      asked.push(`${currency} ${requestedDate}`);
+      if (currency === "SEK") return { currency, requestedDate, date: requestedDate, rate: 1, source: null };
+      const rate = rates[currency];
+      if (rate === undefined) throw new ExchangeRateUnavailableError(currency, requestedDate);
+      return { currency, requestedDate, date, rate, source: "riksbank" as const };
+    },
+  };
+}
+
 // The payment batch service as app.ts wires it, on the fixed CLOCK unless a
-// test moves time (export/confirmation after the execution date).
-export function buildPaymentBatchService(now: () => Date = () => CLOCK) {
+// test moves time (export/confirmation after the execution date). Without
+// `exchangeRates` every payment abroad in another currency than SEK is
+// reported (no rate = the safe side).
+export function buildPaymentBatchService(now: () => Date = () => CLOCK, exchangeRates?: ReturnType<typeof fakeExchangeRates>) {
   return createPaymentBatchService({
     db,
     repo: createPaymentBatchRepository(db),
     bankSettings: testBankSettingsService,
     supplierPayments: testSupplierPaymentService,
+    exchangeRates,
     now,
   });
 }
@@ -329,11 +365,11 @@ const testPaymentRepository = createPaymentRepository(db);
 export const testPaymentService = createPaymentService(testPaymentRepository, testPoster, createAuditRepository(db));
 
 // The bank file service as app.ts wires it, on the fixed CLOCK.
-export function buildBankFileService(now: () => Date = () => CLOCK) {
+export function buildBankFileService(now: () => Date = () => CLOCK, exchangeRates?: ReturnType<typeof fakeExchangeRates>) {
   return createBankFileService({
     db,
     repo: createBankFileRepository(db),
-    batches: buildPaymentBatchService(now),
+    batches: buildPaymentBatchService(now, exchangeRates),
     customerPayments: testPaymentService,
     receivables: testPaymentRepository,
     company: createBankSettingsRepository(db),

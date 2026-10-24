@@ -156,11 +156,11 @@ describe("pain.001 — Swedbank (primär profil)", () => {
     ]);
     expect(items.find((i) => i.endToEndId === "BO-7-1")!.snapshot).toEqual({
       method: "bankgiro", account: "50501055", clearing: null, bic: null, name: "Plåtlagret AB",
-      postalCode: "75320", city: "Uppsala", referenceKind: "ocr", reference: "4605127",
+      postalCode: "75320", city: "Uppsala", referenceKind: "ocr", reference: "4605127", kind: "domestic", currency: "SEK",
     });
     expect(items.find((i) => i.endToEndId === "BO-7-4")!.snapshot).toEqual({
       method: "iban", account: "SE3550000000054910000003", clearing: null, bic: "ESSESESS", name: "Exempelslipen AB",
-      postalCode: "80267", city: "Gävle", referenceKind: "message", reference: "F 2026-0457",
+      postalCode: "80267", city: "Gävle", referenceKind: "message", reference: "F 2026-0457", kind: "domestic", currency: "SEK",
     });
   });
 
@@ -246,15 +246,19 @@ describe("pain.001 — Swedbank (primär profil)", () => {
     ]);
   });
 
-  it("refuses a foreign IBAN and a debit account the bank does not take", () => {
+  // Valuta steg 2: a foreign IBAN is a payment abroad — it needs the
+  // payee's street and a debit account the bank takes abroad (Swedbank:
+  // IBAN, never the bankgiro).
+  it("refuses a debit account the bank does not take, and a payment abroad without street or foreign debit account", () => {
     const input = exampleInput({ account: { kind: "iban", value: "SE4550000000058398257466" } });
-    input.items[2]!.creditor = { ...input.items[2]!.creditor, method: "iban", iban: "DE89370400440532013000", bic: "COBADEFF", clearing: null, account: null };
+    input.items[2]!.creditor = { ...input.items[2]!.creditor, method: "iban", iban: "DE89370400440532013000", bic: "COBADEFF", clearing: null, account: null, country: "DE" };
+    input.items[2]!.reference = { kind: "message", value: "Invoice 88213" };
     const violations = checkPain001(input, profile, TODAY);
-    const messages = violations.map((v) => v.message);
-    expect(messages).toContain("Swedbank tar inte IBAN som debiteringskonto");
-    expect(messages).toContain("Utlandsbetalningar stöds inte — bara svenska IBAN (SE…)");
-    // Only the foreign item is refused — the Swedish IBAN (BO-7-4) passes.
-    expect(violations.filter((v) => v.endToEndId !== null).map((v) => `${v.endToEndId}:${v.field}`)).toEqual(["BO-7-3:creditorAccount"]);
+    expect(violations.map((v) => `${v.endToEndId ?? "header"}:${v.field}:${v.message}`)).toEqual([
+      "header:debtorAccount:Swedbank tar inte IBAN som debiteringskonto",
+      "header:debtorForeignAccount:Swedbank kräver IBAN som debiteringskonto för utlandsbetalningar — lägg in det i Företagsinformation",
+      "BO-7-3:creditorStreet:Mottagarens gatuadress saknas (krävs för utlandsbetalningar)",
+    ]);
   });
 
   it("calls a foreign company debit IBAN out of scope, a broken one invalid", () => {
@@ -267,12 +271,14 @@ describe("pain.001 — Swedbank (primär profil)", () => {
     expect(broken).toEqual([{ endToEndId: null, field: "debtorAccount", message: "Företagets debiteringskonto är ogiltigt" }]);
   });
 
-  it("refuses a foreign IBAN in every profile, and an SE IBAN with a broken checksum", () => {
+  it("treats a foreign IBAN as a payment abroad in every profile, and refuses an SE IBAN with a broken checksum", () => {
     for (const profile of Object.values(BANK_PROFILES)) {
       const input = exampleInput();
       input.items[3]!.creditor.iban = "NO9386011117947";
+      input.items[3]!.creditor.country = "NO";
+      // No street: the one thing the item lacks for a payment abroad.
       expect(checkPain001(input, profile, TODAY).filter((v) => v.endToEndId === "BO-7-4")).toEqual([
-        { endToEndId: "BO-7-4", field: "creditorAccount", message: "Utlandsbetalningar stöds inte — bara svenska IBAN (SE…)" },
+        { endToEndId: "BO-7-4", field: "creditorStreet", message: "Mottagarens gatuadress saknas (krävs för utlandsbetalningar)" },
       ]);
     }
     const input = exampleInput();
@@ -329,17 +335,55 @@ describe("pain.001 — övriga profiler (golden-filer)", () => {
     await expect(xml).toMatchFileSnapshot("./fixtures/iso20022/pain001-handelsbanken.xml");
   });
 
-  it("SEB (overifierad): BANK id, clearing included in the BBAN", async () => {
+  // Verified against SEB's MIG v26.4.0.0 (valuta steg 2): SvcLvl Prtry MPNS,
+  // a 4-digit clearing as MmbId, Annex 5's BBAN rules.
+  it("SEB (verifierad): BANK id, MPNS, 4-digit MmbId, the 8-series BBAN padded to 15", async () => {
     const input = exampleInput({ initiatingPartyId: "1234567890", account: { kind: "iban", value: "SE4550000000058398257466" } });
     expect(checkPain001(input, BANK_PROFILES.seb, TODAY)).toEqual([]);
     const { xml } = buildPain001(input, BANK_PROFILES.seb);
     expect(xml).toContain("<BIC>ESSESESS</BIC>");
     expect(xml).toContain("<MmbId>9960</MmbId>");
+    expect(xml).toContain("<PmtTpInf><SvcLvl><Prtry>MPNS</Prtry></SvcLvl><CtgyPurp><Cd>SUPP</Cd></CtgyPurp></PmtTpInf>");
+    expect(xml).not.toContain("<Cd>NURG</Cd>");
+    expect(xml).toContain("<MmbId>8327</MmbId>");
     expect(xml).toContain("<Id>832799941234123</Id>");
     expect(xml).toContain(SWEDISH_IBAN_ACCOUNT);
-    expect(BANK_PROFILES.seb.verified).toBe(false);
+    expect(BANK_PROFILES.seb.verified).toBe(true);
     expect(await validateAgainstXsd(xml, "pain.001.001.03")).toEqual([]);
     await expect(xml).toMatchFileSnapshot("./fixtures/iso20022/pain001-seb.xml");
+  });
+
+  // SEB Annex 5 "How to enter Swedish bank account numbers": clearing +
+  // account, except Handelsbanken, Danske Bank 9180–9189 and Nordea
+  // personkonto (account alone) and Swedbank's 8-series (padded to 15).
+  it("SEB: Annex 5's BBAN per clearing range, MmbId always the first 4 digits", () => {
+    const bban = (clearing: string, account: string) => {
+      const input = exampleInput({ initiatingPartyId: "1234567890", account: { kind: "iban", value: "SE4550000000058398257466" } });
+      input.items[2]!.creditor = { ...input.items[2]!.creditor, clearing, account };
+      const { xml, items } = buildPain001(input, BANK_PROFILES.seb);
+      const member = /<MmbId>(\d+)<\/MmbId><\/ClrSysMmbId><\/FinInstnId><\/CdtrAgt><Cdtr><Nm>Exempelhydraulik AB/.exec(xml)?.[1];
+      return [items.find((i) => i.endToEndId === "BO-7-3")!.snapshot.account, member];
+    };
+    expect(bban("6001", "898512345")).toEqual(["898512345", "6001"]);
+    expect(bban("9182", "1234567890")).toEqual(["1234567890", "9182"]);
+    expect(bban("3300", "7001011234")).toEqual(["7001011234", "3300"]);
+    expect(bban("82149", "123456")).toEqual(["821490000123456", "8214"]);
+    expect(bban("5440", "1060156")).toEqual(["54401060156", "5440"]);
+    expect(bban("1234", "5678901")).toEqual(["12345678901", "1234"]);
+    // Other profiles are unchanged: Swedbank keeps the 5-digit MmbId.
+    const input = exampleInput();
+    expect(buildPain001(input, BANK_PROFILES.swedbank).xml).toContain("<MmbId>83279</MmbId>");
+  });
+
+  it("SEB: a payment day more than 180 days ahead is refused (MIG: -60 - +180 calendar days)", () => {
+    const input = exampleInput({ initiatingPartyId: "1234567890", account: { kind: "iban", value: "SE4550000000058398257466" } });
+    input.items[0]!.executionDate = "2027-04-08"; // TODAY + 181
+    expect(checkPain001(input, BANK_PROFILES.seb, TODAY)).toEqual([
+      { endToEndId: "BO-7-1", field: "executionDate", message: "Betalningsdagen måste ligga mellan idag och 180 dagar framåt (SEB)" },
+    ]);
+    input.items[0]!.executionDate = "2027-04-07";
+    expect(checkPain001(input, BANK_PROFILES.seb, TODAY)).toEqual([]);
+    expect(checkPain001({ ...input, debtor: { ...input.debtor, account: { kind: "bankgiro", value: "5512348" }, initiatingPartyId: "123456789123B001" } }, BANK_PROFILES.swedbank, TODAY)).toEqual([]);
   });
 
   it("Nordea: CUST signer id, CCM agreement as debtor id, BIC agents, country-only addresses", async () => {

@@ -46,8 +46,11 @@ export const bankEntryDedupeSourceEnum = pgEnum("bank_entry_dedupe_source", [
 
 // What the exported file actually said about the creditor (sanitized values),
 // written at export — the draft reads the supplier/invoice live instead.
+// Valuta steg 2 adds the payment's kind and currency (every export since
+// 0144) and, for a payment abroad, what the file said about the payee's
+// address and bank and whether it was reported to Skatteverket (KU81).
 export interface CreditorSnapshot {
-  method: "bankgiro" | "plusgiro" | "bank_account" | "iban";
+  method: "bankgiro" | "plusgiro" | "bank_account" | "iban" | "foreign_account";
   account: string;
   clearing: string | null;
   bic: string | null;
@@ -56,6 +59,25 @@ export interface CreditorSnapshot {
   city: string | null;
   referenceKind: "ocr" | "message";
   reference: string;
+  kind?: "domestic" | "sepa" | "international";
+  currency?: string;
+  street?: string | null;
+  country?: string;
+  clearingSystem?: string | null;
+  bankName?: string | null;
+  chargeBearer?: "SLEV" | "SHAR" | "DEBT";
+  // KU81: the code sent, and the SEK value the threshold was judged on (null
+  // = no rate could be found, so the payment was reported to be safe).
+  regulatoryReporting?: { code: string; amountSek: number | null; rate: number | null; rateDate: string | null } | null;
+}
+
+// camt.054 TxDtls/AmtDtls/TxAmt/CcyXchg as the bank wrote it (display only —
+// the booking takes the amounts, never the rate).
+export interface BankEntryCurrencyExchange {
+  sourceCurrency: string;
+  targetCurrency: string | null;
+  unitCurrency: string | null;
+  rate: string;
 }
 
 export interface BankEntryReference {
@@ -107,6 +129,9 @@ export const paymentBatchItems = pgTable(
       .notNull()
       .references(() => suppliers.id, { onDelete: "restrict" }),
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    // The invoice's currency (valuta steg 2) — the amount is in it, and it is
+    // the file's InstdAmt Ccy.
+    currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
     executionDate: date("execution_date").notNull(),
     status: paymentBatchItemStatusEnum("status").notNull().default("pending"),
     creditorSnapshot: jsonb("creditor_snapshot").$type<CreditorSnapshot>(),
@@ -188,6 +213,14 @@ export const bankFileEntries = pgTable(
     // "references" is a reserved word in SQL, hence the name.
     remittance: jsonb("remittance").$type<BankEntryReference[]>().notNull(),
     returnReason: varchar("return_reason", { length: 10 }),
+    // Valuta steg 2: the instructed amount when it is in another currency
+    // than the entry (InstdAmt — a payment in EUR debited to the SEK
+    // account), the bank's exchange details, and the charges the bank says
+    // are INCLUDED in the entry amount (account currency).
+    instructedAmount: numeric("instructed_amount", { precision: 14, scale: 2 }),
+    instructedCurrency: varchar("instructed_currency", { length: 3 }),
+    currencyExchange: jsonb("currency_exchange").$type<BankEntryCurrencyExchange>(),
+    chargesAmount: numeric("charges_amount", { precision: 14, scale: 2 }),
     position: integer("position").notNull(),
     ignoredAt: timestamp("ignored_at", { withTimezone: true }),
     ignoredBy: uuid("ignored_by").references(() => users.id, { onDelete: "set null" }),
@@ -196,6 +229,8 @@ export const bankFileEntries = pgTable(
   },
   (table) => [
     check("bank_file_entries_amount_positive", sql`${table.amount} > 0`),
+    check("bank_file_entries_instructed_pair", sql`(${table.instructedAmount} is null) = (${table.instructedCurrency} is null)`),
+    check("bank_file_entries_charges_non_negative", sql`${table.chargesAmount} is null or ${table.chargesAmount} >= 0`),
     index("idx_bank_file_entries_file").on(table.bankFileId),
     index("idx_bank_file_entries_e2e").on(table.endToEndId),
     index("idx_bank_file_entries_booking_date").on(table.bookingDate),

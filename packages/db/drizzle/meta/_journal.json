@@ -1009,6 +1009,13 @@
       "when": 1792836080317,
       "tag": "0143_exchange_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1792840490105,
+      "tag": "0144_valuta_foreign_payments",
+      "breakpoints": true
     }
   ]
 }

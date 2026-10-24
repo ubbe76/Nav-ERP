@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { bankFiles, db, numberSeries, paymentBatchItems, paymentBatches, suppliers, supplierInvoices } from "@navet/db";
+import { bankFileEntries, bankFiles, db, numberSeries, paymentBatchItems, paymentBatches, suppliers, supplierInvoices } from "@navet/db";
 import { isBookkeepingLockViolation } from "../src/modules/system/service/db-errors.js";
 import { expectConstraint, failure } from "./helpers/year-end.js";
 import { makeApprovedSupplierInvoice, makeSupplier, resetBanking, setupBanking } from "./helpers/banking.js";
@@ -108,5 +108,33 @@ describe("migration 0107", () => {
       "supplier_invoices_payment_reference_pair"
     );
     await db.update(supplierInvoices).set({ paymentReferenceKind: "ocr", paymentReference: "4605127" }).where(eq(supplierInvoices.id, invoice.id));
+  });
+});
+
+describe("migration 0144 (utlandsbetalningar)", () => {
+  it("gives a batch row its currency (förval SEK) and keeps a bank entry's instructed amount and currency together", async () => {
+    const supplier = await makeSupplier();
+    const invoice = await makeApprovedSupplierInvoice(supplier.id, { registrationNumber: "LF-T20", gross: 100 });
+    const batch = await makeBatch("BO-T20");
+    const [row] = await db
+      .insert(paymentBatchItems)
+      .values({ batchId: batch.id, seq: 1, endToEndId: "BO-T20-1", supplierInvoiceId: invoice.id, supplierId: supplier.id, amount: "100", executionDate: "2024-10-15" })
+      .returning();
+    expect(row!.currency).toBe("SEK");
+    const [file] = await db
+      .insert(bankFiles)
+      .values({ direction: "incoming", messageType: "camt.054.001.02", filename: "fx.xml", contentType: "application/xml", sizeBytes: 1, sha256: "e".repeat(64), data: Buffer.from("x") })
+      .returning();
+    const entry = {
+      bankFileId: file!.id, dedupeSource: "tx_acct_svcr_ref" as const, direction: "debit" as const, account: "1", amount: "13938.75", currency: "SEK",
+      bookingDate: "2024-10-15", remittance: [], position: 0,
+    };
+    await expectConstraint(db.insert(bankFileEntries).values({ ...entry, dedupeKey: "k1", instructedAmount: "1250" }), "bank_file_entries_instructed_pair");
+    await expectConstraint(db.insert(bankFileEntries).values({ ...entry, dedupeKey: "k2", chargesAmount: "-1" }), "bank_file_entries_charges_non_negative");
+    const [ok] = await db
+      .insert(bankFileEntries)
+      .values({ ...entry, dedupeKey: "k3", instructedAmount: "1250", instructedCurrency: "EUR", chargesAmount: "25", currencyExchange: { sourceCurrency: "SEK", targetCurrency: "EUR", unitCurrency: "EUR", rate: "11.131" } })
+      .returning();
+    expect(ok).toMatchObject({ instructedAmount: "1250.00", instructedCurrency: "EUR", chargesAmount: "25.00" });
   });
 });

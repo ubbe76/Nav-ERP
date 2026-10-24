@@ -15,6 +15,11 @@ const FIXTURES = [
   "camt054-handelsbanken-debit.xml",
   "camt054-nordea-credit.xml",
   "camt054-nordea-debit.xml",
+  // Valuta steg 2: payments abroad debited to the SEK account (own, made up).
+  "camt054-swedbank-debit-fx.xml",
+  "camt054-seb-debit-fx.xml",
+  "camt054-handelsbanken-debit-fx.xml",
+  "camt054-nordea-debit-fx.xml",
 ];
 
 describe("fixturerna", () => {
@@ -62,6 +67,10 @@ describe("Swedbank (primär profil)", () => {
       dedupeKey: "821491234567890|tx:202410098402000100000001",
       dedupeSource: "tx_acct_svcr_ref",
       position: 0,
+      instructedAmount: null,
+      instructedCurrency: null,
+      currencyExchange: null,
+      chargesAmount: null,
     });
     expect(parsed.entries[2]!.remittance).toEqual([{ type: "USTRD", value: "Faktura september", amount: null }]);
     expect(parsed.entries[3]!.remittance).toEqual([
@@ -163,6 +172,96 @@ describe("Handelsbanken och Nordea", () => {
     expect(credit).toMatchObject({ dedupeKey: "SE4550000000058398257466|tx:NDEA-T-77810-1", valueDate: "2024-10-09" });
     const debit = parseCamt054(fixture("camt054-nordea-debit.xml")).entries[0]!;
     expect(debit).toMatchObject({ dedupeKey: "SE4550000000058398257466|tx:NDEA-D-5512", endToEndId: "BO-7-1" });
+  });
+});
+
+// Valuta steg 2: a payment in another currency from the SEK account. The
+// entry's amount stays the SEK that left the account (TxAmt); the instructed
+// amount in the invoice's currency, the bank's exchange details and the
+// charges included in the entry come along.
+describe("utlandsbetalningar (debet med växling)", () => {
+  it("Swedbank: InstdAmt EUR, TxAmt SEK with CcyXchg (SrcCcy = the account), charges included", () => {
+    const [entry, ...rest] = parseCamt054(fixture("camt054-swedbank-debit-fx.xml")).entries;
+    expect(rest).toEqual([]);
+    expect(entry).toMatchObject({
+      direction: "debit",
+      endToEndId: "BO-9-1",
+      amount: 13938.75,
+      currency: "SEK",
+      instructedAmount: 1250,
+      instructedCurrency: "EUR",
+      currencyExchange: { sourceCurrency: "SEK", targetCurrency: "EUR", unitCurrency: "EUR", rate: "11.131" },
+      chargesAmount: 25,
+      valueDate: "2026-10-15",
+    });
+  });
+
+  it("SEB: the rate the other way round (SrcCcy EUR), and the separately debited fee is an entry of its own without EndToEndId", () => {
+    const parsed = parseCamt054(fixture("camt054-seb-debit-fx.xml"));
+    expect(parsed.entries.map((e) => [e.endToEndId, e.amount, e.instructedAmount, e.instructedCurrency, e.chargesAmount])).toEqual([
+      ["BO-12-1", 27385.4, 2480, "EUR", null],
+      [null, 50, null, null, null],
+    ]);
+    expect(parsed.entries[0]!.currencyExchange).toEqual({ sourceCurrency: "EUR", targetCurrency: "SEK", unitCurrency: "EUR", rate: "11.0425" });
+  });
+
+  it("Handelsbanken: COMM is included in the entry, a proprietary SCOM charge is debited separately and is not", () => {
+    const [entry] = parseCamt054(fixture("camt054-handelsbanken-debit-fx.xml")).entries;
+    expect(entry).toMatchObject({ endToEndId: "BO-9-3", amount: 10163.89, instructedAmount: 980, instructedCurrency: "USD", chargesAmount: 40 });
+  });
+
+  it("Nordea: no charges reported; a zero entry is noted and skipped", () => {
+    const parsed = parseCamt054(fixture("camt054-nordea-debit-fx.xml"));
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0]).toMatchObject({ endToEndId: "BO-9-2", amount: 44438, instructedAmount: 3400, instructedCurrency: "GBP", chargesAmount: null });
+    expect(parsed.entries[0]!.currencyExchange).toEqual({ sourceCurrency: "GBP", targetCurrency: "SEK", unitCurrency: null, rate: "13.07" });
+    expect(parsed.warnings).toEqual([
+      "Transaktion 1 i post 2 har belopp 0 i kontots valuta (instruerat 500.00 EUR) och hoppades över — kontrollera betalningen i internetbanken",
+    ]);
+  });
+
+  it("a SEK InstdAmt is no instructed amount of its own; without TxAmt a one-transaction entry takes the entry amount, never a foreign InstdAmt", () => {
+    // Domestic files are read exactly as before: no new fields.
+    const [domestic] = parseCamt054(fixture("camt054-nordea-debit.xml")).entries;
+    expect(domestic).toMatchObject({ amount: 12500, currency: "SEK", instructedAmount: null, instructedCurrency: null, currencyExchange: null, chargesAmount: null });
+    const noTxAmt = fixture("camt054-nordea-debit-fx.xml").replace(/<TxAmt>\s*<Amt Ccy="SEK">44438\.00<\/Amt>[\s\S]*?<\/TxAmt>/, "");
+    const [entry] = parseCamt054(noTxAmt).entries;
+    expect(entry).toMatchObject({ amount: 44438, currency: "SEK", instructedAmount: 3400, instructedCurrency: "GBP" });
+  });
+
+  it("keeps the content hash of a reference-less entry unchanged by the new fields", () => {
+    const xml = camtFile({ messageId: "H-1", entries: [{ direction: "debit", amount: 100, bookingDate: "2024-10-09", txs: [{ amount: 100, counterparty: "X" }] }] });
+    const withFx = camtFile({
+      messageId: "H-1",
+      entries: [{ direction: "debit", amount: 100, bookingDate: "2024-10-09", txs: [{ amount: 100, counterparty: "X", instructed: { amount: 9, currency: "EUR" }, charges: [{ amount: 1, code: "COMM" }] }] }],
+    });
+    expect(parseCamt054(withFx).entries[0]!.dedupeKey).toBe(parseCamt054(xml).entries[0]!.dedupeKey);
+  });
+
+  it("the test builder's exchange case is valid against the XSD", async () => {
+    const xml = camtFile({
+      messageId: "F-1",
+      account: "SE4550000000058398257466",
+      entries: [
+        {
+          direction: "debit",
+          amount: 13938.75,
+          bookingDate: "2024-10-15",
+          txs: [
+            {
+              endToEndId: "BO-1-1",
+              acctSvcrRef: "T1",
+              amount: 13938.75,
+              instructed: { amount: 1250, currency: "EUR" },
+              exchange: { source: "EUR", target: "SEK", unit: "EUR", rate: "11.131" },
+              charges: [{ amount: 25, code: "COMM" }, { amount: 75, proprietary: "SCOM" }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(await validateAgainstXsd(xml, "camt.054.001.02")).toEqual([]);
+    expect(parseCamt054(xml).entries[0]).toMatchObject({ instructedAmount: 1250, chargesAmount: 25 });
   });
 });
 

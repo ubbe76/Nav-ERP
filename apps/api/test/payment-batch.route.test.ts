@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { db } from "@navet/db";
+import { companyInfo, db } from "@navet/db";
 import { paymentBatchRoutes } from "../src/modules/banking/routes/payment-batch.routes.js";
 import {
   buildPaymentBatchService,
@@ -95,6 +95,35 @@ describe("/payment-batches", () => {
     const again = await app.inject({ method: "POST", url: `/payment-batches/${batch.id}/items/${second!.id}/reject`, payload: { reason: "Fel konto" } });
     expect(again.statusCode).toBe(409);
     expect((await app.inject({ method: "POST", url: `/payment-batches/${batch.id}/cancel` })).json().code).toBe("invalid-status-transition");
+  });
+
+  // Valuta steg 2: Bekräfta utförd takes the SEK amount per row in another
+  // currency; malformed amounts are a 400 before anything is booked.
+  it("confirm takes amounts per row (amountSek, bankFeeSek) and validates them", async () => {
+    await db.update(companyInfo).set({ iban: "SE4550000000058398257466" });
+    const de = await makeSupplier({ name: "Muller GmbH", country: "DE", address: "Hauptstrasse 5", city: "Berlin", paymentMethod: "iban", iban: "DE89370400440532013000" });
+    const eur = await makeApprovedSupplierInvoice(de.id, { registrationNumber: "LF-76", gross: 1000, currency: "EUR", exchangeRate: 11.131, dueDate: "2024-10-09" });
+    const app = buildRouteApp(paymentBatchRoutes, { service }, { id: userId });
+    const batch = (await app.inject({ method: "POST", url: "/payment-batches", payload: { invoiceIds: [eur.id] } })).json();
+    // This service has no rate reader: a payment in EUR is reported for safety.
+    expect(batch.items[0]).toMatchObject({ currency: "EUR", paymentKind: "sepa", regulatoryReporting: { code: "101", amountSek: null, rateMissing: true }, problems: [] });
+    expect((await app.inject({ method: "POST", url: `/payment-batches/${batch.id}/export` })).statusCode).toBe(200);
+    const itemId = batch.items[0].id as string;
+    const url = `/payment-batches/${batch.id}/confirm`;
+    const duplicate = await app.inject({ method: "POST", url, payload: { paymentDate: "2024-10-09", amounts: [{ itemId, amountSek: 11131 }, { itemId, amountSek: 11131 }] } });
+    expect(duplicate.statusCode).toBe(400);
+    const outside = await app.inject({
+      method: "POST",
+      url,
+      payload: { paymentDate: "2024-10-09", itemIds: [itemId], amounts: [{ itemId: "00000000-0000-4000-8000-000000000000", amountSek: 1 }] },
+    });
+    expect(outside.statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url, payload: { paymentDate: "2024-10-09", amounts: [{ itemId, amountSek: -5 }] } })).statusCode).toBe(400);
+    // A blank fee is a 400 (blankSafe), never a silent 0.
+    expect((await app.inject({ method: "POST", url, payload: { paymentDate: "2024-10-09", amounts: [{ itemId, amountSek: 11200, bankFeeSek: "" }] } })).statusCode).toBe(400);
+    const ok = await app.inject({ method: "POST", url, payload: { paymentDate: "2024-10-09", amounts: [{ itemId, amountSek: "11200" }] } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().results).toEqual([{ itemId, ok: true, paymentNumber: expect.stringMatching(/^UTB-/) }]);
   });
 
   it("lets ekonomi read but only inkop write", async () => {

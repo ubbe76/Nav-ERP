@@ -272,6 +272,9 @@ export const ERROR_CODES = {
   BANK_ENTRY_NOT_MATCHED: "bank-entry-not-matched",
   BANK_ENTRY_AMOUNT_DIFFERS: "bank-entry-amount-differs",
   BANK_RETURN_BEFORE_PAYMENT: "bank-return-before-payment",
+  // Valuta steg 2: a returned payment in another currency came back with
+  // another SEK amount than it took (409 — cancel and book the difference by hand).
+  BANK_RETURN_SEK_DIFFERS: "bank-return-sek-differs",
   // configurator
   CONFIGURATOR_TEMPLATE_NOT_FOUND: "configurator-template-not-found",
   CONFIGURATOR_TEMPLATE_EXISTS: "configurator-template-exists",

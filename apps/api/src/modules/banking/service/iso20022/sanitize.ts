@@ -7,17 +7,22 @@ export interface SanitizedText {
   truncated: boolean;
 }
 
+// The character set a text is fitted into: the profile's domestic one, or
+// its `foreign.charset` for a payment abroad (valuta steg 2).
+export type CharsetHolder = Pick<BankProfile, "charset">;
+
 const COMBINING_MARKS = /[̀-ͯ]/g;
 
-// Substitutions first (`&` → ` och `), then per character: kept when the
-// bank's set allows it (åäö included — NFC up front composes a decomposed
-// å), else its base letter without diacritics (é → e), else a space (emoji,
-// `<`, line breaks). Spaces collapse, the ends are trimmed, then the text is
-// cut to `max`. `changed` compares against the NFC-trimmed input.
-export function sanitizeText(value: string, profile: BankProfile, max: number): SanitizedText {
+// Substitutions first, verbatim (`&` → ` och `, `ß` → `ss`), then per
+// character: kept when the set allows it (åäö in the domestic set — NFC up
+// front composes a decomposed å), else its base letter without diacritics
+// (é → e), else a space (emoji, `<`, line breaks). Spaces collapse, the ends
+// are trimmed, then the text is cut to `max`. `changed` compares against the
+// NFC-trimmed input.
+export function sanitizeText(value: string, profile: CharsetHolder, max: number): SanitizedText {
   const original = value.normalize("NFC").trim();
   let text = original;
-  for (const [from, to] of Object.entries(profile.charset.substitutions)) text = text.split(from).join(` ${to} `);
+  for (const [from, to] of Object.entries(profile.charset.substitutions)) text = text.split(from).join(to);
   let out = "";
   for (const ch of text) {
     if (profile.charset.allowed.test(ch)) {

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Handelsbanken's camt.054 v2 Debit Notification 1.0.7 (not a copy). -->
+<!-- USD 980.00 from the SEK account: TxAmt includes the commission reported as Chrgs/Tp/Cd COMM; a charge with Prtry SCOM is debited separately and is not part of the entry. -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>HB2026101500031</MsgId><CreDtTm>2026-10-15T19:30:00</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>HB2026101500031-1</Id>
+      <CreDtTm>2026-10-15T19:30:00</CreDtTm>
+      <Acct><Id><IBAN>SE4550000000058398257466</IBAN></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <Amt Ccy="SEK">10163.89</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-10-15</Dt></BookgDt>
+        <AcctSvcrRef>HB-2026101500031</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>XBCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><MsgId>BO-9</MsgId><PmtInfId>BO-9-20261015D</PmtInfId><EndToEndId>BO-9-3</EndToEndId></Refs>
+            <AmtDtls>
+              <InstdAmt><Amt Ccy="USD">980.00</Amt></InstdAmt>
+              <TxAmt>
+                <Amt Ccy="SEK">10163.89</Amt>
+                <CcyXchg><SrcCcy>USD</SrcCcy><TrgtCcy>SEK</TrgtCcy><UnitCcy>USD</UnitCcy><XchgRate>10.3305</XchgRate></CcyXchg>
+              </TxAmt>
+            </AmtDtls>
+            <Chrgs><Amt Ccy="SEK">40.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><Tp><Cd>COMM</Cd></Tp><Br>DEBT</Br></Chrgs>
+            <Chrgs><Amt Ccy="SEK">75.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><Tp><Prtry><Id>SCOM</Id></Prtry></Tp></Chrgs>
+            <RltdPties><Cdtr><Nm>Lakeside Tooling Inc.</Nm></Cdtr></RltdPties>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Swedbank's MIG 1.0 camt.054.001.02 Debit, AmtDtls/CcyXchg and Chrgs (not a copy; Swedbank's example files have no exchange case). -->
+<!-- A SEPA payment of EUR 1 250.00 from the SEK account: TxAmt is what left the account, charges included; SrcCcy = the account's currency. -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02">
+  <BkToCstmrDbtCdtNtfctn>
+    <GrpHdr><MsgId>SWEDSESSDEBT20261015000004</MsgId><CreDtTm>2026-10-15T18:02:11</CreDtTm></GrpHdr>
+    <Ntfctn>
+      <Id>SWEDSESSDEBT2026101500000400001</Id>
+      <CreDtTm>2026-10-15T18:02:11</CreDtTm>
+      <Acct><Id><IBAN>SE4550000000058398257466</IBAN></Id><Ccy>SEK</Ccy></Acct>
+      <Ntry>
+        <Amt Ccy="SEK">13938.75</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2026-10-15</Dt></BookgDt>
+        <ValDt><Dt>2026-10-15</Dt></ValDt>
+        <AcctSvcrRef>2026101577260041</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>NTAV</Cd><SubFmlyCd>NTAV</SubFmlyCd></Fmly></Domn></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs>
+              <MsgId>BO-9</MsgId>
+              <AcctSvcrRef>202610157726004100000001</AcctSvcrRef>
+              <PmtInfId>BO-9-20261015S</PmtInfId>
+              <EndToEndId>BO-9-1</EndToEndId>
+            </Refs>
+            <AmtDtls>
+              <InstdAmt><Amt Ccy="EUR">1250.00</Amt></InstdAmt>
+              <TxAmt>
+                <Amt Ccy="SEK">13938.75</Amt>
+                <CcyXchg><SrcCcy>SEK</SrcCcy><TrgtCcy>EUR</TrgtCcy><UnitCcy>EUR</UnitCcy><XchgRate>11.131</XchgRate></CcyXchg>
+              </TxAmt>
+            </AmtDtls>
+            <Chrgs><Amt Ccy="SEK">25.00</Amt><Tp><Cd>COMM</Cd></Tp><Br>SLEV</Br></Chrgs>
+            <RltdPties><Cdtr><Nm>Muller and Sohne GmbH</Nm></Cdtr></RltdPties>
+            <RmtInf><Ustrd>Rechnung 2026-311</Ustrd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+    </Ntfctn>
+  </BkToCstmrDbtCdtNtfctn>
+</Document>
