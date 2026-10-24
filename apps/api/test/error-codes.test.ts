@@ -19,6 +19,7 @@ import {
 import { errorBody } from "../src/modules/system/service/error-body.js";
 import {
   PriceListCurrencyLockedError,
+  SalesOrderCurrencyChangedError,
   SalesOrderCurrencyLockedError,
   SalesOrderExchangeRateError,
 } from "../src/modules/sales/service/sales.errors.js";
@@ -490,6 +491,7 @@ const cases: Array<[Error, string]> = [
   [new SupplierPaymentAmountSekError("required", "EUR"), ERROR_CODES.SUPPLIER_PAYMENT_AMOUNT_SEK],
   // Valuta steg 3 (försäljning i valuta)
   [new SalesOrderCurrencyLockedError("KO-1"), ERROR_CODES.SALES_ORDER_CURRENCY_LOCKED],
+  [new SalesOrderCurrencyChangedError("KO-1", "SEK", "EUR"), ERROR_CODES.SALES_ORDER_CURRENCY_CHANGED],
   [new SalesOrderExchangeRateError(), ERROR_CODES.SALES_ORDER_EXCHANGE_RATE],
   [new PriceListCurrencyLockedError("PL1"), ERROR_CODES.PRICE_LIST_CURRENCY_LOCKED],
   [new InvoiceRowCurrencyMismatchError("EUR", "SEK"), ERROR_CODES.INVOICE_ROW_CURRENCY_MISMATCH],

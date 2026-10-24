@@ -575,6 +575,13 @@ export const invoiceRows = pgTable(
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull(),
     lineAmount: numeric("line_amount", { precision: 14, scale: 2 }).notNull(),
     vatAmount: numeric("vat_amount", { precision: 14, scale: 2 }).notNull(),
+    // Valuta (migration 0145): the row's net in SEK exactly as the F
+    // verification booked it — the restmetod's share (invoiceSekAmounts,
+    // öresresten included), stamped at Utfärda in the issue transaction;
+    // null on a draft. Positive like line_amount (the sign is invoices.type).
+    // The periodisk sammanställning sums it, so its EUV/EUT amounts are the
+    // booked SEK and reconcile with ruta 35/39 whatever the invoice currency.
+    lineAmountSek: numeric("line_amount_sek", { precision: 14, scale: 2 }),
     // Leveransdatum (ML 17 kap. 24 § p. 7): the last non-undone delivery day
     // of the order row the invoice row bills; null = not delivered.
     deliveryDate: date("delivery_date"),

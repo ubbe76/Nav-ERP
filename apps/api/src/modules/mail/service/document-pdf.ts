@@ -200,6 +200,13 @@ export interface DocumentPdfInput {
   // Köparens momsregistreringsnummer — "Ert momsreg.nr:" under the date
   // (invoice: the issue snapshot).
   buyerVatNumber?: string | null;
+  // Valuta (ML 17 kap. 29 § första stycket, mervärdesskattedirektivet art.
+  // 230): an invoice in another currency than SEK also states the VAT in
+  // SEK — "Moms i SEK: 2 782,75 (kurs 11,131000)" under the totals. The
+  // amount is the VAT the F verification booked (invoiceSekAmounts), signed
+  // like the document's amounts (negative on a credit note). Omitted/null
+  // prints nothing (SEK, no VAT, or no rate yet).
+  vatInSek?: { amount: number; rate: number } | null;
   // Invoice-only: a framed payment box (OCR-nummer, Bankgiro/Plusgiro from
   // the already-loaded company info, Förfallodatum) drawn above the footer
   // once the VAT/total block is done. Omitted (null/undefined) draws no box.
@@ -1273,7 +1280,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // three 15pt lines. perRow reserves one 15pt row per distinct non-zero
     // rate instead (Summa + N Moms lines + Att betala), so 2+ rates don't
     // overflow the reserved space into the footer zone.
-    const vatBlockHeight = perRowVatGroups ? (2 + perRowVatGroups.filter(vatGroupPrints).length) * 15 : 45;
+    const vatInSekLine = input.showTotal && input.vatInSek ? input.vatInSek : null;
+    const vatBlockHeight = (perRowVatGroups ? (2 + perRowVatGroups.filter(vatGroupPrints).length) * 15 : 45) + (vatInSekLine ? 15 : 0);
 
     // Break to a fresh page rather than colliding with the footer when the
     // table ends near the bottom.
@@ -1339,6 +1347,17 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const label = hasUnpricedRows ? `Summa (exkl. rader utan pris) ${input.currency}` : `Summa ${input.currency}`;
       doc.text(label, left + COLS.quantity.x - 60, y, { width: COLS.unitPrice.x - COLS.quantity.x + 110, align: "right" });
       doc.text(formatNumber(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+    }
+
+    // Valuta: the VAT in SEK under the totals (ML 17 kap. 29 §).
+    if (vatInSekLine) {
+      y += 15;
+      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      doc.text(`Moms i SEK: ${formatNumber(vatInSekLine.amount)} (kurs ${formatNumber(vatInSekLine.rate, 6)})`, left, y, {
+        width: CONTENT_WIDTH,
+        align: "right",
+      });
+      doc.fillColor("#000000");
     }
 
     // Momskoder (spec 4.3): the codes' invoice texts, once each, under the

@@ -485,6 +485,15 @@ export function createInvoiceService(
       return text ? [text] : [];
     });
 
+    // Valuta (ML 17 kap. 29 §): an invoice in another currency also states
+    // its VAT in SEK — the VAT the F verification booked (the restmetod's
+    // toSek(Σ moms)) at the invoice's rate, signed like the PDF's amounts.
+    // Nothing for SEK, for an invoice without VAT, or without a rate.
+    const rate = invoice.currency !== SEK && invoice.exchangeRate !== null ? Number(invoice.exchangeRate) : null;
+    const vatSek =
+      rate === null ? 0 : invoiceSekAmounts({ rate, rows: rows.map((r) => ({ lineAmount: Number(r.lineAmount), vatAmount: Number(r.vatAmount) })) }).vatAmount;
+    const vatInSek = rate !== null && vatSek !== 0 ? { amount: sign * vatSek, rate } : null;
+
     const content = await pdf.render({
       title: isCredit ? "Kreditfaktura" : "Faktura",
       documentNumber: invoice.invoiceNumber!,
@@ -542,6 +551,7 @@ export function createInvoiceService(
       })),
       showTotal: true,
       vat: { perRow: true },
+      vatInSek,
       vatTexts,
       // Köparens momsregistreringsnummer — the issue snapshot.
       buyerVatNumber: invoice.vatNumber,

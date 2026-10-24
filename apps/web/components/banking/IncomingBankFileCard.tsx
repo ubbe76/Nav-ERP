@@ -18,7 +18,9 @@ import type { BankFileDetail, BankItemResult, Customer, IncomingEntryView, OpenI
 import { BankEntryIgnoreButton } from "./BankEntryIgnoreButton";
 import { BookingFailures } from "./BookingFailures";
 
-type Draft = { customerId: string; rows: { invoiceId: string; invoiceNumber: string; openAmount: number; applied: string }[] };
+// currency = what the rows settle in: the account's (the entry's own amount)
+// or, for an entry whose payer instructed another currency, that one.
+type Draft = { customerId: string; currency: string; rows: { invoiceId: string; invoiceNumber: string; openAmount: number; applied: string }[] };
 
 const BASIS_TEXT: Record<string, string> = {
   ocr: "OCR",
@@ -29,18 +31,23 @@ const BASIS_TEXT: Record<string, string> = {
 
 const EDITABLE = new Set(["matched", "suggested", "unmatched"]);
 
-// Valuta steg 3: an entry on the SEK account whose payer instructed another
-// currency (InstdAmt in EUR) is a payment in that currency — it is matched
-// against open items in it, allocated in it, and booked with the entry's own
-// SEK amount (what reached the account) and the charges the bank reports.
+// Valuta: an entry on the SEK account whose payer instructed another
+// currency (InstdAmt in EUR) settles open items in either currency, as the
+// server does: invoices in the instructed currency take the instructed amount
+// (booked with the entry's SEK amount and the bank's charges), invoices in the
+// account's currency take the entry's own amount (a plain SEK payment). One
+// booking, one currency — the draft's.
 const paidAmount = (e: IncomingEntryView) => (e.instructedAmount !== null && e.instructedCurrency ? e.instructedAmount : e.amount);
 const paidCurrency = (e: IncomingEntryView) => (e.instructedAmount !== null && e.instructedCurrency ? e.instructedCurrency : e.currency);
 const isForeignPayment = (e: IncomingEntryView) => paidCurrency(e) !== e.currency;
+const settleCurrencies = (e: IncomingEntryView) => new Set([e.currency, paidCurrency(e)]);
+const amountIn = (e: IncomingEntryView, currency: string) => (currency === e.currency ? e.amount : paidAmount(e));
 
 function initialDraft(entry: IncomingEntryView): Draft {
   const p = entry.proposal;
   return {
     customerId: p?.customerId ?? "",
+    currency: p?.currency ?? paidCurrency(entry),
     rows: (p?.rows ?? []).map((r) => ({ invoiceId: r.invoiceId, invoiceNumber: r.invoiceNumber, openAmount: r.openAmount, applied: String(r.appliedAmount) })),
   };
 }
@@ -97,7 +104,10 @@ function IncomingBankFileBody({
   }
 
   const bookable = (e: IncomingEntryView) =>
-    EDITABLE.has(e.state) && drafts[e.id]!.customerId !== "" && drafts[e.id]!.rows.length > 0 && allocated(e.id) === round2(paidAmount(e));
+    EDITABLE.has(e.state) &&
+    drafts[e.id]!.customerId !== "" &&
+    drafts[e.id]!.rows.length > 0 &&
+    allocated(e.id) === round2(amountIn(e, drafts[e.id]!.currency));
   // A chosen entry whose allocation stops adding up (or that changes state)
   // is skipped, never a lock on the others: only chosen ∩ bookable is sent,
   // and its checkbox stays enabled so it can be unchecked.
@@ -211,13 +221,19 @@ function IncomingBankFileBody({
                 <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>Fördelningen stämmer inte med beloppet — posten bokförs inte förrän den gör det.</div>
               )}
               {e.proposal?.reason && <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>{e.proposal.reason}</div>}
-              {editable && isForeignPayment(e) && (
+              {editable && isForeignPayment(e) && draft.currency !== e.currency && (
                 <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
                   Betalningen är i {paidCurrency(e)}: den bokförs mot fakturor i {paidCurrency(e)} med {formatMoney(e.amount)} kr
                   som SEK-värde
                   {e.chargesAmount !== null
                     ? ` och bankavgiften ${formatMoney(e.chargesAmount)} kr som bankkostnad. Resten är kursvinst eller kursförlust.`
                     : ". Banken anger ingen avgift — en eventuell avgift hamnar i kursdifferensen."}
+                </div>
+              )}
+              {editable && isForeignPayment(e) && draft.currency === e.currency && (
+                <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+                  Betalaren angav {formatMoney(paidAmount(e))} {paidCurrency(e)}, men fakturorna är i {currencyLabel(e.currency)}: posten bokförs som
+                  en vanlig betalning med {formatMoney(e.amount)} kr.
                 </div>
               )}
               {e.warning && <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{e.warning}</div>}
@@ -287,11 +303,14 @@ function AllocationEditor({
   }, [draft.customerId]);
 
   const inDraft = new Set(draft.rows.map((r) => r.invoiceId));
-  const currency = paidCurrency(entry);
-  const paid = paidAmount(entry);
+  // With no rows chosen any currency the entry can settle is open; the first
+  // invoice fixes the booking's currency (and so the amount to allocate).
+  const allowed = draft.rows.length === 0 ? settleCurrencies(entry) : new Set([draft.currency]);
+  const currency = draft.currency;
+  const paid = amountIn(entry, currency);
   return (
     <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-      <Select value={draft.customerId} onChange={(ev) => onChange({ customerId: ev.target.value, rows: [] })} aria-label="Kund">
+      <Select value={draft.customerId} onChange={(ev) => onChange({ ...draft, customerId: ev.target.value, rows: [] })} aria-label="Kund">
         <option value="">Välj kund</option>
         {customers.map((c) => (
           <option key={c.id} value={c.id}>
@@ -313,36 +332,39 @@ function AllocationEditor({
             )
           : null;
         // One payment, one currency: an invoice in another currency than the
-        // payment's cannot be settled by it.
-        const otherCurrency = invoice.currency !== currency;
+        // booking's (or than the entry can settle at all) cannot be chosen.
+        const otherCurrency = !allowed.has(invoice.currency);
         return (
           <div key={invoice.id} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <Checkbox
               aria-label={`Välj ${invoice.invoiceNumber}`}
-              title={otherCurrency ? `Fakturan är i ${invoice.currency} men betalningen är i ${currency}` : undefined}
+              title={otherCurrency ? `Fakturan är i ${invoice.currency} men betalningen är i ${[...allowed].join(" eller ")}` : undefined}
               disabled={otherCurrency && !inDraft.has(invoice.id)}
               checked={inDraft.has(invoice.id)}
               onChange={() =>
-                onChange({
-                  ...draft,
-                  rows: inDraft.has(invoice.id)
-                    ? draft.rows.filter((r) => r.invoiceId !== invoice.id)
-                    : [
-                        ...draft.rows,
-                        {
-                          invoiceId: invoice.id,
-                          invoiceNumber: invoice.invoiceNumber ?? "",
-                          openAmount: invoice.openAmount,
-                          applied: String(round2(Math.min(invoice.openAmount, paid - allocated))),
-                        },
-                      ],
-                })
+                onChange(
+                  inDraft.has(invoice.id)
+                    ? { ...draft, rows: draft.rows.filter((r) => r.invoiceId !== invoice.id) }
+                    : {
+                        ...draft,
+                        currency: invoice.currency,
+                        rows: [
+                          ...draft.rows,
+                          {
+                            invoiceId: invoice.id,
+                            invoiceNumber: invoice.invoiceNumber ?? "",
+                            openAmount: invoice.openAmount,
+                            applied: String(round2(Math.min(invoice.openAmount, amountIn(entry, invoice.currency) - allocated))),
+                          },
+                        ],
+                      }
+                )
               }
             />
             <span>{invoice.invoiceNumber}</span>
             <span>
               Öppet {formatMoney(invoice.openAmount)} {currencyLabel(invoice.currency)}
-              {otherCurrency && ` — betalningen är i ${currency}`}
+              {otherCurrency && ` — betalningen är i ${[...allowed].join(" eller ")}`}
             </span>
             {row && (
               <Input

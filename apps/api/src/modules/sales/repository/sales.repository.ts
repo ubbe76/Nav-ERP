@@ -62,7 +62,7 @@ import { pluginEvents } from "../../system/service/plugin-events.js";
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
-import { PriceListInUseError, RowHasManufacturingOrdersError } from "../service/sales.errors.js";
+import { PriceListInUseError, RowHasManufacturingOrdersError, SalesOrderCurrencyChangedError } from "../service/sales.errors.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { getInvoicedQuantitiesWith } from "./invoice.repository.js";
@@ -580,8 +580,10 @@ export function createSalesRepository(db: Db) {
         }
         // Valuta: currency and rate as a quote or a confirmed order only, and
         // a new currency only on an order without rows — read under the
-        // order's lock (addRow does not take it, so the row count is the
-        // pre-check's twin, not a guarantee against a concurrent first row).
+        // order's lock. addRow reads the currency FOR KEY SHARE before its
+        // insert, so a concurrent first row either commits first (and is
+        // seen here: currency_locked) or waits for this and is refused when
+        // the currency it was priced in is gone (sales-order-currency-changed).
         if ((input.currency !== undefined || input.exchangeRate !== undefined) && order.status !== "quote" && order.status !== "confirmed") {
           return { ok: false as const, reason: "status" as const, status: order.status };
         }
@@ -950,8 +952,26 @@ export function createSalesRepository(db: Db) {
     // invoiceOrder was removed in C1 — the invoice module (invoice.repository.ts)
     // now assigns the FA number, on the invoices table rather than the order.
 
-    async addRow(salesOrderId: string, input: SalesRowWrite) {
+    // Valuta: `pricedIn` is the order currency the service priced the row
+    // in (read before this transaction). The order is read FOR KEY SHARE
+    // first — the header PATCH changes the currency under FOR UPDATE, which
+    // this waits for (and vice versa: a PATCH waits for this row and then
+    // sees it, sales-order-currency-locked) — so a row priced in the old
+    // currency never lands on an order in a new one. KEY SHARE, not SHARE:
+    // two concurrent addRows both bump the revision (an UPDATE of the order,
+    // FOR NO KEY UPDATE), which a held FOR SHARE would deadlock. Only the
+    // order is locked here (no row exists yet), so the rad → huvud order of
+    // updateRow/replaceRowConfiguration is not crossed.
+    async addRow(salesOrderId: string, input: SalesRowWrite, pricedIn?: string) {
       return db.transaction(async (tx) => {
+        if (pricedIn !== undefined) {
+          const [order] = await tx
+            .select({ orderNumber: salesOrders.orderNumber, currency: salesOrders.currency })
+            .from(salesOrders)
+            .where(eq(salesOrders.id, salesOrderId))
+            .for("key share");
+          if (order && order.currency !== pricedIn) throw new SalesOrderCurrencyChangedError(order.orderNumber, pricedIn, order.currency);
+        }
         const [row] = await tx
           .insert(salesOrderRows)
           .values({

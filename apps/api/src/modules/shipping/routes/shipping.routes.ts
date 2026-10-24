@@ -15,7 +15,7 @@ import {
   updateFreightSettingsSchema,
   updateShipmentSchema,
 } from "@navet/shared";
-import { FreightAlreadyInvoicedError, FreightRowDeliveredError } from "../../sales/service/sales.errors.js";
+import { FreightAlreadyInvoicedError, FreightRowDeliveredError, SalesOrderCurrencyChangedError } from "../../sales/service/sales.errors.js";
 import { InvalidStatusTransitionError, SalesOrderNotFoundError } from "../../sales/service/sales.service.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -115,6 +115,8 @@ export function mapShippingError(reply: FastifyReply, err: unknown): FastifyRepl
     err instanceof FreightOrderStatusError ||
     err instanceof FreightRowDeliveredError ||
     err instanceof FreightAlreadyInvoicedError ||
+    // Valuta: the order's currency changed while the freight row was priced.
+    err instanceof SalesOrderCurrencyChangedError ||
     err instanceof InvalidStatusTransitionError
   ) {
     return reply.code(409).send(errorBody(err));

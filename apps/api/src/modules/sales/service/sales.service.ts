@@ -1128,10 +1128,13 @@ export function createSalesService(
       if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
         throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${order.status}"`);
       }
-      const write = await resolveRowInput(orderPricing(order), input, userId ?? null);
+      const pricing = orderPricing(order);
+      const write = await resolveRowInput(pricing, input, userId ?? null);
       let row;
       try {
-        row = await repo.addRow(salesOrderId, write);
+        // Valuta: the repository re-reads the currency under the order's key
+        // lock and refuses a row priced in a currency the order no longer has.
+        row = await repo.addRow(salesOrderId, write, pricing.currency);
       } catch (err) {
         // The article (e.g. the variant a configuration resolved to) already
         // sits on the order as an ordinary row — the partial unique index,

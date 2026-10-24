@@ -1195,6 +1195,7 @@ export function createInvoiceRepository(db: Db) {
           // read, through this transaction.
           const postingRows = await tx
             .select({
+              id: invoiceRows.id,
               articleGroupId: articles.groupId,
               lineAmount: invoiceRows.lineAmount,
               vatAmount: invoiceRows.vatAmount,
@@ -1205,7 +1206,9 @@ export function createInvoiceRepository(db: Db) {
             .innerJoin(vatCodes, eq(vatCodes.id, invoiceRows.vatCodeId))
             .leftJoin(articles, eq(articles.id, invoiceRows.articleId))
             .where(eq(invoiceRows.invoiceId, id))
-            .orderBy(asc(invoiceRows.createdAt));
+            // id breaks a createdAt tie (rows inserted in one statement share
+            // it), so the restmetod sees the rows in one fixed order.
+            .orderBy(asc(invoiceRows.createdAt), asc(invoiceRows.id));
 
           // Momskoder (spec 4.2): a code requiring the buyer's
           // momsregistreringsnummer needs one, in the right form, on the
@@ -1242,16 +1245,30 @@ export function createInvoiceRepository(db: Db) {
             })),
             userId
           );
-          // Valuta: the receivable in SEK, exactly what the F verification
-          // booked — the same restmetod (invoiceSekAmounts) over the same
-          // rows, positive like the rows (the sign is invoices.type).
-          const grossAmountSek = invoiceSekAmounts({
+          // Valuta: the receivable in SEK and each row's net in SEK, exactly
+          // what the F verification booked — the same restmetod
+          // (invoiceSekAmounts) over the same rows in the same order,
+          // positive like the rows (the sign is invoices.type). The rows'
+          // share is stored (line_amount_sek) so a later reader — the
+          // periodisk sammanställning — sums the booked SEK instead of
+          // recomputing it.
+          const sek = invoiceSekAmounts({
             rate: bookedRate!,
             rows: postingRows.map((postingRow) => ({ lineAmount: Number(postingRow.lineAmount), vatAmount: Number(postingRow.vatAmount) })),
-          }).grossAmount;
+          });
+          if (postingRows.length > 0) {
+            const values = sql.join(
+              postingRows.map((postingRow, index) => sql`(${postingRow.id}::uuid, ${String(sek.rows[index]!.lineAmount)}::numeric)`),
+              sql`, `
+            );
+            await tx.execute(sql`
+              UPDATE invoice_rows SET line_amount_sek = v.amount
+              FROM (VALUES ${values}) AS v(id, amount)
+              WHERE invoice_rows.id = v.id`);
+          }
           const [posted] = await tx
             .update(invoices)
-            .set({ verificationId, grossAmountSek: String(grossAmountSek) })
+            .set({ verificationId, grossAmountSek: String(sek.grossAmount) })
             .where(eq(invoices.id, id))
             .returning();
 
@@ -1285,14 +1302,20 @@ export function createInvoiceRepository(db: Db) {
     // Cancelled payments stay visible (append-only) and are marked as such
     // rather than filtered away — they no longer settle anything, which is
     // exactly what the open amount above already reflects.
+    // Valuta: the payment's currency (= the invoice's) and the SEK each part
+    // released from the invoice's booked receivable (frigjort SEK — equal to
+    // the amounts on a SEK invoice), as numbers.
     async listPaymentsForInvoice(invoiceId: string) {
-      return db
+      const rows = await db
         .select({
           paymentId: customerPayments.id,
           paymentNumber: customerPayments.paymentNumber,
           paymentDate: customerPayments.paymentDate,
           appliedAmount: customerPaymentRows.appliedAmount,
           writeOffAmount: customerPaymentRows.writeOffAmount,
+          currency: customerPayments.currency,
+          appliedAmountSek: customerPaymentRows.appliedAmountSek,
+          writeOffAmountSek: customerPaymentRows.writeOffAmountSek,
           cancelledAt: customerPayments.cancelledAt,
           verificationId: customerPayments.verificationId,
           verificationDisplayNumber: verificationDisplayNumberSql,
@@ -1304,6 +1327,7 @@ export function createInvoiceRepository(db: Db) {
         .leftJoin(fiscalYears, eq(fiscalYears.id, verifications.fiscalYearId))
         .where(eq(customerPaymentRows.invoiceId, invoiceId))
         .orderBy(asc(customerPaymentRows.createdAt));
+      return rows.map((row) => ({ ...row, appliedAmountSek: Number(row.appliedAmountSek), writeOffAmountSek: Number(row.writeOffAmountSek) }));
     },
 
     // Betalningspåminnelser (B3): the invoice's own reminder history, newest

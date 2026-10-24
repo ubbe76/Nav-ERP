@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BankFileParseError, UnsupportedBankMessageError } from "../src/modules/banking/service/banking.errors.js";
@@ -236,6 +237,67 @@ describe("utlandsbetalningar (debet med växling)", () => {
       entries: [{ direction: "debit", amount: 100, bookingDate: "2024-10-09", txs: [{ amount: 100, counterparty: "X", instructed: { amount: 9, currency: "EUR" }, charges: [{ amount: 1, code: "COMM" }] }] }],
     });
     expect(parseCamt054(withFx).entries[0]!.dedupeKey).toBe(parseCamt054(xml).entries[0]!.dedupeKey);
+  });
+
+  // Chrgs/Br says whose charges they are (ISO 20022 DEBT = the debtor's,
+  // CRED = the creditor's): on our payment (debit) we are the debtor, on
+  // money in (credit) the creditor — only our own charges are a bank fee.
+  it("counts only our own charges: CRED is the payee's on a debit, DEBT the payer's on a credit", async () => {
+    const entry = (direction: "credit" | "debit", bearer: "DEBT" | "CRED" | "SHAR" | undefined) =>
+      camtFile({
+        messageId: `BR-${direction}-${bearer ?? "none"}`,
+        entries: [
+          {
+            direction,
+            amount: 11150,
+            bookingDate: "2024-10-09",
+            txs: [{ acctSvcrRef: "T1", amount: 11150, instructed: { amount: 1000, currency: "EUR" }, charges: [{ amount: 50, code: "COMM", ...(bearer ? { bearer } : {}) }] }],
+          },
+        ],
+      });
+    const charges = (direction: "credit" | "debit", bearer: "DEBT" | "CRED" | "SHAR" | undefined) => parseCamt054(entry(direction, bearer)).entries[0]!.chargesAmount;
+    expect(await validateAgainstXsd(entry("credit", "CRED"), "camt.054.001.02")).toEqual([]);
+    expect([charges("credit", "CRED"), charges("credit", "SHAR"), charges("credit", undefined), charges("credit", "DEBT")]).toEqual([50, 50, 50, null]);
+    expect([charges("debit", "DEBT"), charges("debit", "SHAR"), charges("debit", undefined), charges("debit", "CRED")]).toEqual([50, 50, 50, null]);
+  });
+
+  // A file read before Valuta and read again after it must give the same
+  // dedupe keys. The content hash is therefore taken over the amount the
+  // parser read before (06eddee): the transaction's TxAmt, else its InstdAmt
+  // in any currency, else a one-transaction entry's Ntry/Amt — not the new
+  // `amount`, which prefers the entry's own amount in the account's currency.
+  it("keeps the old content hash where the entry's amount is now read differently", async () => {
+    const legacyKey = (e: ReturnType<typeof parseCamt054>["entries"][number], legacyAmount: string) =>
+      `${e.account}|hash:${createHash("sha256")
+        .update(JSON.stringify([e.account, e.bookingDate, e.direction, e.reversal, legacyAmount, e.endToEndId, e.counterpartyName, e.remittance]))
+        .digest("hex")}#1`;
+    const document = (ntry: string) =>
+      `<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02"><BkToCstmrDbtCdtNtfctn>` +
+      `<GrpHdr><MsgId>LEGACY-1</MsgId><CreDtTm>2024-10-09T18:00:00</CreDtTm></GrpHdr>` +
+      `<Ntfctn><Id>LEGACY-1-1</Id><CreDtTm>2024-10-09T18:00:00</CreDtTm>` +
+      `<Acct><Id><Othr><Id>5512348</Id><SchmeNm><Prtry>BGNR</Prtry></SchmeNm></Othr></Id><Ccy>SEK</Ccy></Acct>${ntry}</Ntfctn></BkToCstmrDbtCdtNtfctn></Document>`;
+    const ntry = (amount: string, entryDetails: string, txDetails: string) =>
+      `<Ntry><Amt Ccy="SEK">${amount}</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2024-10-09</Dt></BookgDt>` +
+      `<BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>NTAV</Cd><SubFmlyCd>NTAV</SubFmlyCd></Fmly></Domn></BkTxCd>${entryDetails}` +
+      `<NtryDtls><TxDtls>${txDetails}<RltdPties><Dbtr><Nm>EURO KUND GMBH</Nm></Dbtr></RltdPties><RmtInf><Ustrd>Faktura 7001</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>`;
+
+    // One transaction with nothing but a foreign InstdAmt: read as the SEK
+    // entry amount now, as the EUR amount before.
+    const foreignOnly = document(ntry("11120.00", "", `<AmtDtls><InstdAmt><Amt Ccy="EUR">1000.00</Amt></InstdAmt></AmtDtls>`));
+    expect(await validateAgainstXsd(foreignOnly, "camt.054.001.02")).toEqual([]);
+    const [a] = parseCamt054(foreignOnly).entries;
+    expect(a).toMatchObject({ amount: 11120, instructedAmount: 1000, instructedCurrency: "EUR", dedupeSource: "content_hash" });
+    expect(a!.dedupeKey).toBe(legacyKey(a!, "1000.00"));
+
+    // The entry's own AmtDtls/TxAmt now wins over the transaction's InstdAmt
+    // in SEK; before, the InstdAmt was the amount.
+    const entryTxAmt = document(
+      ntry("510.00", `<AmtDtls><TxAmt><Amt Ccy="SEK">510.00</Amt></TxAmt></AmtDtls>`, `<AmtDtls><InstdAmt><Amt Ccy="SEK">500.00</Amt></InstdAmt></AmtDtls>`)
+    );
+    expect(await validateAgainstXsd(entryTxAmt, "camt.054.001.02")).toEqual([]);
+    const [b] = parseCamt054(entryTxAmt).entries;
+    expect(b).toMatchObject({ amount: 510, dedupeSource: "content_hash" });
+    expect(b!.dedupeKey).toBe(legacyKey(b!, "500.00"));
   });
 
   it("the test builder's exchange case is valid against the XSD", async () => {

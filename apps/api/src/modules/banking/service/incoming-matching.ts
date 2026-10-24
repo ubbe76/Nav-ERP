@@ -23,12 +23,16 @@ export interface ClosedReceivable {
 }
 export interface IncomingEntryInput {
   id: string;
-  // Valuta: the payment's own amount and currency — for an entry on the SEK
-  // account with an instructed amount in EUR (InstdAmt), the EUR amount; the
-  // entry is only matched against open items in that currency. Omitted
-  // currency = SEK.
+  // The entry's own amount in the account's currency (omitted currency =
+  // SEK) — what landed on the account.
   amount: number;
   currency?: string;
+  // Valuta: what the payer instructed in another currency (InstdAmt in EUR
+  // on the SEK account), null/omitted when nothing was. An open item in the
+  // account's currency is settled with `amount` (a plain SEK payment, as
+  // before the feature); one in the instructed currency with the instructed
+  // amount.
+  instructed?: { amount: number; currency: string } | null;
   counterpartyName: string | null;
   remittance: BankEntryReference[];
 }
@@ -50,6 +54,9 @@ export interface ProposalRow {
 }
 export interface IncomingProposal {
   entryId: string;
+  // Valuta: the currency the rows settle in (the open items' — the account's
+  // or the instructed one), null without rows.
+  currency: string | null;
   state: MatchState;
   basis: MatchBasis | null;
   reason: string | null;
@@ -104,20 +111,41 @@ function rowsOf(allocation: { invoice: OpenReceivable; applied: number }[], tole
 }
 
 function blankProposal(entryId: string): IncomingProposal {
-  return { entryId, state: "unmatched", basis: null, reason: null, partial: false, customerId: null, customerName: null, rows: [], alternatives: [] };
+  return { entryId, currency: null, state: "unmatched", basis: null, reason: null, partial: false, customerId: null, customerName: null, rows: [], alternatives: [] };
+}
+
+// Valuta: what the payment is worth in an open item's currency — the entry's
+// own amount in the account's currency, the instructed amount in the
+// instructed currency, null in any other (the amounts cannot be compared).
+// The booking (bank-file.service.ts) settles with the same rule.
+export function paymentAmountIn(entry: Pick<IncomingEntryInput, "amount" | "currency" | "instructed">, currency: string): number | null {
+  if (currency === currencyOf(entry)) return round2(entry.amount);
+  if (entry.instructed && entry.instructed.currency === currency) return round2(entry.instructed.amount);
+  return null;
+}
+
+// The payment's currencies in matching order for an allocation over a
+// customer's open items: the instructed one first (the payer chose it), then
+// the account's.
+function paymentCurrencies(entry: IncomingEntryInput): string[] {
+  return [...new Set([...(entry.instructed ? [entry.instructed.currency] : []), currencyOf(entry)])];
 }
 
 export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLookup, tolerance: number): IncomingProposal {
   const proposal = blankProposal(entry.id);
   const ocrs = candidateOcrs(entry.remittance);
-  const currency = currencyOf(entry);
-  const sameCurrency = (r: OpenReceivable) => currencyOf(r) === currency;
+  const amountFor = (r: OpenReceivable) => paymentAmountIn(entry, currencyOf(r));
 
   if (ocrs.length > 0) {
     const resolved = ocrs.map((ocr) => lookup.openByOcr.get(ocr)).filter((r): r is OpenReceivable => r !== undefined);
     const missing = ocrs.filter((ocr) => !lookup.openByOcr.has(ocr));
     const customers = new Set(resolved.map((r) => r.customerId));
-    const otherCurrency = resolved.find((r) => !sameCurrency(r));
+    // Valuta: the referenced items' one currency decides which amount of the
+    // payment settles them — a SEK invoice paid with an instructed EUR amount
+    // is settled with what landed on the SEK account.
+    const currencies = [...new Set(resolved.map(currencyOf))];
+    const settleCurrency = currencies.length === 1 ? currencies[0]! : null;
+    const amount = settleCurrency === null ? null : paymentAmountIn(entry, settleCurrency);
     if (missing.length > 0) {
       // A possible double payment outranks an unknown reference. Either way
       // rule 4 still runs (spec §5.1 rule 3) and the reason stays visible.
@@ -126,11 +154,15 @@ export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLo
       proposal.reason = closed
         ? `OCR ${ocr} tillhör ${closed.invoiceNumber} som redan är ${closed.status === "paid" ? "betald" : "makulerad"} — möjlig dubbelbetalning`
         : `OCR ${ocr} hittades inte bland öppna poster`;
-    } else if (otherCurrency) {
-      // Valuta: the invoice is in another currency than the payment — the
-      // amounts cannot be compared. Rule 4 still runs (in the payment's
-      // currency); the reason stays visible.
-      proposal.reason = `${otherCurrency.invoiceNumber} är i ${currencyOf(otherCurrency)} men betalningen är i ${currency} — registrera den under Betalningar`;
+    } else if (settleCurrency === null) {
+      // Valuta: the references point at items in different currencies — one
+      // payment settles one currency. Rule 4 still runs; the reason stays.
+      proposal.reason = "OCR-referenserna avser fakturor i olika valutor — registrera betalningen under Betalningar";
+    } else if (amount === null) {
+      // Valuta: the invoice is in a currency the payment has no amount in —
+      // the amounts cannot be compared. Rule 4 still runs; the reason stays.
+      const paid = paymentCurrencies(entry).join(" och ");
+      proposal.reason = `${resolved[0]!.invoiceNumber} är i ${settleCurrency} men betalningen är i ${paid} — registrera den under Betalningar`;
     } else if (customers.size > 1) {
       // Not an OCR match, but rule 4 still runs (spec §5.1): amount + name
       // may well point at one of the customers. The reason stays visible.
@@ -143,13 +175,13 @@ export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLo
       }
       const exact =
         resolved.length === 1 ||
-        (resolved.every((r) => own.has(r.invoiceId)) && round2([...own.values()].reduce((s, a) => s + a, 0)) === round2(entry.amount));
+        (resolved.every((r) => own.has(r.invoiceId)) && round2([...own.values()].reduce((s, a) => s + a, 0)) === amount);
       const allocation =
         resolved.length === 1
-          ? [{ invoice: resolved[0]!, applied: entry.amount }]
+          ? [{ invoice: resolved[0]!, applied: amount }]
           : exact
             ? resolved.map((invoice) => ({ invoice, applied: own.get(invoice.invoiceId)! }))
-            : allocate(entry.amount, resolved);
+            : allocate(amount, resolved);
       if (!allocation) return { ...proposal, reason: "Fördelningen går inte ihop — välj fakturor manuellt" };
       const rows = rowsOf(allocation, tolerance);
       const customer = resolved[0]!;
@@ -163,6 +195,7 @@ export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLo
       }
       return {
         ...proposal,
+        currency: settleCurrency,
         state: exact ? "matched" : "suggested",
         basis: "ocr",
         reason: exact ? null : "Fördelningen behöver granskas",
@@ -174,14 +207,19 @@ export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLo
     }
   }
 
-  // Rule 4: suggestions on amount and name — open items in the payment's
-  // currency, within the tolerance in that currency.
+  // Rule 4: suggestions on amount and name — open items in a currency the
+  // payment has an amount in (the account's or the instructed one), within
+  // the tolerance in that currency.
   const byAmount = lookup.candidatesByAmount
-    .filter((r) => sameCurrency(r) && r.openAmount > 0 && Math.abs(r.openAmount - entry.amount) <= toleranceFor(r, tolerance))
+    .filter((r) => {
+      const amount = amountFor(r);
+      return amount !== null && r.openAmount > 0 && Math.abs(r.openAmount - amount) <= toleranceFor(r, tolerance);
+    })
     .sort(byDue);
   const named = entry.counterpartyName ? byAmount.filter((r) => namesMatch(entry.counterpartyName!, r.customerName)) : [];
   const suggest = (basis: MatchBasis, invoices: { invoice: OpenReceivable; applied: number }[], alternatives: OpenReceivable[]): IncomingProposal => ({
     ...proposal,
+    currency: currencyOf(invoices[0]!.invoice),
     state: "suggested",
     basis,
     customerId: invoices[0]!.invoice.customerId,
@@ -190,15 +228,18 @@ export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLo
     alternatives: alternatives.slice(0, 5),
   });
   if (named.length > 0) {
-    return suggest("amount_name", [{ invoice: named[0]!, applied: entry.amount }], byAmount.filter((r) => r !== named[0]));
+    return suggest("amount_name", [{ invoice: named[0]!, applied: amountFor(named[0]!)! }], byAmount.filter((r) => r !== named[0]));
   }
-  if (byAmount.length === 1) return suggest("amount_only", [{ invoice: byAmount[0]!, applied: entry.amount }], []);
+  if (byAmount.length === 1) return suggest("amount_only", [{ invoice: byAmount[0]!, applied: amountFor(byAmount[0]!)! }], []);
   const namedCustomers = entry.counterpartyName ? lookup.customers.filter((c) => namesMatch(entry.counterpartyName!, c.name)) : [];
   if (namedCustomers.length === 1) {
-    const open = (lookup.openByCustomer.get(namedCustomers[0]!.id) ?? []).filter((r) => r.openAmount !== 0 && sameCurrency(r));
-    const total = round2(open.reduce((sum, r) => sum + r.openAmount, 0));
-    const allocation = open.length > 0 && entry.amount <= total ? allocate(entry.amount, open.filter((r) => r.openAmount > 0)) : null;
-    if (allocation) return suggest("name_allocation", allocation, []);
+    for (const currency of paymentCurrencies(entry)) {
+      const amount = paymentAmountIn(entry, currency)!;
+      const open = (lookup.openByCustomer.get(namedCustomers[0]!.id) ?? []).filter((r) => r.openAmount !== 0 && currencyOf(r) === currency);
+      const total = round2(open.reduce((sum, r) => sum + r.openAmount, 0));
+      const allocation = open.length > 0 && amount <= total ? allocate(amount, open.filter((r) => r.openAmount > 0)) : null;
+      if (allocation) return suggest("name_allocation", allocation, []);
+    }
   }
   return { ...proposal, reason: proposal.reason ?? "Ingen faktura matchar referens, belopp eller namn", alternatives: byAmount.slice(0, 5) };
 }

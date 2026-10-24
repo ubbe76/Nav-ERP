@@ -5,7 +5,9 @@ import { run } from "./configurator.routes.js";
 import { errorBody } from "../../system/service/error-body.js";
 import {
   ClientCustomerMismatchError,
+  ClientPriceNotAllowedError,
   ClientScopeMissingError,
+  clientCurrencyAllowed,
   clientCustomerAllowed,
   clientHasScope,
 } from "../../auth/middleware/permission.middleware.js";
@@ -29,11 +31,18 @@ export async function publicConfiguratorRoutes(app: FastifyInstance, opts: { ser
   // price lookup like GET /price-quote, so for a client it needs prices:read
   // and, for a client bound to a customer, that very customer. Without a
   // customer the answer is the template's own price (configurator:read).
-  app.post<{ Params: { articleId: string } }>("/configurator/:articleId/evaluate", { config: { access: ["office"], clientScope: "configurator:read", readOnlySafe: true } }, (req, reply) => {
+  // Valuta: a client bound to a customer answers in that customer's currency
+  // only — another `currency` would price past the customer's särpriser
+  // (403 client-price-not-allowed, as on POST /quotes).
+  app.post<{ Params: { articleId: string } }>("/configurator/:articleId/evaluate", { config: { access: ["office"], clientScope: "configurator:read", readOnlySafe: true } }, async (req, reply) => {
     const input = evaluateConfigurationSchema.parse(req.body ?? {});
     if (input.customerId) {
       if (!clientHasScope(req, "prices:read")) return reply.code(403).send(errorBody(new ClientScopeMissingError("prices:read")));
       if (!clientCustomerAllowed(req, input.customerId)) return reply.code(403).send(errorBody(new ClientCustomerMismatchError()));
+    }
+    const bound = req.apiClient?.customerId ?? null;
+    if (bound && input.currency !== undefined && !clientCurrencyAllowed(req, input.currency, await service.customerCurrency(bound))) {
+      return reply.code(403).send(errorBody(new ClientPriceNotAllowedError()));
     }
     return run(reply, () => service.evaluatePublic(req.params.articleId, input, { client: Boolean(req.apiClient) }));
   });

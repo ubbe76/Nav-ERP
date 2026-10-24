@@ -106,6 +106,7 @@ describe("0145 — the Valuta backfill", () => {
       // The state before 0145: no rate, no stamp, no SEK side on the payments.
       await tx.execute(sql`ALTER TABLE customer_payments DROP CONSTRAINT customer_payments_sek_amounts`);
       await tx.execute(sql`UPDATE invoices SET exchange_rate = NULL, gross_amount_sek = NULL`);
+      await tx.execute(sql`UPDATE invoice_rows SET line_amount_sek = NULL`);
       await tx.execute(sql`UPDATE customer_payments SET amount_sek = 0`);
       await tx.execute(sql`UPDATE customer_payment_rows SET applied_amount_sek = 0, write_off_amount_sek = 0`);
       expect(await receivablesTotalAsOf(tx, TODAY)).not.toBe(before);
@@ -122,6 +123,20 @@ describe("0145 — the Valuta backfill", () => {
         ["paid", "credit", "1.000000", "500.00"],
         ["draft", "invoice", "1.000000", null],
         ["issued", "invoice", "1.000000", "1000.00"],
+      ]);
+      // The rows' booked SEK net: the row's own amount on an issued/paid
+      // invoice (what the periodisk sammanställning sums), null on a draft.
+      const rowsSek = [
+        ...(await tx.execute(sql`
+          SELECT i.status, ir.line_amount::text AS line, ir.line_amount_sek::text AS sek
+          FROM invoice_rows ir JOIN invoices i ON i.id = ir.invoice_id ORDER BY i.created_at, ir.created_at`)),
+      ] as { status: string; line: string; sek: string | null }[];
+      expect(rowsSek.map((r) => [r.status, r.line, r.sek])).toEqual([
+        ["paid", "1000.00", "1000.00"],
+        ["paid", "400.00", "400.00"],
+        ["paid", "400.00", "400.00"],
+        ["draft", "99.00", null],
+        ["issued", "800.00", "800.00"],
       ]);
       const payments = [...(await tx.execute(sql`SELECT amount::text AS amount, amount_sek::text AS sek FROM customer_payments ORDER BY created_at`))] as {
         amount: string;

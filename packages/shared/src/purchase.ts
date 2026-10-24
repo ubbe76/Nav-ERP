@@ -443,10 +443,14 @@ export const updateSupplierInvoiceHeaderSchema = z
     note: z.string().nullable().optional(),
     paymentReference: paymentReferenceSchema.nullable().optional(),
     vatCodeId: z.string().uuid().optional(),
-    // Valuta (draft only): a rate typed on the invoice. Without it, a changed
-    // invoice date (or a supplier change to another currency) looks the rate
-    // up again — unless the stored rate was typed by hand.
-    exchangeRate: exchangeRateValueSchema.optional(),
+    // Valuta (draft only): a number is a rate typed on the invoice (source
+    // manual); null goes back to the automatic rate — looked up for the
+    // invoice date, and when there is none the invoice is "kurs saknas"
+    // (no source, no error). Left out, the rate is looked up again when the
+    // currency changes (byte av leverantör), when the invoice date changes
+    // and the rate was not typed, and whenever the rate is missing —
+    // whichever field the PATCH changes.
+    exchangeRate: exchangeRateValueSchema.nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateSupplierInvoiceHeaderInput = z.infer<typeof updateSupplierInvoiceHeaderSchema>;

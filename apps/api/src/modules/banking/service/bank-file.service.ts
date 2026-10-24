@@ -22,7 +22,15 @@ import {
   BankEntryNotMatchedError,
   BankFileNotFoundError,
 } from "./banking.errors.js";
-import { candidateOcrs, matchIncomingEntry, type ClosedReceivable, type IncomingProposal, type MatchState, type OpenReceivable } from "./incoming-matching.js";
+import {
+  candidateOcrs,
+  matchIncomingEntry,
+  paymentAmountIn,
+  type ClosedReceivable,
+  type IncomingProposal,
+  type MatchState,
+  type OpenReceivable,
+} from "./incoming-matching.js";
 import { parseCamt054 } from "./iso20022/camt054-parser.js";
 import { namesMatch } from "./name-match.js";
 import { notificationAccountWarning, type CompanyAccounts } from "./own-account.js";
@@ -67,9 +75,11 @@ export interface IncomingEntryView {
   // The entry's own amount in the account's currency (SEK).
   amount: number;
   currency: string;
-  // Valuta: a payment instructed in another currency (InstdAmt) — matched
-  // against open items in that currency, booked with `amount` as the SEK
-  // value — the bank's exchange details and the charges included.
+  // Valuta: a payment instructed in another currency (InstdAmt) — an open
+  // item in that currency is settled with it (booked with `amount` as the
+  // SEK value and the charges included), one in the account's currency with
+  // `amount` itself, as a plain SEK payment — and the bank's exchange
+  // details.
   instructedAmount: number | null;
   instructedCurrency: string | null;
   currencyExchange: BankEntryCurrencyExchange | null;
@@ -129,13 +139,18 @@ const ENTRY_LIVE_INDEXES = ["customer_payments_entry_live", "supplier_payments_e
 
 const isOutgoing = (entry: { direction: "credit" | "debit"; reversal: boolean }) => entry.direction === "debit" || entry.reversal;
 
-// Valuta: what an incoming entry paid, in the payment's own currency — the
-// instructed amount when the payer instructed another currency than the
-// account's (InstdAmt in EUR on the SEK account), else the entry's own.
-function paymentOf(entry: { amount: string | number; currency: string; instructedAmount: string | number | null; instructedCurrency: string | null }) {
-  return entry.instructedCurrency !== null && entry.instructedAmount !== null
-    ? { amount: round2(Number(entry.instructedAmount)), currency: entry.instructedCurrency }
-    : { amount: round2(Number(entry.amount)), currency: entry.currency };
+// Valuta: an incoming entry as the matching reads it — its own amount in the
+// account's currency plus what the payer instructed in another currency
+// (InstdAmt in EUR on the SEK account), if anything.
+function matchingAmounts(entry: { amount: string | number; currency: string; instructedAmount: string | number | null; instructedCurrency: string | null }) {
+  return {
+    amount: round2(Number(entry.amount)),
+    currency: entry.currency,
+    instructed:
+      entry.instructedCurrency !== null && entry.instructedAmount !== null
+        ? { amount: round2(Number(entry.instructedAmount)), currency: entry.instructedCurrency }
+        : null,
+  };
 }
 
 // Is the bank's amount the batch row's? A SEK row: the entry's own amount
@@ -303,10 +318,18 @@ export function createBankFileService(deps: BankFileServiceDeps) {
       const [byOcr, closed, byAmount, customers] = await Promise.all([
         deps.receivables.openReceivables({ ocrs }),
         deps.receivables.closedByOcrs(ocrs),
-        // Valuta: the payment's own amount (the instructed one when it is in
-        // another currency); the SEK tolerance is a superset in any currency
-        // — matchIncomingEntry narrows per open item.
-        deps.receivables.openReceivables({ amounts: { values: open.map((r) => paymentOf(r.entry).amount), tolerance } }),
+        // Valuta: both of the payment's amounts (the account's and an
+        // instructed one); the SEK tolerance is a superset in any currency —
+        // matchIncomingEntry narrows per open item.
+        deps.receivables.openReceivables({
+          amounts: {
+            values: open.flatMap((r) => {
+              const m = matchingAmounts(r.entry);
+              return m.instructed ? [m.amount, m.instructed.amount] : [m.amount];
+            }),
+            tolerance,
+          },
+        }),
         open.length > 0 ? deps.receivables.customersWithOpenItems() : Promise.resolve([]),
       ]);
       const namedIds = customers.filter((c) => open.some((r) => r.entry.counterpartyName && namesMatch(r.entry.counterpartyName, c.name))).map((c) => c.id);
@@ -346,9 +369,8 @@ export function createBankFileService(deps: BankFileServiceDeps) {
         if (paymentId) return { ...base, state: "booked" as const, proposal: null };
         if (entry.ignoredAt) return { ...base, state: "ignored" as const, proposal: null };
         if (entry.currency !== "SEK") return { ...base, state: "not_sek" as const, proposal: null };
-        const payment = paymentOf(entry);
         const proposal = matchIncomingEntry(
-          { id: entry.id, amount: payment.amount, currency: payment.currency, counterpartyName: entry.counterpartyName, remittance: entry.remittance },
+          { id: entry.id, ...matchingAmounts(entry), counterpartyName: entry.counterpartyName, remittance: entry.remittance },
           lookup,
           tolerance
         );
@@ -371,11 +393,19 @@ export function createBankFileService(deps: BankFileServiceDeps) {
           if (isOutgoing(entry)) throw new BankEntryDirectionError("Posten är en utbetalning eller retur — bokför den under Inköp → Bankfiler");
           if (entry.currency !== "SEK") throw new BankEntryDirectionError(`Posten är i ${entry.currency} — bara SEK kan bokföras`);
           if (entry.ignoredAt || (await repo.incomingBooked(tx, entry.id))) throw new BankEntryAlreadyBookedError();
-          // Valuta: the rows settle the payment's own amount — the instructed
-          // one for a payment in another currency, booked with the entry's
-          // SEK amount and the charges included in it (a bank that reports
-          // none leaves the fee inside the exchange difference).
-          const payment = paymentOf(entry);
+          // Valuta: the chosen items' currency decides which amount the rows
+          // settle — items in the account's currency (SEK) take the entry's
+          // own amount as a plain SEK payment, as before the feature, even
+          // when the payer instructed another currency; items in the
+          // instructed currency take the instructed amount, booked with the
+          // entry's SEK amount and the charges included in it (a bank that
+          // reports none leaves the fee inside the exchange difference).
+          // Items in mixed or other currencies fall back to the entry's own
+          // amount — the registration refuses them (payment-mixed-currencies).
+          const currencies = [...new Set((await repo.invoiceCurrencies(tx, choice.rows.map((r) => r.invoiceId))).values())];
+          const amounts = matchingAmounts(entry);
+          const settled = currencies.length === 1 ? paymentAmountIn(amounts, currencies[0]!) : null;
+          const payment = settled === null ? { amount: amounts.amount, currency: entry.currency } : { amount: settled, currency: currencies[0]! };
           const foreign = payment.currency !== entry.currency;
           const applied = round2(choice.rows.reduce((sum, r) => sum + r.appliedAmount, 0));
           if (applied !== round2(payment.amount)) throw new BankEntryAmountMismatchError(payment.amount, applied);

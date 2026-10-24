@@ -45,11 +45,24 @@ export class ClientCustomerMismatchError extends Error {
   }
 }
 
+// Valuta: also a currency other than the bound customer's — the customer's
+// särpriser and rabattregler only apply in the customer's own currency, so
+// another one would price past them (and an exchangeRate on POST /quotes).
 export class ClientPriceNotAllowedError extends Error {
   constructor() {
-    super("A client bound to a customer cannot set prices — leave unitPrice and discountPercent out");
+    super(
+      "A client bound to a customer cannot set prices — leave unitPrice, discountPercent and exchangeRate out and send no other currency than the customer's"
+    );
     this.name = "ClientPriceNotAllowedError";
   }
+}
+
+// Valuta: a client bound to a customer prices in that customer's currency
+// only (a `currency` that differs would skip the customer's own prices).
+// Sessions, unbound clients and a request without a currency pass.
+export function clientCurrencyAllowed(req: FastifyRequest, currency: string | undefined, customerCurrency: string | null): boolean {
+  if (!req.apiClient?.customerId || currency === undefined || customerCurrency === null) return true;
+  return currency === customerCurrency;
 }
 
 // For routes that take a customer: a client bound to a customer may only act

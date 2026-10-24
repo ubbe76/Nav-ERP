@@ -44,7 +44,15 @@ import { readPostingSettings } from "../../system/service/posting-settings.js";
 // consuming service does not create a runtime import cycle — same seam as
 // invoice.repository.ts's CustomerInvoicePoster.
 import type { CustomerPaymentPoster } from "../service/payment.service.js";
-import { computeOpenAmounts, computeReleasedSek, grossAmountSql, openAmountSql, openItemAggregates } from "./open-amounts.js";
+import {
+  computeOpenAmounts,
+  computeReleasedSek,
+  grossAmountSekSql,
+  grossAmountSql,
+  openAmountSekSql,
+  openAmountSql,
+  openItemAggregates,
+} from "./open-amounts.js";
 
 // Control-flow signals thrown INSIDE the transaction so everything it did (the
 // BET number, the payment rows, the K verification and its verifikatnummer)
@@ -294,9 +302,11 @@ export function createPaymentRepository(db: Db) {
           grossAmount: grossAmountSql,
           openAmount: openAmountSql,
           // Valuta: the registration form shows (and asks for SEK on) a
-          // foreign invoice.
+          // foreign invoice — the same fields and types as /open-invoices.
           currency: invoices.currency,
           exchangeRate: invoices.exchangeRate,
+          grossAmountSek: grossAmountSekSql,
+          openAmountSek: openAmountSekSql,
           reminderCount: reminderCountSql,
           reminderFeeCharged: reminderFeeChargedSql,
         })
@@ -313,6 +323,9 @@ export function createPaymentRepository(db: Db) {
             ...row,
             grossAmount: Number(row.grossAmount),
             openAmount: Number(row.openAmount),
+            exchangeRate: row.exchangeRate === null ? null : Number(row.exchangeRate),
+            grossAmountSek: row.grossAmountSek === null ? null : Number(row.grossAmountSek),
+            openAmountSek: row.openAmountSek === null ? null : Number(row.openAmountSek),
             reminderCount: Number(row.reminderCount),
           }
         : null;

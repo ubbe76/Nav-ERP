@@ -9,6 +9,7 @@ ALTER TABLE "sales_orders" ADD COLUMN "exchange_rate" numeric(14, 6) DEFAULT '1'
 ALTER TABLE "invoices" ADD COLUMN "exchange_rate" numeric(14, 6);--> statement-breakpoint
 ALTER TABLE "invoices" ADD COLUMN "exchange_rate_manual" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "invoices" ADD COLUMN "gross_amount_sek" numeric(14, 2);--> statement-breakpoint
+ALTER TABLE "invoice_rows" ADD COLUMN "line_amount_sek" numeric(14, 2);--> statement-breakpoint
 ALTER TABLE "customer_payments" ADD COLUMN "currency" varchar(3) DEFAULT 'SEK' NOT NULL;--> statement-breakpoint
 ALTER TABLE "customer_payments" ADD COLUMN "amount_sek" numeric(14, 2);--> statement-breakpoint
 ALTER TABLE "customer_payments" ADD COLUMN "bank_fee_sek" numeric(14, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
@@ -27,6 +28,12 @@ SET "gross_amount_sek" = COALESCE((
   SELECT SUM(ir."line_amount" + ir."vat_amount") FROM "invoice_rows" ir WHERE ir."invoice_id" = i."id"
 ), 0)
 WHERE i."status" IN ('issued', 'paid');--> statement-breakpoint
+-- The rows' booked SEK net (what the periodisk sammanställning sums) is
+-- the row's own amount on every issued/paid invoice for the same reason.
+UPDATE "invoice_rows" ir
+SET "line_amount_sek" = ir."line_amount"
+FROM "invoices" i
+WHERE i."id" = ir."invoice_id" AND i."status" IN ('issued', 'paid');--> statement-breakpoint
 UPDATE "customer_payments" SET "amount_sek" = "amount";--> statement-breakpoint
 UPDATE "customer_payment_rows" SET "applied_amount_sek" = "applied_amount", "write_off_amount_sek" = "write_off_amount";--> statement-breakpoint
 -- valuta-sales-backfill:end

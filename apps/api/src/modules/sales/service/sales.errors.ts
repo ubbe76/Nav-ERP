@@ -221,6 +221,17 @@ export class SalesOrderCurrencyLockedError extends Error {
   }
 }
 
+// Valuta: a new row was priced in the order's currency as it was read, and
+// the currency changed (header PATCH on an order without rows) before the
+// row was written — re-read the order and add the row again. 409
+// sales-order-currency-changed.
+export class SalesOrderCurrencyChangedError extends Error {
+  constructor(public orderNumber: string, public pricedIn: string, public currency: string) {
+    super(`Valutan på ${orderNumber} ändrades till ${currency} medan raden prissattes i ${pricedIn} — lägg till raden igen`);
+    this.name = "SalesOrderCurrencyChangedError";
+  }
+}
+
 // Valuta: a rate other than 1 on a SEK order (or quote request). 400
 // sales-order-exchange-rate.
 export class SalesOrderExchangeRateError extends Error {

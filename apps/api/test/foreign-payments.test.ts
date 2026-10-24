@@ -439,6 +439,22 @@ describe("pain.001 — kontrollen för utlandsbetalningar", () => {
     expect(checkPain001(domestic, BANK_PROFILES.swedbank, TODAY)).toEqual([]);
   });
 
+  // ISO 4217: JPY, KRW, ISK … have no minor unit. Nav stores two decimals,
+  // so a fraction is refused (shown in the batch's problems) and a whole
+  // amount is written without decimals.
+  it("refuses decimals in a currency without minor units and writes a whole amount without them", async () => {
+    const input = foreignInput({ profile: BANK_PROFILES.handelsbanken });
+    input.items[2]! = { ...input.items[2]!, currency: "JPY", amount: 150000.5 };
+    expect(messages(input, BANK_PROFILES.handelsbanken, "BO-9-3")).toEqual(["JPY har inga decimaler — beloppet måste vara ett helt tal"]);
+    input.items[2]!.amount = 150000;
+    expect(fields(input, BANK_PROFILES.handelsbanken)).toEqual([]);
+    const { xml } = buildPain001(input, BANK_PROFILES.handelsbanken);
+    expect(xml).toContain('<InstdAmt Ccy="JPY">150000</InstdAmt>');
+    // Two-decimal currencies keep both decimals, even when whole.
+    expect(xml).toContain('<InstdAmt Ccy="GBP">3400.00</InstdAmt>');
+    expect(await validateAgainstXsd(xml, "pain.001.001.03")).toEqual([]);
+  });
+
   it("gives a payment abroad one letter less for the MsgId (PmtInfId suffix)", () => {
     const input = foreignInput({ profile: BANK_PROFILES.handelsbanken });
     input.messageId = "BO-1234567890123456789012"; // 25

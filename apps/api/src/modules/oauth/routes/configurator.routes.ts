@@ -33,6 +33,7 @@ import {
   ClientCustomerMismatchError,
   ClientPriceNotAllowedError,
   ClientScopeMissingError,
+  clientCurrencyAllowed,
   clientCustomerAllowed,
   clientHasScope,
 } from "../../auth/middleware/permission.middleware.js";
@@ -67,6 +68,14 @@ export async function configuratorRoutes(
       (input.exchangeRate !== undefined || input.rows.some((r) => r.unitPrice !== undefined || r.discountPercent !== undefined))
     ) {
       return reply.code(403).send(errorBody(new ClientPriceNotAllowedError()));
+    }
+    // Valuta: nor another currency than the customer's — the särpriser and
+    // the customer's rabattregel only apply in its own currency.
+    if (req.apiClient?.customerId && input.currency !== undefined) {
+      const customer = await salesService.getCustomer(input.customerId);
+      if (!clientCurrencyAllowed(req, input.currency, customer?.currency ?? null)) {
+        return reply.code(403).send(errorBody(new ClientPriceNotAllowedError()));
+      }
     }
     // Delprojekt 5: an API client may only order configurations of templates
     // published for the API (Visa i API); a session (the web's Ny kundorder)
@@ -137,6 +146,14 @@ export async function configuratorRoutes(
     const query = priceQuoteQuerySchema.parse(req.query);
     if (!clientCustomerAllowed(req, query.customerId)) {
       return reply.code(403).send(errorBody(new ClientCustomerMismatchError()));
+    }
+    // Valuta: a bound client reads its customer's prices in the customer's
+    // currency only (another one would show the price lists past them).
+    if (req.apiClient?.customerId && query.currency !== undefined) {
+      const customer = await salesService.getCustomer(query.customerId);
+      if (!clientCurrencyAllowed(req, query.currency, customer?.currency ?? null)) {
+        return reply.code(403).send(errorBody(new ClientPriceNotAllowedError()));
+      }
     }
     let result;
     try {

@@ -4,6 +4,7 @@ import {
   bankFileEntries,
   bankFiles,
   customerPayments,
+  invoices,
   paymentBatches,
   paymentBatchItems,
   supplierInvoices,
@@ -196,6 +197,16 @@ export function createBankFileRepository(db: Db) {
     async lockEntry(tx: Tx, id: string) {
       const [row] = await tx.select().from(bankFileEntries).where(eq(bankFileEntries.id, id)).for("update");
       return row ?? null;
+    },
+
+    // Valuta: the currency of each customer invoice an incoming booking
+    // settles — it decides which of the entry's amounts the rows are in.
+    // Read without a lock: an issued invoice's currency never changes, and
+    // the registration re-checks it under the invoices' own lock.
+    async invoiceCurrencies(tx: Tx, invoiceIds: string[]): Promise<Map<string, string>> {
+      if (invoiceIds.length === 0) return new Map();
+      const rows = await tx.select({ id: invoices.id, currency: invoices.currency }).from(invoices).where(inArray(invoices.id, invoiceIds));
+      return new Map(rows.map((row) => [row.id, row.currency]));
     },
 
     async incomingBooked(tx: Tx, entryId: string): Promise<boolean> {

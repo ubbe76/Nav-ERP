@@ -121,6 +121,39 @@ describe("pris från klienten", () => {
     expect(await db.select().from(salesOrders)).toHaveLength(0);
   });
 
+  // Valuta: the customer's särpriser and rabattregel only apply in the
+  // customer's own currency — a bound client sending another one would price
+  // past them, so it is refused like an own price (on every pricing route).
+  it("refuses a bound client's currency other than its customer's, on the quote, the price question and evaluate", async () => {
+    const reseller = await clientToken(["quotes:create", "prices:read", "configurator:read"], ownCustomer);
+    const res = await call("POST", "/quotes", reseller.auth, { ...pricedQuote(ownCustomer, {}), currency: "EUR" });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().code).toBe("client-price-not-allowed");
+    expect(await db.select().from(salesOrders)).toHaveLength(0);
+    const priceQuote = await call("GET", `/price-quote?customerId=${ownCustomer}&articleId=${articleId}&quantity=1&currency=EUR`, reseller.auth);
+    expect(priceQuote.statusCode).toBe(403);
+    expect(priceQuote.json().code).toBe("client-price-not-allowed");
+    for (const body of [{ selection: {}, customerId: ownCustomer, currency: "EUR" }, { selection: {}, currency: "EUR" }]) {
+      const evaluated = await call("POST", `/configurator/${NO_ID}/evaluate`, reseller.auth, body);
+      expect(evaluated.statusCode).toBe(403);
+      expect(evaluated.json().code).toBe("client-price-not-allowed");
+    }
+
+    // The customer's own currency is no price of the client's own.
+    expect((await call("POST", "/quotes", reseller.auth, { ...pricedQuote(ownCustomer, {}), currency: "sek" })).statusCode).toBe(201);
+    expect((await call("GET", `/price-quote?customerId=${ownCustomer}&articleId=${articleId}&quantity=1&currency=SEK`, reseller.auth)).statusCode).toBe(200);
+    expect((await call("POST", `/configurator/${NO_ID}/evaluate`, reseller.auth, { selection: {}, currency: "SEK" })).json().code).toBe(
+      "configurator-template-not-found"
+    );
+  });
+
+  it("lets an internal (unbound) client choose the currency", async () => {
+    const internal = await clientToken([...API_CLIENT_SCOPES]);
+    const res = await call("POST", "/quotes", internal.auth, { ...pricedQuote(ownCustomer, {}), currency: "EUR", exchangeRate: 11 });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().order).toMatchObject({ currency: "EUR", exchangeRate: "11.000000" });
+  });
+
   it("prices a bound client's row from the price chain", async () => {
     const reseller = await clientToken(["quotes:create"], ownCustomer);
     const res = await call("POST", "/quotes", reseller.auth, pricedQuote(ownCustomer, {}));

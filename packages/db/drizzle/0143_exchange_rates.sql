@@ -24,19 +24,12 @@ ALTER TABLE "supplier_invoices" ADD COLUMN "gross_amount_sek" numeric(14, 2);-->
 -- Every attested invoice so far is SEK (a foreign one could not be attested,
 -- NonSekSupplierInvoiceError): the SEK debt is the gross itself.
 UPDATE "supplier_invoices" SET "gross_amount_sek" = "gross_amount" WHERE "status" <> 'draft';--> statement-breakpoint
--- A foreign-currency DRAFT saved before the feature takes its linked
--- purchase order's rate when the order is in the same currency and has one;
--- any other foreign draft keeps rate 1 without a source = "kurs saknas", and
--- its attest is refused until a rate is entered.
-UPDATE "supplier_invoices" si
-SET "exchange_rate" = po."exchange_rate", "exchange_rate_source" = 'purchase_order'
-FROM "purchase_orders" po
-WHERE si."purchase_order_id" = po."id"
-  AND si."status" = 'draft'
-  AND si."currency" <> 'SEK'
-  AND po."currency" = si."currency"
-  AND po."exchange_rate" > 0
-  AND po."exchange_rate" <> 1;--> statement-breakpoint
+-- A foreign-currency DRAFT saved before the feature keeps rate 1 without a
+-- source = "kurs saknas": the manual told users to register a foreign
+-- invoice in SEK, so its amounts may well be SEK already — neither the
+-- linked purchase order's rate nor any other is assumed. Its attest is
+-- refused (supplier-invoice-exchange-rate-missing) until a rate is entered
+-- or looked up on the draft.
 ALTER TABLE "supplier_payment_rows" ADD COLUMN "applied_amount_sek" numeric(14, 2);--> statement-breakpoint
 ALTER TABLE "supplier_payment_rows" ADD COLUMN "write_off_amount_sek" numeric(14, 2) DEFAULT '0' NOT NULL;--> statement-breakpoint
 UPDATE "supplier_payment_rows" SET "applied_amount_sek" = "applied_amount", "write_off_amount_sek" = "write_off_amount";--> statement-breakpoint

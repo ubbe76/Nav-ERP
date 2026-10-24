@@ -120,6 +120,8 @@ async function issued(opts: {
     vatRate: "0",
     lineAmount: opts.amount,
     vatAmount: "0",
+    // What Utfärda stamps (the booked SEK net) — a SEK row's own amount.
+    lineAmountSek: opts.amount,
   });
   return invoice!.id;
 }

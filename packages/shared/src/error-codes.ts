@@ -94,6 +94,9 @@ export const ERROR_CODES = {
   // Valuta steg 3 (försäljning i valuta)
   // A new currency on an order that has rows (409)
   SALES_ORDER_CURRENCY_LOCKED: "sales-order-currency-locked",
+  // A new row priced in the order's old currency after a concurrent
+  // currency change (409, body.pricedIn/body.currency)
+  SALES_ORDER_CURRENCY_CHANGED: "sales-order-currency-changed",
   // A rate other than 1 on a SEK order/quote/price question (400)
   SALES_ORDER_EXCHANGE_RATE: "sales-order-exchange-rate",
   // A new currency on a price list that has rows (409)

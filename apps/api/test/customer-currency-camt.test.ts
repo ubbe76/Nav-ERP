@@ -111,7 +111,7 @@ describe("camt.054 kredit i valuta", () => {
       instructedCurrency: "EUR",
       chargesAmount: 50,
       state: "matched",
-      proposal: { basis: "ocr", rows: [{ invoiceId: invoice.id, appliedAmount: 1000 }] },
+      proposal: { basis: "ocr", currency: "EUR", rows: [{ invoiceId: invoice.id, appliedAmount: 1000 }] },
     });
 
     const { results } = await files.bookIncoming(
@@ -137,6 +137,76 @@ describe("camt.054 kredit i valuta", () => {
     ]);
     const [paid] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, invoice.id));
     expect(paid!.status).toBe("paid");
+  });
+
+  // The regression the matching must not have: a SEK invoice paid by a payer
+  // who instructed EUR (TxAmt 11 120 SEK, InstdAmt 1 000 EUR) was a plain
+  // SEK payment before Valuta — and still is: the OCR's invoice is in the
+  // account's currency, so the entry's own SEK amount settles it.
+  it("a SEK invoice paid with an instructed EUR amount is matched and booked as a plain SEK payment", async () => {
+    const customer = await makeCustomer("Svensk Kund AB");
+    const sek = await makeIssuedCustomerInvoice(customer.id, { invoiceNumber: "FA-7010", gross: 11120 });
+    const { file } = await upload(eurCredit([{ ref: "SEK-VIA-EUR", ocr: sek.ocrNumber, eur: 1000, sek: 11120, charges: 30 }]));
+    const [entry] = await files.incomingView(file.id);
+    expect(entry).toMatchObject({
+      amount: 11120,
+      instructedAmount: 1000,
+      instructedCurrency: "EUR",
+      state: "matched",
+      proposal: { basis: "ocr", currency: "SEK", reason: null, rows: [{ invoiceId: sek.id, appliedAmount: 11120 }] },
+    });
+
+    // The EUR amount on the SEK invoice is no payment of it.
+    const wrong = await files.bookIncoming(
+      file.id,
+      { entries: [{ entryId: entry!.id, customerId: customer.id, rows: [{ invoiceId: sek.id, appliedAmount: 1000 }] }] },
+      userId
+    );
+    expect(wrong.results[0]).toMatchObject({ ok: false, error: { code: "bank-entry-amount-mismatch" } });
+
+    const { results } = await files.bookIncoming(
+      file.id,
+      { entries: [{ entryId: entry!.id, customerId: customer.id, rows: [{ invoiceId: sek.id, appliedAmount: 11120 }] }] },
+      userId
+    );
+    expect(results[0]).toMatchObject({ ok: true });
+    const [payment] = await db.select().from(customerPayments);
+    // SEK: the amount is the SEK amount, no fee, no exchange difference.
+    expect(payment).toMatchObject({ currency: "SEK", amount: "11120.00", amountSek: "11120.00", bankFeeSek: "0.00" });
+    const rows = await db
+      .select({ number: accounts.number, debit: verificationRows.debit, credit: verificationRows.credit })
+      .from(verificationRows)
+      .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
+      .where(eq(verificationRows.verificationId, payment!.verificationId!))
+      .orderBy(asc(accounts.number));
+    expect(rows.map((r) => [r.number, Number(r.debit) - Number(r.credit)])).toEqual([
+      ["1510", -11120],
+      ["1930", 11120],
+    ]);
+    const [paid] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, sek.id));
+    expect(paid!.status).toBe("paid");
+  });
+
+  it("an instructed EUR amount without a reference is suggested on the EUR or the SEK amount, each in its own currency", async () => {
+    const customer = await makeCustomer("Euro Kund GmbH");
+    const eur = await eurInvoice(customer.id, "FA-7011", 1000);
+    const sek = await makeIssuedCustomerInvoice((await makeCustomer("Annan AB")).id, { invoiceNumber: "FA-7012", gross: 22240 });
+    const credit = (ref: string, eurAmount: number, sekAmount: number) =>
+      camtFile({
+        messageId: `NOREF-${ref}`,
+        entries: [
+          {
+            direction: "credit",
+            amount: sekAmount,
+            bookingDate: "2024-10-09",
+            txs: [{ acctSvcrRef: ref, amount: sekAmount, counterparty: "OKAND BETALARE", instructed: { amount: eurAmount, currency: "EUR" } }],
+          },
+        ],
+      });
+    const [onEur] = await files.incomingView((await upload(credit("A", 1000, 11150))).file.id);
+    expect(onEur!.proposal).toMatchObject({ state: "suggested", basis: "amount_only", currency: "EUR", rows: [{ invoiceId: eur.id, appliedAmount: 1000 }] });
+    const [onSek] = await files.incomingView((await upload(credit("B", 1999, 22240))).file.id);
+    expect(onSek!.proposal).toMatchObject({ state: "suggested", basis: "amount_only", currency: "SEK", rows: [{ invoiceId: sek.id, appliedAmount: 22240 }] });
   });
 
   it("a SEK payment on an EUR invoice's OCR is not matched to it, and cannot book it", async () => {

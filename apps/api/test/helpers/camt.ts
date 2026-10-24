@@ -15,7 +15,8 @@ export interface CamtTx {
   // InstdAmt in that currency, TxAmt/CcyXchg and charges included in TxAmt.
   instructed?: { amount: number; currency: string };
   exchange?: { source: string; target: string; unit: string; rate: string };
-  charges?: { amount: number; code?: string; proprietary?: string }[];
+  // bearer: Chrgs/Br (DEBT/CRED/SHAR/SLEV) — whose charges they are.
+  charges?: { amount: number; code?: string; proprietary?: string; bearer?: "DEBT" | "CRED" | "SHAR" | "SLEV" }[];
 }
 export interface CamtEntry {
   direction: "credit" | "debit";
@@ -62,7 +63,7 @@ function tx(entry: CamtEntry, t: CamtTx): string {
   const charges = (t.charges ?? [])
     .map(
       (c) =>
-        `<Chrgs>${money(c.amount)}<CdtDbtInd>DBIT</CdtDbtInd>${c.code ? `<Tp><Cd>${c.code}</Cd></Tp>` : c.proprietary ? `<Tp><Prtry><Id>${c.proprietary}</Id></Prtry></Tp>` : ""}</Chrgs>`
+        `<Chrgs>${money(c.amount)}<CdtDbtInd>DBIT</CdtDbtInd>${c.code ? `<Tp><Cd>${c.code}</Cd></Tp>` : c.proprietary ? `<Tp><Prtry><Id>${c.proprietary}</Id></Prtry></Tp>` : ""}${c.bearer ? `<Br>${c.bearer}</Br>` : ""}</Chrgs>`
     )
     .join("");
   return `<TxDtls>${refs ? `<Refs>${refs}</Refs>` : ""}<AmtDtls>${instructed}<TxAmt>${money(t.amount)}${exchange}</TxAmt></AmtDtls>${charges}${party}${remittance}${ret}</TxDtls>`;

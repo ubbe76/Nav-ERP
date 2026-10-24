@@ -33,6 +33,7 @@ import { createSalesService, InvalidStatusTransitionError, SalesOrderNotFoundErr
 import { resolvePrice } from "../src/modules/sales/service/price-resolver.js";
 import {
   PriceListCurrencyLockedError,
+  SalesOrderCurrencyChangedError,
   SalesOrderCurrencyLockedError,
   SalesOrderExchangeRateError,
 } from "../src/modules/sales/service/sales.errors.js";
@@ -346,6 +347,60 @@ describe("kundorder i valuta — prissättning", () => {
     expect(Number(freightRow.unitPrice)).toBe(fromSek(556.55, 11.131));
   });
 
+  // The first row and a currency change race: the header PATCH changes the
+  // currency under the order's FOR UPDATE (only while there are no rows),
+  // addRow re-reads it under FOR KEY SHARE — a row priced in the old currency
+  // never lands on an order in the new one.
+  it("a row priced in the old currency is refused when the currency changed meanwhile (409 sales-order-currency-changed)", async () => {
+    const article = await makeArticle(1000);
+    const customer = await makeCustomer("SEK");
+    const { order, rows } = await salesService.createQuote({ customerId: customer.id, rows: [{ articleId: article.id, quantity: 1 }] } as never, userId);
+    // An order without rows — the only state its currency can change in.
+    await salesService.deleteRow(order.id, rows[0]!.id);
+    const salesRepo = createSalesRepository(db);
+    const write = { articleId: article.id, quantity: 1, unitPrice: 1000, discountPercent: 0, unitId: null, unitFactor: null };
+
+    // A header PATCH holding the order's lock while addRow comes in.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+    const patch = db.transaction(async (tx) => {
+      await tx.select({ id: salesOrders.id }).from(salesOrders).where(eq(salesOrders.id, order.id)).for("update");
+      locked();
+      await held;
+      await tx.update(salesOrders).set({ currency: "EUR", exchangeRate: "11" }).where(eq(salesOrders.id, order.id));
+    });
+    await lockTaken;
+    const adding = salesRepo.addRow(order.id, write, "SEK");
+    const outcome = adding.then(
+      () => "added",
+      (err: unknown) => err
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    release();
+    await patch;
+    const err = await outcome;
+    expect(err).toBeInstanceOf(SalesOrderCurrencyChangedError);
+    expect(err).toMatchObject({ pricedIn: "SEK", currency: "EUR" });
+    expect(await salesService.listRows(order.id)).toHaveLength(0);
+
+    // The service passes the currency it priced in: a change between its
+    // read and the insert is refused the same way.
+    const racing = {
+      ...salesRepo,
+      async addRow(...args: Parameters<typeof salesRepo.addRow>) {
+        await db.update(salesOrders).set({ currency: "SEK", exchangeRate: "1" }).where(eq(salesOrders.id, order.id));
+        return salesRepo.addRow(...args);
+      },
+    };
+    const racingService = createSalesService(racing, registerService, mailService, documentPdfService, stockService, articleService, systemService, (query) => resolvePrice(db, query), auditRepository, undefined, undefined, undefined, undefined, undefined, rates);
+    rate("EUR", 11);
+    await expect(racingService.addRow(order.id, { articleId: article.id, quantity: 1 })).rejects.toBeInstanceOf(SalesOrderCurrencyChangedError);
+    // Without a race the row is added as before.
+    expect(Number((await salesService.addRow(order.id, { articleId: article.id, quantity: 1 })).unitPrice)).toBe(1000);
+  });
+
   it("GET /price-quote: in the order's currency, or a chosen one; another customer's order is no answer", async () => {
     const article = await makeArticle(1113.1);
     const customer = await makeCustomer("EUR");
@@ -459,6 +514,27 @@ describe("kundfaktura i valuta", () => {
     expect(issued.openAmountSek).toBe(-toSek(1000, 11.131));
   });
 
+  // ML 17 kap. 29 § (mervärdesskattedirektivet art. 230): the VAT also in
+  // SEK on an invoice in another currency — exactly the booked VAT — and on
+  // the archived PDF a credit note negative. Nothing for SEK or without VAT.
+  it("the invoice PDF states the VAT in SEK (the booked amount and the rate) when the invoice is in another currency", async () => {
+    const customer = await makeCustomer("EUR");
+    const plain = (pdf: Buffer) => pdfText(pdf).replace(/\u00a0/g, " ");
+    const issued = await issuedInvoice(customer.id, "EUR", 11.131, [{ unitPrice: 1000 }]);
+    // 250 EUR VAT × 11.131 = 2 782.75 kr — what 2610 got.
+    expect((await rowsOf(issued.verificationId!))["2610"]).toBe(-2782.75);
+    const text = plain((await invoiceService.renderPdf(issued.id)).content);
+    expect(text).toContain("Moms i SEK: 2 782,75 (kurs 11,131000)");
+
+    const credit = (await invoiceService.issue((await invoiceService.createCredit(issued.id, {}, userId))!.id, userId))!;
+    expect(plain((await invoiceService.renderPdf(credit.id)).content)).toContain("Moms i SEK: -2 782,75 (kurs 11,131000)");
+
+    const zeroVat = await issuedInvoice(customer.id, "EUR", 11.131, [{ unitPrice: 1000, vatRate: 0 }]);
+    expect(plain((await invoiceService.renderPdf(zeroVat.id)).content)).not.toContain("Moms i SEK");
+    const sek = await issuedInvoice((await makeCustomer("SEK")).id, "SEK", 1, [{ unitPrice: 1000 }]);
+    expect(plain((await invoiceService.renderPdf(sek.id)).content)).not.toContain("Moms i SEK");
+  });
+
   it("several VAT codes at an odd rate: the receivable is toSek(brutto), the VAT toSek(Σ moms), the verification balances", async () => {
     const customer = await makeCustomer("EUR");
     const issued = await issuedInvoice(customer.id, "EUR", 11.131, [{ unitPrice: 333.33, vatRate: 25 }, { unitPrice: 333.33, vatRate: 12 }, { unitPrice: 333.34, vatRate: 0 }]);
@@ -515,7 +591,23 @@ describe("kundbetalning i valuta", () => {
     );
     expect(payment).toMatchObject({ currency: "EUR", amount: "1000.00", amountSek: "11200.00", bankFeeSek: "0.00", exchangeRateDifferenceSek: 200 });
     expect(await rowsOf(payment.verificationId!)).toEqual({ "1930": 11200, "1510": -11000, "3960": -200 });
-    expect((await invoiceService.getInvoice(invoice.id))!).toMatchObject({ status: "paid", openAmount: 0, openAmountSek: 0 });
+    const card = (await invoiceService.getInvoice(invoice.id))!;
+    expect(card).toMatchObject({ status: "paid", openAmount: 0, openAmountSek: 0 });
+    // The invoice card's payment rows carry the SEK they released, as numbers.
+    expect(card.payments).toEqual([
+      expect.objectContaining({ paymentNumber: payment.paymentNumber, appliedAmount: "1000.00", currency: "EUR", appliedAmountSek: 11000, writeOffAmountSek: 0 }),
+    ]);
+  });
+
+  it("GET /open-invoices/by-ocr answers like /open-invoices: numbers, and the booked SEK values", async () => {
+    const customer = await makeCustomer("EUR");
+    const invoice = await eurInvoice(customer.id, 1000, 11);
+    const byOcr = await paymentService.findOpenByOcr(invoice.ocrNumber!);
+    const listed = (await paymentService.listOpenInvoices({ limit: 50, offset: 0, overdueOnly: false } as never)).rows.find((r) => r.id === invoice.id)!;
+    expect(byOcr).toMatchObject({ currency: "EUR", exchangeRate: 11, grossAmount: 1000, openAmount: 1000, grossAmountSek: 11000, openAmountSek: 11000 });
+    for (const key of ["currency", "exchangeRate", "grossAmount", "openAmount", "grossAmountSek", "openAmountSek"] as const) {
+      expect(byOcr![key]).toEqual(listed[key]);
+    }
   });
 
   it("kursförlust and bankavgift", async () => {

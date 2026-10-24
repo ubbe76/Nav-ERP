@@ -130,10 +130,18 @@ function currencyExchangeOf(...amountDetails: (XmlNode | null)[]): BankEntryCurr
 // TxDtls is (SEB: TxAmt is "the net amount of the underlying transaction
 // including charges expressed in the currency of the posting account";
 // Handelsbanken: Cd COMM "Used when charges is included in the entry
-// amount"). Only charges in the account's currency, debited, and not borne
-// by the creditor count.
+// amount"; Swedbank: Chrgs "included in the credited amount or booked
+// separately", Br DEBT/SHAR). Only charges in the account's currency,
+// debited, and borne by US count — and who we are depends on the entry's
+// direction (ISO 20022 ChargeBearerType1Code: DEBT = "borne by the debtor",
+// CRED = "borne by the creditor", SHAR = each party its own bank's): on a
+// debit (our payment) we are the debtor, so creditor-borne charges (CRED)
+// are the payee's; on a credit (money in) we are the creditor, so
+// debtor-borne charges (DEBT) are the payer's — while CRED charges there
+// are ours, taken from what came in (a bank fee, not a kursförlust).
 const SEPARATELY_DEBITED_CHARGES = new Set(["MCOM", "QCOM", "YCOM", "SCOM"]);
-function includedCharges(nodes: XmlNode[], accountCurrency: string): number | null {
+function includedCharges(nodes: XmlNode[], accountCurrency: string, direction: "credit" | "debit"): number | null {
+  const othersBearer = direction === "credit" ? "DEBT" : "CRED";
   let total = 0;
   let found = false;
   for (const charge of nodes) {
@@ -141,7 +149,7 @@ function includedCharges(nodes: XmlNode[], accountCurrency: string): number | nu
     if (!money || money.currency !== accountCurrency || money.amount <= 0) continue;
     const indicator = textAt(charge, "CdtDbtInd");
     if (indicator && indicator !== "DBIT") continue;
-    if (textAt(charge, "Br") === "CRED") continue;
+    if (textAt(charge, "Br") === othersBearer) continue;
     const proprietary = textAt(charge, "Tp", "Prtry", "Id");
     if (proprietary && SEPARATELY_DEBITED_CHARGES.has(proprietary.toUpperCase())) continue;
     total += money.amount;
@@ -219,6 +227,15 @@ export function parseCamt054(xml: string): ParsedCamt054 {
           return;
         }
         const foreignInstructed = instructed && instructed.currency !== money.currency && instructed.amount > 0 ? instructed : null;
+        // The amount the content hash is taken over is the one the parser
+        // read before Valuta (the transaction's TxAmt, else its InstdAmt in
+        // whatever currency, else a one-transaction entry's Ntry/Amt) — not
+        // `money`, which now prefers the entry's own amount in the account's
+        // currency. A file read before the upgrade and read again after it
+        // must give the same key, or every hash-keyed entry would come in
+        // twice.
+        const legacyAmount =
+          (tx ? amountOf(path(txDetails, "TxAmt", "Amt")) ?? amountOf(path(txDetails, "InstdAmt", "Amt")) : null) ?? (single ? ntryAmount : null) ?? money;
         if (money.amount <= 0) {
           // Nordea (Sweden): "Zero amount is possible" — unexplained, so the
           // transaction is noted and skipped like any other zero.
@@ -248,7 +265,7 @@ export function parseCamt054(xml: string): ParsedCamt054 {
         else if (ntryRef) [dedupeKey, dedupeSource] = [`${account}|ntry:${ntryRef}#${txIndex}`, "entry_ref"];
         else {
           const base = createHash("sha256")
-            .update(JSON.stringify([account, bookingDate, direction, reversal, money.amount.toFixed(2), endToEndId, counterpartyName, remittance]))
+            .update(JSON.stringify([account, bookingDate, direction, reversal, legacyAmount.amount.toFixed(2), endToEndId, counterpartyName, remittance]))
             .digest("hex");
           const n = (hashCounts.get(base) ?? 0) + 1;
           hashCounts.set(base, n);
@@ -288,7 +305,7 @@ export function parseCamt054(xml: string): ParsedCamt054 {
           currencyExchange: currencyExchangeOf(child(txDetails, "TxAmt"), child(txDetails, "InstdAmt"), child(ntryDetails, "TxAmt"), child(ntryDetails, "InstdAmt")),
           // The transaction's charges; the entry's only for a one-transaction
           // entry that reports none of its own (never both — no double count).
-          chargesAmount: includedCharges(tx && children(tx, "Chrgs").length > 0 ? children(tx, "Chrgs") : single ? children(ntry, "Chrgs") : [], money.currency),
+          chargesAmount: includedCharges(tx && children(tx, "Chrgs").length > 0 ? children(tx, "Chrgs") : single ? children(ntry, "Chrgs") : [], money.currency, direction),
         });
       });
     });

@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { asc, eq, sql } from "drizzle-orm";
 import {
@@ -17,6 +20,7 @@ import { createSupplierInvoiceRepository } from "../src/modules/purchase/reposit
 import {
   createSupplierInvoiceService,
   SupplierInvoiceExchangeRateError,
+  SupplierInvoiceExchangeRateMissingError,
 } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import { createSupplierPaymentRepository } from "../src/modules/purchase/repository/supplier-payment.repository.js";
 import {
@@ -38,6 +42,7 @@ import { vatCodeId } from "./helpers/vat-codes.js";
 // rate lookup is a stub — the Riksbanken client has its own suite.
 
 const TODAY = new Date().toLocaleDateString("sv-SE");
+const MIGRATIONS = fileURLToPath(new URL("../../../packages/db/drizzle/", import.meta.url));
 
 // What the stub answers per currency; absent = unavailable.
 const stubRates = new Map<string, Omit<ExchangeRateLookup, "currency" | "requestedDate">>();
@@ -178,6 +183,80 @@ describe("leverantörsfaktura i valuta — kursen", () => {
     expect(toSek).toMatchObject({ currency: "SEK", exchangeRate: "1.000000", exchangeRateSource: null });
     const backToEur = await invoices.updateHeader(invoice!.id, { supplierId: eur.id }, user.id);
     expect(backToEur).toMatchObject({ currency: "EUR", exchangeRate: "11.123000", exchangeRateSource: "riksbank" });
+  });
+
+  // The header PATCH's contract (webben bygger mot den): a number is typed
+  // (manual), null is the automatic rate again, and left out the rate is
+  // looked up whenever it is missing — an automatic lookup that finds
+  // nothing leaves "kurs saknas" instead of failing the edit.
+  it("PATCH exchangeRate: null goes back to the automatic rate — or to kurs saknas without an error", async () => {
+    const user = await makeUser();
+    const eur = await makeSupplier("EUR");
+    const audited: { action: string; detail: unknown }[] = [];
+    const service = createSupplierInvoiceService(createSupplierInvoiceRepository(db), poster, { log: async (e) => void audited.push(e as never) }, rates);
+    const invoice = await service.create({ supplierId: eur.id, invoiceNumber: "N-1", invoiceDate: TODAY, exchangeRate: 11.3, rows: [] }, user.id);
+    expect(invoice).toMatchObject({ exchangeRate: "11.300000", exchangeRateSource: "manual" });
+
+    stubRates.set("EUR", { date: "2026-10-23", rate: 11.131, source: "riksbank" });
+    const automatic = await service.updateHeader(invoice!.id, { exchangeRate: null }, user.id);
+    expect(automatic).toMatchObject({ exchangeRate: "11.131000", exchangeRateSource: "riksbank", exchangeRateDate: "2026-10-23", exchangeRateMissing: false });
+    expect(audited.map((e) => e.action)).toEqual(["created", "exchange_rate_changed"]);
+    expect(audited[1]!.detail).toMatchObject({
+      before: { exchangeRate: "11.300000", exchangeRateSource: "manual" },
+      after: { exchangeRate: "11.131", exchangeRateSource: "riksbank" },
+    });
+
+    // A new date with no rate to be had: kurs saknas, the edit goes through.
+    stubRates.clear();
+    const redated = await service.updateHeader(invoice!.id, { invoiceDate: "2026-10-20" }, user.id);
+    expect(redated).toMatchObject({ invoiceDate: "2026-10-20", exchangeRateSource: null, exchangeRateDate: null, exchangeRateMissing: true });
+    await expect(service.approve(invoice!.id, user.id)).rejects.toBeInstanceOf(SupplierInvoiceExchangeRateMissingError);
+
+    // Missing, any field: looked up again — still nothing, still no error …
+    const noted = await service.updateHeader(invoice!.id, { note: "Väntar på kurs" }, user.id);
+    expect(noted).toMatchObject({ note: "Väntar på kurs", exchangeRateMissing: true });
+    // … and found once a rate exists.
+    stubRates.set("EUR", { date: "2026-10-20", rate: 11.05, source: "manual" });
+    const found = await service.updateHeader(invoice!.id, { note: null }, user.id);
+    expect(found).toMatchObject({ exchangeRate: "11.050000", exchangeRateSource: "register", exchangeRateDate: "2026-10-20", exchangeRateMissing: false });
+    expect(lookups.at(-1)).toEqual({ currency: "EUR", date: "2026-10-20" });
+
+    // null with nothing to look up: kurs saknas, no error.
+    stubRates.clear();
+    const cleared = await service.updateHeader(invoice!.id, { exchangeRate: null }, user.id);
+    expect(cleared).toMatchObject({ exchangeRateSource: null, exchangeRateMissing: true });
+    // A typed rate after that is manual again and attestable.
+    const typed = await service.updateHeader(invoice!.id, { exchangeRate: 11.2 }, user.id);
+    expect(typed).toMatchObject({ exchangeRate: "11.200000", exchangeRateSource: "manual", exchangeRateMissing: false });
+  });
+
+  // Migration 0143: a foreign draft saved before the feature (the manual said
+  // "registrera fakturan i SEK") keeps kurs saknas — even with a linked
+  // purchase order in the currency — and cannot be attested until a rate is
+  // entered.
+  it("0143 leaves an old foreign draft without a rate, whatever its purchase order says", async () => {
+    const user = await makeUser();
+    const eur = await makeSupplier("EUR");
+    const [order] = await db
+      .insert(purchaseOrders)
+      .values({ orderNumber: `IO-FX-${crypto.randomUUID().slice(0, 8)}`, supplierId: eur.id, currency: "EUR", exchangeRate: "11.4" })
+      .returning();
+    const draft = await invoices.create(
+      { supplierId: eur.id, invoiceNumber: "OLD-1", invoiceDate: TODAY, purchaseOrderId: order!.id, netAmount: 1000, grossAmount: 1000, exchangeRate: 11, rows: [] },
+      user.id
+    );
+    // The state before 0143: rate 1, no source.
+    await db.update(supplierInvoices).set({ exchangeRate: "1", exchangeRateSource: null, exchangeRateDate: null }).where(eq(supplierInvoices.id, draft!.id));
+    const migration = readFileSync(join(MIGRATIONS, readdirSync(MIGRATIONS).find((file) => file.endsWith("_exchange_rates.sql"))!), "utf8");
+    const updates = migration
+      .split("--> statement-breakpoint")
+      .map((chunk) => chunk.split("\n").filter((line) => !line.trim().startsWith("--")).join("\n").trim())
+      .filter((statement) => /^UPDATE "supplier_invoices"/.test(statement));
+    expect(updates.length).toBeGreaterThan(0);
+    for (const statement of updates) await db.execute(sql.raw(statement));
+
+    expect((await invoices.getInvoice(draft!.id))!).toMatchObject({ exchangeRate: "1.000000", exchangeRateSource: null, exchangeRateMissing: true });
+    await expect(invoices.approve(draft!.id, user.id)).rejects.toBeInstanceOf(SupplierInvoiceExchangeRateMissingError);
   });
 
   it("previews omvänd moms on the SEK base and books it so at the attest, stamping gross_amount_sek", async () => {

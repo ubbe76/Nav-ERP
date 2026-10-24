@@ -61,7 +61,16 @@ export interface BuiltPain001Item {
   warnings: string[];
 }
 
-const amountText = (amount: number) => amount.toFixed(2);
+// ISO 4217 currencies without minor units (exponent 0). Their amounts are
+// written without decimals — the banks validate the fraction digits against
+// the currency (CGI-MP) — and pain001-check refuses one that has öre-like
+// decimals (Nav stores every amount with two, spec §9).
+export const ZERO_DECIMAL_CURRENCIES: ReadonlySet<string> = new Set([
+  "BIF", "CLP", "DJF", "GNF", "ISK", "JPY", "KMF", "KRW", "PYG", "RWF", "UGX", "UYI", "VND", "VUV", "XAF", "XOF", "XPF",
+]);
+// An amount as the file writes it: two decimals, none for a currency
+// without minor units. CtrlSum (a plain decimal over all currencies) keeps two.
+const amountText = (amount: number, currency = "SEK") => amount.toFixed(ZERO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2);
 const digits = (value: string | null) => (value ?? "").replace(/\D/g, "");
 
 const KIND_ORDER: Record<PaymentKind, number> = { domestic: 0, sepa: 1, international: 2 };
@@ -259,7 +268,7 @@ function remittanceElement(item: Pain001Item, referenceValue: string, profile: B
   return item.reference.kind === "ocr"
     ? el("RmtInf", [
         el("Strd", [
-          profile.remittance.scorWithRemittedAmount ? el("RfrdDocAmt", [el("RmtdAmt", amountText(item.amount), { Ccy: currency })]) : null,
+          profile.remittance.scorWithRemittedAmount ? el("RfrdDocAmt", [el("RmtdAmt", amountText(item.amount, currency), { Ccy: currency })]) : null,
           el("CdtrRefInf", [el("Tp", [el("CdOrPrtry", [el("Cd", "SCOR")])]), el("Ref", referenceValue)]),
         ]),
       ])
@@ -394,7 +403,7 @@ export function buildPain001(input: Pain001Input, profile: BankProfile): { xml: 
     });
     return el("CdtTrfTxInf", [
       el("PmtId", [el("InstrId", item.endToEndId), el("EndToEndId", item.endToEndId)]),
-      el("Amt", [el("InstdAmt", amountText(item.amount), { Ccy: currency })]),
+      el("Amt", [el("InstdAmt", amountText(item.amount, currency), { Ccy: currency })]),
       foreignCreditorAgent(c, kind, profile),
       el("Cdtr", [
         el("Nm", name.value),

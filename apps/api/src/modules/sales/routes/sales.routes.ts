@@ -68,6 +68,7 @@ import {
   RowHasManufacturingOrdersError,
   RowVariantExistsError,
   PriceListCurrencyLockedError,
+  SalesOrderCurrencyChangedError,
   SalesOrderCurrencyLockedError,
   SalesOrderExchangeRateError,
 } from "../service/sales.errors.js";
@@ -390,6 +391,10 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // The article (e.g. the resolved variant) is already an ordinary row on
       // the order, or the template left the variants mode meanwhile.
       if (err instanceof RowVariantExistsError || err instanceof ConfiguratorNotVariantModeError) return reply.code(409).send(errorBody(err));
+      // Valuta: the order's currency changed while the row was priced.
+      if (err instanceof SalesOrderCurrencyChangedError) {
+        return reply.code(409).send({ ...errorBody(err), pricedIn: err.pricedIn, currency: err.currency });
+      }
       throw err;
     }
   });

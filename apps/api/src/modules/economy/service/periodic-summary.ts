@@ -80,8 +80,9 @@ export function buyerVatNumber(raw: string | null, customerCountry: string): Buy
   return VALID_BUYER_VAT_NUMBER.test(number) ? { status: "ok", vatNumber: number } : { status: "invalid", vatNumber: number };
 }
 
-// One issued invoice's EUV or EUT amount (the sum of its rows with that code,
-// as stored — positive also on a credit note).
+// One issued invoice's EUV or EUT amount (the sum of its rows with that code
+// in SEK as the F verification booked them — line_amount_sek — positive also
+// on a credit note).
 export type EuSalesLine = {
   invoiceId: string;
   invoiceNumber: string;

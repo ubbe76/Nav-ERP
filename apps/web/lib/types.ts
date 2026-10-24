@@ -4703,6 +4703,9 @@ export interface IncomingProposal {
   basis: "ocr" | "amount_name" | "amount_only" | "name_allocation" | null;
   reason: string | null;
   partial: boolean;
+  // Valuta: the currency the rows settle in (the open items' — the account's
+  // or the instructed one); null when nothing is proposed.
+  currency: string | null;
   customerId: string | null;
   customerName: string | null;
   rows: IncomingProposalRow[];

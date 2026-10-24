@@ -561,20 +561,38 @@ export function createSupplierInvoiceService(
           allowInactive: input.vatCodeId === invoice.vatCodeId,
         }).id;
       }
-      // Valuta (the touched-mönster): a rate typed in always wins. Without
-      // one the rate is looked up again when the currency changed (byte av
-      // leverantör) or the invoice date changed — unless the stored rate was
-      // typed by hand (source manual), which a date change leaves alone.
+      // Valuta (the touched-mönster): a rate typed in always wins (a number,
+      // source manual); null asks for the automatic rate again. Left out,
+      // the rate is looked up again when the currency changed (byte av
+      // leverantör), when the invoice date changed and the stored rate was
+      // not typed by hand (source manual), and whenever the rate is missing
+      // (a foreign invoice without a source) — whatever else the PATCH
+      // changes. Every lookup runs here, before the UPDATE; an automatic
+      // lookup that finds nothing leaves the invoice "kurs saknas" (no
+      // source) instead of failing the edit — the attest refuses it.
       const currency = patch.currency ?? invoice.currency;
       const invoiceDate = patch.invoiceDate ?? invoice.invoiceDate;
       const currencyChanged = currency !== invoice.currency;
       const dateChanged = invoiceDate !== invoice.invoiceDate;
+      const rateMissing = invoice.currency !== SEK && invoice.exchangeRateSource === null;
       const purchaseOrderId = patch.purchaseOrderId !== undefined ? patch.purchaseOrderId : invoice.purchaseOrderId;
+      const automaticRate = async (): Promise<ResolvedRate> => {
+        try {
+          return await resolveRate(currency, invoiceDate, undefined, purchaseOrderId);
+        } catch (err) {
+          if (!(err instanceof ExchangeRateUnavailableError)) throw err;
+          // Kurs saknas: the stored value stays (1 for a new currency) and
+          // only the missing source says it — the card's exchangeRateMissing.
+          return { exchangeRate: currencyChanged ? 1 : Number(invoice.exchangeRate), exchangeRateSource: null, exchangeRateDate: null };
+        }
+      };
       let rateChange: ResolvedRate | null = null;
-      if (input.exchangeRate !== undefined) {
+      if (typeof input.exchangeRate === "number") {
         rateChange = await resolveRate(currency, invoiceDate, input.exchangeRate, purchaseOrderId);
-      } else if (currencyChanged || (dateChanged && currency !== SEK && invoice.exchangeRateSource !== "manual")) {
-        rateChange = await resolveRate(currency, invoiceDate, undefined, purchaseOrderId);
+      } else if (input.exchangeRate === null) {
+        rateChange = await automaticRate();
+      } else if (currencyChanged || (currency !== SEK && ((dateChanged && invoice.exchangeRateSource !== "manual") || rateMissing))) {
+        rateChange = await automaticRate();
       }
       if (rateChange) {
         patch.exchangeRate = String(rateChange.exchangeRate);

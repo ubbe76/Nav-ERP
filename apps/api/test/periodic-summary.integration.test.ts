@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq, inArray, sql } from "drizzle-orm";
-import { db, invoices, systemSettings } from "@navet/db";
+import { asc, eq, inArray, sql } from "drizzle-orm";
+import { db, invoiceRows, invoices, systemSettings } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -342,6 +342,63 @@ describe("GET summary — reconciliation against ruta 35 and 39", () => {
     expect(after.warnings.map((warning) => warning.message)).toEqual([
       "Varor: sammanställningen 1,00 kr, bokfört i ruta 35 1,30 kr (skillnad -0,30 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
     ]);
+  });
+});
+
+describe("GET summary — invoices in another currency (Valuta)", () => {
+  // EUR at 11.131: 200.15 + 50.05 EUV and 100.05 EUT. Row by row toSek would
+  // give 2 227.87 + 557.11 + 1 113.66, but the F verification books the
+  // restmetod — toSek(350.25) = 3 898.63 on the rows, the öre left over on
+  // the largest row: 2 227.86 + 557.11 EUV (3108) and 1 113.66 EUT (3308).
+  // The credit note of the 50.05 row books 557.11 back.
+  it("reports the SEK the verifications booked, credit notes negative, and reconciles with ruta 35/39", async () => {
+    await writeVatReportingSettings(db, { contactName: "Per Persson", contactPhone: "08-123 456", contactEmail: "ps@example.com" });
+    const de = await makeCustomer({ currency: "EUR" } as CustomerOverrides);
+    const EUV = await vatCodeId("EUV");
+    const EUT = await vatCodeId("EUT");
+    const draft = await invoiceService.create(
+      {
+        customerId: de.id,
+        currency: "EUR",
+        exchangeRate: 11.131,
+        rows: [
+          { description: "Bänkskiva", quantity: 1, unitPrice: 200.15, vatCodeId: EUV },
+          { description: "Montage", quantity: 1, unitPrice: 100.05, vatCodeId: EUT },
+          { description: "Diskho", quantity: 1, unitPrice: 50.05, vatCodeId: EUV },
+        ],
+      } as never,
+      user.id
+    );
+    const issued = (await invoiceService.issue(draft!.id, user.id))!;
+    expect(issued).toMatchObject({ currency: "EUR", exchangeRate: "11.131000", grossAmountSek: "3898.63" });
+    const stamped = await db
+      .select({ lineAmount: invoiceRows.lineAmount, lineAmountSek: invoiceRows.lineAmountSek })
+      .from(invoiceRows)
+      .where(eq(invoiceRows.invoiceId, issued.id))
+      .orderBy(asc(invoiceRows.createdAt));
+    expect(stamped).toEqual([
+      { lineAmount: "200.15", lineAmountSek: "2227.86" },
+      { lineAmount: "100.05", lineAmountSek: "1113.66" },
+      { lineAmount: "50.05", lineAmountSek: "557.11" },
+    ]);
+
+    const credit = await invoiceService.createCredit(
+      issued.id,
+      { rows: [{ description: "Retur", quantity: 1, unitPrice: 50.05, vatCodeId: EUV }] },
+      user.id
+    );
+    const creditIssued = (await invoiceService.issue(credit!.id, user.id))!;
+    expect(creditIssued).toMatchObject({ currency: "EUR", exchangeRate: "11.131000", grossAmountSek: "557.11" });
+
+    const summary = await service.getSummary(THIS_MONTH);
+    // 2 227.86 + 557.11 − 557.11 = 2 227.86 ⇒ 2 228; 1 113.66 ⇒ 1 114.
+    expect(summary.rows.map((row) => [row.vatNumber, row.goods, row.services])).toEqual([["DE123456789", 2228, 1114]]);
+    expect(summary.ledger).toEqual({ box35: 2228, box39: 1114 });
+    expect(summary.differences).toEqual({ goods: 0, services: 0 });
+    expect(summary.warnings).toEqual([]);
+
+    const { content } = await service.getFile(THIS_MONTH);
+    expect(content.toString("latin1").split("\r\n")[2]).toBe("DE123456789;2228;;1114;");
   });
 });
 

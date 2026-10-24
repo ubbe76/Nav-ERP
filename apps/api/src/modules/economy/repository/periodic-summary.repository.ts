@@ -8,6 +8,11 @@ import type { EuSalesLine } from "../service/periodic-summary.js";
 // invoice's own snapshot (stamped at Utfärda); the customer's name and
 // country are live — the country only decides a missing prefix on an older
 // invoice.
+//
+// Valuta: the amounts are the rows' booked SEK (invoice_rows.line_amount_sek,
+// stamped at Utfärda with the F verification's own restmetod), never the
+// rows' own amounts — an invoice in EUR is reported in SEK, öre for öre what
+// its verification credited, so the sum reconciles with ruta 35/39.
 export async function readEuSalesLines(executor: Db | Tx, from: string, to: string): Promise<EuSalesLine[]> {
   const rows = await executor
     .select({
@@ -19,7 +24,7 @@ export async function readEuSalesLines(executor: Db | Tx, from: string, to: stri
       customerName: customers.name,
       customerCountry: customers.country,
       code: vatCodes.code,
-      amount: sql<string>`SUM(${invoiceRows.lineAmount})`,
+      amount: sql<string>`SUM(${invoiceRows.lineAmountSek})`,
     })
     .from(invoiceRows)
     .innerJoin(invoices, eq(invoices.id, invoiceRows.invoiceId))

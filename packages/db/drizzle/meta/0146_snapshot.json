@@ -12644,6 +12644,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "line_amount_sek": {
+          "name": "line_amount_sek",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "delivery_date": {
           "name": "delivery_date",
           "type": "date",

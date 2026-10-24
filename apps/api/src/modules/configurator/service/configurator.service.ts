@@ -965,6 +965,12 @@ export function createConfiguratorService(deps: {
       return { ...(await evaluate(articleId, { ...input, ...money })), ...money };
     },
 
+    // Valuta: a customer's own currency (null = unknown customer, or no
+    // reader wired) — what a client bound to that customer may price in.
+    async customerCurrency(customerId: string): Promise<string | null> {
+      return deps.customerCurrency ? deps.customerCurrency(customerId) : null;
+    },
+
     // For POST /quotes from a client: the templates among the rows' articles it may not use.
     async unpublishedTemplates(articleIds: string[]): Promise<{ articleId: string; articleNumber: string }[]> {
       return repo.unpublishedTemplates(db, [...new Set(articleIds)]);

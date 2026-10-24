@@ -169,6 +169,12 @@ const MESSAGES: Record<string, MessageEntry> = {
   // Valuta: försäljning
   "sales-order-currency-locked": "Valutan kan inte ändras när ordern har rader — ta bort raderna först.",
   "sales-order-exchange-rate": "En order i SEK har alltid kursen 1.",
+  "sales-order-currency-changed": (err) => {
+    const body = err.body as { pricedIn?: string; currency?: string } | undefined;
+    return body?.pricedIn && body.currency
+      ? `Orderns valuta ändrades till ${body.currency} medan raden prissattes i ${body.pricedIn} — lägg till raden igen.`
+      : "Orderns valuta ändrades medan raden prissattes — lägg till raden igen.";
+  },
   "price-list-currency-locked": "Valutan kan inte ändras när prislistan har rader.",
   "invoice-row-currency-mismatch": (err) => {
     const body = err.body as { rowCurrency?: string; invoiceCurrency?: string } | undefined;

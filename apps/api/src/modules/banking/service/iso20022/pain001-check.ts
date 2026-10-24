@@ -13,6 +13,7 @@ import {
   receivingBankInEea,
   streetName,
   townName,
+  ZERO_DECIMAL_CURRENCIES,
   type Pain001Input,
 } from "./pain001-builder.js";
 import { sanitizeText, type CharsetHolder } from "./sanitize.js";
@@ -108,6 +109,9 @@ export function checkPain001(input: Pain001Input, profile: BankProfile, today: s
     seen.add(item.endToEndId);
     if (!(item.amount > 0) || item.amount > 999_999_999_999.99 || Math.round(item.amount * 100) / 100 !== item.amount) {
       add("amount", "Beloppet måste vara större än 0 och ha högst två decimaler");
+    }
+    if (ZERO_DECIMAL_CURRENCIES.has(currency) && item.amount > 0 && !Number.isInteger(item.amount)) {
+      add("amount", `${currency} har inga decimaler — beloppet måste vara ett helt tal`);
     }
     if (!CURRENCY.test(currency)) add("currency", "Valutan måste vara en ISO-kod med tre bokstäver");
     if (!isCalendarDate(item.executionDate) || item.executionDate < today || item.executionDate > addDays(today, profile.executionDateMaxDays)) {

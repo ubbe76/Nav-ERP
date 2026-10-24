@@ -166,6 +166,18 @@ describe("leverantörsfaktura och betalning i valuta över HTTP", () => {
     expect(rerated.statusCode).toBe(200);
     expect(rerated.json()).toMatchObject({ exchangeRate: "11.200000", exchangeRateSource: "manual", sekAmounts: { grossAmount: 11200 } });
     expect((await app.inject({ method: "PATCH", url: `/supplier-invoices/${id}`, payload: { exchangeRate: -1 } })).statusCode).toBe(400);
+    // null = the automatic rate again; Riksbanken has none here ⇒ kurs
+    // saknas, still a 200 (the attest is what refuses it).
+    const automatic = await app.inject({ method: "PATCH", url: `/supplier-invoices/${id}`, payload: { exchangeRate: null } });
+    expect(automatic.statusCode).toBe(200);
+    expect(automatic.json()).toMatchObject({ exchangeRateSource: null, exchangeRateMissing: true });
+    const missing = await app.inject({ method: "POST", url: `/supplier-invoices/${id}/approve` });
+    expect(missing.statusCode).toBe(409);
+    expect(missing.json()).toMatchObject({ code: "supplier-invoice-exchange-rate-missing" });
+    expect((await app.inject({ method: "PATCH", url: `/supplier-invoices/${id}`, payload: { exchangeRate: 11.2 } })).json()).toMatchObject({
+      exchangeRateSource: "manual",
+      exchangeRateMissing: false,
+    });
 
     const approved = await app.inject({ method: "POST", url: `/supplier-invoices/${id}/approve` });
     expect(approved.statusCode).toBe(200);
