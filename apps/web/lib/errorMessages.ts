@@ -109,6 +109,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "vat-code-amount-mismatch":
     "Fakturaraden har moms trots att momskoden är momsfri, eller en annan sats än momskoden — rätta raden.",
   "vat-code-not-applicable": "Momskoden kan inte användas på den här typen av dokument.",
+  "vat-code-required": "Momskoden används när Nav väljer momskod automatiskt och kan inte inaktiveras.",
   "invalid-vat-code": "Momskoden finns inte, är inaktiv eller kan inte användas här — välj en annan momskod.",
   // The server's sentence names which rule failed (missing number, wrong
   // country prefix, not SE + ten digits + 01) — it is Swedish already.
@@ -122,6 +123,11 @@ const MESSAGES: Record<string, MessageEntry> = {
   "periodic-summary-amount-too-large":
     "Ett belopp är för stort för filen (högst 12 tecken inklusive minustecken) — kontrollera fakturorna i perioden.",
   "periodic-summary-empty": "Ingen EU-försäljning i perioden — ingen periodisk sammanställning ska lämnas.",
+  "periodic-summary-no-valid-rows": "Alla EU-fakturor i perioden saknar giltigt momsnummer — rätta kunderna.",
+  // The server's sentence says which rule failed (name or phone) — Swedish already.
+  "vat-reporting-contact-invalid": serverMessage(
+    "Kontaktpersonens namn eller telefonnummer går inte att skriva i Skatteverkets fil — kontrollera uppgifterna."
+  ),
   "supplier-invoice-vat-code":
     "Fakturan har moms, men momskoden tar ingen debiterad moms (omvänd moms, momsfritt eller import) — välj en svensk momskod eller ange momsbelopp 0.",
   "fiscal-year-closed": "Räkenskapsåret är stängt — öppna det igen under Bokslut",

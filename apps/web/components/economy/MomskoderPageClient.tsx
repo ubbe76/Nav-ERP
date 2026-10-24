@@ -15,6 +15,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import type { Account } from "../../lib/types";
 import type { VatBoxSetting } from "../../lib/vatBoxes";
 import {
+  isDomesticVatCode,
   VAT_CODE_ACCOUNT_FIELDS,
   VAT_CODE_DIRECTION_LABELS,
   VAT_CODE_KIND_LABELS,
@@ -288,6 +289,9 @@ function VatCodeForm({ code, accounts, onClose }: { code: VatCodeView; accounts:
   }
 
   const hasDefaultText = code.defaultInvoiceText !== null;
+  // Moms 25/12/6 % and Momsfri are what Nav falls back on whenever it picks a
+  // code itself, so an active one cannot be deactivated (400 vat-code-required).
+  const domesticInUse = code.active && isDomesticVatCode(code.code);
 
   return (
     <Form onSubmit={submit}>
@@ -324,8 +328,16 @@ function VatCodeForm({ code, accounts, onClose }: { code: VatCodeView; accounts:
       </FormHint>
 
       <Field label="Aktiv" htmlFor="vatCodeActive">
-        <Toggle id="vatCodeActive" checked={active} onChange={(e) => setActive(e.target.checked)} />
+        <Toggle
+          id="vatCodeActive"
+          checked={active}
+          disabled={domesticInUse}
+          onChange={(e) => setActive(e.target.checked)}
+        />
       </Field>
+      {domesticInUse && (
+        <FormHint attached>Används när Nav väljer momskod automatiskt — kan inte inaktiveras.</FormHint>
+      )}
       {!active && code.ruleCount > 0 && (
         <FormHint attached>
           {code.ruleCount} {code.ruleCount === 1 ? "konteringsregel används" : "konteringsregler används"} av koden —

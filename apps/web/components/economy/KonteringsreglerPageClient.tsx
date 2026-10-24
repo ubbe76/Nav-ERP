@@ -13,7 +13,7 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { postingVatCodeLabel } from "../../lib/types";
 import type { Account, ArticleGroup, PostingRule, SystemSettings } from "../../lib/types";
-import { VAT_CODE_CATALOG, isVatCode, vatCodeEntry, type VatCodeView } from "../../lib/vatCodes";
+import { VAT_CODE_CATALOG, ruleBoxProblemText, ruleBoxProblems, type VatCodeView } from "../../lib/vatCodes";
 import type { VatBoxSetting } from "../../lib/vatBoxes";
 import shellStyles from "../AppShell.module.css";
 import { GatedLink } from "../ui/GatedLink";
@@ -76,20 +76,19 @@ function boxPhrase(box: VatBoxSetting | null): string {
   return `ruta ${box}`;
 }
 
-// A rule for exactly a utrikes-/omvänd code replaces the code's own account,
-// so the account must carry the code's box (the revenue account for a sales
-// code, the cost account for an omvänd-moms purchase) — the same check the
-// Momsrapport warns about (vat-report.service.ts's findRuleBoxMismatches).
-function ruleBoxProblem(rule: PostingRule): { slot: "revenue" | "cost"; text: string } | null {
-  if (rule.vatCode === null || !isVatCode(rule.vatCode)) return null;
-  const entry = vatCodeEntry(rule.vatCode);
-  if (entry.kind === "domestic" || entry.kind === "non_eu_goods" || entry.kind === "import") return null;
-  const slot = entry.direction === "sales" ? "revenue" : "cost";
-  const expected = entry.slots[slot]?.box;
-  const accountNumber = slot === "revenue" ? rule.revenueAccountNumber : rule.costAccountNumber;
-  const actual = slot === "revenue" ? rule.revenueAccountVatBox : rule.costAccountVatBox;
-  if (expected === undefined || accountNumber === null || actual === expected) return null;
-  return { slot, text: `Kontot har ${boxPhrase(actual)} men ska ha ${boxPhrase(expected)} för ${rule.vatCode}` };
+// The text under an account of a rule whose momsruta is wrong — the same rules
+// the Momsrapport warns about (ruleBoxProblems in lib/vatCodes.ts, pinned
+// against vat-report.service.ts's findRuleBoxMismatches): an exact
+// utrikes-/omvänd code needs the code's box, MP25/MP12/MP6/MF and "Alla
+// momskoder" a revenue account in ruta 05/42, and a cost account for svensk
+// moms must not carry an inköpsruta. One text per account.
+function ruleBoxProblemTexts(rule: PostingRule): { revenue: string | null; cost: string | null } {
+  const texts: { revenue: string | null; cost: string | null } = { revenue: null, cost: null };
+  for (const problem of ruleBoxProblems(rule)) {
+    const forCode = problem.problem === "box_mismatch" ? ` för ${rule.vatCode ?? "Alla momskoder"}` : "";
+    texts[problem.slot] = `Kontot ${ruleBoxProblemText(problem)}${forCode}`;
+  }
+  return texts;
 }
 
 // One account cell of the rules table: number and name, the chart's momsruta
@@ -461,6 +460,12 @@ function PostingRulesSection({
         finns en regel för exakt den koden — så att en försäljning till ett annat EU-land hamnar i rätt momsruta
         oavsett vad en katalogregel säger.
       </FormHint>
+      <FormHint style={{ marginTop: 6 }}>
+        Kontot en regel pekar på ersätter momskodens eget konto och måste därför ha rätt momsruta: intäktskontot ruta
+        05 för Moms 25/12/6 % (ruta 42 för Momsfri, ruta 05 eller 42 för Alla momskoder) och kodens egen ruta för
+        utrikes- och omvända koder, kostnadskontot ingen av inköpsrutorna 20–24, 37 eller 50 för svensk moms. Fel ruta
+        markeras under kontot, och Momsrapporten varnar för samma sak.
+      </FormHint>
 
       <FormError margin="below">{error}</FormError>
 
@@ -484,28 +489,24 @@ function PostingRulesSection({
               );
             case "vatCode":
               return postingVatCodeLabel(rule);
-            case "revenue": {
-              const problem = ruleBoxProblem(rule);
+            case "revenue":
               return (
                 <RuleAccount
                   number={rule.revenueAccountNumber}
                   name={rule.revenueAccountName}
                   box={rule.revenueAccountVatBox}
-                  problem={problem?.slot === "revenue" ? problem.text : null}
+                  problem={ruleBoxProblemTexts(rule).revenue}
                 />
               );
-            }
-            case "cost": {
-              const problem = ruleBoxProblem(rule);
+            case "cost":
               return (
                 <RuleAccount
                   number={rule.costAccountNumber}
                   name={rule.costAccountName}
                   box={rule.costAccountVatBox}
-                  problem={problem?.slot === "cost" ? problem.text : null}
+                  problem={ruleBoxProblemTexts(rule).cost}
                 />
               );
-            }
             case "actions":
               return (
                 <span style={{ display: "inline-flex", gap: 8 }}>

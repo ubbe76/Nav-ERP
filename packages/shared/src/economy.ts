@@ -347,6 +347,8 @@ export type PeriodicSummary = {
   totals: { goods: number; services: number };
   // The VAT report's booked ruta 35 / 39 for the same range, whole kronor.
   ledger: { box35: number; box39: number };
+  // totals − ledger compared in öre, expressed in kronor with öre (0 only
+  // when the öre agree).
   differences: { goods: number; services: number };
   warnings: PeriodicSummaryWarning[];
   reporter: {

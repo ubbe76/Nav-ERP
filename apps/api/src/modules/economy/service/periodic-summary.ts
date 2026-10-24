@@ -266,10 +266,11 @@ export function aggregatePeriodicSummary(lines: EuSalesLine[]): {
 // those accounts, an invoice row with the wrong code or an invoice left out
 // for its VAT number. Comparing the per-row rounded kronor with the rounded
 // boxes instead would both invent differences (rounding) and hide small
-// ones. One warning per column that differs; `differences` is the öre
-// difference rounded to whole kronor (0 exactly when the öre agree).
+// ones. One warning per column that differs; `differences` is the exact
+// öre difference expressed in kronor (0 exactly when the öre agree), so a
+// difference of a few öre never reads as "agrees".
 export function ledgerDifference(totalOre: number, bookedOre: number): number {
-  return oreToKronor(totalOre - bookedOre);
+  return (totalOre - bookedOre) / 100;
 }
 
 export function ledgerDifferenceWarnings(

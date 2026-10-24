@@ -91,7 +91,9 @@ function ImportVatForm({ vatCodes, onClose }: { vatCodes: VatCodeView[]; onClose
 
   const parsed = rows.map((row) => ({
     code: importCodes.find((code) => code.id === row.vatCodeId) ?? null,
-    taxBase: Number(row.taxBase.replace(",", ".")),
+    // To the öre, like the poster (computedVatAmount works on round2 amounts):
+    // the preview shows what is booked, and 1 000,005 is not > 0 once rounded.
+    taxBase: round2(Number(row.taxBase.replace(",", "."))),
     raw: row.taxBase.trim(),
   }));
   const complete = parsed.flatMap((row) =>

@@ -31,6 +31,8 @@ import { PeppolFields } from "./PeppolFields";
 import { DeliveryDaysFields, type DeliveryDayDefaults, type DeliveryDaysValue } from "./DeliveryDaysFields";
 import {
   CUSTOMER_VAT_TREATMENT_LABELS,
+  buyerVatNumberWarningText,
+  customerVatNumberWarning,
   customerVatTreatment,
   supplierDefaultVatCode,
   vatCodeOptionLabel,
@@ -416,6 +418,15 @@ function AllmantTab({
             ? "Landskod enligt ISO (SE, DE, NO …). Landet och VAT-numret avgör om fakturan får svensk moms, EU-försäljning eller export."
             : "Landskod enligt ISO (SE, DE, CN …). Landet avgör leverantörens förvalda momskod på leverantörsfakturan — Sverige svensk moms, annat EU-land omvänd moms."}
         </FormHint>
+        {/* A supplier invoiced in another currency than SEK but with land
+            Sverige: the country (which derives the förvalda momskod) is
+            probably wrong — typically a foreign supplier left on the default. */}
+        {!isCustomer && showCurrency && currency.trim().toUpperCase() !== "SEK" && country.trim().toUpperCase() === "SE" && (
+          <FormNotice>
+            Leverantören har annan valuta än SEK men land Sverige — kontrollera landet. Landet avgör momskoden på
+            leverantörsfakturan (Sverige ger svensk moms, inte omvänd moms).
+          </FormNotice>
+        )}
 
         <FormActions>
           <Button type="submit" variant="primary" disabled={pending}>
@@ -804,13 +815,18 @@ function derivedSupplierVatCodeName(supplier: Supplier, codes: { code: string; n
 // Momsbehandling (spec 4.6): how this customer's invoice rows are taxed,
 // worked out from country, VAT-nummer, Privatperson and the construction
 // flag — customerVatTreatment, the rules the rows' momskod follows. Reads the
-// fields as they stand in the form, so it is a preview until the card is saved.
+// fields as they stand in the form (VAT-nummer, Privatperson, the construction
+// flag), so it is a preview until the card is saved — except the country,
+// which is the SAVED one (it is edited on Allmänt).
 function CustomerVatTreatmentRow({
   customer,
 }: {
   customer: { country: string; vatNumber: string; privatePerson: boolean; reverseChargeConstruction: boolean };
 }) {
   const treatment = customerVatTreatment(customer);
+  // The VAT-nummer of an EU company customer against the customer's country
+  // (customerVatNumberWarning) — a warning, never a refusal on the card.
+  const numberWarning = customerVatNumberWarning(customer);
   // Omvänd betalningsskyldighet för byggtjänster only applies to a Swedish
   // company customer (a private person always gets svensk moms).
   const constructionApplies =
@@ -835,6 +851,13 @@ function CustomerVatTreatmentRow({
           EU-länder (OSS) ingår inte i Nav.
         </FormNotice>
       )}
+      {treatment === "private_export" && (
+        <FormNotice>
+          Privatperson utanför EU — varor faktureras som export utan moms, tjänster får svensk moms. Spara tull- eller
+          utförselbevis som underlag för momsfriheten.
+        </FormNotice>
+      )}
+      {numberWarning && <FormNotice>{buyerVatNumberWarningText(numberWarning)}</FormNotice>}
     </>
   );
 }

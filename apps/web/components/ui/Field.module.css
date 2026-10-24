@@ -91,6 +91,12 @@
 .toggle input {
   display: none;
 }
+/* A switch that cannot be changed (a fixed value, e.g. a momskod Nav picks by
+   itself that cannot be deactivated). */
+.toggle:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
 .track {
   width: 38px;
   height: 22px;

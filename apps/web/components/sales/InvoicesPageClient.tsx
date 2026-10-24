@@ -29,14 +29,17 @@ import shellStyles from "../../components/AppShell.module.css";
 import listStyles from "../../app/forsaljning/ordrar/page.module.css";
 import { ConfigurationLines } from "../configurator/ConfigurationLines";
 import type { OrderRowConfiguration } from "../../lib/configurator";
-import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import {
   CUSTOMER_VAT_TREATMENT_LABELS,
+  buyerVatNumberWarningText,
+  customerVatNumberWarning,
   customerVatTreatment,
   salesVatCode,
   vatCodeOptionLabel,
   vatCodesFor,
+  type SalesVatCustomer,
 } from "../../lib/vatCodes";
 import { useVatCodes } from "../../lib/useVatCodes";
 
@@ -218,18 +221,18 @@ export function NewInvoiceForm({
   // free row for this customer (goods at 25 % — salesVatCode, the same
   // derivation the API runs when no code is sent).
   const { codes: vatCodes } = useVatCodes();
-  const automaticCode = customer
-    ? salesVatCode({
-        customer: {
-          country: customer.country,
-          vatNumber: customer.vatNumber,
-          privatePerson: customer.privatePerson,
-          reverseChargeConstruction: customer.reverseChargeConstruction,
-        },
-        isGoods: true,
-        articleRate: 25,
-      })
+  const customerVat: SalesVatCustomer | null = customer
+    ? {
+        country: customer.country,
+        vatNumber: customer.vatNumber,
+        privatePerson: customer.privatePerson,
+        reverseChargeConstruction: customer.reverseChargeConstruction,
+      }
     : null;
+  const automaticCode = customerVat ? salesVatCode({ customer: customerVat, isGoods: true, articleRate: 25 }) : null;
+  // The VAT-nummer of an EU company customer: another member state's than the
+  // customer's country, or none that fits (EU sales then cannot be issued).
+  const vatNumberWarning = customerVat ? customerVatNumberWarning(customerVat) : null;
   const automaticName = automaticCode ? vatCodes.find((code) => code.code === automaticCode)?.name : undefined;
   const [orders, setOrders] = useState<InvoiceableOrder[]>([]);
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
@@ -570,20 +573,11 @@ export function NewInvoiceForm({
         />
       </Field>
 
-      {customer && (
-        <FormHint attached>
-          Momsbehandling:{" "}
-          {
-            CUSTOMER_VAT_TREATMENT_LABELS[
-              customerVatTreatment({
-                country: customer.country,
-                vatNumber: customer.vatNumber,
-                privatePerson: customer.privatePerson,
-                reverseChargeConstruction: customer.reverseChargeConstruction,
-              })
-            ]
-          }
-        </FormHint>
+      {customerVat && (
+        <>
+          <FormHint attached>Momsbehandling: {CUSTOMER_VAT_TREATMENT_LABELS[customerVatTreatment(customerVat)]}</FormHint>
+          {vatNumberWarning && <FormNotice>{buyerVatNumberWarningText(vatNumberWarning)}</FormNotice>}
+        </>
       )}
 
       {customer?.collectiveInvoicing ? (

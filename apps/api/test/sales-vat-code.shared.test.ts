@@ -249,7 +249,7 @@ describe("buyerVatNumberWarning", () => {
 // with what the server derives.
 describe("momskod derivations — web mirror", () => {
   const countries = ["SE", "se", " DE ", "GR", "FI", "NO", "US", "GB"];
-  const vatNumbers = [null, "", "  ", "DE123456789", "SE556677889901"];
+  const vatNumbers = [null, "", "  ", "DE123456789", "SE556677889901", "ATU12345678", "EL123456789", "123456789"];
   const customers: SalesVatCustomer[] = countries.flatMap((country) =>
     vatNumbers.flatMap((vatNumber) =>
       [false, true].flatMap((privatePerson) =>
@@ -259,7 +259,7 @@ describe("momskod derivations — web mirror", () => {
   );
 
   it("derives the same salesVatCode, Momsbehandling and VAT number warning for every customer", () => {
-    for (const c of [...customers, { country: "DE", vatNumber: "ATU12345678", privatePerson: false, reverseChargeConstruction: false }]) {
+    for (const c of customers) {
       expect(webCodes.customerVatTreatment(c)).toBe(customerVatTreatment(c));
       expect(webCodes.customerVatNumberWarning(c)).toEqual(customerVatNumberWarning(c));
       expect(webCodes.hasVatNumber(c.vatNumber)).toBe(hasVatNumber(c.vatNumber));
@@ -307,9 +307,31 @@ describe("momskod derivations — web mirror", () => {
     }
   });
 
+  it("answers buyerVatNumberWarning like @navet/shared", () => {
+    const numbers = [null, " ", "de 123456789", "DE123456789", "123456789", "EL123456789", "GR123456789", "SE556677889901", "NO123456789", "ATU12345678"];
+    const countries = ["SE", "DE", " de ", "GR", "NO", "AT"];
+    const codeSets = [["MP25"], ["EUV"], ["EUT"], ["OB"], ["EUV", "OB"], ["MP25", "EXV"], [...VAT_CODES]] as const;
+    for (const codes of codeSets) {
+      for (const vatNumber of numbers) {
+        for (const country of countries) {
+          const input = { codes: [...codes], vatNumber, country };
+          expect(webCodes.buyerVatNumberWarning(input)).toEqual(buyerVatNumberWarning(input));
+        }
+      }
+    }
+  });
+
+  it("has a sentence for every warning", () => {
+    expect(webCodes.buyerVatNumberWarningText({ reason: "eu_country_mismatch", code: "EUV", prefix: "AT", expectedPrefix: "DE" })).toBe(
+      "Momsnumret har ett annat landsprefix (AT) än kundens land (DE) — kontrollera att det är rätt."
+    );
+    expect(webCodes.buyerVatNumberWarningText({ reason: "eu_country_mismatch", prefix: "CY", expectedPrefix: "EL" })).toMatch(/\(CY\).*\(EL\)/);
+    expect(webCodes.buyerVatNumberWarningText({ reason: "eu_format", expectedPrefix: "EL" })).toMatch(/kundens land EL/);
+  });
+
   it("has a sentence for every problem reason", () => {
     expect(webCodes.buyerVatNumberProblemText({ reason: "missing", code: "EUV" })).toMatch(/saknar momsregistreringsnummer/);
-    expect(webCodes.buyerVatNumberProblemText({ reason: "eu_format", code: "EUV", prefix: "DE" })).toMatch(/landskoden DE/);
+    expect(webCodes.buyerVatNumberProblemText({ reason: "eu_format", code: "EUV", prefix: "DE" })).toMatch(/till exempel DE/);
     expect(webCodes.buyerVatNumberProblemText({ reason: "eu_format", code: "EUV", prefix: null })).toMatch(/annat EU-land/);
     expect(webCodes.buyerVatNumberProblemText({ reason: "ob_format", code: "OB" })).toMatch(/SE \+ tio siffror \+ 01/);
   });

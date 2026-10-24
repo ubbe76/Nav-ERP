@@ -17,6 +17,7 @@ import { formatMoney } from "../../lib/format";
 import { toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import {
   buyerVatNumberProblemText,
+  buyerVatNumberWarningText,
   salesRowIsGoods,
   salesVatCode,
   vatCodeOptionLabel,
@@ -242,8 +243,32 @@ export function InvoiceCard({
       {editable && invoice.vatNumberProblem && (
         <FormNotice style={{ marginBottom: 20 }}>
           {buyerVatNumberProblemText(invoice.vatNumberProblem)}{" "}
-          <GatedLink href={`/kunder/${invoice.customerId}`}>Öppna kundkortet</GatedLink> och ange momsnumret under
-          Villkor &amp; frakt.
+          {invoice.type === "credit" ? (
+            <>
+              En kreditfaktura använder momsnumret på fakturan den krediterar
+              {creditedInvoiceNumber ? ` (${creditedInvoiceNumber})` : ""}, inte kundens nuvarande momsnummer.
+            </>
+          ) : (
+            <>
+              <GatedLink href={`/kunder/${invoice.customerId}`}>Öppna kundkortet</GatedLink> och ange momsnumret under
+              Villkor &amp; frakt.
+            </>
+          )}
+        </FormNotice>
+      )}
+      {/* An accepted EU sale whose number is another member state's than the
+          customer's country: allowed (artikel 138), but worth a second look. */}
+      {editable && invoice.vatNumberWarning && (
+        <FormNotice style={{ marginBottom: 20 }}>
+          {buyerVatNumberWarningText(invoice.vatNumberWarning)} Momsnummer på fakturan:{" "}
+          <strong>{invoice.buyerVatNumber ?? "–"}</strong>.{" "}
+          {invoice.type === "credit" ? (
+            <>Kreditfakturan använder momsnumret på fakturan den krediterar.</>
+          ) : (
+            <>
+              <GatedLink href={`/kunder/${invoice.customerId}`}>Öppna kundkortet</GatedLink> om numret ska rättas.
+            </>
+          )}
         </FormNotice>
       )}
 

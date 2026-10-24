@@ -456,8 +456,10 @@ function articleDomesticCode(articleRate: number): DomesticVatCode {
 export function salesVatCode(input: { customer: SalesVatCustomer; isGoods: boolean; articleRate: number }): VatCode {
   const { customer, isGoods } = input;
   const domestic = articleDomesticCode(input.articleRate);
-  if (customer.privatePerson) return domestic;
   const country = customer.country.trim().toUpperCase();
+  // A private person: goods leaving the EU are exempt whoever buys them
+  // (export) ⇒ EXV; anything else is svensk moms.
+  if (customer.privatePerson) return isGoods && !isEuCountry(country) ? "EXV" : domestic;
   if (country === "SE") return customer.reverseChargeConstruction && !isGoods ? "OB" : domestic;
   if (isEuCountry(country)) {
     if (!hasVatNumber(customer.vatNumber)) return domestic;
@@ -467,7 +469,14 @@ export function salesVatCode(input: { customer: SalesVatCustomer; isGoods: boole
 }
 
 // Momsbehandling on the customer card (spec 4.6).
-export const CUSTOMER_VAT_TREATMENTS = ["domestic", "domestic_no_vat_number", "eu", "export", "private_eu"] as const;
+export const CUSTOMER_VAT_TREATMENTS = [
+  "domestic",
+  "domestic_no_vat_number",
+  "eu",
+  "export",
+  "private_eu",
+  "private_export",
+] as const;
 export type CustomerVatTreatment = (typeof CUSTOMER_VAT_TREATMENTS)[number];
 
 export const CUSTOMER_VAT_TREATMENT_LABELS: Record<CustomerVatTreatment, string> = {
@@ -476,11 +485,15 @@ export const CUSTOMER_VAT_TREATMENT_LABELS: Record<CustomerVatTreatment, string>
   eu: "EU — utan moms",
   export: "Export — utan moms",
   private_eu: "Privatperson i annat EU-land — svensk moms",
+  private_export: "Privatperson utanför EU — export utan moms för varor",
 };
 
 export function customerVatTreatment(customer: SalesVatCustomer): CustomerVatTreatment {
   const country = customer.country.trim().toUpperCase();
-  if (customer.privatePerson) return country !== "SE" && isEuCountry(country) ? "private_eu" : "domestic";
+  if (customer.privatePerson) {
+    if (country === "SE") return "domestic";
+    return isEuCountry(country) ? "private_eu" : "private_export";
+  }
   if (country === "SE") return "domestic";
   if (isEuCountry(country)) return hasVatNumber(customer.vatNumber) ? "eu" : "domestic_no_vat_number";
   return "export";
@@ -501,8 +514,25 @@ export function normalizeVatNumber(raw: string | null | undefined): string {
   return (raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+// The VAT number prefixes of the OTHER member states (Greece EL).
+const FOREIGN_EU_VAT_PREFIXES: readonly string[] = EU_COUNTRY_CODES.filter((country) => country !== "SE").map(
+  vatNumberPrefix
+);
+const FOREIGN_EU_VAT_NUMBER = new RegExp(`^(${FOREIGN_EU_VAT_PREFIXES.join("|")})[A-Z0-9]{2,12}$`);
+
+// The member-state prefix of a (normalized) number that is a well-formed VAT
+// number of ANOTHER member state than Sweden, else null.
+function foreignEuVatPrefix(normalized: string): string | null {
+  return FOREIGN_EU_VAT_NUMBER.test(normalized) ? normalized.slice(0, 2) : null;
+}
+
 // Utfärda (spec 4.2): codes that require the buyer's momsregistreringsnummer
-// need one on the invoice, in the right form. null = in order.
+// need one on the invoice, in the right form — EU: a VAT number of ANOTHER
+// member state than Sweden (any of them; a prefix that differs from the
+// customer's country is only a warning, buyerVatNumberWarning), OB: SE + ten
+// digits + 01. null = in order. `prefix` on eu_format is the prefix the
+// customer's own country would have (null when the customer is not in another
+// member state).
 export type BuyerVatNumberProblem =
   | { reason: "missing"; code: VatCode }
   | { reason: "eu_format"; code: VatCode; prefix: string | null }
@@ -520,8 +550,8 @@ export function buyerVatNumberProblem(input: {
   const country = input.country.trim().toUpperCase();
   for (const entry of requiring) {
     if (entry.kind === "eu_sale") {
-      const prefix = country !== "SE" && isEuCountry(country) ? vatNumberPrefix(country) : null;
-      if (prefix === null || !new RegExp(`^${prefix}[A-Z0-9]{2,12}$`).test(number)) {
+      if (foreignEuVatPrefix(number) === null) {
+        const prefix = country !== "SE" && isEuCountry(country) ? vatNumberPrefix(country) : null;
         return { reason: "eu_format", code: entry.code, prefix };
       }
     } else if (!/^SE\d{10}01$/.test(number)) {
@@ -539,11 +569,60 @@ export function buyerVatNumberProblemText(problem: BuyerVatNumberProblem): strin
       return "Kunden saknar momsregistreringsnummer — fakturan kan inte utfärdas med EU-försäljning eller omvänd betalningsskyldighet.";
     case "eu_format":
       return problem.prefix
-        ? `Kundens momsregistreringsnummer ska börja med landskoden ${problem.prefix} — det krävs för EU-försäljning.`
-        : "EU-försäljning kräver en kund i ett annat EU-land med momsregistreringsnummer.";
+        ? `Kundens momsregistreringsnummer ska vara ett momsnummer från ett annat EU-land än Sverige, med landskoden först (till exempel ${problem.prefix}) — det krävs för EU-försäljning.`
+        : "EU-försäljning kräver ett momsregistreringsnummer från ett annat EU-land än Sverige, med landskoden först.";
     case "ob_format":
       return "Kundens momsregistreringsnummer ska ha formen SE + tio siffror + 01 för omvänd betalningsskyldighet.";
   }
+}
+
+// The warning that goes with an accepted EU-sale number (never a refusal):
+// the number is another member state's, but not the one of the customer's
+// own country — allowed (artikel 138), worth a second look.
+export type BuyerVatNumberWarning = {
+  reason: "eu_country_mismatch";
+  code: VatCode;
+  // The number's prefix and the one the customer's country would have.
+  prefix: string;
+  expectedPrefix: string;
+};
+
+export function buyerVatNumberWarning(input: {
+  codes: readonly VatCode[];
+  vatNumber: string | null;
+  country: string;
+}): BuyerVatNumberWarning | null {
+  const euSale = VAT_CODE_CATALOG.find((entry) => entry.kind === "eu_sale" && input.codes.includes(entry.code));
+  if (!euSale) return null;
+  const prefix = foreignEuVatPrefix(normalizeVatNumber(input.vatNumber));
+  const expectedPrefix = vatNumberPrefix(input.country.trim());
+  if (prefix === null || prefix === expectedPrefix) return null;
+  return { reason: "eu_country_mismatch", code: euSale.code, prefix, expectedPrefix };
+}
+
+// The customer card's warning about the momsregistreringsnummer of a company
+// customer in another member state (Momsbehandling "EU — utan moms"): a
+// number that is no other member state's (EU sales with it cannot be issued)
+// or one of another member state than the customer's country (allowed, a
+// warning). null = nothing to say, also for every other treatment.
+export type CustomerVatNumberWarning =
+  | { reason: "eu_format"; expectedPrefix: string }
+  | { reason: "eu_country_mismatch"; prefix: string; expectedPrefix: string };
+
+export function customerVatNumberWarning(customer: SalesVatCustomer): CustomerVatNumberWarning | null {
+  if (customerVatTreatment(customer) !== "eu") return null;
+  const expectedPrefix = vatNumberPrefix(customer.country.trim());
+  const prefix = foreignEuVatPrefix(normalizeVatNumber(customer.vatNumber));
+  if (prefix === null) return { reason: "eu_format", expectedPrefix };
+  return prefix === expectedPrefix ? null : { reason: "eu_country_mismatch", prefix, expectedPrefix };
+}
+
+// The sentences the cards show for the two warnings.
+export function buyerVatNumberWarningText(warning: BuyerVatNumberWarning | CustomerVatNumberWarning): string {
+  if (warning.reason === "eu_format") {
+    return `Momsnumret ser inte ut som ett momsnummer från ett annat EU-land än Sverige — det ska börja med landskoden (för kundens land ${warning.expectedPrefix}). Fakturor med EU-försäljning kan inte utfärdas förrän det är rättat.`;
+  }
+  return `Momsnumret har ett annat landsprefix (${warning.prefix}) än kundens land (${warning.expectedPrefix}) — kontrollera att det är rätt.`;
 }
 
 // A document row's/header's code as the detail GETs return it: the company's
@@ -636,6 +715,112 @@ export const VAT_CODE_WARNING_LABELS: Record<NonNullable<VatCodeAccountView["war
   box_mismatch: "Kontot har fel momsruta",
 };
 
+// --- Konteringsregler: the account's momsruta against the code ---
+
+// Purchase bases (inköp med omvänd moms, trepartsinköp, importunderlag): the
+// cost account of a rule for svensk moms must carry none of them, or a
+// domestic purchase would be declared as an EU/omvänd/import purchase.
+export const PURCHASE_BASE_BOXES: readonly VatBoxSetting[] = ["20", "21", "22", "23", "24", "37", "50"];
+
+export type RuleBoxProblem = {
+  slot: "revenue" | "cost";
+  // purchase_box: the cost account carries one of PURCHASE_BASE_BOXES.
+  problem: "box_mismatch" | "purchase_box";
+  accountNumber: string;
+  actualBox: VatBoxSetting | null;
+  // Every box that would be in order; empty for purchase_box.
+  expectedBoxes: VatBoxSetting[];
+};
+
+// A konteringsregel replaces a code's own account, so the account it names
+// must land in the right box — the same rules as the Momsrapport warns about
+// (vat-report.service.ts's findRuleBoxMismatches, pinned by
+// vat-codes.shared.test.ts):
+//   * exact foreign/omvänd code — the code's box: the revenue account for a
+//     sales code (EUV/EUT/EXV/EXT/OB), the cost account for an omvänd-moms
+//     purchase;
+//   * exact MP25/MP12/MP6 — a revenue account with ruta 05, MF ruta 42;
+//   * "Alla momskoder" (code null) — ruta 05 or 42;
+//   * the cost account of a domestic code, of IUTV and of "Alla momskoder" —
+//     none of the purchase-base boxes.
+// Importmoms codes are never posted through a rule.
+export function ruleBoxProblems(rule: {
+  vatCode: string | null;
+  revenueAccountNumber: string | null;
+  revenueAccountVatBox: VatBoxSetting | null;
+  costAccountNumber: string | null;
+  costAccountVatBox: VatBoxSetting | null;
+}): RuleBoxProblem[] {
+  let code: VatCode | null = null;
+  if (rule.vatCode !== null) {
+    if (!isVatCode(rule.vatCode)) return [];
+    code = rule.vatCode;
+  }
+  const revenue = { number: rule.revenueAccountNumber, box: rule.revenueAccountVatBox };
+  const cost = { number: rule.costAccountNumber, box: rule.costAccountVatBox };
+  const found: RuleBoxProblem[] = [];
+
+  const expectBox = (slotName: "revenue" | "cost", account: typeof revenue, allowed: VatBoxSetting[]) => {
+    if (account.number === null || (account.box !== null && allowed.includes(account.box))) return;
+    found.push({
+      slot: slotName,
+      problem: "box_mismatch",
+      accountNumber: account.number,
+      actualBox: account.box,
+      expectedBoxes: allowed,
+    });
+  };
+  const forbidPurchaseBox = (account: typeof cost) => {
+    if (account.number === null || account.box === null || !PURCHASE_BASE_BOXES.includes(account.box)) return;
+    found.push({
+      slot: "cost",
+      problem: "purchase_box",
+      accountNumber: account.number,
+      actualBox: account.box,
+      expectedBoxes: [],
+    });
+  };
+
+  if (code === null) {
+    expectBox("revenue", revenue, ["05", "42"]);
+    forbidPurchaseBox(cost);
+    return found;
+  }
+  const entry = vatCodeEntry(code);
+  if (entry.kind === "import") return [];
+  if (entry.kind === "domestic") {
+    expectBox("revenue", revenue, [entry.slots.revenue!.box]);
+    forbidPurchaseBox(cost);
+    return found;
+  }
+  if (entry.kind === "non_eu_goods") {
+    forbidPurchaseBox(cost);
+    return found;
+  }
+  const slotName = entry.direction === "sales" ? "revenue" : "cost";
+  const expected = entry.slots[slotName];
+  if (expected) expectBox(slotName, slotName === "revenue" ? revenue : cost, [expected.box]);
+  return found;
+}
+
+// "ruta 05" / "ingen ruta" / "ingen ruta angiven" — a momsruta setting in a
+// sentence.
+export function vatBoxPhrase(box: VatBoxSetting | null): string {
+  if (box === null) return "ingen ruta angiven";
+  if (box === "none") return "ingen ruta";
+  return `ruta ${box}`;
+}
+
+// "har ruta 36 men ska ha ruta 05 eller ruta 42" — what is wrong with the
+// account of a konteringsregel; the inköpsruta case says what must not be
+// there instead.
+export function ruleBoxProblemText(problem: Pick<RuleBoxProblem, "problem" | "actualBox" | "expectedBoxes">): string {
+  if (problem.problem === "purchase_box") {
+    return `har ${vatBoxPhrase(problem.actualBox)} men ska inte ha någon av inköpsrutorna 20–24, 37 eller 50 (de gäller omvänd moms och import)`;
+  }
+  return `har ${vatBoxPhrase(problem.actualBox)} men ska ha ${problem.expectedBoxes.map(vatBoxPhrase).join(" eller ")}`;
+}
+
 // --- Pickers on the documents ---
 
 // The codes a document row/header may be given, in catalog order: those of
@@ -662,4 +847,30 @@ export function vatCodeOptionLabel(code: Pick<VatCodeView, "code" | "name" | "ac
 export function chargedVatRate(code: VatCode): number {
   const entry = vatCodeEntry(code);
   return entry.kind === "domestic" ? entry.rate : 0;
+}
+
+// True when the supplier charges no VAT with this code — omvänd moms,
+// momsfritt, goods from outside the EU: Momssats 0 % and Momsbelopp 0 (the
+// attest refuses charged VAT on such a code, supplier-invoice-vat-code).
+export function vatCodeChargesNoVat(code: VatCode): boolean {
+  const entry = vatCodeEntry(code);
+  return entry.kind !== "domestic" || entry.rate === 0;
+}
+
+// What to tell the user under Momskod/Momssats on a supplier invoice when the
+// code takes no charged VAT — null for a code with a rate. Omvänd moms is
+// computed by Nav at the attest; goods from outside the EU have their
+// importmoms booked separately when the customs decision arrives.
+export function supplierVatCodeNote(code: VatCode): string | null {
+  const entry = vatCodeEntry(code);
+  switch (entry.kind) {
+    case "reverse_purchase":
+      return "Leverantören debiterar ingen moms med den här momskoden — Nav beräknar momsen när fakturan godkänns och bokför den som både utgående och ingående moms.";
+    case "non_eu_goods":
+      return "Varor från ett land utanför EU: leverantören debiterar ingen svensk moms. Importmomsen redovisas separat när tullbeslutet kommer — se Bokför importmoms i Momsrapporten.";
+    case "domestic":
+      return entry.rate === 0 ? "Momsfritt — leverantören debiterar ingen moms på fakturan." : null;
+    default:
+      return null;
+  }
 }

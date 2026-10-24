@@ -13,7 +13,14 @@ import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
 import { formatMoney, round2 } from "../../lib/format";
-import { chargedVatRate, supplierDefaultVatCode, vatCodeOptionLabel, vatCodesFor } from "../../lib/vatCodes";
+import {
+  chargedVatRate,
+  supplierDefaultVatCode,
+  supplierVatCodeNote,
+  vatCodeChargesNoVat,
+  vatCodeOptionLabel,
+  vatCodesFor,
+} from "../../lib/vatCodes";
 import { useVatCodes } from "../../lib/useVatCodes";
 import {
   PURCHASE_ORDER_STATUS_PILL,
@@ -28,7 +35,7 @@ import {
 } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import listStyles from "../../app/inkop/ordrar/page.module.css";
-import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { UNDERLAG_ACCEPT, uploadUnderlag } from "../documents/UnderlagSection";
 
 export function SupplierInvoicesPageClient({
@@ -212,8 +219,17 @@ export function NewSupplierInvoiceForm({
   }, [invoiceSupplierId, vatCodes]);
 
   const pickedVatCode = vatCodes.find((code) => code.id === vatCodeId);
-  // Omvänd moms and goods from outside the EU: the supplier charges no VAT.
-  const noChargedVat = pickedVatCode !== undefined && pickedVatCode.kind !== "domestic";
+  // Omvänd moms, momsfritt and goods from outside the EU: the supplier charges
+  // no VAT, so Momssats is locked to 0 % (a Momsbelopp typed in by hand would
+  // be refused when the invoice is approved) and the note says why.
+  const vatRateLocked = pickedVatCode !== undefined && vatCodeChargesNoVat(pickedVatCode.code);
+  const vatCodeNote = pickedVatCode ? supplierVatCodeNote(pickedVatCode.code) : null;
+  // The invoice's supplier with another currency than SEK but land Sverige —
+  // the country (which derives the förvalda momskod) is probably wrong.
+  const supplierCountryWarning =
+    invoiceSupplier !== null &&
+    invoiceSupplier.currency.trim().toUpperCase() !== "SEK" &&
+    invoiceSupplier.country.trim().toUpperCase() === "SE";
 
   useEffect(() => {
     const net = Number(netAmount);
@@ -505,20 +521,21 @@ export function NewSupplierInvoiceForm({
             </option>
           ))}
         </Select>
-        {noChargedVat && (
-          <FormHint>
-            Leverantören debiterar ingen moms med den här momskoden — Nav beräknar momsen när fakturan godkänns och
-            bokför den som både utgående och ingående moms.
-          </FormHint>
-        )}
+        {vatCodeNote && <FormHint>{vatCodeNote}</FormHint>}
       </Field>
+      {supplierCountryWarning && (
+        <FormNotice>
+          Leverantören har annan valuta än SEK men land Sverige — kontrollera landet på leverantörskortet.
+        </FormNotice>
+      )}
 
       <FormRow>
         <Field label="Momssats" htmlFor="vatRate">
           <Select
             id="vatRate"
             size="xs"
-            value={String(vatRate)}
+            value={String(vatRateLocked ? 0 : vatRate)}
+            disabled={vatRateLocked}
             onChange={(e) => {
               setVatRate(Number(e.target.value));
               setVatTouched(false);
@@ -530,6 +547,7 @@ export function NewSupplierInvoiceForm({
               </option>
             ))}
           </Select>
+          {vatRateLocked && <FormHint>Låst till 0 % — momskoden tar ingen debiterad moms.</FormHint>}
         </Field>
         <Field label="Momsbelopp" htmlFor="vatAmount">
           <Input
@@ -545,6 +563,13 @@ export function NewSupplierInvoiceForm({
           />
         </Field>
       </FormRow>
+
+      {vatRateLocked && Number(vatAmount) !== 0 && vatAmount.trim() !== "" && (
+        <FormNotice>
+          Momsbelopp ska vara 0 med den här momskoden — fakturan kan annars inte godkännas. Välj en svensk momskod om
+          leverantören har debiterat moms.
+        </FormNotice>
+      )}
 
       <FormRow>
         <Field label="Bruttobelopp" htmlFor="grossAmount">

@@ -25,6 +25,7 @@ import {
   vatNumberPrefix,
   vatRates,
 } from "@navet/shared";
+import { findRuleBoxMismatches } from "../src/modules/economy/service/vat-report.service.js";
 import * as webBoxes from "../../web/lib/vatBoxes.js";
 import * as webCodes from "../../web/lib/vatCodes.js";
 
@@ -256,5 +257,61 @@ describe("momskoder — web mirror", () => {
     };
     expect(webCodes.reverseVatPreview(input)).toEqual(reverseVatPreview(input));
     expect(webCodes.reverseVatPreview({ headerCode: "MP25", netAmount: 1000, rows: [] })).toEqual([]);
+  });
+
+  // The Konteringsregler page marks a rule's account with the wrong momsruta
+  // itself (ruleBoxProblems); the Momsrapport's warning comes from the API
+  // (findRuleBoxMismatches). Same rules — compared over every code (and
+  // "Alla momskoder") against every box either account may carry.
+  it("marks the konteringsregler's account boxes like the Momsrapport's warning", () => {
+    const boxes = [null, "none", ...VAT_BOXES] as const;
+    const codes = VAT_CODES.map((code, index) => ({
+      id: `code-${index}`,
+      code,
+      active: true,
+      revenueAccount: null,
+      outputVatAccount: null,
+      inputVatAccount: null,
+      costAccount: null,
+      baseAccount: null,
+      baseCounterAccount: null,
+    }));
+    for (const code of [null, ...VAT_CODES]) {
+      for (const revenueBox of boxes) {
+        for (const costBox of boxes) {
+          for (const accounts of [{ revenue: true, cost: true }, { revenue: true, cost: false }, { revenue: false, cost: true }]) {
+            const rule = {
+              vatCode: code,
+              revenueAccountNumber: accounts.revenue ? "3001" : null,
+              revenueAccountVatBox: accounts.revenue ? revenueBox : null,
+              costAccountNumber: accounts.cost ? "4010" : null,
+              costAccountVatBox: accounts.cost ? costBox : null,
+            };
+            const api = findRuleBoxMismatches(
+              [
+                {
+                  id: "rule",
+                  groupCode: "100",
+                  groupName: "Grupp",
+                  vatCodeId: code === null ? null : codes.find((row) => row.code === code)!.id,
+                  revenueAccountNumber: rule.revenueAccountNumber,
+                  revenueAccountVatBox: rule.revenueAccountVatBox,
+                  costAccountNumber: rule.costAccountNumber,
+                  costAccountVatBox: rule.costAccountVatBox,
+                },
+              ],
+              codes
+            ).map((mismatch) => ({
+              slot: mismatch.slot,
+              problem: mismatch.problem,
+              accountNumber: mismatch.accountNumber,
+              actualBox: mismatch.actualBox,
+              expectedBoxes: mismatch.expectedBoxes,
+            }));
+            expect({ code, revenueBox, costBox, problems: webCodes.ruleBoxProblems(rule) }).toEqual({ code, revenueBox, costBox, problems: api });
+          }
+        }
+      }
+    }
   });
 });

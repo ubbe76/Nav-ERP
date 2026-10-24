@@ -1,7 +1,15 @@
 import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./configurator";
 import type { Permission } from "./permissions";
 import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
-import type { BuyerVatNumberProblem, CustomerVatTreatment, VatCode, VatCodeRef, VatCodeSlot } from "./vatCodes";
+import type {
+  BuyerVatNumberProblem,
+  BuyerVatNumberWarning,
+  CustomerVatNumberWarning,
+  CustomerVatTreatment,
+  VatCode,
+  VatCodeRef,
+  VatCodeSlot,
+} from "./vatCodes";
 import type { FixedAssetDisposalType, FixedAssetStatus } from "./fixedAssets";
 import type { YearEndAccrualKind, YearEndRole, YearEndStep } from "./yearEnd";
 import type { ThemeContrastFailure, ThemeIssue, ThemeScheme, ThemeSource, ThemeValidationResult } from "./themeCore";
@@ -808,6 +816,9 @@ export interface SupplierInvoiceDetail extends SupplierInvoice {
   vatCodeId: string;
   vatCode: VatCodeRef;
   reverseVat: SupplierInvoiceReverseVat[];
+  // Never a refusal: a domestic code with VAT but no Momsbelopp, a supplier
+  // with another currency than SEK but land Sverige (supplierInvoiceWarnings).
+  warnings: string[];
   rows: SupplierInvoiceRow[];
   openAmount: number;
   payments: SupplierInvoicePaymentEntry[];
@@ -975,6 +986,9 @@ export interface Customer extends PartnerCardFields {
   // Momsbehandling — derived by the API (customerVatTreatment); on the detail
   // and PATCH answers, not in the list rows.
   vatTreatment?: CustomerVatTreatment;
+  // What the card says about the momsnummer of an EU company customer
+  // (customerVatNumberWarning) — on the same answers as vatTreatment.
+  vatNumberWarning?: CustomerVatNumberWarning | null;
   // Visa tilläggspriser — förval för konfigurerade raders pristillägg på
   // offert/orderbekräftelse (och vad fakturan följer).
   showConfigurationPrices: boolean;
@@ -1402,12 +1416,17 @@ export interface InvoiceReminderEntry {
 // invoice.service.ts's getInvoice comment.
 export interface InvoiceDetail extends InvoiceHeader {
   rows: InvoiceRow[];
-  // Köparens momsregistreringsnummer as the invoice shows it — the customer's
-  // current one on a draft, the issue snapshot afterwards.
+  // Köparens momsregistreringsnummer as the invoice shows it — on a draft the
+  // number Utfärda would stamp (the customer's current one; a credit note's
+  // source invoice's), the issue snapshot afterwards.
   buyerVatNumber: string | null;
   // Drafts only: what Utfärda would refuse (null = in order, always null once
   // issued) — so the card can warn ahead of it.
   vatNumberProblem: BuyerVatNumberProblem | null;
+  // Drafts only: an EU sale whose number belongs to another member state than
+  // the customer's country — allowed, worth a second look. Null when there is
+  // a problem (the refusal comes first).
+  vatNumberWarning: BuyerVatNumberWarning | null;
   openAmount: number;
   payments: InvoicePaymentEntry[];
   reminders: InvoiceReminderEntry[];
@@ -3222,16 +3241,37 @@ export interface VatCodeBoxMismatch {
   message: string;
 }
 
-// A konteringsregel for exactly a utrikes-/omvänd code whose account does
-// not carry the code's box.
+// A konteringsregel whose account lands in the wrong momsruta: the account of
+// an exact utrikes-/omvänd code without the code's box, of MP25/MP12/MP6/MF or
+// "Alla momskoder" outside ruta 05/42, or a cost account for svensk moms with
+// an inköpsruta (20–24, 37, 50). A rule can give one row per account
+// (slot), so the key is `${ruleId}-${slot}`.
 export interface VatRuleBoxMismatch {
   ruleId: string;
   groupCode: string;
   groupName: string;
-  code: VatCode;
+  // null = the group's rule for "Alla momskoder".
+  code: VatCode | null;
+  slot: "revenue" | "cost";
   accountNumber: string;
-  expectedBox: VatBoxSetting;
+  // The one box the account should carry — null when several would do
+  // (expectedBoxes) or the problem is a forbidden inköpsruta.
+  expectedBox: VatBoxSetting | null;
+  // Every box that would be in order; empty for purchase_box.
+  expectedBoxes: VatBoxSetting[];
   actualBox: VatBoxSetting | null;
+  problem: "box_mismatch" | "purchase_box";
+  message: string;
+}
+
+// The redovisningskonto för moms / öres- och kronutjämning carrying a box the
+// momsomföring empties — the report still shows, only Bokför momsomföring
+// refuses (409 vat-accounts-not-distinct).
+export interface VatSettlementAccountProblem {
+  // settlement = redovisningskonto för moms, rounding = öres- och kronutjämning.
+  role: "settlement" | "rounding";
+  accountNumber: string;
+  vatBox: VatBoxSetting;
   message: string;
 }
 
@@ -3251,6 +3291,7 @@ export interface VatReportResponse {
     unassignedAccounts: VatUnassignedAccount[];
     vatCodeBoxMismatches: VatCodeBoxMismatch[];
     ruleBoxMismatches: VatRuleBoxMismatch[];
+    settlementAccountProblems: VatSettlementAccountProblem[];
   };
 }
 

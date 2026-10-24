@@ -13,7 +13,15 @@ import { ArticlePicker } from "../ui/ArticlePicker";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
-import { isVatCode, vatCodeEntry, vatCodeOptionLabel, vatCodesFor, type VatCodeView } from "../../lib/vatCodes";
+import {
+  isVatCode,
+  supplierVatCodeNote,
+  vatCodeChargesNoVat,
+  vatCodeEntry,
+  vatCodeOptionLabel,
+  vatCodesFor,
+  type VatCodeView,
+} from "../../lib/vatCodes";
 import {
   SUPPLIER_INVOICE_STATUS_PILL,
   type Article,
@@ -120,6 +128,21 @@ export function SupplierInvoiceCard({
         <FormNotice style={{ marginBottom: 20 }}>
           Fakturan har momsbelopp, men momskoden {invoice.vatCode.name} tar ingen debiterad moms (omvänd moms,
           momsfritt eller import). Välj en svensk momskod eller ange momsbelopp 0.
+        </FormNotice>
+      )}
+
+      {/* The API's own remarks (supplierInvoiceWarnings) — never a refusal. */}
+      {invoice.status !== "cancelled" && invoice.warnings.length > 0 && (
+        <FormNotice style={{ marginBottom: 20 }}>
+          {invoice.warnings.length === 1 ? (
+            invoice.warnings[0]
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {invoice.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          )}
         </FormNotice>
       )}
 
@@ -328,6 +351,12 @@ function HeaderForm({
   const [vatAmount, setVatAmount] = useState(invoice.vatAmount);
   const [grossAmount, setGrossAmount] = useState(invoice.grossAmount);
   const [vatCodeId, setVatCodeId] = useState(invoice.vatCodeId);
+  // What the picked code means for the VAT (omvänd moms, momsfritt, varor
+  // utanför EU); null for a code with a rate.
+  const pickedCode =
+    vatCodes.find((code) => code.id === vatCodeId)?.code ??
+    (vatCodeId === invoice.vatCodeId ? invoice.vatCode.code : undefined);
+  const pickedNote = pickedCode !== undefined && isVatCode(pickedCode) ? supplierVatCodeNote(pickedCode) : null;
   const [note, setNote] = useState(invoice.note ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -420,8 +449,8 @@ function HeaderForm({
             )}
           </Select>
           <FormHint>
-            Gäller alla rader utan egen momskod. Med omvänd moms, momsfritt eller import ska Momsbelopp vara 0 — Nav
-            beräknar den omvända momsen när fakturan godkänns.
+            Gäller alla rader utan egen momskod.
+            {pickedNote ? ` Med den här momskoden ska Momsbelopp vara 0. ${pickedNote}` : ""}
           </FormHint>
         </Field>
         <Field label="Notering" htmlFor="hdrNote">
@@ -581,9 +610,7 @@ function AddRowForm({
 // True when the invoice's Momskod takes no VAT charged by the supplier —
 // omvänd moms, momsfritt, goods from outside the EU, importmoms.
 function chargesNoVat(invoice: SupplierInvoiceDetail): boolean {
-  if (!isVatCode(invoice.vatCode.code)) return false;
-  const entry = vatCodeEntry(invoice.vatCode.code);
-  return entry.kind !== "domestic" || entry.rate === 0;
+  return isVatCode(invoice.vatCode.code) && vatCodeChargesNoVat(invoice.vatCode.code);
 }
 
 // Beräknad moms (omvänd): what approving books as both utgående and ingående

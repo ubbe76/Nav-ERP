@@ -34,7 +34,7 @@ import {
   type VatDeclarationBox,
   type VatReportingPeriod,
 } from "../../lib/vatBoxes";
-import type { VatCodeView } from "../../lib/vatCodes";
+import { ruleBoxProblemText, type VatCodeView } from "../../lib/vatCodes";
 import { ImportVatDialog } from "./ImportVatDialog";
 import styles from "./Momsrapport.module.css";
 
@@ -181,6 +181,12 @@ function boxPhrase(box: VatBoxSetting | null): string {
   return `ruta ${box}`;
 }
 
+// The two accounts the momsomföring books on (Konteringsregler → Standardkonton).
+const SETTLEMENT_ROLE_LABELS = {
+  settlement: "Redovisningskonto för moms",
+  rounding: "Öres- och kronutjämning",
+} as const;
+
 // "YYYY-MM-DD" -> "YYYYMM" — the file's period, named after the LAST month.
 function filePeriod(date: string): string {
   return `${date.slice(0, 4)}${date.slice(5, 7)}`;
@@ -246,18 +252,27 @@ export function MomsrapportPageClient({
   const router = useRouter();
   const pathname = usePathname();
 
-  // Initial year: the one covering ?from= when present, else the year
-  // covering TODAY (declaring current-year periods is the normal case — the
-  // list is newest-first, so [0] may be a future year), else the latest.
+  // Initial year: the one covering ?from= when present, else — for a company
+  // that declares the whole year (Helår) — the latest year that has ENDED (the
+  // running year is not over, so there is nothing to declare in it yet), else
+  // the year covering TODAY (declaring current-year periods is the normal
+  // case — the list is newest-first, so [0] may be a future year), else the
+  // latest.
   const initialYearId = useMemo(() => {
     if (defaultFrom) {
       const covering = fiscalYears.find((year) => year.startDate <= defaultFrom && defaultFrom <= year.endDate);
       if (covering) return covering.id;
     }
     const today = stockholmToday();
+    if (reporting?.period === "year") {
+      const latestEnded = fiscalYears
+        .filter((year) => year.endDate < today)
+        .sort((a, b) => (a.endDate < b.endDate ? 1 : a.endDate > b.endDate ? -1 : 0))[0];
+      if (latestEnded) return latestEnded.id;
+    }
     const current = fiscalYears.find((year) => year.startDate <= today && today <= year.endDate);
     return current?.id ?? fiscalYears[0]?.id ?? "";
-  }, [fiscalYears, defaultFrom]);
+  }, [fiscalYears, defaultFrom, reporting]);
 
   const [yearId, setYearId] = useState(initialYearId);
   const [yearDetail, setYearDetail] = useState<FiscalYearDetail | null>(null);
@@ -403,7 +418,11 @@ export function MomsrapportPageClient({
     warnings !== undefined &&
     (warnings.unassignedAccounts.length > 0 ||
       warnings.vatCodeBoxMismatches.length > 0 ||
-      warnings.ruleBoxMismatches.length > 0);
+      warnings.ruleBoxMismatches.length > 0 ||
+      warnings.settlementAccountProblems.length > 0);
+  // The redovisningskonto / öres account carries a box the momsomföring
+  // empties: the report shows, only Bokför momsomföring is refused.
+  const settlementBlocked = (warnings?.settlementAccountProblems.length ?? 0) > 0;
 
   return (
     <>
@@ -524,20 +543,37 @@ export function MomsrapportPageClient({
               {warnings.ruleBoxMismatches.length > 0 && (
                 <div className={styles.warningBlock}>
                   <strong>Konteringsregler med fel momsruta</strong> — regeln ersätter momskodens eget konto, så kontot
-                  måste ha kodens momsruta:
+                  måste hamna i rätt ruta:
                   <ul className={styles.warningList}>
                     {warnings.ruleBoxMismatches.map((mismatch) => (
-                      <li key={mismatch.ruleId}>
+                      <li key={`${mismatch.ruleId}-${mismatch.slot}`}>
                         Konteringsregel{" "}
                         <GatedLink href="/ekonomi/konteringsregler">
-                          {mismatch.groupCode} {mismatch.groupName} / {mismatch.code}
+                          {mismatch.groupCode} {mismatch.groupName} / {mismatch.code ?? "Alla momskoder"}
                         </GatedLink>
-                        : konto{" "}
+                        : {mismatch.slot === "revenue" ? "intäktskonto" : "kostnadskonto"}{" "}
                         <GatedLink href={{ pathname: "/ekonomi/kontoplan", query: { search: mismatch.accountNumber } }}>
                           {mismatch.accountNumber}
                         </GatedLink>{" "}
-                        har <strong>{boxPhrase(mismatch.actualBox)}</strong> men ska ha{" "}
-                        <strong>{boxPhrase(mismatch.expectedBox)}</strong>
+                        <strong>{ruleBoxProblemText(mismatch)}</strong>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {warnings.settlementAccountProblems.length > 0 && (
+                <div className={styles.warningBlock}>
+                  <strong>Redovisningskonton med momsruta</strong> — momsomföringen tömmer kontot, så den kan inte
+                  bokföras förrän kontot har en annan ruta eller ett annat konto har valts under{" "}
+                  <GatedLink href="/ekonomi/konteringsregler">Konteringsregler</GatedLink>. Rapporten visas ändå:
+                  <ul className={styles.warningList}>
+                    {warnings.settlementAccountProblems.map((problem) => (
+                      <li key={problem.role}>
+                        {SETTLEMENT_ROLE_LABELS[problem.role]}{" "}
+                        <GatedLink href={{ pathname: "/ekonomi/kontoplan", query: { search: problem.accountNumber } }}>
+                          {problem.accountNumber}
+                        </GatedLink>{" "}
+                        har <strong>{boxPhrase(problem.vatBox)}</strong>
                       </li>
                     ))}
                   </ul>
@@ -685,10 +721,19 @@ export function MomsrapportPageClient({
               </div>
             ) : (
               <FormActions>
-                <Button type="button" onClick={() => setConfirmOpen(true)} disabled={!hasMovement || settling}>
+                <Button
+                  type="button"
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={!hasMovement || settling || settlementBlocked}
+                >
                   Bokför momsomföring
                 </Button>
                 {!hasMovement && <FormHint>Ingen moms att omföra i perioden.</FormHint>}
+                {hasMovement && settlementBlocked && (
+                  <FormHint>
+                    Momsomföringen kan inte bokföras — se varningen om redovisningskonton ovanför deklarationen.
+                  </FormHint>
+                )}
               </FormActions>
             )}
 
@@ -845,8 +890,8 @@ function ReportingPeriodSetting({ initial }: { initial: VatReportingPeriod }) {
       </div>
       <FormError margin="above">{error}</FormError>
       <FormHint>
-        Den period Skatteverket har bestämt för företaget. Den förvalda perioden när sidan öppnas följer den: månad,
-        kvartal eller helår.
+        Den period Skatteverket har bestämt för företaget. Den förvalda perioden när sidan öppnas följer den: senast
+        avslutade månad eller kvartal, eller för helår det senast avslutade räkenskapsåret.
       </FormHint>
     </>
   );

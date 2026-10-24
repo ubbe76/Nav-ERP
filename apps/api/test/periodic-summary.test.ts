@@ -216,9 +216,9 @@ describe("ledgerDifferenceWarnings / ledgerDifference (öre)", () => {
 
   it("warns about a few öre that round away, and rounds the difference half away from zero", () => {
     expect(ledgerDifferenceWarnings({ goods: 100000, services: 0 }, { box35: 100030, box39: 0 })).toHaveLength(1);
-    expect(ledgerDifference(100000, 100030)).toBe(0);
-    expect(ledgerDifference(100000, 100050)).toBe(-1);
-    expect(ledgerDifference(100050, 100000)).toBe(1);
+    expect(ledgerDifference(100000, 100030)).toBe(-0.3);
+    expect(ledgerDifference(100000, 100050)).toBe(-0.5);
+    expect(ledgerDifference(100050, 100000)).toBe(0.5);
   });
 });
 

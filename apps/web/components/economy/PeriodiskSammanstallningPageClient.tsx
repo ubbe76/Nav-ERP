@@ -360,10 +360,15 @@ export function PeriodiskSammanstallningPageClient({
                   case "summary":
                     return <span className="num">{formatKronor(row.summary)}</span>;
                   case "difference":
-                    return row.difference === 0 ? (
-                      <span className={`num ${styles.differenceOk}`}>Stämmer</span>
-                    ) : (
-                      <span className={`num ${styles.differenceBad}`}>{formatKronor(row.difference)}</span>
+                    // The API compares in öre and returns the exact
+                    // difference (kronor with öre), 0 only when they agree.
+                    if (row.difference === 0) {
+                      return <span className={`num ${styles.differenceOk}`}>Stämmer</span>;
+                    }
+                    return (
+                      <span className={`num ${styles.differenceBad}`}>
+                        {row.difference.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
                     );
                   default:
                     return null;
@@ -375,8 +380,8 @@ export function PeriodiskSammanstallningPageClient({
               <GatedLink href={{ pathname: "/ekonomi/momsrapport", query: { from: summary.from, to: summary.to } }}>
                 momsrapporten
               </GatedLink>{" "}
-              för samma period, i hela kronor. En skillnad beror oftast på ett manuellt verifikat på 3108 eller 3308
-              eller på en faktura med fel momskod.
+              för samma period. Avstämningen görs i ören, och skillnaden visas med ören. En skillnad beror oftast på ett manuellt
+              verifikat på 3108 eller 3308, på en faktura med fel momskod eller på en faktura utan giltigt momsnummer.
             </FormHint>
           </Card>
 
