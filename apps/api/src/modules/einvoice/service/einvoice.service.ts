@@ -23,6 +23,7 @@ import {
   fromProviderError,
 } from "./einvoice.errors.js";
 import { checkUblInput } from "./ubl/ubl-check.js";
+import { isSupportedVatCode } from "./ubl/vat-categories.js";
 import { buildUblDocument } from "./ubl/ubl-invoice-builder.js";
 import type { PeppolIdentifier, UblInvoiceInput, UblLine, UblPaymentAccount, UblPostalAddress } from "./ubl/ubl-types.js";
 
@@ -50,6 +51,10 @@ export interface InvoiceReadRow {
   vatAmount: string;
   salesOrderRowId: string | null;
   configuration: unknown;
+  // Momskoder: the row's code and the company's invoice text for it (BT-120
+  // on an AE subtotal). Optional only for older fixtures — the invoice
+  // service always returns it.
+  vatCode?: { code: string; invoiceText: string | null } | null;
 }
 
 export interface InvoiceReadModel {
@@ -119,7 +124,7 @@ export function splitPeppolId(peppolId: string): PeppolIdentifier {
 
 // Why the invoice cannot be sent right now, in the spec's order; null = it can.
 export function blockedReasonFor(
-  invoice: Pick<InvoiceReadModel, "status" | "currency">,
+  invoice: Pick<InvoiceReadModel, "status" | "currency"> & { rows?: Pick<InvoiceReadRow, "vatCode">[] },
   customer: Pick<CustomerReadModel, "privatePerson" | "country" | "invoiceCountry" | "peppolId" | "orgNumber">,
   company: CompanyInfoRow | null
 ): EinvoiceBlockedReason | null {
@@ -127,6 +132,9 @@ export function blockedReasonFor(
   if (customer.privatePerson) return "private-person";
   if (customer.country !== "SE" || (customer.invoiceCountry !== null && customer.invoiceCountry !== "SE")) return "foreign-customer";
   if (invoice.currency !== "SEK") return "currency";
+  // Momskoder (spec 4.5): MP* ⇒ S, MF ⇒ E, OB ⇒ AE — any other code (a
+  // hand-picked EU or export code) has no category in etapp 1.
+  if ((invoice.rows ?? []).some((row) => row.vatCode != null && !isSupportedVatCode(row.vatCode.code))) return "vat-code-unsupported";
   if (!company || orgNumberDigits(company.orgNumber) === null || !company.vatNumber?.trim()) return "missing-company-data";
   if (resolveRecipient(customer).peppolId === null) return "missing-recipient-id";
   return null;
@@ -258,6 +266,8 @@ export function buildUblInput(args: {
       lineAmount: Number(r.lineAmount),
       vatAmount: Number(r.vatAmount),
       vatRate: Number(r.vatRate),
+      vatCode: r.vatCode?.code ?? null,
+      vatExemptionText: r.vatCode?.invoiceText ?? null,
       orderLineReference: link?.orderNumber ? `${link.orderNumber}:${link.orderLineNo ?? 1}` : null,
       properties: configurationProperties(r.configuration),
     };

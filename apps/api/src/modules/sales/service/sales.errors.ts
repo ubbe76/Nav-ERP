@@ -184,3 +184,30 @@ export class RowVariantExistsError extends Error {
     this.name = "RowVariantExistsError";
   }
 }
+
+// Momskoder (spec 4.2): Utfärda refuses an invoice whose rows carry a code
+// that requires the buyer's momsregistreringsnummer (EU sales, omvänd
+// betalningsskyldighet) when the invoice has none, or one in the wrong form.
+// Thrown inside the issue transaction, so the FA number rolls back with it.
+// The message is Swedish on purpose (it differs per reason and the web shows
+// it as is); `reason` travels in the 409 body.
+export type VatNumberRequiredReason = "missing" | "eu_format" | "ob_format";
+
+export class VatNumberRequiredError extends Error {
+  constructor(
+    public readonly reason: VatNumberRequiredReason,
+    public readonly vatCode: string,
+    prefix: string | null = null
+  ) {
+    super(
+      reason === "missing"
+        ? "Kunden saknar momsregistreringsnummer — det krävs för EU-försäljning och omvänd betalningsskyldighet"
+        : reason === "eu_format"
+          ? prefix
+            ? `Kundens momsregistreringsnummer ska börja med landskoden ${prefix} — det krävs för EU-försäljning`
+            : "EU-försäljning kräver en kund i ett annat EU-land med momsregistreringsnummer"
+          : "Kundens momsregistreringsnummer ska ha formen SE + tio siffror + 01 för omvänd betalningsskyldighet"
+    );
+    this.name = "VatNumberRequiredError";
+  }
+}

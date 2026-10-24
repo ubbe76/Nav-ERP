@@ -7,6 +7,8 @@ import {
   customerPaymentRows,
   customerPayments,
   customers,
+  deliveries,
+  deliveryRows,
   fiscalYears,
   freightProducts,
   invoiceDocuments,
@@ -26,8 +28,10 @@ import {
   einvoiceTransmissions,
 } from "@navet/db";
 import {
+  buyerVatNumberProblem,
   domesticVatCodeForRate,
   ilikePattern,
+  isVatCode,
   isVatRate,
   round2,
   type EinvoiceStatus,
@@ -40,9 +44,9 @@ import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { computeOcrNumber } from "../../system/service/ocr.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
-import { domesticVatCodeIdSql, postingVatCodeColumns } from "../../economy/repository/vat-codes.js";
+import { domesticVatCodeIdSql, loadVatCodeBook, postingVatCodeColumns } from "../../economy/repository/vat-codes.js";
 import { computeOpenAmounts } from "./open-amounts.js";
-import { ShipmentNotBillableError } from "../service/sales.errors.js";
+import { ShipmentNotBillableError, VatNumberRequiredError } from "../service/sales.errors.js";
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle.
 import type { CustomerInvoicePoster, InvoiceReminderPoster } from "../service/invoice.service.js";
@@ -257,12 +261,15 @@ export type InvoiceRowWrite = {
   unitId: string | null;
   unitFactor: number | null;
   vatRate: number;
-  // Momskod (migration 0142). Omitted = the domestic code of vatRate (MP25/
-  // MP12/MP6/MF) — every row the service builds today is svensk moms or
-  // momsfri; the derivation per customer and article fills it explicitly.
+  // Momskod (migration 0142). The service always sets it (explicit choice,
+  // a bare rate's domestic code, or salesVatCode's derivation); omitted =
+  // the domestic code of vatRate, the fallback for direct repository use.
   vatCodeId?: string;
   lineAmount: number;
   vatAmount: number;
+  // Leveransdatum (ML 17 kap. 24 § p. 7) — the order row's last non-undone
+  // delivery day, a credit row's source row's, or the user's. Omitted = null.
+  deliveryDate?: string | null;
   // Konfigurator 4b: copy of the order row's configuration (null for a
   // free/plain row). Written on the draft only; an issued invoice's rows are
   // never rewritten.
@@ -330,6 +337,11 @@ export type CreateReminderResult =
 export type IssueInvoiceResult =
   | { ok: true; invoice: typeof invoices.$inferSelect }
   | { ok: false; reason: "race" | "over_invoicing" | "over_crediting" };
+
+// Momskoder: what Utfärda checks the rows' codes against inside the issue
+// transaction — the momsregistreringsnummer being stamped and the customer's
+// own country (the EU prefix rule).
+export type BuyerVatNumberCheck = { vatNumber: string | null; country: string };
 
 export type InvoiceHeaderWrite = {
   customerId: string;
@@ -434,6 +446,35 @@ export function createInvoiceRepository(db: Db) {
     async findArticleVatRate(articleId: string) {
       const [row] = await db.select({ vatRate: articles.vatRate }).from(articles).where(eq(articles.id, articleId));
       return row ? Number(row.vatRate) : null;
+    },
+
+    // Momskoder: the article facts salesVatCode reads — its rate (the
+    // domestic code) and its type (goods or service).
+    async findArticleForVat(articleId: string) {
+      const [row] = await db
+        .select({ vatRate: articles.vatRate, type: articles.type })
+        .from(articles)
+        .where(eq(articles.id, articleId));
+      return row ? { vatRate: Number(row.vatRate), type: row.type as string } : null;
+    },
+
+    // Momskoder: the company's codes (name, invoice text, active), once per
+    // document operation.
+    async vatCodeBook() {
+      return loadVatCodeBook(db);
+    },
+
+    // Leveransdatum (spec 4.4): the last Stockholm day on which the order row
+    // was delivered, undone delivery rows left out. null = not delivered.
+    async latestDeliveryDate(salesOrderRowId: string): Promise<string | null> {
+      const [row] = await db
+        .select({
+          day: sql<string | null>`to_char(max(${deliveries.deliveredAt}) at time zone 'Europe/Stockholm', 'YYYY-MM-DD')`,
+        })
+        .from(deliveryRows)
+        .innerJoin(deliveries, eq(deliveries.id, deliveryRows.deliveryId))
+        .where(and(eq(deliveryRows.salesOrderRowId, salesOrderRowId), isNull(deliveryRows.undoneAt)));
+      return row?.day ?? null;
     },
 
     // A sales order row plus its order's customer/orderNumber — for the
@@ -596,6 +637,8 @@ export function createInvoiceRepository(db: Db) {
           // sales.repository's listRowsByOrder.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
           vatRate: articles.vatRate,
+          // Momskoder: goods or service for the row's derived code.
+          articleType: articles.type,
           quantityDelivered: salesOrderRows.quantityDelivered,
           // Konfigurator 4b: the dialog shows the configured row's choices.
           configuration: salesOrderRows.configuration,
@@ -635,6 +678,7 @@ export function createInvoiceRepository(db: Db) {
             unitFactor: string | null;
             unitCode: string;
             vatRate: string;
+            articleType: string;
             rest: number;
             configuration: OrderRowConfiguration | null;
           }[];
@@ -659,6 +703,7 @@ export function createInvoiceRepository(db: Db) {
           unitFactor: r.unitFactor,
           unitCode: r.unitCode,
           vatRate: r.vatRate,
+          articleType: r.articleType,
           rest,
           configuration: r.configuration as OrderRowConfiguration | null,
         });
@@ -731,6 +776,7 @@ export function createInvoiceRepository(db: Db) {
               vatCodeId: rowVatCodeId(r),
               lineAmount: String(r.lineAmount),
               vatAmount: String(r.vatAmount),
+              deliveryDate: r.deliveryDate ?? null,
               configuration: r.configuration,
               createdAt: new Date(now + i),
             }))
@@ -866,8 +912,17 @@ export function createInvoiceRepository(db: Db) {
           // Frakt etapp 2: the billed shipment's number, so the card can link
           // to the försändelse (null on every non-freight row).
           shipmentNumber: shipments.shipmentNumber,
+          // Momskoder: the row's code as the company names it, with its
+          // invoice text (the PDF prints it, the e-invoice's BT-120 for OB).
+          vatCode: {
+            id: vatCodes.id,
+            code: vatCodes.code,
+            name: vatCodes.name,
+            invoiceText: vatCodes.invoiceText,
+          },
         })
         .from(invoiceRows)
+        .innerJoin(vatCodes, eq(vatCodes.id, invoiceRows.vatCodeId))
         .leftJoin(articles, eq(articles.id, invoiceRows.articleId))
         .leftJoin(units, eq(units.id, articles.unitId))
         .leftJoin(rowUnits, eq(rowUnits.id, invoiceRows.unitId))
@@ -962,7 +1017,8 @@ export function createInvoiceRepository(db: Db) {
       stamp: IssueStamp,
       type: InvoiceType,
       userId: string,
-      poster: CustomerInvoicePoster
+      poster: CustomerInvoicePoster,
+      vatNumberCheck?: BuyerVatNumberCheck
     ): Promise<IssueInvoiceResult> {
       try {
         return await db.transaction(async (tx) => {
@@ -1013,6 +1069,22 @@ export function createInvoiceRepository(db: Db) {
             .leftJoin(articles, eq(articles.id, invoiceRows.articleId))
             .where(eq(invoiceRows.invoiceId, id))
             .orderBy(asc(invoiceRows.createdAt));
+
+          // Momskoder (spec 4.2): a code requiring the buyer's
+          // momsregistreringsnummer needs one, in the right form, on the
+          // invoice being issued. Checked on the rows as they stand under this
+          // transaction (a concurrent addRow waits for the invoice lock taken
+          // by the UPDATE above), so the FA number rolls back with a refusal.
+          if (vatNumberCheck) {
+            const problem = buyerVatNumberProblem({
+              codes: postingRows.flatMap((postingRow) => (isVatCode(postingRow.vatCode.code) ? [postingRow.vatCode.code] : [])),
+              vatNumber: vatNumberCheck.vatNumber,
+              country: vatNumberCheck.country,
+            });
+            if (problem) {
+              throw new VatNumberRequiredError(problem.reason, problem.code, problem.reason === "eu_format" ? problem.prefix : null);
+            }
+          }
 
           const { verificationId } = await poster.postCustomerInvoice(
             tx,
@@ -1268,6 +1340,7 @@ export function createInvoiceRepository(db: Db) {
             vatCodeId: rowVatCodeId(row),
             lineAmount: String(row.lineAmount),
             vatAmount: String(row.vatAmount),
+            deliveryDate: row.deliveryDate ?? null,
             configuration: row.configuration,
           })
           .returning();
@@ -1304,6 +1377,7 @@ export function createInvoiceRepository(db: Db) {
             vatCodeId: rowVatCodeId(row),
             lineAmount: String(row.lineAmount),
             vatAmount: String(row.vatAmount),
+            deliveryDate: row.deliveryDate ?? null,
             configuration: row.configuration,
           })
           .where(and(eq(invoiceRows.id, rowId), eq(invoiceRows.invoiceId, invoiceId)))

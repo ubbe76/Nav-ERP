@@ -1042,6 +1042,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Exempelby",
     },
     {
+      field: "country",
+      label: "Land",
+      required: false,
+      header: "Land",
+      description: `Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Styr leverantörsfakturans förvalda momskod när leverantören saknar egen: SE ger svensk moms, ett annat EU-land omvänd moms på varor och övriga länder varor utanför EU. Tom cell ger SE på en ny leverantör. ${UNTOUCHED}`,
+      example: "SE",
+    },
+    {
       field: "currency",
       label: "Valuta",
       required: false,

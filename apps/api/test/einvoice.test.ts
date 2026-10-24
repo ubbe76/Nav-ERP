@@ -789,3 +789,52 @@ describe("fakturalistan", () => {
     expect(rows.find((r) => r.id === both.id)).toMatchObject({ einvoiceStatus: "rejected", einvoiceEnvironment: "production" });
   });
 });
+
+describe("momskoder (spec 4.5)", () => {
+  it("blocks a document with a code that has no Peppol category, MP*/MF/OB pass", () => {
+    const company = { orgNumber: "5560000000", vatNumber: "SE556000000001" } as never;
+    const ok = { privatePerson: false, country: "SE", invoiceCountry: null, peppolId: null, orgNumber: "5565555553" };
+    const rows = (...codes: string[]) => codes.map((code) => ({ vatCode: { code, invoiceText: null } }));
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "MF", "OB") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "EXV") }, ok, company)).toBe("vat-code-unsupported");
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EUT") }, ok, company)).toBe("vat-code-unsupported");
+  });
+
+  it("sends omvänd betalningsskyldighet as AE with the code's text and the buyer's VAT number", async () => {
+    const service = await articleService.createArticle({
+      articleNumber: `EINV-OB-${crypto.randomUUID().slice(0, 8)}`,
+      name: "Montage",
+      type: "service",
+      active: true,
+    });
+    const bygg = await makeCustomer({ name: "Bygg AB", reverseChargeConstruction: true, vatNumber: "SE556555555301" });
+    const draft = await invoiceService.create(
+      { customerId: bygg.id, rows: [{ articleId: service.id, description: "Montage", quantity: 2, unitPrice: 800 }] },
+      userId
+    );
+    expect(draft!.rows[0]!.vatCode.code).toBe("OB");
+    const issued = await invoiceService.issue(draft!.id, userId);
+    // BuyerReference falls back to the customer number (no order link).
+    await einvoice.send(issued!.id, userId);
+    const xml = fake.state.submitted[0]!.xml.toString("utf8");
+    expect(xml).toContain("<cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason>");
+    expect(xml).toContain("<cac:PartyTaxScheme><cbc:CompanyID>SE556555555301</cbc:CompanyID>");
+  });
+
+  it("refuses a Swedish invoice with a hand-picked export code (vat-code-unsupported)", async () => {
+    const customer = await makeCustomer();
+    const { vatCodes } = await import("@navet/db");
+    const [exv] = await db.select({ id: vatCodes.id }).from(vatCodes).where(eq(vatCodes.code, "EXV"));
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "Export", quantity: 1, unitPrice: 100, vatCodeId: exv!.id }] },
+      userId
+    );
+    const issued = await invoiceService.issue(draft!.id, userId);
+    const err = await einvoice.send(issued!.id, userId).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(EinvoiceNotAllowedError);
+    expect(err).toMatchObject({ reason: "vat-code-unsupported" });
+    expect(fake.state.submitted).toHaveLength(0);
+    const view = await einvoice.getInvoiceView(issued!.id);
+    expect(view.blockedReason).toBe("vat-code-unsupported");
+  });
+});

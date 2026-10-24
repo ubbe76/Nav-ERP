@@ -13,7 +13,16 @@ import {
   UBL_PROFILE_ID,
 } from "../src/modules/einvoice/service/ubl/ubl-invoice-builder.js";
 import { checkUblInput } from "../src/modules/einvoice/service/ubl/ubl-check.js";
-import { creditNote, GOLDEN_CASES, ibanInvoice, invoiceExemptRow, invoiceTwoRatesDiscount, line, plusgiroInvoice } from "./helpers/ubl-fixtures.js";
+import {
+  creditNote,
+  GOLDEN_CASES,
+  ibanInvoice,
+  invoiceExemptRow,
+  invoiceReverseCharge,
+  invoiceTwoRatesDiscount,
+  line,
+  plusgiroInvoice,
+} from "./helpers/ubl-fixtures.js";
 import { validateAgainstUblXsd } from "./helpers/ubl-xsd.js";
 
 // ---- re-deriving the Peppol sum rules from the produced XML ----------------
@@ -55,6 +64,11 @@ function assertSumRules(xml: string): void {
     if (id === "E") {
       expect(tax).toBe(0);
       expect(textAt(category, "TaxExemptionReason")).toBe("Undantagen från mervärdesskatt");
+    } else if (id === "AE") {
+      // BR-AE-09 / BR-AE-10: reverse charge carries no VAT and a reason.
+      expect(tax).toBe(0);
+      expect(percent).toBe(0);
+      expect(textAt(category, "TaxExemptionReason")).not.toBeNull();
     } else {
       expect(Math.abs(tax - round2(taxable * (percent / 100)))).toBeLessThan(1);
       expect(child(category, "TaxExemptionReason")).toBeNull();
@@ -99,6 +113,57 @@ describe("UBL builder — golden files", () => {
       await expect(xml).toMatchFileSnapshot(`./fixtures/ubl/${name}.xml`);
     });
   }
+});
+
+describe("UBL builder — momskoder", () => {
+  it("MP codes ⇒ S and MF ⇒ E: the same document as the rate alone (the golden files are unchanged)", () => {
+    const plain = invoiceExemptRow();
+    const coded = {
+      ...plain,
+      lines: plain.lines.map((l) => ({ ...l, vatCode: l.vatRate === 0 ? "MF" : `MP${l.vatRate}`, vatExemptionText: "Momsfri omsättning" })),
+    };
+    expect(buildUblInvoice(coded)).toBe(buildUblInvoice(plain));
+    const twoRates = invoiceTwoRatesDiscount();
+    expect(buildUblInvoice({ ...twoRates, lines: twoRates.lines.map((l) => ({ ...l, vatCode: `MP${l.vatRate}` })) })).toBe(
+      buildUblInvoice(twoRates)
+    );
+  });
+
+  it("OB ⇒ AE with the code's text as BT-120, its own subtotal next to E, the buyer's VAT number on the party", () => {
+    const xml = buildUblInvoice(invoiceReverseCharge());
+    expect(xml).toContain(
+      '<cac:TaxSubtotal><cbc:TaxableAmount currencyID="SEK">180.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="SEK">0.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>E</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReason>Undantagen från mervärdesskatt</cbc:TaxExemptionReason>'
+    );
+    expect(xml).toContain(
+      '<cac:TaxSubtotal><cbc:TaxableAmount currencyID="SEK">6000.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="SEK">0.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>'
+    );
+    // S 25 → E 0 → AE 0.
+    expect(xml.indexOf("<cbc:ID>S</cbc:ID>")).toBeLessThan(xml.indexOf("<cbc:ID>E</cbc:ID>"));
+    expect(xml.indexOf("<cbc:ID>E</cbc:ID>")).toBeLessThan(xml.indexOf("<cbc:ID>AE</cbc:ID>"));
+    expect(xml).toContain("<cac:ClassifiedTaxCategory><cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory>");
+    expect(xml).toContain("<cac:PartyTaxScheme><cbc:CompanyID>SE559000123501</cbc:CompanyID>");
+    // BT-120 is the company's own text for the code; without one, the
+    // standard wording.
+    const ownText = invoiceReverseCharge();
+    ownText.lines[0] = { ...ownText.lines[0]!, vatExemptionText: "Omvänd betalningsskyldighet för byggtjänster" };
+    expect(buildUblInvoice(ownText)).toContain("<cbc:TaxExemptionReason>Omvänd betalningsskyldighet för byggtjänster</cbc:TaxExemptionReason>");
+    const noText = invoiceReverseCharge();
+    noText.lines[0] = { ...noText.lines[0]!, vatExemptionText: null };
+    expect(buildUblInvoice(noText)).toContain("<cbc:ID>AE</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReason>Omvänd betalningsskyldighet</cbc:TaxExemptionReason>");
+  });
+
+  it("ubl-check refuses codes without a Peppol category, OB without the buyer's VAT number and an OB row with VAT", () => {
+    const base = invoiceReverseCharge();
+    const eu = { ...base, lines: [{ ...base.lines[0]!, vatCode: "EUV" }] };
+    expect(checkUblInput(eu)).toContain("Rad 1 har momskoden EUV som inte stöds i e-faktura.");
+    const noVat = { ...base, buyer: { ...base.buyer, vatNumber: null } };
+    expect(checkUblInput(noVat)).toContain("Omvänd betalningsskyldighet kräver kundens momsregistreringsnummer på fakturan.");
+    const withVat = { ...base, lines: [{ ...base.lines[0]!, vatAmount: 1500 }] };
+    expect(checkUblInput(withVat)).toContain("Rad 1 har 0 % moms men ändå ett momsbelopp.");
+    // A code whose rate disagrees with the row's rate is refused too.
+    const mismatch = { ...base, lines: [{ ...base.lines[1]!, vatCode: "MP12" }] };
+    expect(checkUblInput(mismatch)).toContain("Rad 2 har en momssats som inte stöds i e-faktura (25 %).");
+  });
 });
 
 describe("UBL builder — document content", () => {

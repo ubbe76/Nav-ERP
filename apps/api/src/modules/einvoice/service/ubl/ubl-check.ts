@@ -19,7 +19,7 @@
 import { BIC_PATTERN, isLuhnValid, isValidIban, isValidOcrReference } from "@navet/shared";
 import { computeTotals, linePricing, toCents } from "./ubl-invoice-builder.js";
 import type { UblCheckResult, UblInvoiceInput, UblLine, UblPostalAddress } from "./ubl-types.js";
-import { isSupportedVatRate } from "./vat-categories.js";
+import { isSupportedLineVat, isSupportedVatCode } from "./vat-categories.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // xs:date rejects 2026-13-01 and 2026-02-30, so the pattern is not enough.
@@ -51,8 +51,15 @@ function checkLine(line: UblLine, problems: string[]): void {
   if (!Number.isFinite(line.discountPercent) || line.discountPercent < 0 || line.discountPercent > 100) problems.push(`${row} har en rabatt utanför 0–100 %.`);
   if (!isMoney(line.lineAmount)) problems.push(`${row} har ett radbelopp som inte är ett belopp med två decimaler.`);
   if (!isMoney(line.vatAmount) || line.vatAmount < 0) problems.push(`${row} har ett momsbelopp som inte är ett belopp med två decimaler.`);
-  if (!isSupportedVatRate(line.vatRate)) problems.push(`${row} har en momssats som inte stöds i e-faktura (${line.vatRate} %).`);
-  else if (line.vatRate === 0 && toCents(line.vatAmount) !== 0) problems.push(`${row} har 0 % moms men ändå ett momsbelopp.`);
+  // Momskoder (spec 4.5): the code decides the category; only svensk moms,
+  // momsfritt and omvänd betalningsskyldighet in Sverige exist in etapp 1.
+  if (line.vatCode != null && !isSupportedVatCode(line.vatCode)) {
+    problems.push(`${row} har momskoden ${line.vatCode} som inte stöds i e-faktura.`);
+  } else if (!isSupportedLineVat(line)) {
+    problems.push(`${row} har en momssats som inte stöds i e-faktura (${line.vatRate} %).`);
+  } else if (line.vatRate === 0 && toCents(line.vatAmount) !== 0) {
+    problems.push(`${row} har 0 % moms men ändå ett momsbelopp.`);
+  }
   for (const property of line.properties) {
     if (blank(property.name) || blank(property.value)) problems.push(`${row} har en konfigurationsrad utan namn eller värde.`);
   }
@@ -102,6 +109,10 @@ export function checkUblInput(input: UblInvoiceInput): UblCheckResult {
   else if (scheme === "0088" && endpointValue.length !== 13) problems.push("Kundens Peppol-id med schema 0088 måste vara ett GLN med 13 siffror.");
   if (buyer.orgNumber !== null && !blank(buyer.orgNumber) && digits(buyer.orgNumber).length !== 10) problems.push("Kundens organisationsnummer måste vara tio siffror.");
   checkAddress(buyer.address, "Kundens", problems);
+  // BR-AE-02: omvänd betalningsskyldighet needs the buyer's VAT identifier.
+  if (input.lines.some((line) => line.vatCode === "OB") && blank(buyer.vatNumber)) {
+    problems.push("Omvänd betalningsskyldighet kräver kundens momsregistreringsnummer på fakturan.");
+  }
 
   // Payment — company_info; only an invoice asks for money. PaymentMeans is
   // optional in Peppol BIS (BR-CO-25 wants a due date or terms, not an
@@ -139,7 +150,7 @@ export function checkUblInput(input: UblInvoiceInput): UblCheckResult {
   }
 
   // Totals — only computable when every rate is supported.
-  if (input.lines.length > 0 && input.lines.every((line) => isSupportedVatRate(line.vatRate) && isMoney(line.lineAmount) && isMoney(line.vatAmount))) {
+  if (input.lines.length > 0 && input.lines.every((line) => isSupportedLineVat(line) && isMoney(line.lineAmount) && isMoney(line.vatAmount))) {
     const totals = computeTotals(input.lines);
     for (const subtotal of totals.subtotals) {
       const expectedCents = Math.round(subtotal.taxableCents * (subtotal.category.percent / 100));

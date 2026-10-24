@@ -36,6 +36,7 @@ export const SUPPLIER_IMPORT_FIELDS = [
   "address3",
   "postalCode",
   "city",
+  "country",
   "currency",
   "ourCustomerNumber",
   "paymentTerm",
@@ -82,6 +83,7 @@ const FIELD_LABELS: Record<SupplierImportField, string> = {
   address3: "Adressrad 3",
   postalCode: "Postnummer",
   city: "Postort",
+  country: "Land",
   currency: "Valuta",
   ourCustomerNumber: "Vårt kundnummer",
   paymentTerm: "Betalningsvillkor",
@@ -103,6 +105,7 @@ const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 const SPECIAL_FIELDS: ReadonlySet<SupplierImportField> = new Set<SupplierImportField>([
   "address2",
   "address3",
+  "country",
   "currency",
   "paymentTerm",
   "deliveryTerm",
@@ -147,6 +150,8 @@ export const SUPPLIER_HEADER_ALIASES: Record<string, string> = {
   postadressadressrad3: "address3",
   postadresspostnummer: "postalCode",
   postadressstad: "city",
+  postadressland: "country",
+  land: "country",
   postnummer: "postalCode",
   postnr: "postalCode",
   ort: "city",
@@ -226,6 +231,9 @@ export interface SupplierCreatePlan {
   address?: string;
   postalCode?: string;
   city?: string;
+  // ISO 3166-1 alpha-2, uppercased; omitted = the column's DB default 'SE'.
+  // Momskoder: steers the derived Momskod (förval) of new supplier invoices.
+  country?: string;
   // Uppercased; omitted = the column's DB default 'SEK'.
   currency?: string;
   ourCustomerNumber?: string;
@@ -416,6 +424,16 @@ export async function planSupplierImport(
     if (mergedAddress !== "") {
       values["address"] = mergedAddress;
       patch.address = mergedAddress;
+    }
+
+    // country (Land) — trim + uppercase, exactly two letters (same rule as
+    // the customer import). Empty cell: SE on create, untouched on update.
+    const countryCell = record["country"] ?? "";
+    if (countryCell !== "") {
+      values["country"] = countryCell;
+      const upper = countryCell.toUpperCase();
+      if (!/^[A-Z]{2}$/.test(upper)) errors.push("Land måste vara en landskod med två bokstäver (t.ex. SE)");
+      else patch.country = upper;
     }
 
     // currency — stored uppercased; an invalid code is a row ERROR.

@@ -63,6 +63,23 @@ export const ERROR_CODES = {
   INVALID_VERIFICATION_STATE: "invalid-verification-state",
   DUPLICATE_POSTING_RULE: "duplicate-posting-rule",
   POSTING_RULE_NO_ACCOUNTS: "posting-rule-no-accounts",
+  // Momskoder (bokföringsgranskningen etapp 1)
+  VAT_CODE_NOT_FOUND: "vat-code-not-found",
+  VAT_CODE_SLOT_NOT_USED: "vat-code-slot-not-used",
+  VAT_CODE_ACCOUNT_INVALID: "vat-code-account-invalid",
+  VAT_CODE_ACCOUNT_CONFLICT: "vat-code-account-conflict",
+  VAT_CODE_AMOUNT_MISMATCH: "vat-code-amount-mismatch",
+  VAT_CODE_NOT_APPLICABLE: "vat-code-not-applicable",
+  POSTING_RULE_VAT_CODE: "posting-rule-vat-code",
+  IMPORT_VAT_CODE: "import-vat-code",
+  VAT_FILE_ORG_NUMBER_MISSING: "vat-file-org-number-missing",
+  SUPPLIER_INVOICE_VAT_CODE: "supplier-invoice-vat-code",
+  // a document's chosen code is unknown, inactive or of the wrong direction
+  // (400, body.reason unknown|inactive|not_applicable)
+  INVALID_VAT_CODE: "invalid-vat-code",
+  // Utfärda: EU sale / omvänd betalningsskyldighet without (a well-formed)
+  // buyer momsregistreringsnummer (409, body.reason missing|eu_format|ob_format)
+  VAT_NUMBER_REQUIRED: "vat-number-required",
   // årsbokslut
   FISCAL_YEAR_CLOSED: "fiscal-year-closed",
   YEAR_END_CLOSING_NOT_FOUND: "year-end-closing-not-found",

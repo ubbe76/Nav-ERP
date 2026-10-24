@@ -108,7 +108,16 @@ import {
   UnbalancedVerificationError,
   VerificationSeriesNotFoundError,
   YearEndClosingVerificationError,
+  VatCodeNotFoundError,
+  PostingRuleVatCodeError,
 } from "../src/modules/economy/service/economy.service.js";
+import {
+  ImportVatCodeError,
+  VatCodeAccountInvalidError,
+  VatCodeSlotNotUsedError,
+} from "../src/modules/economy/service/vat-code.service.js";
+import { InvalidVatCodeError } from "../src/modules/economy/service/document-vat-code.js";
+import { VatNumberRequiredError } from "../src/modules/sales/service/sales.errors.js";
 import {
   ClosingDateLockedError,
   InvalidClosingDateError,
@@ -132,9 +141,14 @@ import { AccountingPeriodLockedError, FiscalYearClosedError } from "../src/modul
 import {
   MissingPostingAccountError,
   NoAccountingPeriodForPostingError,
+  SupplierInvoiceVatCodeError,
+  VatCodeAccountConflictError,
+  VatCodeAmountMismatchError,
+  VatCodeNotApplicableError,
   ZeroAmountPostingError,
 } from "../src/modules/economy/service/verification-poster.js";
 import {
+  VatFileOrgNumberMissingError,
   VatAccountsNotDistinctError,
   VatPeriodAlreadySettledError,
   VatPeriodNotCoveredError,
@@ -351,6 +365,19 @@ const cases: Array<[Error, string]> = [
   [new InvalidVerificationStateError("bad state"), ERROR_CODES.INVALID_VERIFICATION_STATE],
   [new DuplicatePostingRuleError("grp-1", 25), ERROR_CODES.DUPLICATE_POSTING_RULE],
   [new PostingRuleNoAccountsError("rule-1"), ERROR_CODES.POSTING_RULE_NO_ACCOUNTS],
+  // momskoder
+  [new VatCodeNotFoundError("vc-1"), ERROR_CODES.VAT_CODE_NOT_FOUND],
+  [new VatCodeSlotNotUsedError("MP25", "cost"), ERROR_CODES.VAT_CODE_SLOT_NOT_USED],
+  [new VatCodeAccountInvalidError("3001", "missing"), ERROR_CODES.VAT_CODE_ACCOUNT_INVALID],
+  [new VatCodeAccountConflictError("IEUV25", "2614"), ERROR_CODES.VAT_CODE_ACCOUNT_CONFLICT],
+  [new VatCodeAmountMismatchError("EUV", "VAT on a 0 % code"), ERROR_CODES.VAT_CODE_AMOUNT_MISMATCH],
+  [new VatCodeNotApplicableError("IEUV25", "sales"), ERROR_CODES.VAT_CODE_NOT_APPLICABLE],
+  [new PostingRuleVatCodeError("IMP25"), ERROR_CODES.POSTING_RULE_VAT_CODE],
+  [new ImportVatCodeError("vc-1", "inactive"), ERROR_CODES.IMPORT_VAT_CODE],
+  [new VatFileOrgNumberMissingError(), ERROR_CODES.VAT_FILE_ORG_NUMBER_MISSING],
+  [new SupplierInvoiceVatCodeError(250, "MF", "Momsfri"), ERROR_CODES.SUPPLIER_INVOICE_VAT_CODE],
+  [new InvalidVatCodeError("inactive", "EUV", "sales"), ERROR_CODES.INVALID_VAT_CODE],
+  [new VatNumberRequiredError("missing", "EUV"), ERROR_CODES.VAT_NUMBER_REQUIRED],
   [new FiscalYearClosedError("2024"), ERROR_CODES.FISCAL_YEAR_CLOSED],
   [new YearEndClosingNotFoundError("c-1"), ERROR_CODES.YEAR_END_CLOSING_NOT_FOUND],
   [new YearEndClosingExistsError("2024"), ERROR_CODES.YEAR_END_CLOSING_EXISTS],

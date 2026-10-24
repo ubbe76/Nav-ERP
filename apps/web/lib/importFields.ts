@@ -129,6 +129,7 @@ export const SUPPLIER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "address3", label: "Adressrad 3" },
   { field: "postalCode", label: "Postnummer" },
   { field: "city", label: "Postort" },
+  { field: "country", label: "Land" },
   { field: "currency", label: "Valuta" },
   { field: "ourCustomerNumber", label: "Vårt kundnummer" },
   { field: "paymentTerm", label: "Betalningsvillkor" },

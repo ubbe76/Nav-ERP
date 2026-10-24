@@ -1,23 +1,41 @@
-// VAT rate ⇒ Peppol VAT category (BT-151/BT-118, code list UNCL5305).
+// Momskod / VAT rate ⇒ Peppol VAT category (BT-151/BT-118, code list UNCL5305).
 //
-// Etapp 1 is Swedish domestic trade only (spec, decision 1 and 3): 25/12/6 %
-// are category S (standard rated) — and ONLY those three may be S for a
-// Swedish supplier (Peppol SE-R-006, fatal) — while 0 % is category E
-// (exempt) with the reason text BT-120 required by BR-E-10. Reverse charge
-// (AE), export (G) and intra-EU (K) are etapp 2 and would need a momskod
-// register on the row; until then the rate alone decides.
-export type VatCategoryId = "S" | "E";
+// Etapp 1 is Swedish trade only (spec, decision 1 and 3). Since the momskoder
+// (bokföringsgranskningen etapp 1, spec 4.5) the row's CODE decides:
+//   * MP25/MP12/MP6 ⇒ S (standard rated) — and ONLY 25/12/6 may be S for a
+//     Swedish supplier (Peppol SE-R-006, fatal),
+//   * MF ⇒ E (exempt) with the reason text BT-120 required by BR-E-10,
+//   * OB (omvänd betalningsskyldighet, Sverige) ⇒ AE (reverse charge) with
+//     BT-120 = the code's invoice text (BR-AE-10) and the buyer's VAT number
+//     (BR-AE-02).
+// Every other code (EU sales, export) cannot occur in etapp 1 — foreign
+// customers are refused before the document is built — and ubl-check refuses
+// it for safety. A line without a code (documents built before the momskoder,
+// the unit tests) falls back to the rate alone: 25/12/6 ⇒ S, 0 ⇒ E.
+export type VatCategoryId = "S" | "E" | "AE";
 
 export interface VatCategory {
   id: VatCategoryId;
   percent: number;
-  // BT-120, only for E.
+  // BT-120, only for E and AE.
   exemptionReason?: string;
 }
 
 export const VAT_EXEMPTION_REASON = "Undantagen från mervärdesskatt";
+// BT-120 for AE when the code has no invoice text of its own.
+export const REVERSE_CHARGE_REASON = "Omvänd betalningsskyldighet";
 
 export const STANDARD_RATED_PERCENTS: readonly number[] = [25, 12, 6];
+
+// The momskoder an e-invoice may carry in etapp 1, with the rate each one
+// must have.
+const UBL_VAT_CODE_RATES: ReadonlyMap<string, number> = new Map([
+  ["MP25", 25],
+  ["MP12", 12],
+  ["MP6", 6],
+  ["MF", 0],
+  ["OB", 0],
+]);
 
 export function vatCategoryFor(rate: number): VatCategory {
   if (STANDARD_RATED_PERCENTS.includes(rate)) return { id: "S", percent: rate };
@@ -27,4 +45,37 @@ export function vatCategoryFor(rate: number): VatCategory {
 
 export function isSupportedVatRate(rate: number): boolean {
   return rate === 0 || STANDARD_RATED_PERCENTS.includes(rate);
+}
+
+export function isSupportedVatCode(code: string): boolean {
+  return UBL_VAT_CODE_RATES.has(code);
+}
+
+// A line's VAT facts as the builder and ubl-check read them.
+export type LineVatFacts = { vatRate: number; vatCode?: string | null; vatExemptionText?: string | null };
+
+// Whether the line's code (or, without one, its rate) can be expressed in
+// Peppol BIS in etapp 1 — and the rate agrees with the code.
+export function isSupportedLineVat(line: LineVatFacts): boolean {
+  if (line.vatCode == null) return isSupportedVatRate(line.vatRate);
+  return UBL_VAT_CODE_RATES.get(line.vatCode) === line.vatRate;
+}
+
+export function lineVatCategory(line: LineVatFacts): VatCategory {
+  if (line.vatCode == null) return vatCategoryFor(line.vatRate);
+  if (!isSupportedLineVat(line)) {
+    throw new Error(`Unsupported VAT code ${line.vatCode} — ubl-check refuses it before the builder runs`);
+  }
+  if (line.vatCode === "OB") {
+    return { id: "AE", percent: 0, exemptionReason: line.vatExemptionText?.trim() || REVERSE_CHARGE_REASON };
+  }
+  return vatCategoryFor(line.vatRate);
+}
+
+// Subtotal order: highest rate first, then S → E → AE (one subtotal per
+// category and rate, BR-CO-18 / BR-AE-01).
+const CATEGORY_ORDER: Record<VatCategoryId, number> = { S: 0, E: 1, AE: 2 };
+
+export function compareVatCategories(a: VatCategory, b: VatCategory): number {
+  return b.percent - a.percent || CATEGORY_ORDER[a.id] - CATEGORY_ORDER[b.id];
 }

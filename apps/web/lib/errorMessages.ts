@@ -109,6 +109,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   "vat-code-amount-mismatch":
     "Fakturaraden har moms trots att momskoden är momsfri, eller en annan sats än momskoden — rätta raden.",
   "vat-code-not-applicable": "Momskoden kan inte användas på den här typen av dokument.",
+  "invalid-vat-code": "Momskoden finns inte, är inaktiv eller kan inte användas här — välj en annan momskod.",
+  "vat-number-required":
+    "Kunden saknar ett giltigt momsregistreringsnummer — det krävs för EU-försäljning och omvänd betalningsskyldighet.",
   "supplier-invoice-vat-code":
     "Fakturan har moms, men momskoden tar ingen debiterad moms (omvänd moms, momsfritt eller import) — välj en svensk momskod eller ange momsbelopp 0.",
   "fiscal-year-closed": "Räkenskapsåret är stängt — öppna det igen under Bokslut",

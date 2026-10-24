@@ -63,6 +63,7 @@ import {
   suggestPurchaseDeliveryDate,
 } from "../../system/service/delivery-days.js";
 import { resolveSupplierPrice } from "./supplier-price.js";
+import { documentVatCode, supplierVatCode, vatCodeRef, type VatCodeBook } from "../../economy/service/document-vat-code.js";
 // G1: append-only audit trail — optional with a no-op default (see
 // sales.service.ts's identical comment) so the many pre-existing test call
 // sites keep compiling; app.ts wires the real one.
@@ -682,14 +683,32 @@ export function createPurchaseService(
       throw new RegisterEntryNotFoundError(input.carrierId);
   }
 
+  // Momskoder: the supplier's Momskod (förval) as the card shows it — its own
+  // code, else the one derived from its country (derived: true).
+  function withDefaultVatCode<T extends { country: string; defaultVatCodeId: string | null }>(supplier: T, book: VatCodeBook) {
+    const effective = supplierVatCode(book, supplier);
+    return {
+      ...supplier,
+      defaultVatCode: effective ? { ...vatCodeRef(effective.row), derived: effective.derived } : null,
+    };
+  }
+
+  // A supplier's own Momskod (förval) must be an active purchase code (both
+  // or purchase direction) — the code a new supplier invoice starts from.
+  async function validateDefaultVatCode(defaultVatCodeId: string | null | undefined, book: VatCodeBook) {
+    if (defaultVatCodeId) documentVatCode(book, { id: defaultVatCodeId }, "purchase");
+  }
+
   return {
     async createSupplier(input: CreateSupplierInput) {
       await validateRegisterRefs(input);
+      const book = await repo.vatCodeBook();
+      await validateDefaultVatCode(input.defaultVatCodeId, book);
       const normalized = normalizeSupplierPaymentDetails(input);
       const problems = supplierPaymentDetailsProblems(paymentDetailsOf(normalized));
       if (Object.keys(problems).length > 0) throw new InvalidSupplierPaymentDetailsError(problems);
       try {
-        return await repo.createSupplier(normalized);
+        return withDefaultVatCode(await repo.createSupplier(normalized), book);
       } catch (err) {
         // suppliers' only unique constraint is supplier_number, so a 23505
         // here can mean nothing else.
@@ -700,6 +719,8 @@ export function createPurchaseService(
 
     async updateSupplier(id: string, input: UpdateSupplierInput) {
       await validateRegisterRefs(input);
+      const book = await repo.vatCodeBook();
+      await validateDefaultVatCode(input.defaultVatCodeId, book);
       const normalized = normalizeSupplierPaymentDetails(input);
       // The check runs on the MERGED state (stored row + patch), so a PATCH
       // that only switches the method is held against the stored numbers.
@@ -718,11 +739,14 @@ export function createPurchaseService(
         throw err;
       }
       if (!row) throw new SupplierNotFoundError(id);
-      return row;
+      return withDefaultVatCode(row, book);
     },
 
+    // Momskoder: defaultVatCode { id, code, name, rate, derived } — the
+    // supplier's Momskod (förval), derived from the country when it has none.
     async getSupplier(id: string) {
-      return repo.findSupplierById(id);
+      const [supplier, book] = await Promise.all([repo.findSupplierById(id), repo.vatCodeBook()]);
+      return supplier ? withDefaultVatCode(supplier, book) : null;
     },
 
     async listSupplierContacts(supplierId: string) {

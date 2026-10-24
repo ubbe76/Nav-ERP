@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Tx } from "@navet/db";
 import {
+  isVatCode,
+  reverseVatPreview,
   round2,
   type CreateSupplierInvoiceInput,
   type CreateSupplierInvoiceRowInput,
@@ -17,6 +19,12 @@ import type {
 import { InvalidStatusTransitionError, SupplierNotFoundError } from "./purchase.service.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import type { PostingVatCode } from "../../economy/service/verification-poster.js";
+import {
+  documentVatCode,
+  supplierVatCode,
+  vatCodeRef,
+  type VatCodeBook,
+} from "../../economy/service/document-vat-code.js";
 // G1: append-only audit trail — optional with a no-op default (see
 // sales.service.ts's identical comment).
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
@@ -191,6 +199,8 @@ type RowInput = {
   quantity: number;
   unitPrice: number;
   vatRate?: number | null;
+  // Momskod for the row; null/undefined = the invoice's own code.
+  vatCodeId?: string | null;
 };
 
 export function createSupplierInvoiceService(
@@ -200,8 +210,14 @@ export function createSupplierInvoiceService(
   audit: AuditWriter = { log: async () => {} }
 ) {
   // Validates the optional PO-match and computes the line/vat amounts so the
-  // stored numbers always equal quantity × unitPrice.
-  async function resolveRow(input: RowInput): Promise<SupplierInvoiceRowWrite> {
+  // stored numbers always equal quantity × unitPrice. A row's own momskod
+  // must be a purchase code (both/purchase) and active — unless it is the
+  // code the row already carries (`keepVatCodeId`, a PATCH leaving it alone).
+  async function resolveRow(input: RowInput, book: VatCodeBook, keepVatCodeId?: string | null): Promise<SupplierInvoiceRowWrite> {
+    const vatCodeId = input.vatCodeId ?? null;
+    if (vatCodeId !== null) {
+      documentVatCode(book, { id: vatCodeId }, "purchase", { allowInactive: vatCodeId === keepVatCodeId });
+    }
     const articleId = input.articleId ?? null;
     const purchaseOrderRowId = input.purchaseOrderRowId ?? null;
     // The PO's supplier is deliberately NOT compared with the invoice's: the
@@ -228,6 +244,7 @@ export function createSupplierInvoiceService(
       lineAmount,
       vatAmount,
       vatRate,
+      vatCodeId,
     };
   }
 
@@ -246,6 +263,20 @@ export function createSupplierInvoiceService(
     };
   }
 
+  // The invoice's momskod: an explicit choice (active purchase code), else
+  // the supplier's Momskod (förval), else the one derived from its country.
+  function headerVatCodeId(
+    book: VatCodeBook,
+    supplier: { country: string; defaultVatCodeId: string | null },
+    explicit: string | undefined
+  ): string {
+    if (explicit) return documentVatCode(book, { id: explicit }, "purchase").id;
+    const effective = supplierVatCode(book, supplier);
+    // Unreachable while vat_codes holds the whole catalog (migration 0142).
+    if (!effective) throw new Error("No momskod found for the supplier");
+    return documentVatCode(book, { id: effective.row.id }, "purchase").id;
+  }
+
   const service = {
     async list(query: ListSupplierInvoicesQuery) {
       return repo.list(query);
@@ -256,17 +287,49 @@ export function createSupplierInvoiceService(
     // and which payments have touched it. The open amount is DERIVED
     // (open-amounts.ts is the single authority) — there is no stored balance
     // to read, and a draft simply reports its own gross as open.
+    //
+    // Momskoder: the header's vatCode { id, code, name, rate }, each row's
+    // vatCode (null = follows the header) and reverseVat — the förhandsvisning
+    // of the omvänd moms the attest will book (reverseVatPreview, the same
+    // function the poster books with): [{ code, base, vat }] per reverse code.
     async getInvoice(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
-      const [rows, openAmount, payments, files, paymentBatches] = await Promise.all([
-        repo.listRows(id).then((invoiceRows) => invoiceRows.map(withVariance)),
+      const [rawRows, openAmount, payments, files, paymentBatches] = await Promise.all([
+        repo.listRows(id),
         repo.getOpenAmount(id),
         repo.listPaymentsForInvoice(id),
         repo.listFiles(id),
         repo.listPaymentBatchesForInvoice(id),
       ]);
-      return { ...header, rows, openAmount, payments, files, paymentBatches };
+      const { vatCodeCode, vatCodeName, ...headerFields } = header;
+      const rows = rawRows.map((row) => {
+        const { vatCodeCode: rowCode, vatCodeName: rowName, ...rowFields } = withVariance(row);
+        return {
+          ...rowFields,
+          vatCode: row.vatCodeId && rowCode !== null && rowName !== null ? vatCodeRef({ id: row.vatCodeId, code: rowCode, name: rowName }) : null,
+        };
+      });
+      const reverseVat = isVatCode(vatCodeCode)
+        ? reverseVatPreview({
+            headerCode: vatCodeCode,
+            netAmount: Number(header.netAmount),
+            rows: rawRows.map((row) => ({
+              code: row.vatCodeCode !== null && isVatCode(row.vatCodeCode) ? row.vatCodeCode : null,
+              lineAmount: Number(row.lineAmount),
+            })),
+          })
+        : [];
+      return {
+        ...headerFields,
+        vatCode: vatCodeRef({ id: header.vatCodeId, code: vatCodeCode, name: vatCodeName }),
+        reverseVat,
+        rows,
+        openAmount,
+        payments,
+        files,
+        paymentBatches,
+      };
     },
 
     async create(input: CreateSupplierInvoiceInput, createdBy: string) {
@@ -284,7 +347,9 @@ export function createSupplierInvoiceService(
           : null;
         dueDate = computeDueDate(input.invoiceDate, paymentTermCode);
       }
-      const rows = await Promise.all(input.rows.map((r) => resolveRow(r)));
+      const book = await repo.vatCodeBook();
+      const vatCodeId = headerVatCodeId(book, supplier, input.vatCodeId);
+      const rows = await Promise.all(input.rows.map((r) => resolveRow(r, book)));
       let invoice;
       try {
         invoice = await repo.create(
@@ -302,6 +367,7 @@ export function createSupplierInvoiceService(
             note: input.note ?? null,
             paymentReferenceKind: input.paymentReference?.kind ?? null,
             paymentReference: input.paymentReference?.value ?? null,
+            vatCodeId,
           },
           rows,
           createdBy
@@ -340,6 +406,7 @@ export function createSupplierInvoiceService(
         note?: string | null;
         paymentReferenceKind?: PaymentReferenceKind | null;
         paymentReference?: string | null;
+        vatCodeId?: string;
       } = {};
       // Byte av leverantör (betalas till): the currency is re-snapshotted from
       // the new supplier, as at creation. The due date is left alone — like
@@ -369,6 +436,14 @@ export function createSupplierInvoiceService(
       if (input.paymentReference !== undefined) {
         patch.paymentReferenceKind = input.paymentReference?.kind ?? null;
         patch.paymentReference = input.paymentReference?.value ?? null;
+      }
+      // Momskod (draft only, like every header edit): an active purchase
+      // code — the stored one may stay even if deactivated since.
+      if (input.vatCodeId !== undefined) {
+        const book = await repo.vatCodeBook();
+        patch.vatCodeId = documentVatCode(book, { id: input.vatCodeId }, "purchase", {
+          allowInactive: input.vatCodeId === invoice.vatCodeId,
+        }).id;
       }
       let updated;
       try {
@@ -419,7 +494,7 @@ export function createSupplierInvoiceService(
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change rows on a supplier invoice in status "${invoice.status}"`);
       }
-      return repo.addRow(invoiceId, await resolveRow(input));
+      return repo.addRow(invoiceId, await resolveRow(input, await repo.vatCodeBook()));
     },
 
     async updateRow(invoiceId: string, rowId: string, input: UpdateSupplierInvoiceRowInput) {
@@ -440,8 +515,9 @@ export function createSupplierInvoiceService(
         unitPrice: input.unitPrice ?? Number(existing.unitPrice),
         vatRate:
           input.vatRate !== undefined ? input.vatRate : existing.vatRate !== null ? Number(existing.vatRate) : null,
+        vatCodeId: input.vatCodeId !== undefined ? input.vatCodeId : existing.vatCodeId,
       };
-      const row = await repo.updateRow(invoiceId, rowId, await resolveRow(merged));
+      const row = await repo.updateRow(invoiceId, rowId, await resolveRow(merged, await repo.vatCodeBook(), existing.vatCodeId));
       if (!row) throw new SupplierInvoiceRowNotFoundError(rowId);
       return row;
     },

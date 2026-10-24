@@ -118,6 +118,9 @@ export const createCustomerSchema = z.object({
   collectiveInvoicing: z.boolean().default(false),
   // Privatperson — documents print prices including VAT.
   privatePerson: z.boolean().default(false),
+  // Omvänd betalningsskyldighet för byggtjänster (momskoder): a service row
+  // to this Swedish customer gets the momskod OB.
+  reverseChargeConstruction: z.boolean().default(false),
   // Visa tilläggspriser — default for the configured rows' price split on
   // quote/order confirmation (and what the invoice follows).
   showConfigurationPrices: z.boolean().default(false),
@@ -166,6 +169,7 @@ export const updateCustomerSchema = z
     ourSupplierNumber: z.string().max(50).nullable().optional(),
     collectiveInvoicing: z.boolean().optional(),
     privatePerson: z.boolean().optional(),
+    reverseChargeConstruction: z.boolean().optional(),
     showConfigurationPrices: z.boolean().optional(),
     palletCardCode: palletCardCodeSchema.nullable().optional(),
     website: z.string().max(255).nullable().optional(),
@@ -363,8 +367,12 @@ export const listInvoicesQuerySchema = listQuerySchema.extend({
 export type ListInvoicesQuery = z.infer<typeof listInvoicesQuerySchema>;
 
 // Row amounts (lineAmount/vatAmount) are computed in the service from
-// quantity × unitPrice and vatRate — never sent by the client. vatRate
-// omitted ⇒ inherit the article's rate (free rows default to 25).
+// quantity × unitPrice and the row's momskod — never sent by the client.
+// Momskod: vatCodeId wins; a bare vatRate (integrations from before the
+// momskoder) means that rate's domestic code (MP25/MP12/MP6/MF); neither ⇒
+// derived from the customer and the article (salesVatCode).
+// deliveryDate (Leveransdatum, ML 17 kap. 24 § p. 7): omitted ⇒ the linked
+// order row's last non-undone delivery day; null clears it.
 export const invoiceRowInputSchema = z.object({
   articleId: z.string().uuid().nullable().optional(),
   salesOrderRowId: z.string().uuid().nullable().optional(),
@@ -374,6 +382,8 @@ export const invoiceRowInputSchema = z.object({
   unitPrice: z.coerce.number(),
   discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
   vatRate: vatRateSchema.optional(),
+  vatCodeId: z.string().uuid().optional(),
+  deliveryDate: businessDateSchema.nullable().optional(),
 });
 export const createInvoiceRowSchema = invoiceRowInputSchema;
 export type CreateInvoiceRowInput = z.infer<typeof createInvoiceRowSchema>;

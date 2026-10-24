@@ -6,6 +6,7 @@ import { blankSafe } from "./coerce.js";
 import { vatRateSchema } from "./vat.js";
 import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.js";
 import { partnerDeliveryFields } from "./delivery.js";
+import { countryCodeSchema } from "./sales.js";
 
 export const purchaseOrderStatusSchema = z.enum([
   "draft",
@@ -134,6 +135,11 @@ export const createSupplierSchema = z.object({
   // Our customer number at this supplier — printed on inquiry/PO.
   ourCustomerNumber: z.string().max(50).optional(),
   currency: z.string().regex(/^[A-Z]{3}$/, "3 stora bokstäver, t.ex. SEK").default("SEK"),
+  // Momskoder: the supplier's country and its Momskod (förval) for new
+  // supplier invoices — a code with direction both/purchase; omitted/null =
+  // derived from the country (supplierDefaultVatCode).
+  country: countryCodeSchema.default("SE"),
+  defaultVatCodeId: z.string().uuid().nullable().optional(),
   active: z.boolean().default(true),
   ...supplierPaymentDetailsFields,
   ...partnerDeliveryFields,
@@ -159,6 +165,9 @@ export const updateSupplierSchema = z
     carrierCustomerNumber: z.string().max(50).nullable().optional(),
     ourCustomerNumber: z.string().max(50).nullable().optional(),
     currency: z.string().regex(/^[A-Z]{3}$/, "3 stora bokst\u00e4ver, t.ex. SEK").optional(),
+    // Not nullable — a supplier always has a country.
+    country: countryCodeSchema.optional(),
+    defaultVatCodeId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
     ...supplierPaymentDetailsFields,
     ...partnerDeliveryFields,
@@ -368,10 +377,12 @@ const supplierInvoiceRowInputSchema = z.object({
   // Signed — a credit line can be negative.
   unitPrice: z.coerce.number(),
   // Enum-locked to the Swedish set since B5 (was free 0-100) — same
-  // vatRateSchema as the sales side. Omitted/null = no rate: the row is only
-  // a posting-rule lookup key, its VAT is never posted (header is
-  // authoritative).
+  // vatRateSchema as the sales side. Informational only since the momskoder:
+  // the row's VAT is never posted (header is authoritative).
   vatRate: vatRateSchema.optional(),
+  // Momskod for this row (direction both/purchase); omitted/null = the
+  // invoice's own code.
+  vatCodeId: z.string().uuid().nullable().optional(),
 });
 export const createSupplierInvoiceRowSchema = supplierInvoiceRowInputSchema;
 export type CreateSupplierInvoiceRowInput = z.infer<typeof createSupplierInvoiceRowSchema>;
@@ -384,6 +395,8 @@ export const updateSupplierInvoiceRowSchema = z
     quantity: z.coerce.number().positive().optional(),
     unitPrice: z.coerce.number().optional(),
     vatRate: vatRateSchema.nullable().optional(),
+    // null = back to following the invoice's code.
+    vatCodeId: z.string().uuid().nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateSupplierInvoiceRowInput = z.infer<typeof updateSupplierInvoiceRowSchema>;
@@ -399,6 +412,10 @@ export const createSupplierInvoiceSchema = z.object({
   grossAmount: blankSafe(z.coerce.number()).default(0),
   note: z.string().nullable().optional(),
   paymentReference: paymentReferenceSchema.nullable().optional(),
+  // Momskod (direction both/purchase) for every row without a code of its
+  // own and the remainder; omitted = the supplier's Momskod (förval), else
+  // derived from the supplier's country.
+  vatCodeId: z.string().uuid().optional(),
   rows: z.array(supplierInvoiceRowInputSchema).default([]),
 });
 export type CreateSupplierInvoiceInput = z.infer<typeof createSupplierInvoiceSchema>;
@@ -419,6 +436,7 @@ export const updateSupplierInvoiceHeaderSchema = z
     grossAmount: blankSafe(z.coerce.number()).optional(),
     note: z.string().nullable().optional(),
     paymentReference: paymentReferenceSchema.nullable().optional(),
+    vatCodeId: z.string().uuid().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateSupplierInvoiceHeaderInput = z.infer<typeof updateSupplierInvoiceHeaderSchema>;

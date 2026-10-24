@@ -60,7 +60,7 @@
 import { el, renderXml, type XmlChild, type XmlElement } from "../../../banking/service/iso20022/xml-writer.js";
 import { unitCodeFor } from "./unit-codes.js";
 import type { UblBuyer, UblInvoiceInput, UblLine, UblPostalAddress, UblSeller } from "./ubl-types.js";
-import { vatCategoryFor, type VatCategory } from "./vat-categories.js";
+import { compareVatCategories, lineVatCategory, type VatCategory } from "./vat-categories.js";
 
 export const UBL_CUSTOMIZATION_ID = "urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0";
 export const UBL_PROFILE_ID = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0";
@@ -109,20 +109,23 @@ export interface UblTotals {
   lineTotalCents: number; // BT-106 = BT-109
   taxTotalCents: number; // BT-110
   grossCents: number; // BT-112 = BT-115
-  subtotals: UblTaxSubtotal[]; // one per rate, 25 → 12 → 6 → 0
+  subtotals: UblTaxSubtotal[]; // one per category and rate, 25 → 12 → 6 → 0, S → E → AE
 }
 
+// Momskoder: one subtotal per VAT category and rate (the line's code decides
+// the category — lineVatCategory), so a momsfri row (E) and an omvänd
+// betalningsskyldighet row (AE) at 0 % are two subtotals.
 export function computeTotals(lines: readonly UblLine[]): UblTotals {
-  const byRate = new Map<number, { taxableCents: number; taxCents: number }>();
+  const byCategory = new Map<string, UblTaxSubtotal>();
   for (const line of lines) {
-    const bucket = byRate.get(line.vatRate) ?? { taxableCents: 0, taxCents: 0 };
+    const category = lineVatCategory(line);
+    const key = `${category.id}:${category.percent}`;
+    const bucket = byCategory.get(key) ?? { category, taxableCents: 0, taxCents: 0 };
     bucket.taxableCents += toCents(line.lineAmount);
     bucket.taxCents += toCents(line.vatAmount);
-    byRate.set(line.vatRate, bucket);
+    byCategory.set(key, bucket);
   }
-  const subtotals = [...byRate.entries()]
-    .sort(([a], [b]) => b - a)
-    .map(([rate, sums]) => ({ category: vatCategoryFor(rate), ...sums }));
+  const subtotals = [...byCategory.values()].sort((a, b) => compareVatCategories(a.category, b.category));
   const lineTotalCents = subtotals.reduce((sum, s) => sum + s.taxableCents, 0);
   const taxTotalCents = subtotals.reduce((sum, s) => sum + s.taxCents, 0);
   return { lineTotalCents, taxTotalCents, grossCents: lineTotalCents + taxTotalCents, subtotals };
@@ -312,7 +315,7 @@ function monetaryTotal(totals: UblTotals, currency: string): XmlElement {
 
 function documentLine(line: UblLine, credit: boolean, currency: string): XmlElement {
   const pricing = linePricing(line);
-  const category = vatCategoryFor(line.vatRate);
+  const category = lineVatCategory(line);
   const unitCode = unitCodeFor(line.unitCode);
   // InvoiceLine and CreditNoteLine differ only in the quantity element's name
   // for the elements we write (CreditNoteLine puts TaxTotal before

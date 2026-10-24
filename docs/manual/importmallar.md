@@ -198,6 +198,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Adressrad 3** | Nej | Postadressens tredje rad, valfri — slås ihop med Adress. | Godsmottagningen |
 | **Postnummer** | Nej | Max 20 tecken. Tom cell lämnar fältet orört på en befintlig post. | 123 45 |
 | **Postort** | Nej | Max 100 tecken. Tom cell lämnar fältet orört på en befintlig post. | Exempelby |
+| **Land** | Nej | Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Styr leverantörsfakturans förvalda momskod när leverantören saknar egen: SE ger svensk moms, ett annat EU-land omvänd moms på varor och övriga länder varor utanför EU. Tom cell ger SE på en ny leverantör. Tom cell lämnar fältet orört på en befintlig post. | SE |
 | **Valuta** | Nej | Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya inköpsorder och nya katalograder (även de som Inköpspriser-importen skapar) får leverantörens valuta; befintliga behåller sin. Tom cell ger SEK för nya leverantörer och lämnar befintliga orörda. | SEK |
 | **Vårt kundnummer** | Nej | Det kundnummer leverantören har på oss, max 50 tecken — skrivs ut på förfrågan och inköpsorder. Tom cell lämnar fältet orört på en befintlig post. | K-1234 |
 | **Betalningsvillkor** | Nej | Betalningsvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor; börjar namnet med ett antal dagar (30 dagar netto) blir dagarna villkorets kod och styr förfallodatum på leverantörsfakturor. | 30 dagar netto |

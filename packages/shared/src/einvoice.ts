@@ -38,6 +38,9 @@ export const EINVOICE_BLOCKED_REASONS = [
   "currency",
   "missing-company-data",
   "missing-recipient-id",
+  // Momskoder: a row's code has no Peppol category in etapp 1 (only svensk
+  // moms, momsfritt and omvänd betalningsskyldighet in Sverige do).
+  "vat-code-unsupported",
 ] as const;
 export type EinvoiceBlockedReason = (typeof EINVOICE_BLOCKED_REASONS)[number];
 

@@ -3,10 +3,14 @@ import {
   DOMESTIC_VAT_CODES,
   EU_COUNTRY_CODES,
   VAT_BOXES,
+  VAT_BOX_49_LABEL,
   VAT_CODES,
   VAT_CODE_ACCOUNT_FIELDS,
   VAT_CODE_CATALOG,
+  VAT_CODE_DIRECTIONS,
+  VAT_CODE_KINDS,
   VAT_CODE_SLOTS,
+  VAT_REPORTING_PERIODS,
   VAT_SETTLED_BOXES,
   computedVatAmount,
   domesticVatCodeForRate,
@@ -21,6 +25,8 @@ import {
   vatNumberPrefix,
   vatRates,
 } from "@navet/shared";
+import * as webBoxes from "../../web/lib/vatBoxes.js";
+import * as webCodes from "../../web/lib/vatCodes.js";
 
 // Momskoder: the pure catalog and the helpers every consumer shares.
 
@@ -179,5 +185,76 @@ describe("schemas", () => {
     expect(importVatSchema.safeParse({ date: "2030-01-15", description: "Tull", rows: [] }).success).toBe(false);
     expect(importVatSchema.safeParse({ date: "2030-01-15", description: "Tull", rows: [{ vatCodeId: id, taxBase: 0 }] }).success).toBe(false);
     expect(importVatSchema.safeParse({ date: "2030-01-15", description: "", rows: [{ vatCodeId: id, taxBase: 1 }] }).success).toBe(false);
+  });
+});
+
+// The web cannot import @navet/shared, so apps/web/lib/vatCodes.ts (and the
+// box additions in vatBoxes.ts) are hand-kept copies — compared here.
+describe("momskoder — web mirror", () => {
+  it("has the same lists, catalog and EU countries as @navet/shared", () => {
+    expect([...webCodes.VAT_CODES]).toEqual([...VAT_CODES]);
+    expect([...webCodes.VAT_CODE_DIRECTIONS]).toEqual([...VAT_CODE_DIRECTIONS]);
+    expect([...webCodes.VAT_CODE_KINDS]).toEqual([...VAT_CODE_KINDS]);
+    expect([...webCodes.VAT_CODE_SLOTS]).toEqual([...VAT_CODE_SLOTS]);
+    expect([...webCodes.DOMESTIC_VAT_CODES]).toEqual([...DOMESTIC_VAT_CODES]);
+    expect([...webCodes.EU_COUNTRY_CODES]).toEqual([...EU_COUNTRY_CODES]);
+    expect(webCodes.VAT_CODE_ACCOUNT_FIELDS).toEqual(VAT_CODE_ACCOUNT_FIELDS);
+    expect(webCodes.VAT_CODE_CATALOG).toEqual(VAT_CODE_CATALOG);
+  });
+
+  it("has the same ruta additions as @navet/shared", () => {
+    expect([...webBoxes.VAT_BOXES]).toEqual([...VAT_BOXES]);
+    expect(webBoxes.VAT_BOX_49_LABEL).toBe(VAT_BOX_49_LABEL);
+    expect([...webBoxes.VAT_SETTLED_BOXES]).toEqual([...VAT_SETTLED_BOXES]);
+    expect([...webBoxes.VAT_REPORTING_PERIODS]).toEqual([...VAT_REPORTING_PERIODS]);
+  });
+
+  it("has a Swedish label for every slot, kind and direction", () => {
+    for (const slot of VAT_CODE_SLOTS) expect(webCodes.VAT_CODE_SLOT_LABELS[slot]).toMatch(/\S/);
+    for (const slot of VAT_CODE_SLOTS) expect(webCodes.VAT_CODE_SLOT_SHORT_LABELS[slot]).toMatch(/\S/);
+    for (const kind of VAT_CODE_KINDS) expect(webCodes.VAT_CODE_KIND_LABELS[kind]).toMatch(/\S/);
+    for (const direction of VAT_CODE_DIRECTIONS) expect(webCodes.VAT_CODE_DIRECTION_LABELS[direction]).toMatch(/\S/);
+    for (const period of VAT_REPORTING_PERIODS) expect(webBoxes.VAT_REPORTING_PERIOD_LABELS[period]).toMatch(/\S/);
+  });
+
+  it("answers the helpers like @navet/shared", () => {
+    for (const code of VAT_CODES) {
+      expect(webCodes.vatCodeEntry(code)).toEqual(vatCodeEntry(code));
+      expect(webCodes.isDomesticVatCode(code)).toBe(isDomesticVatCode(code));
+      expect(webCodes.vatCodeTakesCatchAllRule(code)).toBe(vatCodeTakesCatchAllRule(code));
+      for (const document of ["sales", "purchase", "import"] as const) {
+        expect(webCodes.vatCodeAllowedOn(code, document)).toBe(vatCodeAllowedOn(code, document));
+      }
+      for (const slot of VAT_CODE_SLOTS) {
+        expect(webCodes.vatCodeUsesSlot(code, slot)).toBe(vatCodeEntry(code).slots[slot] !== undefined);
+      }
+    }
+    for (const rate of vatRates) expect(webCodes.domesticVatCodeForRate(rate)).toBe(domesticVatCodeForRate(rate));
+    for (const country of ["SE", "de", "GR", "NO", "GB", "fr"]) {
+      expect(webCodes.isEuCountry(country)).toBe(isEuCountry(country));
+      expect(webCodes.vatNumberPrefix(country)).toBe(vatNumberPrefix(country));
+    }
+    for (const [base, rate] of [
+      [1000.02, 25],
+      [-1000.02, 25],
+      [0.1, 6],
+      [600.5, 12],
+    ] as const) {
+      expect(webCodes.computedVatAmount(base, rate)).toBe(computedVatAmount(base, rate));
+    }
+  });
+
+  it("previews omvänd moms like @navet/shared", () => {
+    const input = {
+      headerCode: "IEUV25" as const,
+      netAmount: 2000,
+      rows: [
+        { code: "IOBT" as const, lineAmount: 300 },
+        { code: "IEUV12" as const, lineAmount: 600.5 },
+        { code: null, lineAmount: 100 },
+      ],
+    };
+    expect(webCodes.reverseVatPreview(input)).toEqual(reverseVatPreview(input));
+    expect(webCodes.reverseVatPreview({ headerCode: "MP25", netAmount: 1000, rows: [] })).toEqual([]);
   });
 });

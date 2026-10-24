@@ -165,7 +165,8 @@ describe("suggestSupplierMapping", () => {
       "Postadress – Postnummer": "postalCode",
       "Postadress – Stad": "city",
       "Postadress – Region": null,
-      "Postadress – Land": null, // suppliers carry no country column
+      // Momskoder: the supplier's country steers its derived Momskod (förval).
+      "Postadress – Land": "country",
     });
   });
 
@@ -385,6 +386,27 @@ describe("planSupplierImport — currency, e-mail policy and series basis", () =
     expect(plan.creates).toEqual([{ supplierNumber: "702", name: "Lev Tre" }]);
   });
 
+  it("reads Land (momskoder): uppercased two-letter code, rejected otherwise, omitted when empty", async () => {
+    expect(suggestSupplierMapping(["Leverantör", "Postadress – Land"])["Postadress – Land"]).toBe("country");
+    expect(suggestSupplierMapping(["Leverantörsnummer", "Land"])["Land"]).toBe("country");
+    const plan = await planSupplierImport(
+      {
+        mapping: { Leverantörsnummer: "supplierNumber", Namn: "name", Land: "country" },
+        rows: [
+          ["710", "Lev DE", "de"],
+          ["711", "Lev Fel", "Tyskland"],
+          ["712", "Lev Tom", ""],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.creates).toEqual([
+      { supplierNumber: "710", name: "Lev DE", country: "DE" },
+      { supplierNumber: "712", name: "Lev Tom" },
+    ]);
+    expect(plan.rows[1]!.errors).toEqual(["Land måste vara en landskod med två bokstäver (t.ex. SE)"]);
+  });
+
   it("drops an invalid e-mail with a warning instead of blocking the row", async () => {
     const plan = await planSupplierImport(
       {
@@ -583,6 +605,23 @@ describe("supplier import — repository", () => {
     expect(row!.name).toBe("Nytt Namn");
     expect(row!.phone).toBe("070-111 11 11"); // never mapped — untouched
     expect(row!.currency).toBe("EUR"); // mapped but empty cell — untouched
+  });
+
+  it("writes Land on create (SE when empty) and on update", async () => {
+    await db.insert(suppliers).values({ supplierNumber: "44", name: "Lev", country: "SE" });
+    const plan = await planSupplierImport(
+      {
+        mapping: { Leverantörsnummer: "supplierNumber", Namn: "name", Land: "country" },
+        rows: [
+          ["44", "Lev", "fi"],
+          ["45", "Ny Lev", ""],
+        ],
+      },
+      repo
+    );
+    await repo.executeSupplierPlan(plan);
+    const rows = await db.select({ number: suppliers.supplierNumber, country: suppliers.country }).from(suppliers);
+    expect(Object.fromEntries(rows.map((r) => [r.number, r.country]))).toEqual({ "44": "FI", "45": "SE" });
   });
 
   it("overwrites currency on update when the cell has a value", async () => {

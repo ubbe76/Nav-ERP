@@ -77,6 +77,7 @@ import {
   PURCHASE_ORDER_CSV_COLUMNS,
   SUPPLIER_CSV_COLUMNS,
 } from "../service/export-columns.js";
+import { InvalidVatCodeError } from "../../economy/service/document-vat-code.js";
 
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
@@ -113,6 +114,8 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       // was dead code.
       if (err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
       if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send(errorBody(err));
+      // Momskoder: Momskod (förval) unknown, inactive or not a purchase code.
+      if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
       throw err;
     }
   });
@@ -126,6 +129,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicateSupplierNumberError) return reply.code(409).send(errorBody(err));
       if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send(errorBody(err));
+      if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
       throw err;
     }
   });

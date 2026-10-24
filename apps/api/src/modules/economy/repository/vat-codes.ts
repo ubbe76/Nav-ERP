@@ -2,6 +2,7 @@ import { asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { vatCodes, type Db, type Tx } from "@navet/db";
 import type { DomesticVatCode } from "@navet/shared";
 import type { PostingVatCode } from "../service/verification-poster.js";
+import { vatCodeBook, type VatCodeBook } from "../service/document-vat-code.js";
 
 // Momskoder data access shared across modules (Db|Tx leaf, the same seam as
 // readPostingSettings): the invoice issue and the supplier invoice approval
@@ -30,6 +31,14 @@ export async function loadPostingVatCodes(executor: Db | Tx, ids: string[]): Pro
 
 export async function listVatCodeRows(executor: Db | Tx) {
   return executor.select().from(vatCodes).orderBy(asc(vatCodes.code));
+}
+
+// Every code of the company as the documents need it (document-vat-code.ts).
+export async function loadVatCodeBook(executor: Db | Tx): Promise<VatCodeBook> {
+  const rows = await executor
+    .select({ id: vatCodes.id, code: vatCodes.code, name: vatCodes.name, invoiceText: vatCodes.invoiceText, active: vatCodes.active })
+    .from(vatCodes);
+  return vatCodeBook(rows);
 }
 
 export async function findVatCodeRow(executor: Db | Tx, id: string) {

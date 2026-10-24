@@ -40,7 +40,19 @@ import type { RegisterReferenceReader } from "../../register/service/register.se
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
-import { roundUpToMultiple, toBasePrice, toBaseQuantity, toUnitPrice, toUnitQuantity } from "@navet/shared";
+import {
+  customerVatTreatment,
+  roundUpToMultiple,
+  salesRowIsGoods,
+  salesVatCode,
+  toBasePrice,
+  toBaseQuantity,
+  toUnitPrice,
+  toUnitQuantity,
+  VAT_CODE_CATALOG,
+  vatCodeEntry,
+  type VatCode,
+} from "@navet/shared";
 import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
 import {
   addDays,
@@ -146,6 +158,14 @@ export type RowConfigurationReader = {
 
 // Tests that predate 4b build the service without the configurator; a
 // configured row then fails loudly instead of silently storing nothing.
+// Momskoder: which article is the freight article (shipping settings) — the
+// quote/order confirmation counts it as goods when deriving a row's momskod.
+// Same consumer-declared reader as the invoice module's InvoiceFreightReader;
+// omitted ⇒ no freight article.
+export interface SalesFreightReader {
+  freightArticleId(): Promise<string | null>;
+}
+
 const ROW_CONFIGURATION_NOT_WIRED: RowConfigurationReader = {
   evaluate: async () => {
     throw new Error("RowConfigurationReader not wired");
@@ -397,7 +417,9 @@ export function createSalesService(
   // Frakt: see ShipmentReader above.
   shipments?: ShipmentReader,
   // Konfigurator 4b: see RowConfigurationReader above.
-  rowConfiguration: RowConfigurationReader = ROW_CONFIGURATION_NOT_WIRED
+  rowConfiguration: RowConfigurationReader = ROW_CONFIGURATION_NOT_WIRED,
+  // Momskoder: see SalesFreightReader above.
+  freight: SalesFreightReader = { freightArticleId: async () => null }
 ) {
   // Per-row revision line for document printing — null when the system
   // setting "show_revisions_on_documents" is off.
@@ -550,12 +572,29 @@ export function createSalesService(
     variant: "quote" | "confirmation",
     showConfigurationPrices: boolean
   ) {
-    const [customer, rows, { showOrderRevisionOnDocuments }] = await Promise.all([
+    const [customer, rows, { showOrderRevisionOnDocuments }, vatCodeTexts, freightArticleId] = await Promise.all([
       repo.findCustomerById(order.customerId),
       repo.listRowsByOrder(order.id),
       settings.getSettings(),
+      repo.vatCodeInvoiceTexts(),
+      freight.freightArticleId(),
     ]);
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
+    // Momskoder (spec 4.5): each row's VAT follows the momskod the invoice
+    // row will get (salesVatCode) — an EU customer sees 0 % already on the
+    // quote — and the codes' invoice texts are printed like on the invoice.
+    const rowCodes = rows.map((r) =>
+      salesVatCode({
+        customer: customer!,
+        isGoods: salesRowIsGoods({ articleId: r.articleId, articleType: r.articleType, freightArticleId }),
+        articleRate: Number(r.articleVatRate),
+      })
+    );
+    const usedCodes = new Set<VatCode>(rowCodes);
+    const vatTexts = VAT_CODE_CATALOG.flatMap((entry) => {
+      const text = usedCodes.has(entry.code) ? vatCodeTexts.get(entry.code)?.trim() : undefined;
+      return text ? [text] : [];
+    });
     // Offerter (0138): the quote prints its OF- number even after the order
     // took a KO- one; the confirmation prints the order's number and, when
     // it came from an OF- numbered quote, "Vår offert:" as the reference.
@@ -572,15 +611,16 @@ export function createSalesService(
       // Sales has no multi-currency support (v1 skips complex currency flows).
       currency: "SEK",
       // Printed in the row's unit (the values are stored in the base unit).
-      rows: rows.map((r) => ({
+      rows: rows.map((r, i) => ({
         articleNumber: r.articleNumber,
         articleName: r.articleName,
         quantity: String(toUnitQuantity(Number(r.quantityOrdered), r.unitFactor)),
         unit: r.unitCode,
         unitPrice: String(toUnitPrice(Number(r.unitPrice), r.unitFactor)),
         discountPercent: r.discountPercent,
-        // Only used when pricesIncludeVat (privatperson) grosses up the cells.
-        vatRate: Number(r.articleVatRate),
+        // The row's momskod rate — only used when pricesIncludeVat
+        // (privatperson) grosses up the cells.
+        vatRate: vatCodeEntry(rowCodes[i]!).rate,
         revisionInfo: formatRevisionInfo(revisions?.get(r.articleId)),
         articleInfo: formatArticleAttributes({
           surfaceTreatment: r.articleSurfaceTreatment,
@@ -590,6 +630,7 @@ export function createSalesService(
         deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
       })),
       showTotal: true,
+      vatTexts,
       deliveryDate: order.expectedDeliveryDate,
       // Giltig t.o.m. is printed on the quote only — the confirmation is
       // the order, the validity has played out.
@@ -738,7 +779,8 @@ export function createSalesService(
     async createCustomer(input: CreateCustomerInput) {
       await validateRegisterRefs(input);
       try {
-        return await repo.createCustomer(input);
+        const created = await repo.createCustomer(input);
+        return { ...created, vatTreatment: customerVatTreatment(created) };
       } catch (err) {
         // customers' only unique constraint is customer_number, so a 23505
         // here can mean nothing else.
@@ -757,11 +799,14 @@ export function createSalesService(
         throw err;
       }
       if (!row) throw new CustomerNotFoundError(id);
-      return row;
+      return { ...row, vatTreatment: customerVatTreatment(row) };
     },
 
+    // Momskoder: vatTreatment is the customer card's Momsbehandling — the
+    // same rules as the rows' derived momskod (customerVatTreatment).
     async getCustomer(id: string) {
-      return repo.findCustomerById(id);
+      const customer = await repo.findCustomerById(id);
+      return customer ? { ...customer, vatTreatment: customerVatTreatment(customer) } : null;
     },
 
     // Fasta leveransdagar: the earliest Förväntat leveransdatum (the day the

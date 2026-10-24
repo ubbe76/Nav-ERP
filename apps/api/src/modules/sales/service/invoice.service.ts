@@ -10,11 +10,33 @@ import type {
   UpdateInvoiceHeaderInput,
   UpdateInvoiceRowInput,
 } from "@navet/shared";
-import { DEFAULT_VAT_RATE, round2, toUnitPrice, toUnitQuantity, type OrderRowConfiguration } from "@navet/shared";
+import {
+  buyerVatNumberProblem,
+  DEFAULT_VAT_RATE,
+  domesticVatCodeForRate,
+  isVatCode,
+  isVatRate,
+  round2,
+  salesRowIsGoods,
+  salesVatCode,
+  toUnitPrice,
+  toUnitQuantity,
+  VAT_CODE_CATALOG,
+  vatCodeEntry,
+  type OrderRowConfiguration,
+  type SalesVatCustomer,
+} from "@navet/shared";
 import { rowConfigurationLines } from "../../configurator/service/configuration-lines.js";
 import type { InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
 import type { DocumentPdfInput, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
 import { ZeroAmountPostingError, type PostingVatCode } from "../../economy/service/verification-poster.js";
+import {
+  documentVatCode,
+  InvalidVatCodeError,
+  vatCodeRef,
+  type DocumentVatCodeRow,
+  type VatCodeBook,
+} from "../../economy/service/document-vat-code.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { CustomerNotFoundError, InvalidStatusTransitionError } from "./sales.service.js";
 // G1: append-only audit trail — optional with a no-op default (see
@@ -279,10 +301,38 @@ type RowInput = {
   unitPrice: number;
   discountPercent?: number;
   vatRate?: number | null;
+  // Momskod: an explicit choice wins over vatRate (a bare rate = its
+  // domestic code), which wins over the derivation (salesVatCode).
+  vatCodeId?: string | null;
+  // Leveransdatum: set (also null) ⇒ used verbatim; undefined ⇒ the linked
+  // order row's last non-undone delivery day.
+  deliveryDate?: string | null;
+  // A credit note's copy of its source row: the code is kept even when it
+  // has been deactivated since. Never client input.
+  copiedFromSource?: boolean;
   // Konfigurator 4b: the row's configuration copy. Set ⇒ used verbatim (a
   // credit note copies its source row's); undefined ⇒ the linked order
   // row's. Never client input — the route schemas have no such field.
   configuration?: OrderRowConfiguration | null;
+};
+
+// What every row of one create/addRow/PATCH needs to know once: the
+// customer's VAT facts, the company's momskoder and the freight article
+// (goods for the derivation).
+type RowContext = {
+  customerId: string;
+  customer: SalesVatCustomer;
+  book: VatCodeBook;
+  freightArticleId: string | null;
+};
+
+// The row's own state, when this is a PATCH.
+type ExistingRowState = {
+  salesOrderRowId: string | null;
+  quantity: number;
+  shipmentId?: string | null;
+  vatCodeId?: string;
+  deliveryDate?: string | null;
 };
 
 export function createInvoiceService(
@@ -341,6 +391,14 @@ export function createInvoiceService(
     // to change, and a reprint should carry the current one.
     const customer = await repo.findCustomerById(invoice.customerId);
 
+    // Momskoder (spec 4.3): the invoice texts of the codes on the invoice,
+    // once each, in catalog order — the company's own text per code.
+    const textByCode = new Map(rows.map((r) => [r.vatCode.code, r.vatCode.invoiceText] as const));
+    const vatTexts = VAT_CODE_CATALOG.flatMap((entry) => {
+      const text = textByCode.get(entry.code)?.trim();
+      return text ? [text] : [];
+    });
+
     const content = await pdf.render({
       title: isCredit ? "Kreditfaktura" : "Faktura",
       documentNumber: invoice.invoiceNumber!,
@@ -368,6 +426,9 @@ export function createInvoiceService(
         unitPrice: String(toUnitPrice(Number(r.unitPrice), r.unitFactor) * sign),
         discountPercent: r.discountPercent,
         vatRate: Number(r.vatRate),
+        // Momskoder: the VAT summary groups per code (two 0 % codes are two
+        // lines with their own names).
+        vatCode: { code: r.vatCode.code, name: r.vatCode.name },
         // Stored amounts (invoice_rows.lineAmount/vatAmount) are the PDF's
         // monetary authority — the same round2:ed figures the B2 ledger
         // posting and the API list/card already sum, so all three agree on
@@ -383,6 +444,9 @@ export function createInvoiceService(
         orderReference: r.salesOrderRowId
           ? `Order ${r.salesOrderNumber}${r.customerOrderNumber ? ` · Ert ordernr ${r.customerOrderNumber}` : ""}`
           : null,
+        // Leveransdatum (ML 17 kap. 24 § p. 7): printed next to the order
+        // reference only when it differs from the invoice date.
+        deliveredDate: r.deliveryDate && r.deliveryDate !== invoice.invoiceDate ? r.deliveryDate : null,
         // Konfigurator 4b: the row's own configuration copy, with the price
         // additions per the customer's Visa tilläggspriser as it is when the
         // PDF is built — i.e. at issue, since the PDF is archived right then
@@ -391,6 +455,9 @@ export function createInvoiceService(
       })),
       showTotal: true,
       vat: { perRow: true },
+      vatTexts,
+      // Köparens momsregistreringsnummer — the issue snapshot.
+      buyerVatNumber: invoice.vatNumber,
       // Snapshot: what the customer was at issue, not what they are now.
       pricesIncludeVat: invoice.privatePerson,
       dueDate,
@@ -471,15 +538,57 @@ export function createInvoiceService(
     return { filename: `Betalningspåminnelse-${invoice.invoiceNumber}.pdf`, content };
   }
 
+  async function rowContext(customerId: string): Promise<RowContext> {
+    const [customer, book, freightArticleId] = await Promise.all([
+      repo.findCustomerById(customerId),
+      repo.vatCodeBook(),
+      freight.freightArticleId(),
+    ]);
+    if (!customer) throw new CustomerNotFoundError(customerId);
+    return { customerId, customer, book, freightArticleId };
+  }
+
+  // The derived momskod of a row (spec 4.1): the customer's facts, goods or
+  // service, and the article's own rate — a free row is goods at 25 %.
+  async function derivedVatCode(ctx: RowContext, articleId: string | null): Promise<DocumentVatCodeRow> {
+    const article = articleId ? await repo.findArticleForVat(articleId) : null;
+    const code = salesVatCode({
+      customer: ctx.customer,
+      isGoods: salesRowIsGoods({ articleId, articleType: article?.type ?? null, freightArticleId: ctx.freightArticleId }),
+      articleRate: article?.vatRate ?? DEFAULT_VAT_RATE,
+    });
+    return documentVatCode(ctx.book, { code }, "sales");
+  }
+
+  // The row's momskod: explicit id → a bare rate's domestic code → the code
+  // the row already carries (PATCH) → the derivation.
+  async function resolveVatCode(
+    ctx: RowContext,
+    input: RowInput,
+    articleId: string | null,
+    existingRow?: ExistingRowState
+  ): Promise<DocumentVatCodeRow> {
+    if (input.vatCodeId) {
+      const kept = input.copiedFromSource === true || existingRow?.vatCodeId === input.vatCodeId;
+      return documentVatCode(ctx.book, { id: input.vatCodeId }, "sales", { allowInactive: kept });
+    }
+    if (input.vatRate !== undefined && input.vatRate !== null) {
+      if (!isVatRate(input.vatRate)) throw new InvalidVatCodeError("unknown", `rate ${input.vatRate}`, "sales");
+      return documentVatCode(ctx.book, { code: domesticVatCodeForRate(input.vatRate) }, "sales");
+    }
+    if (existingRow?.vatCodeId) return documentVatCode(ctx.book, { id: existingRow.vatCodeId }, "sales", { allowInactive: true });
+    return derivedVatCode(ctx, articleId);
+  }
+
   // Validates the optional delfakturering link and computes the unit
-  // snapshot, VAT rate, and line/vat amounts.
+  // snapshot, momskod, leveransdatum and line/vat amounts.
   async function resolveRow(
-    invoiceCustomerId: string,
+    ctx: RowContext,
     input: RowInput,
     // The row's own current state, when this is a PATCH — used to exclude
     // its own already-invoiced quantity from the over-invoicing/over-credit
-    // guard below.
-    existingRow?: { salesOrderRowId: string | null; quantity: number; shipmentId?: string | null },
+    // guard below, and to keep its momskod/leveransdatum.
+    existingRow?: ExistingRowState,
     // Running per-salesOrderRowId tally of rows already resolved earlier in
     // THIS SAME create()/createCredit() batch (not yet persisted, so
     // getInvoicedQuantities can't see them) — without this, two rows in one
@@ -495,6 +604,7 @@ export function createInvoiceService(
     // against the over-credit guard (net invoiced may not go below 0).
     type: InvoiceType = "invoice"
   ): Promise<InvoiceRowWrite> {
+    const invoiceCustomerId = ctx.customerId;
     const articleId = input.articleId ?? null;
     const salesOrderRowId = input.salesOrderRowId ?? null;
 
@@ -553,13 +663,17 @@ export function createInvoiceService(
       if (input.configuration === undefined) configuration = (orderRow.configuration as OrderRowConfiguration | null) ?? null;
     }
 
-    // vatRate: explicit input wins, else the article's own default, else the
-    // standard rate.
-    let vatRate = input.vatRate ?? null;
-    if (vatRate === null) {
-      vatRate = articleId !== null ? await repo.findArticleVatRate(articleId) : null;
-      vatRate ??= DEFAULT_VAT_RATE;
-    }
+    // Momskod (spec 4.2): the VAT is computed on the code's rate, and
+    // vat_rate keeps that rate as the row's snapshot.
+    const vatCode = await resolveVatCode(ctx, input, articleId, existingRow);
+    const vatRate = vatCodeEntry(vatCode.code).rate;
+
+    // Leveransdatum (spec 4.4): explicit wins; a PATCH that keeps the order
+    // link keeps the row's date; otherwise the order row's last delivery.
+    let deliveryDate: string | null;
+    if (input.deliveryDate !== undefined) deliveryDate = input.deliveryDate;
+    else if (existingRow && existingRow.salesOrderRowId === salesOrderRowId) deliveryDate = existingRow.deliveryDate ?? null;
+    else deliveryDate = salesOrderRowId ? await repo.latestDeliveryDate(salesOrderRowId) : null;
 
     // discountPercent is baked into lineAmount with a single rounding — same
     // rule as the order row's own discount (sales.service.ts) — rather than
@@ -608,8 +722,10 @@ export function createInvoiceService(
       unitId,
       unitFactor,
       vatRate,
+      vatCodeId: vatCode.id,
       lineAmount,
       vatAmount,
+      deliveryDate,
       configuration,
     };
   }
@@ -662,6 +778,12 @@ export function createInvoiceService(
     // to a credit the same way it already links back to the source invoice
     // (creditedInvoiceId). Empty for a credit note itself (nothing credits a
     // credit note in this model).
+    //
+    // Momskoder: each row carries vatCode { id, code, name, rate,
+    // invoiceText }. buyerVatNumber is the köparens momsregistreringsnummer
+    // the invoice shows — the customer's current one on a draft, the issue
+    // snapshot afterwards — and vatNumberProblem (drafts only) is what
+    // Utfärda would refuse, so the card can warn ahead of it.
     async getInvoice(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
@@ -672,7 +794,29 @@ export function createInvoiceService(
         repo.listRemindersForInvoice(id),
         repo.listCreditedBy(id),
       ]);
-      return { ...header, rows, openAmount, payments, reminders, creditedBy };
+      let buyerVatNumber = header.vatNumber;
+      let vatNumberProblem: ReturnType<typeof buyerVatNumberProblem> = null;
+      if (header.status === "draft") {
+        const customer = await repo.findCustomerById(header.customerId);
+        buyerVatNumber = customer?.vatNumber ?? null;
+        if (customer) {
+          vatNumberProblem = buyerVatNumberProblem({
+            codes: rows.flatMap((row) => (isVatCode(row.vatCode.code) ? [row.vatCode.code] : [])),
+            vatNumber: customer.vatNumber,
+            country: customer.country,
+          });
+        }
+      }
+      return {
+        ...header,
+        buyerVatNumber,
+        vatNumberProblem,
+        rows: rows.map((row) => ({ ...row, vatCode: { ...vatCodeRef(row.vatCode), invoiceText: row.vatCode.invoiceText } })),
+        openAmount,
+        payments,
+        reminders,
+        creditedBy,
+      };
     },
 
     // opts.collective is the routine's back door past the samlingsfaktura
@@ -692,10 +836,11 @@ export function createInvoiceService(
       // salesOrderRowId within this one call are checked cumulatively
       // against the over-invoicing guard, not each against the same stale
       // pre-insert "already invoiced" read.
+      const ctx = await rowContext(input.customerId);
       const batchAccumulated = new Map<string, number>();
       const rows: InvoiceRowWrite[] = [];
       for (const r of input.rows) {
-        const resolved = await resolveRow(input.customerId, r, undefined, batchAccumulated);
+        const resolved = await resolveRow(ctx, r, undefined, batchAccumulated);
         rows.push(resolved);
         if (resolved.salesOrderRowId) {
           batchAccumulated.set(
@@ -736,11 +881,24 @@ export function createInvoiceService(
 
       // input.rows, when provided (even an empty array), overrides the
       // prefill entirely — undefined means "mirror every row on the source".
+      // Momskoder: a credit row mirrors its source row's momskod and
+      // leveransdatum (spec 4.2) — the prefill copies them, and an override
+      // row linked to an order row that the source billed takes them from
+      // that source row unless it says otherwise.
+      const sourceRows = await repo.listRows(invoiceId);
       let rowInputs: RowInput[];
       if (input.rows !== undefined) {
-        rowInputs = input.rows;
+        rowInputs = input.rows.map((r) => {
+          const source = r.salesOrderRowId ? sourceRows.find((row) => row.salesOrderRowId === r.salesOrderRowId) : undefined;
+          if (!source) return r;
+          const explicitCode = r.vatCodeId !== undefined || (r.vatRate !== undefined && r.vatRate !== null);
+          return {
+            ...r,
+            ...(explicitCode ? {} : { vatCodeId: source.vatCodeId, copiedFromSource: true }),
+            ...(r.deliveryDate !== undefined ? {} : { deliveryDate: source.deliveryDate }),
+          };
+        });
       } else {
-        const sourceRows = await repo.listRows(invoiceId);
         rowInputs = sourceRows.map((r) => ({
           articleId: r.articleId,
           salesOrderRowId: r.salesOrderRowId,
@@ -748,7 +906,9 @@ export function createInvoiceService(
           quantity: Number(r.quantity),
           unitPrice: Number(r.unitPrice),
           discountPercent: Number(r.discountPercent),
-          vatRate: Number(r.vatRate),
+          vatCodeId: r.vatCodeId,
+          deliveryDate: r.deliveryDate,
+          copiedFromSource: true,
           // The credit copies the SOURCE row's configuration, not the order
           // row's (identical in practice — an invoiced row cannot be
           // reconfigured — but the credit mirrors the invoice it credits).
@@ -761,10 +921,11 @@ export function createInvoiceService(
       // against the same salesOrderRowId must accumulate their combined
       // negative effect on net invoiced, not each be checked against the
       // same stale pre-insert read.
+      const ctx = await rowContext(source.customerId);
       const batchAccumulated = new Map<string, number>();
       const rows: InvoiceRowWrite[] = [];
       for (const r of rowInputs) {
-        const resolved = await resolveRow(source.customerId, r, undefined, batchAccumulated, "credit");
+        const resolved = await resolveRow(ctx, r, undefined, batchAccumulated, "credit");
         rows.push(resolved);
         if (resolved.salesOrderRowId) {
           batchAccumulated.set(
@@ -832,7 +993,7 @@ export function createInvoiceService(
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change rows on an invoice in status "${invoice.status}"`);
       }
-      const resolved = await resolveRow(invoice.customerId, input, undefined, undefined, invoice.type);
+      const resolved = await resolveRow(await rowContext(invoice.customerId), input, undefined, undefined, invoice.type);
       let row;
       try {
         row = await repo.addRow(invoiceId, resolved);
@@ -879,15 +1040,26 @@ export function createInvoiceService(
         quantity: input.quantity ?? Number(existing.quantity),
         unitPrice: input.unitPrice ?? Number(existing.unitPrice),
         discountPercent: input.discountPercent !== undefined ? input.discountPercent : Number(existing.discountPercent),
-        vatRate: input.vatRate !== undefined ? input.vatRate : Number(existing.vatRate),
+        // Momskod: only an explicit vatCodeId or vatRate changes it — the
+        // row otherwise keeps its own code (resolveRow's existingRow).
+        vatRate: input.vatRate,
+        vatCodeId: input.vatCodeId,
+        // undefined keeps the row's date while the order link is unchanged.
+        deliveryDate: input.deliveryDate,
       };
       const row = await repo.updateRow(
         invoiceId,
         rowId,
         await resolveRow(
-          invoice.customerId,
+          await rowContext(invoice.customerId),
           merged,
-          { salesOrderRowId: existing.salesOrderRowId, quantity: Number(existing.quantity), shipmentId: existing.shipmentId },
+          {
+            salesOrderRowId: existing.salesOrderRowId,
+            quantity: Number(existing.quantity),
+            shipmentId: existing.shipmentId,
+            vatCodeId: existing.vatCodeId,
+            deliveryDate: existing.deliveryDate,
+          },
           undefined,
           invoice.type
         )
@@ -946,29 +1118,49 @@ export function createInvoiceService(
     },
 
     // Draft candidates for the "create from delivered order(s)" prefill.
+    // Momskoder: each row carries the code it would get (vatCodeId +
+    // vatCode), the same derivation create() runs when the row is sent
+    // without a code.
     async listInvoiceableOrders(customerId: string) {
-      if (!(await repo.findCustomerById(customerId))) throw new CustomerNotFoundError(customerId);
-      return repo.listInvoiceableOrders(customerId);
+      const ctx = await rowContext(customerId);
+      const orders = await repo.listInvoiceableOrders(customerId);
+      return orders.map((order) => ({
+        ...order,
+        rows: order.rows.map((r) => {
+          const code = salesVatCode({
+            customer: ctx.customer,
+            isGoods: salesRowIsGoods({ articleId: r.articleId, articleType: r.articleType, freightArticleId: ctx.freightArticleId }),
+            articleRate: Number(r.vatRate),
+          });
+          const vatCode = ctx.book.byCode.get(code);
+          return { ...r, vatCodeId: vatCode?.id ?? null, vatCode: vatCode ? vatCodeRef(vatCode) : null };
+        }),
+      }));
     },
 
     // Frakt etapp 2: the customer's booked, unbilled shipments for the
     // dialog's Frakt group — each with the freight article (and its VAT
     // rate) the row will carry and the default row text.
     async listInvoiceableShipments(customerId: string) {
-      if (!(await repo.findCustomerById(customerId))) throw new CustomerNotFoundError(customerId);
-      const freightArticleId = await freight.freightArticleId();
+      const ctx = await rowContext(customerId);
+      const freightArticleId = ctx.freightArticleId;
       if (!freightArticleId) return [];
       const [article, vatRate, rows] = await Promise.all([
         articleReader.getArticle(freightArticleId),
         repo.findArticleVatRate(freightArticleId),
         repo.listInvoiceableShipments(customerId, freightArticleId),
       ]);
+      // Momskoder: freight follows the goods (salesRowIsGoods).
+      const code = salesVatCode({ customer: ctx.customer, isGoods: true, articleRate: vatRate ?? DEFAULT_VAT_RATE });
+      const vatCode = ctx.book.byCode.get(code);
       return rows.map((r) => ({
         ...r,
         articleId: freightArticleId,
         articleNumber: article?.articleNumber ?? "",
         articleName: article?.name ?? "",
         vatRate: String(vatRate ?? DEFAULT_VAT_RATE),
+        vatCodeId: vatCode?.id ?? null,
+        vatCode: vatCode ? vatCodeRef(vatCode) : null,
         description: freightRowDescription(r),
       }));
     },
@@ -1107,7 +1299,12 @@ export function createInvoiceService(
       // propagates out of the repository untouched and is mapped to 409 by
       // the routes — the whole transition rolls back with it, FA number
       // included.
-      const result = await repo.issueInvoice(id, stamp, invoice.type, userId, poster);
+      // Momskoder: the rows' codes are checked against the number being
+      // stamped and the customer's own country inside the transaction.
+      const result = await repo.issueInvoice(id, stamp, invoice.type, userId, poster, {
+        vatNumber: customer.vatNumber,
+        country: customer.country,
+      });
       // ok:false covers two distinct rejections from inside the transaction:
       // "race" is the same lost-the-race report every other conditional repo
       // update in this service gives (a concurrent call already moved this

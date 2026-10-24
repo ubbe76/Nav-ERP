@@ -183,6 +183,22 @@ export function noPaymentAccountInvoice(): UblInvoiceInput {
   });
 }
 
+// Momskoder: omvänd betalningsskyldighet in Sverige (OB ⇒ AE, BT-120 = the
+// code's text) next to svensk moms (MP25 ⇒ S) and a momsfri row (MF ⇒ E) —
+// AE and E are two 0 % subtotals. The buyer's VAT number is on the document
+// (BR-AE-02).
+export function invoiceReverseCharge(): UblInvoiceInput {
+  return base({
+    invoiceNumber: "FA-1009",
+    attachment: { filename: "Faktura-FA-1009.pdf", description: "Faktura (PDF)", mimeCode: "application/pdf", content: FAKE_PDF },
+    lines: [
+      line({ lineNumber: 1, description: "Montage av storköksbänk", unitCode: "tim", quantity: 8, unitPrice: 750, lineAmount: 6000, vatAmount: 0, vatRate: 0, vatCode: "OB", vatExemptionText: "Omvänd betalningsskyldighet" }),
+      line({ lineNumber: 2, description: "Bänkskiva 1200×600", articleNumber: "2001", quantity: 1, unitPrice: 2100, lineAmount: 2100, vatAmount: 525, vatRate: 25, vatCode: "MP25" }),
+      line({ lineNumber: 3, description: "Försäkringspremie transport", quantity: 1, unitPrice: 180, lineAmount: 180, vatAmount: 0, vatRate: 0, vatCode: "MF", vatExemptionText: "Momsfri omsättning" }),
+    ],
+  });
+}
+
 export const GOLDEN_CASES: { name: string; input: () => UblInvoiceInput }[] = [
   { name: "invoice-two-rates-discount", input: invoiceTwoRatesDiscount },
   { name: "invoice-exempt-row", input: invoiceExemptRow },
@@ -192,4 +208,5 @@ export const GOLDEN_CASES: { name: string; input: () => UblInvoiceInput }[] = [
   { name: "invoice-plusgiro-gln", input: plusgiroInvoice },
   { name: "invoice-iban", input: ibanInvoice },
   { name: "invoice-no-payment-account", input: noPaymentAccountInvoice },
+  { name: "invoice-reverse-charge", input: invoiceReverseCharge },
 ];

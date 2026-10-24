@@ -429,7 +429,10 @@ export function buildApp(database: Db = db) {
     // Frakt: the order card's delivery list and the följesedel PDF show the
     // live shipment of each delivery.
     shippingService,
-    rowConfigurationReader
+    rowConfigurationReader,
+    // Momskoder: the quote/order confirmation counts the freight article as
+    // goods when deriving a row's momskod.
+    { freightArticleId: async () => (await freightSettingsService.read()).freightArticleId }
   );
   // Frakt på offert: prices for an order and its freight row — built after
   // salesService, which owns the row rules (setFreightRow).

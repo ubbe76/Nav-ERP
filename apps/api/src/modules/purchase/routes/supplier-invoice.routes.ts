@@ -40,6 +40,7 @@ import {
   VatCodeNotApplicableError,
   ZeroAmountPostingError,
 } from "../../economy/service/verification-poster.js";
+import { InvalidVatCodeError } from "../../economy/service/document-vat-code.js";
 
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
@@ -48,6 +49,9 @@ export async function supplierInvoiceRoutes(app: FastifyInstance, opts: { servic
 
   // Shared error mapper for the supplier-invoice routes.
   function invoiceError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
+    // Momskoder: the chosen code (header, row or the supplier's förval) is
+    // unknown, inactive or not a purchase code.
+    if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
     if (
       err instanceof SupplierInvoiceNotFoundError ||
       err instanceof SupplierInvoiceRowNotFoundError ||

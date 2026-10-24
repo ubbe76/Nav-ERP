@@ -93,6 +93,13 @@ export interface UblLine {
   // Stored invoice_rows.vat_amount and the row's rate (25, 12, 6 or 0).
   vatAmount: number;
   vatRate: number;
+  // The row's momskod (catalog code) — decides the VAT category: MP25/MP12/
+  // MP6 ⇒ S, MF ⇒ E, OB ⇒ AE; anything else is refused by ubl-check.
+  // Omitted/null ⇒ the rate alone decides (25/12/6 ⇒ S, 0 ⇒ E).
+  vatCode?: string | null;
+  // The code's invoice text — BT-120 on the AE subtotal (omvänd
+  // betalningsskyldighet); ignored for S and E.
+  vatExemptionText?: string | null;
   // The order row this line settles: OrderLineReference/LineID. Nav has no
   // order line numbers, so the service passes "<orderNumber>:<n>"-style text
   // or null for a free row — the builder only prints what it is given.

@@ -60,6 +60,7 @@ import { pluginEvents } from "../../system/service/plugin-events.js";
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
+import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 
 function round4(value: number): number {
   return Math.round(value * 10000) / 10000;
@@ -189,6 +190,12 @@ export function createPurchaseRepository(db: Db) {
         if (row) await pluginEvents.emit(tx, { type: "supplier.updated", entityId: row.id, entityNumber: row.supplierNumber });
         return row ?? null;
       });
+    },
+
+    // Momskoder: the company's codes — the supplier's Momskod (förval) is
+    // validated against them and its derived default resolved from them.
+    async vatCodeBook() {
+      return loadVatCodeBook(db);
     },
 
     async findSupplierById(id: string) {

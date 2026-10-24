@@ -30,6 +30,8 @@ export const BLOCKED_MESSAGES: Record<EinvoiceBlockedReason, string> = {
   "missing-company-data":
     "Företagets organisationsnummer och momsregistreringsnummer måste vara ifyllda under System → Företagsuppgifter",
   "missing-recipient-id": "Kunden saknar Peppol-id och organisationsnummer — fyll i ett av dem på kundkortet",
+  "vat-code-unsupported":
+    "E-faktura kan bara skickas för rader med svensk moms, momsfri försäljning eller omvänd betalningsskyldighet i Sverige i den här versionen",
 };
 
 export class EinvoiceNotAllowedError extends Error {

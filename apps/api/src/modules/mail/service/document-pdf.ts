@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
-import { minutesPerUnitToUnitsPerHour } from "@navet/shared";
+import { minutesPerUnitToUnitsPerHour, VAT_CODES } from "@navet/shared";
 import { CODE128_QUIET_ZONE, code128TotalModules, encodeCode128 } from "./code128.js";
 import type { SystemService } from "../../system/service/system.service.js";
 
@@ -27,6 +27,10 @@ export interface DocumentPdfRow {
   // (DocumentPdfInput.vat = { perRow: true }) — ignored by every other
   // document type and by the single-rate vat: { rate } branch.
   vatRate?: number | null;
+  // Invoice-only: the row's momskod — the perRow VAT summary groups per code
+  // (rate + code), so two 0 % codes print as two lines with their own names.
+  // Omitted = grouped by rate alone, as before the momskoder.
+  vatCode?: { code: string; name: string } | null;
   // Invoice-only: the row's STORED net/VAT amounts (invoice_rows.lineAmount/
   // vatAmount — already round2:ed per row, the same figures the ledger
   // posting and the API list/card sum). When present these are the
@@ -51,6 +55,10 @@ export interface DocumentPdfRow {
   // settles, as an 8pt sub-line ("Order KO2500123 · Ert ordernr 4711") — a
   // samlingsfaktura mixes orders, so this is per row, not a header field.
   orderReference?: string | null;
+  // Invoice-only: Leveransdatum (ML 17 kap. 24 § p. 7) — printed as
+  // "Levererad <date>" next to the order reference. The callsite sets it only
+  // when it differs from the invoice date.
+  deliveredDate?: string | null;
   // Lego: one-off ställpris — printed as its own sub-line and added ONCE to
   // the row amount (qty × unitPrice + setupPrice) and the total.
   setupPrice?: string | null;
@@ -185,6 +193,13 @@ export interface DocumentPdfInput {
   // reprints); { perRow: true } groups DocumentPdfRow.vatRate into one
   // "Moms (X %)" line per distinct rate (the customer invoice module).
   vat?: { rate: number } | { perRow: true } | null;
+  // Momskoder: the invoice texts of the codes on the document ("Unionsintern
+  // leverans …", "Omvänd betalningsskyldighet") — printed once each under the
+  // totals, in the order given (the catalog's). Sales documents only.
+  vatTexts?: string[];
+  // Köparens momsregistreringsnummer — "Ert momsreg.nr:" under the date
+  // (invoice: the issue snapshot).
+  buyerVatNumber?: string | null;
   // Invoice-only: a framed payment box (OCR-nummer, Bankgiro/Plusgiro from
   // the already-loaded company info, Förfallodatum) drawn above the footer
   // once the VAT/total block is done. Omitted (null/undefined) draws no box.
@@ -797,8 +812,15 @@ function discountFactor(raw: string | null | undefined): number {
 // factor there (an invoice row always has lineAmount, so this branch is
 // currently only exercised by non-invoice callers, but it stays consistent
 // with the row table regardless).
-export function computePerRowVatGroups(rows: DocumentPdfRow[]): { rate: number; net: number; vatAmount: number }[] {
-  const groups = new Map<number, { net: number; vatAmount: number }>();
+//
+// Momskoder: rows carrying a vatCode group per code (rate + code) — sorted
+// highest rate first, then in catalog order — and each group knows the
+// code's name, so the summary can print a 0 % EU sale and a momsfri row as
+// two lines. Rows without a vatCode group by rate alone (code null).
+export type PerRowVatGroup = { rate: number; code: string | null; name: string | null; net: number; vatAmount: number };
+
+export function computePerRowVatGroups(rows: DocumentPdfRow[]): PerRowVatGroup[] {
+  const groups = new Map<string, PerRowVatGroup>();
   for (const row of rows) {
     if (row.unitPrice === null) continue;
     const rate = row.vatRate ?? 0;
@@ -807,14 +829,26 @@ export function computePerRowVatGroups(rows: DocumentPdfRow[]): { rate: number; 
         ? Number(row.lineAmount)
         : Number(row.quantity) * Number(row.unitPrice) * (1 - discountFactor(row.discountPercent));
     const vatAmount = row.vatAmount != null ? Number(row.vatAmount) : net * (rate / 100);
-    const group = groups.get(rate) ?? { net: 0, vatAmount: 0 };
+    const code = row.vatCode?.code ?? null;
+    const key = `${rate}|${code ?? ""}`;
+    const group = groups.get(key) ?? { rate, code, name: row.vatCode?.name ?? null, net: 0, vatAmount: 0 };
     group.net += net;
     group.vatAmount += vatAmount;
-    groups.set(rate, group);
+    groups.set(key, group);
   }
-  return [...groups.entries()]
-    .map(([rate, group]) => ({ rate, net: group.net, vatAmount: group.vatAmount }))
-    .sort((a, b) => b.rate - a.rate);
+  const catalogIndex = (code: string | null) => (code === null ? -1 : (VAT_CODES as readonly string[]).indexOf(code));
+  return [...groups.values()].sort((a, b) => b.rate - a.rate || catalogIndex(a.code) - catalogIndex(b.code));
+}
+
+// A summary group prints a line when it has VAT, or when it is a 0 % CODE
+// (its name tells the reader why there is no VAT); a bare 0 % rate group
+// (no code — documents from before the momskoder) prints none, as before.
+function vatGroupPrints(group: PerRowVatGroup): boolean {
+  return group.rate !== 0 || group.code !== null;
+}
+
+function vatGroupLabel(group: PerRowVatGroup): string {
+  return group.rate !== 0 ? `Moms (${group.rate} %)` : (group.name ?? "Moms (0 %)");
 }
 
 export function createDocumentPdfService(system: Pick<SystemService, "getCompanyInfo" | "getLogo">) {
@@ -1014,6 +1048,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(`Kundnr: ${input.partnerNumber}`, left, y);
       y += 14;
     }
+    if (input.buyerVatNumber && input.buyerVatNumber.trim() !== "") {
+      doc.text(`Ert momsreg.nr: ${input.buyerVatNumber.trim()}`, left, y);
+      y += 14;
+    }
     if (input.customerOrderNumber) {
       doc.text(`Ert ordernummer: ${input.customerOrderNumber}`, left, y);
       y += 14;
@@ -1140,13 +1178,25 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         row.articleInfo ?? null,
         ...(row.configurationLines ?? []),
         row.moReference ?? null,
-        row.orderReference ?? null,
+        // The order reference and the invoice row's Leveransdatum share one
+        // sub-line ("Order KO… · Ert ordernr … · Levererad 2026-10-01").
+        [row.orderReference ?? null, row.deliveredDate ? `Levererad ${row.deliveredDate}` : null]
+          .filter((part): part is string => part !== null)
+          .join(" · ") || null,
         row.setupPrice != null ? `Ställpris: ${formatNumber(Number(row.setupPrice))} ${input.currency}` : null,
         row.netWeightKg != null ? `Nettovikt: ${formatNumber(row.netWeightKg, 1)} kg` : null,
         row.requestedDeliveryDate ? `Önskat leveransdatum: ${row.requestedDeliveryDate}` : null,
         row.deliveryDate ? `Leveransdatum: ${row.deliveryDate}` : null,
       ].filter((line): line is string => line !== null);
-      const infoHeight = infoLines.length * 11;
+      // An info line that wraps in the name column (a long order reference
+      // with its Levererad date) takes 11pt per printed line, not one slot.
+      doc.fontSize(8);
+      const singleInfoLine = doc.heightOfString("X", { width: COLS.articleName.w });
+      const infoLineCounts = infoLines.map((line) =>
+        Math.max(1, Math.round(doc.heightOfString(line, { width: COLS.articleName.w }) / singleInfoLine))
+      );
+      doc.fontSize(9);
+      const infoHeight = infoLineCounts.reduce((sum, count) => sum + count, 0) * 11;
       const rowHeight = Math.max(nameHeight + infoHeight, 11) + 6;
       if (y + rowHeight > TABLE_BOTTOM) {
         doc.addPage();
@@ -1199,10 +1249,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       if (infoLines.length > 0) {
         doc.fontSize(8).fillColor("#666666");
         let infoY = y + nameHeight + 1;
-        for (const line of infoLines) {
-          doc.text(line, left + COLS.articleName.x, infoY, { width: COLS.articleName.w });
-          infoY += 11;
-        }
+        infoLines.forEach((line, i) => {
+          doc.text(line, left + COLS.articleName.x, infoY, { width: COLS.articleName.w, lineGap: 11 - singleInfoLine });
+          infoY += infoLineCounts[i]! * 11;
+        });
         doc.fontSize(9).fillColor("#000000");
       }
       y += rowHeight;
@@ -1223,9 +1273,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     // three 15pt lines. perRow reserves one 15pt row per distinct non-zero
     // rate instead (Summa + N Moms lines + Att betala), so 2+ rates don't
     // overflow the reserved space into the footer zone.
-    const vatBlockHeight = perRowVatGroups
-      ? (2 + perRowVatGroups.filter((g) => g.rate !== 0).length) * 15
-      : 45;
+    const vatBlockHeight = perRowVatGroups ? (2 + perRowVatGroups.filter(vatGroupPrints).length) * 15 : 45;
 
     // Break to a fresh page rather than colliding with the footer when the
     // table ends near the bottom.
@@ -1278,8 +1326,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       let vatTotal = 0;
       for (const group of perRowVatGroups) {
         vatTotal += group.vatAmount;
-        if (group.rate === 0) continue;
-        doc.text(`Moms (${group.rate} %)`, labelX, y, { width: labelW, align: "right" });
+        if (!vatGroupPrints(group)) continue;
+        doc.text(vatGroupLabel(group), labelX, y, { width: labelW, align: "right" });
         doc.text(formatNumber(group.vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
         y += 15;
       }
@@ -1291,6 +1339,24 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const label = hasUnpricedRows ? `Summa (exkl. rader utan pris) ${input.currency}` : `Summa ${input.currency}`;
       doc.text(label, left + COLS.quantity.x - 60, y, { width: COLS.unitPrice.x - COLS.quantity.x + 110, align: "right" });
       doc.text(formatNumber(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+    }
+
+    // Momskoder (spec 4.3): the codes' invoice texts, once each, under the
+    // totals (ML 17 kap. 24 §: why no Swedish VAT is charged).
+    const vatTexts = (input.vatTexts ?? []).filter((text) => text.trim() !== "");
+    if (vatTexts.length > 0) {
+      y += input.showTotal ? 24 : 10;
+      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      for (const text of vatTexts) {
+        const height = doc.heightOfString(text, { width: CONTENT_WIDTH });
+        if (y + height > TABLE_BOTTOM) {
+          doc.addPage();
+          y = PAGE_MARGIN;
+        }
+        doc.text(text, left, y, { width: CONTENT_WIDTH });
+        y += height + 3;
+      }
+      doc.fillColor("#000000");
     }
 
     // Payment box (OCR/giro/förfallodatum), shared with the payment reminder.

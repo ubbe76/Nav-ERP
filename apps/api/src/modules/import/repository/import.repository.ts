@@ -256,6 +256,7 @@ const SUPPLIER_PASSTHROUGH_FIELDS = [
   "address",
   "postalCode",
   "city",
+  "country",
   "currency",
   "ourCustomerNumber",
   "carrierCustomerNumber",

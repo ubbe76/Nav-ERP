@@ -38,7 +38,8 @@ import {
   SalesOrderRowMismatchError,
   ShipmentAlreadyInvoicedError,
 } from "../service/invoice.service.js";
-import { ShipmentNotBillableError } from "../service/sales.errors.js";
+import { ShipmentNotBillableError, VatNumberRequiredError } from "../service/sales.errors.js";
+import { InvalidVatCodeError } from "../../economy/service/document-vat-code.js";
 import { CustomerNotFoundError, InvalidStatusTransitionError } from "../service/sales.service.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -53,6 +54,11 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
   // Shared error mapper for the invoice routes — same shape as
   // supplierInvoiceRoutes' invoiceError.
   function invoiceError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
+    // Momskoder: a row's chosen code is unknown, inactive or not a sales
+    // code (400), and Utfärda's momsregistreringsnummer rule (409) — both
+    // carry `reason` for the card.
+    if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
+    if (err instanceof VatNumberRequiredError) return reply.code(409).send({ ...errorBody(err), reason: err.reason });
     if (
       err instanceof InvoiceNotFoundError ||
       err instanceof ArchivedReminderNotFoundError ||

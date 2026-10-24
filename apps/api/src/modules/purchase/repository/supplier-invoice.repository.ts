@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   articles,
   fiscalYears,
@@ -13,6 +14,7 @@ import {
   supplierInvoices,
   supplierPaymentRows,
   supplierPayments,
+  vatCodes,
   verifications,
   verificationSeries,
   type Db,
@@ -20,7 +22,7 @@ import {
 } from "@navet/db";
 import { ilikePattern, type ListSupplierInvoicesQuery, type PaymentReferenceKind } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
-import { domesticVatCodeIdSql, loadPostingVatCodes } from "../../economy/repository/vat-codes.js";
+import { domesticVatCodeIdSql, loadPostingVatCodes, loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle — same seam
 // as sales' invoice.repository.ts and its CustomerInvoicePoster.
@@ -100,6 +102,8 @@ export type SupplierInvoiceRowWrite = {
   lineAmount: number;
   vatAmount: number;
   vatRate: number | null;
+  // Momskod for this row; null = the invoice's own code.
+  vatCodeId: string | null;
 };
 
 export type SupplierInvoiceHeaderWrite = {
@@ -135,10 +139,20 @@ type HeaderPatch = {
   note?: string | null;
   paymentReferenceKind?: PaymentReferenceKind | null;
   paymentReference?: string | null;
+  vatCodeId?: string;
 };
+
+// The row's own momskod, joined under its own alias (the header's code is
+// joined as vat_codes itself in findById).
+const rowVatCodes = alias(vatCodes, "row_vat_codes");
 
 export function createSupplierInvoiceRepository(db: Db) {
   return {
+    // Momskoder: the company's codes, once per operation.
+    async vatCodeBook() {
+      return loadVatCodeBook(db);
+    },
+
     async findSupplierById(id: string) {
       const [row] = await db.select().from(suppliers).where(eq(suppliers.id, id));
       return row ?? null;
@@ -211,6 +225,7 @@ export function createSupplierInvoiceRepository(db: Db) {
               lineAmount: String(r.lineAmount),
               vatAmount: String(r.vatAmount),
               vatRate: r.vatRate === null ? null : String(r.vatRate),
+              vatCodeId: r.vatCodeId,
               createdAt: new Date(now + i),
             }))
           );
@@ -286,9 +301,13 @@ export function createSupplierInvoiceRepository(db: Db) {
           supplierName: suppliers.name,
           purchaseOrderNumber: purchaseOrders.orderNumber,
           verificationDisplayNumber: verificationDisplayNumberSql,
+          // Momskoder: the header's code (NOT NULL).
+          vatCodeCode: vatCodes.code,
+          vatCodeName: vatCodes.name,
         })
         .from(supplierInvoices)
         .innerJoin(suppliers, eq(suppliers.id, supplierInvoices.supplierId))
+        .innerJoin(vatCodes, eq(vatCodes.id, supplierInvoices.vatCodeId))
         .leftJoin(purchaseOrders, eq(purchaseOrders.id, supplierInvoices.purchaseOrderId))
         .leftJoin(verifications, eq(verifications.id, supplierInvoices.verificationId))
         .leftJoin(verificationSeries, eq(verificationSeries.id, verifications.seriesId))
@@ -313,8 +332,12 @@ export function createSupplierInvoiceRepository(db: Db) {
           poQuantityOrdered: purchaseOrderRows.quantityOrdered,
           poQuantityReceived: purchaseOrderRows.quantityReceived,
           poUnitPrice: purchaseOrderRows.unitPrice,
+          // Momskoder: the row's own code (null = the invoice's).
+          vatCodeCode: rowVatCodes.code,
+          vatCodeName: rowVatCodes.name,
         })
         .from(supplierInvoiceRows)
+        .leftJoin(rowVatCodes, eq(rowVatCodes.id, supplierInvoiceRows.vatCodeId))
         .leftJoin(articles, eq(articles.id, supplierInvoiceRows.articleId))
         .leftJoin(purchaseOrderRows, eq(purchaseOrderRows.id, supplierInvoiceRows.purchaseOrderRowId))
         .leftJoin(purchaseOrders, eq(purchaseOrders.id, purchaseOrderRows.purchaseOrderId))
@@ -623,6 +646,7 @@ export function createSupplierInvoiceRepository(db: Db) {
           lineAmount: String(row.lineAmount),
           vatAmount: String(row.vatAmount),
           vatRate: row.vatRate === null ? null : String(row.vatRate),
+          vatCodeId: row.vatCodeId,
         })
         .returning();
       return inserted!;
@@ -649,6 +673,7 @@ export function createSupplierInvoiceRepository(db: Db) {
           lineAmount: String(row.lineAmount),
           vatAmount: String(row.vatAmount),
           vatRate: row.vatRate === null ? null : String(row.vatRate),
+          vatCodeId: row.vatCodeId,
         })
         .where(and(eq(supplierInvoiceRows.id, rowId), eq(supplierInvoiceRows.supplierInvoiceId, invoiceId)))
         .returning();

@@ -66,6 +66,7 @@ import { PriceListInUseError, RowHasManufacturingOrdersError } from "../service/
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { getInvoicedQuantitiesWith } from "./invoice.repository.js";
+import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 
 // users joined a second time for "who marked the quote lost" (the order's
 // created_by is not the same person).
@@ -367,6 +368,13 @@ export function createSalesRepository(db: Db) {
         .leftJoin(freightProducts, eq(freightProducts.id, customers.defaultFreightProductId))
         .where(eq(customers.id, id));
       return row ?? null;
+    },
+
+    // Momskoder: the company's invoice text per code, for the quote/order
+    // confirmation (renderSalesOrderPdf).
+    async vatCodeInvoiceTexts() {
+      const book = await loadVatCodeBook(db);
+      return new Map([...book.byCode.values()].map((row) => [row.code, row.invoiceText] as const));
     },
 
     async freightProductExists(id: string) {

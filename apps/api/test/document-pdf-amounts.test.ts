@@ -74,7 +74,7 @@ describe("computePerRowVatGroups", () => {
 
     const groups = computePerRowVatGroups(rows);
 
-    expect(groups).toEqual([{ rate: 25, net: 200, vatAmount: 50 }]);
+    expect(groups).toEqual([{ rate: 25, code: null, name: null, net: 200, vatAmount: 50 }]);
   });
 
   it("mixes stored and fallback rows within the same rate group", () => {
@@ -85,7 +85,7 @@ describe("computePerRowVatGroups", () => {
 
     const groups = computePerRowVatGroups(rows);
 
-    expect(groups).toEqual([{ rate: 25, net: 20, vatAmount: 5 }]);
+    expect(groups).toEqual([{ rate: 25, code: null, name: null, net: 20, vatAmount: 5 }]);
   });
 });
 
