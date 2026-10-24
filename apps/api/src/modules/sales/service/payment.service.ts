@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import { customerPayments, type Tx } from "@navet/db";
 import type { CreatePaymentInput, ListOpenInvoicesQuery, ListPaymentsQuery } from "@navet/shared";
-import { round2 } from "@navet/shared";
+import { receiptExchangeDifference, round2, SEK } from "@navet/shared";
 import { validateOcrNumber } from "../../system/service/ocr.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import {
   PaymentGuardError,
+  type CustomerPaymentSekReason,
+  type PaymentGuardDetail,
   type PaymentGuardReason,
   type PaymentRepository,
   type PaymentRowInput,
@@ -36,8 +38,15 @@ export interface CustomerPaymentPoster {
       // that identity IS the balance condition of the verification.
       bankAmount: number;
       customerName: string;
+      // Valuta: the payment's currency, the SEK the bank account got and the
+      // bank's fee in SEK.
+      currency: string;
+      bankAmountSek: number;
+      bankFeeSek: number;
     },
-    rows: { appliedAmount: number; writeOffAmount: number }[],
+    // appliedAmountSek/writeOffAmountSek: the SEK each part releases from the
+    // invoice's booked receivable (frigjort SEK).
+    rows: { appliedAmount: number; writeOffAmount: number; appliedAmountSek: number; writeOffAmountSek: number }[],
     userId: string
   ): Promise<{ verificationId: string; displayNumber: string } | null>;
 
@@ -119,6 +128,40 @@ export class VerificationAlreadyReversedError extends Error {
   }
 }
 
+// Valuta: one payment never mixes currencies (and a bank entry's payment is in
+// the entry's currency). 400 payment-mixed-currencies — the same class name,
+// and so the same code, as the supplier side's.
+export class PaymentMixedCurrenciesError extends Error {
+  constructor(public currencies: string[]) {
+    super(`En betalning kan inte reglera fakturor i flera valutor (${currencies.join(", ")})`);
+    this.name = "PaymentMixedCurrenciesError";
+  }
+}
+
+// Valuta: the SEK amount/fee does not fit the payment. 400
+// customer-payment-amount-sek with `reason`:
+//   required  — a payment in another currency needs Belopp i SEK,
+//   sign      — the SEK amount is zero or points the other way,
+//   fee       — the fee exceeds the SEK amount,
+//   kvittning — a kvittning (amount 0) moves no SEK and has no fee,
+//   sek       — a SEK payment's SEK amount is the amount itself, without fee.
+export class CustomerPaymentAmountSekError extends Error {
+  constructor(
+    public reason: CustomerPaymentSekReason,
+    public currency: string
+  ) {
+    const text: Record<CustomerPaymentSekReason, string> = {
+      required: `En betalning i ${currency} behöver beloppet i SEK som kom in på kontot`,
+      sign: "Beloppet i SEK måste vara skilt från 0 och ha samma tecken som betalningens belopp",
+      fee: "Bankavgiften kan inte vara större än beloppet i SEK",
+      kvittning: "En kvittning flyttar inga pengar — den har varken belopp i SEK eller bankavgift",
+      sek: "En betalning i SEK har beloppet självt i SEK och ingen egen bankavgift",
+    };
+    super(text[reason]);
+    this.name = "CustomerPaymentAmountSekError";
+  }
+}
+
 // The checks that can be settled from the input alone — shared by create()
 // and createInTx(). Every state-dependent one (status, customer, open amount,
 // tolerance) belongs to the repository's transaction, after the invoices are
@@ -158,10 +201,7 @@ function normalizedRows(input: CreatePaymentInput): PaymentRowInput[] {
 
 // What each repository guard reason becomes — the same domain error whether
 // it came back as a create() result or was thrown inside the caller's tx.
-function guardError(
-  reason: PaymentGuardReason,
-  detail: { invoiceId: string; invoiceNumber: string | null; open?: number; applied?: number }
-): Error {
+function guardError(reason: PaymentGuardReason, detail: PaymentGuardDetail): Error {
   const reference = detail.invoiceNumber ?? detail.invoiceId;
   switch (reason) {
     case "invoice_not_found":
@@ -178,6 +218,10 @@ function guardError(
       );
     case "exceeds_open":
       return new PaymentExceedsOpenAmountError(detail.invoiceNumber, detail.open!, detail.applied!);
+    case "mixed_currencies":
+      return new PaymentMixedCurrenciesError(detail.currencies ?? []);
+    case "amount_sek":
+      return new CustomerPaymentAmountSekError(detail.sekReason ?? "required", detail.currency ?? "");
   }
 }
 
@@ -187,6 +231,9 @@ function headerWrite(input: CreatePaymentInput) {
     paymentDate: input.paymentDate,
     bankAccountNumber: input.bankAccountNumber,
     amount: round2(input.amount),
+    currency: input.currency ?? null,
+    amountSek: input.amountSek === undefined ? null : round2(input.amountSek),
+    bankFeeSek: input.bankFeeSek === undefined ? null : round2(input.bankFeeSek),
     note: input.note ?? null,
   };
 }
@@ -216,11 +263,18 @@ export function createPaymentService(
       return repo.list(query);
     },
 
+    // Valuta: exchangeRateDifferenceSek is the payment's kursdifferens —
+    // positive = kursvinst, negative = kursförlust (0 for SEK).
     async getPayment(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
       const rows = await repo.listRows(id);
-      return { ...header, rows };
+      const difference = receiptExchangeDifference({
+        amountSek: Number(header.amountSek),
+        bankFeeSek: Number(header.bankFeeSek),
+        appliedAmountsSek: rows.map((row) => Number(row.appliedAmountSek)),
+      });
+      return { ...header, exchangeRateDifferenceSek: difference === 0 ? 0 : -difference, rows };
     },
 
     // Registers one received payment against one customer's open items. The
@@ -237,7 +291,11 @@ export function createPaymentService(
         entityType: "customer_payment",
         entityId: payment.paymentNumber,
         action: "created",
-        detail: { amount: payment.amount, bankAccountNumber: payment.bankAccountNumber },
+        detail: {
+          amount: payment.amount,
+          bankAccountNumber: payment.bankAccountNumber,
+          ...(payment.currency === SEK ? {} : { currency: payment.currency, amountSek: payment.amountSek, bankFeeSek: payment.bankFeeSek }),
+        },
         userId: createdBy,
       });
       return payment;

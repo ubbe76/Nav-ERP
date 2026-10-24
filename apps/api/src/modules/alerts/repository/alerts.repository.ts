@@ -70,7 +70,9 @@ export interface OverdueInvoiceRow {
   invoiceNumber: string | null;
   customerName: string | null;
   dueDate: string;
+  // In the invoice's own currency (Valuta) — the alert names it.
   openAmount: number;
+  currency: string;
 }
 
 export interface OpenSupplierInvoiceRow {
@@ -236,6 +238,7 @@ export function createAlertsRepository(db: Db) {
           customerName: invoices.customerName,
           dueDate: invoices.dueDate,
           openAmount: invoiceOpenAmountSql,
+          currency: invoices.currency,
         })
         .from(invoices)
         .where(

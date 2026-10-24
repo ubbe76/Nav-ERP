@@ -14,6 +14,9 @@ import {
   buyerVatNumberProblem,
   buyerVatNumberWarning,
   DEFAULT_VAT_RATE,
+  fromSek,
+  invoiceSekAmounts,
+  SEK,
   domesticVatCodeForRate,
   isVatCode,
   isVatRate,
@@ -28,7 +31,7 @@ import {
   type SalesVatCustomer,
 } from "@navet/shared";
 import { rowConfigurationLines } from "../../configurator/service/configuration-lines.js";
-import type { InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
+import type { InvoiceableShipment, InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
 import type { DocumentPdfInput, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
 import { ZeroAmountPostingError, type PostingVatCode } from "../../economy/service/verification-poster.js";
 import {
@@ -44,6 +47,8 @@ import { CustomerNotFoundError, InvalidStatusTransitionError } from "./sales.ser
 // sales.service.ts's identical comment) so the many pre-existing test call
 // sites keep compiling; app.ts wires the real one.
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
+import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 
 // Narrow slices of mail/pdf services — same cross-module pattern as
 // StockBalanceReader in sales.service.ts. No CompanyInfoReader here: the
@@ -96,7 +101,9 @@ export interface InvoiceFreightReader {
 export interface CustomerInvoicePoster {
   postCustomerInvoice(
     tx: Tx,
-    doc: { invoiceNumber: string; type: InvoiceType; invoiceDate: string; customerName: string },
+    // Valuta: the invoice's currency and the rate it is booked at (SEK per 1
+    // unit; 1 for SEK) — the poster books everything in SEK.
+    doc: { invoiceNumber: string; type: InvoiceType; invoiceDate: string; customerName: string; currency?: string; exchangeRate?: number },
     // Amounts exactly as stored on the invoice rows — always POSITIVE, also
     // for a credit note (the poster mirrors from doc.type itself) — with each
     // row's momskod as loaded in the same transaction.
@@ -250,12 +257,50 @@ export type CollectiveInvoicingResult = {
   customerId: string;
   customerNumber: string | null;
   name: string | null;
+  // Valuta: one invoice per customer and currency (null when nothing was
+  // billed or the customer could not be read).
+  currency: string | null;
   invoiceId: string | null;
   invoiceNumber: string | null;
   status: "draft" | "issued" | "skipped" | "failed";
   rowCount: number;
   error: string | null;
 };
+
+// Valuta: an order row (or a shipment's order) in another currency than the
+// invoice's — one invoice, one currency. 400 invoice-row-currency-mismatch.
+export class InvoiceRowCurrencyMismatchError extends Error {
+  constructor(
+    public rowCurrency: string,
+    public invoiceCurrency: string
+  ) {
+    super(`Raden är i ${rowCurrency} men fakturan är i ${invoiceCurrency} — en faktura har en valuta`);
+    this.name = "InvoiceRowCurrencyMismatchError";
+  }
+}
+
+// Valuta: a rate that does not fit the invoice — another rate than 1 on a
+// SEK invoice, or a rate on a credit note (which takes its source invoice's).
+// 400 invoice-exchange-rate with reason sek|credit.
+export class InvoiceExchangeRateError extends Error {
+  constructor(public reason: "sek" | "credit") {
+    super(
+      reason === "sek"
+        ? "En faktura i SEK har alltid kursen 1"
+        : "En kreditfaktura har alltid den krediterade fakturans kurs"
+    );
+    this.name = "InvoiceExchangeRateError";
+  }
+}
+
+// Valuta: the påminnelseavgift is a Swedish statutory amount in kronor — it
+// is charged on SEK invoices only. 409 reminder-fee-currency.
+export class ReminderFeeCurrencyError extends Error {
+  constructor(public currency: string) {
+    super(`Påminnelseavgift kan bara tas ut på fakturor i SEK — fakturan är i ${currency}`);
+    this.name = "ReminderFeeCurrencyError";
+  }
+}
 
 // A reminder demands money: there has to be some. Covers both "issued but
 // nothing left open" (paid off without the paid-flip, or written off) and a
@@ -325,6 +370,9 @@ type RowContext = {
   customer: SalesVatCustomer;
   book: VatCodeBook;
   freightArticleId: string | null;
+  // Valuta: the invoice's currency — a linked order row (or shipment order)
+  // must be in it.
+  currency: string;
 };
 
 // The row's own state, when this is a PATCH.
@@ -350,8 +398,45 @@ export function createInvoiceService(
   articleReader: ArticleNumberReader = { getArticle: async () => null },
   // Frakt etapp 2: optional, defaults to "no freight article" — then no
   // shipment is ever offered for billing and a shipment row is refused.
-  freight: InvoiceFreightReader = { freightArticleId: async () => null }
+  freight: InvoiceFreightReader = { freightArticleId: async () => null },
+  // Valuta: the invoice date's rate at Utfärda, and today's rate for a
+  // freight row whose shipment has no order rate to take. Optional so the
+  // fixtures that only invoice in SEK need not wire it; without it a foreign
+  // invoice needs a rate typed in (else 409 exchange-rate-unavailable).
+  rates: ExchangeRateReader | null = null
 ) {
+  // Valuta: the rate for a currency and day (SEK = 1), looked up BEFORE any
+  // transaction — it may call Riksbanken.
+  async function lookupRate(currency: string, date: string): Promise<number> {
+    if (currency === SEK) return 1;
+    if (!rates) throw new ExchangeRateUnavailableError(currency, date);
+    return (await rates.getRate(currency, date)).rate;
+  }
+
+  // Valuta: a shipment's freight row in the currency of its order — the
+  // kundpris (SEK) converted with that order's rate; a shipment without an
+  // order rate takes today's rate for `fallbackCurrency` (the invoice's /
+  // customer's). SEK is the kundpris itself.
+  async function shipmentPrice(s: InvoiceableShipment, fallbackCurrency: string): Promise<{ currency: string; unitPrice: number }> {
+    const currency = s.orderCurrency ?? fallbackCurrency;
+    const sek = Number(s.customerPrice);
+    if (currency === SEK) return { currency, unitPrice: sek };
+    const rate =
+      s.orderCurrency === currency && s.orderExchangeRate !== null
+        ? Number(s.orderExchangeRate)
+        : await lookupRate(currency, stockholmToday());
+    return { currency, unitPrice: fromSek(sek, rate) };
+  }
+
+  // Valuta: the SEK figures of an invoice at its rate — the receivable, VAT
+  // and net exactly as Utfärda books them (invoiceSekAmounts); null for a
+  // foreign draft whose rate is decided at Utfärda.
+  function sekPreview(invoice: { currency: string; exchangeRate: string | null }, rows: { lineAmount: string; vatAmount: string }[]) {
+    const rate = invoice.currency === SEK ? 1 : invoice.exchangeRate === null ? null : Number(invoice.exchangeRate);
+    if (rate === null) return null;
+    const sek = invoiceSekAmounts({ rate, rows: rows.map((r) => ({ lineAmount: Number(r.lineAmount), vatAmount: Number(r.vatAmount) })) });
+    return { grossAmount: sek.grossAmount, vatAmount: sek.vatAmount, netAmount: sek.netAmount };
+  }
   // Raw invoice row (findRawById's return shape) — the slice buildPdf needs.
   type RawInvoice = NonNullable<Awaited<ReturnType<InvoiceRepository["findRawById"]>>>;
 
@@ -414,7 +499,8 @@ export function createInvoiceService(
         city: invoice.invoiceCity,
         country: invoice.invoiceCountry,
       },
-      currency: "SEK",
+      // Valuta: the invoice's own currency.
+      currency: invoice.currency,
       // Printed in the row's own unit — quantity/unitPrice are stored in the
       // article's base unit (see resolveRow's comment), unitFactor is the
       // snapshot taken when the row was linked/created. Mirrors
@@ -529,7 +615,8 @@ export function createInvoiceService(
         city: invoice.invoiceCity,
         country: invoice.invoiceCountry,
       },
-      currency: "SEK",
+      // Valuta: the reminder is written in the invoice's currency.
+      currency: invoice.currency,
       grossAmount: context.gross,
       settledAmount: context.settled,
       feeAmount: round2(context.chargedFee + newFee),
@@ -539,14 +626,16 @@ export function createInvoiceService(
     return { filename: `Betalningspåminnelse-${invoice.invoiceNumber}.pdf`, content };
   }
 
-  async function rowContext(customerId: string): Promise<RowContext> {
+  // currency: the invoice's (undefined = the customer's — the readers that
+  // only derive momskoder).
+  async function rowContext(customerId: string, currency?: string): Promise<RowContext> {
     const [customer, book, freightArticleId] = await Promise.all([
       repo.findCustomerById(customerId),
       repo.vatCodeBook(),
       freight.freightArticleId(),
     ]);
     if (!customer) throw new CustomerNotFoundError(customerId);
-    return { customerId, customer, book, freightArticleId };
+    return { customerId, customer, book, freightArticleId, currency: currency ?? customer.currency };
   }
 
   // The derived momskod of a row (spec 4.1): the customer's facts, goods or
@@ -635,6 +724,11 @@ export function createInvoiceService(
       if (shipment.invoiced && existingRow?.shipmentId !== shipmentId) {
         throw new ShipmentAlreadyInvoicedError(shipment.shipmentNumber);
       }
+      // Valuta: the freight of an order in another currency belongs on an
+      // invoice in that currency.
+      if (shipment.orderCurrency !== null && shipment.orderCurrency !== ctx.currency) {
+        throw new InvoiceRowCurrencyMismatchError(shipment.orderCurrency, ctx.currency);
+      }
     }
 
     // Unit snapshot: a linked row copies the order row's unit/factor. A free
@@ -658,6 +752,8 @@ export function createInvoiceService(
       if (articleId === null || orderRow.articleId !== articleId) {
         throw new SalesOrderRowMismatchError("The linked sales order row is for a different article");
       }
+      // Valuta: the row's price is in its order's currency.
+      if (orderRow.currency !== ctx.currency) throw new InvoiceRowCurrencyMismatchError(orderRow.currency, ctx.currency);
       unitId = orderRow.unitId;
       unitFactor = orderRow.unitFactor !== null ? Number(orderRow.unitFactor) : null;
       quantityDelivered = Number(orderRow.quantityDelivered);
@@ -808,9 +904,10 @@ export function createInvoiceService(
     async getInvoice(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
-      const [rows, openAmount, payments, reminders, creditedBy] = await Promise.all([
+      const [rows, openAmount, openAmountSek, payments, reminders, creditedBy] = await Promise.all([
         repo.listRows(id),
         repo.getOpenAmount(id),
+        repo.getOpenAmountSek(id),
         repo.listPaymentsForInvoice(id),
         repo.listRemindersForInvoice(id),
         repo.listCreditedBy(id),
@@ -840,6 +937,12 @@ export function createInvoiceService(
         vatNumberWarning,
         rows: rows.map((row) => ({ ...row, vatCode: { ...vatCodeRef(row.vatCode), invoiceText: row.vatCode.invoiceText } })),
         openAmount,
+        // Valuta: the SEK figures at the invoice's rate (null for a foreign
+        // draft without a typed rate — decided at Utfärda), and the open
+        // amount's booked SEK value (null until issued). Positive like the
+        // rows; the sign is `type`.
+        sekAmounts: sekPreview(header, rows),
+        openAmountSek,
         payments,
         reminders,
         creditedBy,
@@ -863,7 +966,28 @@ export function createInvoiceService(
       // salesOrderRowId within this one call are checked cumulatively
       // against the over-invoicing guard, not each against the same stale
       // pre-insert "already invoiced" read.
-      const ctx = await rowContext(input.customerId);
+      // Valuta: the caller's currency, else the first linked order row's (or
+      // shipment order's), else the customer's — every linked row must then
+      // be in it (resolveRow). A rate sent here is typed in on the draft.
+      let currency = input.currency;
+      if (currency === undefined) {
+        const linked = input.rows.find((r) => r.salesOrderRowId);
+        if (linked) currency = (await repo.findSalesOrderRowForInvoicing(linked.salesOrderRowId!))?.currency;
+      }
+      if (currency === undefined) {
+        const freightRow = input.rows.find((r) => r.shipmentId);
+        if (freightRow) currency = (await repo.findShipmentForInvoicing(freightRow.shipmentId!))?.orderCurrency ?? undefined;
+      }
+      currency ??= customer.currency;
+      let exchangeRate: number | null = null;
+      if (input.exchangeRate !== undefined) {
+        if (currency === SEK) {
+          if (input.exchangeRate !== 1) throw new InvoiceExchangeRateError("sek");
+        } else {
+          exchangeRate = input.exchangeRate;
+        }
+      }
+      const ctx = await rowContext(input.customerId, currency);
       const batchAccumulated = new Map<string, number>();
       const rows: InvoiceRowWrite[] = [];
       for (const r of input.rows) {
@@ -883,6 +1007,9 @@ export function createInvoiceService(
             customerId: input.customerId,
             paymentTermId: input.paymentTermId ?? null,
             note: input.note ?? null,
+            currency,
+            exchangeRate,
+            exchangeRateManual: exchangeRate !== null,
           },
           rows,
           createdBy
@@ -948,7 +1075,10 @@ export function createInvoiceService(
       // against the same salesOrderRowId must accumulate their combined
       // negative effect on net invoiced, not each be checked against the
       // same stale pre-insert read.
-      const ctx = await rowContext(source.customerId);
+      // Valuta: the credit note is in the source invoice's currency and is
+      // booked at the source invoice's rate (Skatteverket: a kreditnota is
+      // converted with the original invoice's rate).
+      const ctx = await rowContext(source.customerId, source.currency);
       const batchAccumulated = new Map<string, number>();
       const rows: InvoiceRowWrite[] = [];
       for (const r of rowInputs) {
@@ -969,6 +1099,9 @@ export function createInvoiceService(
           note: null,
           type: "credit",
           creditedInvoiceId: invoiceId,
+          currency: source.currency,
+          exchangeRate: source.exchangeRate === null ? null : Number(source.exchangeRate),
+          exchangeRateManual: false,
         },
         rows,
         createdBy
@@ -994,9 +1127,21 @@ export function createInvoiceService(
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change an invoice in status "${invoice.status}"`);
       }
-      const patch: { paymentTermId?: string | null; note?: string | null } = {};
+      const patch: { paymentTermId?: string | null; note?: string | null; exchangeRate?: number | null; exchangeRateManual?: boolean } = {};
       if (input.paymentTermId !== undefined) patch.paymentTermId = input.paymentTermId;
       if (input.note !== undefined) patch.note = input.note;
+      // Valuta: a rate typed in on a foreign draft (null = automatic again —
+      // the invoice date's rate at Utfärda). SEK takes only 1 (a no-op); a
+      // credit note keeps its source invoice's rate.
+      if (input.exchangeRate !== undefined) {
+        if (invoice.type === "credit") throw new InvoiceExchangeRateError("credit");
+        if (invoice.currency === SEK) {
+          if (input.exchangeRate !== null && input.exchangeRate !== 1) throw new InvoiceExchangeRateError("sek");
+        } else {
+          patch.exchangeRate = input.exchangeRate;
+          patch.exchangeRateManual = input.exchangeRate !== null;
+        }
+      }
       const updated = await repo.updateHeader(id, patch);
       // null means a concurrent issue() already froze this invoice between
       // the check above and the repo's own row-locked draft guard.
@@ -1006,8 +1151,8 @@ export function createInvoiceService(
         entityId: invoice.invoiceNumber ?? invoice.id,
         action: "updated",
         detail: {
-          before: { paymentTermId: invoice.paymentTermId, note: invoice.note },
-          after: { paymentTermId: updated.paymentTermId, note: updated.note },
+          before: { paymentTermId: invoice.paymentTermId, note: invoice.note, exchangeRate: invoice.exchangeRate },
+          after: { paymentTermId: updated.paymentTermId, note: updated.note, exchangeRate: updated.exchangeRate },
         },
         userId: userId ?? null,
       });
@@ -1020,7 +1165,7 @@ export function createInvoiceService(
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change rows on an invoice in status "${invoice.status}"`);
       }
-      const resolved = await resolveRow(await rowContext(invoice.customerId), input, undefined, undefined, invoice.type);
+      const resolved = await resolveRow(await rowContext(invoice.customerId, invoice.currency), input, undefined, undefined, invoice.type);
       let row;
       try {
         row = await repo.addRow(invoiceId, resolved);
@@ -1078,7 +1223,7 @@ export function createInvoiceService(
         invoiceId,
         rowId,
         await resolveRow(
-          await rowContext(invoice.customerId),
+          await rowContext(invoice.customerId, invoice.currency),
           merged,
           {
             salesOrderRowId: existing.salesOrderRowId,
@@ -1180,16 +1325,32 @@ export function createInvoiceService(
       // Momskoder: freight follows the goods (salesRowIsGoods).
       const code = salesVatCode({ customer: ctx.customer, isGoods: true, articleRate: vatRate ?? DEFAULT_VAT_RATE });
       const vatCode = ctx.book.byCode.get(code);
-      return rows.map((r) => ({
-        ...r,
-        articleId: freightArticleId,
-        articleNumber: article?.articleNumber ?? "",
-        articleName: article?.name ?? "",
-        vatRate: String(vatRate ?? DEFAULT_VAT_RATE),
-        vatCodeId: vatCode?.id ?? null,
-        vatCode: vatCode ? vatCodeRef(vatCode) : null,
-        description: freightRowDescription(r),
-      }));
+      // Valuta: each shipment in its order's currency — customerPrice stays
+      // the kundpris in SEK, unitPrice is what the row bills in `currency`.
+      const out = [];
+      for (const r of rows) {
+        const { orderCurrency: _orderCurrency, orderExchangeRate: _orderExchangeRate, ...rest } = r;
+        let priced: { currency: string; unitPrice: number | null };
+        try {
+          priced = await shipmentPrice(r, ctx.currency);
+        } catch (err) {
+          if (!(err instanceof ExchangeRateUnavailableError)) throw err;
+          priced = { currency: r.orderCurrency ?? ctx.currency, unitPrice: null };
+        }
+        out.push({
+          ...rest,
+          currency: priced.currency,
+          unitPrice: priced.unitPrice,
+          articleId: freightArticleId,
+          articleNumber: article?.articleNumber ?? "",
+          articleName: article?.name ?? "",
+          vatRate: String(vatRate ?? DEFAULT_VAT_RATE),
+          vatCodeId: vatCode?.id ?? null,
+          vatCode: vatCode ? vatCodeRef(vatCode) : null,
+          description: freightRowDescription(r),
+        });
+      }
+      return out;
     },
 
     // Samlingsfakturering: flagged customers with something left to bill
@@ -1211,71 +1372,94 @@ export function createInvoiceService(
       // change per customer.
       const freightArticleId = await freight.freightArticleId();
       for (const customerId of input.customerIds) {
-        const result: CollectiveInvoicingResult = {
+        const base: CollectiveInvoicingResult = {
           customerId,
           customerNumber: null,
           name: null,
+          currency: null,
           invoiceId: null,
           invoiceNumber: null,
           status: "failed",
           rowCount: 0,
           error: null,
         };
+        // Valuta: one invoice per currency — the rows grouped on their
+        // order's currency (shipments on theirs, priced in it). A failure
+        // reading the customer is one result; each currency's invoice is
+        // its own result, created (and issued) in its own transactions.
+        const byCurrency = new Map<string, CreateInvoiceInput["rows"]>();
         try {
           const customer = await repo.findCustomerById(customerId);
           if (!customer) throw new CustomerNotFoundError(customerId);
-          result.customerNumber = customer.customerNumber;
-          result.name = customer.name;
+          base.customerNumber = customer.customerNumber;
+          base.name = customer.name;
           if (!customer.collectiveInvoicing) {
             throw new Error(`Customer ${customer.customerNumber} is not flagged for collective invoicing`);
           }
-          const orders = await repo.listInvoiceableOrders(customerId);
-          const rows: CreateInvoiceInput["rows"] = orders.flatMap((order) =>
-            order.rows.map((r) => ({
-              articleId: r.articleId,
-              salesOrderRowId: r.salesOrderRowId,
-              description: r.articleName,
-              // Base-unit quantity/price, exactly what resolveRow stores.
-              // vatRate is left out: resolveRow then takes the article's
-              // current rate, which is what listInvoiceableOrders reports.
-              quantity: r.rest,
-              unitPrice: Number(r.unitPrice),
-              discountPercent: Number(r.discountPercent),
-            }))
-          );
+          const add = (currency: string, row: CreateInvoiceInput["rows"][number]) => {
+            const list = byCurrency.get(currency) ?? [];
+            list.push(row);
+            byCurrency.set(currency, list);
+          };
+          for (const order of await repo.listInvoiceableOrders(customerId)) {
+            for (const r of order.rows) {
+              add(order.currency, {
+                articleId: r.articleId,
+                salesOrderRowId: r.salesOrderRowId,
+                description: r.articleName,
+                // Base-unit quantity/price, exactly what resolveRow stores.
+                // vatRate is left out: resolveRow then takes the article's
+                // current rate, which is what listInvoiceableOrders reports.
+                quantity: r.rest,
+                unitPrice: Number(r.unitPrice),
+                discountPercent: Number(r.discountPercent),
+              });
+            }
+          }
           // Frakt etapp 2: the customer's unbilled shipments AFTER the order
           // rows — one row each, customer price, the freight article. A
           // customer with only freight left is billed too.
           if (freightArticleId) {
             for (const s of await repo.listInvoiceableShipments(customerId, freightArticleId)) {
-              rows.push({
+              const priced = await shipmentPrice(s, customer.currency);
+              add(priced.currency, {
                 articleId: freightArticleId,
                 shipmentId: s.shipmentId,
                 description: freightRowDescription(s),
                 quantity: 1,
-                unitPrice: Number(s.customerPrice),
+                unitPrice: priced.unitPrice,
                 discountPercent: 0,
               });
             }
           }
-          if (rows.length === 0) {
-            result.status = "skipped";
-            results.push(result);
-            continue;
-          }
-          const invoice = await service.create({ customerId, rows }, userId, { collective: true });
-          result.invoiceId = invoice!.id;
-          result.rowCount = rows.length;
-          result.status = "draft";
-          if (input.issue) {
-            const issued = await service.issue(invoice!.id, userId);
-            result.invoiceNumber = issued!.invoiceNumber;
-            result.status = "issued";
-          }
         } catch (err) {
-          result.error = err instanceof Error ? err.message : String(err);
+          results.push({ ...base, error: err instanceof Error ? err.message : String(err) });
+          continue;
         }
-        results.push(result);
+        if (byCurrency.size === 0) {
+          results.push({ ...base, status: "skipped" });
+          continue;
+        }
+        // SEK first, then the other currencies alphabetically.
+        const currencies = [...byCurrency.keys()].sort((a, b) => (a === SEK ? -1 : b === SEK ? 1 : a.localeCompare(b)));
+        for (const currency of currencies) {
+          const rows = byCurrency.get(currency)!;
+          const result: CollectiveInvoicingResult = { ...base, currency };
+          try {
+            const invoice = await service.create({ customerId, currency, rows }, userId, { collective: true });
+            result.invoiceId = invoice!.id;
+            result.rowCount = rows.length;
+            result.status = "draft";
+            if (input.issue) {
+              const issued = await service.issue(invoice!.id, userId);
+              result.invoiceNumber = issued!.invoiceNumber;
+              result.status = "issued";
+            }
+          } catch (err) {
+            result.error = err instanceof Error ? err.message : String(err);
+          }
+          results.push(result);
+        }
       }
       return { results };
     },
@@ -1306,11 +1490,27 @@ export function createInvoiceService(
       const buyerVatNumber = await issueVatNumber(invoice, customer);
 
       const now = new Date();
+      const invoiceDate = now.toLocaleDateString("sv-SE");
+      // Valuta: the rate the invoice is booked at, decided here — before the
+      // transaction, since the lookup may call Riksbanken. SEK is 1; a rate
+      // typed on the draft wins; a credit note keeps its source invoice's
+      // rate; otherwise the invoice date's rate (ML 8 kap. 21 §), and none at
+      // all is a 409 exchange-rate-unavailable (type the rate on the draft).
+      let exchangeRate: number;
+      if (invoice.currency === SEK) exchangeRate = 1;
+      else if (invoice.exchangeRateManual && invoice.exchangeRate !== null) exchangeRate = Number(invoice.exchangeRate);
+      else if (invoice.type === "credit") {
+        const source = invoice.creditedInvoiceId ? await repo.findRawById(invoice.creditedInvoiceId) : null;
+        const sourceRate = invoice.exchangeRate ?? source?.exchangeRate ?? null;
+        exchangeRate = sourceRate !== null ? Number(sourceRate) : await lookupRate(invoice.currency, invoiceDate);
+      } else exchangeRate = await lookupRate(invoice.currency, invoiceDate);
       // Invoice address with fallback to the visiting address — same rule as
       // renderInvoicePdf in sales.service.ts.
       const useInvoiceAddress = Boolean(customer.invoiceAddress);
       const stamp: IssueStamp = {
-        invoiceDate: now.toLocaleDateString("sv-SE"),
+        exchangeRate,
+        exchangeRateManual: invoice.exchangeRateManual,
+        invoiceDate,
         dueDate: computeDueDate(now, paymentTerm?.code ?? null),
         // Fakturanamn (c/o, holding company) replaces the customer name on
         // the invoice when the customer has a separate invoice address.
@@ -1356,7 +1556,10 @@ export function createInvoiceService(
         entityType: "invoice",
         entityId: result.invoice.invoiceNumber ?? result.invoice.id,
         action: "issued",
-        detail: { type: invoice.type },
+        detail: {
+          type: invoice.type,
+          ...(invoice.currency === SEK ? {} : { currency: invoice.currency, exchangeRate, grossAmountSek: result.invoice.grossAmountSek }),
+        },
         userId,
       });
       // Archive the PDF as issued. Outside the issue transaction (rendering
@@ -1447,6 +1650,8 @@ export function createInvoiceService(
           `Cannot send a payment reminder for an invoice in status "${invoice.status}"`
         );
       }
+      // Valuta: no påminnelseavgift on an invoice in another currency.
+      if (withFee && invoice.currency !== SEK) throw new ReminderFeeCurrencyError(invoice.currency);
       const context = await reminderContext(invoice);
       if (context.open <= 0) throw new NothingToRemindError(id);
       const fee = withFee && context.chargedFee === 0 ? await repo.getReminderFee() : 0;
@@ -1487,6 +1692,9 @@ export function createInvoiceService(
           `Cannot send a payment reminder for an invoice in status "${invoice.status}"`
         );
       }
+      // Valuta: the påminnelseavgift is a SEK amount by law — refused on an
+      // invoice in another currency before anything is sent.
+      if (input.withFee && invoice.currency !== SEK) throw new ReminderFeeCurrencyError(invoice.currency);
       const context = await reminderContext(invoice);
       if (context.open <= 0) throw new NothingToRemindError(id);
       if (input.withFee && context.chargedFee > 0) throw new ReminderFeeAlreadyChargedError(id);

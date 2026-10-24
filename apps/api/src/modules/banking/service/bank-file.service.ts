@@ -64,8 +64,16 @@ export type EntryResult = { entryId: string; ok: true; paymentNumber: string } |
 export interface IncomingEntryView {
   id: string;
   position: number;
+  // The entry's own amount in the account's currency (SEK).
   amount: number;
   currency: string;
+  // Valuta: a payment instructed in another currency (InstdAmt) — matched
+  // against open items in that currency, booked with `amount` as the SEK
+  // value — the bank's exchange details and the charges included.
+  instructedAmount: number | null;
+  instructedCurrency: string | null;
+  currencyExchange: BankEntryCurrencyExchange | null;
+  chargesAmount: number | null;
   bookingDate: string;
   counterpartyName: string | null;
   remittance: BankEntryReference[];
@@ -120,6 +128,15 @@ const notSek = (currency: string) => `Posten är i ${currency} — bara SEK hant
 const ENTRY_LIVE_INDEXES = ["customer_payments_entry_live", "supplier_payments_entry_live"];
 
 const isOutgoing = (entry: { direction: "credit" | "debit"; reversal: boolean }) => entry.direction === "debit" || entry.reversal;
+
+// Valuta: what an incoming entry paid, in the payment's own currency — the
+// instructed amount when the payer instructed another currency than the
+// account's (InstdAmt in EUR on the SEK account), else the entry's own.
+function paymentOf(entry: { amount: string | number; currency: string; instructedAmount: string | number | null; instructedCurrency: string | null }) {
+  return entry.instructedCurrency !== null && entry.instructedAmount !== null
+    ? { amount: round2(Number(entry.instructedAmount)), currency: entry.instructedCurrency }
+    : { amount: round2(Number(entry.amount)), currency: entry.currency };
+}
 
 // Is the bank's amount the batch row's? A SEK row: the entry's own amount
 // (as before). A row in another currency: the instructed amount in that
@@ -286,7 +303,10 @@ export function createBankFileService(deps: BankFileServiceDeps) {
       const [byOcr, closed, byAmount, customers] = await Promise.all([
         deps.receivables.openReceivables({ ocrs }),
         deps.receivables.closedByOcrs(ocrs),
-        deps.receivables.openReceivables({ amounts: { values: open.map((r) => Number(r.entry.amount)), tolerance } }),
+        // Valuta: the payment's own amount (the instructed one when it is in
+        // another currency); the SEK tolerance is a superset in any currency
+        // — matchIncomingEntry narrows per open item.
+        deps.receivables.openReceivables({ amounts: { values: open.map((r) => paymentOf(r.entry).amount), tolerance } }),
         open.length > 0 ? deps.receivables.customersWithOpenItems() : Promise.resolve([]),
       ]);
       const namedIds = customers.filter((c) => open.some((r) => r.entry.counterpartyName && namesMatch(r.entry.counterpartyName, c.name))).map((c) => c.id);
@@ -311,6 +331,10 @@ export function createBankFileService(deps: BankFileServiceDeps) {
           position: entry.position,
           amount,
           currency: entry.currency,
+          instructedAmount: entry.instructedAmount === null ? null : Number(entry.instructedAmount),
+          instructedCurrency: entry.instructedCurrency,
+          currencyExchange: entry.currencyExchange,
+          chargesAmount: entry.chargesAmount === null ? null : Number(entry.chargesAmount),
           bookingDate: entry.bookingDate,
           counterpartyName: entry.counterpartyName,
           remittance: entry.remittance,
@@ -322,7 +346,12 @@ export function createBankFileService(deps: BankFileServiceDeps) {
         if (paymentId) return { ...base, state: "booked" as const, proposal: null };
         if (entry.ignoredAt) return { ...base, state: "ignored" as const, proposal: null };
         if (entry.currency !== "SEK") return { ...base, state: "not_sek" as const, proposal: null };
-        const proposal = matchIncomingEntry({ id: entry.id, amount, counterpartyName: entry.counterpartyName, remittance: entry.remittance }, lookup, tolerance);
+        const payment = paymentOf(entry);
+        const proposal = matchIncomingEntry(
+          { id: entry.id, amount: payment.amount, currency: payment.currency, counterpartyName: entry.counterpartyName, remittance: entry.remittance },
+          lookup,
+          tolerance
+        );
         return { ...base, state: proposal.state, proposal };
       });
     },
@@ -342,8 +371,14 @@ export function createBankFileService(deps: BankFileServiceDeps) {
           if (isOutgoing(entry)) throw new BankEntryDirectionError("Posten är en utbetalning eller retur — bokför den under Inköp → Bankfiler");
           if (entry.currency !== "SEK") throw new BankEntryDirectionError(`Posten är i ${entry.currency} — bara SEK kan bokföras`);
           if (entry.ignoredAt || (await repo.incomingBooked(tx, entry.id))) throw new BankEntryAlreadyBookedError();
+          // Valuta: the rows settle the payment's own amount — the instructed
+          // one for a payment in another currency, booked with the entry's
+          // SEK amount and the charges included in it (a bank that reports
+          // none leaves the fee inside the exchange difference).
+          const payment = paymentOf(entry);
+          const foreign = payment.currency !== entry.currency;
           const applied = round2(choice.rows.reduce((sum, r) => sum + r.appliedAmount, 0));
-          if (applied !== round2(Number(entry.amount))) throw new BankEntryAmountMismatchError(Number(entry.amount), applied);
+          if (applied !== round2(payment.amount)) throw new BankEntryAmountMismatchError(payment.amount, applied);
           const bankAccountNumber = (await readPostingSettings(tx)).postingBank;
           const done = await deps.customerPayments.createInTx(
             tx,
@@ -351,7 +386,11 @@ export function createBankFileService(deps: BankFileServiceDeps) {
               customerId: choice.customerId,
               paymentDate: entry.bookingDate,
               bankAccountNumber,
-              amount: Number(entry.amount),
+              amount: payment.amount,
+              currency: payment.currency,
+              ...(foreign
+                ? { amountSek: Number(entry.amount), bankFeeSek: entry.chargesAmount === null ? 0 : Number(entry.chargesAmount) }
+                : {}),
               note: `Bankfil ${file.filename} · ${entry.dedupeKey}`.slice(0, 500),
               rows: choice.rows,
             },

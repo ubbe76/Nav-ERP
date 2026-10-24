@@ -222,12 +222,14 @@ async function insertNewDeliveryAddress(tx: Tx, customerId: string, input: NewDe
 }
 
 // bumpRevision is a directive, not a column — stripped before the spread.
+// Valuta: the rate is numeric (a string column), resolved by the service.
 async function writeSalesOrderHeader(dbc: Db | Tx, orderId: string, input: UpdateSalesOrderHeaderInput) {
-  const { bumpRevision, newDeliveryAddress: _newDeliveryAddress, ...fields } = input;
+  const { bumpRevision, newDeliveryAddress: _newDeliveryAddress, exchangeRate, ...fields } = input;
   const [row] = await dbc
     .update(salesOrders)
     .set({
       ...fields,
+      ...(exchangeRate !== undefined ? { exchangeRate: String(exchangeRate) } : {}),
       revision: bumpRevision !== false ? sql`${salesOrders.revision} + 1` : undefined,
       updatedAt: new Date(),
     })
@@ -563,6 +565,7 @@ export function createSalesRepository(db: Db) {
             status: salesOrders.status,
             customerId: salesOrders.customerId,
             deliveryAddressId: salesOrders.deliveryAddressId,
+            currency: salesOrders.currency,
           })
           .from(salesOrders)
           .where(eq(salesOrders.id, orderId))
@@ -574,6 +577,21 @@ export function createSalesRepository(db: Db) {
         // Giltig t.o.m. is a quote's field — once confirmed the date is history.
         if (input.quoteValidUntil !== undefined && order.status !== "quote") {
           return { ok: false as const, reason: "status" as const, status: order.status };
+        }
+        // Valuta: currency and rate as a quote or a confirmed order only, and
+        // a new currency only on an order without rows — read under the
+        // order's lock (addRow does not take it, so the row count is the
+        // pre-check's twin, not a guarantee against a concurrent first row).
+        if ((input.currency !== undefined || input.exchangeRate !== undefined) && order.status !== "quote" && order.status !== "confirmed") {
+          return { ok: false as const, reason: "status" as const, status: order.status };
+        }
+        if (input.currency !== undefined && input.currency !== order.currency) {
+          const [row] = await tx
+            .select({ id: salesOrderRows.id })
+            .from(salesOrderRows)
+            .where(eq(salesOrderRows.salesOrderId, orderId))
+            .limit(1);
+          if (row) return { ok: false as const, reason: "currency_locked" as const };
         }
         const { newDeliveryAddress, ...fields } = input;
         if (newDeliveryAddress) {
@@ -602,7 +620,13 @@ export function createSalesRepository(db: Db) {
     // the caller's date; null for a direct order) — the repository writes
     // what it gets. `quoted` = created as a quote, the hit-rate population.
     async createQuote(
-      input: Omit<CreateQuoteInput, "rows" | "quoteValidUntil"> & { rows: SalesRowWrite[]; quoteValidUntil: string | null },
+      input: Omit<CreateQuoteInput, "rows" | "quoteValidUntil" | "currency" | "exchangeRate"> & {
+        rows: SalesRowWrite[];
+        quoteValidUntil: string | null;
+        // Valuta: resolved by the service (the customer's currency, today's rate).
+        currency?: string;
+        exchangeRate?: number;
+      },
       createdBy: string | null
     ) {
       return db.transaction(async (tx) => {
@@ -634,6 +658,8 @@ export function createSalesRepository(db: Db) {
             note: input.note,
             quoted: !input.confirm,
             quoteValidUntil: input.quoteValidUntil,
+            currency: input.currency ?? "SEK",
+            exchangeRate: String(input.exchangeRate ?? 1),
             createdBy,
           })
           .returning();
@@ -1569,13 +1595,22 @@ export function createSalesRepository(db: Db) {
     async createPriceList(input: CreatePriceListInput) {
       const [row] = await db
         .insert(priceLists)
-        .values({ code: input.code, name: input.name, description: input.description ?? null })
+        .values({ code: input.code, name: input.name, description: input.description ?? null, currency: input.currency ?? "SEK" })
         .returning();
       return row!;
     },
 
-    async updatePriceList(id: string, input: UpdatePriceListInput) {
-      const [row] = await db.update(priceLists).set(input).where(eq(priceLists.id, id)).returning();
+    // Valuta: requireNoRows makes the UPDATE conditional on a list without
+    // rows (a currency change) — "has_rows" when a row is there.
+    async updatePriceList(id: string, input: UpdatePriceListInput, opts: { requireNoRows?: boolean } = {}) {
+      const where = opts.requireNoRows
+        ? and(eq(priceLists.id, id), sql`not exists (select 1 from ${priceListRows} r where r.price_list_id = ${id})`)
+        : eq(priceLists.id, id);
+      const [row] = await db.update(priceLists).set(input).where(where).returning();
+      if (!row && opts.requireNoRows) {
+        const [exists] = await db.select({ id: priceLists.id }).from(priceLists).where(eq(priceLists.id, id));
+        if (exists) return "has_rows" as const;
+      }
       return row ?? null;
     },
 

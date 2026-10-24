@@ -67,7 +67,11 @@ import {
   RowConfigurationLockedError,
   RowHasManufacturingOrdersError,
   RowVariantExistsError,
+  PriceListCurrencyLockedError,
+  SalesOrderCurrencyLockedError,
+  SalesOrderExchangeRateError,
 } from "../service/sales.errors.js";
+import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
 import { ArticleGroupNotFoundError, ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
@@ -321,7 +325,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
   app.patch<{ Params: { id: string } }>("/sales-orders/:id", async (req, reply) => {
     const input = updateSalesOrderHeaderSchema.parse(req.body);
     try {
-      return await service.updateSalesOrderHeader(req.params.id, input);
+      return await service.updateSalesOrderHeader(req.params.id, input, req.user?.id ?? null);
     } catch (err) {
       if (
         err instanceof SalesOrderNotFoundError ||
@@ -331,6 +335,13 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         return reply.code(404).send(errorBody(err));
       }
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+      // Valuta: a new currency on an order with rows; no rate for the new
+      // currency today (the client asks for the rate); a rate ≠ 1 on SEK.
+      if (err instanceof SalesOrderCurrencyLockedError) return reply.code(409).send(errorBody(err));
+      if (err instanceof ExchangeRateUnavailableError) {
+        return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+      }
+      if (err instanceof SalesOrderExchangeRateError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });
@@ -754,6 +765,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
     } catch (err) {
       if (err instanceof PriceListNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicatePriceListError) return reply.code(409).send(errorBody(err));
+      // Valuta: the list has rows in its current currency.
+      if (err instanceof PriceListCurrencyLockedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

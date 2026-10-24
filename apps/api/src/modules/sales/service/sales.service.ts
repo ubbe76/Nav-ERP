@@ -54,6 +54,8 @@ import {
   VAT_CODE_CATALOG,
   vatCodeEntry,
   type VatCode,
+  fromSek,
+  SEK,
 } from "@navet/shared";
 import type { CustomerDeliveryDateQuery, CustomerDeliveryDateSuggestion } from "@navet/shared";
 import {
@@ -95,9 +97,13 @@ import {
   PriceListNotFoundError,
   PriceListRowNotFoundError,
   PriceNotFoundError,
+  PriceListCurrencyLockedError,
   RowConfigurationLockedError,
   RowVariantExistsError,
+  SalesOrderCurrencyLockedError,
+  SalesOrderExchangeRateError,
 } from "./sales.errors.js";
+import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 
 // Narrow slice of the stock service — the pick list shows where each
 // article can be picked from (same cross-module pattern as
@@ -148,7 +154,9 @@ export type RowConfigurationReader = {
   evaluate(
     templateArticleId: string,
     selection: ConfiguratorSelection,
-    opts: { customerId: string; quantity: number }
+    // Valuta: the order's currency and rate (omitted = SEK) — the evaluation's
+    // prices come back in that currency.
+    opts: { customerId: string; quantity: number; currency?: string; exchangeRate?: number }
   ): Promise<RowConfigurationEvaluation>;
   variantOf(articleId: string): Promise<{ templateArticleId: string; configKey: string } | null>;
   resolveVariant(
@@ -421,8 +429,38 @@ export function createSalesService(
   // Konfigurator 4b: see RowConfigurationReader above.
   rowConfiguration: RowConfigurationReader = ROW_CONFIGURATION_NOT_WIRED,
   // Momskoder: see SalesFreightReader above.
-  freight: SalesFreightReader = { freightArticleId: async () => null }
+  freight: SalesFreightReader = { freightArticleId: async () => null },
+  // Valuta: today's rate for a new order (or a currency change) in another
+  // currency than SEK. Optional so the fixtures that never sell in another
+  // currency need not wire it; without it such an order needs an explicit
+  // exchangeRate (else 409 exchange-rate-unavailable).
+  rates: ExchangeRateReader | null = null
 ) {
+  // Valuta: what a row on an order is priced in — the order's customer, its
+  // currency and its rate (SEK at rate 1 for a SEK order).
+  type RowPricing = { customerId: string; currency: string; exchangeRate: number };
+  function orderPricing(order: { customerId: string; currency: string; exchangeRate: string | number }): RowPricing {
+    return { customerId: order.customerId, currency: order.currency, exchangeRate: Number(order.exchangeRate) };
+  }
+  // The pricing a chain read gets: SEK orders pass no currency at all, so the
+  // chain (and every reader stub) sees exactly the call it saw before.
+  function chainCurrency(pricing: RowPricing): { currency?: string; exchangeRate?: number } {
+    return pricing.currency === SEK ? {} : { currency: pricing.currency, exchangeRate: pricing.exchangeRate };
+  }
+  // Valuta: a document's rate — SEK is always 1 (another explicit rate is a
+  // 400), an explicit rate wins, else today's rate from Riksbanken /
+  // Valutakurser. Looked up BEFORE any transaction (it may call Riksbanken);
+  // no rate ⇒ ExchangeRateUnavailableError (409, "ange kursen själv").
+  async function documentRate(currency: string, explicit: number | undefined): Promise<number> {
+    if (currency === SEK) {
+      if (explicit !== undefined && explicit !== 1) throw new SalesOrderExchangeRateError();
+      return 1;
+    }
+    if (explicit !== undefined) return explicit;
+    const today = stockholmToday();
+    if (!rates) throw new ExchangeRateUnavailableError(currency, today);
+    return (await rates.getRate(currency, today)).rate;
+  }
   // Per-row revision line for document printing — null when the system
   // setting "show_revisions_on_documents" is off.
   async function revisionInfoMap(articleIds: string[]) {
@@ -475,7 +513,8 @@ export function createSalesService(
       unitId?: string | null;
       configuration?: OrderRowConfigurationInput;
     },
-  >(customerId: string, input: T, userId?: string | null): Promise<Omit<T, "configuration"> & SalesRowWrite> {
+  >(pricing: RowPricing, input: T, userId?: string | null): Promise<Omit<T, "configuration"> & SalesRowWrite> {
+    const { customerId } = pricing;
     // Delprojekt 5: a configuration on a template in mode variants resolves
     // (fetches or creates) the variant — the same resolveVariant as Konfigurera,
     // under the template lock, BEFORE the order's own transaction — and the row
@@ -488,7 +527,7 @@ export function createSalesService(
         const { article: variant } = await rowConfiguration.resolveVariant(input.articleId, input.configuration.selection, userId ?? null);
         const { configuration: _resolved, ...rest } = input;
         // The variant is never a template, so the recursion takes the ordinary path.
-        return resolveRowInput(customerId, { ...rest, articleId: variant.id } as T, userId);
+        return resolveRowInput(pricing, { ...rest, articleId: variant.id } as T, userId);
       }
     }
     // Produktkonfigurator: a template in mode variants never goes on a new
@@ -514,7 +553,11 @@ export function createSalesService(
     let configuration: OrderRowConfiguration | null = null;
     let configurationCost: OrderRowConfigurationCost | null = null;
     if (input.configuration) {
-      const evaluated = await rowConfiguration.evaluate(input.articleId, input.configuration.selection, { customerId, quantity });
+      const evaluated = await rowConfiguration.evaluate(input.articleId, input.configuration.selection, {
+        customerId,
+        quantity,
+        ...chainCurrency(pricing),
+      });
       if (!evaluated.valid || !evaluated.configuration) throw new ConfiguratorInvalidConfigurationError(evaluated.errors);
       configuration = evaluated.configuration;
       configurationCost = evaluated.cost;
@@ -531,7 +574,7 @@ export function createSalesService(
       unitPrice = configuration.price.unitPrice;
       if (input.discountPercent === undefined) discountPercent = configuration.price.discountPercent;
     } else {
-      const resolution = await resolvePrice({ customerId, articleId: input.articleId, quantity });
+      const resolution = await resolvePrice({ customerId, articleId: input.articleId, quantity, ...chainCurrency(pricing) });
       if (!resolution?.price) throw new PriceNotFoundError(resolution?.articleNumber ?? input.articleId);
       unitPrice = resolution.price.unitPrice;
       if (input.discountPercent === undefined) discountPercent = resolution.price.discountPercent;
@@ -610,8 +653,8 @@ export function createSalesService(
       date: order.createdAt,
       partnerLabel: "Kund",
       partner: customer!,
-      // Sales has no multi-currency support (v1 skips complex currency flows).
-      currency: "SEK",
+      // Valuta: the order's own currency (its prices are in it).
+      currency: order.currency,
       // Printed in the row's unit (the values are stored in the base unit).
       rows: rows.map((r, i) => ({
         articleNumber: r.articleNumber,
@@ -887,7 +930,7 @@ export function createSalesService(
 
     // Header fields (customer's PO number/reference/delivery address) are
     // editable while the order is quote/confirmed/in_production.
-    async updateSalesOrderHeader(orderId: string, input: UpdateSalesOrderHeaderInput) {
+    async updateSalesOrderHeader(orderId: string, input: UpdateSalesOrderHeaderInput, userId?: string | null) {
       const order = await repo.findSalesOrderById(orderId);
       if (!order) throw new SalesOrderNotFoundError(orderId);
       if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
@@ -898,6 +941,24 @@ export function createSalesService(
       if (input.quoteValidUntil !== undefined && order.status !== "quote") {
         throw new InvalidStatusTransitionError(`Cannot change the validity date of an order in status "${order.status}"`);
       }
+      // Valuta: currency and rate only as a quote or a confirmed order (the
+      // status is re-checked under the row lock). A new currency needs an
+      // order without rows (re-checked there too) and takes today's rate
+      // unless one is sent — looked up here, outside the transaction.
+      const currencyFields: { currency?: string; exchangeRate?: number } = {};
+      if (input.currency !== undefined || input.exchangeRate !== undefined) {
+        if (order.status !== "quote" && order.status !== "confirmed") {
+          throw new InvalidStatusTransitionError(`Cannot change the currency or rate of an order in status "${order.status}"`);
+        }
+        const currency = input.currency ?? order.currency;
+        if (currency !== order.currency) {
+          if ((await repo.listRowsByOrder(orderId)).length > 0) throw new SalesOrderCurrencyLockedError(order.orderNumber);
+          currencyFields.currency = currency;
+          currencyFields.exchangeRate = await documentRate(currency, input.exchangeRate);
+        } else if (input.exchangeRate !== undefined) {
+          currencyFields.exchangeRate = await documentRate(currency, input.exchangeRate);
+        }
+      }
       if (input.deliveryAddressId) {
         // Another order's engångsadress is not the customer's to pick; the
         // order's own may be sent back unchanged.
@@ -907,10 +968,29 @@ export function createSalesService(
         }
       }
       await validateRegisterRefs(input);
-      const result = await repo.updateSalesOrderHeaderWithAddress(orderId, input);
+      const { currency: _currency, exchangeRate: _exchangeRate, ...headerInput } = input;
+      const result = await repo.updateSalesOrderHeaderWithAddress(orderId, { ...headerInput, ...currencyFields });
       if (!result.ok) {
         if (result.reason === "not_found") throw new SalesOrderNotFoundError(orderId);
+        if (result.reason === "currency_locked") throw new SalesOrderCurrencyLockedError(order.orderNumber);
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${result.status}"`);
+      }
+      // Valuta: a new currency or rate is logged on the order (the rate
+      // decides what every SEK price converts to from now on).
+      if (
+        (currencyFields.currency !== undefined && currencyFields.currency !== order.currency) ||
+        (currencyFields.exchangeRate !== undefined && currencyFields.exchangeRate !== Number(order.exchangeRate))
+      ) {
+        await audit.log({
+          entityType: "sales_order",
+          entityId: order.orderNumber,
+          action: "exchange_rate_changed",
+          detail: {
+            before: { currency: order.currency, exchangeRate: order.exchangeRate },
+            after: { currency: result.order.currency, exchangeRate: result.order.exchangeRate },
+          },
+          userId: userId ?? null,
+        });
       }
       return repo.findSalesOrderById(result.order.id);
     },
@@ -952,11 +1032,18 @@ export function createSalesService(
         const address = await repo.findDeliveryAddress(input.customerId, input.deliveryAddressId);
         if (!address || address.oneOff) throw new DeliveryAddressNotFoundError(input.deliveryAddressId);
       }
+      // Valuta: the customer's currency unless the caller chose one, and
+      // today's rate unless the caller sent one — looked up here, before the
+      // transaction (it may call Riksbanken). Every row is priced in it.
+      const customer = await repo.findCustomerById(input.customerId);
+      const currency = input.currency ?? customer?.currency ?? SEK;
+      const exchangeRate = await documentRate(currency, input.exchangeRate);
+      const pricing: RowPricing = { customerId: input.customerId, currency, exchangeRate };
       // Variants resolved here (delprojekt 5) are created under the template
       // lock BEFORE the order's transaction, so they outlive a quote that
       // fails afterwards — by design (spec): a variant is an ordinary,
       // reusable article, and the next order for the same choices reuses it.
-      const rows = await Promise.all(input.rows.map((r) => resolveRowInput(input.customerId, r, createdBy)));
+      const rows = await Promise.all(input.rows.map((r) => resolveRowInput(pricing, r, createdBy)));
       // Two ordinary rows (incl. resolved variant rows) on the same article
       // would hit the partial unique index sales_order_rows_order_article_unique;
       // refuse with the domain error up front. Configured beställningsvara
@@ -966,7 +1053,7 @@ export function createSalesService(
       const quoteValidUntil = await resolveQuoteValidUntil(input);
       let created;
       try {
-        created = await repo.createQuote({ ...input, rows, quoteValidUntil }, createdBy);
+        created = await repo.createQuote({ ...input, rows, quoteValidUntil, currency, exchangeRate }, createdBy);
       } catch (err) {
         // Backstop for the index, caught outside the repository's transaction
         // (which has already rolled back).
@@ -1041,7 +1128,7 @@ export function createSalesService(
       if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
         throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${order.status}"`);
       }
-      const write = await resolveRowInput(order.customerId, input, userId ?? null);
+      const write = await resolveRowInput(orderPricing(order), input, userId ?? null);
       let row;
       try {
         row = await repo.addRow(salesOrderId, write);
@@ -1120,6 +1207,7 @@ export function createSalesService(
         evaluated = await rowConfiguration.evaluate(stored.templateArticleId, selectionFromEntries(stored.selection), {
           customerId: order.customerId,
           quantity,
+          ...chainCurrency(orderPricing(order)),
         });
         if (!evaluated.valid || !evaluated.configuration) throw new ConfiguratorInvalidConfigurationError(evaluated.errors);
         configurationCostPatch = evaluated.cost;
@@ -1141,7 +1229,12 @@ export function createSalesService(
           // An empty chain means there is no staffel the new quantity could
           // have crossed, so the row keeps the price it already has (it was
           // priced by hand). Only addRow/createQuote refuse an unpriced row.
-          const resolution = await resolvePrice({ customerId: order.customerId, articleId: existing.articleId, quantity });
+          const resolution = await resolvePrice({
+            customerId: order.customerId,
+            articleId: existing.articleId,
+            quantity,
+            ...chainCurrency(orderPricing(order)),
+          });
           if (resolution?.price) {
             unitPrice = resolution.price.unitPrice;
             if (discountPercent === undefined) discountPercent = resolution.price.discountPercent;
@@ -1229,7 +1322,11 @@ export function createSalesService(
       let beforeKey: string | null;
       let afterKey: string | null;
       if (stored) {
-        const evaluated = await rowConfiguration.evaluate(stored.templateArticleId, input.selection, { customerId: order.customerId, quantity });
+        const evaluated = await rowConfiguration.evaluate(stored.templateArticleId, input.selection, {
+          customerId: order.customerId,
+          quantity,
+          ...chainCurrency(orderPricing(order)),
+        });
         if (!evaluated.valid || !evaluated.configuration) throw new ConfiguratorInvalidConfigurationError(evaluated.errors);
         if (evaluated.configuration.price.unitPrice === null) throw new PriceNotFoundError(beforeNumber);
         next = {
@@ -1254,7 +1351,12 @@ export function createSalesService(
         const preRead = await repo.readRowConfigurationLock(salesOrderId, rowId);
         if (!preRead.ok) throwRowConfigurationFailure(preRead, rowId, beforeNumber);
         const { article: variant } = await rowConfiguration.resolveVariant(variantOf.templateArticleId, input.selection, userId ?? null);
-        const resolution = await resolvePrice({ customerId: order.customerId, articleId: variant.id, quantity });
+        const resolution = await resolvePrice({
+          customerId: order.customerId,
+          articleId: variant.id,
+          quantity,
+          ...chainCurrency(orderPricing(order)),
+        });
         if (!resolution?.price) throw new PriceNotFoundError(resolution?.articleNumber ?? variant.id);
         next = {
           articleId: variant.id,
@@ -1300,9 +1402,13 @@ export function createSalesService(
     // article) gets this price — added with quantity 1, or repriced when the
     // order already has one (one row per article per order). Goes through
     // addRow/updateRow so status guards, revision and audit stay identical.
+    // Valuta: input.unitPrice is the kundpris in SEK (Sendify's price plus
+    // the markup); an order in another currency gets it converted with the
+    // order's rate (fromSek).
     async setFreightRow(salesOrderId: string, input: { articleId: string; unitPrice: number }, userId?: string | null) {
       const order = await repo.findSalesOrderById(salesOrderId);
       if (!order) throw new SalesOrderNotFoundError(salesOrderId);
+      const unitPrice = order.currency === SEK ? input.unitPrice : fromSek(input.unitPrice, Number(order.exchangeRate));
       // Frakt etapp 2: the freight of this order's följesedel is already on
       // an invoice as a shipment row — neither a new order freight row nor a
       // repriced one may bill the same transport again.
@@ -1310,10 +1416,10 @@ export function createSalesService(
       if (invoiced) throw new FreightAlreadyInvoicedError(invoiced.shipmentNumber);
       const existing = (await repo.listRowsByOrder(salesOrderId)).find((r) => r.articleId === input.articleId);
       if (!existing) {
-        return this.addRow(salesOrderId, { articleId: input.articleId, quantity: 1, unitPrice: input.unitPrice, discountPercent: 0 }, userId);
+        return this.addRow(salesOrderId, { articleId: input.articleId, quantity: 1, unitPrice, discountPercent: 0 }, userId);
       }
       if (Number(existing.quantityDelivered) > 0) throw new FreightRowDeliveredError();
-      const { row } = await this.updateRow(salesOrderId, existing.id, { unitPrice: input.unitPrice, discountPercent: 0 }, userId);
+      const { row } = await this.updateRow(salesOrderId, existing.id, { unitPrice, discountPercent: 0 }, userId);
       return row;
     },
 
@@ -1906,21 +2012,26 @@ export function createSalesService(
     async updatePriceList(id: string, input: UpdatePriceListInput, userId?: string | null) {
       const existing = await repo.findPriceListById(id);
       if (!existing) throw new PriceListNotFoundError(id);
+      // Valuta: the rows' prices are in the list's currency — it changes only
+      // on a list without rows (re-checked in the repository's UPDATE).
+      const currencyChange = input.currency !== undefined && input.currency !== existing.currency;
+      if (currencyChange && existing.rows.length > 0) throw new PriceListCurrencyLockedError(existing.code);
       let row;
       try {
-        row = await repo.updatePriceList(id, input);
+        row = await repo.updatePriceList(id, input, { requireNoRows: currencyChange });
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicatePriceListError(input.code, input.name);
         throw err;
       }
+      if (row === "has_rows") throw new PriceListCurrencyLockedError(existing.code);
       if (!row) throw new PriceListNotFoundError(id);
       await audit.log({
         entityType: "price_list",
         entityId: row.code,
         action: "updated",
         detail: {
-          before: { code: existing.code, name: existing.name, description: existing.description },
-          after: { code: row.code, name: row.name, description: row.description },
+          before: { code: existing.code, name: existing.name, description: existing.description, currency: existing.currency },
+          after: { code: row.code, name: row.name, description: row.description, currency: row.currency },
         },
         userId: userId ?? null,
       });
@@ -2094,8 +2205,31 @@ export function createSalesService(
     // Exposes the price chain directly — GET /price-quote, used both for
     // order-row pre-fill in the web UI and by the external configurator
     // (requireAuthOrClient scope, see configurator.routes.ts).
+    // Valuta: in the order's currency and rate (salesOrderId), else in
+    // query.currency (default the customer's) at query.exchangeRate (default
+    // today's rate). The answer says which currency and rate it is in.
     async getPriceQuote(query: PriceQuoteQuery) {
-      return resolvePrice(query);
+      let currency: string;
+      let exchangeRate: number;
+      if (query.salesOrderId) {
+        // Another customer's order is no answer (an OAuth client bound to a
+        // customer must not read someone else's order through its id).
+        const order = await repo.findSalesOrderById(query.salesOrderId);
+        if (!order || order.customerId !== query.customerId) throw new SalesOrderNotFoundError(query.salesOrderId);
+        currency = order.currency;
+        exchangeRate = Number(order.exchangeRate);
+      } else {
+        const customer = await repo.findCustomerById(query.customerId);
+        currency = query.currency ?? customer?.currency ?? SEK;
+        exchangeRate = await documentRate(currency, query.exchangeRate);
+      }
+      const resolution = await resolvePrice({
+        customerId: query.customerId,
+        articleId: query.articleId,
+        quantity: query.quantity,
+        ...(currency === SEK ? {} : { currency, exchangeRate }),
+      });
+      return resolution ? { ...resolution, currency, exchangeRate } : null;
     },
   };
 }

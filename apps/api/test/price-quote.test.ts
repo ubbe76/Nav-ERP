@@ -113,9 +113,12 @@ describe("getPriceQuote (service)", () => {
 
     const result = await salesService.getPriceQuote({ customerId: customer.id, articleId: article.id, quantity: 1 });
 
+    // Valuta: the answer says which currency and rate it is in (SEK, 1).
     expect(result).toEqual({
       articleNumber: article.articleNumber,
       price: { unitPrice: 42, discountPercent: 0, source: "customer_article" },
+      currency: "SEK",
+      exchangeRate: 1,
     });
   });
 
@@ -125,7 +128,7 @@ describe("getPriceQuote (service)", () => {
 
     const result = await salesService.getPriceQuote({ customerId: customer.id, articleId: article.id, quantity: 1 });
 
-    expect(result).toEqual({ articleNumber: article.articleNumber, price: null });
+    expect(result).toEqual({ articleNumber: article.articleNumber, price: null, currency: "SEK", exchangeRate: 1 });
   });
 
   it("returns null for an unknown article", async () => {

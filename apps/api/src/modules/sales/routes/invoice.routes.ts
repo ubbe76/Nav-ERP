@@ -37,7 +37,11 @@ import {
   ReminderFeeAlreadyChargedError,
   SalesOrderRowMismatchError,
   ShipmentAlreadyInvoicedError,
+  InvoiceExchangeRateError,
+  InvoiceRowCurrencyMismatchError,
+  ReminderFeeCurrencyError,
 } from "../service/invoice.service.js";
+import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { ShipmentNotBillableError, VatNumberRequiredError } from "../service/sales.errors.js";
 import { InvalidVatCodeError } from "../../economy/service/document-vat-code.js";
 import { CustomerNotFoundError, InvalidStatusTransitionError } from "../service/sales.service.js";
@@ -59,6 +63,18 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
     // carry `reason` for the card.
     if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
     if (err instanceof VatNumberRequiredError) return reply.code(409).send({ ...errorBody(err), reason: err.reason });
+    // Valuta: no rate for the invoice's currency and date at Utfärda (or for
+    // a freight row) — the card asks for the rate; a row in another currency
+    // than the invoice's; a rate that does not fit (SEK, credit note); a
+    // påminnelseavgift on an invoice in another currency.
+    if (err instanceof ExchangeRateUnavailableError) {
+      return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+    }
+    if (err instanceof InvoiceRowCurrencyMismatchError) {
+      return reply.code(400).send({ ...errorBody(err), rowCurrency: err.rowCurrency, invoiceCurrency: err.invoiceCurrency });
+    }
+    if (err instanceof InvoiceExchangeRateError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
+    if (err instanceof ReminderFeeCurrencyError) return reply.code(409).send({ ...errorBody(err), currency: err.currency });
     if (
       err instanceof InvoiceNotFoundError ||
       err instanceof ArchivedReminderNotFoundError ||

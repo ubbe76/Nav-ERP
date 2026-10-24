@@ -65,6 +65,8 @@ async function customerPayment(
       paymentDate,
       bankAccountNumber: "1930",
       amount: String(applied),
+      // Valuta (0145): a SEK payment's SEK amount is its amount.
+      amountSek: String(applied),
       verificationId: await verificationOn(paymentDate, userId),
       cancelledAt: opts.cancelledOn ? new Date(`${opts.cancelledOn}T12:00:00Z`) : null,
       cancellationVerificationId: opts.cancelledOn ? await verificationOn(opts.cancelledOn, userId) : null,
@@ -75,6 +77,8 @@ async function customerPayment(
     invoiceId,
     appliedAmount: String(applied),
     writeOffAmount: String(opts.writeOff ?? 0),
+    appliedAmountSek: String(applied),
+    writeOffAmountSek: String(opts.writeOff ?? 0),
   });
 }
 

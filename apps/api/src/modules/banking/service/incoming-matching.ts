@@ -1,4 +1,4 @@
-import { applyPaymentTolerance, round2, type ToleranceResult } from "@navet/shared";
+import { applyPaymentTolerance, round2, SEK, toleranceInCurrency, type ToleranceResult } from "@navet/shared";
 import type { BankEntryReference } from "@navet/db";
 import { validateOcrNumber } from "../../system/service/ocr.js";
 import { namesMatch } from "./name-match.js";
@@ -11,6 +11,10 @@ export interface OpenReceivable {
   customerName: string;
   dueDate: string | null;
   openAmount: number;
+  // Valuta: the invoice's currency (openAmount is in it) and its rate — the
+  // tolerance is kronor, worth less in EUR. Omitted = SEK at rate 1.
+  currency?: string;
+  exchangeRate?: number;
 }
 export interface ClosedReceivable {
   invoiceNumber: string;
@@ -19,7 +23,12 @@ export interface ClosedReceivable {
 }
 export interface IncomingEntryInput {
   id: string;
+  // Valuta: the payment's own amount and currency — for an entry on the SEK
+  // account with an instructed amount in EUR (InstdAmt), the EUR amount; the
+  // entry is only matched against open items in that currency. Omitted
+  // currency = SEK.
   amount: number;
+  currency?: string;
   counterpartyName: string | null;
   remittance: BankEntryReference[];
 }
@@ -52,6 +61,9 @@ export interface IncomingProposal {
 }
 
 const kr = (n: number) => n.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const currencyOf = (r: { currency?: string }) => r.currency ?? SEK;
+// The tolerance setting (kronor) in the open item's own currency.
+const toleranceFor = (r: OpenReceivable, tolerance: number) => toleranceInCurrency(tolerance, r.exchangeRate ?? 1, currencyOf(r));
 const byDue = (a: OpenReceivable, b: OpenReceivable) =>
   (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31") || a.invoiceNumber.localeCompare(b.invoiceNumber);
 
@@ -87,7 +99,7 @@ function rowsOf(allocation: { invoice: OpenReceivable; applied: number }[], tole
     invoiceNumber: invoice.invoiceNumber,
     openAmount: invoice.openAmount,
     appliedAmount: applied,
-    outcome: applyPaymentTolerance(invoice.openAmount, applied, tolerance),
+    outcome: applyPaymentTolerance(invoice.openAmount, applied, toleranceFor(invoice, tolerance)),
   }));
 }
 
@@ -98,11 +110,14 @@ function blankProposal(entryId: string): IncomingProposal {
 export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLookup, tolerance: number): IncomingProposal {
   const proposal = blankProposal(entry.id);
   const ocrs = candidateOcrs(entry.remittance);
+  const currency = currencyOf(entry);
+  const sameCurrency = (r: OpenReceivable) => currencyOf(r) === currency;
 
   if (ocrs.length > 0) {
     const resolved = ocrs.map((ocr) => lookup.openByOcr.get(ocr)).filter((r): r is OpenReceivable => r !== undefined);
     const missing = ocrs.filter((ocr) => !lookup.openByOcr.has(ocr));
     const customers = new Set(resolved.map((r) => r.customerId));
+    const otherCurrency = resolved.find((r) => !sameCurrency(r));
     if (missing.length > 0) {
       // A possible double payment outranks an unknown reference. Either way
       // rule 4 still runs (spec §5.1 rule 3) and the reason stays visible.
@@ -111,6 +126,11 @@ export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLo
       proposal.reason = closed
         ? `OCR ${ocr} tillhör ${closed.invoiceNumber} som redan är ${closed.status === "paid" ? "betald" : "makulerad"} — möjlig dubbelbetalning`
         : `OCR ${ocr} hittades inte bland öppna poster`;
+    } else if (otherCurrency) {
+      // Valuta: the invoice is in another currency than the payment — the
+      // amounts cannot be compared. Rule 4 still runs (in the payment's
+      // currency); the reason stays visible.
+      proposal.reason = `${otherCurrency.invoiceNumber} är i ${currencyOf(otherCurrency)} men betalningen är i ${currency} — registrera den under Betalningar`;
     } else if (customers.size > 1) {
       // Not an OCR match, but rule 4 still runs (spec §5.1): amount + name
       // may well point at one of the customers. The reason stays visible.
@@ -154,9 +174,10 @@ export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLo
     }
   }
 
-  // Rule 4: suggestions on amount and name.
+  // Rule 4: suggestions on amount and name — open items in the payment's
+  // currency, within the tolerance in that currency.
   const byAmount = lookup.candidatesByAmount
-    .filter((r) => r.openAmount > 0 && Math.abs(r.openAmount - entry.amount) <= tolerance)
+    .filter((r) => sameCurrency(r) && r.openAmount > 0 && Math.abs(r.openAmount - entry.amount) <= toleranceFor(r, tolerance))
     .sort(byDue);
   const named = entry.counterpartyName ? byAmount.filter((r) => namesMatch(entry.counterpartyName!, r.customerName)) : [];
   const suggest = (basis: MatchBasis, invoices: { invoice: OpenReceivable; applied: number }[], alternatives: OpenReceivable[]): IncomingProposal => ({
@@ -174,7 +195,7 @@ export function matchIncomingEntry(entry: IncomingEntryInput, lookup: MatchingLo
   if (byAmount.length === 1) return suggest("amount_only", [{ invoice: byAmount[0]!, applied: entry.amount }], []);
   const namedCustomers = entry.counterpartyName ? lookup.customers.filter((c) => namesMatch(entry.counterpartyName!, c.name)) : [];
   if (namedCustomers.length === 1) {
-    const open = (lookup.openByCustomer.get(namedCustomers[0]!.id) ?? []).filter((r) => r.openAmount !== 0);
+    const open = (lookup.openByCustomer.get(namedCustomers[0]!.id) ?? []).filter((r) => r.openAmount !== 0 && sameCurrency(r));
     const total = round2(open.reduce((sum, r) => sum + r.openAmount, 0));
     const allocation = open.length > 0 && entry.amount <= total ? allocate(entry.amount, open.filter((r) => r.openAmount > 0)) : null;
     if (allocation) return suggest("name_allocation", allocation, []);

@@ -149,6 +149,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Samlingsfaktura** | Nej | Ja/Nej, 1/0, X eller true/false — Ja gör att kundens leveranser faktureras genom samlingsfakturering; ett värde som börjar med Per (t.ex. Per kund) räknas också som Ja. Tom cell lämnar fältet orört på en befintlig post. | Nej |
 | **Privatperson** | Nej | Ja/Nej, 1/0, X eller true/false — Ja visar priser inklusive moms på kundens offerter, orderbekräftelser och fakturor. Tom cell lämnar fältet orört på en befintlig post. | Nej |
 | **Webbsida** | Nej | Max 255 tecken. Tom cell lämnar fältet orört på en befintlig post. | https://www.example.com |
+| **Valuta** | Nej | Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya offerter och kundordrar får kundens valuta och dagens kurs, och kundens kundpriser gäller i den valutan; befintliga ordrar behåller sin. Tom cell ger SEK för nya kunder och lämnar befintliga orörda. | SEK |
 
 ## Kundkontakter
 

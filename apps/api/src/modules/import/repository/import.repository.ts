@@ -189,6 +189,7 @@ const CUSTOMER_PASSTHROUGH_FIELDS = [
   "collectiveInvoicing",
   "privatePerson",
   "website",
+  "currency",
 ] as const satisfies readonly (keyof CustomerCreatePlan)[];
 
 type CustomerRegisterIds = {

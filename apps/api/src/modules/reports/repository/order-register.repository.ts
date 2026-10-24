@@ -85,6 +85,9 @@ export function createOrderRegisterRepository(db: Db) {
           orderDate: salesOrderDate,
           partnerNumber: customers.customerNumber,
           partnerName: customers.name,
+          // Valuta: the order's own currency and rate — the totals are in SEK.
+          currency: salesOrders.currency,
+          exchangeRate: salesOrders.exchangeRate,
           articleNumber: articles.articleNumber,
           articleName: articles.name,
           unitCode: sql<string | null>`coalesce(${units.code}, (select u.code from ${units} u where u.id = ${articles.unitId}))`,
@@ -106,8 +109,7 @@ export function createOrderRegisterRepository(db: Db) {
 
       return rows.map((r) => ({
         ...r,
-        currency: "SEK",
-        exchangeRate: 1,
+        exchangeRate: Number(r.exchangeRate),
         quantity: Number(r.quantity),
         done: Number(r.done),
         unitPrice: Number(r.unitPrice),

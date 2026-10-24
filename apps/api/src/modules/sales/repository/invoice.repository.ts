@@ -30,6 +30,8 @@ import {
 import {
   buyerVatNumberProblem,
   domesticVatCodeForRate,
+  invoiceSekAmounts,
+  SEK,
   ilikePattern,
   isVatCode,
   isVatRate,
@@ -45,7 +47,7 @@ import { computeOcrNumber } from "../../system/service/ocr.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
 import { domesticVatCodeIdSql, loadVatCodeBook, postingVatCodeColumns } from "../../economy/repository/vat-codes.js";
-import { computeOpenAmounts } from "./open-amounts.js";
+import { computeOpenAmounts, computeOpenAmountsSek } from "./open-amounts.js";
 import { ShipmentNotBillableError, VatNumberRequiredError } from "../service/sales.errors.js";
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle.
@@ -71,6 +73,15 @@ export type IssueStamp = {
   privatePerson: boolean;
   paymentTermCode: string | null;
   paymentTermName: string | null;
+  // Valuta: the rate the invoice is booked at (1 for SEK) — decided by the
+  // service before the transaction (the invoice date's rate, a rate typed on
+  // the draft, or a credit note's source rate). exchangeRateManual says which
+  // case the service read: the issue UPDATE is conditional on the draft
+  // still being in that state, so a rate typed in meanwhile loses the race
+  // instead of being booked over. Omitted (a direct repository caller) = the
+  // rate stored on the draft, unconditionally.
+  exchangeRate?: number;
+  exchangeRateManual?: boolean;
 };
 
 // Internal control-flow signal only — never leaves issueInvoice below. Thrown
@@ -325,9 +336,14 @@ export type InvoiceableShipment = {
   customerId: string;
   carrierName: string | null;
   productName: string | null;
+  // Kundpriset i SEK (Sendify's price plus the markup).
   customerPrice: string;
   bookedAt: Date | null;
   deliveryNumbers: string[];
+  // Valuta: the currency and rate of the order the shipment's first live
+  // följesedel belongs to (null when none can be found).
+  orderCurrency: string | null;
+  orderExchangeRate: string | null;
 };
 
 export type CreateReminderResult =
@@ -347,6 +363,10 @@ export type InvoiceHeaderWrite = {
   customerId: string;
   paymentTermId: string | null;
   note: string | null;
+  // Valuta: decided by the service. exchangeRate null = decided at Utfärda.
+  currency?: string;
+  exchangeRate?: number | null;
+  exchangeRateManual?: boolean;
   // Credit notes only — omitted by the ordinary create() callsite, in which
   // case the DB defaults apply ("invoice" / null), same as before Task 5.
   type?: InvoiceType;
@@ -357,6 +377,9 @@ export type InvoiceHeaderWrite = {
 type HeaderPatch = {
   paymentTermId?: string | null;
   note?: string | null;
+  // Valuta: a rate typed in (manual true) or back to automatic (null/false).
+  exchangeRate?: number | null;
+  exchangeRateManual?: boolean;
 };
 
 // Frakt-uppföljning: the shipments a write's freight rows bill, locked FOR
@@ -414,6 +437,18 @@ export function createInvoiceRepository(db: Db) {
           join deliveries d on d.id = sd.delivery_id
           where sd.shipment_id = ${shipments.id} and sd.active
           order by d.delivery_number)`,
+        orderCurrency: sql<string | null>`(
+          select so.currency from shipment_deliveries sd
+          join deliveries d on d.id = sd.delivery_id
+          join sales_orders so on so.id = d.sales_order_id
+          where sd.shipment_id = ${shipments.id} and sd.active
+          order by d.delivery_number limit 1)`,
+        orderExchangeRate: sql<string | null>`(
+          select so.exchange_rate::text from shipment_deliveries sd
+          join deliveries d on d.id = sd.delivery_id
+          join sales_orders so on so.id = d.sales_order_id
+          where sd.shipment_id = ${shipments.id} and sd.active
+          order by d.delivery_number limit 1)`,
       })
       .from(shipments)
       .leftJoin(freightProducts, eq(freightProducts.id, shipments.freightProductId))
@@ -491,6 +526,8 @@ export function createInvoiceRepository(db: Db) {
           unitPrice: salesOrderRows.unitPrice,
           customerId: salesOrders.customerId,
           orderNumber: salesOrders.orderNumber,
+          // Valuta: a row is billed in its order's currency only.
+          currency: salesOrders.currency,
           // Konfigurator 4b: copied onto the invoice row.
           configuration: salesOrderRows.configuration,
         })
@@ -525,6 +562,8 @@ export function createInvoiceRepository(db: Db) {
           unitPrice: salesOrderRows.unitPrice,
           discountPercent: salesOrderRows.discountPercent,
           quantityDelivered: salesOrderRows.quantityDelivered,
+          currency: salesOrders.currency,
+          exchangeRate: salesOrders.exchangeRate,
         })
         .from(salesOrderRows)
         .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
@@ -553,6 +592,7 @@ export function createInvoiceRepository(db: Db) {
           rowCount: number;
           shipmentCount: number;
           netAmount: number;
+          currencies: Set<string>;
         }
       >();
       const candidateFor = (c: { customerId: string; customerNumber: string; name: string }) => {
@@ -566,6 +606,7 @@ export function createInvoiceRepository(db: Db) {
             rowCount: 0,
             shipmentCount: 0,
             netAmount: 0,
+            currencies: new Set(),
           };
           byCustomer.set(c.customerId, candidate);
         }
@@ -577,7 +618,10 @@ export function createInvoiceRepository(db: Db) {
         const c = candidateFor(r);
         c.orderIds.add(r.orderId);
         c.rowCount += 1;
-        c.netAmount += rest * Number(r.unitPrice) * (1 - Number(r.discountPercent ?? 0) / 100);
+        // Valuta: in SEK at the order's rate (informational — one invoice is
+        // made per currency, see runCollectiveInvoicing).
+        c.netAmount += rest * Number(r.unitPrice) * (1 - Number(r.discountPercent ?? 0) / 100) * Number(r.exchangeRate);
+        c.currencies.add(r.currency);
       }
 
       // The register's own order (Postgres collation), for the output below
@@ -599,6 +643,7 @@ export function createInvoiceRepository(db: Db) {
             const c = candidateFor(customer);
             c.shipmentCount += 1;
             c.netAmount += Number(s.customerPrice);
+            c.currencies.add(s.orderCurrency ?? SEK);
           }
         }
       }
@@ -610,10 +655,12 @@ export function createInvoiceRepository(db: Db) {
           const candidate = byCustomer.get(c.customerId);
           return candidate ? [candidate] : [];
         })
-        .map(({ orderIds, netAmount, ...c }) => ({
+        .map(({ orderIds, netAmount, currencies, ...c }) => ({
           ...c,
           orderCount: orderIds.size,
           netAmount: round2(netAmount),
+          // Valuta: the currencies the run will invoice in (one invoice each).
+          currencies: [...currencies].sort(),
         }));
     },
 
@@ -625,6 +672,9 @@ export function createInvoiceRepository(db: Db) {
         .select({
           orderId: salesOrders.id,
           orderNumber: salesOrders.orderNumber,
+          // Valuta: an invoice takes one currency — the dialog groups on it.
+          currency: salesOrders.currency,
+          exchangeRate: salesOrders.exchangeRate,
           salesOrderRowId: salesOrderRows.id,
           articleId: salesOrderRows.articleId,
           articleNumber: articles.articleNumber,
@@ -667,6 +717,8 @@ export function createInvoiceRepository(db: Db) {
         {
           orderId: string;
           orderNumber: string;
+          currency: string;
+          exchangeRate: string;
           rows: {
             salesOrderRowId: string;
             articleId: string;
@@ -689,7 +741,7 @@ export function createInvoiceRepository(db: Db) {
         if (rest <= 0) continue;
         let order = orders.get(r.orderId);
         if (!order) {
-          order = { orderId: r.orderId, orderNumber: r.orderNumber, rows: [] };
+          order = { orderId: r.orderId, orderNumber: r.orderNumber, currency: r.currency, exchangeRate: r.exchangeRate, rows: [] };
           orders.set(r.orderId, order);
         }
         order.rows.push({
@@ -725,6 +777,14 @@ export function createInvoiceRepository(db: Db) {
           // columns unqualified, so `${shipments.id}` became a bare "id" that
           // resolved to invoice_rows.id inside the subquery — always false.
           invoiced: sql<boolean>`exists (select 1 from invoice_rows ir where ir.shipment_id = shipments.id)`,
+          // Valuta: the currency of the order the first live följesedel
+          // belongs to (written out by hand for the same reason as above).
+          orderCurrency: sql<string | null>`(
+            select so.currency from shipment_deliveries sd
+            join deliveries d on d.id = sd.delivery_id
+            join sales_orders so on so.id = d.sales_order_id
+            where sd.shipment_id = shipments.id and sd.active
+            order by d.delivery_number limit 1)`,
         })
         .from(shipments)
         .where(eq(shipments.id, id));
@@ -745,6 +805,13 @@ export function createInvoiceRepository(db: Db) {
             note: header.note,
             type: header.type ?? "invoice",
             creditedInvoiceId: header.creditedInvoiceId ?? null,
+            // Valuta: SEK is always rate 1; another currency carries its
+            // typed rate (or a credit note's source rate), else null until
+            // Utfärda.
+            currency: header.currency ?? SEK,
+            exchangeRate:
+              (header.currency ?? SEK) === SEK ? "1" : header.exchangeRate == null ? null : String(header.exchangeRate),
+            exchangeRateManual: header.exchangeRateManual ?? false,
             createdBy,
           })
           .returning();
@@ -943,9 +1010,14 @@ export function createInvoiceRepository(db: Db) {
       return db.transaction(async (tx) => {
         const [invoice] = await tx.select().from(invoices).where(eq(invoices.id, id)).for("update");
         if (!invoice || invoice.status !== "draft") return null;
+        const { exchangeRate, ...rest } = patch;
         const [row] = await tx
           .update(invoices)
-          .set({ ...patch, updatedAt: new Date() })
+          .set({
+            ...rest,
+            ...(exchangeRate !== undefined ? { exchangeRate: exchangeRate === null ? null : String(exchangeRate) } : {}),
+            updatedAt: new Date(),
+          })
           .where(eq(invoices.id, id))
           .returning();
         return row ?? null;
@@ -1026,12 +1098,33 @@ export function createInvoiceRepository(db: Db) {
 
           const invoiceNumber = await getNextOrderNumber(tx, "invoice");
           const ocrNumber = computeOcrNumber(invoiceNumber);
+          // Valuta: conditional on the rate state the service decided on —
+          // a rate typed in (or cleared) since then is a lost race.
+          const { exchangeRate, exchangeRateManual, ...frozen } = stamp;
           const [row] = await tx
             .update(invoices)
-            .set({ invoiceNumber, ocrNumber, status: "issued", issuedAt: new Date(), updatedAt: new Date(), ...stamp })
-            .where(and(eq(invoices.id, id), eq(invoices.status, "draft")))
+            .set({
+              invoiceNumber,
+              ocrNumber,
+              status: "issued",
+              issuedAt: new Date(),
+              updatedAt: new Date(),
+              ...frozen,
+              ...(exchangeRate !== undefined ? { exchangeRate: String(exchangeRate) } : {}),
+            })
+            .where(
+              and(
+                eq(invoices.id, id),
+                eq(invoices.status, "draft"),
+                exchangeRateManual !== undefined ? eq(invoices.exchangeRateManual, exchangeRateManual) : undefined,
+                exchangeRateManual && exchangeRate !== undefined ? eq(invoices.exchangeRate, String(exchangeRate)) : undefined
+              )
+            )
             .returning();
           if (!row) throw new IssueRaceError();
+          // The rate the F verification books at — what the UPDATE just
+          // stamped (SEK is always 1).
+          const bookedRate = row.currency === SEK ? 1 : row.exchangeRate === null ? undefined : Number(row.exchangeRate);
 
           // G1 fix: while the invoice was a draft, its row/header audit
           // events (row_added/row_updated/row_deleted/updated) were logged
@@ -1137,6 +1230,8 @@ export function createInvoiceRepository(db: Db) {
               type,
               invoiceDate: stamp.invoiceDate,
               customerName: stamp.customerName,
+              currency: row.currency,
+              exchangeRate: bookedRate,
             },
             postingRows.map((postingRow) => ({
               articleGroupId: postingRow.articleGroupId,
@@ -1147,9 +1242,16 @@ export function createInvoiceRepository(db: Db) {
             })),
             userId
           );
+          // Valuta: the receivable in SEK, exactly what the F verification
+          // booked — the same restmetod (invoiceSekAmounts) over the same
+          // rows, positive like the rows (the sign is invoices.type).
+          const grossAmountSek = invoiceSekAmounts({
+            rate: bookedRate!,
+            rows: postingRows.map((postingRow) => ({ lineAmount: Number(postingRow.lineAmount), vatAmount: Number(postingRow.vatAmount) })),
+          }).grossAmount;
           const [posted] = await tx
             .update(invoices)
-            .set({ verificationId })
+            .set({ verificationId, grossAmountSek: String(grossAmountSek) })
             .where(eq(invoices.id, id))
             .returning();
 
@@ -1173,6 +1275,11 @@ export function createInvoiceRepository(db: Db) {
     // here any more.
     async getOpenAmount(id: string) {
       return (await computeOpenAmounts(db, [id])).get(id) ?? 0;
+    },
+
+    // Valuta: the same open item's booked SEK value (null until issued).
+    async getOpenAmountSek(id: string) {
+      return (await computeOpenAmountsSek(db, [id])).get(id) ?? null;
     },
 
     // Cancelled payments stay visible (append-only) and are marked as such

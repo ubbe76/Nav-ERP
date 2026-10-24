@@ -1,5 +1,5 @@
 // apps/api/src/modules/configurator/service/configurator-engine.ts
-import { round2 } from "@navet/shared";
+import { fromSek, round2 } from "@navet/shared";
 import type {
   ConfiguratorCondition, ConfiguratorEvaluation, ConfiguratorEvaluationGroup, ConfiguratorRuleTarget, ConfiguratorSelection, PriceSource,
 } from "@navet/shared";
@@ -78,20 +78,30 @@ export function conditionHolds(
 export function evaluateConfiguration(
   template: EngineTemplate,
   selection: ConfiguratorSelection,
-  customerPrice?: EngineCustomerPrice
+  customerPrice?: EngineCustomerPrice,
+  exchangeRate?: number
 ): ConfiguratorEvaluation {
-  return resolveConfiguration(template, selection, customerPrice).evaluation;
+  return resolveConfiguration(template, selection, customerPrice, exchangeRate).evaluation;
 }
 
 /**
  * The engine proper. Besides the evaluation it returns the effective values (keyed by group id) AFTER pass A —
  * an excluded default is cleared — so conditions on structure lines/operations are judged exactly like rules.
  */
+//
+// Valuta: exchangeRate (SEK per 1 unit of the document's currency; omitted =
+// SEK) prices the configuration in another currency. The template's base
+// price and every addition are SEK and are converted, each to the öre
+// (fromSek — an addition after its own SEK rounding, so a number group's
+// amount is (value − base) × price per unit in SEK first); a customerPrice
+// is already in the document's currency (the sales chain priced it so).
 export function resolveConfiguration(
   template: EngineTemplate,
   selection: ConfiguratorSelection,
-  customerPrice?: EngineCustomerPrice
+  customerPrice?: EngineCustomerPrice,
+  exchangeRate?: number
 ): { evaluation: ConfiguratorEvaluation; effective: Map<string, EffectiveValue> } {
+  const inCurrency = (amountSek: number) => (exchangeRate === undefined || exchangeRate === 1 ? amountSek : fromSek(amountSek, exchangeRate));
   const groups = [...template.groups].sort((a, b) => a.sortOrder - b.sortOrder);
   const groupsById = new Map(groups.map((g) => [g.id, g]));
   const byCode = new Map(groups.map((g) => [g.code, g]));
@@ -213,15 +223,15 @@ export function resolveConfiguration(
     const cur = effective.get(g.id)!;
     if (g.kind === "choice" && cur.valueId) {
       const v = g.values.find((x) => x.id === cur.valueId)!;
-      if (v.priceAdd !== 0) additions.push({ groupCode: g.code, label: `${g.name}: ${v.name}`, amount: round2(v.priceAdd) });
+      if (v.priceAdd !== 0) additions.push({ groupCode: g.code, label: `${g.name}: ${v.name}`, amount: inCurrency(round2(v.priceAdd)) });
     } else if (g.kind === "boolean" && cur.value === true && g.priceAdd !== 0) {
-      additions.push({ groupCode: g.code, label: g.name, amount: round2(g.priceAdd) });
+      additions.push({ groupCode: g.code, label: g.name, amount: inCurrency(round2(g.priceAdd)) });
     } else if (g.kind === "number" && typeof cur.value === "number" && g.pricePerUnit > 0) {
-      const amount = round2(Math.max(0, cur.value - g.priceBaseValue) * g.pricePerUnit);
+      const amount = inCurrency(round2(Math.max(0, cur.value - g.priceBaseValue) * g.pricePerUnit));
       if (amount !== 0) additions.push({ groupCode: g.code, label: `${g.name}: ${sv(cur.value)}${g.unit ? ` ${g.unit}` : ""}`, amount });
     }
   }
-  let base = template.basePrice;
+  let base = template.basePrice === null ? null : inCurrency(template.basePrice);
   let discountPercent = 0;
   let source: PriceSource | null = base === null ? null : "article";
   if (customerPrice) {

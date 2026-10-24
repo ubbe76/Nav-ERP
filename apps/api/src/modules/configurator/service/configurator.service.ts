@@ -44,6 +44,8 @@ import { expandCombinations, MAX_VARIANT_COMBINATIONS, TooManyCombinationsError,
 import { selectionEntries, selectionFromEntries, variantArticleFields, variantIdentity, type VariantArticleFields } from "./variant-identity.js";
 import { mergeVariantMaterials, variantRoutingRows, type VariantBomRow, type VariantRoutingRow } from "./variant-structure.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
+import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 
 // Produktkonfigurator — the service owns every template mutation. Each write
 // runs in ONE transaction that first locks the template row (FOR UPDATE) and
@@ -84,7 +86,8 @@ export type ConfiguredStructureReader = (
 ) => Promise<ConfiguredStructure>;
 
 // The sales price chain (resolvePrice), injected like StockBalanceReader.
-export type PriceReader = (q: { customerId: string; articleId: string; quantity: number }) => Promise<
+// Valuta: currency/exchangeRate omitted = SEK (the chain as before).
+export type PriceReader = (q: { customerId: string; articleId: string; quantity: number; currency?: string; exchangeRate?: number }) => Promise<
   { articleNumber: string; price: { unitPrice: number; discountPercent: number; source: PriceSource } | null } | null
 >;
 
@@ -422,6 +425,10 @@ function operationWrite(f: OperationFields): OperationWrite {
   };
 }
 
+// Valuta: what a configuration is priced in — the document's currency and its
+// rate (SEK per 1 unit). Omitted = SEK at rate 1.
+export type ConfigurationCurrency = { currency?: string; exchangeRate?: number };
+
 export function createConfiguratorService(deps: {
   db: Db;
   prices: PriceReader;
@@ -430,9 +437,35 @@ export function createConfiguratorService(deps: {
   costing: CostingPreview;
   writers: VariantWriters;
   stock: VariantStockReader;
+  // Valuta: evaluate/derive in a currency — the customer's currency is the
+  // default, today's rate the default rate. Optional so the fixtures that
+  // only price in SEK need not wire them.
+  customerCurrency?: (id: string) => Promise<string | null>;
+  rates?: ExchangeRateReader;
 }) {
   const { db } = deps;
   const repo = createConfiguratorRepository();
+
+  // Valuta: the rate to hand the engine (undefined for SEK, which leaves
+  // every price exactly as before) and the chain's currency arguments.
+  function rateOf(input: ConfigurationCurrency): number | undefined {
+    return input.currency === undefined || input.currency === "SEK" ? undefined : input.exchangeRate;
+  }
+  function chainCurrency(input: ConfigurationCurrency): ConfigurationCurrency {
+    return input.currency === undefined || input.currency === "SEK" ? {} : { currency: input.currency, exchangeRate: input.exchangeRate };
+  }
+  // The evaluate/derive routes' currency: the caller's, else the customer's,
+  // else SEK; the rate the caller's, else today's (looked up outside any
+  // transaction — evaluate is a read). No rate ⇒ ExchangeRateUnavailableError.
+  async function requestCurrency(input: { customerId?: string; currency?: string; exchangeRate?: number }): Promise<{ currency: string; exchangeRate: number }> {
+    const customerCurrency = input.customerId && deps.customerCurrency ? await deps.customerCurrency(input.customerId) : null;
+    const currency = input.currency ?? customerCurrency ?? "SEK";
+    if (currency === "SEK") return { currency, exchangeRate: 1 };
+    if (input.exchangeRate !== undefined) return { currency, exchangeRate: input.exchangeRate };
+    const today = stockholmToday();
+    if (!deps.rates) throw new ExchangeRateUnavailableError(currency, today);
+    return { currency, exchangeRate: (await deps.rates.getRate(currency, today)).rate };
+  }
 
   // Every template mutation goes through here: lock first, then load.
   function write<T>(articleId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -597,21 +630,24 @@ export function createConfiguratorService(deps: {
   }
 
   // A plain read (no lock). A local function so evaluatePublic shares it.
+  // Valuta: input.currency/exchangeRate as given (omitted = SEK) — the
+  // routes resolve the defaults first (requestCurrency).
   async function evaluate(
     articleId: string,
-    input: { selection: ConfiguratorSelection; customerId?: string; quantity: number }
+    input: { selection: ConfiguratorSelection; customerId?: string; quantity: number } & ConfigurationCurrency
   ): Promise<ConfiguratorEvaluation> {
     const template = await loadOrThrow(db, articleId);
-    return resolveConfiguration(toEngineTemplate(template), input.selection, await customerPriceFor(articleId, input)).evaluation;
+    return resolveConfiguration(toEngineTemplate(template), input.selection, await customerPriceFor(articleId, input), rateOf(input)).evaluation;
   }
 
-  // The customer price chain, as evaluate and derive both price a configuration.
+  // The customer price chain, as evaluate and derive both price a configuration
+  // — in the document's currency (Valuta).
   async function customerPriceFor(
-    articleId: string, input: { customerId?: string; quantity: number }
+    articleId: string, input: { customerId?: string; quantity: number } & ConfigurationCurrency
   ): Promise<EngineCustomerPrice | undefined> {
     if (input.customerId === undefined) return undefined;
     if (!(await deps.customerExists(input.customerId))) throw new CustomerNotFoundError(input.customerId);
-    const res = await deps.prices({ customerId: input.customerId, articleId, quantity: input.quantity });
+    const res = await deps.prices({ customerId: input.customerId, articleId, quantity: input.quantity, ...chainCurrency(input) });
     return res?.price ?? null; // null: the chain gave nothing → base price, source "article"
   }
 
@@ -917,13 +953,16 @@ export function createConfiguratorService(deps: {
       return toPublicTemplate(await loadOrThrow(db, articleId), article);
     },
 
+    // Valuta: in input.currency (default the customer's, else SEK) at
+    // input.exchangeRate (default today's rate); the answer says which.
     async evaluatePublic(
       articleId: string,
-      input: { selection: ConfiguratorSelection; customerId?: string; quantity: number },
+      input: { selection: ConfiguratorSelection; customerId?: string; quantity: number } & ConfigurationCurrency,
       opts: { client: boolean }
     ): Promise<ConfiguratorEvaluation> {
       await visibleTemplate(articleId, opts);
-      return evaluate(articleId, input);
+      const money = await requestCurrency(input);
+      return { ...(await evaluate(articleId, { ...input, ...money })), ...money };
     },
 
     // For POST /quotes from a client: the templates among the rows' articles it may not use.
@@ -1173,13 +1212,18 @@ export function createConfiguratorService(deps: {
 
     // The one derivation: evaluate → deriveStructure → enrich → pre-costing of
     // exactly that structure (null when the configuration is not derivable).
+    // Valuta: the evaluation's prices in input.currency (default the
+    // customer's, else SEK) like evaluatePublic; the costing stays SEK.
     async derive(
       articleId: string,
-      input: { selection: ConfiguratorSelection; customerId?: string; quantity: number }
+      input: { selection: ConfiguratorSelection; customerId?: string; quantity: number } & ConfigurationCurrency
     ): Promise<ConfiguratorDerivation> {
       const loaded = await loadDerivationInput(db, articleId);
-      const customerPrice = await customerPriceFor(articleId, input);
-      const { evaluation, effective } = resolveConfiguration(toEngineTemplate(loaded.detail), input.selection, customerPrice);
+      const money = await requestCurrency(input);
+      const customerPrice = await customerPriceFor(articleId, { ...input, ...money });
+      const resolved = resolveConfiguration(toEngineTemplate(loaded.detail), input.selection, customerPrice, rateOf(money));
+      const effective = resolved.effective;
+      const evaluation: ConfiguratorEvaluation = { ...resolved.evaluation, ...money };
       const core = deriveStructure({
         template: toEngineTemplate(loaded.detail), evaluation, effective,
         baseBom: loaded.baseBom, baseOperations: loaded.baseOperations, lines: loaded.lines, operations: loaded.operations,
@@ -1309,13 +1353,15 @@ export function createConfiguratorService(deps: {
     // to_order, the customer's chain on the template (as evaluate) and the same
     // selection builder as a variant's stored selection. Pure evaluation: nothing
     // is written; the sales service stores the result on the row.
+    // Valuta: opts.currency/exchangeRate = the order's (omitted = SEK) — the
+    // stored price is in the order's currency.
     async evaluateRowConfiguration(
-      templateArticleId: string, selection: ConfiguratorSelection, opts: { customerId: string; quantity: number }
+      templateArticleId: string, selection: ConfiguratorSelection, opts: { customerId: string; quantity: number } & ConfigurationCurrency
     ): Promise<RowConfigurationEvaluation> {
       const detail = await loadOrThrow(db, templateArticleId);
       if (detail.mode !== "to_order") throw new ConfiguratorNotToOrderModeError();
       const template = toEngineTemplate(detail);
-      const { evaluation, effective } = resolveConfiguration(template, selection, await customerPriceFor(templateArticleId, opts));
+      const { evaluation, effective } = resolveConfiguration(template, selection, await customerPriceFor(templateArticleId, opts), rateOf(opts));
       if (!evaluation.valid || evaluation.key === null) {
         return { valid: false, errors: [...evaluation.errors, ...evaluation.groups.flatMap((g) => g.errors)], configuration: null, cost: null };
       }
@@ -1347,13 +1393,26 @@ export function createConfiguratorService(deps: {
     // step of its own) plus the stored configuration's additions. undefined: not
     // a variant; null: the stored selection no longer validates or the template
     // has no base price — resolvePrice then continues down the variant's own chain.
-    async variantPrice(q: { customerId: string; variantArticleId: string; quantity: number }): Promise<ResolvedPrice | null | undefined> {
+    // Valuta: in the order's currency (q.currency/exchangeRate, omitted = SEK).
+    async variantPrice(
+      q: { customerId: string; variantArticleId: string; quantity: number } & ConfigurationCurrency
+    ): Promise<ResolvedPrice | null | undefined> {
       const link = await repo.variantOf(db, q.variantArticleId);
       if (!link) return undefined;
       const detail = await repo.loadTemplate(db, link.templateArticleId);
       if (!detail) return null;
-      const templatePrice = await deps.prices({ customerId: q.customerId, articleId: link.templateArticleId, quantity: q.quantity });
-      const { evaluation } = resolveConfiguration(toEngineTemplate(detail), selectionFromEntries(link.selection), templatePrice?.price ?? null);
+      const templatePrice = await deps.prices({
+        customerId: q.customerId,
+        articleId: link.templateArticleId,
+        quantity: q.quantity,
+        ...chainCurrency(q),
+      });
+      const { evaluation } = resolveConfiguration(
+        toEngineTemplate(detail),
+        selectionFromEntries(link.selection),
+        templatePrice?.price ?? null,
+        rateOf(q)
+      );
       if (!evaluation.valid || evaluation.price.unitPrice === null || evaluation.price.source === null) return null;
       return { unitPrice: evaluation.price.unitPrice, discountPercent: evaluation.price.discountPercent, source: evaluation.price.source };
     },

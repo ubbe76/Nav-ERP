@@ -1,6 +1,7 @@
 // packages/shared/src/configurator.ts
 import { z } from "zod";
 import { listQuerySchema } from "./list.js";
+import { currencyCodeSchema, exchangeRateValueSchema } from "./currency.js";
 import type { PriceSource } from "./sales.js";
 
 export const configuratorCodeSchema = z
@@ -283,10 +284,16 @@ export const configuratorSelectionSchema = z.record(
   z.union([z.string().max(20), z.boolean(), z.number().finite(), z.null()]),
 );
 export type ConfiguratorSelection = z.infer<typeof configuratorSelectionSchema>;
+// Valuta: the price in a currency — currency omitted = the customer's (with a
+// customerId), else SEK; exchangeRate omitted = today's rate (409
+// exchange-rate-unavailable when there is none). The order card sends its
+// order's currency and rate. The answer carries currency/exchangeRate.
 export const evaluateConfigurationSchema = z.object({
   selection: configuratorSelectionSchema.default({}),
   customerId: z.string().uuid().optional(),
   quantity: z.coerce.number().positive().default(1),
+  currency: currencyCodeSchema.optional(),
+  exchangeRate: exchangeRateValueSchema.optional(),
 });
 
 // Derivation takes the same body as evaluate (selection, customer, quantity).
@@ -315,6 +322,10 @@ export type ConfiguratorEvaluation = {
     source: PriceSource | null;
   };
   warnings: string[];
+  // Valuta: what the prices are in (set by evaluate/derive — the engine's own
+  // answer leaves them out). SEK has rate 1.
+  currency?: string;
+  exchangeRate?: number;
 };
 
 export type ConfiguratorValueDetail = {
@@ -415,6 +426,9 @@ export type PublicTemplateSummary = {
   articleNumber: string;
   name: string;
   mode: ConfiguratorMode;
+  // Valuta: the template's prices (basePrice, priceAdd, pricePerUnit) are
+  // always SEK; evaluate converts them to another currency.
+  currency: "SEK";
   basePrice: number | null;
   groups: PublicTemplateGroupSummary[];
 };

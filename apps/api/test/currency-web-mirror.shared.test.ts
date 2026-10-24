@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   documentSekAmounts,
+  fromSek,
+  invoiceSekAmounts,
+  receiptExchangeDifference,
   paymentExchangeDifference,
   releasedSek,
   sekShare,
@@ -63,5 +66,23 @@ describe("currency web mirror", () => {
     }
     const input = { amountSek: 11250, bankFeeSek: 25, appliedAmountsSek: [5565.5, 5565.5] };
     expect(web.paymentExchangeDifference(input)).toBe(paymentExchangeDifference(input));
+  });
+
+  // Valuta steg 3 (försäljning i valuta).
+  it("fromSek, invoiceSekAmounts and receiptExchangeDifference are identical", () => {
+    for (const amount of [...AMOUNTS, 12.3456]) for (const rate of RATES) expect(web.fromSek(amount, rate)).toBe(fromSek(amount, rate));
+    for (const rate of RATES) {
+      const input = {
+        rate,
+        rows: [
+          { lineAmount: 333.33, vatAmount: 83.33 },
+          { lineAmount: 333.33, vatAmount: 40 },
+          { lineAmount: 333.34, vatAmount: 0 },
+        ],
+      };
+      expect(web.invoiceSekAmounts(input)).toEqual(invoiceSekAmounts(input));
+    }
+    const receipt = { amountSek: 10800, bankFeeSek: 50, appliedAmountsSek: [5500, 5500] };
+    expect(web.receiptExchangeDifference(receipt)).toBe(receiptExchangeDifference(receipt));
   });
 });

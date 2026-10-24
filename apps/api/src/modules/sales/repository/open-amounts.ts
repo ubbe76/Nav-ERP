@@ -50,6 +50,37 @@ export const grossAmountSql = sql<string>`(
     ), 0)
 )`;
 
+// Valuta: the same open item's SEK side —
+//
+//   open SEK = sign(type) · gross_amount_sek
+//            − Σ live customer_payment_rows(applied_amount_sek + write_off_amount_sek)
+//            + Σ invoice_reminders(fee)
+//
+// gross_amount_sek is the receivable the F verification booked (stamped at
+// issue, positive like the rows; null on a draft ⇒ null), each payment row
+// stores the SEK it released (frigjort SEK), and a fee is always SEK (only
+// SEK invoices carry one). For a SEK invoice both sides equal the open amount
+// above.
+export const grossAmountSekSql = sql<string | null>`(
+  CASE WHEN "invoices"."type" = 'credit' THEN -1 ELSE 1 END * "invoices"."gross_amount_sek"
+)`;
+
+export const openAmountSekSql = sql<string | null>`(
+  ${grossAmountSekSql}
+  - COALESCE((
+      SELECT SUM(cpr.applied_amount_sek + cpr.write_off_amount_sek)
+      FROM customer_payment_rows cpr
+      JOIN customer_payments cp ON cp.id = cpr.payment_id
+      WHERE cpr.invoice_id = "invoices"."id"
+        AND cp.cancelled_at IS NULL
+    ), 0)
+  + COALESCE((
+      SELECT SUM(rem.fee)
+      FROM invoice_reminders rem
+      WHERE rem.invoice_id = "invoices"."id"
+    ), 0)
+)`;
+
 // Correlated on the `invoices` row in the surrounding query, so a query can
 // select it and filter on it in SQL (the alternative — computing the amounts
 // in TypeScript — cannot be pushed into a WHERE and would break pagination).
@@ -100,6 +131,9 @@ export function openItemAggregates(executor: Db | Tx) {
     .select({
       invoiceId: customerPaymentRows.invoiceId,
       total: sql<string>`SUM(${customerPaymentRows.appliedAmount} + ${customerPaymentRows.writeOffAmount})`.as("settled_total"),
+      totalSek: sql<string>`SUM(${customerPaymentRows.appliedAmountSek} + ${customerPaymentRows.writeOffAmountSek})`.as(
+        "settled_total_sek"
+      ),
     })
     .from(customerPaymentRows)
     .innerJoin(customerPayments, eq(customerPayments.id, customerPaymentRows.paymentId))
@@ -117,7 +151,10 @@ export function openItemAggregates(executor: Db | Tx) {
     .as("open_fees");
   const grossExpr = sql<string>`(CASE WHEN ${invoices.type} = 'credit' THEN -1 ELSE 1 END * COALESCE(${gross.total}, 0))`;
   const openExpr = sql<string>`(${grossExpr} - COALESCE(${settled.total}, 0) + COALESCE(${fees.total}, 0))`;
-  return { gross, settled, fees, grossExpr, openExpr };
+  // Valuta: the same open item's booked SEK value (see openAmountSekSql).
+  const grossSekExpr = sql<string | null>`(CASE WHEN ${invoices.type} = 'credit' THEN -1 ELSE 1 END * ${invoices.grossAmountSek})`;
+  const openSekExpr = sql<string | null>`(${grossSekExpr} - COALESCE(${settled.totalSek}, 0) + COALESCE(${fees.total}, 0))`;
+  return { gross, settled, fees, grossExpr, openExpr, grossSekExpr, openSekExpr };
 }
 
 // Open amount per invoice id, as numbers (kr). Takes a Db or a Tx: the payment
@@ -141,24 +178,67 @@ export async function computeOpenAmounts(executor: Db | Tx, invoiceIds: string[]
   return open;
 }
 
+// Valuta: open SEK value per invoice id (null for one without a stamped
+// receivable — a draft).
+export async function computeOpenAmountsSek(executor: Db | Tx, invoiceIds: string[]): Promise<Map<string, number | null>> {
+  const open = new Map<string, number | null>(invoiceIds.map((id) => [id, null]));
+  if (invoiceIds.length === 0) return open;
+  const rows = await executor
+    .select({ id: invoices.id, openAmountSek: openAmountSekSql })
+    .from(invoices)
+    .where(inArray(invoices.id, invoiceIds));
+  for (const row of rows) open.set(row.id, row.openAmountSek === null ? null : Number(row.openAmountSek));
+  return open;
+}
+
+// Valuta: the SEK already released from each invoice by live (non-cancelled)
+// payments — what a settling row subtracts from the receivable
+// (@navet/shared releasedSek). Called inside the registration's transaction
+// after the invoices are row-locked, like computeOpenAmounts.
+export async function computeReleasedSek(executor: Db | Tx, invoiceIds: string[]): Promise<Map<string, number>> {
+  const released = new Map<string, number>(invoiceIds.map((id) => [id, 0]));
+  if (invoiceIds.length === 0) return released;
+  const rows = await executor
+    .select({
+      invoiceId: customerPaymentRows.invoiceId,
+      total: sql<string>`SUM(${customerPaymentRows.appliedAmountSek} + ${customerPaymentRows.writeOffAmountSek})`,
+    })
+    .from(customerPaymentRows)
+    .innerJoin(customerPayments, eq(customerPayments.id, customerPaymentRows.paymentId))
+    .where(and(isNull(customerPayments.cancelledAt), inArray(customerPaymentRows.invoiceId, invoiceIds)))
+    .groupBy(customerPaymentRows.invoiceId);
+  for (const row of rows) released.set(row.invoiceId, Number(row.total));
+  return released;
+}
+
 // Årsbokslut (steg 1): the kundreskontra AS OF a date, for the reconciliation
 // against the receivable account. Every document counts on the date it hit
 // the ledger — its own verification's date — so both sides are measured at
 // the same moment: a payment dated before `date` but cancelled after it still
 // counts as paid (its omföring is dated after `date` too).
+//
+// Valuta: in SEK — Σ gross_amount_sek (the receivable each F verification
+// booked) − Σ frigjort SEK (applied_amount_sek + write_off_amount_sek) + the
+// fees (always SEK), so an EUR and a SEK invoice are never summed in their
+// own currencies and the total reconciles with the receivable account (the
+// exchange differences are booked on 3960/7960, never on it). An issued
+// invoice without the stamp (written by something other than Utfärda) counts
+// its gross at its rate, which for SEK is the gross itself.
 export async function receivablesTotalAsOf(executor: Db | Tx, date: string): Promise<number> {
   const rows = await executor.execute(sql`
     SELECT
       COALESCE((
         SELECT SUM(g.gross) FROM (
-          SELECT ${grossAmountSql} AS gross
+          SELECT CASE WHEN "invoices"."type" = 'credit' THEN -1 ELSE 1 END
+                 * COALESCE("invoices"."gross_amount_sek",
+                            ROUND(ABS(${grossAmountSql}) * COALESCE("invoices"."exchange_rate", 1), 2)) AS gross
           FROM invoices
           JOIN verifications iv ON iv.id = "invoices"."verification_id"
           WHERE iv.date <= ${date}
         ) g
       ), 0)
       - COALESCE((
-        SELECT SUM(cpr.applied_amount + cpr.write_off_amount)
+        SELECT SUM(cpr.applied_amount_sek + cpr.write_off_amount_sek)
         FROM customer_payment_rows cpr
         JOIN customer_payments cp ON cp.id = cpr.payment_id
         LEFT JOIN verifications cv ON cv.id = cp.cancellation_verification_id

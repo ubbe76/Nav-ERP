@@ -14,9 +14,11 @@ import {
 import {
   computedVatAmount,
   documentSekAmounts,
+  invoiceSekAmounts,
   isVatCode,
   isVatRate,
   paymentExchangeDifference,
+  receiptExchangeDifference,
   reverseVatPreview,
   round2,
   SEK,
@@ -291,11 +293,15 @@ export interface PostingAccountNumbers {
   postingBankFees: string;
 }
 
+// Valuta: currency/exchangeRate (SEK per 1 unit) of the invoice — omitted =
+// SEK at rate 1, which books exactly as before the feature.
 export type CustomerInvoiceDocument = {
   invoiceNumber: string;
   type: "invoice" | "credit";
   invoiceDate: string;
   customerName: string;
+  currency?: string;
+  exchangeRate?: number;
 };
 
 // A momskod as the poster needs it: the vat_codes row (id for the posting
@@ -365,12 +371,21 @@ export type ImportVatDocument = {
 // payment and snapshotted on the payment row — not a posting setting (see
 // PostingAccountNumbers.postingBank). bankAmount is the bank part only: 0 for
 // a pure kvittning between open items.
+//
+// Valuta: bankAmount is in the payment's currency (the Σ applied identity is
+// checked in that currency); bankAmountSek is what the bank account got in
+// SEK (for a refund: what left it) and bankFeeSek the bank's fee — both
+// default to the SEK case (bankAmount, 0). The rows carry the SEK they
+// release (default = the amounts themselves).
 export type CustomerPaymentDocument = {
   paymentNumber: string;
   paymentDate: string;
   bankAccountNumber: string;
   bankAmount: number;
   customerName: string;
+  currency?: string;
+  bankAmountSek?: number;
+  bankFeeSek?: number;
 };
 
 // One row per settled open item, both amounts signed: appliedAmount is
@@ -382,6 +397,8 @@ export type CustomerPaymentDocument = {
 export type CustomerPaymentDocumentRow = {
   appliedAmount: number;
   writeOffAmount: number;
+  appliedAmountSek?: number;
+  writeOffAmountSek?: number;
 };
 
 // Leverantörsreskontra (B4), the mirror of CustomerPaymentDocument:
@@ -823,6 +840,14 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
     // mirrors every contribution — it is NOT a reversal (no
     // reversesVerificationId): the credit note is its own document in its
     // own right.
+    //
+    // Valuta: everything is booked in SEK at the invoice's rate with the
+    // customer side of the restmetod (invoiceSekAmounts): the receivable is
+    // exactly toSek(brutto) — the gross_amount_sek Utfärda stamps — the VAT
+    // exactly toSek(Σ moms), each row's net and VAT their own toSek, and the
+    // öre the rows leave over go on the largest row (net) and the largest VAT
+    // row, so the verification always balances. The momskoder work on the
+    // SEK base. A SEK invoice (rate 1) gets its own amounts back unchanged.
     async postCustomerInvoice(
       tx: Tx,
       doc: CustomerInvoiceDocument,
@@ -837,10 +862,21 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
       // Normalize to öre ONCE: the accumulator then only ever sums 2-decimal
       // values, so the gross can never drift a cent away from the sum of the
       // contributions and the balance assert cannot fire on rounding.
-      const documentRows = rows.map((row) => ({
+      const currency = doc.currency ?? SEK;
+      const rate = currency === SEK ? 1 : doc.exchangeRate;
+      // Unreachable through the service, which decides a rate before Utfärda.
+      if (rate === undefined || !(rate > 0)) {
+        throw new Error(`Customer invoice ${doc.invoiceNumber} in ${currency} has no exchange rate`);
+      }
+      const ownRows = rows.map((row) => ({ lineAmount: round2(row.lineAmount), vatAmount: round2(row.vatAmount) }));
+      const sek = invoiceSekAmounts({ rate, rows: ownRows });
+      const documentRows = rows.map((row, index) => ({
         articleGroupId: row.articleGroupId,
-        lineAmount: round2(row.lineAmount),
-        vatAmount: round2(row.vatAmount),
+        lineAmount: sek.rows[index]!.lineAmount,
+        vatAmount: sek.rows[index]!.vatAmount,
+        // The document's own VAT decides the 0 %-code check below (a converted
+        // öre must never be mistaken for VAT the code may not carry).
+        ownVatAmount: ownRows[index]!.vatAmount,
         vatRate: row.vatRate,
         vatCode: resolveVatCode(row.vatCode, "sales"),
       }));
@@ -853,13 +889,14 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         if (row.vatRate !== row.vatCode.entry.rate) {
           throw new VatCodeAmountMismatchError(row.vatCode.code, `row rate ${row.vatRate} % is not the code's ${row.vatCode.entry.rate} %`);
         }
-        if (row.vatCode.entry.rate === 0 && row.vatAmount !== 0) {
-          throw new VatCodeAmountMismatchError(row.vatCode.code, `a 0 % code cannot carry VAT ${row.vatAmount}`);
+        if (row.vatCode.entry.rate === 0 && row.ownVatAmount !== 0) {
+          throw new VatCodeAmountMismatchError(row.vatCode.code, `a 0 % code cannot carry VAT ${row.ownVatAmount}`);
         }
       }
 
-      const gross = round2(documentRows.reduce((sum, row) => sum + row.lineAmount + row.vatAmount, 0));
-      if (gross === 0) throw new ZeroAmountPostingError();
+      const ownGross = round2(ownRows.reduce((sum, row) => sum + row.lineAmount + row.vatAmount, 0));
+      const gross = sek.grossAmount;
+      if (ownGross === 0 || gross === 0) throw new ZeroAmountPostingError();
 
       const sign = doc.type === "credit" ? -1 : 1;
       const resolveAccount = createPostingAccountResolver(tx);
@@ -893,7 +930,12 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
           date: doc.invoiceDate,
           // Swedish, like every other user-facing string — this is what the
           // verification list is searched by.
-          description: truncateDescription(`${label} ${doc.invoiceNumber} — ${doc.customerName}`),
+          description: truncateDescription(
+            `${label} ${doc.invoiceNumber} — ${doc.customerName}` +
+              (currency === SEK
+                ? ""
+                : `, ${currency} ${formatDescriptionAmount(ownGross)} à ${formatDescriptionRate(rate)}`)
+          ),
         },
         amounts.toRows(),
         { source: "customer_invoice", document: doc.invoiceNumber },
@@ -1076,6 +1118,15 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
     // every combination: underpayment, overpayment, kvittning and mixes of
     // them are the same arithmetic, no special cases.
     //
+    // Valuta: every ledger amount is SEK. The receivable is credited with the
+    // SEK each row releases (frigjort SEK, computed by the registration from
+    // the invoice's gross_amount_sek), the bank debited with bankAmountSek,
+    // the bank's fee debited on posting_bank_fees, and what is left —
+    // Σ released (applied part) − bankAmountSek − fee — is kursförlust (debit
+    // posting_fx_loss) when positive and kursvinst (credit posting_fx_gain)
+    // when negative. A SEK payment has bankAmountSek = bankAmount, no fee and
+    // released = the amounts, so it books exactly as before the feature.
+    //
     // Returns null when the payment moves nothing in the ledger — see the
     // netting check below.
     async postCustomerPayment(
@@ -1090,15 +1141,28 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
       // Normalize to öre ONCE (postCustomerInvoice's rationale): the
       // accumulator then only ever sums 2-decimal values, so the bank amount
       // cannot drift a cent away from the sum of the contributions.
+      const currency = doc.currency ?? SEK;
       const bankAmount = round2(doc.bankAmount);
       const paymentRows = rows.map((row) => ({
         appliedAmount: round2(row.appliedAmount),
         writeOffAmount: round2(row.writeOffAmount),
+        appliedAmountSek: round2(row.appliedAmountSek ?? row.appliedAmount),
+        writeOffAmountSek: round2(row.writeOffAmountSek ?? row.writeOffAmount),
       }));
 
-      // The balance precondition, stated where it can still be a typed error.
+      // The balance precondition, stated where it can still be a typed error
+      // — in the payment's own currency: the bank part is what the rows apply.
       const appliedTotal = round2(paymentRows.reduce((sum, row) => sum + row.appliedAmount, 0));
       if (bankAmount !== appliedTotal) throw new PaymentAmountMismatchError(bankAmount, appliedTotal);
+
+      const bankAmountSek = round2(doc.bankAmountSek ?? bankAmount);
+      const bankFeeSek = round2(doc.bankFeeSek ?? 0);
+      // > 0 = less SEK came in than the receivable was booked at = loss.
+      const exchangeDifference = receiptExchangeDifference({
+        amountSek: bankAmountSek,
+        bankFeeSek,
+        appliedAmountsSek: paymentRows.map((row) => row.appliedAmountSek),
+      });
 
       const resolveAccount = createPostingAccountResolver(tx);
       const amounts = createAmountAccumulator();
@@ -1110,7 +1174,7 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
       // no write-off row at all — and then there is no write-off account to
       // collide with either, which is why the resolve is conditional.
       const receivableAccountId = await resolveAccount(postingAccounts.postingAccountsReceivable, "accounts receivable");
-      const writeOffTotal = round2(paymentRows.reduce((sum, row) => sum + row.writeOffAmount, 0));
+      const writeOffTotal = round2(paymentRows.reduce((sum, row) => sum + row.writeOffAmountSek, 0));
       const writeOffAccountId =
         writeOffTotal === 0
           ? null
@@ -1135,10 +1199,26 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         throw new PaymentBankAccountConflictError(postingAccounts.postingPaymentWriteOff, "payment write-off account");
       }
 
+      // Valuta: the fee and exchange-difference accounts, only when used —
+      // and never the receivable itself (the same silent absorption).
+      const feeAccountId = bankFeeSek === 0 ? null : await resolveAccount(postingAccounts.postingBankFees, "bank fees");
+      if (feeAccountId !== null && feeAccountId === receivableAccountId) {
+        throw new PaymentBankAccountConflictError(postingAccounts.postingBankFees, "bank fees account");
+      }
+      const fxAccountNumber =
+        exchangeDifference > 0 ? postingAccounts.postingFxLoss : exchangeDifference < 0 ? postingAccounts.postingFxGain : null;
+      const fxAccountId =
+        fxAccountNumber === null
+          ? null
+          : await resolveAccount(fxAccountNumber, exchangeDifference > 0 ? "exchange rate loss" : "exchange rate gain");
+      if (fxAccountId !== null && fxAccountId === receivableAccountId) {
+        throw new PaymentBankAccountConflictError(fxAccountNumber!, exchangeDifference > 0 ? "exchange rate loss account" : "exchange rate gain account");
+      }
+
       // A pure kvittning never touches the bank, so the account is not even
       // resolved: a retired betalkonto on the payment must not block a netting
       // that does not use it.
-      if (bankAmount !== 0) {
+      if (bankAmountSek !== 0) {
         const bankAccountId = await resolveAccount(doc.bankAccountNumber, "payment bank account");
         // A betalkonto that IS one of those two accounts cancels the bank
         // movement against a contribution of the opposite sign, and the
@@ -1149,17 +1229,26 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         // enters the books. Refused here, before a single contribution is
         // added, rather than left to a check that only catches the case where
         // EVERYTHING nets out.
-        if (bankAccountId === receivableAccountId || bankAccountId === writeOffAccountId) {
+        if (
+          bankAccountId === receivableAccountId ||
+          bankAccountId === writeOffAccountId ||
+          bankAccountId === feeAccountId ||
+          bankAccountId === fxAccountId
+        ) {
           throw new PaymentBankAccountConflictError(doc.bankAccountNumber);
         }
-        amounts.add(bankAccountId, bankAmount);
+        amounts.add(bankAccountId, bankAmountSek);
       }
 
+      // Kredit: the receivable shrinks by everything the row settles, in SEK —
+      // what the row releases from the invoice's booked receivable.
       for (const row of paymentRows) {
-        amounts.add(receivableAccountId, -(row.appliedAmount + row.writeOffAmount));
+        amounts.add(receivableAccountId, -(row.appliedAmountSek + row.writeOffAmountSek));
       }
 
       if (writeOffAccountId !== null) amounts.add(writeOffAccountId, writeOffTotal);
+      if (feeAccountId !== null) amounts.add(feeAccountId, bankFeeSek);
+      if (fxAccountId !== null) amounts.add(fxAccountId, exchangeDifference);
 
       const postingRows = amounts.toRows();
       // Kvittning between open items on the SAME receivable account — a credit
@@ -1182,7 +1271,7 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         // misconfigured betalkonto, not a kvittning. The identity check above
         // already refuses every way that can happen — this is the backstop
         // that keeps the invariant local to the return.
-        if (bankAmount !== 0) throw new PaymentBankAccountConflictError(doc.bankAccountNumber);
+        if (bankAmountSek !== 0) throw new PaymentBankAccountConflictError(doc.bankAccountNumber);
         return null;
       }
 
@@ -1192,7 +1281,10 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         {
           series,
           date: doc.paymentDate,
-          description: truncateDescription(`Betalning ${doc.paymentNumber} — ${doc.customerName}`),
+          description: truncateDescription(
+            `Betalning ${doc.paymentNumber} — ${doc.customerName}` +
+              (currency === SEK ? "" : `, ${currency} ${formatDescriptionAmount(bankAmount)}`)
+          ),
         },
         postingRows,
         { source: "customer_payment", document: doc.paymentNumber },

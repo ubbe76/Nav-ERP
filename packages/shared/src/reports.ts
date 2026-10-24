@@ -192,7 +192,10 @@ export interface QuoteFollowupQuote {
   expired: boolean;
   lostReason: { id: string; code: string; name: string } | null;
   lostNote: string | null;
-  value: number; // SEK, the order's current rows
+  value: number; // SEK, the order's current rows (Valuta: converted with the order's rate)
+  // Valuta: the order's currency and its value in it (= value for SEK).
+  currency: string;
+  currencyValue: number;
 }
 
 export interface QuoteFollowupReport {

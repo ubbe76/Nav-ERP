@@ -200,7 +200,7 @@ export function createAlertsService(deps: {
         severity: "red",
         href: `/forsaljning/fakturor/${r.invoiceId}`,
         primary: `${r.invoiceNumber ?? "Faktura"} ${r.customerName ?? ""}`.trim(),
-        secondary: `Förföll ${r.dueDate} (${daysLateText(r.dueDate, today)}) · ${formatAmount(r.openAmount)} kr kvar`,
+        secondary: `Förföll ${r.dueDate} (${daysLateText(r.dueDate, today)}) · ${formatAmount(r.openAmount)} ${r.currency === "SEK" ? "kr" : r.currency} kvar`,
         date: r.dueDate,
       }));
     },

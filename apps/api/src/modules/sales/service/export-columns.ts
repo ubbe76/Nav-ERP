@@ -45,6 +45,7 @@ export const CUSTOMER_CSV_COLUMNS: CsvColumn<CustomerRow>[] = [
   { label: "Privatperson", value: (r) => (r.privatePerson ? "Ja" : "Nej") },
   { label: "Webbsida", value: (r) => r.website },
   { label: "Kundrabatt %", value: (r) => r.discountPercent },
+  { label: "Valuta", value: (r) => r.currency },
   { label: "Skapad", value: (r) => r.createdAt.toISOString(), format: "datetime" },
 ];
 
@@ -80,6 +81,8 @@ export const SALES_ORDER_CSV_COLUMNS: CsvColumn<SalesOrderRow>[] = [
   { label: "Kundens ordernr", value: (r) => r.customerOrderNumber },
   { label: "Kundens förfrågan", value: (r) => r.customerInquiryNumber },
   { label: "Kundens referens", value: (r) => r.customerReference },
+  { label: "Valuta", value: (r) => r.currency },
+  { label: "Kurs", value: (r) => r.exchangeRate },
   { label: "Notering", value: (r) => r.note },
   { label: "Skapad", value: (r) => r.createdAt.toISOString(), format: "datetime" },
 ];
@@ -92,6 +95,7 @@ export const PRICE_LIST_CSV_COLUMNS: CsvColumn<PriceListRow>[] = [
   { label: "Kod", value: (r) => r.code },
   { label: "Namn", value: (r) => r.name },
   { label: "Beskrivning", value: (r) => r.description },
+  { label: "Valuta", value: (r) => r.currency },
   { label: "Antal rader", value: (r) => r.rowCount, format: "number" },
   { label: "Skapad", value: (r) => r.createdAt.toISOString(), format: "datetime" },
 ];
@@ -132,6 +136,8 @@ export const INVOICE_CSV_COLUMNS: CsvColumn<InvoiceRow>[] = [
   },
   { label: "Status", value: (r) => INVOICE_STATUS_LABELS[r.status] },
   { label: "Valuta", value: (r) => r.currency },
+  // Valuta: the receivable in SEK (stamped at Utfärda; empty on a draft).
+  { label: "Belopp SEK", value: (r) => (r.grossAmountSek === null ? null : Number(r.grossAmountSek)), format: "money" },
   { label: "OCR", value: (r) => r.ocrNumber },
   { label: "Verifikat", value: (r) => r.verificationDisplayNumber },
   { label: "Notering", value: (r) => r.note },
@@ -151,6 +157,8 @@ export interface OpenInvoiceCsvRow {
   ocrNumber: string | null;
   grossAmount: number;
   openAmount: number;
+  currency: string;
+  openAmountSek: number | null;
   reminderCount: number;
   reminderFeeCharged: boolean;
 }
@@ -169,6 +177,8 @@ export const OPEN_INVOICE_CSV_COLUMNS: CsvColumn<OpenInvoiceCsvRow>[] = [
   },
   { label: "Fakturadatum", value: (r) => r.invoiceDate, format: "date" },
   { label: "OCR", value: (r) => r.ocrNumber },
+  { label: "Valuta", value: (r) => r.currency },
+  { label: "Öppet belopp SEK", value: (r) => r.openAmountSek, format: "money" },
 ];
 
 // --- Betalningar (customer payments) ---
@@ -184,6 +194,9 @@ export const PAYMENT_CSV_COLUMNS: CsvColumn<PaymentRow>[] = [
   { label: "Datum", value: (r) => r.paymentDate, format: "date" },
   { label: "Kund", value: (r) => r.customerName },
   { label: "Belopp", value: (r) => r.amount, format: "money" },
+  { label: "Valuta", value: (r) => r.currency },
+  { label: "Belopp SEK", value: (r) => r.amountSek, format: "money" },
+  { label: "Bankavgift SEK", value: (r) => r.bankFeeSek, format: "money" },
   { label: "Konto", value: (r) => r.bankAccountNumber },
   { label: "Verifikat", value: (r) => r.verificationDisplayNumber },
   { label: "Status", value: (r) => (r.cancelledAt === null ? "Registrerad" : "Makulerad") },

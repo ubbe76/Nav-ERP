@@ -69,6 +69,75 @@ export function documentSekAmounts(input: {
   return { grossAmount, vatAmount, netAmount, rows, remainder: fromOre(ore(netAmount) - rowTotal) };
 }
 
+// The amount in a document currency that a SEK amount is worth at the
+// document's rate (SEK per 1 unit), to the öre — the other direction of
+// toSek: an article's försäljningspris (SEK, up to four decimals), the
+// configurator's price additions and a freight row's kundpris on an order in
+// EUR. Exact like toSek (the SEK amount is read at four decimals, the rate at
+// six), rounded half away from zero. SEK (rate 1) returns the amount to the
+// öre.
+export function fromSek(amountSek: number, rate: number): number {
+  const m = micro(rate);
+  if (m <= 0n) throw new Error("A rate must be positive");
+  // amount × 10^4 (four decimals) × 10^6 / (rate × 10^6 × 100) = öre.
+  return fromOre(divideRounded(BigInt(Math.round(amountSek * 1e4)) * MICRO_PER_UNIT, m * 100n));
+}
+
+// Kundfakturans SEK-belopp — the customer side of the restmetod
+// (documentSekAmounts): the receivable is exactly toSek(brutto), the VAT
+// exactly toSek(Σ moms), and every row's net and VAT their own toSek. What
+// the rows leave over in öre goes on the row with the largest net (the net
+// remainder) and on the row with the largest VAT (the VAT remainder — never
+// a 0 % row, which has no VAT to carry it), so the verification balances and
+// every ledger total is the toSek of the document's own total. Amounts are
+// as stored (positive, also on a credit note). For SEK (rate 1) every figure
+// equals the document's own.
+export type InvoiceSekAmounts = {
+  grossAmount: number;
+  vatAmount: number;
+  netAmount: number;
+  rows: { lineAmount: number; vatAmount: number }[];
+};
+
+export function invoiceSekAmounts(input: {
+  rate: number;
+  rows: { lineAmount: number; vatAmount: number }[];
+}): InvoiceSekAmounts {
+  const gross = input.rows.reduce((sum, row) => sum + ore(row.lineAmount) + ore(row.vatAmount), 0n);
+  const vat = input.rows.reduce((sum, row) => sum + ore(row.vatAmount), 0n);
+  const doc = documentSekAmounts({
+    rate: input.rate,
+    grossAmount: fromOre(gross),
+    vatAmount: fromOre(vat),
+    rows: input.rows.map((row) => row.lineAmount),
+  });
+  const lines = doc.rows.map((amount) => ore(amount));
+  const vats = input.rows.map((row) => ore(toSek(row.vatAmount, input.rate)));
+  const largest = (values: number[]) => {
+    let index = -1;
+    values.forEach((value, i) => {
+      if (index === -1 || Math.abs(value) > Math.abs(values[index]!)) index = i;
+    });
+    return index;
+  };
+  const netRemainder = ore(doc.remainder);
+  if (netRemainder !== 0n) {
+    const i = largest(input.rows.map((row) => row.lineAmount));
+    if (i >= 0) lines[i] = lines[i]! + netRemainder;
+  }
+  const vatRemainder = ore(doc.vatAmount) - vats.reduce((sum, value) => sum + value, 0n);
+  if (vatRemainder !== 0n) {
+    const i = largest(input.rows.map((row) => row.vatAmount));
+    if (i >= 0) vats[i] = vats[i]! + vatRemainder;
+  }
+  return {
+    grossAmount: doc.grossAmount,
+    vatAmount: doc.vatAmount,
+    netAmount: doc.netAmount,
+    rows: input.rows.map((_, i) => ({ lineAmount: fromOre(lines[i]!), vatAmount: fromOre(vats[i]!) })),
+  };
+}
+
 // part / whole × wholeSek, to the öre.
 export function sekShare(part: number, whole: number, wholeSek: number): number {
   const w = ore(whole);
@@ -165,4 +234,20 @@ export function documentRateSourceText(source: DocumentRateSourceValue | null, d
     default:
       return null;
   }
+}
+
+// The customer side of paymentExchangeDifference: an incoming payment
+// releases Σ frigjort SEK (applied part) from the receivable, while the bank
+// account got amount_sek (the bank's movement — what landed on it, or for a
+// refund left it) and the bank kept bank_fee_sek. Positive = less SEK came
+// in than the receivable was booked at = kursförlust; negative = kursvinst.
+// Exposed on the payment card as exchangeRateDifferenceSek with the opposite
+// sign (positive = vinst), like the supplier side.
+export function receiptExchangeDifference(input: {
+  amountSek: number;
+  bankFeeSek: number;
+  appliedAmountsSek: number[];
+}): number {
+  const applied = input.appliedAmountsSek.reduce((sum, amount) => sum + ore(amount), 0n);
+  return fromOre(applied - ore(input.amountSek) - ore(input.bankFeeSek));
 }

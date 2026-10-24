@@ -211,3 +211,30 @@ export class VatNumberRequiredError extends Error {
     this.name = "VatNumberRequiredError";
   }
 }
+
+// Valuta: the order's currency cannot change once it has rows — their prices
+// stand in the old currency. 409 sales-order-currency-locked.
+export class SalesOrderCurrencyLockedError extends Error {
+  constructor(orderNumber: string) {
+    super(`Valutan på ${orderNumber} kan inte ändras när ordern har rader — ta bort raderna först`);
+    this.name = "SalesOrderCurrencyLockedError";
+  }
+}
+
+// Valuta: a rate other than 1 on a SEK order (or quote request). 400
+// sales-order-exchange-rate.
+export class SalesOrderExchangeRateError extends Error {
+  constructor() {
+    super("En order i SEK har alltid kursen 1");
+    this.name = "SalesOrderExchangeRateError";
+  }
+}
+
+// Valuta: a price list's currency cannot change while it has rows — their
+// prices are in the old currency. 409 price-list-currency-locked.
+export class PriceListCurrencyLockedError extends Error {
+  constructor(code: string) {
+    super(`Valutan på prislistan ${code} kan inte ändras när listan har rader`);
+    this.name = "PriceListCurrencyLockedError";
+  }
+}

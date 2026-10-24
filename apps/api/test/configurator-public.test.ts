@@ -76,10 +76,12 @@ const detail: ConfiguratorTemplateDetail = {
 };
 
 describe("public template mappers", () => {
+  // Valuta: every public shape carries currency "SEK" — the template's own
+  // prices are SEK; evaluate converts them.
   it("toPublicTemplate lämnar bara ut det publika", () => {
     const pub = toPublicTemplate(detail, { articleNumber: "63000", name: "Diskbänk" });
     expect(pub).toEqual({
-      articleId: detail.articleId, articleNumber: "63000", name: "Diskbänk", mode: "to_order", basePrice: 1000,
+      articleId: detail.articleId, articleNumber: "63000", name: "Diskbänk", mode: "to_order", currency: "SEK", basePrice: 1000,
       groups: [
         { code: "LOCK", name: "Lås", kind: "choice", required: true, unit: null, min: null, max: null, step: null,
           default: "A", priceAdd: 0, pricePerUnit: 0, priceBaseValue: 0,
@@ -117,7 +119,7 @@ describe("public template mappers", () => {
   it("toPublicTemplateSummary carries only code, name, kind and required per group", () => {
     const summary = toPublicTemplateSummary(detail, { articleNumber: "63000", name: "Diskbänk" });
     expect(summary).toEqual({
-      articleId: detail.articleId, articleNumber: "63000", name: "Diskbänk", mode: "to_order", basePrice: 1000,
+      articleId: detail.articleId, articleNumber: "63000", name: "Diskbänk", mode: "to_order", currency: "SEK", basePrice: 1000,
       groups: [
         { code: "LOCK", name: "Lås", kind: "choice", required: true },
         { code: "BREDD", name: "Bredd", kind: "number", required: true },
@@ -185,6 +187,8 @@ describe("public configurator routes", () => {
       rows: [
         {
           articleId: visible.article.id, articleNumber: visible.article.articleNumber, name: visible.article.name, mode: "to_order",
+          // Valuta: the template's prices are SEK (the public shape says so).
+          currency: "SEK",
           basePrice: 1000,
           groups: [
             { code: "LOCK", name: "Lås", kind: "choice", required: true },
@@ -241,7 +245,7 @@ describe("public configurator routes", () => {
     const res = await get(client, `/configurator/${t.article.id}`);
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
-      articleId: t.article.id, articleNumber: t.article.articleNumber, name: t.article.name, mode: "to_order", basePrice: 1000,
+      articleId: t.article.id, articleNumber: t.article.articleNumber, name: t.article.name, mode: "to_order", currency: "SEK", basePrice: 1000,
       groups: [
         { code: "LOCK", name: "Lås", kind: "choice", required: true, unit: null, min: null, max: null, step: null, default: "A",
           priceAdd: 0, pricePerUnit: 0, priceBaseValue: 0, values: [{ code: "A", name: "Lås A", priceAdd: 0 }, { code: "B", name: "Lås B", priceAdd: 50 }] },

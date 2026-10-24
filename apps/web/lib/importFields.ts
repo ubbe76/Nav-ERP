@@ -106,6 +106,7 @@ export const CUSTOMER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "collectiveInvoicing", label: "Samlingsfaktura" },
   { field: "privatePerson", label: "Privatperson" },
   { field: "website", label: "Webbsida" },
+  { field: "currency", label: "Valuta" },
 ];
 
 // Mirrors SUPPLIER_IMPORT_FIELDS in

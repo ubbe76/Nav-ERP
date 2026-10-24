@@ -5,8 +5,9 @@ import type { QuoteFollowupQuery } from "@navet/shared";
 // Offertuppföljning — one flat row per QUOTE (quoted = true) created in the
 // range, whatever status it has reached since. The pure builder in
 // quote-followup.ts decides the outcome and groups. The value is the sum of
-// the order's CURRENT rows (antal × à-pris × (1 − rabatt)), in SEK — sales
-// orders have no other currency.
+// the order's CURRENT rows (antal × à-pris × (1 − rabatt)), in SEK — Valuta:
+// an order in another currency is converted with its own rate (round2 of
+// value × rate, the same as toSek), and carries its currency and own value.
 export interface QuoteFollowupSourceRow {
   id: string;
   orderNumber: string;
@@ -21,7 +22,11 @@ export interface QuoteFollowupSourceRow {
   lostReasonCode: string | null;
   lostReasonName: string | null;
   lostNote: string | null;
+  // In SEK (converted with the order's rate).
   value: number;
+  // Valuta: the order's currency and the value in it.
+  currency: string;
+  currencyValue: number;
 }
 
 // Same ceiling as the orderförteckning — the report refuses
@@ -59,7 +64,9 @@ export function createQuoteFollowupRepository(db: Db) {
           lostReasonCode: quoteLossReasons.code,
           lostReasonName: quoteLossReasons.name,
           lostNote: salesOrders.lostNote,
-          value: rowValue,
+          value: sql<string>`round(${rowValue} * ${salesOrders.exchangeRate}, 2)`,
+          currency: salesOrders.currency,
+          currencyValue: rowValue,
         })
         .from(salesOrders)
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
@@ -68,7 +75,7 @@ export function createQuoteFollowupRepository(db: Db) {
         .orderBy(asc(salesOrders.createdAt), asc(salesOrders.orderNumber))
         .limit(limit);
 
-      return rows.map((r) => ({ ...r, value: Number(r.value) }));
+      return rows.map((r) => ({ ...r, value: Number(r.value), currencyValue: Number(r.currencyValue) }));
     },
   };
 }

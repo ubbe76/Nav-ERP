@@ -11,8 +11,10 @@ import {
 import { InvoiceNotFoundError } from "../service/invoice.service.js";
 import type { PaymentService } from "../service/payment.service.js";
 import {
+  CustomerPaymentAmountSekError,
   InvalidOcrError,
   InvoiceNotOpenError,
+  PaymentMixedCurrenciesError,
   PaymentAlreadyCancelledError,
   PaymentExceedsOpenAmountError,
   PaymentNotFoundError,
@@ -38,6 +40,13 @@ export async function paymentRoutes(app: FastifyInstance, opts: { service: Payme
       err instanceof CustomerNotFoundError
     ) {
       return reply.code(404).send(errorBody(err as Error));
+    }
+    // Valuta: the request itself does not fit the invoices' currency.
+    if (err instanceof PaymentMixedCurrenciesError) {
+      return reply.code(400).send({ ...errorBody(err), currencies: err.currencies });
+    }
+    if (err instanceof CustomerPaymentAmountSekError) {
+      return reply.code(400).send({ ...errorBody(err), reason: err.reason, currency: err.currency });
     }
     // Everything that means "your payment cannot become what you asked for,
     // given the current state of the open items or the books".

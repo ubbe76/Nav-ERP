@@ -18,6 +18,17 @@ import {
 } from "../src/modules/system/service/themes.errors.js";
 import { errorBody } from "../src/modules/system/service/error-body.js";
 import {
+  PriceListCurrencyLockedError,
+  SalesOrderCurrencyLockedError,
+  SalesOrderExchangeRateError,
+} from "../src/modules/sales/service/sales.errors.js";
+import {
+  InvoiceExchangeRateError,
+  InvoiceRowCurrencyMismatchError,
+  ReminderFeeCurrencyError,
+} from "../src/modules/sales/service/invoice.service.js";
+import { CustomerPaymentAmountSekError } from "../src/modules/sales/service/payment.service.js";
+import {
   PluginAccessDeniedError,
   PluginDeliveryNotFoundError,
   PluginDeliveryNotRetryableError,
@@ -475,6 +486,14 @@ const cases: Array<[Error, string]> = [
   [new SupplierInvoiceExchangeRateMissingError("EUR"), ERROR_CODES.SUPPLIER_INVOICE_EXCHANGE_RATE_MISSING],
   [new PaymentMixedCurrenciesError(["EUR", "SEK"]), ERROR_CODES.PAYMENT_MIXED_CURRENCIES],
   [new SupplierPaymentAmountSekError("required", "EUR"), ERROR_CODES.SUPPLIER_PAYMENT_AMOUNT_SEK],
+  // Valuta steg 3 (försäljning i valuta)
+  [new SalesOrderCurrencyLockedError("KO-1"), ERROR_CODES.SALES_ORDER_CURRENCY_LOCKED],
+  [new SalesOrderExchangeRateError(), ERROR_CODES.SALES_ORDER_EXCHANGE_RATE],
+  [new PriceListCurrencyLockedError("PL1"), ERROR_CODES.PRICE_LIST_CURRENCY_LOCKED],
+  [new InvoiceRowCurrencyMismatchError("EUR", "SEK"), ERROR_CODES.INVOICE_ROW_CURRENCY_MISMATCH],
+  [new InvoiceExchangeRateError("sek"), ERROR_CODES.INVOICE_EXCHANGE_RATE],
+  [new ReminderFeeCurrencyError("EUR"), ERROR_CODES.REMINDER_FEE_CURRENCY],
+  [new CustomerPaymentAmountSekError("required", "EUR"), ERROR_CODES.CUSTOMER_PAYMENT_AMOUNT_SEK],
   [new CollectiveInvoicingCustomerError("x"), ERROR_CODES.COLLECTIVE_INVOICING_CUSTOMER],
   [new InvalidShipmentInvoiceRowError("x"), ERROR_CODES.INVALID_SHIPMENT_INVOICE_ROW],
   [new ShipmentAlreadyInvoicedError("FR-1"), ERROR_CODES.SHIPMENT_ALREADY_INVOICED],

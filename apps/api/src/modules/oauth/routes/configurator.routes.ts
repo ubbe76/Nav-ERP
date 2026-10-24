@@ -27,6 +27,8 @@ import {
   ConfiguratorVariantTooLongError,
 } from "../../configurator/service/configurator.errors.js";
 import { errorBody } from "../../system/service/error-body.js";
+import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
+import { SalesOrderExchangeRateError } from "../../sales/service/sales.errors.js";
 import {
   ClientCustomerMismatchError,
   ClientPriceNotAllowedError,
@@ -58,7 +60,12 @@ export async function configuratorRoutes(
     // from the customer's price chain (customer price, price list, discount,
     // the configurator's own price for configured rows). An unbound internal
     // client may still send its prices.
-    if (req.apiClient?.customerId && input.rows.some((r) => r.unitPrice !== undefined || r.discountPercent !== undefined)) {
+    // Valuta: the rate prices every row converted from SEK — a bound client
+    // takes today's rate like it takes the chain's prices.
+    if (
+      req.apiClient?.customerId &&
+      (input.exchangeRate !== undefined || input.rows.some((r) => r.unitPrice !== undefined || r.discountPercent !== undefined))
+    ) {
       return reply.code(403).send(errorBody(new ClientPriceNotAllowedError()));
     }
     // Delprojekt 5: an API client may only order configurations of templates
@@ -112,6 +119,12 @@ export async function configuratorRoutes(
       // configurations resolving to one variant), or the template left the
       // variants mode between the read and resolveVariant's lock.
       if (err instanceof RowVariantExistsError || err instanceof ConfiguratorNotVariantModeError) return reply.code(409).send(errorBody(err));
+      // Valuta: no rate for the order's currency today (send exchangeRate),
+      // or a rate ≠ 1 on a SEK order.
+      if (err instanceof ExchangeRateUnavailableError) {
+        return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+      }
+      if (err instanceof SalesOrderExchangeRateError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });
@@ -125,7 +138,19 @@ export async function configuratorRoutes(
     if (!clientCustomerAllowed(req, query.customerId)) {
       return reply.code(403).send(errorBody(new ClientCustomerMismatchError()));
     }
-    const result = await salesService.getPriceQuote(query);
+    let result;
+    try {
+      result = await salesService.getPriceQuote(query);
+    } catch (err) {
+      // Valuta: an unknown salesOrderId, no rate for the currency today, or
+      // a rate ≠ 1 for SEK.
+      if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof ExchangeRateUnavailableError) {
+        return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+      }
+      if (err instanceof SalesOrderExchangeRateError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
     if (!result) return reply.code(404).send({ error: "Article not found" });
     return result;
   });

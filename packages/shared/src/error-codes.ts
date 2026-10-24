@@ -91,6 +91,24 @@ export const ERROR_CODES = {
   // amountSek/bankFeeSek do not fit the payment (400, body.reason
   // required|sign|fee|kvittning|sek, body.currency)
   SUPPLIER_PAYMENT_AMOUNT_SEK: "supplier-payment-amount-sek",
+  // Valuta steg 3 (försäljning i valuta)
+  // A new currency on an order that has rows (409)
+  SALES_ORDER_CURRENCY_LOCKED: "sales-order-currency-locked",
+  // A rate other than 1 on a SEK order/quote/price question (400)
+  SALES_ORDER_EXCHANGE_RATE: "sales-order-exchange-rate",
+  // A new currency on a price list that has rows (409)
+  PRICE_LIST_CURRENCY_LOCKED: "price-list-currency-locked",
+  // An order row/shipment in another currency than the invoice's (400,
+  // body.rowCurrency/body.invoiceCurrency)
+  INVOICE_ROW_CURRENCY_MISMATCH: "invoice-row-currency-mismatch",
+  // A rate that does not fit the invoice (400, body.reason sek|credit)
+  INVOICE_EXCHANGE_RATE: "invoice-exchange-rate",
+  // Påminnelseavgift on an invoice in another currency than SEK (409,
+  // body.currency)
+  REMINDER_FEE_CURRENCY: "reminder-fee-currency",
+  // amountSek/bankFeeSek do not fit a customer payment (400, body.reason
+  // required|sign|fee|kvittning|sek, body.currency)
+  CUSTOMER_PAYMENT_AMOUNT_SEK: "customer-payment-amount-sek",
   // a document's chosen code is unknown, inactive or of the wrong direction
   // (400, body.reason unknown|inactive|not_applicable)
   INVALID_VAT_CODE: "invalid-vat-code",

@@ -10,6 +10,7 @@ import { createCostingRepository } from "../../src/modules/costing/repository/co
 import { createCostingService } from "../../src/modules/costing/service/costing.service.js";
 import { insertRoutingOperations } from "../../src/modules/manufacturing/repository/routing-write.js";
 import { testArticleService } from "./services.js";
+import type { ExchangeRateReader } from "../../src/modules/system/service/exchange-rates.js";
 
 // Mutable System → Kalkyler settings for the configurator tests' costing service (all zero: no markups).
 export const testCostingSettings = {
@@ -31,10 +32,21 @@ export const variantTestDeps = { writers: variantWriters, stock: emptyStockReade
 
 // A configurator service with the real article/structure readers and writers,
 // the shared costing service and, unless overridden, no customer price chain.
-export function makeVariantService(overrides: { writers?: VariantWriters; stock?: VariantStockReader; prices?: PriceReader } = {}) {
+export function makeVariantService(
+  overrides: {
+    writers?: VariantWriters;
+    stock?: VariantStockReader;
+    prices?: PriceReader;
+    // Valuta: evaluate/derive's currency defaults.
+    customerCurrency?: (id: string) => Promise<string | null>;
+    rates?: ExchangeRateReader;
+  } = {}
+) {
   return createConfiguratorService({
     db,
     prices: overrides.prices ?? (async () => ({ articleNumber: "X", price: null })),
+    ...(overrides.customerCurrency ? { customerCurrency: overrides.customerCurrency } : {}),
+    ...(overrides.rates ? { rates: overrides.rates } : {}),
     customerExists: async () => true,
     articles: {
       exists: async (id) => (await testArticleService.getArticle(id)) != null,

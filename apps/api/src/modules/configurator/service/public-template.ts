@@ -57,6 +57,7 @@ export function toPublicTemplateSummary(source: PublicTemplateSummarySource, art
     articleNumber: article.articleNumber,
     name: article.name,
     mode: source.mode,
+    currency: "SEK",
     basePrice: toNumber(source.basePrice),
     groups: bySortOrder(source.groups).map((g) => ({ code: g.code, name: g.name, kind: g.kind, required: g.required })),
   };
@@ -68,6 +69,7 @@ export function toPublicTemplate(detail: ConfiguratorTemplateDetail, article: Pu
     articleNumber: article.articleNumber,
     name: article.name,
     mode: detail.mode,
+    currency: "SEK",
     basePrice: toNumber(detail.basePrice),
     groups: bySortOrder(detail.groups).map(toPublicGroup),
   };

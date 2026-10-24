@@ -10,6 +10,7 @@ import { errorBody } from "../../system/service/error-body.js";
 import { WorkCenterNotFoundError } from "../../manufacturing/service/manufacturing.service.js";
 import { ArticleNotFoundError } from "../../article/service/article.service.js";
 import { CustomerNotFoundError } from "../../sales/service/sales.service.js";
+import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import type { ConfiguratorService } from "../service/configurator.service.js";
 import * as E from "../service/configurator.errors.js";
 
@@ -23,6 +24,9 @@ type P = { id: string; groupId?: string; valueId?: string; ruleId?: string; line
 function sendError(reply: FastifyReply, err: unknown) {
   // A reorder with a wrong id set is a malformed request, not a conflict.
   if (err instanceof E.ConfiguratorReorderMismatchError) return reply.code(400).send({ error: err.message, code: "validation-failed" });
+  // Valuta: evaluate/derive in a currency without a rate for today — the
+  // caller sends exchangeRate.
+  if (err instanceof ExchangeRateUnavailableError) return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
   // resolveVariant: the engine's messages ride along so the dialog can show them per group.
   if (err instanceof E.ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
   if (err instanceof E.ConfiguratorVariantTooLongError) return reply.code(400).send(errorBody(err));

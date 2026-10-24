@@ -49,6 +49,7 @@ export const CUSTOMER_IMPORT_FIELDS = [
   "collectiveInvoicing",
   "privatePerson",
   "website",
+  "currency",
 ] as const;
 export type CustomerImportField = (typeof CUSTOMER_IMPORT_FIELDS)[number];
 
@@ -113,6 +114,7 @@ const FIELD_LABELS: Record<CustomerImportField, string> = {
   collectiveInvoicing: "Samlingsfaktura",
   privatePerson: "Privatperson",
   website: "Webbsida",
+  currency: "Valuta",
 };
 
 // E-mail policy: an invalid address never blocks the row — the value is
@@ -142,7 +144,12 @@ const SPECIAL_FIELDS: ReadonlySet<CustomerImportField> = new Set<CustomerImportF
   "priceList",
   "collectiveInvoicing",
   "privatePerson",
+  "currency",
 ]);
+
+// Valuta: same rule as the supplier import's currency (ISO 4217, three
+// letters, stored uppercased).
+const CURRENCY_PATTERN = /^[A-Z]{3}$/;
 
 const COUNTRY_ERROR = "Land måste vara en landskod med två bokstäver (t.ex. SE)";
 
@@ -230,6 +237,8 @@ export const CUSTOMER_HEADER_ALIASES: Record<string, string> = {
   webbsida: "website",
   hemsida: "website",
   webbplats: "website",
+  valuta: "currency",
+  valutakod: "currency",
 };
 
 // Applied in a first pass, before the general alias contest — a specific
@@ -336,6 +345,7 @@ export interface CustomerCreatePlan {
   collectiveInvoicing?: boolean;
   privatePerson?: boolean;
   website?: string;
+  currency?: string;
 }
 
 export interface CustomerUpdatePlan {
@@ -550,6 +560,16 @@ export async function planCustomerImport(
         continue;
       }
       patch[field] = upper;
+    }
+
+    // currency — stored uppercased; an invalid code is a row ERROR. Empty
+    // cell: SEK on create, untouched on update.
+    const currencyCell = record["currency"] ?? "";
+    if (currencyCell !== "") {
+      values["currency"] = currencyCell;
+      const upper = currencyCell.toUpperCase();
+      if (!CURRENCY_PATTERN.test(upper)) errors.push(`Ogiltig valutakod '${currencyCell}' — ange 3 bokstäver, t.ex. SEK`);
+      else patch.currency = upper;
     }
 
     // discountPercent — normalizeDecimal handles Swedish "15,5"; 0–100.

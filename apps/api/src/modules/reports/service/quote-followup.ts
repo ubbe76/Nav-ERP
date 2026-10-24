@@ -132,6 +132,9 @@ export function buildQuoteFollowup(
           : null,
       lostNote: outcome === "lost" ? r.lostNote : null,
       value: round2(r.value),
+      // A source row from before the Valuta fields is a SEK quote.
+      currency: r.currency ?? "SEK",
+      currencyValue: round2(r.currencyValue ?? r.value),
     };
   });
 

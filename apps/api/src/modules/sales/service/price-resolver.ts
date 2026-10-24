@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { articles, customerPrices, customers, priceListRows, type Db, type Tx } from "@navet/db";
-import type { PriceSource } from "@navet/shared";
+import { articles, customerPrices, customers, priceListRows, priceLists, type Db, type Tx } from "@navet/db";
+import { fromSek, SEK, type PriceSource } from "@navet/shared";
 
 export type ResolvedPrice = { unitPrice: number; discountPercent: number; source: PriceSource };
 export type PriceResolution = { articleNumber: string; price: ResolvedPrice | null } | null; // null = unknown article
@@ -11,7 +11,19 @@ export type PriceResolution = { articleNumber: string; price: ResolvedPrice | nu
 // through to the article's own chain. Injected from app.ts; the configurator's
 // own price binding has no reader, which ends the recursion (a template is
 // never a variant).
-export type VariantPriceReader = (q: { customerId: string; variantArticleId: string; quantity: number }) => Promise<ResolvedPrice | null | undefined>;
+export type VariantPriceReader = (q: {
+  customerId: string;
+  variantArticleId: string;
+  quantity: number;
+  // Valuta: the order's currency and rate — the template's chain runs in the
+  // same currency and the configuration's SEK additions are converted.
+  currency?: string;
+  exchangeRate?: number;
+}) => Promise<ResolvedPrice | null | undefined>;
+
+// Valuta: what the chain prices in. Omitted = SEK at rate 1 — exactly the
+// chain before the feature.
+export type PriceCurrency = { currency?: string; exchangeRate?: number };
 
 // C3 price chain (most specific wins): customer article price → customer
 // group rule → customer's price list → the article's base price. Each level
@@ -23,11 +35,29 @@ export type VariantPriceReader = (q: { customerId: string; variantArticleId: str
 // A variant without agreements of its own (article rule, price list row)
 // takes the template's chain plus the configuration's additions instead —
 // see VariantPriceReader.
+//
+// Valuta: the chain prices in the ORDER's currency. The customer's own rules
+// (customer_prices — särpriser in the customer's currency) only apply when
+// the order is in the customer's currency; the customer's price list only
+// when the list is in the order's currency (a list in another currency is
+// skipped); the article's försäljningspris (SEK) is converted with the
+// order's rate, to the öre (fromSek). The blanket customer discount is a
+// percentage and applies either way. A SEK order (the default) is priced
+// exactly as before — the SEK base price is never rounded.
 export async function resolvePrice(
   dbc: Db | Tx,
-  { customerId, articleId, quantity }: { customerId: string; articleId: string; quantity: number },
+  {
+    customerId,
+    articleId,
+    quantity,
+    currency: currencyInput,
+    exchangeRate,
+  }: { customerId: string; articleId: string; quantity: number } & PriceCurrency,
   opts: { variantPrice?: VariantPriceReader } = {}
 ): Promise<PriceResolution> {
+  const currency = currencyInput ?? SEK;
+  const rate = currency === SEK ? 1 : exchangeRate;
+  if (rate === undefined || !(rate > 0)) throw new Error(`Pricing in ${currency} needs the order's exchange rate`);
   const [article] = await dbc
     .select({ articleNumber: articles.articleNumber, salesPrice: articles.salesPrice, groupId: articles.groupId })
     .from(articles)
@@ -36,13 +66,21 @@ export async function resolvePrice(
   const none = { articleNumber: article.articleNumber, price: null };
 
   const [customer] = await dbc
-    .select({ priceListId: customers.priceListId, discountPercent: customers.discountPercent })
+    .select({
+      priceListId: customers.priceListId,
+      discountPercent: customers.discountPercent,
+      currency: customers.currency,
+      priceListCurrency: priceLists.currency,
+    })
     .from(customers)
+    .leftJoin(priceLists, eq(priceLists.id, customers.priceListId))
     .where(eq(customers.id, customerId));
+  // Valuta: the customer's särpriser are in the customer's currency.
+  const customerRulesApply = (customer?.currency ?? SEK) === currency;
 
   // Chain levels 3-4 first — they are the base a discount-form rule needs.
   let listPrice: number | null = null;
-  if (customer?.priceListId) {
+  if (customer?.priceListId && customer.priceListCurrency === currency) {
     const [row] = await dbc
       .select({ unitPrice: priceListRows.unitPrice })
       .from(priceListRows)
@@ -57,7 +95,9 @@ export async function resolvePrice(
       .limit(1);
     listPrice = row ? Number(row.unitPrice) : null;
   }
-  const basePrice = listPrice ?? (article.salesPrice !== null ? Number(article.salesPrice) : null);
+  const articlePrice =
+    article.salesPrice === null ? null : currency === SEK ? Number(article.salesPrice) : fromSek(Number(article.salesPrice), rate);
+  const basePrice = listPrice ?? articlePrice;
   const baseSource: PriceSource = listPrice !== null ? "price_list" : "article";
 
   const ruleFor = async (where: ReturnType<typeof and>) => {
@@ -69,13 +109,20 @@ export async function resolvePrice(
       .limit(1);
     return rule;
   };
-  const articleRule = await ruleFor(
-    and(eq(customerPrices.customerId, customerId), eq(customerPrices.articleId, articleId), sql`${customerPrices.fromQuantity} <= ${quantity}`)
-  );
+  const articleRule = customerRulesApply
+    ? await ruleFor(
+        and(eq(customerPrices.customerId, customerId), eq(customerPrices.articleId, articleId), sql`${customerPrices.fromQuantity} <= ${quantity}`)
+      )
+    : undefined;
 
   // Variant step: only when the variant has no agreement of its own.
   if (!articleRule && listPrice === null && opts.variantPrice) {
-    const viaTemplate = await opts.variantPrice({ customerId, variantArticleId: articleId, quantity });
+    const viaTemplate = await opts.variantPrice({
+      customerId,
+      variantArticleId: articleId,
+      quantity,
+      ...(currency === SEK ? {} : { currency, exchangeRate: rate }),
+    });
     if (viaTemplate) return { articleNumber: article.articleNumber, price: viaTemplate };
   }
 
@@ -83,7 +130,7 @@ export async function resolvePrice(
   // article rule matched). A matching rule WINS the chain even when its
   // discount form cannot produce a price (spec: no silent fall-through past
   // a matching customer agreement).
-  const groupRule = !articleRule && article.groupId
+  const groupRule = customerRulesApply && !articleRule && article.groupId
     ? await ruleFor(
         and(eq(customerPrices.customerId, customerId), eq(customerPrices.articleGroupId, article.groupId), sql`${customerPrices.fromQuantity} <= ${quantity}`)
       )

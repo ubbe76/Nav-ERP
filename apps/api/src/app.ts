@@ -443,7 +443,9 @@ export function buildApp(database: Db = db) {
     rowConfigurationReader,
     // Momskoder: the quote/order confirmation counts the freight article as
     // goods when deriving a row's momskod.
-    { freightArticleId: async () => (await freightSettingsService.read()).freightArticleId }
+    { freightArticleId: async () => (await freightSettingsService.read()).freightArticleId },
+    // Valuta: today's rate for an order in another currency.
+    exchangeRateService
   );
   // Frakt på offert: prices for an order and its freight row — built after
   // salesService, which owns the row rules (setFreightRow).
@@ -465,7 +467,10 @@ export function buildApp(database: Db = db) {
     auditRepository,
     articleService,
     // Frakt etapp 2: the freight article the shipment rows bill.
-    { freightArticleId: async () => (await freightSettingsService.read()).freightArticleId }
+    { freightArticleId: async () => (await freightSettingsService.read()).freightArticleId },
+    // Valuta: the invoice date's rate at Utfärda, today's rate for a freight
+    // row on a foreign invoice without an order to take it from.
+    exchangeRateService
   );
   // E-faktura via Peppol (B2Brouter): reads the issued invoice, its archived
   // PDF and the customer through narrow readers into sales, and the company
@@ -553,6 +558,10 @@ export function buildApp(database: Db = db) {
     costing: costingService,
     writers: { insertArticle, insertBomRows, insertRoutingOperations },
     stock: { balancesForArticles: (ids) => stockService.balancesForArticles(ids) },
+    // Valuta: evaluate/derive default to the customer's currency at today's rate.
+    customerCurrency: async (id) =>
+      (await database.select({ currency: customers.currency }).from(customers).where(eq(customers.id, id)))[0]?.currency ?? null,
+    rates: exchangeRateService,
   });
   variantPriceRef.current = (q) => configuratorService.variantPrice(q);
   configuredStructureRef.current = (t, s, q, o) => configuratorService.deriveForManufacturing(t, s, q, o);

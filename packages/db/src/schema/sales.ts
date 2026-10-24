@@ -135,11 +135,16 @@ export const customers = pgTable("customers", {
   // organisationsnummer ("0007:" + digits) at send time, never stored.
   invoiceDelivery: invoiceDeliveryEnum("invoice_delivery").notNull().default("email"),
   peppolId: varchar("peppol_id", { length: 60 }),
+  // Valuta (migration 0145): the customer's currency (ISO 4217). A new order
+  // takes it (and today's rate); the customer's särpriser (customer_prices)
+  // are in it.
+  currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("customers_delivery_weekdays", sql`${table.deliveryWeekdays} <@ '{1,2,3,4,5,6,7}'::smallint[]`),
   check("customers_transit_days", sql`${table.transitDays} between 0 and 60`),
+  check("customers_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
 ]);
 
 // Multiple delivery addresses per customer; at most one is the default,
@@ -203,8 +208,11 @@ export const priceLists = pgTable("price_lists", {
   code: varchar("code", { length: 20 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull().unique(),
   description: text("description"),
+  // Valuta (migration 0145): the list's prices are in this currency — the
+  // price chain only uses a list in the order's own currency.
+  currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [check("price_lists_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`)]);
 
 // Price per (list, article, quantity break). Prices are in the article's
 // BASE unit, like sales_order_rows.unit_price. from_quantity 1 = the plain
@@ -314,6 +322,13 @@ export const salesOrders = pgTable("sales_orders", {
   // Bumped by 1 on every content change (header/terms/rows) — never by
   // status transitions or deliveries. Printed on quote/order confirmation.
   revision: integer("revision").notNull().default(1),
+  // Valuta (migration 0145): the order's currency (snapshotted from the
+  // customer at creation, changeable only while the order has no rows) and
+  // its rate, SEK per 1 unit (today's rate at creation, editable in the
+  // header as a quote or confirmed order). Every price on the order is in
+  // its currency; SEK orders have rate 1.
+  currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+  exchangeRate: numeric("exchange_rate", { precision: 14, scale: 6 }).notNull().default("1"),
   // Legacy pre-C1 stamp: orders invoiced before the invoice module got an
   // FA- number written straight onto the order. Never written since C1 —
   // invoicing (partial and collective) lives in invoices/invoice_rows.
@@ -322,7 +337,11 @@ export const salesOrders = pgTable("sales_orders", {
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  check("sales_orders_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+  check("sales_orders_sek_rate", sql`${table.currency} <> 'SEK' OR ${table.exchangeRate} = 1`),
+  check("sales_orders_rate_positive", sql`${table.exchangeRate} > 0`),
+]);
 
 // One row per article per order for ordinary rows (same simplification as
 // purchase_order_rows); configured rows (4b) are exempt — see the index below.
@@ -451,7 +470,17 @@ export const invoices = pgTable(
       .references(() => customers.id, { onDelete: "restrict" }),
     paymentTermId: uuid("payment_term_id").references(() => paymentTerms.id, { onDelete: "restrict" }),
     status: invoiceStatusEnum("status").notNull().default("draft"),
+    // Valuta (migration 0145): the order's currency (a free invoice: the
+    // customer's). exchange_rate is SEK per 1 unit: 1 for SEK; for another
+    // currency null in draft (decided at Utfärda = the invoice date's rate)
+    // unless typed in on the draft (exchange_rate_manual). A credit note
+    // takes its source invoice's currency and rate. gross_amount_sek =
+    // the receivable in SEK, toSek(brutto), stamped at issue (positive like
+    // the rows — the credit sign is applied by invoices.type).
     currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+    exchangeRate: numeric("exchange_rate", { precision: 14, scale: 6 }),
+    exchangeRateManual: boolean("exchange_rate_manual").notNull().default(false),
+    grossAmountSek: numeric("gross_amount_sek", { precision: 14, scale: 2 }),
     invoiceDate: date("invoice_date"),
     dueDate: date("due_date"),
     ocrNumber: varchar("ocr_number", { length: 30 }),
@@ -496,6 +525,14 @@ export const invoices = pgTable(
     // enforced it would only add a way for a repair script to fail.
     index("idx_invoices_due_date").on(table.dueDate),
     index("idx_invoices_ocr").on(table.ocrNumber),
+    // Valuta: SEK ⇒ rate 1 (or not yet set) and never a typed rate; a typed
+    // rate is a rate.
+    check(
+      "invoices_sek_rate",
+      sql`${table.currency} <> 'SEK' OR ((${table.exchangeRate} IS NULL OR ${table.exchangeRate} = 1) AND NOT ${table.exchangeRateManual})`
+    ),
+    check("invoices_rate_positive", sql`${table.exchangeRate} IS NULL OR ${table.exchangeRate} > 0`),
+    check("invoices_manual_rate_set", sql`NOT ${table.exchangeRateManual} OR ${table.exchangeRate} IS NOT NULL`),
   ]
 );
 
@@ -653,8 +690,17 @@ export const customerPayments = pgTable(
     // chart of accounts — snapshotted as a NUMBER (the verification rows carry
     // the account id) so a later renumbering cannot rewrite history.
     bankAccountNumber: varchar("bank_account_number", { length: 4 }).notNull(),
-    // The BANK part only: 0 for a pure kvittning between open items.
+    // The BANK part only: 0 for a pure kvittning between open items. In the
+    // payment's currency.
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    // Valuta (migration 0145): the invoices' currency — one payment never
+    // mixes currencies. amount_sek is the SEK that landed on (or, for a
+    // refund, left) the bank account (= amount for SEK) and bank_fee_sek the
+    // bank's fee in SEK (0 for SEK); the difference to the SEK the rows
+    // release is booked as kursvinst/kursförlust.
+    currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+    amountSek: numeric("amount_sek", { precision: 14, scale: 2 }).notNull(),
+    bankFeeSek: numeric("bank_fee_sek", { precision: 14, scale: 2 }).notNull().default("0"),
     note: text("note"),
     // The K verification booked in the same transaction as the registration.
     // NULL for a pure kvittning, which moves nothing in the ledger and is
@@ -684,6 +730,12 @@ export const customerPayments = pgTable(
     uniqueIndex("customer_payments_entry_live")
       .on(table.bankFileEntryId)
       .where(sql`${table.cancelledAt} is null and ${table.bankFileEntryId} is not null`),
+    // A SEK payment moves exactly its amount and has no fee of its own.
+    check(
+      "customer_payments_sek_amounts",
+      sql`${table.currency} <> 'SEK' OR (${table.amountSek} = ${table.amount} AND ${table.bankFeeSek} = 0)`
+    ),
+    check("customer_payments_bank_fee_non_negative", sql`${table.bankFeeSek} >= 0`),
   ]
 );
 
@@ -705,6 +757,11 @@ export const customerPaymentRows = pgTable(
       .references(() => invoices.id, { onDelete: "restrict" }),
     appliedAmount: numeric("applied_amount", { precision: 14, scale: 2 }).notNull(),
     writeOffAmount: numeric("write_off_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    // Valuta (migration 0145): the SEK each part releases from the invoice's
+    // gross_amount_sek (frigjort SEK, @navet/shared releasedSek), signed like
+    // the amounts — equal to them on a SEK invoice.
+    appliedAmountSek: numeric("applied_amount_sek", { precision: 14, scale: 2 }).notNull(),
+    writeOffAmountSek: numeric("write_off_amount_sek", { precision: 14, scale: 2 }).notNull().default("0"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

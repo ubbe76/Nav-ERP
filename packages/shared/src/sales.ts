@@ -8,6 +8,7 @@ import { businessDateSchema } from "./business-date.js";
 import { partnerDeliveryFields } from "./delivery.js";
 import { palletCardCodeSchema } from "./system.js";
 import { invoiceDeliverySchema, peppolIdFieldSchema } from "./einvoice.js";
+import { currencyCodeSchema, exchangeRateValueSchema } from "./currency.js";
 
 // "lost" (Förlorad): a quote the customer did not take — closed like
 // cancelled (no edits, no documents), reopenable to quote.
@@ -133,6 +134,9 @@ export const createCustomerSchema = z.object({
   // ("" clears — null = derived from the organisationsnummer).
   invoiceDelivery: invoiceDeliverySchema.default("email"),
   peppolId: peppolIdFieldSchema.optional(),
+  // Valuta: the customer's currency (ISO 4217, "eur" → "EUR"). New orders
+  // take it with today's rate; the customer's särpriser are in it.
+  currency: currencyCodeSchema.default("SEK"),
   active: z.boolean().default(true),
   ...partnerDeliveryFields,
 });
@@ -176,6 +180,9 @@ export const updateCustomerSchema = z
     defaultFreightProductId: z.string().uuid().nullable().optional(),
     invoiceDelivery: invoiceDeliverySchema.optional(),
     peppolId: peppolIdFieldSchema.optional(),
+    // Valuta: not nullable — a customer always has a currency. Existing
+    // orders keep theirs.
+    currency: currencyCodeSchema.optional(),
     active: z.boolean().optional(),
     ...partnerDeliveryFields,
   })
@@ -257,6 +264,15 @@ export const updateSalesOrderHeaderSchema = z
     expectedDeliveryDate: businessDateSchema.nullable().optional(),
     // Giltig t.o.m. (quote only — 409 in any other status); null clears it.
     quoteValidUntil: businessDateSchema.nullable().optional(),
+    // Valuta: the order's currency — only while the order has no rows (409
+    // sales-order-currency-locked otherwise: the prices would stand in the
+    // wrong currency). Without exchangeRate a change looks today's rate up.
+    currency: currencyCodeSchema.optional(),
+    // Valuta: SEK per 1 unit of the order's currency, as a quote or a
+    // confirmed order (409 in any other status); only 1 for SEK. Existing
+    // rows keep their prices — the rate converts SEK prices for new rows and
+    // the reports' SEK sums.
+    exchangeRate: exchangeRateValueSchema.optional(),
     // `false` saves without bumping the order's revision — the UI asks on
     // every save; omitted means bump (external callers unchanged).
     bumpRevision: z.boolean().optional(),
@@ -290,6 +306,11 @@ export const createQuoteSchema = z.object({
   // Create as a confirmed order directly ("Ny kundorder") instead of a
   // quote — the order is confirmed via the normal status transition.
   confirm: z.boolean().default(false),
+  // Valuta: omitted = the customer's currency; exchangeRate omitted = today's
+  // rate (Riksbanken / Valutakurser — 409 exchange-rate-unavailable when
+  // there is none, then send the rate). SEK always has rate 1.
+  currency: currencyCodeSchema.optional(),
+  exchangeRate: exchangeRateValueSchema.optional(),
 }).refine((data) => !(data.deliveryAddressId && data.newDeliveryAddress), oneDeliveryAddressChoice);
 export type CreateQuoteInput = z.infer<typeof createQuoteSchema>;
 
@@ -394,10 +415,16 @@ export const updateInvoiceRowSchema = invoiceRowInputSchema
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateInvoiceRowInput = z.infer<typeof updateInvoiceRowSchema>;
 
+// Valuta: currency omitted = the linked order rows' currency, else the
+// customer's; a row from an order in another currency is refused (400
+// invoice-row-currency-mismatch). exchangeRate = a rate typed in on the
+// draft (otherwise decided at Utfärda: the invoice date's rate).
 export const createInvoiceSchema = z.object({
   customerId: z.string().uuid(),
   paymentTermId: z.string().uuid().nullable().optional(),
   note: z.string().nullable().optional(),
+  currency: currencyCodeSchema.optional(),
+  exchangeRate: exchangeRateValueSchema.optional(),
   rows: z.array(invoiceRowInputSchema).default([]),
 });
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
@@ -417,6 +444,9 @@ export const updateInvoiceHeaderSchema = z
   .object({
     paymentTermId: z.string().uuid().nullable().optional(),
     note: z.string().nullable().optional(),
+    // Valuta (draft only, foreign currency only): a rate typed in on the
+    // draft; null = automatic again (the invoice date's rate at Utfärda).
+    exchangeRate: exchangeRateValueSchema.nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateInvoiceHeaderInput = z.infer<typeof updateInvoiceHeaderSchema>;
@@ -458,6 +488,15 @@ const paymentRowInputSchema = z.object({
 
 // amount is the BANK part (0 = pure kvittning) and must equal Σ appliedAmount —
 // checked in the service, where the message can name both figures.
+//
+// Valuta: amount and the rows are in the invoices' currency (one payment
+// never mixes currencies — 400 payment-mixed-currencies; `currency`, when
+// sent, must be that currency). For a payment in another currency than SEK,
+// amountSek is the SEK the bank account actually got (for a refund: what
+// left it — required unless amount is 0) and bankFeeSek the bank's fee in
+// SEK (default 0); the difference to the SEK the payment releases is booked
+// as kursvinst/kursförlust. For a SEK payment amountSek may only repeat
+// amount and bankFeeSek only be 0 (400 customer-payment-amount-sek).
 export const createPaymentSchema = z.object({
   customerId: z.string().uuid(),
   paymentDate: z.string().date(),
@@ -465,6 +504,9 @@ export const createPaymentSchema = z.object({
   // (/account-options); the posting validates that it exists and is active.
   bankAccountNumber: z.string().regex(/^[0-9]{4}$/),
   amount: blankSafe(z.coerce.number()),
+  currency: currencyCodeSchema.optional(),
+  amountSek: blankSafe(z.coerce.number()).optional(),
+  bankFeeSek: blankSafe(z.coerce.number().min(0)).optional(),
   note: z.string().nullable().optional(),
   rows: z.array(paymentRowInputSchema).min(1),
 });
@@ -496,10 +538,14 @@ export const priceSourceSchema = z.enum([
 ]);
 export type PriceSource = z.infer<typeof priceSourceSchema>;
 
+// Valuta: the list's prices are in its currency (default SEK); the price
+// chain only uses a list in the order's own currency. Changing it is refused
+// while the list has rows (409 price-list-currency-locked).
 export const createPriceListSchema = z.object({
   code: z.string().min(1).max(20),
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
+  currency: currencyCodeSchema.default("SEK"),
 });
 export type CreatePriceListInput = z.infer<typeof createPriceListSchema>;
 
@@ -572,10 +618,17 @@ export const updateCustomerPriceSchema = z
   });
 export type UpdateCustomerPriceInput = z.infer<typeof updateCustomerPriceSchema>;
 
+// Valuta: the price in a currency — salesOrderId takes the order's currency
+// and rate (and wins); else currency (default the customer's) and
+// exchangeRate (default today's rate, 409 exchange-rate-unavailable when
+// there is none). The answer carries `currency`.
 export const priceQuoteQuerySchema = z.object({
   customerId: z.string().uuid(),
   articleId: z.string().uuid(),
   quantity: z.coerce.number().positive(),
+  salesOrderId: z.string().uuid().optional(),
+  currency: currencyCodeSchema.optional(),
+  exchangeRate: exchangeRateValueSchema.optional(),
 });
 export type PriceQuoteQuery = z.infer<typeof priceQuoteQuerySchema>;
 

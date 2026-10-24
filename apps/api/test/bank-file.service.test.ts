@@ -255,7 +255,7 @@ describe("inbetalningar (camt.054 kredit)", () => {
     expect(other.ok === false && other.error.error).toContain("customer_payments_payment_number_unique");
     // The real driver error carries the index name where the check reads it.
     const customer = await makeCustomer();
-    const live = (n: string) => ({ paymentNumber: n, customerId: customer.id, paymentDate: "2024-10-09", bankAccountNumber: "1930", amount: "1", bankFileEntryId: entry!.id });
+    const live = (n: string) => ({ paymentNumber: n, customerId: customer.id, paymentDate: "2024-10-09", bankAccountNumber: "1930", amount: "1", amountSek: "1", bankFileEntryId: entry!.id });
     await db.insert(customerPayments).values(live("T-1"));
     const real = await db.insert(customerPayments).values(live("T-2")).catch((e: unknown) => e);
     expect(isUniqueViolation(real, "customer_payments_entry_live")).toBe(true);

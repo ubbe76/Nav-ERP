@@ -26,7 +26,17 @@ import {
   type Db,
   type Tx,
 } from "@navet/db";
-import { applyPaymentTolerance, ilikePattern, round2, type ListOpenInvoicesQuery, type ListPaymentsQuery } from "@navet/shared";
+import {
+  applyPaymentTolerance,
+  ilikePattern,
+  releasedSek,
+  round2,
+  SEK,
+  toSek,
+  toleranceInCurrency,
+  type ListOpenInvoicesQuery,
+  type ListPaymentsQuery,
+} from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
@@ -34,7 +44,7 @@ import { readPostingSettings } from "../../system/service/posting-settings.js";
 // consuming service does not create a runtime import cycle — same seam as
 // invoice.repository.ts's CustomerInvoicePoster.
 import type { CustomerPaymentPoster } from "../service/payment.service.js";
-import { computeOpenAmounts, grossAmountSql, openAmountSql, openItemAggregates } from "./open-amounts.js";
+import { computeOpenAmounts, computeReleasedSek, grossAmountSql, openAmountSql, openItemAggregates } from "./open-amounts.js";
 
 // Control-flow signals thrown INSIDE the transaction so everything it did (the
 // BET number, the payment rows, the K verification and its verifikatnummer)
@@ -52,12 +62,33 @@ export type PaymentGuardReason =
   | "wrong_customer"
   | "not_open"
   | "sign_mismatch"
-  | "exceeds_open";
+  | "exceeds_open"
+  // Valuta: invoices in more than one currency on one payment, or another
+  // currency than the one the caller expected (a bank entry in EUR).
+  | "mixed_currencies"
+  // Valuta: the SEK amount/fee does not fit the payment (detail.sekReason).
+  | "amount_sek";
+
+// Valuta: why the SEK amounts were refused — missing for a foreign payment,
+// pointing the other way (or zero) than the amount, more fee than SEK moved,
+// anything at all on a kvittning, or anything but the amount itself on a SEK
+// payment.
+export type CustomerPaymentSekReason = "required" | "sign" | "fee" | "kvittning" | "sek";
+
+export type PaymentGuardDetail = {
+  invoiceId: string;
+  invoiceNumber: string | null;
+  open?: number;
+  applied?: number;
+  currencies?: string[];
+  currency?: string;
+  sekReason?: CustomerPaymentSekReason;
+};
 
 export class PaymentGuardError extends Error {
   constructor(
     public reason: PaymentGuardReason,
-    public detail: { invoiceId: string; invoiceNumber: string | null; open?: number; applied?: number }
+    public detail: PaymentGuardDetail
   ) {
     super(reason);
   }
@@ -110,6 +141,12 @@ export type PaymentHeaderWrite = {
   paymentDate: string;
   bankAccountNumber: string;
   amount: number;
+  // Valuta: as the client sent them (null = not sent) — what they must be
+  // depends on the invoices' currency, known only under the lock. currency =
+  // the currency the caller expects the invoices to be in (a bank entry).
+  currency: string | null;
+  amountSek: number | null;
+  bankFeeSek: number | null;
   note: string | null;
 };
 
@@ -119,14 +156,7 @@ export type PaymentRowInput = { invoiceId: string; appliedAmount: number };
 
 export type CreatePaymentResult =
   | { ok: true; paymentId: string }
-  | {
-      ok: false;
-      reason: PaymentGuardReason;
-      invoiceId: string;
-      invoiceNumber: string | null;
-      open?: number;
-      applied?: number;
-    };
+  | ({ ok: false; reason: PaymentGuardReason } & PaymentGuardDetail);
 
 export type CancelPaymentResult = { ok: true } | { ok: false; reason: "not_found" | "already_cancelled" };
 
@@ -195,6 +225,12 @@ export function createPaymentRepository(db: Db) {
             ocrNumber: invoices.ocrNumber,
             grossAmount: agg.grossExpr,
             openAmount: agg.openExpr,
+            // Valuta: the open item's currency (the amounts above are in it),
+            // its rate and the booked SEK values (signed like the amounts).
+            currency: invoices.currency,
+            exchangeRate: invoices.exchangeRate,
+            grossAmountSek: agg.grossSekExpr,
+            openAmountSek: agg.openSekExpr,
             reminderCount: reminderCountSql,
             reminderFeeCharged: reminderFeeChargedSql,
           })
@@ -232,6 +268,9 @@ export function createPaymentRepository(db: Db) {
           ...row,
           grossAmount: Number(row.grossAmount),
           openAmount: Number(row.openAmount),
+          exchangeRate: row.exchangeRate === null ? null : Number(row.exchangeRate),
+          grossAmountSek: row.grossAmountSek === null ? null : Number(row.grossAmountSek),
+          openAmountSek: row.openAmountSek === null ? null : Number(row.openAmountSek),
           reminderCount: Number(row.reminderCount),
         })),
         total: totalRows[0]!.total,
@@ -254,6 +293,10 @@ export function createPaymentRepository(db: Db) {
           ocrNumber: invoices.ocrNumber,
           grossAmount: grossAmountSql,
           openAmount: openAmountSql,
+          // Valuta: the registration form shows (and asks for SEK on) a
+          // foreign invoice.
+          currency: invoices.currency,
+          exchangeRate: invoices.exchangeRate,
           reminderCount: reminderCountSql,
           reminderFeeCharged: reminderFeeChargedSql,
         })
@@ -365,6 +408,9 @@ export function createPaymentRepository(db: Db) {
           customerName: sql<string>`COALESCE(${invoices.customerName}, ${customers.name})`,
           dueDate: invoices.dueDate,
           openAmount: agg.openExpr,
+          // Valuta: an entry is matched against open items in its own currency.
+          currency: invoices.currency,
+          exchangeRate: invoices.exchangeRate,
         })
         .from(invoices)
         .innerJoin(customers, eq(customers.id, invoices.customerId))
@@ -374,7 +420,12 @@ export function createPaymentRepository(db: Db) {
         .where(and(...conditions))
         .orderBy(sql`${invoices.dueDate} ASC NULLS LAST`, sql`COALESCE(${invoices.issuedAt}, ${invoices.createdAt}) ASC`)
         .limit(500);
-      return rows.map((row) => ({ ...row, invoiceNumber: row.invoiceNumber!, openAmount: Number(row.openAmount) }));
+      return rows.map((row) => ({
+        ...row,
+        invoiceNumber: row.invoiceNumber!,
+        openAmount: Number(row.openAmount),
+        exchangeRate: row.exchangeRate === null ? 1 : Number(row.exchangeRate),
+      }));
     },
 
     // OCRs that belong to an invoice with nothing left to pay — the matching's
@@ -409,6 +460,7 @@ export function createPaymentRepository(db: Db) {
           invoiceNumber: invoices.invoiceNumber,
           invoiceType: invoices.type,
           invoiceDueDate: invoices.dueDate,
+          invoiceExchangeRate: invoices.exchangeRate,
         })
         .from(customerPaymentRows)
         .innerJoin(invoices, eq(invoices.id, customerPaymentRows.invoiceId))
@@ -461,6 +513,12 @@ export function createPaymentRepository(db: Db) {
           invoiceNumber: invoices.invoiceNumber,
           status: invoices.status,
           customerId: invoices.customerId,
+          type: invoices.type,
+          currency: invoices.currency,
+          exchangeRate: invoices.exchangeRate,
+          grossAmountSek: invoices.grossAmountSek,
+          // Signed (credit notes negative), like the open amount.
+          grossAmount: grossAmountSql,
         })
         .from(invoices)
         .where(inArray(invoices.id, invoiceIds))
@@ -483,9 +541,53 @@ export function createPaymentRepository(db: Db) {
         if (invoice.status !== "issued") throw new PaymentGuardError("not_issued", detail);
       }
 
+      // Valuta: one payment, one currency — the bank moves one amount in one
+      // currency, and the SEK side below is read against it. A caller that
+      // knows the currency (a bank entry) must find exactly that one.
+      const currencies = [...new Set(locked.map((invoice) => invoice.currency))].sort();
+      if (currencies.length > 1 || (header.currency !== null && currencies[0] !== header.currency)) {
+        const first = locked[0]!;
+        throw new PaymentGuardError("mixed_currencies", {
+          invoiceId: first.id,
+          invoiceNumber: first.invoiceNumber,
+          currencies: header.currency !== null ? [...new Set([header.currency, ...currencies])].sort() : currencies,
+        });
+      }
+      const currency = currencies[0]!;
+      const sekGuard = (sekReason: CustomerPaymentSekReason) => {
+        const first = locked[0]!;
+        return new PaymentGuardError("amount_sek", { invoiceId: first.id, invoiceNumber: first.invoiceNumber, currency, sekReason });
+      };
+      const amount = round2(header.amount);
+      let amountSek: number;
+      let bankFeeSek: number;
+      if (currency === SEK) {
+        // A SEK payment moves exactly its amount and has no fee of its own.
+        if (header.amountSek !== null && round2(header.amountSek) !== amount) throw sekGuard("sek");
+        if (header.bankFeeSek !== null && round2(header.bankFeeSek) !== 0) throw sekGuard("sek");
+        amountSek = amount;
+        bankFeeSek = 0;
+      } else if (amount === 0) {
+        // A kvittning moves no money: nothing reached the bank, no fee.
+        if ((header.amountSek !== null && round2(header.amountSek) !== 0) || (header.bankFeeSek !== null && round2(header.bankFeeSek) !== 0)) {
+          throw sekGuard("kvittning");
+        }
+        amountSek = 0;
+        bankFeeSek = 0;
+      } else {
+        if (header.amountSek === null) throw sekGuard("required");
+        amountSek = round2(header.amountSek);
+        if (amountSek === 0 || Math.sign(amountSek) !== Math.sign(amount)) throw sekGuard("sign");
+        bankFeeSek = round2(header.bankFeeSek ?? 0);
+        if (bankFeeSek < 0 || bankFeeSek > Math.abs(amountSek)) throw sekGuard("fee");
+      }
+
       const settings = await readPostingSettings(tx);
       const tolerance = round2(settings.paymentTolerance);
       const openAmounts = await computeOpenAmounts(tx, invoiceIds);
+      // Valuta: the SEK earlier live payments released from each invoice —
+      // read under the same lock, so a settling row releases exactly the rest.
+      const releasedBefore = await computeReleasedSek(tx, invoiceIds);
 
       // Decided against the LOCKED open amounts: the write-off is derived
       // here, never taken from the client.
@@ -495,8 +597,11 @@ export function createPaymentRepository(db: Db) {
         const open = round2(openAmounts.get(row.invoiceId) ?? 0);
         const applied = round2(row.appliedAmount);
         // The shared tolerance rule (packages/shared/src/payment-tolerance.ts) —
-        // the same function the bank-file matching previews with.
-        const result = applyPaymentTolerance(open, applied, tolerance);
+        // the same function the bank-file matching previews with. The
+        // tolerance setting is kronor: on a foreign invoice it is what that
+        // is worth in the invoice's currency at its rate.
+        const rate = invoice.exchangeRate === null ? 1 : Number(invoice.exchangeRate);
+        const result = applyPaymentTolerance(open, applied, toleranceInCurrency(tolerance, rate, invoice.currency));
         if (!result.ok) {
           if (result.reason === "not_open") throw new PaymentGuardError("not_open", detail);
           if (result.reason === "exceeds_open") throw new PaymentGuardError("exceeds_open", { ...detail, open, applied });
@@ -504,10 +609,26 @@ export function createPaymentRepository(db: Db) {
           // extraction a zero applied amount was a sign mismatch, and it still is.
           throw new PaymentGuardError("sign_mismatch", detail);
         }
+        // Valuta: frigjort SEK — signed like the amounts (a credit note's
+        // receivable and releases are negative). gross_amount_sek is stamped
+        // at Utfärda; the fallback covers an invoice issued without it.
+        const grossAmount = Number(invoice.grossAmount);
+        const sign = invoice.type === "credit" ? -1 : 1;
+        const sek = releasedSek({
+          currency: invoice.currency,
+          grossAmount,
+          grossAmountSek: invoice.grossAmountSek === null ? toSek(grossAmount, rate) : sign * Number(invoice.grossAmountSek),
+          previouslyReleasedSek: releasedBefore.get(row.invoiceId) ?? 0,
+          appliedAmount: applied,
+          writeOffAmount: result.writeOffAmount,
+          settles: result.settles,
+        });
         return {
           invoiceId: row.invoiceId,
           appliedAmount: applied,
           writeOffAmount: result.writeOffAmount,
+          appliedAmountSek: sek.appliedAmountSek,
+          writeOffAmountSek: sek.writeOffAmountSek,
           settles: result.settles,
         };
       });
@@ -519,7 +640,10 @@ export function createPaymentRepository(db: Db) {
           customerId: header.customerId,
           paymentDate: header.paymentDate,
           bankAccountNumber: header.bankAccountNumber,
-          amount: String(round2(header.amount)),
+          amount: String(amount),
+          currency,
+          amountSek: String(amountSek),
+          bankFeeSek: String(bankFeeSek),
           note: header.note,
           createdBy,
           bankFileEntryId: link?.bankFileEntryId ?? null,
@@ -539,6 +663,8 @@ export function createPaymentRepository(db: Db) {
           invoiceId: write.invoiceId,
           appliedAmount: String(write.appliedAmount),
           writeOffAmount: String(write.writeOffAmount),
+          appliedAmountSek: String(write.appliedAmountSek),
+          writeOffAmountSek: String(write.writeOffAmountSek),
           createdAt: new Date(now + index),
         }))
       );
@@ -559,10 +685,18 @@ export function createPaymentRepository(db: Db) {
           paymentNumber,
           paymentDate: header.paymentDate,
           bankAccountNumber: header.bankAccountNumber,
-          bankAmount: round2(header.amount),
+          bankAmount: amount,
           customerName: customer!.name,
+          currency,
+          bankAmountSek: amountSek,
+          bankFeeSek,
         },
-        writes.map((write) => ({ appliedAmount: write.appliedAmount, writeOffAmount: write.writeOffAmount })),
+        writes.map((write) => ({
+          appliedAmount: write.appliedAmount,
+          writeOffAmount: write.writeOffAmount,
+          appliedAmountSek: write.appliedAmountSek,
+          writeOffAmountSek: write.writeOffAmountSek,
+        })),
         createdBy
       );
       if (posted) {

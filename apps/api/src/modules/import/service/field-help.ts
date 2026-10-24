@@ -788,6 +788,16 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description: `Max 255 tecken. ${UNTOUCHED}`,
       example: "https://www.example.com",
     },
+    {
+      field: "currency",
+      label: "Valuta",
+      required: false,
+      header: "Valuta",
+      text: true,
+      description:
+        "Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya offerter och kundordrar får kundens valuta och dagens kurs, och kundens kundpriser gäller i den valutan; befintliga ordrar behåller sin. Tom cell ger SEK för nya kunder och lämnar befintliga orörda.",
+      example: "SEK",
+    },
   ],
 
   customerContacts: [

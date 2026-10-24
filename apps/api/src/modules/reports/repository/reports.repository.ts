@@ -185,7 +185,9 @@ export function createReportsRepository(db: Db) {
           articleNumber: articles.articleNumber,
           articleName: articles.name,
           quantity: sql<string>`${sign} * ${invoiceRows.quantity}`,
-          netAmount: sql<string>`${sign} * ${invoiceRows.lineAmount}`,
+          // Valuta: in SEK at the invoice's rate (the rate it was booked at;
+          // 1 for SEK) — the margin is measured against SEK self costs.
+          netAmount: sql<string>`${sign} * ROUND(${invoiceRows.lineAmount} * COALESCE(${invoices.exchangeRate}, 1), 2)`,
           // Konfigurator 4c: the linked order row's own förkalkyl when it is a
           // configured (beställningsvara) row — see rowSelfCostPerUnit below.
           orderRowConfiguration: salesOrderRows.configuration,
@@ -226,7 +228,10 @@ export function createReportsRepository(db: Db) {
 
     async loadSalesStatistics(query: Pick<SalesStatisticsQuery, "groupBy"> & { from: string; to: string }) {
       const { start, end } = monthRangeToDates(query.from, query.to);
-      const signedNet = sql<string>`SUM((CASE WHEN ${invoices.type} = 'credit' THEN -1 ELSE 1 END) * ${invoiceRows.lineAmount})`;
+      // Valuta: in SEK at each invoice's rate (1 for SEK), so EUR and SEK
+      // revenue are never summed in their own currencies — the same per-row
+      // conversion as the inköpsstatistik.
+      const signedNet = sql<string>`SUM((CASE WHEN ${invoices.type} = 'credit' THEN -1 ELSE 1 END) * ROUND(${invoiceRows.lineAmount} * COALESCE(${invoices.exchangeRate}, 1), 2))`;
       const signedQty = sql<string>`SUM((CASE WHEN ${invoices.type} = 'credit' THEN -1 ELSE 1 END) * ${invoiceRows.quantity})`;
       const invoiceCount = sql<string>`COUNT(DISTINCT ${invoices.id})`;
       const dateFilter = and(
