@@ -4311,6 +4311,9 @@ export interface BankProfileView {
   initiatingPartyRequired: boolean;
   debtorAgreementLabel: string | null;
   debitAccountKinds: DebitAccountKind[];
+  // Valuta steg 2: what the company needs for a payment abroad — the account
+  // kinds the bank takes as debit account for it (always IBAN so far).
+  foreignDebitAccountKinds: DebitAccountKind[];
 }
 export interface BankSettingsView {
   profile: BankProfileId | null;
@@ -4320,10 +4323,13 @@ export interface BankSettingsView {
   profiles: BankProfileView[];
   company: { name: string; orgNumber: string | null; postalCode: string | null; city: string | null; iban: string | null; bic: string | null; bankgiro: string | null; plusgiro: string | null };
   missing: string[];
+  // What payments abroad still need (not part of `missing`), null = nothing.
+  foreignProblem: string | null;
 }
 
 // Bankfiler.
-export type SupplierPaymentMethodValue = "bankgiro" | "plusgiro" | "bank_account" | "iban";
+export type SupplierPaymentMethodValue = "bankgiro" | "plusgiro" | "bank_account" | "iban" | "foreign_account";
+export type PaymentKindValue = "domestic" | "sepa" | "international";
 export interface SupplierPaymentFields {
   paymentMethod: SupplierPaymentMethodValue | null;
   bankgiro: string | null;
@@ -4332,6 +4338,22 @@ export interface SupplierPaymentFields {
   bankAccountNumber: string | null;
   iban: string | null;
   bic: string | null;
+  // Utlandsbetalningar (valuta steg 2): an account number without IBAN, the
+  // national bank id (clearingSystem USABA/CACPA/… + clearingMemberId), the
+  // bank's name, Avgiftsfördelning (SHAR/DEBT) and Skatteverkets betalningskod.
+  foreignAccountNumber: string | null;
+  clearingSystem: string | null;
+  clearingMemberId: string | null;
+  bankName: string | null;
+  chargeBearer: "SHAR" | "DEBT";
+  paymentReportingCode: string;
+}
+// KU81: the payment is reported to Skatteverket with `code`; rateMissing = no
+// exchange rate was found, so it is reported to be safe.
+export interface RegulatoryReportingView {
+  code: string;
+  amountSek: number | null;
+  rateMissing: boolean;
 }
 export interface CreditorView {
   method: SupplierPaymentMethodValue;
@@ -4343,6 +4365,19 @@ export interface CreditorView {
   city: string | null;
   referenceKind: "ocr" | "message";
   reference: string;
+  // Valuta steg 2 (every export since then): what the file said about the
+  // payee abroad. Absent on older snapshots.
+  kind?: PaymentKindValue;
+  currency?: string;
+  street?: string | null;
+  country?: string;
+  clearingSystem?: string | null;
+  bankName?: string | null;
+  chargeBearer?: "SLEV" | "SHAR" | "DEBT";
+}
+export interface CurrencyAmount {
+  currency: string;
+  amount: number;
 }
 export interface PaymentBatchListRow {
   id: string;
@@ -4352,7 +4387,9 @@ export interface PaymentBatchListRow {
   exportedAt: string | null;
   itemCount: number;
   confirmedCount: number;
+  // SEK rows only; every currency (SEK included) is in totalsByCurrency.
   totalAmount: number;
+  totalsByCurrency: CurrencyAmount[];
   earliestExecutionDate: string | null;
 }
 export interface PaymentBatchItem {
@@ -4360,7 +4397,13 @@ export interface PaymentBatchItem {
   seq: number;
   endToEndId: string;
   status: "pending" | "exported" | "confirmed" | "rejected" | "returned" | "cancelled";
+  // In `currency` (the invoice's).
   amount: number;
+  currency: string;
+  // Inrikes/SEPA/Utland — null while the supplier has no payment details.
+  paymentKind: PaymentKindValue | null;
+  // KU81 marking, null = not reported.
+  regulatoryReporting: RegulatoryReportingView | null;
   executionDate: string;
   supplierInvoiceId: string;
   registrationNumber: string;
@@ -4371,6 +4414,8 @@ export interface PaymentBatchItem {
   rejectedReason: string | null;
   payment: { id: string; paymentNumber: string; cancelledAt: string | null } | null;
   warnings: string[];
+  // What the export would refuse for this row (draft only).
+  problems: string[];
 }
 export interface PaymentBatchDetail {
   id: string;
@@ -4385,8 +4430,12 @@ export interface PaymentBatchDetail {
   createdAt: string;
   updatedAt: string;
   totalAmount: number;
+  totalsByCurrency: CurrencyAmount[];
   itemCount: number;
   confirmedCount: number;
+  // What the export would refuse for the batch as a whole (draft only), e.g.
+  // a missing debit IBAN for payments abroad.
+  problems: string[];
   file: { id: string; filename: string; sha256: string; createdAt: string } | null;
   items: PaymentBatchItem[];
 }
@@ -4438,8 +4487,15 @@ export interface OutgoingEntryView {
   position: number;
   direction: "credit" | "debit";
   reversal: boolean;
+  // The entry's own amount in the account's currency (SEK).
   amount: number;
   currency: string;
+  // Valuta steg 2: what was instructed in another currency (InstdAmt), the
+  // bank's exchange details and the charges included in `amount`.
+  instructedAmount: number | null;
+  instructedCurrency: string | null;
+  currencyExchange: { sourceCurrency: string; targetCurrency: string | null; unitCurrency: string | null; rate: string } | null;
+  chargesAmount: number | null;
   bookingDate: string;
   endToEndId: string | null;
   counterpartyName: string | null;
@@ -4451,7 +4507,9 @@ export interface OutgoingEntryView {
     batchNumber: string;
     endToEndId: string;
     status: string;
+    // In the item's currency (the invoice's).
     amount: number;
+    currency: string;
     registrationNumber: string;
     paymentId: string | null;
     paymentNumber: string | null;

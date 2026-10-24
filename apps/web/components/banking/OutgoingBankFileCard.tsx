@@ -12,6 +12,7 @@ import { useCan } from "../PermissionsProvider";
 import { API_URL, apiFetch } from "../../lib/api";
 import { OUTGOING_STATE } from "../../lib/banking";
 import { apiErrorMessage } from "../../lib/errorMessages";
+import { formatRate } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
 import type { BankFileDetail, BankItemResult, OutgoingEntryView } from "../../lib/types";
 import { BankEntryIgnoreButton } from "./BankEntryIgnoreButton";
@@ -25,7 +26,28 @@ const HINT: Partial<Record<OutgoingEntryView["state"], string>> = {
 };
 // A return of another amount than we sent is never booked automatically.
 const RETURN_AMOUNT_HINT = "Returen gäller ett annat belopp än betalfilen. Kontrollera i internetbanken och makulera utbetalningen manuellt under Betalningar om det behövs.";
-const hintFor = (e: OutgoingEntryView) => (e.state === "amount_mismatch" && e.reversal ? RETURN_AMOUNT_HINT : HINT[e.state]);
+// Valuta steg 2: a payment in another currency is matched on the instructed
+// amount (InstdAmt) in the invoice's currency, and booked with the SEK the
+// bank drew from the account.
+const isForeignItem = (e: OutgoingEntryView) => e.item !== null && e.item.currency !== "SEK";
+function hintFor(e: OutgoingEntryView): string | undefined {
+  if (e.state === "amount_mismatch" && e.reversal) return RETURN_AMOUNT_HINT;
+  if (e.item && isForeignItem(e)) {
+    const unit = e.item.currency;
+    if (e.state === "amount_mismatch") {
+      return `Betalfilens post är ${formatMoney(e.item.amount)} ${unit}, men bankavin anger inte samma belopp i ${unit}. Kontrollera i internetbanken och bekräfta manuellt med Bekräfta utförd på betalfilen (med beloppet i SEK från kontoutdraget).`;
+    }
+    if (e.state === "matched") {
+      return `Bokförs med ${formatMoney(e.amount)} kr draget från kontot${
+        e.chargesAmount !== null
+          ? `, varav bankavgift ${formatMoney(e.chargesAmount)} kr.`
+          : ". Banken anger ingen avgift — en eventuell avgift hamnar i kursdifferensen."
+      }`;
+    }
+    if (e.state === "return") return "Returen makulerar utbetalningen — det går bara om banken återförde samma belopp i SEK som den drog.";
+  }
+  return HINT[e.state];
+}
 
 // Owns the per-row booking results OUTSIDE the keyed body: book() refreshes the
 // page, the page's key (the entries' states) then remounts the body, and
@@ -93,7 +115,7 @@ function OutgoingBankFileBody({
           { key: "select", label: "", width: "40px" },
           { key: "endToEndId", label: "Post", width: "110px" },
           { key: "batch", label: "Betalfil", width: "1fr" },
-          { key: "amount", label: "Belopp", width: "120px", align: "right" },
+          { key: "amount", label: "Belopp", width: "200px", align: "right" },
           { key: "bookingDate", label: "Bokföringsdag", width: "120px" },
           { key: "state", label: "Läge", width: "1.2fr" },
           { key: "actions", label: "", width: "170px" },
@@ -128,8 +150,35 @@ function OutgoingBankFileBody({
               ) : (
                 e.counterpartyName ?? "–"
               );
-            case "amount":
-              return `${e.reversal ? "+" : "−"}${formatMoney(e.amount)} kr`;
+            case "amount": {
+              const sign = e.reversal ? "+" : "−";
+              // Another currency than the account's: the instructed amount, then
+              // what it cost in SEK with the bank's rate and charges.
+              if (e.instructedAmount !== null && e.instructedCurrency) {
+                const exchange = e.currencyExchange;
+                return (
+                  <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                    <span>
+                      {sign}
+                      {formatMoney(e.instructedAmount)} {e.instructedCurrency}
+                    </span>
+                    <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+                      {formatMoney(e.amount)} kr från kontot
+                    </span>
+                    {exchange && (
+                      <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+                        Bankens kurs {formatRate(exchange.rate)}
+                        {exchange.targetCurrency ? ` (${exchange.sourceCurrency}→${exchange.targetCurrency})` : ""}
+                      </span>
+                    )}
+                    {e.chargesAmount !== null && (
+                      <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>varav avgifter {formatMoney(e.chargesAmount)} kr</span>
+                    )}
+                  </span>
+                );
+              }
+              return `${sign}${formatMoney(e.amount)} kr`;
+            }
             case "bookingDate":
               return e.bookingDate;
             case "state": {

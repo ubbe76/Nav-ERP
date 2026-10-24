@@ -14,6 +14,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
 import { currencyLabel, formatRate, SEK } from "../../lib/currency";
+import { formatCurrencyAmounts, sumByCurrency } from "../../lib/currencyTotals";
 import { formatMoney } from "../../lib/format";
 import { stockholmToday } from "../../lib/date";
 import type { OpenSupplierInvoiceRow, Paged, Supplier } from "../../lib/types";
@@ -33,11 +34,10 @@ function today(): string {
 function unpayable(row: OpenSupplierInvoiceRow): string | null {
   if (row.paymentBatch) return `Ingår i betalfil ${row.paymentBatch.batchNumber}`;
   if (row.openAmount < 0) return "Kreditfakturor kvittas under Betalningar";
-  // Valuta: the payment file carries SEK payments only until
-  // utlandsbetalningarna — a foreign invoice is paid with Registrera betalning.
-  if (row.currency !== SEK) return `Faktura i ${row.currency} — registrera utbetalningen under Betalningar (betalfilen tar bara SEK)`;
+  // Valuta steg 2: an invoice in any currency, to an account in any country,
+  // goes in a payment file — what a payment abroad still lacks (street, BIC, the
+  // company's debit IBAN) is shown on the batch before it is exported.
   if (!row.supplierPaymentMethod) return "Leverantören saknar betalningsuppgifter";
-  if (row.supplierPaymentMethod === "iban" && !(row.supplierIban ?? "").startsWith("SE")) return "Utlandsbetalning stöds inte";
   return null;
 }
 
@@ -61,7 +61,8 @@ export function OpenSupplierInvoicesPageClient({
   const selectedRows = [...selected.values()];
   const visibleIds = new Set(openInvoices.rows.map((r) => r.id));
   const offPage = selectedRows.filter((r) => !visibleIds.has(r.id)).length;
-  const selectedTotal = selectedRows.reduce((sum, r) => sum + r.openAmount, 0);
+  // Never one sum over several currencies.
+  const selectedTotal = formatCurrencyAmounts(sumByCurrency(selectedRows, (r) => ({ currency: r.currency, amount: r.openAmount })));
   const anyForeign = openInvoices.rows.some((r) => r.currency !== SEK);
 
   function toggle(row: OpenSupplierInvoiceRow) {
@@ -116,7 +117,7 @@ export function OpenSupplierInvoicesPageClient({
         <div style={{ display: "flex", gap: 16, alignItems: "center", margin: "12px 0" }}>
           <span>
             {selected.size} valda
-            {offPage > 0 && ` (${offPage} på andra sidor)`} · {formatMoney(selectedTotal)} kr
+            {offPage > 0 && ` (${offPage} på andra sidor)`} · {selectedTotal}
           </span>
           <Button variant="ghost" size="small" onClick={() => setSelected(new Map())} disabled={pending}>
             Rensa val

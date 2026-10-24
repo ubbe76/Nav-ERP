@@ -7,6 +7,8 @@ import { ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
 import { PAYMENT_BATCH_STATUS } from "../../lib/banking";
+import { currencyLabel } from "../../lib/currency";
+import { batchTotals } from "../../lib/currencyTotals";
 import { formatMoney } from "../../lib/format";
 import type { Paged, PaymentBatchListRow } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
@@ -36,7 +38,7 @@ export function PaymentBatchesPageClient({ batches, pageSize }: { batches: Paged
           { key: "batchNumber", label: "Nummer", width: "110px" },
           { key: "status", label: "Status", width: "140px" },
           { key: "itemCount", label: "Poster", width: "80px", align: "right" },
-          { key: "totalAmount", label: "Belopp", width: "140px", align: "right" },
+          { key: "totalAmount", label: "Belopp", width: "170px", align: "right" },
           { key: "earliestExecutionDate", label: "Betalningsdag", width: "130px" },
           { key: "exportedAt", label: "Exporterad", width: "130px" },
           { key: "confirmedCount", label: "Bekräftade", width: "1fr" },
@@ -56,7 +58,16 @@ export function PaymentBatchesPageClient({ batches, pageSize }: { batches: Paged
             case "itemCount":
               return row.itemCount;
             case "totalAmount":
-              return `${formatMoney(row.totalAmount)} kr`;
+              // One line per currency — never one sum over several.
+              return (
+                <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                  {batchTotals(row).map((t) => (
+                    <span key={t.currency}>
+                      {formatMoney(t.amount)} {currencyLabel(t.currency)}
+                    </span>
+                  ))}
+                </span>
+              );
             case "earliestExecutionDate":
               return row.earliestExecutionDate ?? "–";
             case "exportedAt":

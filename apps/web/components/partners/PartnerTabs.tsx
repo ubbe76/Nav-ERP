@@ -1224,7 +1224,21 @@ function VillkorTab({
     {!isCustomer && (
       <SupplierPaymentDetailsSection
         // Remount on every saved change (the server normalizes the numbers).
-        key={[s.paymentMethod, s.bankgiro, s.plusgiro, s.bankClearing, s.bankAccountNumber, s.iban, s.bic].join("|")}
+        key={[
+          s.paymentMethod,
+          s.bankgiro,
+          s.plusgiro,
+          s.bankClearing,
+          s.bankAccountNumber,
+          s.iban,
+          s.bic,
+          s.foreignAccountNumber,
+          s.clearingSystem,
+          s.clearingMemberId,
+          s.bankName,
+          s.chargeBearer,
+          s.paymentReportingCode,
+        ].join("|")}
         supplier={s}
         saved={paymentSaved}
         onSavedChange={setPaymentSaved}

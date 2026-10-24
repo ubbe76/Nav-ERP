@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
-import { Form, FormActions, FormError, FormNotice, FormSaved } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormSaved } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -24,6 +24,7 @@ export function BankSettingsForm({ initial }: { initial: BankSettingsView }) {
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
   const profile = initial.profiles.find((p) => p.id === profileId) ?? null;
+  const foreignKinds = profile?.foreignDebitAccountKinds ?? [];
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -67,6 +68,14 @@ export function BankSettingsForm({ initial }: { initial: BankSettingsView }) {
           </ul>
           Kontonummer och adress ändras under <Link href="/system/foretagsinfo">Företagsinformation</Link>.
         </FormError>
+      )}
+      {/* Valuta steg 2: a company that never pays abroad is ready without it, so
+          this is a notice and not part of the list above. */}
+      {initial.foreignProblem && (
+        <FormNotice>
+          Utlandsbetalningar: {initial.foreignProblem}. Betalningar utomlands kan inte exporteras förrän uppgiften är ifylld; inrikes
+          betalningar påverkas inte. Kontonummer ändras under <Link href="/system/foretagsinfo">Företagsinformation</Link>.
+        </FormNotice>
       )}
       {profile && !profile.verified && (
         <FormNotice>
@@ -112,6 +121,12 @@ export function BankSettingsForm({ initial }: { initial: BankSettingsView }) {
                 ))}
               </Select>
             </Field>
+            <FormHint>
+              Betalningar utomlands (SEPA och internationella) dras från {foreignKinds.map((k) => KIND_LABEL[k]).join(" eller ")} i
+              Företagsinformation
+              {foreignKinds.every((k) => !initial.company[k]) ? " (saknas just nu)" : ""}
+              {kind && !foreignKinds.includes(kind) ? " — alltså inte från debiteringskontot ovan" : ""}.
+            </FormHint>
           </>
         )}
         {error && <FormError>{error}</FormError>}

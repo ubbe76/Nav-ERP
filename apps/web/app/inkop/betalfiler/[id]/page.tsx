@@ -5,7 +5,7 @@ import { PaymentBatchCard } from "../../../../components/banking/PaymentBatchCar
 import { HelpLink } from "../../../../components/ui/HelpLink";
 import shellStyles from "../../../../components/AppShell.module.css";
 import { apiGet } from "../../../../lib/api";
-import type { BankSettingsView, PaymentBatchDetail } from "../../../../lib/types";
+import type { BankSettingsView, PaymentBatchDetail, SystemSettings } from "../../../../lib/types";
 
 export default async function PaymentBatchPage(props: { params: Promise<{ id: string }> }) {
   const { id } = await props.params;
@@ -13,6 +13,9 @@ export default async function PaymentBatchPage(props: { params: Promise<{ id: st
   const batch = await apiGet<PaymentBatchDetail>(`/api/v1/payment-batches/${id}`, cookieHeader).catch(() => null);
   if (!batch) notFound();
   const bank = await apiGet<BankSettingsView>("/api/v1/bank-settings", cookieHeader).catch(() => null);
+  // Betalningstoleransen (kr) — Bekräfta utförd previews the kursdifferens of a
+  // payment in another currency with it, as Registrera betalning does.
+  const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader).catch(() => null);
   const profile = bank?.profiles.find((p) => p.id === (batch.bankProfile ?? bank.profile)) ?? null;
   return (
     <AppShell active="Inköp">
@@ -23,7 +26,7 @@ export default async function PaymentBatchPage(props: { params: Promise<{ id: st
         </div>
         <HelpLink chapter="inkop" anchor={batch.status === "draft" ? "skapa-betalfil" : "bekrafta-betalningar"} label="Hjälp om betalfiler" />
       </div>
-      <PaymentBatchCard batch={batch} unverifiedBank={profile !== null && !profile.verified} />
+      <PaymentBatchCard batch={batch} unverifiedBank={profile !== null && !profile.verified} tolerance={settings?.paymentTolerance ?? 0} />
     </AppShell>
   );
 }

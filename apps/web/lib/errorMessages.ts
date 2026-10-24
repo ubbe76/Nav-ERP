@@ -331,7 +331,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "bank-entry-amount-mismatch": "Fördelningen ska bli exakt postens belopp.",
   "bank-entry-direction": serverMessage("Posten hör till den andra riktningen."),
   "bank-entry-not-matched": "Posten hör inte till någon betalfil — markera den som Hanterad utanför Nav om den är bokförd på annat sätt.",
-  "bank-entry-amount-differs": "Bankens belopp skiljer sig från betalfilens. Kontrollera i internetbanken och hantera posten manuellt.",
+  "bank-entry-amount-differs":
+    "Bankens belopp skiljer sig från betalfilens (en betalning i utländsk valuta jämförs på beloppet i fakturans valuta, och avin måste ange det). Kontrollera i internetbanken och hantera posten manuellt.",
   // Per-row booking results (bank files / Bekräfta utförd) carry the code of
   // whatever refused that row; these are not in ERROR_CODES because no route
   // maps them to a standalone response in this feature.
@@ -340,6 +341,10 @@ const MESSAGES: Record<string, MessageEntry> = {
   "invalid-status-transition": "Åtgärden går inte att göra i det här läget — ladda om sidan.",
   "bank-return-before-payment":
     "Returen är bokförd av banken före utbetalningens datum. Kontrollera betalningsdatumet och makulera utbetalningen manuellt under Betalningar.",
+  // Valuta steg 2: the bank returned a payment in another currency with another
+  // SEK amount than it took (the rate moved in between).
+  "bank-return-sek-differs":
+    "Returen gäller ett annat belopp i kronor än utbetalningen tog från kontot. Makulera utbetalningen manuellt under Betalningar och bokför skillnaden för hand.",
   // configurator — the server's messages are Swedish and name the code, rule
   // or type that has to change, so they are shown as they are.
   "configurator-template-not-found": "Artikeln är inte konfigurerbar.",
