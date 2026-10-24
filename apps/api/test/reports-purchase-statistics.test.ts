@@ -198,4 +198,46 @@ describe("reports service — purchase statistics: header vs rows basis", () => 
     expect(result.rows[0]!.label).toBe("(Rader utan artikel)");
     expect(result.rows[0]!.netAmount).toBe(75);
   });
+
+  // Valuta: an EUR invoice is summed in SEK at its own rate, never next to a
+  // SEK invoice in its own currency.
+  it("converts each invoice to SEK at its rate before summing", async () => {
+    const user = await makeUser();
+    const supplier = await makeSupplier();
+    const euro = await purchaseService.createSupplier({ name: "Lieferant GmbH", currency: "EUR", country: "DE", active: true } as never);
+    const article = await makeArticle();
+    const approve = (inv: { id: string } | null) => supplierInvoiceService.approve(inv!.id, user.id);
+    await supplierInvoiceService
+      .create(
+        { supplierId: supplier.id, invoiceNumber: `INV-${crypto.randomUUID()}`, invoiceDate: POSTING_DATE, netAmount: 100, vatAmount: 25, grossAmount: 125, rows: [] },
+        user.id
+      )
+      .then(approve);
+    await supplierInvoiceService
+      .create(
+        {
+          supplierId: euro.id,
+          invoiceNumber: `INV-${crypto.randomUUID()}`,
+          invoiceDate: POSTING_DATE,
+          netAmount: 1000,
+          vatAmount: 0,
+          grossAmount: 1000,
+          exchangeRate: 11.131,
+          rows: [{ description: "Material", articleId: article.id, quantity: 3, unitPrice: 333.33 }],
+        },
+        user.id
+      )
+      .then(approve);
+
+    const byMonth = await reportsService.getPurchaseStatistics({ groupBy: "month" });
+    expect(byMonth.rows[0]!.netAmount).toBe(100 + 11131);
+    const bySupplier = await reportsService.getPurchaseStatistics({ groupBy: "supplier" });
+    expect(bySupplier.rows.map((row) => [row.label, row.netAmount])).toEqual([
+      ["Lieferant GmbH", 11131],
+      [supplier.name, 100],
+    ]);
+    const byArticle = await reportsService.getPurchaseStatistics({ groupBy: "article" });
+    // 999,99 EUR × 11,131 = 11 130,89 (round(x × rate, 2)).
+    expect(byArticle.rows[0]!.netAmount).toBe(11130.89);
+  });
 });

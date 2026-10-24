@@ -67,6 +67,8 @@ export interface NotPayableDetail {
   registrationNumber: string | null;
   reason: NotPayableReason;
   batchNumber?: string;
+  // not_sek: the invoice's currency.
+  currency?: string;
 }
 
 const NOT_PAYABLE_TEXT: Record<NotPayableReason, string> = {
@@ -74,7 +76,10 @@ const NOT_PAYABLE_TEXT: Record<NotPayableReason, string> = {
   not_approved: "är inte attesterad",
   not_open: "har inget öppet belopp",
   credit_note: "är en kreditfaktura — kvittas under Betalningar",
-  not_sek: "är inte i SEK",
+  // Valuta steg 1: a foreign invoice is attested and paid in its own
+  // currency, but the payment file carries SEK payments only until
+  // utlandsbetalningar (steg 2) — it is paid with Registrera utbetalning.
+  not_sek: "är i utländsk valuta — betalfilen tar bara SEK än så länge; registrera utbetalningen under Betalningar",
   no_payment_details: "leverantören saknar betalningsuppgifter",
   foreign_iban: "utlandsbetalningar stöds inte",
   already_in_batch: "ingår redan i en betalfil",
@@ -89,7 +94,11 @@ export class SupplierInvoicesNotPayableError extends Error {
         .map(
           (d) =>
             `${d.registrationNumber ?? d.invoiceId} ${
-              d.reason === "already_in_batch" && d.batchNumber ? `ingår redan i betalfil ${d.batchNumber}` : NOT_PAYABLE_TEXT[d.reason]
+              d.reason === "already_in_batch" && d.batchNumber
+                ? `ingår redan i betalfil ${d.batchNumber}`
+                : d.reason === "not_sek" && d.currency
+                  ? `är i ${d.currency} — betalfilen tar bara SEK än så länge; registrera utbetalningen under Betalningar`
+                  : NOT_PAYABLE_TEXT[d.reason]
             }`
         )
         .join("; ")

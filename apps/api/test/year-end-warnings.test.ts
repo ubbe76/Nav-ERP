@@ -126,6 +126,8 @@ async function approvedSupplierInvoice(n: number, gross: number, date: string, u
       invoiceDate: date,
       status: "approved",
       grossAmount: String(gross),
+      // Valuta: the attest's stamped SEK debt — what the reskontra sums.
+      grossAmountSek: String(gross),
       verificationId: booked.id,
     })
     .returning();

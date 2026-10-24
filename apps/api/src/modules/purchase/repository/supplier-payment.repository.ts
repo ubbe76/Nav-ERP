@@ -31,7 +31,11 @@ import {
 import {
   applyPaymentTolerance,
   ilikePattern,
+  releasedSek,
   round2,
+  SEK,
+  toSek,
+  toleranceInCurrency,
   type ListOpenSupplierInvoicesQuery,
   type ListSupplierPaymentsQuery,
 } from "@navet/shared";
@@ -41,7 +45,7 @@ import { readPostingSettings } from "../../system/service/posting-settings.js";
 // consuming service does not create a runtime import cycle — same seam as
 // supplier-invoice.repository.ts's SupplierInvoicePoster.
 import type { SupplierPaymentPoster } from "../service/supplier-payment.service.js";
-import { computeOpenAmounts, openItemAggregates } from "./open-amounts.js";
+import { computeOpenAmounts, computeReleasedSek, openItemAggregates } from "./open-amounts.js";
 
 // Control-flow signals thrown INSIDE the transaction so everything it did (the
 // UTB number, the payment rows, the U verification and its verifikatnummer)
@@ -66,7 +70,27 @@ export type SupplierPaymentGuardReason =
   | "reserved"
   // Bankfiler: the link names a batch row that is not an exported row of one
   // of the payment's own invoices (the seam defends itself, whoever calls).
-  | "batch_link_mismatch";
+  | "batch_link_mismatch"
+  // Valuta: invoices in more than one currency on one payment.
+  | "mixed_currencies"
+  // Valuta: the SEK amount/fee does not fit the payment (detail.sekReason).
+  | "amount_sek";
+
+// Valuta: why the SEK amounts were refused — missing for a foreign payment,
+// pointing the other way (or zero) than the amount, more fee than SEK moved,
+// anything at all on a kvittning, or anything but the amount itself on a SEK
+// payment.
+export type SupplierPaymentSekReason = "required" | "sign" | "fee" | "kvittning" | "sek";
+
+export type SupplierPaymentGuardDetail = {
+  invoiceId: string;
+  registrationNumber: string | null;
+  open?: number;
+  applied?: number;
+  currencies?: string[];
+  currency?: string;
+  sekReason?: SupplierPaymentSekReason;
+};
 
 export class SupplierPaymentGuardError extends Error {
   constructor(
@@ -74,7 +98,7 @@ export class SupplierPaymentGuardError extends Error {
     // registrationNumber (LF-3) is the handle the messages name the invoice
     // by — the AP counterpart of the customer ledger's invoiceNumber, and the
     // one number that is unique across every supplier.
-    public detail: { invoiceId: string; registrationNumber: string | null; open?: number; applied?: number }
+    public detail: SupplierPaymentGuardDetail
   ) {
     super(reason);
   }
@@ -102,6 +126,10 @@ export type SupplierPaymentHeaderWrite = {
   paymentDate: string;
   bankAccountNumber: string;
   amount: number;
+  // Valuta: as the client sent them (null = not sent) — what they must be
+  // depends on the invoices' currency, known only under the lock.
+  amountSek: number | null;
+  bankFeeSek: number | null;
   note: string | null;
 };
 
@@ -111,14 +139,7 @@ export type SupplierPaymentRowInput = { supplierInvoiceId: string; appliedAmount
 
 export type CreateSupplierPaymentResult =
   | { ok: true; paymentId: string }
-  | {
-      ok: false;
-      reason: SupplierPaymentGuardReason;
-      invoiceId: string;
-      registrationNumber: string | null;
-      open?: number;
-      applied?: number;
-    };
+  | ({ ok: false; reason: SupplierPaymentGuardReason } & SupplierPaymentGuardDetail);
 
 export type CancelSupplierPaymentResult = { ok: true } | { ok: false; reason: "not_found" | "already_cancelled" };
 
@@ -200,6 +221,12 @@ export function createSupplierPaymentRepository(db: Db) {
             // no type flip on this side, see open-amounts.ts.
             grossAmount: supplierInvoices.grossAmount,
             openAmount: agg.openExpr,
+            // Valuta: the open item's currency (amounts above are in it), its
+            // rate and the booked SEK values — the list's SEK column.
+            currency: supplierInvoices.currency,
+            exchangeRate: supplierInvoices.exchangeRate,
+            grossAmountSek: supplierInvoices.grossAmountSek,
+            openAmountSek: agg.openSekExpr,
             // What the batch picker needs: whether the supplier can be paid
             // by file at all, and which batch already holds the invoice.
             supplierPaymentMethod: suppliers.paymentMethod,
@@ -235,6 +262,9 @@ export function createSupplierPaymentRepository(db: Db) {
           ...row,
           grossAmount: Number(row.grossAmount),
           openAmount: Number(row.openAmount),
+          exchangeRate: Number(row.exchangeRate),
+          grossAmountSek: row.grossAmountSek === null ? null : Number(row.grossAmountSek),
+          openAmountSek: row.openAmountSek === null ? null : Number(row.openAmountSek),
           paymentBatch: paymentBatchId ? { id: paymentBatchId, batchNumber: paymentBatchNumber!, status: paymentBatchStatus! } : null,
         })),
         total: totalRows[0]!.total,
@@ -325,6 +355,7 @@ export function createSupplierPaymentRepository(db: Db) {
           registrationNumber: supplierInvoices.registrationNumber,
           invoiceNumber: supplierInvoices.invoiceNumber,
           invoiceDueDate: supplierInvoices.dueDate,
+          invoiceExchangeRate: supplierInvoices.exchangeRate,
         })
         .from(supplierPaymentRows)
         .innerJoin(supplierInvoices, eq(supplierInvoices.id, supplierPaymentRows.supplierInvoiceId))
@@ -379,6 +410,10 @@ export function createSupplierPaymentRepository(db: Db) {
           registrationNumber: supplierInvoices.registrationNumber,
           status: supplierInvoices.status,
           supplierId: supplierInvoices.supplierId,
+          currency: supplierInvoices.currency,
+          exchangeRate: supplierInvoices.exchangeRate,
+          grossAmount: supplierInvoices.grossAmount,
+          grossAmountSek: supplierInvoices.grossAmountSek,
         })
         .from(supplierInvoices)
         .where(inArray(supplierInvoices.id, invoiceIds))
@@ -404,6 +439,51 @@ export function createSupplierPaymentRepository(db: Db) {
         // obligation yet, a cancelled one never was, and an invoice marked
         // paid before B4 is deliberately never reopened by this path.
         if (invoice.status !== "approved") throw new SupplierPaymentGuardError("not_approved", detail);
+      }
+
+      // Valuta: one payment, one currency — the bank moves one amount in one
+      // currency, and the SEK side below is read against it.
+      const currencies = [...new Set(locked.map((invoice) => invoice.currency))].sort();
+      if (currencies.length > 1) {
+        const first = locked[0]!;
+        throw new SupplierPaymentGuardError("mixed_currencies", {
+          invoiceId: first.id,
+          registrationNumber: first.registrationNumber,
+          currencies,
+        });
+      }
+      const currency = currencies[0]!;
+      const sekGuard = (sekReason: SupplierPaymentSekReason) => {
+        const first = locked[0]!;
+        return new SupplierPaymentGuardError("amount_sek", {
+          invoiceId: first.id,
+          registrationNumber: first.registrationNumber,
+          currency,
+          sekReason,
+        });
+      };
+      const amount = round2(header.amount);
+      let amountSek: number;
+      let bankFeeSek: number;
+      if (currency === SEK) {
+        // A SEK payment moves exactly its amount and has no fee of its own.
+        if (header.amountSek !== null && round2(header.amountSek) !== amount) throw sekGuard("sek");
+        if (header.bankFeeSek !== null && round2(header.bankFeeSek) !== 0) throw sekGuard("sek");
+        amountSek = amount;
+        bankFeeSek = 0;
+      } else if (amount === 0) {
+        // A kvittning moves no money: nothing left the bank, no fee.
+        if ((header.amountSek !== null && round2(header.amountSek) !== 0) || (header.bankFeeSek !== null && round2(header.bankFeeSek) !== 0)) {
+          throw sekGuard("kvittning");
+        }
+        amountSek = 0;
+        bankFeeSek = 0;
+      } else {
+        if (header.amountSek === null) throw sekGuard("required");
+        amountSek = round2(header.amountSek);
+        if (amountSek === 0 || Math.sign(amountSek) !== Math.sign(amount)) throw sekGuard("sign");
+        bankFeeSek = round2(header.bankFeeSek ?? 0);
+        if (bankFeeSek < 0 || bankFeeSek > Math.abs(amountSek)) throw sekGuard("fee");
       }
 
       // Bankfiler: an invoice reserved in a live batch row (pending/
@@ -446,6 +526,9 @@ export function createSupplierPaymentRepository(db: Db) {
       const settings = await readPostingSettings(tx);
       const tolerance = round2(settings.paymentTolerance);
       const openAmounts = await computeOpenAmounts(tx, invoiceIds);
+      // Valuta: the SEK earlier live payments released from each invoice —
+      // read under the same lock, so a settling row releases exactly the rest.
+      const releasedBefore = await computeReleasedSek(tx, invoiceIds);
 
       // Decided against the LOCKED open amounts: the write-off is derived
       // here, never taken from the client.
@@ -455,8 +538,14 @@ export function createSupplierPaymentRepository(db: Db) {
         const open = round2(openAmounts.get(row.supplierInvoiceId) ?? 0);
         const applied = round2(row.appliedAmount);
         // The shared tolerance rule (packages/shared/src/payment-tolerance.ts) —
-        // the same function the bank-file matching previews with.
-        const result = applyPaymentTolerance(open, applied, tolerance);
+        // the same function the bank-file matching previews with. The
+        // tolerance setting is kronor: on a foreign invoice it is what that is
+        // worth in the invoice's currency at its rate.
+        const result = applyPaymentTolerance(
+          open,
+          applied,
+          toleranceInCurrency(tolerance, Number(invoice.exchangeRate), invoice.currency)
+        );
         if (!result.ok) {
           if (result.reason === "not_open") throw new SupplierPaymentGuardError("not_open", detail);
           if (result.reason === "exceeds_open") {
@@ -466,10 +555,24 @@ export function createSupplierPaymentRepository(db: Db) {
           // extraction a zero applied amount was a sign mismatch, and it still is.
           throw new SupplierPaymentGuardError("sign_mismatch", detail);
         }
+        const grossAmount = Number(invoice.grossAmount);
+        const sek = releasedSek({
+          currency: invoice.currency,
+          grossAmount,
+          // Stamped at attest; the fallback covers an invoice attested before
+          // migration 0143 that the backfill could not reach (none expected).
+          grossAmountSek: invoice.grossAmountSek === null ? toSek(grossAmount, Number(invoice.exchangeRate)) : Number(invoice.grossAmountSek),
+          previouslyReleasedSek: releasedBefore.get(row.supplierInvoiceId) ?? 0,
+          appliedAmount: applied,
+          writeOffAmount: result.writeOffAmount,
+          settles: result.settles,
+        });
         return {
           supplierInvoiceId: row.supplierInvoiceId,
           appliedAmount: applied,
           writeOffAmount: result.writeOffAmount,
+          appliedAmountSek: sek.appliedAmountSek,
+          writeOffAmountSek: sek.writeOffAmountSek,
           settles: result.settles,
         };
       });
@@ -481,7 +584,10 @@ export function createSupplierPaymentRepository(db: Db) {
           supplierId: header.supplierId,
           paymentDate: header.paymentDate,
           bankAccountNumber: header.bankAccountNumber,
-          amount: String(round2(header.amount)),
+          amount: String(amount),
+          currency,
+          amountSek: String(amountSek),
+          bankFeeSek: String(bankFeeSek),
           note: header.note,
           createdBy,
           paymentBatchItemId: link?.paymentBatchItemId ?? null,
@@ -502,6 +608,8 @@ export function createSupplierPaymentRepository(db: Db) {
           supplierInvoiceId: write.supplierInvoiceId,
           appliedAmount: String(write.appliedAmount),
           writeOffAmount: String(write.writeOffAmount),
+          appliedAmountSek: String(write.appliedAmountSek),
+          writeOffAmountSek: String(write.writeOffAmountSek),
           createdAt: new Date(now + index),
         }))
       );
@@ -522,10 +630,18 @@ export function createSupplierPaymentRepository(db: Db) {
           paymentNumber,
           paymentDate: header.paymentDate,
           bankAccountNumber: header.bankAccountNumber,
-          bankAmount: round2(header.amount),
+          bankAmount: amount,
           supplierName: supplier!.name,
+          currency,
+          bankAmountSek: amountSek,
+          bankFeeSek,
         },
-        writes.map((write) => ({ appliedAmount: write.appliedAmount, writeOffAmount: write.writeOffAmount })),
+        writes.map((write) => ({
+          appliedAmount: write.appliedAmount,
+          writeOffAmount: write.writeOffAmount,
+          appliedAmountSek: write.appliedAmountSek,
+          writeOffAmountSek: write.writeOffAmountSek,
+        })),
         createdBy
       );
       if (posted) {

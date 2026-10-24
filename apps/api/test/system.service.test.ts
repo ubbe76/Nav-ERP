@@ -447,6 +447,10 @@ describe("system service — settings", () => {
     // Årsbokslut (steg 2).
     "posting_inventory",
     "posting_inventory_change",
+    // Valuta.
+    "posting_fx_gain",
+    "posting_fx_loss",
+    "posting_bank_fees",
   ];
 
   it("defaults the posting accounts (automatic accounting) when the keys are unset", async () => {
@@ -461,6 +465,10 @@ describe("system service — settings", () => {
     expect(settings.postingVatSettlement).toBe("2650");
     expect(settings.postingInventory).toBe("1460");
     expect(settings.postingInventoryChange).toBe("4990");
+    // Valuta.
+    expect(settings.postingFxGain).toBe("3960");
+    expect(settings.postingFxLoss).toBe("7960");
+    expect(settings.postingBankFees).toBe("6570");
   });
 
   it("round-trips the posting accounts, and blanking one reads back as its default", async () => {
@@ -472,7 +480,13 @@ describe("system service — settings", () => {
         postingVatSettlement: "2651",
         postingInventory: "1410",
         postingInventoryChange: "4991",
+        postingFxGain: "3961",
+        postingFxLoss: "7961",
+        postingBankFees: "6571",
       });
+      expect(updated.postingFxGain).toBe("3961");
+      expect(updated.postingFxLoss).toBe("7961");
+      expect(updated.postingBankFees).toBe("6571");
       expect(updated.postingAccountsReceivable).toBe("1511");
       expect(updated.postingAccountsPayable).toBe("2441");
       expect(updated.postingDefaultCost).toBe("4011");
@@ -501,6 +515,9 @@ describe("system service — settings", () => {
         postingVatSettlement: "",
         postingInventory: "",
         postingInventoryChange: "",
+        postingFxGain: "",
+        postingFxLoss: "",
+        postingBankFees: "",
       });
     }
   });

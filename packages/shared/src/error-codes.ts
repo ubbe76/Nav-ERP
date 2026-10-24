@@ -76,6 +76,21 @@ export const ERROR_CODES = {
   IMPORT_VAT_CODE: "import-vat-code",
   VAT_FILE_ORG_NUMBER_MISSING: "vat-file-org-number-missing",
   SUPPLIER_INVOICE_VAT_CODE: "supplier-invoice-vat-code",
+  // Valuta (bokföringsgranskningen etapp 2)
+  // No rate for the currency and day (409, body.currency/body.date)
+  EXCHANGE_RATE_UNAVAILABLE: "exchange-rate-unavailable",
+  // Hämta från Riksbanken failed (502, or 409 for a refused API key; body.reason
+  // unavailable|rate_limited|unauthorized|unexpected)
+  RIKSBANK_UNAVAILABLE: "riksbank-unavailable",
+  // A SEK supplier invoice with another rate than 1 (400)
+  SUPPLIER_INVOICE_EXCHANGE_RATE: "supplier-invoice-exchange-rate",
+  // Attest of a foreign invoice that has no rate (409)
+  SUPPLIER_INVOICE_EXCHANGE_RATE_MISSING: "supplier-invoice-exchange-rate-missing",
+  // One payment, invoices in two currencies (400, body.currencies)
+  PAYMENT_MIXED_CURRENCIES: "payment-mixed-currencies",
+  // amountSek/bankFeeSek do not fit the payment (400, body.reason
+  // required|sign|fee|kvittning|sek, body.currency)
+  SUPPLIER_PAYMENT_AMOUNT_SEK: "supplier-payment-amount-sek",
   // a document's chosen code is unknown, inactive or of the wrong direction
   // (400, body.reason unknown|inactive|not_applicable)
   INVALID_VAT_CODE: "invalid-vat-code",

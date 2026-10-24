@@ -128,7 +128,8 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
       else if (invoice.status !== "approved") detail("not_approved");
       else if (round2(open.get(id) ?? 0) < 0) detail("credit_note");
       else if (round2(open.get(id) ?? 0) === 0) detail("not_open");
-      else if (invoice.currency !== "SEK") detail("not_sek");
+      // Valuta: foreign invoices wait for utlandsbetalningar (steg 2).
+      else if (invoice.currency !== "SEK") detail("not_sek", { currency: invoice.currency });
       else if (!invoice.paymentMethod) detail("no_payment_details");
       else if (invoice.paymentMethod === "iban" && !(invoice.iban ?? "").startsWith("SE")) detail("foreign_iban");
       else if (reserved.has(id)) detail("already_in_batch", { batchNumber: reserved.get(id)! });

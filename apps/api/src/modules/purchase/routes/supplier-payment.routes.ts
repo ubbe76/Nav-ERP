@@ -19,6 +19,8 @@ import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { OPEN_SUPPLIER_INVOICE_CSV_COLUMNS, SUPPLIER_PAYMENT_CSV_COLUMNS } from "../service/export-columns.js";
 import {
+  PaymentMixedCurrenciesError,
+  SupplierPaymentAmountSekError,
   SupplierInvoiceNotOpenError,
   SupplierInvoiceReservedError,
   SupplierPaymentAlreadyCancelledError,
@@ -43,6 +45,13 @@ export async function supplierPaymentRoutes(app: FastifyInstance, opts: { servic
       err instanceof SupplierNotFoundError
     ) {
       return reply.code(404).send(errorBody(err as Error));
+    }
+    // Valuta: the request itself does not fit the invoices' currency.
+    if (err instanceof PaymentMixedCurrenciesError) {
+      return reply.code(400).send({ ...errorBody(err), currencies: err.currencies });
+    }
+    if (err instanceof SupplierPaymentAmountSekError) {
+      return reply.code(400).send({ ...errorBody(err), reason: err.reason, currency: err.currency });
     }
     // Everything that means "your payment cannot become what you asked for,
     // given the current state of the open items or the books".

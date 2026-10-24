@@ -153,6 +153,8 @@ export async function makeApprovedSupplierInvoice(
       netAmount: String(Math.round((input.gross / 1.25) * 100) / 100),
       vatAmount: String(Math.round((input.gross - input.gross / 1.25) * 100) / 100),
       grossAmount: String(input.gross),
+      // Valuta: an attested invoice carries its SEK debt.
+      grossAmountSek: String(input.gross),
       paymentReferenceKind: input.paymentReferenceKind ?? null,
       paymentReference: input.paymentReference ?? null,
     })

@@ -152,6 +152,7 @@ export const BAS_STANDARD_ACCOUNTS: { number: string; name: string; vatBox?: Vat
   { number: "7810", name: "Avskrivningar på immateriella anläggningstillgångar" },
   { number: "7820", name: "Avskrivningar på byggnader" },
   { number: "7830", name: "Avskrivningar på maskiner och inventarier" },
+  { number: "7960", name: "Valutakursförluster på fordringar och skulder av rörelsekaraktär" },
   { number: "7970", name: "Förlust vid avyttring av anläggningstillgångar" },
   { number: "7990", name: "Övriga rörelsekostnader" },
   { number: "8310", name: "Ränteintäkter från omsättningstillgångar" },

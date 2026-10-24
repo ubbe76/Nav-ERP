@@ -20,7 +20,6 @@ import { BAS_STANDARD_ACCOUNTS } from "../src/modules/economy/service/bas-accoun
 import {
   MissingPostingAccountError,
   NoAccountingPeriodForPostingError,
-  NonSekSupplierInvoiceError,
   PaymentAmountMismatchError,
   PaymentBankAccountConflictError,
   SupplierInvoiceAmountMismatchError,
@@ -63,6 +62,10 @@ const DEFAULT_POSTING_SETTINGS = {
   postingPaymentWriteOff: "3740",
   // Momsrapport (B5).
   postingVatSettlement: "2650",
+  // Valuta.
+  postingFxGain: "3960",
+  postingFxLoss: "7960",
+  postingBankFees: "6570",
 };
 let postingSettings = { ...DEFAULT_POSTING_SETTINGS };
 const poster = createVerificationPoster({ read: async () => postingSettings });
@@ -730,22 +733,80 @@ describe("verification poster — supplier invoice", () => {
     expect(await db.select().from(verifications)).toHaveLength(0);
   });
 
-  it("rejects a non-SEK supplier invoice (NonSekSupplierInvoiceError)", async () => {
+  // Valuta: NonSekSupplierInvoiceError is gone — a foreign invoice is booked
+  // in SEK at its rate with the restmetod (debt = toSek(gross), VAT =
+  // toSek(VAT), rows toSek(row), the remainder takes the rest).
+  it("books a EUR invoice in SEK: the debt is exactly toSek(gross) and the rows' rounding lands on the remainder", async () => {
+    const { user } = await setupPosting();
+    const group = await makeArticleGroup("310", "Diskbänkar");
+    const cost = await accountByNumber("4600");
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: null, costAccountId: cost.id });
+
+    // 1 250,00 EUR à 11,131: debt 13 913,75, VAT 2 782,75, net 11 131,00.
+    // Two rows of 333,33 EUR = 3 710,30 SEK each (3 710,296…); the remainder
+    // (333,34 EUR) takes 11 131,00 − 7 420,60 = 3 710,40 — not toSek(333,34)
+    // = 3 710,41, which would leave the verification an öre out.
+    const posted = await db.transaction((tx) =>
+      poster.postSupplierInvoice(
+        tx,
+        { ...SUPPLIER_DOC, currency: "EUR", exchangeRate: 11.131 },
+        [
+          { articleGroupId: group.id, lineAmount: 333.33, vatCode: null },
+          { articleGroupId: group.id, lineAmount: 333.33, vatCode: null },
+        ],
+        user.id
+      )
+    );
+
+    const verification = await loadVerification(posted.verificationId);
+    expectBalanced(verification.rows);
+    expect(byAccount(verification.rows)["2440"]).toEqual({ debit: 0, credit: 13913.75 });
+    expect(byAccount(verification.rows)["2640"]).toEqual({ debit: 2782.75, credit: 0 });
+    expect(byAccount(verification.rows)["4600"]).toEqual({ debit: 7420.6, credit: 0 });
+    expect(byAccount(verification.rows)["4010"]).toEqual({ debit: 3710.4, credit: 0 });
+    expect(verification.description).toBe("Leverantörsfaktura LF-12 (INV-9) — Leverantör AB, EUR 1 250,00 à 11,131000");
+  });
+
+  it("computes omvänd moms on the SEK base of a EUR invoice", async () => {
     const { user } = await setupPosting();
 
-    const error = await db
-      .transaction((tx) =>
-        poster.postSupplierInvoice(
-          tx,
-          { ...SUPPLIER_DOC, currency: "EUR" },
-          [{ articleGroupId: null, lineAmount: 1000, vatCode: null }],
-          user.id
-        )
+    // 1 000,00 EUR à 11,131 from an EU supplier (IEUV25): the base is
+    // 11 131,00 SEK and the computed VAT 25 % of it, 2 782,75.
+    const posted = await db.transaction((tx) =>
+      poster.postSupplierInvoice(
+        tx,
+        { ...SUPPLIER_DOC, currency: "EUR", exchangeRate: 11.131, vatAmount: 0, grossAmount: 1000, vatCode: C.IEUV25 },
+        [],
+        user.id
       )
-      .catch((err: unknown) => err);
+    );
 
-    expect(error).toBeInstanceOf(NonSekSupplierInvoiceError);
-    expect((error as NonSekSupplierInvoiceError).currency).toBe("EUR");
+    const { rows } = await loadVerification(posted.verificationId);
+    expectBalanced(rows);
+    expect(byAccount(rows)["2440"]).toEqual({ debit: 0, credit: 11131 });
+    expect(byAccount(rows)["4515"]).toEqual({ debit: 11131, credit: 0 });
+    expect(byAccount(rows)["2614"]).toEqual({ debit: 0, credit: 2782.75 });
+    expect(byAccount(rows)["2645"]).toEqual({ debit: 2782.75, credit: 0 });
+  });
+
+  it("books a EUR credit note in SEK with the signs mirrored", async () => {
+    const { user } = await setupPosting();
+
+    const posted = await db.transaction((tx) =>
+      poster.postSupplierInvoice(
+        tx,
+        { ...SUPPLIER_DOC, currency: "EUR", exchangeRate: 11.131, netAmount: -100.05, vatAmount: -25.01, grossAmount: -125.06 },
+        [],
+        user.id
+      )
+    );
+
+    const { rows } = await loadVerification(posted.verificationId);
+    expectBalanced(rows);
+    // −125,06 × 11,131 = −1 392,042… → −1 392,04; −25,01 × 11,131 = −278,386… → −278,39.
+    expect(byAccount(rows)["2440"]).toEqual({ debit: 1392.04, credit: 0 });
+    expect(byAccount(rows)["2640"]).toEqual({ debit: 0, credit: 278.39 });
+    expect(byAccount(rows)["4010"]).toEqual({ debit: 0, credit: 1113.65 });
   });
 
   it("rejects a zero-amount supplier invoice (ZeroAmountPostingError)", async () => {
@@ -1855,6 +1916,142 @@ describe("verification poster — supplier payment", () => {
     expect(entries[0]!.entityId).toBe(posted!.displayNumber);
     expect(entries[0]!.userId).toBe(user.id);
     expect(entries[0]!.detail).toEqual({ source: "supplier_payment", document: "UTB-1" });
+  });
+});
+
+// Valuta: a payment in another currency than SEK — the ledger moves SEK
+// only, the difference between what the bank moved and what the rows
+// released is kursvinst/kursförlust, and the bank's fee its own row.
+describe("verification poster — supplier payment in another currency", () => {
+  const EUR_PAYMENT = { ...SUPPLIER_PAYMENT_DOC, bankAmount: 1000, currency: "EUR" };
+
+  it("books a kursförlust and the bank fee when more SEK left the bank than the debt was booked at", async () => {
+    const { user } = await setupPosting();
+
+    // 1 000 EUR booked at 11,131 (11 131,00); the bank drew 11 200,00 SEK
+    // including a 50,00 fee ⇒ 11 150,00 for the debt ⇒ 19,00 kursförlust.
+    const posted = await db.transaction((tx) =>
+      poster.postSupplierPayment(
+        tx,
+        { ...EUR_PAYMENT, bankAmountSek: 11200, bankFeeSek: 50 },
+        [{ appliedAmount: 1000, writeOffAmount: 0, appliedAmountSek: 11131, writeOffAmountSek: 0 }],
+        user.id
+      )
+    );
+
+    const verification = await loadVerification(posted!.verificationId);
+    expectBalanced(verification.rows);
+    expect(byAccount(verification.rows)).toEqual({
+      "1930": { debit: 0, credit: 11200 },
+      "2440": { debit: 11131, credit: 0 },
+      "6570": { debit: 50, credit: 0 },
+      "7960": { debit: 19, credit: 0 },
+    });
+    expect(verification.description).toBe("Betalning UTB-1 — Leverantör AB, EUR 1 000,00");
+  });
+
+  it("books a kursvinst when less SEK left the bank than the debt was booked at", async () => {
+    const { user } = await setupPosting();
+
+    const posted = await db.transaction((tx) =>
+      poster.postSupplierPayment(
+        tx,
+        { ...EUR_PAYMENT, bankAmountSek: 11000, bankFeeSek: 0 },
+        [{ appliedAmount: 1000, writeOffAmount: 0, appliedAmountSek: 11131, writeOffAmountSek: 0 }],
+        user.id
+      )
+    );
+
+    const { rows } = await loadVerification(posted!.verificationId);
+    expectBalanced(rows);
+    expect(byAccount(rows)).toEqual({
+      "1930": { debit: 0, credit: 11000 },
+      "2440": { debit: 11131, credit: 0 },
+      "3960": { debit: 0, credit: 131 },
+    });
+  });
+
+  it("books the write-off's own SEK on öres- och kronutjämning next to the exchange difference", async () => {
+    const { user } = await setupPosting();
+
+    // 999,60 EUR paid on a 1 000 EUR invoice, 0,40 EUR written off (worth
+    // 4,45 SEK at 11,131): the payable releases all 11 131,00.
+    const posted = await db.transaction((tx) =>
+      poster.postSupplierPayment(
+        tx,
+        { ...EUR_PAYMENT, bankAmount: 999.6, bankAmountSek: 11100 },
+        [{ appliedAmount: 999.6, writeOffAmount: 0.4, appliedAmountSek: 11126.55, writeOffAmountSek: 4.45 }],
+        user.id
+      )
+    );
+
+    const { rows } = await loadVerification(posted!.verificationId);
+    expectBalanced(rows);
+    expect(byAccount(rows)).toEqual({
+      "1930": { debit: 0, credit: 11100 },
+      "2440": { debit: 11131, credit: 0 },
+      "3740": { debit: 0, credit: 4.45 },
+      "3960": { debit: 0, credit: 26.55 },
+    });
+  });
+
+  it("books the exchange difference of a kvittning between two EUR open items at different rates", async () => {
+    const { user } = await setupPosting();
+
+    // 100 EUR invoice booked at 11,20 (1 120,00) settled against a 100 EUR
+    // credit note booked at 11,00 (−1 100,00): no money moves, but 20,00 SEK
+    // of debt is left on 2440 — that is a kursvinst.
+    const posted = await db.transaction((tx) =>
+      poster.postSupplierPayment(
+        tx,
+        { ...EUR_PAYMENT, bankAmount: 0, bankAmountSek: 0 },
+        [
+          { appliedAmount: 100, writeOffAmount: 0, appliedAmountSek: 1120, writeOffAmountSek: 0 },
+          { appliedAmount: -100, writeOffAmount: 0, appliedAmountSek: -1100, writeOffAmountSek: 0 },
+        ],
+        user.id
+      )
+    );
+
+    const { rows } = await loadVerification(posted!.verificationId);
+    expectBalanced(rows);
+    expect(byAccount(rows)).toEqual({
+      "2440": { debit: 20, credit: 0 },
+      "3960": { debit: 0, credit: 20 },
+    });
+  });
+
+  it("refuses a betalkonto that is the exchange difference's account", async () => {
+    const { user } = await setupPosting();
+
+    await expect(
+      db.transaction((tx) =>
+        poster.postSupplierPayment(
+          tx,
+          { ...EUR_PAYMENT, bankAccountNumber: "7960", bankAmountSek: 11200 },
+          [{ appliedAmount: 1000, writeOffAmount: 0, appliedAmountSek: 11131, writeOffAmountSek: 0 }],
+          user.id
+        )
+      )
+    ).rejects.toBeInstanceOf(PaymentBankAccountConflictError);
+  });
+
+  it("names a missing kursförlust account", async () => {
+    const { user } = await setupPosting();
+    postingSettings = { ...DEFAULT_POSTING_SETTINGS, postingFxLoss: "7969" };
+
+    const error = await db
+      .transaction((tx) =>
+        poster.postSupplierPayment(
+          tx,
+          { ...EUR_PAYMENT, bankAmountSek: 11200 },
+          [{ appliedAmount: 1000, writeOffAmount: 0, appliedAmountSek: 11131, writeOffAmountSek: 0 }],
+          user.id
+        )
+      )
+      .catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(MissingPostingAccountError);
+    expect((error as MissingPostingAccountError).message).toContain("7969");
   });
 });
 

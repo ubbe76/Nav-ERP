@@ -92,6 +92,20 @@ describe("skapa omgång", () => {
     ]);
   });
 
+  // Valuta steg 1: a foreign invoice is attested and paid manually; the
+  // payment file stays SEK until utlandsbetalningar (steg 2) — with a reason
+  // that says so.
+  it("refuses a foreign-currency invoice with the currency and where to pay it instead", async () => {
+    const ok = await swedbankSupplier();
+    const eur = await makeApprovedSupplierInvoice(ok.id, { registrationNumber: "LF-60", gross: 100 });
+    await db.update(supplierInvoices).set({ currency: "EUR", exchangeRate: "11.131", exchangeRateSource: "manual" }).where(eq(supplierInvoices.id, eur.id));
+    const error = await failure(service.create({ invoiceIds: [eur.id] }, userId));
+    expect((error as SupplierInvoicesNotPayableError).details).toEqual([
+      { invoiceId: eur.id, registrationNumber: "LF-60", reason: "not_sek", currency: "EUR" },
+    ]);
+    expect((error as Error).message).toBe("LF-60 är i EUR — betalfilen tar bara SEK än så länge; registrera utbetalningen under Betalningar");
+  });
+
   it("refuses without bank settings", async () => {
     await resetBankSettings();
     const { a } = await threeInvoices();

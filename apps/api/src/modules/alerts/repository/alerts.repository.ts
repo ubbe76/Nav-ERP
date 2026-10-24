@@ -83,7 +83,9 @@ export interface OpenSupplierInvoiceRow {
   // The supplier's payment term code ("30") for computeDueDate when the
   // invoice was saved without a due date.
   paymentTermCode: string | null;
+  // In the invoice's own currency (Valuta) — the alert names it.
   openAmount: number;
+  currency: string;
 }
 
 export interface FailedEinvoiceRow {
@@ -259,6 +261,7 @@ export function createAlertsRepository(db: Db) {
           dueDate: supplierInvoices.dueDate,
           paymentTermCode: paymentTerms.code,
           openAmount: supplierInvoiceOpenAmountSql,
+          currency: supplierInvoices.currency,
         })
         .from(supplierInvoices)
         .innerJoin(suppliers, eq(suppliers.id, supplierInvoices.supplierId))

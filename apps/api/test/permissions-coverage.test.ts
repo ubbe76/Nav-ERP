@@ -183,6 +183,35 @@ describe("frakt follows the Försäljning menu", () => {
   });
 });
 
+// Valuta: a document form in any office menu looks its rate up; Ny kurs and
+// Hämta från Riksbanken are Ekonomi's; the settings (källa, API-nyckel) admin's.
+describe("valutakurser follow the Ekonomi menu", () => {
+  const as = (perms: string[]) => ({ role: "user" as const, permissions: effectivePermissions("user", perms as never) });
+  const admin = { role: "admin" as const, permissions: effectivePermissions("admin", []) };
+  const verdict = (user: ReturnType<typeof as> | typeof admin, key: string) => {
+    const [method, url] = key.split(" ");
+    const route = routes.find((r) => r.url === url && methods(r).includes(method!));
+    if (!route) return "missing";
+    const rule = resolveRule(route.config as never, method!);
+    return rule !== null && rule !== "public" && satisfiesRule(user, rule) ? "allowed" : "denied";
+  };
+  const READS = ["GET /api/v1/exchange-rates", "GET /api/v1/exchange-rates/list"];
+  const WRITES = ["POST /api/v1/exchange-rates", "POST /api/v1/exchange-rates/fetch"];
+  const SETTINGS = ["GET /api/v1/exchange-rate-settings", "PATCH /api/v1/exchange-rate-settings"];
+
+  it("lets every office menu read rates, only Ekonomi write them, only admin change the settings", () => {
+    const purchasing = as(["inkop"]);
+    const economy = as(["ekonomi"]);
+    const workshop = as(["terminal", "artikeloversikt", "tillverkningsorder_las"]);
+    expect(READS.map((key) => verdict(purchasing, key))).toEqual(["allowed", "allowed"]);
+    expect(READS.map((key) => verdict(workshop, key))).toEqual(["denied", "denied"]);
+    expect(WRITES.map((key) => verdict(economy, key))).toEqual(["allowed", "allowed"]);
+    expect(WRITES.map((key) => verdict(purchasing, key))).toEqual(["denied", "denied"]);
+    expect(SETTINGS.map((key) => verdict(economy, key))).toEqual(["denied", "denied"]);
+    expect(SETTINGS.map((key) => verdict(admin, key))).toEqual(["allowed", "allowed"]);
+  });
+});
+
 // The gate itself, on a mini app: a fake auth hook sets req.user from a
 // header (or req.apiClient, as requireAuthOrClient does for an OAuth client),
 // then enforceAccess.

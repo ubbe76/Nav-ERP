@@ -170,6 +170,7 @@ const SUPPLIER_INVOICE_STATUS_LABELS: Record<(typeof supplierInvoiceStatusEnum.e
 type SupplierInvoiceRow = typeof supplierInvoices.$inferSelect & {
   supplierName: string;
   verificationDisplayNumber: string | null;
+  grossSekValue: string | null;
 };
 
 export const SUPPLIER_INVOICE_CSV_COLUMNS: CsvColumn<SupplierInvoiceRow>[] = [
@@ -182,6 +183,9 @@ export const SUPPLIER_INVOICE_CSV_COLUMNS: CsvColumn<SupplierInvoiceRow>[] = [
   { label: "Belopp", value: (r) => r.grossAmount, format: "money" },
   { label: "Varav moms", value: (r) => r.vatAmount, format: "money" },
   { label: "Valuta", value: (r) => r.currency },
+  // Six decimals at most — "number" would cut it at four.
+  { label: "Kurs", value: (r) => String(Number(r.exchangeRate)).replace(".", ",") },
+  { label: "Belopp SEK", value: (r) => r.grossSekValue, format: "money" },
   { label: "Verifikat", value: (r) => r.verificationDisplayNumber },
   { label: "Notering", value: (r) => r.note },
   { label: "Skapad", value: (r) => r.createdAt.toISOString(), format: "datetime" },
@@ -199,6 +203,8 @@ export interface OpenSupplierInvoiceCsvRow {
   dueDate: string | null;
   grossAmount: number;
   openAmount: number;
+  currency: string;
+  openAmountSek: number | null;
 }
 
 export const OPEN_SUPPLIER_INVOICE_CSV_COLUMNS: CsvColumn<OpenSupplierInvoiceCsvRow>[] = [
@@ -209,6 +215,8 @@ export const OPEN_SUPPLIER_INVOICE_CSV_COLUMNS: CsvColumn<OpenSupplierInvoiceCsv
   { label: "Förfallodatum", value: (r) => r.dueDate, format: "date" },
   { label: "Belopp", value: (r) => r.grossAmount, format: "money" },
   { label: "Öppet belopp", value: (r) => r.openAmount, format: "money" },
+  { label: "Valuta", value: (r) => r.currency },
+  { label: "Öppet belopp SEK", value: (r) => r.openAmountSek, format: "money" },
 ];
 
 // --- Leverantörsbetalningar (supplier payments) ---
@@ -224,6 +232,9 @@ export const SUPPLIER_PAYMENT_CSV_COLUMNS: CsvColumn<SupplierPaymentRow>[] = [
   { label: "Datum", value: (r) => r.paymentDate, format: "date" },
   { label: "Leverantör", value: (r) => r.supplierName },
   { label: "Belopp", value: (r) => r.amount, format: "money" },
+  { label: "Valuta", value: (r) => r.currency },
+  { label: "Belopp SEK", value: (r) => r.amountSek, format: "money" },
+  { label: "Bankavgift SEK", value: (r) => r.bankFeeSek, format: "money" },
   { label: "Konto", value: (r) => r.bankAccountNumber },
   { label: "Verifikat", value: (r) => r.verificationDisplayNumber },
   { label: "Status", value: (r) => (r.cancelledAt === null ? "Registrerad" : "Makulerad") },

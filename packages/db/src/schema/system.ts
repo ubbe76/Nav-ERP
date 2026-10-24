@@ -1,4 +1,20 @@
-import { boolean, customType, index, integer, jsonb, pgTable, text, timestamp, unique, uuid, varchar } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  customType,
+  date,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
 import { carriers } from "./register";
 import { users } from "./auth";
 
@@ -93,4 +109,31 @@ export const auditLog = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("audit_log_by_entity").on(table.entityType, table.entityId)]
+);
+
+// Valutakurser (migration 0143): SEK per 1 unit of a currency on a day, as
+// fetched from Sveriges Riksbank (SWEA, source "riksbank") or entered by hand
+// (source "manual", Ekonomi → Valutakurser). Reference data and a cache —
+// every document snapshots its own rate, so rows may be changed freely. One
+// row per (currency, day, source): a manual rate for a day sits next to
+// Riksbanken's and wins in the lookup (system/service/exchange-rates.ts).
+export const exchangeRates = pgTable(
+  "exchange_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    date: date("date").notNull(),
+    rate: numeric("rate", { precision: 14, scale: 6 }).notNull(),
+    source: varchar("source", { length: 10 }).notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("exchange_rates_currency_date_source_unique").on(table.currency, table.date, table.source),
+    index("idx_exchange_rates_currency_date").on(table.currency, table.date),
+    check("exchange_rates_rate_positive", sql`${table.rate} > 0`),
+    check("exchange_rates_source_valid", sql`${table.source} IN ('riksbank', 'manual')`),
+    check("exchange_rates_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$' AND ${table.currency} <> 'SEK'`),
+  ]
 );

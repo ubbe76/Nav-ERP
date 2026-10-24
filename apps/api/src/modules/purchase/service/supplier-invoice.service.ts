@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import type { Tx } from "@navet/db";
 import {
+  documentSekAmounts,
   isVatCode,
   reverseVatPreview,
   round2,
+  SEK,
   type CreateSupplierInvoiceInput,
+  type DocumentRateSource,
   type CreateSupplierInvoiceRowInput,
   type ListSupplierInvoicesQuery,
   type PaymentReferenceKind,
@@ -29,6 +32,7 @@ import {
 // G1: append-only audit trail — optional with a no-op default (see
 // sales.service.ts's identical comment).
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
+import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 
 // Automatkontering (B2): the slice of the economy module's VerificationPoster
 // this module uses — declared here, at the consumer, like every other
@@ -47,6 +51,8 @@ export interface SupplierInvoicePoster {
       supplierName: string;
       invoiceDate: string;
       currency: string;
+      // Valuta: SEK per 1 unit of the currency (1 for SEK).
+      exchangeRate: number;
       netAmount: number;
       vatAmount: number;
       grossAmount: number;
@@ -143,6 +149,27 @@ export class SupplierInvoiceInPaymentBatchError extends Error {
   }
 }
 
+// Valuta: a rate other than 1 on a SEK invoice. 400.
+export class SupplierInvoiceExchangeRateError extends Error {
+  constructor() {
+    super("A supplier invoice in SEK always has exchange rate 1");
+    this.name = "SupplierInvoiceExchangeRateError";
+  }
+}
+
+// Valuta: a foreign-currency invoice without a rate (saved before rates
+// existed and never given one) cannot be attested. 409.
+export class SupplierInvoiceExchangeRateMissingError extends Error {
+  constructor(public currency: string) {
+    super(`The supplier invoice in ${currency} has no exchange rate — enter the rate before attesting it`);
+    this.name = "SupplierInvoiceExchangeRateMissingError";
+  }
+}
+
+type ResolvedRate = { exchangeRate: number; exchangeRateSource: DocumentRateSource | null; exchangeRateDate: string | null };
+
+const SEK_RATE: ResolvedRate = { exchangeRate: 1, exchangeRateSource: null, exchangeRateDate: null };
+
 // Underlag (the supplier's invoice as a file): same formats and size cap as
 // the article drawings — PDF and scans.
 export const SUPPLIER_INVOICE_FILE_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
@@ -208,8 +235,51 @@ export function createSupplierInvoiceService(
   repo: SupplierInvoiceRepository,
   poster: SupplierInvoicePoster,
   // G1: optional, defaults to a no-op — see sales.service.ts's identical comment.
-  audit: AuditWriter = { log: async () => {} }
+  audit: AuditWriter = { log: async () => {} },
+  // Valuta: the rate lookup (Riksbanken / Valutakurser). Optional so the
+  // fixtures that never create a foreign invoice need not wire it; without
+  // it a foreign invoice takes its explicit rate or the purchase order's.
+  rates: ExchangeRateReader | null = null
 ) {
+  // The invoice's rate: SEK is always 1 (an explicit other rate is a 400); a
+  // rate typed in wins (source manual); else the lookup for the invoice date
+  // (riksbank / register) and, when there is none, the linked purchase
+  // order's rate if the order is in the same currency. Nothing at all ⇒ the
+  // lookup's ExchangeRateUnavailableError (409, "ange kursen själv").
+  async function resolveRate(
+    currency: string,
+    invoiceDate: string,
+    explicit: number | undefined,
+    purchaseOrderId: string | null
+  ): Promise<ResolvedRate> {
+    if (currency === SEK) {
+      if (explicit !== undefined && explicit !== 1) throw new SupplierInvoiceExchangeRateError();
+      return SEK_RATE;
+    }
+    if (explicit !== undefined) return { exchangeRate: explicit, exchangeRateSource: "manual", exchangeRateDate: null };
+    let unavailable: ExchangeRateUnavailableError = new ExchangeRateUnavailableError(currency, invoiceDate);
+    if (rates) {
+      try {
+        const found = await rates.getRate(currency, invoiceDate);
+        return {
+          exchangeRate: found.rate,
+          exchangeRateSource: found.source === "manual" ? "register" : "riksbank",
+          exchangeRateDate: found.date,
+        };
+      } catch (err) {
+        if (!(err instanceof ExchangeRateUnavailableError)) throw err;
+        unavailable = err;
+      }
+    }
+    if (purchaseOrderId) {
+      const order = await repo.findPurchaseOrderRate(purchaseOrderId);
+      if (order && order.currency === currency && order.exchangeRate > 0 && order.exchangeRate !== 1) {
+        return { exchangeRate: order.exchangeRate, exchangeRateSource: "purchase_order", exchangeRateDate: null };
+      }
+    }
+    throw unavailable;
+  }
+
   // Validates the optional PO-match and computes the line/vat amounts so the
   // stored numbers always equal quantity × unitPrice. A row's own momskod
   // must be a purchase code (both/purchase) and active — unless it is the
@@ -299,14 +369,24 @@ export function createSupplierInvoiceService(
     async getInvoice(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
-      const [rawRows, openAmount, payments, files, paymentBatches] = await Promise.all([
+      const [rawRows, openAmount, openAmountSek, payments, files, paymentBatches] = await Promise.all([
         repo.listRows(id),
         repo.getOpenAmount(id),
+        repo.getOpenAmountSek(id),
         repo.listPaymentsForInvoice(id),
         repo.listFiles(id),
         repo.listPaymentBatchesForInvoice(id),
       ]);
       const { vatCodeCode, vatCodeName, supplierCountry, supplierCurrency, ...headerFields } = header;
+      // Valuta: the header and rows in SEK at the invoice's rate — what the
+      // attest books (documentSekAmounts, the poster's own restmetod). For a
+      // SEK invoice the same figures as the document.
+      const sek = documentSekAmounts({
+        rate: Number(header.exchangeRate),
+        grossAmount: Number(header.grossAmount),
+        vatAmount: Number(header.vatAmount),
+        rows: rawRows.map((row) => Number(row.lineAmount)),
+      });
       const rows = rawRows.map((row) => {
         const { vatCodeCode: rowCode, vatCodeName: rowName, ...rowFields } = withVariance(row);
         return {
@@ -314,13 +394,14 @@ export function createSupplierInvoiceService(
           vatCode: row.vatCodeId && rowCode !== null && rowName !== null ? vatCodeRef({ id: row.vatCodeId, code: rowCode, name: rowName }) : null,
         };
       });
+      // Omvänd moms on the SEK base, exactly as the poster books it.
       const reverseVat = isVatCode(vatCodeCode)
         ? reverseVatPreview({
             headerCode: vatCodeCode,
-            netAmount: Number(header.netAmount),
-            rows: rawRows.map((row) => ({
+            netAmount: sek.netAmount,
+            rows: rawRows.map((row, index) => ({
               code: row.vatCodeCode !== null && isVatCode(row.vatCodeCode) ? row.vatCodeCode : null,
-              lineAmount: Number(row.lineAmount),
+              lineAmount: sek.rows[index]!,
             })),
           })
         : [];
@@ -342,8 +423,16 @@ export function createSupplierInvoiceService(
         vatCode: vatCodeRef({ id: header.vatCodeId, code: vatCodeCode, name: vatCodeName }),
         reverseVat,
         warnings,
+        // Valuta: the SEK figures at the invoice's rate (a draft's preview,
+        // after the attest equal to what was booked — sekAmounts.grossAmount
+        // = grossAmountSek), and the open amount's booked SEK value (null
+        // until attested). A foreign invoice without a rate (source null) is
+        // "kurs saknas".
+        sekAmounts: { grossAmount: sek.grossAmount, vatAmount: sek.vatAmount, netAmount: sek.netAmount },
+        exchangeRateMissing: header.currency !== SEK && header.exchangeRateSource === null,
         rows,
         openAmount,
+        openAmountSek,
         payments,
         files,
         paymentBatches,
@@ -368,6 +457,7 @@ export function createSupplierInvoiceService(
       const book = await repo.vatCodeBook();
       const vatCodeId = headerVatCodeId(book, supplier, input.vatCodeId);
       const rows = await Promise.all(input.rows.map((r) => resolveRow(r, book)));
+      const rate = await resolveRate(supplier.currency, input.invoiceDate, input.exchangeRate, input.purchaseOrderId ?? null);
       let invoice;
       try {
         invoice = await repo.create(
@@ -378,6 +468,7 @@ export function createSupplierInvoiceService(
             invoiceDate: input.invoiceDate,
             dueDate,
             currency: supplier.currency,
+            ...rate,
             // Zod defaults these to 0 over HTTP; guard the direct-call path too.
             netAmount: input.netAmount ?? 0,
             vatAmount: input.vatAmount ?? 0,
@@ -398,7 +489,11 @@ export function createSupplierInvoiceService(
         entityType: "supplier_invoice",
         entityId: invoice.registrationNumber,
         action: "created",
-        detail: { supplierInvoiceNumber: invoice.invoiceNumber, grossAmount: invoice.grossAmount },
+        detail: {
+          supplierInvoiceNumber: invoice.invoiceNumber,
+          grossAmount: invoice.grossAmount,
+          ...(invoice.currency === SEK ? {} : { currency: invoice.currency, exchangeRate: invoice.exchangeRate, exchangeRateSource: invoice.exchangeRateSource }),
+        },
         userId: createdBy,
       });
       return service.getInvoice(invoice.id);
@@ -414,6 +509,9 @@ export function createSupplierInvoiceService(
       const patch: {
         supplierId?: string;
         currency?: string;
+        exchangeRate?: string;
+        exchangeRateSource?: DocumentRateSource | null;
+        exchangeRateDate?: string | null;
         invoiceNumber?: string;
         purchaseOrderId?: string | null;
         invoiceDate?: string;
@@ -463,6 +561,26 @@ export function createSupplierInvoiceService(
           allowInactive: input.vatCodeId === invoice.vatCodeId,
         }).id;
       }
+      // Valuta (the touched-mönster): a rate typed in always wins. Without
+      // one the rate is looked up again when the currency changed (byte av
+      // leverantör) or the invoice date changed — unless the stored rate was
+      // typed by hand (source manual), which a date change leaves alone.
+      const currency = patch.currency ?? invoice.currency;
+      const invoiceDate = patch.invoiceDate ?? invoice.invoiceDate;
+      const currencyChanged = currency !== invoice.currency;
+      const dateChanged = invoiceDate !== invoice.invoiceDate;
+      const purchaseOrderId = patch.purchaseOrderId !== undefined ? patch.purchaseOrderId : invoice.purchaseOrderId;
+      let rateChange: ResolvedRate | null = null;
+      if (input.exchangeRate !== undefined) {
+        rateChange = await resolveRate(currency, invoiceDate, input.exchangeRate, purchaseOrderId);
+      } else if (currencyChanged || (dateChanged && currency !== SEK && invoice.exchangeRateSource !== "manual")) {
+        rateChange = await resolveRate(currency, invoiceDate, undefined, purchaseOrderId);
+      }
+      if (rateChange) {
+        patch.exchangeRate = String(rateChange.exchangeRate);
+        patch.exchangeRateSource = rateChange.exchangeRateSource;
+        patch.exchangeRateDate = rateChange.exchangeRateDate;
+      }
       let updated;
       try {
         updated = await repo.updateHeader(id, patch);
@@ -481,6 +599,18 @@ export function createSupplierInvoiceService(
           entityId: invoice.registrationNumber,
           action: "supplier_changed",
           detail: { before: { supplier: supplierChange.from }, after: { supplier: supplierChange.to } },
+          userId,
+        });
+      }
+      if (rateChange && (rateChange.exchangeRate !== Number(invoice.exchangeRate) || rateChange.exchangeRateSource !== invoice.exchangeRateSource)) {
+        await audit.log({
+          entityType: "supplier_invoice",
+          entityId: invoice.registrationNumber,
+          action: "exchange_rate_changed",
+          detail: {
+            before: { currency: invoice.currency, exchangeRate: invoice.exchangeRate, exchangeRateSource: invoice.exchangeRateSource },
+            after: { currency, exchangeRate: String(rateChange.exchangeRate), exchangeRateSource: rateChange.exchangeRateSource },
+          },
           userId,
         });
       }
@@ -571,14 +701,17 @@ export function createSupplierInvoiceService(
         throw new InvalidStatusTransitionError(`Cannot approve a supplier invoice in status "${invoice.status}"`);
       }
       // A posting failure (locked/absent period, missing or inactive account,
-      // header amounts that don't add up, non-SEK) propagates out of the
-      // repository untouched and is mapped to 409 by the routes — the whole
-      // transition rolls back with it.
+      // header amounts that don't add up) propagates out of the repository
+      // untouched and is mapped to 409 by the routes — the whole transition
+      // rolls back with it. A foreign invoice is posted in SEK at its own
+      // rate (Valuta).
       const result = await repo.approve(id, userId, poster);
-      // The only ok:false reason is the lost race the repository's own
-      // FOR UPDATE re-read caught: a concurrent approve/cancel moved this
-      // invoice out of "draft" between the guard above and the transaction.
+      // ok:false is either a foreign invoice without a rate, or the lost race
+      // the repository's own FOR UPDATE re-read caught: a concurrent
+      // approve/cancel moved this invoice out of "draft" between the guard
+      // above and the transaction.
       if (!result.ok) {
+        if (result.reason === "exchange_rate_missing") throw new SupplierInvoiceExchangeRateMissingError(invoice.currency);
         throw new InvalidStatusTransitionError("The supplier invoice was changed by someone else");
       }
       await audit.log({

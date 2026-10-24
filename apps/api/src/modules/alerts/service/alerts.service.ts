@@ -221,7 +221,7 @@ export function createAlertsService(deps: {
           severity,
           href: `/inkop/leverantorsfakturor/${r.invoiceId}`,
           primary: `${r.registrationNumber} ${r.supplierName} (${r.invoiceNumber})`,
-          secondary: `${severity === "red" ? `Förföll ${dueDate} (${daysLateText(dueDate, today)})` : `Förfaller ${dueDate}`} · ${formatAmount(r.openAmount)} kr`,
+          secondary: `${severity === "red" ? `Förföll ${dueDate} (${daysLateText(dueDate, today)})` : `Förfaller ${dueDate}`} · ${formatAmount(r.openAmount)} ${r.currency === "SEK" ? "kr" : r.currency}`,
           date: dueDate,
         });
       }

@@ -299,6 +299,11 @@ export function createReportsRepository(db: Db) {
     // `basis` field on the response tells the caller which one it's looking
     // at, since the two are not always equal (freight/rounding on the header
     // has no article row).
+    //
+    // Valuta: every amount is converted to SEK at its invoice's rate before
+    // it is summed (round(amount × rate, 2) — the same round-half-away
+    // arithmetic as @navet/shared toSek), so an EUR and a SEK invoice never
+    // add up in their own currencies. SEK invoices have rate 1.
     async loadPurchaseStatistics(query: Pick<PurchaseStatisticsQuery, "groupBy"> & { from: string; to: string }) {
       const { start, end } = monthRangeToDates(query.from, query.to);
       const statusFilter = inArray(supplierInvoices.status, ["approved", "paid"]);
@@ -306,7 +311,7 @@ export function createReportsRepository(db: Db) {
       if (query.groupBy === "month" || query.groupBy === "supplier") {
         const dateFilter = and(statusFilter, gte(supplierInvoices.invoiceDate, start), lte(supplierInvoices.invoiceDate, end));
         const invoiceCount = sql<string>`COUNT(DISTINCT ${supplierInvoices.id})`;
-        const netAmount = sql<string>`SUM(${supplierInvoices.netAmount})`;
+        const netAmount = sql<string>`SUM(ROUND(${supplierInvoices.netAmount} * ${supplierInvoices.exchangeRate}, 2))`;
 
         if (query.groupBy === "month") {
           const month = sql<string>`to_char(${supplierInvoices.invoiceDate}, 'YYYY-MM')`;
@@ -349,7 +354,7 @@ export function createReportsRepository(db: Db) {
 
       // groupBy === "article"
       const dateFilter = and(statusFilter, gte(supplierInvoices.invoiceDate, start), lte(supplierInvoices.invoiceDate, end));
-      const netAmount = sql<string>`SUM(${supplierInvoiceRows.lineAmount})`;
+      const netAmount = sql<string>`SUM(ROUND(${supplierInvoiceRows.lineAmount} * ${supplierInvoices.exchangeRate}, 2))`;
       const quantity = sql<string>`SUM(${supplierInvoiceRows.quantity})`;
       const invoiceCount = sql<string>`COUNT(DISTINCT ${supplierInvoices.id})`;
       const key = sql<string>`COALESCE(${articles.id}::text, 'null')`;

@@ -136,6 +136,8 @@ import { createSystemRepository } from "./modules/system/repository/system.repos
 import { createSystemService } from "./modules/system/service/system.service.js";
 import { readPostingSettings } from "./modules/system/service/posting-settings.js";
 import { systemRoutes } from "./modules/system/routes/system.routes.js";
+import { createExchangeRateService } from "./modules/system/service/exchange-rates.js";
+import { exchangeRateRoutes } from "./modules/system/routes/exchange-rates.routes.js";
 import { auditLogRoutes } from "./modules/system/routes/audit-log.routes.js";
 import { createTimeReportRepository } from "./modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "./modules/timereport/service/timereport.service.js";
@@ -277,6 +279,13 @@ export function buildApp(database: Db = db) {
   // standard posting accounts, read through the poster's own transaction
   // (the revenue/VAT accounts come with each row's momskod).
   const verificationPoster = createVerificationPoster({ read: readPostingSettings });
+  // Valutakurser (Valuta): Riksbanken lookups cached in exchange_rates, plus
+  // the manual rates. Read by the supplier invoice (steg 1) for its rate.
+  const exchangeRateService = createExchangeRateService({
+    db: database,
+    audit: auditRepository,
+    log: (entry) => app.log.warn(entry, "Riksbanken request failed"),
+  });
   // Outgoing email + printable PDFs (SMTP config and company header both
   // live in the system module).
   const mailService = createMailService(createMailRepository(database), systemService);
@@ -387,7 +396,8 @@ export function buildApp(database: Db = db) {
   const supplierInvoiceService = createSupplierInvoiceService(
     createSupplierInvoiceRepository(database),
     verificationPoster,
-    auditRepository
+    auditRepository,
+    exchangeRateService
   );
   // articleService is the price writer for "Sätt standardpris"/"Sätt
   // försäljningspris" on a saved calculation — injected so the standard cost
@@ -808,6 +818,7 @@ export function buildApp(database: Db = db) {
         await registerModule(protectedRoutes, costingRoutes, { service: costingService }, { read: office, write: ["tillverkning"] });
         await registerModule(protectedRoutes, apiClientRoutes, { service: oauthService }, adminOnly);
         await registerModule(protectedRoutes, systemRoutes, { service: systemService }, { read: office, write: ["admin"] });
+        await registerModule(protectedRoutes, exchangeRateRoutes, { service: exchangeRateService }, { read: office, write: ["ekonomi"] });
         await registerModule(protectedRoutes, permissionGroupRoutes, { service: permissionGroupService }, adminOnly);
         await registerModule(protectedRoutes, auditLogRoutes, { repo: auditRepository }, adminOnly);
         // System → Exempeldata: the made-up demo company, admin only.

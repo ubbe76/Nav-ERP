@@ -43,6 +43,10 @@ export const DEFAULT_POSTING_SETTINGS = {
   // Årsbokslut (steg 2).
   postingInventory: "1460",
   postingInventoryChange: "4990",
+  // Valuta.
+  postingFxGain: "3960",
+  postingFxLoss: "7960",
+  postingBankFees: "6570",
 } as const;
 
 // Automatkontering (B2): issuing a customer invoice / approving a supplier

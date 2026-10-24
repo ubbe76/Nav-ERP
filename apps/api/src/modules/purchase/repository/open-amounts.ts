@@ -63,6 +63,9 @@ export function openItemAggregates(executor: Db | Tx) {
     .select({
       supplierInvoiceId: supplierPaymentRows.supplierInvoiceId,
       total: sql<string>`SUM(${supplierPaymentRows.appliedAmount} + ${supplierPaymentRows.writeOffAmount})`.as("settled_total"),
+      totalSek: sql<string>`SUM(${supplierPaymentRows.appliedAmountSek} + ${supplierPaymentRows.writeOffAmountSek})`.as(
+        "settled_total_sek"
+      ),
     })
     .from(supplierPaymentRows)
     .innerJoin(supplierPayments, eq(supplierPayments.id, supplierPaymentRows.paymentId))
@@ -70,7 +73,59 @@ export function openItemAggregates(executor: Db | Tx) {
     .groupBy(supplierPaymentRows.supplierInvoiceId)
     .as("open_settled");
   const openExpr = sql<string>`(${supplierInvoices.grossAmount} - COALESCE(${settled.total}, 0))`;
-  return { settled, openExpr };
+  // Valuta: the same open item's booked SEK value.
+  const openSekExpr = sql<string | null>`(${supplierInvoices.grossAmountSek} - COALESCE(${settled.totalSek}, 0))`;
+  return { settled, openExpr, openSekExpr };
+}
+
+// Valuta: the SEK side of the same derivation —
+//
+//   open SEK = gross_amount_sek − Σ live supplier_payment_rows(applied_amount_sek + write_off_amount_sek)
+//
+// gross_amount_sek is the debt the attest booked (null in draft ⇒ null), and
+// each payment row stores the SEK it released (frigjort SEK). For a SEK
+// invoice both sides equal the open amount above.
+export const openAmountSekSql = sql<string | null>`(
+  "supplier_invoices"."gross_amount_sek"
+  - COALESCE((
+      SELECT SUM(spr.applied_amount_sek + spr.write_off_amount_sek)
+      FROM supplier_payment_rows spr
+      JOIN supplier_payments sp ON sp.id = spr.payment_id
+      WHERE spr.supplier_invoice_id = "supplier_invoices"."id"
+        AND sp.cancelled_at IS NULL
+    ), 0)
+)`;
+
+// Open SEK value per invoice id (null for one without a stamped debt).
+export async function computeOpenAmountsSek(executor: Db | Tx, invoiceIds: string[]): Promise<Map<string, number | null>> {
+  const open = new Map<string, number | null>(invoiceIds.map((id) => [id, null]));
+  if (invoiceIds.length === 0) return open;
+  const rows = await executor
+    .select({ id: supplierInvoices.id, openAmountSek: openAmountSekSql })
+    .from(supplierInvoices)
+    .where(inArray(supplierInvoices.id, invoiceIds));
+  for (const row of rows) open.set(row.id, row.openAmountSek === null ? null : Number(row.openAmountSek));
+  return open;
+}
+
+// The SEK already released from each invoice by live (non-cancelled)
+// payments — what a settling row subtracts from gross_amount_sek
+// (@navet/shared releasedSek). Called inside the registration's transaction
+// after the invoices are row-locked, like computeOpenAmounts.
+export async function computeReleasedSek(executor: Db | Tx, invoiceIds: string[]): Promise<Map<string, number>> {
+  const released = new Map<string, number>(invoiceIds.map((id) => [id, 0]));
+  if (invoiceIds.length === 0) return released;
+  const rows = await executor
+    .select({
+      supplierInvoiceId: supplierPaymentRows.supplierInvoiceId,
+      total: sql<string>`SUM(${supplierPaymentRows.appliedAmountSek} + ${supplierPaymentRows.writeOffAmountSek})`,
+    })
+    .from(supplierPaymentRows)
+    .innerJoin(supplierPayments, eq(supplierPayments.id, supplierPaymentRows.paymentId))
+    .where(and(isNull(supplierPayments.cancelledAt), inArray(supplierPaymentRows.supplierInvoiceId, invoiceIds)))
+    .groupBy(supplierPaymentRows.supplierInvoiceId);
+  for (const row of rows) released.set(row.supplierInvoiceId, Number(row.total));
+  return released;
 }
 
 // Open amount per supplier invoice id, as numbers (kr). Takes a Db or a Tx:
@@ -101,11 +156,17 @@ export async function computeOpenAmounts(executor: Db | Tx, invoiceIds: string[]
 // cancelled invoice leaves the register: a manual Omför of the L verification
 // alone leaves the invoice approved and open everywhere else, so the register
 // must keep it too — the ledger loses it and the reconciliation shows the gap.
+//
+// Valuta: in SEK — Σ gross_amount_sek (the debt each L verification booked)
+// − Σ frigjort SEK (applied_amount_sek + write_off_amount_sek), so an EUR
+// and a SEK invoice are never summed in their own currencies and the total
+// reconciles with the payable account (the exchange differences are booked
+// on 3960/7960, never on it).
 export async function payablesTotalAsOf(executor: Db | Tx, date: string): Promise<number> {
   const rows = await executor.execute(sql`
     SELECT
       COALESCE((
-        SELECT SUM(si.gross_amount)
+        SELECT SUM(si.gross_amount_sek)
         FROM supplier_invoices si
         JOIN verifications v ON v.id = si.verification_id
         WHERE v.date <= ${date}
@@ -117,7 +178,7 @@ export async function payablesTotalAsOf(executor: Db | Tx, date: string): Promis
           ))
       ), 0)
       - COALESCE((
-        SELECT SUM(spr.applied_amount + spr.write_off_amount)
+        SELECT SUM(spr.applied_amount_sek + spr.write_off_amount_sek)
         FROM supplier_payment_rows spr
         JOIN supplier_payments sp ON sp.id = spr.payment_id
         LEFT JOIN verifications cv ON cv.id = sp.cancellation_verification_id

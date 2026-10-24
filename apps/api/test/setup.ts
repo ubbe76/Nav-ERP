@@ -4,3 +4,17 @@ import { assertTestDatabase } from "./assert-test-database.js";
 // global-setup.ts; this is only the guard, kept here as well so the check
 // survives even if the global setup is ever removed or reordered.
 assertTestDatabase();
+
+// Valuta: the suite must never call Sveriges Riksbank (5 calls a minute per
+// IP, and a test must not depend on the network). The exchange-rate service
+// reads globalThis.fetch at call time, so a lookup that slipped through
+// without an injected fetch fails here like an unreachable Riksbanken
+// (ExchangeRateUnavailableError) instead of going out.
+const realFetch = globalThis.fetch;
+globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (/^https?:\/\/[^/]*riksbank\.se/i.test(url)) {
+    return Promise.reject(new TypeError("Riksbanken must not be called from tests — inject a fetch"));
+  }
+  return realFetch(input, init);
+}) as typeof fetch;

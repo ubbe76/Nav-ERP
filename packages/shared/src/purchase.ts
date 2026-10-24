@@ -7,6 +7,7 @@ import { vatRateSchema } from "./vat.js";
 import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.js";
 import { partnerDeliveryFields } from "./delivery.js";
 import { countryCodeSchema } from "./sales.js";
+import { exchangeRateValueSchema } from "./currency.js";
 
 export const purchaseOrderStatusSchema = z.enum([
   "draft",
@@ -416,6 +417,11 @@ export const createSupplierInvoiceSchema = z.object({
   // own and the remainder; omitted = the supplier's Momskod (förval), else
   // derived from the supplier's country.
   vatCodeId: z.string().uuid().optional(),
+  // Valuta: SEK per 1 unit of the invoice's currency (the supplier's). Omitted
+  // = looked up for the invoice date (Riksbanken / Valutakurser), with the
+  // linked purchase order's rate as the fallback; for a SEK invoice only 1
+  // is accepted.
+  exchangeRate: exchangeRateValueSchema.optional(),
   rows: z.array(supplierInvoiceRowInputSchema).default([]),
 });
 export type CreateSupplierInvoiceInput = z.infer<typeof createSupplierInvoiceSchema>;
@@ -437,6 +443,10 @@ export const updateSupplierInvoiceHeaderSchema = z
     note: z.string().nullable().optional(),
     paymentReference: paymentReferenceSchema.nullable().optional(),
     vatCodeId: z.string().uuid().optional(),
+    // Valuta (draft only): a rate typed on the invoice. Without it, a changed
+    // invoice date (or a supplier change to another currency) looks the rate
+    // up again — unless the stored rate was typed by hand.
+    exchangeRate: exchangeRateValueSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateSupplierInvoiceHeaderInput = z.infer<typeof updateSupplierInvoiceHeaderSchema>;
@@ -474,6 +484,14 @@ const supplierPaymentRowInputSchema = z.object({
 // checked in the service, where the message can name both figures. No OCR:
 // supplier invoices are matched manually via supplierInvoiceId, not parsed
 // from a betalningsreferens.
+//
+// Valuta: amount and the rows are in the invoices' currency (one payment
+// never mixes currencies — 400 payment-mixed-currencies). For a payment in
+// another currency than SEK, amountSek is the SEK amount that actually left
+// the bank account (required unless amount is 0) and bankFeeSek the bank's
+// fee in SEK (default 0); the difference to the SEK the payment releases is
+// booked as kursvinst/kursförlust. For a SEK payment amountSek may only
+// repeat amount and bankFeeSek only be 0 (400 supplier-payment-amount-sek).
 export const createSupplierPaymentSchema = z.object({
   supplierId: z.string().uuid(),
   paymentDate: z.string().date(),
@@ -481,6 +499,8 @@ export const createSupplierPaymentSchema = z.object({
   // (/account-options); the posting validates that it exists and is active.
   bankAccountNumber: z.string().regex(/^[0-9]{4}$/),
   amount: blankSafe(z.coerce.number()),
+  amountSek: blankSafe(z.coerce.number()).optional(),
+  bankFeeSek: blankSafe(z.coerce.number().min(0)).optional(),
   note: z.string().nullable().optional(),
   rows: z.array(supplierPaymentRowInputSchema).min(1),
 });

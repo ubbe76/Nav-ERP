@@ -15,15 +15,12 @@ import { createArticleRepository } from "../src/modules/article/repository/artic
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { AccountingPeriodLockedError } from "../src/modules/economy/service/accounting-period-lock.js";
-import {
-  NonSekSupplierInvoiceError,
-  SupplierInvoiceAmountMismatchError,
-  createVerificationPoster,
-} from "../src/modules/economy/service/verification-poster.js";
+import { SupplierInvoiceAmountMismatchError, createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { readPostingSettings } from "../src/modules/system/service/posting-settings.js";
 import { createSupplierInvoiceRepository } from "../src/modules/purchase/repository/supplier-invoice.repository.js";
 import {
   createSupplierInvoiceService,
+  SupplierInvoiceExchangeRateMissingError,
   VerificationAlreadyReversedError,
   type SupplierInvoicePoster,
 } from "../src/modules/purchase/service/supplier-invoice.service.js";
@@ -153,7 +150,8 @@ async function makeInvoice(
   amounts: { netAmount: number; vatAmount: number; grossAmount: number },
   rows: RowInput[],
   userId: string,
-  invoiceDate = TODAY
+  invoiceDate = TODAY,
+  exchangeRate?: number
 ) {
   const invoice = await invoiceService.create(
     {
@@ -162,6 +160,7 @@ async function makeInvoice(
       invoiceDate,
       ...amounts,
       rows,
+      ...(exchangeRate === undefined ? {} : { exchangeRate }),
     },
     userId
   );
@@ -357,18 +356,25 @@ describe("leverantörsfaktura — automatkontering vid attest (B2)", () => {
     expect(await db.select().from(verifications)).toHaveLength(0);
   });
 
-  it("refuses to approve a supplier invoice in another currency than SEK", async () => {
+  // Valuta: a foreign invoice is attested at its rate and booked in SEK
+  // (supplier-currency.test.ts drives the whole flow); one saved before rates
+  // existed, without a rate, is refused until a rate is entered.
+  it("approves a supplier invoice in another currency than SEK in SEK, and refuses one without a rate", async () => {
     const user = await makeUser();
     const supplier = await makeSupplier("Euro AB", "EUR");
-    const invoice = await makeInvoice(
-      supplier.id,
-      { netAmount: 100, vatAmount: 25, grossAmount: 125 },
-      [{ description: "Material", quantity: 1, unitPrice: 100, vatRate: 25 }],
+    const invoice = await invoiceService.create(
+      { supplierId: supplier.id, invoiceNumber: "EUR-1", invoiceDate: TODAY, netAmount: 100, vatAmount: 25, grossAmount: 125, exchangeRate: 11.131, rows: [] },
       user.id
     );
+    const approved = await invoiceService.approve(invoice!.id, user.id);
+    expect(approved).toMatchObject({ status: "approved", currency: "EUR", exchangeRate: "11.131000", grossAmountSek: "1391.38" });
+    const verification = await verificationFor(invoice!.id);
+    expect(verification!.description).toContain("EUR 125,00 à 11,131000");
 
-    await expect(invoiceService.approve(invoice.id, user.id)).rejects.toThrow(NonSekSupplierInvoiceError);
-    expect((await invoiceService.getInvoice(invoice.id))!.status).toBe("draft");
+    const legacy = await makeInvoice(supplier.id, { netAmount: 100, vatAmount: 0, grossAmount: 100 }, [], user.id, TODAY, 2);
+    await db.update(supplierInvoices).set({ exchangeRate: "1", exchangeRateSource: null }).where(eq(supplierInvoices.id, legacy.id));
+    await expect(invoiceService.approve(legacy.id, user.id)).rejects.toThrow(SupplierInvoiceExchangeRateMissingError);
+    expect((await invoiceService.getInvoice(legacy.id))!).toMatchObject({ status: "draft", exchangeRateMissing: true });
   });
 
   it("blocks the approval when the period covering the invoice date is locked, and burns no verification number", async () => {

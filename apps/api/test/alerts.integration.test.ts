@@ -204,6 +204,7 @@ async function supplierInvoice(opts: {
   invoiceDate?: string;
   paymentTermCode?: string | null;
   gross?: number;
+  currency?: string;
 }) {
   let paymentTermId: string | null = null;
   if (opts.paymentTermCode) {
@@ -225,6 +226,7 @@ async function supplierInvoice(opts: {
       dueDate: opts.dueDate ?? null,
       status: opts.status ?? "approved",
       grossAmount: String(opts.gross ?? 500),
+      ...(opts.currency ? { currency: opts.currency, exchangeRate: "11.131", exchangeRateSource: "manual" } : {}),
     })
     .returning();
   return { invoice: invoice!, supplier };
@@ -453,6 +455,13 @@ describe("supplier_invoice_due", () => {
     expect((await group("supplier_invoice_due")).count).toBe(3);
     supplierInvoiceDays = 0;
     expect((await group("supplier_invoice_due")).items.map((i) => i.key)).toEqual([overdue.invoice.id]);
+  });
+
+  // Valuta: the open amount is in the invoice's own currency — the alert
+  // names it instead of kr.
+  it("names the currency of a foreign invoice", async () => {
+    await supplierInvoice({ dueDate: "2030-03-10", currency: "EUR" });
+    expect((await group("supplier_invoice_due")).items[0]!.secondary).toBe("Förfaller 2030-03-10 · 500,00 EUR");
   });
 
   it("the group is yellow when nothing is overdue", async () => {

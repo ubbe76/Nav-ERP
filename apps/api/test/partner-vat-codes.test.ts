@@ -271,7 +271,7 @@ describe("supplier invoices — momskoder", () => {
     // A German supplier wrongly left on Sverige: MP25 is derived, no VAT typed.
     const misfiled = await supplier({ name: "Lieferant GmbH", currency: "EUR" });
     const invoice = await supplierInvoiceService.create(
-      { supplierId: misfiled.id, invoiceNumber: "W-1", invoiceDate: TODAY, netAmount: 1000, vatAmount: 0, grossAmount: 1000, rows: [] } as never,
+      { supplierId: misfiled.id, invoiceNumber: "W-1", invoiceDate: TODAY, netAmount: 1000, vatAmount: 0, grossAmount: 1000, exchangeRate: 11.131, rows: [] } as never,
       userId
     );
     expect(invoice!.vatCode.code).toBe("MP25");

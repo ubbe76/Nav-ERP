@@ -34,6 +34,11 @@ export const POSTING_VAT_SETTLEMENT_KEY = "posting_vat_settlement";
 // its counter account. One account by design (spec 4.3).
 export const POSTING_INVENTORY_KEY = "posting_inventory";
 export const POSTING_INVENTORY_CHANGE_KEY = "posting_inventory_change";
+// Valuta: kursvinst/kursförlust on payments in another currency than SEK,
+// and the bank's fee for such a payment.
+export const POSTING_FX_GAIN_KEY = "posting_fx_gain";
+export const POSTING_FX_LOSS_KEY = "posting_fx_loss";
+export const POSTING_BANK_FEES_KEY = "posting_bank_fees";
 // How much a payment may miss the invoice's remaining amount by and still
 // count as fully paid (kr), and the fee charged per payment reminder (kr).
 export const PAYMENT_TOLERANCE_KEY = "payment_tolerance";
@@ -49,6 +54,9 @@ export const POSTING_SETTINGS_KEYS = [
   POSTING_VAT_SETTLEMENT_KEY,
   POSTING_INVENTORY_KEY,
   POSTING_INVENTORY_CHANGE_KEY,
+  POSTING_FX_GAIN_KEY,
+  POSTING_FX_LOSS_KEY,
+  POSTING_BANK_FEES_KEY,
   PAYMENT_TOLERANCE_KEY,
   REMINDER_FEE_KEY,
 ] as const;
@@ -63,6 +71,9 @@ export interface PostingSettings {
   postingVatSettlement: string;
   postingInventory: string;
   postingInventoryChange: string;
+  postingFxGain: string;
+  postingFxLoss: string;
+  postingBankFees: string;
   paymentTolerance: number;
   reminderFee: number;
 }
@@ -104,6 +115,9 @@ export function decodePostingSettings(get: (key: string) => string | null): Post
     postingVatSettlement: codeSetting(get(POSTING_VAT_SETTLEMENT_KEY), "2650"),
     postingInventory: codeSetting(get(POSTING_INVENTORY_KEY), "1460"),
     postingInventoryChange: codeSetting(get(POSTING_INVENTORY_CHANGE_KEY), "4990"),
+    postingFxGain: codeSetting(get(POSTING_FX_GAIN_KEY), "3960"),
+    postingFxLoss: codeSetting(get(POSTING_FX_LOSS_KEY), "7960"),
+    postingBankFees: codeSetting(get(POSTING_BANK_FEES_KEY), "6570"),
     paymentTolerance: amountSetting(get(PAYMENT_TOLERANCE_KEY), 5.0),
     reminderFee: amountSetting(get(REMINDER_FEE_KEY), 60.0),
   };

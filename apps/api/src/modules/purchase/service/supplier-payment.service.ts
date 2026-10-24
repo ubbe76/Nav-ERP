@@ -5,13 +5,15 @@ import type {
   ListSupplierPaymentsQuery,
   SupplierPaymentInput,
 } from "@navet/shared";
-import { round2 } from "@navet/shared";
+import { paymentExchangeDifference, round2 } from "@navet/shared";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import {
   CancelGuardError,
   SupplierPaymentGuardError,
+  type SupplierPaymentGuardDetail,
   type SupplierPaymentGuardReason,
   type SupplierPaymentLink,
+  type SupplierPaymentSekReason,
   type SupplierPaymentRepository,
   type SupplierPaymentRowInput,
 } from "../repository/supplier-payment.repository.js";
@@ -42,8 +44,15 @@ export interface SupplierPaymentPoster {
       // that identity IS the balance condition of the verification.
       bankAmount: number;
       supplierName: string;
+      // Valuta: the payment's currency, the SEK that left the bank and the
+      // bank's fee in SEK.
+      currency: string;
+      bankAmountSek: number;
+      bankFeeSek: number;
     },
-    rows: { appliedAmount: number; writeOffAmount: number }[],
+    // appliedAmountSek/writeOffAmountSek: the SEK each part releases from the
+    // invoice's booked debt (frigjort SEK).
+    rows: { appliedAmount: number; writeOffAmount: number; appliedAmountSek: number; writeOffAmountSek: number }[],
     userId: string
   ): Promise<{ verificationId: string; displayNumber: string } | null>;
 
@@ -117,6 +126,38 @@ export class VerificationAlreadyReversedError extends Error {
   }
 }
 
+// Valuta: one payment never mixes currencies. 400 payment-mixed-currencies.
+export class PaymentMixedCurrenciesError extends Error {
+  constructor(public currencies: string[]) {
+    super(`A payment cannot settle invoices in more than one currency (${currencies.join(", ")})`);
+    this.name = "PaymentMixedCurrenciesError";
+  }
+}
+
+// Valuta: the SEK amount/fee does not fit the payment. 400
+// supplier-payment-amount-sek with `reason`:
+//   required  — a payment in another currency needs Belopp i SEK,
+//   sign      — the SEK amount is zero or points the other way,
+//   fee       — the fee exceeds the SEK amount,
+//   kvittning — a kvittning (amount 0) moves no SEK and has no fee,
+//   sek       — a SEK payment's SEK amount is the amount itself, without fee.
+export class SupplierPaymentAmountSekError extends Error {
+  constructor(
+    public reason: SupplierPaymentSekReason,
+    public currency: string
+  ) {
+    const text: Record<SupplierPaymentSekReason, string> = {
+      required: `A payment in ${currency} needs the amount in SEK that left the bank account`,
+      sign: "The SEK amount must be non-zero and point the same way as the payment amount",
+      fee: "The bank fee cannot exceed the SEK amount",
+      kvittning: "A kvittning moves no money — it has no SEK amount and no bank fee",
+      sek: "A SEK payment's SEK amount is the amount itself, and it has no separate bank fee",
+    };
+    super(text[reason]);
+    this.name = "SupplierPaymentAmountSekError";
+  }
+}
+
 // Bankfiler: the invoice is reserved in a live payment batch — only that
 // batch's confirmation may pay it.
 export class SupplierInvoiceReservedError extends Error {
@@ -171,10 +212,7 @@ function normalizedRows(input: SupplierPaymentInput): SupplierPaymentRowInput[] 
 
 // What each repository guard reason becomes — the same domain error whether
 // it came back as a create() result or was thrown inside the caller's tx.
-function guardError(
-  reason: SupplierPaymentGuardReason,
-  detail: { invoiceId: string; registrationNumber: string | null; open?: number; applied?: number }
-): Error {
+function guardError(reason: SupplierPaymentGuardReason, detail: SupplierPaymentGuardDetail): Error {
   const reference = detail.registrationNumber ?? detail.invoiceId;
   switch (reason) {
     case "invoice_not_found":
@@ -197,6 +235,10 @@ function guardError(
       return new SupplierPaymentRowMismatchError(
         `The payment batch row is not an exported row of supplier invoice ${reference} — it cannot confirm this payment`
       );
+    case "mixed_currencies":
+      return new PaymentMixedCurrenciesError(detail.currencies ?? []);
+    case "amount_sek":
+      return new SupplierPaymentAmountSekError(detail.sekReason ?? "required", detail.currency ?? "");
   }
 }
 
@@ -206,6 +248,8 @@ function headerWrite(input: SupplierPaymentInput) {
     paymentDate: input.paymentDate,
     bankAccountNumber: input.bankAccountNumber,
     amount: round2(input.amount),
+    amountSek: input.amountSek === undefined ? null : round2(input.amountSek),
+    bankFeeSek: input.bankFeeSek === undefined ? null : round2(input.bankFeeSek),
     note: input.note ?? null,
   };
 }
@@ -226,11 +270,18 @@ export function createSupplierPaymentService(
       return repo.list(query);
     },
 
+    // Valuta: exchangeRateDifferenceSek is the payment's kursdifferens —
+    // positive = kursvinst, negative = kursförlust (0 for SEK).
     async getPayment(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
       const rows = await repo.listRows(id);
-      return { ...header, rows };
+      const difference = paymentExchangeDifference({
+        amountSek: Number(header.amountSek),
+        bankFeeSek: Number(header.bankFeeSek),
+        appliedAmountsSek: rows.map((row) => Number(row.appliedAmountSek)),
+      });
+      return { ...header, exchangeRateDifferenceSek: difference === 0 ? 0 : -difference, rows };
     },
 
     // Registers one outgoing payment against one supplier's open items. The
@@ -247,7 +298,11 @@ export function createSupplierPaymentService(
         entityType: "supplier_payment",
         entityId: payment.paymentNumber,
         action: "created",
-        detail: { amount: payment.amount, bankAccountNumber: payment.bankAccountNumber },
+        detail: {
+          amount: payment.amount,
+          bankAccountNumber: payment.bankAccountNumber,
+          ...(payment.currency === "SEK" ? {} : { currency: payment.currency, amountSek: payment.amountSek, bankFeeSek: payment.bankFeeSek }),
+        },
         userId: createdBy,
       });
       return payment;

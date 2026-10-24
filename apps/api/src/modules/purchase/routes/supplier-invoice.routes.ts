@@ -19,8 +19,11 @@ import {
   SupplierInvoiceInPaymentBatchError,
   SupplierInvoiceNotFoundError,
   SupplierInvoiceRowNotFoundError,
+  SupplierInvoiceExchangeRateError,
+  SupplierInvoiceExchangeRateMissingError,
   VerificationAlreadyReversedError,
 } from "../service/supplier-invoice.service.js";
+import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { InvalidStatusTransitionError, SupplierNotFoundError } from "../service/purchase.service.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -32,7 +35,6 @@ import { AccountingPeriodLockedError } from "../../economy/service/accounting-pe
 import {
   MissingPostingAccountError,
   NoAccountingPeriodForPostingError,
-  NonSekSupplierInvoiceError,
   SupplierInvoiceAmountMismatchError,
   UnknownVatRateError,
   SupplierInvoiceVatCodeError,
@@ -52,6 +54,12 @@ export async function supplierInvoiceRoutes(app: FastifyInstance, opts: { servic
     // Momskoder: the chosen code (header, row or the supplier's förval) is
     // unknown, inactive or not a purchase code.
     if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
+    // Valuta: no rate for the invoice's currency and date (Riksbanken has
+    // none or did not answer, no manual rate, no purchase order rate) — the
+    // client asks the user to type the rate.
+    if (err instanceof ExchangeRateUnavailableError) {
+      return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+    }
     if (
       err instanceof SupplierInvoiceNotFoundError ||
       err instanceof SupplierInvoiceRowNotFoundError ||
@@ -86,7 +94,8 @@ export async function supplierInvoiceRoutes(app: FastifyInstance, opts: { servic
       err instanceof SupplierInvoiceVatCodeError ||
       err instanceof VatCodeNotApplicableError ||
       err instanceof VatCodeAccountConflictError ||
-      err instanceof NonSekSupplierInvoiceError ||
+      // Valuta: a foreign invoice saved before rates existed, without one.
+      err instanceof SupplierInvoiceExchangeRateMissingError ||
       err instanceof VerificationAlreadyReversedError ||
       // Leverantörsreskontra (B4): makulering refused because live payments
       // still point at the invoice — a conflict with the current state of the
@@ -99,7 +108,11 @@ export async function supplierInvoiceRoutes(app: FastifyInstance, opts: { servic
     ) {
       return reply.code(409).send(errorBody(err as Error));
     }
-    if (err instanceof PoMatchMismatchError || err instanceof InvalidSupplierInvoiceFileTypeError) {
+    if (
+      err instanceof PoMatchMismatchError ||
+      err instanceof InvalidSupplierInvoiceFileTypeError ||
+      err instanceof SupplierInvoiceExchangeRateError
+    ) {
       return reply.code(400).send(errorBody(err));
     }
     throw err;

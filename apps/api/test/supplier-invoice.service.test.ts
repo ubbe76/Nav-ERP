@@ -152,6 +152,9 @@ describe("supplier invoice — creation", () => {
         netAmount: 100,
         vatAmount: 25,
         grossAmount: 125,
+        // Valuta: no rate lookup is wired in this suite — a foreign invoice
+        // takes its rate typed in.
+        exchangeRate: 11.5,
         rows: [{ description: "Material", quantity: 2, unitPrice: 50, vatRate: 25 }],
       },
       user.id
@@ -160,6 +163,7 @@ describe("supplier invoice — creation", () => {
     expect(invoice!.registrationNumber).toMatch(/^LF-\d+$/);
     expect(invoice!.status).toBe("draft");
     expect(invoice!.currency).toBe("EUR");
+    expect(invoice!.exchangeRate).toBe("11.500000");
     expect(invoice!.rows).toHaveLength(1);
     expect(invoice!.rows[0]!.lineAmount).toBe("100.00");
     expect(invoice!.rows[0]!.vatAmount).toBe("25.00");
@@ -451,7 +455,9 @@ describe("supplier invoice — byte av leverantör", () => {
     );
     expect(invoice!.currency).toBe("SEK");
 
-    const updated = await supplierInvoiceService.updateHeader(invoice!.id, { supplierId: payee.id }, user.id);
+    // Valuta: the new supplier is EUR — without a lookup wired here the rate
+    // is typed in the same PATCH.
+    const updated = await supplierInvoiceService.updateHeader(invoice!.id, { supplierId: payee.id, exchangeRate: 11.5 }, user.id);
     expect(updated!.supplierId).toBe(payee.id);
     expect(updated!.supplierName).toBe("Betalas till AB");
     expect(updated!.currency).toBe("EUR");

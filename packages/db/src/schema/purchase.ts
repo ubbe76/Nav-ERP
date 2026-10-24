@@ -425,6 +425,20 @@ export const supplierInvoices = pgTable(
     dueDate: date("due_date"),
     // Snapshotted from the supplier at creation.
     currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+    // Valuta (migration 0143): SEK per 1 unit of the invoice's currency —
+    // always 1 for SEK. Looked up for the invoice date when the invoice is
+    // created (Riksbanken / Valutakurser, the linked purchase order's rate as
+    // the fallback) unless typed in; editable in draft. The source says where
+    // it came from (null for SEK — and for a foreign invoice saved before the
+    // feature, whose rate is missing and must be entered before the attest);
+    // exchange_rate_date is the day of the rate that was looked up.
+    exchangeRate: numeric("exchange_rate", { precision: 14, scale: 6 }).notNull().default("1"),
+    exchangeRateSource: varchar("exchange_rate_source", { length: 20 }),
+    exchangeRateDate: date("exchange_rate_date"),
+    // Leverantörsskulden i SEK = toSek(gross_amount, exchange_rate), stamped
+    // by the attest in the same transaction as the L verification (null in
+    // draft). The reskontra's SEK side: payments release it (frigjort SEK).
+    grossAmountSek: numeric("gross_amount_sek", { precision: 14, scale: 2 }),
     status: supplierInvoiceStatusEnum("status").notNull().default("draft"),
     // B4: set by the payment registration when this open item is fully
     // settled; cleared back to null if that payment is cancelled. NULL on a
@@ -471,6 +485,19 @@ export const supplierInvoices = pgTable(
     check(
       "supplier_invoices_payment_reference_pair",
       sql`(${table.paymentReferenceKind} is null) = (${table.paymentReference} is null)`
+    ),
+    // SEK ⇒ kurs 1 and no source. The converse (a foreign invoice always has
+    // a real rate) is the service's: an invoice saved in another currency
+    // before migration 0143 has no rate at all, and its attest is refused
+    // until one is entered (SupplierInvoiceExchangeRateMissingError).
+    check(
+      "supplier_invoices_sek_rate",
+      sql`${table.currency} <> 'SEK' OR (${table.exchangeRate} = 1 AND ${table.exchangeRateSource} IS NULL)`
+    ),
+    check("supplier_invoices_rate_positive", sql`${table.exchangeRate} > 0`),
+    check(
+      "supplier_invoices_rate_source_valid",
+      sql`${table.exchangeRateSource} IS NULL OR ${table.exchangeRateSource} IN ('riksbank', 'register', 'manual', 'purchase_order')`
     ),
   ]
 );
@@ -552,8 +579,17 @@ export const supplierPayments = pgTable(
     // chart of accounts — snapshotted as a NUMBER (the verification rows carry
     // the account id) so a later renumbering cannot rewrite history.
     bankAccountNumber: varchar("bank_account_number", { length: 4 }).notNull(),
-    // The BANK part only: 0 for a pure kvittning between open items.
+    // The BANK part only: 0 for a pure kvittning between open items. In the
+    // payment's currency.
     amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    // Valuta (migration 0143): the invoices' currency — one payment never
+    // mixes currencies. amount_sek is the SEK amount that actually left the
+    // bank account (= amount for SEK) and bank_fee_sek the bank's fee in SEK
+    // (0 for SEK); the difference to the SEK the rows release is booked as
+    // kursvinst/kursförlust.
+    currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+    amountSek: numeric("amount_sek", { precision: 14, scale: 2 }).notNull(),
+    bankFeeSek: numeric("bank_fee_sek", { precision: 14, scale: 2 }).notNull().default("0"),
     note: text("note"),
     // The U verification booked in the same transaction as the registration.
     // NULL for a pure kvittning, which moves nothing in the ledger and is
@@ -588,6 +624,12 @@ export const supplierPayments = pgTable(
     uniqueIndex("supplier_payments_entry_live")
       .on(table.bankFileEntryId)
       .where(sql`${table.cancelledAt} is null and ${table.bankFileEntryId} is not null`),
+    // A SEK payment moves exactly its amount and has no fee of its own.
+    check(
+      "supplier_payments_sek_amounts",
+      sql`${table.currency} <> 'SEK' OR (${table.amountSek} = ${table.amount} AND ${table.bankFeeSek} = 0)`
+    ),
+    check("supplier_payments_bank_fee_non_negative", sql`${table.bankFeeSek} >= 0`),
   ]
 );
 
@@ -609,6 +651,11 @@ export const supplierPaymentRows = pgTable(
       .references(() => supplierInvoices.id, { onDelete: "restrict" }),
     appliedAmount: numeric("applied_amount", { precision: 14, scale: 2 }).notNull(),
     writeOffAmount: numeric("write_off_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    // Valuta (migration 0143): the SEK each part releases from the invoice's
+    // gross_amount_sek (frigjort SEK, @navet/shared releasedSek) — equal to
+    // the amounts themselves on a SEK invoice.
+    appliedAmountSek: numeric("applied_amount_sek", { precision: 14, scale: 2 }).notNull(),
+    writeOffAmountSek: numeric("write_off_amount_sek", { precision: 14, scale: 2 }).notNull().default("0"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

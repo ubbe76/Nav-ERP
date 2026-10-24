@@ -29,6 +29,9 @@ import {
   POSTING_VAT_SETTLEMENT_KEY,
   POSTING_INVENTORY_KEY,
   POSTING_INVENTORY_CHANGE_KEY,
+  POSTING_FX_GAIN_KEY,
+  POSTING_FX_LOSS_KEY,
+  POSTING_BANK_FEES_KEY,
   REMINDER_FEE_KEY,
 } from "./posting-settings.js";
 import { isUniqueViolation } from "./db-errors.js";
@@ -636,6 +639,10 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // Årsbokslut (steg 2).
       if (input.postingInventory !== undefined) await set(POSTING_INVENTORY_KEY, input.postingInventory);
       if (input.postingInventoryChange !== undefined) await set(POSTING_INVENTORY_CHANGE_KEY, input.postingInventoryChange);
+      // Valuta.
+      if (input.postingFxGain !== undefined) await set(POSTING_FX_GAIN_KEY, input.postingFxGain);
+      if (input.postingFxLoss !== undefined) await set(POSTING_FX_LOSS_KEY, input.postingFxLoss);
+      if (input.postingBankFees !== undefined) await set(POSTING_BANK_FEES_KEY, input.postingBankFees);
       if (input.paymentTolerance !== undefined) {
         await set(PAYMENT_TOLERANCE_KEY, String(round2(input.paymentTolerance)));
       }

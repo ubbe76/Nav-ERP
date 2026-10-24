@@ -235,10 +235,17 @@ import {
   RowHasReceiptsError,
 } from "../src/modules/purchase/service/purchase.service.js";
 import {
+  PaymentMixedCurrenciesError,
   SupplierInvoiceReservedError,
   SupplierPaymentAlreadyCancelledError,
+  SupplierPaymentAmountSekError,
 } from "../src/modules/purchase/service/supplier-payment.service.js";
-import { SupplierInvoiceInPaymentBatchError } from "../src/modules/purchase/service/supplier-invoice.service.js";
+import {
+  SupplierInvoiceExchangeRateError,
+  SupplierInvoiceExchangeRateMissingError,
+  SupplierInvoiceInPaymentBatchError,
+} from "../src/modules/purchase/service/supplier-invoice.service.js";
+import { ExchangeRateUnavailableError, RiksbankUnavailableError } from "../src/modules/system/service/exchange-rates.js";
 
 import { SeriesExhaustedError } from "../src/modules/system/service/number-series.js";
 import { BuiltInNumberSeriesError, DuplicateNumberSeriesNameError } from "../src/modules/system/service/system.service.js";
@@ -460,6 +467,13 @@ const cases: Array<[Error, string]> = [
   [new PaymentExceedsOpenAmountError("F-1", 100, 150), ERROR_CODES.PAYMENT_EXCEEDS_OPEN_AMOUNT],
   [new VerificationAlreadyReversedError(), ERROR_CODES.VERIFICATION_ALREADY_REVERSED],
   [new SupplierPaymentAlreadyCancelledError("pay-1"), ERROR_CODES.SUPPLIER_PAYMENT_ALREADY_CANCELLED],
+  // Valuta
+  [new ExchangeRateUnavailableError("EUR", "2026-10-24"), ERROR_CODES.EXCHANGE_RATE_UNAVAILABLE],
+  [new RiksbankUnavailableError("rate_limited"), ERROR_CODES.RIKSBANK_UNAVAILABLE],
+  [new SupplierInvoiceExchangeRateError(), ERROR_CODES.SUPPLIER_INVOICE_EXCHANGE_RATE],
+  [new SupplierInvoiceExchangeRateMissingError("EUR"), ERROR_CODES.SUPPLIER_INVOICE_EXCHANGE_RATE_MISSING],
+  [new PaymentMixedCurrenciesError(["EUR", "SEK"]), ERROR_CODES.PAYMENT_MIXED_CURRENCIES],
+  [new SupplierPaymentAmountSekError("required", "EUR"), ERROR_CODES.SUPPLIER_PAYMENT_AMOUNT_SEK],
   [new CollectiveInvoicingCustomerError("x"), ERROR_CODES.COLLECTIVE_INVOICING_CUSTOMER],
   [new InvalidShipmentInvoiceRowError("x"), ERROR_CODES.INVALID_SHIPMENT_INVOICE_ROW],
   [new ShipmentAlreadyInvoicedError("FR-1"), ERROR_CODES.SHIPMENT_ALREADY_INVOICED],

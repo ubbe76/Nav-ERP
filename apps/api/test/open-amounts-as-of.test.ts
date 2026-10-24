@@ -119,6 +119,8 @@ describe("payablesTotalAsOf", () => {
           invoiceDate: date,
           status: reversedOn ? "cancelled" : "approved",
           grossAmount: String(gross),
+          // Valuta: the attest stamps the SEK debt — what the reskontra sums.
+          grossAmountSek: String(gross),
           verificationId,
         })
         .returning();
@@ -136,10 +138,13 @@ describe("payablesTotalAsOf", () => {
         paymentDate: `${YEAR}-12-15`,
         bankAccountNumber: "1930",
         amount: "3000",
+        amountSek: "3000",
         verificationId: await verificationOn(`${YEAR}-12-15`, user.id),
       })
       .returning();
-    await db.insert(supplierPaymentRows).values({ paymentId: payment!.id, supplierInvoiceId: si1.id, appliedAmount: "3000" });
+    await db
+      .insert(supplierPaymentRows)
+      .values({ paymentId: payment!.id, supplierInvoiceId: si1.id, appliedAmount: "3000", appliedAmountSek: "3000" });
 
     expect(await payablesTotalAsOf(db, D)).toBe(6500);
   });
@@ -162,6 +167,7 @@ async function supplierPayment(
       paymentDate,
       bankAccountNumber: "1930",
       amount: String(applied),
+      amountSek: String(applied),
       verificationId: await verificationOn(paymentDate, userId),
       cancelledAt: opts.cancelledOn ? new Date(`${opts.cancelledOn}T12:00:00Z`) : null,
       cancellationVerificationId: opts.cancelledOn ? await verificationOn(opts.cancelledOn, userId) : null,
@@ -172,6 +178,8 @@ async function supplierPayment(
     supplierInvoiceId,
     appliedAmount: String(applied),
     writeOffAmount: String(opts.writeOff ?? 0),
+    appliedAmountSek: String(applied),
+    writeOffAmountSek: String(opts.writeOff ?? 0),
   });
 }
 
@@ -190,6 +198,7 @@ describe("payablesTotalAsOf — payments", () => {
         invoiceDate: `${YEAR}-11-01`,
         status: "approved",
         grossAmount: "10000",
+        grossAmountSek: "10000",
         verificationId: await verificationOn(`${YEAR}-11-01`, user.id),
       })
       .returning();
@@ -219,9 +228,64 @@ describe("payablesTotalAsOf — payments", () => {
       invoiceDate: `${YEAR}-11-01`,
       status: "approved",
       grossAmount: "4000",
+      grossAmountSek: "4000",
       verificationId,
     });
 
     expect(await payablesTotalAsOf(db, D)).toBe(4000);
+  });
+
+  // Valuta: the sum is SEK — the EUR invoice counts with its stamped debt
+  // and the payment with the SEK it released, never in their own currency.
+  it("sums gross_amount_sek − released SEK, never an EUR amount next to a SEK one", async () => {
+    const { user } = await setupYearEnd();
+    const [supplier] = await db.insert(suppliers).values({ supplierNumber: "L-T4", name: "Lieferant GmbH", currency: "EUR" }).returning();
+    const [eur] = await db
+      .insert(supplierInvoices)
+      .values({
+        registrationNumber: "LF-V1",
+        invoiceNumber: "V1",
+        supplierId: supplier!.id,
+        vatCodeId: await vatCodeId("IEUV25"),
+        invoiceDate: `${YEAR}-11-01`,
+        status: "approved",
+        currency: "EUR",
+        exchangeRate: "11.131",
+        exchangeRateSource: "manual",
+        grossAmount: "1000",
+        grossAmountSek: "11131",
+        verificationId: await verificationOn(`${YEAR}-11-01`, user.id),
+      })
+      .returning();
+    await db.insert(supplierInvoices).values({
+      registrationNumber: "LF-V2",
+      invoiceNumber: "V2",
+      supplierId: supplier!.id,
+      vatCodeId: await vatCodeId("MP25"),
+      invoiceDate: `${YEAR}-11-02`,
+      status: "approved",
+      grossAmount: "500",
+      grossAmountSek: "500",
+      verificationId: await verificationOn(`${YEAR}-11-02`, user.id),
+    });
+    const [payment] = await db
+      .insert(supplierPayments)
+      .values({
+        paymentNumber: "UT-V1",
+        supplierId: supplier!.id,
+        paymentDate: `${YEAR}-12-01`,
+        bankAccountNumber: "1930",
+        currency: "EUR",
+        amount: "400",
+        amountSek: "4500",
+        verificationId: await verificationOn(`${YEAR}-12-01`, user.id),
+      })
+      .returning();
+    await db
+      .insert(supplierPaymentRows)
+      .values({ paymentId: payment!.id, supplierInvoiceId: eur!.id, appliedAmount: "400", appliedAmountSek: "4452.40" });
+
+    // 11 131 + 500 − 4 452,40 (the SEK the 400 EUR released, not the 4 500 the bank moved).
+    expect(await payablesTotalAsOf(db, D)).toBe(7178.6);
   });
 });

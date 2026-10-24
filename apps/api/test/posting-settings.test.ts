@@ -34,6 +34,10 @@ const DEFAULTS = {
   // Årsbokslut (steg 2): lager och lagerförändring.
   postingInventory: "1460",
   postingInventoryChange: "4990",
+  // Valuta: kursvinst, kursförlust, bankkostnader.
+  postingFxGain: "3960",
+  postingFxLoss: "7960",
+  postingBankFees: "6570",
   paymentTolerance: 5,
   reminderFee: 60,
 };

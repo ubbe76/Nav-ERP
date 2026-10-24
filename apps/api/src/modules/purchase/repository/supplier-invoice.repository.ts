@@ -20,14 +20,21 @@ import {
   type Db,
   type Tx,
 } from "@navet/db";
-import { ilikePattern, type ListSupplierInvoicesQuery, type PaymentReferenceKind } from "@navet/shared";
+import {
+  ilikePattern,
+  SEK,
+  toSek,
+  type DocumentRateSource,
+  type ListSupplierInvoicesQuery,
+  type PaymentReferenceKind,
+} from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { domesticVatCodeIdSql, loadPostingVatCodes, loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle — same seam
 // as sales' invoice.repository.ts and its CustomerInvoicePoster.
 import type { SupplierInvoicePoster } from "../service/supplier-invoice.service.js";
-import { computeOpenAmounts } from "./open-amounts.js";
+import { computeOpenAmounts, computeOpenAmountsSek } from "./open-amounts.js";
 
 // Internal control-flow signal only — never leaves approve/cancelApproved
 // below. Thrown INSIDE the transaction when the row-locked re-read (or the
@@ -49,6 +56,11 @@ class TransitionRaceError extends Error {}
 // Thrown inside the transaction like the race signal so the omföring the
 // poster may already have written rolls back with it.
 class HasPaymentsError extends Error {}
+
+// Valuta: a foreign-currency invoice without a rate (saved before migration
+// 0143, never given one) — the attest cannot convert it, so it is refused
+// until a rate is entered. Same internal-signal idiom.
+class ExchangeRateMissingError extends Error {}
 
 // Bankfiler: the same idiom for an invoice reserved in a live payment batch
 // row — makulering is refused until the row leaves the batch (or is marked
@@ -79,7 +91,7 @@ async function liveBatchNumber(tx: Tx, invoiceId: string): Promise<string | null
 // real business guards.
 export type SupplierInvoiceTransitionResult =
   | { ok: true; invoice: typeof supplierInvoices.$inferSelect }
-  | { ok: false; reason: "race" | "has_payments" }
+  | { ok: false; reason: "race" | "has_payments" | "exchange_rate_missing" }
   | { ok: false; reason: "in_payment_batch"; batchNumber: string };
 
 // The booked verification's display number (L-2026-1), assembled from the
@@ -113,6 +125,10 @@ export type SupplierInvoiceHeaderWrite = {
   invoiceDate: string;
   dueDate: string | null;
   currency: string;
+  // Valuta: 1 / null / null for SEK.
+  exchangeRate: number;
+  exchangeRateSource: DocumentRateSource | null;
+  exchangeRateDate: string | null;
   netAmount: number;
   vatAmount: number;
   grossAmount: number;
@@ -129,6 +145,9 @@ export type SupplierInvoiceHeaderWrite = {
 type HeaderPatch = {
   supplierId?: string;
   currency?: string;
+  exchangeRate?: string;
+  exchangeRateSource?: DocumentRateSource | null;
+  exchangeRateDate?: string | null;
   invoiceNumber?: string;
   purchaseOrderId?: string | null;
   invoiceDate?: string;
@@ -156,6 +175,16 @@ export function createSupplierInvoiceRepository(db: Db) {
     async findSupplierById(id: string) {
       const [row] = await db.select().from(suppliers).where(eq(suppliers.id, id));
       return row ?? null;
+    },
+
+    // Valuta: the linked purchase order's currency and rate — the fallback
+    // rate when none can be looked up for the invoice date.
+    async findPurchaseOrderRate(purchaseOrderId: string) {
+      const [row] = await db
+        .select({ currency: purchaseOrders.currency, exchangeRate: purchaseOrders.exchangeRate })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, purchaseOrderId));
+      return row ? { currency: row.currency, exchangeRate: Number(row.exchangeRate) } : null;
     },
 
     // A PO row plus its order's supplier — for PO-match validation and the
@@ -193,6 +222,9 @@ export function createSupplierInvoiceRepository(db: Db) {
             invoiceDate: header.invoiceDate,
             dueDate: header.dueDate,
             currency: header.currency,
+            exchangeRate: String(header.exchangeRate),
+            exchangeRateSource: header.exchangeRateSource,
+            exchangeRateDate: header.exchangeRateDate,
             netAmount: String(header.netAmount),
             vatAmount: String(header.vatAmount),
             grossAmount: String(header.grossAmount),
@@ -271,6 +303,15 @@ export function createSupplierInvoiceRepository(db: Db) {
             ...getTableColumns(supplierInvoices),
             supplierName: suppliers.name,
             verificationDisplayNumber: verificationDisplayNumberSql,
+            // Valuta: the invoice's SEK value for the list — the debt stamped
+            // at attest, else gross × rate (a draft's preview; the same
+            // round-half-away arithmetic as toSek); null for a foreign draft
+            // that has no rate yet (kurs saknas).
+            grossSekValue: sql<string | null>`CASE
+              WHEN ${supplierInvoices.grossAmountSek} IS NOT NULL THEN ${supplierInvoices.grossAmountSek}
+              WHEN ${supplierInvoices.currency} <> 'SEK' AND ${supplierInvoices.exchangeRateSource} IS NULL THEN NULL
+              ELSE ROUND(${supplierInvoices.grossAmount} * ${supplierInvoices.exchangeRate}, 2)
+            END`,
           })
           .from(supplierInvoices)
           .innerJoin(suppliers, eq(suppliers.id, supplierInvoices.supplierId))
@@ -397,8 +438,8 @@ export function createSupplierInvoiceRepository(db: Db) {
     // that braces.
     //
     // The poster's own errors — locked/absent accounting period, missing or
-    // inactive posting account, header amounts that don't add up, non-SEK,
-    // zero amount — are DELIBERATELY not caught here: the catch below only
+    // inactive posting account, header amounts that don't add up, zero
+    // amount — are DELIBERATELY not caught here: the catch below only
     // normalizes this file's internal race signal, so a posting failure
     // propagates to the service/routes as a 409 and takes the whole
     // transition with it.
@@ -415,6 +456,7 @@ export function createSupplierInvoiceRepository(db: Db) {
             .where(eq(supplierInvoices.id, id))
             .for("update");
           if (!invoice || invoice.status !== "draft") throw new TransitionRaceError();
+          if (invoice.currency !== SEK && invoice.exchangeRateSource === null) throw new ExchangeRateMissingError();
 
           // Read in-tx so the posting sees the same snapshot the status flip
           // is written against.
@@ -453,6 +495,7 @@ export function createSupplierInvoiceRepository(db: Db) {
               supplierName: supplier!.name,
               invoiceDate: invoice.invoiceDate,
               currency: invoice.currency,
+              exchangeRate: Number(invoice.exchangeRate),
               netAmount: Number(invoice.netAmount),
               vatAmount: Number(invoice.vatAmount),
               grossAmount: Number(invoice.grossAmount),
@@ -466,9 +509,12 @@ export function createSupplierInvoiceRepository(db: Db) {
             userId
           );
 
+          // Valuta: the SEK debt the L verification just booked — the same
+          // toSek(gross, rate) the poster's restmetod starts from.
+          const grossAmountSek = toSek(Number(invoice.grossAmount), Number(invoice.exchangeRate));
           const [updated] = await tx
             .update(supplierInvoices)
-            .set({ status: "approved", verificationId, updatedAt: new Date() })
+            .set({ status: "approved", verificationId, grossAmountSek: String(grossAmountSek), updatedAt: new Date() })
             .where(and(eq(supplierInvoices.id, id), eq(supplierInvoices.status, "draft")))
             .returning();
           if (!updated) throw new TransitionRaceError();
@@ -476,6 +522,7 @@ export function createSupplierInvoiceRepository(db: Db) {
         });
       } catch (err) {
         if (err instanceof TransitionRaceError) return { ok: false, reason: "race" };
+        if (err instanceof ExchangeRateMissingError) return { ok: false, reason: "exchange_rate_missing" };
         throw err;
       }
     },
@@ -586,6 +633,12 @@ export function createSupplierInvoiceRepository(db: Db) {
       return (await computeOpenAmounts(db, [id])).get(id) ?? 0;
     },
 
+    // Valuta: the open amount's booked SEK value (gross_amount_sek − the SEK
+    // released by live payments); null before the attest stamped the debt.
+    async getOpenAmountSek(id: string) {
+      return (await computeOpenAmountsSek(db, [id])).get(id) ?? null;
+    },
+
     // Bankfiler: every batch row this invoice has been in, newest first.
     async listPaymentBatchesForInvoice(invoiceId: string) {
       return db
@@ -612,6 +665,11 @@ export function createSupplierInvoiceRepository(db: Db) {
           paymentDate: supplierPayments.paymentDate,
           appliedAmount: supplierPaymentRows.appliedAmount,
           writeOffAmount: supplierPaymentRows.writeOffAmount,
+          // Valuta: the payment's currency (= the invoice's) and the SEK the
+          // row released from the invoice's debt.
+          currency: supplierPayments.currency,
+          appliedAmountSek: supplierPaymentRows.appliedAmountSek,
+          writeOffAmountSek: supplierPaymentRows.writeOffAmountSek,
           cancelledAt: supplierPayments.cancelledAt,
           verificationId: supplierPayments.verificationId,
           verificationDisplayNumber: verificationDisplayNumberSql,
