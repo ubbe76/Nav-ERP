@@ -37,6 +37,7 @@ import { createEconomyRepository } from "./modules/economy/repository/economy.re
 import { createEconomyService } from "./modules/economy/service/economy.service.js";
 import { createVerificationPoster } from "./modules/economy/service/verification-poster.js";
 import { createVatReportService } from "./modules/economy/service/vat-report.service.js";
+import { createPeriodicSummaryService } from "./modules/economy/service/periodic-summary.service.js";
 import { createVatCodeService } from "./modules/economy/service/vat-code.service.js";
 import { createFinancialReportsService } from "./modules/economy/service/financial-reports.service.js";
 import { createSieService } from "./modules/economy/service/sie.service.js";
@@ -661,6 +662,12 @@ export function buildApp(database: Db = db) {
     company: { orgNumber: async () => (await systemService.getCompanyInfo())?.orgNumber ?? null },
     audit: auditRepository,
   });
+  // Periodisk sammanställning: the issued invoices' EU sales per buyer,
+  // reconciled against the booked ruta 35/39, and Skatteverket's file.
+  const periodicSummaryService = createPeriodicSummaryService({
+    db: database,
+    company: { vatNumber: async () => (await systemService.getCompanyInfo())?.vatNumber ?? null },
+  });
   // Momskoder: the catalog's per-company settings and the importmoms posting
   // (series IM via the shared poster).
   const vatCodeService = createVatCodeService({ db: database, poster: verificationPoster, audit: auditRepository });
@@ -792,6 +799,7 @@ export function buildApp(database: Db = db) {
             reports: financialReportsService,
             sie: sieService,
             vatCodes: vatCodeService,
+            periodicSummary: periodicSummaryService,
           },
           { read: ["ekonomi"], write: ["ekonomi"] }
         );

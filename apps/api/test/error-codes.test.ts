@@ -153,6 +153,12 @@ import {
   VatPeriodAlreadySettledError,
   VatPeriodNotCoveredError,
 } from "../src/modules/economy/service/vat-report.service.js";
+import { PeriodicSummaryPeriodInvalidError } from "../src/modules/economy/service/periodic-summary.js";
+import { PeriodicSummaryAmountTooLargeError } from "../src/modules/economy/service/periodic-summary-file.js";
+import {
+  PeriodicSummaryEmptyError,
+  PeriodicSummaryReporterIncompleteError,
+} from "../src/modules/economy/service/periodic-summary.service.js";
 
 import {
   DeliveryNotFoundError,
@@ -378,6 +384,10 @@ const cases: Array<[Error, string]> = [
   [new SupplierInvoiceVatCodeError(250, "MF", "Momsfri"), ERROR_CODES.SUPPLIER_INVOICE_VAT_CODE],
   [new InvalidVatCodeError("inactive", "EUV", "sales"), ERROR_CODES.INVALID_VAT_CODE],
   [new VatNumberRequiredError("missing", "EUV"), ERROR_CODES.VAT_NUMBER_REQUIRED],
+  [new PeriodicSummaryPeriodInvalidError("2026-10-02", "2026-10-31"), ERROR_CODES.PERIODIC_SUMMARY_PERIOD_INVALID],
+  [new PeriodicSummaryEmptyError(), ERROR_CODES.PERIODIC_SUMMARY_EMPTY],
+  [new PeriodicSummaryReporterIncompleteError(["contactPhone"]), ERROR_CODES.PERIODIC_SUMMARY_REPORTER_INCOMPLETE],
+  [new PeriodicSummaryAmountTooLargeError("DE123456789", 1e12), ERROR_CODES.PERIODIC_SUMMARY_AMOUNT_TOO_LARGE],
   [new FiscalYearClosedError("2024"), ERROR_CODES.FISCAL_YEAR_CLOSED],
   [new YearEndClosingNotFoundError("c-1"), ERROR_CODES.YEAR_END_CLOSING_NOT_FOUND],
   [new YearEndClosingExistsError("2024"), ERROR_CODES.YEAR_END_CLOSING_EXISTS],

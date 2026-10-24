@@ -80,6 +80,13 @@ export const ERROR_CODES = {
   // Utfärda: EU sale / omvänd betalningsskyldighet without (a well-formed)
   // buyer momsregistreringsnummer (409, body.reason missing|eu_format|ob_format)
   VAT_NUMBER_REQUIRED: "vat-number-required",
+  // Periodisk sammanställning: not one calendar month/quarter (400), no EU
+  // sales to submit (409), the reporter's details missing (409, body.missing)
+  // and an amount over 12 characters (400)
+  PERIODIC_SUMMARY_PERIOD_INVALID: "periodic-summary-period-invalid",
+  PERIODIC_SUMMARY_EMPTY: "periodic-summary-empty",
+  PERIODIC_SUMMARY_REPORTER_INCOMPLETE: "periodic-summary-reporter-incomplete",
+  PERIODIC_SUMMARY_AMOUNT_TOO_LARGE: "periodic-summary-amount-too-large",
   // årsbokslut
   FISCAL_YEAR_CLOSED: "fiscal-year-closed",
   YEAR_END_CLOSING_NOT_FOUND: "year-end-closing-not-found",

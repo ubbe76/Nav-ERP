@@ -560,6 +560,21 @@ describe("profiles against the real app", () => {
     expect(await status(ekonomi, "PATCH", `/vat-codes/${id}`, { name: "X" })).toBe(404);
   });
 
+  it("periodisk sammanställning: Ekonomi only, reads included", async () => {
+    const inkop = await sessionFor(["inkop"]);
+    const ekonomi = await sessionFor(["ekonomi"]);
+    // Not a calendar month: Ekonomi gets past the gate to the period check.
+    const bad = "from=2030-01-02&to=2030-01-31";
+    expect(await status(inkop, "GET", `/periodic-summary?${bad}`)).toBe(403);
+    expect(await status(inkop, "GET", `/periodic-summary/file?${bad}`)).toBe(403);
+    expect(await status(ekonomi, "GET", `/periodic-summary?${bad}`)).toBe(400);
+    expect(await status(ekonomi, "GET", `/periodic-summary/file?${bad}`)).toBe(400);
+    for (const url of ["/api/v1/periodic-summary", "/api/v1/periodic-summary/file"]) {
+      const route = routes.find((r) => r.url === url && methods(r).includes("GET"));
+      expect(resolveRule(route!.config as never, "GET")).toEqual(["ekonomi"]);
+    }
+  });
+
   it("the gate really runs: a groupless user is refused on every protected route", { timeout: 120_000 }, async () => {
     // Static checks above prove each route HAS a rule; this proves the
     // preHandler that enforces it is wired in front of every one of them.

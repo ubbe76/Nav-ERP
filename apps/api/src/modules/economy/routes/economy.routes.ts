@@ -23,6 +23,7 @@ import {
   updateVatCodeSchema,
   updateVatReportingSettingsSchema,
   importVatSchema,
+  periodicSummaryQuerySchema,
   vatReportQuerySchema,
   verificationRowInputSchema,
 } from "@navet/shared";
@@ -100,6 +101,13 @@ import {
   type SieService,
 } from "../service/sie.service.js";
 import { SieParseError } from "../service/sie-parse.js";
+import {
+  PeriodicSummaryEmptyError,
+  PeriodicSummaryReporterIncompleteError,
+  type PeriodicSummaryService,
+} from "../service/periodic-summary.service.js";
+import { PeriodicSummaryPeriodInvalidError } from "../service/periodic-summary.js";
+import { PeriodicSummaryAmountTooLargeError } from "../service/periodic-summary-file.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
 
@@ -118,9 +126,10 @@ export async function economyRoutes(
     reports: FinancialReportsService;
     sie: SieService;
     vatCodes: VatCodeService;
+    periodicSummary: PeriodicSummaryService;
   }
 ) {
-  const { service, vatReport, reports, sie, vatCodes } = opts;
+  const { service, vatReport, reports, sie, vatCodes, periodicSummary } = opts;
 
   // Shared error mapper: 404 for a missing account, 409 for a duplicate
   // number (same shape as supplier-invoice.routes.ts's invoiceError).
@@ -680,6 +689,43 @@ export async function economyRoutes(
       return reply.code(201).send(await vatReport.settle(input, req.user!.id));
     } catch (err) {
       return vatReportError(err, reply);
+    }
+  });
+
+  // --- Periodisk sammanställning (Momskoder steg 3) ---
+  // 400 for a range that is not one calendar month or quarter and for an
+  // amount the file cannot carry, 409 when there is nothing to submit or the
+  // reporter's details are missing (body.missing lists them).
+  function periodicSummaryError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
+    if (err instanceof PeriodicSummaryPeriodInvalidError || err instanceof PeriodicSummaryAmountTooLargeError) {
+      return reply.code(400).send(errorBody(err));
+    }
+    if (err instanceof PeriodicSummaryReporterIncompleteError) {
+      return reply.code(409).send({ ...errorBody(err), missing: err.missing });
+    }
+    if (err instanceof PeriodicSummaryEmptyError) return reply.code(409).send(errorBody(err));
+    throw err;
+  }
+
+  app.get("/periodic-summary", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+    const query = periodicSummaryQuerySchema.parse(req.query);
+    try {
+      return await periodicSummary.getSummary(query);
+    } catch (err) {
+      return periodicSummaryError(err, reply);
+    }
+  });
+
+  // Skatteverket's file (SKV 574008), ISO-8859-1 with CRLF.
+  app.get("/periodic-summary/file", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+    const query = periodicSummaryQuerySchema.parse(req.query);
+    try {
+      const { filename, content } = await periodicSummary.getFile(query);
+      reply.header("Content-Type", "text/plain; charset=ISO-8859-1");
+      reply.header("Content-Disposition", contentDisposition(filename));
+      return reply.send(content);
+    } catch (err) {
+      return periodicSummaryError(err, reply);
     }
   });
 

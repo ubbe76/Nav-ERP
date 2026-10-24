@@ -297,6 +297,67 @@ export type VatReportingSettings = {
   contactEmail: string | null;
 };
 
+// --- Periodisk sammanställning (Momskoder steg 3) ---
+// from/to must be exactly one calendar month or one calendar quarter —
+// checked in the service (400 periodic-summary-period-invalid), the schema
+// only guards the date shape.
+export const periodicSummaryQuerySchema = z.object({ from: z.string().date(), to: z.string().date() });
+export type PeriodicSummaryQuery = z.infer<typeof periodicSummaryQuerySchema>;
+
+export const PERIODIC_SUMMARY_WARNING_KINDS = [
+  "missing_vat_number",
+  "invalid_vat_number",
+  "non_eu_country",
+  "ledger_difference",
+] as const;
+export type PeriodicSummaryWarningKind = (typeof PERIODIC_SUMMARY_WARNING_KINDS)[number];
+
+// What the file needs from Företagsuppgifter / the VAT reporting settings
+// that is absent or not in Skatteverket's format.
+export const PERIODIC_SUMMARY_MISSING_FIELDS = ["vatNumber", "contactName", "contactPhone"] as const;
+export type PeriodicSummaryMissingField = (typeof PERIODIC_SUMMARY_MISSING_FIELDS)[number];
+
+export type PeriodicSummaryInvoiceRef = { id: string; invoiceNumber: string };
+
+export type PeriodicSummaryRow = {
+  // Normalized, with the country prefix (Greece EL).
+  vatNumber: string;
+  customers: { id: string; name: string }[];
+  // Whole kronor — the öre sum rounded per row, half away from zero.
+  goods: number;
+  // Trepartshandel has no momskod — always empty.
+  triangular: null;
+  services: number;
+  invoices: PeriodicSummaryInvoiceRef[];
+};
+
+export type PeriodicSummaryWarning = {
+  kind: PeriodicSummaryWarningKind;
+  message: string;
+  invoices: PeriodicSummaryInvoiceRef[];
+};
+
+export type PeriodicSummary = {
+  from: string;
+  to: string;
+  kind: "month" | "quarter";
+  // ÅÅMM for a month, ÅÅ-K for a quarter.
+  periodCode: string;
+  rows: PeriodicSummaryRow[];
+  totals: { goods: number; services: number };
+  // The VAT report's booked ruta 35 / 39 for the same range, whole kronor.
+  ledger: { box35: number; box39: number };
+  differences: { goods: number; services: number };
+  warnings: PeriodicSummaryWarning[];
+  reporter: {
+    vatNumber: string | null;
+    contactName: string | null;
+    contactPhone: string | null;
+    contactEmail: string | null;
+  };
+  missing: PeriodicSummaryMissingField[];
+};
+
 // --- Ekonomirapporter (B6a) ---
 // Unlike the VAT report, these ranges do NOT have to tile whole accounting
 // periods: the reports never write anything, so there is no settlement
