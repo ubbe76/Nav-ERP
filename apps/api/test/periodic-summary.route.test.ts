@@ -153,7 +153,7 @@ describe("GET /periodic-summary", () => {
       ],
       totals: { goods: 1501, services: 0 },
       ledger: { box35: 0, box39: 0 },
-      differences: { goods: 1501, services: 0 },
+      differences: { goods: 1500.5, services: 0 },
       warnings: [
         {
           kind: "ledger_difference",

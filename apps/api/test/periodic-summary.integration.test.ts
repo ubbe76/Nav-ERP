@@ -308,8 +308,8 @@ describe("GET summary — reconciliation against ruta 35 and 39", () => {
     const after = await service.getSummary(THIS_MONTH);
     // 1200.50 rounds half away from zero.
     expect(after.ledger).toEqual({ box35: 0, box39: 1201 });
-    // The öre difference (−200.50) rounded half away from zero.
-    expect(after.differences).toEqual({ goods: 0, services: -201 });
+    // The exact öre difference, in kronor.
+    expect(after.differences).toEqual({ goods: 0, services: -200.5 });
     expect(after.warnings).toEqual([
       {
         kind: "ledger_difference",
@@ -338,7 +338,7 @@ describe("GET summary — reconciliation against ruta 35 and 39", () => {
     await bookManualSale("3108", 0.3);
     const after = await service.getSummary(THIS_MONTH);
     expect(after.ledger).toEqual({ box35: 1, box39: 0 });
-    expect(after.differences).toEqual({ goods: 0, services: 0 });
+    expect(after.differences).toEqual({ goods: -0.3, services: 0 });
     expect(after.warnings.map((warning) => warning.message)).toEqual([
       "Varor: sammanställningen 1,00 kr, bokfört i ruta 35 1,30 kr (skillnad -0,30 kr) — typiskt ett manuellt verifikat eller en faktura med fel momskod",
     ]);
