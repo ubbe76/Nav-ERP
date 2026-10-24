@@ -8,9 +8,11 @@ import { Button } from "../ui/Button";
 import { StatusPill } from "../ui/StatusPill";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
+import { FormNotice } from "../ui/Form";
 import { SupplierPaymentRegistrationForm } from "./SupplierPaymentRegistrationForm";
+import { currencyLabel, exchangeDifferenceText, SEK } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
-import type { AccountOption, Paged, Supplier, SupplierPaymentHeader } from "../../lib/types";
+import type { AccountOption, Paged, Supplier, SupplierPaymentDetail, SupplierPaymentHeader } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import listStyles from "../../app/inkop/ordrar/page.module.css";
 
@@ -34,12 +36,24 @@ export function SupplierPaymentsPageClient({
   pageSize: number;
 }) {
   const router = useRouter();
+  // Valuta: the SEK column only when the page has a payment in another currency.
+  const anyForeign = payments.rows.some((p) => p.currency !== SEK);
   // Opens straight into the registration panel when linked with ?invoice=
   // (a supplier invoice's "Registrera betalning" action).
   const [panelOpen, setPanelOpen] = useState(Boolean(initialInvoiceId));
+  // What the last registration did — for a payment in another currency, its
+  // kursdifferens (positive = kursvinst).
+  const [registered, setRegistered] = useState<string | null>(null);
 
-  function onRegistered() {
+  function onRegistered(payment: SupplierPaymentDetail) {
     setPanelOpen(false);
+    setRegistered(
+      payment.currency === SEK
+        ? `Betalning ${payment.paymentNumber} registrerades.`
+        : `Betalning ${payment.paymentNumber} registrerades — ${exchangeDifferenceText(payment.exchangeRateDifferenceSek, formatMoney)}${
+            Number(payment.bankFeeSek) > 0 ? `, bankavgift ${formatMoney(payment.bankFeeSek)} kr` : ""
+          }.`
+    );
     router.refresh();
   }
 
@@ -57,6 +71,8 @@ export function SupplierPaymentsPageClient({
           <HelpLink chapter="inkop" anchor="registrera-betalning" label="Hjälp om betalningar" />
         </div>
       </div>
+
+      {registered && !panelOpen && <FormNotice style={{ marginBottom: 14 }}>{registered}</FormNotice>}
 
       {panelOpen && (
         <SupplierPaymentRegistrationForm
@@ -85,6 +101,7 @@ export function SupplierPaymentsPageClient({
           { key: "paymentDate", label: "Datum", width: "120px" },
           { key: "supplierName", label: "Leverantör", width: "1.4fr" },
           { key: "amount", label: "Belopp", width: "130px", align: "right" },
+          ...(anyForeign ? [{ key: "amountSek", label: "Draget i SEK", width: "130px", align: "right" as const }] : []),
           { key: "bankAccountNumber", label: "Konto", width: "110px" },
           { key: "verificationDisplayNumber", label: "Verifikat", width: "120px" },
           { key: "status", label: "Status", width: "130px" },
@@ -104,7 +121,10 @@ export function SupplierPaymentsPageClient({
             case "supplierName":
               return payment.supplierName;
             case "amount":
-              return `${formatMoney(payment.amount)} kr`;
+              return `${formatMoney(payment.amount)} ${currencyLabel(payment.currency)}`;
+            case "amountSek":
+              // Only a payment in another currency has a SEK figure of its own.
+              return payment.currency === SEK ? "–" : `${formatMoney(payment.amountSek)} kr`;
             case "bankAccountNumber":
               return payment.bankAccountNumber;
             case "verificationDisplayNumber":

@@ -12,6 +12,7 @@ import { Card } from "../ui/Card";
 import { GatedLink } from "../ui/GatedLink";
 import { FormError, FormStack } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
+import { currencyLabel, exchangeDifferenceText, formatRate, SEK } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
 import type { SupplierPaymentDetail, SupplierPaymentRow } from "../../lib/types";
 
@@ -27,6 +28,9 @@ export function SupplierPaymentCard({
 }) {
   const router = useRouter();
   const cancelled = payment.cancelledAt !== null;
+  // Valuta: a payment in another currency also carries the SEK that left the
+  // bank account, the bank's fee and the kursdifferens it booked.
+  const foreign = payment.currency !== SEK;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -60,7 +64,12 @@ export function SupplierPaymentCard({
           Leverantör: <strong>{payment.supplierName}</strong>
         </span>
         <span>Datum: {payment.paymentDate}</span>
-        <span>Belopp: {formatMoney(payment.amount)} kr</span>
+        <span>
+          Belopp: {formatMoney(payment.amount)} {currencyLabel(payment.currency)}
+        </span>
+        {foreign && <span>Draget från kontot: {formatMoney(payment.amountSek)} kr</span>}
+        {foreign && Number(payment.bankFeeSek) > 0 && <span>Bankavgift: {formatMoney(payment.bankFeeSek)} kr</span>}
+        {foreign && <span>{exchangeDifferenceText(payment.exchangeRateDifferenceSek, formatMoney)}</span>}
         <span>Konto: {payment.bankAccountNumber}</span>
         {payment.paymentBatchItem && (
           <span>
@@ -112,6 +121,14 @@ export function SupplierPaymentCard({
             { key: "registrationNumber", label: "Faktura", width: "1fr" },
             { key: "appliedAmount", label: "Belopp", width: "150px", align: "right" },
             { key: "writeOffAmount", label: "Avskrivning", width: "150px", align: "right" },
+            // Valuta: the invoice's own rate and the SEK the row cleared of the
+            // booked debt.
+            ...(foreign
+              ? [
+                  { key: "invoiceRate", label: "Fakturans kurs", width: "130px", align: "right" as const },
+                  { key: "settledSek", label: "Avräknat i SEK", width: "150px", align: "right" as const },
+                ]
+              : []),
           ]}
           rows={payment.rows}
           renderCell={(row, key) => {
@@ -125,9 +142,13 @@ export function SupplierPaymentCard({
                   </Link>
                 );
               case "appliedAmount":
-                return `${formatMoney(row.appliedAmount)} kr`;
+                return `${formatMoney(row.appliedAmount)} ${currencyLabel(payment.currency)}`;
               case "writeOffAmount":
-                return Number(row.writeOffAmount) !== 0 ? `${formatMoney(row.writeOffAmount)} kr` : "–";
+                return Number(row.writeOffAmount) !== 0 ? `${formatMoney(row.writeOffAmount)} ${currencyLabel(payment.currency)}` : "–";
+              case "invoiceRate":
+                return formatRate(row.invoiceExchangeRate);
+              case "settledSek":
+                return `${formatMoney(Number(row.appliedAmountSek) + Number(row.writeOffAmountSek))} kr`;
               default:
                 return null;
             }

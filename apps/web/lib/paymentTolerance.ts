@@ -44,7 +44,14 @@ function kr(value: number): string {
   return value.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function paymentPreview(open: number, appliedRaw: string, tolerance: number): { text: string; tone: PreviewTone } {
+// `unit` is the word after the amounts: "kr" for a SEK item (the default),
+// the ISO code for an invoice in another currency.
+export function paymentPreview(
+  open: number,
+  appliedRaw: string,
+  tolerance: number,
+  unit: string = "kr"
+): { text: string; tone: PreviewTone } {
   const trimmed = appliedRaw.trim();
   if (trimmed === "") return { text: "Ange ett belopp", tone: "neutral" };
   const applied = round2(Number(trimmed));
@@ -56,7 +63,7 @@ export function paymentPreview(open: number, appliedRaw: string, tolerance: numb
   }
   if (result.kind === "closes") return { text: "Stänger posten", tone: "success" };
   if (result.kind === "closes_with_writeoff") {
-    return { text: `Stänger posten · avskrivning ${kr(Math.abs(result.writeOffAmount))} kr`, tone: "success" };
+    return { text: `Stänger posten · avskrivning ${kr(Math.abs(result.writeOffAmount))} ${unit}`, tone: "success" };
   }
-  return { text: `Delbetalning · rest ${kr(result.rest)} kr`, tone: "neutral" };
+  return { text: `Delbetalning · rest ${kr(result.rest)} ${unit}`, tone: "neutral" };
 }

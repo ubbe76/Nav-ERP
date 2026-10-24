@@ -13,6 +13,7 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
+import { currencyLabel, formatRate, SEK } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
 import { stockholmToday } from "../../lib/date";
 import type { OpenSupplierInvoiceRow, Paged, Supplier } from "../../lib/types";
@@ -32,6 +33,9 @@ function today(): string {
 function unpayable(row: OpenSupplierInvoiceRow): string | null {
   if (row.paymentBatch) return `Ingår i betalfil ${row.paymentBatch.batchNumber}`;
   if (row.openAmount < 0) return "Kreditfakturor kvittas under Betalningar";
+  // Valuta: the payment file carries SEK payments only until
+  // utlandsbetalningarna — a foreign invoice is paid with Registrera betalning.
+  if (row.currency !== SEK) return `Faktura i ${row.currency} — registrera utbetalningen under Betalningar (betalfilen tar bara SEK)`;
   if (!row.supplierPaymentMethod) return "Leverantören saknar betalningsuppgifter";
   if (row.supplierPaymentMethod === "iban" && !(row.supplierIban ?? "").startsWith("SE")) return "Utlandsbetalning stöds inte";
   return null;
@@ -58,6 +62,7 @@ export function OpenSupplierInvoicesPageClient({
   const visibleIds = new Set(openInvoices.rows.map((r) => r.id));
   const offPage = selectedRows.filter((r) => !visibleIds.has(r.id)).length;
   const selectedTotal = selectedRows.reduce((sum, r) => sum + r.openAmount, 0);
+  const anyForeign = openInvoices.rows.some((r) => r.currency !== SEK);
 
   function toggle(row: OpenSupplierInvoiceRow) {
     setSelected((current) => {
@@ -131,6 +136,10 @@ export function OpenSupplierInvoicesPageClient({
           { key: "dueDate", label: "Förfallodatum", width: "150px" },
           { key: "grossAmount", label: "Belopp", width: "130px", align: "right" },
           { key: "openAmount", label: "Öppet belopp", width: "130px", align: "right" },
+          // Valuta: the open amount's booked SEK value — the column to add up.
+          // Only when the page has an invoice in another currency; for SEK it
+          // would repeat Öppet belopp.
+          ...(anyForeign ? [{ key: "openAmountSek", label: "Öppet i SEK", width: "130px", align: "right" as const }] : []),
           { key: "paymentBatch", label: "Betalfil", width: "110px" },
         ]}
         rows={openInvoices.rows}
@@ -175,9 +184,20 @@ export function OpenSupplierInvoicesPageClient({
               );
             }
             case "grossAmount":
-              return `${formatMoney(row.grossAmount)} kr`;
+              return `${formatMoney(row.grossAmount)} ${currencyLabel(row.currency)}`;
             case "openAmount":
-              return `${formatMoney(row.openAmount)} kr`;
+              return row.currency === SEK ? (
+                `${formatMoney(row.openAmount)} kr`
+              ) : (
+                <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                  <span>
+                    {formatMoney(row.openAmount)} {row.currency}
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>kurs {formatRate(row.exchangeRate)}</span>
+                </span>
+              );
+            case "openAmountSek":
+              return row.openAmountSek === null ? "–" : `${formatMoney(row.openAmountSek)} kr`;
             default:
               return null;
           }

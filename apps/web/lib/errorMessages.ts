@@ -130,6 +130,42 @@ const MESSAGES: Record<string, MessageEntry> = {
   ),
   "supplier-invoice-vat-code":
     "Fakturan har moms, men momskoden tar ingen debiterad moms (omvänd moms, momsfritt eller import) — välj en svensk momskod eller ange momsbelopp 0.",
+  // Valuta
+  // The server names the currency and day ("Ingen kurs för EUR 2026-10-24 —
+  // ange kursen själv").
+  "exchange-rate-unavailable": serverMessage("Ingen kurs hittades — ange kursen själv."),
+  "riksbank-unavailable": (err) => {
+    const reason = (err.body as { reason?: string } | undefined)?.reason;
+    if (reason === "rate_limited") return "Riksbanken tar inte emot fler anrop just nu — försök igen om en minut eller ange kursen själv.";
+    if (reason === "unauthorized") return "Riksbanken godkände inte API-nyckeln — kontrollera den under Ekonomi → Valutakurser.";
+    if (reason === "unexpected") return "Riksbanken gav ett oväntat svar — försök igen eller ange kursen själv.";
+    return "Riksbanken svarar inte — försök igen eller ange kursen själv.";
+  },
+  "supplier-invoice-exchange-rate": "En faktura i SEK har alltid kurs 1.",
+  "supplier-invoice-exchange-rate-missing":
+    "Fakturan är i utländsk valuta men saknar kurs — ange kursen innan fakturan godkänns.",
+  "payment-mixed-currencies": (err) => {
+    const currencies = (err.body as { currencies?: unknown } | undefined)?.currencies;
+    const list = Array.isArray(currencies) ? ` (${(currencies as string[]).join(", ")})` : "";
+    return `En betalning kan inte blanda valutor${list} — välj bara fakturor i samma valuta.`;
+  },
+  "supplier-payment-amount-sek": (err) => {
+    const body = err.body as { reason?: string; currency?: string } | undefined;
+    switch (body?.reason) {
+      case "required":
+        return `En betalning i ${body.currency ?? "utländsk valuta"} behöver beloppet i SEK som drogs från kontot.`;
+      case "sign":
+        return "Beloppet i SEK måste vara skilt från 0 och ha samma tecken som betalningen.";
+      case "fee":
+        return "Bankavgiften kan inte vara större än beloppet i SEK.";
+      case "kvittning":
+        return "En kvittning flyttar inga pengar — den har varken belopp i SEK eller bankavgift.";
+      case "sek":
+        return "En betalning i SEK drar exakt sitt belopp och har ingen separat bankavgift.";
+      default:
+        return "Beloppet i SEK eller bankavgiften passar inte betalningen.";
+    }
+  },
   "fiscal-year-closed": "Räkenskapsåret är stängt — öppna det igen under Bokslut",
   "year-end-closing-not-found": "Bokslutet hittades inte",
   "year-end-closing-exists": "Räkenskapsåret har redan ett bokslut",

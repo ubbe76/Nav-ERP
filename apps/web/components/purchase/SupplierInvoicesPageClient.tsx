@@ -12,7 +12,10 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
+import { documentSekAmounts, SEK } from "../../lib/currency";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, round2 } from "../../lib/format";
+import { useInvoiceRate } from "../../lib/useExchangeRate";
 import {
   chargedVatRate,
   supplierDefaultVatCode,
@@ -37,6 +40,7 @@ import shellStyles from "../../components/AppShell.module.css";
 import listStyles from "../../app/inkop/ordrar/page.module.css";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { UNDERLAG_ACCEPT, uploadUnderlag } from "../documents/UnderlagSection";
+import { InvoiceRateField, SekAmountsLine } from "./InvoiceRateField";
 
 export function SupplierInvoicesPageClient({
   invoices,
@@ -102,7 +106,24 @@ export function SupplierInvoicesPageClient({
               return <StatusPill status={pill.status} label={pill.label} compact />;
             }
             case "grossAmount":
-              return `${formatMoney(invoice.grossAmount)} ${invoice.currency}`;
+              // A foreign invoice shows its own currency and, under it, the SEK
+              // value (the booked debt, else gross × rate) — never the two
+              // added together.
+              if (invoice.currency === SEK) return `${formatMoney(invoice.grossAmount)} ${invoice.currency}`;
+              return (
+                <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                  <span>
+                    {formatMoney(invoice.grossAmount)} {invoice.currency}
+                  </span>
+                  {invoice.grossSekValue == null ? (
+                    <span style={{ fontSize: 12, color: "var(--status-delayed-text)" }}>kurs saknas</span>
+                  ) : (
+                    <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+                      {formatMoney(invoice.grossSekValue)} kr
+                    </span>
+                  )}
+                </span>
+              );
             default:
               return null;
           }
@@ -171,6 +192,18 @@ export function NewSupplierInvoiceForm({
   const { codes: vatCodes } = useVatCodes();
   const [vatCodeId, setVatCodeId] = useState("");
   const [grossTouched, setGrossTouched] = useState(false);
+  // Valuta: a supplier in another currency than SEK invoices in it. The Kurs is
+  // looked up for the Fakturadatum (Riksbanken, or an own rate from Ekonomi →
+  // Valutakurser) until it is typed in; a changed date or supplier looks it up
+  // again. Only a rate typed in is sent — otherwise the API does the same
+  // lookup itself and records where the rate came from.
+  const invoiceCurrency = invoiceSupplier?.currency.trim().toUpperCase() ?? SEK;
+  const foreignCurrency = invoiceSupplier !== null && invoiceCurrency !== SEK;
+  const invoiceRate = useInvoiceRate({
+    currency: foreignCurrency ? invoiceCurrency : null,
+    date: invoiceDate,
+    lookupEnabled: foreignCurrency && invoiceDate !== "",
+  });
   const [note, setNote] = useState("");
   // Underlag — the supplier's invoice as PDF/scan, uploaded right after the
   // invoice is created (the file needs the new LF's id).
@@ -230,6 +263,17 @@ export function NewSupplierInvoiceForm({
     invoiceSupplier !== null &&
     invoiceSupplier.currency.trim().toUpperCase() !== "SEK" &&
     invoiceSupplier.country.trim().toUpperCase() === "SE";
+
+  const rateNumber = Number(invoiceRate.rate.replace(",", "."));
+  const sekPreview =
+    foreignCurrency && Number.isFinite(rateNumber) && rateNumber > 0 && grossAmount.trim() !== ""
+      ? documentSekAmounts({
+          rate: rateNumber,
+          grossAmount: Number(grossAmount) || 0,
+          vatAmount: Number(vatAmount) || 0,
+          rows: [],
+        })
+      : null;
 
   useEffect(() => {
     const net = Number(netAmount);
@@ -345,6 +389,9 @@ export function NewSupplierInvoiceForm({
           note: note.trim() || undefined,
           purchaseOrderId: previewRows.length > 0 ? selectedOrderId : undefined,
           vatCodeId: vatCodeId || undefined,
+          // Only a rate typed in; otherwise the API looks it up for the date.
+          exchangeRate:
+            foreignCurrency && invoiceRate.touched && invoiceRate.rate.trim() !== "" ? rateNumber : undefined,
           rows: previewRows.map((r) => ({
             description: r.description,
             articleId: r.articleId,
@@ -369,7 +416,7 @@ export function NewSupplierInvoiceForm({
       }
       router.push(`/inkop/leverantorsfakturor/${invoice.id}${uploadFailed ? "?underlag=fel" : ""}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa fakturan");
+      setError(apiErrorMessage(err, "Kunde inte skapa fakturan"));
       setPending(false);
     }
   }
@@ -494,11 +541,21 @@ export function NewSupplierInvoiceForm({
         </Field>
       </FormRow>
 
+      {foreignCurrency && (
+        <>
+          <FormHint>
+            Leverantören fakturerar i {invoiceCurrency} — ange beloppen i {invoiceCurrency}. Kursen räknar om dem till
+            SEK, och fakturan bokförs i SEK när den godkänns.
+          </FormHint>
+          <InvoiceRateField id="invoiceRate" currency={invoiceCurrency} invoiceRate={invoiceRate} />
+        </>
+      )}
+
       <FormRow>
         <Field label="Förfallodatum" htmlFor="dueDate">
           <Input id="dueDate" type="date" size="sm" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
         </Field>
-        <Field label="Nettobelopp" htmlFor="netAmount">
+        <Field label={`Nettobelopp${foreignCurrency ? ` (${invoiceCurrency})` : ""}`} htmlFor="netAmount">
           <Input id="netAmount" type="number" step="0.01" size="sm" value={netAmount} onChange={(e) => setNetAmount(e.target.value)} />
         </Field>
       </FormRow>
@@ -549,7 +606,7 @@ export function NewSupplierInvoiceForm({
           </Select>
           {vatRateLocked && <FormHint>Låst till 0 % — momskoden tar ingen debiterad moms.</FormHint>}
         </Field>
-        <Field label="Momsbelopp" htmlFor="vatAmount">
+        <Field label={`Momsbelopp${foreignCurrency ? ` (${invoiceCurrency})` : ""}`} htmlFor="vatAmount">
           <Input
             id="vatAmount"
             type="number"
@@ -572,7 +629,7 @@ export function NewSupplierInvoiceForm({
       )}
 
       <FormRow>
-        <Field label="Bruttobelopp" htmlFor="grossAmount">
+        <Field label={`Bruttobelopp${foreignCurrency ? ` (${invoiceCurrency})` : ""}`} htmlFor="grossAmount">
           <Input
             id="grossAmount"
             type="number"
@@ -586,6 +643,8 @@ export function NewSupplierInvoiceForm({
           />
         </Field>
       </FormRow>
+
+      {sekPreview && <SekAmountsLine amounts={sekPreview} label="I SEK vid godkännande" />}
 
       <Field label="Notering" htmlFor="invoiceNote">
         <Input id="invoiceNote" value={note} onChange={(e) => setNote(e.target.value)} />

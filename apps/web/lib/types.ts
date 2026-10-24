@@ -1,4 +1,5 @@
 import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./configurator";
+import type { DocumentRateSourceValue } from "./currency";
 import type { Permission } from "./permissions";
 import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
 import type {
@@ -728,6 +729,51 @@ export interface PurchaseInvoiceBasisEntry {
   invoiceRegistrationNumber: string | null;
 }
 
+// --- Valutakurser (Ekonomi → Valutakurser) ---
+
+// Where a stored rate came from: fetched from Sveriges Riksbank or typed in.
+export type ExchangeRateSourceValue = "riksbank" | "manual";
+
+// GET /exchange-rates/list row.
+export interface ExchangeRateEntry {
+  id: string;
+  currency: string;
+  date: string;
+  // SEK per 1 unit of the currency.
+  rate: number;
+  source: ExchangeRateSourceValue;
+  createdBy: string | null;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// GET /exchange-rates?currency&date — the rate for the day: the latest banking
+// day ≤ requestedDate. SEK ⇒ rate 1 and source null. 409
+// exchange-rate-unavailable when there is none.
+export interface ExchangeRateLookup {
+  currency: string;
+  requestedDate: string;
+  date: string;
+  rate: number;
+  source: ExchangeRateSourceValue | null;
+}
+
+// POST /exchange-rates/fetch (Hämta från Riksbanken).
+export interface ExchangeRateFetchResult {
+  currency: string;
+  from: string;
+  to: string;
+  fetched: number;
+  rates: ExchangeRateEntry[];
+}
+
+// GET/PATCH /exchange-rate-settings (admin). The API key is write-only.
+export interface ExchangeRateSettings {
+  source: "riksbank" | "manual";
+  apiKeySet: boolean;
+}
+
 // --- Leverantörsfaktura (AP) ---
 // State machine: draft → approved → paid, cancellable from draft/approved.
 export type SupplierInvoiceStatus = "draft" | "approved" | "paid" | "cancelled";
@@ -772,6 +818,16 @@ export interface SupplierInvoice {
   // Momskoder: the header's code (every row without a code of its own and the
   // remainder follow it). Not in the list rows' joins, so optional here.
   vatCodeId?: string;
+  // Valuta: SEK per 1 unit of `currency` (numeric string, 1 for SEK), where it
+  // came from (null for SEK) and the day of a looked-up rate, and the debt in
+  // SEK stamped at attest (null in a draft).
+  exchangeRate: string;
+  exchangeRateSource: DocumentRateSourceValue | null;
+  exchangeRateDate: string | null;
+  grossAmountSek: string | null;
+  // Only on the list rows: the invoice's SEK value — the stamped debt, else
+  // gross × rate; null for a foreign draft that has no rate yet.
+  grossSekValue?: string | null;
 }
 
 export interface SupplierInvoiceRow {
@@ -805,7 +861,8 @@ export interface SupplierInvoiceRow {
 // meaningless for draft/cancelled, see supplier-invoice.service.ts's
 // getInvoice comment.
 // Förhandsvisning av beräknad (omvänd) moms — what approving books as both
-// utgående and ingående moms, per omvänd momskod.
+// utgående and ingående moms, per omvänd momskod. In SEK (the base is the
+// invoice's SEK net at its rate, exactly as the poster books it).
 export interface SupplierInvoiceReverseVat {
   code: VatCode;
   base: number;
@@ -821,6 +878,13 @@ export interface SupplierInvoiceDetail extends SupplierInvoice {
   warnings: string[];
   rows: SupplierInvoiceRow[];
   openAmount: number;
+  // Valuta: the open amount's booked SEK value (null until attested), the
+  // header in SEK at the invoice's rate (a draft's preview; after the attest
+  // the amounts that were booked) and "kurs saknas" for a foreign invoice
+  // that never got a rate.
+  openAmountSek: number | null;
+  sekAmounts: { grossAmount: number; vatAmount: number; netAmount: number };
+  exchangeRateMissing: boolean;
   payments: SupplierInvoicePaymentEntry[];
   files: SupplierInvoiceFile[];
   // Bankfiler: every payment-file row the invoice has been in, newest first.
@@ -859,6 +923,13 @@ export interface OpenSupplierInvoiceRow {
   dueDate: string | null;
   grossAmount: number;
   openAmount: number;
+  // Valuta: grossAmount/openAmount are in `currency`; exchangeRate is the
+  // invoice's, grossAmountSek the debt booked at attest and openAmountSek what
+  // is left of it (both null before the attest stamped it).
+  currency: string;
+  exchangeRate: number;
+  grossAmountSek: number | null;
+  openAmountSek: number | null;
   // Bankfiler: whether (and how) the supplier can be paid by file, and the
   // live batch the invoice is reserved in.
   supplierPaymentMethod: SupplierPaymentMethodValue | null;
@@ -882,7 +953,13 @@ export interface SupplierPaymentHeader {
   supplierId: string;
   paymentDate: string;
   bankAccountNumber: string;
+  // In `currency` (the invoices' — one payment never mixes currencies).
   amount: string;
+  // Valuta: the SEK that left the bank account (= amount for a SEK payment)
+  // and the bank's fee in SEK (part of amountSek).
+  currency: string;
+  amountSek: string;
+  bankFeeSek: string;
   note: string | null;
   verificationId: string | null;
   cancelledAt: string | null;
@@ -909,6 +986,11 @@ export interface SupplierPaymentRow {
   supplierInvoiceId: string;
   appliedAmount: string;
   writeOffAmount: string;
+  // Valuta: the SEK each part released from the invoice's booked debt
+  // (frigjort SEK) and the invoice's own rate.
+  appliedAmountSek: string;
+  writeOffAmountSek: string;
+  invoiceExchangeRate: string;
   createdAt: string;
   registrationNumber: string;
   invoiceNumber: string;
@@ -917,6 +999,8 @@ export interface SupplierPaymentRow {
 
 // GET /supplier-payments/:id — header plus its rows.
 export interface SupplierPaymentDetail extends SupplierPaymentHeader {
+  // Valuta: positive = kursvinst, negative = kursförlust (0 for SEK).
+  exchangeRateDifferenceSek: number;
   rows: SupplierPaymentRow[];
   // Bankfiler: the batch row a file payment confirms / the camt.054 entry
   // that confirmed it (both null for a manual payment).
@@ -937,6 +1021,11 @@ export interface SupplierInvoicePaymentEntry {
   paymentDate: string;
   appliedAmount: string;
   writeOffAmount: string;
+  // Valuta: the payment's currency (= the invoice's) and the SEK the row
+  // released from the invoice's debt.
+  currency: string;
+  appliedAmountSek: string;
+  writeOffAmountSek: string;
   cancelledAt: string | null;
   verificationId: string | null;
   verificationDisplayNumber: string | null;
@@ -2371,6 +2460,11 @@ export interface SystemSettings {
   // Årsbokslut (steg 2): lager och lagerförändring.
   postingInventory: string;
   postingInventoryChange: string;
+  // Valuta: kursvinst, kursförlust and bankkostnader — where a payment in
+  // another currency books its exchange difference and the bank's fee.
+  postingFxGain: string;
+  postingFxLoss: string;
+  postingBankFees: string;
   // How much a payment may miss the invoice's remaining amount by and still
   // count as fully paid (kr), and the fee charged per payment reminder (kr).
   // Unlike the account codes, there is no reset-to-default — always a number.

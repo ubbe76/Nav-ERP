@@ -36,7 +36,10 @@ type PostingAccountFieldKey =
   | "postingPaymentWriteOff"
   | "postingVatSettlement"
   | "postingInventory"
-  | "postingInventoryChange";
+  | "postingInventoryChange"
+  | "postingFxGain"
+  | "postingFxLoss"
+  | "postingBankFees";
 
 const POSTING_FIELDS: { key: PostingAccountFieldKey; label: string; defaultNumber: string }[] = [
   { key: "postingAccountsReceivable", label: "Kundfordringar", defaultNumber: "1510" },
@@ -48,6 +51,9 @@ const POSTING_FIELDS: { key: PostingAccountFieldKey; label: string; defaultNumbe
   { key: "postingVatSettlement", label: "Redovisningskonto för moms", defaultNumber: "2650" },
   { key: "postingInventory", label: "Lager", defaultNumber: "1460" },
   { key: "postingInventoryChange", label: "Lagerförändring", defaultNumber: "4990" },
+  { key: "postingFxGain", label: "Kursvinst", defaultNumber: "3960" },
+  { key: "postingFxLoss", label: "Kursförlust", defaultNumber: "7960" },
+  { key: "postingBankFees", label: "Bankkostnader", defaultNumber: "6570" },
 ];
 
 // The 2 kundreskontra kr-amounts (B3) — always required, no "reset to
@@ -263,9 +269,9 @@ function StandardAccountsSection({ settings, accounts }: { settings: SystemSetti
     <Card maxWidth="none">
       <div style={{ fontWeight: 600, fontSize: 15 }}>Standardkonton</div>
       <FormHint>
-        Konton automatkonteringen bokför mot: reskontrorna, banken, avgifter, utjämning, momsomföringen, bokslutet och
-        kostnadskontot när ingen konteringsregel matchar en leverantörsfakturarad. Välj &quot;Återställ till
-        standard&quot; för att ta bort en egen inställning.
+        Konton automatkonteringen bokför mot: reskontrorna, banken, avgifter, utjämning, momsomföringen, bokslutet,
+        kursdifferenser och bankavgifter vid betalning i utländsk valuta och kostnadskontot när ingen konteringsregel
+        matchar en leverantörsfakturarad. Välj &quot;Återställ till standard&quot; för att ta bort en egen inställning.
       </FormHint>
       <FormHint style={{ marginTop: 6 }}>
         Intäktskontona och momskontona (utgående och ingående moms) ligger på momskoderna — ändra dem under{" "}
@@ -369,7 +375,8 @@ function KundreskontraSection({ settings }: { settings: SystemSettings }) {
       <div style={{ fontWeight: 600, fontSize: 15 }}>Kundreskontra</div>
       <FormHint>
         Styr när en kundbetalning räknas som fullt betald trots en mellanskillnad, och avgiften som läggs på en
-        betalningspåminnelse.
+        betalningspåminnelse. Toleransen gäller även utbetalningar till leverantörer; på en faktura i utländsk valuta
+        räknas den om med fakturans kurs.
       </FormHint>
 
       <Form onSubmit={handleSave}>

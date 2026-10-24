@@ -348,13 +348,19 @@ function ConfirmModal({ batch, onClose, onConfirm }: { batch: PaymentBatchDetail
 
 function AddInvoicesModal({ batchId, onClose, onAdded }: { batchId: string; onClose: () => void; onAdded: () => void }) {
   const [rows, setRows] = useState<OpenSupplierInvoiceRow[] | null>(null);
+  // Valuta: invoices in another currency than SEK cannot go in a payment file
+  // yet — they are paid with Registrera betalning.
+  const [foreignHidden, setForeignHidden] = useState(0);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     apiFetch<Paged<OpenSupplierInvoiceRow>>("/api/v1/open-supplier-invoices?limit=200")
       .then((page) => {
-        if (!cancelled) setRows(page.rows.filter((r) => !r.paymentBatch && r.openAmount > 0 && r.supplierPaymentMethod));
+        if (cancelled) return;
+        const payable = page.rows.filter((r) => !r.paymentBatch && r.openAmount > 0 && r.supplierPaymentMethod);
+        setRows(payable.filter((r) => r.currency === "SEK"));
+        setForeignHidden(payable.filter((r) => r.currency !== "SEK").length);
       })
       .catch((err) => {
         if (!cancelled) setError(apiErrorMessage(err, "Öppna poster kunde inte hämtas."));
@@ -367,6 +373,12 @@ function AddInvoicesModal({ batchId, onClose, onAdded }: { batchId: string; onCl
     <Modal open onClose={onClose} title="Lägg till fakturor" wide>
       {error && <FormError>{error}</FormError>}
       {rows?.length === 0 && <p>Inga fler betalbara öppna poster.</p>}
+      {foreignHidden > 0 && (
+        <p style={{ color: "var(--color-text-secondary)" }}>
+          {foreignHidden} {foreignHidden === 1 ? "faktura" : "fakturor"} i utländsk valuta visas inte — betalfilen tar bara SEK än så länge.
+          Registrera utbetalningen under Betalningar.
+        </p>
+      )}
       {rows?.map((r) => (
         <label key={r.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <Checkbox

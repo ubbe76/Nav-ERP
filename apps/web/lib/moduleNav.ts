@@ -524,6 +524,11 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
         description: "Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms och import — med konton, momsrutor och fakturatext.",
       },
       {
+        href: "/ekonomi/valutakurser",
+        title: "Valutakurser",
+        description: "Dagskurser från Riksbanken och egna kurser för fakturor och utbetalningar i utländsk valuta.",
+      },
+      {
         href: "/ekonomi/anlaggningsgrupper",
         title: "Anläggningsgrupper",
         description: "Tillgångsgrupper med konton och förvald nyttjandetid.",
