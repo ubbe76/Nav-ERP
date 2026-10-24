@@ -6,7 +6,15 @@ import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import { BAS_STANDARD_ACCOUNTS, defaultVatBox } from "../src/modules/economy/service/bas-accounts.js";
+import { VAT_CODE_CATALOG } from "@navet/shared";
 import { DEFAULT_POSTING_SETTINGS } from "./helpers/services.js";
+
+// Every account a momskod points at, except the ones the 0102 rule already
+// classified the same way (the domestic accounts and 3105/3108).
+const PRE_0142 = new Set(["2610", "2620", "2630", "2640", "3001", "3002", "3003", "3004", "3105", "3108"]);
+const MOMSKOD_ACCOUNTS = [
+  ...new Set(VAT_CODE_CATALOG.flatMap((entry) => Object.values(entry.slots).map((slot) => slot.account))),
+].filter((number) => !PRE_0142.has(number));
 
 // The 0102 migration's backfill must reproduce the OLD bucketMovements
 // classification exactly — otherwise the VAT report changes on deploy. The
@@ -24,9 +32,17 @@ const backfillSql = (() => {
   return start >= 0 && end > start ? text.slice(start, end) : "";
 })();
 
-// DEFAULT_POSTING_SETTINGS is `as const` — widen to plain strings so the
-// customized variant can override fields.
-type Settings = { [K in keyof typeof DEFAULT_POSTING_SETTINGS]: string };
+// The 0102 rule read the per-rate settings that migration 0142 moved onto
+// the momskoder; their old defaults are spelled out here for the port.
+const LEGACY_DEFAULTS = {
+  ...DEFAULT_POSTING_SETTINGS,
+  postingVatOut25: "2610",
+  postingVatOut12: "2620",
+  postingVatOut6: "2630",
+  postingVatIn: "2640",
+  postingRevenue0: "3004",
+};
+type Settings = { [K in keyof typeof LEGACY_DEFAULTS]: string };
 
 // Port of the pre-migration bucketMovements chain: which box an account's
 // movements landed in (null = not counted anywhere).
@@ -84,11 +100,11 @@ describe("0102 vat_box backfill", () => {
   });
 
   const variants: { label: string; settings: Settings }[] = [
-    { label: "default settings", settings: { ...DEFAULT_POSTING_SETTINGS } },
+    { label: "default settings", settings: { ...LEGACY_DEFAULTS } },
     {
       label: "customized settings",
       settings: {
-        ...DEFAULT_POSTING_SETTINGS,
+        ...LEGACY_DEFAULTS,
         postingVatOut25: "2611",
         postingRevenue0: "3010",
         postingReminderFeeAccount: "3590",
@@ -101,7 +117,7 @@ describe("0102 vat_box backfill", () => {
       await seedFixtures();
       for (const [field, key] of Object.entries(SETTING_KEYS)) {
         const value = settings[field as keyof Settings];
-        if (value !== DEFAULT_POSTING_SETTINGS[field as keyof Settings]) {
+        if (value !== LEGACY_DEFAULTS[field as keyof Settings]) {
           await db.execute(sql`INSERT INTO system_settings (key, value) VALUES (${key}, ${value})`);
         }
       }
@@ -118,12 +134,19 @@ describe("0102 vat_box backfill", () => {
     });
   }
 
-  it("the BAS defaults equal the backfill under default settings", async () => {
+  it("the BAS defaults equal the backfill under default settings (accounts that predate the momskoder)", async () => {
     await repo.seedAccounts(BAS_STANDARD_ACCOUNTS);
     const seeded = await boxesByNumber();
     await db.execute(sql`UPDATE accounts SET vat_box = NULL`);
     await db.execute(sql.raw(backfillSql));
-    expect(await boxesByNumber()).toEqual(seeded);
+    const backfilled = await boxesByNumber();
+    // The accounts the momskod catalog brought in (0142) carry their slot's
+    // box, which the old interval rule never knew about.
+    for (const number of MOMSKOD_ACCOUNTS) {
+      seeded.delete(number);
+      backfilled.delete(number);
+    }
+    expect(backfilled).toEqual(seeded);
   });
 
   it("defaultVatBox returns the BAS default and null for unknown numbers", () => {

@@ -25,22 +25,15 @@ export const testEconomyService = createEconomyService(testEconomyRepository, { 
 // year would go red the moment the real calendar rolls over.
 export const POSTING_BASELINE_YEAR = new Date().getFullYear();
 
-// The 15 posting accounts as readPostingSettings resolves them with no
-// settings rows written (codeSetting fallbacks) — all BAS numbers, so seeding
-// the standard chart below makes every posting role resolve. postingBank/
+// The posting accounts as readPostingSettings resolves them with no settings
+// rows written (codeSetting fallbacks) — all BAS numbers, so seeding the
+// standard chart below makes every posting role resolve (the revenue/VAT
+// accounts come with the seeded momskoder, also BAS numbers). postingBank/
 // postingReminderFeeAccount/postingPaymentWriteOff (B3) are here to satisfy
 // PostingAccountNumbers' shape; nothing posts against them yet.
 export const DEFAULT_POSTING_SETTINGS = {
   postingAccountsReceivable: "1510",
-  postingVatOut25: "2610",
-  postingVatOut12: "2620",
-  postingVatOut6: "2630",
-  postingRevenue25: "3001",
-  postingRevenue12: "3002",
-  postingRevenue6: "3003",
-  postingRevenue0: "3004",
   postingAccountsPayable: "2440",
-  postingVatIn: "2640",
   postingDefaultCost: "4010",
   postingBank: "1930",
   postingReminderFeeAccount: "3540",

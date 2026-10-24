@@ -35,6 +35,9 @@ import {
   NonSekSupplierInvoiceError,
   SupplierInvoiceAmountMismatchError,
   UnknownVatRateError,
+  SupplierInvoiceVatCodeError,
+  VatCodeAccountConflictError,
+  VatCodeNotApplicableError,
   ZeroAmountPostingError,
 } from "../../economy/service/verification-poster.js";
 
@@ -73,6 +76,12 @@ export async function supplierInvoiceRoutes(app: FastifyInstance, opts: { servic
       err instanceof UnknownVatRateError ||
       err instanceof ZeroAmountPostingError ||
       err instanceof SupplierInvoiceAmountMismatchError ||
+      // Momskoder: charged VAT under a code that cannot carry it, a code that
+      // is not a purchase code, or an omvänd code whose two VAT accounts
+      // coincide — refused at attest.
+      err instanceof SupplierInvoiceVatCodeError ||
+      err instanceof VatCodeNotApplicableError ||
+      err instanceof VatCodeAccountConflictError ||
       err instanceof NonSekSupplierInvoiceError ||
       err instanceof VerificationAlreadyReversedError ||
       // Leverantörsreskontra (B4): makulering refused because live payments

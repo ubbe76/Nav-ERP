@@ -14,7 +14,7 @@ import type {
   UpdateVerificationSeriesInput,
   VerificationRowInput,
 } from "@navet/shared";
-import { round2 } from "@navet/shared";
+import { isVatCode, round2, vatCodeEntry } from "@navet/shared";
 import type {
   EconomyRepository,
   PostingRulePatch,
@@ -294,18 +294,35 @@ export class ArticleGroupNotFoundError extends Error {
   }
 }
 
-// Fired on the real unique-constraint violation (posting_rules_group_rate_
-// unique / posting_rules_group_norate_unique) — vatRate null in the message
-// reads as "all rates" (the catch-all rule), matching the schema's own
-// null-rate semantics.
+// Fired on the real unique-constraint violation (posting_rules_group_code_
+// unique / posting_rules_group_nocode_unique) — a null code in the message
+// reads as "all codes" (the catch-all rule), matching the schema's own
+// null-code semantics.
 export class DuplicatePostingRuleError extends Error {
-  constructor(articleGroupId: string, vatRate: number | null) {
+  constructor(articleGroupId: string, vatCode: string | null) {
     super(
-      vatRate === null
-        ? `A catch-all posting rule (all rates) already exists for article group ${articleGroupId}`
-        : `A posting rule for article group ${articleGroupId} and VAT rate ${vatRate} already exists`
+      vatCode === null
+        ? `A catch-all posting rule (all VAT codes) already exists for article group ${articleGroupId}`
+        : `A posting rule for article group ${articleGroupId} and VAT code ${vatCode} already exists`
     );
     this.name = "DuplicatePostingRuleError";
+  }
+}
+
+export class VatCodeNotFoundError extends Error {
+  constructor(id: string) {
+    super(`VAT code ${id} not found`);
+    this.name = "VatCodeNotFoundError";
+  }
+}
+
+// Konteringsregler steer customer and supplier invoices; the importmoms
+// posting has no article group, so a rule for an import code could never
+// apply.
+export class PostingRuleVatCodeError extends Error {
+  constructor(code: string) {
+    super(`VAT code ${code} is only used for import VAT and cannot have a posting rule`);
+    this.name = "PostingRuleVatCodeError";
   }
 }
 
@@ -361,6 +378,17 @@ async function requireActiveAccount(repo: EconomyRepository, accountId: string):
 }
 
 export function createEconomyService(repo: EconomyRepository, audit: AuditWriter) {
+  // A rule's momskod must exist and be usable on an invoice (not an import
+  // code). An inactive code is allowed — the Momskoder page warns about it.
+  async function requirePostingRuleVatCode(id: string) {
+    const vatCode = await repo.findVatCodeById(id);
+    if (!vatCode) throw new VatCodeNotFoundError(id);
+    if (isVatCode(vatCode.code) && vatCodeEntry(vatCode.code).direction === "import") {
+      throw new PostingRuleVatCodeError(vatCode.code);
+    }
+    return vatCode;
+  }
+
   const service = {
     async listAccounts(query: ListAccountsQuery) {
       return repo.listAccounts(query);
@@ -926,18 +954,20 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       if (!(await repo.findArticleGroupById(input.articleGroupId))) {
         throw new ArticleGroupNotFoundError(input.articleGroupId);
       }
+      const vatCodeId = input.vatCodeId ?? null;
+      const vatCode = vatCodeId === null ? null : await requirePostingRuleVatCode(vatCodeId);
       if (input.revenueAccountId !== null) await requireActiveAccount(repo, input.revenueAccountId);
       if (input.costAccountId !== null) await requireActiveAccount(repo, input.costAccountId);
 
       try {
         return await repo.createPostingRule({
           articleGroupId: input.articleGroupId,
-          vatRate: input.vatRate === null ? null : String(input.vatRate),
+          vatCodeId,
           revenueAccountId: input.revenueAccountId,
           costAccountId: input.costAccountId,
         });
       } catch (err) {
-        if (isUniqueViolation(err)) throw new DuplicatePostingRuleError(input.articleGroupId, input.vatRate);
+        if (isUniqueViolation(err)) throw new DuplicatePostingRuleError(input.articleGroupId, vatCode?.code ?? null);
         throw err;
       }
     },
@@ -959,6 +989,7 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
           throw new ArticleGroupNotFoundError(input.articleGroupId);
         }
       }
+      if (input.vatCodeId !== undefined && input.vatCodeId !== null) await requirePostingRuleVatCode(input.vatCodeId);
       if (input.revenueAccountId !== undefined && input.revenueAccountId !== null) {
         await requireActiveAccount(repo, input.revenueAccountId);
       }
@@ -974,7 +1005,7 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
 
       const patch: PostingRulePatch = {};
       if (input.articleGroupId !== undefined) patch.articleGroupId = input.articleGroupId;
-      if (input.vatRate !== undefined) patch.vatRate = input.vatRate === null ? null : String(input.vatRate);
+      if (input.vatCodeId !== undefined) patch.vatCodeId = input.vatCodeId;
       if (input.revenueAccountId !== undefined) patch.revenueAccountId = input.revenueAccountId;
       if (input.costAccountId !== undefined) patch.costAccountId = input.costAccountId;
 
@@ -985,8 +1016,9 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       } catch (err) {
         if (isUniqueViolation(err)) {
           const mergedArticleGroupId = input.articleGroupId ?? existing.articleGroupId;
-          const mergedVatRate = input.vatRate !== undefined ? input.vatRate : existing.vatRate === null ? null : Number(existing.vatRate);
-          throw new DuplicatePostingRuleError(mergedArticleGroupId, mergedVatRate);
+          const mergedVatCodeId = input.vatCodeId !== undefined ? input.vatCodeId : existing.vatCodeId;
+          const mergedVatCode = mergedVatCodeId === null ? null : await repo.findVatCodeById(mergedVatCodeId);
+          throw new DuplicatePostingRuleError(mergedArticleGroupId, mergedVatCode?.code ?? null);
         }
         throw err;
       }

@@ -26,14 +26,6 @@ import {
   POSTING_DEFAULT_COST_KEY,
   POSTING_PAYMENT_WRITEOFF_KEY,
   POSTING_REMINDER_FEE_ACCOUNT_KEY,
-  POSTING_REVENUE_0_KEY,
-  POSTING_REVENUE_12_KEY,
-  POSTING_REVENUE_25_KEY,
-  POSTING_REVENUE_6_KEY,
-  POSTING_VAT_IN_KEY,
-  POSTING_VAT_OUT_12_KEY,
-  POSTING_VAT_OUT_25_KEY,
-  POSTING_VAT_OUT_6_KEY,
   POSTING_VAT_SETTLEMENT_KEY,
   POSTING_INVENTORY_KEY,
   POSTING_INVENTORY_CHANGE_KEY,
@@ -149,7 +141,7 @@ function flattenDeliveryDefaults(d: DeliveryDefaults) {
   };
 }
 
-// The 14 posting accounts + 2 kundreskontra amounts (Ekonomi →
+// The 9 posting accounts + 2 kundreskontra amounts (Ekonomi →
 // automatkontering) live in ./posting-settings.js, which owns their key
 // constants and BAS-standard/kundreskontra defaults — imported above rather
 // than duplicated here.
@@ -299,7 +291,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // Egna teman — theme-settings.ts owns the keys and defaults.
       defaultTheme: decodeDefaultTheme(get(DEFAULT_THEME_KEY)),
       themeChoiceLocked: get(THEME_CHOICE_LOCKED_KEY) === "true",
-      // Automatic accounting (Ekonomi → automatkontering) — the 14 posting
+      // Automatic accounting (Ekonomi → automatkontering) — the 9 posting
       // accounts + the 2 kundreskontra amounts, decoded by the leaf that owns
       // their keys/defaults (posting-settings.js).
       ...decodePostingSettings(get),
@@ -625,17 +617,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       if (input.postingAccountsReceivable !== undefined) {
         await set(POSTING_ACCOUNTS_RECEIVABLE_KEY, input.postingAccountsReceivable);
       }
-      if (input.postingVatOut25 !== undefined) await set(POSTING_VAT_OUT_25_KEY, input.postingVatOut25);
-      if (input.postingVatOut12 !== undefined) await set(POSTING_VAT_OUT_12_KEY, input.postingVatOut12);
-      if (input.postingVatOut6 !== undefined) await set(POSTING_VAT_OUT_6_KEY, input.postingVatOut6);
-      if (input.postingRevenue25 !== undefined) await set(POSTING_REVENUE_25_KEY, input.postingRevenue25);
-      if (input.postingRevenue12 !== undefined) await set(POSTING_REVENUE_12_KEY, input.postingRevenue12);
-      if (input.postingRevenue6 !== undefined) await set(POSTING_REVENUE_6_KEY, input.postingRevenue6);
-      if (input.postingRevenue0 !== undefined) await set(POSTING_REVENUE_0_KEY, input.postingRevenue0);
       if (input.postingAccountsPayable !== undefined) {
         await set(POSTING_ACCOUNTS_PAYABLE_KEY, input.postingAccountsPayable);
       }
-      if (input.postingVatIn !== undefined) await set(POSTING_VAT_IN_KEY, input.postingVatIn);
       if (input.postingDefaultCost !== undefined) await set(POSTING_DEFAULT_COST_KEY, input.postingDefaultCost);
       // Kundreskontra (B3).
       if (input.postingBank !== undefined) await set(POSTING_BANK_KEY, input.postingBank);

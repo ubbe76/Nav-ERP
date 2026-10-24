@@ -171,8 +171,8 @@ describe("bookkeeping lock — underlag and archived documents", () => {
       sql`INSERT INTO suppliers (name, supplier_number) VALUES ('Lev AB', ${`L-${Date.now()}`}) RETURNING id`
     )) as unknown as { id: string }[];
     const [invoice] = (await db.execute(
-      sql`INSERT INTO supplier_invoices (registration_number, invoice_number, supplier_id, invoice_date)
-          VALUES (${`LF-T${Date.now()}`}, 'F-1', ${supplier!.id}, ${`${YEAR}-03-01`}) RETURNING id`
+      sql`INSERT INTO supplier_invoices (registration_number, invoice_number, supplier_id, invoice_date, vat_code_id)
+          VALUES (${`LF-T${Date.now()}`}, 'F-1', ${supplier!.id}, ${`${YEAR}-03-01`}, (SELECT id FROM vat_codes WHERE code = 'MP25')) RETURNING id`
     )) as unknown as { id: string }[];
     const [file] = (await db.execute(
       sql`INSERT INTO supplier_invoice_files (supplier_invoice_id, filename, content_type, size_bytes, sha256, data)

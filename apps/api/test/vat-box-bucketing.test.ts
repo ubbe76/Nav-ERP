@@ -1,112 +1,227 @@
 import { describe, expect, it } from "vitest";
+import { VAT_BOXES, VAT_CODE_CATALOG } from "@navet/shared";
 import {
   bucketMovements,
-  findRoleBoxMismatches,
+  findRuleBoxMismatches,
   findUnassignedAccounts,
+  findVatCodeBoxMismatches,
+  roundBoxes,
+  roundToKronor,
 } from "../src/modules/economy/service/vat-report.service.js";
 import type { VatAccountMovement } from "../src/modules/economy/service/vat-account-movements.js";
-import { DEFAULT_POSTING_SETTINGS } from "./helpers/services.js";
 
 function movement(accountNumber: string, vatBox: VatAccountMovement["vatBox"], debit: number, credit: number): VatAccountMovement {
   return { accountId: `id-${accountNumber}`, accountNumber, accountName: `Konto ${accountNumber}`, vatBox, debit, credit };
 }
 
-describe("bucketMovements — ruta per konto", () => {
-  it("routes each account's credit-net to its box and box 48 debit-positive", () => {
+describe("bucketMovements — every box of the declaration", () => {
+  it("routes each account's net to its box: sales and utgående moms credit-positive, inköp, 50 and 48 debit-positive", () => {
     const boxes = bucketMovements([
       movement("3001", "05", 0, 1000),
       movement("3010", "05", 0, 200),
-      movement("3004", "42", 0, 300),
-      movement("3108", "35", 0, 400),
-      movement("3105", "36", 0, 500),
+      movement("3401", "06", 0, 70),
+      movement("3211", "07", 0, 80),
+      movement("3913", "08", 0, 90),
       movement("2610", "10", 0, 300),
       movement("2620", "11", 0, 24),
       movement("2630", "12", 0, 6),
+      movement("4515", "20", 1000, 0),
+      movement("4535", "21", 600, 0),
+      movement("4531", "22", 200, 0),
+      movement("4415", "23", 400, 0),
+      movement("4425", "24", 100, 0),
+      movement("2614", "30", 0, 575),
+      movement("2624", "31", 0, 12),
+      movement("2634", "32", 0, 3),
+      movement("3108", "35", 0, 400),
+      movement("3105", "36", 0, 500),
+      movement("4512", "37", 0, 0),
+      movement("3109", "38", 0, 11),
+      movement("3308", "39", 0, 120),
+      movement("3305", "40", 0, 130),
+      movement("3231", "41", 0, 140),
+      movement("3004", "42", 0, 300),
       movement("2640", "48", 80, 0),
+      movement("2645", "48", 1145, 0),
+      movement("4545", "50", 10000, 0),
+      movement("2615", "60", 0, 2500),
+      movement("2625", "61", 0, 120),
+      movement("2635", "62", 0, 30),
     ]);
     expect(boxes).toEqual({
-      sales05: 1200,
-      salesExempt42: 300,
-      salesEu35: 400,
-      salesExport36: 500,
-      vatOut25_10: 300,
-      vatOut12_11: 24,
-      vatOut6_12: 6,
-      vatIn48: 80,
-      vatToPay49: 250,
+      "05": 1200,
+      "06": 70,
+      "07": 80,
+      "08": 90,
+      "10": 300,
+      "11": 24,
+      "12": 6,
+      "20": 1000,
+      "21": 600,
+      "22": 200,
+      "23": 400,
+      "24": 100,
+      "30": 575,
+      "31": 12,
+      "32": 3,
+      "35": 400,
+      "36": 500,
+      "37": 0,
+      "38": 11,
+      "39": 120,
+      "40": 130,
+      "41": 140,
+      "42": 300,
+      "48": 1225,
+      "50": 10000,
+      "60": 2500,
+      "61": 120,
+      "62": 30,
+      // (300 + 24 + 6 + 575 + 12 + 3 + 2500 + 120 + 30) − 1225
+      "49": 2345,
     });
+  });
+
+  it("has one key per stored box plus 49", () => {
+    expect(Object.keys(bucketMovements([])).sort()).toEqual([...VAT_BOXES, "49"].sort());
   });
 
   it("ignores accounts with no box or 'none', whatever their number", () => {
     const boxes = bucketMovements([movement("3540", "none", 0, 60), movement("3999", null, 0, 75), movement("1510", null, 135, 0)]);
-    expect(boxes.sales05).toBe(0);
-    expect(boxes.vatToPay49).toBe(0);
+    expect(boxes["05"]).toBe(0);
+    expect(boxes["49"]).toBe(0);
   });
 
-  it("a second account tagged 10 counts in ruta 10 too (box follows the account, not the setting)", () => {
+  it("a second account tagged 10 counts in ruta 10 too (box follows the account)", () => {
     const boxes = bucketMovements([movement("2610", "10", 0, 100), movement("2611", "10", 0, 25)]);
-    expect(boxes.vatOut25_10).toBe(125);
+    expect(boxes["10"]).toBe(125);
+  });
+
+  it("gives a negative 49 when the ingående moms exceeds the utgående (moms att få tillbaka)", () => {
+    const boxes = bucketMovements([movement("2610", "10", 0, 100), movement("2640", "48", 400, 0)]);
+    expect(boxes["49"]).toBe(-300);
+  });
+});
+
+describe("hela kronor", () => {
+  it("rounds to the nearest krona, halves away from zero, never a negative zero", () => {
+    expect(roundToKronor(100.49)).toBe(100);
+    expect(roundToKronor(100.5)).toBe(101);
+    expect(roundToKronor(-100.5)).toBe(-101);
+    expect(roundToKronor(-0.4)).toBe(0);
+    expect(Object.is(roundToKronor(-0.4), 0)).toBe(true);
+  });
+
+  it("computes ruta 49 from the rounded boxes, not by rounding the öre sum", () => {
+    const boxes = bucketMovements([
+      movement("2610", "10", 0, 100.4),
+      movement("2620", "11", 0, 50.4),
+      movement("2630", "12", 0, 10.4),
+      movement("2640", "48", 0.4, 0),
+    ]);
+    // öre: 161.20 − 0.40 = 160.80 → would round to 161
+    expect(boxes["49"]).toBe(160.8);
+    const rounded = roundBoxes(boxes);
+    expect(rounded["10"]).toBe(100);
+    expect(rounded["11"]).toBe(50);
+    expect(rounded["12"]).toBe(10);
+    expect(rounded["48"]).toBe(0);
+    expect(rounded["49"]).toBe(160);
   });
 });
 
 describe("findUnassignedAccounts", () => {
-  it("lists class-3 and 26xx accounts without a box that moved, credit-net, and nothing else", () => {
+  it("lists class-3, 26xx, 44xx and 45xx accounts without a box that moved, credit-net, and nothing else", () => {
     const warnings = findUnassignedAccounts([
       movement("3010", null, 0, 200),
       movement("2611", null, 0, 50),
+      movement("4416", null, 30, 0),
+      movement("4518", null, 20, 0),
       movement("3540", "none", 0, 60),
       movement("1510", null, 250, 0),
+      movement("4010", null, 99, 0),
       movement("3020", null, 100, 100),
     ]);
     expect(warnings).toEqual([
       { accountNumber: "3010", accountName: "Konto 3010", net: 200 },
       { accountNumber: "2611", accountName: "Konto 2611", net: 50 },
+      { accountNumber: "4416", accountName: "Konto 4416", net: -30 },
+      { accountNumber: "4518", accountName: "Konto 4518", net: -20 },
     ]);
   });
 });
 
-// The BAS-seeded accounts behind every posting role that feeds a box.
-const BAS_ROLE_ACCOUNTS = [
-  { number: "2610", vatBox: "10" },
-  { number: "2620", vatBox: "11" },
-  { number: "2630", vatBox: "12" },
-  { number: "2640", vatBox: "48" },
-  { number: "3001", vatBox: "05" },
-  { number: "3002", vatBox: "05" },
-  { number: "3003", vatBox: "05" },
-  { number: "3004", vatBox: "42" },
+// The catalog's default accounts with their expected boxes — a chart where
+// every momskod is in order.
+const CATALOG_CHART = [
+  ...new Map(
+    VAT_CODE_CATALOG.flatMap((entry) =>
+      Object.values(entry.slots).map((slot) => [slot.account, { number: slot.account, name: slot.account, active: true, vatBox: slot.box as string | null }] as const)
+    )
+  ).values(),
 ];
+const catalogCode = (code: string, overrides: Record<string, string | null | boolean> = {}) => {
+  const entry = VAT_CODE_CATALOG.find((candidate) => candidate.code === code)!;
+  return {
+    id: `id-${code}`,
+    code,
+    active: true,
+    revenueAccount: entry.slots.revenue?.account ?? null,
+    outputVatAccount: entry.slots.outputVat?.account ?? null,
+    inputVatAccount: entry.slots.inputVat?.account ?? null,
+    costAccount: entry.slots.cost?.account ?? null,
+    baseAccount: entry.slots.base?.account ?? null,
+    baseCounterAccount: entry.slots.baseCounter?.account ?? null,
+    ...overrides,
+  } as Parameters<typeof findVatCodeBoxMismatches>[0][number];
+};
 
-describe("findRoleBoxMismatches", () => {
-  it("flags a configured VAT account whose momsruta is not its role's box", () => {
-    const settings = { ...DEFAULT_POSTING_SETTINGS, postingVatOut25: "2611" };
-    const mismatches = findRoleBoxMismatches(settings, [
-      ...BAS_ROLE_ACCOUNTS.filter((account) => account.number !== "2640"),
-      { number: "2611", vatBox: null },
-      { number: "2640", vatBox: "05" },
-    ]);
-    expect(mismatches).toEqual([
-      { role: "vatOut25", accountNumber: "2611", expectedBox: "10", actualBox: null },
-      { role: "vatIn", accountNumber: "2640", expectedBox: "48", actualBox: "05" },
-    ]);
+describe("findVatCodeBoxMismatches — the catalog against the chart", () => {
+  it("is empty for the catalog defaults", () => {
+    expect(findVatCodeBoxMismatches(VAT_CODE_CATALOG.map((entry) => catalogCode(entry.code)), CATALOG_CHART)).toEqual([]);
   });
 
-  it("flags a revenue role whose account carries another box (momsfri moved onto a 05 account)", () => {
-    const settings = { ...DEFAULT_POSTING_SETTINGS, postingRevenue0: "3011", postingRevenue25: "3540" };
-    const mismatches = findRoleBoxMismatches(settings, [
-      ...BAS_ROLE_ACCOUNTS,
-      { number: "3011", vatBox: "05" },
-      { number: "3540", vatBox: "none" },
+  it("names the code, the account and both boxes, and skips inactive codes", () => {
+    const chart = CATALOG_CHART.map((account) => (account.number === "3108" ? { ...account, vatBox: "05" } : account));
+    const mismatches = findVatCodeBoxMismatches(
+      [catalogCode("EUV"), catalogCode("IMP25", { baseCounterAccount: "4599" }), catalogCode("EXV", { active: false, revenueAccount: "3001" })],
+      chart
+    );
+    expect(mismatches.map((mismatch) => mismatch.message)).toEqual([
+      "Momskod EUV: konto 3108 har ruta 05 men ska ha ruta 35",
+      "Momskod IMP25: konto 4599 finns inte i kontoplanen",
     ]);
-    expect(mismatches).toEqual([
-      { role: "revenue25", accountNumber: "3540", expectedBox: "05", actualBox: "none" },
-      { role: "revenue0", accountNumber: "3011", expectedBox: "42", actualBox: "05" },
-    ]);
+    expect(mismatches[0]).toMatchObject({ code: "EUV", slot: "revenue", expectedBox: "35", actualBox: "05", problem: "box_mismatch" });
+  });
+});
+
+describe("findRuleBoxMismatches — rules for an exact foreign/omvänd code", () => {
+  const codes = VAT_CODE_CATALOG.map((entry) => catalogCode(entry.code));
+  const rule = (code: string, revenue: [string, string | null] | null, cost: [string, string | null] | null) => ({
+    id: `rule-${code}`,
+    groupCode: "310",
+    groupName: "Diskbänkar",
+    vatCodeId: `id-${code}`,
+    revenueAccountNumber: revenue?.[0] ?? null,
+    revenueAccountVatBox: revenue?.[1] ?? null,
+    costAccountNumber: cost?.[0] ?? null,
+    costAccountVatBox: cost?.[1] ?? null,
   });
 
-  it("is empty for the BAS defaults", () => {
-    expect(
-      findRoleBoxMismatches(DEFAULT_POSTING_SETTINGS, BAS_ROLE_ACCOUNTS)
-    ).toEqual([]);
+  it("checks the revenue account of a sales code and the cost account of an omvänd purchase, never a domestic code", () => {
+    const mismatches = findRuleBoxMismatches(
+      [
+        rule("EUV", ["3010", "05"], null),
+        rule("EUT", ["3308", "39"], null),
+        rule("IEUV25", null, ["4011", null]),
+        rule("MP25", ["3108", "35"], null),
+        rule("IUTV", null, ["4011", null]),
+      ],
+      codes
+    );
+    expect(mismatches.map((mismatch) => mismatch.message)).toEqual([
+      "Konteringsregel 310 Diskbänkar / EUV: konto 3010 har ruta 05 men ska ha ruta 35",
+      "Konteringsregel 310 Diskbänkar / IEUV25: konto 4011 har ingen ruta men ska ha ruta 20",
+    ]);
   });
 });

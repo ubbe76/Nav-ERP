@@ -20,6 +20,9 @@ import {
   updatePostingRuleSchema,
   updateVerificationSchema,
   updateVerificationSeriesSchema,
+  updateVatCodeSchema,
+  updateVatReportingSettingsSchema,
+  importVatSchema,
   vatReportQuerySchema,
   verificationRowInputSchema,
 } from "@navet/shared";
@@ -50,6 +53,8 @@ import {
   PeriodNotLockedError,
   PostingRuleNoAccountsError,
   PostingRuleNotFoundError,
+  PostingRuleVatCodeError,
+  VatCodeNotFoundError,
   SeriesCodeLockedError,
   TooFewVerificationRowsError,
   UnbalancedVerificationError,
@@ -65,14 +70,23 @@ import {
 import {
   MissingPostingAccountError,
   NoAccountingPeriodForPostingError,
+  VatCodeAccountConflictError,
+  VatCodeNotApplicableError,
   ZeroAmountPostingError,
 } from "../service/verification-poster.js";
 import {
   VatAccountsNotDistinctError,
+  VatFileOrgNumberMissingError,
   VatPeriodAlreadySettledError,
   VatPeriodNotCoveredError,
   type VatReportService,
 } from "../service/vat-report.service.js";
+import {
+  ImportVatCodeError,
+  VatCodeAccountInvalidError,
+  VatCodeSlotNotUsedError,
+  type VatCodeService,
+} from "../service/vat-code.service.js";
 import {
   ReportFiscalYearNotFoundError,
   type FinancialReportsService,
@@ -103,9 +117,10 @@ export async function economyRoutes(
     vatReport: VatReportService;
     reports: FinancialReportsService;
     sie: SieService;
+    vatCodes: VatCodeService;
   }
 ) {
-  const { service, vatReport, reports, sie } = opts;
+  const { service, vatReport, reports, sie, vatCodes } = opts;
 
   // Shared error mapper: 404 for a missing account, 409 for a duplicate
   // number (same shape as supplier-invoice.routes.ts's invoiceError).
@@ -499,12 +514,17 @@ export async function economyRoutes(
     if (
       err instanceof PostingRuleNotFoundError ||
       err instanceof ArticleGroupNotFoundError ||
-      err instanceof AccountNotFoundError
+      err instanceof AccountNotFoundError ||
+      err instanceof VatCodeNotFoundError
     ) {
       return reply.code(404).send(errorBody(err));
     }
     if (err instanceof DuplicatePostingRuleError) return reply.code(409).send(errorBody(err));
-    if (err instanceof InactiveAccountError || err instanceof PostingRuleNoAccountsError) {
+    if (
+      err instanceof InactiveAccountError ||
+      err instanceof PostingRuleNoAccountsError ||
+      err instanceof PostingRuleVatCodeError
+    ) {
       return reply.code(400).send(errorBody(err));
     }
     throw err;
@@ -543,12 +563,77 @@ export async function economyRoutes(
     }
   );
 
+  // --- Momskoder ---
+  // The list is read by the invoice card and the supplier invoice dialog as
+  // well, so it is open to every office user like /account-options (the
+  // codes' account numbers are BAS labels, no amounts); editing and the
+  // importmoms posting need Ekonomi.
+
+  function vatCodeError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
+    if (err instanceof VatCodeNotFoundError) return reply.code(404).send(errorBody(err));
+    if (
+      err instanceof VatCodeSlotNotUsedError ||
+      err instanceof VatCodeAccountInvalidError ||
+      err instanceof VatCodeAccountConflictError
+    ) {
+      return reply.code(400).send(errorBody(err));
+    }
+    throw err;
+  }
+
+  app.get("/vat-codes", { config: { access: ["office"] } }, async () => vatCodes.list());
+
+  app.patch<{ Params: { id: string } }>("/vat-codes/:id", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+    const input = updateVatCodeSchema.parse(req.body);
+    try {
+      return await vatCodes.update(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return vatCodeError(err, reply);
+    }
+  });
+
+  // Importmoms (tullbeslutet) → one IM verification. 400 for a row whose
+  // code is not an active import code or a date outside every period, 409
+  // for a locked period/closed year, a missing account or two roles on one
+  // account.
+  app.post("/import-vat", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+    const input = importVatSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await vatCodes.postImportVat(input, req.user!.id));
+    } catch (err) {
+      if (err instanceof ImportVatCodeError || err instanceof NoAccountingPeriodForPostingError) {
+        return reply.code(400).send(errorBody(err as Error));
+      }
+      if (
+        err instanceof AccountingPeriodLockedError ||
+        err instanceof MissingPostingAccountError ||
+        err instanceof VatCodeAccountConflictError ||
+        err instanceof VatCodeNotApplicableError ||
+        err instanceof ZeroAmountPostingError
+      ) {
+        return reply.code(409).send(errorBody(err));
+      }
+      throw err;
+    }
+  });
+
+  // Redovisningsperiod för moms + the periodisk sammanställning's contact:
+  // read by every office user (the report page's default period), written
+  // with Ekonomi.
+  app.get("/settings/vat-reporting", { config: { access: ["office"] } }, async () => vatReport.getReportingSettings());
+
+  app.patch("/settings/vat-reporting", { preHandler: requirePermission("ekonomi") }, async (req) => {
+    const input = updateVatReportingSettingsSchema.parse(req.body);
+    return vatReport.updateReportingSettings(input, req.user!.id);
+  });
+
   // --- Momsrapport (B5) ---
 
   // 400 for a range the periods don't cover (client sent a bad range), 409
   // for everything that is a state/configuration conflict: an active
-  // momsomföring already covering the range, VAT roles sharing an account,
-  // a locked end month, an empty period, a missing/inactive posting account.
+  // momsomföring already covering the range, a settlement account carrying
+  // an emptied box, a locked end month, an empty period, a missing/inactive
+  // posting account, no organisationsnummer for the file.
   function vatReportError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
     if (err instanceof VatPeriodNotCoveredError || err instanceof NoAccountingPeriodForPostingError) {
       return reply.code(400).send(errorBody(err));
@@ -558,7 +643,8 @@ export async function economyRoutes(
       err instanceof VatAccountsNotDistinctError ||
       err instanceof AccountingPeriodLockedError ||
       err instanceof ZeroAmountPostingError ||
-      err instanceof MissingPostingAccountError
+      err instanceof MissingPostingAccountError ||
+      err instanceof VatFileOrgNumberMissingError
     ) {
       return reply.code(409).send(errorBody(err));
     }
@@ -569,6 +655,20 @@ export async function economyRoutes(
     const query = vatReportQuerySchema.parse(req.query);
     try {
       return await vatReport.getReport(query);
+    } catch (err) {
+      return vatReportError(err, reply);
+    }
+  });
+
+  // Skatteverket's file (eSKDUpload 6.0) for exactly the range the report
+  // shows, ISO-8859-1.
+  app.get("/vat-report/file", { preHandler: requirePermission("ekonomi") }, async (req, reply) => {
+    const query = vatReportQuerySchema.parse(req.query);
+    try {
+      const { filename, content } = await vatReport.getFile(query);
+      reply.header("Content-Type", "application/xml; charset=ISO-8859-1");
+      reply.header("Content-Disposition", contentDisposition(filename));
+      return reply.send(content);
     } catch (err) {
       return vatReportError(err, reply);
     }

@@ -533,16 +533,31 @@ describe("profiles against the real app", () => {
       method: "PATCH",
       url: "/api/v1/settings/posting",
       headers: { cookie: ekonomi },
-      payload: { postingVatOut25: "" },
+      payload: { postingDefaultCost: "" },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().postingVatOut25).toBe("2610");
-    // Any other settings key is refused, not silently saved.
+    expect(res.json().postingDefaultCost).toBe("4010");
+    // Any other settings key is refused, not silently saved — including the
+    // per-rate accounts that moved to the momskoder.
     expect(await status(ekonomi, "PATCH", "/settings/posting", { smtpHost: "smtp.example.com" })).toBe(400);
+    expect(await status(ekonomi, "PATCH", "/settings/posting", { postingVatOut25: "2610" })).toBe(400);
     // The full settings PATCH stays admin-only.
-    expect(await status(ekonomi, "PATCH", "/settings", { postingVatOut25: "" })).toBe(403);
+    expect(await status(ekonomi, "PATCH", "/settings", { postingDefaultCost: "" })).toBe(403);
     const inkop = await sessionFor(["inkop"]);
-    expect(await status(inkop, "PATCH", "/settings/posting", { postingVatOut25: "" })).toBe(403);
+    expect(await status(inkop, "PATCH", "/settings/posting", { postingDefaultCost: "" })).toBe(403);
+  });
+
+  it("momskoder: every office user reads the codes and the VAT reporting settings, only Ekonomi edits", async () => {
+    const inkop = await sessionFor(["inkop"]);
+    const ekonomi = await sessionFor(["ekonomi"]);
+    expect(await status(inkop, "GET", "/vat-codes")).toBe(200);
+    expect(await status(inkop, "GET", "/settings/vat-reporting")).toBe(200);
+    const id = "00000000-0000-0000-0000-000000000000";
+    expect(await status(inkop, "PATCH", `/vat-codes/${id}`, { name: "X" })).toBe(403);
+    expect(await status(inkop, "PATCH", "/settings/vat-reporting", { period: "month" })).toBe(403);
+    expect(await status(inkop, "POST", "/import-vat", {})).toBe(403);
+    expect(await status(inkop, "GET", "/vat-report/file?from=2030-01-01&to=2030-01-31")).toBe(403);
+    expect(await status(ekonomi, "PATCH", `/vat-codes/${id}`, { name: "X" })).toBe(404);
   });
 
   it("the gate really runs: a groupless user is refused on every protected route", { timeout: 120_000 }, async () => {

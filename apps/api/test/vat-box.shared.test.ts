@@ -11,6 +11,6 @@ describe("momsruta — web mirror", () => {
   it("labels null and 'none' distinctly", () => {
     expect(web.vatBoxLabel(null)).toBe("Ej angiven");
     expect(web.vatBoxLabel("none")).toBe("Ingen ruta");
-    expect(web.vatBoxLabel("05")).toBe("05 · Momspliktig försäljning");
+    expect(web.vatBoxLabel("05")).toBe("05 · Momspliktig försäljning som inte ingår i ruta 06, 07 eller 08");
   });
 });

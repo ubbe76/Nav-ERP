@@ -14,7 +14,7 @@ import { DEFAULT_VAT_RATE, round2, toUnitPrice, toUnitQuantity, type OrderRowCon
 import { rowConfigurationLines } from "../../configurator/service/configuration-lines.js";
 import type { InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
 import type { DocumentPdfInput, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
-import { ZeroAmountPostingError } from "../../economy/service/verification-poster.js";
+import { ZeroAmountPostingError, type PostingVatCode } from "../../economy/service/verification-poster.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { CustomerNotFoundError, InvalidStatusTransitionError } from "./sales.service.js";
 // G1: append-only audit trail — optional with a no-op default (see
@@ -75,8 +75,9 @@ export interface CustomerInvoicePoster {
     tx: Tx,
     doc: { invoiceNumber: string; type: InvoiceType; invoiceDate: string; customerName: string },
     // Amounts exactly as stored on the invoice rows — always POSITIVE, also
-    // for a credit note (the poster mirrors from doc.type itself).
-    rows: { articleGroupId: string | null; lineAmount: number; vatAmount: number; vatRate: number }[],
+    // for a credit note (the poster mirrors from doc.type itself) — with each
+    // row's momskod as loaded in the same transaction.
+    rows: { articleGroupId: string | null; lineAmount: number; vatAmount: number; vatRate: number; vatCode: PostingVatCode }[],
     userId: string
   ): Promise<{ verificationId: string; displayNumber: string }>;
 }

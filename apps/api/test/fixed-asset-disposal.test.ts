@@ -245,9 +245,9 @@ describe("avyttring", () => {
     await testEconomyService.book(draft.id, user.id);
 
     const report = await vatReport.getReport({ from: `${Y}-09-01`, to: `${Y}-09-30` });
-    expect(report.boxes.sales05).toBe(95000);
-    expect(report.boxes.vatOut25_10).toBe(23750);
-    expect(report.boxes.vatToPay49).toBe(23750);
+    expect(report.boxes["05"]).toBe(95000);
+    expect(report.boxes["10"]).toBe(23750);
+    expect(report.boxes["49"]).toBe(23750);
 
     const movements = await readVatAccountMovements(db, `${Y}-09-01`, `${Y}-09-30`);
     expect(movements.find((row) => row.accountNumber === "3973")).toMatchObject({ debit: 0, credit: 95000 });

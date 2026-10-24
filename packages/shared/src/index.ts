@@ -39,3 +39,4 @@ export * from "./alerts.js";
 export * from "./theme-core.js";
 export * from "./themes.js";
 export * from "./plugins.js";
+export * from "./vat-codes.js";

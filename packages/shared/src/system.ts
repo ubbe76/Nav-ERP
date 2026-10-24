@@ -130,17 +130,10 @@ const systemSettingsFieldsSchema = z.object({
     // account codes used when posting customer/supplier invoices to the
     // ledger automatically. An empty string clears the override (same
     // convention as the PAXml codes) and getSettings() decodes it back to
-    // the BAS-standard default.
+    // the BAS-standard default. The revenue and VAT accounts per rate moved
+    // to the momskoder (vat_codes, migration 0142).
     postingAccountsReceivable: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
-    postingVatOut25: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
-    postingVatOut12: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
-    postingVatOut6: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
-    postingRevenue25: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
-    postingRevenue12: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
-    postingRevenue6: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
-    postingRevenue0: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
     postingAccountsPayable: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
-    postingVatIn: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
     postingDefaultCost: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
     // Kundreskontra (B3): the bank/betalkonto a customer payment is debited
     // against, the account a reminder fee is credited to, and the account for
@@ -202,15 +195,7 @@ export type UpdateSystemSettingsInput = z.infer<typeof updateSystemSettingsSchem
 // other settings key (SMTP, PAXml, costing…) is a 400, never silently saved.
 export const POSTING_SETTINGS_KEYS = [
   "postingAccountsReceivable",
-  "postingVatOut25",
-  "postingVatOut12",
-  "postingVatOut6",
-  "postingRevenue25",
-  "postingRevenue12",
-  "postingRevenue6",
-  "postingRevenue0",
   "postingAccountsPayable",
-  "postingVatIn",
   "postingDefaultCost",
   "postingBank",
   "postingReminderFeeAccount",

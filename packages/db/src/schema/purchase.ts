@@ -19,7 +19,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { articles } from "./article";
 import { users } from "./auth";
-import { verifications } from "./economy";
+import { vatCodes, verifications } from "./economy";
 import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, units } from "./register";
 import { bankFileEntries, paymentBatchItems } from "./banking";
 import { stockLocations, stockTransactions } from "./stock";
@@ -71,6 +71,11 @@ export const suppliers = pgTable("suppliers", {
   // value (same rule as the supplier address block).
   ourCustomerNumber: varchar("our_customer_number", { length: 50 }),
   currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+  // Momskoder: the supplier's country (ISO 3166-1 alpha-2) and its default
+  // momskod for new supplier invoices — null = derived from the country
+  // (SE ⇒ MP25, EU ⇒ IEUV25, otherwise IUTV).
+  country: varchar("country", { length: 2 }).notNull().default("SE"),
+  defaultVatCodeId: uuid("default_vat_code_id").references(() => vatCodes.id, { onDelete: "restrict" }),
   // Bankfiler: betalsätt + uppgifter (all may be stored; the method picks).
   // Normalized digits/upper case; check digits validated in the service.
   paymentMethod: supplierPaymentMethodEnum("payment_method"),
@@ -433,6 +438,13 @@ export const supplierInvoices = pgTable(
     netAmount: numeric("net_amount", { precision: 14, scale: 2 }).notNull().default("0"),
     vatAmount: numeric("vat_amount", { precision: 14, scale: 2 }).notNull().default("0"),
     grossAmount: numeric("gross_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    // Momskod (migration 0142): applies to every row without a code of its
+    // own and to the remainder (net − row total). The header's VAT amount is
+    // booked on this code's ingående moms — so it must be a domestic code
+    // with a rate whenever the VAT amount is not zero.
+    vatCodeId: uuid("vat_code_id")
+      .notNull()
+      .references(() => vatCodes.id, { onDelete: "restrict" }),
     note: text("note"),
     // Bankfiler: OCR (sent as SCOR) or a message (Ustrd). Editable in draft
     // and approved, never while the invoice is reserved in a live batch.
@@ -483,7 +495,10 @@ export const supplierInvoiceRows = pgTable(
     unitPrice: numeric("unit_price", { precision: 14, scale: 4 }).notNull(),
     lineAmount: numeric("line_amount", { precision: 14, scale: 2 }).notNull(),
     vatAmount: numeric("vat_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    // Unused by the bookkeeping since migration 0142 — vatCodeId decides.
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }),
+    // Momskod for this row; null = the invoice's own code.
+    vatCodeId: uuid("vat_code_id").references(() => vatCodes.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

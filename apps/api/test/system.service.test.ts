@@ -440,15 +440,7 @@ describe("system service — settings", () => {
 
   const POSTING_ACCOUNT_KEYS = [
     "posting_accounts_receivable",
-    "posting_vat_out_25",
-    "posting_vat_out_12",
-    "posting_vat_out_6",
-    "posting_revenue_25",
-    "posting_revenue_12",
-    "posting_revenue_6",
-    "posting_revenue_0",
     "posting_accounts_payable",
-    "posting_vat_in",
     "posting_default_cost",
     // Momsrapport (B5).
     "posting_vat_settlement",
@@ -464,15 +456,7 @@ describe("system service — settings", () => {
 
     const settings = await systemService.getSettings();
     expect(settings.postingAccountsReceivable).toBe("1510");
-    expect(settings.postingVatOut25).toBe("2610");
-    expect(settings.postingVatOut12).toBe("2620");
-    expect(settings.postingVatOut6).toBe("2630");
-    expect(settings.postingRevenue25).toBe("3001");
-    expect(settings.postingRevenue12).toBe("3002");
-    expect(settings.postingRevenue6).toBe("3003");
-    expect(settings.postingRevenue0).toBe("3004");
     expect(settings.postingAccountsPayable).toBe("2440");
-    expect(settings.postingVatIn).toBe("2640");
     expect(settings.postingDefaultCost).toBe("4010");
     expect(settings.postingVatSettlement).toBe("2650");
     expect(settings.postingInventory).toBe("1460");
@@ -483,44 +467,28 @@ describe("system service — settings", () => {
     try {
       const updated = await systemService.updateSettings({
         postingAccountsReceivable: "1511",
-        postingVatOut25: "2611",
-        postingVatOut12: "2621",
-        postingVatOut6: "2631",
-        postingRevenue25: "3011",
-        postingRevenue12: "3012",
-        postingRevenue6: "3013",
-        postingRevenue0: "3014",
         postingAccountsPayable: "2441",
-        postingVatIn: "2641",
         postingDefaultCost: "4011",
         postingVatSettlement: "2651",
         postingInventory: "1410",
         postingInventoryChange: "4991",
       });
       expect(updated.postingAccountsReceivable).toBe("1511");
-      expect(updated.postingVatOut25).toBe("2611");
-      expect(updated.postingVatOut12).toBe("2621");
-      expect(updated.postingVatOut6).toBe("2631");
-      expect(updated.postingRevenue25).toBe("3011");
-      expect(updated.postingRevenue12).toBe("3012");
-      expect(updated.postingRevenue6).toBe("3013");
-      expect(updated.postingRevenue0).toBe("3014");
       expect(updated.postingAccountsPayable).toBe("2441");
-      expect(updated.postingVatIn).toBe("2641");
       expect(updated.postingDefaultCost).toBe("4011");
       expect(updated.postingVatSettlement).toBe("2651");
       expect(updated.postingInventory).toBe("1410");
       expect(updated.postingInventoryChange).toBe("4991");
 
       const reread = await systemService.getSettings();
-      expect(reread.postingVatOut25).toBe("2611");
+      expect(reread.postingAccountsPayable).toBe("2441");
       expect(reread.postingDefaultCost).toBe("4011");
 
       // An explicit empty-string PATCH is "set" (stored as-is, like the
       // PAXml codes/SMTP fields), but getSettings() decodes an empty stored
       // value back to the default rather than exporting a blank account.
-      const blanked = await systemService.updateSettings({ postingVatOut25: "", postingVatSettlement: "", postingInventory: "" });
-      expect(blanked.postingVatOut25).toBe("2610");
+      const blanked = await systemService.updateSettings({ postingAccountsPayable: "", postingVatSettlement: "", postingInventory: "" });
+      expect(blanked.postingAccountsPayable).toBe("2440");
       expect(blanked.postingVatSettlement).toBe("2650");
       expect(blanked.postingInventory).toBe("1460");
       // Untouched fields keep their previously stored value.
@@ -528,15 +496,7 @@ describe("system service — settings", () => {
     } finally {
       await systemService.updateSettings({
         postingAccountsReceivable: "",
-        postingVatOut25: "",
-        postingVatOut12: "",
-        postingVatOut6: "",
-        postingRevenue25: "",
-        postingRevenue12: "",
-        postingRevenue6: "",
-        postingRevenue0: "",
         postingAccountsPayable: "",
-        postingVatIn: "",
         postingDefaultCost: "",
         postingVatSettlement: "",
         postingInventory: "",
@@ -546,11 +506,11 @@ describe("system service — settings", () => {
   });
 
   it("rejects posting account values that aren't exactly 4 digits", () => {
-    expect(updateSystemSettingsSchema.safeParse({ postingVatOut25: "12a4" }).success).toBe(false);
-    expect(updateSystemSettingsSchema.safeParse({ postingVatOut25: "123" }).success).toBe(false);
-    expect(updateSystemSettingsSchema.safeParse({ postingVatOut25: "12345" }).success).toBe(false);
-    expect(updateSystemSettingsSchema.safeParse({ postingVatOut25: "2610" }).success).toBe(true);
-    expect(updateSystemSettingsSchema.safeParse({ postingVatOut25: "" }).success).toBe(true);
+    expect(updateSystemSettingsSchema.safeParse({ postingDefaultCost: "12a4" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ postingDefaultCost: "123" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ postingDefaultCost: "12345" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ postingDefaultCost: "4010" }).success).toBe(true);
+    expect(updateSystemSettingsSchema.safeParse({ postingDefaultCost: "" }).success).toBe(true);
   });
 
   // Kundreskontra (B3): the 3 new posting accounts and the 2 kr amounts.

@@ -18,6 +18,7 @@ import {
   salesOrders,
   shipments,
   units,
+  vatCodes,
   verifications,
   verificationSeries,
   type Db,
@@ -25,7 +26,9 @@ import {
   einvoiceTransmissions,
 } from "@navet/db";
 import {
+  domesticVatCodeForRate,
   ilikePattern,
+  isVatRate,
   round2,
   type EinvoiceStatus,
   type InvoiceStatus,
@@ -37,6 +40,7 @@ import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { computeOcrNumber } from "../../system/service/ocr.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
+import { domesticVatCodeIdSql, postingVatCodeColumns } from "../../economy/repository/vat-codes.js";
 import { computeOpenAmounts } from "./open-amounts.js";
 import { ShipmentNotBillableError } from "../service/sales.errors.js";
 // Type-only (erased at compile time), so declaring the poster interface at
@@ -253,6 +257,10 @@ export type InvoiceRowWrite = {
   unitId: string | null;
   unitFactor: number | null;
   vatRate: number;
+  // Momskod (migration 0142). Omitted = the domestic code of vatRate (MP25/
+  // MP12/MP6/MF) — every row the service builds today is svensk moms or
+  // momsfri; the derivation per customer and article fills it explicitly.
+  vatCodeId?: string;
   lineAmount: number;
   vatAmount: number;
   // Konfigurator 4b: copy of the order row's configuration (null for a
@@ -260,6 +268,14 @@ export type InvoiceRowWrite = {
   // never rewritten.
   configuration: OrderRowConfiguration | null;
 };
+
+// The row's momskod as an insert/update value: the explicit id, else the
+// domestic code of its rate. A rate outside the Swedish set gets MP25 and
+// keeps its rate, so issuing still refuses it (UnknownVatRateError).
+function rowVatCodeId(row: InvoiceRowWrite) {
+  if (row.vatCodeId) return row.vatCodeId;
+  return domesticVatCodeIdSql(isVatRate(row.vatRate) ? domesticVatCodeForRate(row.vatRate) : "MP25");
+}
 
 // Internal control-flow signal only — never leaves createReminder below.
 // Thrown INSIDE its transaction so the reminder row and the fee posting roll
@@ -712,6 +728,7 @@ export function createInvoiceRepository(db: Db) {
               unitId: r.unitId,
               unitFactor: r.unitFactor !== null ? String(r.unitFactor) : null,
               vatRate: String(r.vatRate),
+              vatCodeId: rowVatCodeId(r),
               lineAmount: String(r.lineAmount),
               vatAmount: String(r.vatAmount),
               configuration: r.configuration,
@@ -981,14 +998,18 @@ export function createInvoiceRepository(db: Db) {
           // back null and fall through to the settings default. Amounts are
           // read straight off the stored columns — always positive, also on
           // a credit note, which the poster mirrors itself from `type`.
+          // Each row's momskod (accounts included) is joined in the same
+          // read, through this transaction.
           const postingRows = await tx
             .select({
               articleGroupId: articles.groupId,
               lineAmount: invoiceRows.lineAmount,
               vatAmount: invoiceRows.vatAmount,
               vatRate: invoiceRows.vatRate,
+              vatCode: postingVatCodeColumns,
             })
             .from(invoiceRows)
+            .innerJoin(vatCodes, eq(vatCodes.id, invoiceRows.vatCodeId))
             .leftJoin(articles, eq(articles.id, invoiceRows.articleId))
             .where(eq(invoiceRows.invoiceId, id))
             .orderBy(asc(invoiceRows.createdAt));
@@ -1006,6 +1027,7 @@ export function createInvoiceRepository(db: Db) {
               lineAmount: Number(postingRow.lineAmount),
               vatAmount: Number(postingRow.vatAmount),
               vatRate: Number(postingRow.vatRate),
+              vatCode: postingRow.vatCode,
             })),
             userId
           );
@@ -1243,6 +1265,7 @@ export function createInvoiceRepository(db: Db) {
             unitId: row.unitId,
             unitFactor: row.unitFactor !== null ? String(row.unitFactor) : null,
             vatRate: String(row.vatRate),
+            vatCodeId: rowVatCodeId(row),
             lineAmount: String(row.lineAmount),
             vatAmount: String(row.vatAmount),
             configuration: row.configuration,
@@ -1278,6 +1301,7 @@ export function createInvoiceRepository(db: Db) {
             unitId: row.unitId,
             unitFactor: row.unitFactor !== null ? String(row.unitFactor) : null,
             vatRate: String(row.vatRate),
+            vatCodeId: rowVatCodeId(row),
             lineAmount: String(row.lineAmount),
             vatAmount: String(row.vatAmount),
             configuration: row.configuration,

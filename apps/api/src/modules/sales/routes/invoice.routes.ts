@@ -18,6 +18,8 @@ import {
   NoAccountingPeriodForPostingError,
   PaymentBankAccountConflictError,
   UnknownVatRateError,
+  VatCodeAmountMismatchError,
+  VatCodeNotApplicableError,
   ZeroAmountPostingError,
 } from "../../economy/service/verification-poster.js";
 import type { InvoiceService } from "../service/invoice.service.js";
@@ -95,6 +97,10 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
       err instanceof NoAccountingPeriodForPostingError ||
       err instanceof MissingPostingAccountError ||
       err instanceof UnknownVatRateError ||
+      // Momskoder: a row's code and amounts disagree, or the code is not a
+      // sales code — a data problem on the draft, refused at issue.
+      err instanceof VatCodeAmountMismatchError ||
+      err instanceof VatCodeNotApplicableError ||
       err instanceof ZeroAmountPostingError ||
       // The reminder fee account and accounts receivable pointing at ONE
       // account: a configuration conflict, refused before the email goes out.

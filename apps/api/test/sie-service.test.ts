@@ -26,10 +26,8 @@ const TRUNCATE = sql`TRUNCATE vat_settlements, verification_rows, verifications,
 
 const poster = createVerificationPoster({
   read: async () => ({
-    postingAccountsReceivable: "1510", postingVatOut25: "2610", postingVatOut12: "2620",
-    postingVatOut6: "2630", postingRevenue25: "3001", postingRevenue12: "3002",
-    postingRevenue6: "3003", postingRevenue0: "3004", postingAccountsPayable: "2440",
-    postingVatIn: "2640", postingDefaultCost: "4010", postingBank: "1930",
+    postingAccountsReceivable: "1510", postingAccountsPayable: "2440",
+    postingDefaultCost: "4010", postingBank: "1930",
     postingReminderFeeAccount: "3540", postingPaymentWriteOff: "3740", postingVatSettlement: "2650",
   }),
 });

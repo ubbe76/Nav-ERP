@@ -23,15 +23,7 @@ const systemService = createSystemService(createSystemRepository(db));
 // POSTING_ACCOUNT_KEYS expectations plus the 3 new accounts and 2 amounts.
 const DEFAULTS = {
   postingAccountsReceivable: "1510",
-  postingVatOut25: "2610",
-  postingVatOut12: "2620",
-  postingVatOut6: "2630",
-  postingRevenue25: "3001",
-  postingRevenue12: "3002",
-  postingRevenue6: "3003",
-  postingRevenue0: "3004",
   postingAccountsPayable: "2440",
-  postingVatIn: "2640",
   postingDefaultCost: "4010",
   postingBank: "1930",
   postingReminderFeeAccount: "3540",
@@ -95,11 +87,20 @@ describe("posting-settings leaf — readPostingSettings", () => {
     expect(result.postingBank).toBe("1950");
   });
 
+  it("no longer carries the revenue and VAT accounts per rate (they belong to the momskoder)", async () => {
+    const settings = (await readPostingSettings(db)) as unknown as Record<string, unknown>;
+    for (const key of ["postingRevenue25", "postingVatOut25", "postingVatIn", "postingRevenue0"]) {
+      expect(settings[key]).toBeUndefined();
+    }
+    const fromService = (await systemService.getSettings()) as unknown as Record<string, unknown>;
+    expect(fromService.postingVatOut25).toBeUndefined();
+  });
+
   it("agrees with systemService.getSettings()'s posting slice", async () => {
     await db.insert(systemSettings).values([
       { key: "posting_bank", value: "1960" },
       { key: "reminder_fee", value: "42" },
-      { key: "posting_vat_out_25", value: "2699" },
+      { key: "posting_default_cost", value: "4099" },
     ]);
 
     const leafResult = await readPostingSettings(db);

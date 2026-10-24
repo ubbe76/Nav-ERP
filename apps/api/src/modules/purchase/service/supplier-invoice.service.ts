@@ -16,6 +16,7 @@ import type {
 } from "../repository/supplier-invoice.repository.js";
 import { InvalidStatusTransitionError, SupplierNotFoundError } from "./purchase.service.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import type { PostingVatCode } from "../../economy/service/verification-poster.js";
 // G1: append-only audit trail — optional with a no-op default (see
 // sales.service.ts's identical comment).
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
@@ -40,11 +41,12 @@ export interface SupplierInvoicePoster {
       netAmount: number;
       vatAmount: number;
       grossAmount: number;
+      // The header's momskod (accounts included), loaded in the same tx.
+      vatCode: PostingVatCode;
     },
-    // Rows only steer WHICH cost accounts the header net is split over.
-    // vatRate is nullable (a freight row may carry no VAT at all) and is only
-    // a konteringsregel lookup key here.
-    rows: { articleGroupId: string | null; vatRate: number | null; lineAmount: number }[],
+    // Rows only steer WHICH cost accounts the header net is split over, and
+    // under which momskod (null = the header's).
+    rows: { articleGroupId: string | null; lineAmount: number; vatCode: PostingVatCode | null }[],
     userId: string
   ): Promise<{ verificationId: string; displayNumber: string }>;
 

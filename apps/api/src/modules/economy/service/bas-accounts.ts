@@ -5,9 +5,11 @@ import type { VatBoxSetting } from "@navet/shared";
 // register. Seeded via POST /accounts/generate-bas (createEconomyRepository.
 // seedAccounts). This list is authoritative: no additions/removals without
 // updating the B1 task brief.
-// vatBox is each account's default momsruta — it MUST equal what the 0102
-// backfill assigns under the default posting settings
-// (vat-box-backfill.test.ts pins it).
+// vatBox is each account's default momsruta. For the accounts that existed
+// before the momskoder it MUST equal what the 0102 backfill assigns under
+// the default posting settings (vat-box-backfill.test.ts pins it); the
+// accounts the momskod catalog points at (VAT_CODE_CATALOG) carry the box
+// their slot expects, the same values migration 0142 adds them with.
 export const BAS_STANDARD_ACCOUNTS: { number: string; name: string; vatBox?: VatBoxSetting }[] = [
   { number: "1010", name: "Utvecklingsutgifter" },
   { number: "1110", name: "Byggnader" },
@@ -50,9 +52,17 @@ export const BAS_STANDARD_ACCOUNTS: { number: string; name: string; vatBox?: Vat
   { number: "2440", name: "Leverantörsskulder" },
   { number: "2510", name: "Skatteskulder" },
   { number: "2610", name: "Utgående moms 25 %", vatBox: "10" },
+  { number: "2614", name: "Utgående moms omvänd betalningsskyldighet, 25 %", vatBox: "30" },
+  { number: "2615", name: "Utgående moms import av varor, 25 %", vatBox: "60" },
   { number: "2620", name: "Utgående moms 12 %", vatBox: "11" },
+  { number: "2624", name: "Utgående moms omvänd betalningsskyldighet, 12 %", vatBox: "31" },
+  { number: "2625", name: "Utgående moms import av varor, 12 %", vatBox: "61" },
   { number: "2630", name: "Utgående moms 6 %", vatBox: "12" },
+  { number: "2634", name: "Utgående moms omvänd betalningsskyldighet, 6 %", vatBox: "32" },
+  { number: "2635", name: "Utgående moms import av varor, 6 %", vatBox: "62" },
   { number: "2640", name: "Ingående moms", vatBox: "48" },
+  { number: "2645", name: "Beräknad ingående moms på förvärv från utlandet", vatBox: "48" },
+  { number: "2647", name: "Ingående moms omvänd betalningsskyldighet varor och tjänster i Sverige", vatBox: "48" },
   { number: "2650", name: "Redovisningskonto för moms", vatBox: "none" },
   { number: "2710", name: "Personalskatt" },
   { number: "2731", name: "Avräkning lagstadgade sociala avgifter" },
@@ -69,6 +79,9 @@ export const BAS_STANDARD_ACCOUNTS: { number: string; name: string; vatBox?: Vat
   { number: "3004", name: "Försäljning inom Sverige momsfri", vatBox: "42" },
   { number: "3105", name: "Försäljning varor till land utanför EU", vatBox: "36" },
   { number: "3108", name: "Försäljning varor till annat EU-land", vatBox: "35" },
+  { number: "3231", name: "Försäljning inom byggsektorn, omvänd betalningsskyldighet moms", vatBox: "41" },
+  { number: "3305", name: "Försäljning tjänster till land utanför EU", vatBox: "40" },
+  { number: "3308", name: "Försäljning tjänster till annat EU-land", vatBox: "39" },
   { number: "3540", name: "Faktureringsavgifter", vatBox: "none" },
   { number: "3590", name: "Övriga fakturerade kostnader", vatBox: "05" },
   { number: "3740", name: "Öres- och kronutjämning", vatBox: "none" },
@@ -77,8 +90,19 @@ export const BAS_STANDARD_ACCOUNTS: { number: string; name: string; vatBox?: Vat
   { number: "3973", name: "Vinst vid avyttring av maskiner och inventarier", vatBox: "none" },
   { number: "3990", name: "Övriga ersättningar och intäkter", vatBox: "none" },
   { number: "4010", name: "Inköp material och varor" },
-  { number: "4515", name: "Inköp varor från annat EU-land 25 %" },
-  { number: "4531", name: "Inköp tjänster från annat EU-land 25 %" },
+  { number: "4415", name: "Inköp av råvaror och material i Sverige, omvänd betalningsskyldighet, 25 % moms", vatBox: "23" },
+  { number: "4425", name: "Inköp av tjänster i Sverige, omvänd betalningsskyldighet, 25 % moms", vatBox: "24" },
+  { number: "4515", name: "Inköp varor från annat EU-land 25 %", vatBox: "20" },
+  { number: "4516", name: "Inköp av råvaror och material från annat EU-land, 12 %", vatBox: "20" },
+  { number: "4517", name: "Inköp av råvaror och material från annat EU-land, 6 %", vatBox: "20" },
+  // BAS: tjänster från land UTANFÖR EU (the seed called it EU before 0142).
+  { number: "4531", name: "Inköp av tjänster från ett land utanför EU, 25 % moms", vatBox: "22" },
+  { number: "4535", name: "Inköp av tjänster från annat EU-land, 25 %", vatBox: "21" },
+  { number: "4545", name: "Import av råvaror och material, 25 % moms", vatBox: "50" },
+  { number: "4546", name: "Import av råvaror och material, 12 % moms", vatBox: "50" },
+  { number: "4547", name: "Import av råvaror och material, 6 % moms", vatBox: "50" },
+  // Not in BAS 2026 — the import base's counter account (momskod IMP*).
+  { number: "4549", name: "Motkonto beskattningsunderlag import", vatBox: "none" },
   { number: "4600", name: "Legoarbeten och underentreprenader" },
   { number: "4990", name: "Förändring av lager" },
   { number: "5010", name: "Lokalhyra" },

@@ -15,6 +15,7 @@ import {
   setupYearEnd,
   testYearEndPoster,
 } from "./helpers/year-end.js";
+import { vatCodeId } from "./helpers/vat-codes.js";
 
 beforeEach(resetYearEnd);
 afterAll(resetYearEnd);
@@ -121,6 +122,7 @@ async function approvedSupplierInvoice(n: number, gross: number, date: string, u
       registrationNumber: `LF-W${n}`,
       invoiceNumber: `W${n}`,
       supplierId: supplier!.id,
+      vatCodeId: await vatCodeId("MP25"),
       invoiceDate: date,
       status: "approved",
       grossAmount: String(gross),

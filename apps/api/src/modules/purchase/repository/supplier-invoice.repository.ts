@@ -20,6 +20,7 @@ import {
 } from "@navet/db";
 import { ilikePattern, type ListSupplierInvoicesQuery, type PaymentReferenceKind } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+import { domesticVatCodeIdSql, loadPostingVatCodes } from "../../economy/repository/vat-codes.js";
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle — same seam
 // as sales' invoice.repository.ts and its CustomerInvoicePoster.
@@ -114,6 +115,9 @@ export type SupplierInvoiceHeaderWrite = {
   note: string | null;
   paymentReferenceKind: PaymentReferenceKind | null;
   paymentReference: string | null;
+  // Momskod (migration 0142). Omitted = MP25 (svensk moms 25 %, which posts
+  // a 0 kr VAT invoice exactly like before the momskoder).
+  vatCodeId?: string;
 };
 
 // Header patch (draft only) — amounts already stringified for the numeric
@@ -181,6 +185,7 @@ export function createSupplierInvoiceRepository(db: Db) {
             note: header.note,
             paymentReferenceKind: header.paymentReferenceKind,
             paymentReference: header.paymentReference,
+            vatCodeId: header.vatCodeId ?? domesticVatCodeIdSql("MP25"),
             createdBy,
           })
           .returning();
@@ -397,13 +402,18 @@ export function createSupplierInvoiceRepository(db: Db) {
           const postingRows = await tx
             .select({
               articleGroupId: articles.groupId,
-              vatRate: supplierInvoiceRows.vatRate,
+              vatCodeId: supplierInvoiceRows.vatCodeId,
               lineAmount: supplierInvoiceRows.lineAmount,
             })
             .from(supplierInvoiceRows)
             .leftJoin(articles, eq(articles.id, supplierInvoiceRows.articleId))
             .where(eq(supplierInvoiceRows.supplierInvoiceId, id))
             .orderBy(asc(supplierInvoiceRows.createdAt));
+          // The header's and the rows' momskoder, through this transaction.
+          const vatCodesById = await loadPostingVatCodes(tx, [
+            invoice.vatCodeId,
+            ...postingRows.flatMap((row) => (row.vatCodeId ? [row.vatCodeId] : [])),
+          ]);
 
           // The HEADER amounts are what gets posted (they are typed in from
           // the paper invoice and are authoritative); the rows only steer
@@ -419,11 +429,12 @@ export function createSupplierInvoiceRepository(db: Db) {
               netAmount: Number(invoice.netAmount),
               vatAmount: Number(invoice.vatAmount),
               grossAmount: Number(invoice.grossAmount),
+              vatCode: vatCodesById.get(invoice.vatCodeId)!,
             },
             postingRows.map((row) => ({
               articleGroupId: row.articleGroupId,
-              vatRate: row.vatRate === null ? null : Number(row.vatRate),
               lineAmount: Number(row.lineAmount),
+              vatCode: row.vatCodeId ? vatCodesById.get(row.vatCodeId)! : null,
             })),
             userId
           );

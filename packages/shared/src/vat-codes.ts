@@ -1,0 +1,542 @@
+import { z } from "zod";
+import type { VatBoxSetting } from "./economy.js";
+import type { VatRate } from "./vat.js";
+
+// Momskoder (bokföringsgranskningen etapp 1). A VAT code says how a document
+// row is taxed: its rate, which accounts it posts to — and therefore which
+// declaration boxes the amounts land in — and the text an invoice must carry.
+// The CODES are a fixed catalog here, like the alert kinds: the law decides
+// which exist. What is the company's own (account numbers, invoice text,
+// active) lives in the vat_codes table, one row per catalog code, seeded by
+// migration 0142. The VAT report keeps reading the ACCOUNTS' momsruta, never
+// the documents — the code is only the way to the right account.
+//
+// Mirrored in apps/web/lib/vatCodes.ts (the web cannot import @navet/shared),
+// kept in sync by vat-codes.shared.test.ts.
+
+export const VAT_CODES = [
+  "MP25",
+  "MP12",
+  "MP6",
+  "MF",
+  "EUV",
+  "EUT",
+  "EXV",
+  "EXT",
+  "OB",
+  "IEUV25",
+  "IEUV12",
+  "IEUV6",
+  "IEUT",
+  "IUTT",
+  "IOBV",
+  "IOBT",
+  "IUTV",
+  "IMP25",
+  "IMP12",
+  "IMP6",
+] as const;
+export type VatCode = (typeof VAT_CODES)[number];
+
+export function isVatCode(value: string): value is VatCode {
+  return (VAT_CODES as readonly string[]).includes(value);
+}
+
+// both = customer and supplier invoices, sales = customer invoices only,
+// purchase = supplier invoices only, import = the importmoms posting only.
+export const VAT_CODE_DIRECTIONS = ["both", "sales", "purchase", "import"] as const;
+export type VatCodeDirection = (typeof VAT_CODE_DIRECTIONS)[number];
+
+// What the poster does with a row carrying the code:
+//   domestic         — svensk moms (or momsfri): revenue/cost by konteringsregel,
+//                      the document's own VAT on the code's VAT account
+//   eu_sale          — EU-försäljning, no VAT, revenue on the code's account
+//   export           — export, no VAT
+//   reverse_sale     — omvänd betalningsskyldighet in Sweden (the buyer pays)
+//   reverse_purchase — omvänd moms on a purchase: VAT computed and booked
+//                      both as utgående and ingående
+//   non_eu_goods     — goods from outside the EU: no VAT on the invoice, the
+//                      importmoms is its own event (tullbeslutet)
+//   import           — importmoms on the tax base from the customs decision
+export const VAT_CODE_KINDS = [
+  "domestic",
+  "eu_sale",
+  "export",
+  "reverse_sale",
+  "reverse_purchase",
+  "non_eu_goods",
+  "import",
+] as const;
+export type VatCodeKind = (typeof VAT_CODE_KINDS)[number];
+
+// Account slots a code can use. A code uses exactly the slots its catalog
+// entry lists; the vat_codes service refuses an account for any other slot.
+export const VAT_CODE_SLOTS = ["revenue", "outputVat", "inputVat", "cost", "base", "baseCounter"] as const;
+export type VatCodeSlot = (typeof VAT_CODE_SLOTS)[number];
+
+// Default account number per slot and the momsruta that account is expected
+// to carry — what the VAT report's warnings and the Momskoder page compare
+// against. "none" = deliberately no box (the import base's counter account).
+export type VatCodeSlotDefault = { account: string; box: VatBoxSetting };
+
+export type VatCodeCatalogEntry = {
+  code: VatCode;
+  label: string;
+  direction: VatCodeDirection;
+  kind: VatCodeKind;
+  rate: VatRate;
+  slots: Partial<Record<VatCodeSlot, VatCodeSlotDefault>>;
+  invoiceText: string | null;
+  // EU sales and omvänd betalningsskyldighet: the buyer's momsregistrerings-
+  // nummer must be on the invoice (ML 17 kap. 24 §).
+  requiresBuyerVatNumber: boolean;
+};
+
+const slot = (account: string, box: VatBoxSetting): VatCodeSlotDefault => ({ account, box });
+
+// Account numbers follow BAS 2026. Two deviations from the BAS 2025 era the
+// design started from: BAS 2026 has no 2617, so domestic omvänd moms uses the
+// general 2614 (both land in ruta 30), and no 4549 — the import base's counter
+// account keeps the long-established 4549 "Motkonto beskattningsunderlag
+// import" in the free 454x range (migration 0142 adds it when missing).
+export const VAT_CODE_CATALOG: readonly VatCodeCatalogEntry[] = [
+  {
+    code: "MP25",
+    label: "Moms 25 %",
+    direction: "both",
+    kind: "domestic",
+    rate: 25,
+    slots: { revenue: slot("3001", "05"), outputVat: slot("2610", "10"), inputVat: slot("2640", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "MP12",
+    label: "Moms 12 %",
+    direction: "both",
+    kind: "domestic",
+    rate: 12,
+    slots: { revenue: slot("3002", "05"), outputVat: slot("2620", "11"), inputVat: slot("2640", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "MP6",
+    label: "Moms 6 %",
+    direction: "both",
+    kind: "domestic",
+    rate: 6,
+    slots: { revenue: slot("3003", "05"), outputVat: slot("2630", "12"), inputVat: slot("2640", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "MF",
+    label: "Momsfri",
+    direction: "both",
+    kind: "domestic",
+    rate: 0,
+    slots: { revenue: slot("3004", "42") },
+    invoiceText: "Momsfri omsättning",
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "EUV",
+    label: "Varor till annat EU-land",
+    direction: "sales",
+    kind: "eu_sale",
+    rate: 0,
+    slots: { revenue: slot("3108", "35") },
+    invoiceText: "Unionsintern leverans (artikel 138 i mervärdesskattedirektivet)",
+    requiresBuyerVatNumber: true,
+  },
+  {
+    code: "EUT",
+    label: "Tjänster till annat EU-land",
+    direction: "sales",
+    kind: "eu_sale",
+    rate: 0,
+    slots: { revenue: slot("3308", "39") },
+    invoiceText: "Omvänd betalningsskyldighet (artikel 196 i mervärdesskattedirektivet)",
+    requiresBuyerVatNumber: true,
+  },
+  {
+    code: "EXV",
+    label: "Export av varor",
+    direction: "sales",
+    kind: "export",
+    rate: 0,
+    slots: { revenue: slot("3105", "36") },
+    invoiceText: "Export av varor, undantagen från moms (artikel 146 i mervärdesskattedirektivet)",
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "EXT",
+    label: "Tjänster till land utanför EU",
+    direction: "sales",
+    kind: "export",
+    rate: 0,
+    slots: { revenue: slot("3305", "40") },
+    invoiceText: "Tjänsten är omsatt utanför Sverige",
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "OB",
+    label: "Omvänd betalningsskyldighet, Sverige",
+    direction: "sales",
+    kind: "reverse_sale",
+    rate: 0,
+    slots: { revenue: slot("3231", "41") },
+    invoiceText: "Omvänd betalningsskyldighet",
+    requiresBuyerVatNumber: true,
+  },
+  {
+    code: "IEUV25",
+    label: "Inköp varor från EU 25 %",
+    direction: "purchase",
+    kind: "reverse_purchase",
+    rate: 25,
+    slots: { cost: slot("4515", "20"), outputVat: slot("2614", "30"), inputVat: slot("2645", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IEUV12",
+    label: "Inköp varor från EU 12 %",
+    direction: "purchase",
+    kind: "reverse_purchase",
+    rate: 12,
+    slots: { cost: slot("4516", "20"), outputVat: slot("2624", "31"), inputVat: slot("2645", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IEUV6",
+    label: "Inköp varor från EU 6 %",
+    direction: "purchase",
+    kind: "reverse_purchase",
+    rate: 6,
+    slots: { cost: slot("4517", "20"), outputVat: slot("2634", "32"), inputVat: slot("2645", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IEUT",
+    label: "Inköp tjänster från EU 25 %",
+    direction: "purchase",
+    kind: "reverse_purchase",
+    rate: 25,
+    slots: { cost: slot("4535", "21"), outputVat: slot("2614", "30"), inputVat: slot("2645", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IUTT",
+    label: "Inköp tjänster utanför EU 25 %",
+    direction: "purchase",
+    kind: "reverse_purchase",
+    rate: 25,
+    slots: { cost: slot("4531", "22"), outputVat: slot("2614", "30"), inputVat: slot("2645", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IOBV",
+    label: "Inköp varor i Sverige, omvänd betalningsskyldighet",
+    direction: "purchase",
+    kind: "reverse_purchase",
+    rate: 25,
+    slots: { cost: slot("4415", "23"), outputVat: slot("2614", "30"), inputVat: slot("2647", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IOBT",
+    label: "Inköp tjänster i Sverige, omvänd betalningsskyldighet",
+    direction: "purchase",
+    kind: "reverse_purchase",
+    rate: 25,
+    slots: { cost: slot("4425", "24"), outputVat: slot("2614", "30"), inputVat: slot("2647", "48") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IUTV",
+    label: "Inköp varor utanför EU (importmoms separat)",
+    direction: "purchase",
+    kind: "non_eu_goods",
+    rate: 0,
+    slots: {},
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IMP25",
+    label: "Importmoms 25 %",
+    direction: "import",
+    kind: "import",
+    rate: 25,
+    slots: {
+      base: slot("4545", "50"),
+      baseCounter: slot("4549", "none"),
+      outputVat: slot("2615", "60"),
+      inputVat: slot("2645", "48"),
+    },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IMP12",
+    label: "Importmoms 12 %",
+    direction: "import",
+    kind: "import",
+    rate: 12,
+    slots: {
+      base: slot("4546", "50"),
+      baseCounter: slot("4549", "none"),
+      outputVat: slot("2625", "61"),
+      inputVat: slot("2645", "48"),
+    },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+  {
+    code: "IMP6",
+    label: "Importmoms 6 %",
+    direction: "import",
+    kind: "import",
+    rate: 6,
+    slots: {
+      base: slot("4547", "50"),
+      baseCounter: slot("4549", "none"),
+      outputVat: slot("2635", "62"),
+      inputVat: slot("2645", "48"),
+    },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
+  },
+];
+
+const CATALOG_BY_CODE = new Map(VAT_CODE_CATALOG.map((entry) => [entry.code, entry] as const));
+
+export function vatCodeEntry(code: VatCode): VatCodeCatalogEntry {
+  // Total over the VatCode union: the catalog lists every code exactly once
+  // (vat-codes.shared.test.ts).
+  return CATALOG_BY_CODE.get(code)!;
+}
+
+export function vatCodeUsesSlot(code: VatCode, slotName: VatCodeSlot): boolean {
+  return vatCodeEntry(code).slots[slotName] !== undefined;
+}
+
+// Svensk moms and momsfritt — the only codes a konteringsregel for "Alla
+// momskoder" applies to (a catch-all rule sending a group to a 05 account
+// must never silently take an EU sale that belongs in ruta 35).
+export const DOMESTIC_VAT_CODES = ["MP25", "MP12", "MP6", "MF"] as const satisfies readonly VatCode[];
+export type DomesticVatCode = (typeof DOMESTIC_VAT_CODES)[number];
+
+export function isDomesticVatCode(code: VatCode): code is DomesticVatCode {
+  return (DOMESTIC_VAT_CODES as readonly string[]).includes(code);
+}
+
+// Which codes a konteringsregel for "Alla momskoder" applies to: the domestic
+// ones, plus goods from outside the EU — IUTV posts no VAT and its cost
+// account carries no box, so a catch-all cost rule cannot misplace anything.
+export function vatCodeTakesCatchAllRule(code: VatCode): boolean {
+  const { kind } = vatCodeEntry(code);
+  return kind === "domestic" || kind === "non_eu_goods";
+}
+
+// The domestic code for a Swedish rate — how a bare vatRate (an article's
+// rate, an integration still sending vatRate, migration 0142's backfill)
+// translates to a code.
+export function domesticVatCodeForRate(rate: VatRate): DomesticVatCode {
+  switch (rate) {
+    case 25:
+      return "MP25";
+    case 12:
+      return "MP12";
+    case 6:
+      return "MP6";
+    case 0:
+      return "MF";
+  }
+}
+
+export function vatCodeAllowedOn(code: VatCode, document: "sales" | "purchase" | "import"): boolean {
+  const { direction } = vatCodeEntry(code);
+  if (document === "import") return direction === "import";
+  return direction === "both" || direction === document;
+}
+
+// Omvänd moms: what the buyer computes and books as both utgående and
+// ingående moms. Rounded half away from zero to öre, so a supplier credit
+// note computes the exact mirror of the invoice it reverses.
+export function computedVatAmount(base: number, rate: number): number {
+  // |base| × rate is the VAT in öre (kr × % / 100 × 100).
+  const magnitude = Math.round(Math.abs(base) * rate + 1e-9) / 100;
+  return base < 0 ? -magnitude : magnitude;
+}
+
+// Förhandsvisning av beräknad (omvänd) moms on a supplier invoice — the ONE
+// implementation the poster books and the invoice card shows. The header's
+// code covers every row without a code of its own and the remainder (net −
+// row total, freight/fees typed only into the header). One entry per reverse
+// code in catalog order; codes without reverse VAT are left out.
+export type ReverseVatPreviewInput = {
+  headerCode: VatCode;
+  netAmount: number;
+  rows: { code: VatCode | null; lineAmount: number }[];
+};
+export type ReverseVatPreviewLine = { code: VatCode; base: number; vat: number };
+
+export function reverseVatPreview(input: ReverseVatPreviewInput): ReverseVatPreviewLine[] {
+  const baseByCode = new Map<VatCode, number>();
+  const add = (code: VatCode, amount: number) =>
+    baseByCode.set(code, Math.round(((baseByCode.get(code) ?? 0) + amount) * 100) / 100);
+  let rowTotal = 0;
+  for (const row of input.rows) {
+    add(row.code ?? input.headerCode, row.lineAmount);
+    rowTotal += row.lineAmount;
+  }
+  const remainder = Math.round((input.netAmount - rowTotal) * 100) / 100;
+  if (remainder !== 0) add(input.headerCode, remainder);
+
+  return VAT_CODE_CATALOG.flatMap((entry) => {
+    if (entry.kind !== "reverse_purchase") return [];
+    const base = baseByCode.get(entry.code);
+    if (base === undefined || base === 0) return [];
+    return [{ code: entry.code, base, vat: computedVatAmount(base, entry.rate) }];
+  });
+}
+
+// The 27 EU member states (ISO 3166-1 alpha-2; Greece is GR as a country
+// code but EL as a VAT number prefix — vatNumberPrefix).
+export const EU_COUNTRY_CODES = [
+  "AT",
+  "BE",
+  "BG",
+  "CY",
+  "CZ",
+  "DE",
+  "DK",
+  "EE",
+  "ES",
+  "FI",
+  "FR",
+  "GR",
+  "HR",
+  "HU",
+  "IE",
+  "IT",
+  "LT",
+  "LU",
+  "LV",
+  "MT",
+  "NL",
+  "PL",
+  "PT",
+  "RO",
+  "SE",
+  "SI",
+  "SK",
+] as const;
+export type EuCountryCode = (typeof EU_COUNTRY_CODES)[number];
+
+export function isEuCountry(country: string): boolean {
+  return (EU_COUNTRY_CODES as readonly string[]).includes(country.toUpperCase());
+}
+
+export function vatNumberPrefix(country: string): string {
+  const upper = country.toUpperCase();
+  return upper === "GR" ? "EL" : upper;
+}
+
+// --- API contracts ---
+
+// "" resets the slot to the catalog's default account (the same convention
+// as the posting_* settings); a slot the code does not use is refused by the
+// service.
+const vatCodeAccountField = z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/, "Account number must be exactly 4 digits")]);
+
+export const updateVatCodeSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    // "" and null both clear the text (no text printed on the invoice).
+    invoiceText: z
+      .string()
+      .trim()
+      .max(255)
+      .nullable()
+      .optional()
+      .transform((value) => (value === "" ? null : value)),
+    active: z.boolean().optional(),
+    revenueAccount: vatCodeAccountField.optional(),
+    outputVatAccount: vatCodeAccountField.optional(),
+    inputVatAccount: vatCodeAccountField.optional(),
+    costAccount: vatCodeAccountField.optional(),
+    baseAccount: vatCodeAccountField.optional(),
+    baseCounterAccount: vatCodeAccountField.optional(),
+  })
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
+export type UpdateVatCodeInput = z.infer<typeof updateVatCodeSchema>;
+
+// The account field per slot, in the order of VAT_CODE_SLOTS — shared by the
+// service and the web's dialog.
+export const VAT_CODE_ACCOUNT_FIELDS: Record<VatCodeSlot, keyof UpdateVatCodeInput & `${string}Account`> = {
+  revenue: "revenueAccount",
+  outputVat: "outputVatAccount",
+  inputVat: "inputVatAccount",
+  cost: "costAccount",
+  base: "baseAccount",
+  baseCounter: "baseCounterAccount",
+};
+
+// One slot of GET /vat-codes: the stored account, the catalog default and
+// how the account looks in the chart. warning null = in order.
+export type VatCodeAccountView = {
+  slot: VatCodeSlot;
+  accountNumber: string;
+  defaultAccountNumber: string;
+  expectedBox: VatBoxSetting;
+  accountName: string | null;
+  accountActive: boolean | null;
+  actualBox: VatBoxSetting | null;
+  warning: "missing" | "inactive" | "box_mismatch" | null;
+};
+
+export type VatCodeView = {
+  id: string;
+  code: VatCode;
+  name: string;
+  invoiceText: string | null;
+  active: boolean;
+  label: string;
+  direction: VatCodeDirection;
+  kind: VatCodeKind;
+  rate: number;
+  requiresBuyerVatNumber: boolean;
+  defaultInvoiceText: string | null;
+  accounts: VatCodeAccountView[];
+  // Konteringsregler pointing at the code exactly.
+  ruleCount: number;
+};
+
+// Importmoms (tullbeslutet): one row per rate on the customs decision. The
+// tax base is tullvärde + tull + frakt till gränsen — never the supplier's
+// invoice — so the posting is its own event.
+export const importVatSchema = z.object({
+  date: z.string().date(),
+  description: z.string().trim().min(1).max(255),
+  rows: z
+    .array(
+      z.object({
+        vatCodeId: z.string().uuid(),
+        taxBase: z.coerce.number().positive().max(999_999_999_999),
+      })
+    )
+    .min(1)
+    .max(20),
+});
+export type ImportVatInput = z.infer<typeof importVatSchema>;

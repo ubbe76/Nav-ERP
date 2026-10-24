@@ -28,6 +28,7 @@ import { createStockRepository } from "../src/modules/stock/repository/stock.rep
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAlertsRepository } from "../src/modules/alerts/repository/alerts.repository.js";
 import { createAlertsService, EMAIL_FAILED_DAYS } from "../src/modules/alerts/service/alerts.service.js";
+import { vatCodeId } from "./helpers/vat-codes.js";
 
 // Aviseringar against Postgres: per kind one case that gives a row and one
 // borderline case that must not. "Today" is pinned to Monday 2030-03-04 (as
@@ -190,6 +191,7 @@ async function customerInvoice(status: "draft" | "issued" | "paid", dueDate: str
     quantity: "1",
     unitPrice: String(gross * 0.8),
     vatRate: "25",
+    vatCodeId: await vatCodeId("MP25"),
     lineAmount: String(gross * 0.8),
     vatAmount: String(gross * 0.2),
   });
@@ -218,6 +220,7 @@ async function supplierInvoice(opts: {
       registrationNumber: `LF-${suffix()}`,
       invoiceNumber: `INV-${suffix()}`,
       supplierId: supplier.id,
+      vatCodeId: await vatCodeId("MP25"),
       invoiceDate: opts.invoiceDate ?? "2030-02-20",
       dueDate: opts.dueDate ?? null,
       status: opts.status ?? "approved",

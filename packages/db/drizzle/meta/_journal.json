@@ -995,6 +995,13 @@
       "when": 1792746192021,
       "tag": "0141_plugins",
       "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "7",
+      "when": 1792815771292,
+      "tag": "0142_vat_codes",
+      "breakpoints": true
     }
   ]
 }

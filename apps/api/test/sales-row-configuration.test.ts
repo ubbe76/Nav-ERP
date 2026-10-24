@@ -15,6 +15,7 @@ import {
   salesService,
   stockService,
 } from "./helpers/configured-rows.js";
+import { vatCodeId } from "./helpers/vat-codes.js";
 
 // Delprojekt 4b, Ändra konfiguration: PUT /sales-orders/:id/rows/:rowId/
 // configuration replaces a beställningsvara row's choices (and price) or
@@ -129,6 +130,7 @@ describe("Ändra konfiguration — beställningsvara", () => {
       quantity: "1",
       unitPrice: "1",
       vatRate: "25",
+    vatCodeId: await vatCodeId("MP25"),
       lineAmount: "1",
       vatAmount: "0.25",
     });
@@ -242,6 +244,7 @@ describe("Ändra konfiguration — variantrad", () => {
       quantity: "1",
       unitPrice: "1",
       vatRate: "25",
+    vatCodeId: await vatCodeId("MP25"),
       lineAmount: "1",
       vatAmount: "0.25",
     });

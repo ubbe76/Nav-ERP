@@ -1,10 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
   accounts,
   articleGroups,
   db,
   suppliers,
+  supplierInvoiceRows,
   supplierInvoices,
   verificationRows,
   verifications,
@@ -33,6 +34,7 @@ import {
   testEconomyService,
   testSystemService,
 } from "./helpers/services.js";
+import { vatCodeId } from "./helpers/vat-codes.js";
 
 // B2: approving a supplier invoice books an L verification inside the SAME
 // transaction as the draft → approved flip, and cancelling an approved one
@@ -239,7 +241,7 @@ describe("leverantörsfaktura — automatkontering vid attest (B2)", () => {
     const article = await makeArticle(group.id);
     await testEconomyService.createPostingRule({
       articleGroupId: group.id,
-      vatRate: 25,
+      vatCodeId: await vatCodeId("MP25"),
       revenueAccountId: null,
       costAccountId: await accountId("4600"),
     });
@@ -277,6 +279,41 @@ describe("leverantörsfaktura — automatkontering vid attest (B2)", () => {
       { number: "2640", debit: "250.00", credit: "0.00" },
       { number: "4600", debit: "800.00", credit: "0.00" },
       { number: "4010", debit: "200.00", credit: "0.00" },
+    ]);
+    expectBalanced(verification!.rows);
+  });
+
+  it("gives a new invoice MP25 and books omvänd moms when the header and a row carry other momskoder", async () => {
+    const user = await makeUser();
+    const supplier = await makeSupplier();
+    const invoice = await makeInvoice(
+      supplier.id,
+      { netAmount: 1000, vatAmount: 0, grossAmount: 1000 },
+      [
+        { description: "Material", quantity: 1, unitPrice: 600, vatRate: 25 },
+        { description: "Montage", quantity: 1, unitPrice: 400, vatRate: 25 },
+      ],
+      user.id
+    );
+    const [stored] = await db.select().from(supplierInvoices).where(eq(supplierInvoices.id, invoice.id));
+    expect(stored!.vatCodeId).toBe(await vatCodeId("MP25"));
+
+    // The fields arrive with the documents step; set the codes directly here
+    // to drive the approval's in-tx loading.
+    await db.update(supplierInvoices).set({ vatCodeId: await vatCodeId("IEUV25") }).where(eq(supplierInvoices.id, invoice.id));
+    await db
+      .update(supplierInvoiceRows)
+      .set({ vatCodeId: await vatCodeId("IEUT") })
+      .where(and(eq(supplierInvoiceRows.supplierInvoiceId, invoice.id), eq(supplierInvoiceRows.description, "Montage")));
+
+    await invoiceService.approve(invoice.id, user.id);
+    const verification = await verificationFor(invoice.id);
+    expect(verification!.rows).toEqual([
+      { number: "2440", debit: "0.00", credit: "1000.00" },
+      { number: "4515", debit: "600.00", credit: "0.00" },
+      { number: "4535", debit: "400.00", credit: "0.00" },
+      { number: "2614", debit: "0.00", credit: "250.00" },
+      { number: "2645", debit: "250.00", credit: "0.00" },
     ]);
     expectBalanced(verification!.rows);
   });

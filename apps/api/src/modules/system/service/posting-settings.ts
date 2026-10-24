@@ -14,18 +14,12 @@ import { systemSettings, type Db, type Tx } from "@navet/db";
 // This module OWNS the posting-settings key constants and their defaults —
 // the one source of truth both readPostingSettings (below) and
 // system.service.ts's getSettings()/updateSettings() build on, so the key
-// strings and BAS-standard defaults are never duplicated.
+// strings and BAS-standard defaults are never duplicated. The revenue and
+// VAT accounts per rate are no longer settings: they belong to the momskoder
+// (vat_codes), which migration 0142 seeded from the old keys.
 
 export const POSTING_ACCOUNTS_RECEIVABLE_KEY = "posting_accounts_receivable";
-export const POSTING_VAT_OUT_25_KEY = "posting_vat_out_25";
-export const POSTING_VAT_OUT_12_KEY = "posting_vat_out_12";
-export const POSTING_VAT_OUT_6_KEY = "posting_vat_out_6";
-export const POSTING_REVENUE_25_KEY = "posting_revenue_25";
-export const POSTING_REVENUE_12_KEY = "posting_revenue_12";
-export const POSTING_REVENUE_6_KEY = "posting_revenue_6";
-export const POSTING_REVENUE_0_KEY = "posting_revenue_0";
 export const POSTING_ACCOUNTS_PAYABLE_KEY = "posting_accounts_payable";
-export const POSTING_VAT_IN_KEY = "posting_vat_in";
 export const POSTING_DEFAULT_COST_KEY = "posting_default_cost";
 // Kundreskontra (B3): the bank/betalkonto a customer payment is debited
 // against, the account a reminder fee is credited to, and the account for
@@ -47,15 +41,7 @@ export const REMINDER_FEE_KEY = "reminder_fee";
 
 export const POSTING_SETTINGS_KEYS = [
   POSTING_ACCOUNTS_RECEIVABLE_KEY,
-  POSTING_VAT_OUT_25_KEY,
-  POSTING_VAT_OUT_12_KEY,
-  POSTING_VAT_OUT_6_KEY,
-  POSTING_REVENUE_25_KEY,
-  POSTING_REVENUE_12_KEY,
-  POSTING_REVENUE_6_KEY,
-  POSTING_REVENUE_0_KEY,
   POSTING_ACCOUNTS_PAYABLE_KEY,
-  POSTING_VAT_IN_KEY,
   POSTING_DEFAULT_COST_KEY,
   POSTING_BANK_KEY,
   POSTING_REMINDER_FEE_ACCOUNT_KEY,
@@ -69,15 +55,7 @@ export const POSTING_SETTINGS_KEYS = [
 
 export interface PostingSettings {
   postingAccountsReceivable: string;
-  postingVatOut25: string;
-  postingVatOut12: string;
-  postingVatOut6: string;
-  postingRevenue25: string;
-  postingRevenue12: string;
-  postingRevenue6: string;
-  postingRevenue0: string;
   postingAccountsPayable: string;
-  postingVatIn: string;
   postingDefaultCost: string;
   postingBank: string;
   postingReminderFeeAccount: string;
@@ -118,15 +96,7 @@ function amountSetting(value: string | null, fallback: number): number {
 export function decodePostingSettings(get: (key: string) => string | null): PostingSettings {
   return {
     postingAccountsReceivable: codeSetting(get(POSTING_ACCOUNTS_RECEIVABLE_KEY), "1510"),
-    postingVatOut25: codeSetting(get(POSTING_VAT_OUT_25_KEY), "2610"),
-    postingVatOut12: codeSetting(get(POSTING_VAT_OUT_12_KEY), "2620"),
-    postingVatOut6: codeSetting(get(POSTING_VAT_OUT_6_KEY), "2630"),
-    postingRevenue25: codeSetting(get(POSTING_REVENUE_25_KEY), "3001"),
-    postingRevenue12: codeSetting(get(POSTING_REVENUE_12_KEY), "3002"),
-    postingRevenue6: codeSetting(get(POSTING_REVENUE_6_KEY), "3003"),
-    postingRevenue0: codeSetting(get(POSTING_REVENUE_0_KEY), "3004"),
     postingAccountsPayable: codeSetting(get(POSTING_ACCOUNTS_PAYABLE_KEY), "2440"),
-    postingVatIn: codeSetting(get(POSTING_VAT_IN_KEY), "2640"),
     postingDefaultCost: codeSetting(get(POSTING_DEFAULT_COST_KEY), "4010"),
     postingBank: codeSetting(get(POSTING_BANK_KEY), "1930"),
     postingReminderFeeAccount: codeSetting(get(POSTING_REMINDER_FEE_ACCOUNT_KEY), "3540"),

@@ -1,31 +1,91 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
-import { postingVatRateSchema } from "./vat.js";
 
 // --- Kontoplan (chart of accounts) ---
-// Momsruta per konto (ekonomi etapp 2, delprojekt 1): the VAT declaration
-// box an account's movements are reported in. Box 49 is computed, never
-// stored. "none" = deliberately no box (fee/utjämning accounts, 2650 …);
-// null = not classified yet — the VAT report warns when such an account in
-// class 3 or 26xx has movements.
-export const VAT_BOXES = ["05", "10", "11", "12", "35", "36", "42", "48"] as const;
+// Momsruta per konto (ekonomi etapp 2, delprojekt 1; every box of the
+// declaration since Momskoder, migration 0142): the VAT declaration box an
+// account's movements are reported in. Box 49 is computed, never stored.
+// "none" = deliberately no box (fee/utjämning accounts, 2650 …); null = not
+// classified yet — the VAT report warns when such an account in class 3,
+// 26xx, 44xx or 45xx has movements.
+export const VAT_BOXES = [
+  "05",
+  "06",
+  "07",
+  "08",
+  "10",
+  "11",
+  "12",
+  "20",
+  "21",
+  "22",
+  "23",
+  "24",
+  "30",
+  "31",
+  "32",
+  "35",
+  "36",
+  "37",
+  "38",
+  "39",
+  "40",
+  "41",
+  "42",
+  "48",
+  "50",
+  "60",
+  "61",
+  "62",
+] as const;
 export type VatBox = (typeof VAT_BOXES)[number];
 export const vatBoxSettingSchema = z.enum([...VAT_BOXES, "none"]);
 export type VatBoxSetting = z.infer<typeof vatBoxSettingSchema>;
 
-// Same wording as the VAT report's rows (MomsrapportPageClient RUTA_ROWS);
-// mirrored in apps/web/lib/vatBoxes.ts, kept in sync by vat-box.shared.test.ts.
+// Skatteverket's headings on the momsdeklaration; mirrored in
+// apps/web/lib/vatBoxes.ts, kept in sync by vat-box.shared.test.ts.
 export const VAT_BOX_LABELS: Record<VatBox, string> = {
-  "05": "Momspliktig försäljning",
+  "05": "Momspliktig försäljning som inte ingår i ruta 06, 07 eller 08",
+  "06": "Momspliktiga uttag",
+  "07": "Beskattningsunderlag vid vinstmarginalbeskattning",
+  "08": "Hyresinkomster vid frivillig skattskyldighet",
   "10": "Utgående moms 25 %",
   "11": "Utgående moms 12 %",
   "12": "Utgående moms 6 %",
-  "35": "Varor till annat EU-land",
-  "36": "Export av varor utanför EU",
-  "42": "Momsfri försäljning",
+  "20": "Inköp av varor från ett annat EU-land",
+  "21": "Inköp av tjänster från ett annat EU-land enligt huvudregeln",
+  "22": "Inköp av tjänster från ett land utanför EU",
+  "23": "Inköp av varor i Sverige som köparen är skattskyldig för",
+  "24": "Övriga inköp av tjänster",
+  "30": "Utgående moms 25 %",
+  "31": "Utgående moms 12 %",
+  "32": "Utgående moms 6 %",
+  "35": "Försäljning av varor till ett annat EU-land",
+  "36": "Försäljning av varor utanför EU",
+  "37": "Mellanmans inköp av varor vid trepartshandel",
+  "38": "Mellanmans försäljning av varor vid trepartshandel",
+  "39": "Försäljning av tjänster till en näringsidkare i ett annat EU-land enligt huvudregeln",
+  "40": "Övrig försäljning av tjänster omsatta utanför Sverige",
+  "41": "Försäljning när köparen är skattskyldig i Sverige",
+  "42": "Övrig försäljning m.m.",
   "48": "Ingående moms att dra av",
+  "50": "Beskattningsunderlag vid import",
+  "60": "Utgående moms 25 %",
+  "61": "Utgående moms 12 %",
+  "62": "Utgående moms 6 %",
 };
+
+// The declaration as reported: every stored box plus the computed ruta 49.
+export type VatDeclarationBox = VatBox | "49";
+export const VAT_BOX_49_LABEL = "Moms att betala eller få tillbaka";
+export type VatDeclarationBoxes = Record<VatDeclarationBox, number>;
+
+// Boxes whose ACCOUNTS the momsomföring empties: every VAT box that enters
+// ruta 49 (utgående moms on sales, on purchases with omvänd moms and on
+// import, and the ingående moms). Shared so the report, the settlement and
+// the web's omföring card agree.
+export const VAT_SETTLED_BOXES = ["10", "11", "12", "30", "31", "32", "48", "60", "61", "62"] as const satisfies readonly VatBox[];
 
 export const createAccountSchema = z.object({
   number: z.string().regex(/^[0-9]{4}$/, "Account number must be exactly 4 digits"),
@@ -148,19 +208,18 @@ export const ledgerQuerySchema = z.object({
 export type LedgerQuery = z.infer<typeof ledgerQuerySchema>;
 
 // --- Konteringsregler (B2 posting rules) ---
-// postingVatRateSchema (the blank-string-rejecting variant) moved to vat.ts
-// in B5 — imported here for the rule schemas below, re-exported via index.ts.
-
-// vatRate null = the catch-all rule for the group (all rates); revenue/cost
-// account are independently nullable so a rule can post revenue only, cost
-// only, or both — but not neither, hence the refine.
+// vatCodeId null = the catch-all rule for the group ("Alla momskoder" — the
+// poster applies it to the domestic codes only, see verification-poster.ts);
+// revenue/cost account are independently nullable so a rule can post revenue
+// only, cost only, or both — but not neither, hence the refine.
 export const createPostingRuleSchema = z
   .object({
     articleGroupId: z.string().uuid(),
-    vatRate: postingVatRateSchema.nullable().default(null),
+    vatCodeId: z.string().uuid().nullable().default(null),
     revenueAccountId: z.string().uuid().nullable().default(null),
     costAccountId: z.string().uuid().nullable().default(null),
   })
+  .strict()
   .refine((data) => data.revenueAccountId !== null || data.costAccountId !== null, {
     message: "At least one of revenueAccountId or costAccountId must be set",
     path: ["revenueAccountId"],
@@ -175,10 +234,11 @@ export type CreatePostingRuleInput = z.infer<typeof createPostingRuleSchema>;
 export const updatePostingRuleSchema = z
   .object({
     articleGroupId: z.string().uuid().optional(),
-    vatRate: postingVatRateSchema.nullable().optional(),
+    vatCodeId: z.string().uuid().nullable().optional(),
     revenueAccountId: z.string().uuid().nullable().optional(),
     costAccountId: z.string().uuid().nullable().optional(),
   })
+  .strict()
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided")
   .refine((data) => data.revenueAccountId !== null || data.costAccountId !== null, {
     message: "At least one of revenueAccountId or costAccountId must be set",
@@ -188,8 +248,8 @@ export type UpdatePostingRuleInput = z.infer<typeof updatePostingRuleSchema>;
 
 // --- Momsrapport (B5) ---
 // from/to must exactly cover a contiguous run of accounting periods (one
-// month or a calendar quarter in practice) — validated in the service, the
-// schema only guards shape and order.
+// month, a calendar quarter or a whole fiscal year in practice) — validated
+// in the service, the schema only guards shape and order.
 export const vatReportQuerySchema = z
   .object({ from: z.string().date(), to: z.string().date() })
   .refine((range) => range.to >= range.from, { message: "to must not be before from", path: ["to"] });
@@ -199,6 +259,43 @@ export type VatReportQuery = z.infer<typeof vatReportQuerySchema>;
 // showed. Aliased so the two can never drift apart.
 export const settleVatReportSchema = vatReportQuerySchema;
 export type SettleVatReportInput = z.infer<typeof settleVatReportSchema>;
+
+// Redovisningsperiod för moms + the contact for the periodisk sammanställning
+// (system_settings vat_reporting_period / vat_contact_*). PATCH is partial;
+// "" and null clear a contact field.
+export const VAT_REPORTING_PERIODS = ["month", "quarter", "year"] as const;
+export type VatReportingPeriod = (typeof VAT_REPORTING_PERIODS)[number];
+
+const vatContactField = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullable()
+    .optional()
+    .transform((value) => (value === "" ? null : value));
+
+export const updateVatReportingSettingsSchema = z
+  .object({
+    period: z.enum(VAT_REPORTING_PERIODS).optional(),
+    contactName: vatContactField(35),
+    contactPhone: vatContactField(17),
+    contactEmail: z
+      .union([z.literal(""), z.string().trim().max(255).email()])
+      .nullable()
+      .optional()
+      .transform((value) => (value === "" ? null : value)),
+  })
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
+export type UpdateVatReportingSettingsInput = z.infer<typeof updateVatReportingSettingsSchema>;
+
+export type VatReportingSettings = {
+  period: VatReportingPeriod;
+  contactName: string | null;
+  contactPhone: string | null;
+  contactEmail: string | null;
+};
 
 // --- Ekonomirapporter (B6a) ---
 // Unlike the VAT report, these ranges do NOT have to tile whole accounting

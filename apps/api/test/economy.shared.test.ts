@@ -62,11 +62,11 @@ describe("createPostingRuleSchema", () => {
   const articleGroupId = "11111111-1111-1111-1111-111111111111";
   const accountId = "22222222-2222-2222-2222-222222222222";
 
-  it("defaults vatRate/accounts to null (the group's catch-all rule) when only one account is set", () => {
+  it("defaults vatCodeId/accounts to null (the group's Alla momskoder rule) when only one account is set", () => {
     const parsed = createPostingRuleSchema.parse({ articleGroupId, revenueAccountId: accountId });
     expect(parsed).toEqual({
       articleGroupId,
-      vatRate: null,
+      vatCodeId: null,
       revenueAccountId: accountId,
       costAccountId: null,
     });
@@ -76,12 +76,12 @@ describe("createPostingRuleSchema", () => {
     expect(() => createPostingRuleSchema.parse({ articleGroupId, costAccountId: accountId })).not.toThrow();
   });
 
-  // An API consumer sending an empty vatRate must be told, not handed a
-  // 0 % rule (Number("") === 0).
-  it("rejects a blank vatRate instead of creating a 0 % rule", () => {
-    expect(() =>
-      createPostingRuleSchema.parse({ articleGroupId, vatRate: "", revenueAccountId: accountId })
-    ).toThrow();
+  // A rule is keyed on a momskod since migration 0142 — the old vatRate
+  // field is refused rather than ignored (which would silently create an
+  // Alla momskoder rule), and a blank code is not a code.
+  it("rejects the old vatRate field and a blank vatCodeId", () => {
+    expect(() => createPostingRuleSchema.parse({ articleGroupId, vatRate: 25, revenueAccountId: accountId })).toThrow();
+    expect(() => createPostingRuleSchema.parse({ articleGroupId, vatCodeId: "", revenueAccountId: accountId })).toThrow();
   });
 
   it("accepts a rule with both accounts set", () => {
@@ -105,12 +105,14 @@ describe("updatePostingRuleSchema", () => {
     expect(() => updatePostingRuleSchema.parse({})).toThrow();
   });
 
-  it("accepts a patch that only touches vatRate (accounts untouched)", () => {
-    expect(() => updatePostingRuleSchema.parse({ vatRate: 6 })).not.toThrow();
+  it("accepts a patch that only touches vatCodeId (accounts untouched), null meaning Alla momskoder", () => {
+    expect(() => updatePostingRuleSchema.parse({ vatCodeId: accountId })).not.toThrow();
+    expect(() => updatePostingRuleSchema.parse({ vatCodeId: null })).not.toThrow();
   });
 
-  it("rejects a blank vatRate in a patch (never silently 0 %)", () => {
-    expect(() => updatePostingRuleSchema.parse({ vatRate: "" })).toThrow();
+  it("rejects the old vatRate field and a blank vatCodeId in a patch", () => {
+    expect(() => updatePostingRuleSchema.parse({ vatRate: 6 })).toThrow();
+    expect(() => updatePostingRuleSchema.parse({ vatCodeId: "" })).toThrow();
   });
 
   it("rejects a patch that explicitly nulls out both accounts", () => {

@@ -39,6 +39,7 @@ import { rejectMalformedIds } from "../../src/modules/system/middleware/reject-m
 import { isBookkeepingLockViolation } from "../../src/modules/system/service/db-errors.js";
 import { computeOcrNumber } from "../../src/modules/system/service/ocr.js";
 import { DEFAULT_POSTING_SETTINGS, testEconomyRepository, testEconomyService, testSystemService } from "./services.js";
+import { vatCodeId } from "./vat-codes.js";
 
 // Fixed, long-past year and a fixed clock: no banking test depends on the
 // real calendar (month boundaries, Stockholm vs UTC midnight). The clock is
@@ -108,6 +109,7 @@ export async function makeIssuedCustomerInvoice(
     quantity: "1",
     unitPrice: String(net),
     vatRate: "25",
+    vatCodeId: await vatCodeId("MP25"),
     lineAmount: String(net),
     vatAmount: String(vat),
   });
@@ -143,6 +145,7 @@ export async function makeApprovedSupplierInvoice(
       registrationNumber: input.registrationNumber,
       invoiceNumber: input.invoiceNumber ?? `INV-${crypto.randomUUID().slice(0, 8)}`,
       supplierId,
+      vatCodeId: await vatCodeId("MP25"),
       invoiceDate: input.invoiceDate ?? `${BANK_YEAR}-09-15`,
       dueDate: input.dueDate === undefined ? `${BANK_YEAR}-10-15` : input.dueDate,
       currency: "SEK",

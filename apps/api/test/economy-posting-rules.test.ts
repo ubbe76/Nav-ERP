@@ -1,7 +1,7 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { articleGroups, db } from "@navet/db";
-import { createPostingRuleSchema, postingVatRateSchema, updatePostingRuleSchema } from "@navet/shared";
+import { VAT_CODES, createPostingRuleSchema, updatePostingRuleSchema, type VatCode } from "@navet/shared";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import {
   AccountNotFoundError,
@@ -10,8 +10,17 @@ import {
   InactiveAccountError,
   PostingRuleNoAccountsError,
   PostingRuleNotFoundError,
+  PostingRuleVatCodeError,
+  VatCodeNotFoundError,
   createEconomyService,
 } from "../src/modules/economy/service/economy.service.js";
+import { vatCodeId } from "./helpers/vat-codes.js";
+
+// The seeded momskoder's ids (never truncated).
+const V = {} as Record<VatCode, string>;
+beforeAll(async () => {
+  for (const code of VAT_CODES) V[code] = await vatCodeId(code);
+});
 
 const repo = createEconomyRepository(db);
 // audit is unused by every posting-rule CRUD method (no audit trail
@@ -47,29 +56,29 @@ describe("economy service — posting rules: create", () => {
 
     const rule = await service.createPostingRule({
       articleGroupId: group.id,
-      vatRate: 25,
+      vatCodeId: V.MP25,
       revenueAccountId: revenue.id,
       costAccountId: null,
     });
 
     expect(rule.articleGroupId).toBe(group.id);
-    expect(Number(rule.vatRate)).toBe(25);
+    expect(rule.vatCodeId).toBe(V.MP25);
     expect(rule.revenueAccountId).toBe(revenue.id);
     expect(rule.costAccountId).toBeNull();
   });
 
-  it("creates a catch-all rule with vatRate null", async () => {
+  it("creates a catch-all (Alla momskoder) rule with vatCodeId null", async () => {
     const group = await makeArticleGroup("320", "Övrigt");
     const cost = await makeAccount("4000", "Inköp material");
 
     const rule = await service.createPostingRule({
       articleGroupId: group.id,
-      vatRate: null,
+      vatCodeId: null,
       revenueAccountId: null,
       costAccountId: cost.id,
     });
 
-    expect(rule.vatRate).toBeNull();
+    expect(rule.vatCodeId).toBeNull();
     expect(rule.costAccountId).toBe(cost.id);
     expect(rule.revenueAccountId).toBeNull();
   });
@@ -80,7 +89,7 @@ describe("economy service — posting rules: create", () => {
     await expect(
       service.createPostingRule({
         articleGroupId: "00000000-0000-0000-0000-000000000000",
-        vatRate: null,
+        vatCodeId: null,
         revenueAccountId: revenue.id,
         costAccountId: null,
       })
@@ -93,7 +102,7 @@ describe("economy service — posting rules: create", () => {
     await expect(
       service.createPostingRule({
         articleGroupId: group.id,
-        vatRate: null,
+        vatCodeId: null,
         revenueAccountId: "00000000-0000-0000-0000-000000000000",
         costAccountId: null,
       })
@@ -106,18 +115,18 @@ describe("economy service — posting rules: create", () => {
     await service.updateAccount(revenue.id, { active: false });
 
     await expect(
-      service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: revenue.id, costAccountId: null })
+      service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: revenue.id, costAccountId: null })
     ).rejects.toBeInstanceOf(InactiveAccountError);
   });
 
-  it("rejects a duplicate (group, vatRate) combination (409)", async () => {
+  it("rejects a duplicate (group, momskod) combination (409)", async () => {
     const group = await makeArticleGroup("310", "Diskbänkar");
     const revenue = await makeAccount("3001", "Försäljning");
     const revenue2 = await makeAccount("3002", "Övrig försäljning");
-    await service.createPostingRule({ articleGroupId: group.id, vatRate: 25, revenueAccountId: revenue.id, costAccountId: null });
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: V.MP25, revenueAccountId: revenue.id, costAccountId: null });
 
     await expect(
-      service.createPostingRule({ articleGroupId: group.id, vatRate: 25, revenueAccountId: revenue2.id, costAccountId: null })
+      service.createPostingRule({ articleGroupId: group.id, vatCodeId: V.MP25, revenueAccountId: revenue2.id, costAccountId: null })
     ).rejects.toBeInstanceOf(DuplicatePostingRuleError);
   });
 
@@ -125,24 +134,24 @@ describe("economy service — posting rules: create", () => {
     const group = await makeArticleGroup("310", "Diskbänkar");
     const revenue = await makeAccount("3001", "Försäljning");
     const revenue2 = await makeAccount("3002", "Övrig försäljning");
-    await service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: revenue.id, costAccountId: null });
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: revenue.id, costAccountId: null });
 
     await expect(
-      service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: revenue2.id, costAccountId: null })
+      service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: revenue2.id, costAccountId: null })
     ).rejects.toBeInstanceOf(DuplicatePostingRuleError);
   });
 });
 
 describe("economy service — posting rules: list (joined)", () => {
-  it("lists rules joined with group code/name and both accounts' number/name, ordered by group code then vatRate NULLS LAST", async () => {
+  it("lists rules joined with group code/name and both accounts' number/name, ordered by group code then momskod NULLS LAST", async () => {
     const groupA = await makeArticleGroup("100", "Grupp A");
     const groupB = await makeArticleGroup("200", "Grupp B");
     const revenue = await makeAccount("3001", "Försäljning");
     const cost = await makeAccount("4000", "Inköp material");
 
-    await service.createPostingRule({ articleGroupId: groupB.id, vatRate: 25, revenueAccountId: revenue.id, costAccountId: null });
-    await service.createPostingRule({ articleGroupId: groupB.id, vatRate: null, revenueAccountId: null, costAccountId: cost.id });
-    await service.createPostingRule({ articleGroupId: groupA.id, vatRate: 6, revenueAccountId: revenue.id, costAccountId: cost.id });
+    await service.createPostingRule({ articleGroupId: groupB.id, vatCodeId: V.MP25, revenueAccountId: revenue.id, costAccountId: null });
+    await service.createPostingRule({ articleGroupId: groupB.id, vatCodeId: null, revenueAccountId: null, costAccountId: cost.id });
+    await service.createPostingRule({ articleGroupId: groupA.id, vatCodeId: V.MP6, revenueAccountId: revenue.id, costAccountId: cost.id });
 
     const rows = await service.listPostingRules();
     expect(rows).toHaveLength(3);
@@ -150,7 +159,9 @@ describe("economy service — posting rules: list (joined)", () => {
     // Group A (code "100") sorts before group B (code "200").
     expect(rows[0]?.groupCode).toBe("100");
     expect(rows[0]?.groupName).toBe("Grupp A");
-    expect(Number(rows[0]?.vatRate)).toBe(6);
+    expect(rows[0]?.vatCodeId).toBe(V.MP6);
+    expect(rows[0]?.vatCode).toBe("MP6");
+    expect(rows[0]?.vatCodeName).toBe("Moms 6 %");
     expect(rows[0]?.revenueAccountNumber).toBe("3001");
     expect(rows[0]?.revenueAccountName).toBe("Försäljning");
     expect(rows[0]?.costAccountNumber).toBe("4000");
@@ -159,9 +170,10 @@ describe("economy service — posting rules: list (joined)", () => {
     // Within group B, the rate-specific row (25) sorts before the catch-all
     // (null) — NULLS LAST.
     expect(rows[1]?.groupCode).toBe("200");
-    expect(Number(rows[1]?.vatRate)).toBe(25);
+    expect(rows[1]?.vatCode).toBe("MP25");
     expect(rows[2]?.groupCode).toBe("200");
-    expect(rows[2]?.vatRate).toBeNull();
+    expect(rows[2]?.vatCodeId).toBeNull();
+    expect(rows[2]?.vatCode).toBeNull();
     expect(rows[2]?.revenueAccountNumber).toBeNull();
     expect(rows[2]?.costAccountNumber).toBe("4000");
   });
@@ -172,31 +184,31 @@ describe("economy service — posting rules: update", () => {
     const group = await makeArticleGroup("310", "Diskbänkar");
     const revenue = await makeAccount("3001", "Försäljning");
     const revenue2 = await makeAccount("3002", "Övrig försäljning");
-    const rule = await service.createPostingRule({ articleGroupId: group.id, vatRate: 25, revenueAccountId: revenue.id, costAccountId: null });
+    const rule = await service.createPostingRule({ articleGroupId: group.id, vatCodeId: V.MP25, revenueAccountId: revenue.id, costAccountId: null });
 
     const updated = await service.updatePostingRule(rule.id, { revenueAccountId: revenue2.id });
     expect(updated.revenueAccountId).toBe(revenue2.id);
   });
 
-  it("rejects changing vatRate to one already taken within the same group (409)", async () => {
+  it("rejects changing the momskod to one already taken within the same group (409)", async () => {
     const group = await makeArticleGroup("310", "Diskbänkar");
     const revenue = await makeAccount("3001", "Försäljning");
-    await service.createPostingRule({ articleGroupId: group.id, vatRate: 25, revenueAccountId: revenue.id, costAccountId: null });
-    const rule6 = await service.createPostingRule({ articleGroupId: group.id, vatRate: 6, revenueAccountId: revenue.id, costAccountId: null });
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: V.MP25, revenueAccountId: revenue.id, costAccountId: null });
+    const rule6 = await service.createPostingRule({ articleGroupId: group.id, vatCodeId: V.MP6, revenueAccountId: revenue.id, costAccountId: null });
 
-    await expect(service.updatePostingRule(rule6.id, { vatRate: 25 })).rejects.toBeInstanceOf(DuplicatePostingRuleError);
+    await expect(service.updatePostingRule(rule6.id, { vatCodeId: V.MP25 })).rejects.toBeInstanceOf(DuplicatePostingRuleError);
   });
 
   it("throws PostingRuleNotFoundError for a missing id", async () => {
     await expect(
-      service.updatePostingRule("00000000-0000-0000-0000-000000000000", { vatRate: 6 })
+      service.updatePostingRule("00000000-0000-0000-0000-000000000000", { vatCodeId: V.MP6 })
     ).rejects.toBeInstanceOf(PostingRuleNotFoundError);
   });
 
   it("rejects a non-existent article group on update (404)", async () => {
     const group = await makeArticleGroup("310", "Diskbänkar");
     const revenue = await makeAccount("3001", "Försäljning");
-    const rule = await service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: revenue.id, costAccountId: null });
+    const rule = await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: revenue.id, costAccountId: null });
 
     await expect(
       service.updatePostingRule(rule.id, { articleGroupId: "00000000-0000-0000-0000-000000000000" })
@@ -212,7 +224,7 @@ describe("economy service — posting rules: update", () => {
   it("rejects a PATCH that nulls the only account set on the stored row (merged-both-null, 400 PostingRuleNoAccountsError)", async () => {
     const group = await makeArticleGroup("310", "Diskbänkar");
     const cost = await makeAccount("4000", "Inköp material");
-    const rule = await service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: null, costAccountId: cost.id });
+    const rule = await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: null, costAccountId: cost.id });
 
     // The patch alone is zod-valid — revenueAccountId is never mentioned, so
     // the schema's own refine can't see that the stored row has it null too.
@@ -228,7 +240,7 @@ describe("economy service — posting rules: delete", () => {
   it("deletes a rule", async () => {
     const group = await makeArticleGroup("310", "Diskbänkar");
     const revenue = await makeAccount("3001", "Försäljning");
-    const rule = await service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: revenue.id, costAccountId: null });
+    const rule = await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: revenue.id, costAccountId: null });
 
     await service.deletePostingRule(rule.id);
 
@@ -243,15 +255,42 @@ describe("economy service — posting rules: delete", () => {
   });
 });
 
-describe("postingVatRateSchema — zod avvisar sats 21.5", () => {
-  it("rejects a VAT rate that isn't one of 0/6/12/25", () => {
-    expect(postingVatRateSchema.safeParse(21.5).success).toBe(false);
+describe("posting rule schemas — keyed on a momskod", () => {
+  it("refuses the old vatRate field instead of silently creating an Alla momskoder rule", () => {
     expect(
       createPostingRuleSchema.safeParse({
         articleGroupId: "00000000-0000-0000-0000-000000000000",
-        vatRate: 21.5,
+        vatRate: 25,
         revenueAccountId: "00000000-0000-0000-0000-000000000000",
       }).success
     ).toBe(false);
+    expect(updatePostingRuleSchema.safeParse({ vatRate: 25 }).success).toBe(false);
+  });
+});
+
+describe("economy service — posting rules: momskod", () => {
+  it("rejects an unknown momskod (404) and an import code (400)", async () => {
+    const group = await makeArticleGroup("310", "Diskbänkar");
+    const revenue = await makeAccount("3001", "Försäljning");
+    await expect(
+      service.createPostingRule({
+        articleGroupId: group.id,
+        vatCodeId: "00000000-0000-0000-0000-000000000000",
+        revenueAccountId: revenue.id,
+        costAccountId: null,
+      })
+    ).rejects.toBeInstanceOf(VatCodeNotFoundError);
+    await expect(
+      service.createPostingRule({ articleGroupId: group.id, vatCodeId: V.IMP25, revenueAccountId: revenue.id, costAccountId: null })
+    ).rejects.toBeInstanceOf(PostingRuleVatCodeError);
+  });
+
+  it("accepts a rule for a foreign code next to the group's catch-all", async () => {
+    const group = await makeArticleGroup("310", "Diskbänkar");
+    const revenue = await makeAccount("3001", "Försäljning");
+    const eu = await makeAccount("3108", "Försäljning EU");
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: revenue.id, costAccountId: null });
+    const rule = await service.createPostingRule({ articleGroupId: group.id, vatCodeId: V.EUV, revenueAccountId: eu.id, costAccountId: null });
+    expect(rule.vatCodeId).toBe(V.EUV);
   });
 });

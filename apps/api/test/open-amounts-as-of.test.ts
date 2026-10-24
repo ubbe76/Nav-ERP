@@ -15,6 +15,7 @@ import {
 import { payablesTotalAsOf } from "../src/modules/purchase/repository/open-amounts.js";
 import { receivablesTotalAsOf } from "../src/modules/sales/repository/open-amounts.js";
 import { NEXT_YEAR, YEAR, bookManual, createCalendarYear, resetYearEnd, setupYearEnd, testYearEndPoster } from "./helpers/year-end.js";
+import { vatCodeId } from "./helpers/vat-codes.js";
 
 beforeEach(resetYearEnd);
 afterAll(resetYearEnd);
@@ -40,6 +41,7 @@ async function issuedInvoice(customerId: string, date: string, net: number, vat:
     quantity: "1",
     unitPrice: String(net),
     vatRate: "25",
+    vatCodeId: await vatCodeId("MP25"),
     lineAmount: String(net),
     vatAmount: String(vat),
   });
@@ -113,6 +115,7 @@ describe("payablesTotalAsOf", () => {
           registrationNumber: `LF-T${n}`,
           invoiceNumber: `F${n}`,
           supplierId: supplier!.id,
+          vatCodeId: await vatCodeId("MP25"),
           invoiceDate: date,
           status: reversedOn ? "cancelled" : "approved",
           grossAmount: String(gross),
@@ -183,6 +186,7 @@ describe("payablesTotalAsOf — payments", () => {
         registrationNumber: "LF-P1",
         invoiceNumber: "P1",
         supplierId: supplier!.id,
+        vatCodeId: await vatCodeId("MP25"),
         invoiceDate: `${YEAR}-11-01`,
         status: "approved",
         grossAmount: "10000",
@@ -211,6 +215,7 @@ describe("payablesTotalAsOf — payments", () => {
       registrationNumber: "LF-R1",
       invoiceNumber: "R1",
       supplierId: supplier!.id,
+      vatCodeId: await vatCodeId("MP25"),
       invoiceDate: `${YEAR}-11-01`,
       status: "approved",
       grossAmount: "4000",

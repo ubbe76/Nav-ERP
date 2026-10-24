@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { db, vatSettlements, verifications } from "@navet/db";
+import { db, vatCodes, vatSettlements, verifications } from "@navet/db";
 import { round2 } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
@@ -15,6 +15,8 @@ import {
   createVatReportService,
 } from "../src/modules/economy/service/vat-report.service.js";
 
+import { postingVatCode, resetVatCodes } from "./helpers/vat-codes.js";
+
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
 const service = createEconomyService(repo, { log: async () => {} });
@@ -25,15 +27,7 @@ const TRUNCATE = sql`TRUNCATE vat_settlements, verification_rows, verifications,
 // postingSettings to redirect a role, beforeEach restores it.
 const DEFAULT_POSTING_SETTINGS = {
   postingAccountsReceivable: "1510",
-  postingVatOut25: "2610",
-  postingVatOut12: "2620",
-  postingVatOut6: "2630",
-  postingRevenue25: "3001",
-  postingRevenue12: "3002",
-  postingRevenue6: "3003",
-  postingRevenue0: "3004",
   postingAccountsPayable: "2440",
-  postingVatIn: "2640",
   postingDefaultCost: "4010",
   postingBank: "1930",
   postingReminderFeeAccount: "3540",
@@ -47,11 +41,13 @@ const vatReport = createVatReportService({ db, poster, settings: settingsReader 
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
+  await resetVatCodes();
   postingSettings = { ...DEFAULT_POSTING_SETTINGS };
 });
 
 afterAll(async () => {
   await db.execute(TRUNCATE);
+  await resetVatCodes();
 });
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -173,12 +169,12 @@ describe("vat report — box computation", () => {
     await bookPurchase(user.id, `${CURRENT_YEAR}-03-20`, 400, 100);
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.sales05).toBe(1700);
-    expect(report.boxes.vatOut25_10).toBe(250);
-    expect(report.boxes.vatOut12_11).toBe(60);
-    expect(report.boxes.vatOut6_12).toBe(12);
-    expect(report.boxes.vatIn48).toBe(100);
-    expect(report.boxes.vatToPay49).toBe(round2(250 + 60 + 12 - 100));
+    expect(report.boxes["05"]).toBe(1700);
+    expect(report.boxes["10"]).toBe(250);
+    expect(report.boxes["11"]).toBe(60);
+    expect(report.boxes["12"]).toBe(12);
+    expect(report.boxes["48"]).toBe(100);
+    expect(report.boxes["49"]).toBe(round2(250 + 60 + 12 - 100));
   });
 
   it("counts rows on the range's boundary dates (inclusive at both ends)", async () => {
@@ -190,8 +186,8 @@ describe("vat report — box computation", () => {
     await bookSale(user.id, `${CURRENT_YEAR}-04-01`, 100, "2610", 25);
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.vatOut25_10).toBe(50);
-    expect(report.boxes.sales05).toBe(200);
+    expect(report.boxes["10"]).toBe(50);
+    expect(report.boxes["05"]).toBe(200);
   });
 
   it("splits momsfri/EU/export sales out of ruta 05 into rutorna 42/35/36", async () => {
@@ -211,10 +207,10 @@ describe("vat report — box computation", () => {
     ]);
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.sales05).toBe(1000);
-    expect(report.boxes.salesExempt42).toBe(300);
-    expect(report.boxes.salesEu35).toBe(400);
-    expect(report.boxes.salesExport36).toBe(500);
+    expect(report.boxes["05"]).toBe(1000);
+    expect(report.boxes["42"]).toBe(300);
+    expect(report.boxes["35"]).toBe(400);
+    expect(report.boxes["36"]).toBe(500);
   });
 
   it("ruta 05 is account-based: a box-tagged account counts, an unclassified one is a warning, 'none' is silent", async () => {
@@ -242,9 +238,10 @@ describe("vat report — box computation", () => {
     ]);
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.sales05).toBe(200);
+    expect(report.boxes["05"]).toBe(200);
     expect(report.warnings.unassignedAccounts).toEqual([{ accountNumber: "3911", accountName: "Hyresintäkter", net: 800 }]);
-    expect(report.warnings.roleBoxMismatches).toEqual([]);
+    expect(report.warnings.vatCodeBoxMismatches).toEqual([]);
+    expect(report.warnings.ruleBoxMismatches).toEqual([]);
   });
 
   it("draft verifications never count", async () => {
@@ -265,17 +262,18 @@ describe("vat report — box computation", () => {
     );
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.vatOut25_10).toBe(0);
-    expect(report.boxes.sales05).toBe(0);
+    expect(report.boxes["10"]).toBe(0);
+    expect(report.boxes["05"]).toBe(0);
   });
 
   it("a credit invoice posted through the real poster mirrors out of the boxes", async () => {
     const { user } = await setupEconomy();
+    const mp25 = await postingVatCode("MP25");
     await db.transaction((tx) =>
       poster.postCustomerInvoice(
         tx,
         { invoiceNumber: "FA-1", type: "invoice", invoiceDate: `${CURRENT_YEAR}-03-05`, customerName: "Kund AB" },
-        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: mp25 }],
         user.id
       )
     );
@@ -283,15 +281,15 @@ describe("vat report — box computation", () => {
       poster.postCustomerInvoice(
         tx,
         { invoiceNumber: "FA-2", type: "credit", invoiceDate: `${CURRENT_YEAR}-03-10`, customerName: "Kund AB" },
-        [{ articleGroupId: null, lineAmount: 400, vatAmount: 100, vatRate: 25 }],
+        [{ articleGroupId: null, lineAmount: 400, vatAmount: 100, vatRate: 25, vatCode: mp25 }],
         user.id
       )
     );
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.sales05).toBe(600);
-    expect(report.boxes.vatOut25_10).toBe(150);
-    expect(report.boxes.vatToPay49).toBe(150);
+    expect(report.boxes["05"]).toBe(600);
+    expect(report.boxes["10"]).toBe(150);
+    expect(report.boxes["49"]).toBe(150);
   });
 
   it("manual verifications on a configured VAT account count (account-based, not document-based)", async () => {
@@ -302,7 +300,7 @@ describe("vat report — box computation", () => {
     ]);
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.vatOut25_10).toBe(75);
+    expect(report.boxes["10"]).toBe(75);
   });
 
   it("ruta 49 goes negative on a momsfordran period", async () => {
@@ -311,7 +309,7 @@ describe("vat report — box computation", () => {
     await bookPurchase(user.id, `${CURRENT_YEAR}-03-10`, 800, 200);
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.vatToPay49).toBe(round2(25 - 200));
+    expect(report.boxes["49"]).toBe(round2(25 - 200));
   });
 
   it("a quarter report equals the sum of its three month reports", async () => {
@@ -333,10 +331,10 @@ describe("vat report — box computation", () => {
     expect(q1.periods).toHaveLength(3);
   });
 
-  it("a VAT role moved to an account without its box is reported, and the momsomföring still empties the configured account", async () => {
+  it("a momskod pointing at an account without its box is reported, and the box-driven omföring leaves that account alone", async () => {
     const { user } = await setupEconomy();
     await service.createAccount({ number: "2611", name: "Utgående moms 25 % (egen)" });
-    postingSettings = { ...postingSettings, postingVatOut25: "2611" };
+    await db.update(vatCodes).set({ outputVatAccount: "2611" }).where(eq(vatCodes.code, "MP25"));
     await bookManual(user.id, `${CURRENT_YEAR}-03-05`, [
       ["1930", 125],
       ["2611", -125],
@@ -344,54 +342,86 @@ describe("vat report — box computation", () => {
 
     const report = await vatReport.getReport(MAR);
     // 2611 has no box (unknown number): not in ruta 10, but visible twice.
-    expect(report.boxes.vatOut25_10).toBe(0);
+    expect(report.boxes["10"]).toBe(0);
     expect(report.warnings.unassignedAccounts).toEqual([
       { accountNumber: "2611", accountName: "Utgående moms 25 % (egen)", net: 125 },
     ]);
-    expect(report.warnings.roleBoxMismatches).toEqual([
-      { role: "vatOut25", accountNumber: "2611", expectedBox: "10", actualBox: null },
+    expect(report.warnings.vatCodeBoxMismatches).toEqual([
+      {
+        code: "MP25",
+        slot: "outputVat",
+        accountNumber: "2611",
+        expectedBox: "10",
+        actualBox: null,
+        problem: "box_mismatch",
+        message: "Momskod MP25: konto 2611 har ingen ruta men ska ha ruta 10",
+      },
     ]);
-
-    const result = await vatReport.settle(MAR, user.id);
-    const rows = await db.execute<{ number: string; debit: string }>(sql`
-      SELECT a.number, r.debit FROM verification_rows r JOIN accounts a ON a.id = r.account_id
-      WHERE r.verification_id = ${result.verification.id} AND a.number = '2611'`);
-    expect(Number(rows[0]!.debit)).toBe(125);
+    // Only accounts with a box that enters ruta 49 are emptied — none moved.
+    expect(report.settlement.rows).toEqual([]);
+    await expect(vatReport.settle(MAR, user.id)).rejects.toBeInstanceOf(ZeroAmountPostingError);
   });
 
-  it("tagging the moved VAT account with box 10 clears both warnings", async () => {
+  it("tagging the account with box 10 clears both warnings and the omföring empties it", async () => {
     const { user } = await setupEconomy();
     await service.createAccount({ number: "2611", name: "Utgående moms 25 % (egen)", vatBox: "10" });
-    postingSettings = { ...postingSettings, postingVatOut25: "2611" };
+    await db.update(vatCodes).set({ outputVatAccount: "2611" }).where(eq(vatCodes.code, "MP25"));
     await bookManual(user.id, `${CURRENT_YEAR}-03-05`, [
       ["1930", 125],
       ["2611", -125],
     ]);
 
     const report = await vatReport.getReport(MAR);
-    expect(report.boxes.vatOut25_10).toBe(125);
-    expect(report.warnings).toEqual({ unassignedAccounts: [], roleBoxMismatches: [] });
+    expect(report.boxes["10"]).toBe(125);
+    expect(report.warnings).toEqual({ unassignedAccounts: [], vatCodeBoxMismatches: [], ruleBoxMismatches: [] });
+
+    const result = await vatReport.settle(MAR, user.id);
+    expect(await ledgerNet("2611", MAR.from, MAR.to)).toBe(0);
+    expect(result.verification.displayNumber).toBe(`M-${CURRENT_YEAR}-1`);
   });
 
-  it("rejects a configuration where two VAT roles share one account", async () => {
+  it("rejects a redovisningskonto that itself carries a box the omföring empties", async () => {
     await setupEconomy();
-    postingSettings = { ...postingSettings, postingVatIn: "2610" };
+    postingSettings = { ...postingSettings, postingVatSettlement: "2640" };
 
     await expect(vatReport.getReport(MAR)).rejects.toBeInstanceOf(VatAccountsNotDistinctError);
   });
 
-  it("exposes the four VAT accounts' movements as the settlement preview", async () => {
+  it("exposes every moved account with a settled box, ruta 49 in kronor and the öresutjämning as the settlement preview", async () => {
     const { user } = await setupEconomy();
     await bookSale(user.id, `${CURRENT_YEAR}-03-05`, 1000, "2610", 25);
     await bookPurchase(user.id, `${CURRENT_YEAR}-03-10`, 400, 100);
+    // Omvänd moms on an EU purchase: 2614 (ruta 30) and 2645 (ruta 48).
+    await bookManual(user.id, `${CURRENT_YEAR}-03-12`, [
+      ["4515", 1000.6],
+      ["2645", 250.15],
+      ["2614", -250.15],
+      ["2440", -1000.6],
+    ]);
 
     const report = await vatReport.getReport(MAR);
-    expect(report.vatAccounts).toHaveLength(4);
-    const byRole = Object.fromEntries(report.vatAccounts.map((row) => [row.role, row]));
-    expect(byRole["vatOut25"]).toMatchObject({ accountNumber: "2610", debit: 0, credit: 250, net: -250 });
-    expect(byRole["vatIn"]).toMatchObject({ accountNumber: "2640", debit: 100, credit: 0, net: 100 });
-    expect(byRole["vatOut12"]).toMatchObject({ accountNumber: "2620", debit: 0, credit: 0, net: 0 });
+    expect(report.settlement.rows.map((row) => [row.accountNumber, row.vatBox, row.net])).toEqual([
+      ["2610", "10", -250],
+      ["2614", "30", -250.15],
+      ["2640", "48", 100],
+      ["2645", "48", 250.15],
+    ]);
+    expect(report.boxes["20"]).toBe(1000.6);
+    expect(report.roundedBoxes["20"]).toBe(1001);
+    // (250 + 250) − (100 + 250) in kronor.
+    expect(report.roundedBoxes["49"]).toBe(150);
+    expect(report.settlement.settlementAccount).toEqual({ number: "2650", name: "Redovisningskonto för moms", amount: 150 });
+    expect(report.settlement.roundingAccount).toEqual({ number: "3740", name: "Öres- och kronutjämning", amount: 0 });
     expect(report.settlements).toEqual([]);
+  });
+
+  it("accepts a whole fiscal year (helår) as the range", async () => {
+    const { user } = await setupEconomy();
+    await bookSale(user.id, `${CURRENT_YEAR}-02-05`, 100, "2610", 25);
+    await bookSale(user.id, `${CURRENT_YEAR}-11-05`, 100, "2610", 25);
+    const report = await vatReport.getReport({ from: `${CURRENT_YEAR}-01-01`, to: `${CURRENT_YEAR}-12-31` });
+    expect(report.periods).toHaveLength(12);
+    expect(report.boxes["10"]).toBe(50);
   });
 });
 
@@ -424,6 +454,28 @@ describe("vat report — settlement", () => {
     expect(await ledgerNet("2650", MAR.from, MAR.to)).toBe(-150);
   });
 
+  it("puts ruta 49 in whole kronor on 2650 and the öre difference on öres- och kronutjämning", async () => {
+    const { user } = await setupEconomy();
+    await bookManual(user.id, `${CURRENT_YEAR}-03-05`, [
+      ["1510", 1252.4],
+      ["3001", -1002],
+      ["2610", -250.4],
+    ]);
+    await bookPurchase(user.id, `${CURRENT_YEAR}-03-10`, 400, 100.3);
+
+    const report = await vatReport.getReport(MAR);
+    expect(report.boxes["49"]).toBe(150.1);
+    // 250 − 100 on the rounded boxes.
+    expect(report.roundedBoxes["49"]).toBe(150);
+    expect(report.settlement.roundingAccount.amount).toBe(0.1);
+
+    await vatReport.settle(MAR, user.id);
+    expect(await ledgerNet("2610", MAR.from, MAR.to)).toBe(0);
+    expect(await ledgerNet("2640", MAR.from, MAR.to)).toBe(0);
+    expect(await ledgerNet("2650", MAR.from, MAR.to)).toBe(-150);
+    expect(await ledgerNet("3740", MAR.from, MAR.to)).toBe(-0.1);
+  });
+
   it("validates period coverage like the report does", async () => {
     const { user } = await setupEconomy();
     await expect(vatReport.settle({ from: `${CURRENT_YEAR}-03-15`, to: MAR.to }, user.id)).rejects.toBeInstanceOf(
@@ -431,10 +483,10 @@ describe("vat report — settlement", () => {
     );
   });
 
-  it("refuses a misconfiguration where two VAT roles share one account", async () => {
+  it("refuses a redovisningskonto carrying a box the omföring empties", async () => {
     const { user } = await setupEconomy();
     await bookSale(user.id, `${CURRENT_YEAR}-03-05`, 100, "2610", 25);
-    postingSettings = { ...postingSettings, postingVatIn: "2610" };
+    postingSettings = { ...postingSettings, postingVatSettlement: "2610" };
 
     await expect(vatReport.settle(MAR, user.id)).rejects.toBeInstanceOf(VatAccountsNotDistinctError);
     expect(await db.select().from(vatSettlements)).toHaveLength(0);
@@ -449,7 +501,7 @@ describe("vat report — settlement", () => {
     const after = await vatReport.getReport(MAR);
 
     expect(after.boxes).toEqual(before.boxes);
-    expect(after.vatAccounts).toEqual(before.vatAccounts);
+    expect(after.settlement).toEqual(before.settlement);
     expect(after.settlements).toHaveLength(1);
     expect(after.settlements[0]).toMatchObject({
       fromDate: MAR.from,
@@ -496,7 +548,7 @@ describe("vat report — settlement", () => {
     await reverseAndBook(first.verification.id, user.id);
 
     const report = await vatReport.getReport(JAN);
-    expect(report.boxes.vatOut25_10).toBe(350);
+    expect(report.boxes["10"]).toBe(350);
     expect(report.settlements[0]).toMatchObject({ reversed: true });
     expect(report.settlements[0]!.reversedBy).not.toBeNull();
 
@@ -548,8 +600,8 @@ describe("vat report — settlement", () => {
 
     const todayPeriod = await repo.findPeriodForDate(today);
     const report = await vatReport.getReport({ from: todayPeriod!.startDate, to: todayPeriod!.endDate });
-    expect(report.boxes.vatOut25_10).toBe(-25);
-    expect(report.boxes.sales05).toBe(-100);
+    expect(report.boxes["10"]).toBe(-25);
+    expect(report.boxes["05"]).toBe(-100);
   });
 
   it("settles a quarter whose earlier months are locked, but refuses when the end month is locked", async () => {

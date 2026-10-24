@@ -199,8 +199,8 @@ describe("steg 4 — periodiseringar", () => {
     const vatReport = createVatReportService({ db, poster: testYearEndPoster, settings: { read: async () => DEFAULT_POSTING_SETTINGS } });
     const december = await vatReport.getReport({ from: `${YEAR}-12-01`, to: `${YEAR}-12-31` });
     const january = await vatReport.getReport({ from: `${NEXT_YEAR}-01-01`, to: `${NEXT_YEAR}-01-31` });
-    expect(december.boxes.sales05).toBe(1000);
-    expect(january.boxes.sales05).toBe(0);
+    expect(december.boxes["05"]).toBe(1000);
+    expect(january.boxes["05"]).toBe(0);
     // The accrual did book on 3001 in both months — the report just ignores it.
     expect(await netOn("3001", `${YEAR}-12-01`, `${YEAR}-12-31`)).toBe(-13000);
     expect(await netOn("3001", `${NEXT_YEAR}-01-01`, `${NEXT_YEAR}-01-31`)).toBe(12000);

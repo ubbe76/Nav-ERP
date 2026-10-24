@@ -9,6 +9,7 @@ import {
   fixedAssets,
   postingRules,
   users,
+  vatCodes,
   verificationFiles,
   verificationRows,
   verifications,
@@ -121,12 +122,10 @@ export type VerificationRowWrite = {
   description: string | null;
 };
 
-// A posting rule ready to write — vatRate is already stringified (numeric
-// column, same convention as VerificationRowWrite's debit/credit) by the
-// service before this type is ever constructed.
+// A posting rule ready to write — vatCodeId null = "Alla momskoder".
 export type PostingRuleWrite = {
   articleGroupId: string;
-  vatRate: string | null;
+  vatCodeId: string | null;
   revenueAccountId: string | null;
   costAccountId: string | null;
 };
@@ -1003,14 +1002,14 @@ export function createEconomyRepository(db: Db) {
     },
 
     // List-all, no pagination (small register, same shape as listSeries) —
-    // joined with the article group's code/name and BOTH accounts'
-    // number/name via two aliased instances of `accounts` (a rule can
-    // reference two different accounts, so one join per side, same trick as
-    // invoiceRepository.listInvoiceableOrders's aliased `units`). Either
-    // account may be null (revenue-only or cost-only rule), hence left joins.
-    // Ordered by group code, then vatRate ascending with NULLS LAST so a
-    // group's catch-all (null) rule always sorts after its rate-specific
-    // rules.
+    // joined with the article group's code/name, the momskod's code/name and
+    // BOTH accounts' number/name/momsruta via two aliased instances of
+    // `accounts` (a rule can reference two different accounts, so one join
+    // per side, same trick as invoiceRepository.listInvoiceableOrders's
+    // aliased `units`). Either account may be null (revenue-only or
+    // cost-only rule), hence left joins. Ordered by group code, then momskod
+    // with NULLS LAST so a group's "Alla momskoder" rule always sorts after
+    // its code-specific rules.
     async listPostingRules() {
       const revenueAccounts = alias(accounts, "revenue_accounts");
       const costAccounts = alias(accounts, "cost_accounts");
@@ -1019,16 +1018,26 @@ export function createEconomyRepository(db: Db) {
           ...getTableColumns(postingRules),
           groupCode: articleGroups.code,
           groupName: articleGroups.name,
+          vatCode: vatCodes.code,
+          vatCodeName: vatCodes.name,
           revenueAccountNumber: revenueAccounts.number,
           revenueAccountName: revenueAccounts.name,
+          revenueAccountVatBox: revenueAccounts.vatBox,
           costAccountNumber: costAccounts.number,
           costAccountName: costAccounts.name,
+          costAccountVatBox: costAccounts.vatBox,
         })
         .from(postingRules)
         .innerJoin(articleGroups, eq(articleGroups.id, postingRules.articleGroupId))
+        .leftJoin(vatCodes, eq(vatCodes.id, postingRules.vatCodeId))
         .leftJoin(revenueAccounts, eq(revenueAccounts.id, postingRules.revenueAccountId))
         .leftJoin(costAccounts, eq(costAccounts.id, postingRules.costAccountId))
-        .orderBy(asc(articleGroups.code), sql`${postingRules.vatRate} ASC NULLS LAST`);
+        .orderBy(asc(articleGroups.code), sql`${vatCodes.code} ASC NULLS LAST`);
+    },
+
+    async findVatCodeById(id: string) {
+      const [row] = await db.select().from(vatCodes).where(eq(vatCodes.id, id));
+      return row ?? null;
     },
 
     async createPostingRule(input: PostingRuleWrite) {

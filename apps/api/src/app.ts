@@ -37,6 +37,7 @@ import { createEconomyRepository } from "./modules/economy/repository/economy.re
 import { createEconomyService } from "./modules/economy/service/economy.service.js";
 import { createVerificationPoster } from "./modules/economy/service/verification-poster.js";
 import { createVatReportService } from "./modules/economy/service/vat-report.service.js";
+import { createVatCodeService } from "./modules/economy/service/vat-code.service.js";
 import { createFinancialReportsService } from "./modules/economy/service/financial-reports.service.js";
 import { createSieService } from "./modules/economy/service/sie.service.js";
 import { economyRoutes } from "./modules/economy/routes/economy.routes.js";
@@ -271,8 +272,9 @@ export function buildApp(database: Db = db) {
     },
   });
   // Automatkontering (B2) — wired into the sales/purchase services that post
-  // invoices; readPostingSettings (system module leaf) supplies the 14
-  // standard posting accounts, read through the poster's own transaction.
+  // invoices; readPostingSettings (system module leaf) supplies the 9
+  // standard posting accounts, read through the poster's own transaction
+  // (the revenue/VAT accounts come with each row's momskod).
   const verificationPoster = createVerificationPoster({ read: readPostingSettings });
   // Outgoing email + printable PDFs (SMTP config and company header both
   // live in the system module).
@@ -653,7 +655,12 @@ export function buildApp(database: Db = db) {
     db: database,
     poster: verificationPoster,
     settings: { read: readPostingSettings },
+    company: { orgNumber: async () => (await systemService.getCompanyInfo())?.orgNumber ?? null },
+    audit: auditRepository,
   });
+  // Momskoder: the catalog's per-company settings and the importmoms posting
+  // (series IM via the shared poster).
+  const vatCodeService = createVatCodeService({ db: database, poster: verificationPoster, audit: auditRepository });
   // Ekonomirapporter (B6a): balans-/resultaträkning, flerkontoshuvudbok och
   // verifikatlista — read-only, with PDF drawn in the shared A4 template.
   const financialReportsService = createFinancialReportsService({
@@ -776,7 +783,13 @@ export function buildApp(database: Db = db) {
         await registerModule(
           protectedRoutes,
           economyRoutes,
-          { service: economyService, vatReport: vatReportService, reports: financialReportsService, sie: sieService },
+          {
+            service: economyService,
+            vatReport: vatReportService,
+            reports: financialReportsService,
+            sie: sieService,
+            vatCodes: vatCodeService,
+          },
           { read: ["ekonomi"], write: ["ekonomi"] }
         );
         await registerModule(protectedRoutes, fixedAssetRoutes, { service: fixedAssetService }, { read: ["ekonomi"], write: ["ekonomi"] });

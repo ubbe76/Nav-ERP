@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
 import {
   accounts,
@@ -11,7 +11,7 @@ import {
   verifications,
   verificationSeries,
 } from "@navet/db";
-import { round2 } from "@navet/shared";
+import { VAT_CODES, round2, type VatCode } from "@navet/shared";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createEconomyRepository } from "../src/modules/economy/repository/economy.repository.js";
 import { createEconomyService } from "../src/modules/economy/service/economy.service.js";
@@ -27,7 +27,17 @@ import {
   UnknownVatRateError,
   ZeroAmountPostingError,
   createVerificationPoster,
+  type PostingVatCode,
 } from "../src/modules/economy/service/verification-poster.js";
+import { postingVatCode } from "./helpers/vat-codes.js";
+
+// Every momskod as the poster takes it, loaded once (the seeded vat_codes
+// rows are never truncated).
+const C = {} as Record<VatCode, PostingVatCode>;
+beforeAll(async () => {
+  for (const code of VAT_CODES) C[code] = await postingVatCode(code);
+  SUPPLIER_DOC.vatCode = C.MP25;
+});
 
 const repo = createEconomyRepository(db);
 const authRepo = createAuthRepository(db);
@@ -41,20 +51,12 @@ const service = createEconomyService(repo, { log: async () => {} });
 // truncated (it is shared, sequence-like base data).
 const TRUNCATE = sql`TRUNCATE verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, posting_rules, article_groups, audit_log, users CASCADE`;
 
-// The 15 posting accounts as readPostingSettings resolves them (codeSetting
+// The posting accounts as readPostingSettings resolves them (codeSetting
 // fallbacks — every field is always a populated 4-digit string). Individual
 // tests mutate the live copy to point a role at a missing account.
 const DEFAULT_POSTING_SETTINGS = {
   postingAccountsReceivable: "1510",
-  postingVatOut25: "2610",
-  postingVatOut12: "2620",
-  postingVatOut6: "2630",
-  postingRevenue25: "3001",
-  postingRevenue12: "3002",
-  postingRevenue6: "3003",
-  postingRevenue0: "3004",
   postingAccountsPayable: "2440",
-  postingVatIn: "2640",
   postingDefaultCost: "4010",
   postingBank: "1930",
   postingReminderFeeAccount: "3540",
@@ -128,6 +130,8 @@ const SUPPLIER_DOC = {
   netAmount: 1000,
   vatAmount: 250,
   grossAmount: 1250,
+  // Filled in beforeAll (the vat_codes rows' ids are per database).
+  vatCode: undefined as unknown as PostingVatCode,
 };
 
 // The bank account is chosen per payment (snapshot on the payment row), so it
@@ -205,7 +209,7 @@ describe("verification poster — customer invoice", () => {
       poster.postCustomerInvoice(
         tx,
         CUSTOMER_DOC,
-        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
@@ -230,13 +234,13 @@ describe("verification poster — customer invoice", () => {
     ]);
   });
 
-  it("uses the exact (group, rate) posting rule for the revenue account", async () => {
+  it("uses the exact (group, momskod) posting rule for the revenue account", async () => {
     const { user } = await setupPosting();
     const group = await makeArticleGroup("310", "Diskbänkar");
     const revenue = await accountByNumber("3105");
     await service.createPostingRule({
       articleGroupId: group.id,
-      vatRate: 25,
+      vatCodeId: C.MP25.id,
       revenueAccountId: revenue.id,
       costAccountId: null,
     });
@@ -245,7 +249,7 @@ describe("verification poster — customer invoice", () => {
       poster.postCustomerInvoice(
         tx,
         CUSTOMER_DOC,
-        [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
@@ -256,13 +260,13 @@ describe("verification poster — customer invoice", () => {
     expect(byAccount(rows)["3001"]).toBeUndefined();
   });
 
-  it("falls back to the group's catch-all (null rate) rule when no rate-specific rule matches", async () => {
+  it("falls back to the group's catch-all (Alla momskoder) rule for a domestic code", async () => {
     const { user } = await setupPosting();
     const group = await makeArticleGroup("310", "Diskbänkar");
     const revenue = await accountByNumber("3108");
     await service.createPostingRule({
       articleGroupId: group.id,
-      vatRate: null,
+      vatCodeId: null,
       revenueAccountId: revenue.id,
       costAccountId: null,
     });
@@ -271,7 +275,7 @@ describe("verification poster — customer invoice", () => {
       poster.postCustomerInvoice(
         tx,
         CUSTOMER_DOC,
-        [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
@@ -288,10 +292,10 @@ describe("verification poster — customer invoice", () => {
     const catchAllRevenue = await accountByNumber("3108");
     // Rate-specific rule is cost-only -> ignored for revenue; the catch-all
     // rule below is the next step, then the default account.
-    await service.createPostingRule({ articleGroupId: group.id, vatRate: 25, revenueAccountId: null, costAccountId: cost.id });
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: C.MP25.id, revenueAccountId: null, costAccountId: cost.id });
     await service.createPostingRule({
       articleGroupId: group.id,
-      vatRate: null,
+      vatCodeId: null,
       revenueAccountId: catchAllRevenue.id,
       costAccountId: null,
     });
@@ -300,7 +304,7 @@ describe("verification poster — customer invoice", () => {
       poster.postCustomerInvoice(
         tx,
         CUSTOMER_DOC,
-        [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
@@ -310,17 +314,17 @@ describe("verification poster — customer invoice", () => {
     expect(byAccount(rows)["3108"]).toEqual({ debit: 0, credit: 1000 });
   });
 
-  it("falls back to the settings default when the group has no usable rule at all", async () => {
+  it("falls back to the momskod's revenue account when the group has no usable rule at all", async () => {
     const { user } = await setupPosting();
     const group = await makeArticleGroup("310", "Diskbänkar");
     const cost = await accountByNumber("4600");
-    await service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: null, costAccountId: cost.id });
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: null, costAccountId: cost.id });
 
     const posted = await db.transaction((tx) =>
       poster.postCustomerInvoice(
         tx,
         CUSTOMER_DOC,
-        [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: group.id, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
@@ -338,10 +342,10 @@ describe("verification poster — customer invoice", () => {
         tx,
         CUSTOMER_DOC,
         [
-          { articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 },
-          { articleGroupId: null, lineAmount: 500, vatAmount: 60, vatRate: 12 },
-          { articleGroupId: null, lineAmount: 200, vatAmount: 12, vatRate: 6 },
-          { articleGroupId: null, lineAmount: 100, vatAmount: 0, vatRate: 0 },
+          { articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 },
+          { articleGroupId: null, lineAmount: 500, vatAmount: 60, vatRate: 12, vatCode: C.MP12 },
+          { articleGroupId: null, lineAmount: 200, vatAmount: 12, vatRate: 6, vatCode: C.MP6 },
+          { articleGroupId: null, lineAmount: 100, vatAmount: 0, vatRate: 0, vatCode: C.MF },
         ],
         user.id
       )
@@ -370,8 +374,8 @@ describe("verification poster — customer invoice", () => {
         tx,
         CUSTOMER_DOC,
         [
-          { articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 },
-          { articleGroupId: null, lineAmount: 400, vatAmount: 100, vatRate: 25 },
+          { articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 },
+          { articleGroupId: null, lineAmount: 400, vatAmount: 100, vatRate: 25, vatCode: C.MP25 },
         ],
         user.id
       )
@@ -393,7 +397,7 @@ describe("verification poster — customer invoice", () => {
       poster.postCustomerInvoice(
         tx,
         { ...CUSTOMER_DOC, invoiceNumber: "FA-1002", type: "credit" },
-        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
@@ -418,7 +422,7 @@ describe("verification poster — customer invoice", () => {
         poster.postCustomerInvoice(
           tx,
           CUSTOMER_DOC,
-          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 215, vatRate: 21.5 }],
+          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 215, vatRate: 21.5, vatCode: C.MP25 }],
           user.id
         )
       )
@@ -427,16 +431,15 @@ describe("verification poster — customer invoice", () => {
     expect(await db.select().from(verifications)).toHaveLength(0);
   });
 
-  it("rejects a settings account number that does not exist (MissingPostingAccountError)", async () => {
+  it("rejects a momskod account number that does not exist (MissingPostingAccountError)", async () => {
     const { user } = await setupPosting();
-    postingSettings.postingRevenue25 = "9999";
 
     const error = await db
       .transaction((tx) =>
         poster.postCustomerInvoice(
           tx,
           CUSTOMER_DOC,
-          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: { ...C.MP25, revenueAccount: "9999" } }],
           user.id
         )
       )
@@ -457,7 +460,7 @@ describe("verification poster — customer invoice", () => {
         poster.postCustomerInvoice(
           tx,
           CUSTOMER_DOC,
-          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
           user.id
         )
       )
@@ -477,7 +480,7 @@ describe("verification poster — customer invoice", () => {
         poster.postCustomerInvoice(
           tx,
           CUSTOMER_DOC,
-          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
           user.id
         )
       )
@@ -494,7 +497,7 @@ describe("verification poster — customer invoice", () => {
         poster.postCustomerInvoice(
           tx,
           { ...CUSTOMER_DOC, invoiceDate: UNCOVERED_DATE },
-          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+          [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
           user.id
         )
       )
@@ -509,7 +512,7 @@ describe("verification poster — customer invoice", () => {
         poster.postCustomerInvoice(
           tx,
           CUSTOMER_DOC,
-          [{ articleGroupId: null, lineAmount: 0, vatAmount: 0, vatRate: 25 }],
+          [{ articleGroupId: null, lineAmount: 0, vatAmount: 0, vatRate: 25, vatCode: C.MP25 }],
           user.id
         )
       )
@@ -523,7 +526,7 @@ describe("verification poster — customer invoice", () => {
       poster.postCustomerInvoice(
         tx,
         CUSTOMER_DOC,
-        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
@@ -542,7 +545,7 @@ describe("verification poster — customer invoice", () => {
 describe("verification poster — series and numbering", () => {
   it("lazily creates the F series once and reuses it, numbering consecutively", async () => {
     const { user } = await setupPosting();
-    const rows = [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }];
+    const rows = [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }];
 
     const first = await db.transaction((tx) => poster.postCustomerInvoice(tx, CUSTOMER_DOC, rows, user.id));
     const second = await db.transaction((tx) =>
@@ -564,12 +567,12 @@ describe("verification poster — series and numbering", () => {
       poster.postCustomerInvoice(
         tx,
         CUSTOMER_DOC,
-        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
     const supplier = await db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, vatRate: 25, lineAmount: 1000 }], user.id)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, lineAmount: 1000, vatCode: null }], user.id)
     );
 
     // Numbering is per (series, fiscal year) — L starts over at 1.
@@ -580,7 +583,7 @@ describe("verification poster — series and numbering", () => {
 
   it("burns no verification number when the caller's transaction rolls back", async () => {
     const { user } = await setupPosting();
-    const rows = [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }];
+    const rows = [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }];
 
     await expect(
       db.transaction(async (tx) => {
@@ -603,7 +606,7 @@ describe("verification poster — supplier invoice", () => {
     const { user } = await setupPosting();
 
     const posted = await db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, vatRate: 25, lineAmount: 1000 }], user.id)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, lineAmount: 1000, vatCode: null }], user.id)
     );
 
     const verification = await loadVerification(posted.verificationId);
@@ -623,10 +626,10 @@ describe("verification poster — supplier invoice", () => {
     const { user } = await setupPosting();
     const group = await makeArticleGroup("310", "Diskbänkar");
     const cost = await accountByNumber("4600");
-    await service.createPostingRule({ articleGroupId: group.id, vatRate: 25, revenueAccountId: null, costAccountId: cost.id });
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: C.MP25.id, revenueAccountId: null, costAccountId: cost.id });
 
     const posted = await db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: group.id, vatRate: 25, lineAmount: 1000 }], user.id)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: group.id, lineAmount: 1000, vatCode: null }], user.id)
     );
 
     const { rows } = await loadVerification(posted.verificationId);
@@ -639,10 +642,10 @@ describe("verification poster — supplier invoice", () => {
     const { user } = await setupPosting();
     const group = await makeArticleGroup("310", "Diskbänkar");
     const cost = await accountByNumber("4600");
-    await service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: null, costAccountId: cost.id });
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: null, costAccountId: cost.id });
 
     const posted = await db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: group.id, vatRate: 25, lineAmount: 900 }], user.id)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: group.id, lineAmount: 900, vatCode: null }], user.id)
     );
 
     const { rows } = await loadVerification(posted.verificationId);
@@ -655,10 +658,10 @@ describe("verification poster — supplier invoice", () => {
     const { user } = await setupPosting();
     const group = await makeArticleGroup("310", "Diskbänkar");
     const cost = await accountByNumber("4600");
-    await service.createPostingRule({ articleGroupId: group.id, vatRate: null, revenueAccountId: null, costAccountId: cost.id });
+    await service.createPostingRule({ articleGroupId: group.id, vatCodeId: null, revenueAccountId: null, costAccountId: cost.id });
 
     const posted = await db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: group.id, vatRate: 25, lineAmount: 1100 }], user.id)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: group.id, lineAmount: 1100, vatCode: null }], user.id)
     );
 
     const { rows } = await loadVerification(posted.verificationId);
@@ -682,7 +685,7 @@ describe("verification poster — supplier invoice", () => {
     const { user } = await setupPosting();
 
     const posted = await db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, vatRate: null, lineAmount: 1000 }], user.id)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, lineAmount: 1000, vatCode: null }], user.id)
     );
 
     const { rows } = await loadVerification(posted.verificationId);
@@ -697,7 +700,7 @@ describe("verification poster — supplier invoice", () => {
       poster.postSupplierInvoice(
         tx,
         { ...SUPPLIER_DOC, vatAmount: 0, grossAmount: 1000 },
-        [{ articleGroupId: null, vatRate: 0, lineAmount: 1000 }],
+        [{ articleGroupId: null, lineAmount: 1000, vatCode: null }],
         user.id
       )
     );
@@ -718,7 +721,7 @@ describe("verification poster — supplier invoice", () => {
         poster.postSupplierInvoice(
           tx,
           { ...SUPPLIER_DOC, grossAmount: 1300 },
-          [{ articleGroupId: null, vatRate: 25, lineAmount: 1000 }],
+          [{ articleGroupId: null, lineAmount: 1000, vatCode: null }],
           user.id
         )
       )
@@ -735,7 +738,7 @@ describe("verification poster — supplier invoice", () => {
         poster.postSupplierInvoice(
           tx,
           { ...SUPPLIER_DOC, currency: "EUR" },
-          [{ articleGroupId: null, vatRate: 25, lineAmount: 1000 }],
+          [{ articleGroupId: null, lineAmount: 1000, vatCode: null }],
           user.id
         )
       )
@@ -767,7 +770,7 @@ describe("verification poster — supplier invoice", () => {
 
     await expect(
       db.transaction((tx) =>
-        poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, vatRate: 25, lineAmount: 1000 }], user.id)
+        poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, lineAmount: 1000, vatCode: null }], user.id)
       )
     ).rejects.toBeInstanceOf(AccountingPeriodLockedError);
   });
@@ -776,7 +779,7 @@ describe("verification poster — supplier invoice", () => {
     const { user } = await setupPosting();
 
     const posted = await db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, vatRate: 25, lineAmount: 1000 }], user.id)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, lineAmount: 1000, vatCode: null }], user.id)
     );
 
     const entries = await db.select().from(auditLog).where(eq(auditLog.entityType, "verification"));
@@ -789,7 +792,7 @@ describe("verification poster — supplier invoice", () => {
 describe("verification poster — reversal", () => {
   async function postSupplier(userId: string) {
     return db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, vatRate: 25, lineAmount: 1000 }], userId)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, lineAmount: 1000, vatCode: null }], userId)
     );
   }
 
@@ -1398,7 +1401,7 @@ describe("verification poster — kundreskontra series K", () => {
       poster.postCustomerInvoice(
         tx,
         CUSTOMER_DOC,
-        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25 }],
+        [{ articleGroupId: null, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: C.MP25 }],
         user.id
       )
     );
@@ -1860,7 +1863,7 @@ describe("verification poster — leverantörsreskontra series U", () => {
     const { user } = await setupPosting();
 
     const invoice = await db.transaction((tx) =>
-      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, vatRate: 25, lineAmount: 1000 }], user.id)
+      poster.postSupplierInvoice(tx, SUPPLIER_DOC, [{ articleGroupId: null, lineAmount: 1000, vatCode: null }], user.id)
     );
     const first = await db.transaction((tx) =>
       poster.postSupplierPayment(tx, SUPPLIER_PAYMENT_DOC, [{ appliedAmount: 125, writeOffAmount: 0 }], user.id)
@@ -1951,6 +1954,7 @@ describe("verification poster — vat settlement", () => {
       { accountNumber: "2610", net: -1000 },
       { accountNumber: "2640", net: 400 },
     ],
+    payable: 600,
   };
 
   it("books a balanced M verification on the range's end date, netting the accounts onto 2650", async () => {
@@ -1984,6 +1988,7 @@ describe("verification poster — vat settlement", () => {
             { accountNumber: "2610", net: -100 },
             { accountNumber: "2640", net: 400 },
           ],
+          payable: -300,
         },
         user.id
       )
@@ -2006,6 +2011,7 @@ describe("verification poster — vat settlement", () => {
             { accountNumber: "2610", net: -400 },
             { accountNumber: "2640", net: 400 },
           ],
+          payable: 0,
         },
         user.id
       )
@@ -2039,6 +2045,39 @@ describe("verification poster — vat settlement", () => {
 
     const verification = await loadVerification(result.verificationId);
     expect(Object.keys(byAccount(verification.rows)).sort()).toEqual(["2610", "2640", "2650"]);
+  });
+
+  it("books the öre difference between the accounts and ruta 49 in whole kronor on öres- och kronutjämning", async () => {
+    const { user } = await setupPosting();
+
+    const result = await db.transaction((tx) =>
+      poster.postVatSettlement(
+        tx,
+        {
+          ...SETTLEMENT_DOC,
+          movements: [
+            { accountNumber: "2610", net: -1000.4 },
+            { accountNumber: "2614", net: -50.3 },
+            { accountNumber: "2645", net: 50.3 },
+            { accountNumber: "2640", net: 399.8 },
+          ],
+          // 1000 − 400 (rounded boxes) = 600, the öre sum is 600.60.
+          payable: 600,
+        },
+        user.id
+      )
+    );
+
+    const verification = await loadVerification(result.verificationId);
+    expectBalanced(verification.rows);
+    expect(byAccount(verification.rows)).toEqual({
+      "2610": { debit: 1000.4, credit: 0 },
+      "2614": { debit: 50.3, credit: 0 },
+      "2645": { debit: 0, credit: 50.3 },
+      "2640": { debit: 0, credit: 399.8 },
+      "2650": { debit: 0, credit: 600 },
+      "3740": { debit: 0, credit: 0.6 },
+    });
   });
 
   it("throws ZeroAmountPostingError when every movement nets zero (nothing to omföra)", async () => {

@@ -18,6 +18,7 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   time_report: "Tidrapport",
   accounting_period: "Bokföringsperiod",
   verification: "Verifikat",
+  vat_code: "Momskod",
   // Sales/purchase (G1 Agent 1).
   sales_order: "Kundorder",
   sales_order_row: "Kundorderrad",
@@ -51,6 +52,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   demo_data_created: "Exempeldata skapad",
   created: "Skapad",
   updated: "Ändrad",
+  vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",
   set: "Satt",

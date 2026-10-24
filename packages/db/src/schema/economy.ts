@@ -46,7 +46,10 @@ export const accounts = pgTable(
   },
   (table) => [
     check("account_number_four_digits", sql`${table.number} ~ '^[0-9]{4}$'`),
-    check("account_vat_box_valid", sql`${table.vatBox} IN ('05', '10', '11', '12', '35', '36', '42', '48', 'none')`),
+    check(
+      "account_vat_box_valid",
+      sql`${table.vatBox} IN ('05', '06', '07', '08', '10', '11', '12', '20', '21', '22', '23', '24', '30', '31', '32', '35', '36', '37', '38', '39', '40', '41', '42', '48', '50', '60', '61', '62', 'none')`
+    ),
   ]
 );
 
@@ -184,14 +187,38 @@ export const verificationRows = pgTable(
   ]
 );
 
+// Momskoder (migration 0142): the company's own settings for each code of
+// the fixed catalog in @navet/shared's vat-codes.ts — one row per catalog
+// code, seeded by the migration, never inserted or deleted by the app. The
+// accounts are NUMBERS, not FKs (same model as the posting_* settings), so an
+// empty chart of accounts never blocks the seed; the poster resolves them
+// with its account resolver and reports a missing/inactive one. Only the
+// slots the catalog says the code uses may be set — validated in the
+// service.
+export const vatCodes = pgTable("vat_codes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: varchar("code", { length: 10 }).notNull().unique(),
+  name: varchar("name", { length: 100 }).notNull(),
+  invoiceText: varchar("invoice_text", { length: 255 }),
+  active: boolean("active").notNull().default(true),
+  revenueAccount: varchar("revenue_account", { length: 4 }),
+  outputVatAccount: varchar("output_vat_account", { length: 4 }),
+  inputVatAccount: varchar("input_vat_account", { length: 4 }),
+  costAccount: varchar("cost_account", { length: 4 }),
+  baseAccount: varchar("base_account", { length: 4 }),
+  baseCounterAccount: varchar("base_counter_account", { length: 4 }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Konteringsregler (B2 automatkontering): which revenue/cost account an
-// article group posts to, optionally split per VAT rate. vatRate = null
-// means "all rates" (the catch-all rule for the group); a rate-specific rule
-// takes precedence over it — the resolution order lives in the poster
-// service, not here. At least one of revenueAccountId/costAccountId must be
-// set (validated in zod/service) since a rule can be revenue-only or
-// cost-only. onDelete cascade: article groups have no delete endpoint today,
-// so this only fires from direct DB maintenance.
+// article group posts to, optionally split per momskod. vatCodeId = null
+// means "Alla momskoder" (the catch-all rule for the group) — the poster
+// applies it to the domestic codes only, and a code-specific rule takes
+// precedence over it; the resolution order lives in the poster service, not
+// here. At least one of revenueAccountId/costAccountId must be set
+// (validated in zod/service) since a rule can be revenue-only or cost-only.
+// onDelete cascade: article groups have no delete endpoint today, so this
+// only fires from direct DB maintenance.
 export const postingRules = pgTable(
   "posting_rules",
   {
@@ -199,24 +226,24 @@ export const postingRules = pgTable(
     articleGroupId: uuid("article_group_id")
       .notNull()
       .references(() => articleGroups.id, { onDelete: "cascade" }),
-    vatRate: numeric("vat_rate", { precision: 5, scale: 2 }),
+    vatCodeId: uuid("vat_code_id").references(() => vatCodes.id, { onDelete: "restrict" }),
     revenueAccountId: uuid("revenue_account_id").references(() => accounts.id, { onDelete: "restrict" }),
     costAccountId: uuid("cost_account_id").references(() => accounts.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Two partial indexes rather than one plain unique(articleGroupId, vatRate):
-    // Postgres treats NULL as distinct in a unique index, so a plain index
-    // would let a group collect unlimited null-rate ("all rates") rows. Each
-    // index therefore owns one half of the space — rate-specific rows here.
-    uniqueIndex("posting_rules_group_rate_unique")
-      .on(table.articleGroupId, table.vatRate)
-      .where(sql`${table.vatRate} IS NOT NULL`),
+    // Two partial indexes rather than one plain unique(articleGroupId,
+    // vatCodeId): Postgres treats NULL as distinct in a unique index, so a
+    // plain index would let a group collect unlimited "all codes" rows. Each
+    // index therefore owns one half of the space — code-specific rows here.
+    uniqueIndex("posting_rules_group_code_unique")
+      .on(table.articleGroupId, table.vatCodeId)
+      .where(sql`${table.vatCodeId} IS NOT NULL`),
     // ...and the catch-all row per group here, capped at one via a
     // single-column partial index.
-    uniqueIndex("posting_rules_group_norate_unique")
+    uniqueIndex("posting_rules_group_nocode_unique")
       .on(table.articleGroupId)
-      .where(sql`${table.vatRate} IS NULL`),
+      .where(sql`${table.vatCodeId} IS NULL`),
   ]
 );
 

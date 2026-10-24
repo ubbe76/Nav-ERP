@@ -2,11 +2,11 @@ import { z } from "zod";
 
 // Swedish VAT rates (moms) — the single source of truth since B5. A flat
 // value list rather than a database register: the set is fixed by law and
-// changes on a legislative timescale. If reverse charge/EU VAT ever arrives,
-// a proper momskod register replaces this file — until then every consumer
-// (article card, invoice rows, posting rules, the verification poster's
-// account maps) derives from these exports. The web app keeps a hand-synced
-// mirror in apps/web/lib/types.ts (Turbopack cannot import @navet/shared).
+// changes on a legislative timescale. An article carries a rate; how a
+// document row is taxed (which accounts, which declaration boxes, which
+// invoice text) is its momskod — vat-codes.ts, where each code has one of
+// these rates. The web app keeps a hand-synced mirror in apps/web/lib/types.ts
+// (Turbopack cannot import @navet/shared).
 export const vatRates = [25, 12, 6, 0] as const;
 export type VatRate = (typeof vatRates)[number];
 

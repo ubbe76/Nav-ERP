@@ -22,7 +22,7 @@ import {
 import { articleGroups, articles } from "./article";
 import { users } from "./auth";
 import { bankFileEntries } from "./banking";
-import { verifications } from "./economy";
+import { vatCodes, verifications } from "./economy";
 import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, quoteLossReasons, units } from "./register";
 import { stockLocations, stockTransactions } from "./stock";
 
@@ -113,6 +113,9 @@ export const customers = pgTable("customers", {
   // Privatperson: sales documents print prices including VAT and the card
   // labels org_number as "Personnummer". Bookkeeping is unaffected.
   privatePerson: boolean("private_person").notNull().default(false),
+  // Omvänd betalningsskyldighet för byggtjänster (Momskoder): a service row
+  // to this Swedish customer gets the momskod OB instead of svensk moms.
+  reverseChargeConstruction: boolean("reverse_charge_construction").notNull().default(false),
   // Visa tilläggspriser — default for the quote/confirmation print & mail
   // dialog, and what the invoice PDF follows at issue (configurator 4b).
   showConfigurationPrices: boolean("show_configuration_prices").notNull().default(false),
@@ -526,9 +529,18 @@ export const invoiceRows = pgTable(
     // Display unit snapshot — same pattern as sales_order_rows.
     unitId: uuid("unit_id").references(() => units.id, { onDelete: "restrict" }),
     unitFactor: numeric("unit_factor", { precision: 16, scale: 6 }),
+    // Momskod (migration 0142): decides the revenue/VAT accounts and the
+    // invoice text. vat_rate stays as the snapshot of the code's rate the
+    // VAT amount was computed with.
+    vatCodeId: uuid("vat_code_id")
+      .notNull()
+      .references(() => vatCodes.id, { onDelete: "restrict" }),
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull(),
     lineAmount: numeric("line_amount", { precision: 14, scale: 2 }).notNull(),
     vatAmount: numeric("vat_amount", { precision: 14, scale: 2 }).notNull(),
+    // Leveransdatum (ML 17 kap. 24 § p. 7): the last non-undone delivery day
+    // of the order row the invoice row bills; null = not delivered.
+    deliveryDate: date("delivery_date"),
     // Konfigurator 4b: copy of the order row's configuration when the row was
     // linked (or of the credited invoice row); written once with the row,
     // never updated on an issued invoice.

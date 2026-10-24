@@ -11,7 +11,18 @@ import {
   type Db,
   type Tx,
 } from "@navet/db";
-import { isVatRate, round2, type VatRate } from "@navet/shared";
+import {
+  computedVatAmount,
+  isVatCode,
+  isVatRate,
+  reverseVatPreview,
+  round2,
+  vatCodeAllowedOn,
+  vatCodeEntry,
+  vatCodeTakesCatchAllRule,
+  type VatCode,
+  type VatCodeCatalogEntry,
+} from "@navet/shared";
 import { AccountingPeriodLockedError, FiscalYearClosedError } from "./accounting-period-lock.js";
 import { disposalPostingRows } from "./depreciation-schedule.js";
 import { allocateVerificationNumber } from "./verification-number.js";
@@ -50,6 +61,9 @@ const SUPPLIER_LEDGER_SERIES = { code: "U", name: "Leverantörsreskontra" } as c
 // Momsrapport (B5): momsomföringar get their own journal — an M verification
 // is the period's VAT declaration event, not a document posting.
 const VAT_SETTLEMENT_SERIES = { code: "M", name: "Momsredovisning" } as const;
+// Momskoder: importmoms from the customs decision (tullbeslutet) is its own
+// event — not part of any supplier invoice — and gets its own journal.
+const IMPORT_VAT_SERIES = { code: "IM", name: "Importmoms" } as const;
 
 // SIE opening-balance import (B6b): the imported balances become one booked
 // verification of their own, so they show up in the ledger, the balance
@@ -100,6 +114,60 @@ export class UnknownVatRateError extends Error {
   constructor(public rate: number) {
     super(`No VAT account is configured for rate ${rate}`);
     this.name = "UnknownVatRateError";
+  }
+}
+
+// A row's momskod and its amounts disagree: VAT on a 0 % code, or a rate
+// snapshot that is not the code's rate. A data problem — posting it would
+// put VAT computed at one rate on another rate's account.
+export class VatCodeAmountMismatchError extends Error {
+  constructor(
+    public code: string,
+    detail: string
+  ) {
+    super(`VAT code ${code}: ${detail}`);
+    this.name = "VatCodeAmountMismatchError";
+  }
+}
+
+// A momskod used on a document it does not belong to (a purchase code on a
+// customer invoice, a sales code on a supplier invoice, anything but an
+// import code on the importmoms posting), or a code outside the catalog.
+export class VatCodeNotApplicableError extends Error {
+  constructor(
+    public code: string,
+    public document: "sales" | "purchase" | "import"
+  ) {
+    super(`VAT code ${code} cannot be used on ${document === "import" ? "an import VAT posting" : `a ${document} document`}`);
+    this.name = "VatCodeNotApplicableError";
+  }
+}
+
+// The supplier invoice's header VAT is booked on the header code's ingående
+// moms — so a header with VAT needs a domestic code with a rate. Omvänd
+// moms is computed by the poster (the supplier charged none), and a
+// momsfri/import-goods code has no VAT account at all.
+export class SupplierInvoiceVatCodeError extends Error {
+  constructor(
+    public vatAmount: number,
+    public code: string,
+    public label: string
+  ) {
+    super(`The supplier invoice has VAT ${vatAmount} but its VAT code ${code} (${label}) takes no charged VAT`);
+    this.name = "SupplierInvoiceVatCodeError";
+  }
+}
+
+// Two slots of one momskod on the same account: the utgående and ingående
+// halves of omvänd moms (or the import base and its counter account) would
+// cancel each other and nothing would reach the declaration.
+export class VatCodeAccountConflictError extends Error {
+  constructor(
+    public code: string,
+    public accountNumber: string
+  ) {
+    super(`VAT code ${code} uses account ${accountNumber} for two roles — the posting would cancel itself out`);
+    this.name = "VatCodeAccountConflictError";
   }
 }
 
@@ -190,7 +258,7 @@ export class ZeroAmountPostingError extends Error {
 
 // --- Input/settings shapes ---
 
-// The 14 posting accounts, as 4-digit account-number strings. Structurally
+// The 9 posting accounts, as 4-digit account-number strings. Structurally
 // satisfied by system/service/posting-settings.js's PostingSettings (whose
 // codeSetting fallbacks guarantee every field is populated) — declared here,
 // at the consumer, same DI convention as CostingSettingsReader/
@@ -202,17 +270,11 @@ export interface PostingSettingsReader {
   read(executor: Db | Tx): Promise<PostingAccountNumbers>;
 }
 
+// The revenue and VAT accounts per rate are not settings any more — they are
+// the momskod's own accounts (PostingVatCode, loaded by the caller).
 export interface PostingAccountNumbers {
   postingAccountsReceivable: string;
-  postingVatOut25: string;
-  postingVatOut12: string;
-  postingVatOut6: string;
-  postingRevenue25: string;
-  postingRevenue12: string;
-  postingRevenue6: string;
-  postingRevenue0: string;
   postingAccountsPayable: string;
-  postingVatIn: string;
   postingDefaultCost: string;
   // Kundreskontra (B3). postingReminderFeeAccount and postingPaymentWriteOff
   // are read by postReminderFee/postCustomerPayment below; postingBank is
@@ -224,7 +286,7 @@ export interface PostingAccountNumbers {
   postingReminderFeeAccount: string;
   postingPaymentWriteOff: string;
   // Momsrapport (B5): redovisningskonto för moms — postVatSettlement's
-  // counter account.
+  // counter account (and postingPaymentWriteOff takes its öresutjämning).
   postingVatSettlement: string;
   // Årsbokslut (steg 2): read by the year-end service, not by the poster.
   postingInventory: string;
@@ -238,15 +300,37 @@ export type CustomerInvoiceDocument = {
   customerName: string;
 };
 
+// A momskod as the poster needs it: the vat_codes row (id for the posting
+// rules, code for the catalog — rate, kind, slots) with the company's
+// account numbers. Loaded by the CALLER inside its own transaction
+// (loadPostingVatCodes), so the posting sees the same snapshot as the
+// document's status flip. An account is null for a slot the code does not
+// use.
+export type PostingVatCode = {
+  id: string;
+  code: string;
+  revenueAccount: string | null;
+  outputVatAccount: string | null;
+  inputVatAccount: string | null;
+  costAccount: string | null;
+  baseAccount: string | null;
+  baseCounterAccount: string | null;
+};
+
 // articleGroupId comes from the invoice row's article (null for free-text
-// rows and for articles without a group).
+// rows and for articles without a group). vatRate is the row's stored
+// snapshot of its code's rate.
 export type CustomerInvoiceDocumentRow = {
   articleGroupId: string | null;
   lineAmount: number;
   vatAmount: number;
   vatRate: number;
+  vatCode: PostingVatCode;
 };
 
+// vatCode = the header's momskod: rows without one of their own and the
+// remainder (net − row total) are taxed by it, and the header's VAT amount
+// lands on its ingående moms.
 export type SupplierInvoiceDocument = {
   registrationNumber: string;
   invoiceNumber: string;
@@ -256,14 +340,22 @@ export type SupplierInvoiceDocument = {
   netAmount: number;
   vatAmount: number;
   grossAmount: number;
+  vatCode: PostingVatCode;
 };
 
-// vatRate is nullable here (supplier invoice rows carry no rate of their
-// own — the VAT comes from the header); it is only a posting-rule lookup key.
+// vatCode null = follows the header.
 export type SupplierInvoiceDocumentRow = {
   articleGroupId: string | null;
-  vatRate: number | null;
   lineAmount: number;
+  vatCode: PostingVatCode | null;
+};
+
+// Importmoms: one row per momskod IMP25/IMP12/IMP6 with the tax base from
+// the customs decision.
+export type ImportVatDocument = {
+  date: string;
+  description: string;
+  rows: { vatCode: PostingVatCode; taxBase: number }[];
 };
 
 // bankAccountNumber is the account the money actually landed on, picked per
@@ -313,16 +405,20 @@ export type SupplierPaymentDocumentRow = {
   writeOffAmount: number;
 };
 
-// Momsomföring (B5). The CALLER (vat-report service) computes each
-// configured VAT account's net movement (Σdebit − Σkredit over the declared
-// range, prior settlements and their reversals excluded) inside the same tx
-// — this stays a pure posting leaf like its siblings. Positive net = the
-// account currently sits on the debit side (ingående moms), negative =
-// credit side (utgående moms).
+// Momsomföring (B5, box-driven since the momskoder). The CALLER (vat-report
+// service) computes the net movement (Σdebit − Σkredit over the declared
+// range, prior settlements and their reversals excluded) of every account
+// whose momsruta enters ruta 49, inside the same tx — this stays a pure
+// posting leaf like its siblings. Positive net = the account sits on the
+// debit side (ingående moms), negative = credit side (utgående moms).
+// payable is ruta 49 in whole kronor (positive = moms att betala) as the
+// declaration states it; the difference to the öre sum of the movements is
+// the öresutjämning.
 export type VatSettlementDocument = {
   fromDate: string;
   toDate: string;
   movements: { accountNumber: string; net: number }[];
+  payable: number;
 };
 
 export type InvoiceReminderDocument = {
@@ -371,7 +467,7 @@ type PostingAuditContext = { source: string; document: string };
 
 type LoadedPostingRule = {
   articleGroupId: string;
-  vatRate: string | null;
+  vatCodeId: string | null;
   revenueAccountId: string | null;
   costAccountId: string | null;
 };
@@ -444,7 +540,7 @@ async function createRuleAccountResolver(tx: Tx, documentRows: { articleGroupId:
       : await tx
           .select({
             articleGroupId: postingRules.articleGroupId,
-            vatRate: postingRules.vatRate,
+            vatCodeId: postingRules.vatCodeId,
             revenueAccountId: postingRules.revenueAccountId,
             costAccountId: postingRules.costAccountId,
           })
@@ -465,13 +561,16 @@ async function createRuleAccountResolver(tx: Tx, documentRows: { articleGroupId:
           .where(inArray(accounts.id, ruleAccountIds));
   const accountById = new Map(ruleAccounts.map((account) => [account.id, account] as const));
 
-  // Resolution order (spec): rule (group, rate) -> rule (group, all rates) ->
-  // null, meaning "use the settings default". A rule that has no account for
-  // THIS side (revenue-only/cost-only rules are legal) falls through to the
-  // next step rather than blocking.
+  // Resolution order (spec): rule (group, exact momskod) -> rule (group,
+  // "Alla momskoder") but only for a code that takes the catch-all (domestic
+  // and IUTV — a catch-all sending a group to a 05 account must never take
+  // an EU sale or an omvänd-moms purchase out of its box) -> null, meaning
+  // "use the code's own / the settings default". A rule that has no account
+  // for THIS side (revenue-only/cost-only rules are legal) falls through to
+  // the next step rather than blocking.
   return function ruleAccount(
     articleGroupId: string | null,
-    vatRate: number | null,
+    vatCode: { id: string; code: VatCode },
     side: "revenue" | "cost",
     roleLabel: string
   ): string | null {
@@ -479,14 +578,12 @@ async function createRuleAccountResolver(tx: Tx, documentRows: { articleGroupId:
     const pick = (rule: LoadedPostingRule) => (side === "revenue" ? rule.revenueAccountId : rule.costAccountId);
 
     const candidates: (string | null)[] = [];
-    if (vatRate !== null) {
-      const exact = rules.find(
-        (rule) => rule.articleGroupId === articleGroupId && rule.vatRate !== null && Number(rule.vatRate) === vatRate
-      );
-      if (exact) candidates.push(pick(exact));
+    const exact = rules.find((rule) => rule.articleGroupId === articleGroupId && rule.vatCodeId === vatCode.id);
+    if (exact) candidates.push(pick(exact));
+    if (vatCodeTakesCatchAllRule(vatCode.code)) {
+      const catchAll = rules.find((rule) => rule.articleGroupId === articleGroupId && rule.vatCodeId === null);
+      if (catchAll) candidates.push(pick(catchAll));
     }
-    const catchAll = rules.find((rule) => rule.articleGroupId === articleGroupId && rule.vatRate === null);
-    if (catchAll) candidates.push(pick(catchAll));
 
     for (const accountId of candidates) {
       if (accountId === null) continue;
@@ -503,35 +600,35 @@ async function createRuleAccountResolver(tx: Tx, documentRows: { articleGroupId:
   };
 }
 
-// Rate → settings-field maps (B5): keyed by the shared VatRate union, so a
-// fifth rate added to vatRates refuses to compile until its account wiring
-// exists here. 0 % deliberately has no outgoing VAT entry — a zero-rated row
-// posts no VAT row at all.
-const OUTGOING_VAT_SETTING_BY_RATE: Record<Exclude<VatRate, 0>, keyof PostingAccountNumbers> = {
-  25: "postingVatOut25",
-  12: "postingVatOut12",
-  6: "postingVatOut6",
-};
+// --- Momskoder ---
 
-const REVENUE_SETTING_BY_RATE: Record<VatRate, keyof PostingAccountNumbers> = {
-  25: "postingRevenue25",
-  12: "postingRevenue12",
-  6: "postingRevenue6",
-  0: "postingRevenue0",
-};
+type ResolvedVatCode = { id: string; code: VatCode; entry: VatCodeCatalogEntry; row: PostingVatCode };
 
-// Utgående moms per rate. 0 % has no VAT row at all (returns null); anything
-// outside the Swedish set is a data error. Called once per document row, so
-// it doubles as the rate validation.
-function outgoingVatAccountNumber(rate: number, settings: PostingAccountNumbers): string | null {
-  if (!isVatRate(rate)) throw new UnknownVatRateError(rate);
-  if (rate === 0) return null;
-  return settings[OUTGOING_VAT_SETTING_BY_RATE[rate]];
+// Catalog lookup + the document check in one: every posting path calls this
+// once per distinct code before resolving any account.
+function resolveVatCode(vatCode: PostingVatCode, document: "sales" | "purchase" | "import"): ResolvedVatCode {
+  if (!isVatCode(vatCode.code) || !vatCodeAllowedOn(vatCode.code, document)) {
+    throw new VatCodeNotApplicableError(vatCode.code, document);
+  }
+  return { id: vatCode.id, code: vatCode.code, entry: vatCodeEntry(vatCode.code), row: vatCode };
 }
 
-function defaultRevenueAccountNumber(rate: number, settings: PostingAccountNumbers): string {
-  if (!isVatRate(rate)) throw new UnknownVatRateError(rate);
-  return settings[REVENUE_SETTING_BY_RATE[rate]];
+const SLOT_COLUMN = {
+  revenue: "revenueAccount",
+  outputVat: "outputVatAccount",
+  inputVat: "inputVatAccount",
+  cost: "costAccount",
+  base: "baseAccount",
+  baseCounter: "baseCounterAccount",
+} as const satisfies Record<string, keyof PostingVatCode>;
+
+// The code's account for a slot. An empty slot on a code that uses it is
+// the same misconfiguration as a missing account (the vat_codes service
+// never leaves one empty, but the row is data).
+function vatCodeAccount(code: ResolvedVatCode, slot: keyof typeof SLOT_COLUMN, roleLabel: string): string {
+  const number = code.row[SLOT_COLUMN[slot]];
+  if (!number) throw new MissingPostingAccountError("—", `${roleLabel} (momskod ${code.code})`);
+  return number;
 }
 
 // Exported for its unit test. Truncates by CODE POINTS (Array.from), which is
@@ -693,11 +790,12 @@ async function insertBookedVerification(
 export function createVerificationPoster(settings: PostingSettingsReader) {
   return {
     // Kundfaktura -> series F, dated on the invoice date. Debit accounts
-    // receivable with the gross, credit revenue per row (rule -> rule
-    // catch-all -> settings default per rate) and credit outgoing VAT per
-    // rate. A credit invoice mirrors every contribution — it is NOT a
-    // reversal (no reversesVerificationId): the credit note is its own
-    // document in its own right.
+    // receivable with the gross, credit revenue per row (rule exact code ->
+    // rule "Alla momskoder" for a domestic code -> the code's revenue
+    // account) and credit outgoing VAT on the row's code. A credit invoice
+    // mirrors every contribution — it is NOT a reversal (no
+    // reversesVerificationId): the credit note is its own document in its
+    // own right.
     async postCustomerInvoice(
       tx: Tx,
       doc: CustomerInvoiceDocument,
@@ -717,7 +815,21 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         lineAmount: round2(row.lineAmount),
         vatAmount: round2(row.vatAmount),
         vatRate: row.vatRate,
+        vatCode: resolveVatCode(row.vatCode, "sales"),
       }));
+
+      // The rate and VAT checks run before anything is resolved, so a data
+      // problem is reported as itself rather than as whichever account
+      // happened to be looked up first.
+      for (const row of documentRows) {
+        if (!isVatRate(row.vatRate)) throw new UnknownVatRateError(row.vatRate);
+        if (row.vatRate !== row.vatCode.entry.rate) {
+          throw new VatCodeAmountMismatchError(row.vatCode.code, `row rate ${row.vatRate} % is not the code's ${row.vatCode.entry.rate} %`);
+        }
+        if (row.vatCode.entry.rate === 0 && row.vatAmount !== 0) {
+          throw new VatCodeAmountMismatchError(row.vatCode.code, `a 0 % code cannot carry VAT ${row.vatAmount}`);
+        }
+      }
 
       const gross = round2(documentRows.reduce((sum, row) => sum + row.lineAmount + row.vatAmount, 0));
       if (gross === 0) throw new ZeroAmountPostingError();
@@ -730,19 +842,17 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
       amounts.add(await resolveAccount(postingAccounts.postingAccountsReceivable, "accounts receivable"), sign * gross);
 
       for (const row of documentRows) {
-        // Also validates the rate: an unknown one throws before anything is
-        // resolved. A 0 % row has no VAT account — a 0 % row carrying VAT
-        // would be contradictory input and the balance assert catches it.
-        const vatAccountNumber = outgoingVatAccountNumber(row.vatRate, postingAccounts);
-
-        const ruleRevenue = ruleAccount(row.articleGroupId, row.vatRate, "revenue", "posting rule revenue account");
+        const ruleRevenue = ruleAccount(row.articleGroupId, row.vatCode, "revenue", "posting rule revenue account");
         const revenueAccountId =
           ruleRevenue ??
-          (await resolveAccount(defaultRevenueAccountNumber(row.vatRate, postingAccounts), `revenue ${row.vatRate} %`));
+          (await resolveAccount(vatCodeAccount(row.vatCode, "revenue", "revenue"), `revenue (momskod ${row.vatCode.code})`));
         amounts.add(revenueAccountId, -sign * row.lineAmount);
 
-        if (vatAccountNumber !== null) {
-          const vatAccountId = await resolveAccount(vatAccountNumber, `outgoing VAT ${row.vatRate} %`);
+        if (row.vatCode.entry.rate !== 0) {
+          const vatAccountId = await resolveAccount(
+            vatCodeAccount(row.vatCode, "outputVat", "outgoing VAT"),
+            `outgoing VAT (momskod ${row.vatCode.code})`
+          );
           amounts.add(vatAccountId, -sign * row.vatAmount);
         }
       }
@@ -766,10 +876,13 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
 
     // Leverantörsfaktura -> series L, dated on the SUPPLIER's invoice date
     // (that is what decides the period). The header amounts are authoritative:
-    // credit accounts payable with the gross, debit incoming VAT with the
-    // header VAT, debit the cost accounts per row, and put whatever the rows
-    // do not explain (freight, fees, öresavrundning) on the default cost
-    // account — signed, so rows exceeding the header net become a credit.
+    // credit accounts payable with the gross, debit the header VAT on the
+    // header code's ingående moms, and debit the cost accounts per row and
+    // momskod. Whatever the rows do not explain (freight, fees,
+    // öresavrundning) is taxed by the header's code — signed, so rows
+    // exceeding the header net become a credit. An omvänd-moms code books
+    // the VAT the buyer computes itself (reverseVatPreview, the same
+    // function the invoice card shows) as utgående and ingående moms.
     async postSupplierInvoice(
       tx: Tx,
       doc: SupplierInvoiceDocument,
@@ -787,13 +900,26 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
       if (round2(net + vat) !== gross) throw new SupplierInvoiceAmountMismatchError(net, vat, gross);
       if (gross === 0) throw new ZeroAmountPostingError();
 
+      const header = resolveVatCode(doc.vatCode, "purchase");
+      // Charged VAT can only sit on a domestic code with a rate: omvänd moms
+      // is computed below (the supplier charged none) and a momsfri or
+      // import-goods code has no ingående moms to book it on.
+      if (vat !== 0 && (header.entry.kind !== "domestic" || header.entry.rate === 0)) {
+        throw new SupplierInvoiceVatCodeError(vat, header.code, header.entry.label);
+      }
+
       // Same in-tx read as postCustomerInvoice above.
       const postingAccounts = await settings.read(tx);
       const documentRows = rows.map((row) => ({
         articleGroupId: row.articleGroupId,
-        vatRate: row.vatRate,
         lineAmount: round2(row.lineAmount),
+        vatCode: row.vatCode === null ? header : resolveVatCode(row.vatCode, "purchase"),
       }));
+      const rowTotal = round2(documentRows.reduce((sum, row) => sum + row.lineAmount, 0));
+      const remainder = round2(net - rowTotal);
+      // The remainder is part of the header code's amount, with no article
+      // group (so no konteringsregel).
+      const costLines = remainder === 0 ? documentRows : [...documentRows, { articleGroupId: null, lineAmount: remainder, vatCode: header }];
 
       const resolveAccount = createPostingAccountResolver(tx);
       const ruleAccount = await createRuleAccountResolver(tx, documentRows);
@@ -801,21 +927,42 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
 
       amounts.add(await resolveAccount(postingAccounts.postingAccountsPayable, "accounts payable"), -gross);
       if (vat !== 0) {
-        amounts.add(await resolveAccount(postingAccounts.postingVatIn, "incoming VAT"), vat);
+        amounts.add(
+          await resolveAccount(vatCodeAccount(header, "inputVat", "incoming VAT"), `incoming VAT (momskod ${header.code})`),
+          vat
+        );
       }
 
-      for (const row of documentRows) {
-        const ruleCost = ruleAccount(row.articleGroupId, row.vatRate, "cost", "posting rule cost account");
-        const costAccountId =
-          ruleCost ?? (await resolveAccount(postingAccounts.postingDefaultCost, "default cost account"));
-        amounts.add(costAccountId, row.lineAmount);
+      for (const line of costLines) {
+        const ruleCost = ruleAccount(line.articleGroupId, line.vatCode, "cost", "posting rule cost account");
+        let costAccountId = ruleCost;
+        if (costAccountId === null) {
+          // Omvänd moms: never the default cost account — the base must land
+          // on the code's own account, the one carrying ruta 20–24.
+          costAccountId =
+            line.vatCode.entry.kind === "reverse_purchase"
+              ? await resolveAccount(vatCodeAccount(line.vatCode, "cost", "cost"), `cost (momskod ${line.vatCode.code})`)
+              : await resolveAccount(postingAccounts.postingDefaultCost, "default cost account");
+        }
+        amounts.add(costAccountId, line.lineAmount);
       }
 
-      const rowTotal = round2(documentRows.reduce((sum, row) => sum + row.lineAmount, 0));
-      const remainder = round2(net - rowTotal);
-      if (remainder !== 0) {
-        const defaultCostAccountId = await resolveAccount(postingAccounts.postingDefaultCost, "default cost account");
-        amounts.add(defaultCostAccountId, remainder);
+      const codeById = new Map(costLines.map((line) => [line.vatCode.code, line.vatCode] as const));
+      const preview = reverseVatPreview({
+        headerCode: header.code,
+        netAmount: net,
+        rows: documentRows.map((row) => ({ code: row.vatCode.code, lineAmount: row.lineAmount })),
+      });
+      for (const line of preview) {
+        const code = codeById.get(line.code)!;
+        const outputId = await resolveAccount(
+          vatCodeAccount(code, "outputVat", "outgoing VAT"),
+          `outgoing VAT (momskod ${code.code})`
+        );
+        const inputId = await resolveAccount(vatCodeAccount(code, "inputVat", "incoming VAT"), `incoming VAT (momskod ${code.code})`);
+        if (outputId === inputId) throw new VatCodeAccountConflictError(code.code, code.row.outputVatAccount!);
+        amounts.add(outputId, -line.vat);
+        amounts.add(inputId, line.vat);
       }
 
       const series = await ensureSeries(tx, SUPPLIER_INVOICE_SERIES);
@@ -830,6 +977,52 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         },
         amounts.toRows(),
         { source: "supplier_invoice", document: doc.registrationNumber },
+        userId
+      );
+    },
+
+    // Importmoms -> series IM, dated by the caller (the customs decision's
+    // date). Per row: debit the code's base account (ruta 50) and credit its
+    // counter account with the tax base — a pure memorandum pair that nets
+    // to zero in the result — and debit ingående / credit utgående moms
+    // (ruta 60–62) with the VAT on the base. The supplier invoice for the
+    // goods is posted on its own with IUTV; the customs decision is its own
+    // bokföringshändelse with its own underlag (uploaded on the verification).
+    async postImportVat(
+      tx: Tx,
+      doc: ImportVatDocument,
+      userId: string
+    ): Promise<{ verificationId: string; displayNumber: string }> {
+      const resolveAccount = createPostingAccountResolver(tx);
+      const amounts = createAmountAccumulator();
+      for (const row of doc.rows) {
+        const code = resolveVatCode(row.vatCode, "import");
+        const taxBase = round2(row.taxBase);
+        if (taxBase <= 0) throw new ZeroAmountPostingError();
+        const baseId = await resolveAccount(vatCodeAccount(code, "base", "import tax base"), `import tax base (momskod ${code.code})`);
+        const counterId = await resolveAccount(
+          vatCodeAccount(code, "baseCounter", "import tax base counter"),
+          `import tax base counter (momskod ${code.code})`
+        );
+        const outputId = await resolveAccount(vatCodeAccount(code, "outputVat", "outgoing VAT"), `outgoing VAT (momskod ${code.code})`);
+        const inputId = await resolveAccount(vatCodeAccount(code, "inputVat", "incoming VAT"), `incoming VAT (momskod ${code.code})`);
+        if (baseId === counterId) throw new VatCodeAccountConflictError(code.code, code.row.baseAccount!);
+        if (outputId === inputId) throw new VatCodeAccountConflictError(code.code, code.row.outputVatAccount!);
+        const vatAmount = computedVatAmount(taxBase, code.entry.rate);
+        amounts.add(baseId, taxBase);
+        amounts.add(counterId, -taxBase);
+        amounts.add(inputId, vatAmount);
+        amounts.add(outputId, -vatAmount);
+      }
+      const rows = amounts.toRows();
+      if (rows.length === 0) throw new ZeroAmountPostingError();
+
+      const series = await ensureSeries(tx, IMPORT_VAT_SERIES);
+      return insertBookedVerification(
+        tx,
+        { series, date: doc.date, description: truncateDescription(doc.description) },
+        rows,
+        { source: "import_vat", document: doc.date },
         userId
       );
     },
@@ -1148,11 +1341,11 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
     // Momsomföring (B5) -> series M, dated on the declared range's END (the
     // period's sista dag) — so assertPostablePeriod judges only that date and
     // a quarter whose earlier months are already locked settles fine. Every
-    // non-zero net is mirrored onto its account (emptying it for the range)
-    // and the sum lands on redovisningskontot för moms: a payable period
-    // credits it, a momsfordran debits it, and in-/utgående that cancel
-    // exactly leave no settlement row at all — all out of the accumulator's
-    // `add(account, -net); add(settlement, +net)` arithmetic.
+    // non-zero net is mirrored onto its account (emptying it for the range),
+    // ruta 49 in whole kronor lands on redovisningskontot för moms (a payable
+    // period credits it, a momsfordran debits it) and the öre difference
+    // between the emptied accounts and the declared kronor goes to öres- och
+    // kronutjämning.
     async postVatSettlement(
       tx: Tx,
       doc: VatSettlementDocument,
@@ -1175,13 +1368,23 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
       const resolveAccount = createPostingAccountResolver(tx);
       const amounts = createAmountAccumulator();
 
-      // Resolved even when the nets would cancel to no 2650 row: a missing
-      // or inactive redovisningskonto is a misconfiguration worth rejecting
-      // regardless of this particular period's arithmetic.
+      // Resolved even when ruta 49 is 0: a missing or inactive
+      // redovisningskonto is a misconfiguration worth rejecting regardless of
+      // this particular period's arithmetic.
       const settlementAccountId = await resolveAccount(postingAccounts.postingVatSettlement, "VAT settlement");
+      let emptied = 0;
       for (const movement of movements) {
         amounts.add(await resolveAccount(movement.accountNumber, "VAT"), -movement.net);
-        amounts.add(settlementAccountId, movement.net);
+        emptied = round2(emptied - movement.net);
+      }
+      const payable = round2(doc.payable);
+      amounts.add(settlementAccountId, -payable);
+      const rounding = round2(emptied - payable);
+      if (rounding !== 0) {
+        amounts.add(
+          await resolveAccount(postingAccounts.postingPaymentWriteOff, "VAT rounding (öres- och kronutjämning)"),
+          -rounding
+        );
       }
 
       const series = await ensureSeries(tx, VAT_SETTLEMENT_SERIES);

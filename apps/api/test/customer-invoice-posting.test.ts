@@ -7,6 +7,7 @@ import {
   db,
   invoiceRows,
   invoices,
+  vatCodes,
   verificationRows,
   verifications,
   verificationSeries,
@@ -30,6 +31,7 @@ import {
   testEconomyService,
   testSystemService,
 } from "./helpers/services.js";
+import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
 
 // B2: issuing a customer invoice books an F verification inside the SAME
 // transaction as the FA-number allocation. This suite drives the real wiring
@@ -221,7 +223,7 @@ describe("kundfaktura — automatkontering vid utfärdande (B2)", () => {
     const article = await makeArticle({ groupId: group.id });
     await testEconomyService.createPostingRule({
       articleGroupId: group.id,
-      vatRate: 25,
+      vatCodeId: await vatCodeId("MP25"),
       revenueAccountId: await accountId("3990"),
       costAccountId: null,
     });
@@ -391,18 +393,44 @@ describe("kundfaktura — automatkontering vid utfärdande (B2)", () => {
     expect(stillDraft!.invoiceNumber).toBeNull();
   });
 
-  it("refuses to issue when a posting account in the settings is missing from the chart of accounts", async () => {
+  it("refuses to issue when the momskod's account is missing from the chart of accounts", async () => {
     const user = await makeUser();
     const customer = await makeCustomer();
-    await testSystemService.updateSettings({ postingRevenue25: "9999" });
+    await db.update(vatCodes).set({ revenueAccount: "9999" }).where(eq(vatCodes.code, "MP25"));
 
     const draft = await makeDraft(customer.id, [{ description: "A", quantity: 1, unitPrice: 100 }], user.id);
-    await expect(invoiceService.issue(draft.id, user.id)).rejects.toThrow(MissingPostingAccountError);
+    try {
+      await expect(invoiceService.issue(draft.id, user.id)).rejects.toThrow(MissingPostingAccountError);
+    } finally {
+      await resetVatCodes();
+    }
 
     const stillDraft = await invoiceService.getInvoice(draft.id);
     expect(stillDraft!.status).toBe("draft");
     expect(stillDraft!.invoiceNumber).toBeNull();
     expect(stillDraft!.verificationId).toBeNull();
+  });
+
+  it("gives every draft row the domestic momskod of its rate (until the derivation per customer arrives)", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const draft = await makeDraft(
+      customer.id,
+      [
+        { description: "25 %", quantity: 1, unitPrice: 400, vatRate: 25 },
+        { description: "12 %", quantity: 1, unitPrice: 200, vatRate: 12 },
+        { description: "6 %", quantity: 1, unitPrice: 100, vatRate: 6 },
+        { description: "0 %", quantity: 1, unitPrice: 50, vatRate: 0 },
+      ],
+      user.id
+    );
+    const rows = await db
+      .select({ description: invoiceRows.description, code: vatCodes.code })
+      .from(invoiceRows)
+      .innerJoin(vatCodes, eq(vatCodes.id, invoiceRows.vatCodeId))
+      .where(eq(invoiceRows.invoiceId, draft.id))
+      .orderBy(asc(invoiceRows.createdAt));
+    expect(rows.map((row) => row.code)).toEqual(["MP25", "MP12", "MP6", "MF"]);
   });
 
   it("two concurrent issues produce exactly one verification and one FA number", async () => {
