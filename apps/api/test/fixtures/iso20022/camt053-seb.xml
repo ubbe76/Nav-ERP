@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after SEB's MIG camt.053.001.02 (v26) and its published sample structure (own, made-up data — not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>3200441</MsgId>
+      <CreDtTm>2024-10-10T02:50:52+02:00</CreDtTm>
+      <MsgRcpt><Id><OrgId><Othr><Id>00551234500001</Id><SchmeNm><Cd>BANK</Cd></SchmeNm></Othr></OrgId></Id></MsgRcpt>
+    </GrpHdr>
+    <Stmt>
+      <Id>STOIID65241010023535000011</Id>
+      <ElctrncSeqNb>244</ElctrncSeqNb>
+      <LglSeqNb>244</LglSeqNb>
+      <CreDtTm>2024-10-10T02:35:35+02:00</CreDtTm>
+      <FrToDt>
+        <FrDtTm>2024-10-09T00:00:00+02:00</FrDtTm>
+        <ToDtTm>2024-10-09T23:59:59+02:00</ToDtTm>
+      </FrToDt>
+      <Acct>
+        <Id><Othr><Id>54401234567</Id><SchmeNm><Cd>BBAN</Cd></SchmeNm></Othr></Id>
+        <Ccy>SEK</Ccy>
+        <Ownr><Nm>Exempel Verkstad AB</Nm><Id><OrgId><Othr><Id>00551234500001</Id><SchmeNm><Cd>BANK</Cd></SchmeNm></Othr></OrgId></Id></Ownr>
+        <Svcr><FinInstnId><BIC>ESSESESSXXX</BIC></FinInstnId></Svcr>
+      </Acct>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="SEK">365371.31</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2024-10-09</Dt></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <CdtLine><Incl>false</Incl><Amt Ccy="SEK">250000</Amt></CdtLine>
+        <Amt Ccy="SEK">135830.31</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2024-10-09</Dt></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLAV</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="SEK">135830.31</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2024-10-09</Dt></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>FWAV</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="SEK">135830.31</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2024-10-10</Dt></Dt>
+      </Bal>
+      <TxsSummry>
+        <TtlCdtNtries><NbOfNtries>1</NbOfNtries><Sum>12500.00</Sum></TtlCdtNtries>
+        <TtlDbtNtries><NbOfNtries>1</NbOfNtries><Sum>242041.00</Sum></TtlDbtNtries>
+      </TxsSummry>
+      <Ntry>
+        <NtryRef>LBE5419-0186-0029234</NtryRef>
+        <Amt Ccy="SEK">242041.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <ValDt><Dt>2024-10-09</Dt></ValDt>
+        <AcctSvcrRef>STOI520111188400029234</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>ATXN</SubFmlyCd></Fmly></Domn><Prtry><Cd>TRF</Cd><Issr>SWIFT</Issr></Prtry></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><MsgId>BO-12</MsgId><AcctSvcrRef>STOESI05241009113433580558000001</AcctSvcrRef><PmtInfId>BO-12</PmtInfId><InstrId>BO-12-1</InstrId><EndToEndId>BO-12-1</EndToEndId></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">200000.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>Exempel Verkstad AB</Nm></Dbtr><Cdtr><Nm>Stalgrossisten AB</Nm></Cdtr></RltdPties>
+            <RmtInf><Strd><RfrdDocAmt><RmtdAmt Ccy="SEK">200000.00</RmtdAmt></RfrdDocAmt><CdtrRefInf><Tp><CdOrPrtry><Cd>SCOR</Cd></CdOrPrtry></Tp><Ref>85858</Ref></CdtrRefInf></Strd></RmtInf>
+          </TxDtls>
+          <TxDtls>
+            <Refs><MsgId>BO-12</MsgId><AcctSvcrRef>STOESI05241009113433580559000001</AcctSvcrRef><PmtInfId>BO-12</PmtInfId><InstrId>BO-12-2</InstrId><EndToEndId>BO-12-2</EndToEndId></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">42041.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>Exempel Verkstad AB</Nm></Dbtr><Cdtr><Nm>Verktygsbolaget AB</Nm></Cdtr></RltdPties>
+            <RmtInf><Strd><RfrdDocInf><Tp><CdOrPrtry><Cd>CINV</Cd></CdOrPrtry></Tp><Nb>333333333333</Nb></RfrdDocInf><RfrdDocAmt><RmtdAmt Ccy="SEK">42041.00</RmtdAmt></RfrdDocAmt></Strd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+      </Ntry>
+      <Ntry>
+        <NtryRef>INT5419-0186-0029235</NtryRef>
+        <Amt Ccy="SEK">12500.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <ValDt><Dt>2024-10-09</Dt></ValDt>
+        <AcctSvcrRef>STOI520111188400029235</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>ACMT</Cd><Fmly><Cd>MCOP</Cd><SubFmlyCd>INTR</SubFmlyCd></Fmly></Domn><Prtry><Cd>INT</Cd><Issr>SEB</Issr></Prtry></BkTxCd>
+        <AddtlNtryInf>Ränta</AddtlNtryInf>
+      </Ntry>
+      <Ntry>
+        <NtryRef>PND5419-0186-0029236</NtryRef>
+        <Amt Ccy="SEK">5000.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>PDNG</Sts>
+        <BookgDt><Dt>2024-10-10</Dt></BookgDt>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>ESCT</SubFmlyCd></Fmly></Domn></BkTxCd>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

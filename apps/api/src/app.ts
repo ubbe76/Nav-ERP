@@ -101,6 +101,9 @@ import { createPaymentBatchService } from "./modules/banking/service/payment-bat
 import { createBankFileRepository } from "./modules/banking/repository/bank-file.repository.js";
 import { bankFileRoutes } from "./modules/banking/routes/bank-file.routes.js";
 import { createBankFileService } from "./modules/banking/service/bank-file.service.js";
+import { createBankReconciliationRepository } from "./modules/banking/repository/bank-reconciliation.repository.js";
+import { bankReconciliationRoutes } from "./modules/banking/routes/bank-reconciliation.routes.js";
+import { createBankReconciliationService } from "./modules/banking/service/bank-reconciliation.service.js";
 import { supplierPaymentRoutes } from "./modules/purchase/routes/supplier-payment.routes.js";
 import { createRegisterRepository } from "./modules/register/repository/register.repository.js";
 import { createRegisterService } from "./modules/register/service/register.service.js";
@@ -738,6 +741,16 @@ export function buildApp(database: Db = db) {
     economy: economyService,
     audit: auditRepository,
   });
+  // Bankavstämning (etapp 4): kontoutdrag (camt.053/CSV), matchning mot
+  // bankkontots verifikatrader, bokföring av saknade poster i serie B genom
+  // economy's createVerificationInTx, bankregler och Avstämd t.o.m.
+  const bankReconciliationService = createBankReconciliationService({
+    db: database,
+    repo: createBankReconciliationRepository(database),
+    economy: economyService,
+    settings: { read: readPostingSettings },
+    company: bankSettingsRepository,
+  });
   // Anläggningsregister (ekonomi etapp 2, delprojekt 2): tillgångsgrupper,
   // anläggningar, avskrivningskörningar (serie AV via the shared poster),
   // avyttring and the avskrivningsplan PDF/CSV.
@@ -804,6 +817,7 @@ export function buildApp(database: Db = db) {
         await registerModule(protectedRoutes, bankSettingsRoutes, { service: bankSettingsService }, { read: ["inkop", "forsaljning", "ekonomi"], write: ["admin"] });
         await registerModule(protectedRoutes, paymentBatchRoutes, { service: paymentBatchService }, { read: ["inkop", "ekonomi"], write: ["inkop"] });
         await registerModule(protectedRoutes, bankFileRoutes, { service: bankFileService }, { read: ["inkop", "forsaljning", "ekonomi"], write: ["inkop", "forsaljning"] });
+        await registerModule(protectedRoutes, bankReconciliationRoutes, { service: bankReconciliationService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, salesRoutes, { service: salesService }, { read: office, write: ["forsaljning"] });
         await registerModule(protectedRoutes, invoiceRoutes, { service: invoiceService }, { read: office, write: ["forsaljning"] });
         await registerModule(protectedRoutes, paymentRoutes, { service: paymentService }, { read: office, write: ["forsaljning"] });

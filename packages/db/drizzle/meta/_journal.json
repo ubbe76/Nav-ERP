@@ -1037,6 +1037,13 @@
       "when": 1792864986795,
       "tag": "0147_manuell_bokforing",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1792873872664,
+      "tag": "0148_bankavstamning",
+      "breakpoints": true
     }
   ]
 }

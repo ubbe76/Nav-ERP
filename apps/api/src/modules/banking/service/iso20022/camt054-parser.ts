@@ -61,7 +61,7 @@ const clip = (value: string) => (value.length > 40 ? `${value.slice(0, 40)}…` 
 const isCalendarDate = (date: string) =>
   ISO_DATE.test(date) && !date.startsWith("0000") && !Number.isNaN(Date.parse(`${date}T12:00:00Z`)) && addDays(date, 0) === date;
 
-function amountOf(node: XmlNode | null): { amount: number; currency: string } | null {
+export function amountOf(node: XmlNode | null): { amount: number; currency: string } | null {
   if (!node) return null;
   const raw = node.text.trim();
   if (!DECIMAL.test(raw)) throw new BankFileParseError(`Ogiltigt belopp i filen: "${clip(raw)}"`);
@@ -71,7 +71,7 @@ function amountOf(node: XmlNode | null): { amount: number; currency: string } | 
 }
 
 // The date part of Dt or DtTm; `what` names it in the error.
-function dateOf(node: XmlNode | null, what: string): string | null {
+export function dateOf(node: XmlNode | null, what: string): string | null {
   const value = textAt(node, "Dt") ?? textAt(node, "DtTm");
   if (!value) return null;
   const date = value.slice(0, 10);

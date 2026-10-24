@@ -46,7 +46,7 @@ export class LegacyExcelFileError extends ImportFileError {
   }
 }
 
-function decodeBuffer(buf: Buffer): { text: string; encoding: "utf-8" | "windows-1252" } {
+export function decodeBuffer(buf: Buffer): { text: string; encoding: "utf-8" | "windows-1252" } {
   // A UTF-8 BOM (EF BB BF) is authoritative: strip it and trust the encoding.
   if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
     return { text: buf.subarray(3).toString("utf-8"), encoding: "utf-8" };
@@ -63,7 +63,7 @@ function decodeBuffer(buf: Buffer): { text: string; encoding: "utf-8" | "windows
 // Counts candidate delimiters OUTSIDE quoted regions on the header line;
 // most wins, ties resolve ; then , then tab (semicolon is the Swedish/
 // Monitor default).
-function detectDelimiter(firstLine: string): ";" | "," | "\t" {
+export function detectDelimiter(firstLine: string): ";" | "," | "\t" {
   const counts: Record<";" | "," | "\t", number> = { ";": 0, ",": 0, "\t": 0 };
   let inQuotes = false;
   for (const ch of firstLine) {
@@ -77,7 +77,7 @@ function detectDelimiter(firstLine: string): ";" | "," | "\t" {
   return best;
 }
 
-function parseRecords(text: string, delimiter: string): string[][] {
+export function parseRecords(text: string, delimiter: string): string[][] {
   const records: string[][] = [];
   let row: string[] = [];
   let field = "";

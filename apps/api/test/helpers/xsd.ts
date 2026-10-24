@@ -7,11 +7,14 @@ import { validateXML } from "xmllint-wasm";
 //     https://www.iso20022.org/sites/default/files/documents/messages/pain/schemas/pain.001.001.03.xsd
 //   camt.054.001.02.xsd  sha256 7ff18dd9ceb927ea6576cc1c367b1e14aa10df3332b21629e1ca5d001fa4cada
 //     https://www.iso20022.org/sites/default/files/documents/messages/camt/schemas/camt.054.001.02.xsd
+//   camt.053.001.02.xsd  sha256 d664afd198d1f36386a14e2bfd0505c80c1291a5357d8132aa6ab5443a6f2f3d
+//     https://www.iso20022.org/sites/default/files/documents/messages/camt/schemas/camt.053.001.02.xsd
+//     (byte-identical to the copy SEB ships with its camt samples)
 // xmllint-wasm is a devDependency ONLY — production builds the XML by hand
 // and runs the structural check in pain001-check.ts (spec §3.4).
 const XSD_DIR = new URL("../fixtures/iso20022/xsd/", import.meta.url);
 
-export async function validateAgainstXsd(xml: string, schema: "pain.001.001.03" | "camt.054.001.02"): Promise<string[]> {
+export async function validateAgainstXsd(xml: string, schema: "pain.001.001.03" | "camt.054.001.02" | "camt.053.001.02"): Promise<string[]> {
   const contents = readFileSync(new URL(`${schema}.xsd`, XSD_DIR), "utf8");
   const result = await validateXML({
     xml: [{ fileName: "document.xml", contents: xml }],

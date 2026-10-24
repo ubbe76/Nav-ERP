@@ -99,6 +99,15 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["tillverkning"],
     listHref: "/tillverkning/behovsberakning",
   },
+  // Bankavstämning: statement entries older than BANK_UNRECONCILED_DAYS
+  // without a matching — a bookkeeping to-do, not an error.
+  {
+    kind: "bank_unreconciled",
+    label: "Omatchade bankposter",
+    severity: "yellow",
+    rule: ["ekonomi"],
+    listHref: "/ekonomi/bankavstamning",
+  },
 ];
 
 const BY_KIND = new Map(ALERT_KIND_CATALOG.map((def) => [def.kind, def] as const));

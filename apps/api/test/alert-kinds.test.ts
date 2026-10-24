@@ -35,6 +35,7 @@ describe("the catalog", () => {
       "manufacturing_order_late",
       "purchase_needed",
       "manufacture_needed",
+      "bank_unreconciled",
     ]);
   });
 
@@ -70,7 +71,7 @@ describe("visibleKinds", () => {
     ]);
     expect(visibleKinds(user(["tillverkning"]))).toEqual(["manufacturing_order_late", "manufacture_needed"]);
     expect(visibleKinds(user(["lager"]))).toEqual(["stock_negative"]);
-    expect(visibleKinds(user(["ekonomi"]))).toEqual(["recurring_verification_failed"]);
+    expect(visibleKinds(user(["ekonomi"]))).toEqual(["recurring_verification_failed", "bank_unreconciled"]);
   });
 
   it("Utskick som misslyckades and Tillägg are admin-only: every menu together still does not give them", () => {

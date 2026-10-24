@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Handwritten after Nordea's camt.053.001.02 account statement structure (own, made-up data — not a copy). -->
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <GrpHdr>
+      <MsgId>NDEASESS2024101000009</MsgId>
+      <CreDtTm>2024-10-10T00:30:00Z</CreDtTm>
+      <MsgPgntn><PgNb>1</PgNb><LastPgInd>true</LastPgInd></MsgPgntn>
+    </GrpHdr>
+    <Stmt>
+      <Id>NDEASESS2024101000009-01</Id>
+      <ElctrncSeqNb>9</ElctrncSeqNb>
+      <CreDtTm>2024-10-10T00:30:00Z</CreDtTm>
+      <FrToDt>
+        <FrDtTm>2024-10-09T00:00:00Z</FrDtTm>
+        <ToDtTm>2024-10-09T23:59:59Z</ToDtTm>
+      </FrToDt>
+      <Acct>
+        <Id><IBAN>SE2130000000012345678901</IBAN></Id>
+        <Ccy>SEK</Ccy>
+        <Ownr><Nm>Exempel Verkstad AB</Nm></Ownr>
+        <Svcr><FinInstnId><BIC>NDEASESS</BIC></FinInstnId></Svcr>
+      </Acct>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>OPBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="SEK">50000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2024-10-09</Dt></Dt>
+      </Bal>
+      <Bal>
+        <Tp><CdOrPrtry><Cd>CLBD</Cd></CdOrPrtry></Tp>
+        <Amt Ccy="SEK">25000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Dt><Dt>2024-10-09</Dt></Dt>
+      </Bal>
+      <Ntry>
+        <NtryRef>1</NtryRef>
+        <Amt Ccy="SEK">5000.00</Amt>
+        <CdtDbtInd>CRDT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <ValDt><Dt>2024-10-09</Dt></ValDt>
+        <AcctSvcrRef>2024100912345678</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn><Prtry><Cd>700</Cd><Issr>Nordea</Issr></Prtry></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><AcctSvcrRef>2024100912345678</AcctSvcrRef><EndToEndId>NOTPROVIDED</EndToEndId></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">5000.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Dbtr><Nm>KUNDEN I NORR AB</Nm></Dbtr></RltdPties>
+            <RmtInf><Strd><CdtrRefInf><Tp><CdOrPrtry><Cd>SCOR</Cd></CdOrPrtry></Tp><Ref>501300</Ref></CdtrRefInf></Strd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+        <AddtlNtryInf>INBETALNING BANKGIRO</AddtlNtryInf>
+      </Ntry>
+      <Ntry>
+        <NtryRef>2</NtryRef>
+        <Amt Ccy="SEK">30000.00</Amt>
+        <CdtDbtInd>DBIT</CdtDbtInd>
+        <Sts>BOOK</Sts>
+        <BookgDt><Dt>2024-10-09</Dt></BookgDt>
+        <ValDt><Dt>2024-10-09</Dt></ValDt>
+        <AcctSvcrRef>2024100912345679</AcctSvcrRef>
+        <BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>ICDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn><Prtry><Cd>800</Cd><Issr>Nordea</Issr></Prtry></BkTxCd>
+        <NtryDtls>
+          <TxDtls>
+            <Refs><AcctSvcrRef>2024100912345679</AcctSvcrRef><EndToEndId>SKATT-2024-10</EndToEndId></Refs>
+            <AmtDtls><TxAmt><Amt Ccy="SEK">30000.00</Amt></TxAmt></AmtDtls>
+            <RltdPties><Cdtr><Nm>SKATTEVERKET</Nm></Cdtr></RltdPties>
+            <RmtInf><Strd><CdtrRefInf><Tp><CdOrPrtry><Cd>SCOR</Cd></CdOrPrtry></Tp><Ref>16556677889900</Ref></CdtrRefInf></Strd></RmtInf>
+          </TxDtls>
+        </NtryDtls>
+        <AddtlNtryInf>BETALNING SKATTEKONTO</AddtlNtryInf>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>

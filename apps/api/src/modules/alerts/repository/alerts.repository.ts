@@ -28,6 +28,7 @@ import { purchaseRowArrivalDate, salesRowDeliveryDate } from "../../planning/rep
 import { openAmountSql as invoiceOpenAmountSql } from "../../sales/repository/open-amounts.js";
 import { openAmountSql as supplierInvoiceOpenAmountSql } from "../../purchase/repository/open-amounts.js";
 import { PLUGIN_REFUSAL_ERRORS } from "../../system/service/plugin-webhook.js";
+import { createBankReconciliationRepository } from "../../banking/repository/bank-reconciliation.repository.js";
 
 // Aviseringar — one reader per kind, every one a question against the
 // current state (nothing is stored). The readers reuse the expressions the
@@ -130,7 +131,14 @@ export interface FailedEmailRow {
 }
 
 export function createAlertsRepository(db: Db) {
+  // Bankavstämning: the unmatched statement entries, through the banking
+  // module's own reader so "unmatched" has one definition.
+  const bankReconciliation = createBankReconciliationRepository(db);
   return {
+    async unreconciledBankEntries(before: string) {
+      return bankReconciliation.unreconciledEntriesBefore(before);
+    },
+
     // Negativt saldo: the article's total over every location < 0 — the
     // same sum the balance lists show, just the other sign.
     async negativeStock(): Promise<NegativeStockRow[]> {

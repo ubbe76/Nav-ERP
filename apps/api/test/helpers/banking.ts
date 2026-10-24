@@ -25,6 +25,8 @@ import { createBankFileRepository } from "../../src/modules/banking/repository/b
 import { createBankSettingsRepository } from "../../src/modules/banking/repository/bank-settings.repository.js";
 import { createPaymentBatchRepository } from "../../src/modules/banking/repository/payment-batch.repository.js";
 import { createBankFileService } from "../../src/modules/banking/service/bank-file.service.js";
+import { createBankReconciliationRepository } from "../../src/modules/banking/repository/bank-reconciliation.repository.js";
+import { createBankReconciliationService } from "../../src/modules/banking/service/bank-reconciliation.service.js";
 import { createBankSettingsService } from "../../src/modules/banking/service/bank-settings.service.js";
 import { createPaymentBatchService } from "../../src/modules/banking/service/payment-batch.service.js";
 import { createVerificationPoster } from "../../src/modules/economy/service/verification-poster.js";
@@ -52,7 +54,7 @@ export const TODAY = "2024-10-09";
 
 // number_series is never truncated (seed rows). The banking tables come
 // first; CASCADE reaches everything else that references these.
-export const BANKING_TRUNCATE = sql`TRUNCATE bank_file_entries, bank_files, payment_batch_items, payment_batches, invoice_reminders, customer_payment_rows, customer_payments, invoice_rows, invoices, customers, supplier_payment_rows, supplier_payments, supplier_invoice_rows, supplier_invoices, suppliers, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, audit_log, users CASCADE`;
+export const BANKING_TRUNCATE = sql`TRUNCATE bank_match_rows, bank_match_entries, bank_matches, bank_reconciliations, bank_statement_entries, bank_statements, bank_accounts, bank_rules, bank_file_entries, bank_files, payment_batch_items, payment_batches, invoice_reminders, customer_payment_rows, customer_payments, invoice_rows, invoices, customers, supplier_payment_rows, supplier_payments, supplier_invoice_rows, supplier_invoices, suppliers, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, audit_log, users CASCADE`;
 
 export async function resetBanking() {
   await db.execute(BANKING_TRUNCATE);
@@ -387,4 +389,31 @@ export function multipartFile(filename: string, content: string | Buffer) {
   const head = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: application/xml\r\n\r\n`;
   const payload = Buffer.concat([Buffer.from(head), Buffer.isBuffer(content) ? content : Buffer.from(content), Buffer.from(`\r\n--${boundary}--\r\n`)]);
   return { payload, headers: { "content-type": `multipart/form-data; boundary=${boundary}` } };
+}
+
+// Bankavstämning (etapp 4): the reconciliation service as app.ts wires it.
+export const testBankReconciliationRepository = createBankReconciliationRepository(db);
+export function buildBankReconciliationService(now: () => Date = () => CLOCK) {
+  return createBankReconciliationService({
+    db,
+    repo: testBankReconciliationRepository,
+    economy: testEconomyService,
+    settings: { read: readPostingSettings },
+    company: createBankSettingsRepository(db),
+    now,
+  });
+}
+
+// A multipart body with text fields beside the file (bankAccountId,
+// csvMapping, autoMatch) — the statement import's form.
+export function multipartWithFields(filename: string, content: string | Buffer, fields: Record<string, string>, contentType = "application/xml") {
+  const boundary = "----navbankstatementtest";
+  const parts: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+  }
+  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`));
+  parts.push(Buffer.isBuffer(content) ? content : Buffer.from(content));
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+  return { payload: Buffer.concat(parts), headers: { "content-type": `multipart/form-data; boundary=${boundary}` } };
 }

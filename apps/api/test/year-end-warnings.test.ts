@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { db, supplierInvoices, suppliers, vatSettlements } from "@navet/db";
+import { bankAccounts, bankReconciliations, db, supplierInvoices, suppliers, vatSettlements } from "@navet/db";
 import { formatNumber } from "../src/modules/mail/service/document-pdf.js";
 import { testEconomyService } from "./helpers/services.js";
 import { testFixedAssetService } from "./helpers/fixed-assets.js";
@@ -58,6 +58,26 @@ describe("steg 1 — step blockers", () => {
 });
 
 describe("steg 1 — warnings", () => {
+  it("warns about a bank account not reconciled through the closing date, and stops once it is", async () => {
+    const { user, yearId } = await setupYearEnd();
+    await db.delete(bankReconciliations);
+    await db.delete(bankAccounts);
+    const [account] = await db.insert(bankAccounts).values({ name: "Företagskonto", identifier: "SE4550000000058398257466", ledgerAccount: "1930" }).returning();
+    try {
+      const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
+      const before = (await service.getClosing(closing.id)).checks.warnings.filter((w) => w.code === "bank-not-reconciled");
+      expect(before.map((w) => w.message)).toEqual(["Bankkontot 1930 Företagskonto är inte avstämt t.o.m. bokslutsdagen — se Bankavstämning"]);
+      await db.insert(bankReconciliations).values({ bankAccountId: account!.id, throughDate: `${YEAR}-11-30`, statementBalance: "0", ledgerBalance: "0", createdBy: user.id });
+      const partial = (await service.getClosing(closing.id)).checks.warnings.find((w) => w.code === "bank-not-reconciled");
+      expect(partial!.message).toContain(`(senast avstämt ${YEAR}-11-30)`);
+      await db.insert(bankReconciliations).values({ bankAccountId: account!.id, throughDate: `${YEAR}-12-31`, statementBalance: "0", ledgerBalance: "0", createdBy: user.id });
+      expect((await service.getClosing(closing.id)).checks.warnings.some((w) => w.code === "bank-not-reconciled")).toBe(false);
+    } finally {
+      await db.delete(bankReconciliations);
+      await db.delete(bankAccounts);
+    }
+  });
+
   it("warns about every unsettled VAT month, then only about December", async () => {
     const { user, yearId } = await setupYearEnd();
     const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);

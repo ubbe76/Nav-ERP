@@ -318,6 +318,28 @@ export const ERROR_CODES = {
   // Valuta steg 2: a returned payment in another currency came back with
   // another SEK amount than it took (409 — cancel and book the difference by hand).
   BANK_RETURN_SEK_DIFFERS: "bank-return-sek-differs",
+  // Bankavstämning (etapp 4)
+  BANK_ACCOUNT_NOT_FOUND: "bank-account-not-found",
+  BANK_ACCOUNT_IDENTIFIER_TAKEN: "bank-account-identifier-taken",
+  BANK_ACCOUNT_LEDGER_MISSING: "bank-account-ledger-missing",
+  BANK_ACCOUNT_REQUIRED: "bank-account-required",
+  BANK_STATEMENT_FORMAT: "bank-statement-format",
+  BANK_STATEMENT_CSV_MAPPING: "bank-statement-csv-mapping",
+  BANK_STATEMENT_ACCOUNT_UNKNOWN: "bank-statement-account-unknown",
+  BANK_STATEMENT_ACCOUNT_MISMATCH: "bank-statement-account-mismatch",
+  BANK_STATEMENT_CURRENCY: "bank-statement-currency",
+  BANK_STATEMENT_ENTRY_NOT_FOUND: "bank-statement-entry-not-found",
+  BANK_MATCH_NOT_FOUND: "bank-match-not-found",
+  BANK_MATCH_SUM_MISMATCH: "bank-match-sum-mismatch",
+  BANK_MATCH_ALREADY_MATCHED: "bank-match-already-matched",
+  BANK_MATCH_WRONG_ACCOUNT: "bank-match-wrong-account",
+  BANK_MATCH_ALREADY_UNDONE: "bank-match-already-undone",
+  BANK_ENTRY_BOOK_MISMATCH: "bank-entry-book-mismatch",
+  BANK_RULE_NOT_FOUND: "bank-rule-not-found",
+  BANK_RULE_MISSING: "bank-rule-missing",
+  BANK_RULE_AMBIGUOUS: "bank-rule-ambiguous",
+  BANK_RULE_ACCOUNT_MISSING: "bank-rule-account-missing",
+  BANK_RECONCILIATION_INCOMPLETE: "bank-reconciliation-incomplete",
   // configurator
   CONFIGURATOR_TEMPLATE_NOT_FOUND: "configurator-template-not-found",
   CONFIGURATOR_TEMPLATE_EXISTS: "configurator-template-exists",

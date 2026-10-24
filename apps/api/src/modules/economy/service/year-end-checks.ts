@@ -21,7 +21,8 @@ export type YearEndCheckCode =
   | "fx-revaluation-not-done"
   | "fx-revaluation-stale"
   | "result-not-transferred"
-  | "next-year-opening-balance-import";
+  | "next-year-opening-balance-import"
+  | "bank-not-reconciled";
 
 export interface YearEndCheck {
   code: YearEndCheckCode;
@@ -137,6 +138,9 @@ export interface WarningInput {
   // The valutaomvärdering is booked but the open foreign items (or their
   // currencies) changed since — a re-run would book something else.
   fxRevaluationStale?: boolean;
+  // Bankavstämning: active bank accounts not marked Avstämd t.o.m. the
+  // closing date (reconciledThrough = the latest mark, null = none).
+  unreconciledBankAccounts?: { name: string; ledgerAccount: string; reconciledThrough: string | null }[];
 }
 
 const MONTHS = ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"];
@@ -195,6 +199,12 @@ export function evaluateWarnings(input: WarningInput): YearEndCheck[] {
     warnings.push({
       code: "fx-revaluation-stale",
       message: "De öppna valutaposterna har ändrats sedan valutaomvärderingen bokfördes — gör om valutaomvärderingen",
+    });
+  }
+  for (const account of input.unreconciledBankAccounts ?? []) {
+    warnings.push({
+      code: "bank-not-reconciled",
+      message: `Bankkontot ${account.ledgerAccount} ${account.name} är inte avstämt t.o.m. bokslutsdagen${account.reconciledThrough ? ` (senast avstämt ${account.reconciledThrough})` : ""} — se Bankavstämning`,
     });
   }
   return warnings;

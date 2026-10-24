@@ -1,4 +1,4 @@
-import { ALERT_ITEMS_LIMIT, type AlertGroup, type AlertItem, type AlertKind, type AlertSeverity, type AlertsResponse } from "@navet/shared";
+import { ALERT_ITEMS_LIMIT, BANK_UNRECONCILED_DAYS, type AlertGroup, type AlertItem, type AlertKind, type AlertSeverity, type AlertsResponse } from "@navet/shared";
 import { addDays, stockholmToday } from "../../system/service/delivery-days.js";
 import { stockholmNow } from "../../shipping/service/pickup.js";
 import { computeDueDate } from "../../purchase/service/supplier-invoice.service.js";
@@ -281,6 +281,20 @@ export function createAlertsService(deps: {
         primary: `${EMAIL_DOCUMENT_TEXT[r.documentType] ?? r.documentType}: ${r.subject}`,
         secondary: r.error ? `Till ${r.recipient} · ${r.error}` : `Till ${r.recipient}`,
         date: stockholmNow(r.createdAt).date,
+      }));
+    },
+
+    // Omatchade bankposter: statement entries booked more than
+    // BANK_UNRECONCILED_DAYS ago without a live matching, oldest first.
+    async bank_unreconciled(today) {
+      const rows = await repo.unreconciledBankEntries(addDays(today, -BANK_UNRECONCILED_DAYS));
+      return rows.map((r) => ({
+        key: r.id,
+        severity: "yellow" as const,
+        href: `/ekonomi/bankavstamning?bankAccountId=${r.bankAccountId}`,
+        primary: `${r.bookingDate} ${r.text}`,
+        secondary: `${formatAmount(r.amount)} ${r.currency === "SEK" ? "kr" : r.currency} · ${r.accountName} · ${daysLateText(r.bookingDate, today)}`,
+        date: r.bookingDate,
       }));
     },
 

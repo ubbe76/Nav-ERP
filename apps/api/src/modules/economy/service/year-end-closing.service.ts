@@ -66,6 +66,7 @@ import {
 } from "./year-end-calc.js";
 import { DIVIDEND_PAYABLE_ACCOUNT, RETAINED_EARNINGS_ACCOUNT, YEAR_RESULT_ACCOUNT, YEAR_RESULT_EQUITY_ACCOUNT } from "./year-end-accounts.js";
 import { evaluateCloseBlockers, evaluateStepBlockers, evaluateWarnings, type StepGateInput, type YearEndCheck } from "./year-end-checks.js";
+import { unreconciledBankAccountsAsOf } from "../../banking/repository/bank-reconciliation.repository.js";
 
 export class YearEndClosingNotFoundError extends Error {
   constructor(id: string) {
@@ -370,6 +371,9 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
       inventoryStale:
         inventoryStep.status === "stale" ? { ledger: inventoryStep.ledger ?? 0, value: inventoryStep.value ?? 0 } : null,
       fxRevaluationStale: fx.status === "stale",
+      // Bankavstämning: a bank account not reconciled through the closing
+      // date is a warning, never a blocker (spec etapp 4 §4).
+      unreconciledBankAccounts: await unreconciledBankAccountsAsOf(executor, closing.closingDate),
     });
   }
 

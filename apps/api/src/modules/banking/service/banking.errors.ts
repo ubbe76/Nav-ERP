@@ -230,3 +230,197 @@ export class BankReturnBeforePaymentError extends Error {
     this.name = "BankReturnBeforePaymentError";
   }
 }
+
+// --- Bankavstämning (etapp 4) ---
+
+export class BankAccountNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Bank account ${id} not found`);
+    this.name = "BankAccountNotFoundError";
+  }
+}
+
+// Another bank account already carries this IBAN/BBAN. 409.
+export class BankAccountIdentifierTakenError extends Error {
+  constructor(public identifier: string) {
+    super(`Bank account identifier ${identifier} is already in use`);
+    this.name = "BankAccountIdentifierTakenError";
+  }
+}
+
+// The ledger account number is not in the chart of accounts (or inactive). 400.
+export class BankAccountLedgerMissingError extends Error {
+  constructor(public accountNumber: string) {
+    super(`Ledger account ${accountNumber} does not exist or is inactive`);
+    this.name = "BankAccountLedgerMissingError";
+  }
+}
+
+// A CSV import, or a statement for an account the register does not know,
+// needs bankAccountId. 400.
+export class BankAccountRequiredError extends Error {
+  constructor(message = "bankAccountId is required for this file") {
+    super(message);
+    this.name = "BankAccountRequiredError";
+  }
+}
+
+// Well-formed XML, but not a camt.053.001.02 (a camt.054 belongs under
+// Bankfiler). 400.
+export class BankStatementFormatError extends Error {
+  constructor(public namespace: string | null) {
+    const shown = namespace && namespace.length > 60 ? `${namespace.slice(0, 60)}…` : namespace;
+    super(`Only camt.053.001.02 statements are supported (the file is ${shown ?? "without namespace"})`);
+    this.name = "BankStatementFormatError";
+  }
+}
+
+// The CSV cannot be read with the given mapping (missing column, a cell
+// that is no date/amount). 400, Swedish message.
+export class BankStatementCsvMappingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BankStatementCsvMappingError";
+  }
+}
+
+// The file reports accounts the register does not know and bankAccountId
+// cannot settle it (none given, or more than one unknown). 400.
+export class BankStatementAccountUnknownError extends Error {
+  constructor(public identifiers: string[]) {
+    super(`The statement is for an unknown bank account: ${identifiers.join(", ")}`);
+    this.name = "BankStatementAccountUnknownError";
+  }
+}
+
+// bankAccountId names another account than the file's Acct/Id resolves to. 400.
+export class BankStatementAccountMismatchError extends Error {
+  constructor(public identifier: string) {
+    super(`The statement's account ${identifier} belongs to another bank account than the one chosen`);
+    this.name = "BankStatementAccountMismatchError";
+  }
+}
+
+// The statement is in another currency than the bank account. 400.
+export class BankStatementCurrencyError extends Error {
+  constructor(
+    public statementCurrency: string,
+    public accountCurrency: string
+  ) {
+    super(`The statement is in ${statementCurrency} but the bank account is in ${accountCurrency}`);
+    this.name = "BankStatementCurrencyError";
+  }
+}
+
+export class BankStatementEntryNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Bank statement entry ${id} not found`);
+    this.name = "BankStatementEntryNotFoundError";
+  }
+}
+
+export class BankMatchNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Bank match ${id} not found`);
+    this.name = "BankMatchNotFoundError";
+  }
+}
+
+// Σ entries ≠ Σ rows (debit − credit on the bank's ledger account). 409.
+export class BankMatchSumMismatchError extends Error {
+  constructor(
+    public entriesSum: number,
+    public rowsSum: number
+  ) {
+    super(`The entries sum to ${entriesSum.toFixed(2)} but the rows to ${rowsSum.toFixed(2)}`);
+    this.name = "BankMatchSumMismatchError";
+  }
+}
+
+// An entry or row is already part of a live matching. 409.
+export class BankMatchAlreadyMatchedError extends Error {
+  constructor() {
+    super("An entry or row is already matched");
+    this.name = "BankMatchAlreadyMatchedError";
+  }
+}
+
+// An entry of another bank account, a row on another ledger account, or an
+// unbooked verification. 400.
+export class BankMatchWrongAccountError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BankMatchWrongAccountError";
+  }
+}
+
+export class BankMatchAlreadyUndoneError extends Error {
+  constructor(id: string) {
+    super(`Bank match ${id} is already undone`);
+    this.name = "BankMatchAlreadyUndoneError";
+  }
+}
+
+// Bokför: the rows do not carry the bank's ledger account with exactly the
+// entry's amount on the right side. 400.
+export class BankEntryBookMismatchError extends Error {
+  constructor(
+    public expected: number,
+    public actual: number
+  ) {
+    super(`The rows put ${actual.toFixed(2)} on the bank account but the entry is ${expected.toFixed(2)}`);
+    this.name = "BankEntryBookMismatchError";
+  }
+}
+
+export class BankRuleNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Bank rule ${id} not found`);
+    this.name = "BankRuleNotFoundError";
+  }
+}
+
+// Bokför enligt regel: no active rule matches the entry. 409.
+export class BankRuleMissingError extends Error {
+  constructor() {
+    super("No bank rule matches the entry");
+    this.name = "BankRuleMissingError";
+  }
+}
+
+// More than one rule matches — the user picks. 409.
+export class BankRuleAmbiguousError extends Error {
+  constructor(public ruleIds: string[]) {
+    super(`${ruleIds.length} bank rules match the entry`);
+    this.name = "BankRuleAmbiguousError";
+  }
+}
+
+// The rule's account (or its momskod's VAT account) is not in the chart of
+// accounts or inactive. 400.
+export class BankRuleAccountMissingError extends Error {
+  constructor(public accountNumber: string) {
+    super(`Account ${accountNumber} does not exist or is inactive`);
+    this.name = "BankRuleAccountMissingError";
+  }
+}
+
+// Avstämd t.o.m. refused: something before the date is unmatched or the
+// balances disagree. 409 with `reason`.
+export class BankReconciliationIncompleteError extends Error {
+  constructor(
+    public reason: "unmatched-entries" | "unmatched-rows" | "no-statement-balance" | "balance-mismatch",
+    public detail: { count?: number; statementBalance?: number | null; ledgerBalance?: number } = {}
+  ) {
+    super(
+      reason === "unmatched-entries"
+        ? `${detail.count ?? 0} statement entries up to the date are unmatched`
+        : reason === "unmatched-rows"
+          ? `${detail.count ?? 0} ledger rows up to the date are unmatched`
+          : reason === "no-statement-balance"
+            ? "No statement balance is known for the date"
+            : `The statement balance ${(detail.statementBalance ?? 0).toFixed(2)} differs from the ledger balance ${(detail.ledgerBalance ?? 0).toFixed(2)}`
+    );
+    this.name = "BankReconciliationIncompleteError";
+  }
+}
