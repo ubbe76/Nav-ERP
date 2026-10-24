@@ -6,6 +6,7 @@ import {
   ACCRUAL_KIND_BALANCE_SIDE,
   round2,
   type BookAccrualsInput,
+  type BookFxRevaluationInput,
   type BookInventoryInput,
   type CreateFiscalYearInput,
   type ListYearEndClosingsQuery,
@@ -16,6 +17,7 @@ import {
 import { formatNumber } from "../../mail/service/document-pdf.js";
 import { METHOD_LABELS } from "../../stock/service/valuation.service.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 import { findSettlementsOverlapping } from "../repository/vat-settlement.repository.js";
 import * as repo from "../repository/year-end.repository.js";
 import { FiscalYearClosedError } from "./accounting-period-lock.js";
@@ -29,6 +31,18 @@ import {
   OverlappingFiscalYearError,
 } from "./economy.service.js";
 import type { FixedAssetPlan } from "./fixed-asset-plan.js";
+import {
+  fxRevaluationEntries,
+  revalue,
+  sameNetAmounts,
+  sameRates,
+  type FxEntry,
+  type FxOpenItem,
+  type FxRate,
+  type FxRevaluation,
+  type FxRole,
+  type FxSideSummary,
+} from "./fx-revaluation.js";
 import { reconciliationLine, stockholmToday, type DepreciationRunResult, type RunDepreciationInput } from "./fixed-asset.service.js";
 import { readVatAccountMovements } from "./vat-account-movements.js";
 import { findUnassignedAccounts } from "./vat-report.service.js";
@@ -172,6 +186,54 @@ export class ProfitDispositionNotFoundError extends Error {
   }
 }
 
+// Valutaomvärdering: a currency the open items need has no rate — neither
+// typed in the step, nor booked before, nor in Valutakurser for the closing
+// date. 409 fx-revaluation-rate-missing (body.currencies, body.date).
+export class FxRevaluationRateMissingError extends Error {
+  constructor(
+    public currencies: string[],
+    public date: string
+  ) {
+    super(`Kurs saknas för ${currencies.join(", ")} per ${date} — ange kursen i steget Valutaomvärdering`);
+    this.name = "FxRevaluationRateMissingError";
+  }
+}
+
+// One open item of a reskontra per a date, as the open-amounts readers return
+// it (receivableForeignItemsAsOf / payableForeignItemsAsOf).
+export interface ReskontraOpenItem {
+  id: string;
+  number: string;
+  partnerName: string;
+  currency: string;
+  exchangeRate: number | null;
+  openAmount: number;
+  openAmountSek: number;
+}
+
+export interface ReskontraReader {
+  // The reskontra's SEK total per the date (steg 1's reconciliation).
+  totalAsOf(executor: Db | Tx, date: string): Promise<number>;
+  // Its invoices in another currency than SEK open per the date — the same
+  // per-invoice derivation as the total (valutaomvärderingen).
+  foreignItemsAsOf(executor: Db | Tx, date: string): Promise<ReskontraOpenItem[]>;
+}
+
+// A rate as the step shows it: fromBooking = the live booking's rate (kept
+// as the default so a re-run does not silently replace a rate typed before).
+export type FxRateView = FxRate & { fromBooking: boolean };
+
+const FX_ROLE_LABELS: Record<FxRole, string> = {
+  receivable: "accounts receivable",
+  payable: "accounts payable",
+  gain: "exchange gain",
+  loss: "exchange loss",
+};
+
+function formatRate(rate: number): string {
+  return rate.toFixed(6).replace(".", ",");
+}
+
 export interface InventoryValuation {
   totalValue: number;
   unvaluedCount: number;
@@ -187,8 +249,11 @@ export interface YearEndClosingServiceDeps {
   db: Db;
   poster: VerificationPoster;
   settings: PostingSettingsReader;
-  receivables: { totalAsOf(executor: Db | Tx, date: string): Promise<number> };
-  payables: { totalAsOf(executor: Db | Tx, date: string): Promise<number> };
+  receivables: ReskontraReader;
+  payables: ReskontraReader;
+  // Valutaomvärdering: the closing date's rate per currency. May call
+  // Riksbanken — only ever outside a transaction.
+  exchangeRates: ExchangeRateReader;
   fixedAssets: {
     getPlan(query: { fiscalYearId: string }): Promise<FixedAssetPlan>;
     runDepreciation(tx: Tx, input: RunDepreciationInput, userId: string): Promise<DepreciationRunResult | null>;
@@ -230,9 +295,10 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     }
   }
 
-  // The date locks after the first booked step (2–5), steg 3's AV run included.
+  // The date locks after the first booked step (2–5 and the valutaomvärdering),
+  // steg 3's AV run included.
   async function closingDateLocked(executor: Db | Tx, closing: repo.ClosingRow): Promise<boolean> {
-    if (closing.inventoryBookedAt || closing.accrualsBookedAt || closing.resultTransferVerificationId) return true;
+    if (closing.inventoryBookedAt || closing.accrualsBookedAt || closing.fxBookedAt || closing.resultTransferVerificationId) return true;
     return repo.hasDepreciationRunOn(executor, closing.closingDate);
   }
 
@@ -279,24 +345,31 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     const plan = await deps.fixedAssets.getPlan({ fiscalYearId: year.id });
     const movements = await readVatAccountMovements(executor, year.startDate, year.endDate);
     const inventoryStep = await inventoryStepView(executor, closing);
+    const fx = await fxStepState(executor, closing);
     return evaluateWarnings({
       unsettledVatMonths: periods
         .filter((period) => !settlements.some((s) => s.fromDate <= period.startDate && s.toDate >= period.endDate))
         .map((period) => period.startDate.slice(0, 7)),
+      // The live valutaomvärdering sits on both accounts (dated on the
+      // closing date, its reversal after year end): the ledger is expected
+      // to be the reskontra plus what it booked there.
       receivables: {
         accountNumber: settings.postingAccountsReceivable,
         ledger: debitBalance(settings.postingAccountsReceivable),
         register: await deps.receivables.totalAsOf(executor, year.endDate),
+        revaluation: await fxBookedOnAccount(executor, closing, settings.postingAccountsReceivable, 1),
       },
       payables: {
         accountNumber: settings.postingAccountsPayable,
         ledger: round2(-debitBalance(settings.postingAccountsPayable)),
         register: await deps.payables.totalAsOf(executor, year.endDate),
+        revaluation: await fxBookedOnAccount(executor, closing, settings.postingAccountsPayable, -1),
       },
       fixedAssetMismatches: plan.reconciliation.filter((row) => row.mismatch).map(reconciliationLine),
       revenueWithoutVatBox: findUnassignedAccounts(movements).filter((account) => account.accountNumber.startsWith("3")),
       inventoryStale:
         inventoryStep.status === "stale" ? { ledger: inventoryStep.ledger ?? 0, value: inventoryStep.value ?? 0 } : null,
+      fxRevaluationStale: fx.status === "stale",
     });
   }
 
@@ -457,6 +530,203 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     }
   }
 
+  // --- Valutaomvärdering (valuta steg 4) ---
+
+  // Both reskontror's foreign open items per the date, tagged with their side.
+  async function loadFxItems(executor: Db | Tx, date: string): Promise<FxOpenItem[]> {
+    const receivable = await deps.receivables.foreignItemsAsOf(executor, date);
+    const payable = await deps.payables.foreignItemsAsOf(executor, date);
+    return [
+      ...receivable.map((item) => ({ ...item, side: "receivable" as const })),
+      ...payable.map((item) => ({ ...item, side: "payable" as const })),
+    ];
+  }
+
+  function currenciesOf(items: FxOpenItem[]): string[] {
+    return [...new Set(items.map((item) => item.currency))].sort();
+  }
+
+  function rateMap(rates: Iterable<FxRate>): Map<string, number> {
+    return new Map([...rates].map((rate) => [rate.currency, rate.rate]));
+  }
+
+  function storedRate(rate: FxRateView | FxRate): FxRate {
+    return { currency: rate.currency, rate: rate.rate, date: rate.date, source: rate.source };
+  }
+
+  // The rate per currency: typed in the request → the live booking's →
+  // Valutakurser for the closing date (getRate — may call Riksbanken, so
+  // this NEVER runs inside a transaction). A currency nothing answers for
+  // is left out (the caller lists it as missing).
+  async function resolveFxRates(
+    closing: repo.ClosingRow,
+    currencies: string[],
+    requested: Record<string, number>
+  ): Promise<Map<string, FxRateView>> {
+    const rates = new Map<string, FxRateView>();
+    const booked = new Map((closing.fxRates ?? []).map((rate) => [rate.currency, rate]));
+    for (const currency of currencies) {
+      const typed = requested[currency];
+      if (typed !== undefined) {
+        rates.set(currency, { currency, rate: typed, date: null, source: "step", fromBooking: false });
+        continue;
+      }
+      const fromBooking = booked.get(currency);
+      if (fromBooking) {
+        rates.set(currency, { ...fromBooking, fromBooking: true });
+        continue;
+      }
+      try {
+        const lookup = await deps.exchangeRates.getRate(currency, closing.closingDate);
+        rates.set(currency, { currency, rate: lookup.rate, date: lookup.date, source: lookup.source ?? "manual", fromBooking: false });
+      } catch (err) {
+        if (!(err instanceof ExchangeRateUnavailableError)) throw err;
+      }
+    }
+    return rates;
+  }
+
+  function fxRoleNumbers(settings: Awaited<ReturnType<PostingSettingsReader["read"]>>): Record<FxRole, string> {
+    return {
+      receivable: settings.postingAccountsReceivable,
+      payable: settings.postingAccountsPayable,
+      gain: settings.postingFxGain,
+      loss: settings.postingFxLoss,
+    };
+  }
+
+  // The entries as the poster will book them: accounts by the posting
+  // settings, required active — resolved BEFORE any omföring so a missing
+  // account writes nothing.
+  async function fxBookingAmounts(executor: Db | Tx, entries: FxEntry[]): Promise<SignedAmount[]> {
+    const numbers = fxRoleNumbers(await deps.settings.read(executor));
+    const amounts: SignedAmount[] = [];
+    for (const entry of entries) {
+      const account = await requireAccountByNumber(executor, numbers[entry.role], FX_ROLE_LABELS[entry.role]);
+      amounts.push({ accountId: account.id, amount: entry.amount });
+    }
+    return amounts;
+  }
+
+  // The preview's verification rows, netted per account number. Lenient: an
+  // account missing from the chart shows with an empty name (the booking
+  // itself then 409s missing-posting-account).
+  async function fxPreviewRows(executor: Db | Tx, entries: FxEntry[]) {
+    const numbers = fxRoleNumbers(await deps.settings.read(executor));
+    const net = new Map<string, number>();
+    for (const entry of entries) net.set(numbers[entry.role], round2((net.get(numbers[entry.role]) ?? 0) + entry.amount));
+    const rows = [];
+    for (const [accountNumber, value] of net) {
+      if (value === 0) continue;
+      const account = await repo.findAccountByNumber(executor, accountNumber);
+      rows.push({ accountNumber, accountName: account?.name ?? "", debit: value > 0 ? value : 0, credit: value < 0 ? -value : 0 });
+    }
+    return rows;
+  }
+
+  // Does the live booking equal what this revaluation would book? An account
+  // the settings no longer resolve counts as a difference.
+  async function fxLiveMatches(executor: Db | Tx, closing: repo.ClosingRow, revaluation: FxRevaluation): Promise<boolean> {
+    if (revaluation.missingCurrencies.length > 0) return false;
+    const numbers = fxRoleNumbers(await deps.settings.read(executor));
+    const wanted: SignedAmount[] = [];
+    for (const entry of fxRevaluationEntries(revaluation)) {
+      const account = await repo.findAccountByNumber(executor, numbers[entry.role]);
+      if (!account) return false;
+      wanted.push({ accountId: account.id, amount: entry.amount });
+    }
+    const live = closing.fxVerificationId ? await repo.verificationAmounts(executor, closing.fxVerificationId) : [];
+    return sameNetAmounts(live, wanted);
+  }
+
+  // The step's status from the database alone (no rate lookup — closeYear
+  // reads it inside its transaction): not done; done = the live booking is
+  // exactly what its own rates give for today's open items; stale = the
+  // items or their currencies changed since.
+  async function fxStepState(executor: Db | Tx, closing: repo.ClosingRow) {
+    const items = await loadFxItems(executor, closing.closingDate);
+    let status: "not_done" | "done" | "stale" = "not_done";
+    if (closing.fxBookedAt) {
+      const booked = rateMap(closing.fxRates ?? []);
+      const covered = currenciesOf(items).every((currency) => booked.has(currency));
+      status = covered && (await fxLiveMatches(executor, closing, revalue(items, booked))) ? "done" : "stale";
+    }
+    return { items, status, required: items.length > 0 };
+  }
+
+  // What the live revaluation booked on a reskontra account, in the
+  // reskontra's sign (sign −1 for the payable account, a credit balance).
+  async function fxBookedOnAccount(executor: Db | Tx, closing: repo.ClosingRow, accountNumber: string, sign: 1 | -1): Promise<number> {
+    if (!closing.fxVerificationId) return 0;
+    const account = await repo.findAccountByNumber(executor, accountNumber);
+    if (!account) return 0;
+    return round2(sign * (await repo.verificationAmountOnAccount(executor, closing.fxVerificationId, account.id)));
+  }
+
+  function fxSideView(accountNumber: string, side: FxSideSummary) {
+    return { accountNumber, ...side };
+  }
+
+  // The preview at the given rates (default: booked, else Valutakurser).
+  // Always on the service's own connection, never a transaction: the rate
+  // lookup may call Riksbanken.
+  async function fxPreview(closing: repo.ClosingRow, requested: Record<string, number>, opts: { invoices: boolean }) {
+    const items = await loadFxItems(db, closing.closingDate);
+    const currencies = currenciesOf(items);
+    const rates = await resolveFxRates(closing, currencies, requested);
+    const revaluation = revalue(items, rateMap(rates.values()));
+    const entries = revaluation.missingCurrencies.length === 0 ? fxRevaluationEntries(revaluation) : [];
+    const settings = await deps.settings.read(db);
+    const used = currencies.flatMap((currency) => (rates.has(currency) ? [storedRate(rates.get(currency)!)] : []));
+    const unchanged =
+      closing.fxBookedAt !== null &&
+      revaluation.missingCurrencies.length === 0 &&
+      sameRates(closing.fxRates ?? [], used) &&
+      (await fxLiveMatches(db, closing, revaluation));
+    return {
+      asOf: closing.closingDate,
+      rates: currencies.map(
+        (currency) => rates.get(currency) ?? { currency, rate: null, date: null, source: null, fromBooking: false }
+      ),
+      missingCurrencies: revaluation.missingCurrencies,
+      receivable: fxSideView(settings.postingAccountsReceivable, revaluation.receivable),
+      payable: fxSideView(settings.postingAccountsPayable, revaluation.payable),
+      resultEffect: revaluation.resultEffect,
+      rows: await fxPreviewRows(db, entries),
+      unchanged,
+      ...(opts.invoices
+        ? {
+            invoices: revaluation.items.map((item) => ({
+              side: item.side,
+              id: item.id,
+              number: item.number,
+              partnerName: item.partnerName,
+              currency: item.currency,
+              exchangeRate: item.exchangeRate,
+              openAmount: item.openAmount,
+              bookedSek: item.openAmountSek,
+              rate: item.rate,
+              revaluedSek: item.revaluedSek,
+              difference: item.difference,
+            })),
+          }
+        : {}),
+    };
+  }
+
+  async function fxStepView(closing: repo.ClosingRow) {
+    const state = await fxStepState(db, closing);
+    return {
+      status: state.status,
+      required: state.required,
+      verification: closing.fxVerificationId ? await repo.verificationRef(db, closing.fxVerificationId) : null,
+      reversalVerification: closing.fxReversalVerificationId ? await repo.verificationRef(db, closing.fxReversalVerificationId) : null,
+      bookedAt: closing.fxBookedAt,
+      bookedRates: closing.fxRates,
+      preview: await fxPreview(closing, {}, { invoices: false }),
+    };
+  }
+
   async function accrualsStepView(executor: Db | Tx, closing: repo.ClosingRow) {
     return {
       status: (closing.accrualsBookedAt ? "done" : "not_done") as "done" | "not_done",
@@ -540,6 +810,10 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         inventoryDone: closing.inventoryBookedAt !== null,
         missingDepreciationAssets: depreciation.missingAssets,
         accrualsDone: closing.accrualsBookedAt !== null,
+        fxRevaluation: {
+          openItems: (await loadFxItems(executor, closing.closingDate)).length,
+          done: closing.fxBookedAt !== null,
+        },
         resultNet: await incomeStatementNet(executor, year),
         openingBalanceImports: ib?.imports ?? [],
         openingBalanceDifferences: ib?.differences.length ?? 0,
@@ -633,6 +907,9 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         inventory: await inventoryStepView(executor, closing),
         depreciation: await depreciationStepView(executor, closing),
         accruals: await accrualsStepView(executor, closing),
+        // The preview looks rates up (maybe Riksbanken): on the service's
+        // own connection — views() only ever runs for a GET (detail(db)).
+        fxRevaluation: await fxStepView(closing),
         resultTransfer: await resultTransferView(executor, closing, year),
       },
       checks: {
@@ -863,6 +1140,146 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
       });
     },
 
+    // Valutaomvärdering: what the step would book at the given rates
+    // (default: the live booking's rate, else Valutakurser for the closing
+    // date), with every invoice behind it.
+    async previewFxRevaluation(id: string, rates: Record<string, number> = {}) {
+      return fxPreview(await requireClosing(db, id), rates, { invoices: true });
+    },
+
+    // Valutaomvärdering: one BS verification on the closing date (each
+    // reskontra account takes its side's net difference, kursvinst/kursförlust
+    // the gains and losses per currency) and its mirror on the next year's
+    // first day, booked in ONE transaction and stored as a pair — the
+    // accruals' pattern. The rates are resolved first, outside the
+    // transaction (getRate may call Riksbanken); a currency without one is a
+    // 409. A re-run cancels the live pair and books a new one, or is
+    // unchanged when it would book the same at the same rates.
+    async bookFxRevaluation(id: string, input: BookFxRevaluationInput, userId: string) {
+      const pre = await requireClosing(db, id);
+      const year = await requireYear(db, pre.fiscalYearId);
+      // Checked again under the row lock; here so a closed closing neither
+      // looks rates up nor creates the next year.
+      if (pre.status !== "in_progress") throw new YearEndClosingClosedError(year.label);
+      const preItems = await loadFxItems(db, pre.closingDate);
+      const rates = await resolveFxRates(pre, currenciesOf(preItems), input.rates);
+      const preRevaluation = revalue(preItems, rateMap(rates.values()));
+      if (preRevaluation.missingCurrencies.length > 0) {
+        throw new FxRevaluationRateMissingError(preRevaluation.missingCurrencies, pre.closingDate);
+      }
+      const nextFiscalYearCreated = fxRevaluationEntries(preRevaluation).length > 0 ? await ensureNextFiscalYear(year) : false;
+
+      return db.transaction(async (tx) => {
+        const { closing } = await lockOpenClosing(tx, id);
+        // The rates were looked up for the closing date read before the lock;
+        // a date moved in between (possible until the first booked step)
+        // needs a new lookup — outside a transaction, so: try again.
+        if (closing.closingDate !== pre.closingDate) {
+          throw new YearEndBlockedError(["Bokslutsdagen ändrades under valutaomvärderingen — försök igen"]);
+        }
+        // Re-read under the row lock: what is booked is what is open NOW. A
+        // currency that appeared since the lookup has no rate yet.
+        const items = await loadFxItems(tx, closing.closingDate);
+        const revaluation = revalue(items, rateMap(rates.values()));
+        if (revaluation.missingCurrencies.length > 0) {
+          throw new FxRevaluationRateMissingError(revaluation.missingCurrencies, closing.closingDate);
+        }
+        const used = currenciesOf(items).map((currency) => storedRate(rates.get(currency)!));
+        const summary = {
+          receivable: revaluation.receivable,
+          payable: revaluation.payable,
+          resultEffect: revaluation.resultEffect,
+        };
+        const verificationRef = (verificationId: string | null) => (verificationId ? repo.verificationRef(tx, verificationId) : null);
+
+        const amounts = await fxBookingAmounts(tx, fxRevaluationEntries(revaluation));
+        const live = closing.fxVerificationId ? await repo.verificationAmounts(tx, closing.fxVerificationId) : [];
+        if (closing.fxBookedAt && sameRates(closing.fxRates ?? [], used) && sameNetAmounts(live, amounts)) {
+          return {
+            unchanged: true,
+            verification: await verificationRef(closing.fxVerificationId),
+            reversalVerification: await verificationRef(closing.fxReversalVerificationId),
+            cancelled: [] as repo.VerificationRef[],
+            nextFiscalYearCreated,
+            rates: closing.fxRates ?? [],
+            revaluation: summary,
+          };
+        }
+
+        // R (and the omföring of a live R) lands on the next year's first
+        // day: check that period before anything is posted.
+        const next = await repo.findNextFiscalYear(tx, year.endDate);
+        if (closing.fxVerificationId || amounts.length > 0) {
+          if (!next) throw new NextFiscalYearMissingError(year.label);
+          await assertPostablePeriod(tx, next.startDate);
+        }
+
+        const cancelled: repo.VerificationRef[] = [];
+        if (closing.fxVerificationId && closing.fxReversalVerificationId) {
+          cancelled.push(await cancelGuideVerification(tx, closing.id, closing.fxVerificationId, "fx_revaluation", userId));
+          cancelled.push(await cancelGuideVerification(tx, closing.id, closing.fxReversalVerificationId, "fx_revaluation", userId));
+        }
+
+        let verification: repo.VerificationRef | null = null;
+        let reversalVerification: repo.VerificationRef | null = null;
+        if (amounts.length > 0) {
+          const document = `Bokslut ${year.label}`;
+          const rateText = used.map((rate) => `${rate.currency} ${formatRate(rate.rate)}`).join(", ");
+          const v = await deps.poster.postClosingEntry(
+            tx,
+            {
+              date: closing.closingDate,
+              description: `Valutaomvärdering bokslut ${year.label} (${rateText})`,
+              amounts,
+              source: "year_end_fx_revaluation",
+              document,
+            },
+            userId
+          );
+          // R is an ordinary booking in the next year, NOT linked through
+          // reverses_verification_id (then a re-run could not omföra V).
+          const r = await deps.poster.postClosingEntry(
+            tx,
+            {
+              date: next!.startDate,
+              description: `Återföring av valutaomvärdering bokslut ${year.label} (${v.displayNumber})`,
+              amounts: mirrorAmounts(amounts),
+              source: "year_end_fx_reversal",
+              document,
+            },
+            userId
+          );
+          await repo.insertOwnership(tx, { verificationId: v.verificationId, closingId: closing.id, step: "fx_revaluation", role: "booking" });
+          await repo.insertOwnership(tx, { verificationId: r.verificationId, closingId: closing.id, step: "fx_revaluation", role: "fx_reversal" });
+          verification = await repo.verificationRef(tx, v.verificationId);
+          reversalVerification = await repo.verificationRef(tx, r.verificationId);
+        }
+
+        await repo.updateClosing(tx, closing.id, {
+          fxVerificationId: verification?.id ?? null,
+          fxReversalVerificationId: reversalVerification?.id ?? null,
+          fxBookedAt: new Date(),
+          fxRates: used,
+        });
+        await writeAudit(
+          tx,
+          year.label,
+          "fx_revaluation_booked",
+          {
+            rates: used,
+            receivable: { difference: revaluation.receivable.difference, currencies: revaluation.receivable.currencies },
+            payable: { difference: revaluation.payable.difference, currencies: revaluation.payable.currencies },
+            verification: verification?.displayNumber ?? null,
+            reversal: reversalVerification?.displayNumber ?? null,
+            cancelled: cancelled.map((ref) => ref.displayNumber),
+            nextFiscalYearCreated,
+          },
+          userId
+        );
+        return { unchanged: false, verification, reversalVerification, cancelled, nextFiscalYearCreated, rates: used, revaluation: summary };
+      });
+    },
+
     // The booking steg 5 would make now: the rows of resultTransferAmounts
     // (the one place the sign rule lives) for the result before any live
     // transfer — the same rows a done step booked.
@@ -889,6 +1306,9 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         if (!closing.inventoryBookedAt) throw new YearEndStepOrderError("Lagerförändring");
         if ((await depreciationStepView(tx, closing)).missingAssets > 0) throw new YearEndStepOrderError("Avskrivningar");
         if (!closing.accrualsBookedAt) throw new YearEndStepOrderError("Periodiseringar");
+        if (!closing.fxBookedAt && (await loadFxItems(tx, closing.closingDate)).length > 0) {
+          throw new YearEndStepOrderError("Valutaomvärdering");
+        }
 
         let net = await incomeStatementNet(tx, year);
         if (net === 0) {
@@ -974,6 +1394,8 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
               inventory: await ref(closing.inventoryVerificationId),
               accruals: await ref(closing.accrualsVerificationId),
               accrualReversal: await ref(closing.accrualsReversalVerificationId),
+              fxRevaluation: await ref(closing.fxVerificationId),
+              fxReversal: await ref(closing.fxReversalVerificationId),
               resultTransfer: await ref(closing.resultTransferVerificationId),
             },
           },

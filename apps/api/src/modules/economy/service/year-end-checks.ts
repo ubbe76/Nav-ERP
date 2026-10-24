@@ -18,6 +18,8 @@ export type YearEndCheckCode =
   | "inventory-not-done"
   | "depreciation-missing"
   | "accruals-not-done"
+  | "fx-revaluation-not-done"
+  | "fx-revaluation-stale"
   | "result-not-transferred"
   | "next-year-opening-balance-import";
 
@@ -64,6 +66,9 @@ export interface CloseGateInput extends StepGateInput {
   openingBalanceImports: string[];
   // Balance accounts where IB(N+1) ≠ UB(N) — what actually blocks.
   openingBalanceDifferences: number;
+  // Valutaomvärdering: open invoices in another currency than SEK per the
+  // closing date, and whether the step is done. Absent = no foreign items.
+  fxRevaluation?: { openItems: number; done: boolean };
 }
 
 // Gate for steg 6 (spec 4.2/4.7). A locked closing month does not block:
@@ -84,6 +89,15 @@ export function evaluateCloseBlockers(input: CloseGateInput): YearEndCheck[] {
     });
   }
   if (!input.accrualsDone) blockers.push({ code: "accruals-not-done", message: "Steg 4 Periodiseringar är inte gjort" });
+  // Like the accruals a blocker, but only when there is something to
+  // revalue: K2 values monetary items at the balance day's rate, and the
+  // revaluation moves the result, so it must stand before the transfer.
+  if (input.fxRevaluation && input.fxRevaluation.openItems > 0 && !input.fxRevaluation.done) {
+    blockers.push({
+      code: "fx-revaluation-not-done",
+      message: `Valutaomvärderingen är inte gjord — ${input.fxRevaluation.openItems} öppna fakturor i annan valuta än SEK per bokslutsdagen`,
+    });
+  }
   if (round2(input.resultNet) !== 0) {
     blockers.push({
       code: "result-not-transferred",
@@ -107,6 +121,9 @@ export interface LedgerComparison {
   accountNumber: string;
   ledger: number;
   register: number;
+  // Valutaomvärdering: what the live revaluation booked on the account (in
+  // the reskontra's sign) — the ledger is expected to be register + this.
+  revaluation?: number;
 }
 
 export interface WarningInput {
@@ -117,6 +134,9 @@ export interface WarningInput {
   revenueWithoutVatBox: { accountNumber: string; accountName: string; net: number }[];
   // Steg 2 done but the inventory account no longer equals the booked value.
   inventoryStale: { ledger: number; value: number } | null;
+  // The valutaomvärdering is booked but the open foreign items (or their
+  // currencies) changed since — a re-run would book something else.
+  fxRevaluationStale?: boolean;
 }
 
 const MONTHS = ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"];
@@ -130,11 +150,16 @@ function signed(value: number): string {
 }
 
 function ledgerMismatch(code: YearEndCheckCode, label: string, comparison: LedgerComparison): YearEndCheck | null {
-  const difference = round2(comparison.ledger - comparison.register);
+  const revaluation = round2(comparison.revaluation ?? 0);
+  const difference = round2(comparison.ledger - comparison.register - revaluation);
   if (difference === 0) return null;
+  const expected =
+    revaluation === 0
+      ? `reskontra ${formatNumber(comparison.register)}`
+      : `reskontra ${formatNumber(comparison.register)} ${revaluation > 0 ? "+" : "-"} valutaomvärdering ${formatNumber(Math.abs(revaluation))}`;
   return {
     code,
-    message: `${label} stämmer inte mot konto ${comparison.accountNumber}: huvudbok ${formatNumber(comparison.ledger)}, reskontra ${formatNumber(comparison.register)} (skillnad ${signed(difference)})`,
+    message: `${label} stämmer inte mot konto ${comparison.accountNumber}: huvudbok ${formatNumber(comparison.ledger)}, ${expected} (skillnad ${signed(difference)})`,
   };
 }
 
@@ -164,6 +189,12 @@ export function evaluateWarnings(input: WarningInput): YearEndCheck[] {
     warnings.push({
       code: "inventory-stale",
       message: `Lagerkontots saldo (${formatNumber(input.inventoryStale.ledger)}) stämmer inte med den bokförda lagervärderingen (${formatNumber(input.inventoryStale.value)}) — gör om steg 2`,
+    });
+  }
+  if (input.fxRevaluationStale) {
+    warnings.push({
+      code: "fx-revaluation-stale",
+      message: "De öppna valutaposterna har ändrats sedan valutaomvärderingen bokfördes — gör om valutaomvärderingen",
     });
   }
   return warnings;

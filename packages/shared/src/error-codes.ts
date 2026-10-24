@@ -147,6 +147,9 @@ export const ERROR_CODES = {
   PROFIT_DISPOSITION_EXISTS: "profit-disposition-exists",
   NOTHING_TO_DISPOSE: "nothing-to-dispose",
   PROFIT_DISPOSITION_NOT_FOUND: "profit-disposition-not-found",
+  // Valutaomvärdering: no rate for a currency the open items need (409,
+  // body.currencies/body.date) — type the rate in the step
+  FX_REVALUATION_RATE_MISSING: "fx-revaluation-rate-missing",
   // anläggningsregister
   FIXED_ASSET_NOT_FOUND: "fixed-asset-not-found",
   FIXED_ASSET_CATEGORY_NOT_FOUND: "fixed-asset-category-not-found",

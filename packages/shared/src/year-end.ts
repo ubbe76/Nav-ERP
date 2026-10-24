@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { currencyCodeSchema, exchangeRateValueSchema, SEK } from "./currency.js";
 import { listQuerySchema } from "./list.js";
 import { valuationMethodSchema } from "./stock.js";
 
@@ -28,12 +29,14 @@ export const YEAR_END_STEP_LABELS = {
   accruals: "Periodiseringar",
   result_transfer: "Resultatöverföring",
   profit_disposition: "Vinstdisposition",
+  fx_revaluation: "Valutaomvärdering",
 } as const;
 
 export const YEAR_END_ROLE_LABELS = {
   booking: "Bokföring",
   accrual_reversal: "Återföring",
   cancellation: "Omföring",
+  fx_reversal: "Återföring",
 } as const;
 
 export const listYearEndClosingsQuerySchema = listQuerySchema.extend({
@@ -79,3 +82,38 @@ export const profitDispositionSchema = z.object({
   dividendAmount: z.coerce.number().min(0).max(100_000_000_000).default(0),
 });
 export type ProfitDispositionInput = z.infer<typeof profitDispositionSchema>;
+
+// Valutaomvärdering (valuta steg 4). A rate per currency that wins over the
+// step's default (the live booking's rate, else Valutakurser for the closing
+// date): SEK per 1 unit, never for SEK itself. Rates for currencies without
+// open items are ignored.
+const fxRateMapSchema = z
+  .record(currencyCodeSchema, exchangeRateValueSchema)
+  .refine((rates) => !Object.keys(rates).includes(SEK), "SEK has no rate to revalue");
+
+export const bookFxRevaluationSchema = z.object({ rates: fxRateMapSchema.default({}) });
+export type BookFxRevaluationInput = z.infer<typeof bookFxRevaluationSchema>;
+
+// The preview's query: ?rates=EUR:11.2,USD:10.15 (a decimal point; the
+// query string has no nested objects).
+export const fxRevaluationPreviewQuerySchema = z.object({
+  rates: z
+    .string()
+    .trim()
+    .max(500)
+    .optional()
+    .transform((value, ctx) => {
+      const rates: Record<string, string> = {};
+      if (!value) return rates;
+      for (const part of value.split(",")) {
+        const [currency, rate, ...rest] = part.split(":");
+        if (!currency || rate === undefined || rest.length > 0) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Expected CCY:rate, got "${part}"` });
+          return z.NEVER;
+        }
+        rates[currency.trim()] = rate.trim();
+      }
+      return rates;
+    })
+    .pipe(fxRateMapSchema),
+});

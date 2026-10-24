@@ -84,7 +84,7 @@ import { createSupplierInvoiceRepository } from "./modules/purchase/repository/s
 import { createSupplierInvoiceService } from "./modules/purchase/service/supplier-invoice.service.js";
 import { supplierInvoiceRoutes } from "./modules/purchase/routes/supplier-invoice.routes.js";
 import { createSupplierPaymentRepository } from "./modules/purchase/repository/supplier-payment.repository.js";
-import { payablesTotalAsOf } from "./modules/purchase/repository/open-amounts.js";
+import { payableForeignItemsAsOf, payablesTotalAsOf } from "./modules/purchase/repository/open-amounts.js";
 import { createSupplierPaymentService } from "./modules/purchase/service/supplier-payment.service.js";
 import { createBankSettingsRepository } from "./modules/banking/repository/bank-settings.repository.js";
 import { bankSettingsRoutes } from "./modules/banking/routes/bank-settings.routes.js";
@@ -111,7 +111,7 @@ import { createInvoiceRepository } from "./modules/sales/repository/invoice.repo
 import { createInvoiceService } from "./modules/sales/service/invoice.service.js";
 import { invoiceRoutes } from "./modules/sales/routes/invoice.routes.js";
 import { createPaymentRepository } from "./modules/sales/repository/payment.repository.js";
-import { receivablesTotalAsOf } from "./modules/sales/repository/open-amounts.js";
+import { receivableForeignItemsAsOf, receivablesTotalAsOf } from "./modules/sales/repository/open-amounts.js";
 import { createPaymentService } from "./modules/sales/service/payment.service.js";
 import { paymentRoutes } from "./modules/sales/routes/payment.routes.js";
 import { createShippingRepository } from "./modules/shipping/repository/shipping.repository.js";
@@ -719,13 +719,15 @@ export function buildApp(database: Db = db) {
   });
   // Årsbokslut (ekonomi etapp 2, delprojekt 3): the closing guide — steps in
   // series BS via the shared poster, close/reopen behind the closed-year
-  // triggers of migration 0105.
+  // triggers of migration 0105, the valutaomvärdering (valuta steg 4).
   const yearEndClosingService = createYearEndClosingService({
     db: database,
     poster: verificationPoster,
     settings: { read: readPostingSettings },
-    receivables: { totalAsOf: receivablesTotalAsOf },
-    payables: { totalAsOf: payablesTotalAsOf },
+    receivables: { totalAsOf: receivablesTotalAsOf, foreignItemsAsOf: receivableForeignItemsAsOf },
+    payables: { totalAsOf: payablesTotalAsOf, foreignItemsAsOf: payableForeignItemsAsOf },
+    // Valutaomvärderingen: the closing date's rate per currency.
+    exchangeRates: exchangeRateService,
     fixedAssets: fixedAssetService,
     inventory: valuationService,
     fiscalYears: economyService,

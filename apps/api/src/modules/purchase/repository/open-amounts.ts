@@ -149,45 +149,109 @@ export async function computeOpenAmounts(executor: Db | Tx, invoiceIds: string[]
   return open;
 }
 
-// Årsbokslut (steg 1): the leverantörsreskontra AS OF a date — an attested
-// invoice counts from its L verification's date until it is CANCELLED with a
-// BOOKED omföring dated on or before `date`; payments follow the same rule as
-// the kundreskontra's (sales open-amounts.ts receivablesTotalAsOf). Only a
-// cancelled invoice leaves the register: a manual Omför of the L verification
-// alone leaves the invoice approved and open everywhere else, so the register
-// must keep it too — the ledger loses it and the reconciliation shows the gap.
+// Årsbokslut: the leverantörsreskontra AS OF a date, PER INVOICE — the one
+// derivation both payablesTotalAsOf (steg 1's reconciliation against the
+// payable account) and the valutaomvärdering (payableForeignItemsAsOf) read,
+// so the two can never disagree about an invoice. An attested invoice counts
+// from its L verification's date until it is CANCELLED with a BOOKED
+// omföring dated on or before `date`; payments follow the same rule as the
+// kundreskontra's (sales open-amounts.ts receivableItemsAsOfSql). Only a
+// cancelled invoice leaves the register: a manual Omför of the L
+// verification alone leaves the invoice approved and open everywhere else,
+// so the register must keep it too — the ledger loses it and the
+// reconciliation shows the gap.
 //
-// Valuta: in SEK — Σ gross_amount_sek (the debt each L verification booked)
+// Valuta: in SEK — gross_amount_sek (the debt each L verification booked)
 // − Σ frigjort SEK (applied_amount_sek + write_off_amount_sek), so an EUR
 // and a SEK invoice are never summed in their own currencies and the total
 // reconciles with the payable account (the exchange differences are booked
-// on 3960/7960, never on it).
+// on 3960/7960, never on it). A missing stamp counts as nothing, as it
+// always has in the total.
+function payableItemsAsOfSql(date: string) {
+  return sql`
+    SELECT t.supplier_invoice_id, SUM(t.amount) AS open_amount, COALESCE(SUM(t.amount_sek), 0) AS open_amount_sek
+    FROM (
+      SELECT si.id AS supplier_invoice_id, si.gross_amount AS amount, si.gross_amount_sek AS amount_sek
+      FROM supplier_invoices si
+      JOIN verifications v ON v.id = si.verification_id
+      WHERE v.date <= ${date}
+        AND NOT (si.status = 'cancelled' AND EXISTS (
+          SELECT 1 FROM verifications r
+          WHERE r.reverses_verification_id = si.verification_id
+            AND r.status = 'booked'
+            AND r.date <= ${date}
+        ))
+      UNION ALL
+      SELECT spr.supplier_invoice_id,
+             -(spr.applied_amount + spr.write_off_amount),
+             -(spr.applied_amount_sek + spr.write_off_amount_sek)
+      FROM supplier_payment_rows spr
+      JOIN supplier_payments sp ON sp.id = spr.payment_id
+      LEFT JOIN verifications cv ON cv.id = sp.cancellation_verification_id
+      WHERE sp.payment_date <= ${date}
+        AND (sp.cancelled_at IS NULL
+             OR COALESCE(cv.date, (sp.cancelled_at AT TIME ZONE 'Europe/Stockholm')::date) > ${date})
+    ) t
+    GROUP BY t.supplier_invoice_id
+  `;
+}
+
+// Steg 1: the leverantörsreskontra's SEK total per `date` — Σ of the
+// per-invoice open SEK values above.
 export async function payablesTotalAsOf(executor: Db | Tx, date: string): Promise<number> {
   const rows = await executor.execute(sql`
-    SELECT
-      COALESCE((
-        SELECT SUM(si.gross_amount_sek)
-        FROM supplier_invoices si
-        JOIN verifications v ON v.id = si.verification_id
-        WHERE v.date <= ${date}
-          AND NOT (si.status = 'cancelled' AND EXISTS (
-            SELECT 1 FROM verifications r
-            WHERE r.reverses_verification_id = si.verification_id
-              AND r.status = 'booked'
-              AND r.date <= ${date}
-          ))
-      ), 0)
-      - COALESCE((
-        SELECT SUM(spr.applied_amount_sek + spr.write_off_amount_sek)
-        FROM supplier_payment_rows spr
-        JOIN supplier_payments sp ON sp.id = spr.payment_id
-        LEFT JOIN verifications cv ON cv.id = sp.cancellation_verification_id
-        WHERE sp.payment_date <= ${date}
-          AND (sp.cancelled_at IS NULL
-               OR COALESCE(cv.date, (sp.cancelled_at AT TIME ZONE 'Europe/Stockholm')::date) > ${date})
-      ), 0) AS total
+    SELECT COALESCE(SUM(items.open_amount_sek), 0) AS total
+    FROM (${payableItemsAsOfSql(date)}) items
   `);
   // postgres-js: db.execute returns an array of rows.
   const [row] = [...rows] as { total: string }[];
   return Math.round(Number(row?.total ?? 0) * 100) / 100;
+}
+
+// One open supplier invoice per a date, for the valutaomvärdering — the
+// same shape as the kundreskontra's ReceivableOpenItem (the year-end
+// service declares the interface both satisfy, ReskontraOpenItem).
+// number = "LF-… (leverantörens fakturanummer)".
+export type PayableOpenItem = {
+  id: string;
+  number: string;
+  partnerName: string;
+  currency: string;
+  exchangeRate: number | null;
+  openAmount: number;
+  openAmountSek: number;
+};
+
+// Valutaomvärdering: the supplier invoices in another currency than SEK that
+// are open per `date` (see the kundreskontra's receivableForeignItemsAsOf —
+// same per-invoice rows as payablesTotalAsOf). + = we owe.
+export async function payableForeignItemsAsOf(executor: Db | Tx, date: string): Promise<PayableOpenItem[]> {
+  const rows = await executor.execute(sql`
+    SELECT si.id, si.registration_number, si.invoice_number, s.name AS partner_name, si.currency, si.exchange_rate,
+           items.open_amount, items.open_amount_sek
+    FROM (${payableItemsAsOfSql(date)}) items
+    JOIN supplier_invoices si ON si.id = items.supplier_invoice_id
+    LEFT JOIN suppliers s ON s.id = si.supplier_id
+    WHERE si.currency <> 'SEK'
+      AND NOT (items.open_amount = 0 AND items.open_amount_sek = 0)
+    ORDER BY si.currency, si.registration_number, si.id
+  `);
+  return ([...rows] as {
+    id: string;
+    registration_number: string;
+    invoice_number: string;
+    partner_name: string | null;
+    currency: string;
+    exchange_rate: string;
+    open_amount: string;
+    open_amount_sek: string;
+  }[]).map((row) => ({
+    id: row.id,
+    number: `${row.registration_number} (${row.invoice_number})`,
+    partnerName: row.partner_name ?? "",
+    currency: row.currency,
+    exchangeRate: Number(row.exchange_rate),
+    openAmount: Number(row.open_amount),
+    openAmountSek: Number(row.open_amount_sek),
+  }));
 }

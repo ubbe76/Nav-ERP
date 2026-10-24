@@ -248,6 +248,16 @@ export function receiptExchangeDifference(input: {
   return fromOre(applied - ore(input.amountSek) - ore(input.bankFeeSek));
 }
 
+// Valutaomvärdering (årsbokslutet): one open invoice in another currency
+// valued at the balance day's rate — revalued SEK = toSek(open amount, rate),
+// difference = revalued − the open SEK value booked for it, to the öre.
+// Signs follow the reskontra (+ = the customer owes us / we owe): a positive
+// difference on a receivable is a kursvinst, on a payable a kursförlust.
+export function revaluationDifference(openAmount: number, bookedSek: number, rate: number): { revaluedSek: number; difference: number } {
+  const revaluedSek = toSek(openAmount, rate);
+  return { revaluedSek, difference: fromOre(ore(revaluedSek) - ore(bookedSek)) };
+}
+
 // --- Valutakurser (exchange_rates) ---
 
 // Where a stored rate came from: fetched from Sveriges Riksbank (SWEA) or

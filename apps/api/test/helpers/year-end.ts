@@ -11,8 +11,9 @@ import {
   type YearEndClosingService,
   type YearEndClosingServiceDeps,
 } from "../../src/modules/economy/service/year-end-closing.service.js";
-import { payablesTotalAsOf } from "../../src/modules/purchase/repository/open-amounts.js";
-import { receivablesTotalAsOf } from "../../src/modules/sales/repository/open-amounts.js";
+import { payableForeignItemsAsOf, payablesTotalAsOf } from "../../src/modules/purchase/repository/open-amounts.js";
+import { receivableForeignItemsAsOf, receivablesTotalAsOf } from "../../src/modules/sales/repository/open-amounts.js";
+import { ExchangeRateUnavailableError } from "../../src/modules/system/service/exchange-rates.js";
 import { rejectMalformedIds } from "../../src/modules/system/middleware/reject-malformed-ids.js";
 import { testFixedAssetService } from "./fixed-assets.js";
 import { DEFAULT_POSTING_SETTINGS, testEconomyRepository, testEconomyService } from "./services.js";
@@ -88,8 +89,15 @@ export function buildYearEndService(overrides: Partial<YearEndClosingServiceDeps
     db,
     poster: testYearEndPoster,
     settings: { read: async () => DEFAULT_POSTING_SETTINGS },
-    receivables: { totalAsOf: receivablesTotalAsOf },
-    payables: { totalAsOf: payablesTotalAsOf },
+    receivables: { totalAsOf: receivablesTotalAsOf, foreignItemsAsOf: receivableForeignItemsAsOf },
+    payables: { totalAsOf: payablesTotalAsOf, foreignItemsAsOf: payableForeignItemsAsOf },
+    // Valutaomvärderingen: never Riksbanken — no rate unless a suite passes
+    // its own reader (or types the rate in the step).
+    exchangeRates: {
+      getRate: async (currency, date) => {
+        throw new ExchangeRateUnavailableError(currency, date);
+      },
+    },
     fixedAssets: testFixedAssetService,
     fiscalYears: testEconomyService,
     // Steg 2's default: nothing in stock. Suites that test the step pass a fake.

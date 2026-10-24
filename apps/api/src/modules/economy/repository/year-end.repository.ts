@@ -223,6 +223,20 @@ export async function verificationAmountOnAccount(executor: Executor, verificati
   return Math.round(Number(row?.net ?? 0) * 100) / 100;
 }
 
+// Debit − credit per account of ONE verification (the live valutaomvärdering
+// a re-run is compared against), netted per account.
+export async function verificationAmounts(executor: Executor, verificationId: string): Promise<{ accountId: string; amount: number }[]> {
+  const rows = await executor
+    .select({
+      accountId: verificationRows.accountId,
+      net: sql<string>`SUM(${verificationRows.debit} - ${verificationRows.credit})`,
+    })
+    .from(verificationRows)
+    .where(eq(verificationRows.verificationId, verificationId))
+    .groupBy(verificationRows.accountId);
+  return rows.map((row) => ({ accountId: row.accountId, amount: Math.round(Number(row.net) * 100) / 100 }));
+}
+
 // The inventory method of the latest CLOSED closing before this year — the
 // guide's default (konsekvensprincipen).
 export async function latestClosedInventoryMethod(executor: Executor, beforeStartDate: string): Promise<ValuationMethod | null> {

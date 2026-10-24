@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import {
   bookAccrualsSchema,
+  bookFxRevaluationSchema,
   bookInventorySchema,
+  fxRevaluationPreviewQuerySchema,
   inventoryPreviewQuerySchema,
   listYearEndClosingsQuerySchema,
   profitDispositionSchema,
@@ -17,6 +19,7 @@ import { DepreciationMonthInFutureError } from "../service/fixed-asset.service.j
 import { MissingPostingAccountError, NoAccountingPeriodForPostingError, ZeroAmountPostingError } from "../service/verification-poster.js";
 import {
   ClosingDateLockedError,
+  FxRevaluationRateMissingError,
   InvalidAccrualAccountError,
   InvalidAgmDateError,
   InvalidClosingDateError,
@@ -69,6 +72,10 @@ const CONFLICT: ErrorClass[] = [
 
 function closingError(err: unknown, reply: Reply) {
   if (!(err instanceof Error)) throw err;
+  // Valutaomvärdering: which currencies need a rate, for which day.
+  if (err instanceof FxRevaluationRateMissingError) {
+    return reply.code(409).send({ ...errorBody(err), currencies: err.currencies, date: err.date });
+  }
   if (NOT_FOUND.some((type) => err instanceof type)) return reply.code(404).send(errorBody(err));
   if (BAD_REQUEST.some((type) => err instanceof type)) return reply.code(400).send(errorBody(err));
   if (CONFLICT.some((type) => err instanceof type)) return reply.code(409).send(errorBody(err));
@@ -140,6 +147,27 @@ export async function yearEndRoutes(app: FastifyInstance, opts: { service: YearE
     const input = bookAccrualsSchema.parse(req.body);
     try {
       return await service.bookAccruals(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return closingError(err, reply);
+    }
+  });
+
+  // Valutaomvärdering: the preview at ?rates=EUR:11.2,USD:10.15 (default: the
+  // live booking's rate, else Valutakurser for the closing date) and the
+  // booking with `rates` in the body winning the same way.
+  app.get<{ Params: { id: string } }>("/year-end-closings/:id/fx-revaluation-preview", ekonomi, async (req, reply) => {
+    const { rates } = fxRevaluationPreviewQuerySchema.parse(req.query);
+    try {
+      return await service.previewFxRevaluation(req.params.id, rates);
+    } catch (err) {
+      return closingError(err, reply);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/year-end-closings/:id/fx-revaluation", ekonomi, async (req, reply) => {
+    const input = bookFxRevaluationSchema.parse(req.body ?? {});
+    try {
+      return await service.bookFxRevaluation(req.params.id, input, req.user!.id);
     } catch (err) {
       return closingError(err, reply);
     }

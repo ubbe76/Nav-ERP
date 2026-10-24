@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, date, index, integer, numeric, pgEnum, pgTable, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { check, date, index, integer, jsonb, numeric, pgEnum, pgTable, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { users } from "./auth";
 import { accounts, fiscalYears, verifications } from "./economy";
 
@@ -9,8 +9,16 @@ import { accounts, fiscalYears, verifications } from "./economy";
 // report excludes them by identity). No stored balances anywhere.
 
 export const yearEndClosingStatusEnum = pgEnum("year_end_closing_status", ["in_progress", "closed"]);
-export const yearEndStepEnum = pgEnum("year_end_step", ["inventory", "accruals", "result_transfer", "profit_disposition"]);
-export const yearEndVerificationRoleEnum = pgEnum("year_end_verification_role", ["booking", "accrual_reversal", "cancellation"]);
+// Valuta steg 4 (migration 0146): the step fx_revaluation and the role
+// fx_reversal (its automatic reversal on the next year's first day) are
+// appended — enum order carries no meaning.
+export const yearEndStepEnum = pgEnum("year_end_step", ["inventory", "accruals", "result_transfer", "profit_disposition", "fx_revaluation"]);
+export const yearEndVerificationRoleEnum = pgEnum("year_end_verification_role", ["booking", "accrual_reversal", "cancellation", "fx_reversal"]);
+
+// The rate the valutaomvärdering used for one currency: SEK per 1 unit, the
+// rate's own day (null for a rate typed in the step) and where it came from
+// (Valutakurser: riksbank/manual, or "step" = typed in the step).
+export type YearEndFxRate = { currency: string; rate: number; date: string | null; source: "riksbank" | "manual" | "step" };
 export const yearEndAccrualKindEnum = pgEnum("year_end_accrual_kind", [
   "prepaid_expense",
   "accrued_income",
@@ -44,6 +52,20 @@ export const yearEndClosings = pgTable(
     resultTransferVerificationId: uuid("result_transfer_verification_id")
       .unique()
       .references(() => verifications.id, { onDelete: "restrict" }),
+    // Valuta steg 4 (migration 0146): the valutaomvärdering — open customer
+    // and supplier invoices in another currency revalued at the closing
+    // date's rate (V, closing date) and its automatic reversal on the next
+    // year's first day (R), a pair exactly like the accruals. fx_booked_at
+    // set = the step is done (also with nothing to book); fx_rates = the
+    // rates the live booking used, one per currency it revalued.
+    fxVerificationId: uuid("fx_verification_id")
+      .unique()
+      .references(() => verifications.id, { onDelete: "restrict" }),
+    fxReversalVerificationId: uuid("fx_reversal_verification_id")
+      .unique()
+      .references(() => verifications.id, { onDelete: "restrict" }),
+    fxBookedAt: timestamp("fx_booked_at", { withTimezone: true }),
+    fxRates: jsonb("fx_rates").$type<YearEndFxRate[]>(),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -58,6 +80,11 @@ export const yearEndClosings = pgTable(
       "year_end_accruals_pair",
       sql`(${table.accrualsVerificationId} IS NULL) = (${table.accrualsReversalVerificationId} IS NULL) AND (${table.accrualsVerificationId} IS NULL OR ${table.accrualsBookedAt} IS NOT NULL)`
     ),
+    check(
+      "year_end_fx_pair",
+      sql`(${table.fxVerificationId} IS NULL) = (${table.fxReversalVerificationId} IS NULL) AND (${table.fxVerificationId} IS NULL OR ${table.fxBookedAt} IS NOT NULL)`
+    ),
+    check("year_end_fx_rates_booked", sql`(${table.fxBookedAt} IS NULL) = (${table.fxRates} IS NULL)`),
   ]
 );
 

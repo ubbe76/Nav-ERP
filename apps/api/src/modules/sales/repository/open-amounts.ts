@@ -211,49 +211,119 @@ export async function computeReleasedSek(executor: Db | Tx, invoiceIds: string[]
   return released;
 }
 
-// Årsbokslut (steg 1): the kundreskontra AS OF a date, for the reconciliation
-// against the receivable account. Every document counts on the date it hit
-// the ledger — its own verification's date — so both sides are measured at
-// the same moment: a payment dated before `date` but cancelled after it still
-// counts as paid (its omföring is dated after `date` too).
+// Årsbokslut: the kundreskontra AS OF a date, PER INVOICE — the one
+// derivation both receivablesTotalAsOf (steg 1's reconciliation against the
+// receivable account) and the valutaomvärdering (receivableForeignItemsAsOf)
+// read, so the two can never disagree about an invoice. Every document
+// counts on the date it hit the ledger — its own verification's date — so
+// both sides are measured at the same moment: a payment dated before `date`
+// but cancelled after it still counts as paid (its omföring is dated after
+// `date` too).
 //
-// Valuta: in SEK — Σ gross_amount_sek (the receivable each F verification
-// booked) − Σ frigjort SEK (applied_amount_sek + write_off_amount_sek) + the
-// fees (always SEK), so an EUR and a SEK invoice are never summed in their
-// own currencies and the total reconciles with the receivable account (the
-// exchange differences are booked on 3960/7960, never on it). An issued
-// invoice without the stamp (written by something other than Utfärda) counts
-// its gross at its rate, which for SEK is the gross itself.
+// Per invoice, in its own currency and in SEK:
+//   gross   sign(type) · Σ rows            sign(type) · gross_amount_sek
+//   paid    − Σ (applied + write-off)       − Σ (applied_sek + write_off_sek)
+//   fees    + Σ fee                         + Σ fee
+//
+// Valuta: in SEK — gross_amount_sek is the receivable each F verification
+// booked, the payment rows the SEK they released (frigjort SEK), and a fee
+// is always SEK (only SEK invoices carry one), so an EUR and a SEK invoice
+// are never summed in their own currencies and the total reconciles with
+// the receivable account (the exchange differences are booked on 3960/7960,
+// never on it). An issued invoice without the stamp (written by something
+// other than Utfärda) counts its gross at its rate, which for SEK is the
+// gross itself.
+function receivableItemsAsOfSql(date: string) {
+  return sql`
+    SELECT t.invoice_id, SUM(t.amount) AS open_amount, COALESCE(SUM(t.amount_sek), 0) AS open_amount_sek
+    FROM (
+      SELECT "invoices"."id" AS invoice_id,
+             ${grossAmountSql} AS amount,
+             CASE WHEN "invoices"."type" = 'credit' THEN -1 ELSE 1 END
+             * COALESCE("invoices"."gross_amount_sek",
+                        ROUND(ABS(${grossAmountSql}) * COALESCE("invoices"."exchange_rate", 1), 2)) AS amount_sek
+      FROM invoices
+      JOIN verifications iv ON iv.id = "invoices"."verification_id"
+      WHERE iv.date <= ${date}
+      UNION ALL
+      SELECT cpr.invoice_id,
+             -(cpr.applied_amount + cpr.write_off_amount),
+             -(cpr.applied_amount_sek + cpr.write_off_amount_sek)
+      FROM customer_payment_rows cpr
+      JOIN customer_payments cp ON cp.id = cpr.payment_id
+      LEFT JOIN verifications cv ON cv.id = cp.cancellation_verification_id
+      WHERE cp.payment_date <= ${date}
+        AND (cp.cancelled_at IS NULL
+             OR COALESCE(cv.date, (cp.cancelled_at AT TIME ZONE 'Europe/Stockholm')::date) > ${date})
+      UNION ALL
+      SELECT rem.invoice_id, rem.fee, rem.fee
+      FROM invoice_reminders rem
+      JOIN verifications fv ON fv.id = rem.fee_verification_id
+      WHERE fv.date <= ${date}
+    ) t
+    GROUP BY t.invoice_id
+  `;
+}
+
+// Steg 1: the kundreskontra's SEK total per `date` — Σ of the per-invoice
+// open SEK values above.
 export async function receivablesTotalAsOf(executor: Db | Tx, date: string): Promise<number> {
   const rows = await executor.execute(sql`
-    SELECT
-      COALESCE((
-        SELECT SUM(g.gross) FROM (
-          SELECT CASE WHEN "invoices"."type" = 'credit' THEN -1 ELSE 1 END
-                 * COALESCE("invoices"."gross_amount_sek",
-                            ROUND(ABS(${grossAmountSql}) * COALESCE("invoices"."exchange_rate", 1), 2)) AS gross
-          FROM invoices
-          JOIN verifications iv ON iv.id = "invoices"."verification_id"
-          WHERE iv.date <= ${date}
-        ) g
-      ), 0)
-      - COALESCE((
-        SELECT SUM(cpr.applied_amount_sek + cpr.write_off_amount_sek)
-        FROM customer_payment_rows cpr
-        JOIN customer_payments cp ON cp.id = cpr.payment_id
-        LEFT JOIN verifications cv ON cv.id = cp.cancellation_verification_id
-        WHERE cp.payment_date <= ${date}
-          AND (cp.cancelled_at IS NULL
-               OR COALESCE(cv.date, (cp.cancelled_at AT TIME ZONE 'Europe/Stockholm')::date) > ${date})
-      ), 0)
-      + COALESCE((
-        SELECT SUM(rem.fee)
-        FROM invoice_reminders rem
-        JOIN verifications fv ON fv.id = rem.fee_verification_id
-        WHERE fv.date <= ${date}
-      ), 0) AS total
+    SELECT COALESCE(SUM(items.open_amount_sek), 0) AS total
+    FROM (${receivableItemsAsOfSql(date)}) items
   `);
   // postgres-js: db.execute returns an array of rows.
   const [row] = [...rows] as { total: string }[];
   return Math.round(Number(row?.total ?? 0) * 100) / 100;
+}
+
+// One open invoice per a date — the shape both ledgers' foreign readers
+// return to the valutaomvärdering (the year-end service declares the
+// interface, ReskontraOpenItem). openAmount is in the document's
+// currency, openAmountSek the SEK value booked for it (signed as the
+// reskontra counts it: + = the customer owes us / we owe the supplier).
+export type ReceivableOpenItem = {
+  id: string;
+  number: string;
+  partnerName: string;
+  currency: string;
+  // The document's own (booked) rate, SEK per 1 unit.
+  exchangeRate: number | null;
+  openAmount: number;
+  openAmountSek: number;
+};
+
+// Valutaomvärdering: the invoices in another currency than SEK that are open
+// per `date` — open in their currency, or carrying a booked SEK value with
+// nothing left in it (that value then revalues to 0). Same per-invoice rows
+// as receivablesTotalAsOf, so the revaluation and the reconciliation always
+// agree.
+export async function receivableForeignItemsAsOf(executor: Db | Tx, date: string): Promise<ReceivableOpenItem[]> {
+  const rows = await executor.execute(sql`
+    SELECT i.id, i.invoice_number, COALESCE(i.customer_name, c.name) AS partner_name, i.currency, i.exchange_rate,
+           items.open_amount, items.open_amount_sek
+    FROM (${receivableItemsAsOfSql(date)}) items
+    JOIN invoices i ON i.id = items.invoice_id
+    LEFT JOIN customers c ON c.id = i.customer_id
+    WHERE i.currency <> 'SEK'
+      AND NOT (items.open_amount = 0 AND items.open_amount_sek = 0)
+    ORDER BY i.currency, i.invoice_number, i.id
+  `);
+  return ([...rows] as {
+    id: string;
+    invoice_number: string | null;
+    partner_name: string | null;
+    currency: string;
+    exchange_rate: string | null;
+    open_amount: string;
+    open_amount_sek: string;
+  }[]).map((row) => ({
+    id: row.id,
+    number: row.invoice_number ?? "",
+    partnerName: row.partner_name ?? "",
+    currency: row.currency,
+    exchangeRate: row.exchange_rate === null ? null : Number(row.exchange_rate),
+    openAmount: Number(row.open_amount),
+    openAmountSek: Number(row.open_amount_sek),
+  }));
 }

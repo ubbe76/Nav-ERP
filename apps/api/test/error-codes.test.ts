@@ -132,6 +132,7 @@ import { InvalidVatCodeError } from "../src/modules/economy/service/document-vat
 import { VatNumberRequiredError } from "../src/modules/sales/service/sales.errors.js";
 import {
   ClosingDateLockedError,
+  FxRevaluationRateMissingError,
   InvalidClosingDateError,
   InventoryAccountConflictError,
   InvalidAccrualAccountError,
@@ -432,6 +433,7 @@ const cases: Array<[Error, string]> = [
   [new ProfitDispositionExistsError("2024"), ERROR_CODES.PROFIT_DISPOSITION_EXISTS],
   [new NothingToDisposeError("2024"), ERROR_CODES.NOTHING_TO_DISPOSE],
   [new ProfitDispositionNotFoundError("2024"), ERROR_CODES.PROFIT_DISPOSITION_NOT_FOUND],
+  [new FxRevaluationRateMissingError(["EUR"], "2024-12-31"), ERROR_CODES.FX_REVALUATION_RATE_MISSING],
   // anläggningsregister
   [new FixedAssetNotFoundError("a-1"), ERROR_CODES.FIXED_ASSET_NOT_FOUND],
   [new FixedAssetCategoryNotFoundError("cat-1"), ERROR_CODES.FIXED_ASSET_CATEGORY_NOT_FOUND],

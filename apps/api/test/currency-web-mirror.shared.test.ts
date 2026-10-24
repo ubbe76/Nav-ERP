@@ -6,6 +6,7 @@ import {
   receiptExchangeDifference,
   paymentExchangeDifference,
   releasedSek,
+  revaluationDifference,
   sekShare,
   toleranceInCurrency,
   toSek,
@@ -84,5 +85,16 @@ describe("currency web mirror", () => {
     }
     const receipt = { amountSek: 10800, bankFeeSek: 50, appliedAmountsSek: [5500, 5500] };
     expect(web.receiptExchangeDifference(receipt)).toBe(receiptExchangeDifference(receipt));
+  });
+
+  // Valuta steg 4 (valutaomvärdering i bokslutet).
+  it("revaluationDifference is identical", () => {
+    for (const amount of AMOUNTS) {
+      for (const rate of RATES) {
+        for (const booked of [0, 0.03, 11131, -11131, amount * 11]) {
+          expect(web.revaluationDifference(amount, booked, rate)).toEqual(revaluationDifference(amount, booked, rate));
+        }
+      }
+    }
   });
 });
