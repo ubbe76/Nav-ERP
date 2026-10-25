@@ -17,7 +17,13 @@ import {
 } from "@navet/shared";
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
 import { AccountingPeriodLockedError } from "../../economy/service/accounting-period-lock.js";
-import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
+import {
+  CostCenterInactiveError,
+  CostCenterNotFoundError,
+  CostCenterRequiredError,
+  ProjectClosedError,
+  ProjectNotFoundError,
+} from "../../economy/service/dimension-check.js";
 import {
   AccountNotFoundError,
   InactiveAccountError,
@@ -78,6 +84,8 @@ function bankError(err: unknown, reply: Reply) {
   }
   // Kostnadsställen och projekt: an inactive/closed object on a rule or a Bokför row.
   if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
+  // Kräver kostnadsställe at Bokför posten — same 409 + `accounts` as the manual verification.
+  if (err instanceof CostCenterRequiredError) return reply.code(409).send({ ...errorBody(err), accounts: err.accounts });
   if (
     err instanceof BankAccountIdentifierTakenError ||
     err instanceof BankMatchAlreadyMatchedError ||

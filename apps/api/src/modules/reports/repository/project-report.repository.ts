@@ -1,6 +1,7 @@
-import { and, asc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, lte, ne, sql, type SQL } from "drizzle-orm";
 import { accounts, customers, projects, salesOrderRows, salesOrders, verificationRows, verifications, type Db } from "@navet/db";
 import type { ProjectRowSource } from "../service/project-report.js";
+import { documentKindSql } from "../../sales/repository/document-kind.js";
 
 // Projektrapport: the project header, the BOOKED verification rows that
 // carry it (optionally within [from, to]) and the customer orders pointing at
@@ -58,6 +59,9 @@ export function createProjectReportRepository(db: Db) {
       return rows.map((row) => ({ ...row, debit: Number(row.debit), credit: Number(row.credit) }));
     },
 
+    // Orders only — a quote (quote/lost, or cancelled as a quote, the
+    // derived documentKind) or a cancelled order is not part of the
+    // project's business.
     async loadSalesOrders(projectId: string): Promise<ProjectSalesOrderRow[]> {
       const rows = await db
         .select({
@@ -67,7 +71,7 @@ export function createProjectReportRepository(db: Db) {
           value: sql<string>`round(${rowValue} * ${salesOrders.exchangeRate}, 2)`,
         })
         .from(salesOrders)
-        .where(eq(salesOrders.projectId, projectId))
+        .where(and(eq(salesOrders.projectId, projectId), sql`${documentKindSql} = 'order'`, ne(salesOrders.status, "cancelled")))
         .orderBy(asc(salesOrders.createdAt), asc(salesOrders.orderNumber));
       return rows.map((row) => ({ ...row, value: Number(row.value) }));
     },

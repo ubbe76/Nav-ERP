@@ -1,6 +1,21 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { articleGroups, bankRules, customers, db, invoiceRows, invoices, salesOrders, suppliers, verificationRows, verificationTemplateRows, verificationTemplates } from "@navet/db";
+import {
+  articleGroups,
+  bankRules,
+  customers,
+  db,
+  invoiceRows,
+  invoices,
+  purchaseOrders,
+  salesOrders,
+  supplierInvoiceRows,
+  supplierInvoices,
+  suppliers,
+  verificationRows,
+  verificationTemplateRows,
+  verificationTemplates,
+} from "@navet/db";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createDimensionRepository } from "../src/modules/economy/repository/dimension.repository.js";
 import {
@@ -29,7 +44,7 @@ const repo = createDimensionRepository(db);
 const service = createDimensionService(repo, { log: async () => {} });
 const authRepo = createAuthRepository(db);
 
-const TRUNCATE = sql`TRUNCATE bank_rules, invoice_rows, invoices, sales_orders, verification_template_rows, verification_templates, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, article_groups, suppliers, customers, cost_centers, projects, audit_log, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE bank_rules, invoice_rows, invoices, sales_orders, purchase_orders, supplier_invoice_rows, supplier_invoices, verification_template_rows, verification_templates, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, article_groups, suppliers, customers, cost_centers, projects, audit_log, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -146,11 +161,107 @@ describe("cost centers — register", () => {
       u.id
     );
     const usage = await service.costCenters.usage(old.id);
-    expect(usage.references).toEqual([{ table: "verification_rows", label: "bokförda verifikatrader", labelOne: "bokförd verifikatrad", count: 1 }]);
+    expect(usage.references).toEqual([{ table: "verification_rows", label: "bokförda verifikatrader", labelOne: "bokförd verifikatrad", count: 1, blocksReplacement: true }]);
     await expect(service.costCenters.remove(old.id, next.id, u.id)).rejects.toBeInstanceOf(DimensionBookedError);
     await expect(service.costCenters.remove(old.id, null, u.id)).rejects.toBeInstanceOf(DimensionBookedError);
     // Deactivating is the way out.
     expect((await service.costCenters.update(old.id, { active: false }, u.id)).active).toBe(false);
+  });
+});
+
+describe("locked documents", () => {
+  it("moves the objects on drafts and open orders only; a locked document blocks the delete like a booked row, flagged in the usage", async () => {
+    const { user: u } = await setupEconomy();
+    const old = await service.costCenters.create({ code: "100", name: "Verkstad", active: true }, u.id);
+    const next = await service.costCenters.create({ code: "110", name: "Verkstad 2", active: true }, u.id);
+    const [customer] = await db.insert(customers).values({ customerNumber: "K-1", name: "Kund AB" }).returning();
+    const row = async (invoiceId: string, costCenterId: string) =>
+      db.insert(invoiceRows).values({
+        invoiceId,
+        description: "Rad",
+        quantity: "1",
+        unitPrice: "10",
+        lineAmount: "10",
+        vatAmount: "0",
+        vatRate: "0",
+        vatCodeId: await vatCodeId("MP25"),
+        costCenterId,
+      });
+    const [draftInvoice] = await db.insert(invoices).values({ customerId: customer!.id, currency: "SEK", exchangeRate: "1" }).returning();
+    await row(draftInvoice!.id, old.id);
+    const [openOrder] = await db.insert(salesOrders).values({ orderNumber: "KO-1", customerId: customer!.id, status: "confirmed", costCenterId: old.id }).returning();
+
+    // Drafts and open orders only: the move goes through.
+    const movable = await service.costCenters.usage(old.id);
+    expect(movable.references.map((r) => [r.table, r.labelOne, r.blocksReplacement])).toEqual([
+      ["invoice_rows", "kundfakturarad (utkast)", false],
+      ["sales_orders", "kundorder", false],
+    ]);
+    await service.costCenters.remove(old.id, next.id, u.id);
+    expect((await db.select().from(salesOrders).where(eq(salesOrders.id, openOrder!.id)))[0]!.costCenterId).toBe(next.id);
+
+    // An issued invoice's row and a delivered order are locked: the usage
+    // says so and the delete is refused with or without a replacement —
+    // the draft row is NOT moved either (all or nothing).
+    const third = await service.costCenters.create({ code: "120", name: "Verkstad 3", active: true }, u.id);
+    const [issued] = await db
+      .insert(invoices)
+      .values({ customerId: customer!.id, currency: "SEK", exchangeRate: "1", status: "issued", invoiceNumber: "FA-1", invoiceDate: DATE, dueDate: DATE })
+      .returning();
+    await row(issued!.id, next.id);
+    await db.insert(salesOrders).values({ orderNumber: "KO-2", customerId: customer!.id, status: "delivered", costCenterId: next.id });
+    const locked = await service.costCenters.usage(next.id);
+    expect(locked.references.map((r) => [r.table, r.labelOne, r.blocksReplacement])).toEqual([
+      ["invoice_rows", "kundfakturarad (utkast)", false],
+      ["invoice_rows", "kundfakturarad (utfärdad)", true],
+      ["sales_orders", "kundorder", false],
+      ["sales_orders", "avslutad kundorder", true],
+    ]);
+    await expect(service.costCenters.remove(next.id, third.id, u.id)).rejects.toBeInstanceOf(DimensionBookedError);
+    await expect(service.costCenters.remove(next.id, null, u.id)).rejects.toBeInstanceOf(DimensionBookedError);
+    expect((await db.select().from(invoiceRows).where(eq(invoiceRows.invoiceId, draftInvoice!.id)))[0]!.costCenterId).toBe(next.id);
+    expect(await repo.costCenters.findById(next.id)).not.toBeNull();
+  });
+
+  it("a project on an attested supplier invoice or a closed purchase order is locked too", async () => {
+    const { user: u } = await setupEconomy();
+    const old = await service.projects.create({ code: "P1", name: "Ett", active: true, status: "open" }, u.id);
+    const next = await service.projects.create({ code: "P2", name: "Två", active: true, status: "open" }, u.id);
+    const [supplier] = await db.insert(suppliers).values({ supplierNumber: "L-1", name: "Lev AB" }).returning();
+    const [draft] = await db
+      .insert(supplierInvoices)
+      .values({
+        registrationNumber: "LF-1",
+        supplierId: supplier!.id,
+        invoiceNumber: "F-1",
+        invoiceDate: DATE,
+        dueDate: DATE,
+        netAmount: "100",
+        vatAmount: "25",
+        grossAmount: "125",
+        vatCodeId: await vatCodeId("MP25"),
+        projectId: old.id,
+      })
+      .returning();
+    await db.insert(supplierInvoiceRows).values({ supplierInvoiceId: draft!.id, description: "Rad", quantity: "1", unitPrice: "100", lineAmount: "100", projectId: old.id });
+    await db.insert(purchaseOrders).values({ orderNumber: "IO-1", supplierId: supplier!.id, status: "confirmed", projectId: old.id });
+    expect((await service.projects.usage(old.id)).references.map((r) => [r.labelOne, r.blocksReplacement])).toEqual([
+      ["leverantörsfaktura (utkast)", false],
+      ["leverantörsfakturarad (utkast)", false],
+      ["inköpsorder", false],
+    ]);
+    await service.projects.remove(old.id, next.id, u.id);
+    expect((await db.select().from(supplierInvoiceRows))[0]!.projectId).toBe(next.id);
+
+    await db.update(supplierInvoices).set({ status: "approved" });
+    await db.update(purchaseOrders).set({ status: "received" });
+    const third = await service.projects.create({ code: "P3", name: "Tre", active: true, status: "open" }, u.id);
+    expect((await service.projects.usage(next.id)).references.map((r) => [r.labelOne, r.blocksReplacement])).toEqual([
+      ["leverantörsfaktura (attesterad)", true],
+      ["leverantörsfakturarad (attesterad)", true],
+      ["avslutad inköpsorder", true],
+    ]);
+    await expect(service.projects.remove(next.id, third.id, u.id)).rejects.toBeInstanceOf(DimensionBookedError);
   });
 });
 
@@ -226,6 +337,21 @@ describe("the dimension rule on rows", () => {
     expect(await resolveDimensions(db, {}, { fallback: { projectId: open.id } })).toEqual({ costCenterId: null, projectId: open.id });
     // null in the input is an explicit "none" that beats the default.
     expect(await resolveDimensions(db, { projectId: null }, { fallback: { projectId: open.id } })).toEqual({ costCenterId: null, projectId: null });
+  });
+
+  it("Kopiera treats the source rows' objects as a new choice: a project closed since refuses the copy", async () => {
+    const { user: u, series, bank, rent } = await setupEconomy();
+    const project = await service.projects.create({ code: "P1", name: "Pågår", active: true, status: "open" }, u.id);
+    const booked = await testEconomyService.createVerification(
+      { seriesId: series.id, date: DATE, description: "Hyra", rows: [{ accountId: rent.id, debit: 100, credit: 0, projectId: project.id }, { accountId: bank.id, debit: 0, credit: 100 }], book: true },
+      u.id
+    );
+    const copy = await testEconomyService.copy(booked.id, u.id);
+    expect(copy.verification.rows[0]!.project?.id).toBe(project.id);
+    await service.projects.update(project.id, { status: "closed" }, u.id);
+    await expect(testEconomyService.copy(booked.id, u.id)).rejects.toBeInstanceOf(ProjectClosedError);
+    // The source itself keeps the closed project, untouched.
+    expect((await testEconomyService.findVerificationById(booked.id)).rows[0]!.project?.id).toBe(project.id);
   });
 
   it("holds a manual verification row to the rule and returns the objects as { id, code, name }", async () => {

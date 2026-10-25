@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { costCenters, db } from "@navet/db";
 import { bankReconciliationRoutes } from "../src/modules/banking/routes/bank-reconciliation.routes.js";
 import { testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import {
@@ -30,12 +31,15 @@ beforeAll(async () => {
 beforeEach(async () => {
   await resetBanking();
   await resetBankSettings();
+  // Kostnadsställen are not in the banking truncate (other registers hang off them).
+  await db.delete(costCenters);
   userId = (await setupBanking()).user.id;
 });
 afterAll(async () => {
   await resetBankSettings();
   await restoreCompany();
   await resetBanking();
+  await db.delete(costCenters);
 });
 
 const asUser = (permissions: string[]) => buildRouteApp(bankReconciliationRoutes, { service }, { id: userId, role: "user", permissions });
@@ -257,6 +261,35 @@ describe("avstämning, matchning, bokföring, regler, avstämd t.o.m.", () => {
     expect(early.json()).toMatchObject({ code: "bank-reconciliation-incomplete", reason: "balance-mismatch", statementBalance: 107580, ledgerBalance: 7580 });
     expect((await ekonomi().inject({ method: "POST", url: "/bank-reconciliations", payload: { bankAccountId: NIL, throughDate: `${BANK_YEAR}-10-09` } })).statusCode).toBe(404);
     expect((await ekonomi().inject({ method: "POST", url: "/bank-reconciliations", payload: { bankAccountId: account.id, throughDate: "9999-13-01" } })).statusCode).toBe(400);
+  });
+
+  it("Bokför posten: 409 cost-center-required with the accounts when a row's account has Kräver kostnadsställe and no cost center", async () => {
+    const account = await createAccount();
+    const bank = await accountId("1930");
+    const cost = await accountId("6570");
+    await testEconomyService.updateAccount(cost, { costCenterRequired: true });
+    await ekonomi().inject({ method: "POST", url: "/bank-statements/import", ...multipartWithFields("s.xml", fixtureXml("camt053-swedbank.xml"), { autoMatch: "false" }) });
+    const view = (await ekonomi().inject({ method: "GET", url: `/bank-reconciliation?bankAccountId=${account.id}&from=${BANK_YEAR}-10-01&to=${BANK_YEAR}-10-31` })).json();
+    const fee = view.statementEntries.find((e: { amount: number }) => e.amount === -150).id;
+    const refused = await ekonomi().inject({
+      method: "POST",
+      url: `/bank-statement-entries/${fee}/book`,
+      payload: { description: "Bankavgift", rows: [{ accountId: bank, debit: 0, credit: 150 }, { accountId: cost, debit: 150, credit: 0 }] },
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ code: "cost-center-required", accounts: ["6570"] });
+    // Nothing booked, nothing matched.
+    const after = (await ekonomi().inject({ method: "GET", url: `/bank-reconciliation?bankAccountId=${account.id}&from=${BANK_YEAR}-10-01&to=${BANK_YEAR}-10-31` })).json();
+    expect(after.matches).toEqual([]);
+    expect(after.ledgerRows).toEqual([]);
+
+    const cc = (await db.insert(costCenters).values({ code: "100", name: "Verkstad" }).returning())[0]!;
+    const booked = await ekonomi().inject({
+      method: "POST",
+      url: `/bank-statement-entries/${fee}/book`,
+      payload: { description: "Bankavgift", rows: [{ accountId: bank, debit: 0, credit: 150 }, { accountId: cost, debit: 150, credit: 0, costCenterId: cc.id }] },
+    });
+    expect(booked.statusCode).toBe(201);
   });
 
   it("marks Avstämd t.o.m. when everything up to the day is matched and the balances agree", async () => {

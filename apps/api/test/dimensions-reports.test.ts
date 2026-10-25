@@ -8,7 +8,7 @@ import { createEconomyRepository } from "../src/modules/economy/repository/econo
 import { createEconomyService } from "../src/modules/economy/service/economy.service.js";
 import { BAS_STANDARD_ACCOUNTS } from "../src/modules/economy/service/bas-accounts.js";
 import { buildGroupedIncomeStatementCsv } from "../src/modules/economy/service/financial-reports-csv.js";
-import { createFinancialReportsService } from "../src/modules/economy/service/financial-reports.service.js";
+import { buildGroupedIncomeStatement, createFinancialReportsService } from "../src/modules/economy/service/financial-reports.service.js";
 import { createProjectReportRepository } from "../src/modules/reports/repository/project-report.repository.js";
 import { buildProjectReport } from "../src/modules/reports/service/project-report.js";
 import { createProjectReportService, ProjectNotFoundError } from "../src/modules/reports/service/project-report.service.js";
@@ -145,6 +145,50 @@ describe("resultaträkningen", () => {
   });
 });
 
+describe("buildGroupedIncomeStatement (pure)", () => {
+  const balance = (accountNumber: string, objectId: string | null, net: number) => ({
+    accountId: `acc-${accountNumber}`,
+    accountNumber,
+    accountName: accountNumber,
+    objectId,
+    openingDebit: 0,
+    openingCredit: 0,
+    periodDebit: net > 0 ? net : 0,
+    periodCredit: net < 0 ? -net : 0,
+  });
+  const objects = [
+    { id: "cc-100", code: "100", name: "Verkstad" },
+    { id: "cc-200", code: "200", name: "Montering" },
+  ];
+
+  it("has no Utan column when every result row carries an object, and the column sums equal the total", () => {
+    const grouped = buildGroupedIncomeStatement(
+      [balance("3001", "cc-100", -1000), balance("5010", "cc-200", 300), balance("5010", "cc-100", 200), balance("1930", null, 500)],
+      objects
+    );
+    expect(grouped.columns.map((c) => c.code)).toEqual(["100", "200"]);
+    expect(grouped.result).toBe(500);
+    for (const entry of grouped.entries) {
+      expect(entry.amounts!.reduce((sum, a) => sum + a, 0)).toBeCloseTo(entry.total, 2);
+    }
+    const last = [...grouped.entries].reverse().find((e) => e.kind === "subtotal")!;
+    expect(last.amounts).toEqual([800, -300]);
+  });
+
+  it("gives no column to an object that only moves on balance-sheet accounts, and Utan only for result rows without one", () => {
+    const grouped = buildGroupedIncomeStatement([balance("3001", "cc-100", -1000), balance("1930", "cc-200", 1000), balance("6110", null, 50)], objects);
+    expect(grouped.columns).toEqual([
+      { id: "cc-100", code: "100", name: "Verkstad" },
+      { id: null, code: null, name: "Utan" },
+    ]);
+    const last = [...grouped.entries].reverse().find((e) => e.kind === "subtotal")!;
+    expect(last.amounts).toEqual([1000, -50]);
+    expect(last.total).toBe(950);
+    // Only a bank row: no columns at all, nothing on the statement.
+    expect(buildGroupedIncomeStatement([balance("1930", "cc-200", 1000)], objects).columns).toEqual([]);
+  });
+});
+
 describe("huvudboken och verifikationslistan", () => {
   it("keeps only the rows carrying the object in the general ledger, with the object on the row", async () => {
     const { workshop } = await setup();
@@ -192,6 +236,17 @@ describe("projektrapporten", () => {
     const article = await articleService.createArticle({ articleNumber: `ART-${crypto.randomUUID()}`, name: "Diskbänk", type: "manufactured", active: true });
     const [order] = await db.insert(salesOrders).values({ orderNumber: "KO-100", customerId: customer!.id, status: "confirmed", projectId: project.id }).returning();
     await db.insert(salesOrderRows).values({ salesOrderId: order!.id, articleId: article.id, quantityOrdered: "2", unitPrice: "500", discountPercent: "10" });
+    // Quotes (open, lost, cancelled as a quote) and cancelled orders are not
+    // the project's business — only orders are listed.
+    for (const [orderNumber, status, quoteNumber] of [
+      ["OF-1", "quote", "OF-1"],
+      ["OF-2", "lost", "OF-2"],
+      ["OF-3", "cancelled", "OF-3"],
+      ["KO-101", "cancelled", null],
+    ] as const) {
+      const [row] = await db.insert(salesOrders).values({ orderNumber, quoteNumber, customerId: customer!.id, status, projectId: project.id }).returning();
+      await db.insert(salesOrderRows).values({ salesOrderId: row!.id, articleId: article.id, quantityOrdered: "1", unitPrice: "100" });
+    }
 
     const report = await projectReport.get({ projectId: project.id });
     expect(report.project).toEqual({ id: project.id, code: "P1", name: "Storköket", status: "open", customerName: null });

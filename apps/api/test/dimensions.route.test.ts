@@ -5,6 +5,7 @@ import { buildApp } from "../src/app.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { encodeCp437 } from "../src/modules/economy/service/sie-encoding.js";
 import { testEconomyService } from "./helpers/services.js";
 
 // Kostnadsställen och projekt through the real app: the registers' routes
@@ -14,7 +15,7 @@ import { testEconomyService } from "./helpers/services.js";
 
 const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
 const PASSWORD = "correcthorsebattery";
-const TRUNCATE = sql`TRUNCATE verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, cost_centers, projects, user_settings, audit_log, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE sie_verification_imports, verification_files, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, cost_centers, projects, user_settings, audit_log, users CASCADE`;
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'DIM%'`;
 
 let app: ReturnType<typeof buildApp>;
@@ -54,6 +55,7 @@ async function cookieWith(permissions: string[], name: string) {
 
 function api(cookie: string) {
   return {
+    cookie,
     get: (url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, headers: { cookie } }),
     post: (url: string, payload?: unknown) => app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, payload }),
     patch: (url: string, payload?: unknown) => app.inject({ method: "PATCH", url: `/api/v1${url}`, headers: { cookie }, payload }),
@@ -120,7 +122,10 @@ describe("the registers", () => {
     expect(draft.json().rows[0].costCenter).toEqual({ id: a.id, code: "100", name: "Verkstad" });
 
     const usage = await ekonomi.get(`/cost-centers/${a.id}/usage`);
-    expect(usage.json()).toEqual({ total: 1, references: [{ table: "verification_rows", label: "verifikatrader (utkast)", labelOne: "verifikatrad (utkast)", count: 1 }] });
+    expect(usage.json()).toEqual({
+      total: 1,
+      references: [{ table: "verification_rows", label: "verifikatrader (utkast)", labelOne: "verifikatrad (utkast)", count: 1, blocksReplacement: false }],
+    });
     const inUse = await ekonomi.delete(`/cost-centers/${a.id}`);
     expect(inUse.statusCode).toBe(409);
     expect(inUse.json()).toMatchObject({ code: "register-entry-in-use", usage: { total: 1 } });
@@ -132,6 +137,22 @@ describe("the registers", () => {
     const booked = await ekonomi.delete(`/cost-centers/${b.id}`);
     expect(booked.statusCode).toBe(409);
     expect(booked.json().code).toBe("dimension-booked");
+    expect((await ekonomi.get(`/cost-centers/${b.id}/usage`)).json().references).toEqual([
+      { table: "verification_rows", label: "bokförda verifikatrader", labelOne: "bokförd verifikatrad", count: 1, blocksReplacement: true },
+    ]);
+  });
+
+  it("project PATCH: an end date before the start is 400 project-dates, an unknown customer 404 project-customer-not-found", async () => {
+    const ekonomi = api(await cookieWith(["ekonomi"], "Ekonom"));
+    const created = await ekonomi.post("/projects", { code: "P1", name: "Storköket", startDate: `${YEAR}-03-01` });
+    expect(created.statusCode).toBe(201);
+    const dates = await ekonomi.patch(`/projects/${created.json().id}`, { endDate: `${YEAR}-02-01` });
+    expect(dates.statusCode).toBe(400);
+    expect(dates.json().code).toBe("project-dates");
+    const customer = await ekonomi.patch(`/projects/${created.json().id}`, { customerId: crypto.randomUUID() });
+    expect(customer.statusCode).toBe(404);
+    expect(customer.json().code).toBe("project-customer-not-found");
+    expect((await ekonomi.patch(`/projects/${created.json().id}`, { endDate: `${YEAR}-04-01` })).json().endDate).toBe(`${YEAR}-04-01`);
   });
 });
 
@@ -181,6 +202,61 @@ describe("the rules on rows", () => {
     expect(direct.statusCode).toBe(409);
     expect(direct.json().code).toBe("cost-center-required");
     expect((await ekonomi.get(`/accounts`)).json().rows.find((a: { number: string }) => a.number === "5010").costCenterRequired).toBe(true);
+  });
+});
+
+// Multipart body for the SIE import routes (manual-bookkeeping.route.test.ts's helper).
+function multipart(fields: Record<string, string>, file: { name: string; data: Buffer }) {
+  const boundary = `----nav${crypto.randomUUID().replace(/-/g, "")}`;
+  const parts: Buffer[] = [];
+  for (const [name, value] of Object.entries(fields)) {
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`));
+  }
+  parts.push(
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: application/octet-stream\r\n\r\n`),
+    file.data,
+    Buffer.from(`\r\n--${boundary}--\r\n`)
+  );
+  return { payload: Buffer.concat(parts), headers: { "content-type": `multipart/form-data; boundary=${boundary}` } };
+}
+
+describe("SIE-import i läge Bokför", () => {
+  it("answers 409 cost-center-required with blockers for a row on a Kräver kostnadsställe account without one, and books with the objects otherwise", async () => {
+    const ekonomi = api(await cookieWith(["ekonomi"], "Ekonom"));
+    const { rent } = await setupEconomy();
+    expect((await ekonomi.patch(`/accounts/${rent.id}`, { costCenterRequired: true })).statusCode).toBe(200);
+    const sie = (trans: string, ver = "1") =>
+      encodeCp437(
+        [
+          "#FLAGGA 0",
+          '#PROGRAM "Lönesystemet" 2.4',
+          "#FORMAT PC8",
+          "#SIETYP 4",
+          `#RAR 0 ${YEAR}0101 ${YEAR}1231`,
+          '#DIM 1 "Kostnadsställe"',
+          '#OBJEKT 1 "100" "Verkstad"',
+          `#VER "LÖ" "${ver}" ${YEAR}0315 "Hyra"`,
+          "{",
+          trans,
+          "#TRANS 1930 {} -100.00",
+          "}",
+          "",
+        ].join("\r\n")
+      );
+    const without = multipart({ mode: "book", createMissingAccounts: "true" }, { name: "utan.se", data: sie("#TRANS 5010 {} 100.00") });
+    const refused = await app.inject({ method: "POST", url: "/api/v1/sie/verifications/import", headers: { cookie: ekonomi.cookie, ...without.headers }, payload: without.payload });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ code: "cost-center-required", accounts: ["5010"], blockers: [expect.stringContaining("5010")] });
+    expect((await ekonomi.get("/cost-centers")).json().total).toBe(0);
+
+    const withObject = multipart({ mode: "book", createMissingAccounts: "true" }, { name: "med.se", data: sie('#TRANS 5010 {1 "100"} 100.00', "2") });
+    const booked = await app.inject({ method: "POST", url: "/api/v1/sie/verifications/import", headers: { cookie: ekonomi.cookie, ...withObject.headers }, payload: withObject.payload });
+    expect(booked.statusCode).toBe(201);
+    const created = (await ekonomi.get("/cost-centers")).json();
+    expect(created.rows).toEqual([{ id: expect.any(String), code: "100", name: "Verkstad", active: true }]);
+    const verification = (await ekonomi.get(`/verifications/${booked.json().verifications[0].id}`)).json();
+    expect(verification.status).toBe("booked");
+    expect(verification.rows.find((r: { costCenter: unknown }) => r.costCenter !== null).costCenter).toEqual({ id: created.rows[0].id, code: "100", name: "Verkstad" });
   });
 });
 

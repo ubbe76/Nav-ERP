@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { bankFiles, bankRules, bankStatementEntries, companyInfo, customerPayments, customers, db, systemSettings, verificationRows, verifications } from "@navet/db";
+import { bankFiles, bankRules, bankStatementEntries, companyInfo, costCenters, customerPayments, customers, db, systemSettings, verificationRows, verifications } from "@navet/db";
 import { createAlertsService } from "../src/modules/alerts/service/alerts.service.js";
 import { createAlertsRepository } from "../src/modules/alerts/repository/alerts.repository.js";
 import { unreconciledBankAccountsAsOf } from "../src/modules/banking/repository/bank-reconciliation.repository.js";
@@ -61,12 +61,15 @@ beforeAll(async () => {
 beforeEach(async () => {
   await resetBanking();
   await resetBankSettings();
+  // Kostnadsställen are not in the banking truncate (other registers hang off them).
+  await db.delete(costCenters);
   userId = (await setupBanking()).user.id;
 });
 afterAll(async () => {
   await resetBankSettings();
   await restoreCompany();
   await resetBanking();
+  await db.delete(costCenters);
 });
 
 async function makeAccount(identifier = SWEDBANK, ledger = "1930") {
@@ -427,6 +430,27 @@ describe("bokföra en post", () => {
     // The seed never comes back once the user has emptied the table.
     for (const rule of rules.rows) await service.deleteRule(rule.id, userId);
     expect((await service.listRules()).total).toBe(0);
+  });
+
+  it("Kräver kostnadsställe on the rule's account: Bokför enligt regel reports the refusal per entry with the real code and message", async () => {
+    const account = await makeAccount();
+    await service.listRules(); // seeds the standard rules ("avgift" → 6570)
+    await testEconomyService.updateAccount(await accountId("6570"), { costCenterRequired: true });
+    await service.import(uploadOf(fixtureXml("camt053-swedbank.xml")), { autoMatch: false }, userId);
+    const view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
+    const fee = view.statementEntries.find((e) => e.amount === -150)!;
+    const result = await service.bookByRule({ entryIds: [fee.id] }, userId);
+    expect(result.booked).toEqual([]);
+    expect(result.failed).toEqual([{ entryId: fee.id, error: { code: "cost-center-required", error: "Konto 6570 kräver kostnadsställe — ange ett på raden" } }]);
+
+    // With the cost center on the rule the entry books.
+    const [workshop] = await db.insert(costCenters).values({ code: "100", name: "Verkstad" }).returning();
+    const rule = (await service.listRules()).rows.find((r) => r.textContains === "avgift")!;
+    await service.updateRule(rule.id, { costCenterId: workshop!.id }, userId);
+    const again = await service.bookByRule({ entryIds: [fee.id] }, userId);
+    expect(again.booked).toHaveLength(1);
+    const rows = await db.select().from(verificationRows).where(eq(verificationRows.verificationId, again.booked[0]!.verificationId));
+    expect(rows.find((r) => Number(r.debit) === 150)!.costCenterId).toBe(workshop!.id);
   });
 
   it("refuses booking by a rule whose account is missing, and surfaces missing/ambiguous rules as errors", async () => {

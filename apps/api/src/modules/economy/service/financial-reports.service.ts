@@ -229,20 +229,24 @@ export function buildIncomeStatement(balances: AccountBalance[]): IncomeStatemen
 // gets `amounts` in column order (0 where the column has nothing). Columns:
 // the objects with movement, in the caller's order, then "Utan" when some
 // rows carry none.
+// A grouped balance that puts something on the income statement: a result
+// account with movement in the period.
+export function hasResultMovement(balance: GroupedAccountBalance): boolean {
+  return classifyAccount(balance.accountNumber).report === "incomeStatement" && (balance.periodDebit !== 0 || balance.periodCredit !== 0);
+}
+
 export function buildGroupedIncomeStatement(
   balances: GroupedAccountBalance[],
   objects: DimensionRef[]
 ): IncomeStatementBody & { columns: IncomeStatementColumn[] } {
-  // Only the result accounts count — a bank row without an object is not an
-  // "Utan" column on the income statement.
-  const hasWithout = balances.some(
-    (balance) =>
-      balance.objectId === null &&
-      classifyAccount(balance.accountNumber).report === "incomeStatement" &&
-      (balance.periodDebit !== 0 || balance.periodCredit !== 0)
-  );
+  // Only the result accounts count, for the objects and for "Utan" alike —
+  // a bank row without an object is not an "Utan" column on the income
+  // statement, and an object carried only by balance-sheet rows gets no
+  // (empty) column of its own.
+  const movingObjectIds = new Set(balances.filter(hasResultMovement).map((balance) => balance.objectId));
+  const hasWithout = movingObjectIds.has(null);
   const columns: IncomeStatementColumn[] = [
-    ...objects.map((object) => ({ id: object.id, code: object.code, name: object.name })),
+    ...objects.filter((object) => movingObjectIds.has(object.id)).map((object) => ({ id: object.id, code: object.code, name: object.name })),
     ...(hasWithout ? [{ id: null, code: null, name: WITHOUT_OBJECT_LABEL }] : []),
   ];
 
@@ -596,8 +600,9 @@ export function createFinancialReportsService(deps: {
         return { from: query.from, to: query.to, ...buildIncomeStatement(balances) };
       }
       const grouped = await readAccountBalancesGrouped(db, { from: query.from, to: query.to }, query.groupBy, filter);
-      const moving = grouped.filter((balance) => balance.periodDebit !== 0 || balance.periodCredit !== 0);
-      const ids = moving.map((balance) => balance.objectId);
+      // Columns = the objects with result-account movement — the same rule
+      // as the Utan column, so no column is ever empty.
+      const ids = grouped.filter(hasResultMovement).map((balance) => balance.objectId);
       const refs = await loadDimensionRefs(db, {
         costCenterIds: query.groupBy === "costCenter" ? ids : [],
         projectIds: query.groupBy === "project" ? ids : [],

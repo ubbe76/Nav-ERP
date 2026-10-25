@@ -78,7 +78,7 @@ Beloppet delas först när det finns ett belopp på raden: väljer du momskod f�
 
 - **Bokför** är inaktiv tills verifikatet har **minst två rader** och differensen är **0**. Ett bekräftelsemeddelande — **"Verifikatet får nummer och låses. Fortsätt?"** — visas innan bokföringen genomförs. Verifikatet får då sitt löpnummer (t.ex. **A-2026-17**: serie, räkenskapsår och löpnummer), blir **Bokfört** och raderna blir skrivskyddade.
 - **Ta bort** raderar utkastet permanent efter bekräftelse (**"Ta bort verifikatet permanent?"**). Bara utkast kan tas bort — ett bokfört verifikat är append-only och kan bara rättas genom en omföring.
-- **Kopiera** (finns på alla verifikat, även bokförda) skapar ett nytt **utkast** med samma serie, beskrivning och rader, daterat i dag, och tar dig till det. Har ett konto på en rad inaktiverats sedan dess utelämnas raden och kortet visar en varning om vilken. Kopiera är aktiv först när raderna är sparade.
+- **Kopiera** (finns på alla verifikat, även bokförda) skapar ett nytt **utkast** med samma serie, beskrivning och rader, daterat i dag, och tar dig till det. Har ett konto på en rad inaktiverats sedan dess utelämnas raden och kortet visar en varning om vilken. Bär en rad ett kostnadsställe som inaktiverats eller ett projekt som stängts sedan dess vägras kopian (*"Projektet … är stängt och kan inte väljas på nya rader"*) — kopian är en ny bokning. Kopiera är aktiv först när raderna är sparade.
 - **Spara som mall** frågar efter ett **Namn** och sparar verifikatets serie, beskrivning och rader — med belopp — som en [verifikatmall](#verifikatmallar). Namnet måste vara unikt (*"Det finns redan en mall med det namnet"*).
 
 ### Kostnadsställe och projekt på raderna
@@ -357,12 +357,12 @@ Med **kostnadsställen** och **projekt** kan du följa resultatet per avdelning 
 
 **Ta bort** fungerar som i övriga register: används objektet visas vad det är kopplat till, och du väljer ett annat objekt att **Flytta och ta bort** kopplingarna till. Vill du behålla historiken ungefär som den är, inaktivera objektet i stället.
 
-Används objektet på **bokförda** verifikatrader går det aldrig att ta bort, eftersom bokföringen inte kan ändras. Då visar **Ta bort** i stället listan över kopplingarna (där de bokförda raderna står som *bokförda verifikatrader*) och texten *"… används på bokförda verifikat. Bokföringen kan inte ändras, så posten kan inte tas bort eller flyttas — inaktivera den i stället."* Ingen ersättare kan väljas; knappen **Inaktivera** gör objektet inaktivt, så att det inte kan väljas på nya rader men finns kvar på det som redan bokats. Ett projekt kan också sättas till **Stängt**.
+Används objektet på **bokförda** verifikatrader eller på dokument som inte längre är utkast — utfärdade kundfakturor, attesterade eller makulerade leverantörsfakturor, levererade, fakturerade, makulerade eller förlorade kundorder, mottagna, stängda eller makulerade inköpsorder — går det aldrig att ta bort, eftersom bokföringen och dess underlag inte kan ändras. Då visar **Ta bort** i stället listan över kopplingarna (där de står som t.ex. *bokförda verifikatrader*, *kundfakturarader (utfärdade)*, *leverantörsfakturor (attesterade)* eller *avslutade kundorder*) och texten *"… används på bokförda verifikat eller låsta dokument. Bokföringen kan inte ändras, så posten kan inte tas bort eller flyttas — inaktivera den i stället."* Ingen ersättare kan väljas; knappen **Inaktivera** gör objektet inaktivt, så att det inte kan väljas på nya rader men finns kvar på det som redan bokats. Ett projekt kan också sättas till **Stängt**.
 
 ### Var objekten sätts
 
 - **Verifikat** — kolumnerna **Kostnadsställe** och **Projekt** i verifikattabellen, se [Kostnadsställe och projekt på raderna](#kostnadsstalle-och-projekt-pa-raderna). Mallar och återkommande verifikat bär dem.
-- **Kundfaktura** — varje fakturarad har ett kostnadsställe och ett projekt (kolumnen **Kostnadsställe / projekt**, och i **Lägg till rad**). Förval är kundorderns **Kostnadsställe** och **Projekt** (sätts på ordern under **Ändra**), annars artikelgruppens **Kostnadsställe (förval)**. Objekten bokförs på intäktsraden, inte på kundfordran eller momsen.
+- **Kundfaktura** — varje fakturarad har ett kostnadsställe och ett projekt (kolumnen **Kostnadsställe / projekt**, och i **Lägg till rad**). Förval för kostnadsstället är kundorderns **Kostnadsställe** (sätts på ordern under **Ändra**), annars artikelgruppens **Kostnadsställe (förval)**; förval för projektet är kundorderns **Projekt**. Objekten bokförs på intäktsraden, inte på kundfordran eller momsen.
 - **Leverantörsfaktura** — fakturans **Kostnadsställe** och **Projekt** är förval för raderna, och varje rad kan ha egna. Förval är leverantörens **Kostnadsställe (förval)**, annars artikelgruppens, och inköpsorderns **Projekt** när underlaget hämtas från en inköpsorder. Objekten bokförs på kostnadsraden; restraden tar fakturans.
 - **Bankavstämning** — en [bankregel](#bankregler) kan bära kostnadsställe och projekt, och raderna i **Bokför posten** har kolumnerna.
 - **Anläggningsregister** — en [anläggningsgrupp](#anlaggningsgrupper) har ett **Kostnadsställe (förval)** för avskrivningsraden.
@@ -375,9 +375,9 @@ Kryssrutan **Kräver kostnadsställe** på ett konto (se [Kontoplan](#kontoplan)
 
 ### Rapporterna
 
-- [Resultaträkningen](#resultatrakning) har urval **Kostnadsställe** och **Projekt** och lägena **Per kostnadsställe** och **Per projekt**, med en kolumn per objekt och en för rader **utan** objekt.
+- [Resultaträkningen](#resultatrakning) har urval **Kostnadsställe** och **Projekt** och lägena **Per kostnadsställe** och **Per projekt**, med en kolumn per objekt som har bokningar på resultatkonton i perioden och en för rader **utan** objekt (bara när sådana finns).
 - [Huvudboken](#huvudbok) och verifikatlistan har samma urval och visar objekten per rad.
-- **Rapporter → Projektrapport** visar intäkter, kostnader och resultat per projekt och månad ur bokföringen, per konto och de kundordrar som har projektet, se [Projektrapport](/hjalp/rapporter#projektrapport).
+- **Rapporter → Projektrapport** visar intäkter, kostnader och resultat per projekt och månad ur bokföringen, per konto och de kundordrar som har projektet (offerter och makulerade order räknas inte), se [Projektrapport](/hjalp/rapporter#projektrapport).
 
 ## Valutakurser
 

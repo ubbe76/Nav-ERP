@@ -59,6 +59,7 @@ import {
   type UpdateSalesOrderHeaderInput,
   type UpdateSalesOrderRowInput,
 } from "@navet/shared";
+import { documentKindSql } from "./document-kind.js";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
@@ -78,10 +79,6 @@ const lostByUser = alias(users, "lost_by_user");
 const orderCostCenters = alias(costCenters, "order_cost_centers");
 const orderProjects = alias(projects, "order_projects");
 
-// Offerter (0138): the SQL twin of @navet/shared's salesDocumentKind — the
-// one place the rule lives on the database side (list filter, list rows and
-// the detail read). Keep the two in step.
-const documentKindSql = sql<SalesDocumentKind>`(case when ${salesOrders.status} in ('quote', 'lost') or (${salesOrders.status} = 'cancelled' and ${salesOrders.quoteNumber} is not null and ${salesOrders.orderNumber} = ${salesOrders.quoteNumber}) then 'quote' else 'order' end)`;
 
 // A plain sales_orders row (from insert/update … returning) with its derived
 // document kind, so every write path answers in the same shape as the reads.

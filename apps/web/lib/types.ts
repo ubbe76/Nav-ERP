@@ -404,7 +404,10 @@ export interface RegisterEntry {
 export interface RegisterUsage {
   total: number;
   // label = Swedish plural ("kunder"), labelOne = singular ("kund").
-  references: { table: string; label: string; labelOne: string; count: number }[];
+  // blocksReplacement (the dimension registers): the reference cannot be
+  // moved to a replacement — booked verification rows, locked documents —
+  // so the entry can only be deactivated.
+  references: { table: string; label: string; labelOne: string; count: number; blocksReplacement?: boolean }[];
 }
 
 // Contact on a customer or supplier card; at most one per partner is primary.

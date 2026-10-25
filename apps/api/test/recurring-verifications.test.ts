@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { accountingPeriods, db, recurringVerificationRuns, verificationRows, verifications } from "@navet/db";
+import { accountingPeriods, costCenters, db, projects, recurringVerificationRuns, verificationRows, verifications } from "@navet/db";
 import { round2 } from "@navet/shared";
 import { createAlertsRepository } from "../src/modules/alerts/repository/alerts.repository.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -43,7 +43,7 @@ const recurring = createRecurringVerificationService({
   log: () => {},
 });
 
-const TRUNCATE = sql`TRUNCATE recurring_verification_runs, recurring_verifications, verification_template_rows, verification_templates, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, audit_log, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE recurring_verification_runs, recurring_verifications, verification_template_rows, verification_templates, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, cost_centers, projects, audit_log, users CASCADE`;
 
 beforeEach(async () => {
   today = `${YEAR}-03-20`;
@@ -360,6 +360,67 @@ describe("recurring verifications — failures and Kör nu", () => {
     const post = await recurring.create({ templateId: template.id, dayOfMonth: 1, startMonth: `${YEAR}-01`, endMonth: null, mode: "draft" }, user.id);
     expect(post.runs.map((r) => [r.status, r.error])).toEqual([["failed", "Ett konto på mallen är inaktivt"]]);
     expect(await allVerifications()).toEqual([]);
+  });
+
+  it("Kostnadsställen och projekt: a closed project on the template fails the month in mode book, and so does Kräver kostnadsställe", async () => {
+    const { user, series } = await setup();
+    const [project] = await db.insert(projects).values({ code: "P1", name: "Storköket" }).returning();
+    const [workshop] = await db.insert(costCenters).values({ code: "100", name: "Verkstad" }).returning();
+    const template = await templates.create(
+      {
+        name: "Projekthyra",
+        seriesId: series.id,
+        description: "Hyra projekt",
+        rows: [
+          { accountNumber: "5010", debit: 8000, projectId: project!.id },
+          { accountNumber: "1930", credit: 8000 },
+        ],
+      },
+      user.id
+    );
+    today = `${YEAR}-01-02`;
+    const post = await recurring.create({ templateId: template.id, dayOfMonth: 1, startMonth: `${YEAR}-01`, endMonth: null, mode: "book" }, user.id);
+    expect(post.runs.map((r) => [r.month, r.status])).toEqual([[`${YEAR}-01`, "created"]]);
+
+    // The project closes: February fails with the Swedish reason, nothing booked for it.
+    await db.update(projects).set({ status: "closed" }).where(eq(projects.id, project!.id));
+    today = `${YEAR}-02-02`;
+    expect(await recurring.runDue()).toEqual({ posts: 1, created: 0, failed: 1 });
+    const closed = (await recurring.findById(post.id)).runs.find((r) => r.month === `${YEAR}-02`)!;
+    expect(closed.status).toBe("failed");
+    expect(closed.error).toBe("Projektet P1 är stängt och kan inte väljas på nya rader");
+    expect(closed.verificationId).toBeNull();
+    expect((await allVerifications()).map((v) => v.date)).toEqual([`${YEAR}-01-01`]);
+
+    // Kräver kostnadsställe on 5010: a template without one fails in mode book …
+    await db.update(projects).set({ status: "open" }).where(eq(projects.id, project!.id));
+    const rent = await economyRepo.findAccountByNumber("5010");
+    await economy.updateAccount(rent!.id, { costCenterRequired: true });
+    today = `${YEAR}-03-02`;
+    const run = await recurring.run(post.id, user.id);
+    expect(run.created).toEqual([]);
+    expect(run.failed.map((r) => [r.month, r.error])).toEqual([
+      [`${YEAR}-02`, "Konto 5010 kräver kostnadsställe — ange ett på raden"],
+      [`${YEAR}-03`, "Konto 5010 kräver kostnadsställe — ange ett på raden"],
+    ]);
+    expect((await allVerifications()).map((v) => v.date)).toEqual([`${YEAR}-01-01`]);
+
+    // … and books once the template row carries one.
+    await templates.update(
+      template.id,
+      {
+        rows: [
+          { accountNumber: "5010", debit: 8000, projectId: project!.id, costCenterId: workshop!.id },
+          { accountNumber: "1930", credit: 8000 },
+        ],
+      },
+      user.id
+    );
+    const retried = await recurring.run(post.id, user.id);
+    expect(retried.created.map((r) => r.month)).toEqual([`${YEAR}-02`, `${YEAR}-03`]);
+    expect((await recurring.findById(post.id)).failedCount).toBe(0);
+    const rows = await db.select().from(verificationRows).where(eq(verificationRows.verificationId, retried.created[0]!.verificationId!));
+    expect(rows.find((r) => Number(r.debit) === 8000)).toMatchObject({ costCenterId: workshop!.id, projectId: project!.id });
   });
 
   it("deletes the post: failed rows go, rows with a verification stay unlinked, the verifications stay", async () => {

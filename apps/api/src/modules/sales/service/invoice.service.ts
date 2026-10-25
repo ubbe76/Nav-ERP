@@ -365,6 +365,11 @@ type RowInput = {
   // group's Kostnadsställe (förval); undefined on a PATCH = the row's.
   costCenterId?: string | null;
   projectId?: string | null;
+  // A credit note's copy: the SOURCE row's objects. A value equal to the
+  // source's is kept as it is (the same booking mirrored, never re-checked);
+  // an override that differs is the user's choice and held to the rule.
+  // Never client input.
+  sourceDimensions?: { costCenterId: string | null; projectId: string | null };
 };
 
 // What every row of one create/addRow/PATCH needs to know once: the
@@ -779,22 +784,25 @@ export function createInvoiceService(
       if (input.configuration === undefined) configuration = (orderRow.configuration as OrderRowConfiguration | null) ?? null;
       dimensionFallback = { costCenterId: orderRow.orderCostCenterId, projectId: orderRow.orderProjectId };
     }
-    // Spec: the order header first, else the article group's Kostnadsställe
-    // (förval); a free row without an article has no default.
-    if (dimensionFallback === null && articleId) {
-      dimensionFallback = { costCenterId: await repo.findArticleGroupDefaultCostCenter(articleId), projectId: null };
+    // Per field, like the supplier side: the cost center is the order
+    // header's, else the article group's Kostnadsställe (förval); the project
+    // is the order header's only. A free row without an article has no default.
+    if (articleId && (dimensionFallback === null || dimensionFallback.costCenterId === null)) {
+      dimensionFallback = {
+        costCenterId: await repo.findArticleGroupDefaultCostCenter(articleId),
+        projectId: dimensionFallback?.projectId ?? null,
+      };
     }
     // A credit note's copy keeps the source row's objects as they are (an
     // object closed since the source was issued stays — it is the same
-    // booking mirrored); a PATCH keeps the row's own unless the field is sent.
+    // booking mirrored) while an override that differs is a choice; a PATCH
+    // keeps the row's own unless the field is sent.
     const dimensions = await repo.resolveDimensions(
       { costCenterId: input.costCenterId, projectId: input.projectId },
       {
-        existing: input.copiedFromSource
-          ? { costCenterId: input.costCenterId ?? null, projectId: input.projectId ?? null }
-          : existingRow
-            ? { costCenterId: existingRow.costCenterId ?? null, projectId: existingRow.projectId ?? null }
-            : null,
+        existing:
+          input.sourceDimensions ??
+          (existingRow ? { costCenterId: existingRow.costCenterId ?? null, projectId: existingRow.projectId ?? null } : null),
         fallback: dimensionFallback,
       }
     );
@@ -1091,9 +1099,11 @@ export function createInvoiceService(
             ...(explicitCode ? {} : { vatCodeId: source.vatCodeId, copiedFromSource: true }),
             ...(r.deliveryDate !== undefined ? {} : { deliveryDate: source.deliveryDate }),
             // Kostnadsställen och projekt: the source row's unless the
-            // override says otherwise (held to the rule like any input).
+            // override says otherwise — a copied value is kept as it is, a
+            // differing override is held to the rule (sourceDimensions).
             ...(r.costCenterId !== undefined ? {} : { costCenterId: source.costCenterId }),
             ...(r.projectId !== undefined ? {} : { projectId: source.projectId }),
+            sourceDimensions: { costCenterId: source.costCenterId, projectId: source.projectId },
           };
         });
       } else {
@@ -1114,6 +1124,7 @@ export function createInvoiceService(
           // …and its objects, so the credit nets the revenue per object.
           costCenterId: r.costCenterId,
           projectId: r.projectId,
+          sourceDimensions: { costCenterId: r.costCenterId, projectId: r.projectId },
         }));
       }
 

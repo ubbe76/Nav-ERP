@@ -234,6 +234,68 @@ describe("kundfaktura — the objects on the revenue row", () => {
     const mirrored = await rowsOf(creditIssued!.verificationId!);
     expect(mirrored.find((r) => r.number === "3001" && r.costCenterId === workshop.id)).toMatchObject({ debit: 1000, credit: 0, projectId: project.id });
   });
+
+  it("defaults per field: the article group's cost center fills in when the order header has none, the project is the header's only", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const office = await makeCostCenter("300", "Kontor");
+    const project = await makeProject("P1", "Storköket");
+    const [group] = await db.insert(articleGroups).values({ code: "100", name: "Tjänster", defaultCostCenterId: office.id }).returning();
+    const article = await makeArticle(group!.id);
+    const [order] = await db
+      .insert(salesOrders)
+      .values({ orderNumber: `KO-${crypto.randomUUID().slice(0, 8)}`, customerId: customer.id, status: "delivered", projectId: project.id })
+      .returning();
+    const [orderRow] = await db.insert(salesOrderRows).values({ salesOrderId: order!.id, articleId: article.id, quantityOrdered: "1", quantityDelivered: "1", unitPrice: "500" }).returning();
+
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "Orderrad", articleId: article.id, salesOrderRowId: orderRow!.id, quantity: 1, unitPrice: 500, vatRate: 25 }] },
+      user.id
+    );
+    expect(draft!.rows[0]!.costCenter?.id).toBe(office.id);
+    expect(draft!.rows[0]!.project?.id).toBe(project.id);
+    // An explicit null on the row beats the group default.
+    const none = await invoiceService.updateRow(draft!.id, draft!.rows[0]!.id, { costCenterId: null }, user.id);
+    expect(none.costCenterId).toBeNull();
+    expect(none.projectId).toBe(project.id);
+  });
+
+  it("a credit note's rows override keeps the copied source objects unchecked, but holds a differing override to the rule", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const workshop = await makeCostCenter("100", "Verkstad");
+    const project = await makeProject("P1", "Storköket");
+    const other = await makeProject("P2", "Annat");
+    const article = await makeArticle();
+    const [order] = await db
+      .insert(salesOrders)
+      .values({ orderNumber: `KO-${crypto.randomUUID().slice(0, 8)}`, customerId: customer.id, status: "delivered", costCenterId: workshop.id, projectId: project.id })
+      .returning();
+    // Ten invoiced, so the four one-piece credit drafts below never over-credit.
+    const [orderRow] = await db.insert(salesOrderRows).values({ salesOrderId: order!.id, articleId: article.id, quantityOrdered: "10", quantityDelivered: "10", unitPrice: "500" }).returning();
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "Orderrad", articleId: article.id, salesOrderRowId: orderRow!.id, quantity: 10, unitPrice: 500, vatRate: 25 }] },
+      user.id
+    );
+    const issued = await invoiceService.issue(draft!.id, user.id);
+    // The project closes after the invoice went out.
+    await db.update(projects).set({ status: "closed" }).where(eq(projects.id, project.id));
+
+    const linked = { articleId: article.id, salesOrderRowId: orderRow!.id, description: "Kredit", quantity: 1, unitPrice: 500 };
+    // Copied from the source (even with an explicit momskod on the override): kept, not re-checked.
+    const copied = await invoiceService.createCredit(issued!.id, { rows: [{ ...linked, vatCodeId: issued!.rows[0]!.vatCodeId }] }, user.id);
+    expect(copied!.rows[0]!.costCenter?.id).toBe(workshop.id);
+    expect(copied!.rows[0]!.project?.id).toBe(project.id);
+    // The same objects named explicitly are still the source's — kept too.
+    const same = await invoiceService.createCredit(issued!.id, { rows: [{ ...linked, costCenterId: workshop.id, projectId: project.id }] }, user.id);
+    expect(same!.rows[0]!.project?.id).toBe(project.id);
+    // A differing override is the user's choice: a closed project is refused, null clears.
+    await db.update(projects).set({ status: "closed" }).where(eq(projects.id, other.id));
+    await expect(invoiceService.createCredit(issued!.id, { rows: [{ ...linked, projectId: other.id }] }, user.id)).rejects.toMatchObject({ name: "ProjectClosedError" });
+    const cleared = await invoiceService.createCredit(issued!.id, { rows: [{ ...linked, projectId: null, costCenterId: null }] }, user.id);
+    expect(cleared!.rows[0]!.project).toBeNull();
+    expect(cleared!.rows[0]!.costCenter).toBeNull();
+  });
 });
 
 describe("leverantörsfaktura — the objects on the cost rows", () => {

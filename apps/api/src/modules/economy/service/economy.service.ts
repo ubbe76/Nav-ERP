@@ -846,15 +846,15 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
           warnings.push(`Konto ${row.accountNumber} ${row.accountName} är inaktivt — raden utelämnades`);
           continue;
         }
-        // The objects follow — a closed project on the source stays on the
-        // copy (it is the same booking again); the register decides later.
+        // The objects follow, as a NEW choice: the copy is a new booking, so
+        // an inactive cost center or a closed project on the source refuses
+        // it (400) like it would any new row.
         rows.push({
           accountId: row.accountId,
           debit: round2(Number(row.debit)),
           credit: round2(Number(row.credit)),
           description: row.description,
-          costCenterId: row.costCenterId,
-          projectId: row.projectId,
+          ...(await repo.resolveRowDimensions({ costCenterId: row.costCenterId, projectId: row.projectId })),
         });
       }
 

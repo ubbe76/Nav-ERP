@@ -7,6 +7,7 @@ import {
   customers,
   fixedAssetCategories,
   invoiceRows,
+  invoices,
   projects,
   purchaseOrders,
   salesOrders,
@@ -28,9 +29,13 @@ import { RegisterEntryInUseError, type RegisterUsage } from "../../register/serv
 // (the register module's pattern, see register.repository.ts). What differs
 // from the terms registers: a dimension on a BOOKED verification row can
 // never be moved (the 0095 triggers refuse every UPDATE of a locked row and
-// the bookkeeping must not be rewritten), so an object carried by booked rows
+// the bookkeeping must not be rewritten), and neither can one on a document
+// that is no longer a draft (an issued customer invoice's rows, an attested
+// supplier invoice, a delivered or cancelled order — their verifications
+// are booked and the document is the underlag). An object such rows carry
 // cannot be deleted at all — only deactivated (DimensionBookedError). Draft
-// rows, templates, documents and defaults move like any register reference.
+// rows, open documents, templates and defaults move like any register
+// reference. Each reference says so with `blocksReplacement` in the usage.
 //
 // EVERY new FK to cost_centers/projects must be added to the two lists below
 // (the FK's onDelete: "restrict" still guards the database; a missing entry
@@ -42,47 +47,94 @@ interface DimensionReference {
   label: string;
   labelOne: string;
   column: PgColumn;
-  // Verification rows are split into the draft rows (movable) and the
-  // booked ones (immutable); every other reference has no extra condition.
-  rows?: "draft" | "booked";
+  // Rows the delete may not move: the usage lists them as a blocker and
+  // the service refuses the delete while any exist.
+  locked: boolean;
+  // The rows this reference counts beyond `column = id` (the status split
+  // of a locked/movable pair); none = every row.
+  condition?: (id: string) => SQL;
 }
 
-function ref(table: PgTable, tableName: string, labels: string, column: PgColumn, rows?: "draft" | "booked"): DimensionReference {
+function ref(table: PgTable, tableName: string, labels: string, column: PgColumn): DimensionReference {
   const [labelOne, label] = labels.split("|") as [string, string];
-  return rows ? { table, tableName, label, labelOne, column, rows } : { table, tableName, label, labelOne, column };
+  return { table, tableName, label, labelOne, column, locked: false };
 }
 
-const bookedRowCondition = (column: PgColumn, id: string, status: "draft" | "booked") =>
-  and(
-    eq(column, id),
-    sql`${verificationRows.verificationId} in (select ${verifications.id} from ${verifications} where ${verifications.status} = ${status})`
-  );
+// A table whose rows are movable while the document is open and locked once
+// it is not: two references, `movableLabels` for the first, `lockedLabels`
+// for the second, split on `lockedWhen`.
+function split(
+  table: PgTable,
+  tableName: string,
+  column: PgColumn,
+  movableLabels: string,
+  lockedLabels: string,
+  lockedWhen: SQL
+): DimensionReference[] {
+  const movable = ref(table, tableName, movableLabels, column);
+  const locked = ref(table, tableName, lockedLabels, column);
+  return [
+    { ...movable, condition: (id) => and(eq(column, id), sql`not (${lockedWhen})`)! },
+    { ...locked, locked: true, condition: (id) => and(eq(column, id), lockedWhen)! },
+  ];
+}
 
-const COST_CENTER_REFERENCES: DimensionReference[] = [
-  ref(verificationRows, "verification_rows", "bokförd verifikatrad|bokförda verifikatrader", verificationRows.costCenterId, "booked"),
-  ref(verificationRows, "verification_rows", "verifikatrad (utkast)|verifikatrader (utkast)", verificationRows.costCenterId, "draft"),
-  ref(verificationTemplateRows, "verification_template_rows", "mallrad|mallrader", verificationTemplateRows.costCenterId),
-  ref(invoiceRows, "invoice_rows", "kundfakturarad|kundfakturarader", invoiceRows.costCenterId),
-  ref(supplierInvoices, "supplier_invoices", "leverantörsfaktura|leverantörsfakturor", supplierInvoices.costCenterId),
-  ref(supplierInvoiceRows, "supplier_invoice_rows", "leverantörsfakturarad|leverantörsfakturarader", supplierInvoiceRows.costCenterId),
-  ref(salesOrders, "sales_orders", "kundorder|kundorder", salesOrders.costCenterId),
-  ref(bankRules, "bank_rules", "bankregel|bankregler", bankRules.costCenterId),
-  ref(articleGroups, "article_groups", "artikelgrupp (förval)|artikelgrupper (förval)", articleGroups.defaultCostCenterId),
-  ref(suppliers, "suppliers", "leverantör (förval)|leverantörer (förval)", suppliers.defaultCostCenterId),
-  ref(fixedAssetCategories, "fixed_asset_categories", "tillgångsgrupp (förval)|tillgångsgrupper (förval)", fixedAssetCategories.defaultCostCenterId),
-];
+// Document states where the header can no longer be edited (the status
+// guards in sales.service.ts / purchase.service.ts / supplier-invoice.service.ts).
+const verificationBooked = sql`${verificationRows.verificationId} in (select ${verifications.id} from ${verifications} where ${verifications.status} = 'booked')`;
+const invoiceNotDraft = sql`${invoiceRows.invoiceId} in (select ${invoices.id} from ${invoices} where ${invoices.status} <> 'draft')`;
+const supplierInvoiceNotDraft = sql`${supplierInvoices.status} <> 'draft'`;
+const supplierInvoiceRowNotDraft = sql`${supplierInvoiceRows.supplierInvoiceId} in (select ${supplierInvoices.id} from ${supplierInvoices} where ${supplierInvoices.status} <> 'draft')`;
+const salesOrderClosed = sql`${salesOrders.status} in ('delivered', 'invoiced', 'cancelled', 'lost')`;
+const purchaseOrderClosed = sql`${purchaseOrders.status} in ('received', 'closed', 'cancelled')`;
 
-const PROJECT_REFERENCES: DimensionReference[] = [
-  ref(verificationRows, "verification_rows", "bokförd verifikatrad|bokförda verifikatrader", verificationRows.projectId, "booked"),
-  ref(verificationRows, "verification_rows", "verifikatrad (utkast)|verifikatrader (utkast)", verificationRows.projectId, "draft"),
-  ref(verificationTemplateRows, "verification_template_rows", "mallrad|mallrader", verificationTemplateRows.projectId),
-  ref(invoiceRows, "invoice_rows", "kundfakturarad|kundfakturarader", invoiceRows.projectId),
-  ref(supplierInvoices, "supplier_invoices", "leverantörsfaktura|leverantörsfakturor", supplierInvoices.projectId),
-  ref(supplierInvoiceRows, "supplier_invoice_rows", "leverantörsfakturarad|leverantörsfakturarader", supplierInvoiceRows.projectId),
-  ref(salesOrders, "sales_orders", "kundorder|kundorder", salesOrders.projectId),
-  ref(purchaseOrders, "purchase_orders", "inköpsorder|inköpsorder", purchaseOrders.projectId),
-  ref(bankRules, "bank_rules", "bankregel|bankregler", bankRules.projectId),
-];
+function references(dimension: "costCenter" | "project"): DimensionReference[] {
+  const column = <T extends { costCenterId?: PgColumn; projectId?: PgColumn; defaultCostCenterId?: PgColumn }>(t: T): PgColumn =>
+    (dimension === "costCenter" ? (t.costCenterId ?? t.defaultCostCenterId) : t.projectId) as PgColumn;
+  return [
+    ...split(
+      verificationRows,
+      "verification_rows",
+      column(verificationRows),
+      "verifikatrad (utkast)|verifikatrader (utkast)",
+      "bokförd verifikatrad|bokförda verifikatrader",
+      verificationBooked
+    ),
+    ref(verificationTemplateRows, "verification_template_rows", "mallrad|mallrader", column(verificationTemplateRows)),
+    ...split(invoiceRows, "invoice_rows", column(invoiceRows), "kundfakturarad (utkast)|kundfakturarader (utkast)", "kundfakturarad (utfärdad)|kundfakturarader (utfärdade)", invoiceNotDraft),
+    ...split(
+      supplierInvoices,
+      "supplier_invoices",
+      column(supplierInvoices),
+      "leverantörsfaktura (utkast)|leverantörsfakturor (utkast)",
+      "leverantörsfaktura (attesterad)|leverantörsfakturor (attesterade)",
+      supplierInvoiceNotDraft
+    ),
+    ...split(
+      supplierInvoiceRows,
+      "supplier_invoice_rows",
+      column(supplierInvoiceRows),
+      "leverantörsfakturarad (utkast)|leverantörsfakturarader (utkast)",
+      "leverantörsfakturarad (attesterad)|leverantörsfakturarader (attesterade)",
+      supplierInvoiceRowNotDraft
+    ),
+    ...split(salesOrders, "sales_orders", column(salesOrders), "kundorder|kundorder", "avslutad kundorder|avslutade kundorder", salesOrderClosed),
+    ...(dimension === "project"
+      ? split(purchaseOrders, "purchase_orders", column(purchaseOrders), "inköpsorder|inköpsorder", "avslutad inköpsorder|avslutade inköpsorder", purchaseOrderClosed)
+      : []),
+    ref(bankRules, "bank_rules", "bankregel|bankregler", column(bankRules)),
+    ...(dimension === "costCenter"
+      ? [
+          ref(articleGroups, "article_groups", "artikelgrupp (förval)|artikelgrupper (förval)", articleGroups.defaultCostCenterId),
+          ref(suppliers, "suppliers", "leverantör (förval)|leverantörer (förval)", suppliers.defaultCostCenterId),
+          ref(fixedAssetCategories, "fixed_asset_categories", "tillgångsgrupp (förval)|tillgångsgrupper (förval)", fixedAssetCategories.defaultCostCenterId),
+        ]
+      : []),
+  ];
+}
+
+const COST_CENTER_REFERENCES = references("costCenter");
+const PROJECT_REFERENCES = references("project");
 
 export type CostCenterRow = typeof costCenters.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect & { customerName: string | null };
@@ -100,7 +152,7 @@ export type ProjectWrite = {
 
 export function createDimensionRepository(db: Db) {
   function whereFor(r: DimensionReference, id: string): SQL {
-    return r.rows ? bookedRowCondition(r.column, id, r.rows)! : eq(r.column, id);
+    return r.condition ? r.condition(id) : eq(r.column, id);
   }
 
   async function countReferences(references: DimensionReference[], id: string): Promise<RegisterUsage> {
@@ -108,21 +160,26 @@ export function createDimensionRepository(db: Db) {
     for (const r of references) {
       const [row] = await db.select({ n: count() }).from(r.table).where(whereFor(r, id));
       const n = Number(row?.n ?? 0);
-      if (n > 0) found.push({ table: r.tableName, label: r.label, labelOne: r.labelOne, count: n });
+      if (n > 0) found.push({ table: r.tableName, label: r.label, labelOne: r.labelOne, count: n, blocksReplacement: r.locked });
     }
     return { total: found.reduce((sum, r) => sum + r.count, 0), references: found };
   }
 
-  async function bookedRowCount(column: PgColumn, id: string): Promise<number> {
-    const [row] = await db.select({ n: count() }).from(verificationRows).where(bookedRowCondition(column, id, "booked"));
-    return Number(row?.n ?? 0);
+  // Any booked verification row or locked document carrying the object.
+  async function hasLockedReferences(references: DimensionReference[], id: string): Promise<boolean> {
+    for (const r of references) {
+      if (!r.locked) continue;
+      const [row] = await db.select({ n: count() }).from(r.table).where(whereFor(r, id));
+      if (Number(row?.n ?? 0) > 0) return true;
+    }
+    return false;
   }
 
   // Moves every movable reference to `replacementId` (when given) and
-  // deletes the entry in one transaction. Booked verification rows are
-  // never touched: the service refuses an object they carry up front
-  // (hasBookedRows → DimensionBookedError) — and the FK on the final DELETE
-  // is the race guard for a row booked in between (RegisterEntryInUseError).
+  // deletes the entry in one transaction. Locked references are never
+  // touched: the service refuses an object they carry up front
+  // (hasLockedReferences → DimensionBookedError) — and the FK on the final
+  // DELETE is the race guard for a row booked in between (RegisterEntryInUseError).
   async function deleteWithReassign(
     table: typeof costCenters | typeof projects,
     references: DimensionReference[],
@@ -134,7 +191,7 @@ export function createDimensionRepository(db: Db) {
         const moved: { table: string; count: number }[] = [];
         if (replacementId) {
           for (const r of references) {
-            if (r.rows === "booked") continue;
+            if (r.locked) continue;
             const [before] = await tx.select({ n: count() }).from(r.table).where(whereFor(r, entry.id));
             const n = Number(before?.n ?? 0);
             if (n === 0) continue;
@@ -190,8 +247,8 @@ export function createDimensionRepository(db: Db) {
       async countReferences(id: string) {
         return countReferences(COST_CENTER_REFERENCES, id);
       },
-      async hasBookedRows(id: string) {
-        return (await bookedRowCount(verificationRows.costCenterId, id)) > 0;
+      async hasLockedReferences(id: string) {
+        return hasLockedReferences(COST_CENTER_REFERENCES, id);
       },
       async deleteWithReassign(entry: { id: string; code: string }, replacementId: string | null) {
         return deleteWithReassign(costCenters, COST_CENTER_REFERENCES, entry, replacementId);
@@ -246,8 +303,8 @@ export function createDimensionRepository(db: Db) {
       async countReferences(id: string) {
         return countReferences(PROJECT_REFERENCES, id);
       },
-      async hasBookedRows(id: string) {
-        return (await bookedRowCount(verificationRows.projectId, id)) > 0;
+      async hasLockedReferences(id: string) {
+        return hasLockedReferences(PROJECT_REFERENCES, id);
       },
       async deleteWithReassign(entry: { id: string; code: string }, replacementId: string | null) {
         return deleteWithReassign(projects, PROJECT_REFERENCES, entry, replacementId);

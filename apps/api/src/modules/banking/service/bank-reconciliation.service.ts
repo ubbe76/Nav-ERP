@@ -27,7 +27,16 @@ import type { PostingSettings } from "../../system/service/posting-settings.js";
 import type { VerificationComposeInput } from "../../economy/service/economy.service.js";
 import type { VerificationRowWrite } from "../../economy/repository/economy.repository.js";
 import { AccountingPeriodLockedError } from "../../economy/service/accounting-period-lock.js";
-import { dimensionRef, loadDimensionRefs, resolveDimensions } from "../../economy/service/dimension-check.js";
+import {
+  CostCenterInactiveError,
+  CostCenterNotFoundError,
+  CostCenterRequiredError,
+  ProjectClosedError,
+  ProjectNotFoundError,
+  dimensionRef,
+  loadDimensionRefs,
+  resolveDimensions,
+} from "../../economy/service/dimension-check.js";
 import {
   AccountNotFoundError,
   InactiveAccountError,
@@ -96,6 +105,13 @@ const KNOWN_ERROR_CLASSES: ErrorClass[] = [
   TooFewVerificationRowsError,
   UnbalancedVerificationError,
   VerificationSeriesNotFoundError,
+  // Kostnadsställen och projekt: Kräver kostnadsställe and the object rule
+  // on a rule's objects — Swedish messages meant for the user.
+  CostCenterRequiredError,
+  CostCenterInactiveError,
+  CostCenterNotFoundError,
+  ProjectClosedError,
+  ProjectNotFoundError,
 ];
 export const UNEXPECTED_ERROR_TEXT = "Ett oväntat fel inträffade — se serverns logg.";
 export function isKnownBankError(err: unknown): err is Error {

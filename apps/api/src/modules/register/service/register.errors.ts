@@ -21,9 +21,12 @@ export class DuplicateRegisterEntryError extends Error {
 // only those with count > 0. `label`/`labelOne` are the Swedish plural and
 // singular the UI prints ("3 kunder" / "1 kund"); `table` is the SQL table
 // name for programmatic use.
+// `blocksReplacement` (the dimension registers) marks a reference the
+// delete cannot move — booked verification rows, locked documents — so the
+// web offers deactivation instead of a replacement.
 export type RegisterUsage = {
   total: number;
-  references: { table: string; label: string; labelOne: string; count: number }[];
+  references: { table: string; label: string; labelOne: string; count: number; blocksReplacement?: boolean }[];
 };
 
 // Deleting a referenced entry without naming a replacement — or the race

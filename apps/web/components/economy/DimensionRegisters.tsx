@@ -32,11 +32,11 @@ interface DeleteMoveProps<T extends Entry> {
   onError: (message: string | null) => void;
 }
 
-// Booked verification rows are immutable (the bookkeeping lock), so an entry
-// they carry can never be moved or deleted — only deactivated. The usage
-// lists them as their own reference ("bokförd verifikatrad").
-const hasBookedRows = (usage: RegisterUsage) =>
-  usage.references.some((ref) => ref.table === "verification_rows" && ref.labelOne.startsWith("bokförd"));
+// Booked verification rows and locked documents (issued invoices, attested
+// supplier invoices, closed orders) are immutable, so an entry they carry can
+// never be moved or deleted — only deactivated. The usage flags such a
+// reference with blocksReplacement.
+const hasLockedReferences = (usage: RegisterUsage) => usage.references.some((ref) => ref.blocksReplacement === true);
 
 // The delete button of an edit dialog; swaps the dialog for the move step
 // when something still points at the entry.
@@ -97,7 +97,7 @@ function useDeleteWithMove<T extends Entry>({ basePath, entry, others, singular,
     }
   }
 
-  const booked = usage ? hasBookedRows(usage) : false;
+  const booked = usage ? hasLockedReferences(usage) : false;
 
   const moveForm = usage ? (
     <Form onSubmit={move}>
@@ -113,7 +113,7 @@ function useDeleteWithMove<T extends Entry>({ basePath, entry, others, singular,
       </ul>
       {booked ? (
         <FormHint>
-          {entry.name} används på bokförda verifikat. Bokföringen kan inte ändras, så posten kan inte tas bort eller flyttas —{" "}
+          {entry.name} används på bokförda verifikat eller låsta dokument. Bokföringen kan inte ändras, så posten kan inte tas bort eller flyttas —{" "}
           {entry.active ? "inaktivera den i stället." : "den är redan inaktiv och kan inte väljas på nya rader."}
         </FormHint>
       ) : others.length > 0 ? (

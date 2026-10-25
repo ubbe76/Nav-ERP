@@ -12,7 +12,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { Modal } from "../ui/Modal";
-import { CostCenterSelect, ProjectSelect } from "../economy/DimensionSelect";
+import { CostCenterSelect, NO_OBJECT, ProjectSelect } from "../economy/DimensionSelect";
 import { dimensionText, useDimensions } from "../../lib/dimensions";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
@@ -1006,8 +1006,10 @@ function AddRowForm({
           unitPrice: unitPrice.trim() ? Number(unitPrice) : 0,
           vatCodeId: vatCodeId || undefined,
           deliveryDate: deliveryDate.trim() || undefined,
-          costCenterId: costCenterId || undefined,
-          projectId: projectId || undefined,
+          // Omitted = Förval (the order header's, else the article group's
+          // cost center); null = Inget; an id = the row's own.
+          costCenterId: costCenterId === NO_OBJECT ? null : costCenterId || undefined,
+          projectId: projectId === NO_OBJECT ? null : projectId || undefined,
         }),
       });
       setCostCenterId("");
@@ -1073,15 +1075,15 @@ function AddRowForm({
           <>
             <FormRow>
               <Field label="Kostnadsställe (valfritt)" htmlFor="rowCostCenter">
-                <CostCenterSelect id="rowCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Förval" />
+                <CostCenterSelect id="rowCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Förval" noneLabel="Inget" />
               </Field>
               <Field label="Projekt (valfritt)" htmlFor="rowProject">
-                <ProjectSelect id="rowProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Förval" />
+                <ProjectSelect id="rowProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Förval" noneLabel="Inget" />
               </Field>
             </FormRow>
             <FormHint>
-              Förval är kundorderns kostnadsställe och projekt, annars artikelgruppens kostnadsställe. Objekten bokförs på
-              intäktsraden.
+              Förval är kundorderns kostnadsställe, annars artikelgruppens, och kundorderns projekt; Inget ger raden inget
+              objekt. Objekten bokförs på intäktsraden.
             </FormHint>
           </>
         )}

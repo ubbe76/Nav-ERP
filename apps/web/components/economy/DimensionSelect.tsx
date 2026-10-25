@@ -49,14 +49,16 @@ export function ProjectSelect({
   value,
   onChange,
   emptyLabel = "—",
+  noneLabel,
   all,
   size,
   ...rest
-}: Common & { all: Project[]; size?: "xs" | "sm" | "md" }) {
-  const current = value ? all.find((p) => p.id === value) : undefined;
+}: Common & { all: Project[]; size?: "xs" | "sm" | "md"; noneLabel?: string }) {
+  const current = value && value !== NO_OBJECT ? all.find((p) => p.id === value) : undefined;
   return (
     <Select size={size} value={value} onChange={(e) => onChange(e.target.value)} {...rest}>
       <option value="">{emptyLabel}</option>
+      {noneLabel && <option value={NO_OBJECT}>{noneLabel}</option>}
       {all
         .filter((p) => (p.active && p.status === "open") || p.id === value)
         .map((p) => (
@@ -65,7 +67,7 @@ export function ProjectSelect({
             {p.status === "closed" ? " (stängt)" : p.active ? "" : " (inaktivt)"}
           </option>
         ))}
-      {value && !current && <option value={value}>(okänt projekt)</option>}
+      {value && value !== NO_OBJECT && !current && <option value={value}>(okänt projekt)</option>}
     </Select>
   );
 }

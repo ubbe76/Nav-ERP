@@ -72,7 +72,7 @@ export function createDimensionService(repo: DimensionRepository, audit: AuditWr
     entries: {
       findById(id: string): Promise<TRow | null>;
       countReferences(id: string): Promise<RegisterUsage>;
-      hasBookedRows(id: string): Promise<boolean>;
+      hasLockedReferences(id: string): Promise<boolean>;
       deleteWithReassign(entry: { id: string; code: string }, replacementId: string | null): Promise<{ moved: { table: string; count: number }[] }>;
     },
     kind: "costCenter" | "project",
@@ -86,8 +86,9 @@ export function createDimensionService(repo: DimensionRepository, audit: AuditWr
       if (replacementId === id) throw new InvalidReplacementError("same");
       if (!(await entries.findById(replacementId))) throw new InvalidReplacementError("unknown");
     }
-    // Booked rows first: that object can never be deleted, replacement or not.
-    if (await entries.hasBookedRows(id)) throw new DimensionBookedError(kind, entry.code);
+    // Booked rows and locked documents first: that object can never be
+    // deleted, replacement or not.
+    if (await entries.hasLockedReferences(id)) throw new DimensionBookedError(kind, entry.code);
     const usage = await entries.countReferences(id);
     if (usage.total > 0 && !replacementId) throw new RegisterEntryInUseError(entry.code, usage);
     return entries.deleteWithReassign(entry, replacementId);

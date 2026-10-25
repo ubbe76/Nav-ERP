@@ -53,14 +53,16 @@ export class CostCenterRequiredError extends Error {
 }
 
 // 409 at DELETE of a cost center / project carried by BOOKED verification
-// rows: the bookkeeping is immutable (0095), so the object can only be
-// deactivated. Swedish on purpose — the web has no dictionary entry for it.
+// rows or by documents that are no longer drafts (issued invoices, attested
+// supplier invoices, closed orders): the bookkeeping is immutable (0095), so
+// the object can only be deactivated. Swedish on purpose — the web has no
+// dictionary entry for it.
 export class DimensionBookedError extends Error {
   constructor(kind: "costCenter" | "project", code: string) {
     super(
       kind === "costCenter"
-        ? `Kostnadsstället ${code} används på bokförda verifikat och kan inte tas bort — inaktivera det i stället`
-        : `Projektet ${code} används på bokförda verifikat och kan inte tas bort — stäng eller inaktivera det i stället`
+        ? `Kostnadsstället ${code} används på bokförda verifikat eller låsta dokument och kan inte tas bort — inaktivera det i stället`
+        : `Projektet ${code} används på bokförda verifikat eller låsta dokument och kan inte tas bort — stäng eller inaktivera det i stället`
     );
     this.name = "DimensionBookedError";
   }
