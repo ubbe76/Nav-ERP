@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { customers, db, invoices, permissionGroups, referenceRates } from "@navet/db";
 import { buildApp } from "../src/app.js";
@@ -21,7 +21,16 @@ let app: ReturnType<typeof buildApp>;
 const Y = POSTING_BASELINE_YEAR;
 const AS_OF = `${Y}-10-20`;
 
+// The fixtures are fixed dates (due 1 September, T.o.m. 20 October); run
+// before 20 October the real today would make AS_OF a future date, which the
+// routine refuses — so the clock (Date only) is moved to AS_OF then.
+const REAL_TODAY = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
+
 beforeAll(async () => {
+  if (REAL_TODAY < AS_OF) {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${AS_OF}T12:00:00+02:00`));
+  }
   app = buildApp();
   await app.ready();
 });
@@ -44,6 +53,7 @@ beforeEach(async () => {
   ]);
 });
 afterAll(async () => {
+  vi.useRealTimers();
   await app.close();
   await db.execute(TRUNCATE);
   await db.execute(DELETE_GROUPS);
@@ -108,6 +118,10 @@ describe("dröjsmålsränta routes", () => {
     expect(typeof row.principal).toBe("number");
     expect(typeof row.openAmount).toBe("number");
     expect(row.segments[0]).toEqual({ from: `${Y}-09-02`, to: AS_OF, days: 49, rate: 12, amount: 588 });
+    // A T.o.m. datum after today: 400 late-interest-future-date.
+    const future = await sales.get(`/late-interest/candidates?asOf=${Y + 1}-12-31`);
+    expect(future.statusCode).toBe(400);
+    expect(future.json().code).toBe("late-interest-future-date");
     // includeUnpaid=false as a STRING must be false (no z.coerce.boolean()).
     expect((await sales.get(`/late-interest/candidates?asOf=${AS_OF}&includeUnpaid=false`)).json().rows).toEqual([]);
 

@@ -17,6 +17,7 @@ import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
+import { stockholmToday } from "../../lib/date";
 import {
   customerSummaries,
   defaultSelection,
@@ -226,7 +227,7 @@ function Routine({
 
       <form onSubmit={applyFilters} className={styles.filters}>
         <Field label="T.o.m. datum" htmlFor="lateAsOf">
-          <Input id="lateAsOf" type="date" size="sm" required value={fAsOf} onChange={(e) => setFAsOf(e.target.value)} />
+          <Input id="lateAsOf" type="date" size="sm" required max={stockholmToday()} value={fAsOf} onChange={(e) => setFAsOf(e.target.value)} />
         </Field>
         <Field label="Kund" htmlFor="lateCustomer">
           <Select id="lateCustomer" value={fCustomerId} onChange={(e) => setFCustomerId(e.target.value)}>

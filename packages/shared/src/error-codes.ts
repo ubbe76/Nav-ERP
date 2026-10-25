@@ -472,6 +472,8 @@ export const ERROR_CODES = {
   // Skapa räntefakturor: the period/fee the client sent no longer matches
   // (charged meanwhile, or no longer a candidate) — 409, body.invoiceIds
   LATE_INTEREST_ALREADY_CHARGED: "late-interest-already-charged",
+  // Räntefakturering with T.o.m. datum after today (400, body.today)
+  LATE_INTEREST_FUTURE_DATE: "late-interest-future-date",
   // Påminnelseavgift on an invoice with an active förseningsersättning (409)
   REMINDER_FEE_AFTER_LATE_FEE: "reminder-fee-after-late-fee",
   // DELETE /reference-rates/:id on a Riksbanken row (409)

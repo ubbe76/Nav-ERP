@@ -27,6 +27,7 @@ import {
   createLateInterestService,
   LateInterestAlreadyChargedError,
   LateInterestDisabledError,
+  LateInterestFutureDateError,
 } from "../src/modules/sales/service/late-interest.service.js";
 import { createPaymentRepository } from "../src/modules/sales/repository/payment.repository.js";
 import { createPaymentService } from "../src/modules/sales/service/payment.service.js";
@@ -74,6 +75,10 @@ const lateInterestService = createLateInterestService({
   invoiceRepo,
   invoices: { issue: (id, userId) => invoiceService.issue(id, userId) },
   referenceRates: referenceRateReader,
+  // The fixed AS_OF may lie after the real today (January–October): the
+  // service's "today" is the later of the two, so the guard against a future
+  // T.o.m. datum never trips on the fixtures.
+  today: () => (TODAY > AS_OF ? TODAY : AS_OF),
 });
 
 const TRUNCATE = sql`TRUNCATE late_interest_charges, reference_rates, posting_rules, verification_rows, verifications, verification_counters, verification_series, accounting_periods, fiscal_years, accounts, customer_payment_rows, customer_payments, invoice_reminders, invoice_documents, invoice_rows, invoices, customers, email_log, audit_log, users CASCADE`;
@@ -565,5 +570,18 @@ describe("Skapa räntefakturor", () => {
     // account) is missing or inactive") — never what the routine shows.
     expect(run.issueFailed).toEqual([{ invoiceId: run.created[0]!.invoiceId, error: "Kontot 8313 saknas eller är inaktivt i kontoplanen" }]);
     expect(logged).toEqual([]);
+  });
+});
+
+describe("Räntefakturering — T.o.m. datum", () => {
+  it("refuses a T.o.m. datum after today for the list and the run (interest only for days that have passed)", async () => {
+    const tomorrow = addDays(TODAY > AS_OF ? TODAY : AS_OF, 1);
+    await expect(lateInterestService.listCandidates({ asOf: tomorrow, includeUnpaid: true })).rejects.toBeInstanceOf(LateInterestFutureDateError);
+    await expect(
+      lateInterestService.createInvoices(
+        { asOf: tomorrow, issue: false, items: [{ invoiceId: crypto.randomUUID(), fromDate: `${Y}-09-02`, includeInterest: true, includeFee: false, fee: 0 }] },
+        "x"
+      )
+    ).rejects.toBeInstanceOf(LateInterestFutureDateError);
   });
 });

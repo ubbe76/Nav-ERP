@@ -44,7 +44,7 @@ import {
   ReminderFeeAfterLateFeeError,
   ReminderFeeCurrencyError,
 } from "../src/modules/sales/service/invoice.service.js";
-import { LateInterestAlreadyChargedError, LateInterestDisabledError } from "../src/modules/sales/service/late-interest.service.js";
+import { LateInterestAlreadyChargedError, LateInterestDisabledError, LateInterestFutureDateError } from "../src/modules/sales/service/late-interest.service.js";
 import { CustomerPaymentAmountSekError } from "../src/modules/sales/service/payment.service.js";
 import {
   PluginAccessDeniedError,
@@ -790,6 +790,7 @@ const cases: Array<[Error, string]> = [
   [new BudgetRangeOutsideYearError("2026-12-01", "2027-01-31", "2027"), ERROR_CODES.BUDGET_RANGE_OUTSIDE_YEAR],
   // Dröjsmålsränta och förseningsersättning
   [new LateInterestDisabledError(), ERROR_CODES.LATE_INTEREST_DISABLED],
+  [new LateInterestFutureDateError("2026-12-31", "2026-10-25"), ERROR_CODES.LATE_INTEREST_FUTURE_DATE],
   [new LateInterestAlreadyChargedError(["x"]), ERROR_CODES.LATE_INTEREST_ALREADY_CHARGED],
   [new ReminderFeeAfterLateFeeError("x"), ERROR_CODES.REMINDER_FEE_AFTER_LATE_FEE],
   [new ReferenceRateRiksbankError("2026-07-01"), ERROR_CODES.REFERENCE_RATE_RIKSBANK],

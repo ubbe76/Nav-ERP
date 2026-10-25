@@ -80,6 +80,18 @@ export function issueErrorText(err: unknown): string | null {
   return null;
 }
 
+// T.o.m. datum after today: interest for days that have not passed yet
+// would be charged — 400 late-interest-future-date.
+export class LateInterestFutureDateError extends Error {
+  constructor(
+    public asOf: string,
+    public today: string
+  ) {
+    super(`T.o.m. datum ${asOf} ligger efter dagens datum ${today}`);
+    this.name = "LateInterestFutureDateError";
+  }
+}
+
 export type LateInterestCandidate = {
   invoiceId: string;
   invoiceNumber: string;
@@ -239,12 +251,18 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
     return { rows, rateMissing: [...rateMissing].sort() };
   }
 
+  function assertNotFuture(asOf: string) {
+    const now = today();
+    if (asOf > now) throw new LateInterestFutureDateError(asOf, now);
+  }
+
   const service = {
     // GET /late-interest/candidates. Reads — but fetches missing
     // referensräntor first (reference data, outside any transaction).
     async listCandidates(query: LateInterestCandidatesQuery) {
       const settings = await readSettings();
       const asOf = query.asOf ?? today();
+      assertNotFuture(asOf);
       const filter = { asOf, customerId: query.customerId, includeUnpaid: query.includeUnpaid };
       const sources = await listLateInterestSources(db, filter);
       const rates = await ratesFor(sources, asOf);
@@ -258,6 +276,7 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
     // holds, then one invoice per customer with its charge rows. Utfärda
     // direkt runs afterwards per invoice through the ordinary issue path.
     async createInvoices(input: CreateLateInterestInvoicesInput, userId: string): Promise<LateInterestRunResult> {
+      assertNotFuture(input.asOf);
       const settings = await readSettings();
       const utm = documentVatCode(await invoiceRepo.vatCodeBook(), { code: "UTM" }, "sales");
       const ids = [...new Set(input.items.map((item) => item.invoiceId))].sort();

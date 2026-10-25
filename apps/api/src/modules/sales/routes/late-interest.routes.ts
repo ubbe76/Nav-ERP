@@ -5,6 +5,7 @@ import { errorBody } from "../../system/service/error-body.js";
 import {
   LateInterestAlreadyChargedError,
   LateInterestDisabledError,
+  LateInterestFutureDateError,
   type LateInterestService,
 } from "../service/late-interest.service.js";
 
@@ -17,6 +18,7 @@ export async function lateInterestRoutes(app: FastifyInstance, opts: { service: 
 
   function lateInterestError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
     if (err instanceof LateInterestDisabledError) return reply.code(409).send(errorBody(err));
+    if (err instanceof LateInterestFutureDateError) return reply.code(400).send({ ...errorBody(err), today: err.today });
     if (err instanceof LateInterestAlreadyChargedError) {
       return reply.code(409).send({ ...errorBody(err), invoiceIds: err.invoiceIds });
     }
