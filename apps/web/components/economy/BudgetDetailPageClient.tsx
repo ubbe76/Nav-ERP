@@ -520,6 +520,12 @@ export function BudgetDetailPageClient({
                           value={row.annual ?? (sum === 0 ? "" : String(sum))}
                           onFocus={(e) => e.currentTarget.select()}
                           onChange={(e) => patchRow(row.key, { annual: e.target.value })}
+                          // A typed annual amount is applied when the field is
+                          // left too — otherwise Spara would silently drop it
+                          // (the PUT body only carries the months).
+                          onBlur={() => {
+                            if (row.annual !== null && row.annual.trim() !== "") distribute(row.key);
+                          }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
                               e.preventDefault();
@@ -591,12 +597,15 @@ export function BudgetDetailPageClient({
           </table>
         </div>
 
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 16 }}>
-          <Button type="button" variant="primary" disabled={pending || !dirty} onClick={() => void save()}>
-            {pending ? "Sparar…" : "Spara"}
-          </Button>
-          {saved && !dirty && <FormSaved>Sparat</FormSaved>}
-        </div>
+        {/* Totalt is read-only, so Spara only appears there when the name has changed. */}
+        {(!readOnly || nameDirty) && (
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 16 }}>
+            <Button type="button" variant="primary" disabled={pending || !dirty} onClick={() => void save()}>
+              {pending ? "Sparar…" : "Spara"}
+            </Button>
+            {saved && !dirty && <FormSaved>Sparat</FormSaved>}
+          </div>
+        )}
       </Card>
 
       <ActualsDialog

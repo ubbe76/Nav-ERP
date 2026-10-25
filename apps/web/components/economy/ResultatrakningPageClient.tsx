@@ -33,7 +33,7 @@ type StatementRow =
   | {
       id: string;
       kind: "account";
-      accountId: string;
+      accountId: string | null;
       accountNumber: string;
       accountName: string;
       amount: number;
@@ -49,7 +49,7 @@ function flatten(report: IncomeStatementResponse): StatementRow[] {
     rows.push({ id: `l-${entry.key}`, kind: "line", label: entry.label, total: entry.total });
     for (const account of entry.accounts) {
       rows.push({
-        id: `a-${account.accountId}`,
+        id: `a-${entry.key}-${account.accountNumber}`,
         kind: "account",
         accountId: account.accountId,
         accountNumber: account.accountNumber,
@@ -282,10 +282,12 @@ export function ResultatrakningPageClient({
               if (row.kind === "account") {
                 switch (key) {
                   case "account":
-                    return (
+                    return row.accountId ? (
                       <Link href={`/ekonomi/huvudbok?accountId=${row.accountId}&from=${from}&to=${to}`}>
                         {row.accountNumber}
                       </Link>
+                    ) : (
+                      row.accountNumber
                     );
                   case "label":
                     return <span style={{ paddingLeft: 16 }}>{row.accountName}</span>;
@@ -355,9 +357,14 @@ function ObjectMatrix({ report, columns, from, to }: { report: IncomeStatementRe
               return [
                 head,
                 ...entry.accounts.map((a) => (
-                  <tr key={`a-${entry.key}-${a.accountId}`} className={styles.accountRow}>
+                  <tr key={`a-${entry.key}-${a.accountNumber}`} className={styles.accountRow}>
                     <td className={styles.labelCell}>
-                      <Link href={`/ekonomi/huvudbok?accountId=${a.accountId}&from=${from}&to=${to}`}>{a.accountNumber}</Link> {a.accountName}
+                      {a.accountId ? (
+                        <Link href={`/ekonomi/huvudbok?accountId=${a.accountId}&from=${from}&to=${to}`}>{a.accountNumber}</Link>
+                      ) : (
+                        a.accountNumber
+                      )}{" "}
+                      {a.accountName}
                     </td>
                     {columns.map((c, i) => (
                       <td key={c.id ?? "none"} className={`${styles.amountCell} num`}>
@@ -381,7 +388,7 @@ type BudgetRow =
   | ({
       id: string;
       kind: "account";
-      accountId: string;
+      accountId: string | null;
       accountNumber: string;
       accountName: string;
       actual: number;

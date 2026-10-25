@@ -3792,8 +3792,13 @@ export interface BalanceSheetResponse {
   difference: number;
 }
 
+// The income statement's account: accountId is null only with ?budgetId=, for
+// a budgeted account the chart no longer has (no ledger link then — the id
+// guard would refuse the number).
+export type IncomeStatementAccount = Omit<ReportAccount, "accountId"> & { accountId: string | null } & Partial<BudgetFigures>;
+
 export type IncomeStatementEntry =
-  | ({ kind: "line"; key: string; label: string; accounts: (ReportAccount & Partial<BudgetFigures>)[]; total: number; amounts?: number[] } & Partial<BudgetFigures>)
+  | ({ kind: "line"; key: string; label: string; accounts: IncomeStatementAccount[]; total: number; amounts?: number[] } & Partial<BudgetFigures>)
   | ({ kind: "subtotal"; key: string; label: string; total: number; amounts?: number[] } & Partial<BudgetFigures>);
 
 // One column of "Per kostnadsställe"/"Per projekt": an object, or the rows

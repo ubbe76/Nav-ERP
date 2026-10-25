@@ -175,6 +175,7 @@ describe("buildBudgetedIncomeStatement", () => {
       ["5010", "Lokalhyra", 0, -100, 100, 100],
       ["6110", "Konto 6110", -50, 0, -50, null],
     ]);
+    expect(external.accounts.map((a) => a.accountId)).toEqual(["id-5010", "id-6110"]);
     expect(external).toMatchObject({ amount: -50, budget: -100, variance: 50, variancePercent: 50 });
 
     // The bank row is not an income statement account and never appears.
@@ -192,6 +193,19 @@ describe("buildBudgetedIncomeStatement", () => {
       resultAccumulatedVariance: -50,
       resultAccumulatedVariancePercent: -4.2,
     });
+  });
+
+  it("lists a budgeted account the chart has lost with accountId null, never the number", () => {
+    const body = buildBudgetedIncomeStatement({
+      period: [],
+      accumulated: [],
+      periodBudget: new Map([["5010", -100]]),
+      accumulatedBudget: new Map([["5010", -100]]),
+      accounts: new Map(),
+    });
+    const external = body.entries.find((e) => e.key === "otherExternalCosts")!;
+    if (external.kind !== "line") throw new Error("unreachable");
+    expect(external.accounts).toEqual([expect.objectContaining({ accountId: null, accountNumber: "5010", accountName: "", amount: 0, budget: -100 })]);
   });
 
   it("is empty without data and skips lines without accounts", () => {

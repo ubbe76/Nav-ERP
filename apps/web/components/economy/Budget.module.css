@@ -116,6 +116,21 @@
   text-align: left;
 }
 
+/* A phone: the sticky account column must leave room for at least one month
+   column, so it is capped and the account text is cut with an ellipsis. */
+@media (max-width: 640px) {
+  .grid .accountCell {
+    min-width: 0;
+    width: 45vw;
+    max-width: 45vw;
+  }
+  .grid .accountCell .readonlyAmount {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .monthCell {
   min-width: 88px;
   text-align: right;

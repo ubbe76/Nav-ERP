@@ -141,7 +141,9 @@ export interface BudgetedFigures {
 }
 
 export interface BudgetedReportAccount extends BudgetedFigures {
-  accountId: string;
+  // null for an account the chart has lost since the budget was saved — the
+  // web links to the ledger only when there is an id to link to.
+  accountId: string | null;
   accountNumber: string;
   accountName: string;
 }
@@ -223,9 +225,10 @@ export function buildBudgetedIncomeStatement(input: BudgetedIncomeStatementInput
     const name = names.get(accountNumber);
     const list = accountsByLine.get(classification.lineKey) ?? [];
     list.push({
-      // An account the chart has lost since the budget was saved keeps its
-      // number as the id — the reports never write, so nothing dereferences it.
-      accountId: name?.accountId ?? accountNumber,
+      // An account the chart has lost since the budget was saved has no id
+      // (never the number — the web would build a ledger link the id guard
+      // refuses with 400).
+      accountId: name?.accountId ?? null,
       accountNumber,
       accountName: name?.accountName ?? "",
       ...figures(amount, budget, accumulated, accumulatedBudget),

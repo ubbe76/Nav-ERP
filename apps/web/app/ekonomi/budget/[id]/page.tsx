@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
 import { BudgetDetailPageClient } from "../../../../components/economy/BudgetDetailPageClient";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
@@ -23,8 +24,10 @@ export default async function BudgetDetailPage(props: {
     );
   }
 
-  const [detail, accounts, fiscalYears] = await Promise.all([
-    apiGet<BudgetDetail>(`/api/v1/budgets/${id}`, cookieHeader),
+  // An unknown (or malformed) id is a 404 page like the other detail pages.
+  const detail = await apiGet<BudgetDetail>(`/api/v1/budgets/${id}`, cookieHeader).catch(() => null);
+  if (!detail) notFound();
+  const [accounts, fiscalYears] = await Promise.all([
     apiGet<Paged<Account>>("/api/v1/accounts?limit=1000", cookieHeader),
     apiGet<FiscalYear[]>("/api/v1/fiscal-years", cookieHeader),
   ]);

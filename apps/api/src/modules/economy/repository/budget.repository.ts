@@ -172,18 +172,21 @@ export function createBudgetRepository(db: Db) {
     },
 
     // `isDefault: true` moves the flag within the year; false clears it.
+    // Lock order: the FISCAL YEAR first, then the budget rows — a default
+    // move touches the year's other budgets too, so taking the budget's own
+    // row first would let two concurrent moves in one year deadlock.
     async update(id: string, patch: { name?: string; isDefault?: boolean }): Promise<BudgetHeaderRow | null> {
       return db.transaction(async (tx) => {
+        const [found] = await tx.select({ fiscalYearId: budgets.fiscalYearId }).from(budgets).where(eq(budgets.id, id));
+        if (!found) return null;
+        if (patch.isDefault !== undefined) await lockFiscalYear(tx, found.fiscalYearId);
         const [current] = await tx.select({ id: budgets.id, fiscalYearId: budgets.fiscalYearId }).from(budgets).where(eq(budgets.id, id)).for("update");
         if (!current) return null;
-        if (patch.isDefault !== undefined) {
-          await lockFiscalYear(tx, current.fiscalYearId);
-          if (patch.isDefault) {
-            await tx
-              .update(budgets)
-              .set({ isDefault: false, updatedAt: new Date() })
-              .where(and(eq(budgets.fiscalYearId, current.fiscalYearId), eq(budgets.isDefault, true)));
-          }
+        if (patch.isDefault) {
+          await tx
+            .update(budgets)
+            .set({ isDefault: false, updatedAt: new Date() })
+            .where(and(eq(budgets.fiscalYearId, current.fiscalYearId), eq(budgets.isDefault, true)));
         }
         await tx
           .update(budgets)

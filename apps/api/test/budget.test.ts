@@ -130,6 +130,18 @@ describe("budgets — CRUD and the default flag", () => {
     expect(await db.select().from(budgetLines)).toHaveLength(0);
     await expect(service.delete(first.id, user.id)).rejects.toBeInstanceOf(BudgetNotFoundError);
   });
+
+  it("two concurrent default moves in one year serialize on the year's lock — exactly one default, no deadlock", async () => {
+    const { user, year } = await setup();
+    const a = await service.create({ fiscalYearId: year.id, name: "A" }, user.id);
+    const b = await service.create({ fiscalYearId: year.id, name: "B" }, user.id);
+    const c = await service.create({ fiscalYearId: year.id, name: "C" }, user.id);
+    for (let round = 0; round < 5; round++) {
+      await Promise.all([service.update(b.id, { isDefault: true }, user.id), service.update(c.id, { isDefault: true }, user.id), service.update(a.id, { name: `A${round}` }, user.id)]);
+      const rows = (await service.list({ fiscalYearId: year.id })).rows;
+      expect(rows.filter((r) => r.isDefault).map((r) => r.name)).toHaveLength(1);
+    }
+  });
 });
 
 describe("budgets — the grid", () => {
