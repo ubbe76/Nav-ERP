@@ -13,6 +13,7 @@ import {
   type BookBankEntryInput,
   type CreateBankAccountInput,
   type CreateBankMatchInput,
+  type CreateBankOpeningInput,
   type CreateBankReconciliationInput,
   type CreateBankRuleInput,
   type BankReconciliationQuery,
@@ -25,7 +26,16 @@ import { errorBody } from "../../system/service/error-body.js";
 import type { PostingSettings } from "../../system/service/posting-settings.js";
 import type { VerificationComposeInput } from "../../economy/service/economy.service.js";
 import type { VerificationRowWrite } from "../../economy/repository/economy.repository.js";
-import { AccountNotFoundError, InactiveAccountError } from "../../economy/service/economy.service.js";
+import { AccountingPeriodLockedError } from "../../economy/service/accounting-period-lock.js";
+import {
+  AccountNotFoundError,
+  InactiveAccountError,
+  NoAccountingPeriodError,
+  NoFiscalYearForDateError,
+  TooFewVerificationRowsError,
+  UnbalancedVerificationError,
+  VerificationSeriesNotFoundError,
+} from "../../economy/service/economy.service.js";
 import {
   lockBankAccount,
   type BankAccountRow,
@@ -36,8 +46,11 @@ import {
   type LedgerRowView,
   type StatementEntryView,
 } from "../repository/bank-reconciliation.repository.js";
+import * as bankingErrors from "./banking.errors.js";
 import {
+  BankAccountIdentifierLockedError,
   BankAccountIdentifierTakenError,
+  BankAccountInUseError,
   BankAccountLedgerMissingError,
   BankAccountNotFoundError,
   BankAccountRequiredError,
@@ -48,6 +61,8 @@ import {
   BankMatchNotFoundError,
   BankMatchSumMismatchError,
   BankMatchWrongAccountError,
+  BankOpeningBalanceMismatchError,
+  BankOpeningNotAllowedError,
   BankReconciliationIncompleteError,
   BankRuleAccountMissingError,
   BankRuleAmbiguousError,
@@ -64,6 +79,27 @@ import { parseBankStatementCsv, readBankCsvHeaders } from "./bank-statement-csv.
 import { parseCamt053, type ParsedStatement } from "./iso20022/camt053-parser.js";
 import { proposeMatches, type MatchProposal } from "./match-proposals.js";
 import { reconciliationSummary, type ReconciliationSummary } from "./reconciliation-summary.js";
+
+// The errors whose message may be shown to the user as is (the import's
+// warnings, Bokför enligt regel's per-entry failures): every banking domain
+// error plus economy's known refusals. Anything else is logged and replaced
+// by a generic Swedish text — a driver or programming error never leaks.
+type ErrorClass = abstract new (...args: never[]) => Error;
+const KNOWN_ERROR_CLASSES: ErrorClass[] = [
+  ...(Object.values(bankingErrors) as unknown[]).filter((v): v is ErrorClass => typeof v === "function"),
+  AccountingPeriodLockedError,
+  AccountNotFoundError,
+  InactiveAccountError,
+  NoAccountingPeriodError,
+  NoFiscalYearForDateError,
+  TooFewVerificationRowsError,
+  UnbalancedVerificationError,
+  VerificationSeriesNotFoundError,
+];
+export const UNEXPECTED_ERROR_TEXT = "Ett oväntat fel inträffade — se serverns logg.";
+export function isKnownBankError(err: unknown): err is Error {
+  return err instanceof Error && KNOWN_ERROR_CLASSES.some((cls) => err instanceof cls);
+}
 
 // Bankavstämning (etapp 4) — spec §1–§5. The statement side of a bank
 // account is imported from camt.053 or CSV, matched against the verification
@@ -86,6 +122,8 @@ export interface BankAccountView {
   reconciledThrough: string | null;
   lastStatementDate: string | null;
   unmatchedCount: number;
+  // Entries or matchings exist: ledgerAccount and currency are locked.
+  hasActivity: boolean;
 }
 
 export interface RuleSuggestion {
@@ -110,7 +148,7 @@ export interface LedgerRowOut {
 
 export interface MatchView {
   id: string;
-  kind: "auto" | "manual" | "created";
+  kind: BankMatchRow["kind"];
   createdAt: Date;
   createdBy: string | null;
   undoneAt: Date | null;
@@ -123,6 +161,9 @@ export interface ReconciliationView {
   throughDate: string;
   statementBalance: number;
   ledgerBalance: number;
+  // The Startpunkt's mark: written by the opening matching (`matchId`).
+  opening: boolean;
+  matchId: string | null;
   createdAt: Date;
   createdBy: string | null;
 }
@@ -186,6 +227,8 @@ export interface BankReconciliationServiceDeps {
   // The company's own IBAN (the first bank account is prefilled from it).
   company: { readCompany(): Promise<{ iban: string | null }> };
   now?: () => Date;
+  // Where unexpected errors (never shown to the user) are reported.
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
 
 export const BANK_SERIES = { code: "B", name: "Bank" } as const;
@@ -239,7 +282,13 @@ export function entryReferences(entry: Pick<StatementEntryView, "details" | "ref
   return [...refs];
 }
 
-const forProposals = (entries: StatementEntryView[]) => entries.map((e) => ({ id: e.id, bookingDate: e.bookingDate, amount: e.amount, references: entryReferences(e) }));
+const forProposals = (entries: StatementEntryView[]) => entries.map((e) => ({ id: e.id, bookingDate: e.bookingDate, amount: e.amount, references: entryReferences(e), reversal: e.reversal }));
+
+// The currencies among a statement's entries (Amt@Ccy) other than the
+// account's — a statement in SEK may still carry an EUR entry.
+const foreignEntryCurrencies = (statement: ParsedStatement, accountCurrency: string): string[] => [
+  ...new Set(statement.entries.map((e) => e.currency).filter((c) => c !== accountCurrency)),
+];
 
 const toRowOut = (row: LedgerRowView): LedgerRowOut => ({
   id: row.id,
@@ -253,6 +302,16 @@ const toRowOut = (row: LedgerRowView): LedgerRowOut => ({
 export function createBankReconciliationService(deps: BankReconciliationServiceDeps) {
   const { db, repo } = deps;
   const now = deps.now ?? (() => new Date());
+  const log = deps.log ?? ((msg: string, extra?: Record<string, unknown>) => console.error(msg, extra));
+
+  // The error envelope for a failure reported inside a 2xx answer (import
+  // warnings, book-by-rule failures): known domain errors as they are,
+  // anything else logged and replaced by the generic text.
+  function reportableError(err: unknown, context: string): { error: string; code?: string } {
+    if (isKnownBankError(err)) return errorBody(err);
+    log(`Bankavstämning: ${context} failed unexpectedly`, { err });
+    return { error: UNEXPECTED_ERROR_TEXT };
+  }
 
   async function audit(executor: Db | Tx, entityType: string, entityId: string, action: string, detail: unknown, userId: string | null) {
     await executor.insert(auditLog).values({ entityType, entityId, action, detail, userId });
@@ -285,6 +344,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       reconciledThrough: row.reconciledThrough,
       lastStatementDate: row.lastStatementDate,
       unmatchedCount: Number(row.unmatchedCount),
+      hasActivity: row.hasActivity === true,
     };
   }
 
@@ -297,8 +357,8 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
 
   // The first bank account, prefilled from Företagsuppgifter's IBAN and the
   // standard account Bank/betalkonto — only when the IBAN is set and the
-  // ledger account exists (spec §1). A concurrent first GET loses on the
-  // identifier's unique index and simply reads what the winner made.
+  // ledger account exists (spec §1). INSERT … ON CONFLICT DO NOTHING on the
+  // identifier: a concurrent first GET simply reads what the winner made.
   async function ensureFirstAccount(): Promise<void> {
     if ((await repo.countAccounts()) > 0) return;
     const company = await deps.company.readCompany();
@@ -308,11 +368,20 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     const settings = await deps.settings.read(db);
     const ledger = await repo.findLedgerAccountByNumber(db, settings.postingBank);
     if (!ledger || !ledger.active) return;
-    try {
-      await repo.insertAccount({ name: "Företagskonto", identifier, ledgerAccount: settings.postingBank, currency: "SEK" });
-    } catch (err) {
-      if (!isUniqueViolation(err)) throw err;
-    }
+    await repo.insertAccountIfAbsent({ name: "Företagskonto", identifier, ledgerAccount: settings.postingBank, currency: "SEK" });
+  }
+
+  // The suggested rules, once per installation: the flag is claimed with
+  // INSERT … ON CONFLICT DO NOTHING RETURNING inside the transaction that
+  // inserts the rules, so two concurrent first GETs give ONE set — and a
+  // user who emptied the table never gets the seed back.
+  async function seedRulesOnce(): Promise<void> {
+    if ((await repo.getSetting(RULES_SEEDED_KEY)) !== null) return;
+    await db.transaction(async (tx) => {
+      if (!(await repo.claimSetting(tx, RULES_SEEDED_KEY, now().toISOString()))) return;
+      if ((await repo.countRules(tx)) > 0) return;
+      await repo.insertRules(tx, DEFAULT_BANK_RULES.map((r) => ({ ...r, sortOrder: r.sortOrder ?? 0 })));
+    });
   }
 
   async function rulesList(): Promise<BankRuleRow[]> {
@@ -376,7 +445,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     const onBank = round2(input.rows.filter((r) => r.accountId === ledgerAccountId).reduce((acc, r) => acc + r.debit - r.credit, 0));
     if (onBank !== locked.amount) throw new BankEntryBookMismatchError(locked.amount, onBank);
     const series = input.seriesId ? await repo.findSeriesById(tx, input.seriesId) : await repo.ensureSeries(tx, BANK_SERIES);
-    if (!series) throw new BankMatchWrongAccountError(`Verification series ${input.seriesId} not found`);
+    if (!series) throw new VerificationSeriesNotFoundError(input.seriesId!);
     const { id: verificationId } = await deps.economy.createVerificationInTx(
       tx,
       { seriesId: series.id, date: input.date, description: input.description.slice(0, 255), rows: input.rows },
@@ -512,7 +581,9 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       return { sha256, format: "csv", messageId: null, statements: [], warnings: [], csvHeaders: headers, needsMapping: true, mappingUsed: null };
     }
     try {
-      const parsed = parseBankStatementCsv(data, mapping, account.identifier, account.currency);
+      // The dedupe key is scoped on the account's id (stable), not its
+      // identifier (correctable), so a renamed account never re-imports.
+      const parsed = parseBankStatementCsv(data, mapping, account.identifier, account.currency, account.id);
       return { sha256, format: "csv", messageId: null, statements: [parsed.statement], warnings: parsed.warnings, csvHeaders: parsed.headers, needsMapping: false, mappingUsed: mapping };
     } catch (err) {
       if (lenient && err instanceof BankStatementCsvMappingError) {
@@ -524,7 +595,9 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
 
   // Which bank account each statement belongs to: the register by the
   // file's Acct/Id; an unknown one takes `bankAccountId` when exactly one
-  // statement is unknown (the import then saves the identifier).
+  // statement is unknown (the import then saves the identifier) — but only
+  // onto an account without entries: one that already has statements under
+  // its identifier is not taken over by a file for another account.
   async function resolveAccounts(executor: Db | Tx, statements: ParsedStatement[], bankAccountId: string | undefined, format: "camt.053" | "csv") {
     const resolved: { statement: ParsedStatement; account: BankAccountRow | null; learnIdentifier: boolean }[] = [];
     const unknown: string[] = [];
@@ -545,7 +618,12 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     const unknownCount = resolved.filter((r) => r.account === null).length;
     if (chosen && format === "camt.053") {
       if (unknownCount === 1) {
-        for (const r of resolved) if (r.account === null) r.account = chosen;
+        const locked = (await repo.countEntries(executor, chosen.id)) > 0;
+        for (const r of resolved) {
+          if (r.account !== null) continue;
+          if (locked && r.statement.accountIdentifier) throw new BankAccountIdentifierLockedError(chosen.name, chosen.identifier, r.statement.accountIdentifier);
+          r.account = chosen;
+        }
       } else if (unknownCount === 0) {
         // Every statement resolved on its own; the chosen account must be one of them.
         if (!resolved.some((r) => r.account?.id === chosen.id)) throw new BankStatementAccountMismatchError(resolved[0]?.statement.accountIdentifier ?? "?");
@@ -556,8 +634,10 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
 
   const service = {
     // --- Bankkonton ---
-    async listAccounts(includeInactive: boolean): Promise<{ rows: BankAccountView[]; total: number }> {
-      await ensureFirstAccount();
+    // `seed` (default true) lets the first GET create the company account;
+    // the route passes false for an Endast läsning user, who writes nothing.
+    async listAccounts(includeInactive: boolean, opts: { seed?: boolean } = {}): Promise<{ rows: BankAccountView[]; total: number }> {
+      if (opts.seed !== false) await ensureFirstAccount();
       const rows = await repo.listAccounts(includeInactive);
       const views = await Promise.all(rows.map(accountView));
       return { rows: views, total: views.length };
@@ -589,6 +669,11 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     async updateAccount(id: string, input: UpdateBankAccountInput, userId: string): Promise<BankAccountView> {
       const existing = await requireAccount(db, id);
       if (input.ledgerAccount !== undefined) await requireLedgerAccount(db, input.ledgerAccount);
+      // The ledger account and the currency are what the entries and the
+      // matchings were made against — locked once any exist.
+      const changesLedger = input.ledgerAccount !== undefined && input.ledgerAccount !== existing.ledgerAccount;
+      const changesCurrency = input.currency !== undefined && input.currency !== existing.currency;
+      if ((changesLedger || changesCurrency) && (await repo.accountHasActivity(db, id))) throw new BankAccountInUseError(changesLedger ? "ledgerAccount" : "currency");
       const values: Partial<typeof existing> = {};
       if (input.name !== undefined) values.name = input.name;
       if (input.identifier !== undefined) values.identifier = normalizeBankIdentifier(input.identifier);
@@ -615,6 +700,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       if (parsed.needsMapping) blockers.push("Kolumnmappningen saknas eller stämmer inte — ange kolumnerna för bokföringsdag, belopp och text");
       let unknown: string[] = [];
       let resolved: Awaited<ReturnType<typeof resolveAccounts>>["resolved"] = [];
+      let identifierLocked = false;
       try {
         const r = await resolveAccounts(db, parsed.statements, fields.bankAccountId, parsed.format);
         unknown = r.unknown;
@@ -623,9 +709,14 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
         if (err instanceof BankStatementAccountMismatchError) {
           blockers.push("Filens konto hör till ett annat bankkonto än det valda");
           resolved = parsed.statements.map((statement) => ({ statement, account: null, learnIdentifier: false }));
+        } else if (err instanceof BankAccountIdentifierLockedError) {
+          identifierLocked = true;
+          unknown = [err.fileIdentifier];
+          blockers.push(`Bankkontot ${err.accountName} har redan identifieraren ${err.identifier} och importerade poster — filens konto ${err.fileIdentifier} kan inte tas över. Lägg upp ett eget bankkonto för det, eller välj ett annat.`);
+          resolved = parsed.statements.map((statement) => ({ statement, account: null, learnIdentifier: false }));
         } else throw err;
       }
-      if (resolved.some((r) => r.account === null && parsed.format === "camt.053")) {
+      if (!identifierLocked && resolved.some((r) => r.account === null && parsed.format === "camt.053")) {
         blockers.push(unknown.length > 1 ? `Filen gäller ${unknown.length} okända konton — lägg upp dem under Bankkonton först` : "Kontoutdragets konto är okänt — välj vilket bankkonto det är");
       }
       const rules = await rulesList();
@@ -634,6 +725,12 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       const statements: StatementPreview[] = resolved.map(({ statement, account }) => {
         if (account && statement.currency && statement.currency !== account.currency) {
           blockers.push(`Kontoutdraget är i ${statement.currency} men bankkontot ${account.name} är i ${account.currency}`);
+        } else if (account) {
+          // The statement's currency agrees (or is unstated): every entry's
+          // Amt@Ccy must too.
+          for (const currency of foreignEntryCurrencies(statement, account.currency)) {
+            blockers.push(`Kontoutdraget har poster i ${currency} men bankkontot ${account.name} är i ${account.currency}`);
+          }
         }
         const entries: PreviewEntry[] = statement.entries.map((e) => ({
           bookingDate: e.bookingDate,
@@ -685,24 +782,25 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
         }
         for (const r of resolved) {
           if (r.statement.currency && r.account!.currency !== r.statement.currency) throw new BankStatementCurrencyError(r.statement.currency, r.account!.currency);
+          const [foreign] = foreignEntryCurrencies(r.statement, r.account!.currency);
+          if (foreign) throw new BankStatementCurrencyError(foreign, r.account!.currency);
         }
         // The file: insert-only bank_files, reused when the same bytes were
-        // uploaded before (the entries then dedupe themselves).
-        const file =
-          (await repo.findIncomingFileBySha(tx, parsed.sha256)) ??
-          (await repo.insertFile(tx, {
-            direction: "incoming",
-            messageType: parsed.format === "camt.053" ? "camt.053.001.02" : "csv",
-            filename: upload.filename.slice(0, 255),
-            contentType: (upload.contentType || (parsed.format === "csv" ? "text/csv" : "application/xml")).slice(0, 100),
-            sizeBytes: upload.data.length,
-            sha256: parsed.sha256,
-            data: upload.data,
-            bankMessageId: parsed.messageId?.slice(0, 35) ?? null,
-            entryCount: parsed.statements.reduce((acc, s) => acc + s.entries.length, 0),
-            warnings: parsed.warnings,
-            uploadedBy: userId,
-          }));
+        // uploaded before — or are being uploaded concurrently (get-or-create
+        // on the sha256; the entries then dedupe themselves).
+        const file = await repo.ensureIncomingFile(tx, {
+          direction: "incoming",
+          messageType: parsed.format === "camt.053" ? "camt.053.001.02" : "csv",
+          filename: upload.filename.slice(0, 255),
+          contentType: (upload.contentType || (parsed.format === "csv" ? "text/csv" : "application/xml")).slice(0, 100),
+          sizeBytes: upload.data.length,
+          sha256: parsed.sha256,
+          data: upload.data,
+          bankMessageId: parsed.messageId?.slice(0, 35) ?? null,
+          entryCount: parsed.statements.reduce((acc, s) => acc + s.entries.length, 0),
+          warnings: parsed.warnings,
+          uploadedBy: userId,
+        });
         let imported = 0;
         let duplicates = 0;
         const statements: { id: string; bankAccountId: string; from: string | null; to: string | null }[] = [];
@@ -764,27 +862,38 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
 
       // After the commit: the automatic matching per account, then the
       // Bokför direkt rules on what is still unmatched — each in its own
-      // transaction, a failure never undoes the import.
+      // transaction. The import stands whatever happens here: a failure
+      // becomes a warning in the answer (and a log line), never a 500.
       let autoMatched = 0;
       let autoBooked = 0;
       if (fields.autoMatch !== false) {
-        for (const account of result.touched) autoMatched += (await autoMatchAccount(account, {}, userId)).matched;
-      }
-      const rules = await rulesList();
-      if (rules.some((r) => r.autoBook && r.active) && result.newEntryIds.length > 0) {
-        const entries = await repo.entriesByIds(db, result.newEntryIds);
-        for (const entry of entries) {
-          const hits = matchingRules(rules, entry);
-          if (hits.length !== 1 || !hits[0]!.autoBook) continue;
-          if (await repo.isEntryMatched(db, entry.id)) continue;
+        for (const account of result.touched) {
           try {
-            await bookOneByRule(entry.id, userId, rules);
-            autoBooked++;
+            autoMatched += (await autoMatchAccount(account, {}, userId)).matched;
           } catch (err) {
-            if (err instanceof BankMatchAlreadyMatchedError) continue;
-            warnings.push(`Posten ${entry.bookingDate} ${entry.text} kunde inte bokföras direkt: ${errorBody(err as Error).error}`);
+            warnings.push(`Den automatiska matchningen av ${account.name} misslyckades: ${reportableError(err, "automatic matching after import").error}`);
           }
         }
+      }
+      try {
+        const rules = await rulesList();
+        if (rules.some((r) => r.autoBook && r.active) && result.newEntryIds.length > 0) {
+          const entries = await repo.entriesByIds(db, result.newEntryIds);
+          for (const entry of entries) {
+            const hits = matchingRules(rules, entry);
+            if (hits.length !== 1 || !hits[0]!.autoBook) continue;
+            if (await repo.isEntryMatched(db, entry.id)) continue;
+            try {
+              await bookOneByRule(entry.id, userId, rules);
+              autoBooked++;
+            } catch (err) {
+              if (err instanceof BankMatchAlreadyMatchedError) continue;
+              warnings.push(`Posten ${entry.bookingDate} ${entry.text} kunde inte bokföras direkt: ${reportableError(err, "Bokför direkt after import").error}`);
+            }
+          }
+        }
+      } catch (err) {
+        warnings.push(`Bankreglerna kunde inte köras efter importen: ${reportableError(err, "rules after import").error}`);
       }
       return { bankFileId: result.bankFileId, statements: result.statements, imported: result.imported, duplicates: result.duplicates, autoMatched, autoBooked, warnings };
     },
@@ -805,10 +914,11 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
         ledgerBalance: ledger ? await repo.ledgerBalanceThrough(db, ledger.id, balanceDate) : 0,
         unmatchedEntriesSum: await repo.unmatchedEntriesSum(db, bankAccount.id, balanceDate),
         unmatchedRowsSum: ledger ? await repo.unmatchedRowsSum(db, ledger.id, balanceDate) : 0,
+        inTransit: await repo.inTransitSum(db, bankAccount.id, balanceDate),
       });
       const reconciliations = (await repo.listReconciliations(db, bankAccount.id)).map(reconciliationView);
       const latest = await repo.latestReconciliation(db, bankAccount.id);
-      const changedRows = latest && ledger ? await repo.rowsBookedAfter(db, ledger.id, latest.throughDate, latest.createdAt) : 0;
+      const changed = latest && ledger ? await repo.changedSinceReconciliation(db, bankAccount.id, ledger.id, latest.throughDate, latest.createdAt) : null;
       const proposals: MatchProposal[] = proposeMatches(forProposals(entries), rows);
       return {
         bankAccount,
@@ -819,7 +929,8 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
         matches,
         summary,
         reconciliations,
-        changedAfterReconciliation: latest && changedRows > 0 ? { through: latest.throughDate, rows: changedRows } : null,
+        changedAfterReconciliation:
+          latest && changed && (changed.rows > 0 || changed.entries > 0) ? { through: latest.throughDate, rows: changed.rows, entries: changed.entries } : null,
         proposals,
       };
     },
@@ -862,16 +973,66 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       return loadMatch(db, matchId);
     },
 
+    // Undo frees the entries and rows again. The Startpunkt's matching also
+    // withdraws its reconciliation mark — allowed only while no later mark
+    // rests on it.
     async undoMatch(id: string, userId: string): Promise<MatchView> {
       await db.transaction(async (tx) => {
         const match = await repo.lockMatch(tx, id);
         if (!match) throw new BankMatchNotFoundError(id);
         if (match.undoneAt) throw new BankMatchAlreadyUndoneError(id);
         await lockBankAccount(tx, match.bankAccountId);
+        if (match.kind === "opening") {
+          const mark = await repo.findReconciliationByOpeningMatch(tx, id);
+          if (mark) {
+            if ((await repo.countLiveReconciliations(tx, match.bankAccountId, mark.id)) > 0) throw new BankOpeningNotAllowedError("later-mark");
+            await repo.undoReconciliation(tx, mark.id, userId);
+            await audit(tx, "bank_reconciliation", mark.id, "opening_undone", { bankAccountId: match.bankAccountId, throughDate: mark.throughDate }, userId);
+          }
+        }
         await repo.undoMatch(tx, id, userId);
         await audit(tx, "bank_match", id, "undone", { kind: match.kind }, userId);
       });
       return loadMatch(db, id);
+    },
+
+    // --- Startpunkt för avstämningen ---
+    // The day the reconciliation starts: everything on the account up to it
+    // (statement entries and ledger rows alike — the IB, what was booked
+    // before the first statement) is linked by ONE opening matching without
+    // the sum rule, and the mark records the statement balance the user read
+    // off the bank. It must equal the ledger balance per the day; otherwise
+    // the difference is booked first. Allowed only as the account's first
+    // live mark — a later mark already rests on everything before it.
+    async createOpening(bankAccountId: string, input: CreateBankOpeningInput, userId: string): Promise<{ reconciliation: ReconciliationView; match: MatchView }> {
+      const account = await requireAccount(db, bankAccountId);
+      const ledger = await requireLedgerAccount(db, account.ledgerAccount);
+      const statementBalance = round2(input.statementBalance);
+      const { mark, matchId } = await db.transaction(async (tx) => {
+        await lockBankAccount(tx, account.id);
+        if ((await repo.countLiveReconciliations(tx, account.id)) > 0) throw new BankOpeningNotAllowedError("mark-exists");
+        const ledgerBalance = await repo.ledgerBalanceThrough(tx, ledger.id, input.date);
+        if (round2(ledgerBalance) !== statementBalance) throw new BankOpeningBalanceMismatchError(statementBalance, ledgerBalance);
+        const entries = await repo.unmatchedEntries(tx, account.id, { to: input.date });
+        const rows = await repo.unmatchedRows(tx, ledger.id, { to: input.date });
+        const matchId = await repo.insertMatch(
+          tx,
+          { bankAccountId: account.id, kind: "opening", createdBy: userId },
+          entries.map((e) => e.id),
+          rows.map((r) => r.id)
+        );
+        const mark = await repo.insertReconciliation(tx, {
+          bankAccountId: account.id,
+          throughDate: input.date,
+          statementBalance: String(statementBalance),
+          ledgerBalance: String(round2(ledgerBalance)),
+          openingMatchId: matchId,
+          createdBy: userId,
+        });
+        await audit(tx, "bank_reconciliation", mark.id, "opening_created", { bankAccountId: account.id, date: input.date, statementBalance, entries: entries.length, rows: rows.length, matchId }, userId);
+        return { mark, matchId };
+      });
+      return { reconciliation: reconciliationView(mark), match: await loadMatch(db, matchId) };
     },
 
     async autoMatch(input: AutoMatchInput, userId: string): Promise<{ matched: number; ambiguous: number }> {
@@ -905,20 +1066,15 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
         try {
           booked.push(await bookOneByRule(entryId, userId, rules));
         } catch (err) {
-          failed.push({ entryId, error: errorBody(err as Error) });
+          failed.push({ entryId, error: reportableError(err, `Bokför enligt regel of entry ${entryId}`) });
         }
       }
       return { booked, failed };
     },
 
     // --- Bankregler ---
-    async listRules(): Promise<{ rows: BankRuleView[]; total: number }> {
-      if ((await repo.countRules()) === 0 && (await repo.getSetting(RULES_SEEDED_KEY)) === null) {
-        await db.transaction(async (tx) => {
-          await repo.insertRules(tx, DEFAULT_BANK_RULES.map((r) => ({ ...r, sortOrder: r.sortOrder ?? 0 })));
-          await repo.setSetting(tx, RULES_SEEDED_KEY, now().toISOString());
-        });
-      }
+    async listRules(opts: { seed?: boolean } = {}): Promise<{ rows: BankRuleView[]; total: number }> {
+      if (opts.seed !== false) await seedRulesOnce();
       const rows = await repo.listRules();
       const views = await Promise.all(rows.map((r) => ruleView(r)));
       return { rows: views, total: views.length };
@@ -969,9 +1125,14 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
         if (!balance || (balance.date < input.throughDate && (await repo.entriesBetween(tx, account.id, balance.date, input.throughDate)) > 0)) {
           throw new BankReconciliationIncompleteError("no-statement-balance");
         }
+        // The summary's equation with nothing unmatched left: saldo bank −
+        // saldo bok must be exactly what the matchings crossing the day
+        // contribute (I transit) — a payment the bank booked on the 30th
+        // and the ledger on the 1st is not a mismatch.
         const ledgerBalance = await repo.ledgerBalanceThrough(tx, ledger.id, input.throughDate);
-        if (round2(ledgerBalance) !== round2(balance.balance)) {
-          throw new BankReconciliationIncompleteError("balance-mismatch", { statementBalance: balance.balance, ledgerBalance });
+        const inTransit = await repo.inTransitSum(tx, account.id, input.throughDate);
+        if (round2(balance.balance - ledgerBalance) !== inTransit) {
+          throw new BankReconciliationIncompleteError("balance-mismatch", { statementBalance: balance.balance, ledgerBalance, inTransit });
         }
         const inserted = await repo.insertReconciliation(tx, {
           bankAccountId: account.id,
@@ -1014,6 +1175,8 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       throughDate: row.throughDate,
       statementBalance: round2(Number(row.statementBalance)),
       ledgerBalance: round2(Number(row.ledgerBalance)),
+      opening: row.openingMatchId !== null,
+      matchId: row.openingMatchId,
       createdAt: row.createdAt,
       createdBy: row.createdBy,
     };

@@ -143,6 +143,9 @@ function BankAccountForm({
   const [identifier, setIdentifier] = useState(bankAccount?.identifier ?? "");
   const [ledgerAccount, setLedgerAccount] = useState(bankAccount?.ledgerAccount ?? "");
   const [active, setActive] = useState(bankAccount?.active ?? true);
+  // Entries or matchings were made against this ledger account: locked
+  // (the API answers 409 bank-account-in-use otherwise).
+  const ledgerLocked = bankAccount?.hasActivity === true;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
@@ -168,7 +171,9 @@ function BankAccountForm({
     try {
       const payload = { name: name.trim(), identifier: identifier.trim(), ledgerAccount: ledgerAccount.trim() };
       if (bankAccount) {
-        await apiFetch(`/api/v1/bank-accounts/${bankAccount.id}`, { method: "PATCH", body: JSON.stringify({ ...payload, active }) });
+        // A locked ledger account is left out of the PATCH (unchanged anyway).
+        const { ledgerAccount: _ledger, ...rest } = payload;
+        await apiFetch(`/api/v1/bank-accounts/${bankAccount.id}`, { method: "PATCH", body: JSON.stringify({ ...(ledgerLocked ? rest : payload), active }) });
       } else {
         await apiFetch("/api/v1/bank-accounts", { method: "POST", body: JSON.stringify(payload) });
       }
@@ -210,9 +215,16 @@ function BankAccountForm({
               maxLength={10}
               size="sm"
               value={ledgerAccount}
+              disabled={ledgerLocked}
               onChange={(e) => setLedgerAccount(e.target.value)}
             />
           </Field>
+          {ledgerLocked && (
+            <FormHint attached>
+              Huvudbokskontot är låst — bankkontot har importerade poster eller matchningar. Lägg upp ett nytt bankkonto om saldot ska
+              stämmas mot ett annat konto.
+            </FormHint>
+          )}
           <datalist id="bankAccountLedgerOptions">
             {accounts.map((a) => (
               <option key={a.id} value={a.number}>

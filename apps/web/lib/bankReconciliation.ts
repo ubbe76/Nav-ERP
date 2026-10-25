@@ -11,6 +11,7 @@ export const BANK_MATCH_KIND_LABELS: Record<BankMatchKind, string> = {
   auto: "Automatisk",
   manual: "Manuell",
   created: "Bokförd från posten",
+  opening: "Startpunkt",
 };
 
 export const BANK_RULE_DIRECTION_LABELS = { in: "In", out: "Ut", both: "Båda" } as const;

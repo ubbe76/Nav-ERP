@@ -214,9 +214,25 @@ export const createBankReconciliationSchema = z.object({
 });
 export type CreateBankReconciliationInput = z.infer<typeof createBankReconciliationSchema>;
 
+// Startpunkt för avstämningen (POST /bank-accounts/:id/opening): the day the
+// reconciliation starts and the statement's balance per that day, as the
+// user reads it off the bank. Everything on the account up to the day is
+// linked by one opening matching without the sum rule; the ledger balance
+// per the day must equal the statement balance.
+export const createBankOpeningSchema = z.object({
+  date: businessDateSchema,
+  statementBalance: z.number().finite().min(-1e12).max(1e12),
+});
+export type CreateBankOpeningInput = z.infer<typeof createBankOpeningSchema>;
+
 // Why Avstämd t.o.m. was refused (409 bank-reconciliation-incomplete).
 export const BANK_RECONCILIATION_REASONS = ["unmatched-entries", "unmatched-rows", "no-statement-balance", "balance-mismatch"] as const;
 export type BankReconciliationReason = (typeof BANK_RECONCILIATION_REASONS)[number];
+
+// Why the Startpunkt was refused (409 bank-opening-not-allowed): the account
+// already has a live mark (create), or a later mark rests on it (undo).
+export const BANK_OPENING_REASONS = ["mark-exists", "later-mark"] as const;
+export type BankOpeningReason = (typeof BANK_OPENING_REASONS)[number];
 
 // Omatchade bankposter: statement entries older than this many days without
 // a live matching.

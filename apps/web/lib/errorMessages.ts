@@ -610,13 +610,41 @@ const MESSAGES: Record<string, MessageEntry> = {
       case "balance-mismatch": {
         const statement = moneyOrNull(body?.statementBalance);
         const ledger = moneyOrNull(body?.ledgerBalance);
+        const transit = typeof (body as { inTransit?: unknown } | undefined)?.inTransit === "number" ? ((body as { inTransit: number }).inTransit) : 0;
+        const transitText = transit !== 0 ? ` (varav ${moneyOrNull(transit)} kr i transit — matchningar som korsar datumet)` : "";
         return statement !== null && ledger !== null
-          ? `Kontoutdragets saldo ${statement} kr stämmer inte med bokföringens saldo ${ledger} kr per datumet.`
+          ? `Kontoutdragets saldo ${statement} kr stämmer inte med bokföringens saldo ${ledger} kr per datumet${transitText}.`
           : "Kontoutdragets saldo stämmer inte med bokföringens saldo per datumet.";
       }
       default:
         return "Allt till och med datumet måste vara matchat och kontoutdragets saldo måste stämma med bokföringens innan perioden kan markeras som avstämd.";
     }
+  },
+  "bank-opening-balance-mismatch": (err) => {
+    const body = err.body as { statementBalance?: unknown; ledgerBalance?: unknown } | undefined;
+    const statement = moneyOrNull(body?.statementBalance);
+    const ledger = moneyOrNull(body?.ledgerBalance);
+    return statement !== null && ledger !== null
+      ? `Kontoutdragets saldo ${statement} kr stämmer inte med bokföringens saldo ${ledger} kr per startdatumet. Bokför skillnaden först, eller kontrollera saldot och datumet.`
+      : "Kontoutdragets saldo stämmer inte med bokföringens saldo per startdatumet — bokför skillnaden först.";
+  },
+  "bank-opening-not-allowed": (err) => {
+    const reason = (err.body as { reason?: unknown } | undefined)?.reason;
+    return reason === "later-mark"
+      ? "Startpunkten kan inte ångras — en senare avstämning bygger på den."
+      : "Bankkontot är redan avstämt — en startpunkt kan bara skapas innan den första avstämningen.";
+  },
+  "bank-account-in-use": (err) => {
+    const field = (err.body as { field?: unknown } | undefined)?.field;
+    return field === "currency"
+      ? "Valutan kan inte ändras — bankkontot har importerade poster eller matchningar."
+      : "Huvudbokskontot kan inte ändras — bankkontot har importerade poster eller matchningar. Lägg upp ett nytt bankkonto i stället.";
+  },
+  "bank-account-identifier-locked": (err) => {
+    const body = err.body as { accountName?: unknown; identifier?: unknown; fileIdentifier?: unknown } | undefined;
+    return typeof body?.accountName === "string" && typeof body?.fileIdentifier === "string"
+      ? `Bankkontot ${body.accountName} har redan importerade poster under ${String(body.identifier ?? "sin identifierare")} — filens konto ${body.fileIdentifier} kan inte tas över. Lägg upp ett eget bankkonto för det.`
+      : "Bankkontot har redan importerade poster under en annan identifierare — lägg upp ett eget bankkonto för filens konto.";
   },
   // generic (thrown by the zod/body-parsing layer, not a named domain error)
   "validation-failed": "Ogiltiga uppgifter — kontrollera fälten.",

@@ -410,7 +410,7 @@ export class BankRuleAccountMissingError extends Error {
 export class BankReconciliationIncompleteError extends Error {
   constructor(
     public reason: "unmatched-entries" | "unmatched-rows" | "no-statement-balance" | "balance-mismatch",
-    public detail: { count?: number; statementBalance?: number | null; ledgerBalance?: number } = {}
+    public detail: { count?: number; statementBalance?: number | null; ledgerBalance?: number; inTransit?: number } = {}
   ) {
     super(
       reason === "unmatched-entries"
@@ -422,5 +422,48 @@ export class BankReconciliationIncompleteError extends Error {
             : `The statement balance ${(detail.statementBalance ?? 0).toFixed(2)} differs from the ledger balance ${(detail.ledgerBalance ?? 0).toFixed(2)}`
     );
     this.name = "BankReconciliationIncompleteError";
+  }
+}
+
+// Startpunkt: the statement balance typed in differs from the ledger
+// balance per the day — book the difference first. 409 with both amounts.
+export class BankOpeningBalanceMismatchError extends Error {
+  constructor(
+    public statementBalance: number,
+    public ledgerBalance: number
+  ) {
+    super(`The statement balance ${statementBalance.toFixed(2)} differs from the ledger balance ${ledgerBalance.toFixed(2)} per the opening day`);
+    this.name = "BankOpeningBalanceMismatchError";
+  }
+}
+
+// Startpunkt refused: the account already has a live reconciliation mark
+// (create), or a later mark rests on the opening (undo). 409 with `reason`.
+export class BankOpeningNotAllowedError extends Error {
+  constructor(public reason: "mark-exists" | "later-mark") {
+    super(reason === "mark-exists" ? "The bank account already has a reconciliation mark — the opening must come first" : "A later reconciliation mark rests on the opening");
+    this.name = "BankOpeningNotAllowedError";
+  }
+}
+
+// PATCH /bank-accounts/:id: the ledger account and the currency are locked
+// once the account carries statement entries or matchings. 409 with `field`.
+export class BankAccountInUseError extends Error {
+  constructor(public field: "ledgerAccount" | "currency") {
+    super(`${field} cannot change on a bank account with statement entries or matchings`);
+    this.name = "BankAccountInUseError";
+  }
+}
+
+// Import: the chosen bank account already has entries under another
+// identifier, so the file's identifier cannot be learned onto it. 409.
+export class BankAccountIdentifierLockedError extends Error {
+  constructor(
+    public accountName: string,
+    public identifier: string,
+    public fileIdentifier: string
+  ) {
+    super(`Bank account ${accountName} already carries identifier ${identifier} and has entries — ${fileIdentifier} cannot replace it`);
+    this.name = "BankAccountIdentifierLockedError";
   }
 }

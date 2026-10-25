@@ -3,7 +3,7 @@
 -- kontoutdrag (camt.053/CSV) med poster (unik dedupe_key), matchningar mot
 -- verifikatrader (partiella unika index på de levande länkraderna), bankregler
 -- och avstämningsmärken (append-only). Filerna ligger i bank_files som förut.
-CREATE TYPE "public"."bank_match_kind" AS ENUM('auto', 'manual', 'created');--> statement-breakpoint
+CREATE TYPE "public"."bank_match_kind" AS ENUM('auto', 'manual', 'created', 'opening');--> statement-breakpoint
 CREATE TYPE "public"."bank_rule_direction" AS ENUM('in', 'out', 'both');--> statement-breakpoint
 CREATE TABLE "bank_accounts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -50,8 +50,12 @@ CREATE TABLE "bank_reconciliations" (
 	"statement_balance" numeric(14, 2) NOT NULL,
 	"ledger_balance" numeric(14, 2) NOT NULL,
 	"note" text,
+	"opening_match_id" uuid,
 	"created_by" uuid,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"undone_at" timestamp with time zone,
+	"undone_by" uuid,
+	CONSTRAINT "bank_reconciliations_undo_only_opening" CHECK ("bank_reconciliations"."undone_at" IS NULL OR "bank_reconciliations"."opening_match_id" IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE "bank_rules" (
@@ -114,7 +118,9 @@ ALTER TABLE "bank_matches" ADD CONSTRAINT "bank_matches_bank_account_id_bank_acc
 ALTER TABLE "bank_matches" ADD CONSTRAINT "bank_matches_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bank_matches" ADD CONSTRAINT "bank_matches_undone_by_users_id_fk" FOREIGN KEY ("undone_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bank_reconciliations" ADD CONSTRAINT "bank_reconciliations_bank_account_id_bank_accounts_id_fk" FOREIGN KEY ("bank_account_id") REFERENCES "public"."bank_accounts"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "bank_reconciliations" ADD CONSTRAINT "bank_reconciliations_opening_match_id_bank_matches_id_fk" FOREIGN KEY ("opening_match_id") REFERENCES "public"."bank_matches"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bank_reconciliations" ADD CONSTRAINT "bank_reconciliations_created_by_users_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "bank_reconciliations" ADD CONSTRAINT "bank_reconciliations_undone_by_users_id_fk" FOREIGN KEY ("undone_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bank_statement_entries" ADD CONSTRAINT "bank_statement_entries_bank_account_id_bank_accounts_id_fk" FOREIGN KEY ("bank_account_id") REFERENCES "public"."bank_accounts"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bank_statement_entries" ADD CONSTRAINT "bank_statement_entries_bank_statement_id_bank_statements_id_fk" FOREIGN KEY ("bank_statement_id") REFERENCES "public"."bank_statements"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bank_statement_entries" ADD CONSTRAINT "bank_statement_entries_bank_file_id_bank_files_id_fk" FOREIGN KEY ("bank_file_id") REFERENCES "public"."bank_files"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
@@ -126,6 +132,7 @@ CREATE UNIQUE INDEX "bank_match_rows_row_live" ON "bank_match_rows" USING btree 
 CREATE INDEX "idx_bank_match_rows_match" ON "bank_match_rows" USING btree ("match_id");--> statement-breakpoint
 CREATE INDEX "idx_bank_matches_account" ON "bank_matches" USING btree ("bank_account_id");--> statement-breakpoint
 CREATE INDEX "idx_bank_reconciliations_account_date" ON "bank_reconciliations" USING btree ("bank_account_id","through_date");--> statement-breakpoint
+CREATE UNIQUE INDEX "bank_reconciliations_opening_match_unique" ON "bank_reconciliations" USING btree ("opening_match_id");--> statement-breakpoint
 CREATE INDEX "idx_bank_statement_entries_account_date" ON "bank_statement_entries" USING btree ("bank_account_id","booking_date");--> statement-breakpoint
 CREATE INDEX "idx_bank_statement_entries_statement" ON "bank_statement_entries" USING btree ("bank_statement_id");--> statement-breakpoint
 CREATE INDEX "idx_bank_statements_account" ON "bank_statements" USING btree ("bank_account_id");--> statement-breakpoint

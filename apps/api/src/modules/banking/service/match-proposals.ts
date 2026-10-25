@@ -3,12 +3,16 @@ import { addDays } from "./banking-dates.js";
 
 // Bankavstämning — the automatic matching, pure (no DB imports). Entries
 // are the unmatched statement entries, rows the unmatched verification rows
-// on the account's ledger account (amount = debit − credit). Two passes, each
-// only proposing what is UNAMBIGUOUS:
+// on the account's ledger account (amount = debit − credit). Three passes,
+// each only proposing what is UNAMBIGUOUS:
 //   1. Reference: the entry carries a bank reference (AcctSvcrRef /
 //      EndToEndId) that the row's payment was booked from (a camt.054
 //      entry) — and the amounts agree.
-//   2. Amount + date: exactly one row with the same amount within ±3 days of
+//   2. Reversal: a statement entry flagged RvslInd is netted against its
+//      original ENTRY (opposite amount): the one sharing a reference, else
+//      the nearest earlier one. Reversals never enter the amount+date pass —
+//      a reversed payment's row belongs to the original, not the reversal.
+//   3. Amount + date: exactly one row with the same amount within ±3 days of
 //      the booking day, and no other entry with that amount could claim it.
 // Anything with more than one candidate comes back as an ambiguous proposal
 // (the candidates listed) for the user; it is never matched by itself.
@@ -18,6 +22,8 @@ export interface ProposalEntry {
   bookingDate: string;
   amount: number;
   references: readonly string[];
+  // RvslInd on the statement entry.
+  reversal?: boolean;
 }
 
 export interface ProposalRow {
@@ -27,10 +33,12 @@ export interface ProposalRow {
   references: readonly string[];
 }
 
+export type MatchBasis = "reference" | "reversal" | "amount_date";
+
 export interface MatchProposal {
   entryIds: string[];
   rowIds: string[];
-  basis: "reference" | "amount_date";
+  basis: MatchBasis;
   ambiguous: boolean;
 }
 
@@ -81,7 +89,35 @@ export function proposeMatches(
     }
   }
 
-  // Pass 2: amount + date among what is left.
+  // Pass 2: reversals against their original entry. The original is an
+  // unmatched, non-reversal entry with the opposite amount: one sharing a
+  // reference wins outright; otherwise the nearest one booked on or before
+  // the reversal (the latest such day) — several on that day are ambiguous.
+  // A reversal with no original stays unmatched (the user books the return).
+  const reversals = entries.filter((e) => e.reversal === true && !doneEntries.has(e.id));
+  for (const reversal of reversals) {
+    doneEntries.add(reversal.id); // never in the amount+date pass
+    const originals = entries.filter((e) => e.reversal !== true && !doneEntries.has(e.id) && round2(e.amount) === round2(-reversal.amount));
+    if (originals.length === 0) continue;
+    const refs = new Set(reversal.references);
+    const byReference = originals.filter((e) => e.references.some((ref) => refs.has(ref)));
+    let candidates: ProposalEntry[];
+    if (byReference.length > 0) candidates = byReference;
+    else {
+      const before = originals.filter((e) => e.bookingDate <= reversal.bookingDate);
+      const pool = before.length > 0 ? before : originals;
+      const nearest = before.length > 0 ? pool.reduce((best, e) => (e.bookingDate > best.bookingDate ? e : best)) : pool.reduce((best, e) => (e.bookingDate < best.bookingDate ? e : best));
+      candidates = pool.filter((e) => e.bookingDate === nearest.bookingDate);
+    }
+    if (candidates.length === 1) {
+      doneEntries.add(candidates[0]!.id);
+      proposals.push({ entryIds: [candidates[0]!.id, reversal.id], rowIds: [], basis: "reversal", ambiguous: false });
+    } else {
+      proposals.push({ entryIds: [...candidates.map((e) => e.id), reversal.id], rowIds: [], basis: "reversal", ambiguous: true });
+    }
+  }
+
+  // Pass 3: amount + date among what is left.
   const remainingEntries = entries.filter((e) => !doneEntries.has(e.id));
   const remainingRows = rows.filter((r) => !takenRows.has(r.id));
   const candidatesFor = (entry: ProposalEntry) =>

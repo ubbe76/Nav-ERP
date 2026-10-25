@@ -75,6 +75,8 @@ const E = sql.raw(`"bank_statement_entries"`);
 const VR = sql.raw(`"verification_rows"`);
 const entryUnmatched = sql`NOT EXISTS (SELECT 1 FROM bank_match_entries me WHERE me.entry_id = ${E}."id" AND me.active)`;
 const rowUnmatched = sql`NOT EXISTS (SELECT 1 FROM bank_match_rows mr WHERE mr.verification_row_id = ${VR}."id" AND mr.active)`;
+// The live reconciliation marks: an undone Startpunkt no longer counts.
+const reconciledThroughSql = sql<string | null>`(SELECT max(r.through_date) FROM bank_reconciliations r WHERE r.bank_account_id = "bank_accounts"."id" AND r.undone_at IS NULL)`;
 
 const entryView = {
   id: bankStatementEntries.id,
@@ -117,7 +119,7 @@ export async function unreconciledBankAccountsAsOf(
       id: bankAccounts.id,
       name: bankAccounts.name,
       ledgerAccount: bankAccounts.ledgerAccount,
-      reconciledThrough: sql<string | null>`(SELECT max(r.through_date) FROM bank_reconciliations r WHERE r.bank_account_id = "bank_accounts"."id")`,
+      reconciledThrough: reconciledThroughSql,
     })
     .from(bankAccounts)
     .where(eq(bankAccounts.active, true))
@@ -151,8 +153,16 @@ export function createBankReconciliationRepository(db: Db) {
       const refs = map.get(row.verificationId) ?? [];
       if (row.endToEndId) refs.push(row.endToEndId);
       // "<account>|tx:<AcctSvcrRef>" (a repeat in the file gets "#2" — kept
-      // as is, it never meets a statement reference).
+      // as is, it never meets a statement reference), or
+      // "<account>|ntry:<Ntry/AcctSvcrRef>#<txIndex>" for a camt.054 entry
+      // keyed on the entry's own reference — the statement's Ntry/AcctSvcrRef
+      // is the same string, so the per-transaction suffix is dropped.
       if (row.dedupeSource === "tx_acct_svcr_ref") refs.push(row.dedupeKey.slice(row.dedupeKey.indexOf("|tx:") + 4));
+      if (row.dedupeSource === "entry_ref") {
+        const ref = row.dedupeKey.slice(row.dedupeKey.indexOf("|ntry:") + 6);
+        const hash = ref.indexOf("#");
+        refs.push(hash === -1 ? ref : ref.slice(0, hash));
+      }
       map.set(row.verificationId, refs);
     }
     return map;
@@ -201,9 +211,13 @@ export function createBankReconciliationRepository(db: Db) {
         .select({
           account: bankAccounts,
           ledgerAccountName: accounts.name,
-          reconciledThrough: sql<string | null>`(SELECT max(r.through_date) FROM bank_reconciliations r WHERE r.bank_account_id = "bank_accounts"."id")`,
+          reconciledThrough: reconciledThroughSql,
           lastStatementDate: sql<string | null>`(SELECT max(e.booking_date) FROM bank_statement_entries e WHERE e.bank_account_id = "bank_accounts"."id")`,
           unmatchedCount: sql<number>`(SELECT count(*) FROM bank_statement_entries e WHERE e.bank_account_id = "bank_accounts"."id" AND NOT EXISTS (SELECT 1 FROM bank_match_entries me WHERE me.entry_id = e.id AND me.active))`,
+          // Entries or matchings on the account: the ledger account and the
+          // currency are locked then (PATCH), and the identifier is no longer
+          // learned from a file.
+          hasActivity: sql<boolean>`(EXISTS (SELECT 1 FROM bank_statement_entries e WHERE e.bank_account_id = "bank_accounts"."id") OR EXISTS (SELECT 1 FROM bank_matches m WHERE m.bank_account_id = "bank_accounts"."id"))`,
         })
         .from(bankAccounts)
         .leftJoin(accounts, eq(accounts.number, bankAccounts.ledgerAccount))
@@ -229,6 +243,28 @@ export function createBankReconciliationRepository(db: Db) {
     async insertAccount(values: typeof bankAccounts.$inferInsert): Promise<BankAccountRow> {
       const [row] = await db.insert(bankAccounts).values(values).returning();
       return row!;
+    },
+
+    // The first-account seed: ON CONFLICT DO NOTHING on the identifier, so a
+    // concurrent first GET simply reads what the winner made.
+    async insertAccountIfAbsent(values: typeof bankAccounts.$inferInsert): Promise<void> {
+      await db.insert(bankAccounts).values(values).onConflictDoNothing({ target: bankAccounts.identifier });
+    },
+
+    // Has the account statement entries or matchings (live or undone)?
+    async accountHasActivity(executor: Db | Tx, bankAccountId: string): Promise<boolean> {
+      const [row] = await executor
+        .select({
+          any: sql<boolean>`(EXISTS (SELECT 1 FROM bank_statement_entries e WHERE e.bank_account_id = ${bankAccountId}) OR EXISTS (SELECT 1 FROM bank_matches m WHERE m.bank_account_id = ${bankAccountId}))`,
+        })
+        .from(bankAccounts)
+        .where(eq(bankAccounts.id, bankAccountId));
+      return row?.any === true;
+    },
+
+    async countEntries(executor: Db | Tx, bankAccountId: string): Promise<number> {
+      const [row] = await executor.select({ n: count() }).from(bankStatementEntries).where(eq(bankStatementEntries.bankAccountId, bankAccountId));
+      return row!.n;
     },
 
     async updateAccount(executor: Db | Tx, id: string, values: Partial<typeof bankAccounts.$inferInsert>): Promise<BankAccountRow | null> {
@@ -301,6 +337,12 @@ export function createBankReconciliationRepository(db: Db) {
     async setSetting(executor: Db | Tx, key: string, value: string): Promise<void> {
       await executor.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
     },
+    // Claims a one-off flag: true for the ONE caller that wrote it, false
+    // when it was already there (INSERT … ON CONFLICT DO NOTHING RETURNING).
+    async claimSetting(executor: Db | Tx, key: string, value: string): Promise<boolean> {
+      const rows = await executor.insert(systemSettings).values({ key, value }).onConflictDoNothing({ target: systemSettings.key }).returning({ key: systemSettings.key });
+      return rows.length > 0;
+    },
 
     // --- Files, statements, entries ---
     async findIncomingFileBySha(executor: Db | Tx, sha256: string): Promise<{ id: string; filename: string } | null> {
@@ -311,9 +353,20 @@ export function createBankReconciliationRepository(db: Db) {
       return row ?? null;
     },
 
-    async insertFile(tx: Tx, values: typeof bankFiles.$inferInsert): Promise<{ id: string; filename: string }> {
-      const [row] = await tx.insert(bankFiles).values(values).returning({ id: bankFiles.id, filename: bankFiles.filename });
-      return row!;
+    // Get-or-create on the incoming file's sha256 (partial unique index
+    // bank_files_incoming_sha256): ON CONFLICT DO NOTHING + re-select, so two
+    // concurrent imports of the same file never abort on 23505 — the loser
+    // reads the winner's row and its entries dedupe themselves.
+    async ensureIncomingFile(tx: Tx, values: typeof bankFiles.$inferInsert): Promise<{ id: string; filename: string }> {
+      const inserted = await tx
+        .insert(bankFiles)
+        .values(values)
+        .onConflictDoNothing({ target: bankFiles.sha256, where: sql`${bankFiles.direction} = 'incoming'` })
+        .returning({ id: bankFiles.id, filename: bankFiles.filename });
+      if (inserted[0]) return inserted[0];
+      const existing = await repo.findIncomingFileBySha(tx, values.sha256);
+      if (!existing) throw new Error(`bank file ${values.sha256} could not be materialized`);
+      return existing;
     },
 
     async existingEntryKeys(executor: Db | Tx, keys: string[]): Promise<Set<string>> {
@@ -438,6 +491,29 @@ export function createBankReconciliationRepository(db: Db) {
       return round2(Number(row?.total ?? 0));
     },
 
+    // I transit: what the live matchings (never the Startpunkt — its
+    // balances are the agreed starting point) contribute to
+    // saldo bank − saldo bok per `through`: Σ matched entries ≤ day − Σ
+    // matched rows ≤ day. A matching wholly on one side of the day nets to
+    // 0; one that crosses it (the bank booked on the 30th, the ledger on the
+    // 1st, or the reverse) leaves exactly its crossing amount.
+    async inTransitSum(executor: Db | Tx, bankAccountId: string, through: string): Promise<number> {
+      const [entries] = await executor
+        .select({ total: sql<string | null>`sum(${bankStatementEntries.amount})` })
+        .from(bankMatchEntries)
+        .innerJoin(bankMatches, eq(bankMatches.id, bankMatchEntries.matchId))
+        .innerJoin(bankStatementEntries, eq(bankStatementEntries.id, bankMatchEntries.entryId))
+        .where(and(eq(bankMatches.bankAccountId, bankAccountId), isNull(bankMatches.undoneAt), sql`${bankMatches.kind} <> 'opening'`, eq(bankMatchEntries.active, true), lte(bankStatementEntries.bookingDate, through)));
+      const [rows] = await executor
+        .select({ total: sql<string | null>`sum(${verificationRows.debit} - ${verificationRows.credit})` })
+        .from(bankMatchRows)
+        .innerJoin(bankMatches, eq(bankMatches.id, bankMatchRows.matchId))
+        .innerJoin(verificationRows, eq(verificationRows.id, bankMatchRows.verificationRowId))
+        .innerJoin(verifications, eq(verifications.id, verificationRows.verificationId))
+        .where(and(eq(bankMatches.bankAccountId, bankAccountId), isNull(bankMatches.undoneAt), sql`${bankMatches.kind} <> 'opening'`, eq(bankMatchRows.active, true), lte(verifications.date, through)));
+      return round2(Number(entries?.total ?? 0) - Number(rows?.total ?? 0));
+    },
+
     // The latest statement closing balance on or before `through`.
     async latestStatementBalance(executor: Db | Tx, bankAccountId: string, through: string): Promise<{ balance: number; date: string } | null> {
       const [row] = await executor
@@ -458,10 +534,15 @@ export function createBankReconciliationRepository(db: Db) {
     },
 
     // --- Matches ---
-    async insertMatch(tx: Tx, values: { bankAccountId: string; kind: "auto" | "manual" | "created"; createdBy: string | null }, entryIds: string[], rowIds: string[]): Promise<string> {
+    async insertMatch(tx: Tx, values: { bankAccountId: string; kind: BankMatchRow["kind"]; createdBy: string | null }, entryIds: string[], rowIds: string[]): Promise<string> {
       const [match] = await tx.insert(bankMatches).values(values).returning({ id: bankMatches.id });
-      if (entryIds.length > 0) await tx.insert(bankMatchEntries).values(entryIds.map((entryId) => ({ matchId: match!.id, entryId })));
-      if (rowIds.length > 0) await tx.insert(bankMatchRows).values(rowIds.map((verificationRowId) => ({ matchId: match!.id, verificationRowId })));
+      // In chunks: the Startpunkt may link an account's whole history.
+      for (let i = 0; i < entryIds.length; i += 2000) {
+        await tx.insert(bankMatchEntries).values(entryIds.slice(i, i + 2000).map((entryId) => ({ matchId: match!.id, entryId })));
+      }
+      for (let i = 0; i < rowIds.length; i += 2000) {
+        await tx.insert(bankMatchRows).values(rowIds.slice(i, i + 2000).map((verificationRowId) => ({ matchId: match!.id, verificationRowId })));
+      }
       return match!.id;
     },
 
@@ -483,7 +564,8 @@ export function createBankReconciliationRepository(db: Db) {
     },
 
     // The matches touching the period: live ones with an entry booked or a
-    // row dated inside it.
+    // row dated inside it — and the Startpunkt always, so it can be seen and
+    // undone whatever period is shown.
     async matchesInRange(executor: Db | Tx, bankAccountId: string, from: string, to: string): Promise<BankMatchRow[]> {
       return executor
         .select()
@@ -492,7 +574,8 @@ export function createBankReconciliationRepository(db: Db) {
           and(
             eq(bankMatches.bankAccountId, bankAccountId),
             isNull(bankMatches.undoneAt),
-            sql`(EXISTS (SELECT 1 FROM bank_match_entries me JOIN bank_statement_entries e ON e.id = me.entry_id WHERE me.match_id = "bank_matches"."id" AND e.booking_date BETWEEN ${from} AND ${to})
+            sql`(${bankMatches.kind} = 'opening'
+              OR EXISTS (SELECT 1 FROM bank_match_entries me JOIN bank_statement_entries e ON e.id = me.entry_id WHERE me.match_id = "bank_matches"."id" AND e.booking_date BETWEEN ${from} AND ${to})
               OR EXISTS (SELECT 1 FROM bank_match_rows mr JOIN verification_rows vr ON vr.id = mr.verification_row_id JOIN verifications v ON v.id = vr.verification_id WHERE mr.match_id = "bank_matches"."id" AND v.date BETWEEN ${from} AND ${to}))`
           )
         )
@@ -534,8 +617,8 @@ export function createBankReconciliationRepository(db: Db) {
     async listRules(): Promise<BankRuleRow[]> {
       return db.select().from(bankRules).orderBy(asc(bankRules.sortOrder), asc(bankRules.createdAt));
     },
-    async countRules(): Promise<number> {
-      const [row] = await db.select({ n: count() }).from(bankRules);
+    async countRules(executor: Db | Tx = db): Promise<number> {
+      const [row] = await executor.select({ n: count() }).from(bankRules);
       return row!.n;
     },
     async findRule(id: string): Promise<BankRuleRow | null> {
@@ -563,33 +646,56 @@ export function createBankReconciliationRepository(db: Db) {
       return row?.m ?? 0;
     },
 
-    // --- Avstämd t.o.m. ---
+    // --- Avstämd t.o.m. --- (the live marks only: an undone Startpunkt is out)
     async listReconciliations(executor: Db | Tx, bankAccountId: string): Promise<BankReconciliationRow[]> {
-      return executor.select().from(bankReconciliations).where(eq(bankReconciliations.bankAccountId, bankAccountId)).orderBy(desc(bankReconciliations.throughDate), desc(bankReconciliations.createdAt));
+      return executor
+        .select()
+        .from(bankReconciliations)
+        .where(and(eq(bankReconciliations.bankAccountId, bankAccountId), isNull(bankReconciliations.undoneAt)))
+        .orderBy(desc(bankReconciliations.throughDate), desc(bankReconciliations.createdAt));
     },
     async latestReconciliation(executor: Db | Tx, bankAccountId: string): Promise<BankReconciliationRow | null> {
       const [row] = await executor
         .select()
         .from(bankReconciliations)
-        .where(eq(bankReconciliations.bankAccountId, bankAccountId))
+        .where(and(eq(bankReconciliations.bankAccountId, bankAccountId), isNull(bankReconciliations.undoneAt)))
         .orderBy(desc(bankReconciliations.throughDate), desc(bankReconciliations.createdAt))
         .limit(1);
       return row ?? null;
+    },
+    async countLiveReconciliations(executor: Db | Tx, bankAccountId: string, exceptId?: string): Promise<number> {
+      const conditions: SQL[] = [eq(bankReconciliations.bankAccountId, bankAccountId), isNull(bankReconciliations.undoneAt)];
+      if (exceptId) conditions.push(sql`${bankReconciliations.id} <> ${exceptId}`);
+      const [row] = await executor.select({ n: count() }).from(bankReconciliations).where(and(...conditions));
+      return row!.n;
     },
     async insertReconciliation(tx: Tx, values: typeof bankReconciliations.$inferInsert): Promise<BankReconciliationRow> {
       const [row] = await tx.insert(bankReconciliations).values(values).returning();
       return row!;
     },
+    async findReconciliationByOpeningMatch(executor: Db | Tx, matchId: string): Promise<BankReconciliationRow | null> {
+      const [row] = await executor.select().from(bankReconciliations).where(eq(bankReconciliations.openingMatchId, matchId));
+      return row ?? null;
+    },
+    async undoReconciliation(tx: Tx, id: string, userId: string): Promise<void> {
+      await tx.update(bankReconciliations).set({ undoneAt: new Date(), undoneBy: userId }).where(eq(bankReconciliations.id, id));
+    },
 
-    // Rows on the ledger account dated on or before the mark that were
-    // booked after it was made — the "bokföringen har ändrats" warning.
-    async rowsBookedAfter(executor: Db | Tx, ledgerAccountId: string, through: string, since: Date): Promise<number> {
-      const [row] = await executor
+    // The "bokföringen har ändrats" warning: rows on the ledger account dated
+    // on or before the mark that were booked after it was made OR are
+    // unmatched now (an undone matching, a later import), and statement
+    // entries ≤ the mark that are unmatched.
+    async changedSinceReconciliation(executor: Db | Tx, bankAccountId: string, ledgerAccountId: string, through: string, since: Date): Promise<{ rows: number; entries: number }> {
+      const [rows] = await executor
         .select({ n: count() })
         .from(verificationRows)
         .innerJoin(verifications, eq(verifications.id, verificationRows.verificationId))
-        .where(and(eq(verificationRows.accountId, ledgerAccountId), eq(verifications.status, "booked"), lte(verifications.date, through), gt(verifications.bookedAt, since)));
-      return row!.n;
+        .where(and(eq(verificationRows.accountId, ledgerAccountId), eq(verifications.status, "booked"), lte(verifications.date, through), sql`(${gt(verifications.bookedAt, since)} OR ${rowUnmatched})`));
+      const [entries] = await executor
+        .select({ n: count() })
+        .from(bankStatementEntries)
+        .where(and(eq(bankStatementEntries.bankAccountId, bankAccountId), lte(bankStatementEntries.bookingDate, through), entryUnmatched));
+      return { rows: rows!.n, entries: entries!.n };
     },
 
     // --- Aviseringar ---

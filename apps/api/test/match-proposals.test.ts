@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { proposeMatches } from "../src/modules/banking/service/match-proposals.js";
 import { reconciliationSummary } from "../src/modules/banking/service/reconciliation-summary.js";
 
-const entry = (id: string, amount: number, bookingDate = "2024-10-09", references: string[] = []) => ({ id, amount, bookingDate, references });
+const entry = (id: string, amount: number, bookingDate = "2024-10-09", references: string[] = [], reversal = false) => ({ id, amount, bookingDate, references, reversal });
 const row = (id: string, amount: number, date = "2024-10-09", references: string[] = []) => ({ id, amount, date, references });
 
 describe("proposeMatches — referens", () => {
@@ -63,18 +63,51 @@ describe("proposeMatches — belopp + datum", () => {
   });
 });
 
+describe("proposeMatches — återföring", () => {
+  it("nets a reversal against the original entry sharing its reference, never against a row", () => {
+    const proposals = proposeMatches(
+      [entry("e1", -500, "2024-10-09", ["P1"]), entry("e2", 500, "2024-10-12", ["P1"], true)],
+      [row("r1", 500, "2024-10-12"), row("r2", -500, "2024-10-09")]
+    );
+    expect(proposals).toEqual([
+      { entryIds: ["e1", "e2"], rowIds: [], basis: "reversal", ambiguous: false },
+    ]);
+  });
+
+  it("without a shared reference takes the nearest earlier original; two on that day are ambiguous", () => {
+    expect(proposeMatches([entry("a", -500, "2024-10-01"), entry("b", -500, "2024-10-08"), entry("rev", 500, "2024-10-12", [], true)], [])).toEqual([
+      { entryIds: ["b", "rev"], rowIds: [], basis: "reversal", ambiguous: false },
+    ]);
+    expect(proposeMatches([entry("a", -500, "2024-10-08"), entry("b", -500, "2024-10-08"), entry("rev", 500, "2024-10-12", [], true)], [])).toEqual([
+      { entryIds: ["a", "b", "rev"], rowIds: [], basis: "reversal", ambiguous: true },
+    ]);
+  });
+
+  it("a reversal without an original stays out of the amount+date pass", () => {
+    expect(proposeMatches([entry("rev", 500, "2024-10-12", [], true)], [row("r1", 500, "2024-10-12")])).toEqual([]);
+  });
+});
+
 describe("reconciliationSummary", () => {
   it("explains the difference by the unmatched sums", () => {
-    const summary = reconciliationSummary({ statementBalance: 107580, statementBalanceDate: "2024-10-09", ledgerBalance: 107730, unmatchedEntriesSum: -150, unmatchedRowsSum: 0 });
-    expect(summary).toMatchObject({ difference: -150, explained: true });
+    const summary = reconciliationSummary({ statementBalance: 107580, statementBalanceDate: "2024-10-09", ledgerBalance: 107730, unmatchedEntriesSum: -150, unmatchedRowsSum: 0, inTransit: 0 });
+    expect(summary).toMatchObject({ difference: -150, expectedDifference: -150, explained: true });
   });
 
   it("flags a deviation the unmatched items do not explain", () => {
-    expect(reconciliationSummary({ statementBalance: 1000, statementBalanceDate: "2024-10-09", ledgerBalance: 900, unmatchedEntriesSum: 0, unmatchedRowsSum: 0 })).toMatchObject({ difference: 100, explained: false });
-    expect(reconciliationSummary({ statementBalance: 1000, statementBalanceDate: "2024-10-09", ledgerBalance: 1300, unmatchedEntriesSum: 200, unmatchedRowsSum: 500 })).toMatchObject({ difference: -300, explained: true });
+    expect(reconciliationSummary({ statementBalance: 1000, statementBalanceDate: "2024-10-09", ledgerBalance: 900, unmatchedEntriesSum: 0, unmatchedRowsSum: 0, inTransit: 0 })).toMatchObject({ difference: 100, explained: false });
+    expect(reconciliationSummary({ statementBalance: 1000, statementBalanceDate: "2024-10-09", ledgerBalance: 1300, unmatchedEntriesSum: 200, unmatchedRowsSum: 500, inTransit: 0 })).toMatchObject({ difference: -300, explained: true });
+  });
+
+  it("counts what is in transit: a matching crossing the balance day", () => {
+    // The bank booked +1000 on the 30th, the ledger row is dated the 1st:
+    // bank 1000 − bok 0 = 0 − 0 + 1000 in transit.
+    expect(reconciliationSummary({ statementBalance: 1000, statementBalanceDate: "2024-09-30", ledgerBalance: 0, unmatchedEntriesSum: 0, unmatchedRowsSum: 0, inTransit: 1000 })).toMatchObject({ difference: 1000, expectedDifference: 1000, explained: true });
+    // The ledger booked −200 on the 30th, the bank on the 1st: in transit −(−200) = +200.
+    expect(reconciliationSummary({ statementBalance: 1000, statementBalanceDate: "2024-09-30", ledgerBalance: 800, unmatchedEntriesSum: 0, unmatchedRowsSum: 0, inTransit: 200 })).toMatchObject({ difference: 200, explained: true });
   });
 
   it("has no difference without a statement balance", () => {
-    expect(reconciliationSummary({ statementBalance: null, statementBalanceDate: null, ledgerBalance: 10.005, unmatchedEntriesSum: 0, unmatchedRowsSum: 0 })).toMatchObject({ difference: null, explained: false, ledgerBalance: 10.01 });
+    expect(reconciliationSummary({ statementBalance: null, statementBalanceDate: null, ledgerBalance: 10.005, unmatchedEntriesSum: 0, unmatchedRowsSum: 0, inTransit: 0 })).toMatchObject({ difference: null, explained: false, ledgerBalance: 10.01 });
   });
 });

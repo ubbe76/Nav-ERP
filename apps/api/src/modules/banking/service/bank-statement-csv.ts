@@ -45,14 +45,25 @@ function checkDate(y: string, mo: string, d: string): string | null {
 // false) → 1234.56. Without a stated convention the LAST separator is the
 // decimal mark (Swedish exports write the comma). Trailing currency
 // ("kr", "SEK") and a Unicode minus are tolerated.
-export function parseBankCsvAmount(raw: string, decimalComma?: boolean): number | null {
+function cleanAmount(raw: string): string {
   let s = raw
     .replace(/[\s  ]/g, "")
     .replace(/kr$|SEK$/i, "")
     .replace(/−/g, "-");
-  if (s === "") return null;
   // "123,45-" (some exports put the sign last).
   if (/^\d.*-$/.test(s)) s = `-${s.slice(0, -1)}`;
+  return s;
+}
+
+// Without a stated convention, "1.234" is read as 1,234 — but it could be a
+// thousands point (1 234). The parser warns so the user sets decimalComma.
+export function isAmbiguousCsvAmount(raw: string, decimalComma?: boolean): boolean {
+  return decimalComma === undefined && /^[+-]?\d{1,3}\.\d{3}$/.test(cleanAmount(raw));
+}
+
+export function parseBankCsvAmount(raw: string, decimalComma?: boolean): number | null {
+  let s = cleanAmount(raw);
+  if (s === "") return null;
   if (decimalComma === true) s = s.replace(/\./g, "").replace(",", ".");
   else if (decimalComma === false) s = s.replace(/,/g, "");
   else {
@@ -78,6 +89,31 @@ export function readBankCsvHeaders(buf: Buffer, opts: { delimiter?: ";" | "," | 
   return (records[0] ?? []).map((h) => h.trim());
 }
 
+// In which order the file lists its rows. "ascending" = oldest first (the
+// last row is the latest), "descending" = newest first, "unknown" = one day
+// without a balance chain that settles it (read as ascending).
+export function rowOrder(rows: readonly { bookingDate: string; amount: number; balance: number | null }[]): "ascending" | "descending" | "unknown" {
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  if (!first || !last || rows.length < 2) return "unknown";
+  if (first.bookingDate < last.bookingDate) return "ascending";
+  if (first.bookingDate > last.bookingDate) return "descending";
+  if (rows.some((r) => r.balance === null)) return "unknown";
+  // Ascending: balance[i] = balance[i−1] + amount[i]. Descending: the file's
+  // previous row is the later one, so balance[i−1] = balance[i] + amount[i−1].
+  let ascending = true;
+  let descending = true;
+  for (let i = 1; i < rows.length; i++) {
+    const prev = rows[i - 1]!;
+    const cur = rows[i]!;
+    if (round2(prev.balance! + cur.amount) !== round2(cur.balance!)) ascending = false;
+    if (round2(cur.balance! + prev.amount) !== round2(prev.balance!)) descending = false;
+  }
+  if (ascending && !descending) return "ascending";
+  if (descending && !ascending) return "descending";
+  return "unknown";
+}
+
 function columnIndex(headers: string[], name: string, what: string): number {
   const wanted = name.trim().toLowerCase();
   const index = headers.findIndex((h) => h.trim().toLowerCase() === wanted);
@@ -85,7 +121,10 @@ function columnIndex(headers: string[], name: string, what: string): number {
   return index;
 }
 
-export function parseBankStatementCsv(buf: Buffer, mapping: BankCsvMappingInput, account: string, currency: string): ParsedBankCsv {
+// `account` is the identifier the statement is reported under; `dedupeScope`
+// (default the same) is what the dedupe key is hashed on — the service passes
+// the bank account's id, which outlives a corrected or learned identifier.
+export function parseBankStatementCsv(buf: Buffer, mapping: BankCsvMappingInput, account: string, currency: string, dedupeScope = account): ParsedBankCsv {
   const { text } = decodeBuffer(buf);
   const lines = text.split(/\r\n|\r|\n/);
   const body = lines.slice(mapping.skipRows ?? 0).join("\n");
@@ -105,6 +144,7 @@ export function parseBankStatementCsv(buf: Buffer, mapping: BankCsvMappingInput,
 
   const warnings: string[] = [];
   const errors: string[] = [];
+  const ambiguousAmounts: string[] = [];
   const hashCounts = new Map<string, number>();
   const entries: (ParsedStatementEntry & { balance: number | null })[] = [];
   records.slice(1).forEach((record, i) => {
@@ -132,15 +172,16 @@ export function parseBankStatementCsv(buf: Buffer, mapping: BankCsvMappingInput,
       warnings.push(`Rad ${line} har belopp 0 och hoppades över`);
       return;
     }
+    if (isAmbiguousCsvAmount(rawAmount, mapping.decimalComma)) ambiguousAmounts.push(`rad ${line} "${rawAmount}"`);
     const valueDate = valueDateIx === null || cell(valueDateIx) === "" ? null : parseBankCsvDate(cell(valueDateIx));
     const reference = referenceIx === null || cell(referenceIx) === "" ? null : cell(referenceIx).slice(0, 140);
     const balanceRaw = balanceIx === null ? "" : cell(balanceIx);
     const balance = balanceRaw === "" ? null : parseBankCsvAmount(balanceRaw, mapping.decimalComma);
     const lineText = (cell(textIx) || reference || "Bankpost").slice(0, 255);
-    const base = createHash("sha256").update(JSON.stringify([account, bookingDate, amount.toFixed(2), lineText, reference])).digest("hex");
+    const base = createHash("sha256").update(JSON.stringify([dedupeScope, bookingDate, amount.toFixed(2), lineText, reference])).digest("hex");
     const n = (hashCounts.get(base) ?? 0) + 1;
     hashCounts.set(base, n);
-    const dedupeKey = `${account}|csv:${base}#${n}`;
+    const dedupeKey = `${dedupeScope}|csv:${base}#${n}`;
     if (dedupeKey.length > STATEMENT_DEDUPE_KEY_MAX) throw new BankStatementCsvMappingError("Kontots identifierare är för lång");
     entries.push({
       bookingDate,
@@ -162,15 +203,24 @@ export function parseBankStatementCsv(buf: Buffer, mapping: BankCsvMappingInput,
     const shown = errors.slice(0, 5).join("; ");
     throw new BankStatementCsvMappingError(errors.length > 5 ? `${shown} … (${errors.length} rader)` : shown);
   }
+  if (ambiguousAmounts.length > 0) {
+    const shown = ambiguousAmounts.slice(0, 3).join(", ");
+    warnings.push(
+      `Beloppet på ${shown}${ambiguousAmounts.length > 3 ? ` och ${ambiguousAmounts.length - 3} rader till` : ""} har en ensam punkt följd av tre siffror och lästes som decimaltecken — ange i kolumnmappningen om filen använder decimalkomma eller decimalpunkt`
+    );
+  }
 
   // Exports come newest-first or oldest-first; the closing balance is the
   // chronologically last row's, the opening balance the first row's before
-  // its own amount.
-  const first = entries[0];
-  const last = entries[entries.length - 1];
-  const descending = first && last && first.bookingDate > last.bookingDate;
-  const chronoFirst = descending ? last : first;
-  const chronoLast = descending ? first : last;
+  // its own amount. The dates decide when they differ; within one day the
+  // balance column's chain does (each row's balance = the previous row's +
+  // its amount, read in one direction or the other).
+  const order = rowOrder(entries);
+  const chronoFirst = order === "descending" ? entries[entries.length - 1] : entries[0];
+  const chronoLast = order === "descending" ? entries[0] : entries[entries.length - 1];
+  if (order === "unknown" && entries.length > 1 && entries.every((e) => e.balance !== null)) {
+    warnings.push("Saldokolumnen följer inte beloppen rad för rad — kontrollera att utgående saldo blev rätt");
+  }
   const dates = entries.map((e) => e.bookingDate).sort();
   const closingBalance = chronoLast?.balance ?? null;
   const openingBalance = chronoFirst && chronoFirst.balance !== null ? round2(chronoFirst.balance - chronoFirst.amount) : null;

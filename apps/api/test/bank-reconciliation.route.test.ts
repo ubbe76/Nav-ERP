@@ -254,10 +254,46 @@ describe("avstämning, matchning, bokföring, regler, avstämd t.o.m.", () => {
     expect(imported.json()).toMatchObject({ imported: 1, autoMatched: 1 });
     const marked = await ekonomi().inject({ method: "POST", url: "/bank-reconciliations", payload: { bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-09` } });
     expect(marked.statusCode).toBe(201);
-    expect(marked.json()).toEqual({ id: expect.any(String), throughDate: `${BANK_YEAR}-10-09`, statementBalance: 500, ledgerBalance: 500, createdAt: expect.any(String), createdBy: userId });
+    expect(marked.json()).toEqual({ id: expect.any(String), throughDate: `${BANK_YEAR}-10-09`, statementBalance: 500, ledgerBalance: 500, opening: false, matchId: null, createdAt: expect.any(String), createdBy: userId });
     const view = (await ekonomi().inject({ method: "GET", url: `/bank-reconciliation?bankAccountId=${account.id}&from=${BANK_YEAR}-10-01&to=${BANK_YEAR}-10-31` })).json();
     expect(view.reconciliations).toEqual([marked.json()]);
     expect(view.bankAccount.reconciledThrough).toBe(`${BANK_YEAR}-10-09`);
-    expect(view.summary).toMatchObject({ difference: 0, explained: true });
+    expect(view.summary).toMatchObject({ difference: 0, inTransit: 0, expectedDifference: 0, explained: true });
+  });
+
+  it("Startpunkt: POST /bank-accounts/:id/opening — 409 on a wrong balance or a second opening, 201 with the mark and the matching; PATCH locks the ledger account", async () => {
+    const account = await createAccount();
+    const bank = await accountId("1930");
+    const series = await testEconomyService.createSeries({ code: "A", name: "Manuella" });
+    await testEconomyService.createVerification({ seriesId: series.id, date: `${BANK_YEAR}-01-01`, description: "IB", rows: [{ accountId: bank, debit: 2500, credit: 0 }, { accountId: await accountId("1510"), debit: 0, credit: 2500 }], book: true }, userId);
+    const wrong = await ekonomi().inject({ method: "POST", url: `/bank-accounts/${account.id}/opening`, payload: { date: `${BANK_YEAR}-09-30`, statementBalance: 2400 } });
+    expect(wrong.statusCode).toBe(409);
+    expect(wrong.json()).toMatchObject({ code: "bank-opening-balance-mismatch", statementBalance: 2400, ledgerBalance: 2500 });
+    expect((await ekonomi().inject({ method: "POST", url: `/bank-accounts/${account.id}/opening`, payload: { date: "nej", statementBalance: 1 } })).statusCode).toBe(400);
+    expect((await ekonomi().inject({ method: "POST", url: `/bank-accounts/${NIL}/opening`, payload: { date: `${BANK_YEAR}-09-30`, statementBalance: 0 } })).statusCode).toBe(404);
+    const created = await ekonomi().inject({ method: "POST", url: `/bank-accounts/${account.id}/opening`, payload: { date: `${BANK_YEAR}-09-30`, statementBalance: 2500 } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      reconciliation: { id: expect.any(String), throughDate: `${BANK_YEAR}-09-30`, statementBalance: 2500, ledgerBalance: 2500, opening: true, matchId: expect.any(String), createdBy: userId },
+      match: { kind: "opening", entries: [], rows: [{ amount: 2500 }] },
+    });
+    const again = await ekonomi().inject({ method: "POST", url: `/bank-accounts/${account.id}/opening`, payload: { date: `${BANK_YEAR}-09-30`, statementBalance: 2500 } });
+    expect(again.statusCode).toBe(409);
+    expect(again.json()).toMatchObject({ code: "bank-opening-not-allowed", reason: "mark-exists" });
+    const view = (await ekonomi().inject({ method: "GET", url: `/bank-reconciliation?bankAccountId=${account.id}&from=${BANK_YEAR}-10-01&to=${BANK_YEAR}-10-31` })).json();
+    expect(view.matches).toEqual([expect.objectContaining({ kind: "opening", id: created.json().match.id })]);
+    expect(view.reconciliations[0]).toMatchObject({ opening: true });
+    expect(view.bankAccount).toMatchObject({ reconciledThrough: `${BANK_YEAR}-09-30`, hasActivity: true });
+    // The ledger account is locked now (a matching exists), the name is not.
+    const locked = await ekonomi().inject({ method: "PATCH", url: `/bank-accounts/${account.id}`, payload: { ledgerAccount: "1940" } });
+    expect(locked.statusCode).toBe(409);
+    expect(locked.json()).toMatchObject({ code: "bank-account-in-use", field: "ledgerAccount" });
+    expect((await ekonomi().inject({ method: "PATCH", url: `/bank-accounts/${account.id}`, payload: { name: "Nytt" } })).statusCode).toBe(200);
+    // Undo the opening through the match route: the mark goes with it.
+    const undone = await ekonomi().inject({ method: "POST", url: `/bank-matches/${created.json().match.id}/undo` });
+    expect(undone.statusCode).toBe(200);
+    const after = (await ekonomi().inject({ method: "GET", url: `/bank-reconciliation?bankAccountId=${account.id}&from=${BANK_YEAR}-10-01&to=${BANK_YEAR}-10-31` })).json();
+    expect(after.reconciliations).toEqual([]);
+    expect(after.bankAccount.reconciledThrough).toBeNull();
   });
 });

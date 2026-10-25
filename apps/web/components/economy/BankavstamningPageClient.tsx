@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
+import { Card } from "../ui/Card";
 import { Checkbox, Field, Input, Select } from "../ui/Field";
-import { FormError, FormHint, FormNotice } from "../ui/Form";
+import { FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
 import { HelpLink } from "../ui/HelpLink";
 import { useListNavigation } from "../ui/ListControls";
 import { SectionHeading } from "../ui/SectionHeading";
@@ -23,6 +24,7 @@ import type {
   BankLedgerRow,
   BankMatch,
   BankMatchProposal,
+  BankOpeningResult,
   BankReconciliationRecord,
   BankReconciliationView,
   BankStatementEntry,
@@ -33,7 +35,7 @@ import styles from "./Bankavstamning.module.css";
 import { BankBookDialog, type BookedEntry } from "./BankBookDialog";
 import { BankImportDialog } from "./BankImportDialog";
 
-const BASIS_LABELS = { reference: "referens", amount_date: "belopp och datum" } as const;
+const BASIS_LABELS = { reference: "referens", reversal: "återföring", amount_date: "belopp och datum" } as const;
 
 function toggled(set: Set<string>, id: string, on: boolean): Set<string> {
   const next = new Set(set);
@@ -72,6 +74,8 @@ export function BankavstamningPageClient({
   const [fromInput, setFromInput] = useState(from);
   const [toInput, setToInput] = useState(to);
   const [reconcileDate, setReconcileDate] = useState("");
+  const [openingDate, setOpeningDate] = useState("");
+  const [openingBalance, setOpeningBalance] = useState("");
   const [notice, setNotice] = useState<ReactNode>(null);
   const [failures, setFailures] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -184,15 +188,41 @@ export function BankavstamningPageClient({
 
   async function undo(m: BankMatch) {
     const ok = await confirmDialog(
-      `Ångra matchningen av ${m.entries.length} ${m.entries.length === 1 ? "post" : "poster"} och ${m.rows.length} ${m.rows.length === 1 ? "rad" : "rader"}? Posterna och raderna blir omatchade igen${m.kind === "created" ? " — verifikatet som bokfördes från posten ligger kvar" : ""}.`,
-      { confirmLabel: "Ångra matchningen", danger: true }
+      m.kind === "opening"
+        ? `Ångra startpunkten? De ${m.entries.length} ${m.entries.length === 1 ? "posten" : "posterna"} och ${m.rows.length} ${m.rows.length === 1 ? "raden" : "raderna"} som den täcker blir omatchade igen och avstämningsmärket tas bort.`
+        : `Ångra matchningen av ${m.entries.length} ${m.entries.length === 1 ? "post" : "poster"} och ${m.rows.length} ${m.rows.length === 1 ? "rad" : "rader"}? Posterna och raderna blir omatchade igen${m.kind === "created" ? " — verifikatet som bokfördes från posten ligger kvar" : ""}.`,
+      { confirmLabel: m.kind === "opening" ? "Ångra startpunkten" : "Ångra matchningen", danger: true }
     );
     if (!ok) return;
     void run(async () => {
       await apiFetch<BankMatch>(`/api/v1/bank-matches/${m.id}/undo`, { method: "POST" });
-      setNotice("Matchningen ångrades.");
+      setNotice(m.kind === "opening" ? "Startpunkten ångrades." : "Matchningen ångrades.");
       router.refresh();
     }, "Matchningen kunde inte ångras");
+  }
+
+  // The Startpunkt: everything on the account up to the day is taken as
+  // reconciled, with the statement balance the user reads off the bank.
+  async function createOpening() {
+    if (!view) return;
+    if (!isIsoDate(openingDate)) return setError("Ange startdatumet.");
+    const balance = Number(openingBalance.replace(",", "."));
+    if (openingBalance.trim() === "" || !Number.isFinite(balance)) return setError("Ange kontoutdragets saldo per startdatumet.");
+    const ok = await confirmDialog(
+      `Skapa startpunkten ${openingDate} med saldot ${formatMoney(round2(balance))} kr enligt kontoutdraget? Alla poster och rader på ${view.bankAccount.name} till och med den dagen räknas då som avstämda.`,
+      { confirmLabel: "Skapa startpunkt" }
+    );
+    if (!ok) return;
+    void run(async () => {
+      const result = await apiFetch<BankOpeningResult>(`/api/v1/bank-accounts/${view.bankAccount.id}/opening`, {
+        method: "POST",
+        body: JSON.stringify({ date: openingDate, statementBalance: round2(balance) }),
+      });
+      setNotice(
+        `Startpunkten ${openingDate} skapades: ${result.match.entries.length} ${result.match.entries.length === 1 ? "post" : "poster"} och ${result.match.rows.length} ${result.match.rows.length === 1 ? "rad" : "rader"} till och med den dagen räknas som avstämda.`
+      );
+      router.refresh();
+    }, "Startpunkten kunde inte skapas");
   }
 
   async function bookByRule() {
@@ -353,8 +383,17 @@ export function BankavstamningPageClient({
       {view?.changedAfterReconciliation && (
         <FormNotice>
           Bokföringen har ändrats efter avstämningen {view.changedAfterReconciliation.through}:{" "}
-          {view.changedAfterReconciliation.rows} {view.changedAfterReconciliation.rows === 1 ? "rad" : "rader"} på bankkontot med
-          datum t.o.m. den dagen har tillkommit. Kontrollera och stäm av igen.
+          {[
+            view.changedAfterReconciliation.rows > 0
+              ? `${view.changedAfterReconciliation.rows} ${view.changedAfterReconciliation.rows === 1 ? "rad" : "rader"} på bankkontot`
+              : null,
+            view.changedAfterReconciliation.entries > 0
+              ? `${view.changedAfterReconciliation.entries} ${view.changedAfterReconciliation.entries === 1 ? "post" : "poster"} på kontoutdraget`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" och ")}{" "}
+          med datum t.o.m. den dagen har tillkommit eller är omatchade. Kontrollera och stäm av igen.
         </FormNotice>
       )}
 
@@ -382,6 +421,11 @@ export function BankavstamningPageClient({
               sub={`t.o.m. ${balanceDate} · ${rows.length} ${rows.length === 1 ? "rad" : "rader"} i perioden`}
             />
             <Tile
+              label="I transit"
+              value={`${formatMoney(summary.inTransit)} kr`}
+              sub={`matchningar som korsar ${balanceDate}`}
+            />
+            <Tile
               label="Skillnad"
               value={summary.difference === null ? "–" : `${formatMoney(summary.difference)} kr`}
               sub={`kontoutdraget minus bokföringen per ${balanceDate}`}
@@ -393,15 +437,58 @@ export function BankavstamningPageClient({
             </div>
           ) : summary.explained ? (
             <div className={`${styles.verdict} ${styles.verdictOk}`}>
-              Skillnaden per {balanceDate} är förklarad: den motsvarar de omatchade posterna minus de omatchade raderna till och med den
-              dagen ({formatMoney(round2(summary.unmatchedEntriesSum - summary.unmatchedRowsSum))} kr).
+              Skillnaden per {balanceDate} är förklarad: den motsvarar de omatchade posterna minus de omatchade raderna
+              {summary.inTransit !== 0 ? " plus det som är i transit" : ""} till och med den dagen ({formatMoney(summary.expectedDifference)} kr).
             </div>
           ) : (
             <div className={`${styles.verdict} ${styles.verdictBad}`}>
               Avvikelse per {balanceDate}: skillnaden på {formatMoney(summary.difference)} kr förklaras inte av de omatchade posterna
-              och raderna till och med den dagen ({formatMoney(round2(summary.unmatchedEntriesSum - summary.unmatchedRowsSum))} kr). Det
-              beror oftast på att ett kontoutdrag saknas för en del av perioden, eller att något har ändrats efter importen.
+              och raderna{summary.inTransit !== 0 ? " och det som är i transit" : ""} till och med den dagen ({formatMoney(summary.expectedDifference)} kr).
+              Det beror oftast på att ett kontoutdrag saknas för en del av perioden, att något har ändrats efter importen
+              {bankAccount.reconciledThrough === null ? ", eller att avstämningen saknar en startpunkt" : ""}.
             </div>
+          )}
+
+          {bankAccount.reconciledThrough === null && (
+            <Card maxWidth={760} className={styles.opening}>
+              <FormStack>
+                <strong>Startpunkt för avstämningen</strong>
+                <p className={styles.openingText}>
+                  Bokföringen på kontot börjar före det första kontoutdraget — den ingående balansen och allt som bokfördes innan kan
+                  aldrig matchas mot en post. Ange dagen avstämningen ska börja och kontoutdragets saldo per den dagen (vanligtvis
+                  dagen före det första kontoutdraget du importerar). Allt till och med dagen räknas då som avstämt, och saldot måste
+                  stämma med bokföringens — annars bokför du skillnaden först.
+                </p>
+                <div className={styles.reconcile}>
+                  <Field label="Startdatum" htmlFor="bankOpeningDate">
+                    <Input id="bankOpeningDate" type="date" size="sm" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+                  </Field>
+                  <Field label="Kontoutdragets saldo per datumet" htmlFor="bankOpeningBalance">
+                    <Input
+                      id="bankOpeningBalance"
+                      type="number"
+                      step="0.01"
+                      inputMode="decimal"
+                      size="sm"
+                      value={openingBalance}
+                      onChange={(e) => setOpeningBalance(e.target.value)}
+                    />
+                  </Field>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={pending || !isIsoDate(openingDate) || openingBalance.trim() === ""}
+                    onClick={() => void createOpening()}
+                  >
+                    Skapa startpunkt
+                  </Button>
+                </div>
+                <FormHint>
+                  Bokföringens saldo på konto {bankAccount.ledgerAccount} per samma dag visas under Saldo i bokföringen när du väljer
+                  dagen som Till. Startpunkten kan ångras under Matchat så länge ingen senare avstämning gjorts.
+                </FormHint>
+              </FormStack>
+            </Card>
           )}
 
           <div className={styles.matchBar} role="group" aria-label="Markerat">
@@ -597,7 +684,8 @@ export function BankavstamningPageClient({
             </Button>
           </div>
           <FormHint>
-            Går bara när allt till och med datumet är matchat och kontoutdragets saldo stämmer med bokföringens.
+            Går bara när allt till och med datumet är matchat och kontoutdragets saldo stämmer med bokföringens (matchningar som korsar
+            datumet räknas som i transit).
           </FormHint>
           {view.reconciliations.length > 0 && (
             <details style={{ marginTop: 8 }}>
@@ -605,7 +693,8 @@ export function BankavstamningPageClient({
               <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
                 {view.reconciliations.map((r) => (
                   <li key={r.id}>
-                    t.o.m. {r.throughDate} — saldo {formatMoney(r.statementBalance)} kr, markerad {r.createdAt.slice(0, 10)}
+                    {r.opening ? "Startpunkt " : "t.o.m. "}
+                    {r.throughDate} — saldo {formatMoney(r.statementBalance)} kr, markerad {r.createdAt.slice(0, 10)}
                   </li>
                 ))}
               </ul>
@@ -657,6 +746,7 @@ function ProposalBadge({ proposal }: { proposal: BankMatchProposal }) {
 
 function MatchCard({ match, pending, onUndo }: { match: BankMatch; pending: boolean; onUndo: () => void }) {
   const sum = sumAmounts(match.entries);
+  const opening = match.kind === "opening";
   return (
     <details className={styles.match}>
       <summary>
@@ -666,9 +756,15 @@ function MatchCard({ match, pending, onUndo }: { match: BankMatch; pending: bool
           {match.entries.length} {match.entries.length === 1 ? "post" : "poster"} · {match.rows.length}{" "}
           {match.rows.length === 1 ? "rad" : "rader"}
         </span>
-        <span>{formatMoney(sum)} kr</span>
+        {opening ? <span>poster {formatMoney(sum)} kr · rader {formatMoney(sumAmounts(match.rows))} kr</span> : <span>{formatMoney(sum)} kr</span>}
       </summary>
       <div className={styles.matchBody}>
+        {opening && (
+          <div className={styles.openingNote}>
+            Startpunkten: allt på kontot till och med dagen räknas som avstämt utan att summorna behöver stämma. Ångra tar även bort
+            avstämningsmärket.
+          </div>
+        )}
         <div>
           <div className={styles.matchColumnTitle}>Poster på kontoutdraget</div>
           {match.entries.map((e) => (

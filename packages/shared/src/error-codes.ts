@@ -340,6 +340,17 @@ export const ERROR_CODES = {
   BANK_RULE_AMBIGUOUS: "bank-rule-ambiguous",
   BANK_RULE_ACCOUNT_MISSING: "bank-rule-account-missing",
   BANK_RECONCILIATION_INCOMPLETE: "bank-reconciliation-incomplete",
+  // Startpunkt: the typed statement balance ≠ the ledger balance per the day
+  // (409, body.statementBalance/ledgerBalance), or an opening is not allowed
+  // now (409, body.reason "mark-exists" | "later-mark").
+  BANK_OPENING_BALANCE_MISMATCH: "bank-opening-balance-mismatch",
+  BANK_OPENING_NOT_ALLOWED: "bank-opening-not-allowed",
+  // PATCH /bank-accounts/:id: ledgerAccount/currency are locked once the
+  // account has entries or matchings (409, body.field).
+  BANK_ACCOUNT_IN_USE: "bank-account-in-use",
+  // Import: the chosen account already has entries under another identifier,
+  // so the file's identifier cannot be learned onto it (409).
+  BANK_ACCOUNT_IDENTIFIER_LOCKED: "bank-account-identifier-locked",
   // configurator
   CONFIGURATOR_TEMPLATE_NOT_FOUND: "configurator-template-not-found",
   CONFIGURATOR_TEMPLATE_EXISTS: "configurator-template-exists",

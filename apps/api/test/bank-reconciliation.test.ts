@@ -1,14 +1,18 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { companyInfo, customerPayments, customers, db, systemSettings, verificationRows, verifications } from "@navet/db";
+import { bankFiles, bankRules, bankStatementEntries, companyInfo, customerPayments, customers, db, systemSettings, verificationRows, verifications } from "@navet/db";
 import { createAlertsService } from "../src/modules/alerts/service/alerts.service.js";
 import { createAlertsRepository } from "../src/modules/alerts/repository/alerts.repository.js";
 import { unreconciledBankAccountsAsOf } from "../src/modules/banking/repository/bank-reconciliation.repository.js";
 import {
+  BankAccountIdentifierLockedError,
   BankAccountIdentifierTakenError,
+  BankAccountInUseError,
   BankAccountLedgerMissingError,
   BankAccountRequiredError,
   BankEntryBookMismatchError,
+  BankOpeningBalanceMismatchError,
+  BankOpeningNotAllowedError,
   BankMatchAlreadyMatchedError,
   BankMatchAlreadyUndoneError,
   BankMatchSumMismatchError,
@@ -19,6 +23,9 @@ import {
   BankStatementCsvMappingError,
   BankStatementCurrencyError,
 } from "../src/modules/banking/service/banking.errors.js";
+import { createBankReconciliationService, UNEXPECTED_ERROR_TEXT } from "../src/modules/banking/service/bank-reconciliation.service.js";
+import { createBankSettingsRepository } from "../src/modules/banking/repository/bank-settings.repository.js";
+import { readPostingSettings } from "../src/modules/system/service/posting-settings.js";
 import { AccountingPeriodLockedError } from "../src/modules/economy/service/accounting-period-lock.js";
 import { evaluateWarnings } from "../src/modules/economy/service/year-end-checks.js";
 import { testEconomyRepository, testEconomyService } from "./helpers/services.js";
@@ -470,7 +477,7 @@ describe("avstämd t.o.m.", () => {
     const mismatch = await service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-10` }, userId).catch((err: unknown) => err);
     expect(mismatch).toBeInstanceOf(BankReconciliationIncompleteError);
     expect((mismatch as BankReconciliationIncompleteError).reason).toBe("balance-mismatch");
-    expect((mismatch as BankReconciliationIncompleteError).detail).toEqual({ statementBalance: 900, ledgerBalance: 835 });
+    expect((mismatch as BankReconciliationIncompleteError).detail).toEqual({ statementBalance: 900, ledgerBalance: 835, inTransit: 0 });
 
     let view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
     expect(view.changedAfterReconciliation).toBeNull();
@@ -478,7 +485,7 @@ describe("avstämd t.o.m.", () => {
     // A verification dated on or before the mark, booked after it.
     await bookOnBank(`${BANK_YEAR}-10-09`, -1);
     view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
-    expect(view.changedAfterReconciliation).toEqual({ through, rows: 1 });
+    expect(view.changedAfterReconciliation).toEqual({ through, rows: 1, entries: 0 });
     // Pure summary check on the view: statement 900 on 10-10, ledger 834, unmatched row −1.
     expect(view.summary).toMatchObject({ statementBalance: 900, statementBalanceDate: `${BANK_YEAR}-10-10`, ledgerBalance: 834, unmatchedEntriesSum: 0, unmatchedRowsSum: -1, difference: 66, explained: false });
   });
@@ -527,6 +534,257 @@ describe("årsbokslut och avisering", () => {
     expect((await alerts.computeAlerts(["bank_unreconciled"])).groups[0]!.count).toBe(2);
     // The seed flag is a bank_* setting, reset by the suites.
     expect((await db.select().from(systemSettings).where(eq(systemSettings.key, "bank_rules_seeded"))).length).toBe(0);
+  });
+});
+
+describe("startpunkt för avstämningen", () => {
+  it("history before the first statement blocks Avstämd t.o.m. until the opening links it; the opening needs the right balance", async () => {
+    const account = await makeAccount();
+    // The opening balance (IB) on 1930, booked long before the first statement.
+    const ib = await bookOnBank(`${BANK_YEAR}-01-01`, 100000, "1510", "Ingående balans");
+    await service.import(uploadOf(fixtureXml("camt053-swedbank.xml")), { autoMatch: false }, userId);
+    await bookOnBank(`${BANK_YEAR}-10-09`, 26180, "1510");
+    await bookOnBank(`${BANK_YEAR}-10-09`, -18450, "2440");
+    await bookOnBank(`${BANK_YEAR}-10-09`, -150);
+    expect(await service.autoMatch({ bankAccountId: account.id }, userId)).toEqual({ matched: 3, ambiguous: 0 });
+    // Everything on the statement is matched, the balances even agree (IB 100 000 + 7 580) —
+    // but the IB row can never meet an entry, so the mark is refused.
+    await expect(service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-09` }, userId)).rejects.toMatchObject({ reason: "unmatched-rows", detail: { count: 1 } });
+    let view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
+    expect(view.summary).toMatchObject({ statementBalance: 107580, ledgerBalance: 107580, unmatchedRowsSum: 100000, inTransit: 0, difference: 0, explained: false });
+
+    // The Startpunkt per the day before the statement: the typed balance must equal the ledger.
+    const wrong = await service.createOpening(account.id, { date: `${BANK_YEAR}-10-08`, statementBalance: 99000 }, userId).catch((err: unknown) => err);
+    expect(wrong).toBeInstanceOf(BankOpeningBalanceMismatchError);
+    expect(wrong).toMatchObject({ statementBalance: 99000, ledgerBalance: 100000 });
+    const opening = await service.createOpening(account.id, { date: `${BANK_YEAR}-10-08`, statementBalance: 100000 }, userId);
+    expect(opening.reconciliation).toMatchObject({ throughDate: `${BANK_YEAR}-10-08`, statementBalance: 100000, ledgerBalance: 100000, opening: true, matchId: opening.match.id });
+    expect(opening.match).toMatchObject({ kind: "opening", entries: [], rows: [expect.objectContaining({ id: ib.rowId, amount: 100000 })] });
+    await expect(service.createOpening(account.id, { date: `${BANK_YEAR}-10-08`, statementBalance: 100000 }, userId)).rejects.toMatchObject({ reason: "mark-exists" });
+
+    // Now the mark goes through, and the summary is explained.
+    const marked = await service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-09` }, userId);
+    expect(marked).toMatchObject({ throughDate: `${BANK_YEAR}-10-09`, statementBalance: 107580, ledgerBalance: 107580, opening: false, matchId: null });
+    view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
+    expect(view.summary).toMatchObject({ difference: 0, expectedDifference: 0, explained: true });
+    expect(view.ledgerRows).toEqual([]);
+    expect(view.reconciliations.map((r) => [r.throughDate, r.opening])).toEqual([[`${BANK_YEAR}-10-09`, false], [`${BANK_YEAR}-10-08`, true]]);
+    // The Startpunkt is listed under Matchat whatever the period shown.
+    expect(view.matches.find((m) => m.kind === "opening")?.id).toBe(opening.match.id);
+    expect((await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-12-01`, to: `${BANK_YEAR}-12-31` })).matches.map((m) => m.kind)).toEqual(["opening"]);
+    expect(view.bankAccount.reconciledThrough).toBe(`${BANK_YEAR}-10-09`);
+
+    // Undo of the opening is refused while a later mark rests on it.
+    await expect(service.undoMatch(opening.match.id, userId)).rejects.toMatchObject({ reason: "later-mark" });
+    expect(new BankOpeningNotAllowedError("later-mark").name).toBe("BankOpeningNotAllowedError");
+  });
+
+  it("undoing the opening frees its rows and withdraws the mark; a new opening can then be made", async () => {
+    const account = await makeAccount();
+    const ib = await bookOnBank(`${BANK_YEAR}-01-01`, 5000, "1510", "IB");
+    const opening = await service.createOpening(account.id, { date: `${BANK_YEAR}-09-30`, statementBalance: 5000 }, userId);
+    expect((await service.listAccounts(false)).rows[0]!.reconciledThrough).toBe(`${BANK_YEAR}-09-30`);
+    expect(await unreconciledBankAccountsAsOf(db, `${BANK_YEAR}-09-30`)).toEqual([]);
+    const undone = await service.undoMatch(opening.match.id, userId);
+    expect(undone.undoneAt).not.toBeNull();
+    const view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-01-01`, to: `${BANK_YEAR}-12-31` });
+    expect(view.ledgerRows.map((r) => r.id)).toEqual([ib.rowId]);
+    expect(view.reconciliations).toEqual([]);
+    expect(view.matches).toEqual([]);
+    expect(view.bankAccount.reconciledThrough).toBeNull();
+    expect(view.changedAfterReconciliation).toBeNull();
+    expect((await unreconciledBankAccountsAsOf(db, `${BANK_YEAR}-09-30`)).map((a) => a.reconciledThrough)).toEqual([null]);
+    const again = await service.createOpening(account.id, { date: `${BANK_YEAR}-09-30`, statementBalance: 5000 }, userId);
+    expect(again.match.rows).toHaveLength(1);
+  });
+});
+
+describe("i transit", () => {
+  it("a matching that crosses the balance day explains the difference and does not block the mark", async () => {
+    const account = await makeAccount();
+    // The bank booked the inbound payment on the 9th; the ledger row is dated the 11th.
+    await service.import(uploadOf(statementWith([{ direction: "credit", amount: 1000, bookingDate: `${BANK_YEAR}-10-09`, acctSvcrRef: "T1", addtlNtryInf: "Inbetalning" }], { closing: { amount: 1000, date: `${BANK_YEAR}-10-09` } })), { autoMatch: false }, userId);
+    const late = await bookOnBank(`${BANK_YEAR}-10-11`, 1000, "1510");
+    let view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-09` });
+    expect(view.summary).toMatchObject({ statementBalance: 1000, ledgerBalance: 0, unmatchedEntriesSum: 1000, unmatchedRowsSum: 0, inTransit: 0, difference: 1000, explained: true });
+    await service.createMatch({ bankAccountId: account.id, entryIds: [view.statementEntries[0]!.id], verificationRowIds: [late.rowId] }, userId);
+    view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-09` });
+    expect(view.summary).toMatchObject({ statementBalance: 1000, ledgerBalance: 0, unmatchedEntriesSum: 0, unmatchedRowsSum: 0, inTransit: 1000, difference: 1000, expectedDifference: 1000, explained: true });
+    // Per the 11th the matching is wholly on both sides: nothing in transit.
+    view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-11` });
+    expect(view.summary).toMatchObject({ statementBalanceDate: `${BANK_YEAR}-10-09`, inTransit: 1000 });
+    const marked = await service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-09` }, userId);
+    expect(marked).toMatchObject({ statementBalance: 1000, ledgerBalance: 0 });
+    // The other direction: the ledger booked −200 on the 9th, the bank on the 12th.
+    const early = await bookOnBank(`${BANK_YEAR}-10-09`, -200);
+    await service.import(uploadOf(statementWith([{ direction: "debit", amount: 200, bookingDate: `${BANK_YEAR}-10-12`, acctSvcrRef: "T2", addtlNtryInf: "Avgift" }], { closing: { amount: 800, date: `${BANK_YEAR}-10-12` } })), { autoMatch: false }, userId);
+    view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-12` });
+    await service.createMatch({ bankAccountId: account.id, entryIds: [view.statementEntries[0]!.id], verificationRowIds: [early.rowId] }, userId);
+    view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-09` });
+    expect(view.summary).toMatchObject({ statementBalance: 1000, ledgerBalance: -200, inTransit: 1200, difference: 1200, explained: true });
+    view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-12` });
+    expect(view.summary).toMatchObject({ statementBalance: 800, ledgerBalance: 800, inTransit: 0, difference: 0, explained: true });
+    const mismatch = await service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-12` }, userId);
+    expect(mismatch).toMatchObject({ statementBalance: 800, ledgerBalance: 800 });
+  });
+});
+
+describe("granskningsfynden", () => {
+  it("locks the ledger account and the currency once the account has entries or matchings", async () => {
+    const account = await makeAccount();
+    expect(account.hasActivity).toBe(false);
+    // Without entries the ledger account may still change.
+    expect((await service.updateAccount(account.id, { ledgerAccount: "1940" }, userId)).ledgerAccount).toBe("1940");
+    await service.import(uploadOf(fixtureXml("camt053-swedbank.xml")), { autoMatch: false }, userId);
+    expect((await service.getAccount(account.id)).hasActivity).toBe(true);
+    const ledger = await service.updateAccount(account.id, { ledgerAccount: "1930" }, userId).catch((err: unknown) => err);
+    expect(ledger).toBeInstanceOf(BankAccountInUseError);
+    expect((ledger as BankAccountInUseError).field).toBe("ledgerAccount");
+    await expect(service.updateAccount(account.id, { currency: "EUR" }, userId)).rejects.toMatchObject({ field: "currency" });
+    // The same values and the other fields are fine.
+    const same = await service.updateAccount(account.id, { ledgerAccount: "1940", currency: "SEK", name: "Nytt namn" }, userId);
+    expect(same).toMatchObject({ name: "Nytt namn", ledgerAccount: "1940" });
+  });
+
+  it("learns the file's identifier only onto an account without entries; refuses to take over one with statements", async () => {
+    const taken = await makeAccount("OTHER123");
+    await service.import(uploadOf(statementWith([{ direction: "credit", amount: 1, bookingDate: `${BANK_YEAR}-10-01`, acctSvcrRef: "O1" }], { bban: "OTHER123" })), { autoMatch: false }, userId);
+    const locked = await service.import(uploadOf(fixtureXml("camt053-swedbank.xml")), { bankAccountId: taken.id, autoMatch: false }, userId).catch((err: unknown) => err);
+    expect(locked).toBeInstanceOf(BankAccountIdentifierLockedError);
+    expect(locked).toMatchObject({ accountName: "Företagskonto", identifier: "OTHER123", fileIdentifier: SWEDBANK });
+    expect((await service.getAccount(taken.id)).identifier).toBe("OTHER123");
+    const preview = await service.preview({ data: Buffer.from(fixtureXml("camt053-swedbank.xml")) }, { bankAccountId: taken.id });
+    expect(preview.blockers).toEqual([expect.stringContaining("kan inte tas över")]);
+    expect(preview.unknownAccounts).toEqual([SWEDBANK]);
+    // An empty account takes the identifier as before.
+    const fresh = await service.createAccount({ name: "Nytt", identifier: "FRESH1", ledgerAccount: "1930", currency: "SEK" }, userId);
+    const result = await service.import(uploadOf(fixtureXml("camt053-swedbank.xml")), { bankAccountId: fresh.id, autoMatch: false }, userId);
+    expect(result.imported).toBe(3);
+    expect((await service.getAccount(fresh.id)).identifier).toBe(SWEDBANK);
+  });
+
+  it("checks every entry's currency, not just the statement's", async () => {
+    const account = await makeAccount();
+    const xml = statementWith([
+      { direction: "credit", amount: 10, bookingDate: `${BANK_YEAR}-10-09`, acctSvcrRef: "C1" },
+      { direction: "credit", amount: 20, bookingDate: `${BANK_YEAR}-10-09`, acctSvcrRef: "C2" },
+    ]).replace('<Amt Ccy="SEK">10.00</Amt>', '<Amt Ccy="EUR">10.00</Amt>');
+    const err = await service.import(uploadOf(xml), { autoMatch: false }, userId).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BankStatementCurrencyError);
+    expect(err).toMatchObject({ statementCurrency: "EUR", accountCurrency: "SEK" });
+    const preview = await service.preview({ data: Buffer.from(xml) }, {});
+    expect(preview.blockers).toEqual([`Kontoutdraget har poster i EUR men bankkontot ${account.name} är i SEK`]);
+    expect(await repo.countEntries(db, account.id)).toBe(0);
+  });
+
+  it("two concurrent imports of the same file both succeed with one file row and no duplicate entries", async () => {
+    const account = await makeAccount();
+    const results = await Promise.all([
+      service.import(uploadOf(fixtureXml("camt053-swedbank.xml"), "a.xml"), { autoMatch: false }, userId),
+      service.import(uploadOf(fixtureXml("camt053-swedbank.xml"), "b.xml"), { autoMatch: false }, userId),
+    ]);
+    expect(results.map((r) => r.imported).sort()).toEqual([0, 3]);
+    expect(results[0]!.bankFileId).toBe(results[1]!.bankFileId);
+    expect((await db.select().from(bankFiles)).length).toBe(1);
+    expect(await repo.countEntries(db, account.id)).toBe(3);
+  });
+
+  it("seeds the rules once under concurrent first GETs, and never for a reader who asks not to", async () => {
+    await resetBankSettings();
+    const lists = await Promise.all(Array.from({ length: 6 }, () => service.listRules()));
+    for (const list of lists) expect(list.total).toBe(5);
+    expect((await db.select().from(bankRules)).length).toBe(5);
+    await db.delete(bankRules);
+    await resetBankSettings();
+    expect((await service.listRules({ seed: false })).total).toBe(0);
+    expect((await db.select().from(systemSettings).where(eq(systemSettings.key, "bank_rules_seeded"))).length).toBe(0);
+    await db.update(companyInfo).set({ iban: "SE45 5000 0000 0583 9825 7466" });
+    expect((await service.listAccounts(false, { seed: false })).total).toBe(0);
+    expect((await service.listAccounts(false)).total).toBe(1);
+  });
+
+  it("a failure after the import's commit becomes a warning, and an unexpected error never leaks its message", async () => {
+    await makeAccount();
+    const seeded = await service.listRules();
+    await service.updateRule(seeded.rows.find((r) => r.textContains === "avgift")!.id, { autoBook: true }, userId);
+    const logged: string[] = [];
+    const broken = createBankReconciliationService({
+      db,
+      repo: { ...repo, entriesByIds: async () => { throw new TypeError("driver exploded"); }, findEntry: async () => { throw new TypeError("driver exploded"); } },
+      economy: testEconomyService,
+      settings: { read: readPostingSettings },
+      company: createBankSettingsRepository(db),
+      log: (msg) => logged.push(msg),
+    });
+    const result = await broken.import(uploadOf(fixtureXml("camt053-swedbank.xml")), { autoMatch: false }, userId);
+    expect(result.imported).toBe(3);
+    expect(result.autoBooked).toBe(0);
+    expect(result.warnings).toEqual([`Bankreglerna kunde inte köras efter importen: ${UNEXPECTED_ERROR_TEXT}`]);
+    expect(result.warnings.join(" ")).not.toContain("driver exploded");
+    expect(logged).toHaveLength(1);
+    const [entry] = await db.select({ id: bankStatementEntries.id }).from(bankStatementEntries).limit(1);
+    const byRule = await broken.bookByRule({ entryIds: [entry!.id] }, userId);
+    expect(byRule.failed).toEqual([{ entryId: entry!.id, error: { error: UNEXPECTED_ERROR_TEXT } }]);
+    expect(logged).toHaveLength(2);
+    // A known domain error keeps its code.
+    const known = await service.bookByRule({ entryIds: [crypto.randomUUID()] }, userId);
+    expect(known.failed[0]!.error.code).toBe("bank-statement-entry-not-found");
+  });
+
+  it("warns after the mark when something up to it is unmatched again (an undone matching)", async () => {
+    const account = await makeAccount();
+    const row = await bookOnBank(`${BANK_YEAR}-10-09`, 500, "1510");
+    await service.import(uploadOf(statementWith([{ direction: "credit", amount: 500, bookingDate: `${BANK_YEAR}-10-09`, acctSvcrRef: "U1" }], { closing: { amount: 500, date: `${BANK_YEAR}-10-09` } })), {}, userId);
+    await service.createReconciliation({ bankAccountId: account.id, throughDate: `${BANK_YEAR}-10-09` }, userId);
+    let view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
+    expect(view.changedAfterReconciliation).toBeNull();
+    await service.undoMatch(view.matches[0]!.id, userId);
+    view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
+    expect(view.changedAfterReconciliation).toEqual({ through: `${BANK_YEAR}-10-09`, rows: 1, entries: 1 });
+    expect(view.ledgerRows.map((r) => r.id)).toEqual([row.rowId]);
+  });
+
+  it("matches on a camt.054 entry keyed on Ntry/AcctSvcrRef (entry_ref) too", async () => {
+    const account = await makeAccount();
+    const paidFromBank = await bookOnBank(`${BANK_YEAR}-10-09`, 26180, "1510", "Inbetalning via bankfil");
+    await bookOnBank(`${BANK_YEAR}-10-09`, 26180, "1510", "Annan");
+    const { entry } = await makeBankEntry({ direction: "credit", amount: 26180, dedupeKey: `${SWEDBANK}|ntry:2024100984020001#0`, dedupeSource: "entry_ref" });
+    const customer = await makeCustomer();
+    await db.insert(customerPayments).values({
+      paymentNumber: "BET-T2",
+      customerId: customer.id,
+      paymentDate: `${BANK_YEAR}-10-09`,
+      bankAccountNumber: "1930",
+      amount: "26180",
+      amountSek: "26180",
+      verificationId: paidFromBank.verificationId,
+      bankFileEntryId: entry.id,
+    });
+    const result = await service.import(uploadOf(fixtureXml("camt053-swedbank.xml")), {}, userId);
+    expect(result.autoMatched).toBe(1);
+    const view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
+    expect(view.matches[0]!.rows.map((r) => r.id)).toEqual([paidFromBank.rowId]);
+  });
+
+  it("nets a reversal against its original automatically, never against a row", async () => {
+    const account = await makeAccount();
+    await bookOnBank(`${BANK_YEAR}-10-12`, 500, "1510", "Skulle inte matchas");
+    await service.import(
+      uploadOf(
+        statementWith([
+          { direction: "debit", amount: 500, bookingDate: `${BANK_YEAR}-10-11`, acctSvcrRef: "P1", addtlNtryInf: "Betalning" },
+          { direction: "credit", amount: 500, bookingDate: `${BANK_YEAR}-10-12`, acctSvcrRef: "P2", reversal: true, addtlNtryInf: "Återföring" },
+        ])
+      ),
+      {},
+      userId
+    );
+    const view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
+    expect(view.matches).toHaveLength(1);
+    expect(view.matches[0]).toMatchObject({ kind: "auto", rows: [] });
+    expect(view.matches[0]!.entries.map((e) => e.amount)).toEqual([-500, 500]);
+    expect(view.ledgerRows).toHaveLength(1);
+    expect(view.statementEntries).toEqual([]);
   });
 });
 

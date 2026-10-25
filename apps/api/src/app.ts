@@ -750,6 +750,7 @@ export function buildApp(database: Db = db) {
     economy: economyService,
     settings: { read: readPostingSettings },
     company: bankSettingsRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   // Anläggningsregister (ekonomi etapp 2, delprojekt 2): tillgångsgrupper,
   // anläggningar, avskrivningskörningar (serie AV via the shared poster),

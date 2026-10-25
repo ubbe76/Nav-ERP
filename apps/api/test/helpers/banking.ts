@@ -217,6 +217,7 @@ export async function makeBankEntry(input: {
   counterpartyName?: string | null;
   remittance?: BankEntryReference[];
   dedupeKey?: string;
+  dedupeSource?: "tx_acct_svcr_ref" | "clr_sys_ref" | "entry_ref" | "content_hash";
   // Valuta steg 2: a payment in another currency from the SEK account.
   instructedAmount?: number;
   instructedCurrency?: string;
@@ -242,7 +243,7 @@ export async function makeBankEntry(input: {
     .values({
       bankFileId: file!.id,
       dedupeKey: input.dedupeKey ?? `test:${crypto.randomUUID()}`,
-      dedupeSource: "tx_acct_svcr_ref",
+      dedupeSource: input.dedupeSource ?? "tx_acct_svcr_ref",
       direction: input.direction,
       reversal: input.reversal ?? false,
       account: "5512348",

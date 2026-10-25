@@ -5111,6 +5111,8 @@ export interface BankAccount {
   reconciledThrough: string | null;
   lastStatementDate: string | null;
   unmatchedCount: number;
+  // Entries or matchings exist: Huvudbokskonto and currency are locked.
+  hasActivity: boolean;
 }
 
 export interface BankRuleSuggestion {
@@ -5156,10 +5158,13 @@ export interface BankLedgerRow {
   amount: number;
 }
 
-export type BankMatchKind = "auto" | "manual" | "created";
+// opening = the Startpunkt: links everything up to the opening day without
+// the sum rule; undoing it withdraws its reconciliation mark too.
+export type BankMatchKind = "auto" | "manual" | "created" | "opening";
 
-// A matching. The view lists live ones only; POST /bank-matches/:id/undo
-// answers the match stamped `undoneAt`. The entries carry no ruleSuggestion.
+// A matching. The view lists live ones only (the Startpunkt always, whatever
+// the period); POST /bank-matches/:id/undo answers the match stamped
+// `undoneAt`. The entries carry no ruleSuggestion.
 export interface BankMatch {
   id: string;
   kind: BankMatchKind;
@@ -5170,10 +5175,12 @@ export interface BankMatch {
   rows: BankLedgerRow[];
 }
 
+// reversal = a statement entry flagged as a reversal netted against its
+// original entry (no rows).
 export interface BankMatchProposal {
   entryIds: string[];
   rowIds: string[];
-  basis: "reference" | "amount_date";
+  basis: "reference" | "reversal" | "amount_date";
   ambiguous: boolean;
 }
 
@@ -5182,18 +5189,32 @@ export interface BankReconciliationRecord {
   throughDate: string;
   statementBalance: number;
   ledgerBalance: number;
+  // The Startpunkt's mark, written by the opening matching `matchId`.
+  opening: boolean;
+  matchId: string | null;
   createdAt: string;
   createdBy: string | null;
 }
 
+// saldo bank − saldo bok = Σ omatchade poster − Σ omatchade rader + I transit,
+// all per statementBalanceDate. inTransit is what the matchings crossing the
+// day contribute; expectedDifference is the right-hand side.
 export interface BankReconciliationSummary {
   statementBalance: number | null;
   statementBalanceDate: string | null;
   ledgerBalance: number;
   unmatchedEntriesSum: number;
   unmatchedRowsSum: number;
+  inTransit: number;
   difference: number | null;
+  expectedDifference: number;
   explained: boolean;
+}
+
+// POST /bank-accounts/:id/opening — the Startpunkt: its mark and matching.
+export interface BankOpeningResult {
+  reconciliation: BankReconciliationRecord;
+  match: BankMatch;
 }
 
 export interface BankReconciliationView {
@@ -5205,7 +5226,9 @@ export interface BankReconciliationView {
   matches: BankMatch[];
   summary: BankReconciliationSummary;
   reconciliations: BankReconciliationRecord[];
-  changedAfterReconciliation: { through: string; rows: number } | null;
+  // Rows on the ledger account dated ≤ the latest mark that were booked after
+  // it or are unmatched now, and unmatched entries ≤ the mark.
+  changedAfterReconciliation: { through: string; rows: number; entries: number } | null;
   proposals: BankMatchProposal[];
 }
 

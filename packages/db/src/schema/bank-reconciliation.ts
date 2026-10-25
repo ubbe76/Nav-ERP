@@ -28,7 +28,10 @@ import { verificationRows } from "./economy";
 // are append-only in their own way (a match is undone by a stamp, never
 // deleted; a reconciliation is never changed).
 
-export const bankMatchKindEnum = pgEnum("bank_match_kind", ["auto", "manual", "created"]);
+// opening = the Startpunkt: the one matching per account that links every
+// entry and row up to the opening day WITHOUT the sum rule (history before
+// the first statement is outside the reconciliation).
+export const bankMatchKindEnum = pgEnum("bank_match_kind", ["auto", "manual", "created", "opening"]);
 export const bankRuleDirectionEnum = pgEnum("bank_rule_direction", ["in", "out", "both"]);
 
 // How a CSV export from the internet bank maps onto a statement entry
@@ -235,7 +238,10 @@ export const bankRules = pgTable(
 
 // Avstämd t.o.m. — append-only: a later mark is a new row, and a change to
 // the books on or before a marked day is a WARNING on the page, never a
-// rewrite of the mark.
+// rewrite of the mark. The one exception is the Startpunkt (opening_match_id
+// set): the mark the opening matching writes, with the statement balance the
+// user typed in. It can be undone — stamped, never deleted — as long as no
+// later mark rests on it; the CHECK keeps ordinary marks immutable.
 export const bankReconciliations = pgTable(
   "bank_reconciliations",
   {
@@ -247,8 +253,15 @@ export const bankReconciliations = pgTable(
     statementBalance: numeric("statement_balance", { precision: 14, scale: 2 }).notNull(),
     ledgerBalance: numeric("ledger_balance", { precision: 14, scale: 2 }).notNull(),
     note: text("note"),
+    openingMatchId: uuid("opening_match_id").references(() => bankMatches.id, { onDelete: "restrict" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+    undoneBy: uuid("undone_by").references(() => users.id, { onDelete: "set null" }),
   },
-  (table) => [index("idx_bank_reconciliations_account_date").on(table.bankAccountId, table.throughDate)]
+  (table) => [
+    index("idx_bank_reconciliations_account_date").on(table.bankAccountId, table.throughDate),
+    uniqueIndex("bank_reconciliations_opening_match_unique").on(table.openingMatchId),
+    check("bank_reconciliations_undo_only_opening", sql`${table.undoneAt} IS NULL OR ${table.openingMatchId} IS NOT NULL`),
+  ]
 );

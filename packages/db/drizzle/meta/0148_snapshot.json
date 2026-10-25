@@ -1,5 +1,5 @@
 {
-  "id": "50d76a2a-346a-49cf-a545-26ef586a441c",
+  "id": "57d33cfe-e290-4b01-a93b-62f7dfd113c5",
   "prevId": "61d679eb-dda0-4e5a-bb86-a952e37d9791",
   "version": "7",
   "dialect": "postgresql",
@@ -19853,6 +19853,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "opening_match_id": {
+          "name": "opening_match_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "uuid",
@@ -19865,6 +19871,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "undone_at": {
+          "name": "undone_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "undone_by": {
+          "name": "undone_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -19888,6 +19906,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "bank_reconciliations_opening_match_unique": {
+          "name": "bank_reconciliations_opening_match_unique",
+          "columns": [
+            {
+              "expression": "opening_match_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -19897,6 +19930,19 @@
           "tableTo": "bank_accounts",
           "columnsFrom": [
             "bank_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "bank_reconciliations_opening_match_id_bank_matches_id_fk": {
+          "name": "bank_reconciliations_opening_match_id_bank_matches_id_fk",
+          "tableFrom": "bank_reconciliations",
+          "tableTo": "bank_matches",
+          "columnsFrom": [
+            "opening_match_id"
           ],
           "columnsTo": [
             "id"
@@ -19916,12 +19962,30 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
+        },
+        "bank_reconciliations_undone_by_users_id_fk": {
+          "name": "bank_reconciliations_undone_by_users_id_fk",
+          "tableFrom": "bank_reconciliations",
+          "tableTo": "users",
+          "columnsFrom": [
+            "undone_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "bank_reconciliations_undo_only_opening": {
+          "name": "bank_reconciliations_undo_only_opening",
+          "value": "\"bank_reconciliations\".\"undone_at\" IS NULL OR \"bank_reconciliations\".\"opening_match_id\" IS NOT NULL"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.bank_rules": {
@@ -20948,7 +21012,8 @@
       "values": [
         "auto",
         "manual",
-        "created"
+        "created",
+        "opening"
       ]
     },
     "public.bank_rule_direction": {

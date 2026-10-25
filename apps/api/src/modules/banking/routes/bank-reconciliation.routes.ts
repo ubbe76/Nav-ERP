@@ -8,6 +8,7 @@ import {
   bookBankEntrySchema,
   createBankAccountSchema,
   createBankMatchSchema,
+  createBankOpeningSchema,
   createBankReconciliationSchema,
   createBankRuleSchema,
   listBankAccountsQuerySchema,
@@ -27,7 +28,9 @@ import {
 } from "../../economy/service/economy.service.js";
 import { errorBody } from "../../system/service/error-body.js";
 import {
+  BankAccountIdentifierLockedError,
   BankAccountIdentifierTakenError,
+  BankAccountInUseError,
   BankAccountLedgerMissingError,
   BankAccountNotFoundError,
   BankAccountRequiredError,
@@ -38,6 +41,8 @@ import {
   BankMatchNotFoundError,
   BankMatchSumMismatchError,
   BankMatchWrongAccountError,
+  BankOpeningBalanceMismatchError,
+  BankOpeningNotAllowedError,
   BankReconciliationIncompleteError,
   BankRuleAccountMissingError,
   BankRuleAmbiguousError,
@@ -82,6 +87,12 @@ function bankError(err: unknown, reply: Reply) {
   if (err instanceof BankMatchSumMismatchError) return reply.code(409).send({ ...errorBody(err), entriesSum: err.entriesSum, rowsSum: err.rowsSum });
   if (err instanceof BankRuleAmbiguousError) return reply.code(409).send({ ...errorBody(err), ruleIds: err.ruleIds });
   if (err instanceof BankReconciliationIncompleteError) return reply.code(409).send({ ...errorBody(err), reason: err.reason, ...err.detail });
+  if (err instanceof BankOpeningBalanceMismatchError) return reply.code(409).send({ ...errorBody(err), statementBalance: err.statementBalance, ledgerBalance: err.ledgerBalance });
+  if (err instanceof BankOpeningNotAllowedError) return reply.code(409).send({ ...errorBody(err), reason: err.reason });
+  if (err instanceof BankAccountInUseError) return reply.code(409).send({ ...errorBody(err), field: err.field });
+  if (err instanceof BankAccountIdentifierLockedError) {
+    return reply.code(409).send({ ...errorBody(err), accountName: err.accountName, identifier: err.identifier, fileIdentifier: err.fileIdentifier });
+  }
   if (
     err instanceof BankAccountLedgerMissingError ||
     err instanceof BankAccountRequiredError ||
@@ -140,7 +151,10 @@ export async function bankReconciliationRoutes(app: FastifyInstance, opts: { ser
   const ekonomi = { preHandler: requirePermission("ekonomi") };
 
   // --- Bankkonton ---
-  app.get("/bank-accounts", ekonomi, async (req) => service.listAccounts(listBankAccountsQuerySchema.parse(req.query).includeInactive));
+  // The first GET may seed the company account (and /bank-rules the
+  // suggested rules) — not for an Endast läsning user, who writes nothing.
+  const seeds = (req: FastifyRequest) => ({ seed: req.user?.readOnly !== true });
+  app.get("/bank-accounts", ekonomi, async (req) => service.listAccounts(listBankAccountsQuerySchema.parse(req.query).includeInactive, seeds(req)));
 
   app.post("/bank-accounts", ekonomi, async (req, reply) => {
     const input = createBankAccountSchema.parse(req.body);
@@ -155,6 +169,16 @@ export async function bankReconciliationRoutes(app: FastifyInstance, opts: { ser
     const input = updateBankAccountSchema.parse(req.body);
     try {
       return await service.updateAccount(req.params.id, input, req.user!.id);
+    } catch (err) {
+      return bankError(err, reply);
+    }
+  });
+
+  // Startpunkt för avstämningen: the opening matching + the first mark.
+  app.post<{ Params: { id: string } }>("/bank-accounts/:id/opening", ekonomi, async (req, reply) => {
+    const input = createBankOpeningSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await service.createOpening(req.params.id, input, req.user!.id));
     } catch (err) {
       return bankError(err, reply);
     }
@@ -242,7 +266,7 @@ export async function bankReconciliationRoutes(app: FastifyInstance, opts: { ser
   });
 
   // --- Bankregler ---
-  app.get("/bank-rules", ekonomi, async () => service.listRules());
+  app.get("/bank-rules", ekonomi, async (req) => service.listRules(seeds(req)));
 
   app.post("/bank-rules", ekonomi, async (req, reply) => {
     const input = createBankRuleSchema.parse(req.body);

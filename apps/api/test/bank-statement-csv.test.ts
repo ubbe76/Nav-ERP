@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BankStatementCsvMappingError } from "../src/modules/banking/service/banking.errors.js";
-import { parseBankCsvAmount, parseBankCsvDate, parseBankStatementCsv, readBankCsvHeaders } from "../src/modules/banking/service/bank-statement-csv.js";
+import { isAmbiguousCsvAmount, parseBankCsvAmount, parseBankCsvDate, parseBankStatementCsv, readBankCsvHeaders, rowOrder } from "../src/modules/banking/service/bank-statement-csv.js";
 
 const MAPPING = { dateColumn: "Bokföringsdag", amountColumn: "Belopp", textColumn: "Text", balanceColumn: "Saldo", referenceColumn: "Referens" };
 
@@ -27,6 +27,31 @@ describe("parseBankCsvAmount", () => {
     expect(parseBankCsvAmount("")).toBeNull();
     expect(parseBankCsvAmount("abc")).toBeNull();
     expect(parseBankCsvAmount("1,2,3")).toBeNull();
+  });
+
+  it("flags a lone point followed by exactly three digits as ambiguous unless the convention is stated", () => {
+    expect(isAmbiguousCsvAmount("1.234")).toBe(true);
+    expect(isAmbiguousCsvAmount("-12.500 kr")).toBe(true);
+    expect(isAmbiguousCsvAmount("1.234", true)).toBe(false);
+    expect(isAmbiguousCsvAmount("1.234", false)).toBe(false);
+    expect(isAmbiguousCsvAmount("1.23")).toBe(false);
+    expect(isAmbiguousCsvAmount("1.234,50")).toBe(false);
+    expect(isAmbiguousCsvAmount("1234.567")).toBe(false);
+  });
+});
+
+describe("rowOrder", () => {
+  const r = (bookingDate: string, amount: number, balance: number | null) => ({ bookingDate, amount, balance });
+  it("decides by the dates when they differ, by the balance chain within one day", () => {
+    expect(rowOrder([r("2024-10-09", -1, 1), r("2024-10-08", -1, 2)])).toBe("descending");
+    expect(rowOrder([r("2024-10-08", -1, 1), r("2024-10-09", -1, 0)])).toBe("ascending");
+    // One day, newest first: 107 580 after −899 means the row below carried 108 479.
+    expect(rowOrder([r("2024-10-09", -899, 107580), r("2024-10-09", 10000, 108479), r("2024-10-09", -150, 98479)])).toBe("descending");
+    // One day, oldest first.
+    expect(rowOrder([r("2024-10-09", -150, 98479), r("2024-10-09", 10000, 108479), r("2024-10-09", -899, 107580)])).toBe("ascending");
+    expect(rowOrder([r("2024-10-09", -1, null), r("2024-10-09", -1, null)])).toBe("unknown");
+    expect(rowOrder([r("2024-10-09", -1, 5), r("2024-10-09", -1, 7)])).toBe("unknown");
+    expect(rowOrder([r("2024-10-09", -1, 5)])).toBe("unknown");
   });
 });
 
@@ -58,6 +83,32 @@ describe("parseBankStatementCsv", () => {
     expect(statement.entries[1]!.references).toEqual(["501262"]);
     expect(statement.entries[0]!.dedupeKey).toMatch(/^12345678\|csv:[0-9a-f]{64}#1$/);
     expect(statement.entries[0]!.details).toEqual({ transactions: [], balance: 107580 });
+  });
+
+  it("reads a one-day export newest first by the balance chain, and warns about ambiguous points", () => {
+    const oneDay = ["Bokföringsdag;Text;Belopp;Saldo", "2024-10-09;KORTKÖP;-899,00;107 580,00", "2024-10-09;INBETALNING;10 000,00;108 479,00"].join("\n");
+    const result = parseBankStatementCsv(Buffer.from(oneDay), { dateColumn: "Bokföringsdag", amountColumn: "Belopp", textColumn: "Text", balanceColumn: "Saldo" }, "X", "SEK");
+    expect(result.statement).toMatchObject({ openingBalance: 98479, closingBalance: 107580, closingBalanceDate: "2024-10-09" });
+    expect(result.warnings).toEqual([]);
+    const dotted = ["Bokföringsdag;Text;Belopp", "2024-10-09;A;1.234", "2024-10-09;B;-2.500"].join("\n");
+    const ambiguous = parseBankStatementCsv(Buffer.from(dotted), { dateColumn: "Bokföringsdag", amountColumn: "Belopp", textColumn: "Text" }, "X", "SEK");
+    expect(ambiguous.statement.entries.map((e) => e.amount)).toEqual([1.23, -2.5]);
+    expect(ambiguous.warnings).toHaveLength(1);
+    expect(ambiguous.warnings[0]).toContain('rad 2 "1.234", rad 3 "-2.500"');
+    expect(ambiguous.warnings[0]).toContain("decimalkomma eller decimalpunkt");
+    const stated = parseBankStatementCsv(Buffer.from(dotted), { dateColumn: "Bokföringsdag", amountColumn: "Belopp", textColumn: "Text", decimalComma: true }, "X", "SEK");
+    expect(stated.statement.entries.map((e) => e.amount)).toEqual([1234, -2500]);
+    expect(stated.warnings).toEqual([]);
+  });
+
+  it("hashes the dedupe key on the given scope (the bank account's id), not the identifier", () => {
+    const file = ["Bokföringsdag;Text;Belopp", "2024-10-09;AVGIFT;-150,00"].join("\n");
+    const mapping = { dateColumn: "Bokföringsdag", amountColumn: "Belopp", textColumn: "Text" };
+    const scoped = parseBankStatementCsv(Buffer.from(file), mapping, "IDENT-1", "SEK", "account-uuid").statement.entries[0]!;
+    const renamed = parseBankStatementCsv(Buffer.from(file), mapping, "IDENT-2", "SEK", "account-uuid").statement.entries[0]!;
+    expect(scoped.dedupeKey).toMatch(/^account-uuid\|csv:[0-9a-f]{64}#1$/);
+    expect(renamed.dedupeKey).toBe(scoped.dedupeKey);
+    expect(renamed.dedupeKey).not.toBe(parseBankStatementCsv(Buffer.from(file), mapping, "IDENT-1", "SEK").statement.entries[0]!.dedupeKey);
   });
 
   it("the same file gives the same keys; two identical lines get #1 and #2", () => {

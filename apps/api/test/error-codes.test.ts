@@ -253,6 +253,10 @@ import {
   BankStatementCsvMappingError,
   BankStatementAccountUnknownError,
   BankStatementAccountMismatchError,
+  BankOpeningBalanceMismatchError,
+  BankOpeningNotAllowedError,
+  BankAccountInUseError,
+  BankAccountIdentifierLockedError,
   BankStatementCurrencyError,
   BankStatementEntryNotFoundError,
   BankMatchNotFoundError,
@@ -731,6 +735,10 @@ const cases: Array<[Error, string]> = [
   [new BankRuleAmbiguousError(["r-1", "r-2"]), ERROR_CODES.BANK_RULE_AMBIGUOUS],
   [new BankRuleAccountMissingError("6570"), ERROR_CODES.BANK_RULE_ACCOUNT_MISSING],
   [new BankReconciliationIncompleteError("unmatched-entries", { count: 2 }), ERROR_CODES.BANK_RECONCILIATION_INCOMPLETE],
+  [new BankOpeningBalanceMismatchError(100, 90), ERROR_CODES.BANK_OPENING_BALANCE_MISMATCH],
+  [new BankOpeningNotAllowedError("mark-exists"), ERROR_CODES.BANK_OPENING_NOT_ALLOWED],
+  [new BankAccountInUseError("ledgerAccount"), ERROR_CODES.BANK_ACCOUNT_IN_USE],
+  [new BankAccountIdentifierLockedError("Företagskonto", "A", "B"), ERROR_CODES.BANK_ACCOUNT_IDENTIFIER_LOCKED],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {
