@@ -29,6 +29,8 @@ import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved 
 import { SupplierPaymentDetailsSection } from "../banking/SupplierPaymentDetailsSection";
 import { CustomerPricesTab } from "./CustomerPricesTab";
 import { PeppolFields } from "./PeppolFields";
+import { useDimensions } from "../../lib/dimensions";
+import { CostCenterSelect } from "../economy/DimensionSelect";
 import { DeliveryDaysFields, type DeliveryDayDefaults, type DeliveryDaysValue } from "./DeliveryDaysFields";
 import {
   CUSTOMER_VAT_TREATMENT_LABELS,
@@ -929,6 +931,10 @@ function VillkorTab({
   // Supplier: its own Momskod (förval); "" = derived from the country.
   const [defaultVatCodeId, setDefaultVatCodeId] = useState(!isCustomer ? ((partner as Supplier).defaultVatCodeId ?? "") : "");
   const { codes: vatCodes } = useVatCodes({ enabled: !isCustomer });
+  const dims = useDimensions();
+  const [defaultCostCenterId, setDefaultCostCenterId] = useState(
+    !isCustomer ? ((partner as Supplier).defaultCostCenterId ?? "") : ""
+  );
   const [collectiveInvoicing, setCollectiveInvoicing] = useState(
     isCustomer ? (partner as Customer).collectiveInvoicing : false
   );
@@ -1007,7 +1013,7 @@ function VillkorTab({
             ? { discountPercent: discountPercent.trim() === "" ? 0 : Number(discountPercent) }
             : {}),
           ...(isCustomer ? { privatePerson, collectiveInvoicing, reverseChargeConstruction } : {}),
-          ...(!isCustomer ? { defaultVatCodeId: defaultVatCodeId || null } : {}),
+          ...(!isCustomer ? { defaultVatCodeId: defaultVatCodeId || null, defaultCostCenterId: defaultCostCenterId || null } : {}),
           // E-faktura: a private person never gets Peppol invoices, so the
           // fields are hidden — and what is sent stays as it was saved.
           ...(isCustomer && !privatePerson ? { invoiceDelivery, peppolId: peppolId.trim() } : {}),
@@ -1117,6 +1123,16 @@ function VillkorTab({
                 <>Raderna på fakturan kan ändå få en egen momskod.</>
               )}
             </FormHint>
+            {(dims.allCostCenters.length > 0 || defaultCostCenterId !== "") && (
+              <>
+                <Field label="Kostnadsställe (förval)" htmlFor="defaultCostCenterId">
+                  <CostCenterSelect id="defaultCostCenterId" all={dims.allCostCenters} value={defaultCostCenterId} onChange={setDefaultCostCenterId} />
+                </Field>
+                <FormHint attached>
+                  Förvalt kostnadsställe på nya leverantörsfakturor; saknas det används artikelgruppens.
+                </FormHint>
+              </>
+            )}
           </>
         )}
 

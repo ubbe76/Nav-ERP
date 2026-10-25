@@ -14,9 +14,11 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { BANK_RULE_DIRECTION_LABELS } from "../../lib/bankReconciliation";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
+import { useDimensions } from "../../lib/dimensions";
 import { useVatCodes } from "../../lib/useVatCodes";
 import { DOMESTIC_VAT_CODES, vatCodeOptionLabel } from "../../lib/vatCodes";
 import type { Account, BankRule, BankRuleDirection } from "../../lib/types";
+import { CostCenterSelect, ProjectSelect } from "./DimensionSelect";
 import shellStyles from "../AppShell.module.css";
 
 // Ekonomi → Bankregler: recognises recurring entries on the kontoutdrag by
@@ -93,6 +95,7 @@ export function BankreglerPageClient({ rules, accounts }: { rules: BankRule[]; a
           { key: "account", label: "Konto", width: "1.2fr" },
           { key: "vat", label: "Momskod", width: "90px" },
           { key: "description", label: "Beskrivning", width: "1.2fr" },
+          { key: "objects", label: "Kostnadsställe / projekt", width: "1fr" },
           { key: "autoBook", label: "Bokför direkt", width: "100px" },
           { key: "status", label: "Status", width: "90px" },
           { key: "id", label: "", width: "250px", align: "right" },
@@ -111,6 +114,8 @@ export function BankreglerPageClient({ rules, accounts }: { rules: BankRule[]; a
               return r.vatCode ?? "–";
             case "description":
               return r.description ?? "–";
+            case "objects":
+              return [r.costCenter?.code, r.project?.code].filter(Boolean).join(" / ") || "–";
             case "autoBook":
               return r.autoBook ? "Ja" : "Nej";
             case "status":
@@ -150,6 +155,9 @@ function RuleForm({
   onCancel: () => void;
 }) {
   const { codes: vatCodes } = useVatCodes();
+  const dims = useDimensions();
+  const [costCenterId, setCostCenterId] = useState(rule?.costCenterId ?? "");
+  const [projectId, setProjectId] = useState(rule?.projectId ?? "");
   const [textContains, setTextContains] = useState(rule?.textContains ?? "");
   const [direction, setDirection] = useState<BankRuleDirection>(rule?.direction ?? "both");
   const [accountNumber, setAccountNumber] = useState(rule?.accountNumber ?? "");
@@ -168,6 +176,8 @@ function RuleForm({
       accountNumber !== (rule?.accountNumber ?? "") ||
       vatCode !== (rule?.vatCode ?? "") ||
       description !== (rule?.description ?? "") ||
+      costCenterId !== (rule?.costCenterId ?? "") ||
+      projectId !== (rule?.projectId ?? "") ||
       autoBook !== (rule?.autoBook ?? false) ||
       active !== (rule?.active ?? true));
   useUnsavedGuard(dirty);
@@ -194,6 +204,8 @@ function RuleForm({
         accountNumber: accountNumber.trim(),
         vatCode: vatCode || null,
         description: description.trim() || null,
+        costCenterId: costCenterId || null,
+        projectId: projectId || null,
         autoBook,
         active,
       };
@@ -270,6 +282,19 @@ function RuleForm({
             />
           </Field>
           <FormHint attached>Texten på kontoradens beskrivning i verifikatet. Lämnas den tom används texten från kontoutdraget.</FormHint>
+          {(dims.allCostCenters.length > 0 || dims.allProjects.length > 0 || costCenterId !== "" || projectId !== "") && (
+            <>
+              <FormRow>
+                <Field label="Kostnadsställe" htmlFor="bankRuleCostCenter">
+                  <CostCenterSelect id="bankRuleCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} />
+                </Field>
+                <Field label="Projekt" htmlFor="bankRuleProject">
+                  <ProjectSelect id="bankRuleProject" all={dims.allProjects} value={projectId} onChange={setProjectId} />
+                </Field>
+              </FormRow>
+              <FormHint attached>Förifylls på kontoraden när posten bokförs, och sätts på rader som regeln bokför direkt.</FormHint>
+            </>
+          )}
           <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <Checkbox checked={autoBook} onChange={(e) => setAutoBook(e.target.checked)} />
             Bokför direkt

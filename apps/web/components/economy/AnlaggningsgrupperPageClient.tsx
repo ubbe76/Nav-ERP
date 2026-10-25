@@ -12,6 +12,8 @@ import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import type { Account, FixedAssetCategory } from "../../lib/types";
+import { useDimensions } from "../../lib/dimensions";
+import { CostCenterSelect } from "./DimensionSelect";
 import shellStyles from "../AppShell.module.css";
 
 // `posting`: the three accounts the group's depreciation sits on — locked
@@ -169,6 +171,8 @@ function CategoryModal({
   const accountsLocked = category?.postingAccountsLocked ?? false;
   const [name, setName] = useState(category?.name ?? "");
   const [life, setLife] = useState(String(category?.defaultUsefulLifeMonths ?? 60));
+  const dims = useDimensions();
+  const [costCenterId, setCostCenterId] = useState(category?.defaultCostCenterId ?? "");
   const [accountIds, setAccountIds] = useState<Record<AccountKey, string>>({
     assetAccountId: category?.assetAccountId ?? "",
     accumulatedDepreciationAccountId: category?.accumulatedDepreciationAccountId ?? "",
@@ -182,7 +186,7 @@ function CategoryModal({
     setSaving(true);
     setError(null);
     try {
-      const payload = { name, defaultUsefulLifeMonths: life, ...accountIds };
+      const payload = { name, defaultUsefulLifeMonths: life, ...accountIds, defaultCostCenterId: costCenterId || null };
       if (category) {
         await apiFetch<FixedAssetCategory>(`/api/v1/fixed-asset-categories/${category.id}`, { method: "PATCH", body: JSON.stringify(payload) });
       } else {
@@ -227,6 +231,14 @@ function CategoryModal({
             </Field>
           </FormRow>
         ))}
+        {(dims.allCostCenters.length > 0 || costCenterId !== "") && (
+          <>
+            <Field label="Kostnadsställe (förval)" htmlFor="category-costCenter">
+              <CostCenterSelect id="category-costCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} />
+            </Field>
+            <FormHint>Sätts på avskrivningsraden (kostnadskontot) i avskrivningskörningarna för gruppens anläggningar.</FormHint>
+          </>
+        )}
         {accountsLocked && (
           <FormHint>Tillgångskonto, ack-konto och kostnadskonto är låsta — gruppen har bokförd eller ingående avskrivning på de kontona. Vinst- och förlustkonto, namn och nyttjandetid kan ändras.</FormHint>
         )}

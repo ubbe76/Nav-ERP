@@ -25,6 +25,7 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 | **Sena tillverkningsordrar** | gul | Frisläppta tillverkningsordrar och pågående tillverkningsordrar som är **Sena** enligt produktionsplaneringen, alltså samma **Sen** som tillverkningsorderlistan och tillverkningsordern visar. |
 | **Behöver beställas** | gul | Behovsberäkningens rader med förslaget att köpa eller lägga ut på legotillverkning: artikeln ligger under beställningspunkten eller räcker inte till behovet. |
 | **Behöver tillverkas** | gul | Behovsberäkningens rader med förslaget att tillverka, även konfigurerade artiklar. |
+| **Bokningar utan kostnadsställe** | gul | Bokförda rader på ett konto med **Kräver kostnadsställe** som saknar kostnadsställe — i praktiken rader som automatkonteringen bokat utan, eftersom manuella verifikat inte kan bokföras utan. Raden länkar till [Verifikat](/hjalp/ekonomi#verifikat). Ekonomi-rättigheten krävs. |
 | **Omatchade bankposter** | gul | Poster på ett kontoutdrag som är äldre än 10 dagar och ännu inte är matchade mot bokföringen. Raden visar dag, text, belopp och bankkonto och länkar till [Bankavstämning](/hjalp/ekonomi#bankavstamning) för kontot, där posterna matchas eller bokförs; aviseringen försvinner när posten matchats. |
 
 Datumen för order räknas som på [Översikten och i planeringen](/hjalp/komma-igang#oversikten): radens eget leveransdatum gäller före orderns. För kundorder jämförs radens leveransdatum (annars orderns) med dagens datum.
@@ -37,7 +38,7 @@ Du ser bara de typer som din behörighetsgrupp ger:
 - **Förfallna kundfakturor**, **E-fakturor som inte gick fram**, **Offerter att följa upp** och **Försenade kundordrar**: menyn **Försäljning**.
 - **Leverantörsfakturor att betala**, **Försenade inköpsordrar** och **Behöver beställas**: menyn **Inköp**.
 - **Sena tillverkningsordrar** och **Behöver tillverkas**: menyn **Tillverkning**.
-- **Återkommande verifikat som misslyckats** och **Omatchade bankposter**: menyn **Ekonomi**.
+- **Återkommande verifikat som misslyckats**, **Bokningar utan kostnadsställe** och **Omatchade bankposter**: menyn **Ekonomi**.
 - **Utskick som misslyckades**: bara administratörer.
 
 Administratörer ser allt. Sidan kräver minst en meny. Även ett konto med **Endast läsning** ser aviseringarna.

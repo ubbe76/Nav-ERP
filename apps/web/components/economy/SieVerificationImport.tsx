@@ -102,7 +102,9 @@ export function SieVerificationImport() {
   }
 
   const blocked = preview !== null && (preview.blockers.length > 0 || preview.alreadyImported !== null);
-  const needsAccounts = preview !== null && preview.missingAccounts.length > 0 && !createMissing;
+  const missingObjects = preview?.missingObjects ?? [];
+  const needsAccounts =
+    preview !== null && (preview.missingAccounts.length > 0 || missingObjects.length > 0) && !createMissing;
   const hasUnbalanced = preview?.verifications.some((v) => !v.balanced) ?? false;
   const canImport =
     preview !== null && preview.verifications.length > 0 && !blocked && !needsAccounts && !hasUnbalanced && !pending;
@@ -177,6 +179,16 @@ export function SieVerificationImport() {
             </FormNotice>
           )}
 
+          {missingObjects.length > 0 && (
+            <FormNotice>
+              Kostnadsställen och projekt som saknas:{" "}
+              {missingObjects
+                .map((o) => `${o.dimension === 1 ? "Kostnadsställe" : "Projekt"} ${o.code}${o.name ? ` (${o.name})` : ""}`)
+                .join(", ")}
+              .
+            </FormNotice>
+          )}
+
           {preview.verifications.map((v) => (
             <details key={v.index} className={styles.verification}>
               <summary>
@@ -220,10 +232,10 @@ export function SieVerificationImport() {
               <option value="book">Bokför</option>
             </Select>
           </Field>
-          {preview.missingAccounts.length > 0 && (
+          {(preview.missingAccounts.length > 0 || missingObjects.length > 0) && (
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontFamily: "var(--font-body)", fontSize: 13.5 }}>
               <Checkbox checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />
-              Skapa saknade konton
+              Skapa saknade konton och objekt
             </label>
           )}
           {hasUnbalanced && <FormError>Ett eller flera verifikat balanserar inte — filen kan inte importeras.</FormError>}

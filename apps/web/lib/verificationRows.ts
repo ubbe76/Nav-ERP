@@ -17,6 +17,12 @@ export interface EditorRow {
   // Momskod picked on the row; the split happens when the cell is left and
   // the code is then cleared. Never stored.
   vatCode: string;
+  // Kostnadsställe/Projekt: registry ids ("" = none). The labels carry the
+  // name a loaded row's object had, for one that is inactive/closed now.
+  costCenterId: string;
+  projectId: string;
+  costCenterLabel: string;
+  projectLabel: string;
 }
 
 let rowSeq = 0;
@@ -26,7 +32,7 @@ export function newRowKey(): string {
 }
 
 export function emptyRow(partial: Partial<EditorRow> = {}): EditorRow {
-  return { key: newRowKey(), accountNumber: "", accountName: "", description: "", debit: "", credit: "", vatCode: "", ...partial };
+  return { key: newRowKey(), accountNumber: "", accountName: "", description: "", debit: "", credit: "", vatCode: "", costCenterId: "", projectId: "", costCenterLabel: "", projectLabel: "", ...partial };
 }
 
 export function amountOf(value: string): number {
@@ -38,6 +44,22 @@ function amountText(n: number): string {
   return n > 0 ? String(round2(n)) : "";
 }
 
+// Reads the dimensions a server row carries, as either the joined objects or
+// the bare ids (templates).
+export function dimensionFields(r: {
+  costCenter?: { id: string; code: string; name: string } | null;
+  project?: { id: string; code: string; name: string } | null;
+  costCenterId?: string | null;
+  projectId?: string | null;
+}): Pick<EditorRow, "costCenterId" | "projectId" | "costCenterLabel" | "projectLabel"> {
+  return {
+    costCenterId: r.costCenter?.id ?? r.costCenterId ?? "",
+    projectId: r.project?.id ?? r.projectId ?? "",
+    costCenterLabel: r.costCenter ? `${r.costCenter.code} · ${r.costCenter.name}` : "",
+    projectLabel: r.project ? `${r.project.code} · ${r.project.name}` : "",
+  };
+}
+
 export function rowsFromVerification(rows: VerificationRow[]): EditorRow[] {
   return rows.map((r) =>
     emptyRow({
@@ -46,6 +68,7 @@ export function rowsFromVerification(rows: VerificationRow[]): EditorRow[] {
       description: r.description ?? "",
       debit: amountText(Number(r.debit)),
       credit: amountText(Number(r.credit)),
+      ...dimensionFields(r),
     })
   );
 }
@@ -58,6 +81,7 @@ export function rowsFromTemplate(rows: VerificationTemplateRow[]): EditorRow[] {
       description: r.description ?? "",
       debit: r.debit ? amountText(r.debit) : "",
       credit: r.credit ? amountText(r.credit) : "",
+      ...dimensionFields(r),
     })
   );
 }
@@ -99,7 +123,7 @@ export function rowsSignature(rows: EditorRow[]): string {
   return JSON.stringify(
     rows
       .filter((r) => !isBlankRow(r))
-      .map((r) => [r.accountNumber, r.description.trim(), amountOf(r.debit), amountOf(r.credit)])
+      .map((r) => [r.accountNumber, r.description.trim(), amountOf(r.debit), amountOf(r.credit), r.costCenterId, r.projectId])
   );
 }
 
@@ -108,6 +132,9 @@ export interface ApiVerificationRow {
   debit: number;
   credit: number;
   description?: string;
+  // Omitted = no cost centre / project.
+  costCenterId?: string;
+  projectId?: string;
 }
 
 // The body of PUT /verifications/:id/rows (and POST /verifications): blank
@@ -131,7 +158,14 @@ export function toVerificationApiRows(
       return { rows: null, error: `Rad ${n}: ange ett belopp i antingen Debet eller Kredit.` };
     }
     const description = row.description.trim();
-    out.push({ accountId: account.id, debit: round2(debit), credit: round2(credit), description: description || undefined });
+    out.push({
+      accountId: account.id,
+      debit: round2(debit),
+      credit: round2(credit),
+      description: description || undefined,
+      costCenterId: row.costCenterId || undefined,
+      projectId: row.projectId || undefined,
+    });
   }
   return { rows: out, error: null };
 }
@@ -141,6 +175,8 @@ export interface ApiTemplateRow {
   description?: string;
   debit: number | null;
   credit: number | null;
+  costCenterId?: string;
+  projectId?: string;
 }
 
 // Template rows: an account is required, amounts may be empty (filled in when
@@ -169,6 +205,8 @@ export function toTemplateApiRows(
       description: description || undefined,
       debit: debit > 0 ? round2(debit) : null,
       credit: credit > 0 ? round2(credit) : null,
+      costCenterId: row.costCenterId || undefined,
+      projectId: row.projectId || undefined,
     });
   }
   return { rows: out, error: null };

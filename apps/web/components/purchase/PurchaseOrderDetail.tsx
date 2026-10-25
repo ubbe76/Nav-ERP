@@ -24,6 +24,8 @@ import { DeliveryDateHint } from "../ui/DeliveryDateHint";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { askBumpRevision } from "../../lib/revision";
+import { headerDimensionFields, useDimensions } from "../../lib/dimensions";
+import { DimensionFields } from "../economy/DimensionSelect";
 import {
   PURCHASE_ORDER_STATUS_PILL,
   type Article,
@@ -59,6 +61,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   const rowsEditable = order.status === "draft" || order.status === "confirmed" || order.status === "partially_received";
 
   const [modal, setModal] = useState<"header" | "addRow" | "receive" | null>(null);
+  const dims = useDimensions();
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowPending, setRowPending] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -228,6 +231,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           { label: "Växelkurs", value: order.exchangeRate },
           { label: "Er referens", value: order.yourReference },
           { label: "Vår referens", value: order.ourReference },
+          ...headerDimensionFields(order, dims, { costCenter: false }),
           { label: "Frakt på vårt konto", value: order.freightPaidByUs ? "Ja" : "Nej" },
           { label: "Leveransvillkor", value: termsLabel(order.deliveryTermCode, order.deliveryTermName) },
           { label: "Betalningsvillkor", value: termsLabel(order.paymentTermCode, order.paymentTermName) },
@@ -526,6 +530,8 @@ function EditHeaderForm({
   const [exchangeRate, setExchangeRate] = useState(order.exchangeRate);
   const [yourReference, setYourReference] = useState(order.yourReference ?? "");
   const [ourReference, setOurReference] = useState(order.ourReference ?? "");
+  const dims = useDimensions();
+  const [projectId, setProjectId] = useState(order.projectId ?? order.project?.id ?? "");
   const [note, setNote] = useState(order.note ?? "");
   const [freightPaidByUs, setFreightPaidByUs] = useState(order.freightPaidByUs);
   const [terms, setTerms] = useState<TermsValue>(termsFrom(order));
@@ -551,6 +557,7 @@ function EditHeaderForm({
           exchangeRate: Number(exchangeRate),
           yourReference: yourReference.trim() || null,
           ourReference: ourReference.trim() || null,
+          projectId: projectId || null,
           note: note.trim() || null,
           freightPaidByUs,
           ...termsPayload(terms),
@@ -611,6 +618,16 @@ function EditHeaderForm({
           <Input id="headerOurReference" maxLength={100} value={ourReference} onChange={(e) => setOurReference(e.target.value)} />
         </Field>
       </FormRow>
+
+      <DimensionFields
+        idPrefix="header"
+        lists={dims}
+        withCostCenter={false}
+        costCenterId=""
+        projectId={projectId}
+        onCostCenterChange={() => {}}
+        onProjectChange={setProjectId}
+      />
 
       <TermsFields registers={registers} value={terms} onChange={setTerms} />
 

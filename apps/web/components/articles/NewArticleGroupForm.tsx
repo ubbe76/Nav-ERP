@@ -6,7 +6,9 @@ import { Field, Input, Select, Textarea } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 
 import type { ArticleGroup, ArticleNumberSeriesOption } from "../../lib/types";
-import { Form, FormActions, FormError } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { useDimensions } from "../../lib/dimensions";
+import { CostCenterSelect } from "../economy/DimensionSelect";
 
 // Creates an article group, or renames one when `group` is passed.
 export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup; onSuccess: () => void }) {
@@ -15,6 +17,8 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
   const [description, setDescription] = useState(group?.description ?? "");
   // "" = the default series.
   const [numberSeriesKey, setNumberSeriesKey] = useState(group?.numberSeriesKey ?? "");
+  const dims = useDimensions();
+  const [defaultCostCenterId, setDefaultCostCenterId] = useState(group?.defaultCostCenterId ?? "");
   const [seriesOptions, setSeriesOptions] = useState<ArticleNumberSeriesOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -30,7 +34,9 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
     setError(null);
     setPending(true);
     try {
-      const body = JSON.stringify({ code, name, description, numberSeriesKey: numberSeriesKey === "" ? null : numberSeriesKey });
+      const body = JSON.stringify({ code, name, description, numberSeriesKey: numberSeriesKey === "" ? null : numberSeriesKey,
+        defaultCostCenterId: defaultCostCenterId || null,
+      });
       if (group) {
         await apiFetch(`/api/v1/article-groups/${group.id}`, { method: "PATCH", body });
       } else {
@@ -86,6 +92,13 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
             ))}
         </Select>
       </Field>
+
+      {(dims.allCostCenters.length > 0 || defaultCostCenterId !== "") && (
+        <Field label="Kostnadsställe (förval)" htmlFor="defaultCostCenterId">
+          <CostCenterSelect id="defaultCostCenterId" all={dims.allCostCenters} value={defaultCostCenterId} onChange={setDefaultCostCenterId} />
+          <FormHint>Sätts på faktura- och leverantörsfakturarader för gruppens artiklar när inget annat kostnadsställe anges.</FormHint>
+        </Field>
+      )}
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

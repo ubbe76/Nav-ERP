@@ -23,7 +23,7 @@ Klicka på leverantörens namn för att öppna **leverantörskortet** med fyra f
 
 - **Allmänt** — **Leverantörsnummer** (unikt internt nummer; kan skrivas över i efterhand, upptagna nummer avvisas — skrivs inte ut på några dokument), **Vårt kundnummer** (vårt kundnummer i leverantörens system — skrivs ut som "Vårt kundnummer hos er" på förfrågan och inköpsorder när det är ifyllt), namn, aktiv, adress, postnummer, postort, **Land** (ISO-2-kod, t.ex. "SE", "DE" eller "CN"; standardvärde "SE") och valuta. Landet avgör leverantörens förvalda momskod, se [Land och momskod](#land-och-momskod).
 - **Adresser** — en lista med valbara **Leveransadresser** (**+ Ny leveransadress**), var och en med **Benämning** (t.ex. "Huvudlager"), adress, postnummer och postort. Knappen **Kopiera från adressen** i dialogen fyller i adressfälten från Allmänt-flikens adress (visas bara när en adress finns). En adress kan markeras som **Förvald**; max en adress åt gången är förvald, markeras en ny flyttas markeringen automatiskt. Till skillnad från kundkortets adressflik finns ingen fakturaadress här — leverantörens adress på Allmänt-fliken används som den.
-- **Villkor & frakt** — organisationsnummer, VAT-nummer, **Momskod (förval)**, leveransvillkor, betalningsvillkor, speditör och kundnummer hos speditör. Villkor och speditörer väljs ur registren under [Grunddata](/hjalp/grunddata) och visas med sitt namn, t.ex. "30 dagar netto". Här anges också leverantörens **Leveransdagar**, **Dagarna avser** och **Transportdagar**, se [Leveransdagar](#leveransdagar).
+- **Villkor & frakt** — organisationsnummer, VAT-nummer, **Momskod (förval)**, **Kostnadsställe (förval)** (när det finns kostnadsställen), leveransvillkor, betalningsvillkor, speditör och kundnummer hos speditör. Villkor och speditörer väljs ur registren under [Grunddata](/hjalp/grunddata) och visas med sitt namn, t.ex. "30 dagar netto". Här anges också leverantörens **Leveransdagar**, **Dagarna avser** och **Transportdagar**, se [Leveransdagar](#leveransdagar).
 - **Kontakter** — flera kontakter per leverantör med namn, telefon, mobil, e-post och kommentar. En kontakt kan markeras som **Huvudkontakt** och visas då överst.
 
 Uppe till höger på kortet finns **+ Ny förfrågan** och **+ Ny inköpsorder** — båda skapas med leverantören förvald.
@@ -197,6 +197,8 @@ När en legorad har fått ett pris visas knappen **Uppdatera beredningens legopr
 En konfigurerbar mall i läget Variantartiklar (se [Artiklar](/hjalp/artiklar#varianter)) går inte att välja på inköpsorder- eller förfrågningsrader — artikelväljaren döljer den; köp i stället en av dess varianter.
 
 Orderkortet inleds med **orderhuvudet**: ett kort med status, **Rev**, valuta och orderns uppgifter — **Leverantör** (klickbar till leverantörskortet), **Önskat leveransdatum**, **Bekräftat leveransdatum**, **Växelkurs**, **Er referens**, **Vår referens**, **Frakt på vårt konto**, de tre villkoren och **Notering**. Knappen **Ändra** öppnar dialogen **Ändra orderhuvud** där allt detta redigeras på ett ställe och sparas i ett svep, så länge ordern är i status Utkast, Bekräftad eller Delvis mottagen. Valutan är låst till leverantörens valuta vid skapandet. Er referens och Vår referens skrivs ut på PDF:en när de är satta.
+
+Under **Ändra** på orderhuvudet kan ordern få ett **Projekt** (visas i huvudet när det är satt). Det följer med till leverantörsfakturan när fakturaunderlaget hämtas från ordern, se [Kostnadsställe och projekt på fakturan](#kostnadsstalle-och-projekt-pa-fakturan).
 
 Ordern får automatiskt leverantörens **Leveransvillkor**, **Betalningsvillkor** och **Speditör** (skapas ordern från en förfrågan tas villkoren från förfrågan i stället). De skrivs ut på PDF:en när de är satta.
 
@@ -384,6 +386,10 @@ Avbruten är ett slutläge. Betald kan gå tillbaka till Godkänd (se ovan), men
 De fakturor som rör en viss artikel syns även i sektionen **Leverantörsfakturor** på artikelkortets Inköp-flik (se [Artiklar](/hjalp/artiklar)).
 
 Sektionen **Historik** längst ner på fakturakortet visar fakturans egna händelser — se [Händelselogg](/hjalp/system#handelselogg).
+
+### Kostnadsställe och projekt på fakturan
+
+Finns det kostnadsställen eller projekt (se [Kostnadsställen och projekt](/hjalp/ekonomi#kostnadsstallen-och-projekt)) har fakturahuvudet fälten **Kostnadsställe** och **Projekt**, som gäller alla rader utan egna. Varje rad kan få egna i **Lägg till rad** (**Följer fakturan** lämnar det till huvudet), och kolumnen **Kostnadsställe / projekt** visar vad raden har. Förval är leverantörens **Kostnadsställe (förval)** (leverantörskortet, fliken **Villkor & frakt**), annars artikelgruppens, och inköpsorderns **Projekt** när underlaget hämtas från en inköpsorder. Objekten bokförs på kostnadsraden när fakturan godkänns; restraden tar alltid fakturans objekt.
 
 ### Bokföring av leverantörsfakturan
 

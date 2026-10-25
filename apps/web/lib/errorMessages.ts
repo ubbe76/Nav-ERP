@@ -578,6 +578,17 @@ const MESSAGES: Record<string, MessageEntry> = {
   "bank-match-already-undone": "Matchningen är redan ångrad — ladda om sidan.",
   "bank-entry-book-mismatch":
     "Verifikatet ska ha en rad på bankkontots huvudbokskonto med exakt postens belopp, på rätt sida (debet för en inbetalning, kredit för en utbetalning).",
+  // kostnadsställen och projekt
+  "cost-center-code-taken": "Koden används redan av ett annat kostnadsställe — välj en annan kod.",
+  "project-code-taken": "Koden används redan av ett annat projekt — välj en annan kod.",
+  "project-closed": "Projektet är stängt och kan inte väljas på nya rader — öppna projektet igen eller välj ett annat.",
+  "cost-center-required": (err) => {
+    const accounts = (err.body as { accounts?: unknown } | undefined)?.accounts;
+    const list = Array.isArray(accounts) ? accounts.filter((a): a is string => typeof a === "string") : [];
+    return list.length > 0
+      ? `${list.length === 1 ? "Konto" : "Konton"} ${list.join(", ")} kräver kostnadsställe — välj kostnadsställe på raderna.`
+      : "Ett konto på verifikatet kräver kostnadsställe — välj kostnadsställe på raderna.";
+  },
   "bank-rule-not-found": "Bankregeln hittades inte — ladda om sidan.",
   "bank-rule-missing": "Ingen aktiv bankregel känner igen posten — bokför den med Bokför i stället.",
   "bank-rule-ambiguous": (err) => {

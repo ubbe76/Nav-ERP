@@ -11,7 +11,9 @@ import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
-import type { Account, GeneralLedgerResponse, LedgerResponse } from "../../lib/types";
+import { dimensionText, useDimensions } from "../../lib/dimensions";
+import type { Account, DimensionRef, GeneralLedgerResponse, LedgerResponse } from "../../lib/types";
+import { CostCenterSelect, ProjectSelect } from "./DimensionSelect";
 import { SectionHeading } from "../ui/SectionHeading";
 
 // "1930 · Företagskonto" — same accountLabel idiom as VerificationCard.tsx's
@@ -47,7 +49,24 @@ type LedgerDisplayRow =
       debit: string;
       credit: string;
       balance: number;
+      costCenter: DimensionRef | null;
+      project: DimensionRef | null;
     };
+
+// Date, Verifikat, Text (+ Kostnadsställe/Projekt when a row carries one),
+// then the amounts.
+function ledgerColumns(withCostCenter: boolean, withProject: boolean) {
+  return [
+    { key: "date", label: "Datum", width: "110px" },
+    { key: "verifikat", label: "Verifikat", width: "140px" },
+    { key: "text", label: "Text", width: "1.6fr" },
+    ...(withCostCenter ? [{ key: "costCenter", label: "Kostnadsställe", width: "1fr" }] : []),
+    ...(withProject ? [{ key: "project", label: "Projekt", width: "1fr" }] : []),
+    { key: "debit", label: "Debet", width: "130px", align: "right" as const },
+    { key: "credit", label: "Kredit", width: "130px", align: "right" as const },
+    { key: "saldo", label: "Saldo", width: "130px", align: "right" as const },
+  ];
+}
 
 export function HuvudbokPageClient({
   accounts,
@@ -76,11 +95,26 @@ export function HuvudbokPageClient({
   const [rangeLedger, setRangeLedger] = useState<GeneralLedgerResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dims = useDimensions();
+  const [costCenterId, setCostCenterId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const showDimensionFilters = dims.allCostCenters.length > 0 || dims.allProjects.length > 0;
+
+  // The Kostnadsställe/Projekt filter, appended to every ledger request.
+  function dimensionParams(): string {
+    const params = new URLSearchParams();
+    if (costCenterId) params.set("costCenterId", costCenterId);
+    if (projectId) params.set("projectId", projectId);
+    const text = params.toString();
+    return text ? `&${text}` : "";
+  }
 
   // Query string for the multi-account endpoint and its PDF — empty account
   // bounds mean "all accounts" and are simply omitted.
   function rangeParams(): string {
     const params = new URLSearchParams({ from, to, onlyWithMovement: String(onlyWithMovement) });
+    if (costCenterId) params.set("costCenterId", costCenterId);
+    if (projectId) params.set("projectId", projectId);
     if (accountFrom) params.set("accountFrom", accountFrom);
     if (accountTo) params.set("accountTo", accountTo);
     return params.toString();
@@ -108,7 +142,7 @@ export function HuvudbokPageClient({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- rangeParams is derived from these
-  }, [mode, from, to, accountFrom, accountTo, onlyWithMovement]);
+  }, [mode, from, to, accountFrom, accountTo, onlyWithMovement, costCenterId, projectId]);
 
   // Fetches on every selection change (account or either date) — the ledger
   // is a pure read with nothing to submit. The URL is kept in sync
@@ -124,6 +158,8 @@ export function HuvudbokPageClient({
       return;
     }
     const params = new URLSearchParams({ accountId, from, to });
+    if (costCenterId) params.set("costCenterId", costCenterId);
+    if (projectId) params.set("projectId", projectId);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
 
     let cancelled = false;
@@ -146,7 +182,7 @@ export function HuvudbokPageClient({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- router/pathname are stable
-  }, [mode, accountId, from, to]);
+  }, [mode, accountId, from, to, costCenterId, projectId]);
 
   const displayRows: LedgerDisplayRow[] = ledger
     ? [
@@ -162,6 +198,8 @@ export function HuvudbokPageClient({
             debit: row.debit,
             credit: row.credit,
             balance: row.balance,
+            costCenter: row.costCenter ?? null,
+            project: row.project ?? null,
           })
         ),
         { id: "closing", kind: "closing", balance: ledger.closingBalance },
@@ -190,6 +228,17 @@ export function HuvudbokPageClient({
           </Field>
         </FormRow>
 
+        {showDimensionFilters && (
+          <FormRow columns={2}>
+            <Field label="Kostnadsställe" htmlFor="ledgerCostCenter">
+              <CostCenterSelect id="ledgerCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Alla kostnadsställen" />
+            </Field>
+            <Field label="Projekt" htmlFor="ledgerProject">
+              <ProjectSelect id="ledgerProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Alla projekt" />
+            </Field>
+          </FormRow>
+        )}
+
         {mode === "single" ? (
           <FormRow columns={2}>
             <Field label="Konto" htmlFor="ledgerAccount">
@@ -210,7 +259,7 @@ export function HuvudbokPageClient({
                 // on-screen view deliberately still shows.
                 href={`${API_URL}/api/v1/general-ledger/pdf?from=${from}&to=${to}&onlyWithMovement=false&accountFrom=${
                   accounts.find((a) => a.id === accountId)?.number ?? "0000"
-                }&accountTo=${accounts.find((a) => a.id === accountId)?.number ?? "9999"}`}
+                }&accountTo=${accounts.find((a) => a.id === accountId)?.number ?? "9999"}${dimensionParams()}`}
                 download
                 className={`${buttonStyles.button} ${buttonStyles.ghost}`}
               >
@@ -221,7 +270,7 @@ export function HuvudbokPageClient({
               <a
                 href={`${API_URL}/api/v1/general-ledger/csv?from=${from}&to=${to}&onlyWithMovement=false&accountFrom=${
                   accounts.find((a) => a.id === accountId)?.number ?? "0000"
-                }&accountTo=${accounts.find((a) => a.id === accountId)?.number ?? "9999"}`}
+                }&accountTo=${accounts.find((a) => a.id === accountId)?.number ?? "9999"}${dimensionParams()}`}
                 download
                 className={`${buttonStyles.button} ${buttonStyles.ghost}`}
               >
@@ -302,14 +351,10 @@ export function HuvudbokPageClient({
 
       {mode === "single" && accountId && ledger && (
         <Table<LedgerDisplayRow>
-          columns={[
-            { key: "date", label: "Datum", width: "110px" },
-            { key: "verifikat", label: "Verifikat", width: "140px" },
-            { key: "text", label: "Text", width: "1.6fr" },
-            { key: "debit", label: "Debet", width: "130px", align: "right" },
-            { key: "credit", label: "Kredit", width: "130px", align: "right" },
-            { key: "saldo", label: "Saldo", width: "130px", align: "right" },
-          ]}
+          columns={ledgerColumns(
+            displayRows.some((r) => r.kind === "row" && r.costCenter),
+            displayRows.some((r) => r.kind === "row" && r.project)
+          )}
           rows={displayRows}
           renderCell={(row, key) => {
             switch (key) {
@@ -325,6 +370,10 @@ export function HuvudbokPageClient({
                 if (row.kind === "opening") return <strong>Ingående saldo</strong>;
                 if (row.kind === "closing") return <strong>Utgående saldo</strong>;
                 return row.description;
+              case "costCenter":
+                return row.kind === "row" ? dimensionText(row.costCenter) : "";
+              case "project":
+                return row.kind === "row" ? dimensionText(row.project) : "";
               case "debit":
                 return row.kind === "row" ? <span className="num">{formatMoney(row.debit)}</span> : "";
               case "credit":
@@ -354,14 +403,10 @@ export function HuvudbokPageClient({
               {account.accountNumber} · {account.accountName}
             </SectionHeading>
             <Table<LedgerDisplayRow>
-              columns={[
-                { key: "date", label: "Datum", width: "110px" },
-                { key: "verifikat", label: "Verifikat", width: "140px" },
-                { key: "text", label: "Text", width: "1.6fr" },
-                { key: "debit", label: "Debet", width: "130px", align: "right" },
-                { key: "credit", label: "Kredit", width: "130px", align: "right" },
-                { key: "saldo", label: "Saldo", width: "130px", align: "right" },
-              ]}
+              columns={ledgerColumns(
+                account.rows.some((r) => r.costCenter),
+                account.rows.some((r) => r.project)
+              )}
               rows={[
                 { id: "opening", kind: "opening", balance: account.openingBalance },
                 ...account.rows.map(
@@ -375,6 +420,8 @@ export function HuvudbokPageClient({
                     debit: row.debit,
                     credit: row.credit,
                     balance: row.balance,
+                    costCenter: row.costCenter ?? null,
+                    project: row.project ?? null,
                   })
                 ),
                 { id: "closing", kind: "closing", balance: account.closingBalance },
@@ -393,6 +440,10 @@ export function HuvudbokPageClient({
                     if (row.kind === "opening") return <strong>Ingående saldo</strong>;
                     if (row.kind === "closing") return <strong>Utgående saldo</strong>;
                     return row.description;
+                  case "costCenter":
+                    return row.kind === "row" ? dimensionText(row.costCenter) : "";
+                  case "project":
+                    return row.kind === "row" ? dimensionText(row.project) : "";
                   case "debit":
                     return row.kind === "row" ? <span className="num">{formatMoney(row.debit)}</span> : "";
                   case "credit":

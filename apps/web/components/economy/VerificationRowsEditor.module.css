@@ -11,15 +11,10 @@
 .headerRow,
 .row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.5fr) minmax(120px, 1fr) 118px 118px 34px;
+  grid-template-columns: var(--editor-cols);
   gap: 8px;
   align-items: center;
   padding: 6px 12px;
-}
-
-.withVat .headerRow,
-.withVat .row {
-  grid-template-columns: minmax(190px, 1.5fr) minmax(120px, 1fr) minmax(150px, 1fr) 118px 118px 34px;
 }
 
 .headerRow {
@@ -183,6 +178,15 @@
   margin-left: auto;
 }
 
+.dimensionsToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
 .notice {
   margin: 4px 14px 2px;
   font-family: var(--font-body);
@@ -197,24 +201,91 @@
   color: var(--color-text-muted);
 }
 
-@media (max-width: 760px) {
-  .headerRow {
+/* Kostnadsställe and Projekt add two columns, so the stacked card layout
+   starts earlier when they are shown. */
+@media (max-width: 1040px) {
+  .withDims .headerRow {
     display: none;
   }
 
-  .row,
-  .withVat .row {
+  .withDims .row {
     grid-template-columns: 1fr 1fr 34px;
     padding: 12px 14px;
     gap: 8px 10px;
   }
 
-  /* Konto, Beskrivning and Momskod take the full width; Debet and Kredit sit
-     side by side with the remove button at the end of that line. */
+  /* Konto, Beskrivning and Momskod take the full width; Kostnadsställe and
+     Projekt sit side by side; Debet and Kredit sit side by side with the
+     remove button at the end of that line. */
+  .withDims .cellAccount,
+  .withDims .cellDescription,
+  .withDims .cellVat {
+    grid-column: 1 / -1;
+  }
+
+  .withDims .cellCostCenter {
+    grid-column: 1;
+  }
+
+  .withDims .cellProject {
+    grid-column: 2 / -1;
+  }
+
+  .withDims .cellDebit {
+    grid-column: 1;
+  }
+
+  .withDims .cellCredit {
+    grid-column: 2;
+  }
+
+  .withDims .cellRemove {
+    grid-column: 3;
+    align-self: end;
+  }
+
+  .withDims .mobileLabel {
+    display: block;
+    font-family: var(--font-body);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-muted);
+    margin-bottom: 3px;
+  }
+
+  .withDims .list {
+    max-width: calc(100vw - 64px);
+  }
+}
+
+@media (max-width: 760px) {
+  .headerRow {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: 1fr 1fr 34px;
+    padding: 12px 14px;
+    gap: 8px 10px;
+  }
+
+  /* Konto, Beskrivning and Momskod take the full width; Kostnadsställe and
+     Projekt sit side by side; Debet and Kredit sit side by side with the
+     remove button at the end of that line. */
   .cellAccount,
   .cellDescription,
   .cellVat {
     grid-column: 1 / -1;
+  }
+
+  .cellCostCenter {
+    grid-column: 1;
+  }
+
+  .cellProject {
+    grid-column: 2 / -1;
   }
 
   .cellDebit {

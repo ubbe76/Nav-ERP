@@ -262,7 +262,7 @@ Ordern får automatiskt kundens **Leveransvillkor**, **Betalningsvillkor** och *
 
 **Moms på offert och orderbekräftelse.** Momsen räknas per rad efter den momskod raden skulle få på fakturan — en EU-kund med VAT-nummer ser alltså 0 % redan på offerten — och kodernas fakturatexter skrivs ut under summeringen, precis som på fakturan. Se [Momsbehandling](#momsbehandling).
 
-**Orderhuvudet.** Orderkortet (och offertkortet) inleds med ett kort som visar status, **Rev**, valuta (och fakturanummer när ordern är fakturerad) tillsammans med orderns uppgifter: **Kund** (klickbar till kundkortet), **Kundens förfrågan** på en offert respektive **Kundens ordernummer** på en order (en order visar även **Kundens förfrågan** när den är ifylld, och en äldre offert som har ett ordernummer visar det), **Referens**, **Leveransdatum**, de tre villkoren, **Leveransadress** och **Notering**. Knappen **Ändra** öppnar dialogen **Ändra orderhuvud**, där kundens förfrågan, kundens ordernummer (på en offert bara när den redan har ett), referens, villkoren och leveransadressen redigeras på ett ställe och sparas i ett svep, så länge ordern är i status Offert, Bekräftad eller Under tillverkning. Leveransdatum och notering sätts när offerten skapas och visas bara.
+**Orderhuvudet.** Orderkortet (och offertkortet) inleds med ett kort som visar status, **Rev**, valuta (och fakturanummer när ordern är fakturerad) tillsammans med orderns uppgifter: **Kund** (klickbar till kundkortet), **Kundens förfrågan** på en offert respektive **Kundens ordernummer** på en order (en order visar även **Kundens förfrågan** när den är ifylld, och en äldre offert som har ett ordernummer visar det), **Referens**, **Leveransdatum**, de tre villkoren, **Leveransadress** och **Notering**. Knappen **Ändra** öppnar dialogen **Ändra orderhuvud**, där kundens förfrågan, kundens ordernummer (på en offert bara när den redan har ett), referens, **Kostnadsställe** och **Projekt** (se [Kostnadsställe och projekt](#kostnadsstalle-och-projekt-pa-order-och-faktura)), villkoren och leveransadressen redigeras på ett ställe och sparas i ett svep, så länge ordern är i status Offert, Bekräftad eller Under tillverkning. Leveransdatum och notering sätts när offerten skapas och visas bara.
 
 ### Valuta och kurs på offert och order
 
@@ -434,6 +434,12 @@ Knappen **Lägg till fri rad** lägger till en rad utan artikelkoppling — **Be
 Klicka **Skapa faktura** för att spara som **Utkast**. Fakturan får sitt fakturanummer i FA-serien först när den utfärdas. Under varje fakturarad som är kopplad till en order skriver PDF:en ut "Order KO… · Ert ordernr …" (ordernumret alltid, kundens ordernummer när det finns) — det gäller alla fakturor, inte bara samlingsfakturor. Fria rader får ingen sådan rad.
 
 En fakturarad som hämtats från en konfigurerad orderrad bär en kopia av radens konfiguration: valen skrivs ut under benämningen på fakturan (och på en kreditfaktura som kopierar raden), med tilläggspriserna enligt kundens **Visa tilläggspriser** när fakturan utfärdas — eftersom fakturans PDF arkiveras då ändras utseendet inte efteråt. Samlingsfakturering gör likadant.
+
+### Kostnadsställe och projekt på order och faktura
+
+Finns det kostnadsställen eller projekt (se [Kostnadsställen och projekt](/hjalp/ekonomi#kostnadsstallen-och-projekt)) har kundordern och offerten fälten **Kostnadsställe** och **Projekt** — i **Ny offert**/**Ny kundorder** och under **Ändra** på orderhuvudet — och de visas i orderhuvudet när de är satta. De är förval för fakturaraderna.
+
+På fakturan har varje rad ett kostnadsställe och ett projekt: kolumnen **Kostnadsställe / projekt**, ändringsbara med **Ändra** på raden i ett utkast, och **Kostnadsställe (valfritt)** och **Projekt (valfritt)** i **Lägg till rad**. En rad som hämtas från en order får orderns kostnadsställe och projekt; saknar ordern kostnadsställe används artikelgruppens **Kostnadsställe (förval)** (se [Artiklar](/hjalp/artiklar#artikelgrupper)). Objekten bokförs på intäktsraden när fakturan utfärdas, inte på kundfordran eller momsen. Ett stängt projekt kan inte väljas på en ny rad.
 
 ### Momskod och leveransdatum på raden
 

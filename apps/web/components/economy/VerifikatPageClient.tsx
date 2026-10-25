@@ -13,6 +13,7 @@ import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui
 import { HelpLink } from "../ui/HelpLink";
 import { API_URL, apiFetch } from "../../lib/api";
 import { AllocateDialog } from "./AllocateDialog";
+import { useDimensions } from "../../lib/dimensions";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import buttonStyles from "../ui/Button.module.css";
 import {
@@ -40,11 +41,12 @@ export function VerifikatPageClient({
   const [templateOpen, setTemplateOpen] = useState(false);
   const [allocateOpen, setAllocateOpen] = useState(false);
   const searchParams = useSearchParams();
+  const dims = useDimensions();
 
   // The printout mirrors exactly what the list shows: forward the page's own
   // filters, dropping the paging params (the PDF is never paginated).
   const printParams = new URLSearchParams();
-  for (const key of ["fiscalYearId", "seriesId", "status", "search"]) {
+  for (const key of ["fiscalYearId", "seriesId", "status", "search", "costCenterId", "projectId"]) {
     const value = searchParams.get(key);
     if (value) printParams.set(key, value);
   }
@@ -103,6 +105,22 @@ export function VerifikatPageClient({
           ariaLabel="Filtrera på status"
           options={Object.entries(VERIFICATION_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
         />
+        {dims.allCostCenters.length > 0 && (
+          <ListFilterSelect
+            param="costCenterId"
+            allLabel="Alla kostnadsställen"
+            ariaLabel="Filtrera på kostnadsställe"
+            options={dims.allCostCenters.map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` }))}
+          />
+        )}
+        {dims.allProjects.length > 0 && (
+          <ListFilterSelect
+            param="projectId"
+            allLabel="Alla projekt"
+            ariaLabel="Filtrera på projekt"
+            options={dims.allProjects.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))}
+          />
+        )}
         <ListExportLink endpoint="/api/v1/verifications/csv" />
       </ListToolbar>
 

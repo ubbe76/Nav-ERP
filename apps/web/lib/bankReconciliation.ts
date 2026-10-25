@@ -167,6 +167,8 @@ export function bookRowsForEntry(
       accountName: accountName(rule.accountNumber),
       description,
       [counterSide]: String(counterAmount),
+      costCenterId: rule.costCenterId ?? "",
+      projectId: rule.projectId ?? "",
     }),
     ...extra
   );

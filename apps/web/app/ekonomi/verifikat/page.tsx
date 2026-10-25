@@ -25,7 +25,7 @@ export default async function VerifikatPage(props: { searchParams: Promise<PageS
   const pageSize = await getListPageSize();
   const [verifications, fiscalYears, series] = await Promise.all([
     apiGet<Paged<VerificationListRow>>(
-      `/api/v1/verifications${listApiQuery(searchParams, ["fiscalYearId", "seriesId", "status"], pageSize)}`,
+      `/api/v1/verifications${listApiQuery(searchParams, ["fiscalYearId", "seriesId", "status", "costCenterId", "projectId"], pageSize)}`,
       cookieHeader
     ),
     // Small registers (no pagination) — used for both the filter row and the

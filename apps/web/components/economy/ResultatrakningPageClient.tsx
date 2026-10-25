@@ -4,13 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Card } from "../ui/Card";
-import { Field, Input } from "../ui/Field";
+import { Field, Input, Select } from "../ui/Field";
 import { FormError, FormRow } from "../ui/Form";
 import { Table } from "../ui/Table";
 import { API_URL, apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
-import type { FiscalYear, IncomeStatementResponse } from "../../lib/types";
+import { useDimensions } from "../../lib/dimensions";
+import type { FiscalYear, IncomeStatementColumn, IncomeStatementResponse } from "../../lib/types";
+import { CostCenterSelect, ProjectSelect } from "./DimensionSelect";
+import styles from "./Resultatrakning.module.css";
+
+type GroupBy = "" | "costCenter" | "project";
+
+function columnLabel(c: IncomeStatementColumn): string {
+  return c.code ? `${c.code} ${c.name}` : c.name;
+}
 
 type StatementRow =
   | { id: string; kind: "line" | "subtotal"; label: string; total: number }
@@ -49,10 +58,16 @@ export function ResultatrakningPageClient({
   fiscalYears,
   defaultFrom,
   defaultTo,
+  defaultCostCenterId,
+  defaultProjectId,
+  defaultGroupBy,
 }: {
   fiscalYears: FiscalYear[];
   defaultFrom?: string;
   defaultTo?: string;
+  defaultCostCenterId?: string;
+  defaultProjectId?: string;
+  defaultGroupBy?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -69,15 +84,29 @@ export function ResultatrakningPageClient({
   );
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
+  const dims = useDimensions();
+  const [costCenterId, setCostCenterId] = useState(defaultCostCenterId ?? "");
+  const [projectId, setProjectId] = useState(defaultProjectId ?? "");
+  const [groupBy, setGroupBy] = useState<GroupBy>(
+    defaultGroupBy === "costCenter" || defaultGroupBy === "project" ? defaultGroupBy : ""
+  );
   const [report, setReport] = useState<IncomeStatementResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  // The same query string drives the screen, the URL, the PDF and the CSV.
+  const query = new URLSearchParams({ from, to });
+  if (costCenterId) query.set("costCenterId", costCenterId);
+  if (projectId) query.set("projectId", projectId);
+  if (groupBy) query.set("groupBy", groupBy);
+  const queryString = query.toString();
+  const showDimensionControls = dims.allCostCenters.length > 0 || dims.allProjects.length > 0 || groupBy !== "";
 
   useEffect(() => {
     let cancelled = false;
     setPending(true);
     setError(null);
-    apiFetch<IncomeStatementResponse>(`/api/v1/income-statement?from=${from}&to=${to}`)
+    apiFetch<IncomeStatementResponse>(`/api/v1/income-statement?${queryString}`)
       .then((data) => {
         if (cancelled) return;
         setReport(data);
@@ -93,13 +122,14 @@ export function ResultatrakningPageClient({
     return () => {
       cancelled = true;
     };
-  }, [from, to]);
+  }, [queryString]);
 
   useEffect(() => {
-    router.replace(`${pathname}?from=${from}&to=${to}`, { scroll: false });
-  }, [from, to, pathname, router]);
+    router.replace(`${pathname}?${queryString}`, { scroll: false });
+  }, [queryString, pathname, router]);
 
-  const rows = report ? flatten(report) : [];
+  const columns = report?.columns && groupBy ? report.columns : null;
+  const rows = report && !columns ? flatten(report) : [];
 
   return (
     <>
@@ -113,7 +143,7 @@ export function ResultatrakningPageClient({
           </Field>
           {report && (
             <a
-              href={`${API_URL}/api/v1/income-statement/pdf?from=${from}&to=${to}`}
+              href={`${API_URL}/api/v1/income-statement/pdf?${queryString}`}
               download
               className={`${buttonStyles.button} ${buttonStyles.ghost}`}
             >
@@ -122,7 +152,7 @@ export function ResultatrakningPageClient({
           )}
           {report && (
             <a
-              href={`${API_URL}/api/v1/income-statement/csv?from=${from}&to=${to}`}
+              href={`${API_URL}/api/v1/income-statement/csv?${queryString}`}
               download
               className={`${buttonStyles.button} ${buttonStyles.ghost}`}
             >
@@ -130,11 +160,30 @@ export function ResultatrakningPageClient({
             </a>
           )}
         </FormRow>
+        {showDimensionControls && (
+          <FormRow columns={3}>
+            <Field label="Kostnadsställe" htmlFor="incomeCostCenter">
+              <CostCenterSelect id="incomeCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Alla kostnadsställen" />
+            </Field>
+            <Field label="Projekt" htmlFor="incomeProject">
+              <ProjectSelect id="incomeProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Alla projekt" />
+            </Field>
+            <Field label="Visa" htmlFor="incomeGroupBy">
+              <Select id="incomeGroupBy" value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)}>
+                <option value="">Totalt</option>
+                <option value="costCenter">Per kostnadsställe</option>
+                <option value="project">Per projekt</option>
+              </Select>
+            </Field>
+          </FormRow>
+        )}
       </Card>
 
       {error && <FormError>{error}</FormError>}
 
-      {report && !pending && (
+      {report && !pending && columns && <ObjectMatrix report={report} columns={columns} from={from} to={to} />}
+
+      {report && !pending && !columns && (
         <Card>
           <Table<StatementRow>
             columns={[
@@ -181,5 +230,62 @@ export function ResultatrakningPageClient({
         </Card>
       )}
     </>
+  );
+}
+
+// One column per object (and "Utan") plus the sum. Scrolls sideways inside its
+// own box on narrow screens.
+function ObjectMatrix({ report, columns, from, to }: { report: IncomeStatementResponse; columns: IncomeStatementColumn[]; from: string; to: string }) {
+  const money = (n: number | undefined) => (n === undefined ? "" : formatMoney(n));
+  return (
+    <Card maxWidth="none">
+      <div className={styles.scroller}>
+        <table className={styles.matrix}>
+          <thead>
+            <tr>
+              <th className={styles.labelCell}>Konto / benämning</th>
+              {columns.map((c) => (
+                <th key={c.id ?? "none"} className={styles.amountCell}>
+                  {columnLabel(c)}
+                </th>
+              ))}
+              <th className={`${styles.amountCell} ${styles.sumCell}`}>Summa</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.entries.flatMap((entry) => {
+              const head = (
+                <tr key={`e-${entry.key}`} className={entry.kind === "subtotal" ? styles.subtotalRow : styles.lineRow}>
+                  <td className={styles.labelCell}>{entry.label}</td>
+                  {columns.map((c, i) => (
+                    <td key={c.id ?? "none"} className={`${styles.amountCell} num`}>
+                      {money(entry.amounts?.[i])}
+                    </td>
+                  ))}
+                  <td className={`${styles.amountCell} ${styles.sumCell} num`}>{formatMoney(entry.total)}</td>
+                </tr>
+              );
+              if (entry.kind === "subtotal") return [head];
+              return [
+                head,
+                ...entry.accounts.map((a) => (
+                  <tr key={`a-${entry.key}-${a.accountId}`} className={styles.accountRow}>
+                    <td className={styles.labelCell}>
+                      <Link href={`/ekonomi/huvudbok?accountId=${a.accountId}&from=${from}&to=${to}`}>{a.accountNumber}</Link> {a.accountName}
+                    </td>
+                    {columns.map((c, i) => (
+                      <td key={c.id ?? "none"} className={`${styles.amountCell} num`}>
+                        {money(a.amounts?.[i])}
+                      </td>
+                    ))}
+                    <td className={`${styles.amountCell} ${styles.sumCell} num`}>{formatMoney(a.amount)}</td>
+                  </tr>
+                )),
+              ];
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }

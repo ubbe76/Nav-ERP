@@ -99,6 +99,8 @@ export interface ArticleGroup {
   description: string | null;
   // null = the default article number series.
   numberSeriesKey: string | null;
+  // Kostnadsställe (förval) for the revenue/cost rows of this group's articles.
+  defaultCostCenterId?: string | null;
   createdAt: string;
 }
 
@@ -475,6 +477,8 @@ export interface Supplier extends PartnerCardFields, SupplierPaymentFields {
   // on the detail/PATCH answers only, not in the list rows.
   country: string;
   defaultVatCodeId: string | null;
+  // Kostnadsställe (förval) on the supplier's invoice rows.
+  defaultCostCenterId?: string | null;
   defaultVatCode?: (VatCodeRef & { derived: boolean }) | null;
   active: boolean;
   createdAt: string;
@@ -529,6 +533,9 @@ export interface PurchaseOrder extends DocumentTermsFields {
   // Er referens (leverantörens referens) / Vår referens (vår inköpare).
   yourReference: string | null;
   ourReference: string | null;
+  // Projekt: follows along when the order is the basis of a supplier invoice.
+  projectId?: string | null;
+  project?: DimensionRef | null;
   // Bumped on every content change (header/terms/rows).
   revision: number;
   createdBy: string | null;
@@ -820,6 +827,13 @@ export interface SupplierInvoice {
   // Momskoder: the header's code (every row without a code of its own and the
   // remainder follow it). Not in the list rows' joins, so optional here.
   vatCodeId?: string;
+  // Kostnadsställe/Projekt: the default for rows without their own (default
+  // from the supplier's cost centre, else the article group's; the project
+  // follows the purchase order).
+  costCenterId?: string | null;
+  projectId?: string | null;
+  costCenter?: DimensionRef | null;
+  project?: DimensionRef | null;
   // Valuta: SEK per 1 unit of `currency` (numeric string, 1 for SEK), where it
   // came from (null for SEK) and the day of a looked-up rate, and the debt in
   // SEK stamped at attest (null in a draft).
@@ -849,6 +863,11 @@ export interface SupplierInvoiceRow {
   // Momskoder: the row's own code; null = follows the invoice's.
   vatCodeId: string | null;
   vatCode: VatCodeRef | null;
+  // null = follows the invoice's Kostnadsställe/Projekt.
+  costCenterId?: string | null;
+  projectId?: string | null;
+  costCenter?: DimensionRef | null;
+  project?: DimensionRef | null;
   poOrderNumber?: string | null;
   poQuantityOrdered?: string | null;
   poQuantityReceived?: string | null;
@@ -1219,6 +1238,11 @@ export interface SalesOrder extends DocumentTermsFields {
   // Kundens förfrågan — the customer's inquiry/RFQ reference (0139).
   customerInquiryNumber: string | null;
   customerReference: string | null;
+  // Kostnadsställe/Projekt: the default for the order's invoice rows.
+  costCenterId?: string | null;
+  projectId?: string | null;
+  costCenter?: DimensionRef | null;
+  project?: DimensionRef | null;
   deliveryAddressId: string | null;
   // Joined from the selected delivery address (detail endpoint only).
   deliveryAddressLabel?: string | null;
@@ -1495,6 +1519,12 @@ export interface InvoiceRow {
   // Konfigurator 4b: copy of the order row's configuration (null for a
   // free/plain row), printed as choice lines on the invoice PDF.
   configuration: OrderRowConfiguration | null;
+  // Kostnadsställe/Projekt on the revenue row (default from the order, else
+  // the article group's cost centre).
+  costCenterId?: string | null;
+  projectId?: string | null;
+  costCenter?: DimensionRef | null;
+  project?: DimensionRef | null;
 }
 
 // Kundreskontra (B3): one settlement row from the invoice's own point of
@@ -2958,7 +2988,46 @@ export interface Account {
   name: string;
   active: boolean;
   vatBox: VatBoxSetting | null;
+  // Kräver kostnadsställe: a booking on the account without one is refused
+  // in manual verifications (409 cost-center-required).
+  costCenterRequired: boolean;
   createdAt: string;
+}
+
+// --- Kostnadsställen och projekt (bokföringsgranskningen etapp 5 del A) ---
+// SIE dimensions 1 (Kostnadsställe) and 6 (Projekt). Registers under
+// Ekonomi; mirrors the API contract (GET /cost-centers, GET /projects).
+export interface CostCenter {
+  id: string;
+  code: string;
+  name: string;
+  active: boolean;
+}
+
+export type ProjectStatus = "open" | "closed";
+
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  open: "Öppet",
+  closed: "Stängt",
+};
+
+export interface Project {
+  id: string;
+  code: string;
+  name: string;
+  active: boolean;
+  status: ProjectStatus;
+  customerId: string | null;
+  customerName: string | null;
+  startDate: string | null;
+  endDate: string | null;
+}
+
+// A cost centre / project as a row, document or report line carries it.
+export interface DimensionRef {
+  id: string;
+  code: string;
+  name: string;
 }
 
 export type AccountingPeriodStatus = "open" | "locked";
@@ -3039,6 +3108,8 @@ export interface VerificationRow {
   createdAt: string;
   accountNumber: string;
   accountName: string;
+  costCenter?: DimensionRef | null;
+  project?: DimensionRef | null;
 }
 
 // Shared header fields — mirrors getTableColumns(verifications) plus the
@@ -3087,6 +3158,9 @@ export interface VerificationDetail extends VerificationHeader {
   fixedAsset: { kind: "depreciation_run" | "reversal" | "disposal"; runId: string | null; assetId: string | null } | null;
   // Set for the year-end guide's BS verifications (booking, reversal, cancellation).
   yearEnd: { closingId: string; fiscalYearId: string; fiscalYearLabel: string; step: YearEndStep; role: YearEndRole } | null;
+  // Automatkonteringen's remarks, e.g. a row booked without the cost centre
+  // its account requires (Kräver kostnadsställe).
+  warnings?: string[];
 }
 
 export interface VerificationFile {
@@ -3112,6 +3186,10 @@ export interface VerificationTemplateRow {
   debit: number | null;
   credit: number | null;
   sortOrder: number;
+  costCenterId?: string | null;
+  projectId?: string | null;
+  costCenter?: DimensionRef | null;
+  project?: DimensionRef | null;
 }
 
 export interface VerificationTemplate {
@@ -3212,6 +3290,10 @@ export interface SieVerificationPreview {
   alreadyImported: { importedAt: string; importedBy: string | null } | null;
   verifications: SieVerificationPreviewItem[];
   missingAccounts: { number: string; name: string | null }[];
+  // Objects (#OBJEKT) the verifications use that do not exist yet:
+  // dimension 1 = Kostnadsställe, 6 = Projekt. Created together with the
+  // missing accounts by "Skapa saknade konton och objekt".
+  missingObjects?: { dimension: 1 | 6; code: string; name: string | null }[];
   blockers: string[];
   warnings: string[];
 }
@@ -3236,6 +3318,8 @@ export interface LedgerRow {
   debit: string;
   credit: string;
   balance: number;
+  costCenter?: DimensionRef | null;
+  project?: DimensionRef | null;
 }
 
 // GET /ledger?accountId=&from=&to= response.
@@ -3294,6 +3378,8 @@ export interface FixedAssetCategory {
   disposalGainAccountId: string;
   disposalLossAccountId: string;
   defaultUsefulLifeMonths: number;
+  // Kostnadsställe (förval) on the depreciation rows of the group's assets.
+  defaultCostCenterId?: string | null;
   accounts: Record<"asset" | "accumulated" | "expense" | "gain" | "loss", FixedAssetAccountRef>;
   assetCount: number;
   // Tillgångskonto/ack-konto/kostnadskonto are locked once the group has
@@ -3661,6 +3747,8 @@ export interface ReportAccount {
   accountNumber: string;
   accountName: string;
   amount: number;
+  // Only with groupBy: the amount per column of the response, in column order.
+  amounts?: number[];
 }
 
 export interface BalanceSheetLine {
@@ -3688,14 +3776,24 @@ export interface BalanceSheetResponse {
 }
 
 export type IncomeStatementEntry =
-  | { kind: "line"; key: string; label: string; accounts: ReportAccount[]; total: number }
-  | { kind: "subtotal"; key: string; label: string; total: number };
+  | { kind: "line"; key: string; label: string; accounts: ReportAccount[]; total: number; amounts?: number[] }
+  | { kind: "subtotal"; key: string; label: string; total: number; amounts?: number[] };
+
+// One column of "Per kostnadsställe"/"Per projekt": an object, or the rows
+// without one (id/code null).
+export interface IncomeStatementColumn {
+  id: string | null;
+  code: string | null;
+  name: string;
+}
 
 export interface IncomeStatementResponse {
   from: string;
   to: string;
   entries: IncomeStatementEntry[];
   result: number;
+  // Only with groupBy.
+  columns?: IncomeStatementColumn[];
 }
 
 export interface GeneralLedgerAccount {
@@ -5120,6 +5218,9 @@ export interface BankRuleSuggestion {
   accountNumber: string;
   description: string | null;
   vatCode: string | null;
+  // The rule's Kostnadsställe/Projekt, prefilled on the counter row.
+  costCenterId?: string | null;
+  projectId?: string | null;
 }
 
 // An entry on the statement as the repository reads it (StatementEntryView);
@@ -5290,6 +5391,10 @@ export interface BankRule {
   autoBook: boolean;
   active: boolean;
   sortOrder: number;
+  costCenterId?: string | null;
+  projectId?: string | null;
+  costCenter?: DimensionRef | null;
+  project?: DimensionRef | null;
 }
 
 // POST /bank-statement-entries/book-by-rule: one verification per entry, each

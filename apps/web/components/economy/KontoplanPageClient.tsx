@@ -7,8 +7,8 @@ import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { ListExportLink, ListFilterSelect, ListToolbar, Pagination } from "../ui/ListControls";
-import { Field, Input, Select, Toggle } from "../ui/Field";
-import { Form, FormActions, FormError, FormRow } from "../ui/Form";
+import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
+import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import type { Account, Paged } from "../../lib/types";
@@ -96,6 +96,7 @@ export function KontoplanPageClient({ accounts, pageSize }: { accounts: Paged<Ac
           { key: "number", label: "Nummer", width: "140px" },
           { key: "name", label: "Namn", width: "1fr" },
           { key: "vatBox", label: "Momsruta", width: "220px" },
+          { key: "costCenter", label: "Kräver kostnadsställe", width: "130px" },
           { key: "active", label: "Status", width: "120px" },
         ]}
         rows={accounts.rows}
@@ -123,6 +124,8 @@ export function KontoplanPageClient({ accounts, pageSize }: { accounts: Paged<Ac
                   {account.number.startsWith("3") || account.number.startsWith("26") ? vatBoxLabel(null) : "—"}
                 </span>
               );
+            case "costCenter":
+              return account.costCenterRequired ? "Ja" : <span style={{ color: "var(--color-text-muted)" }}>—</span>;
             case "active":
               return account.active ? (
                 <StatusPill status="running" label="Aktiv" compact />
@@ -175,6 +178,7 @@ function AccountForm({ account, onDone }: { account?: Account; onDone: () => voi
   // "default" is a form-only value (omitted from the POST so the server
   // applies the BAS default); "" = Ej angiven (null).
   const [vatBox, setVatBox] = useState<string>(account ? (account.vatBox ?? "") : "default");
+  const [costCenterRequired, setCostCenterRequired] = useState(account?.costCenterRequired ?? false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -187,12 +191,17 @@ function AccountForm({ account, onDone }: { account?: Account; onDone: () => voi
       if (account) {
         await apiFetch(`/api/v1/accounts/${account.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ name, active, vatBox: vatBoxPayload }),
+          body: JSON.stringify({ name, active, vatBox: vatBoxPayload, costCenterRequired }),
         });
       } else {
         await apiFetch("/api/v1/accounts", {
           method: "POST",
-          body: JSON.stringify(vatBox === "default" ? { number, name } : { number, name, vatBox: vatBoxPayload }),
+          body: JSON.stringify({
+            number,
+            name,
+            ...(vatBox === "default" ? {} : { vatBox: vatBoxPayload }),
+            ...(costCenterRequired ? { costCenterRequired: true } : {}),
+          }),
         });
       }
       onDone();
@@ -248,6 +257,15 @@ function AccountForm({ account, onDone }: { account?: Account; onDone: () => voi
           ))}
         </Select>
       </Field>
+
+      <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <Checkbox checked={costCenterRequired} onChange={(e) => setCostCenterRequired(e.target.checked)} />
+        Kräver kostnadsställe
+      </label>
+      <FormHint>
+        En bokning på kontot utan kostnadsställe vägras i manuella verifikat. Automatiskt konterade verifikat bokas ändå, med en
+        varning på verifikatet och i Aviseringar.
+      </FormHint>
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

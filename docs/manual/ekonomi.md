@@ -1,6 +1,6 @@
 # Ekonomi
 
-Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Manuella verifikat registreras direkt i en tabell med kontosök, automatisk motrad och momshjälp, och återkommande bokningar och kostnader som ska fördelas över flera månader sköts med **Verifikatmallar** och **Återkommande verifikat**, se [Verifikat](#verifikat), [Verifikatmallar](#verifikatmallar) och [Återkommande verifikat](#aterkommande-verifikat). Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Har du sålt till företag i andra EU-länder sammanställer **Periodisk sammanställning** försäljningen per köparens momsnummer och ger dig filen till Skatteverket, se [Periodisk sammanställning](#periodisk-sammanstallning). **Bankavstämning** stämmer av bankkontot mot kontoutdraget från banken och visar vad som saknas i bokföringen, se [Bankavstämning](#bankavstamning). Leverantörsfakturor och utbetalningar i utländsk valuta räknas om till kronor med **valutakurser** från Riksbanken eller egna kurser, se [Valutakurser](#valutakurser). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
+Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Manuella verifikat registreras direkt i en tabell med kontosök, automatisk motrad och momshjälp, och återkommande bokningar och kostnader som ska fördelas över flera månader sköts med **Verifikatmallar** och **Återkommande verifikat**, se [Verifikat](#verifikat), [Verifikatmallar](#verifikatmallar) och [Återkommande verifikat](#aterkommande-verifikat). Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Har du sålt till företag i andra EU-länder sammanställer **Periodisk sammanställning** försäljningen per köparens momsnummer och ger dig filen till Skatteverket, se [Periodisk sammanställning](#periodisk-sammanstallning). **Bankavstämning** stämmer av bankkontot mot kontoutdraget från banken och visar vad som saknas i bokföringen, se [Bankavstämning](#bankavstamning). Leverantörsfakturor och utbetalningar i utländsk valuta räknas om till kronor med **valutakurser** från Riksbanken eller egna kurser, se [Valutakurser](#valutakurser). Resultatet kan följas per avdelning och projekt med **kostnadsställen** och **projekt**, se [Kostnadsställen och projekt](#kostnadsstallen-och-projekt). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
 
 Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, **Verifikatmallar**, **Återkommande verifikat**, Huvudbok, **Bankavstämning**, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, **Periodisk sammanställning**, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, **Bankkonton**, **Bankregler**, **Valutakurser**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
 
@@ -11,6 +11,8 @@ Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger gru
 Klicka **+ Nytt konto** för att lägga upp ett konto manuellt, eller på en rad i listan för att öppna den till redigering. Kontonumret går inte att ändra i efterhand — fältet är låst på redigeringsvyn — men namnet kan ändras, och kontot kan sättas **Aktiv**/**Inaktiv** när det inte längre ska gå att bokföra mot. Ett inaktivt konto avvisas om det används på en ny verifikatrad eller vid bokföring.
 
 Varje konto har också en **Momsruta** — rutan i momsdeklarationen som kontots rörelser redovisas i (se [Momsrapport](#momsrapport)). Välj en ruta, **Ingen ruta** för konton som medvetet inte ska redovisas (t.ex. påminnelseavgifter och öres- och kronutjämning), eller **Ej angiven**. Ett nytt konto får **Förval enligt BAS**: konton ur BAS-urvalet får sin standardruta, övriga blir **Ej angiven**. Samma förval gäller konton som skapas av SIE-importen. Kolumnen **Momsruta** syns i listan (ett konto utanför kontoklass 3 och 26xx utan ruta visas med ett streck) och i CSV-exporten.
+
+Ett konto kan dessutom ha kryssrutan **Kräver kostnadsställe**: en bokning på kontot utan kostnadsställe vägras då i manuella verifikat (*"Konto 5010 kräver kostnadsställe"*). Automatiskt konterade verifikat bokas ändå, med en varning, se [Kostnadsställen och projekt](#kostnadsstallen-och-projekt). Kolumnen **Kräver kostnadsställe** visar vilka konton som har den.
 
 Knappen **Förifyll BAS-urval** lägger in ett standardurval ur den svenska BAS-kontoplanen i ett enda klick. Den är säker att klicka flera gånger — konton som redan finns (t.ex. ett omdöpt konto 1930) lämnas orörda, och notisen efteråt visar vad som hände: **"X skapade, Y fanns redan"** när något nytt lades till, eller **"Alla poster fanns redan"** om urvalet redan var på plats.
 
@@ -79,6 +81,10 @@ Beloppet delas först när det finns ett belopp på raden: väljer du momskod f�
 - **Kopiera** (finns på alla verifikat, även bokförda) skapar ett nytt **utkast** med samma serie, beskrivning och rader, daterat i dag, och tar dig till det. Har ett konto på en rad inaktiverats sedan dess utelämnas raden och kortet visar en varning om vilken. Kopiera är aktiv först när raderna är sparade.
 - **Spara som mall** frågar efter ett **Namn** och sparar verifikatets serie, beskrivning och rader — med belopp — som en [verifikatmall](#verifikatmallar). Namnet måste vara unikt (*"Det finns redan en mall med det namnet"*).
 
+### Kostnadsställe och projekt på raderna
+
+Finns det kostnadsställen eller projekt visar verifikattabellen kryssrutan **Visa kostnadsställe och projekt** under raderna. Kryssar du i den kommer kolumnerna **Kostnadsställe** och **Projekt** — två listor över de aktiva kostnadsställena och de öppna projekten — och valet minns Nav i webbläsaren till nästa gång. Tangenterna fungerar som förut: **Tab** och **Enter** går vidare genom de nya fälten, **Esc** ångrar fältet. Har en rad redan ett kostnadsställe eller projekt visas kolumnerna alltid. Ett bokfört verifikat visar dem skrivskyddat. Mallar, återkommande verifikat och **Bokför** på en kontoutdragspost har samma kolumner, och **Kopiera** tar med dem. Se [Kostnadsställen och projekt](#kostnadsstallen-och-projekt).
+
 ### Bokfört
 
 Ett bokfört verifikat visar sitt nummer, när och (om det går att slå upp) av vem det bokfördes, och raderna skrivskyddade.
@@ -105,7 +111,7 @@ Verifikat som skapas av automatkonteringen har sitt underlag på källdokumentet
 
 ### Skriv ut verifikatlista
 
-Knappen **Skriv ut lista (PDF)** överst på verifikatlistan — och **Ladda ner CSV** bredvid, för samma urval i Excel-vänligt format — skriver ut exakt det urval som råkar vara satt på sidan just då — **räkenskapsår**, **serie**, **status** och fritextsökningen — så en filtrering på **Bokförd** innan utskrift ger en ren grundbok utan utkast. Under varje verifikat listas dess konteringsrader med konto, text, debet och kredit, följt av en summerad debet-/kreditsumma för verifikatet. Utkast tas med om filtret tillåter det och skrivs då ut med numret **Utkast** i stället för ett löpnummer. Långa texter radbryts inom sina kolumner, och blir utskriften längre än en sida numreras varje sida med **Sida X av Y** nere till höger — samma sidnumrering finns på systemets övriga interna utskrifter (huvudbok, balans- och resultaträkning, plocklista, räknelista, TO-utskrift och löneunderlag).
+Listan kan filtreras på **Alla kostnadsställen** och **Alla projekt** (filtren syns när det finns objekt), och utskriften och CSV-filen visar kostnadsställe och projekt per rad. Knappen **Skriv ut lista (PDF)** överst på verifikatlistan — och **Ladda ner CSV** bredvid, för samma urval i Excel-vänligt format — skriver ut exakt det urval som råkar vara satt på sidan just då — **räkenskapsår**, **serie**, **status** och fritextsökningen — så en filtrering på **Bokförd** innan utskrift ger en ren grundbok utan utkast. Under varje verifikat listas dess konteringsrader med konto, text, debet och kredit, följt av en summerad debet-/kreditsumma för verifikatet. Utkast tas med om filtret tillåter det och skrivs då ut med numret **Utkast** i stället för ett löpnummer. Långa texter radbryts inom sina kolumner, och blir utskriften längre än en sida numreras varje sida med **Sida X av Y** nere till höger — samma sidnumrering finns på systemets övriga interna utskrifter (huvudbok, balans- och resultaträkning, plocklista, räknelista, TO-utskrift och löneunderlag).
 
 Utskriften skriver ingenting till databasen — den kan tas fram hur många gånger som helst, oavsett om perioden är låst eller ej.
 
@@ -113,7 +119,7 @@ Utskriften skriver ingenting till databasen — den kan tas fram hur många gån
 
 **Ekonomi → Verifikatmallar** är registret över mallar för verifikat som du bokför ofta — hyra, leasing, avgifter, periodiseringar. En mall har ett **Namn** (unikt), en **Serie**, en **Beskrivning** och rader med konto, beskrivning och valfria belopp. Mallarna används av **Ny från mall** på verifikatlistan och på sidan **Nytt verifikat**, och som underlag för [återkommande verifikat](#aterkommande-verifikat). Ett verifikat kan också sparas som mall direkt från verifikatkortet med **Spara som mall**.
 
-- **+ Ny mall** och **Ändra** öppnar mallen i samma tabell som verifikaten (kontosök, tangenterna, **Spara mall** eller **Ctrl+Enter**). Här får **Debet** och **Kredit** lämnas tomma — beloppen fylls i när mallen används — men en rad kan inte ha belopp i båda, och en mall behöver minst en rad. Momskod och balansindikator finns inte i mallar.
+- **+ Ny mall** och **Ändra** öppnar mallen i samma tabell som verifikaten (kontosök, tangenterna, **Spara mall** eller **Ctrl+Enter**). Här får **Debet** och **Kredit** lämnas tomma — beloppen fylls i när mallen används — men en rad kan inte ha belopp i båda, och en mall behöver minst en rad. Momskod och balansindikator finns inte i mallar, men kolumnerna **Kostnadsställe** och **Projekt** finns (visa dem med **Visa kostnadsställe och projekt**) och följer med till verifikaten som skapas ur mallen och de återkommande posterna.
 - **Använd** öppnar sidan **Nytt verifikat** ifylld från mallen.
 - **Inaktivera** döljer mallen i **Ny från mall** och när en återkommande post skapas; **Aktivera** tar tillbaka den. Posterna lagras med kontonummer, så en mall med ett konto som sedan har tagits bort ur kontoplanen kan inte sparas förrän kontot bytts (*"Konton som inte finns i kontoplanen: …"*).
 - **Ta bort** raderar mallen efter bekräftelse. Används mallen av en återkommande post nekas det (*"Mallen används av en återkommande post och kan inte tas bort"*) — ta bort posten först, eller inaktivera mallen. Verifikat som skapats ur mallen påverkas aldrig.
@@ -163,6 +169,8 @@ Fältet **Visa** växlar huvudboken mellan **Ett konto** (beskrivet ovan) och **
 
 Resultatet visas som ett block per konto, i kontonummerordning, med samma tabellrader som enkontosläget: **Ingående saldo**, de bokförda raderna och **Utgående saldo**. Ingående och utgående saldo visas alltid, även för konton utan en enda rad i perioden. Ett inaktivt konto med bokförd historik går att välja i **Ett konto**-läget, märkt **"(inaktivt)"** i listan.
 
+**Kostnadsställe** och **Projekt** överst begränsar huvudboken till de rader som bär det valda objektet (fälten visas när det finns kostnadsställen eller projekt), och raderna får kolumnerna **Kostnadsställe** och **Projekt** när något av dem har ett. Saldona är då saldon för objektets rader.
+
 **Ladda ner PDF** och **Ladda ner CSV** finns i båda lägena och laddar ner exakt det som visas på skärmen (CSV i Excel-vänligt format, se [Rapporter](/hjalp/rapporter#exportera-till-excel-csv)).
 
 ## Balansräkning
@@ -197,6 +205,8 @@ Raderna kommer i fast ordning med fem delsummerader: **Rörelseresultat**, **Res
 Rapporten är **kreditpositiv**: intäkter visas som positiva belopp, kostnader som negativa, så den sista raden går att läsa direkt som resultatet. Sista raden (**Beräknat resultat**) är alltid samma belopp som balansräkningens **Årets resultat** för samma period.
 
 När året är stängt i bokslutet (se [Resultatöverföring](#resultatoverforing)) visas överföringen på raden **Årets resultat (bokfört)** (konto 8999). **Årets resultat** visar då fortfarande årets resultat, medan **Beräknat resultat** blir 0,00 — resultatet ligger nu på konto 2099 under eget kapital.
+
+**Kostnadsställe** och **Projekt** (visas när det finns objekt) begränsar rapporten till rader som bär det valda objektet, och fältet **Visa** växlar mellan **Totalt**, **Per kostnadsställe** och **Per projekt**. I de två sista lägena får tabellen en kolumn per objekt, en kolumn för rader **utan** objekt och en kolumn **Summa**; på en smal skärm rullar tabellen i sidled i sin egen ruta. Balansräkningen påverkas inte. **Ladda ner PDF** och **Ladda ner CSV** följer samma urval.
 
 Till skillnad från balansräkningen är resultaträkningen strikt periodavgränsad — intäkter och kostnader från tidigare år läcker aldrig in, även om de bokförts på samma konton.
 
@@ -332,6 +342,41 @@ Tabellen har kolumnerna **Momsnummer**, **Kund** (länk till kundkortet), **Varo
 
 Sidan kräver rättigheten **Ekonomi**, som resten av modulen.
 
+## Kostnadsställen och projekt
+
+Med **kostnadsställen** och **projekt** kan du följa resultatet per avdelning (verkstad, montering, kontor) och per projekt (en storköksleverans, ett kundprojekt) i stället för bara för hela företaget. De motsvarar dimension 1 (Kostnadsställe) och 6 (Projekt) i SIE, så revisorn får dem med i SIE-filen. Det finns bara de två dimensionerna.
+
+### Registren
+
+**Ekonomi → Kostnadsställen** och **Ekonomi → Projekt** är registren, under Grunddata. Klicka **+ Nytt kostnadsställe** eller **+ Nytt projekt**, eller på namnet i listan för att redigera.
+
+- **Kod** — 1–20 tecken och unik (*"Koden används redan av ett annat kostnadsställe"*). Koden blir objektkoden i SIE-filen.
+- **Namn**.
+- **Aktivt** — ett inaktivt objekt kan inte väljas på nya rader men finns kvar på det som redan bokats.
+- Ett projekt har dessutom en valfri **Kund**, **Start** och **Slut** och en **Status**: **Öppet** eller **Stängt**. Ett stängt projekt kan inte väljas på nya rader (*"Projektet är stängt …"*) men finns kvar på det som redan bokats och i rapporterna.
+
+**Ta bort** fungerar som i övriga register: används objektet visas vad det är kopplat till, och du väljer ett annat objekt att **Flytta och ta bort** kopplingarna till. Vill du behålla historiken ungefär som den är, inaktivera objektet i stället.
+
+### Var objekten sätts
+
+- **Verifikat** — kolumnerna **Kostnadsställe** och **Projekt** i verifikattabellen, se [Kostnadsställe och projekt på raderna](#kostnadsstalle-och-projekt-pa-raderna). Mallar och återkommande verifikat bär dem.
+- **Kundfaktura** — varje fakturarad har ett kostnadsställe och ett projekt (kolumnen **Kostnadsställe / projekt**, och i **Lägg till rad**). Förval är kundorderns **Kostnadsställe** och **Projekt** (sätts på ordern under **Ändra**), annars artikelgruppens **Kostnadsställe (förval)**. Objekten bokförs på intäktsraden, inte på kundfordran eller momsen.
+- **Leverantörsfaktura** — fakturans **Kostnadsställe** och **Projekt** är förval för raderna, och varje rad kan ha egna. Förval är leverantörens **Kostnadsställe (förval)**, annars artikelgruppens, och inköpsorderns **Projekt** när underlaget hämtas från en inköpsorder. Objekten bokförs på kostnadsraden; restraden tar fakturans.
+- **Bankavstämning** — en [bankregel](#bankregler) kan bära kostnadsställe och projekt, och raderna i **Bokför posten** har kolumnerna.
+- **Anläggningsregister** — en [anläggningsgrupp](#anlaggningsgrupper) har ett **Kostnadsställe (förval)** för avskrivningsraden.
+- **SIE-import** — verifikatens objekt importeras, se [Importera verifikat](#importera-verifikat).
+- Lager, löner (PAXml) och övriga automatiska bokningar får inga objekt.
+
+### Kräver kostnadsställe
+
+Kryssrutan **Kräver kostnadsställe** på ett konto (se [Kontoplan](#kontoplan)) gör att en bokning på kontot utan kostnadsställe vägras i manuella verifikat — meddelandet nämner kontona. Utkast kan sparas utan; det är vid **Bokför** det kontrolleras. Automatkonteringen bokar raden ändå (en faktura får aldrig stoppas av det) och visar en varning på verifikatet. Dessutom visar [Aviseringar](/hjalp/aviseringar) **Bokningar utan kostnadsställe**.
+
+### Rapporterna
+
+- [Resultaträkningen](#resultatrakning) har urval **Kostnadsställe** och **Projekt** och lägena **Per kostnadsställe** och **Per projekt**, med en kolumn per objekt och en för rader **utan** objekt.
+- [Huvudboken](#huvudbok) och verifikatlistan har samma urval och visar objekten per rad.
+- **Rapporter → Projektrapport** visar intäkter, kostnader och resultat per projekt och månad ur bokföringen, per konto och de kundordrar som har projektet, se [Projektrapport](/hjalp/rapporter#projektrapport).
+
 ## Valutakurser
 
 **Ekonomi → Valutakurser** håller de växelkurser Nav räknar om fakturor och utbetalningar i utländsk valuta med. En kurs anges som **kronor per 1 enhet** av valutan — 11,131 för EUR betyder att 1 EUR kostar 11,131 kr. SEK har alltid kurs 1 och behöver ingen kurs.
@@ -363,6 +408,8 @@ Hela sidan kräver rättigheten **Ekonomi**, som resten av modulen.
 
 Välj **Räkenskapsår** och klicka **Ladda ner SIE-fil**. Filen innehåller räkenskapsårets kontoplan, ingående och utgående saldon, årets resultat per konto och **samtliga bokförda verifikat** med sina konteringsrader. Utkast följer aldrig med. Finns ett föregående räkenskapsår tas även dess datumintervall med som jämförelseår, vilket många mottagande program vill ha.
 
+Kostnadsställen och projekt följer med: filen innehåller `#DIM 1 "Kostnadsställe"` och `#DIM 6 "Projekt"`, ett `#OBJEKT` per kostnadsställe och projekt och objekten på varje verifikatrad (`{1 "kod" 6 "kod"}` i `#TRANS`).
+
 Filen skrivs i teckenkodningen **CP437**, som SIE-standarden kräver — öppnar du den i en vanlig textredigerare kan svenska tecken därför se konstiga ut, medan bokföringsprogrammet läser den rätt. Filändelsen är `.se` och filnamnet innehåller företagsnamn och räkenskapsårets datum.
 
 ### Importera ingående balanser
@@ -387,19 +434,19 @@ Fliken **Importera verifikat** läser själva verifikaten (`#VER` med `#TRANS`) 
 
 - Filens namn, vilket program som skrev den och antalet verifikat.
 - Varje verifikat som en rad som kan fällas ut: serie, nummer, datum, text, summa **Debet** och **Kredit** och dess rader med konto, text och belopp. Ett obalanserat verifikat markeras **Obalans**, och varningar (till exempel datum utanför räkenskapsåret eller en låst period) står under raden.
-- **Konton som saknas i kontoplanen**, och **Spärrar** — fel som stoppar hela importen — i rött. Har filen redan importerats visas när och av vem.
+- **Konton som saknas i kontoplanen** och **Kostnadsställen och projekt som saknas** (objekten i filens `#TRANS`-rader som inte finns i Nav, med dimension 1 = kostnadsställe och 6 = projekt), och **Spärrar** — fel som stoppar hela importen — i rött. Har filen redan importerats visas när och av vem.
 
 Välj sedan:
 
 - **Serie** — förvalet är **LÖ — Lönejournal**, som skapas automatiskt första gången den behövs. Du kan välja en annan serie.
 - **Läge** — **Utkast** (förval) lägger verifikaten som utkast att granska och bokföra, **Bokför** bokför dem direkt.
-- **Skapa saknade konton** — kryssrutan visas när filen använder konton som inte finns. Utan den kan filen inte importeras; med den läggs kontona upp med namnen ur filens `#KONTO`-rader (ett namn längre än 100 tecken kortas). Ett konto som inte har **fyra siffror** kan inte läggas upp i Navs kontoplan — det stoppar importen (*"Kontot 12345 har inte fyra siffror och kan inte skapas"*) oavsett kryssrutan; lägg upp det för hand under ett fyrsiffrigt nummer eller rätta filen.
+- **Skapa saknade konton och objekt** — kryssrutan visas när filen använder konton, kostnadsställen eller projekt som inte finns. Utan den kan filen inte importeras; med den läggs kontona upp med namnen ur filens `#KONTO`-rader (ett namn längre än 100 tecken kortas), och kostnadsställena och projekten med koderna och namnen ur filens `#OBJEKT`-rader. Objekten på verifikatraderna importeras alltid, så resultatet per kostnadsställe och projekt stämmer med filens. Ett konto som inte har **fyra siffror** kan inte läggas upp i Navs kontoplan — det stoppar importen (*"Kontot 12345 har inte fyra siffror och kan inte skapas"*) oavsett kryssrutan; lägg upp det för hand under ett fyrsiffrigt nummer eller rätta filen.
 
 Klicka **Importera**. Resultatet listar de nya verifikaten med länkar.
 
 Regler att känna till:
 
-- **Allt eller inget.** Är något verifikat obalanserat, saknas ett konto utan att du valt **Skapa saknade konton**, eller ligger ett datum i en låst period, importeras ingenting (*"Ingenting importerades: …"* med orsakerna).
+- **Allt eller inget.** Är något verifikat obalanserat, saknas ett konto eller objekt utan att du valt **Skapa saknade konton och objekt**, eller ligger ett datum i en låst period, importeras ingenting (*"Ingenting importerades: …"* med orsakerna).
 - **Samma fil kan bara importeras en gång.** Filen känns igen på sitt innehåll (kontrollsumma), inte på filnamnet — en andra import avvisas med *"Filen har redan importerats … av …"*, så ingen löneperiod bokförs två gånger.
 - Varje verifikat får filens text och hänvisningen *(SIE-import ver LÖ 12)* som beskrivning (radtexter längre än 255 tecken kortas), och **filen sparas som underlag** på varje verifikat (se [Underlag på verifikat](#underlag-pa-verifikat)). Är serien eller räkenskapsåret fel kan du ta bort ett utkast och importera om först när du rättat — den redan importerade filen kan inte läsas in igen, så rätta i stället utkasten för hand.
 - Eftersom filen sparas en gång per verifikat tar en stor fil med många verifikat plats: förhandsgranskningen varnar när antal verifikat × filens storlek överstiger **50 MB** (*"Filen sparas som underlag på varje verifikat: 60 verifikat × 1 MB ≈ 60 MB lagras i databasen"*), och över **500 MB** stoppas importen — dela då upp filen i mindre delar.
@@ -488,6 +535,7 @@ Med flera poster som en regel känner igen kryssar du i dem och klickar **Bokfö
 - **Konto** — motkontot som föreslås när posten bokförs.
 - **Momskod** — valfri, bara en inhemsk kod (**MP25**, **MP12**, **MP6** eller **MF**); beloppet tolkas då som inklusive moms och momsraden läggs till på kodens konto för utgående moms (insättning) eller ingående moms (uttag). MF lägger inte till någon momsrad.
 - **Beskrivning** — texten på motkontots rad; tom ⇒ postens egen text.
+- **Kostnadsställe** och **Projekt** — valfria (visas när det finns objekt); förifylls på motkontots rad när posten bokförs och sätts på rader som regeln bokför direkt.
 - **Bokför direkt** — nya poster som regeln träffar bokförs direkt vid import, efter den automatiska matchningen. Det gäller bara när **exakt en** aktiv regel träffar posten och kontot (och momskodens momskonto) är aktivt; träffar flera regler samma post lämnas den till dig. **Bokför direkt är avstängt som förval** — slå på det först när du litar på regeln.
 - **Aktiv** — en inaktiv regel används inte men finns kvar.
 
@@ -512,6 +560,8 @@ Avstämningen är ingen spärr — du kan fortfarande bokföra — men [årsboks
 ### Anläggningsgrupper
 
 **Ekonomi → Anläggningsgrupper** är grunddata: varje grupp bär fem konton — **Tillgångskonto** (t.ex. 1220), **Ack. avskrivningar** (1229), **Avskrivningskostnad** (7830), **Vinst vid avyttring** (3973) och **Förlust vid avyttring** (7970) — samt **Förvald nyttjandetid (månader)**, som förifylls på nya anläggningar i gruppen. Tillgångskonto, ack-konto och kostnadskonto måste vara tre olika konton. När någon anläggning i gruppen har bokförd avskrivning eller en **Ingående avskrivning** är de tre kontona låsta i gruppens dialog (*"Tillgångskonto, ack-konto och kostnadskonto är låsta — gruppen har bokförd eller ingående avskrivning"*) — de bär redan bokförda belopp; vinst- och förlustkonto, namn och nyttjandetid kan fortfarande ändras.
+
+En grupp kan också få ett **Kostnadsställe (förval)**, som sätts på avskrivningsraden (kostnadskontot) när gruppens anläggningar skrivs av.
 
 Knappen **Förifyll BAS-grupper** skapar fem grupper ur BAS-kontoplanen: *Maskiner och andra tekniska anläggningar* (1210/1219/7830, 60 mån), *Inventarier och verktyg* (1220/1229/7830, 60 mån), *Bilar och andra transportmedel* (1240/1249/7830, 60 mån), *Datorer* (1250/1259/7830, 36 mån) och *Byggnader* (1110/1119/7820, 600 mån = 2 % per år). Grupper som redan finns hoppas över. Saknas ett av kontona i kontoplanen avbryts förifyllningen — kör **Förifyll BAS-urval** under Kontoplan först. Nyttjandetiderna är bara förval; ändra dem efter företagets egna bedömningar. En grupp kan tas bort så länge den saknar anläggningar.
 
@@ -640,6 +690,8 @@ Kund- och leverantörsfakturor bokförs automatiskt — du behöver aldrig knapp
 Serierna skapas bara om de saknas. Finns redan en verifikatserie med koden **F**, **L**, **K**, **U**, **M**, **IM**, **AV** eller **BS** — t.ex. en du lagt upp själv för något annat — återanvänder automatkonteringen den serien utan att säga till, och fakturaverifikaten hamnar alltså i din befintliga serie. Vill du hålla dem åtskilda, använd andra koder än F, L, K, U, M, IM, AV och BS för egna serier.
 
 Fakturanumret/attesten/BET-numret/UTB-numret och verifikatet skapas i ett och samma steg — antingen blir båda av, eller ingetdera. På respektive faktura-/betalningskort visas en länk till verifikatet (**Verifikat F-…** / **Verifikat L-…** / **Verifikat K-…** / **Verifikat U-…**), synlig bara för den som kan öppna Ekonomi.
+
+Kostnadsställe och projekt följer med automatkonteringen: en kundfakturas intäktsrad och en leverantörsfakturas kostnadsrad bokförs med radens kostnadsställe och projekt, se [Kostnadsställen och projekt](#kostnadsstallen-och-projekt). Kräver kontot kostnadsställe men raden saknar det bokas verifikatet ändå — en faktura får aldrig stoppas av det — och en varning visas på verifikatet och i [Aviseringar](/hjalp/aviseringar).
 
 **Vilket konto en rad bokförs mot avgörs i den här ordningen:**
 

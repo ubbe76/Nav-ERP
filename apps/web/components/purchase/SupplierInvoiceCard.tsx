@@ -1,5 +1,7 @@
 "use client";
 
+import { CostCenterSelect, ProjectSelect, DimensionFields } from "../economy/DimensionSelect";
+import { dimensionText, headerDimensionFields, useDimensions } from "../../lib/dimensions";
 import { confirmDelete } from "../../lib/confirm";
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
@@ -75,6 +77,9 @@ export function SupplierInvoiceCard({
     : null;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const dims = useDimensions();
+  const showObjects =
+    dims.allCostCenters.length > 0 || dims.allProjects.length > 0 || invoice.rows.some((r) => r.costCenter || r.project);
 
   async function statusAction(action: "approve" | "cancel") {
     setError(null);
@@ -241,6 +246,7 @@ export function SupplierInvoiceCard({
             { key: "unitPrice", label: foreign ? `À-pris (${invoice.currency})` : "À-pris", width: "110px", align: "right" },
             { key: "lineAmount", label: foreign ? `Belopp (${invoice.currency})` : "Belopp", width: "120px", align: "right" },
             { key: "vatCode", label: "Momskod", width: "minmax(170px, 1fr)" },
+            ...(showObjects ? [{ key: "objects", label: "Kostnadsställe / projekt", width: "minmax(170px, 1fr)" }] : []),
             { key: "poOrderNumber", label: "IO-matchning", width: "1fr" },
             { key: "id", label: "", width: "110px", align: "right" },
           ]}
@@ -258,6 +264,16 @@ export function SupplierInvoiceCard({
               case "vatCode":
                 // null = the row follows the invoice's code.
                 return row.vatCode ? row.vatCode.name : <span style={{ opacity: 0.7 }}>Följer fakturan</span>;
+              case "objects":
+                // null = the row follows the invoice's own.
+                return row.costCenter || row.project ? (
+                  <>
+                    <div>{dimensionText(row.costCenter)}</div>
+                    <div>{dimensionText(row.project)}</div>
+                  </>
+                ) : (
+                  <span style={{ opacity: 0.7 }}>Följer fakturan</span>
+                );
               case "poOrderNumber":
                 return <MatchCell row={row} />;
               case "id":
@@ -413,6 +429,9 @@ function HeaderForm({
   const [vatAmount, setVatAmount] = useState(invoice.vatAmount);
   const [grossAmount, setGrossAmount] = useState(invoice.grossAmount);
   const [vatCodeId, setVatCodeId] = useState(invoice.vatCodeId);
+  const dims = useDimensions();
+  const [costCenterId, setCostCenterId] = useState(invoice.costCenterId ?? invoice.costCenter?.id ?? "");
+  const [projectId, setProjectId] = useState(invoice.projectId ?? invoice.project?.id ?? "");
   // What the picked code means for the VAT (omvänd moms, momsfritt, varor
   // utanför EU); null for a code with a rate.
   const pickedCode =
@@ -490,6 +509,8 @@ function HeaderForm({
           // the supplier change gives the invoice another currency.
           exchangeRate: foreign && !currencyChanging ? invoiceRate.patchValue : undefined,
           note: note.trim() || null,
+          costCenterId: costCenterId || null,
+          projectId: projectId || null,
         }),
       });
       setSaved(true);
@@ -567,6 +588,20 @@ function HeaderForm({
             {pickedNote ? ` Med den här momskoden ska Momsbelopp vara 0. ${pickedNote}` : ""}
           </FormHint>
         </Field>
+        <DimensionFields
+          idPrefix="hdr"
+          lists={dims}
+          costCenterId={costCenterId}
+          projectId={projectId}
+          onCostCenterChange={setCostCenterId}
+          onProjectChange={setProjectId}
+        />
+        {(dims.allCostCenters.length > 0 || dims.allProjects.length > 0) && (
+          <FormHint>
+            Gäller alla rader utan eget kostnadsställe och projekt, och bokförs på kostnadsraden (restraden tar alltid
+            fakturans). Förval är leverantörens kostnadsställe, annars artikelgruppens, och inköpsorderns projekt.
+          </FormHint>
+        )}
         <Field label="Notering" htmlFor="hdrNote">
           <Input id="hdrNote" value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
@@ -607,6 +642,9 @@ function AddRowForm({
   // "" = the row follows the invoice's Momskod.
   const [vatCodeId, setVatCodeId] = useState("");
   const [poRowId, setPoRowId] = useState("");
+  const dims = useDimensions();
+  const [costCenterId, setCostCenterId] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [matchOptions, setMatchOptions] = useState<PriceHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -647,8 +685,12 @@ function AddRowForm({
           unitPrice: unitPrice.trim() ? Number(unitPrice) : 0,
           vatCodeId: vatCodeId || undefined,
           purchaseOrderRowId: poRowId || undefined,
+          costCenterId: costCenterId || undefined,
+          projectId: projectId || undefined,
         }),
       });
+      setCostCenterId("");
+      setProjectId("");
       setDescription("");
       setArticle(null);
       setQuantity("1");
@@ -697,6 +739,17 @@ function AddRowForm({
             ))}
           </Select>
         </Field>
+
+        {(dims.allCostCenters.length > 0 || dims.allProjects.length > 0) && (
+          <FormRow>
+            <Field label="Kostnadsställe" htmlFor="rowCostCenter">
+              <CostCenterSelect id="rowCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Följer fakturan" />
+            </Field>
+            <Field label="Projekt" htmlFor="rowProject">
+              <ProjectSelect id="rowProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Följer fakturan" />
+            </Field>
+          </FormRow>
+        )}
 
         {article && matchOptions.length > 0 && (
           <Field label="Koppla till inköpsorderrad (valfritt)" htmlFor="rowPoMatch">

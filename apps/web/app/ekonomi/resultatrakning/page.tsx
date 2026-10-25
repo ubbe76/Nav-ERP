@@ -43,6 +43,9 @@ export default async function ResultatrakningPage(props: { searchParams: Promise
         fiscalYears={fiscalYears}
         defaultFrom={singleParam(searchParams.from)}
         defaultTo={singleParam(searchParams.to)}
+        defaultCostCenterId={singleParam(searchParams.costCenterId)}
+        defaultProjectId={singleParam(searchParams.projectId)}
+        defaultGroupBy={singleParam(searchParams.groupBy)}
       />
     </AppShell>
   );

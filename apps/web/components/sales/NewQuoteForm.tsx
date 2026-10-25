@@ -21,6 +21,8 @@ import { addDaysIso, stockholmToday } from "../../lib/date";
 import { useCustomerDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
+import { useDimensions } from "../../lib/dimensions";
+import { DimensionFields } from "../economy/DimensionSelect";
 import type { DeliveryTimeCheckRequest } from "../../lib/deliveryTimeCheck";
 import { toBaseQuantity, toBasePrice, toUnitPrice } from "../../lib/units";
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
@@ -131,6 +133,9 @@ export function NewQuoteForm({
   const [customerOrderNumber, setCustomerOrderNumber] = useState("");
   const [customerInquiryNumber, setCustomerInquiryNumber] = useState("");
   const [customerReference, setCustomerReference] = useState("");
+  const dims = useDimensions();
+  const [costCenterId, setCostCenterId] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [deliveryAddressId, setDeliveryAddressId] = useState("");
   const [deliveryAddresses, setDeliveryAddresses] = useState<CustomerDeliveryAddress[]>([]);
   const [newDeliveryAddress, setNewDeliveryAddress] = useState<DeliveryAddressDraft>(emptyDeliveryAddressDraft());
@@ -235,6 +240,8 @@ export function NewQuoteForm({
             ? { customerOrderNumber: customerOrderNumber.trim() || undefined }
             : { customerInquiryNumber: customerInquiryNumber.trim() || undefined }),
           customerReference: customerReference.trim() || undefined,
+          costCenterId: costCenterId || undefined,
+          projectId: projectId || undefined,
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, undefined),
           confirm: mode === "order",
           ...(mode === "order" || quoteValidUntil === null ? {} : { quoteValidUntil: quoteValidUntil === "" ? null : quoteValidUntil }),
@@ -362,6 +369,15 @@ export function NewQuoteForm({
           />
         </Field>
       </FormRow>
+
+      <DimensionFields
+        idPrefix="quote"
+        lists={dims}
+        costCenterId={costCenterId}
+        projectId={projectId}
+        onCostCenterChange={setCostCenterId}
+        onProjectChange={setProjectId}
+      />
 
       {customer && (
         <DeliveryAddressChoice

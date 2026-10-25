@@ -12,6 +12,8 @@ import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { Modal } from "../ui/Modal";
+import { CostCenterSelect, ProjectSelect } from "../economy/DimensionSelect";
+import { dimensionText, useDimensions } from "../../lib/dimensions";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { formatRate, SEK } from "../../lib/currency";
@@ -94,6 +96,12 @@ export function InvoiceCard({
   const [editUnitPrice, setEditUnitPrice] = useState("");
   const [editVatCodeId, setEditVatCodeId] = useState("");
   const [editDeliveryDate, setEditDeliveryDate] = useState("");
+  const [editCostCenterId, setEditCostCenterId] = useState("");
+  const [editProjectId, setEditProjectId] = useState("");
+  const dims = useDimensions();
+  // The column shows when objects exist or a row already carries one.
+  const showObjects =
+    dims.allCostCenters.length > 0 || dims.allProjects.length > 0 || invoice.rows.some((r) => r.costCenter || r.project);
   const [reminderOpen, setReminderOpen] = useState(false);
 
   const netAmount = invoice.rows.reduce((sum, r) => sum + Number(r.lineAmount), 0);
@@ -154,6 +162,8 @@ export function InvoiceCard({
     setEditUnitPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
     setEditVatCodeId(row.vatCodeId);
     setEditDeliveryDate(row.deliveryDate ?? "");
+    setEditCostCenterId(row.costCenterId ?? row.costCenter?.id ?? "");
+    setEditProjectId(row.projectId ?? row.project?.id ?? "");
   }
 
   async function saveRow(row: InvoiceRow) {
@@ -170,6 +180,8 @@ export function InvoiceCard({
           // give an EU customer svensk moms.
           vatCodeId: editVatCodeId,
           deliveryDate: editDeliveryDate.trim() || null,
+          costCenterId: editCostCenterId || null,
+          projectId: editProjectId || null,
         }),
       });
       setEditingRowId(null);
@@ -350,6 +362,7 @@ export function InvoiceCard({
             { key: "vatCode", label: "Momskod", width: "minmax(190px, 1fr)" },
             { key: "lineAmount", label: foreign ? `Belopp (${invoice.currency})` : "Belopp", width: "120px", align: "right" },
             { key: "deliveryDate", label: "Leveransdatum", width: "140px" },
+            ...(showObjects ? [{ key: "objects", label: "Kostnadsställe / projekt", width: "minmax(180px, 1fr)" }] : []),
             { key: "salesOrderNumber", label: "Order", width: "110px" },
             ...(editable ? ([{ key: "id", label: "", width: "160px", align: "right" }] as const) : []),
           ]}
@@ -437,6 +450,32 @@ export function InvoiceCard({
                   />
                 ) : (
                   (row.deliveryDate ?? "–")
+                );
+              case "objects":
+                return isEditing ? (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <CostCenterSelect
+                      aria-label="Kostnadsställe"
+                      all={dims.allCostCenters}
+                      value={editCostCenterId}
+                      onChange={setEditCostCenterId}
+                      emptyLabel="Kostnadsställe —"
+                    />
+                    <ProjectSelect
+                      aria-label="Projekt"
+                      all={dims.allProjects}
+                      value={editProjectId}
+                      onChange={setEditProjectId}
+                      emptyLabel="Projekt —"
+                    />
+                  </div>
+                ) : row.costCenter || row.project ? (
+                  <>
+                    <div>{dimensionText(row.costCenter)}</div>
+                    <div>{dimensionText(row.project)}</div>
+                  </>
+                ) : (
+                  "–"
                 );
               case "lineAmount":
                 return formatMoney(row.lineAmount);
@@ -926,6 +965,9 @@ function AddRowForm({
   // sends that vatCodeId; the bare vatRate is never sent.
   const [vatCodeId, setVatCodeId] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
+  const [costCenterId, setCostCenterId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const dims = useDimensions();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -964,8 +1006,12 @@ function AddRowForm({
           unitPrice: unitPrice.trim() ? Number(unitPrice) : 0,
           vatCodeId: vatCodeId || undefined,
           deliveryDate: deliveryDate.trim() || undefined,
+          costCenterId: costCenterId || undefined,
+          projectId: projectId || undefined,
         }),
       });
+      setCostCenterId("");
+      setProjectId("");
       setDescription("");
       setArticle(null);
       setQuantity("1");
@@ -1022,6 +1068,23 @@ function AddRowForm({
           Automatisk väljer momskod efter kundens land, momsnummer och artikeln. Leveransdatumet skrivs ut på fakturan
           när det skiljer sig från fakturadatumet.
         </FormHint>
+
+        {(dims.allCostCenters.length > 0 || dims.allProjects.length > 0) && (
+          <>
+            <FormRow>
+              <Field label="Kostnadsställe (valfritt)" htmlFor="rowCostCenter">
+                <CostCenterSelect id="rowCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Förval" />
+              </Field>
+              <Field label="Projekt (valfritt)" htmlFor="rowProject">
+                <ProjectSelect id="rowProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Förval" />
+              </Field>
+            </FormRow>
+            <FormHint>
+              Förval är kundorderns kostnadsställe och projekt, annars artikelgruppens kostnadsställe. Objekten bokförs på
+              intäktsraden.
+            </FormHint>
+          </>
+        )}
 
         <FormActions>
           <Button type="submit" variant="secondary" disabled={pending}>

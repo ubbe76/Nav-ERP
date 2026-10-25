@@ -42,6 +42,8 @@ import { apiFetch } from "../../lib/api";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { askBumpRevision } from "../../lib/revision";
+import { headerDimensionFields, useDimensions } from "../../lib/dimensions";
+import { DimensionFields } from "../economy/DimensionSelect";
 import { salesDocumentKind } from "../../lib/salesDocumentKind";
 import {
   MANUFACTURING_ORDER_STATUS_PILL,
@@ -82,6 +84,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   const router = useRouter();
   const canSell = useCan()(["forsaljning"]);
   const [freightOpen, setFreightOpen] = useState(false);
+  const dims = useDimensions();
   const [freight, setFreight] = useState<OrderFreight | null>(null);
   const reloadFreight = useCallback(() => {
     if (!freightEnabled) return;
@@ -428,6 +431,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           { label: "Kund", value: order.customerName, href: `/kunder/${order.customerId}` },
           ...customerNumberFields(order),
           { label: "Referens", value: order.customerReference },
+          ...headerDimensionFields(order, dims),
           ...(foreign
             ? [{ label: "Kurs", value: `1 ${order.currency} = ${formatRate(order.exchangeRate)} kr` }]
             : []),
@@ -1019,6 +1023,9 @@ function EditHeaderForm({
   const isQuote = salesDocumentKind(order) === "quote";
   const showOrderNumber = !isQuote || Boolean(order.customerOrderNumber);
   const [customerReference, setCustomerReference] = useState(order.customerReference ?? "");
+  const dims = useDimensions();
+  const [costCenterId, setCostCenterId] = useState(order.costCenterId ?? order.costCenter?.id ?? "");
+  const [projectId, setProjectId] = useState(order.projectId ?? order.project?.id ?? "");
   const [deliveryAddressId, setDeliveryAddressId] = useState(order.deliveryAddressId ?? "");
   const [newDeliveryAddress, setNewDeliveryAddress] = useState<DeliveryAddressDraft>(emptyDeliveryAddressDraft());
   // The order's engångsadress is not in the customer's list — offered as its
@@ -1077,6 +1084,8 @@ function EditHeaderForm({
           ...(showOrderNumber ? { customerOrderNumber: customerOrderNumber.trim() || null } : {}),
           customerInquiryNumber: customerInquiryNumber.trim() || null,
           customerReference: customerReference.trim() || null,
+          costCenterId: costCenterId || null,
+          projectId: projectId || null,
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, null),
           ...termsPayload(terms),
           // Giltig t.o.m. only exists on a quote (the API refuses it otherwise).
@@ -1132,6 +1141,15 @@ function EditHeaderForm({
           />
         </Field>
       </FormRow>
+
+      <DimensionFields
+        idPrefix="header"
+        lists={dims}
+        costCenterId={costCenterId}
+        projectId={projectId}
+        onCostCenterChange={setCostCenterId}
+        onProjectChange={setProjectId}
+      />
 
       {canChangeCurrency && (
         <>

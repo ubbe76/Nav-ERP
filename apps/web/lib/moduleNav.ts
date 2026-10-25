@@ -435,6 +435,11 @@ export const LAGER_SECTIONS: ModuleNavSection[] = [
         description: "Täckningsbidrag på fakturerad omsättning per månad, kund eller artikel.",
       },
       {
+        href: "/rapporter/projektrapport",
+        title: "Projektrapport",
+        description: "Intäkter, kostnader och resultat per projekt ur bokföringen, med månadsfördelning, konton och länkade kundordrar.",
+      },
+      {
         href: "/lager/vardering",
         title: "Lagervärdering",
         description: "Lagervärde per valfritt datum — standardpris, senaste inköp eller vägt snitt.",
@@ -557,6 +562,16 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
         href: "/ekonomi/anlaggningsgrupper",
         title: "Anläggningsgrupper",
         description: "Tillgångsgrupper med konton och förvald nyttjandetid.",
+      },
+      {
+        href: "/ekonomi/kostnadsstallen",
+        title: "Kostnadsställen",
+        description: "Avdelningar att följa resultatet per — väljs på verifikatrader, fakturor och orderhuvuden.",
+      },
+      {
+        href: "/ekonomi/projekt",
+        title: "Projekt",
+        description: "Projekt med kund, start och slut, som öppna eller stängda — resultatet följs i resultaträkningen och Projektrapporten.",
       },
       {
         href: "/ekonomi/sie",

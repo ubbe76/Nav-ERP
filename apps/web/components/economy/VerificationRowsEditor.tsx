@@ -2,6 +2,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Field";
+import { useDimensions } from "../../lib/dimensions";
 import { formatMoney } from "../../lib/format";
 import { splitVat, splitVatApplies } from "../../lib/splitVat";
 import { vatCodeOptionLabel, type VatCodeView } from "../../lib/vatCodes";
@@ -21,15 +23,50 @@ export interface EditorAccount {
   name: string;
 }
 
-type ColKey = "account" | "description" | "vatCode" | "debit" | "credit";
+type ColKey = "account" | "description" | "vatCode" | "costCenter" | "project" | "debit" | "credit";
 
 const COL_LABELS: Record<ColKey, string> = {
   account: "Konto",
   description: "Beskrivning",
   vatCode: "Momskod",
+  costCenter: "Kostnadsställe",
+  project: "Projekt",
   debit: "Debet",
   credit: "Kredit",
 };
+
+// The EditorRow field a column edits (Esc restores it).
+const ROW_FIELD: Record<ColKey, keyof EditorRow> = {
+  account: "accountNumber",
+  description: "description",
+  vatCode: "vatCode",
+  costCenter: "costCenterId",
+  project: "projectId",
+  debit: "debit",
+  credit: "credit",
+};
+
+// Kostnadsställe/Projekt columns are shown or hidden with a checkbox; the
+// choice is remembered in this browser (localStorage can throw — private
+// mode, blocked site data — so every access is guarded).
+const DIMENSIONS_KEY = "nav:verification-dimensions";
+
+function readDimensionsPreference(): boolean | null {
+  try {
+    const raw = window.localStorage.getItem(DIMENSIONS_KEY);
+    return raw === "true" ? true : raw === "false" ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDimensionsPreference(value: boolean) {
+  try {
+    window.localStorage.setItem(DIMENSIONS_KEY, String(value));
+  } catch {
+    // Not remembered — the checkbox still works for this visit.
+  }
+}
 
 function valueOf(row: EditorRow, col: ColKey): string {
   switch (col) {
@@ -39,6 +76,10 @@ function valueOf(row: EditorRow, col: ColKey): string {
       return row.description;
     case "vatCode":
       return row.vatCode;
+    case "costCenter":
+      return row.costCenterId;
+    case "project":
+      return row.projectId;
     case "debit":
       return row.debit;
     case "credit":
@@ -59,6 +100,9 @@ interface EditorProps {
   counterRows?: boolean;
   showBalance?: boolean;
   disabled?: boolean;
+  // Kostnadsställe och Projekt: the checkbox and the two columns (on by
+  // default; the editor reads the two registers itself).
+  dimensions?: boolean;
 }
 
 // The editable rows table of a verification/template: Konto (searchable),
@@ -74,6 +118,7 @@ export function VerificationRowsEditor({
   counterRows = true,
   showBalance = true,
   disabled = false,
+  dimensions = true,
 }: EditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rowsRef = useRef(rows);
@@ -85,9 +130,39 @@ export function VerificationRowsEditor({
   const [notice, setNotice] = useState<string | null>(null);
 
   const withVat = vatCodes !== undefined;
-  const cols: ColKey[] = withVat
-    ? ["account", "description", "vatCode", "debit", "credit"]
-    : ["account", "description", "debit", "credit"];
+
+  // Hidden unless the user chose to show them — or a row already carries one,
+  // which must never be invisible. Read after mount (the server render has no
+  // localStorage), so the first paint is the hidden state.
+  const dims = useDimensions();
+  const hasObjects = dims.allCostCenters.length > 0 || dims.allProjects.length > 0;
+  const rowsHaveDimensions = rows.some((r) => r.costCenterId !== "" || r.projectId !== "");
+  const [dimensionsChoice, setDimensionsChoice] = useState<boolean | null>(null);
+  useEffect(() => {
+    setDimensionsChoice(readDimensionsPreference());
+  }, []);
+  const dimensionsAvailable = dimensions && (hasObjects || rowsHaveDimensions);
+  const withDims = dimensionsAvailable && (rowsHaveDimensions || dimensionsChoice === true);
+
+  const cols: ColKey[] = [
+    "account",
+    "description",
+    ...(withVat ? (["vatCode"] as ColKey[]) : []),
+    ...(withDims ? (["costCenter", "project"] as ColKey[]) : []),
+    "debit",
+    "credit",
+  ];
+  // Desktop grid; the stacked card layout takes over below the breakpoints
+  // in the stylesheet.
+  const gridColumns = [
+    withDims ? "minmax(150px, 1.3fr)" : "minmax(190px, 1.5fr)",
+    withDims ? "minmax(100px, 1fr)" : "minmax(120px, 1fr)",
+    ...(withVat ? [withDims ? "130px" : "minmax(150px, 1fr)"] : []),
+    ...(withDims ? ["minmax(96px, 0.8fr)", "minmax(96px, 0.8fr)"] : []),
+    withDims ? "110px" : "118px",
+    withDims ? "110px" : "118px",
+    "34px",
+  ].join(" ");
   const splittable = (vatCodes ?? []).filter((c) => c.active && splitVatApplies(c));
 
   // Cells are addressed by row INDEX, not by the row's key: the keys come from
@@ -199,7 +274,7 @@ export function VerificationRowsEditor({
   function revert(key: string, col: ColKey) {
     const snap = snapshot.current;
     if (!snap || snap.key !== key || snap.col !== col) return;
-    patchRow(key, { [col === "account" ? "accountNumber" : col]: snap.value } as Partial<EditorRow>);
+    patchRow(key, { [ROW_FIELD[col]]: snap.value } as Partial<EditorRow>);
   }
 
   function rememberCell(row: EditorRow, col: ColKey) {
@@ -234,7 +309,8 @@ export function VerificationRowsEditor({
     <div>
       <div
         ref={containerRef}
-        className={`${styles.editor} ${withVat ? styles.withVat : ""}`}
+        className={`${styles.editor} ${withDims ? styles.withDims : ""}`}
+        style={{ "--editor-cols": gridColumns } as React.CSSProperties}
         role="group"
         aria-label="Verifikatrader"
         onKeyDown={tableKeyDown}
@@ -300,6 +376,38 @@ export function VerificationRowsEditor({
                     ))}
                   </select>
                 </div>
+              )}
+              {withDims && (
+                <>
+                  <div className={`${styles.cell} ${styles.cellCostCenter}`}>
+                    <span className={styles.mobileLabel}>Kostnadsställe</span>
+                    <DimensionCell
+                      cellId={`${rowIndex}:costCenter`}
+                      label={`Kostnadsställe, rad ${n}`}
+                      disabled={disabled}
+                      value={row.costCenterId}
+                      currentLabel={row.costCenterLabel}
+                      options={dims.costCenters.map((c) => ({ id: c.id, label: `${c.code} · ${c.name}` }))}
+                      onFocus={() => rememberCell(row, "costCenter")}
+                      onChange={(id) => patchRow(row.key, { costCenterId: id, costCenterLabel: "" })}
+                      onKeyDown={(e) => cellKeyDown(e, row.key, "costCenter")}
+                    />
+                  </div>
+                  <div className={`${styles.cell} ${styles.cellProject}`}>
+                    <span className={styles.mobileLabel}>Projekt</span>
+                    <DimensionCell
+                      cellId={`${rowIndex}:project`}
+                      label={`Projekt, rad ${n}`}
+                      disabled={disabled}
+                      value={row.projectId}
+                      currentLabel={row.projectLabel}
+                      options={dims.projects.map((p) => ({ id: p.id, label: `${p.code} · ${p.name}` }))}
+                      onFocus={() => rememberCell(row, "project")}
+                      onChange={(id) => patchRow(row.key, { projectId: id, projectLabel: "" })}
+                      onKeyDown={(e) => cellKeyDown(e, row.key, "project")}
+                    />
+                  </div>
+                </>
               )}
               <div className={`${styles.cell} ${styles.cellDebit}`}>
                 <span className={styles.mobileLabel}>Debet</span>
@@ -368,6 +476,19 @@ export function VerificationRowsEditor({
               </span>
             </>
           )}
+          {dimensionsAvailable && (
+            <label className={styles.dimensionsToggle}>
+              <Checkbox
+                checked={withDims}
+                disabled={rowsHaveDimensions}
+                onChange={(e) => {
+                  setDimensionsChoice(e.target.checked);
+                  writeDimensionsPreference(e.target.checked);
+                }}
+              />
+              Visa kostnadsställe och projekt
+            </label>
+          )}
           <Button type="button" variant="secondary" size="small" className={styles.addButton} disabled={disabled} onClick={() => addRow()}>
             + Lägg till rad
           </Button>
@@ -382,6 +503,54 @@ export function VerificationRowsEditor({
         </div>
       </div>
     </div>
+  );
+}
+
+// Kostnadsställe/Projekt cell: a plain select over the active objects. A value
+// that is no longer offered (inactive cost centre, closed project) stays
+// selectable under the name the row carried, so opening an old row changes
+// nothing.
+function DimensionCell({
+  cellId,
+  label,
+  disabled,
+  value,
+  currentLabel,
+  options,
+  onFocus,
+  onChange,
+  onKeyDown,
+}: {
+  cellId: string;
+  label: string;
+  disabled: boolean;
+  value: string;
+  currentLabel: string;
+  options: { id: string; label: string }[];
+  onFocus: () => void;
+  onChange: (id: string) => void;
+  onKeyDown: (e: KeyboardEvent<HTMLSelectElement>) => void;
+}) {
+  const offered = options.some((o) => o.id === value);
+  return (
+    <select
+      data-cell={cellId}
+      className={styles.input}
+      aria-label={label}
+      disabled={disabled}
+      value={value}
+      onFocus={onFocus}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
+    >
+      <option value="">—</option>
+      {value !== "" && !offered && <option value={value}>{currentLabel || "(inaktivt)"}</option>}
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   );
 }
 

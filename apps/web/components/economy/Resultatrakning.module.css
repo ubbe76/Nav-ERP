@@ -1,0 +1,69 @@
+/* "Per kostnadsställe"/"Per projekt": one column per object. The table
+   scrolls sideways inside its own box so the page never grows wider than the
+   screen; the account column stays put while the figures scroll. */
+.scroller {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.matrix {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+
+.matrix th,
+.matrix td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-divider);
+  white-space: nowrap;
+}
+
+.matrix thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+  text-align: right;
+}
+
+.matrix .labelCell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 220px;
+  text-align: left;
+  background: var(--color-surface);
+}
+
+.matrix thead .labelCell {
+  text-align: left;
+}
+
+.amountCell {
+  text-align: right;
+  min-width: 112px;
+}
+
+.sumCell {
+  font-weight: 600;
+  border-left: 1px solid var(--color-border);
+}
+
+.lineRow td {
+  font-weight: 500;
+}
+
+.accountRow .labelCell {
+  padding-left: 28px;
+}
+
+.subtotalRow td {
+  font-weight: 600;
+  border-top: 1px solid var(--color-border);
+}

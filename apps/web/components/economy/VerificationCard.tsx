@@ -28,6 +28,7 @@ import {
   type EditorRow,
 } from "../../lib/verificationRows";
 import { VerificationRowsEditor } from "./VerificationRowsEditor";
+import { dimensionText } from "../../lib/dimensions";
 import { AllocateDialog } from "./AllocateDialog";
 import {
   VERIFICATION_STATUS_PILL,
@@ -274,9 +275,9 @@ export function VerificationCard({
       </div>
 
       <FormError>{error}</FormError>
-      {warnings.length > 0 && (
+      {(warnings.length > 0 || (verification.warnings ?? []).length > 0) && (
         <FormNotice style={{ marginBottom: 16 }}>
-          {warnings.map((w) => (
+          {[...warnings, ...(verification.warnings ?? [])].map((w) => (
             <div key={w}>{w}</div>
           ))}
         </FormNotice>
@@ -556,9 +557,20 @@ const ROW_COLUMNS_READONLY = [
 ];
 
 function ReadOnlyRows({ rows }: { rows: VerificationRow[] }) {
+  // Kostnadsställe/Projekt columns only when some row carries one.
+  const withCostCenter = rows.some((r) => r.costCenter);
+  const withProject = rows.some((r) => r.project);
+  const columns = [
+    ROW_COLUMNS_READONLY[0]!,
+    ROW_COLUMNS_READONLY[1]!,
+    ...(withCostCenter ? [{ key: "costCenter", label: "Kostnadsställe", width: "1fr" }] : []),
+    ...(withProject ? [{ key: "project", label: "Projekt", width: "1fr" }] : []),
+    ROW_COLUMNS_READONLY[2]!,
+    ROW_COLUMNS_READONLY[3]!,
+  ];
   return (
     <Table<VerificationRow>
-      columns={ROW_COLUMNS_READONLY}
+      columns={columns}
       rows={rows}
       renderCell={(row, key) => {
         switch (key) {
@@ -566,6 +578,10 @@ function ReadOnlyRows({ rows }: { rows: VerificationRow[] }) {
             return `${row.accountNumber} · ${row.accountName}`;
           case "description":
             return row.description ?? "–";
+          case "costCenter":
+            return dimensionText(row.costCenter);
+          case "project":
+            return dimensionText(row.project);
           case "debit":
             return formatMoney(row.debit);
           case "credit":
