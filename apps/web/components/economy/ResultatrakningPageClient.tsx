@@ -5,13 +5,20 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Card } from "../ui/Card";
 import { Field, Input, Select } from "../ui/Field";
-import { FormError, FormRow } from "../ui/Form";
+import { FormError, FormHint, FormRow } from "../ui/Form";
 import { Table } from "../ui/Table";
 import { API_URL, apiFetch } from "../../lib/api";
-import { formatMoney } from "../../lib/format";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import { formatMoney, formatPercent } from "../../lib/format";
 import buttonStyles from "../ui/Button.module.css";
 import { useDimensions } from "../../lib/dimensions";
-import type { FiscalYear, IncomeStatementColumn, IncomeStatementResponse } from "../../lib/types";
+import type {
+  BudgetFigures,
+  BudgetSummary,
+  FiscalYear,
+  IncomeStatementColumn,
+  IncomeStatementResponse,
+} from "../../lib/types";
 import { CostCenterSelect, ProjectSelect } from "./DimensionSelect";
 import styles from "./Resultatrakning.module.css";
 
@@ -54,6 +61,11 @@ function flatten(report: IncomeStatementResponse): StatementRow[] {
   return rows;
 }
 
+// Budget on the report: the year's budgets are offered for the fiscal year
+// that contains `from`; the year's default is preselected, "Ingen" is kept in
+// the URL as budgetId=none so a reload does not bring the default back.
+const NO_BUDGET = "none";
+
 export function ResultatrakningPageClient({
   fiscalYears,
   defaultFrom,
@@ -61,6 +73,7 @@ export function ResultatrakningPageClient({
   defaultCostCenterId,
   defaultProjectId,
   defaultGroupBy,
+  defaultBudgetId,
 }: {
   fiscalYears: FiscalYear[];
   defaultFrom?: string;
@@ -68,6 +81,7 @@ export function ResultatrakningPageClient({
   defaultCostCenterId?: string;
   defaultProjectId?: string;
   defaultGroupBy?: string;
+  defaultBudgetId?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -90,19 +104,63 @@ export function ResultatrakningPageClient({
   const [groupBy, setGroupBy] = useState<GroupBy>(
     defaultGroupBy === "costCenter" || defaultGroupBy === "project" ? defaultGroupBy : ""
   );
+  const [budgets, setBudgets] = useState<BudgetSummary[]>([]);
+  const [budgetId, setBudgetId] = useState(defaultBudgetId && defaultBudgetId !== NO_BUDGET ? defaultBudgetId : "");
+  // true once the user (or the URL) has made a choice — then the year's
+  // default budget is never selected over it.
+  const [budgetChosen, setBudgetChosen] = useState(defaultBudgetId !== undefined);
+  const budgetYearId = fiscalYears.find((y) => y.startDate <= from && from <= y.endDate)?.id ?? "";
+  const [budgetsLoaded, setBudgetsLoaded] = useState(budgetYearId === "");
   const [report, setReport] = useState<IncomeStatementResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   // The same query string drives the screen, the URL, the PDF and the CSV.
+  const budgetBlocked = projectId !== "" || groupBy !== "";
   const query = new URLSearchParams({ from, to });
   if (costCenterId) query.set("costCenterId", costCenterId);
   if (projectId) query.set("projectId", projectId);
   if (groupBy) query.set("groupBy", groupBy);
+  const urlQuery = new URLSearchParams(query);
+  if (budgetId) urlQuery.set("budgetId", budgetId);
+  else if (budgetChosen) urlQuery.set("budgetId", NO_BUDGET);
+  // Budget cannot be combined with Projekt or Per kostnadsställe/Per projekt.
+  if (budgetId && !budgetBlocked) query.set("budgetId", budgetId);
   const queryString = query.toString();
+  const urlQueryString = urlQuery.toString();
   const showDimensionControls = dims.allCostCenters.length > 0 || dims.allProjects.length > 0 || groupBy !== "";
 
+  // The budgets of the fiscal year that contains `from`.
   useEffect(() => {
+    if (budgetYearId === "") {
+      setBudgets([]);
+      setBudgetsLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    setBudgetsLoaded(false);
+    apiFetch<{ rows: BudgetSummary[] }>(`/api/v1/budgets?fiscalYearId=${budgetYearId}`)
+      .then((data) => data.rows)
+      .catch(() => [] as BudgetSummary[])
+      .then((rows) => {
+        if (cancelled) return;
+        setBudgets(rows);
+        setBudgetId((current) => {
+          if (current && rows.some((b) => b.id === current)) return current;
+          if (budgetChosen && current === "") return "";
+          return rows.find((b) => b.isDefault)?.id ?? "";
+        });
+        setBudgetsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // budgetChosen is read once per year change on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [budgetYearId]);
+
+  useEffect(() => {
+    if (!budgetsLoaded) return;
     let cancelled = false;
     setPending(true);
     setError(null);
@@ -114,7 +172,7 @@ export function ResultatrakningPageClient({
       .catch((err: Error) => {
         if (cancelled) return;
         setReport(null);
-        setError(err.message);
+        setError(apiErrorMessage(err, err.message));
       })
       .finally(() => {
         if (!cancelled) setPending(false);
@@ -122,11 +180,11 @@ export function ResultatrakningPageClient({
     return () => {
       cancelled = true;
     };
-  }, [queryString]);
+  }, [queryString, budgetsLoaded]);
 
   useEffect(() => {
-    router.replace(`${pathname}?${queryString}`, { scroll: false });
-  }, [queryString, pathname, router]);
+    router.replace(`${pathname}?${urlQueryString}`, { scroll: false });
+  }, [urlQueryString, pathname, router]);
 
   const columns = report?.columns && groupBy ? report.columns : null;
   const rows = report && !columns ? flatten(report) : [];
@@ -177,13 +235,41 @@ export function ResultatrakningPageClient({
             </Field>
           </FormRow>
         )}
+        {budgets.length > 0 && (
+          <FormRow>
+            <Field label="Budget" htmlFor="incomeBudget">
+              <Select
+                id="incomeBudget"
+                value={budgetId}
+                disabled={budgetBlocked}
+                onChange={(e) => {
+                  setBudgetChosen(true);
+                  setBudgetId(e.target.value);
+                }}
+              >
+                <option value="">Ingen</option>
+                {budgets.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                    {b.isDefault ? " (förvald)" : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {budgetBlocked && (
+              <FormHint>Budget kan inte kombineras med Projekt eller Per kostnadsställe/Per projekt.</FormHint>
+            )}
+          </FormRow>
+        )}
       </Card>
 
       {error && <FormError>{error}</FormError>}
 
       {report && !pending && columns && <ObjectMatrix report={report} columns={columns} from={from} to={to} />}
 
-      {report && !pending && !columns && (
+      {report && !pending && !columns && report.budget && <BudgetStatement report={report} from={from} to={to} />}
+
+      {report && !pending && !columns && !report.budget && (
         <Card>
           <Table<StatementRow>
             columns={[
@@ -283,6 +369,119 @@ function ObjectMatrix({ report, columns, from, to }: { report: IncomeStatementRe
                 )),
               ];
             })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+type BudgetRow =
+  | ({ id: string; kind: "line" | "subtotal"; label: string; actual: number } & Partial<BudgetFigures>)
+  | ({
+      id: string;
+      kind: "account";
+      accountId: string;
+      accountNumber: string;
+      accountName: string;
+      actual: number;
+    } & Partial<BudgetFigures>);
+
+function flattenBudget(report: IncomeStatementResponse): BudgetRow[] {
+  const rows: BudgetRow[] = [];
+  for (const entry of report.entries) {
+    if (entry.kind === "subtotal") {
+      rows.push({ ...entry, id: `s-${entry.key}`, kind: "subtotal", actual: entry.total });
+      continue;
+    }
+    const { accounts, ...figures } = entry;
+    rows.push({ ...figures, id: `l-${entry.key}`, kind: "line", actual: entry.total });
+    for (const account of accounts) {
+      rows.push({
+        ...account,
+        id: `a-${entry.key}-${account.accountNumber}`,
+        kind: "account",
+        accountId: account.accountId,
+        accountNumber: account.accountNumber,
+        accountName: account.accountName,
+        actual: account.amount,
+      });
+    }
+  }
+  return rows;
+}
+
+// With a budget: Utfall, Budget, Avvikelse and Avvikelse % for the period, and
+// the same accumulated from the start of the fiscal year when the period does
+// not begin there. A negative variance is marked with the stopped colour.
+function BudgetStatement({ report, from, to }: { report: IncomeStatementResponse; from: string; to: string }) {
+  const showAccumulated = report.accumulatedFrom !== undefined && from !== report.accumulatedFrom;
+  const rows = flattenBudget(report);
+  const money = (n: number | undefined) => formatMoney(n ?? 0);
+  const percent = (n: number | null | undefined) => (n === null || n === undefined ? "–" : formatPercent(n, 1));
+  const variance = (n: number | undefined, text: string) => (
+    <span className={`${styles.amountCell} num ${(n ?? 0) < 0 ? styles.negative : ""}`}>{text}</span>
+  );
+  return (
+    <Card maxWidth="none">
+      <p className={styles.budgetNote}>
+        Budget: {report.budget?.name}. Avvikelse = utfall − budget; ett negativt tal är sämre än budget.
+      </p>
+      <div className={styles.scroller}>
+        <table className={styles.matrix}>
+          <thead>
+            <tr>
+              <th className={styles.labelCell}>Konto / benämning</th>
+              <th className={styles.amountCell}>Utfall</th>
+              <th className={styles.amountCell}>Budget</th>
+              <th className={styles.amountCell}>Avvikelse</th>
+              <th className={styles.amountCell}>Avvikelse %</th>
+              {showAccumulated && (
+                <>
+                  <th className={`${styles.amountCell} ${styles.sumCell}`}>Utfall ack.</th>
+                  <th className={styles.amountCell}>Budget ack.</th>
+                  <th className={styles.amountCell}>Avvikelse ack.</th>
+                  <th className={styles.amountCell}>Avvikelse ack. %</th>
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.id}
+                className={row.kind === "subtotal" ? styles.subtotalRow : row.kind === "line" ? styles.lineRow : styles.accountRow}
+              >
+                <td className={styles.labelCell}>
+                  {row.kind === "account" ? (
+                    <>
+                      {row.accountId ? (
+                        <Link href={`/ekonomi/huvudbok?accountId=${row.accountId}&from=${from}&to=${to}`}>{row.accountNumber}</Link>
+                      ) : (
+                        row.accountNumber
+                      )}{" "}
+                      {row.accountName}
+                    </>
+                  ) : (
+                    row.label
+                  )}
+                </td>
+                <td className={`${styles.amountCell} num`}>{money(row.actual)}</td>
+                <td className={`${styles.amountCell} num`}>{money(row.budget)}</td>
+                <td className={styles.amountCell}>{variance(row.variance, money(row.variance))}</td>
+                <td className={styles.amountCell}>{variance(row.variance, percent(row.variancePercent))}</td>
+                {showAccumulated && (
+                  <>
+                    <td className={`${styles.amountCell} ${styles.sumCell} num`}>{money(row.accumulated)}</td>
+                    <td className={`${styles.amountCell} num`}>{money(row.accumulatedBudget)}</td>
+                    <td className={styles.amountCell}>{variance(row.accumulatedVariance, money(row.accumulatedVariance))}</td>
+                    <td className={styles.amountCell}>
+                      {variance(row.accumulatedVariance, percent(row.accumulatedVariancePercent))}
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

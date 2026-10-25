@@ -3754,6 +3754,20 @@ export interface ReportAccount {
   amounts?: number[];
 }
 
+// Resultaträkning med budget (?budgetId=): credit-positive like the rest of
+// the report; variance = utfall − budget (positive = better than budget).
+// variancePercent is null when the budget is 0. Present on every line,
+// subtotal and account of a response that has `budget`.
+export interface BudgetFigures {
+  budget: number;
+  variance: number;
+  variancePercent: number | null;
+  accumulated: number;
+  accumulatedBudget: number;
+  accumulatedVariance: number;
+  accumulatedVariancePercent: number | null;
+}
+
 export interface BalanceSheetLine {
   key: string;
   label: string;
@@ -3779,8 +3793,8 @@ export interface BalanceSheetResponse {
 }
 
 export type IncomeStatementEntry =
-  | { kind: "line"; key: string; label: string; accounts: ReportAccount[]; total: number; amounts?: number[] }
-  | { kind: "subtotal"; key: string; label: string; total: number; amounts?: number[] };
+  | ({ kind: "line"; key: string; label: string; accounts: (ReportAccount & Partial<BudgetFigures>)[]; total: number; amounts?: number[] } & Partial<BudgetFigures>)
+  | ({ kind: "subtotal"; key: string; label: string; total: number; amounts?: number[] } & Partial<BudgetFigures>);
 
 // One column of "Per kostnadsställe"/"Per projekt": an object, or the rows
 // without one (id/code null).
@@ -3797,6 +3811,17 @@ export interface IncomeStatementResponse {
   result: number;
   // Only with groupBy.
   columns?: IncomeStatementColumn[];
+  // Only with ?budgetId=: the budget used, the start of the fiscal year (the
+  // accumulated columns run from there) and the result row's figures.
+  budget?: { id: string; name: string; fiscalYearId: string };
+  accumulatedFrom?: string;
+  resultBudget?: number;
+  resultVariance?: number;
+  resultVariancePercent?: number | null;
+  resultAccumulated?: number;
+  resultAccumulatedBudget?: number;
+  resultAccumulatedVariance?: number;
+  resultAccumulatedVariancePercent?: number | null;
 }
 
 export interface GeneralLedgerAccount {
@@ -5406,4 +5431,66 @@ export interface BankRule {
 export interface BankBookByRuleResult {
   booked: { entryId: string; verificationId: string; displayNumber: string }[];
   failed: { entryId: string; error: { error: string; code?: string } }[];
+}
+
+// --- Budget (bokföringsgranskningen etapp 5 del B) ---
+// Mirrors the API contract (GET /budgets, GET /budgets/:id, PUT
+// /budgets/:id/lines, POST /budgets/:id/copy, GET /budgets/:id/actuals).
+// Amounts are in the account's NATURAL sign: revenue and cost both positive.
+export interface BudgetSummary {
+  id: string;
+  fiscalYearId: string;
+  fiscalYearLabel: string;
+  name: string;
+  isDefault: boolean;
+  revenue: number;
+  costs: number;
+  result: number;
+  updatedAt: string;
+}
+
+export interface BudgetMonth {
+  // 1..N, the period's ordinal in the fiscal year.
+  month: number;
+  startDate: string;
+  endDate: string;
+  // "YYYY-MM" of the period's start date.
+  label: string;
+}
+
+// One (account, cost centre) pair with an amount per month (length N, 0 where
+// the row has none). costCenterId null = Ej fördelat.
+export interface BudgetGridLine {
+  accountNumber: string;
+  accountName: string | null;
+  costCenterId: string | null;
+  amounts: number[];
+}
+
+export interface BudgetDetail {
+  id: string;
+  fiscalYearId: string;
+  fiscalYearLabel: string;
+  fiscalYearStart: string;
+  fiscalYearEnd: string;
+  name: string;
+  isDefault: boolean;
+  months: BudgetMonth[];
+  lines: BudgetGridLine[];
+}
+
+// POST /budgets/:id/copy
+export interface BudgetCopyResult extends BudgetDetail {
+  droppedMonths: number;
+}
+
+// GET /budgets/:id/actuals — nothing is saved.
+export interface BudgetActualsResponse {
+  lines: BudgetGridLine[];
+}
+
+// POST /budgets/:id/csv/parse — nothing is saved.
+export interface BudgetCsvParseResult {
+  lines: BudgetGridLine[];
+  errors: { row: number; message: string }[];
 }

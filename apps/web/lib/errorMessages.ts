@@ -596,6 +596,21 @@ const MESSAGES: Record<string, MessageEntry> = {
       ? `${list.length === 1 ? "Konto" : "Konton"} ${list.join(", ")} kräver kostnadsställe — välj kostnadsställe på raderna.`
       : "Ett konto på verifikatet kräver kostnadsställe — välj kostnadsställe på raderna.";
   },
+  // budget
+  "budget-not-found": "Budgeten hittades inte — ladda om sidan.",
+  "budget-name-taken": "Det finns redan en budget med det namnet för räkenskapsåret — välj ett annat namn.",
+  "budget-account-invalid": (err) => {
+    const accounts = (err.body as { accounts?: unknown } | undefined)?.accounts;
+    const list = Array.isArray(accounts) ? accounts.filter((a): a is string => typeof a === "string") : [];
+    return list.length > 0
+      ? `${list.length === 1 ? "Konto" : "Konton"} ${list.join(", ")} kan inte budgeteras — det finns inte i kontoplanen eller ligger utanför kontoklass 3–8.`
+      : "Ett konto kan inte budgeteras — det finns inte i kontoplanen eller ligger utanför kontoklass 3–8.";
+  },
+  "budget-month-invalid": "Budgeten har ett annat antal månader än räkenskapsåret — ladda om sidan.",
+  "budget-duplicate-account": "Samma konto förekommer på flera rader — slå ihop dem.",
+  "budget-no-previous-year": "Det finns inget föregående räkenskapsår att hämta utfall från — välj ett källår.",
+  "budget-not-combinable": "Budget kan inte kombineras med Projekt eller Per kostnadsställe/Per projekt.",
+  "budget-range-outside-year": "Perioden ligger utanför budgetens räkenskapsår — välj datum inom samma år.",
   "bank-rule-not-found": "Bankregeln hittades inte — ladda om sidan.",
   "bank-rule-missing": "Ingen aktiv bankregel känner igen posten — bokför den med Bokför i stället.",
   "bank-rule-ambiguous": (err) => {

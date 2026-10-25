@@ -1,0 +1,206 @@
+/* Budget: the tab strip and the month grid. The grid scrolls sideways inside
+   its own box (.scroller) so the page itself never grows wider than the
+   screen — iOS zooms the whole page out otherwise. The account column stays
+   put while the months scroll. */
+.tabStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--color-border);
+  margin: 16px 0;
+}
+
+.tab {
+  padding: 10px 16px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tab[data-active="true"] {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .tabStrip {
+    gap: 2px;
+  }
+  .tab {
+    padding: 8px 10px;
+  }
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.notice {
+  margin: 0 0 12px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-secondary);
+}
+
+.errorList {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+/* min-height leaves room for the account dropdown under the last rows (it
+   opens inside the scroll box). */
+.scroller {
+  overflow: auto;
+  max-width: 100%;
+  min-height: 320px;
+  max-height: 75vh;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+
+.grid th,
+.grid td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--color-divider);
+  white-space: nowrap;
+  background: var(--color-surface);
+}
+
+.grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+  text-align: right;
+}
+
+.grid .accountCell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 230px;
+  width: 230px;
+  text-align: left;
+}
+
+.grid thead .accountCell {
+  z-index: 3;
+  text-align: left;
+}
+
+.monthCell {
+  min-width: 88px;
+  text-align: right;
+}
+
+.sumCell {
+  min-width: 112px;
+  text-align: right;
+  border-left: 1px solid var(--color-border);
+}
+
+.actionCell {
+  min-width: 150px;
+  text-align: right;
+}
+
+.input {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+  background: var(--color-input-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  padding: 6px 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+.amount {
+  text-align: right;
+}
+
+.readonlyAmount {
+  display: block;
+  padding: 6px 8px;
+  text-align: right;
+}
+
+.removeButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 4px 6px;
+}
+
+.removeButton:hover {
+  color: var(--status-stopped-text);
+}
+
+.summaryRow td {
+  font-weight: 600;
+  border-top: 1px solid var(--color-border);
+}
+
+.summaryRow .readonlyAmount {
+  padding: 4px 8px;
+}
+
+.negative {
+  color: var(--status-stopped-text);
+}
+
+.empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.name {
+  max-width: 420px;
+}
+
+.dialogHint {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}

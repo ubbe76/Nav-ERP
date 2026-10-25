@@ -556,8 +556,9 @@ function DimensionCell({
 
 // The searchable Konto cell: digits match the account number from the start,
 // text matches the name; only active accounts; Enter picks the highlighted
-// account and moves on, Tab picks it too, Esc undoes the cell.
-function AccountCell({
+// account and moves on, Tab picks it too, Esc undoes the cell. Exported for
+// the budget grid, which searches accounts the same way.
+export function AccountCell({
   cellId,
   row,
   accounts,
@@ -567,7 +568,7 @@ function AccountCell({
   onEnter,
 }: {
   cellId: string;
-  row: EditorRow;
+  row: Pick<EditorRow, "accountNumber" | "accountName">;
   accounts: EditorAccount[];
   disabled: boolean;
   label: string;
