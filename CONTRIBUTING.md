@@ -16,7 +16,7 @@ Pull requests är välkomna. För något större än en liten rättning — öpp
 
 ### Komma igång
 
-Utvecklingsmiljön beskrivs i README:s [Komma igång](README.md#komma-igång). `CLAUDE.md` beskriver arkitekturen och kodkonventionerna i detalj — läs den innan du ändrar i en modul.
+Utvecklingsmiljön beskrivs i README:s [Komma igång](README.md#komma-igång). `CLAUDE.md` beskriver arkitekturen och kodkonventionerna, och `.claude/rules/` har reglerna per modul — läs dem innan du ändrar i en modul.
 
 ### Innan du skickar en pull request
 

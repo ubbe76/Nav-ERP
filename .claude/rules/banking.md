@@ -1,0 +1,55 @@
+---
+paths:
+  - "apps/api/src/modules/banking/**"
+  - "apps/web/app/ekonomi/bank*/**"
+  - "apps/web/app/inkop/betalfiler/**"
+  - "apps/web/app/inkop/bankfiler/**"
+  - "apps/web/app/forsaljning/bankfiler/**"
+  - "apps/web/app/system/bank/**"
+  - "apps/web/components/banking/**"
+  - "apps/web/lib/banking.ts"
+  - "apps/web/lib/bankReconciliation.ts"
+  - "packages/shared/src/banking.ts"
+  - "packages/shared/src/bank-reconciliation.ts"
+  - "apps/api/test/bank*"
+  - "apps/api/test/camt*"
+  - "apps/api/test/pain001*"
+  - "apps/api/test/incoming*"
+  - "apps/api/test/match*"
+  - "apps/api/test/ocr*"
+---
+
+# Bank: betalfiler, bankfiler och bankavstämning
+
+## Bankfiler (ISO 20022)
+
+Spec `docs/superpowers/specs/2026-10-09-bankfiler-design.md`. pain.001.001.03 för leverantörsbetalningar, camt.054.001.02 för inbetalningar och bekräftelser (Handelsbanken/SEB/Swedbank/Nordea).
+
+- **Bankernas skillnader är data** i `banking/service/iso20022/bank-profiles.ts` (agent-/kontoschema per betalsätt, BBAN med/utan clearing, ID-schema, debiteringskonton, längdgränser, adressfält, teckenmängd, `foreign`-delen). Swedbank är primär profil; SEB:s är jämförd med SEB:s publika MIG v26.4 och `verified: true`. **En ny bank eller ändrad regel är en tabellpost, aldrig ny kod.** En generisk byggare (`pain001-builder.ts`, handskriven XML i schemaordning) och en tolk (`camt054-parser.ts` ovanpå `xml-reader.ts`, linjär, nodtakad, vägrar DOCTYPE/ENTITY).
+- **Ingen XML-dependency i produktion:** `pain001-check.ts` strukturkontrollerar filen vid export; testerna validerar golden-filer och camt-fixturer mot de officiella XSD:erna med `xmllint-wasm` (bara devDependency).
+- **Betalningsomgång** (`payment_batches`/`payment_batch_items`, serie `BO-`, draft → exported → confirmed | cancelled): reservationen är partiella unika indexet `payment_batch_items_invoice_live`; manuell registrering, makulering och ny betalningsreferens av en reserverad faktura vägras. **Exporten bokför ingenting** — bekräftelsen kommer via camt.054 eller **Bekräfta utförd**, båda genom U-registreringens Tx-söm (`supplierPaymentService.createInTx`/`cancelInTx`). Inbetalningar bokförs genom K-registreringen (`paymentService.createInTx`) med OCR-matchning (rena `incoming-matching.ts`, räknas vid varje GET). Länkarna (`payment_batch_item_id`/`bank_file_entry_id`) skrivs i betalningens transaktion.
+- **`bank_file_entries.dedupe_key`** är unik och idempotent: TxDtls/AcctSvcrRef → ClrSysRef → Ntry/AcctSvcrRef#index → innehållshash#n, alltid med kontot som prefix.
+- **Låsordning:** bankpost → omgång → omgångsrad → fakturor (sorterade id) → betalning; makulering: omgångsrad → betalning → fakturor.
+- `bank_files` är insert-only bytea med sha256 och NV001-trigger. Bankinställningarna (`bank_*`, `/system/bank`) bara för admin.
+- **Utlandsbetalningar (migration 0144):** betalsätt `iban` för alla länder (BIC krävs utanför SEPA) och `foreign_account` (**Utländskt kontonummer**: kontonummer + BIC och/eller `clearing_system`/`clearing_member_id`, `bank_name`); `charge_bearer` (SHAR/DEBT, SLEV för SEPA) och `payment_reporting_code` (KU81, förval 101); utländsk mottagare kräver gata + ort. Rena `paymentKind` ger `domestic`/`sepa` (EUR + IBAN-landskod i SEPA-listan)/`international`; PmtInf grupperas per betalningstyp och avgiftsfördelning. Namn/adress/meddelande translittereras.
+  - **KU81:** motvärde > 150 000 kr (dagens kurs hämtad **före** exportens transaktion) ⇒ `RgltryRptg` i profilens form; saknad kurs ⇒ rapporteras ändå med varning (en onödig kod är ofarlig, en saknad kostar en rättelse).
+  - Omgången visar `problems` (det exporten vägrar) per post och omgång och `totalsByCurrency`; **Bekräfta utförd** kräver `amountSek` (+ valfri `bankFeeSek`) per valutapost.
+  - camt.054 matchar valutaposter på `InstdAmt` och bokför postens SEK-belopp och ingående avgifter (`Chrgs`, efter riktning: på en kreditpost är `CRED`-avgifterna våra, på en debetpost `DEBT`). På inbetalningar avgör de matchade fakturornas valuta beloppet (`paymentAmountIn`). `content_hash` räknas på exakt det belopp parsern läste före valutastödet så en gammal fil som läses om inte ger dubbletter. `ZERO_DECIMAL_CURRENCIES` skrivs som heltal. En retur av en valutabetalning bokförs bara när SEK-beloppet är exakt det betalningen drog (annars 409 `bank-return-sek-differs`).
+  - Utanför: pain.002, camt.053 för betalningar, host-to-host, express, valutakonton. Swedbank-profilens fil ska provas i Swedbank Validex efter deploy (användarens steg).
+- Sidor: `/inkop/betalfiler`, `/inkop/bankfiler`, `/forsaljning/bankfiler`.
+
+## Bankavstämning (migration 0148)
+
+Spec `private/superpowers/specs/2026-10-24-bankavstamning-design.md`. Kontoutdraget mot bokföringen, regeln `ekonomi`.
+
+- **Bankkonton** (`bank_accounts`): `identifier` = IBAN/BBAN normaliserat med `normalizeBankIdentifier` (shared; versaler, utan blanksteg/bindestreck), `ledger_account` som kontonummer (inte FK). Första `GET /bank-accounts` skapar ett konto ur Företagsuppgifternas IBAN + `posting_bank` (`ON CONFLICT DO NOTHING` på identifieraren). `PATCH /bank-accounts/:id` vägrar byte av `ledgerAccount`/`currency` när kontot har poster eller matchningar (`BankAccountInUseError` 409 `field`, `BankAccountView.hasActivity`); filens identifierare lärs bara in på ett konto utan poster (`BankAccountIdentifierLockedError` 409).
+- **Importen** (`POST /bank-statements/preview|import`, multipart med `bankAccountId`/`csvMapping`/`autoMatch`): rena `iso20022/camt053-parser.ts` (en `Stmt` ⇒ `bank_statements` med OPBD/CLBD, en `Ntry` ⇒ EN `bank_statement_entries`-rad med signerat belopp; samlingsposter behåller `TxDtls` i `details`) eller CSV via `bank-statement-csv.ts` (mappningen sparas på kontot; radordningen inom en dag avgörs av saldokedjan, `rowOrder`; `isAmbiguousCsvAmount` varnar för ensam punkt + tre siffror utan `decimalComma`). Filen i `bank_files` (`message_type` `camt.053.001.02`/`csv`). `dedupe_key` unik (konto + `AcctSvcrRef`, annars innehållshash#n; CSV hashar på `bank_account_id`) så samma/överlappande fil hoppar över det redan lästa, aldrig fel. Samtidig import av samma fil: `ensureIncomingFile` (ON CONFLICT på `bank_files_incoming_sha256` + omläsning). Valutan kontrolleras per post (`Amt@Ccy`) utöver `Stmt/Acct/Ccy`.
+- **Matchning:** `bank_matches` (`auto|manual|created|opening`) + `bank_match_entries`/`bank_match_rows` med `active` och partiella unika index — EN levande matchning per post/rad; Σ poster = Σ rader (debet − kredit på bankkontots huvudbokskonto). Allt under `pg_advisory_xact_lock(hashtext('bank_account:<id>'))` (`lockBankAccount`). Ångra stämplar `undone_at` och sätter länkraderna inaktiva.
+- **Förslagen** (rena `proposeMatches`, `match-proposals.ts`): referens (postens `AcctSvcrRef`/`EndToEndId` mot den camt.054-post vars betalning bokförde raden, även camt.054-poster nycklade `entry_ref` på `Ntry/AcctSvcrRef`) före **återföring** (`RvslInd`-post nettas mot sitt original på kontoutdraget: delad referens, annars närmast före; aldrig mot en rad) före belopp + ±3 dagar. Bara entydiga blir matchningar; tvetydiga är `proposals` med `ambiguous: true`.
+- **Startpunkten** (`POST /bank-accounts/:id/opening` `{ date, statementBalance }`, `createOpening`): under kontolåset länkas ALLA omatchade poster och rader ≤ datumet i EN `kind: "opening"`-matchning **utan summakrav**, och ett `bank_reconciliations`-märke skrivs med användarens saldo (`opening_match_id`). Bokföringssaldot per dagen måste vara lika (`BankOpeningBalanceMismatchError` 409 med båda beloppen), bara som kontots första levande märke (`BankOpeningNotAllowedError` `mark-exists`). Ångras via `undoMatch` (stämplar även märkets `undone_at` — CHECK: bara ett openingmärke kan ångras; vägrat med `later-mark` när ett senare märke finns). `matchesInRange` visar openingmatchningen oavsett period; alla läsare av märken filtrerar `undone_at IS NULL`.
+- **Bokför** (`POST /bank-statement-entries/:id/book`, serie **B** "Bank" self-healing) skapar och bokför verifikatet via `economyService.createVerificationInTx` och matchar posten (`created`) i SAMMA transaktion; raderna måste bära bankkontot med exakt postens belopp (`bank-entry-book-mismatch`).
+- **Bankregler** (`bank_rules`: text innehåller + riktning + konto + inhemsk momskod som delar bruttot) seedas vid första `GET /bank-rules` — flaggan `bank_rules_seeded` tas med `INSERT … ON CONFLICT DO NOTHING RETURNING` i samma transaktion som reglerna (`claimSetting`: en uppsättning även vid samtidiga GET:ar, aldrig igen); rutterna skickar `seed: false` för Endast läsning. `book-by-rule` bokför ett verifikat per post i egna transaktioner; **Bokför direkt** vid import bara när exakt en regel träffar.
+- **Fel efter commit:** importens matchnings-/regelfel fångas och blir `warnings`. Felkroppar i 2xx-svar (`warnings`, `failed[].error`) går genom `reportableError` — vitlistan `isKnownBankError` (alla `banking.errors` + ekonomins kända fel), övrigt loggas via `deps.log` och blir `UNEXPECTED_ERROR_TEXT`.
+- **Avstämd t.o.m.** (`bank_reconciliations`, append-only utom startpunkten) vägras med 409 `bank-reconciliation-incomplete` + `reason` (`unmatched-entries|unmatched-rows|no-statement-balance|balance-mismatch`, det sista med `inTransit`). Sammanställningen är rena `reconciliationSummary`: `saldo bank − saldo bok = Σ omatchade poster − Σ omatchade rader + I transit`, där `inTransitSum` = Σ matchade poster ≤ dagen − Σ matchade rader ≤ dagen över levande icke-opening-matchningar; `createReconciliation` kräver `saldo bank − saldo bok = inTransit`. `changedAfterReconciliation` räknar rader ≤ märket som bokförts efter det eller är omatchade, och omatchade poster ≤ märket.
+- Aviseringen `bank_unreconciled` (poster äldre än `BANK_UNRECONCILED_DAYS` = 10 utan matchning) och bokslutsvarningen `bank-not-reconciled` (`unreconciledBankAccountsAsOf`).
+- Tester: `camt053.test.ts` (fixturerna valideras mot `camt.053.001.02.xsd`), `bank-statement-csv.test.ts`, `match-proposals.test.ts`, `bank-reconciliation.test.ts`, `bank-reconciliation.route.test.ts`.

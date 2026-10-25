@@ -1,0 +1,54 @@
+---
+paths:
+  - "apps/api/src/modules/configurator/**"
+  - "apps/web/components/configurator/**"
+  - "apps/web/lib/configurator.ts"
+  - "apps/web/lib/configurationLines.ts"
+  - "apps/web/lib/configuredDelivery.ts"
+  - "apps/web/lib/useVariantOf.ts"
+  - "packages/shared/src/configurator.ts"
+  - "apps/api/test/configur*"
+---
+
+# Produktkonfiguratorn
+
+En mall har läget `variants` (materialiseras till vanliga artiklar) eller `to_order` (beställningsvara — mallen ligger kvar som radens artikel).
+
+## Varianter (delprojekt 3, migration 0112)
+
+- `POST /articles/:id/configurator/variants` (förhandsgranskning `…/variants/preview`). `configurator_variants` länkar variant → mall och bär `selection` + `calc_quantity`; den **unika spärren (mall, nyckel)** gör att samma kombination aldrig blir två artiklar.
+- Skapandet sker i **EN transaktion under mallåset** (`lockTemplate` först, mallartikeln `FOR SHARE`) med Tx-funktionerna `insertArticle`/`insertBomRows`/`insertRoutingOperations` — ett fel rullar tillbaka alla nya varianter. **Förhandsgranskningen litas aldrig på:** klienten skickar bara urvalet; nummer, benämning, struktur, pris och status räknas om i transaktionen.
+- **Sammanslagningsregeln** (`mergeVariantMaterials` i `variant-structure.ts`): samma komponent på flera härledda rader ⇒ en rad med summerat antal; olika operationskopplingar ⇒ operationen med lägst nummer + varning; olika visningsenheter ⇒ basenheten.
+- **Standardpriset är TVK/st** (`costing.manufacturingCostPerUnit`) vid **kalkylantalet**, 4 decimaler (saknad kostnad ⇒ null, aldrig 0); försäljningspriset är motorns `unitPrice` utan kund.
+- **Kodlåset** (`codesInUse`): grupp- och alternativkoder som någon variants `selection` eller en konfigurerad orderrad använder kan inte ändras eller tas bort (`configurator-code-locked`/`configurator-reference-in-use`; inaktivera går) — annars slutar nyckeln stämma.
+- **Täckningsvarningen** (`structure-coverage.ts`, ren): strukturrader vars villkor bara skiljer sig i ett *är*-villkor på en valgrupp är en familj (övriga villkor = sammanhang); en familj med ≥ 2 rader som lämnar ett **aktivt** alternativ otäckt ger `structureWarnings` på `GET /articles/:id/configurator` (`ConfiguratorTemplateView`, visas över Struktur per val) och, när valet hamnar i luckan, en varning från `deriveStructure`. Aldrig en spärr; regler konsulteras inte.
+- **Mallen kan inte läggas på order:** `assertOrderableArticle` (sales/purchase/manufacturing) ⇒ 409 `article-is-template` ("63000 är en mall — välj en variant"); `GET /articles?orderable=true` (`ArticlePicker orderable`, bara på orderradernas artikelval — aldrig register, struktur eller faktura) döljer den. Läget `variants` kräver en **tillverkad** artikel som inte är fantom.
+- Ritningar, filer, revisioner, leverantörskatalog och kundpriser följer **inte** med till varianten. Variantens kort visar **Variant av …** och en skrivskyddad vallista (`GET /articles/:id/variant-of`, `VariantOfPanel`).
+
+## Konfigurera på orderraden (4a)
+
+- `POST /configurator/:articleId/variant` (`resolveVariant`, regeln `CONFIGURE_ROW_WRITE` = forsaljning/tillverkning/artiklar) hämtar eller skapar EN variant för ett `selection`, i samma transaktion och med samma hjälpare (`createPlannedVariant`) som `createVariants`; kalkylantal = mallens `orderQuantity` (annars 1). En orderrad med `configuration` på en `variants`-mall löser varianten i `resolveRowInput` (före orderns transaktion) och blir en vanlig rad.
+- Webbens `ConfigureModal` öppnas av `AddRowForm`/`QuoteRowFields`/`NewManufacturingOrderForm` när `ArticlePicker configurable` (`GET /articles?orderable=true&configurable=true`) ger `configuratorMode === "variants"`. Två utgångar: `onResolved` (variantläget, hämtar/skapar artikeln) och `onConfigured` (beställningsvara och Ändra konfiguration, lämnar `RowConfigurationDraft` utan anrop).
+- **Variantens priskedja:** `resolvePrice(dbc, q, { variantPrice })` tar mallens kundkedja plus tilläggen (`configuratorService.variantPrice`, sent bunden i `app.ts` via `variantPriceRef`) när varianten saknar egen kundartikelregel och prislisterad; `null`/`undefined` ⇒ variantens egen kedja. Konfiguratorns egen `prices`-bindning har inget `opts` (rekursionsvakten).
+
+## Beställningsvara på orderraden (4b, migration 0113)
+
+- En `to_order`-mall ligger kvar som radens artikel med `sales_order_rows.configuration` (jsonb `OrderRowConfiguration`: `templateArticleId`, `key`, `selection` = `VariantSelectionEntry[]` via rena `selectionEntries`, `price` med `base`/`additions`/`unitPrice`/`discountPercent`/`source`).
+- `unique(sales_order_id, article_id)` är ersatt av partiella `sales_order_rows_order_article_unique … WHERE configuration IS NULL`: vanliga rader (inkl. fraktradens uppslag per artikel) beter sig som förut, konfigurerade rader av samma mall får upprepas.
+- `resolveRowInput` kräver `configuration: { selection }` på en `to_order`-mall (409 `configuration-required`), vägrar den på allt annat (400 `configuration-not-allowed`), utvärderar via `RowConfigurationReader` (`configuratorService.evaluateRowConfiguration`, sent bunden via `rowConfigurationRef`) och tar à-pris/rabatt ur utvärderingen om inget à-pris anges. `updateRow` prissätter om vid antalsbyte (ogiltig sparad `selection` ⇒ 400). Formulären utvärderar om på `/configurator/:id/evaluate` när antal eller kund ändras (staffel); "manuellt vinner" för à-pris/rabatt.
+- **Ändra konfiguration** (`PUT /sales-orders/:id/rows/:rowId/configuration`, `setRowConfiguration` + `repo.replaceRowConfiguration`, raden `FOR UPDATE`; spärrarna orderstatus/leverans/icke-avbruten TO/fakturarad ⇒ 409 `row-configuration-locked`) gäller båda lägena: beställningsvara = ny utvärdering (handskrivet pris ersätts), variantrad = `resolveVariant` + ny `resolvePrice` (dubblettvariant på ordern ⇒ 409 `row-variant-exists`, fångat på indexnamnet utanför transaktionen).
+- **Dokument:** rena `configurationLines` (`configuration-lines.ts`, webbspegel `apps/web/lib/configurationLines.ts`, pinnad av `configuration-lines.test.ts`) skriver `Grupp: Värde` som underrader på offert/orderbekräftelse/faktura/plocklista/följesedel. Tilläggspriserna styrs av `showConfigurationPrices` (`GET …/pdf?showConfigurationPrices=`, `sendSalesOrderEmail`, sparad på `email_log.show_configuration_prices` och återanvänd av Skicka om; utelämnad ⇒ `customers.show_configuration_prices`). Fakturan tar kundens inställning när PDF:en arkiveras vid utfärdandet; `invoice_rows.configuration` är en kopia (kreditrad kopierar källraden).
+
+## Tillverkning av beställningsvara (4c, migration 0114)
+
+- `manufacturing_orders.configuration` (jsonb `ManufacturingOrderConfiguration`: mall, nyckel, `selection`, `cost.manufacturingCostPerUnit`/`calculatedAt`) och TO-strukturen skrivs vid **skapandet** via `deriveForManufacturing` (`ConfiguredStructureReader`, sent bunden via `configuredStructureRef`). Härledningen körs före transaktionen, som låser KO-raden `FOR UPDATE` först (samma ordning som `replaceRowConfiguration`) och bara jämför nyckeln (`row-configuration-changed` → 409).
+- **Släpp** hoppar över BOM/rutt (en malländring efter skapandet rör inte TO:n); inleveransens `unit_cost` = `configuration.cost.manufacturingCostPerUnit`, som döljs för verkstadsprofilen som övriga priser.
+- **Behovsberäkningen:** `MATERIAL_MO_STATUSES` inkluderar `planned`; en `to_order`-mall får aldrig förslag; konfigurerade KO-rader är behov på mallen med förslagsraden `configured` och otäckt antal = `uncoveredConfiguredQuantity` (rena, enda implementationen — även Leveranstidskontrollen), kaskaden härledd i planeringstjänsten per (mall, nyckel). Artikelöversiktens planerade-TO-explosion filtrerar `manufacturing_orders.configuration IS NULL` (de konfigurerade syns via sina materialrader).
+- **TB:** `sales_order_rows.configuration_cost` (`OrderRowConfigurationCost`, aldrig till faktura/OAuth; den råa kolumnen returneras inte — `listRows` ger `selfCostPerUnit`/`selfCostCalculatedAt`) är underlaget på kundorderkortet ("Förkalkyl för konfigurationen, <datum>") och i marginalrapporten. Den räknas om bara vid faktisk antalsändring; formulären hämtar den för en ny rad via `POST /configurator/:id/derive` (`useConfiguredSelfCost`).
+- Leverans av en konfigurerad rad över antalet färdigrapporterade TO:er varnar (`configuredDeliveryWarning`, kundorderkortets Leverera och Utleverans) men stoppar aldrig. Inköpet använder `assertPurchasableArticle` (409 `article-is-template` med beställningsvarutext). Lägesbyte/borttag av mallen spärras inte av rader (raden är självbärande).
+
+## Externt API (delprojekt 5, migration 0115)
+
+- `configurator_templates.published` (kryssrutan **Visa i API**, `PATCH /articles/:id/configurator { published }`) styr vilka mallar externa system ser. De publika svarsformerna byggs av rena `toPublicTemplate` (`configurator/service/public-template.ts`) och serveras av `configurator/routes/public-configurator.routes.ts` i OAuth-scopet (`GET /configurator/templates`, `GET /configurator/:articleId`, `POST …/evaluate`) — regler, strukturrader, operationer, kostnader, artikelkopplingar och interna id:n går aldrig ut.
+- **Synlighetsregeln gäller bara klienttoken** (`req.apiClient`): opublicerad/inaktiv mall ⇒ 404 `configurator-template-not-found`, en `POST /quotes`-rad med `configuration` ⇒ 409 `configurator-not-published` (`unpublishedTemplates`, kontrollen i rutten); sessioner påverkas aldrig. Klientbehörigheterna (scopes, kundknytning): `permissions.md`.
+- **`null` i en `selection` = medvetet tomt förval** (saknad nyckel = förvalet gäller): motorn ger `defaulted: false`, `selectionFromEntries` skriver `null` så en sparad rad behåller tomt, och webbens `selectionFromRaw` skickar `null` för **— Välj —**/tömt fält men utelämnar orörda grupper; `variantSetsSchema` tar `[null]`. Manualen beskriver anropen under System → Integrationer → Konfigurator-API.
