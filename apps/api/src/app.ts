@@ -51,6 +51,9 @@ import { economyRoutes } from "./modules/economy/routes/economy.routes.js";
 import { createDimensionRepository } from "./modules/economy/repository/dimension.repository.js";
 import { createDimensionService } from "./modules/economy/service/dimension.service.js";
 import { dimensionRoutes } from "./modules/economy/routes/dimension.routes.js";
+import { createBudgetRepository } from "./modules/economy/repository/budget.repository.js";
+import { createBudgetService } from "./modules/economy/service/budget.service.js";
+import { budgetRoutes } from "./modules/economy/routes/budget.routes.js";
 import { createProjectReportRepository } from "./modules/reports/repository/project-report.repository.js";
 import { createProjectReportService } from "./modules/reports/service/project-report.service.js";
 import { createFixedAssetService } from "./modules/economy/service/fixed-asset.service.js";
@@ -713,10 +716,15 @@ export function buildApp(database: Db = db) {
   const vatCodeService = createVatCodeService({ db: database, poster: verificationPoster, audit: auditRepository });
   // Ekonomirapporter (B6a): balans-/resultaträkning, flerkontoshuvudbok och
   // verifikatlista — read-only, with PDF drawn in the shared A4 template.
+  // Budget (etapp 5 del B): budgets per räkenskapsår; the reports read the
+  // budget through the repository's report slice.
+  const budgetRepository = createBudgetRepository(database);
+  const budgetService = createBudgetService({ repo: budgetRepository, audit: auditRepository });
   const financialReportsService = createFinancialReportsService({
     db: database,
     repo: economyRepository,
     pdf: documentPdfService,
+    budgets: budgetRepository,
   });
   // SIE (B6b): SIETYP 4-export per räkenskapsår och import av ingående
   // balanser som ett bokfört verifikat i serie I.
@@ -895,6 +903,8 @@ export function buildApp(database: Db = db) {
         // Kostnadsställen och projekt: every office user reads the registers
         // (the pickers on orders, invoices and article groups), Ekonomi writes.
         await registerModule(protectedRoutes, dimensionRoutes, { service: dimensionService }, { read: office, write: ["ekonomi"] });
+        // Budget: management's planning data — Ekonomi reads and writes.
+        await registerModule(protectedRoutes, budgetRoutes, { service: budgetService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, fixedAssetRoutes, { service: fixedAssetService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, yearEndRoutes, { service: yearEndClosingService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, costingRoutes, { service: costingService }, { read: office, write: ["tillverkning"] });

@@ -4,6 +4,7 @@
 // Excel-friendly CSV conventions from @navet/shared.
 import { buildCsv, type CsvColumn, type DimensionRef } from "@navet/shared";
 import { dimensionText } from "./dimension-check.js";
+import type { BudgetedIncomeStatementBody } from "./budget-calc.js";
 import type {
   BalanceSheetBody,
   GeneralLedgerResponse,
@@ -102,6 +103,56 @@ export function buildGroupedIncomeStatementCsv(report: IncomeStatementBody, colu
   const resultEntry = [...report.entries].reverse().find((entry) => entry.kind === "subtotal");
   rows.push({ konto: "", label: "Periodens resultat", amount: report.result, amounts: amountsOf(resultEntry?.amounts) });
   return buildCsv(csvColumns, rows);
+}
+
+// Resultaträkningen med budget: every budget column, always (the PDF drops
+// the accumulated ones when the period starts on the year's first day).
+export function buildBudgetedIncomeStatementCsv(report: BudgetedIncomeStatementBody): string {
+  type Figures = {
+    amount: number;
+    budget: number;
+    variance: number;
+    variancePercent: number | null;
+    accumulated: number;
+    accumulatedBudget: number;
+    accumulatedVariance: number;
+    accumulatedVariancePercent: number | null;
+  };
+  type BudgetRow = { konto: string; label: string } & Figures;
+  const columns: CsvColumn<BudgetRow>[] = [
+    { label: "Konto", value: (r) => r.konto },
+    { label: "Benämning", value: (r) => r.label },
+    { label: "Utfall", value: (r) => r.amount, format: "money" },
+    { label: "Budget", value: (r) => r.budget, format: "money" },
+    { label: "Avvikelse", value: (r) => r.variance, format: "money" },
+    { label: "Avvikelse %", value: (r) => r.variancePercent, format: "number" },
+    { label: "Utfall ack.", value: (r) => r.accumulated, format: "money" },
+    { label: "Budget ack.", value: (r) => r.accumulatedBudget, format: "money" },
+    { label: "Avvikelse ack.", value: (r) => r.accumulatedVariance, format: "money" },
+    { label: "Avvikelse ack. %", value: (r) => r.accumulatedVariancePercent, format: "number" },
+  ];
+  const rows: BudgetRow[] = [];
+  for (const entry of report.entries) {
+    if (entry.kind === "line") {
+      for (const account of entry.accounts) rows.push({ ...account, konto: account.accountNumber, label: account.accountName });
+      if (entry.accounts.length !== 1) rows.push({ ...entry, konto: "", label: entry.label });
+    } else {
+      rows.push({ ...entry, konto: "", label: entry.label });
+    }
+  }
+  rows.push({
+    konto: "",
+    label: "Periodens resultat",
+    amount: report.result,
+    budget: report.resultBudget,
+    variance: report.resultVariance,
+    variancePercent: report.resultVariancePercent,
+    accumulated: report.resultAccumulated,
+    accumulatedBudget: report.resultAccumulatedBudget,
+    accumulatedVariance: report.resultAccumulatedVariance,
+    accumulatedVariancePercent: report.resultAccumulatedVariancePercent,
+  });
+  return buildCsv(columns, rows);
 }
 
 interface LedgerFlatRow {

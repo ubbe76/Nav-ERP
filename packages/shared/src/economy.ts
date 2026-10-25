@@ -399,6 +399,10 @@ export const incomeStatementQuerySchema = z
     to: z.string().date(),
     ...dimensionFilterQuery,
     groupBy: incomeStatementGroupBySchema.optional(),
+    // Budget: adds the budget/variance columns (period + accumulated from
+    // the fiscal year's start). Never combined with projectId or groupBy
+    // (400 budget-not-combinable); from/to must lie in the budget's year.
+    budgetId: z.string().uuid().optional(),
   })
   .refine((range) => range.to >= range.from, { message: "to must not be before from", path: ["to"] });
 export type IncomeStatementQuery = z.infer<typeof incomeStatementQuerySchema>;

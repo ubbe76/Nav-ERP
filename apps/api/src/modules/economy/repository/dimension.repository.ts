@@ -3,6 +3,7 @@ import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import {
   articleGroups,
   bankRules,
+  budgetLines,
   costCenters,
   customers,
   fixedAssetCategories,
@@ -18,6 +19,7 @@ import {
   verificationTemplateRows,
   verifications,
   type Db,
+  type Tx,
 } from "@navet/db";
 import type { ListCostCentersQuery, ListProjectsQuery, ProjectStatus } from "@navet/shared";
 import { ilikePattern } from "@navet/shared";
@@ -53,6 +55,9 @@ interface DimensionReference {
   // The rows this reference counts beyond `column = id` (the status split
   // of a locked/movable pair); none = every row.
   condition?: (id: string) => SQL;
+  // A reference whose rows cannot simply be re-pointed (a unique key would
+  // collide): the move is this statement instead of the generic UPDATE.
+  move?: (tx: Tx, id: string, replacementId: string) => Promise<void>;
 }
 
 function ref(table: PgTable, tableName: string, labels: string, column: PgColumn): DimensionReference {
@@ -86,6 +91,35 @@ const invoiceNotDraft = sql`${invoiceRows.invoiceId} in (select ${invoices.id} f
 const supplierInvoiceNotDraft = sql`${supplierInvoices.status} <> 'draft'`;
 const supplierInvoiceRowNotDraft = sql`${supplierInvoiceRows.supplierInvoiceId} in (select ${supplierInvoices.id} from ${supplierInvoices} where ${supplierInvoices.status} <> 'draft')`;
 const salesOrderClosed = sql`${salesOrders.status} in ('delivered', 'invoiced', 'cancelled', 'lost')`;
+
+// Budget lines are unique per (budget, account, month, cost center), so a
+// line the replacement already has for the same key is SUMMED into it (a
+// sum of zero removes the line — zero is never stored) before the rest are
+// re-pointed. Decision 10 of the budget contract.
+async function moveBudgetLines(tx: Tx, id: string, replacementId: string) {
+  const paired = sql`source.cost_center_id = ${id} AND target.cost_center_id = ${replacementId}
+      AND target.budget_id = source.budget_id AND target.account_number = source.account_number AND target.month = source.month`;
+  // Pairs that cancel out go first — both rows — since the CHECK refuses an
+  // updated amount of 0.
+  await tx.execute(sql`
+    DELETE FROM ${budgetLines} WHERE id IN (
+      SELECT source.id FROM ${budgetLines} AS source JOIN ${budgetLines} AS target ON ${paired} WHERE target.amount + source.amount = 0
+      UNION
+      SELECT target.id FROM ${budgetLines} AS source JOIN ${budgetLines} AS target ON ${paired} WHERE target.amount + source.amount = 0
+    )
+  `);
+  await tx.execute(sql`
+    UPDATE ${budgetLines} AS target SET amount = target.amount + source.amount
+    FROM ${budgetLines} AS source
+    WHERE ${paired}
+  `);
+  await tx.execute(sql`
+    DELETE FROM ${budgetLines} AS source
+    USING ${budgetLines} AS target
+    WHERE ${paired}
+  `);
+  await tx.execute(sql`UPDATE ${budgetLines} SET cost_center_id = ${replacementId} WHERE cost_center_id = ${id}`);
+}
 const purchaseOrderClosed = sql`${purchaseOrders.status} in ('received', 'closed', 'cancelled')`;
 
 function references(dimension: "costCenter" | "project"): DimensionReference[] {
@@ -128,6 +162,7 @@ function references(dimension: "costCenter" | "project"): DimensionReference[] {
           ref(articleGroups, "article_groups", "artikelgrupp (förval)|artikelgrupper (förval)", articleGroups.defaultCostCenterId),
           ref(suppliers, "suppliers", "leverantör (förval)|leverantörer (förval)", suppliers.defaultCostCenterId),
           ref(fixedAssetCategories, "fixed_asset_categories", "tillgångsgrupp (förval)|tillgångsgrupper (förval)", fixedAssetCategories.defaultCostCenterId),
+          { ...ref(budgetLines, "budget_lines", "budgetrad|budgetrader", budgetLines.costCenterId), move: moveBudgetLines },
         ]
       : []),
   ];
@@ -195,7 +230,8 @@ export function createDimensionRepository(db: Db) {
             const [before] = await tx.select({ n: count() }).from(r.table).where(whereFor(r, entry.id));
             const n = Number(before?.n ?? 0);
             if (n === 0) continue;
-            await tx.execute(sql`UPDATE ${r.table} SET ${sql.identifier(r.column.name)} = ${replacementId} WHERE ${whereFor(r, entry.id)}`);
+            if (r.move) await r.move(tx, entry.id, replacementId);
+            else await tx.execute(sql`UPDATE ${r.table} SET ${sql.identifier(r.column.name)} = ${replacementId} WHERE ${whereFor(r, entry.id)}`);
             moved.push({ table: r.tableName, count: n });
           }
         }

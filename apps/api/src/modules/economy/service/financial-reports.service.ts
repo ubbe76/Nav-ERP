@@ -15,11 +15,15 @@ import { displayNumber } from "./economy.service.js";
 import { formatNumber } from "../../mail/service/document-pdf.js";
 import {
   buildBalanceSheetCsv,
+  buildBudgetedIncomeStatementCsv,
   buildGeneralLedgerCsv,
   buildGroupedIncomeStatementCsv,
   buildIncomeStatementCsv,
   buildVerificationListCsv,
 } from "./financial-reports-csv.js";
+import { budgetedAmounts, buildBudgetedIncomeStatement, type BudgetedIncomeStatementBody } from "./budget-calc.js";
+import { BudgetNotFoundError } from "./budget.service.js";
+import type { BudgetReportSource } from "../repository/budget.repository.js";
 import type {
   FinancialStatementPdfInput,
   GeneralLedgerPdfInput,
@@ -35,6 +39,23 @@ export class ReportFiscalYearNotFoundError extends Error {
   constructor(date: string) {
     super(`Inget räkenskapsår täcker datumet ${date}`);
     this.name = "ReportFiscalYearNotFoundError";
+  }
+}
+
+// Budget on the income statement: never together with a project filter or
+// Per kostnadsställe/Per projekt (project budgets and budget per column are
+// outside v1).
+export class BudgetNotCombinableError extends Error {
+  constructor() {
+    super("Budget kan inte kombineras med projekt eller gruppering");
+    this.name = "BudgetNotCombinableError";
+  }
+}
+
+export class BudgetRangeOutsideYearError extends Error {
+  constructor(from: string, to: string, label: string) {
+    super(`Perioden ${from} – ${to} ligger utanför budgetens räkenskapsår ${label}`);
+    this.name = "BudgetRangeOutsideYearError";
   }
 }
 
@@ -499,6 +520,20 @@ export interface IncomeStatementResponse extends IncomeStatementBody {
   to: string;
 }
 
+// With `budgetId`: the same entries with budget/variance figures for the
+// period and accumulated from the fiscal year's start (budget-calc.ts).
+export interface BudgetedIncomeStatementResponse extends BudgetedIncomeStatementBody {
+  from: string;
+  to: string;
+  budget: { id: string; name: string; fiscalYearId: string };
+  accumulatedFrom: string;
+}
+
+// The budget's slice of the budget repository.
+export interface BudgetReportReader {
+  findForReport(id: string): Promise<BudgetReportSource | null>;
+}
+
 // Only the three report renderers — economy never touches the rest of the
 // PDF service.
 export interface ReportPdfRenderer {
@@ -513,6 +548,7 @@ export type IncomeStatementQueryInput = {
   costCenterId?: string;
   projectId?: string;
   groupBy?: IncomeStatementGroupBy;
+  budgetId?: string;
 };
 
 export type GeneralLedgerQueryInput = {
@@ -552,8 +588,10 @@ export function createFinancialReportsService(deps: {
   db: Db;
   repo: ReportFiscalYearReader & ReportLedgerReader & ReportVerificationReader;
   pdf?: ReportPdfRenderer;
+  // Budget on the income statement; without it `budgetId` is a 404.
+  budgets?: BudgetReportReader;
 }) {
-  const { db, repo } = deps;
+  const { db, repo, budgets } = deps;
   // The PDF subtitles name the filtered object(s) — "… · Kostnadsställe 100
   // Verkstad" — resolved right before the render, never for JSON/CSV.
   async function subtitleFor(base: string, query: { costCenterId?: string; projectId?: string }): Promise<string> {
@@ -593,7 +631,8 @@ export function createFinancialReportsService(deps: {
     // Kostnadsställen och projekt: `costCenterId`/`projectId` keep only the
     // rows carrying the object(s) (same shape as before); `groupBy` adds the
     // columns and per-column amounts (buildGroupedIncomeStatement).
-    async getIncomeStatement(query: IncomeStatementQueryInput): Promise<IncomeStatementResponse> {
+    async getIncomeStatement(query: IncomeStatementQueryInput): Promise<IncomeStatementResponse | BudgetedIncomeStatementResponse> {
+      if (query.budgetId) return service.getBudgetedIncomeStatement({ ...query, budgetId: query.budgetId });
       const filter = dimensionFilterOf(query);
       if (!query.groupBy) {
         const balances = await readAccountBalances(db, { from: query.from, to: query.to }, filter);
@@ -611,6 +650,42 @@ export function createFinancialReportsService(deps: {
         a.code.localeCompare(b.code, "sv")
       );
       return { from: query.from, to: query.to, ...buildGroupedIncomeStatement(grouped, objects) };
+    },
+
+    // Resultaträkningen med budget: the period's actuals against the budget
+    // apportioned over the same window (budgetedAmounts), plus both
+    // accumulated from the fiscal year's start. A `costCenterId` filters
+    // actuals AND budget lines to that cost center; without one the whole
+    // company's budget (every line, Ej fördelat included) meets the whole
+    // company's actuals.
+    async getBudgetedIncomeStatement(query: IncomeStatementQueryInput & { budgetId: string }): Promise<BudgetedIncomeStatementResponse> {
+      if (query.projectId || query.groupBy) throw new BudgetNotCombinableError();
+      const budget = budgets ? await budgets.findForReport(query.budgetId) : null;
+      if (!budget) throw new BudgetNotFoundError(query.budgetId);
+      const { fiscalYear } = budget;
+      if (query.from < fiscalYear.startDate || query.to > fiscalYear.endDate) {
+        throw new BudgetRangeOutsideYearError(query.from, query.to, fiscalYear.label);
+      }
+      const filter = dimensionFilterOf(query);
+      const lines = query.costCenterId ? budget.lines.filter((line) => line.costCenterId === query.costCenterId) : budget.lines;
+      const [period, accumulated] = await Promise.all([
+        readAccountBalances(db, { from: query.from, to: query.to }, filter),
+        readAccountBalances(db, { from: fiscalYear.startDate, to: query.to }, filter),
+      ]);
+      const body = buildBudgetedIncomeStatement({
+        period,
+        accumulated,
+        periodBudget: budgetedAmounts(lines, fiscalYear.periods, query.from, query.to),
+        accumulatedBudget: budgetedAmounts(lines, fiscalYear.periods, fiscalYear.startDate, query.to),
+        accounts: budget.accounts,
+      });
+      return {
+        from: query.from,
+        to: query.to,
+        budget: { id: budget.id, name: budget.name, fiscalYearId: fiscalYear.id },
+        accumulatedFrom: fiscalYear.startDate,
+        ...body,
+      };
     },
 
     // Two queries total: the per-account opening/period sums, and the rows.
@@ -774,8 +849,45 @@ export function createFinancialReportsService(deps: {
     // Per objekt the A4 template has one amount column, so the PDF prints
     // one section per column (the object's name as a group heading, its own
     // lines and subtotals) and the total last.
+    // With a budget: Utfall, Budget, Avvikelse, Avvikelse % for the period
+    // and, when the period does not start on the year's first day, the three
+    // accumulated columns too (the renderer goes landscape for seven).
+    async getBudgetedIncomeStatementPdf(query: IncomeStatementQueryInput & { budgetId: string }) {
+      const statement = await service.getBudgetedIncomeStatement(query);
+      const withAccumulated = statement.from !== statement.accumulatedFrom;
+      const columns = ["Utfall", "Budget", "Avvikelse", "Avvikelse %", ...(withAccumulated ? ["Utfall ack.", "Budget ack.", "Avvikelse ack."] : [])];
+      const percent = (value: number | null) => (value === null ? "" : formatNumber(value, 1));
+      const amountsOf = (f: { amount: number; budget: number; variance: number; variancePercent: number | null; accumulated: number; accumulatedBudget: number; accumulatedVariance: number }) => [
+        formatNumber(f.amount),
+        formatNumber(f.budget),
+        formatNumber(f.variance),
+        percent(f.variancePercent),
+        ...(withAccumulated ? [formatNumber(f.accumulated), formatNumber(f.accumulatedBudget), formatNumber(f.accumulatedVariance)] : []),
+      ];
+      const rows: FinancialStatementPdfInput["rows"] = [];
+      for (const entry of statement.entries) {
+        if (entry.kind === "subtotal") {
+          rows.push({ kind: "subtotal", label: entry.label, amount: null, amounts: amountsOf(entry) });
+          continue;
+        }
+        rows.push({ kind: "line", label: entry.label, amount: null, amounts: amountsOf(entry) });
+        for (const account of entry.accounts) {
+          rows.push({ kind: "account", label: `${account.accountNumber} ${account.accountName}`, amount: null, amounts: amountsOf(account) });
+        }
+      }
+      const content = await renderer().renderFinancialStatement({
+        title: "Resultaträkning",
+        subtitle: await subtitleFor(`${statement.from} – ${statement.to} · Budget ${statement.budget.name}`, query),
+        columns,
+        rows,
+      });
+      return { filename: `resultatrakning-${statement.from}--${statement.to}.pdf`, content };
+    },
+
     async getIncomeStatementPdf(query: IncomeStatementQueryInput) {
+      if (query.budgetId) return service.getBudgetedIncomeStatementPdf({ ...query, budgetId: query.budgetId });
       const statement = await service.getIncomeStatement(query);
+      if ("budget" in statement) throw new Error("unreachable: budgeted statement without budgetId");
       const rows: FinancialStatementPdfInput["rows"] = [];
 
       const pushSection = (amountOf: (entry: IncomeStatementEntry) => number, accountAmountOf: (account: ReportAccount) => number) => {
@@ -817,7 +929,12 @@ export function createFinancialReportsService(deps: {
     },
 
     async getIncomeStatementCsv(query: IncomeStatementQueryInput) {
+      if (query.budgetId) {
+        const statement = await service.getBudgetedIncomeStatement({ ...query, budgetId: query.budgetId });
+        return { filename: `resultatrakning-${statement.from}--${statement.to}.csv`, content: buildBudgetedIncomeStatementCsv(statement) };
+      }
       const statement = await service.getIncomeStatement(query);
+      if ("budget" in statement) throw new Error("unreachable: budgeted statement without budgetId");
       return {
         filename: `resultatrakning-${statement.from}--${statement.to}.csv`,
         content: statement.columns ? buildGroupedIncomeStatementCsv(statement, statement.columns) : buildIncomeStatementCsv(statement),

@@ -386,11 +386,16 @@ export interface PayrollReportPdfInput {
 export interface FinancialStatementPdfInput {
   title: string;
   subtitle: string;
+  // Resultaträkningen med budget: column headings; every row then carries
+  // `amounts` (one per column, right-aligned) and `amount` is ignored. More
+  // than four columns go landscape.
+  columns?: string[];
   rows: {
     kind: "group" | "line" | "account" | "subtotal" | "total";
     label: string;
     // null = a heading with no figure of its own.
     amount: string | null;
+    amounts?: string[];
   }[];
 }
 
@@ -2329,9 +2334,36 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   // sequence of indented labelled rows with a right-aligned amount. Economy
   // decides the sequence and formats every amount; this only draws it.
   async function renderFinancialStatement(input: FinancialStatementPdfInput): Promise<Buffer> {
-    const { doc, finished } = await startDocument();
+    const columns = input.columns ?? [];
+    const multi = columns.length > 0;
+    const { doc, finished } = await startDocument({ landscape: columns.length > 4 });
     const left = PAGE_MARGIN;
+    const right = doc.page.width - PAGE_MARGIN;
+    const bottom = doc.page.height - 62;
     let y = startReport(doc, input.title, input.subtitle);
+
+    // Multi-column: the amount columns hang from the right edge, the label
+    // takes what is left. Single-column: the classic statement layout.
+    const columnWidth = columns.length > 4 ? 76 : 78;
+    const columnX = (index: number) => right - (columns.length - index) * columnWidth;
+    const amountsStart = multi ? columnX(0) : left + STATEMENT_AMOUNT_COL.x;
+    const rule = (atY: number) =>
+      doc
+        .moveTo(amountsStart, atY)
+        .lineTo(multi ? right : left + STATEMENT_AMOUNT_COL.x + STATEMENT_AMOUNT_COL.w, atY)
+        .strokeColor("#666666")
+        .lineWidth(0.5)
+        .stroke();
+    const columnHeader = () => {
+      if (!multi) return;
+      doc.font("Helvetica-Bold").fontSize(8.5);
+      columns.forEach((heading, index) => {
+        doc.text(heading, columnX(index), y, { width: columnWidth - 4, align: "right", lineBreak: false });
+      });
+      y += 12;
+      doc.moveTo(left, y).lineTo(right, y).strokeColor("#999999").lineWidth(0.5).stroke();
+      y += 4;
+    };
 
     const STYLE = {
       group: { indent: 0, font: "Helvetica-Bold", size: 11, gapBefore: 8, rule: "none" },
@@ -2341,26 +2373,30 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       total: { indent: 0, font: "Helvetica-Bold", size: 11, gapBefore: 6, rule: "double" },
     } as const;
 
+    columnHeader();
     for (const row of input.rows) {
       const style = STYLE[row.kind];
       y += style.gapBefore;
-      if (y + 16 > TABLE_BOTTOM) {
+      if (y + 16 > bottom) {
         doc.addPage();
         y = PAGE_MARGIN;
+        columnHeader();
       }
 
-      if (style.rule !== "none") {
-        doc
-          .moveTo(left + STATEMENT_AMOUNT_COL.x, y - 3)
-          .lineTo(left + STATEMENT_AMOUNT_COL.x + STATEMENT_AMOUNT_COL.w, y - 3)
-          .strokeColor("#666666")
-          .lineWidth(0.5)
-          .stroke();
-      }
+      if (style.rule !== "none") rule(y - 3);
 
       doc.font(style.font).fontSize(style.size);
-      doc.text(row.label, left + style.indent, y, { width: STATEMENT_AMOUNT_COL.x - style.indent - 6 });
-      if (row.amount !== null) {
+      doc.text(row.label, left + style.indent, y, {
+        width: amountsStart - left - style.indent - 6,
+        // The narrow label column of the multi-column layout cuts with an
+        // ellipsis instead of wrapping into the next row.
+        ...(multi ? { height: style.size + 3, ellipsis: true } : {}),
+      });
+      if (multi) {
+        (row.amounts ?? []).forEach((amount, index) => {
+          doc.text(amount, columnX(index), y, { width: columnWidth - 4, align: "right", lineBreak: false });
+        });
+      } else if (row.amount !== null) {
         doc.text(row.amount, left + STATEMENT_AMOUNT_COL.x, y, {
           width: STATEMENT_AMOUNT_COL.w,
           align: "right",
@@ -2369,12 +2405,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y += style.size + 4;
 
       if (style.rule === "double") {
-        doc
-          .moveTo(left + STATEMENT_AMOUNT_COL.x, y)
-          .lineTo(left + STATEMENT_AMOUNT_COL.x + STATEMENT_AMOUNT_COL.w, y)
-          .strokeColor("#666666")
-          .lineWidth(0.5)
-          .stroke();
+        rule(y);
         y += 4;
       }
     }

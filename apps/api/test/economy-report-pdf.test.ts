@@ -43,6 +43,28 @@ describe("renderFinancialStatement", () => {
   });
 });
 
+describe("renderFinancialStatement with columns (resultaträkningen med budget)", () => {
+  it("prints the column headings and every amount, landscape beyond four columns", async () => {
+    const columns = ["Utfall", "Budget", "Avvikelse", "Avvikelse %", "Utfall ack.", "Budget ack.", "Avvikelse ack."];
+    const buffer = await testDocumentPdfService.renderFinancialStatement({
+      title: "Resultaträkning",
+      subtitle: "2026-02-01 – 2026-02-28 · Budget Huvudbudget",
+      columns,
+      rows: [
+        { kind: "line", label: "Nettoomsättning", amount: null, amounts: ["1 000,00", "1 500,00", "-500,00", "-33,3", "2 800,00", "3 000,00", "-200,00"] },
+        { kind: "account", label: "3001 Försäljning inom Sverige 25 %", amount: null, amounts: ["1 000,00", "1 500,00", "-500,00", "-33,3", "2 800,00", "3 000,00", "-200,00"] },
+        { kind: "subtotal", label: "Rörelseresultat", amount: null, amounts: ["1 000,00", "1 500,00", "-500,00", "-33,3", "2 800,00", "3 000,00", "-200,00"] },
+      ],
+    });
+    const text = pdfText(buffer);
+    for (const heading of columns) expect(text).toContain(heading);
+    expect(text).toContain("3001 Försäljning inom Sverige 25 %");
+    expect(text).toContain("-33,3");
+    expect(text).toContain("2 800,00");
+    expect(pdfPageCount(buffer)).toBe(1);
+  });
+});
+
 describe("renderGeneralLedger", () => {
   it("prints one section per account with opening and closing balances", async () => {
     const buffer = await testDocumentPdfService.renderGeneralLedger({

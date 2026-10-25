@@ -6,6 +6,7 @@ export * from "./dimensions.js";
 export * from "./business-date.js";
 export * from "./coerce.js";
 export * from "./economy.js";
+export * from "./budget.js";
 export * from "./error-codes.js";
 export * from "./fixed-asset.js";
 export * from "./year-end.js";

@@ -169,6 +169,25 @@ export const ERROR_CODES = {
   // Bokför of a manual verification with a row on an account that has Kräver
   // kostnadsställe but no cost center (409, body.accounts = the numbers)
   COST_CENTER_REQUIRED: "cost-center-required",
+  // Budget (bokföringsgranskningen etapp 5 del B).
+  // An unknown budget id (404)
+  BUDGET_NOT_FOUND: "budget-not-found",
+  // POST/PATCH/copy with a name another budget of the year has (409)
+  BUDGET_NAME_TAKEN: "budget-name-taken",
+  // A line on an account the chart lacks or outside class 3–8 / 8990–8999
+  // (400, body.accounts = the numbers)
+  BUDGET_ACCOUNT_INVALID: "budget-account-invalid",
+  // `amounts` with another length than the year's period count (400)
+  BUDGET_MONTH_INVALID: "budget-month-invalid",
+  // The same account twice in one PUT (400)
+  BUDGET_DUPLICATE_ACCOUNT: "budget-duplicate-account",
+  // Kopiera utfall without a source year when the budget's year has no
+  // predecessor (400)
+  BUDGET_NO_PREVIOUS_YEAR: "budget-no-previous-year",
+  // Resultaträkningen: budgetId together with projectId or groupBy (400)
+  BUDGET_NOT_COMBINABLE: "budget-not-combinable",
+  // Resultaträkningen: from/to outside the budget's fiscal year (400)
+  BUDGET_RANGE_OUTSIDE_YEAR: "budget-range-outside-year",
   // årsbokslut
   FISCAL_YEAR_CLOSED: "fiscal-year-closed",
   YEAR_END_CLOSING_NOT_FOUND: "year-end-closing-not-found",

@@ -391,6 +391,15 @@ import {
 } from "../src/modules/economy/service/fixed-asset.service.js";
 import { FixedAssetVerificationError } from "../src/modules/economy/service/economy.service.js";
 import {
+  BudgetAccountInvalidError,
+  BudgetDuplicateAccountError,
+  BudgetMonthInvalidError,
+  BudgetNameTakenError,
+  BudgetNoPreviousYearError,
+  BudgetNotFoundError,
+} from "../src/modules/economy/service/budget.service.js";
+import { BudgetNotCombinableError, BudgetRangeOutsideYearError } from "../src/modules/economy/service/financial-reports.service.js";
+import {
   CostCenterInactiveError,
   CostCenterNotFoundError,
   CostCenterRequiredError,
@@ -764,6 +773,15 @@ const cases: Array<[Error, string]> = [
   [new ProjectCustomerNotFoundError("k-1"), ERROR_CODES.PROJECT_CUSTOMER_NOT_FOUND],
   [new ProjectDatesError(), ERROR_CODES.PROJECT_DATES],
   [new DimensionBookedError("project", "P1"), ERROR_CODES.DIMENSION_BOOKED],
+  // Budget
+  [new BudgetNotFoundError("b-1"), ERROR_CODES.BUDGET_NOT_FOUND],
+  [new BudgetNameTakenError("Budget 2027"), ERROR_CODES.BUDGET_NAME_TAKEN],
+  [new BudgetAccountInvalidError(["1930"]), ERROR_CODES.BUDGET_ACCOUNT_INVALID],
+  [new BudgetMonthInvalidError(12, 11), ERROR_CODES.BUDGET_MONTH_INVALID],
+  [new BudgetDuplicateAccountError("3001"), ERROR_CODES.BUDGET_DUPLICATE_ACCOUNT],
+  [new BudgetNoPreviousYearError("2027"), ERROR_CODES.BUDGET_NO_PREVIOUS_YEAR],
+  [new BudgetNotCombinableError(), ERROR_CODES.BUDGET_NOT_COMBINABLE],
+  [new BudgetRangeOutsideYearError("2026-12-01", "2027-01-31", "2027"), ERROR_CODES.BUDGET_RANGE_OUTSIDE_YEAR],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

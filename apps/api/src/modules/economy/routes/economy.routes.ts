@@ -96,9 +96,12 @@ import {
   type VatCodeService,
 } from "../service/vat-code.service.js";
 import {
+  BudgetNotCombinableError,
+  BudgetRangeOutsideYearError,
   ReportFiscalYearNotFoundError,
   type FinancialReportsService,
 } from "../service/financial-reports.service.js";
+import { BudgetNotFoundError } from "../service/budget.service.js";
 import {
   SieAlreadyImportedError,
   SieFiscalYearMismatchError,
@@ -758,7 +761,10 @@ export async function economyRoutes(
   // locking, so the only domain failure is a date outside every fiscal year.
 
   function reportError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
-    if (err instanceof ReportFiscalYearNotFoundError) return reply.code(400).send(errorBody(err));
+    if (err instanceof ReportFiscalYearNotFoundError || err instanceof BudgetNotCombinableError || err instanceof BudgetRangeOutsideYearError) {
+      return reply.code(400).send(errorBody(err));
+    }
+    if (err instanceof BudgetNotFoundError) return reply.code(404).send(errorBody(err));
     throw err;
   }
 
