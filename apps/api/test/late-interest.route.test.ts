@@ -141,6 +141,9 @@ describe("dröjsmålsränta routes", () => {
     expect(again.statusCode).toBe(409);
     expect(again.json().code).toBe("late-interest-already-charged");
     expect(again.json().invoiceIds).toEqual([invoiceId]);
+    // The same invoice twice in one call: 400 before anything is read.
+    const item = { invoiceId, fromDate: row.fromDate, includeInterest: true, includeFee: false, fee: 0 };
+    expect((await sales.post("/late-interest/invoices", { asOf: AS_OF, items: [item, item] })).statusCode).toBe(400);
 
     // The påminnelseavgift after the förseningsersättning.
     await testSystemService.updateSettings({ smtpHost: "smtp.test.local", smtpFromEmail: "erp@test.local" });

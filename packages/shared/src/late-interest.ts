@@ -45,7 +45,13 @@ export type LateInterestRunItem = z.infer<typeof lateInterestRunItemSchema>;
 export const createLateInterestInvoicesSchema = z.object({
   asOf: businessDateSchema,
   issue: z.boolean().default(false),
-  items: z.array(lateInterestRunItemSchema).min(1).max(500),
+  // One item per source invoice: a second one would bill the same period
+  // (or fee) twice in the same run.
+  items: z
+    .array(lateInterestRunItemSchema)
+    .min(1)
+    .max(500)
+    .refine((items) => new Set(items.map((item) => item.invoiceId)).size === items.length, "Each invoice may appear only once"),
 });
 export type CreateLateInterestInvoicesInput = z.infer<typeof createLateInterestInvoicesSchema>;
 

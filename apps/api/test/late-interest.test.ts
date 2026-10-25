@@ -409,6 +409,11 @@ describe("Skapa räntefakturor", () => {
         user.id
       )
     ).rejects.toBeInstanceOf(LateInterestAlreadyChargedError);
+    // The same invoice twice in one call would bill the period twice.
+    const twice = { invoiceId: invoice.id, fromDate: `${Y}-10-02`, includeInterest: true, includeFee: false, fee: 450 };
+    await expect(lateInterestService.createInvoices({ asOf: AS_OF, issue: false, items: [twice, twice] }, user.id)).rejects.toBeInstanceOf(
+      LateInterestAlreadyChargedError
+    );
 
     // Two identical runs at once: exactly one creates, the other gets 409.
     const run = () =>
@@ -536,5 +541,29 @@ describe("Skapa räntefakturor", () => {
     await expect(invoiceService.issue(draft.id, user.id)).rejects.toMatchObject({ name: "MissingPostingAccountError" });
     expect((await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, draft.id)))[0]!.status).toBe("draft");
     expect((await db.select().from(invoiceRows).where(eq(invoiceRows.invoiceId, draft.id)))[0]!.revenueAccount).toBe("8313");
+  });
+
+  it("reports an Utfärda direkt failure in Swedish and leaves the räntefaktura as a draft", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const invoice = await makeInvoice(customer.id, user.id, 36500);
+    await db.update(accounts).set({ active: false }).where(eq(accounts.number, "8313"));
+    const logged: unknown[] = [];
+    const service = createLateInterestService({
+      db,
+      invoiceRepo,
+      invoices: { issue: (id, userId) => invoiceService.issue(id, userId) },
+      referenceRates: referenceRateReader,
+      log: (msg) => logged.push(msg),
+    });
+    const run = await service.createInvoices(
+      { asOf: AS_OF, issue: true, items: [{ invoiceId: invoice.id, fromDate: `${Y}-09-02`, includeInterest: true, includeFee: false, fee: 0 }] },
+      user.id
+    );
+    expect(run.created.map((c) => [c.status, c.invoiceNumber])).toEqual([["draft", null]]);
+    // The poster's own message is English ("Posting account 8313 (row revenue
+    // account) is missing or inactive") — never what the routine shows.
+    expect(run.issueFailed).toEqual([{ invoiceId: run.created[0]!.invoiceId, error: "Kontot 8313 saknas eller är inaktivt i kontoplanen" }]);
+    expect(logged).toEqual([]);
   });
 });

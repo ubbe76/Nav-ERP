@@ -1,6 +1,15 @@
 import type { Db, Tx } from "@navet/db";
 import { round2, SEK, type CreateLateInterestInvoicesInput, type LateInterestCandidatesQuery } from "@navet/shared";
-import { documentVatCode } from "../../economy/service/document-vat-code.js";
+import { AccountingPeriodLockedError, FiscalYearClosedError } from "../../economy/service/accounting-period-lock.js";
+import { documentVatCode, InvalidVatCodeError } from "../../economy/service/document-vat-code.js";
+import {
+  MissingPostingAccountError,
+  NoAccountingPeriodForPostingError,
+  VatCodeAmountMismatchError,
+  VatCodeNotApplicableError,
+  ZeroAmountPostingError,
+} from "../../economy/service/verification-poster.js";
+import { isBookkeepingLockViolation } from "../../system/service/db-errors.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
 import type { ReferenceRateReader } from "../../system/service/exchange-rates.js";
@@ -49,6 +58,26 @@ export class LateInterestAlreadyChargedError extends Error {
     super(`Late interest or fee already charged (or no longer applicable) for ${invoiceIds.length} invoice(s)`);
     this.name = "LateInterestAlreadyChargedError";
   }
+}
+
+// Utfärda direkt failed for one räntefaktura: why, in the user's language —
+// shown in the routine's Resultat. The error classes' own messages are
+// English and may name internals, so an unknown error gets the generic text
+// and goes to the server log in full (the recurring verifications' rule).
+export const UNEXPECTED_ISSUE_ERROR = "Ett oväntat fel inträffade — se serverloggen";
+
+export function issueErrorText(err: unknown): string | null {
+  if (err instanceof FiscalYearClosedError) return "Räkenskapsåret är stängt — öppna det under Bokslut och utfärda fakturan";
+  if (err instanceof AccountingPeriodLockedError) return "Bokföringsperioden för fakturadatumet är låst";
+  if (err instanceof NoAccountingPeriodForPostingError) return "Ingen bokföringsperiod täcker fakturadatumet";
+  if (err instanceof MissingPostingAccountError) return `Kontot ${err.accountNumber} saknas eller är inaktivt i kontoplanen`;
+  if (err instanceof InvalidVatCodeError) return `Momskoden ${err.vatCode} saknas eller är inaktiv`;
+  if (err instanceof VatCodeAmountMismatchError || err instanceof VatCodeNotApplicableError) {
+    return `Momskoden ${err.code} stämmer inte med fakturans rader`;
+  }
+  if (err instanceof ZeroAmountPostingError) return "Fakturan har inget belopp att bokföra";
+  if (isBookkeepingLockViolation(err)) return "Bokföringen är låst för datumet";
+  return null;
 }
 
 export type LateInterestCandidate = {
@@ -101,6 +130,8 @@ export interface LateInterestServiceDeps {
   referenceRates: ReferenceRateReader;
   audit?: AuditWriter;
   today?: () => string;
+  // The server log for an Utfärda direkt failure this module does not know.
+  log?: (msg: string, extra?: unknown) => void;
 }
 
 const sv = (n: number) => n.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/ /g, " ");
@@ -109,6 +140,7 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
   const { db, invoiceRepo, invoices } = deps;
   const audit: AuditWriter = deps.audit ?? { log: async () => {} };
   const today = deps.today ?? stockholmToday;
+  const log = deps.log ?? ((msg: string, extra?: unknown) => console.error(msg, extra));
 
   async function readSettings(): Promise<LateInterestSettings> {
     const settings = await invoiceRepo.getLateInterestSettings();
@@ -244,9 +276,14 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
         const conflicts: string[] = [];
         type Picked = { candidate: LateInterestCandidate; interest: boolean; fee: boolean };
         const picked: Picked[] = [];
+        const seen = new Set<string>();
         for (const item of input.items) {
           const candidate = byInvoice.get(item.invoiceId);
-          if (!candidate) {
+          // A second item for the same invoice would charge it twice (the
+          // route's schema refuses it already; the service never trusts that).
+          const duplicate = seen.has(item.invoiceId);
+          seen.add(item.invoiceId);
+          if (!candidate || duplicate) {
             conflicts.push(item.invoiceId);
             continue;
           }
@@ -362,7 +399,9 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
             created.invoiceNumber = issued?.invoiceNumber ?? null;
             created.status = issued?.status ?? "issued";
           } catch (err) {
-            result.issueFailed.push({ invoiceId: created.invoiceId, error: err instanceof Error ? err.message : String(err) });
+            const known = issueErrorText(err);
+            if (!known) log(`Räntefakturering: issuing ${created.invoiceId} failed`, { error: err });
+            result.issueFailed.push({ invoiceId: created.invoiceId, error: known ?? UNEXPECTED_ISSUE_ERROR });
           }
         }
       }

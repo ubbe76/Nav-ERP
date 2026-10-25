@@ -458,7 +458,7 @@ function Routine({
           {result.issueFailed.length > 0 && (
             <FormError margin="above">
               {result.issueFailed.length === 1 ? "En räntefaktura" : `${result.issueFailed.length} räntefakturor`} kunde
-              inte utfärdas och {result.issueFailed.length === 1 ? "ligger" : "ligger"} kvar som utkast:{" "}
+              inte utfärdas och ligger kvar som utkast:{" "}
               {result.issueFailed.map((f) => {
                 const created = result.created.find((c) => c.invoiceId === f.invoiceId);
                 return `${created?.customerName ?? f.invoiceId}: ${f.error}`;

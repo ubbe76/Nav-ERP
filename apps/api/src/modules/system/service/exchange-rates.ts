@@ -312,10 +312,6 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
     return halfYearStartsBetween(from, to).filter((start) => start <= todayDate);
   }
 
-  function referenceFetchedKey(validFrom: string) {
-    return `${REFERENCE_RATE_SERIES}|${validFrom}`;
-  }
-
   function lookup(currency: string, requestedDate: string, rate: StoredRate): ExchangeRateLookup {
     return { currency, requestedDate, date: rate.date, rate: rate.rate, source: rate.source };
   }

@@ -504,6 +504,7 @@ export function buildApp(database: Db = db) {
     invoices: { issue: (id, userId) => invoiceService.issue(id, userId) },
     referenceRates: exchangeRateService,
     audit: auditRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   // E-faktura via Peppol (B2Brouter): reads the issued invoice, its archived
   // PDF and the customer through narrow readers into sales, and the company
