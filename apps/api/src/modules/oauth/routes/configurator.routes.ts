@@ -26,6 +26,7 @@ import {
   ConfiguratorVariantNumberTakenError,
   ConfiguratorVariantTooLongError,
 } from "../../configurator/service/configurator.errors.js";
+import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { SalesOrderExchangeRateError } from "../../sales/service/sales.errors.js";
@@ -97,6 +98,9 @@ export async function configuratorRoutes(
     } catch (err) {
       // The delivery address must belong to the quote's customer.
       if (err instanceof DeliveryAddressNotFoundError) return reply.code(400).send(errorBody(err));
+      // Kostnadsställen och projekt on the header: unknown (404), inactive/closed (400).
+      if (err instanceof CostCenterNotFoundError || err instanceof ProjectNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
       // C3: a row's unitPrice was omitted and the price chain came up empty.
       if (err instanceof PriceNotFoundError) return reply.code(400).send(errorBody(err));
       // A row's unitId is neither the article's base unit nor one of its

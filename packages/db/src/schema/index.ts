@@ -23,3 +23,4 @@ export * from "./themes";
 export * from "./plugins";
 export * from "./manual-bookkeeping";
 export * from "./bank-reconciliation";
+export * from "./dimensions";

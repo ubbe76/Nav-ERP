@@ -32,6 +32,8 @@ export const createFixedAssetCategorySchema = z.object({
   disposalGainAccountId: z.string().uuid(),
   disposalLossAccountId: z.string().uuid(),
   defaultUsefulLifeMonths: usefulLifeSchema,
+  // Kostnadsställe (förval) on the depreciation expense row.
+  defaultCostCenterId: z.string().uuid().nullable().optional(),
 });
 export type CreateFixedAssetCategoryInput = z.infer<typeof createFixedAssetCategorySchema>;
 

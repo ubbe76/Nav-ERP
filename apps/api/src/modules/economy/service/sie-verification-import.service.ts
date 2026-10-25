@@ -1,13 +1,44 @@
 import { createHash } from "node:crypto";
 import { and, eq, gte, inArray, lte } from "drizzle-orm";
-import { accountingPeriods, fiscalYears, sieVerificationImports, users, verificationSeries, verifications, type Db, type Tx } from "@navet/db";
-import { round2, type SieVerificationImportFields } from "@navet/shared";
+import {
+  accountingPeriods,
+  costCenters,
+  fiscalYears,
+  projects,
+  sieVerificationImports,
+  users,
+  verificationSeries,
+  verifications,
+  type Db,
+  type Tx,
+} from "@navet/db";
+import { round2, type SieMissingObject, type SieVerificationImportFields } from "@navet/shared";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import type { EconomyRepository, VerificationRowWrite } from "../repository/economy.repository.js";
 import { defaultVatBox } from "./bas-accounts.js";
 import { VerificationSeriesNotFoundError, type EconomyService } from "./economy.service.js";
-import { parseSieDocument, type ParsedSieDocument, type ParsedSieVerification } from "./sie-parse.js";
+import { parseSieDocument, type ParsedSieDocument, type ParsedSieTransaction, type ParsedSieVerification } from "./sie-parse.js";
+
+// Kostnadsställen och projekt: the two SIE dimensions the import maps —
+// {1 "kod"} to a cost center, {6 "kod"} to a project; every other dimension
+// in a #TRANS object list is ignored. The object's name comes from the file's
+// #OBJEKT line when it has one; a code the register lacks is created by
+// "Skapa saknade konton och objekt" (the same box as the accounts), an
+// inactive cost center / closed project is a blocker like an inactive account.
+const DIMENSION_COST_CENTER = "1";
+const DIMENSION_PROJECT = "6";
+const OBJECT_CODE_MAX = 20;
+const OBJECT_NAME_MAX = 100;
+
+function rowObjectCode(row: ParsedSieTransaction, dimension: string): string | null {
+  return row.objects.find((object) => object.dimension === dimension)?.object ?? null;
+}
+
+type ObjectRegisters = {
+  costCenters: Map<string, { id: string; code: string; active: boolean }>;
+  projects: Map<string, { id: string; code: string; active: boolean; status: string }>;
+};
 
 // SIE-import av verifikat (snabbare manuell bokföring, etapp 3): the
 // lönejournal from the payroll system, or any SIE 4 file with #VER blocks,
@@ -117,6 +148,8 @@ export interface SiePreview {
   alreadyImported: { importedAt: string; importedBy: string | null } | null;
   verifications: SiePreviewVerification[];
   missingAccounts: { number: string; name: string | null }[];
+  // Kostnadsställen och projekt the rows name that the registers lack.
+  missingObjects: SieMissingObject[];
   blockers: string[];
   warnings: string[];
 }
@@ -126,6 +159,7 @@ type DateStatus = { period: "open" | "locked" | null; yearClosed: boolean };
 interface CheckResult {
   verifications: SiePreviewVerification[];
   missingAccounts: { number: string; name: string | null }[];
+  missingObjects: SieMissingObject[];
   blockers: string[];
   warnings: string[];
 }
@@ -156,13 +190,65 @@ export function createSieVerificationImportService(deps: {
     return result;
   }
 
+  // The cost centers / projects the file's rows name, by code, through the
+  // caller's executor.
+  async function loadObjectRegisters(executor: Db | Tx, document: ParsedSieDocument): Promise<ObjectRegisters> {
+    const rows = document.verifications.flatMap((v) => v.rows);
+    const ccCodes = [...new Set(rows.map((r) => rowObjectCode(r, DIMENSION_COST_CENTER)).filter((c): c is string => c !== null))];
+    const prCodes = [...new Set(rows.map((r) => rowObjectCode(r, DIMENSION_PROJECT)).filter((c): c is string => c !== null))];
+    const [cc, pr] = await Promise.all([
+      ccCodes.length === 0
+        ? []
+        : executor.select({ id: costCenters.id, code: costCenters.code, active: costCenters.active }).from(costCenters).where(inArray(costCenters.code, ccCodes)),
+      prCodes.length === 0
+        ? []
+        : executor
+            .select({ id: projects.id, code: projects.code, active: projects.active, status: projects.status })
+            .from(projects)
+            .where(inArray(projects.code, prCodes)),
+    ]);
+    return { costCenters: new Map(cc.map((r) => [r.code, r] as const)), projects: new Map(pr.map((r) => [r.code, r] as const)) };
+  }
+
   // The checks preview and import share. `createMissingAccounts` decides
-  // whether a missing account is a blocker (import) or a warning (preview /
-  // import with the box ticked).
+  // whether a missing account (or object) is a blocker (import) or a warning
+  // (preview / import with the box ticked).
   async function checkDocument(executor: Db | Tx, document: ParsedSieDocument, fileBytes: number, createMissingAccounts: boolean): Promise<CheckResult> {
     const blockers: string[] = [];
     const warnings: string[] = [];
     if (document.verifications.length === 0) blockers.push("Filen innehåller inga verifikat (#VER)");
+
+    // Kostnadsställen och projekt: the objects the rows name.
+    const registers = await loadObjectRegisters(executor, document);
+    const allRows = document.verifications.flatMap((v) => v.rows);
+    const objectName = (dimension: string, code: string) =>
+      document.objects.find((o) => o.dimension === dimension && o.code === code)?.name?.slice(0, OBJECT_NAME_MAX) ?? null;
+    const missingObjects: SieMissingObject[] = [];
+    const uncreatableObjects: string[] = [];
+    for (const [dimension, register, label] of [
+      [DIMENSION_COST_CENTER, registers.costCenters, "Kostnadsstället"],
+      [DIMENSION_PROJECT, registers.projects, "Projektet"],
+    ] as const) {
+      const codes = [...new Set(allRows.map((r) => rowObjectCode(r, dimension)).filter((c): c is string => c !== null))].sort();
+      for (const code of codes) {
+        if (register.has(code)) continue;
+        if (code.length > OBJECT_CODE_MAX) {
+          uncreatableObjects.push(`${label} ${code} har en kod längre än ${OBJECT_CODE_MAX} tecken och kan inte skapas`);
+          continue;
+        }
+        missingObjects.push({ dimension: dimension === DIMENSION_COST_CENTER ? 1 : 6, code, name: objectName(dimension, code) });
+      }
+    }
+    blockers.push(...uncreatableObjects);
+    if (missingObjects.length > 0) {
+      const names = missingObjects.map((o) => `${o.dimension === 1 ? "kostnadsställe" : "projekt"} ${o.code}`).join(", ");
+      if (createMissingAccounts) warnings.push(`${missingObjects.length} objekt saknas i registren och skapas: ${names}`);
+      else blockers.push(`Objektet ${names} finns inte i registren — välj Skapa saknade konton och objekt eller lägg upp dem först`);
+    }
+    const inactiveCostCenters = [...registers.costCenters.values()].filter((c) => !c.active).map((c) => c.code).sort();
+    if (inactiveCostCenters.length > 0) blockers.push(`Kostnadsstället ${inactiveCostCenters.join(", ")} är inaktivt`);
+    const closedProjects = [...registers.projects.values()].filter((p) => !p.active || p.status === "closed").map((p) => p.code).sort();
+    if (closedProjects.length > 0) blockers.push(`Projektet ${closedProjects.join(", ")} är stängt`);
 
     const numbers = document.verifications.flatMap((v) => v.rows.map((r) => r.accountNumber));
     const accounts = await repo.accountsByNumbers(executor, numbers);
@@ -218,6 +304,10 @@ export function createSieVerificationImportService(deps: {
       }
       for (const row of rows) {
         if (!accounts.has(row.accountNumber)) own.push(`Konto ${row.accountNumber} saknas`);
+        const cc = rowObjectCode(row, DIMENSION_COST_CENTER);
+        if (cc !== null && !registers.costCenters.has(cc)) own.push(`Kostnadsställe ${cc} saknas`);
+        const pr = rowObjectCode(row, DIMENSION_PROJECT);
+        if (pr !== null && !registers.projects.has(pr)) own.push(`Projekt ${pr} saknas`);
       }
       return {
         index,
@@ -239,7 +329,20 @@ export function createSieVerificationImportService(deps: {
       };
     });
 
-    return { verifications, missingAccounts, blockers: [...new Set(blockers)], warnings };
+    return { verifications, missingAccounts, missingObjects, blockers: [...new Set(blockers)], warnings };
+  }
+
+  // Skapa saknade konton och objekt: the cost centers / projects the rows
+  // name but the registers lack, inside the import's transaction. ON CONFLICT
+  // on the code (a concurrent import or user may have created one meanwhile).
+  async function createMissingObjects(tx: Tx, missing: SieMissingObject[]) {
+    for (const object of missing) {
+      if (object.dimension === 1) {
+        await tx.insert(costCenters).values({ code: object.code, name: object.name ?? object.code }).onConflictDoNothing({ target: costCenters.code });
+      } else {
+        await tx.insert(projects).values({ code: object.code, name: object.name ?? object.code }).onConflictDoNothing({ target: projects.code });
+      }
+    }
   }
 
   async function findImport(sha256: string) {
@@ -311,6 +414,8 @@ export function createSieVerificationImportService(deps: {
             vatBox: defaultVatBox(missing.number),
           });
         }
+        await createMissingObjects(tx, check.missingObjects);
+        const registers = await loadObjectRegisters(tx, document);
 
         const series = fields.seriesId
           ? { id: fields.seriesId }
@@ -324,12 +429,18 @@ export function createSieVerificationImportService(deps: {
         for (const v of document.verifications) {
           const rows: VerificationRowWrite[] = v.rows
             .filter((r) => r.amount !== 0)
-            .map((r) => ({
-              accountId: accounts.get(r.accountNumber)!.id,
-              debit: r.amount > 0 ? round2(r.amount) : 0,
-              credit: r.amount < 0 ? round2(-r.amount) : 0,
-              description: rowText(r.description),
-            }));
+            .map((r) => {
+              const cc = rowObjectCode(r, DIMENSION_COST_CENTER);
+              const pr = rowObjectCode(r, DIMENSION_PROJECT);
+              return {
+                accountId: accounts.get(r.accountNumber)!.id,
+                debit: r.amount > 0 ? round2(r.amount) : 0,
+                credit: r.amount < 0 ? round2(-r.amount) : 0,
+                description: rowText(r.description),
+                costCenterId: cc !== null ? (registers.costCenters.get(cc)?.id ?? null) : null,
+                projectId: pr !== null ? (registers.projects.get(pr)?.id ?? null) : null,
+              };
+            });
           const description = importDescription(v);
           const { id, verificationNumber } = await economy.createVerificationInTx(
             tx,
@@ -348,7 +459,12 @@ export function createSieVerificationImportService(deps: {
           });
           created.push({ id, verificationNumber, date: v.date, description });
         }
-        return { created, seriesId: series.id, accountsCreated: check.missingAccounts.map((a) => a.number) };
+        return {
+          created,
+          seriesId: series.id,
+          accountsCreated: check.missingAccounts.map((a) => a.number),
+          objectsCreated: check.missingObjects.map((o) => `${o.dimension}:${o.code}`),
+        };
       }).catch(async (err) => {
         if (err instanceof SieDuplicateSignal) {
           const now = await findImport(sha256);
@@ -364,7 +480,14 @@ export function createSieVerificationImportService(deps: {
         entityType: "sie_import",
         entityId: sha256.slice(0, 16),
         action: "verifications_imported",
-        detail: { fileName, count: ids.length, mode: fields.mode, accountsCreated: result.accountsCreated, seriesId: result.seriesId },
+        detail: {
+          fileName,
+          count: ids.length,
+          mode: fields.mode,
+          accountsCreated: result.accountsCreated,
+          objectsCreated: result.objectsCreated,
+          seriesId: result.seriesId,
+        },
         userId,
       });
       return {

@@ -41,6 +41,8 @@ export type CategoryWrite = {
   disposalGainAccountId: string;
   disposalLossAccountId: string;
   defaultUsefulLifeMonths: number;
+  // Kostnadsställe (förval) on the depreciation expense row.
+  defaultCostCenterId?: string | null;
 };
 
 export async function findAccountRef(executor: Db | Tx, id: string): Promise<AccountRef | null> {
@@ -392,6 +394,7 @@ export type DepreciableAsset = FixedAssetRow & {
     accumulatedAccountNumber: string;
     accumulatedAccountName: string;
     accumulatedAccountActive: boolean;
+    defaultCostCenterId: string | null;
   };
 };
 
@@ -412,6 +415,7 @@ export async function listDepreciableAssets(
       categoryName: fixedAssetCategories.name,
       depreciationExpenseAccountId: fixedAssetCategories.depreciationExpenseAccountId,
       accumulatedDepreciationAccountId: fixedAssetCategories.accumulatedDepreciationAccountId,
+      defaultCostCenterId: fixedAssetCategories.defaultCostCenterId,
       expenseAccountNumber: expense.number,
       expenseAccountName: expense.name,
       expenseAccountActive: expense.active,
@@ -430,6 +434,7 @@ export async function listDepreciableAssets(
       categoryName,
       depreciationExpenseAccountId,
       accumulatedDepreciationAccountId,
+      defaultCostCenterId,
       expenseAccountNumber,
       expenseAccountName,
       expenseAccountActive,
@@ -444,6 +449,7 @@ export async function listDepreciableAssets(
         name: categoryName,
         depreciationExpenseAccountId,
         accumulatedDepreciationAccountId,
+        defaultCostCenterId,
         expenseAccountNumber,
         expenseAccountName,
         expenseAccountActive,

@@ -15,7 +15,12 @@ import { errorBody } from "../../system/service/error-body.js";
 import {
   AccountNotFoundError,
   AccountingPeriodLockedError,
+  CostCenterInactiveError,
+  CostCenterNotFoundError,
+  CostCenterRequiredError,
   InactiveAccountError,
+  ProjectClosedError,
+  ProjectNotFoundError,
   InvalidVerificationStateError,
   NoAccountingPeriodError,
   NoFiscalYearForDateError,
@@ -77,7 +82,18 @@ export async function manualBookkeepingRoutes(
 
   // Same mapping as economy.routes.ts's verificationError for the routes
   // that touch a verification.
+  // Kostnadsställen och projekt: an unknown object 404, an inactive/closed
+  // one on a new row 400, Kräver kostnadsställe at booking 409 (+ accounts).
+  function dimensionError(err: unknown, reply: Reply) {
+    if (err instanceof CostCenterNotFoundError || err instanceof ProjectNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
+    if (err instanceof CostCenterRequiredError) return reply.code(409).send({ ...errorBody(err), accounts: err.accounts });
+    return undefined;
+  }
+
   function verificationError(err: unknown, reply: Reply) {
+    const dimension = dimensionError(err, reply);
+    if (dimension !== undefined) return dimension;
     if (err instanceof VerificationNotFoundError || err instanceof AccountNotFoundError || err instanceof VerificationSeriesNotFoundError) {
       return reply.code(404).send(errorBody(err));
     }
@@ -96,6 +112,8 @@ export async function manualBookkeepingRoutes(
   }
 
   function templateError(err: unknown, reply: Reply) {
+    const dimension = dimensionError(err, reply);
+    if (dimension !== undefined) return dimension;
     if (err instanceof VerificationTemplateNotFoundError || err instanceof VerificationSeriesNotFoundError || err instanceof VerificationNotFoundError) {
       return reply.code(404).send(errorBody(err));
     }
@@ -109,6 +127,8 @@ export async function manualBookkeepingRoutes(
   }
 
   function recurringError(err: unknown, reply: Reply) {
+    const dimension = dimensionError(err, reply);
+    if (dimension !== undefined) return dimension;
     if (
       err instanceof RecurringVerificationNotFoundError ||
       err instanceof VerificationTemplateNotFoundError ||
@@ -257,6 +277,9 @@ export async function manualBookkeepingRoutes(
   // --- SIE-import av verifikat ---
 
   function sieError(err: unknown, reply: Reply) {
+    if (err instanceof CostCenterRequiredError) return reply.code(409).send({ ...errorBody(err), blockers: [err.message], accounts: err.accounts });
+    const dimension = dimensionError(err, reply);
+    if (dimension !== undefined) return dimension;
     if (err instanceof SieParseError) return reply.code(400).send(errorBody(err));
     if (err instanceof VerificationSeriesNotFoundError) return reply.code(404).send(errorBody(err));
     if (err instanceof SieFileAlreadyImportedError) {

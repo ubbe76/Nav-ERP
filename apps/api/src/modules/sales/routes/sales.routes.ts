@@ -89,6 +89,7 @@ import {
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
+import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { SeriesExhaustedError } from "../../system/service/number-series.js";
 import { CUSTOMER_CSV_COLUMNS, PRICE_LIST_CSV_COLUMNS, SALES_ORDER_CSV_COLUMNS } from "../service/export-columns.js";
@@ -331,10 +332,14 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (
         err instanceof SalesOrderNotFoundError ||
         err instanceof DeliveryAddressNotFoundError ||
-        err instanceof RegisterEntryNotFoundError
+        err instanceof RegisterEntryNotFoundError ||
+        err instanceof CostCenterNotFoundError ||
+        err instanceof ProjectNotFoundError
       ) {
         return reply.code(404).send(errorBody(err));
       }
+      // Kostnadsställen och projekt: an inactive/closed object on the header.
+      if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       // Valuta: a new currency on an order with rows; no rate for the new
       // currency today (the client asks for the rate); a rate ≠ 1 on SEK.

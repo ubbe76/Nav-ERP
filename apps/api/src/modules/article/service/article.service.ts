@@ -604,6 +604,7 @@ export function createArticleService(repo: ArticleRepository) {
 
     async createArticleGroup(input: CreateArticleGroupInput) {
       await assertArticleNumberSeries(input.numberSeriesKey);
+      await repo.resolveDimensions({ costCenterId: input.defaultCostCenterId });
       if (await repo.findArticleGroupByCode(input.code)) throw new DuplicateArticleGroupError("code", input.code);
       if (await repo.findArticleGroupByName(input.name)) throw new DuplicateArticleGroupError("name", input.name);
       return repo.createArticleGroup(input);
@@ -611,6 +612,12 @@ export function createArticleService(repo: ArticleRepository) {
 
     async updateArticleGroup(id: string, input: UpdateArticleGroupInput) {
       await assertArticleNumberSeries(input.numberSeriesKey);
+      // Kostnadsställe (förval): a new choice must be active; the kept one may stay.
+      if (input.defaultCostCenterId !== undefined) {
+        const current = await repo.findArticleGroupById(id);
+        if (!current) throw new ArticleGroupNotFoundError(id);
+        await repo.resolveDimensions({ costCenterId: input.defaultCostCenterId }, { existing: { costCenterId: current.defaultCostCenterId, projectId: null } });
+      }
       // A group may of course keep its own code/name, so conflicts only
       // count when they sit on a different row.
       const byCode = await repo.findArticleGroupByCode(input.code);

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { businessDateSchema } from "./business-date.js";
+import { dimensionFields } from "./dimensions.js";
 import { verificationRowInputSchema } from "./economy.js";
 import { DOMESTIC_VAT_CODES } from "./vat-codes.js";
 
@@ -191,6 +192,8 @@ export const createBankRuleSchema = z.object({
   autoBook: z.boolean().default(false),
   active: z.boolean().default(true),
   sortOrder: z.number().int().min(0).max(10_000).optional(),
+  // Kostnadsställen och projekt: on the counter row the rule books.
+  ...dimensionFields,
 });
 export type CreateBankRuleInput = z.infer<typeof createBankRuleSchema>;
 
@@ -204,6 +207,7 @@ export const updateBankRuleSchema = z
     autoBook: z.boolean().optional(),
     active: z.boolean().optional(),
     sortOrder: z.number().int().min(0).max(10_000).optional(),
+    ...dimensionFields,
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateBankRuleInput = z.infer<typeof updateBankRuleSchema>;

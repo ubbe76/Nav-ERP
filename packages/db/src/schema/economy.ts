@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { articleGroups } from "./article";
 import { users } from "./auth";
+import { costCenters, projects } from "./dimensions";
 
 // Same pattern as article.ts/system.ts — no built-in bytea helper.
 const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
@@ -42,6 +43,12 @@ export const accounts = pgTable(
     // "none" — the db package does not depend on shared, so the list is
     // repeated in the CHECK. NULL = not classified (passes the CHECK).
     vatBox: varchar("vat_box", { length: 4 }),
+    // Kräver kostnadsställe (kostnadsställen och projekt): a manual booking
+    // on this account without a cost center is refused at Bokför (409
+    // cost-center-required); the automatkontering books anyway and the row
+    // shows up as a warning on the verification and in the alert
+    // cost_center_missing — a document must never be refused for it.
+    costCenterRequired: boolean("cost_center_required").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -177,11 +184,18 @@ export const verificationRows = pgTable(
     debit: numeric("debit", { precision: 14, scale: 2 }).notNull().default("0"),
     credit: numeric("credit", { precision: 14, scale: 2 }).notNull().default("0"),
     description: varchar("description", { length: 255 }),
+    // Kostnadsställen och projekt (migration 0149): the SIE dimensions 1 and
+    // 6 on the row. Booked rows are immutable (the 0095 triggers cover these
+    // columns too); the reports group and filter on them.
+    costCenterId: uuid("cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_verification_rows_verification").on(table.verificationId),
     index("idx_verification_rows_account").on(table.accountId),
+    index("idx_verification_rows_cost_center").on(table.costCenterId),
+    index("idx_verification_rows_project").on(table.projectId),
     check("verification_row_amounts_nonnegative", sql`${table.debit} >= 0 AND ${table.credit} >= 0`),
     check("verification_row_debit_xor_credit", sql`(${table.debit} = 0) <> (${table.credit} = 0)`),
   ]

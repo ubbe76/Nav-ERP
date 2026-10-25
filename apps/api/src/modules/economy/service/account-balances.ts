@@ -26,9 +26,33 @@ export interface AccountBalance {
   periodCredit: number;
 }
 
+// Kostnadsställen och projekt: an optional object filter (only the rows
+// carrying the cost center and/or the project) and, for the grouped reader,
+// which dimension to split the sums on.
+export interface DimensionFilter {
+  costCenterId?: string;
+  projectId?: string;
+}
+
+export type BalanceGroupBy = "costCenter" | "project";
+
+// A per-(account, object) balance: objectId null = the rows without one
+// ("Utan" in the report).
+export interface GroupedAccountBalance extends AccountBalance {
+  objectId: string | null;
+}
+
+function dimensionConditions(filter: DimensionFilter | undefined) {
+  const conditions = [];
+  if (filter?.costCenterId) conditions.push(eq(verificationRows.costCenterId, filter.costCenterId));
+  if (filter?.projectId) conditions.push(eq(verificationRows.projectId, filter.projectId));
+  return conditions;
+}
+
 export async function readAccountBalances(
   executor: Db | Tx,
-  range: { from: string | null; to: string }
+  range: { from: string | null; to: string },
+  filter?: DimensionFilter
 ): Promise<AccountBalance[]> {
   const { from, to } = range;
 
@@ -62,7 +86,7 @@ export async function readAccountBalances(
     .from(verificationRows)
     .innerJoin(verifications, eq(verifications.id, verificationRows.verificationId))
     .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
-    .where(and(eq(verifications.status, "booked"), lte(verifications.date, to)))
+    .where(and(eq(verifications.status, "booked"), lte(verifications.date, to), ...dimensionConditions(filter)))
     .groupBy(verificationRows.accountId, accounts.number, accounts.name)
     .orderBy(asc(accounts.number));
 
@@ -70,6 +94,60 @@ export async function readAccountBalances(
     accountId: row.accountId,
     accountNumber: row.accountNumber,
     accountName: row.accountName,
+    openingDebit: Number(row.openingDebit),
+    openingCredit: Number(row.openingCredit),
+    periodDebit: Number(row.periodDebit),
+    periodCredit: Number(row.periodCredit),
+  }));
+}
+
+// The same aggregation split per object of ONE dimension (resultaträkningen
+// Per kostnadsställe / Per projekt). Summing the groups of an account gives
+// exactly readAccountBalances' figure for it — same rows, same windows.
+export async function readAccountBalancesGrouped(
+  executor: Db | Tx,
+  range: { from: string | null; to: string },
+  groupBy: BalanceGroupBy,
+  filter?: DimensionFilter
+): Promise<GroupedAccountBalance[]> {
+  const { from, to } = range;
+  const objectColumn = groupBy === "costCenter" ? verificationRows.costCenterId : verificationRows.projectId;
+  const openingDebit = from
+    ? sql<string>`COALESCE(SUM(${verificationRows.debit}) FILTER (WHERE ${verifications.date} < ${from}), 0)`
+    : sql<string>`0`;
+  const openingCredit = from
+    ? sql<string>`COALESCE(SUM(${verificationRows.credit}) FILTER (WHERE ${verifications.date} < ${from}), 0)`
+    : sql<string>`0`;
+  const periodDebit = from
+    ? sql<string>`COALESCE(SUM(${verificationRows.debit}) FILTER (WHERE ${verifications.date} >= ${from}), 0)`
+    : sql<string>`COALESCE(SUM(${verificationRows.debit}), 0)`;
+  const periodCredit = from
+    ? sql<string>`COALESCE(SUM(${verificationRows.credit}) FILTER (WHERE ${verifications.date} >= ${from}), 0)`
+    : sql<string>`COALESCE(SUM(${verificationRows.credit}), 0)`;
+
+  const rows = await executor
+    .select({
+      accountId: verificationRows.accountId,
+      accountNumber: accounts.number,
+      accountName: accounts.name,
+      objectId: objectColumn,
+      openingDebit,
+      openingCredit,
+      periodDebit,
+      periodCredit,
+    })
+    .from(verificationRows)
+    .innerJoin(verifications, eq(verifications.id, verificationRows.verificationId))
+    .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
+    .where(and(eq(verifications.status, "booked"), lte(verifications.date, to), ...dimensionConditions(filter)))
+    .groupBy(verificationRows.accountId, accounts.number, accounts.name, objectColumn)
+    .orderBy(asc(accounts.number));
+
+  return rows.map((row) => ({
+    accountId: row.accountId,
+    accountNumber: row.accountNumber,
+    accountName: row.accountName,
+    objectId: row.objectId,
     openingDebit: Number(row.openingDebit),
     openingCredit: Number(row.openingCredit),
     periodDebit: Number(row.periodDebit),

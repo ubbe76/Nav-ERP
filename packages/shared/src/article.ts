@@ -220,6 +220,8 @@ export const createArticleGroupSchema = z.object({
   // The article number series new articles in the group draw from; null =
   // the default series.
   numberSeriesKey: z.string().min(1).max(50).nullable().optional(),
+  // Kostnadsställe (förval) for invoice/supplier invoice rows in the group.
+  defaultCostCenterId: z.string().uuid().nullable().optional(),
 });
 export type CreateArticleGroupInput = z.infer<typeof createArticleGroupSchema>;
 
@@ -228,6 +230,7 @@ export const updateArticleGroupSchema = z.object({
   name: z.string().min(1).max(100),
   description: optionalText(500).optional(),
   numberSeriesKey: z.string().min(1).max(50).nullable().optional(),
+  defaultCostCenterId: z.string().uuid().nullable().optional(),
 });
 export type UpdateArticleGroupInput = z.infer<typeof updateArticleGroupSchema>;
 

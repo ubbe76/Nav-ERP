@@ -390,6 +390,8 @@ import {
   SupplierInvoiceNotFoundError,
 } from "../src/modules/economy/service/fixed-asset.service.js";
 import { FixedAssetVerificationError } from "../src/modules/economy/service/economy.service.js";
+import { CostCenterRequiredError, ProjectClosedError } from "../src/modules/economy/service/dimension-check.js";
+import { CostCenterCodeTakenError, ProjectCodeTakenError } from "../src/modules/economy/service/dimension.service.js";
 
 const cases: Array<[Error, string]> = [
   // payroll / timereport
@@ -739,6 +741,11 @@ const cases: Array<[Error, string]> = [
   [new BankOpeningNotAllowedError("mark-exists"), ERROR_CODES.BANK_OPENING_NOT_ALLOWED],
   [new BankAccountInUseError("ledgerAccount"), ERROR_CODES.BANK_ACCOUNT_IN_USE],
   [new BankAccountIdentifierLockedError("Företagskonto", "A", "B"), ERROR_CODES.BANK_ACCOUNT_IDENTIFIER_LOCKED],
+  // kostnadsställen och projekt
+  [new CostCenterCodeTakenError("100"), ERROR_CODES.COST_CENTER_CODE_TAKEN],
+  [new ProjectCodeTakenError("P1"), ERROR_CODES.PROJECT_CODE_TAKEN],
+  [new ProjectClosedError("P1"), ERROR_CODES.PROJECT_CLOSED],
+  [new CostCenterRequiredError(["5010"]), ERROR_CODES.COST_CENTER_REQUIRED],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

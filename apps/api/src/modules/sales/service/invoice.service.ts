@@ -360,6 +360,11 @@ type RowInput = {
   // credit note copies its source row's); undefined ⇒ the linked order
   // row's. Never client input — the route schemas have no such field.
   configuration?: OrderRowConfiguration | null;
+  // Kostnadsställen och projekt: the row's own choice (null = none);
+  // undefined on a new row = the linked order's header, else the article
+  // group's Kostnadsställe (förval); undefined on a PATCH = the row's.
+  costCenterId?: string | null;
+  projectId?: string | null;
 };
 
 // What every row of one create/addRow/PATCH needs to know once: the
@@ -382,6 +387,8 @@ type ExistingRowState = {
   shipmentId?: string | null;
   vatCodeId?: string;
   deliveryDate?: string | null;
+  costCenterId?: string | null;
+  projectId?: string | null;
 };
 
 export function createInvoiceService(
@@ -749,6 +756,8 @@ export function createInvoiceService(
     let unitId: string | null = null;
     let unitFactor: number | null = null;
     let quantityDelivered = 0;
+    // Kostnadsställen och projekt: the default for a new row without its own.
+    let dimensionFallback: { costCenterId: string | null; projectId: string | null } | null = null;
     // Konfigurator 4b: a caller-supplied copy wins (credit note), else the
     // linked order row's; a free row has none.
     let configuration: OrderRowConfiguration | null = input.configuration ?? null;
@@ -768,7 +777,27 @@ export function createInvoiceService(
       unitFactor = orderRow.unitFactor !== null ? Number(orderRow.unitFactor) : null;
       quantityDelivered = Number(orderRow.quantityDelivered);
       if (input.configuration === undefined) configuration = (orderRow.configuration as OrderRowConfiguration | null) ?? null;
+      dimensionFallback = { costCenterId: orderRow.orderCostCenterId, projectId: orderRow.orderProjectId };
     }
+    // Spec: the order header first, else the article group's Kostnadsställe
+    // (förval); a free row without an article has no default.
+    if (dimensionFallback === null && articleId) {
+      dimensionFallback = { costCenterId: await repo.findArticleGroupDefaultCostCenter(articleId), projectId: null };
+    }
+    // A credit note's copy keeps the source row's objects as they are (an
+    // object closed since the source was issued stays — it is the same
+    // booking mirrored); a PATCH keeps the row's own unless the field is sent.
+    const dimensions = await repo.resolveDimensions(
+      { costCenterId: input.costCenterId, projectId: input.projectId },
+      {
+        existing: input.copiedFromSource
+          ? { costCenterId: input.costCenterId ?? null, projectId: input.projectId ?? null }
+          : existingRow
+            ? { costCenterId: existingRow.costCenterId ?? null, projectId: existingRow.projectId ?? null }
+            : null,
+        fallback: dimensionFallback,
+      }
+    );
 
     // Momskod (spec 4.2): the VAT is computed on the code's rate, and
     // vat_rate keeps that rate as the row's snapshot.
@@ -834,6 +863,7 @@ export function createInvoiceService(
       vatAmount,
       deliveryDate,
       configuration,
+      ...dimensions,
     };
   }
 
@@ -1060,6 +1090,10 @@ export function createInvoiceService(
             ...r,
             ...(explicitCode ? {} : { vatCodeId: source.vatCodeId, copiedFromSource: true }),
             ...(r.deliveryDate !== undefined ? {} : { deliveryDate: source.deliveryDate }),
+            // Kostnadsställen och projekt: the source row's unless the
+            // override says otherwise (held to the rule like any input).
+            ...(r.costCenterId !== undefined ? {} : { costCenterId: source.costCenterId }),
+            ...(r.projectId !== undefined ? {} : { projectId: source.projectId }),
           };
         });
       } else {
@@ -1077,6 +1111,9 @@ export function createInvoiceService(
           // row's (identical in practice — an invoiced row cannot be
           // reconfigured — but the credit mirrors the invoice it credits).
           configuration: r.configuration as OrderRowConfiguration | null,
+          // …and its objects, so the credit nets the revenue per object.
+          costCenterId: r.costCenterId,
+          projectId: r.projectId,
         }));
       }
 
@@ -1228,6 +1265,9 @@ export function createInvoiceService(
         vatCodeId: input.vatCodeId,
         // undefined keeps the row's date while the order link is unchanged.
         deliveryDate: input.deliveryDate,
+        // Kostnadsställen och projekt: undefined keeps the row's, null clears.
+        costCenterId: input.costCenterId,
+        projectId: input.projectId,
       };
       const row = await repo.updateRow(
         invoiceId,
@@ -1241,6 +1281,8 @@ export function createInvoiceService(
             shipmentId: existing.shipmentId,
             vatCodeId: existing.vatCodeId,
             deliveryDate: existing.deliveryDate,
+            costCenterId: existing.costCenterId,
+            projectId: existing.projectId,
           },
           undefined,
           invoice.type

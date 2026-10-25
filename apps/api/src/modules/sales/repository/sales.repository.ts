@@ -5,6 +5,8 @@ import {
   articles,
   carriers,
   configuratorVariants,
+  costCenters,
+  projects,
   customerContacts,
   customerDeliveryAddresses,
   customerPrices,
@@ -59,6 +61,7 @@ import {
 } from "@navet/shared";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
+import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
@@ -71,6 +74,9 @@ import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 // users joined a second time for "who marked the quote lost" (the order's
 // created_by is not the same person).
 const lostByUser = alias(users, "lost_by_user");
+// Kostnadsställen och projekt: the order header's objects as { id, code, name }.
+const orderCostCenters = alias(costCenters, "order_cost_centers");
+const orderProjects = alias(projects, "order_projects");
 
 // Offerter (0138): the SQL twin of @navet/shared's salesDocumentKind — the
 // one place the rule lives on the database side (list filter, list rows and
@@ -551,6 +557,12 @@ export function createSalesRepository(db: Db) {
       return writeSalesOrderHeader(dbc, orderId, input);
     },
 
+    // Kostnadsställen och projekt: the one dimension rule (dimension-check.ts)
+    // through this repository's connection.
+    async resolveDimensions(input: DimensionInput, opts: ResolveDimensionsOptions = {}) {
+      return resolveDimensions(db, input, opts);
+    },
+
     // Header PATCH: the status guard is re-read under the order's row lock
     // (the service's own check is an unlocked pre-read), a Ny leveransadress
     // is created in the same transaction, and an engångsadress the order no
@@ -662,6 +674,9 @@ export function createSalesRepository(db: Db) {
             quoteValidUntil: input.quoteValidUntil,
             currency: input.currency ?? "SEK",
             exchangeRate: String(input.exchangeRate ?? 1),
+            // Kostnadsställen och projekt (header) — validated by the service.
+            costCenterId: input.costCenterId ?? null,
+            projectId: input.projectId ?? null,
             createdBy,
           })
           .returning();
@@ -736,6 +751,9 @@ export function createSalesRepository(db: Db) {
           lostReasonCode: quoteLossReasons.code,
           lostReasonName: quoteLossReasons.name,
           lostByName: lostByUser.name,
+          // Kostnadsställen och projekt: the header's objects for the card.
+          costCenter: { id: orderCostCenters.id, code: orderCostCenters.code, name: orderCostCenters.name },
+          project: { id: orderProjects.id, code: orderProjects.code, name: orderProjects.name },
         })
         .from(salesOrders)
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
@@ -745,6 +763,8 @@ export function createSalesRepository(db: Db) {
         .leftJoin(carriers, eq(carriers.id, salesOrders.carrierId))
         .leftJoin(quoteLossReasons, eq(quoteLossReasons.id, salesOrders.lostReasonId))
         .leftJoin(lostByUser, eq(lostByUser.id, salesOrders.lostBy))
+        .leftJoin(orderCostCenters, eq(orderCostCenters.id, salesOrders.costCenterId))
+        .leftJoin(orderProjects, eq(orderProjects.id, salesOrders.projectId))
         .where(eq(salesOrders.id, id));
       return row ?? null;
     },

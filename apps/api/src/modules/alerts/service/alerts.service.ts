@@ -300,6 +300,19 @@ export function createAlertsService(deps: {
       }));
     },
 
+    // Bokningar utan kostnadsställe: one row per booked verification.
+    async cost_center_missing() {
+      const rows = await repo.verificationsMissingCostCenter();
+      return rows.map((r) => ({
+        key: r.verificationId,
+        severity: "yellow" as const,
+        href: `/ekonomi/verifikat/${r.verificationId}`,
+        primary: `${r.displayNumber} ${r.description}`,
+        secondary: `Konto ${r.accountNumbers.join(", ")} kräver kostnadsställe`,
+        date: r.date,
+      }));
+    },
+
     async plugin_delivery_failed() {
       const since = new Date(nowFn().getTime() - PLUGIN_FAILED_DAYS * DAY_MS);
       const rows = await repo.failedPluginDeliveries(since);

@@ -2,11 +2,13 @@
 // pdfkit) — they flatten the hierarchical report bodies to semicolon rows in
 // the same visual order as the web pages and the PDFs, using the shared
 // Excel-friendly CSV conventions from @navet/shared.
-import { buildCsv, type CsvColumn } from "@navet/shared";
+import { buildCsv, type CsvColumn, type DimensionRef } from "@navet/shared";
+import { dimensionText } from "./dimension-check.js";
 import type {
   BalanceSheetBody,
   GeneralLedgerResponse,
   IncomeStatementBody,
+  IncomeStatementColumn,
   VerificationListResponse,
 } from "./financial-reports.service.js";
 
@@ -69,12 +71,47 @@ export function buildIncomeStatementCsv(report: IncomeStatementBody): string {
   return buildCsv(FLAT_COLUMNS, rows);
 }
 
+// Resultaträkningen per objekt: Konto, Benämning, one column per objekt
+// (code and name as the heading) and Totalt — the same rows as the flat CSV.
+export function buildGroupedIncomeStatementCsv(report: IncomeStatementBody, columns: IncomeStatementColumn[]): string {
+  type GroupedRow = FlatRow & { amounts: (number | null)[] };
+  const csvColumns: CsvColumn<GroupedRow>[] = [
+    { label: "Konto", value: (r) => r.konto },
+    { label: "Benämning", value: (r) => r.label },
+    ...columns.map(
+      (column, index): CsvColumn<GroupedRow> => ({
+        label: column.id === null ? column.name : `${column.code} ${column.name}`,
+        value: (r) => r.amounts[index] ?? null,
+        format: "money",
+      })
+    ),
+    { label: "Totalt", value: (r) => r.amount, format: "money" },
+  ];
+  const rows: GroupedRow[] = [];
+  const amountsOf = (amounts: number[] | undefined) => columns.map((_, index) => amounts?.[index] ?? 0);
+  for (const entry of report.entries) {
+    if (entry.kind === "line") {
+      for (const account of entry.accounts) {
+        rows.push({ konto: account.accountNumber, label: account.accountName, amount: account.amount, amounts: amountsOf(account.amounts) });
+      }
+      if (entry.accounts.length !== 1) rows.push({ konto: "", label: entry.label, amount: entry.total, amounts: amountsOf(entry.amounts) });
+    } else {
+      rows.push({ konto: "", label: entry.label, amount: entry.total, amounts: amountsOf(entry.amounts) });
+    }
+  }
+  const resultEntry = [...report.entries].reverse().find((entry) => entry.kind === "subtotal");
+  rows.push({ konto: "", label: "Periodens resultat", amount: report.result, amounts: amountsOf(resultEntry?.amounts) });
+  return buildCsv(csvColumns, rows);
+}
+
 interface LedgerFlatRow {
   konto: string;
   kontonamn: string;
   datum: string;
   verifikat: string;
   text: string;
+  kostnadsstalle: DimensionRef | null;
+  projekt: DimensionRef | null;
   debet: number | null;
   kredit: number | null;
   saldo: number | null;
@@ -86,6 +123,8 @@ const LEDGER_COLUMNS: CsvColumn<LedgerFlatRow>[] = [
   { label: "Datum", value: (r) => r.datum },
   { label: "Verifikat", value: (r) => r.verifikat },
   { label: "Text", value: (r) => r.text },
+  { label: "Kostnadsställe", value: (r) => dimensionText(r.kostnadsstalle) },
+  { label: "Projekt", value: (r) => dimensionText(r.projekt) },
   { label: "Debet", value: (r) => r.debet, format: "money" },
   { label: "Kredit", value: (r) => r.kredit, format: "money" },
   { label: "Saldo", value: (r) => r.saldo, format: "money" },
@@ -100,6 +139,8 @@ export function buildGeneralLedgerCsv(report: GeneralLedgerResponse): string {
       datum: "",
       verifikat: "",
       text: "Ingående saldo",
+      kostnadsstalle: null,
+      projekt: null,
       debet: null,
       kredit: null,
       saldo: account.openingBalance,
@@ -111,6 +152,8 @@ export function buildGeneralLedgerCsv(report: GeneralLedgerResponse): string {
         datum: row.date,
         verifikat: row.displayNumber,
         text: row.description,
+        kostnadsstalle: row.costCenter,
+        projekt: row.project,
         debet: Number(row.debit),
         kredit: Number(row.credit),
         saldo: row.balance,
@@ -122,6 +165,8 @@ export function buildGeneralLedgerCsv(report: GeneralLedgerResponse): string {
       datum: "",
       verifikat: "",
       text: "Utgående saldo",
+      kostnadsstalle: null,
+      projekt: null,
       debet: account.totalDebit,
       kredit: account.totalCredit,
       saldo: account.closingBalance,
@@ -136,6 +181,8 @@ interface VerificationFlatRow {
   text: string;
   konto: string;
   kontonamn: string;
+  kostnadsstalle: DimensionRef | null;
+  projekt: DimensionRef | null;
   debet: number;
   kredit: number;
 }
@@ -146,6 +193,8 @@ const VERIFICATION_COLUMNS: CsvColumn<VerificationFlatRow>[] = [
   { label: "Text", value: (r) => r.text },
   { label: "Konto", value: (r) => r.konto },
   { label: "Kontonamn", value: (r) => r.kontonamn },
+  { label: "Kostnadsställe", value: (r) => dimensionText(r.kostnadsstalle) },
+  { label: "Projekt", value: (r) => dimensionText(r.projekt) },
   { label: "Debet", value: (r) => r.debet, format: "money" },
   { label: "Kredit", value: (r) => r.kredit, format: "money" },
 ];
@@ -160,6 +209,8 @@ export function buildVerificationListCsv(report: VerificationListResponse): stri
         text: verification.description,
         konto: row.accountNumber,
         kontonamn: row.accountName,
+        kostnadsstalle: row.costCenter,
+        projekt: row.project,
         debet: Number(row.debit),
         kredit: Number(row.credit),
       });

@@ -56,6 +56,8 @@ export function toTemplateRowWrite(row: VerificationTemplateRowInput): TemplateR
     description: row.description && row.description.length > 0 ? row.description : null,
     debit,
     credit,
+    costCenterId: row.costCenterId ?? null,
+    projectId: row.projectId ?? null,
   };
 }
 
@@ -71,6 +73,15 @@ export function createVerificationTemplateService(deps: {
     const existing = await repo.existingAccountNumbers(numbers);
     const missing = numbers.filter((n) => !existing.has(n));
     if (missing.length > 0) throw new VerificationTemplateAccountMissingError(missing);
+  }
+
+  // Kostnadsställen och projekt: every object a template names must exist
+  // and be pickable (active / open) — the same rule as a verification row.
+  async function requireDimensions(rows: TemplateRowWrite[]) {
+    for (const row of rows) {
+      if (row.costCenterId === null && row.projectId === null) continue;
+      await economy.resolveRowDimensions({ costCenterId: row.costCenterId, projectId: row.projectId });
+    }
   }
 
   async function requireSeries(seriesId: string) {
@@ -94,6 +105,7 @@ export function createVerificationTemplateService(deps: {
       await requireSeries(input.seriesId);
       const rows = input.rows.map(toTemplateRowWrite);
       await requireExistingAccounts(rows);
+      await requireDimensions(rows);
       let id: string;
       try {
         id = await repo.create({ name: input.name, seriesId: input.seriesId, description: input.description }, rows, userId);
@@ -110,7 +122,10 @@ export function createVerificationTemplateService(deps: {
       if (!existing) throw new VerificationTemplateNotFoundError(id);
       if (input.seriesId !== undefined) await requireSeries(input.seriesId);
       const rows = input.rows?.map(toTemplateRowWrite);
-      if (rows) await requireExistingAccounts(rows);
+      if (rows) {
+        await requireExistingAccounts(rows);
+        await requireDimensions(rows);
+      }
 
       const patch: TemplateHeaderPatch = {};
       if (input.name !== undefined) patch.name = input.name;
@@ -159,6 +174,8 @@ export function createVerificationTemplateService(deps: {
         description: row.description,
         debit: Number(row.debit) > 0 ? round2(Number(row.debit)) : null,
         credit: Number(row.credit) > 0 ? round2(Number(row.credit)) : null,
+        costCenterId: row.costCenterId,
+        projectId: row.projectId,
       }));
       let id: string;
       try {

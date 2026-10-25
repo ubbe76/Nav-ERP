@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dimensionFields } from "./dimensions.js";
 import { vatRateSchema } from "./vat.js";
 import { listQuerySchema, statusListParam } from "./list.js";
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
@@ -273,6 +274,9 @@ export const updateSalesOrderHeaderSchema = z
     // rows keep their prices — the rate converts SEK prices for new rows and
     // the reports' SEK sums.
     exchangeRate: exchangeRateValueSchema.optional(),
+    // Kostnadsställen och projekt: the order's dimensions, the default for
+    // the invoice rows billed from it.
+    ...dimensionFields,
     // `false` saves without bumping the order's revision — the UI asks on
     // every save; omitted means bump (external callers unchanged).
     bumpRevision: z.boolean().optional(),
@@ -311,6 +315,8 @@ export const createQuoteSchema = z.object({
   // there is none, then send the rate). SEK always has rate 1.
   currency: currencyCodeSchema.optional(),
   exchangeRate: exchangeRateValueSchema.optional(),
+  // Kostnadsställen och projekt (header).
+  ...dimensionFields,
 }).refine((data) => !(data.deliveryAddressId && data.newDeliveryAddress), oneDeliveryAddressChoice);
 export type CreateQuoteInput = z.infer<typeof createQuoteSchema>;
 
@@ -405,6 +411,10 @@ export const invoiceRowInputSchema = z.object({
   vatRate: vatRateSchema.optional(),
   vatCodeId: z.string().uuid().optional(),
   deliveryDate: businessDateSchema.nullable().optional(),
+  // Kostnadsställen och projekt: omitted on a new row = the linked order's
+  // header dimensions, else the article group's Kostnadsställe (förval);
+  // omitted on a PATCH keeps the row's; null = none.
+  ...dimensionFields,
 });
 export const createInvoiceRowSchema = invoiceRowInputSchema;
 export type CreateInvoiceRowInput = z.infer<typeof createInvoiceRowSchema>;

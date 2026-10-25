@@ -327,12 +327,17 @@ export type PostingVatCode = {
 // articleGroupId comes from the invoice row's article (null for free-text
 // rows and for articles without a group). vatRate is the row's stored
 // snapshot of its code's rate.
+// Kostnadsställen och projekt: the row's dimensions go on its REVENUE row
+// only — never on the receivable or the VAT (the reskontra and the
+// declaration are not per object).
 export type CustomerInvoiceDocumentRow = {
   articleGroupId: string | null;
   lineAmount: number;
   vatAmount: number;
   vatRate: number;
   vatCode: PostingVatCode;
+  costCenterId?: string | null;
+  projectId?: string | null;
 };
 
 // vatCode = the header's momskod: rows without one of their own and the
@@ -342,6 +347,10 @@ export type CustomerInvoiceDocumentRow = {
 // Valuta: the amounts are in the invoice's currency and exchangeRate (SEK per
 // 1 unit, 1 for SEK and the default) converts them — the debt is exactly
 // toSek(gross), see @navet/shared documentSekAmounts.
+//
+// Kostnadsställen och projekt: the header's dimensions are the default for
+// every row without its own and for the remainder — they land on the COST
+// rows only, never on the payable or the VAT rows.
 export type SupplierInvoiceDocument = {
   registrationNumber: string;
   invoiceNumber: string;
@@ -353,13 +362,18 @@ export type SupplierInvoiceDocument = {
   vatAmount: number;
   grossAmount: number;
   vatCode: PostingVatCode;
+  costCenterId?: string | null;
+  projectId?: string | null;
 };
 
-// vatCode null = follows the header.
+// vatCode null = follows the header; costCenterId/projectId null = the
+// header's.
 export type SupplierInvoiceDocumentRow = {
   articleGroupId: string | null;
   lineAmount: number;
   vatCode: PostingVatCode | null;
+  costCenterId?: string | null;
+  projectId?: string | null;
 };
 
 // Importmoms: one row per momskod IMP25/IMP12/IMP6 with the tax base from
@@ -464,10 +478,12 @@ export type InvoiceReminderDocument = {
 
 // One contribution per tillgångsgrupp: debet kostnadskonto, kredit ack-konto.
 // Accounts come as IDs (the category's FK columns), not numbers.
+// costCenterId (the tillgångsgrupp's Kostnadsställe (förval)) goes on the
+// expense row only.
 export type DepreciationDocument = {
   date: string;
   description: string;
-  rows: { expenseAccountId: string; accumulatedAccountId: string; amount: number }[];
+  rows: { expenseAccountId: string; accumulatedAccountId: string; amount: number; costCenterId?: string | null }[];
 };
 
 // Avyttring: kredit tillgångskonto (anskaffningsvärdet), debet ack-konto,
@@ -487,7 +503,10 @@ export type FixedAssetDisposalDocument = {
 
 // --- Internal shapes ---
 
-type PostingRow = { accountId: string; debit: number; credit: number };
+type PostingRow = { accountId: string; debit: number; credit: number; costCenterId: string | null; projectId: string | null };
+
+// Kostnadsställen och projekt on a posting row — omitted = none.
+type PostingDimensions = { costCenterId?: string | null; projectId?: string | null };
 
 type PostingHeader = {
   series: { id: string; code: string };
@@ -513,21 +532,28 @@ type LoadedPostingRule = {
 // supplier remainders and two document rows landing on the same account all
 // fall out of the same arithmetic — the debit/credit split happens exactly
 // once, at the end, which is also what keeps the XOR check satisfiable.
+// Kostnadsställen och projekt: one row per (account, cost center, project)
+// — two document rows on the same account but different objects stay two
+// verification rows, since the reports read the objects per row.
 function createAmountAccumulator() {
-  const netByAccount = new Map<string, number>();
+  const netByKey = new Map<string, { accountId: string; costCenterId: string | null; projectId: string | null; net: number }>();
   return {
-    add(accountId: string, amount: number) {
-      netByAccount.set(accountId, round2((netByAccount.get(accountId) ?? 0) + amount));
+    add(accountId: string, amount: number, dimensions: PostingDimensions = {}) {
+      const costCenterId = dimensions.costCenterId ?? null;
+      const projectId = dimensions.projectId ?? null;
+      const key = `${accountId}|${costCenterId ?? ""}|${projectId ?? ""}`;
+      const current = netByKey.get(key);
+      netByKey.set(key, { accountId, costCenterId, projectId, net: round2((current?.net ?? 0) + amount) });
     },
     // Map preserves insertion order, so rows come out in the order the
     // document was walked (balance account first, then its rows).
     toRows(): PostingRow[] {
       const rows: PostingRow[] = [];
-      for (const [accountId, net] of netByAccount) {
+      for (const { accountId, costCenterId, projectId, net } of netByKey.values()) {
         // An account whose contributions cancel out is no row at all — a zero
         // row would violate the debit-XOR-credit check anyway.
         if (net === 0) continue;
-        rows.push({ accountId, debit: net > 0 ? net : 0, credit: net < 0 ? -net : 0 });
+        rows.push({ accountId, costCenterId, projectId, debit: net > 0 ? net : 0, credit: net < 0 ? -net : 0 });
       }
       return rows;
     },
@@ -812,6 +838,8 @@ async function insertBookedVerification(
       debit: String(row.debit),
       credit: String(row.credit),
       description: null,
+      costCenterId: row.costCenterId,
+      projectId: row.projectId,
       createdAt: new Date(now + index),
     }))
   );
@@ -882,6 +910,8 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         ownVatAmount: ownRows[index]!.vatAmount,
         vatRate: row.vatRate,
         vatCode: resolveVatCode(row.vatCode, "sales"),
+        costCenterId: row.costCenterId ?? null,
+        projectId: row.projectId ?? null,
       }));
 
       // The rate and VAT checks run before anything is resolved, so a data
@@ -913,7 +943,7 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         const revenueAccountId =
           ruleRevenue ??
           (await resolveAccount(vatCodeAccount(row.vatCode, "revenue", "revenue"), `revenue (momskod ${row.vatCode.code})`));
-        amounts.add(revenueAccountId, -sign * row.lineAmount);
+        amounts.add(revenueAccountId, -sign * row.lineAmount, { costCenterId: row.costCenterId, projectId: row.projectId });
 
         if (row.vatCode.entry.rate !== 0) {
           const vatAccountId = await resolveAccount(
@@ -994,15 +1024,20 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
 
       // Same in-tx read as postCustomerInvoice above.
       const postingAccounts = await settings.read(tx);
+      const headerDimensions = { costCenterId: doc.costCenterId ?? null, projectId: doc.projectId ?? null };
       const documentRows = rows.map((row, index) => ({
         articleGroupId: row.articleGroupId,
         lineAmount: sek.rows[index]!,
         vatCode: row.vatCode === null ? header : resolveVatCode(row.vatCode, "purchase"),
+        // A row without its own object takes the header's.
+        costCenterId: row.costCenterId ?? headerDimensions.costCenterId,
+        projectId: row.projectId ?? headerDimensions.projectId,
       }));
       const remainder = sek.remainder;
       // The remainder is part of the header code's amount, with no article
-      // group (so no konteringsregel).
-      const costLines = remainder === 0 ? documentRows : [...documentRows, { articleGroupId: null, lineAmount: remainder, vatCode: header }];
+      // group (so no konteringsregel) and the header's dimensions.
+      const costLines =
+        remainder === 0 ? documentRows : [...documentRows, { articleGroupId: null, lineAmount: remainder, vatCode: header, ...headerDimensions }];
 
       const resolveAccount = createPostingAccountResolver(tx);
       const ruleAccount = await createRuleAccountResolver(tx, documentRows);
@@ -1027,7 +1062,7 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
               ? await resolveAccount(vatCodeAccount(line.vatCode, "cost", "cost"), `cost (momskod ${line.vatCode.code})`)
               : await resolveAccount(postingAccounts.postingDefaultCost, "default cost account");
         }
-        amounts.add(costAccountId, line.lineAmount);
+        amounts.add(costAccountId, line.lineAmount, { costCenterId: line.costCenterId, projectId: line.projectId });
       }
 
       const codeById = new Map(costLines.map((line) => [line.vatCode.code, line.vatCode] as const));
@@ -1659,7 +1694,7 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         if (amount <= 0) continue;
         await requireActiveAccountById(tx, row.expenseAccountId, "depreciation expense");
         await requireActiveAccountById(tx, row.accumulatedAccountId, "accumulated depreciation");
-        amounts.add(row.expenseAccountId, amount);
+        amounts.add(row.expenseAccountId, amount, { costCenterId: row.costCenterId ?? null });
         amounts.add(row.accumulatedAccountId, -amount);
       }
       const rows = amounts.toRows();
@@ -1795,16 +1830,24 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
       }
 
       const sourceRows = await tx
-        .select({ accountId: verificationRows.accountId, debit: verificationRows.debit, credit: verificationRows.credit })
+        .select({
+          accountId: verificationRows.accountId,
+          debit: verificationRows.debit,
+          credit: verificationRows.credit,
+          costCenterId: verificationRows.costCenterId,
+          projectId: verificationRows.projectId,
+        })
         .from(verificationRows)
         .where(eq(verificationRows.verificationId, sourceVerificationId))
         .orderBy(asc(verificationRows.createdAt));
-      // Debit and credit swap places, amounts and accounts stay — source plus
-      // reversal nets to zero on every account.
-      const mirrored = sourceRows.map((row) => ({
+      // Debit and credit swap places, amounts, accounts and objects stay —
+      // source plus reversal nets to zero on every account and dimension.
+      const mirrored: PostingRow[] = sourceRows.map((row) => ({
         accountId: row.accountId,
         debit: round2(Number(row.credit)),
         credit: round2(Number(row.debit)),
+        costCenterId: row.costCenterId,
+        projectId: row.projectId,
       }));
 
       // The reversal belongs to the same series as its source (L for a

@@ -37,6 +37,11 @@ import {
   AccountingPeriodNotFoundError,
   AlreadyReversedError,
   ArticleGroupNotFoundError,
+  CostCenterInactiveError,
+  CostCenterNotFoundError,
+  CostCenterRequiredError,
+  ProjectClosedError,
+  ProjectNotFoundError,
   DuplicateAccountNumberError,
   DuplicateFiscalYearLabelError,
   DuplicatePostingRuleError,
@@ -306,10 +311,15 @@ export async function economyRoutes(
       err instanceof VerificationFileNotFoundError ||
       err instanceof VerificationRowNotFoundError ||
       err instanceof AccountNotFoundError ||
-      err instanceof VerificationSeriesNotFoundError
+      err instanceof VerificationSeriesNotFoundError ||
+      err instanceof CostCenterNotFoundError ||
+      err instanceof ProjectNotFoundError
     ) {
       return reply.code(404).send(errorBody(err));
     }
+    // Kräver kostnadsställe at Bokför — the body names the accounts.
+    if (err instanceof CostCenterRequiredError) return reply.code(409).send({ ...errorBody(err), accounts: err.accounts });
+    if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
     if (
       err instanceof InvalidVerificationStateError ||
       err instanceof TooFewVerificationRowsError ||

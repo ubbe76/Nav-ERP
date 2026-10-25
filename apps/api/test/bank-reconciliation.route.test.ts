@@ -212,7 +212,22 @@ describe("avstämning, matchning, bokföring, regler, avstämd t.o.m.", () => {
     const rules = await ekonomi().inject({ method: "GET", url: "/bank-rules" });
     expect(rules.statusCode).toBe(200);
     expect(rules.json().total).toBe(5);
-    expect(rules.json().rows[0]).toEqual({ id: expect.any(String), textContains: "avgift", direction: "both", accountNumber: "6570", accountName: "Bankkostnader", vatCode: null, description: "Bankavgift", autoBook: false, active: true, sortOrder: 10 });
+    expect(rules.json().rows[0]).toEqual({
+      id: expect.any(String),
+      textContains: "avgift",
+      direction: "both",
+      accountNumber: "6570",
+      accountName: "Bankkostnader",
+      vatCode: null,
+      description: "Bankavgift",
+      autoBook: false,
+      active: true,
+      sortOrder: 10,
+      costCenterId: null,
+      projectId: null,
+      costCenter: null,
+      project: null,
+    });
     const rule = await ekonomi().inject({ method: "POST", url: "/bank-rules", payload: { textContains: "inbetalningar", direction: "in", accountNumber: "1510", vatCode: null, description: "Kundinbetalning" } });
     expect(rule.statusCode).toBe(201);
     expect(rule.json()).toMatchObject({ direction: "in", accountNumber: "1510", accountName: "Kundfordringar", autoBook: false, active: true, sortOrder: 60 });

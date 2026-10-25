@@ -14,6 +14,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth";
+import { costCenters } from "./dimensions";
 import { accounts, verifications } from "./economy";
 import { supplierInvoices } from "./purchase";
 
@@ -50,6 +51,9 @@ export const fixedAssetCategories = pgTable(
       .notNull()
       .references(() => accounts.id, { onDelete: "restrict" }),
     defaultUsefulLifeMonths: integer("default_useful_life_months").notNull(),
+    // Kostnadsställe (förval): put on the depreciation expense row of every
+    // AV verification for the group's assets (never on the ack row).
+    defaultCostCenterId: uuid("default_cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

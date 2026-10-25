@@ -19,6 +19,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { articles } from "./article";
 import { users } from "./auth";
+import { costCenters, projects } from "./dimensions";
 import { vatCodes, verifications } from "./economy";
 import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, units } from "./register";
 import { bankFileEntries, paymentBatchItems } from "./banking";
@@ -76,6 +77,9 @@ export const suppliers = pgTable("suppliers", {
   // (SE ⇒ MP25, EU ⇒ IEUV25, otherwise IUTV).
   country: varchar("country", { length: 2 }).notNull().default("SE"),
   defaultVatCodeId: uuid("default_vat_code_id").references(() => vatCodes.id, { onDelete: "restrict" }),
+  // Kostnadsställe (förval): the default header cost center of a new
+  // supplier invoice from this supplier.
+  defaultCostCenterId: uuid("default_cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
   // Bankfiler: betalsätt + uppgifter (all may be stored; the method picks).
   // Normalized digits/upper case; check digits validated in the service.
   paymentMethod: supplierPaymentMethodEnum("payment_method"),
@@ -203,6 +207,9 @@ export const purchaseOrders = pgTable("purchase_orders", {
   // contact, Vår referens = our buyer) — like Monitor's IO header fields.
   yourReference: varchar("your_reference", { length: 100 }),
   ourReference: varchar("our_reference", { length: 100 }),
+  // Projekt (migration 0149): follows into the supplier invoice when the
+  // fakturaunderlag is fetched from this order.
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
   // Bumped by 1 on every content change (header/terms/rows) — never by
   // status transitions or receipts. Printed on the PO document.
   revision: integer("revision").notNull().default(1),
@@ -490,6 +497,13 @@ export const supplierInvoices = pgTable(
     // Null while draft, and for invoices approved before B2 shipped —
     // restrict, same reasoning as invoices.verificationId.
     verificationId: uuid("verification_id").references(() => verifications.id, { onDelete: "restrict" }),
+    // Kostnadsställen och projekt (migration 0149): the header's dimensions
+    // = the default for every row without its own and for the remainder
+    // (net − row total) the poster books on the header's code. Defaulted
+    // from the supplier's Kostnadsställe (förval) and the linked purchase
+    // order's project when the invoice is created.
+    costCenterId: uuid("cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -547,6 +561,11 @@ export const supplierInvoiceRows = pgTable(
     vatRate: numeric("vat_rate", { precision: 5, scale: 2 }),
     // Momskod for this row; null = the invoice's own code.
     vatCodeId: uuid("vat_code_id").references(() => vatCodes.id, { onDelete: "restrict" }),
+    // Kostnadsställen och projekt: the row's own dimensions; null = the
+    // invoice header's. Defaulted from the article group's Kostnadsställe
+    // (förval) when the row is created.
+    costCenterId: uuid("cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

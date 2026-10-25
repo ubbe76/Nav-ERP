@@ -1,14 +1,22 @@
 // Balansräkning + resultaträkning (B6a). The builders are pure and exported
 // so the whole classification and all arithmetic is unit-testable without a
 // database — same split as vat-report.service.ts's bucketMovements.
-import { round2 } from "@navet/shared";
+import { round2, type DimensionRef, type IncomeStatementGroupBy } from "@navet/shared";
 import type { Db } from "@navet/db";
-import { readAccountBalances, type AccountBalance } from "./account-balances.js";
+import {
+  readAccountBalances,
+  readAccountBalancesGrouped,
+  type AccountBalance,
+  type DimensionFilter,
+  type GroupedAccountBalance,
+} from "./account-balances.js";
+import { dimensionText, loadDimensionRefs } from "./dimension-check.js";
 import { displayNumber } from "./economy.service.js";
 import { formatNumber } from "../../mail/service/document-pdf.js";
 import {
   buildBalanceSheetCsv,
   buildGeneralLedgerCsv,
+  buildGroupedIncomeStatementCsv,
   buildIncomeStatementCsv,
   buildVerificationListCsv,
 } from "./financial-reports-csv.js";
@@ -35,6 +43,8 @@ export interface ReportAccount {
   accountNumber: string;
   accountName: string;
   amount: number;
+  // Resultaträkningen per objekt: the amount per column (column order).
+  amounts?: number[];
 }
 
 export interface BalanceSheetLine {
@@ -61,12 +71,23 @@ export interface BalanceSheetBody {
 }
 
 export type IncomeStatementEntry =
-  | { kind: "line"; key: string; label: string; accounts: ReportAccount[]; total: number }
-  | { kind: "subtotal"; key: string; label: string; total: number };
+  | { kind: "line"; key: string; label: string; accounts: ReportAccount[]; total: number; amounts?: number[] }
+  | { kind: "subtotal"; key: string; label: string; total: number; amounts?: number[] };
+
+// One column of Per kostnadsställe / Per projekt: an object, or the rows
+// without one (id and code null, name "Utan").
+export interface IncomeStatementColumn {
+  id: string | null;
+  code: string | null;
+  name: string;
+}
+
+export const WITHOUT_OBJECT_LABEL = "Utan";
 
 export interface IncomeStatementBody {
   entries: IncomeStatementEntry[];
   result: number;
+  columns?: IncomeStatementColumn[];
 }
 
 // Why this balances without a bokslut: double-entry gives
@@ -202,6 +223,80 @@ export function buildIncomeStatement(balances: AccountBalance[]): IncomeStatemen
   return { entries, result: running };
 }
 
+// Resultaträkningen per objekt (pure): one income statement per column plus
+// the total — the total is buildIncomeStatement over the summed balances, so
+// it equals the ungrouped report exactly, and every line/subtotal/account
+// gets `amounts` in column order (0 where the column has nothing). Columns:
+// the objects with movement, in the caller's order, then "Utan" when some
+// rows carry none.
+export function buildGroupedIncomeStatement(
+  balances: GroupedAccountBalance[],
+  objects: DimensionRef[]
+): IncomeStatementBody & { columns: IncomeStatementColumn[] } {
+  // Only the result accounts count — a bank row without an object is not an
+  // "Utan" column on the income statement.
+  const hasWithout = balances.some(
+    (balance) =>
+      balance.objectId === null &&
+      classifyAccount(balance.accountNumber).report === "incomeStatement" &&
+      (balance.periodDebit !== 0 || balance.periodCredit !== 0)
+  );
+  const columns: IncomeStatementColumn[] = [
+    ...objects.map((object) => ({ id: object.id, code: object.code, name: object.name })),
+    ...(hasWithout ? [{ id: null, code: null, name: WITHOUT_OBJECT_LABEL }] : []),
+  ];
+
+  // Per account totals (the ungrouped figures) and per column.
+  const totalsByAccount = new Map<string, AccountBalance>();
+  const perColumn = columns.map(() => new Map<string, AccountBalance>());
+  const columnIndex = new Map<string | null, number>(columns.map((column, index) => [column.id, index] as const));
+  for (const balance of balances) {
+    const add = (map: Map<string, AccountBalance>) => {
+      const current = map.get(balance.accountId) ?? {
+        accountId: balance.accountId,
+        accountNumber: balance.accountNumber,
+        accountName: balance.accountName,
+        openingDebit: 0,
+        openingCredit: 0,
+        periodDebit: 0,
+        periodCredit: 0,
+      };
+      map.set(balance.accountId, {
+        ...current,
+        openingDebit: round2(current.openingDebit + balance.openingDebit),
+        openingCredit: round2(current.openingCredit + balance.openingCredit),
+        periodDebit: round2(current.periodDebit + balance.periodDebit),
+        periodCredit: round2(current.periodCredit + balance.periodCredit),
+      });
+    };
+    add(totalsByAccount);
+    const index = columnIndex.get(balance.objectId);
+    if (index !== undefined) add(perColumn[index]!);
+  }
+  const sorted = (map: Map<string, AccountBalance>) => [...map.values()].sort((a, b) => a.accountNumber.localeCompare(b.accountNumber));
+
+  const total = buildIncomeStatement(sorted(totalsByAccount));
+  const columnStatements = perColumn.map((map) => buildIncomeStatement(sorted(map)));
+
+  const entries: IncomeStatementEntry[] = total.entries.map((entry) => {
+    const amounts = columnStatements.map((statement) => statement.entries.find((e) => e.key === entry.key)?.total ?? 0);
+    if (entry.kind === "subtotal") return { ...entry, amounts };
+    return {
+      ...entry,
+      amounts,
+      accounts: entry.accounts.map((account) => ({
+        ...account,
+        amounts: columnStatements.map((statement) => {
+          const line = statement.entries.find((e) => e.key === entry.key);
+          return line && line.kind === "line" ? (line.accounts.find((a) => a.accountId === account.accountId)?.amount ?? 0) : 0;
+        }),
+      })),
+    };
+  });
+
+  return { entries, result: total.result, columns };
+}
+
 export interface ReportFiscalYear {
   id: string;
   label: string;
@@ -226,6 +321,9 @@ export interface GeneralLedgerSourceRow {
   debit: string;
   credit: string;
   verificationId: string;
+  // Kostnadsställen och projekt on the row.
+  costCenter: DimensionRef | null;
+  project: DimensionRef | null;
 }
 
 export interface ReportLedgerReader {
@@ -233,7 +331,8 @@ export interface ReportLedgerReader {
     from: string,
     to: string,
     accountFrom: string,
-    accountTo: string
+    accountTo: string,
+    filter?: DimensionFilter
   ): Promise<GeneralLedgerSourceRow[]>;
 }
 
@@ -249,6 +348,8 @@ export interface GeneralLedgerRow {
   credit: string;
   verificationId: string;
   balance: number;
+  costCenter: DimensionRef | null;
+  project: DimensionRef | null;
 }
 
 export interface GeneralLedgerAccount {
@@ -279,6 +380,10 @@ export interface VerificationListFilters {
   seriesId?: string;
   status?: ("draft" | "booked")[];
   search?: string;
+  // Kostnadsställen och projekt: verifications with at least one row on the
+  // object(s); every row of those verifications is listed.
+  costCenterId?: string;
+  projectId?: string;
 }
 
 export interface VerificationListSourceHeader {
@@ -298,6 +403,8 @@ export interface VerificationListSourceRow {
   debit: string;
   credit: string;
   description: string | null;
+  costCenter: DimensionRef | null;
+  project: DimensionRef | null;
 }
 
 export interface ReportVerificationReader {
@@ -313,6 +420,8 @@ export interface VerificationListRow {
   description: string;
   debit: string;
   credit: string;
+  costCenter: DimensionRef | null;
+  project: DimensionRef | null;
 }
 
 export interface VerificationListEntry {
@@ -356,6 +465,8 @@ export function buildVerificationList(
         description: row.description ?? header.description,
         debit: row.debit,
         credit: row.credit,
+        costCenter: row.costCenter,
+        project: row.project,
       };
     });
 
@@ -392,12 +503,63 @@ export interface ReportPdfRenderer {
   renderVerificationList(input: VerificationListPdfInput): Promise<Buffer>;
 }
 
+export type IncomeStatementQueryInput = {
+  from: string;
+  to: string;
+  costCenterId?: string;
+  projectId?: string;
+  groupBy?: IncomeStatementGroupBy;
+};
+
+export type GeneralLedgerQueryInput = {
+  from: string;
+  to: string;
+  accountFrom?: string;
+  accountTo?: string;
+  onlyWithMovement: boolean;
+  costCenterId?: string;
+  projectId?: string;
+};
+
+function dimensionFilterOf(query: { costCenterId?: string; projectId?: string }): DimensionFilter | undefined {
+  if (!query.costCenterId && !query.projectId) return undefined;
+  return {
+    ...(query.costCenterId ? { costCenterId: query.costCenterId } : {}),
+    ...(query.projectId ? { projectId: query.projectId } : {}),
+  };
+}
+
+// "Kostnadsställe 100 Verkstad" / "Utan kostnadsställe" — the PDF's column
+// heading per objekt.
+function columnLabel(groupBy: IncomeStatementGroupBy, column: IncomeStatementColumn): string {
+  const dimension = groupBy === "costCenter" ? "Kostnadsställe" : "Projekt";
+  return column.id === null ? `Utan ${dimension.toLowerCase()}` : `${dimension} ${column.code} ${column.name}`;
+}
+
+// The objects of a row appended to its text on the PDFs, whose row layouts
+// have no column of their own: "Hyra [100 Verkstad · P1 Storkök]".
+function withObjects(text: string, row: { costCenter: DimensionRef | null; project: DimensionRef | null }): string {
+  const parts = [dimensionText(row.costCenter), dimensionText(row.project)].filter((part) => part !== "");
+  return parts.length === 0 ? text : `${text} [${parts.join(" · ")}]`;
+}
+
+
 export function createFinancialReportsService(deps: {
   db: Db;
   repo: ReportFiscalYearReader & ReportLedgerReader & ReportVerificationReader;
   pdf?: ReportPdfRenderer;
 }) {
   const { db, repo } = deps;
+  // The PDF subtitles name the filtered object(s) — "… · Kostnadsställe 100
+  // Verkstad" — resolved right before the render, never for JSON/CSV.
+  async function subtitleFor(base: string, query: { costCenterId?: string; projectId?: string }): Promise<string> {
+    if (!query.costCenterId && !query.projectId) return base;
+    const refs = await loadDimensionRefs(db, { costCenterIds: [query.costCenterId], projectIds: [query.projectId] });
+    const parts = [base];
+    if (query.costCenterId) parts.push(`Kostnadsställe ${dimensionText(refs.costCenters.get(query.costCenterId)) || query.costCenterId}`);
+    if (query.projectId) parts.push(`Projekt ${dimensionText(refs.projects.get(query.projectId)) || query.projectId}`);
+    return parts.join(" · ");
+  }
   // The PDF renderer is optional so the report tests can construct the
   // service without dragging pdfkit in; the routes always pass it.
   const pdf = deps.pdf;
@@ -424,28 +586,43 @@ export function createFinancialReportsService(deps: {
       return { asOf: query.asOf, fiscalYear, ...buildBalanceSheet(balances) };
     },
 
-    async getIncomeStatement(query: { from: string; to: string }): Promise<IncomeStatementResponse> {
-      const balances = await readAccountBalances(db, { from: query.from, to: query.to });
-      return { from: query.from, to: query.to, ...buildIncomeStatement(balances) };
+    // Kostnadsställen och projekt: `costCenterId`/`projectId` keep only the
+    // rows carrying the object(s) (same shape as before); `groupBy` adds the
+    // columns and per-column amounts (buildGroupedIncomeStatement).
+    async getIncomeStatement(query: IncomeStatementQueryInput): Promise<IncomeStatementResponse> {
+      const filter = dimensionFilterOf(query);
+      if (!query.groupBy) {
+        const balances = await readAccountBalances(db, { from: query.from, to: query.to }, filter);
+        return { from: query.from, to: query.to, ...buildIncomeStatement(balances) };
+      }
+      const grouped = await readAccountBalancesGrouped(db, { from: query.from, to: query.to }, query.groupBy, filter);
+      const moving = grouped.filter((balance) => balance.periodDebit !== 0 || balance.periodCredit !== 0);
+      const ids = moving.map((balance) => balance.objectId);
+      const refs = await loadDimensionRefs(db, {
+        costCenterIds: query.groupBy === "costCenter" ? ids : [],
+        projectIds: query.groupBy === "project" ? ids : [],
+      });
+      const objects = [...(query.groupBy === "costCenter" ? refs.costCenters : refs.projects).values()].sort((a, b) =>
+        a.code.localeCompare(b.code, "sv")
+      );
+      return { from: query.from, to: query.to, ...buildGroupedIncomeStatement(grouped, objects) };
     },
 
     // Two queries total: the per-account opening/period sums, and the rows.
     // The running balance is computed exactly like getLedger's — round2 on
     // every step, never an accumulated float.
-    async getGeneralLedger(query: {
-      from: string;
-      to: string;
-      accountFrom?: string;
-      accountTo?: string;
-      onlyWithMovement: boolean;
-    }): Promise<GeneralLedgerResponse> {
+    // Kostnadsställen och projekt: the object filter applies to the opening
+    // balances, the rows and the before-year correction alike, so the running
+    // balance is the object's own.
+    async getGeneralLedger(query: GeneralLedgerQueryInput): Promise<GeneralLedgerResponse> {
       const accountFrom = query.accountFrom ?? "0000";
       const accountTo = query.accountTo ?? "9999";
+      const filter = dimensionFilterOf(query);
 
-      const balances = (await readAccountBalances(db, { from: query.from, to: query.to })).filter(
+      const balances = (await readAccountBalances(db, { from: query.from, to: query.to }, filter)).filter(
         (balance) => balance.accountNumber >= accountFrom && balance.accountNumber <= accountTo
       );
-      const sourceRows = await repo.getGeneralLedgerRows(query.from, query.to, accountFrom, accountTo);
+      const sourceRows = await repo.getGeneralLedgerRows(query.from, query.to, accountFrom, accountTo, filter);
       // Result accounts (class 3–8) start every fiscal year at 0: their IB is
       // the movement from the start of the year containing `from`, i.e. the
       // all-history opening minus what was booked before that year started.
@@ -454,7 +631,7 @@ export function createFinancialReportsService(deps: {
       const fiscalYear = await repo.findFiscalYearForDate(query.from);
       const beforeYear = new Map<string, number>();
       if (fiscalYear) {
-        for (const balance of await readAccountBalances(db, { from: fiscalYear.startDate, to: fiscalYear.startDate })) {
+        for (const balance of await readAccountBalances(db, { from: fiscalYear.startDate, to: fiscalYear.startDate }, filter)) {
           beforeYear.set(balance.accountId, balance.openingDebit - balance.openingCredit);
         }
       }
@@ -502,6 +679,8 @@ export function createFinancialReportsService(deps: {
             credit: row.credit,
             verificationId: row.verificationId,
             balance: running,
+            costCenter: row.costCenter,
+            project: row.project,
           };
         });
 
@@ -587,52 +766,64 @@ export function createFinancialReportsService(deps: {
       return { filename: `balansrakning-${sheet.asOf}.csv`, content: buildBalanceSheetCsv(sheet) };
     },
 
-    async getIncomeStatementPdf(query: { from: string; to: string }) {
+    // Per objekt the A4 template has one amount column, so the PDF prints
+    // one section per column (the object's name as a group heading, its own
+    // lines and subtotals) and the total last.
+    async getIncomeStatementPdf(query: IncomeStatementQueryInput) {
       const statement = await service.getIncomeStatement(query);
       const rows: FinancialStatementPdfInput["rows"] = [];
 
-      for (const entry of statement.entries) {
-        if (entry.kind === "subtotal") {
-          rows.push({ kind: "subtotal", label: entry.label, amount: formatNumber(entry.total) });
-          continue;
+      const pushSection = (amountOf: (entry: IncomeStatementEntry) => number, accountAmountOf: (account: ReportAccount) => number) => {
+        for (const entry of statement.entries) {
+          if (entry.kind === "subtotal") {
+            rows.push({ kind: "subtotal", label: entry.label, amount: formatNumber(amountOf(entry)) });
+            continue;
+          }
+          rows.push({ kind: "line", label: entry.label, amount: formatNumber(amountOf(entry)) });
+          for (const account of entry.accounts) {
+            const amount = accountAmountOf(account);
+            if (amount === 0 && statement.columns) continue;
+            rows.push({ kind: "account", label: `${account.accountNumber} ${account.accountName}`, amount: formatNumber(amount) });
+          }
         }
-        rows.push({ kind: "line", label: entry.label, amount: formatNumber(entry.total) });
-        for (const account of entry.accounts) {
-          rows.push({
-            kind: "account",
-            label: `${account.accountNumber} ${account.accountName}`,
-            amount: formatNumber(account.amount),
-          });
-        }
+      };
+
+      if (statement.columns) {
+        statement.columns.forEach((column, index) => {
+          rows.push({ kind: "group", label: columnLabel(query.groupBy!, column), amount: null });
+          pushSection(
+            (entry) => entry.amounts?.[index] ?? 0,
+            (account) => account.amounts?.[index] ?? 0
+          );
+        });
+        rows.push({ kind: "group", label: "Totalt", amount: null });
       }
+      pushSection(
+        (entry) => entry.total,
+        (account) => account.amount
+      );
 
       const content = await renderer().renderFinancialStatement({
         title: "Resultaträkning",
-        subtitle: `${statement.from} – ${statement.to}`,
+        subtitle: await subtitleFor(`${statement.from} – ${statement.to}`, query),
         rows,
       });
       return { filename: `resultatrakning-${statement.from}--${statement.to}.pdf`, content };
     },
 
-    async getIncomeStatementCsv(query: { from: string; to: string }) {
+    async getIncomeStatementCsv(query: IncomeStatementQueryInput) {
       const statement = await service.getIncomeStatement(query);
       return {
         filename: `resultatrakning-${statement.from}--${statement.to}.csv`,
-        content: buildIncomeStatementCsv(statement),
+        content: statement.columns ? buildGroupedIncomeStatementCsv(statement, statement.columns) : buildIncomeStatementCsv(statement),
       };
     },
 
-    async getGeneralLedgerPdf(query: {
-      from: string;
-      to: string;
-      accountFrom?: string;
-      accountTo?: string;
-      onlyWithMovement: boolean;
-    }) {
+    async getGeneralLedgerPdf(query: GeneralLedgerQueryInput) {
       const ledger = await service.getGeneralLedger(query);
       const content = await renderer().renderGeneralLedger({
         title: "Huvudbok",
-        subtitle: `${ledger.from} – ${ledger.to} · Konto ${ledger.accountFrom}–${ledger.accountTo}`,
+        subtitle: await subtitleFor(`${ledger.from} – ${ledger.to} · Konto ${ledger.accountFrom}–${ledger.accountTo}`, query),
         accounts: ledger.accounts.map((account) => ({
           heading: `${account.accountNumber} · ${account.accountName}`,
           openingAmount: formatNumber(account.openingBalance),
@@ -640,7 +831,7 @@ export function createFinancialReportsService(deps: {
           rows: account.rows.map((row) => ({
             date: row.date,
             verification: row.displayNumber,
-            text: row.description,
+            text: withObjects(row.description, row),
             debit: formatNumber(Number(row.debit)),
             credit: formatNumber(Number(row.credit)),
             balance: formatNumber(row.balance),
@@ -651,13 +842,7 @@ export function createFinancialReportsService(deps: {
       return { filename: `huvudbok-${ledger.from}--${ledger.to}.pdf`, content };
     },
 
-    async getGeneralLedgerCsv(query: {
-      from: string;
-      to: string;
-      accountFrom?: string;
-      accountTo?: string;
-      onlyWithMovement: boolean;
-    }) {
+    async getGeneralLedgerCsv(query: GeneralLedgerQueryInput) {
       const ledger = await service.getGeneralLedger(query);
       return { filename: `huvudbok-${ledger.from}--${ledger.to}.csv`, content: buildGeneralLedgerCsv(ledger) };
     },
@@ -676,12 +861,12 @@ export function createFinancialReportsService(deps: {
               : "Alla datum";
       const content = await renderer().renderVerificationList({
         title: "Verifikatlista",
-        subtitle: range,
+        subtitle: await subtitleFor(range, filters),
         verifications: list.verifications.map((verification) => ({
           heading: `${verification.displayNumber} · ${verification.date} · ${verification.description}`,
           rows: verification.rows.map((row) => ({
             account: `${row.accountNumber} ${row.accountName}`,
-            text: row.description,
+            text: withObjects(row.description, row),
             debit: formatNumber(Number(row.debit)),
             credit: formatNumber(Number(row.credit)),
           })),

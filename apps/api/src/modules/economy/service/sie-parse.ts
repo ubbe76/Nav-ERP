@@ -47,6 +47,9 @@ export interface ParsedSieDocument {
   accounts: { number: string; name: string }[];
   openingBalances: { accountNumber: string; amount: number }[];
   verifications: ParsedSieVerification[];
+  // #OBJEKT dimnr objektnr objektnamn — the names the import gives the cost
+  // centers/projects it creates (kostnadsställen och projekt).
+  objects: { dimension: string; code: string; name: string | null }[];
 }
 
 // The spec mandates CP437, but real exporters emit UTF-8 too (php-sie ships
@@ -211,6 +214,7 @@ export function parseSieDocument(buffer: Buffer): ParsedSieDocument {
   const accounts: { number: string; name: string }[] = [];
   const openingBalances: { accountNumber: string; amount: number }[] = [];
   const verifications: ParsedSieVerification[] = [];
+  const objects: ParsedSieDocument["objects"] = [];
 
   // The #VER block being read: its header, then `{`, its #TRANS rows, `}`.
   let current: ParsedSieVerification | null = null;
@@ -277,6 +281,9 @@ export function parseSieDocument(buffer: Buffer): ParsedSieDocument {
           openingBalances.push({ accountNumber: fields[2], amount: amount(fields[3]) });
         }
         break;
+      case "#OBJEKT":
+        if (fields[1] && fields[2]) objects.push({ dimension: fields[1], code: fields[2], name: fields[3] && fields[3] !== "" ? fields[3] : null });
+        break;
       case "#VER": {
         // #VER serie vernr verdatum [vertext] [regdatum] [sign]
         const dateRaw = fields[3];
@@ -292,14 +299,14 @@ export function parseSieDocument(buffer: Buffer): ParsedSieDocument {
         break;
       }
       default:
-        // #UB, #RES, #FLAGGA, #FORMAT, #GEN, #SIETYP, #ORGNR, #DIM, #OBJEKT …
+        // #UB, #RES, #FLAGGA, #FORMAT, #GEN, #SIETYP, #ORGNR, #DIM …
         break;
     }
   }
   if (current && inBlock) throw new SieParseError("Filen slutar mitt i ett #VER-block");
   assertNoOpenHeader("filen slutar");
 
-  return { program, companyName, fiscalYears, accounts, openingBalances, verifications };
+  return { program, companyName, fiscalYears, accounts, openingBalances, verifications, objects };
 }
 
 // The opening-balance import's view: #RAR 0 and at least one #IB 0.

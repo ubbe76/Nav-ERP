@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import {
+  accounts,
   articles,
   customers,
   einvoiceTransmissions,
@@ -20,7 +21,11 @@ import {
   stockTransactions,
   supplierInvoices,
   suppliers,
+  verificationRows,
+  verificationSeries,
+  fiscalYears,
   verificationTemplates,
+  verifications,
   type Db,
 } from "@navet/db";
 import { PLUGIN_TEST_EVENT_TYPE } from "@navet/shared";
@@ -137,6 +142,44 @@ export function createAlertsRepository(db: Db) {
   return {
     async unreconciledBankEntries(before: string) {
       return bankReconciliation.unreconciledEntriesBefore(before);
+    },
+
+    // Bokningar utan kostnadsställe: BOOKED verifications with a row on an
+    // account that has Kräver kostnadsställe and no cost center — the same
+    // rows the verification card's `warnings` names. Oldest first.
+    async verificationsMissingCostCenter(): Promise<
+      { verificationId: string; displayNumber: string; date: string; description: string; accountNumbers: string[] }[]
+    > {
+      const rows = await db
+        .select({
+          verificationId: verifications.id,
+          seriesCode: verificationSeries.code,
+          yearLabel: fiscalYears.label,
+          verificationNumber: verifications.verificationNumber,
+          date: verifications.date,
+          description: verifications.description,
+          accountNumber: accounts.number,
+        })
+        .from(verificationRows)
+        .innerJoin(verifications, eq(verifications.id, verificationRows.verificationId))
+        .innerJoin(verificationSeries, eq(verificationSeries.id, verifications.seriesId))
+        .innerJoin(fiscalYears, eq(fiscalYears.id, verifications.fiscalYearId))
+        .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
+        .where(and(eq(verifications.status, "booked"), eq(accounts.costCenterRequired, true), sql`${verificationRows.costCenterId} is null`))
+        .orderBy(asc(verifications.date), asc(verifications.verificationNumber), asc(accounts.number));
+      const byVerification = new Map<string, { verificationId: string; displayNumber: string; date: string; description: string; accountNumbers: string[] }>();
+      for (const row of rows) {
+        const entry = byVerification.get(row.verificationId) ?? {
+          verificationId: row.verificationId,
+          displayNumber: `${row.seriesCode}-${row.yearLabel}-${row.verificationNumber}`,
+          date: row.date,
+          description: row.description,
+          accountNumbers: [],
+        };
+        if (!entry.accountNumbers.includes(row.accountNumber)) entry.accountNumbers.push(row.accountNumber);
+        byVerification.set(row.verificationId, entry);
+      }
+      return [...byVerification.values()];
     },
 
     // Negativt saldo: the article's total over every location < 0 — the

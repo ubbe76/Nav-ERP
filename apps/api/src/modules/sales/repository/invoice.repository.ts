@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
+  articleGroups,
   articles,
   auditLog,
+  costCenters,
+  projects,
   customerPaymentRows,
   customerPayments,
   customers,
@@ -47,6 +50,7 @@ import { computeOcrNumber } from "../../system/service/ocr.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
 import { domesticVatCodeIdSql, loadVatCodeBook, postingVatCodeColumns } from "../../economy/repository/vat-codes.js";
+import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { computeOpenAmounts, computeOpenAmountsSek } from "./open-amounts.js";
 import { ShipmentNotBillableError, VatNumberRequiredError } from "../service/sales.errors.js";
 // Type-only (erased at compile time), so declaring the poster interface at
@@ -285,6 +289,18 @@ export type InvoiceRowWrite = {
   // free/plain row). Written on the draft only; an issued invoice's rows are
   // never rewritten.
   configuration: OrderRowConfiguration | null;
+  // Kostnadsställen och projekt: resolved by the service (the row's choice,
+  // the order header's, the article group's default). Omitted = none.
+  costCenterId?: string | null;
+  projectId?: string | null;
+};
+
+// The row's objects as { id, code, name } | null on every row read.
+const rowCostCenters = alias(costCenters, "invoice_row_cost_centers");
+const rowProjects = alias(projects, "invoice_row_projects");
+const rowDimensionColumns = {
+  costCenter: { id: rowCostCenters.id, code: rowCostCenters.code, name: rowCostCenters.name },
+  project: { id: rowProjects.id, code: rowProjects.code, name: rowProjects.name },
 };
 
 // The row's momskod as an insert/update value: the explicit id, else the
@@ -530,11 +546,32 @@ export function createInvoiceRepository(db: Db) {
           currency: salesOrders.currency,
           // Konfigurator 4b: copied onto the invoice row.
           configuration: salesOrderRows.configuration,
+          // Kostnadsställen och projekt: the order header's, the default for
+          // the invoice row.
+          orderCostCenterId: salesOrders.costCenterId,
+          orderProjectId: salesOrders.projectId,
         })
         .from(salesOrderRows)
         .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
         .where(eq(salesOrderRows.id, rowId));
       return row ?? null;
+    },
+
+    // Kostnadsställen och projekt: the article group's Kostnadsställe
+    // (förval) — the default for a row without an order header's.
+    async findArticleGroupDefaultCostCenter(articleId: string): Promise<string | null> {
+      const [row] = await db
+        .select({ defaultCostCenterId: articleGroups.defaultCostCenterId })
+        .from(articles)
+        .leftJoin(articleGroups, eq(articleGroups.id, articles.groupId))
+        .where(eq(articles.id, articleId));
+      return row?.defaultCostCenterId ?? null;
+    },
+
+    // The one dimension rule (dimension-check.ts), through this repository's
+    // connection.
+    async resolveDimensions(input: DimensionInput, opts: ResolveDimensionsOptions = {}) {
+      return resolveDimensions(db, input, opts);
     },
 
     getInvoicedQuantities,
@@ -845,6 +882,8 @@ export function createInvoiceRepository(db: Db) {
               vatAmount: String(r.vatAmount),
               deliveryDate: r.deliveryDate ?? null,
               configuration: r.configuration,
+              costCenterId: r.costCenterId ?? null,
+              projectId: r.projectId ?? null,
               createdAt: new Date(now + i),
             }))
           );
@@ -987,6 +1026,8 @@ export function createInvoiceRepository(db: Db) {
             name: vatCodes.name,
             invoiceText: vatCodes.invoiceText,
           },
+          // Kostnadsställen och projekt on the revenue row.
+          ...rowDimensionColumns,
         })
         .from(invoiceRows)
         .innerJoin(vatCodes, eq(vatCodes.id, invoiceRows.vatCodeId))
@@ -996,6 +1037,8 @@ export function createInvoiceRepository(db: Db) {
         .leftJoin(salesOrderRows, eq(salesOrderRows.id, invoiceRows.salesOrderRowId))
         .leftJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
         .leftJoin(shipments, eq(shipments.id, invoiceRows.shipmentId))
+        .leftJoin(rowCostCenters, eq(rowCostCenters.id, invoiceRows.costCenterId))
+        .leftJoin(rowProjects, eq(rowProjects.id, invoiceRows.projectId))
         .where(eq(invoiceRows.invoiceId, invoiceId))
         .orderBy(asc(invoiceRows.createdAt));
     },
@@ -1201,6 +1244,9 @@ export function createInvoiceRepository(db: Db) {
               vatAmount: invoiceRows.vatAmount,
               vatRate: invoiceRows.vatRate,
               vatCode: postingVatCodeColumns,
+              // Kostnadsställen och projekt: onto the revenue row only.
+              costCenterId: invoiceRows.costCenterId,
+              projectId: invoiceRows.projectId,
             })
             .from(invoiceRows)
             .innerJoin(vatCodes, eq(vatCodes.id, invoiceRows.vatCodeId))
@@ -1242,6 +1288,8 @@ export function createInvoiceRepository(db: Db) {
               vatAmount: Number(postingRow.vatAmount),
               vatRate: Number(postingRow.vatRate),
               vatCode: postingRow.vatCode,
+              costCenterId: postingRow.costCenterId,
+              projectId: postingRow.projectId,
             })),
             userId
           );
@@ -1517,6 +1565,8 @@ export function createInvoiceRepository(db: Db) {
             vatAmount: String(row.vatAmount),
             deliveryDate: row.deliveryDate ?? null,
             configuration: row.configuration,
+            costCenterId: row.costCenterId ?? null,
+            projectId: row.projectId ?? null,
           })
           .returning();
         return inserted ?? null;
@@ -1554,6 +1604,8 @@ export function createInvoiceRepository(db: Db) {
             vatAmount: String(row.vatAmount),
             deliveryDate: row.deliveryDate ?? null,
             configuration: row.configuration,
+            costCenterId: row.costCenterId ?? null,
+            projectId: row.projectId ?? null,
           })
           .where(and(eq(invoiceRows.id, rowId), eq(invoiceRows.invoiceId, invoiceId)))
           .returning();

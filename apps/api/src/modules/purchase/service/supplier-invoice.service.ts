@@ -58,10 +58,15 @@ export interface SupplierInvoicePoster {
       grossAmount: number;
       // The header's momskod (accounts included), loaded in the same tx.
       vatCode: PostingVatCode;
+      // Kostnadsställen och projekt: the header's = the rows' default and
+      // the remainder's.
+      costCenterId?: string | null;
+      projectId?: string | null;
     },
-    // Rows only steer WHICH cost accounts the header net is split over, and
-    // under which momskod (null = the header's).
-    rows: { articleGroupId: string | null; lineAmount: number; vatCode: PostingVatCode | null }[],
+    // Rows only steer WHICH cost accounts the header net is split over, under
+    // which momskod (null = the header's) and with which objects (null = the
+    // header's).
+    rows: { articleGroupId: string | null; lineAmount: number; vatCode: PostingVatCode | null; costCenterId?: string | null; projectId?: string | null }[],
     userId: string
   ): Promise<{ verificationId: string; displayNumber: string }>;
 
@@ -229,6 +234,11 @@ type RowInput = {
   vatRate?: number | null;
   // Momskod for the row; null/undefined = the invoice's own code.
   vatCodeId?: string | null;
+  // Kostnadsställen och projekt: the row's own; null = follows the header,
+  // undefined on a new row = the article group's Kostnadsställe (förval),
+  // undefined on a PATCH = the row's.
+  costCenterId?: string | null;
+  projectId?: string | null;
 };
 
 export function createSupplierInvoiceService(
@@ -284,7 +294,13 @@ export function createSupplierInvoiceService(
   // stored numbers always equal quantity × unitPrice. A row's own momskod
   // must be a purchase code (both/purchase) and active — unless it is the
   // code the row already carries (`keepVatCodeId`, a PATCH leaving it alone).
-  async function resolveRow(input: RowInput, book: VatCodeBook, keepVatCodeId?: string | null): Promise<SupplierInvoiceRowWrite> {
+  async function resolveRow(
+    input: RowInput,
+    book: VatCodeBook,
+    keepVatCodeId?: string | null,
+    // The row's current objects on a PATCH (undefined = a new row).
+    existingDimensions?: { costCenterId: string | null; projectId: string | null }
+  ): Promise<SupplierInvoiceRowWrite> {
     const vatCodeId = input.vatCodeId ?? null;
     if (vatCodeId !== null) {
       documentVatCode(book, { id: vatCodeId }, "purchase", { allowInactive: vatCodeId === keepVatCodeId });
@@ -306,6 +322,15 @@ export function createSupplierInvoiceService(
     const lineAmount = round2(input.quantity * input.unitPrice);
     const vatRate = input.vatRate ?? null;
     const vatAmount = vatRate !== null ? round2(lineAmount * (vatRate / 100)) : 0;
+    // Kostnadsställen och projekt: a new row without its own takes the
+    // article group's Kostnadsställe (förval); null stays null (= the header's).
+    const dimensions = await repo.resolveDimensions(
+      { costCenterId: input.costCenterId, projectId: input.projectId },
+      {
+        existing: existingDimensions ?? null,
+        fallback: existingDimensions || !articleId ? null : { costCenterId: await repo.findArticleGroupDefaultCostCenter(articleId), projectId: null },
+      }
+    );
     return {
       articleId,
       purchaseOrderRowId,
@@ -316,6 +341,7 @@ export function createSupplierInvoiceService(
       vatAmount,
       vatRate,
       vatCodeId,
+      ...dimensions,
     };
   }
 
@@ -458,6 +484,18 @@ export function createSupplierInvoiceService(
       const vatCodeId = headerVatCodeId(book, supplier, input.vatCodeId);
       const rows = await Promise.all(input.rows.map((r) => resolveRow(r, book)));
       const rate = await resolveRate(supplier.currency, input.invoiceDate, input.exchangeRate, input.purchaseOrderId ?? null);
+      // Kostnadsställen och projekt (header = the rows' default): the
+      // supplier's Kostnadsställe (förval) and the linked purchase order's
+      // project unless the caller says otherwise.
+      const dimensions = await repo.resolveDimensions(
+        { costCenterId: input.costCenterId, projectId: input.projectId },
+        {
+          fallback: {
+            costCenterId: supplier.defaultCostCenterId,
+            projectId: input.purchaseOrderId ? await repo.findPurchaseOrderProject(input.purchaseOrderId) : null,
+          },
+        }
+      );
       let invoice;
       try {
         invoice = await repo.create(
@@ -465,6 +503,7 @@ export function createSupplierInvoiceService(
             supplierId: input.supplierId,
             invoiceNumber: input.invoiceNumber,
             purchaseOrderId: input.purchaseOrderId ?? null,
+            ...dimensions,
             invoiceDate: input.invoiceDate,
             dueDate,
             currency: supplier.currency,
@@ -523,7 +562,24 @@ export function createSupplierInvoiceService(
         paymentReferenceKind?: PaymentReferenceKind | null;
         paymentReference?: string | null;
         vatCodeId?: string;
+        costCenterId?: string | null;
+        projectId?: string | null;
       } = {};
+      // Kostnadsställen och projekt: a sent field wins (null clears), an
+      // omitted one keeps the header's. The project follows a NEW purchase
+      // order link when the invoice has none and the PATCH sets none
+      // ("manuellt vinner" — a chosen project is never overwritten).
+      const dimensions = await repo.resolveDimensions(
+        { costCenterId: input.costCenterId, projectId: input.projectId },
+        { existing: { costCenterId: invoice.costCenterId, projectId: invoice.projectId } }
+      );
+      if (dimensions.projectId === null && input.projectId === undefined && input.purchaseOrderId && input.purchaseOrderId !== invoice.purchaseOrderId) {
+        const linked = await repo.findPurchaseOrderProject(input.purchaseOrderId);
+        // A closed project on the order is dropped silently, like any default.
+        if (linked) dimensions.projectId = (await repo.resolveDimensions({}, { fallback: { projectId: linked } })).projectId;
+      }
+      patch.costCenterId = dimensions.costCenterId;
+      patch.projectId = dimensions.projectId;
       // Byte av leverantör (betalas till): the currency is re-snapshotted from
       // the new supplier, as at creation. The due date is left alone — like
       // every other draft edit it stays under manual control.
@@ -682,8 +738,15 @@ export function createSupplierInvoiceService(
         vatRate:
           input.vatRate !== undefined ? input.vatRate : existing.vatRate !== null ? Number(existing.vatRate) : null,
         vatCodeId: input.vatCodeId !== undefined ? input.vatCodeId : existing.vatCodeId,
+        // Kostnadsställen och projekt: undefined keeps the row's, null clears.
+        costCenterId: input.costCenterId,
+        projectId: input.projectId,
       };
-      const row = await repo.updateRow(invoiceId, rowId, await resolveRow(merged, await repo.vatCodeBook(), existing.vatCodeId));
+      const row = await repo.updateRow(
+        invoiceId,
+        rowId,
+        await resolveRow(merged, await repo.vatCodeBook(), existing.vatCodeId, { costCenterId: existing.costCenterId, projectId: existing.projectId })
+      );
       if (!row) throw new SupplierInvoiceRowNotFoundError(rowId);
       return row;
     },

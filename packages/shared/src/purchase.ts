@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dimensionFields } from "./dimensions.js";
 import { businessDateSchema } from "./business-date.js";
 import { materialShortageOverrideSchema } from "./manufacturing.js";
 import { listQuerySchema, statusListParam } from "./list.js";
@@ -141,6 +142,8 @@ export const createSupplierSchema = z.object({
   // derived from the country (supplierDefaultVatCode).
   country: countryCodeSchema.default("SE"),
   defaultVatCodeId: z.string().uuid().nullable().optional(),
+  // Kostnadsställe (förval) for the supplier's invoices.
+  defaultCostCenterId: z.string().uuid().nullable().optional(),
   active: z.boolean().default(true),
   ...supplierPaymentDetailsFields,
   ...partnerDeliveryFields,
@@ -169,6 +172,7 @@ export const updateSupplierSchema = z
     // Not nullable — a supplier always has a country.
     country: countryCodeSchema.optional(),
     defaultVatCodeId: z.string().uuid().nullable().optional(),
+    defaultCostCenterId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
     ...supplierPaymentDetailsFields,
     ...partnerDeliveryFields,
@@ -189,6 +193,8 @@ export const createPurchaseOrderSchema = z.object({
   // printed on the PO document when set.
   yourReference: z.string().max(100).optional(),
   ourReference: z.string().max(100).optional(),
+  // Projekt (kostnadsställen och projekt): follows into the supplier invoice.
+  projectId: z.string().uuid().nullable().optional(),
 });
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>;
 
@@ -255,6 +261,7 @@ export const updatePurchaseOrderHeaderSchema = z
     carrierId: z.string().uuid().nullable().optional(),
     // "Frakt på vårt konto" — prints our carrier customer number on the PO.
     freightPaidByUs: z.boolean().optional(),
+    projectId: z.string().uuid().nullable().optional(),
     bumpRevision: z.boolean().optional(),
   })
   .refine(
@@ -384,6 +391,9 @@ const supplierInvoiceRowInputSchema = z.object({
   // Momskod for this row (direction both/purchase); omitted/null = the
   // invoice's own code.
   vatCodeId: z.string().uuid().nullable().optional(),
+  // Kostnadsställen och projekt: the row's own; omitted on a new row = the
+  // article group's Kostnadsställe (förval), null = follows the header.
+  ...dimensionFields,
 });
 export const createSupplierInvoiceRowSchema = supplierInvoiceRowInputSchema;
 export type CreateSupplierInvoiceRowInput = z.infer<typeof createSupplierInvoiceRowSchema>;
@@ -398,6 +408,7 @@ export const updateSupplierInvoiceRowSchema = z
     vatRate: vatRateSchema.nullable().optional(),
     // null = back to following the invoice's code.
     vatCodeId: z.string().uuid().nullable().optional(),
+    ...dimensionFields,
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateSupplierInvoiceRowInput = z.infer<typeof updateSupplierInvoiceRowSchema>;
@@ -422,6 +433,10 @@ export const createSupplierInvoiceSchema = z.object({
   // linked purchase order's rate as the fallback; for a SEK invoice only 1
   // is accepted.
   exchangeRate: exchangeRateValueSchema.optional(),
+  // Kostnadsställen och projekt (header = the rows' default): omitted = the
+  // supplier's Kostnadsställe (förval) and the linked purchase order's
+  // project; null = none.
+  ...dimensionFields,
   rows: z.array(supplierInvoiceRowInputSchema).default([]),
 });
 export type CreateSupplierInvoiceInput = z.infer<typeof createSupplierInvoiceSchema>;
@@ -451,6 +466,7 @@ export const updateSupplierInvoiceHeaderSchema = z
     // and the rate was not typed, and whenever the rate is missing —
     // whichever field the PATCH changes.
     exchangeRate: exchangeRateValueSchema.nullable().optional(),
+    ...dimensionFields,
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateSupplierInvoiceHeaderInput = z.infer<typeof updateSupplierInvoiceHeaderSchema>;

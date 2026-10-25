@@ -1,3 +1,4 @@
+import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, notExists, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { pluginEvents } from "../../system/service/plugin-events.js";
@@ -437,6 +438,12 @@ export function createArticleRepository(db: Db) {
       return row!.total;
     },
 
+    // Kostnadsställen och projekt: the group's Kostnadsställe (förval) must
+    // exist and be active (the one rule, dimension-check.ts).
+    async resolveDimensions(input: DimensionInput, opts: ResolveDimensionsOptions = {}) {
+      return resolveDimensions(db, input, opts);
+    },
+
     async createArticleGroup(input: CreateArticleGroupInput) {
       const [row] = await db.insert(articleGroups).values(input).returning();
       return row!;
@@ -449,6 +456,11 @@ export function createArticleRepository(db: Db) {
 
     async listArticleGroups() {
       return db.select().from(articleGroups).orderBy(asc(articleGroups.code));
+    },
+
+    async findArticleGroupById(id: string) {
+      const [row] = await db.select().from(articleGroups).where(eq(articleGroups.id, id));
+      return row ?? null;
     },
 
     async findArticleGroupByCode(code: string) {

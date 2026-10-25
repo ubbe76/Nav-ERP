@@ -7,6 +7,7 @@ import {
   scrapStatisticsQuerySchema,
   deliveryPrecisionCsvQuerySchema,
   purchaseOrderRegisterQuerySchema,
+  projectReportQuerySchema,
   quoteFollowupQuerySchema,
   salesOrderRegisterQuerySchema,
 } from "@navet/shared";
@@ -20,6 +21,7 @@ import {
   type OrderRegisterService,
 } from "../service/order-register.service.js";
 import { QuoteFollowupTooLargeError, type QuoteFollowupService } from "../service/quote-followup.service.js";
+import { ProjectNotFoundError, type ProjectReportService } from "../service/project-report.service.js";
 import {
   buildCalculationOutcomeCsv,
   buildDeliveryPrecisionCsv,
@@ -34,9 +36,9 @@ import {
 // hook keeps the guard in mini-app tests that register this plugin directly.
 export async function reportsRoutes(
   app: FastifyInstance,
-  opts: { service: ReportsService; orderRegister: OrderRegisterService; quoteFollowup: QuoteFollowupService }
+  opts: { service: ReportsService; orderRegister: OrderRegisterService; quoteFollowup: QuoteFollowupService; projectReport: ProjectReportService }
 ) {
-  const { service, orderRegister, quoteFollowup } = opts;
+  const { service, orderRegister, quoteFollowup, projectReport } = opts;
   app.addHook("preHandler", requirePermission("rapporter"));
 
   // F2: CSV download — same content, text/csv instead of JSON.
@@ -137,6 +139,29 @@ export async function reportsRoutes(
       return sendCsv(reply, filename, content);
     } catch (err) {
       if (err instanceof QuoteFollowupTooLargeError) return reply.code(400).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Projektrapport (kostnadsställen och projekt) — one project's result out
+  // of the booked rows carrying it, plus its customer orders.
+  app.get("/reports/project-report", async (req, reply) => {
+    const query = projectReportQuerySchema.parse(req.query);
+    try {
+      return await projectReport.get(query);
+    } catch (err) {
+      if (err instanceof ProjectNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  app.get("/reports/project-report/csv", async (req, reply) => {
+    const query = projectReportQuerySchema.parse(req.query);
+    try {
+      const { filename, content } = await projectReport.getCsv(query);
+      return sendCsv(reply, filename, content);
+    } catch (err) {
+      if (err instanceof ProjectNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
     }
   });

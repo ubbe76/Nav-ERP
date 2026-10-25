@@ -108,6 +108,16 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["ekonomi"],
     listHref: "/ekonomi/bankavstamning",
   },
+  // Kostnadsställen och projekt: a booked row on an account with Kräver
+  // kostnadsställe but without one — the automatkontering books anyway and
+  // leaves it here (a manual booking is refused at Bokför).
+  {
+    kind: "cost_center_missing",
+    label: "Bokningar utan kostnadsställe",
+    severity: "yellow",
+    rule: ["ekonomi"],
+    listHref: "/ekonomi/verifikat",
+  },
 ];
 
 const BY_KIND = new Map(ALERT_KIND_CATALOG.map((def) => [def.kind, def] as const));

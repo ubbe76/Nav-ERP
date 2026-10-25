@@ -48,6 +48,11 @@ import { createRecurringVerificationService } from "./modules/economy/service/re
 import { createSieVerificationImportService } from "./modules/economy/service/sie-verification-import.service.js";
 import { manualBookkeepingRoutes } from "./modules/economy/routes/manual-bookkeeping.routes.js";
 import { economyRoutes } from "./modules/economy/routes/economy.routes.js";
+import { createDimensionRepository } from "./modules/economy/repository/dimension.repository.js";
+import { createDimensionService } from "./modules/economy/service/dimension.service.js";
+import { dimensionRoutes } from "./modules/economy/routes/dimension.routes.js";
+import { createProjectReportRepository } from "./modules/reports/repository/project-report.repository.js";
+import { createProjectReportService } from "./modules/reports/service/project-report.service.js";
 import { createFixedAssetService } from "./modules/economy/service/fixed-asset.service.js";
 import { createYearEndClosingService } from "./modules/economy/service/year-end-closing.service.js";
 import { fixedAssetRoutes } from "./modules/economy/routes/fixed-asset.routes.js";
@@ -628,6 +633,9 @@ export function buildApp(database: Db = db) {
   const reportsService = createReportsService(createReportsRepository(database), costingService);
   const orderRegisterService = createOrderRegisterService(createOrderRegisterRepository(database), documentPdfService);
   const quoteFollowupService = createQuoteFollowupService(createQuoteFollowupRepository(database));
+  // Projektrapport (kostnadsställen och projekt): one project's result out
+  // of the booked rows carrying it, plus its customer orders.
+  const projectReportService = createProjectReportService(createProjectReportRepository(database));
   const oauthService = createOAuthService(createOAuthRepository(database), jwtSecret);
   // auditRepository is constructed earlier (ahead of purchase/sales) — see
   // that declaration's comment. Payroll/timereport reuse the same instance.
@@ -683,6 +691,8 @@ export function buildApp(database: Db = db) {
   // task — Task 4's fiscal years/verifications are the first writer).
   const economyRepository = createEconomyRepository(database);
   const economyService = createEconomyService(economyRepository, auditRepository);
+  // Kostnadsställen och projekt (etapp 5 del A): the two dimension registers.
+  const dimensionService = createDimensionService(createDimensionRepository(database), auditRepository);
   // Momsrapport (B5): deklarationsrutor per period + momsomföringen (series
   // M via the shared poster).
   const vatReportService = createVatReportService({
@@ -848,7 +858,7 @@ export function buildApp(database: Db = db) {
         await registerModule(
           protectedRoutes,
           reportsRoutes,
-          { service: reportsService, orderRegister: orderRegisterService, quoteFollowup: quoteFollowupService },
+          { service: reportsService, orderRegister: orderRegisterService, quoteFollowup: quoteFollowupService, projectReport: projectReportService },
           { read: ["rapporter"], write: ["rapporter"] }
         );
         await registerModule(protectedRoutes, timeReportRoutes, { service: timeReportService }, { read: office, write: ["tillverkning"] });
@@ -882,6 +892,9 @@ export function buildApp(database: Db = db) {
           },
           { read: ["ekonomi"], write: ["ekonomi"] }
         );
+        // Kostnadsställen och projekt: every office user reads the registers
+        // (the pickers on orders, invoices and article groups), Ekonomi writes.
+        await registerModule(protectedRoutes, dimensionRoutes, { service: dimensionService }, { read: office, write: ["ekonomi"] });
         await registerModule(protectedRoutes, fixedAssetRoutes, { service: fixedAssetService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, yearEndRoutes, { service: yearEndClosingService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, costingRoutes, { service: costingService }, { read: office, write: ["tillverkning"] });

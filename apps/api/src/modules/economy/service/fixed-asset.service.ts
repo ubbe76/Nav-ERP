@@ -15,6 +15,7 @@ import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/d
 import * as repo from "../repository/fixed-asset.repository.js";
 import { BAS_FIXED_ASSET_CATEGORIES } from "./bas-accounts.js";
 import { AccountNotFoundError, AlreadyReversedError, InactiveAccountError } from "./economy.service.js";
+import { resolveDimensions } from "./dimension-check.js";
 import {
   disposalAmounts,
   disposalPostingRows,
@@ -310,6 +311,8 @@ export interface DepreciationCategoryTotal {
   expenseAccountNumber: string;
   accumulatedAccountId: string;
   accumulatedAccountNumber: string;
+  // Kostnadsställe (förval) of the group — on the expense row.
+  costCenterId: string | null;
   amount: number;
 }
 
@@ -527,6 +530,7 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
         expenseAccountNumber: asset.category.expenseAccountNumber,
         accumulatedAccountId: asset.category.accumulatedDepreciationAccountId,
         accumulatedAccountNumber: asset.category.accumulatedAccountNumber,
+        costCenterId: asset.category.defaultCostCenterId,
         amount: 0,
       };
       bucket.amount = round2(bucket.amount + amount);
@@ -605,6 +609,8 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
 
     async createCategory(input: CreateFixedAssetCategoryInput) {
       assertDistinctCategoryAccounts(input);
+      // Kostnadsställe (förval): must exist and be active.
+      await resolveDimensions(db, { costCenterId: input.defaultCostCenterId });
       for (const id of [
         input.assetAccountId,
         input.accumulatedDepreciationAccountId,
@@ -652,6 +658,10 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
           const account = await repo.findAccountRef(tx, input[key]!);
           if (!account) throw new AccountNotFoundError(input[key]!);
           if (!account.active) throw new InactiveAccountError(input[key]!);
+        }
+        // Kostnadsställe (förval): a new choice must be active; the kept one may stay.
+        if (input.defaultCostCenterId !== undefined) {
+          await resolveDimensions(tx, { costCenterId: input.defaultCostCenterId }, { existing: { costCenterId: existing.defaultCostCenterId, projectId: null } });
         }
         try {
           await repo.updateCategory(tx, id, input);
@@ -992,6 +1002,8 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
             expenseAccountId: category.expenseAccountId,
             accumulatedAccountId: category.accumulatedAccountId,
             amount: category.amount,
+            // Kostnadsställe (förval) of the group, on the expense row only.
+            costCenterId: category.costCenterId,
           })),
         },
         userId

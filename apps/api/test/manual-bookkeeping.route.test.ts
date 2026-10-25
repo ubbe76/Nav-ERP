@@ -203,7 +203,19 @@ describe("verification templates", () => {
     const template = created.json();
     expect(template).toMatchObject({ name: "Hyra", seriesId: series.id, seriesCode: "A", description: "Lokalhyra", active: true });
     expect(typeof template.createdAt).toBe("string");
-    expect(template.rows[0]).toEqual({ id: expect.any(String), accountNumber: "5010", accountName: "Lokalhyra", description: "Hyra", debit: 8000, credit: null, sortOrder: 0 });
+    expect(template.rows[0]).toEqual({
+      id: expect.any(String),
+      accountNumber: "5010",
+      accountName: "Lokalhyra",
+      description: "Hyra",
+      debit: 8000,
+      credit: null,
+      sortOrder: 0,
+      costCenterId: null,
+      projectId: null,
+      costCenter: null,
+      project: null,
+    });
     expect(template.rows[2]).toMatchObject({ accountNumber: "1790", debit: null, credit: null });
 
     const list = await c.get("/verification-templates");

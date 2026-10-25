@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./auth";
 import { bankFiles } from "./banking";
+import { costCenters, projects } from "./dimensions";
 import { verificationRows } from "./economy";
 
 // Bankavstämning (bokföringsgranskningen etapp 4, spec
@@ -230,6 +231,10 @@ export const bankRules = pgTable(
     autoBook: boolean("auto_book").notNull().default(false),
     active: boolean("active").notNull().default(true),
     sortOrder: integer("sort_order").notNull().default(0),
+    // Kostnadsställen och projekt: put on the counter row (never the bank
+    // or VAT row) of the verification the rule books.
+    costCenterId: uuid("cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

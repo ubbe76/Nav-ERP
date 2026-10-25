@@ -21,6 +21,7 @@ import {
 } from "@navet/shared";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
+import { CostCenterInactiveError, CostCenterNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { ConfiguratorModeNotAllowedError } from "../../configurator/service/configurator.errors.js";
 import { canSeePrices, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
@@ -107,7 +108,8 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       return reply.code(201).send(group);
     } catch (err) {
       if (err instanceof DuplicateArticleGroupError) return reply.code(409).send(errorBody(err));
-      if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
+      if (err instanceof InvalidReferenceError || err instanceof CostCenterInactiveError) return reply.code(400).send(errorBody(err));
+      if (err instanceof CostCenterNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
     }
   });
@@ -187,9 +189,9 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
     try {
       return await service.updateArticleGroup(req.params.id, input);
     } catch (err) {
-      if (err instanceof ArticleGroupNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof ArticleGroupNotFoundError || err instanceof CostCenterNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof DuplicateArticleGroupError) return reply.code(409).send(errorBody(err));
-      if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
+      if (err instanceof InvalidReferenceError || err instanceof CostCenterInactiveError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

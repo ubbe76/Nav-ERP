@@ -6,6 +6,7 @@ import {
   articleSuppliers,
   articles,
   carriers,
+  projects,
   deliveryTerms,
   inquiries,
   inquiryRows,
@@ -61,6 +62,7 @@ import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
+import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 
 function round4(value: number): number {
   return Math.round(value * 10000) / 10000;
@@ -671,6 +673,8 @@ export function createPurchaseRepository(db: Db) {
             note: input.note,
             yourReference: input.yourReference,
             ourReference: input.ourReference,
+            // Projekt (kostnadsställen och projekt) — validated by the service.
+            projectId: input.projectId ?? null,
             currency,
             exchangeRate: String(input.exchangeRate ?? 1),
             deliveryTermId: supplier?.deliveryTermId ?? null,
@@ -696,14 +700,23 @@ export function createPurchaseRepository(db: Db) {
           paymentTermName: paymentTerms.name,
           carrierCode: carriers.code,
           carrierName: carriers.name,
+          // Projekt (kostnadsställen och projekt) for the card.
+          project: { id: projects.id, code: projects.code, name: projects.name },
         })
         .from(purchaseOrders)
         .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
         .leftJoin(deliveryTerms, eq(deliveryTerms.id, purchaseOrders.deliveryTermId))
         .leftJoin(paymentTerms, eq(paymentTerms.id, purchaseOrders.paymentTermId))
         .leftJoin(carriers, eq(carriers.id, purchaseOrders.carrierId))
+        .leftJoin(projects, eq(projects.id, purchaseOrders.projectId))
         .where(eq(purchaseOrders.id, id));
       return row ?? null;
+    },
+
+    // Kostnadsställen och projekt: the one dimension rule (dimension-check.ts)
+    // through this repository's connection.
+    async resolveDimensions(input: DimensionInput, opts: ResolveDimensionsOptions = {}) {
+      return resolveDimensions(db, input, opts);
     },
 
     async updatePurchaseOrderHeader(id: string, input: UpdatePurchaseOrderHeaderInput) {

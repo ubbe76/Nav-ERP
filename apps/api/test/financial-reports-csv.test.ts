@@ -110,20 +110,22 @@ describe("buildGeneralLedgerCsv", () => {
               credit: "0.00",
               verificationId: "v1",
               balance: 150,
+              costCenter: { id: "cc1", code: "100", name: "Verkstad" },
+              project: null,
             },
           ],
         },
       ],
     });
     const rows = lines(csv);
-    expect(rows[0]).toBe("Konto;Kontonamn;Datum;Verifikat;Text;Debet;Kredit;Saldo");
+    expect(rows[0]).toBe("Konto;Kontonamn;Datum;Verifikat;Text;Kostnadsställe;Projekt;Debet;Kredit;Saldo");
     const opening = rows.findIndex((r) => r.includes("Ingående saldo"));
     const row = rows.findIndex((r) => r.includes("A-2026-1"));
     const closing = rows.findIndex((r) => r.includes("Utgående saldo"));
     expect(opening).toBeGreaterThan(0);
     expect(row).toBeGreaterThan(opening);
     expect(closing).toBeGreaterThan(row);
-    expect(rows[row]).toBe("1910;Kassa;2026-01-10;A-2026-1;Insättning;100,00;0,00;150,00");
+    expect(rows[row]).toBe("1910;Kassa;2026-01-10;A-2026-1;Insättning;100 Verkstad;;100,00;0,00;150,00");
   });
 });
 
@@ -140,15 +142,15 @@ describe("buildVerificationListCsv", () => {
           totalDebit: 100,
           totalCredit: 100,
           rows: [
-            { accountNumber: "5010", accountName: "Lokalhyra", description: "", debit: "100.00", credit: "0.00" },
-            { accountNumber: "1910", accountName: "Kassa", description: "", debit: "0.00", credit: "100.00" },
+            { accountNumber: "5010", accountName: "Lokalhyra", description: "", debit: "100.00", credit: "0.00", costCenter: null, project: { id: "p1", code: "P1", name: "Storköket" } },
+            { accountNumber: "1910", accountName: "Kassa", description: "", debit: "0.00", credit: "100.00", costCenter: null, project: null },
           ],
         },
       ],
     });
     const rows = lines(csv);
-    expect(rows[0]).toBe("Verifikat;Datum;Text;Konto;Kontonamn;Debet;Kredit");
-    expect(rows[1]).toBe("A-2026-1;2026-01-10;Hyra januari;5010;Lokalhyra;100,00;0,00");
-    expect(rows[2]).toBe("A-2026-1;2026-01-10;Hyra januari;1910;Kassa;0,00;100,00");
+    expect(rows[0]).toBe("Verifikat;Datum;Text;Konto;Kontonamn;Kostnadsställe;Projekt;Debet;Kredit");
+    expect(rows[1]).toBe("A-2026-1;2026-01-10;Hyra januari;5010;Lokalhyra;;P1 Storköket;100,00;0,00");
+    expect(rows[2]).toBe("A-2026-1;2026-01-10;Hyra januari;1910;Kassa;;;0,00;100,00");
   });
 });

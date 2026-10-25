@@ -27,6 +27,7 @@ import type { PostingSettings } from "../../system/service/posting-settings.js";
 import type { VerificationComposeInput } from "../../economy/service/economy.service.js";
 import type { VerificationRowWrite } from "../../economy/repository/economy.repository.js";
 import { AccountingPeriodLockedError } from "../../economy/service/accounting-period-lock.js";
+import { dimensionRef, loadDimensionRefs, resolveDimensions } from "../../economy/service/dimension-check.js";
 import {
   AccountNotFoundError,
   InactiveAccountError,
@@ -131,6 +132,9 @@ export interface RuleSuggestion {
   accountNumber: string;
   description: string | null;
   vatCode: string | null;
+  // Kostnadsställen och projekt: prefilled on the counter row.
+  costCenterId: string | null;
+  projectId: string | null;
 }
 
 export interface EntryView extends StatementEntryView {
@@ -214,6 +218,11 @@ export interface BankRuleView {
   autoBook: boolean;
   active: boolean;
   sortOrder: number;
+  // Kostnadsställen och projekt on the counter row the rule books.
+  costCenterId: string | null;
+  projectId: string | null;
+  costCenter: { id: string; code: string; name: string } | null;
+  project: { id: string; code: string; name: string } | null;
 }
 
 export interface BankReconciliationServiceDeps {
@@ -392,7 +401,14 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     const hits = matchingRules(rules, entry);
     if (hits.length !== 1) return null;
     const rule = hits[0]!;
-    return { ruleId: rule.id, accountNumber: rule.accountNumber, description: rule.description, vatCode: rule.vatCode };
+    return {
+      ruleId: rule.id,
+      accountNumber: rule.accountNumber,
+      description: rule.description,
+      vatCode: rule.vatCode,
+      costCenterId: rule.costCenterId,
+      projectId: rule.projectId,
+    };
   }
 
   async function matchViews(executor: Db | Tx, matches: BankMatchRow[]): Promise<MatchView[]> {
@@ -422,7 +438,9 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       const account = await repo.findLedgerAccountById(executor, row.accountId);
       if (!account) throw new AccountNotFoundError(row.accountId);
       if (!account.active) throw new InactiveAccountError(row.accountId);
-      out.push({ accountId: row.accountId, debit: round2(row.debit), credit: round2(row.credit), description: row.description ?? null });
+      // Kostnadsställen och projekt: the row's objects, held to the rule.
+      const dimensions = await resolveDimensions(executor, { costCenterId: row.costCenterId, projectId: row.projectId });
+      out.push({ accountId: row.accountId, debit: round2(row.debit), credit: round2(row.credit), description: row.description ?? null, ...dimensions });
     }
     return out;
   }
@@ -483,7 +501,11 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       }
     }
     const rows: VerificationRowWrite[] = [{ accountId: ledgerAccountId, debit: incoming ? gross : 0, credit: incoming ? 0 : gross, description: null }];
-    rows.push({ accountId: counter.id, debit: incoming ? 0 : net, credit: incoming ? net : 0, description: null });
+    // Kostnadsställen och projekt: the rule's objects on the counter row only
+    // (never the bank or the VAT row). A closed/inactive object on the rule is
+    // dropped like any default — the booking must not fail on the register.
+    const dimensions = await resolveDimensions(executor, {}, { fallback: { costCenterId: rule.costCenterId, projectId: rule.projectId } });
+    rows.push({ accountId: counter.id, debit: incoming ? 0 : net, credit: incoming ? net : 0, description: null, ...dimensions });
     if (vatAccountId && vat > 0) rows.push({ accountId: vatAccountId, debit: incoming ? 0 : vat, credit: incoming ? vat : 0, description: null });
     return rows;
   }
@@ -1082,8 +1104,10 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
 
     async createRule(input: CreateBankRuleInput, userId: string): Promise<BankRuleView> {
       await requireRuleAccount(input.accountNumber);
+      // Kostnadsställen och projekt: must exist and be pickable.
+      const dimensions = await resolveDimensions(db, { costCenterId: input.costCenterId, projectId: input.projectId });
       const sortOrder = input.sortOrder ?? (await repo.maxRuleSortOrder()) + 10;
-      const [row] = await repo.insertRules(db, [{ ...input, vatCode: input.vatCode ?? null, description: input.description ?? null, sortOrder }]);
+      const [row] = await repo.insertRules(db, [{ ...input, ...dimensions, vatCode: input.vatCode ?? null, description: input.description ?? null, sortOrder }]);
       await audit(db, "bank_rule", row!.id, "created", { textContains: row!.textContains, accountNumber: row!.accountNumber }, userId);
       return ruleView(row!);
     },
@@ -1095,6 +1119,16 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       const values: Partial<BankRuleRow> = {};
       for (const key of ["textContains", "direction", "accountNumber", "vatCode", "description", "autoBook", "active", "sortOrder"] as const) {
         if (input[key] !== undefined) (values as Record<string, unknown>)[key] = input[key];
+      }
+      // Kostnadsställen och projekt: a new choice must be pickable, the kept one may stay.
+      if (input.costCenterId !== undefined || input.projectId !== undefined) {
+        const dimensions = await resolveDimensions(
+          db,
+          { costCenterId: input.costCenterId, projectId: input.projectId },
+          { existing: { costCenterId: existing.costCenterId, projectId: existing.projectId } }
+        );
+        values.costCenterId = dimensions.costCenterId;
+        values.projectId = dimensions.projectId;
       }
       const row = await repo.updateRule(id, values);
       if (!row) throw new BankRuleNotFoundError(id);
@@ -1154,7 +1188,10 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
   }
 
   async function ruleView(row: BankRuleRow): Promise<BankRuleView> {
-    const account = await repo.findLedgerAccountByNumber(db, row.accountNumber);
+    const [account, refs] = await Promise.all([
+      repo.findLedgerAccountByNumber(db, row.accountNumber),
+      loadDimensionRefs(db, { costCenterIds: [row.costCenterId], projectIds: [row.projectId] }),
+    ]);
     return {
       id: row.id,
       textContains: row.textContains,
@@ -1166,6 +1203,10 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       autoBook: row.autoBook,
       active: row.active,
       sortOrder: row.sortOrder,
+      costCenterId: row.costCenterId,
+      projectId: row.projectId,
+      costCenter: dimensionRef(refs.costCenters, row.costCenterId),
+      project: dimensionRef(refs.projects, row.projectId),
     };
   }
 

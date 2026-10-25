@@ -15,6 +15,7 @@ import { contentDisposition } from "../../system/service/content-disposition.js"
 import { errorBody } from "../../system/service/error-body.js";
 import { AccountingPeriodLockedError } from "../service/accounting-period-lock.js";
 import { AccountNotFoundError, AlreadyReversedError, InactiveAccountError } from "../service/economy.service.js";
+import { CostCenterInactiveError, CostCenterNotFoundError } from "../service/dimension-check.js";
 import {
   MissingPostingAccountError,
   NoAccountingPeriodForPostingError,
@@ -57,10 +58,10 @@ export async function fixedAssetRoutes(app: FastifyInstance, opts: { service: Fi
   const ekonomi = { preHandler: requirePermission("ekonomi") };
 
   function categoryError(err: unknown, reply: Reply) {
-    if (err instanceof FixedAssetCategoryNotFoundError || err instanceof AccountNotFoundError) {
+    if (err instanceof FixedAssetCategoryNotFoundError || err instanceof AccountNotFoundError || err instanceof CostCenterNotFoundError) {
       return reply.code(404).send(errorBody(err));
     }
-    if (err instanceof InactiveAccountError || err instanceof FixedAssetCategoryAccountsNotDistinctError) {
+    if (err instanceof InactiveAccountError || err instanceof FixedAssetCategoryAccountsNotDistinctError || err instanceof CostCenterInactiveError) {
       return reply.code(400).send(errorBody(err));
     }
     if (

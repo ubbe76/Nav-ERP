@@ -1,8 +1,11 @@
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
+  articleGroups,
   articles,
+  costCenters,
   fiscalYears,
+  projects,
   paymentBatches,
   paymentBatchItems,
   paymentTerms,
@@ -29,6 +32,7 @@ import {
   type PaymentReferenceKind,
 } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { domesticVatCodeIdSql, loadPostingVatCodes, loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle — same seam
@@ -116,6 +120,9 @@ export type SupplierInvoiceRowWrite = {
   vatRate: number | null;
   // Momskod for this row; null = the invoice's own code.
   vatCodeId: string | null;
+  // Kostnadsställen och projekt: the row's own; null = the header's.
+  costCenterId: string | null;
+  projectId: string | null;
 };
 
 export type SupplierInvoiceHeaderWrite = {
@@ -138,11 +145,16 @@ export type SupplierInvoiceHeaderWrite = {
   // Momskod (migration 0142). Omitted = MP25 (svensk moms 25 %, which posts
   // a 0 kr VAT invoice exactly like before the momskoder).
   vatCodeId?: string;
+  // Kostnadsställen och projekt (header = the rows' default). Omitted = none.
+  costCenterId?: string | null;
+  projectId?: string | null;
 };
 
 // Header patch (draft only) — amounts already stringified for the numeric
 // columns by the service.
 type HeaderPatch = {
+  costCenterId?: string | null;
+  projectId?: string | null;
   supplierId?: string;
   currency?: string;
   exchangeRate?: string;
@@ -164,6 +176,12 @@ type HeaderPatch = {
 // The row's own momskod, joined under its own alias (the header's code is
 // joined as vat_codes itself in findById).
 const rowVatCodes = alias(vatCodes, "row_vat_codes");
+// Kostnadsställen och projekt: the header's and the rows' objects as
+// { id, code, name } | null.
+const headerCostCenters = alias(costCenters, "si_cost_centers");
+const headerProjects = alias(projects, "si_projects");
+const rowCostCenters = alias(costCenters, "si_row_cost_centers");
+const rowProjects = alias(projects, "si_row_projects");
 
 export function createSupplierInvoiceRepository(db: Db) {
   return {
@@ -175,6 +193,28 @@ export function createSupplierInvoiceRepository(db: Db) {
     async findSupplierById(id: string) {
       const [row] = await db.select().from(suppliers).where(eq(suppliers.id, id));
       return row ?? null;
+    },
+
+    // Kostnadsställen och projekt: the linked purchase order's project —
+    // follows into the invoice header when the underlag comes from an IO.
+    async findPurchaseOrderProject(purchaseOrderId: string): Promise<string | null> {
+      const [row] = await db.select({ projectId: purchaseOrders.projectId }).from(purchaseOrders).where(eq(purchaseOrders.id, purchaseOrderId));
+      return row?.projectId ?? null;
+    },
+
+    // The article group's Kostnadsställe (förval) — a new row's default.
+    async findArticleGroupDefaultCostCenter(articleId: string): Promise<string | null> {
+      const [row] = await db
+        .select({ defaultCostCenterId: articleGroups.defaultCostCenterId })
+        .from(articles)
+        .leftJoin(articleGroups, eq(articleGroups.id, articles.groupId))
+        .where(eq(articles.id, articleId));
+      return row?.defaultCostCenterId ?? null;
+    },
+
+    // The one dimension rule (dimension-check.ts) through this connection.
+    async resolveDimensions(input: DimensionInput, opts: ResolveDimensionsOptions = {}) {
+      return resolveDimensions(db, input, opts);
     },
 
     // Valuta: the linked purchase order's currency and rate — the fallback
@@ -232,6 +272,8 @@ export function createSupplierInvoiceRepository(db: Db) {
             paymentReferenceKind: header.paymentReferenceKind,
             paymentReference: header.paymentReference,
             vatCodeId: header.vatCodeId ?? domesticVatCodeIdSql("MP25"),
+            costCenterId: header.costCenterId ?? null,
+            projectId: header.projectId ?? null,
             createdBy,
           })
           .returning();
@@ -258,6 +300,8 @@ export function createSupplierInvoiceRepository(db: Db) {
               vatAmount: String(r.vatAmount),
               vatRate: r.vatRate === null ? null : String(r.vatRate),
               vatCodeId: r.vatCodeId,
+              costCenterId: r.costCenterId,
+              projectId: r.projectId,
               createdAt: new Date(now + i),
             }))
           );
@@ -349,10 +393,15 @@ export function createSupplierInvoiceRepository(db: Db) {
           // Momskoder: the header's code (NOT NULL).
           vatCodeCode: vatCodes.code,
           vatCodeName: vatCodes.name,
+          // Kostnadsställen och projekt on the header.
+          costCenter: { id: headerCostCenters.id, code: headerCostCenters.code, name: headerCostCenters.name },
+          project: { id: headerProjects.id, code: headerProjects.code, name: headerProjects.name },
         })
         .from(supplierInvoices)
         .innerJoin(suppliers, eq(suppliers.id, supplierInvoices.supplierId))
         .innerJoin(vatCodes, eq(vatCodes.id, supplierInvoices.vatCodeId))
+        .leftJoin(headerCostCenters, eq(headerCostCenters.id, supplierInvoices.costCenterId))
+        .leftJoin(headerProjects, eq(headerProjects.id, supplierInvoices.projectId))
         .leftJoin(purchaseOrders, eq(purchaseOrders.id, supplierInvoices.purchaseOrderId))
         .leftJoin(verifications, eq(verifications.id, supplierInvoices.verificationId))
         .leftJoin(verificationSeries, eq(verificationSeries.id, verifications.seriesId))
@@ -380,9 +429,14 @@ export function createSupplierInvoiceRepository(db: Db) {
           // Momskoder: the row's own code (null = the invoice's).
           vatCodeCode: rowVatCodes.code,
           vatCodeName: rowVatCodes.name,
+          // Kostnadsställen och projekt: the row's own (null = the header's).
+          costCenter: { id: rowCostCenters.id, code: rowCostCenters.code, name: rowCostCenters.name },
+          project: { id: rowProjects.id, code: rowProjects.code, name: rowProjects.name },
         })
         .from(supplierInvoiceRows)
         .leftJoin(rowVatCodes, eq(rowVatCodes.id, supplierInvoiceRows.vatCodeId))
+        .leftJoin(rowCostCenters, eq(rowCostCenters.id, supplierInvoiceRows.costCenterId))
+        .leftJoin(rowProjects, eq(rowProjects.id, supplierInvoiceRows.projectId))
         .leftJoin(articles, eq(articles.id, supplierInvoiceRows.articleId))
         .leftJoin(purchaseOrderRows, eq(purchaseOrderRows.id, supplierInvoiceRows.purchaseOrderRowId))
         .leftJoin(purchaseOrders, eq(purchaseOrders.id, purchaseOrderRows.purchaseOrderId))
@@ -473,6 +527,9 @@ export function createSupplierInvoiceRepository(db: Db) {
               articleGroupId: articles.groupId,
               vatCodeId: supplierInvoiceRows.vatCodeId,
               lineAmount: supplierInvoiceRows.lineAmount,
+              // Kostnadsställen och projekt: the row's own, null = the header's.
+              costCenterId: supplierInvoiceRows.costCenterId,
+              projectId: supplierInvoiceRows.projectId,
             })
             .from(supplierInvoiceRows)
             .leftJoin(articles, eq(articles.id, supplierInvoiceRows.articleId))
@@ -500,11 +557,15 @@ export function createSupplierInvoiceRepository(db: Db) {
               vatAmount: Number(invoice.vatAmount),
               grossAmount: Number(invoice.grossAmount),
               vatCode: vatCodesById.get(invoice.vatCodeId)!,
+              costCenterId: invoice.costCenterId,
+              projectId: invoice.projectId,
             },
             postingRows.map((row) => ({
               articleGroupId: row.articleGroupId,
               lineAmount: Number(row.lineAmount),
               vatCode: row.vatCodeId ? vatCodesById.get(row.vatCodeId)! : null,
+              costCenterId: row.costCenterId,
+              projectId: row.projectId,
             })),
             userId
           );
@@ -709,6 +770,8 @@ export function createSupplierInvoiceRepository(db: Db) {
           vatAmount: String(row.vatAmount),
           vatRate: row.vatRate === null ? null : String(row.vatRate),
           vatCodeId: row.vatCodeId,
+          costCenterId: row.costCenterId,
+          projectId: row.projectId,
         })
         .returning();
       return inserted!;
@@ -736,6 +799,8 @@ export function createSupplierInvoiceRepository(db: Db) {
           vatAmount: String(row.vatAmount),
           vatRate: row.vatRate === null ? null : String(row.vatRate),
           vatCodeId: row.vatCodeId,
+          costCenterId: row.costCenterId,
+          projectId: row.projectId,
         })
         .where(and(eq(supplierInvoiceRows.id, rowId), eq(supplierInvoiceRows.supplierInvoiceId, invoiceId)))
         .returning();

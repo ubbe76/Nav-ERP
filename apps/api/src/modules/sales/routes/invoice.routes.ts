@@ -44,6 +44,7 @@ import {
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { ShipmentNotBillableError, VatNumberRequiredError } from "../service/sales.errors.js";
 import { InvalidVatCodeError } from "../../economy/service/document-vat-code.js";
+import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 import { CustomerNotFoundError, InvalidStatusTransitionError } from "../service/sales.service.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -79,10 +80,14 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
       err instanceof InvoiceNotFoundError ||
       err instanceof ArchivedReminderNotFoundError ||
       err instanceof InvoiceRowNotFoundError ||
-      err instanceof CustomerNotFoundError
+      err instanceof CustomerNotFoundError ||
+      err instanceof CostCenterNotFoundError ||
+      err instanceof ProjectNotFoundError
     ) {
       return reply.code(404).send(errorBody(err as Error));
     }
+    // Kostnadsställen och projekt: an inactive/closed object picked on a row.
+    if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
     // The automatkontering (B2) failures all mean the same thing to the
     // caller as a rejected transition: the invoice is untouched and stays a
     // draft until the bookkeeping side is fixed (period reopened, account

@@ -15,6 +15,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth";
+import { costCenters, projects } from "./dimensions";
 import { verificationSeries, verifications } from "./economy";
 
 // Snabbare manuell bokföring (bokföringsgranskningen etapp 3, migration
@@ -55,6 +56,10 @@ export const verificationTemplateRows = pgTable(
     description: varchar("description", { length: 255 }),
     debit: numeric("debit", { precision: 14, scale: 2 }),
     credit: numeric("credit", { precision: 14, scale: 2 }),
+    // Kostnadsställen och projekt: carried onto the verification rows a
+    // template or a recurring post creates.
+    costCenterId: uuid("cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
     sortOrder: integer("sort_order").notNull(),
   },
   (table) => [

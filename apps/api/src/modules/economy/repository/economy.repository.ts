@@ -4,7 +4,9 @@ import {
   accountingPeriods,
   accounts,
   articleGroups,
+  costCenters,
   fiscalYears,
+  projects,
   fixedAssetDepreciationRuns,
   fixedAssets,
   postingRules,
@@ -28,10 +30,12 @@ import {
   type ListVerificationsQuery,
   type UpdateAccountInput,
   type UpdateVerificationSeriesInput,
+  type DimensionIds,
   type VatBoxSetting,
 } from "@navet/shared";
 import { generateMonthlyPeriods } from "../service/month-periods.js";
 import { allocateVerificationNumber } from "../service/verification-number.js";
+import { resolveDimensions, type DimensionInput } from "../service/dimension-check.js";
 
 // Internal signal thrown INSIDE bookVerification's transaction when the
 // draft-conditioned UPDATE matches no row — forces a rollback that undoes
@@ -85,6 +89,14 @@ class NoPeriodAtBookingError extends Error {
     super();
   }
 }
+// Fifth in-tx check (kostnadsställen och projekt): a row on an account with
+// Kräver kostnadsställe but no cost center. Read under the same lock as the
+// others — the flag can be set between the draft and Bokför.
+class CostCenterRequiredAtBookingError extends Error {
+  constructor(public accountNumbers: string[]) {
+    super();
+  }
+}
 
 // Maps the booking body's internal signals to the discriminated failure
 // result bookVerification() returns — null for any other error. Exported for
@@ -96,7 +108,8 @@ export type BookFailure =
   | { ok: false; reason: "unbalanced"; totalDebit: number; totalCredit: number }
   | { ok: false; reason: "inactive_account"; accountId: string }
   | { ok: false; reason: "locked_period"; date: string }
-  | { ok: false; reason: "no_period"; date: string };
+  | { ok: false; reason: "no_period"; date: string }
+  | { ok: false; reason: "cost_center_required"; accountNumbers: string[] };
 
 export function bookFailureReason(err: unknown): BookFailure | null {
   if (err instanceof BookRaceError) return { ok: false, reason: "race" };
@@ -107,6 +120,7 @@ export function bookFailureReason(err: unknown): BookFailure | null {
   if (err instanceof InactiveAccountAtBookingError) return { ok: false, reason: "inactive_account", accountId: err.accountId };
   if (err instanceof LockedPeriodAtBookingError) return { ok: false, reason: "locked_period", date: err.date };
   if (err instanceof NoPeriodAtBookingError) return { ok: false, reason: "no_period", date: err.date };
+  if (err instanceof CostCenterRequiredAtBookingError) return { ok: false, reason: "cost_center_required", accountNumbers: err.accountNumbers };
   return null;
 }
 
@@ -144,7 +158,32 @@ export type VerificationRowWrite = {
   debit: number;
   credit: number;
   description: string | null;
+  // Kostnadsställen och projekt — omitted = none (direct repository callers
+  // and the compositions that predate the dimensions).
+  costCenterId?: string | null;
+  projectId?: string | null;
 };
+
+// The aliases every row read joins so a row can show its objects as
+// { id, code, name } | null.
+const rowCostCenters = alias(costCenters, "row_cost_centers");
+const rowProjects = alias(projects, "row_projects");
+const rowDimensionColumns = {
+  costCenter: {
+    id: rowCostCenters.id,
+    code: rowCostCenters.code,
+    name: rowCostCenters.name,
+  },
+  project: {
+    id: rowProjects.id,
+    code: rowProjects.code,
+    name: rowProjects.name,
+  },
+};
+
+// drizzle hands a nested selection off a LEFT JOIN back as null when the
+// join found nothing, so the { id, code, name } | null shape needs no
+// post-processing.
 
 // A posting rule ready to write — vatCodeId null = "Alla momskoder".
 export type PostingRuleWrite = {
@@ -172,7 +211,12 @@ export function createEconomyRepository(db: Db) {
     if (!existing || existing.status !== "draft") throw new BookRaceError();
 
     const lockedRows = await tx
-      .select({ accountId: verificationRows.accountId, debit: verificationRows.debit, credit: verificationRows.credit })
+      .select({
+        accountId: verificationRows.accountId,
+        debit: verificationRows.debit,
+        credit: verificationRows.credit,
+        costCenterId: verificationRows.costCenterId,
+      })
       .from(verificationRows)
       .where(eq(verificationRows.verificationId, id));
     if (lockedRows.length < 2) throw new TooFewRowsAtBookingError();
@@ -183,7 +227,7 @@ export function createEconomyRepository(db: Db) {
 
     const accountIds = [...new Set(lockedRows.map((row) => row.accountId))];
     const lockedAccounts = await tx
-      .select({ id: accounts.id, active: accounts.active })
+      .select({ id: accounts.id, number: accounts.number, active: accounts.active, costCenterRequired: accounts.costCenterRequired })
       .from(accounts)
       .where(inArray(accounts.id, accountIds));
     const accountById = new Map(lockedAccounts.map((account) => [account.id, account] as const));
@@ -191,6 +235,18 @@ export function createEconomyRepository(db: Db) {
       const account = accountById.get(accountId);
       if (!account || !account.active) throw new InactiveAccountAtBookingError(accountId);
     }
+
+    // Kräver kostnadsställe: a manual booking never passes without one on
+    // such an account (the automatkontering books through the poster, which
+    // does not come here — it warns instead).
+    const missingCostCenter = [
+      ...new Set(
+        lockedRows
+          .filter((row) => row.costCenterId === null && accountById.get(row.accountId)?.costCenterRequired)
+          .map((row) => accountById.get(row.accountId)!.number)
+      ),
+    ].sort();
+    if (missingCostCenter.length > 0) throw new CostCenterRequiredAtBookingError(missingCostCenter);
 
     // Fourth re-check, under the same lock: `existing.date` is the ONLY
     // value proven fresh at this point — a concurrent header PATCH could
@@ -256,6 +312,8 @@ export function createEconomyRepository(db: Db) {
           debit: String(r.debit),
           credit: String(r.credit),
           description: r.description,
+          costCenterId: r.costCenterId ?? null,
+          projectId: r.projectId ?? null,
           createdAt: new Date(now + i),
         }))
       );
@@ -308,7 +366,7 @@ export function createEconomyRepository(db: Db) {
       return row ?? null;
     },
 
-    async createAccount(input: { number: string; name: string; vatBox: VatBoxSetting | null }) {
+    async createAccount(input: { number: string; name: string; vatBox: VatBoxSetting | null; costCenterRequired?: boolean }) {
       const [row] = await db.insert(accounts).values(input).returning();
       return row!;
     },
@@ -537,6 +595,8 @@ export function createEconomyRepository(db: Db) {
       seriesId?: string;
       status?: ("draft" | "booked")[];
       search?: string;
+      costCenterId?: string;
+      projectId?: string;
     }) {
       const conditions = [];
       if (query.search) conditions.push(ilike(verifications.description, ilikePattern(query.search)));
@@ -545,6 +605,16 @@ export function createEconomyRepository(db: Db) {
       if (query.status) conditions.push(inArray(verifications.status, query.status));
       if (query.from) conditions.push(gte(verifications.date, query.from));
       if (query.to) conditions.push(lte(verifications.date, query.to));
+      // Kostnadsställen och projekt: verifications with at least one row on
+      // the object(s) — every row of those verifications is then listed.
+      const dimensionConditions = [];
+      if (query.costCenterId) dimensionConditions.push(eq(verificationRows.costCenterId, query.costCenterId));
+      if (query.projectId) dimensionConditions.push(eq(verificationRows.projectId, query.projectId));
+      if (dimensionConditions.length > 0) {
+        conditions.push(
+          sql`exists (select 1 from ${verificationRows} where ${verificationRows.verificationId} = ${verifications.id} and ${and(...dimensionConditions)})`
+        );
+      }
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       const headers = await db
@@ -566,9 +636,12 @@ export function createEconomyRepository(db: Db) {
           ...getTableColumns(verificationRows),
           accountNumber: accounts.number,
           accountName: accounts.name,
+          ...rowDimensionColumns,
         })
         .from(verificationRows)
         .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
+        .leftJoin(rowCostCenters, eq(rowCostCenters.id, verificationRows.costCenterId))
+        .leftJoin(rowProjects, eq(rowProjects.id, verificationRows.projectId))
         .where(
           inArray(
             verificationRows.verificationId,
@@ -629,6 +702,17 @@ export function createEconomyRepository(db: Db) {
       await tx.insert(accounts).values(input).onConflictDoNothing({ target: accounts.number });
     },
 
+    // Kostnadsställen och projekt: every object of the two registers for the
+    // SIE export's #OBJEKT lines — inactive and closed ones included, since a
+    // booked row may still carry them.
+    async listSieObjects(): Promise<{ dimension: 1 | 6; code: string; name: string }[]> {
+      const [cc, pr] = await Promise.all([
+        db.select({ code: costCenters.code, name: costCenters.name }).from(costCenters).orderBy(asc(costCenters.code)),
+        db.select({ code: projects.code, name: projects.name }).from(projects).orderBy(asc(projects.code)),
+      ]);
+      return [...cc.map((row) => ({ dimension: 1 as const, ...row })), ...pr.map((row) => ({ dimension: 6 as const, ...row }))];
+    },
+
     // Every BOOKED verification of a fiscal year with its rows, for the SIE
     // export. Ordered series then ascending number — the SIE spec requires
     // ascending verification numbers within a series. Two queries, no N+1.
@@ -655,9 +739,14 @@ export function createEconomyRepository(db: Db) {
           debit: verificationRows.debit,
           credit: verificationRows.credit,
           description: verificationRows.description,
+          // SIE object codes (#TRANS {1 "kod" 6 "kod"}).
+          costCenterCode: rowCostCenters.code,
+          projectCode: rowProjects.code,
         })
         .from(verificationRows)
         .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
+        .leftJoin(rowCostCenters, eq(rowCostCenters.id, verificationRows.costCenterId))
+        .leftJoin(rowProjects, eq(rowProjects.id, verificationRows.projectId))
         .where(
           inArray(
             verificationRows.verificationId,
@@ -684,6 +773,8 @@ export function createEconomyRepository(db: Db) {
           debit: row.debit,
           credit: row.credit,
           description: row.description,
+          costCenterCode: row.costCenterCode,
+          projectCode: row.projectCode,
         })),
       }));
     },
@@ -713,9 +804,19 @@ export function createEconomyRepository(db: Db) {
       if (!header) return null;
 
       const rows = await db
-        .select({ ...getTableColumns(verificationRows), accountNumber: accounts.number, accountName: accounts.name })
+        .select({
+          ...getTableColumns(verificationRows),
+          accountNumber: accounts.number,
+          accountName: accounts.name,
+          // Kräver kostnadsställe — the service turns a required-but-missing
+          // cost center into the card's `warnings`.
+          accountCostCenterRequired: accounts.costCenterRequired,
+          ...rowDimensionColumns,
+        })
         .from(verificationRows)
         .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
+        .leftJoin(rowCostCenters, eq(rowCostCenters.id, verificationRows.costCenterId))
+        .leftJoin(rowProjects, eq(rowProjects.id, verificationRows.projectId))
         .where(eq(verificationRows.verificationId, id))
         .orderBy(asc(verificationRows.createdAt));
 
@@ -844,6 +945,8 @@ export function createEconomyRepository(db: Db) {
               debit: String(r.debit),
               credit: String(r.credit),
               description: r.description,
+              costCenterId: r.costCenterId ?? null,
+              projectId: r.projectId ?? null,
               createdAt: new Date(now + i),
             }))
           );
@@ -954,6 +1057,8 @@ export function createEconomyRepository(db: Db) {
             debit: String(row.debit),
             credit: String(row.credit),
             description: row.description,
+            costCenterId: row.costCenterId ?? null,
+            projectId: row.projectId ?? null,
           })
           .returning();
         return inserted ?? null;
@@ -977,7 +1082,14 @@ export function createEconomyRepository(db: Db) {
         if (!verification || verification.status !== "draft") return null;
         const [updated] = await tx
           .update(verificationRows)
-          .set({ accountId: row.accountId, debit: String(row.debit), credit: String(row.credit), description: row.description })
+          .set({
+            accountId: row.accountId,
+            debit: String(row.debit),
+            credit: String(row.credit),
+            description: row.description,
+            costCenterId: row.costCenterId ?? null,
+            projectId: row.projectId ?? null,
+          })
           .where(and(eq(verificationRows.id, rowId), eq(verificationRows.verificationId, verificationId)))
           .returning();
         return updated ?? null;
@@ -1010,10 +1122,16 @@ export function createEconomyRepository(db: Db) {
     // than run unfiltered, which would silently compute the wrong thing).
     // openingFrom: the opening window's lower bound (a result account's
     // fiscal-year start); absent = all history.
-    async getLedger(accountId: string, from?: string, to?: string, openingFrom?: string) {
+    // Kostnadsställen och projekt: `filter` keeps only the rows carrying the
+    // object(s) — for the opening balance too, so the running balance is the
+    // object's own.
+    async getLedger(accountId: string, from?: string, to?: string, openingFrom?: string, filter: { costCenterId?: string; projectId?: string } = {}) {
+      const dimensionConditions = [];
+      if (filter.costCenterId) dimensionConditions.push(eq(verificationRows.costCenterId, filter.costCenterId));
+      if (filter.projectId) dimensionConditions.push(eq(verificationRows.projectId, filter.projectId));
       let openingBalance = "0";
       if (from) {
-        const openingConditions = [eq(verificationRows.accountId, accountId), eq(verifications.status, "booked"), lt(verifications.date, from)];
+        const openingConditions = [eq(verificationRows.accountId, accountId), eq(verifications.status, "booked"), lt(verifications.date, from), ...dimensionConditions];
         if (openingFrom) openingConditions.push(gte(verifications.date, openingFrom));
         const [openingRow] = await db
           .select({
@@ -1025,7 +1143,7 @@ export function createEconomyRepository(db: Db) {
         openingBalance = openingRow?.opening ?? "0";
       }
 
-      const rowConditions = [eq(verificationRows.accountId, accountId), eq(verifications.status, "booked")];
+      const rowConditions = [eq(verificationRows.accountId, accountId), eq(verifications.status, "booked"), ...dimensionConditions];
       if (from) rowConditions.push(gte(verifications.date, from));
       if (to) rowConditions.push(lte(verifications.date, to));
 
@@ -1045,11 +1163,14 @@ export function createEconomyRepository(db: Db) {
           debit: verificationRows.debit,
           credit: verificationRows.credit,
           verificationId: verifications.id,
+          ...rowDimensionColumns,
         })
         .from(verificationRows)
         .innerJoin(verifications, eq(verifications.id, verificationRows.verificationId))
         .innerJoin(verificationSeries, eq(verificationSeries.id, verifications.seriesId))
         .innerJoin(fiscalYears, eq(fiscalYears.id, verifications.fiscalYearId))
+        .leftJoin(rowCostCenters, eq(rowCostCenters.id, verificationRows.costCenterId))
+        .leftJoin(rowProjects, eq(rowProjects.id, verificationRows.projectId))
         .where(and(...rowConditions))
         .orderBy(asc(verifications.date), asc(verifications.verificationNumber), asc(verificationSeries.code));
 
@@ -1061,8 +1182,26 @@ export function createEconomyRepository(db: Db) {
     // flat query. Account order comes first in the sort so the printout
     // groups per account; the (date, verificationNumber, seriesCode) trio
     // after it is getLedger's tie-break, kept identical on purpose.
-    async getGeneralLedgerRows(from: string, to: string, accountFrom: string, accountTo: string) {
-      return db
+    // Kostnadsställen och projekt: `filter` keeps only the rows carrying the
+    // object(s) — the opening balances come from readAccountBalances with
+    // the same filter, so the two never disagree.
+    async getGeneralLedgerRows(
+      from: string,
+      to: string,
+      accountFrom: string,
+      accountTo: string,
+      filter: { costCenterId?: string; projectId?: string } = {}
+    ) {
+      const conditions = [
+        eq(verifications.status, "booked"),
+        gte(verifications.date, from),
+        lte(verifications.date, to),
+        gte(accounts.number, accountFrom),
+        lte(accounts.number, accountTo),
+      ];
+      if (filter.costCenterId) conditions.push(eq(verificationRows.costCenterId, filter.costCenterId));
+      if (filter.projectId) conditions.push(eq(verificationRows.projectId, filter.projectId));
+      const rows = await db
         .select({
           accountId: verificationRows.accountId,
           accountNumber: accounts.number,
@@ -1074,27 +1213,29 @@ export function createEconomyRepository(db: Db) {
           debit: verificationRows.debit,
           credit: verificationRows.credit,
           verificationId: verifications.id,
+          ...rowDimensionColumns,
         })
         .from(verificationRows)
         .innerJoin(verifications, eq(verifications.id, verificationRows.verificationId))
         .innerJoin(verificationSeries, eq(verificationSeries.id, verifications.seriesId))
         .innerJoin(fiscalYears, eq(fiscalYears.id, verifications.fiscalYearId))
         .innerJoin(accounts, eq(accounts.id, verificationRows.accountId))
-        .where(
-          and(
-            eq(verifications.status, "booked"),
-            gte(verifications.date, from),
-            lte(verifications.date, to),
-            gte(accounts.number, accountFrom),
-            lte(accounts.number, accountTo)
-          )
-        )
+        .leftJoin(rowCostCenters, eq(rowCostCenters.id, verificationRows.costCenterId))
+        .leftJoin(rowProjects, eq(rowProjects.id, verificationRows.projectId))
+        .where(and(...conditions))
         .orderBy(
           asc(accounts.number),
           asc(verifications.date),
           asc(verifications.verificationNumber),
           asc(verificationSeries.code)
         );
+      return rows;
+    },
+
+    // Kostnadsställen och projekt: the one dimension check, through this
+    // repository's connection (the service never imports the db client).
+    async resolveRowDimensions(input: DimensionInput, existing: DimensionIds | null = null): Promise<DimensionIds> {
+      return resolveDimensions(db, input, { existing });
     },
 
     // --- Konteringsregler (B2 automatkontering) ---

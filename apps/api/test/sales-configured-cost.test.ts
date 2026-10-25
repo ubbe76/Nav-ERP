@@ -275,7 +275,8 @@ describe("configured rows — cost and margin", () => {
     );
     const linked = draft!.rows.find((r) => r.salesOrderRowId === orderRow!.id)!;
     expect(linked.configuration).not.toBeNull();
-    expect(Object.keys(linked).filter((k) => /cost/i.test(k))).toEqual([]);
+    // costCenterId/costCenter are the row's kostnadsställe, not a cost.
+    expect(Object.keys(linked).filter((k) => /cost/i.test(k) && !/^costCenter/.test(k))).toEqual([]);
     const serializedInvoice = JSON.stringify(draft);
     for (const leak of ["configurationCost", "configuration_cost", "selfCostPerUnit", "manufacturingCostPerUnit"]) {
       expect(serializedInvoice).not.toContain(leak);

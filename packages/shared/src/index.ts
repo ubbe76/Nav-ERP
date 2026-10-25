@@ -2,6 +2,7 @@ export * from "./article.js";
 export * from "./audit.js";
 export * from "./banking.js";
 export * from "./bank-reconciliation.js";
+export * from "./dimensions.js";
 export * from "./business-date.js";
 export * from "./coerce.js";
 export * from "./economy.js";

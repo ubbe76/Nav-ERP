@@ -117,6 +117,54 @@ export type PurchaseOrderRegisterQuery = z.infer<typeof purchaseOrderRegisterQue
 // Offertuppföljning (quote follow-up) — the quotes (quoted = true) created
 // in [from, to] (Stockholm days), optionally one customer's. The web's
 // default is the current year, so both dates are required here.
+// Projektrapport: one project's revenue, costs and result out of the booked
+// verification rows that carry it, per month and per account, plus the
+// customer orders pointing at the project. from/to optional = all time.
+export const projectReportQuerySchema = z
+  .object({
+    projectId: z.string().uuid(),
+    from: dayParam.optional(),
+    to: dayParam.optional(),
+  })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
+export type ProjectReportQuery = z.infer<typeof projectReportQuerySchema>;
+
+export interface ProjectReportMonth {
+  month: string; // YYYY-MM
+  revenue: number;
+  costs: number;
+  result: number;
+}
+
+// amount is the row's result contribution (credit − debit): revenue
+// positive, a cost negative — so Σ amount = result.
+export interface ProjectReportAccount {
+  accountNumber: string;
+  accountName: string;
+  amount: number;
+}
+
+export interface ProjectReportSalesOrder {
+  id: string;
+  orderNumber: string;
+  status: string;
+  // Σ rows (antal × à-pris × (1 − rabatt)) in SEK, like the offertuppföljning.
+  value: number;
+}
+
+export interface ProjectReport {
+  project: { id: string; code: string; name: string; status: string; customerName: string | null };
+  from: string | null;
+  to: string | null;
+  // revenue and costs are both positive; result = revenue − costs.
+  revenue: number;
+  costs: number;
+  result: number;
+  months: ProjectReportMonth[];
+  accounts: ProjectReportAccount[];
+  salesOrders: ProjectReportSalesOrder[];
+}
+
 export const quoteFollowupQuerySchema = z
   .object({
     from: dayParam,

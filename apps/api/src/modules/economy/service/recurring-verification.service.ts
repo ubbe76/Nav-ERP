@@ -19,6 +19,7 @@ import type {
 } from "../repository/recurring-verification.repository.js";
 import type { TemplateRowWrite, VerificationTemplateRepository, VerificationTemplateView } from "../repository/verification-template.repository.js";
 import { AccountingPeriodLockedError, FiscalYearClosedError } from "./accounting-period-lock.js";
+import { CostCenterInactiveError, CostCenterNotFoundError, CostCenterRequiredError, ProjectClosedError, ProjectNotFoundError } from "./dimension-check.js";
 import {
   InactiveAccountError,
   NoAccountingPeriodError,
@@ -141,6 +142,9 @@ export function runErrorMessage(err: unknown): string | null {
   if (err instanceof UnbalancedVerificationError) return "Verifikatet balanserar inte";
   if (err instanceof TooFewVerificationRowsError) return "Mallen har färre än två rader";
   if (err instanceof RecurringTemplateIncompleteError) return err.reason;
+  // Kostnadsställen och projekt on the template's rows.
+  if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError || err instanceof CostCenterRequiredError) return err.message;
+  if (err instanceof CostCenterNotFoundError || err instanceof ProjectNotFoundError) return "Ett kostnadsställe eller projekt på mallen finns inte längre";
   if (isBookkeepingLockViolation(err)) return "Bokföringen är låst för datumet";
   return null;
 }
@@ -252,7 +256,14 @@ export function createRecurringVerificationService(deps: {
       const debit = row.debit ?? 0;
       const credit = row.credit ?? 0;
       if (debit <= 0 && credit <= 0) throw new RecurringTemplateIncompleteError(`Mallens rad för konto ${row.accountNumber} saknar belopp`);
-      return { accountId: accountsByNumber.get(row.accountNumber)!.id, debit: round2(debit), credit: round2(credit), description: row.description };
+      return {
+        accountId: accountsByNumber.get(row.accountNumber)!.id,
+        debit: round2(debit),
+        credit: round2(credit),
+        description: row.description,
+        costCenterId: row.costCenterId,
+        projectId: row.projectId,
+      };
     });
   }
 
@@ -271,6 +282,14 @@ export function createRecurringVerificationService(deps: {
       ];
       const accountsByNumber = await economy.accountsByNumbers(tx, numbers);
       const rows = buildRows(template, accountsByNumber, post, month);
+      // Kostnadsställen och projekt: a closed project / inactive cost center
+      // on the template stops the month like an inactive account does — the
+      // run row records it and Kör nu retries once the register is fixed.
+      for (const row of rows) {
+        if ((row.costCenterId ?? null) !== null || (row.projectId ?? null) !== null) {
+          await economy.resolveRowDimensions({ costCenterId: row.costCenterId ?? null, projectId: row.projectId ?? null });
+        }
+      }
       const description = post.allocation
         ? allocationDescription(template.description, month, post.startMonth, post.allocation.months)
         : template.description;
@@ -505,12 +524,12 @@ export function createRecurringVerificationService(deps: {
       const templateRows: TemplateRowWrite[] =
         input.kind === "cost"
           ? [
-              { accountNumber: input.resultAccount, description: null, debit: null, credit: null },
-              { accountNumber: input.balanceAccount, description: null, debit: null, credit: null },
+              { accountNumber: input.resultAccount, description: null, debit: null, credit: null, costCenterId: null, projectId: null },
+              { accountNumber: input.balanceAccount, description: null, debit: null, credit: null, costCenterId: null, projectId: null },
             ]
           : [
-              { accountNumber: input.balanceAccount, description: null, debit: null, credit: null },
-              { accountNumber: input.resultAccount, description: null, debit: null, credit: null },
+              { accountNumber: input.balanceAccount, description: null, debit: null, credit: null, costCenterId: null, projectId: null },
+              { accountNumber: input.resultAccount, description: null, debit: null, credit: null, costCenterId: null, projectId: null },
             ];
 
       // The template's name must be unique; a repeated fördelning of the

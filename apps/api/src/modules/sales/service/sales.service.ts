@@ -968,8 +968,14 @@ export function createSalesService(
         }
       }
       await validateRegisterRefs(input);
+      // Kostnadsställen och projekt: a new choice must be active/open, the
+      // kept one may stay as it is.
+      const dimensions = await repo.resolveDimensions(
+        { costCenterId: input.costCenterId, projectId: input.projectId },
+        { existing: { costCenterId: order.costCenterId, projectId: order.projectId } }
+      );
       const { currency: _currency, exchangeRate: _exchangeRate, ...headerInput } = input;
-      const result = await repo.updateSalesOrderHeaderWithAddress(orderId, { ...headerInput, ...currencyFields });
+      const result = await repo.updateSalesOrderHeaderWithAddress(orderId, { ...headerInput, ...currencyFields, ...dimensions });
       if (!result.ok) {
         if (result.reason === "not_found") throw new SalesOrderNotFoundError(orderId);
         if (result.reason === "currency_locked") throw new SalesOrderCurrencyLockedError(order.orderNumber);
@@ -1051,9 +1057,11 @@ export function createSalesService(
       const duplicate = firstDuplicateArticleId(rows);
       if (duplicate) throw new RowVariantExistsError(await articleNumberOf(duplicate));
       const quoteValidUntil = await resolveQuoteValidUntil(input);
+      // Kostnadsställen och projekt on the header: must exist and be pickable.
+      const dimensions = await repo.resolveDimensions({ costCenterId: input.costCenterId, projectId: input.projectId });
       let created;
       try {
-        created = await repo.createQuote({ ...input, rows, quoteValidUntil, currency, exchangeRate }, createdBy);
+        created = await repo.createQuote({ ...input, ...dimensions, rows, quoteValidUntil, currency, exchangeRate }, createdBy);
       } catch (err) {
         // Backstop for the index, caught outside the repository's transaction
         // (which has already rolled back).

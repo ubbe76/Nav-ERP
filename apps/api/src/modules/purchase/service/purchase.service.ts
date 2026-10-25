@@ -734,6 +734,8 @@ export function createPurchaseService(
       await validateRegisterRefs(input);
       const book = await repo.vatCodeBook();
       await validateDefaultVatCode(input.defaultVatCodeId, book);
+      // Kostnadsställe (förval): must exist and be active.
+      await repo.resolveDimensions({ costCenterId: input.defaultCostCenterId });
       const normalized = normalizeSupplierPaymentDetails(input);
       const problems = supplierPaymentDetailsProblems(paymentDetailsOf(normalized), paymentContextOf(normalized));
       if (Object.keys(problems).length > 0) throw new InvalidSupplierPaymentDetailsError(problems);
@@ -749,6 +751,12 @@ export function createPurchaseService(
 
     async updateSupplier(id: string, input: UpdateSupplierInput) {
       await validateRegisterRefs(input);
+      // Kostnadsställe (förval): a new choice must be active; the kept one may stay.
+      if (input.defaultCostCenterId !== undefined) {
+        const current = await repo.findSupplierById(id);
+        if (!current) throw new SupplierNotFoundError(id);
+        await repo.resolveDimensions({ costCenterId: input.defaultCostCenterId }, { existing: { costCenterId: current.defaultCostCenterId, projectId: null } });
+      }
       const book = await repo.vatCodeBook();
       // Read only when it matters: a code is being sent (unchanged may be
       // inactive) or the payment details need the merged state below.
@@ -844,7 +852,9 @@ export function createPurchaseService(
     async createPurchaseOrder(input: CreatePurchaseOrderInput, createdBy: string) {
       const supplier = await repo.findSupplierById(input.supplierId);
       if (!supplier) throw new SupplierNotFoundError(input.supplierId);
-      return repo.createPurchaseOrder(input, createdBy, supplier.currency);
+      // Projekt (kostnadsställen och projekt): must exist and be open.
+      const { projectId } = await repo.resolveDimensions({ projectId: input.projectId });
+      return repo.createPurchaseOrder({ ...input, projectId }, createdBy, supplier.currency);
     },
 
     // Header fields (leveransdatum, notering, växelkurs, Er/Vår referens,
@@ -858,7 +868,9 @@ export function createPurchaseService(
         throw new InvalidStatusTransitionError(`Cannot change the header of an order in status "${order.status}"`);
       }
       await validateRegisterRefs(input);
-      await repo.updatePurchaseOrderHeader(orderId, input);
+      // Projekt: a new choice must be open; the order's own may stay closed.
+      const { projectId } = await repo.resolveDimensions({ projectId: input.projectId }, { existing: { costCenterId: null, projectId: order.projectId } });
+      await repo.updatePurchaseOrderHeader(orderId, { ...input, projectId });
       return repo.findPurchaseOrderById(orderId);
     },
 

@@ -18,6 +18,9 @@ import {
 import { packageTypes, parcelKindEnum, units } from "./register";
 import { users } from "./auth";
 import { numberSeries } from "./system";
+// Last on purpose: dimensions.ts reaches sales.ts, which cycles back here —
+// everything above must be evaluated before that chain starts.
+import { costCenters } from "./dimensions";
 
 // Same pattern as the company logo in system.ts — no built-in bytea helper
 // in drizzle-orm/pg-core.
@@ -47,6 +50,9 @@ export const articleGroups = pgTable(
     numberSeriesKey: varchar("number_series_key", { length: 50 }).references(() => numberSeries.key, {
       onDelete: "set null",
     }),
+    // Kostnadsställe (förval): what an invoice/supplier invoice row for an
+    // article in this group gets when the document header has none.
+    defaultCostCenterId: uuid("default_cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [check("code_three_or_four_digits", sql`${table.code} ~ '^[0-9]{3,4}$'`)]

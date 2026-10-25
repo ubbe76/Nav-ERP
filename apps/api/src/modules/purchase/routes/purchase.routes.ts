@@ -67,6 +67,7 @@ import { MaterialShortageError } from "../../manufacturing/service/manufacturing
 import { MoReportStockMissingError } from "../../manufacturing/service/manufacturing.service.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
+import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { SeriesExhaustedError } from "../../system/service/number-series.js";
 import {
@@ -106,7 +107,8 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       const supplier = await service.createSupplier(input);
       return reply.code(201).send(supplier);
     } catch (err) {
-      if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof RegisterEntryNotFoundError || err instanceof CostCenterNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof CostCenterInactiveError) return reply.code(400).send(errorBody(err));
       if (err instanceof DuplicateSupplierNumberError) return reply.code(409).send(errorBody(err));
       // Retry storm on the number series (all five stepped-over numbers taken)
       // is a retryable conflict, not a server fault — without this it fell
@@ -127,7 +129,8 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       return await service.updateSupplier(req.params.id, input);
     } catch (err) {
       if (err instanceof SupplierNotFoundError) return reply.code(404).send(errorBody(err));
-      if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof RegisterEntryNotFoundError || err instanceof CostCenterNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof CostCenterInactiveError) return reply.code(400).send(errorBody(err));
       if (err instanceof DuplicateSupplierNumberError) return reply.code(409).send(errorBody(err));
       // body.problems: field → Swedish problem (the supplier card marks the fields).
       if (err instanceof InvalidSupplierPaymentDetailsError) return reply.code(400).send({ ...errorBody(err), problems: err.problems });
@@ -424,7 +427,8 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       const order = await service.createPurchaseOrder(input, req.user!.id);
       return reply.code(201).send(order);
     } catch (err) {
-      if (err instanceof SupplierNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof SupplierNotFoundError || err instanceof ProjectNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });
@@ -435,9 +439,10 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
     try {
       return await service.updatePurchaseOrderHeader(req.params.id, input);
     } catch (err) {
-      if (err instanceof PurchaseOrderNotFoundError || err instanceof RegisterEntryNotFoundError) {
+      if (err instanceof PurchaseOrderNotFoundError || err instanceof RegisterEntryNotFoundError || err instanceof ProjectNotFoundError) {
         return reply.code(404).send(errorBody(err));
       }
+      if (err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       throw err;
     }

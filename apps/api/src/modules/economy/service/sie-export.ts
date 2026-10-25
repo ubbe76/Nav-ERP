@@ -27,8 +27,24 @@ export interface SieExportData {
     number: number;
     date: string;
     description: string;
-    rows: { accountNumber: string; amount: number; description: string | null }[];
+    // Kostnadsställen och projekt: the row's SIE object codes (dimension 1
+    // and 6), written as {1 "kod" 6 "kod"} in #TRANS.
+    rows: { accountNumber: string; amount: number; description: string | null; costCenterCode?: string | null; projectCode?: string | null }[];
   }[];
+  // The objects of the two fixed dimensions (#DIM 1 Kostnadsställe, #DIM 6
+  // Projekt): every object the registers hold, inactive ones included, so
+  // every code a #TRANS names is declared. Omitted/empty = no #DIM lines.
+  objects?: { dimension: 1 | 6; code: string; name: string }[];
+}
+
+export const SIE_DIMENSION_NAMES = { 1: "Kostnadsställe", 6: "Projekt" } as const;
+
+// {1 "100" 6 "P1"} — the #TRANS object list; {} when the row carries none.
+export function sieObjectList(row: { costCenterCode?: string | null; projectCode?: string | null }): string {
+  const parts: string[] = [];
+  if (row.costCenterCode) parts.push(`1 ${sieText(row.costCenterCode)}`);
+  if (row.projectCode) parts.push(`6 ${sieText(row.projectCode)}`);
+  return `{${parts.join(" ")}}`;
 }
 
 // Reuses B6a's interval table so the SIE account type and the balance sheet
@@ -64,6 +80,16 @@ export function buildSieFile(data: SieExportData): Buffer {
   for (const account of data.accounts) {
     lines.push(`#KONTO ${account.number} ${sieText(account.name)}`);
     lines.push(`#KTYP ${account.number} ${account.type}`);
+  }
+
+  // --- Dimensions (kostnadsställen och projekt): the two fixed dimensions
+  // and their objects, only when there is anything to declare. ---
+  const objects = data.objects ?? [];
+  for (const dimension of [1, 6] as const) {
+    const own = objects.filter((object) => object.dimension === dimension);
+    if (own.length === 0) continue;
+    lines.push(`#DIM ${dimension} ${sieText(SIE_DIMENSION_NAMES[dimension])}`);
+    for (const object of own) lines.push(`#OBJEKT ${dimension} ${sieText(object.code)} ${sieText(object.name)}`);
   }
 
   // --- Balances. #IB/#UB are the BALANCE accounts' opening/closing balances
@@ -104,7 +130,7 @@ export function buildSieFile(data: SieExportData): Buffer {
       // transdate is skipped (the row inherits the verification's date), but
       // it must still be present as an empty field when a transtext follows.
       const suffix = row.description ? ` "" ${sieText(row.description)}` : "";
-      lines.push(`\t#TRANS ${row.accountNumber} {} ${sieAmount(row.amount)}${suffix}`);
+      lines.push(`\t#TRANS ${row.accountNumber} ${sieObjectList(row)} ${sieAmount(row.amount)}${suffix}`);
     }
     lines.push("}");
   }

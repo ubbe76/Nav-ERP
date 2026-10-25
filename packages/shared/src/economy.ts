@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
+import { dimensionFields, dimensionFilterQuery, incomeStatementGroupBySchema } from "./dimensions.js";
 
 // --- Kontoplan (chart of accounts) ---
 // Momsruta per konto (ekonomi etapp 2, delprojekt 1; every box of the
@@ -93,6 +94,8 @@ export const createAccountSchema = z.object({
   // Omitted = the BAS default for the number (defaultVatBox); null = not
   // classified; a box or "none" = explicit.
   vatBox: vatBoxSettingSchema.nullable().optional(),
+  // Kräver kostnadsställe (kostnadsställen och projekt).
+  costCenterRequired: z.boolean().optional(),
 });
 export type CreateAccountInput = z.infer<typeof createAccountSchema>;
 
@@ -101,6 +104,7 @@ export const updateAccountSchema = z
     name: z.string().trim().min(1).max(100).optional(),
     active: z.boolean().optional(),
     vatBox: vatBoxSettingSchema.nullable().optional(),
+    costCenterRequired: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateAccountInput = z.infer<typeof updateAccountSchema>;
@@ -170,6 +174,8 @@ export const verificationRowInputSchema = z
     debit: blankSafe(z.coerce.number().nonnegative()),
     credit: blankSafe(z.coerce.number().nonnegative()),
     description: z.string().max(255).optional(),
+    // Kostnadsställen och projekt: the row's SIE objects.
+    ...dimensionFields,
   })
   .refine((data) => (data.debit > 0) !== (data.credit > 0), {
     message: "Exactly one of debit or credit must be greater than zero",
@@ -207,6 +213,9 @@ export const ledgerQuerySchema = z.object({
   accountId: z.string().uuid(),
   from: z.string().date().optional(),
   to: z.string().date().optional(),
+  // Kostnadsställen och projekt: only the rows carrying the object(s); the
+  // opening balance is filtered the same way.
+  ...dimensionFilterQuery,
 });
 export type LedgerQuery = z.infer<typeof ledgerQuerySchema>;
 
@@ -378,8 +387,16 @@ export type BalanceSheetQuery = z.infer<typeof balanceSheetQuerySchema>;
 
 // The income statement is strictly period-bound — class 3–8 is never closed,
 // so accumulating would make year 2 show year 1's revenue.
+// Kostnadsställen och projekt: an optional object filter (one cost center
+// and/or one project) and `groupBy` — one column per object plus "Utan"
+// (columns + amounts[] in the response); without it the shape is unchanged.
 export const incomeStatementQuerySchema = z
-  .object({ from: z.string().date(), to: z.string().date() })
+  .object({
+    from: z.string().date(),
+    to: z.string().date(),
+    ...dimensionFilterQuery,
+    groupBy: incomeStatementGroupBySchema.optional(),
+  })
   .refine((range) => range.to >= range.from, { message: "to must not be before from", path: ["to"] });
 export type IncomeStatementQuery = z.infer<typeof incomeStatementQuerySchema>;
 
@@ -401,6 +418,8 @@ export const generalLedgerQuerySchema = z
       .enum(["true", "false"])
       .optional()
       .transform((value) => value !== "false"),
+    // Kostnadsställen och projekt: only the rows carrying the object(s).
+    ...dimensionFilterQuery,
   })
   .refine((range) => range.to >= range.from, { message: "to must not be before from", path: ["to"] })
   .refine((range) => !range.accountFrom || !range.accountTo || range.accountTo >= range.accountFrom, {
@@ -419,6 +438,9 @@ export const verificationListReportQuerySchema = z
     seriesId: z.string().uuid().optional(),
     status: statusListParam(verificationStatusSchema.options),
     search: z.string().trim().optional(),
+    // Kostnadsställen och projekt: verifications with at least one row on
+    // the object(s); every row of those verifications is listed.
+    ...dimensionFilterQuery,
   })
   .refine((range) => !range.from || !range.to || range.to >= range.from, {
     message: "to must not be before from",
@@ -456,6 +478,7 @@ export const verificationTemplateRowInputSchema = z
     description: z.string().trim().max(255).nullable().optional(),
     debit: templateAmountSchema,
     credit: templateAmountSchema,
+    ...dimensionFields,
   })
   .refine((row) => !((row.debit ?? 0) > 0 && (row.credit ?? 0) > 0), {
     message: "A template row cannot have both debit and credit",
@@ -550,6 +573,9 @@ export const sieVerificationImportFieldsSchema = z.object({
   // An empty form field = omitted.
   seriesId: z.preprocess((value) => (value === "" ? undefined : value), z.string().uuid().optional()),
   mode: recurringVerificationModeSchema.default("draft"),
+  // Skapa saknade konton och objekt: the same field also creates the cost
+  // centers / projects the file's #TRANS object lists name but the registers
+  // lack (kostnadsställen och projekt).
   createMissingAccounts: z
     .enum(["true", "false"])
     .optional()

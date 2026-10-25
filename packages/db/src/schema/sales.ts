@@ -22,6 +22,7 @@ import {
 import { articleGroups, articles } from "./article";
 import { users } from "./auth";
 import { bankFileEntries } from "./banking";
+import { costCenters, projects } from "./dimensions";
 import { vatCodes, verifications } from "./economy";
 import { carriers, deliveryDayModeEnum, deliveryTerms, paymentTerms, quoteLossReasons, units } from "./register";
 import { stockLocations, stockTransactions } from "./stock";
@@ -303,6 +304,11 @@ export const salesOrders = pgTable("sales_orders", {
   freightProductId: uuid("freight_product_id").references(() => freightProducts.id, { onDelete: "restrict" }),
   freightCarrierPrice: numeric("freight_carrier_price", { precision: 14, scale: 2 }),
   freightQuote: jsonb("freight_quote").$type<StoredRates>(),
+  // Kostnadsställen och projekt (migration 0149): the order's dimensions —
+  // the default for the invoice rows billed from it (the poster puts them on
+  // the revenue row). Header fields, editable like the terms.
+  costCenterId: uuid("cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
   status: salesOrderStatusEnum("status").notNull().default("quote"),
   expectedDeliveryDate: date("expected_delivery_date"),
   note: text("note"),
@@ -589,6 +595,11 @@ export const invoiceRows = pgTable(
     // linked (or of the credited invoice row); written once with the row,
     // never updated on an issued invoice.
     configuration: jsonb("configuration"),
+    // Kostnadsställen och projekt (migration 0149): defaulted from the order
+    // header, else the article group's Kostnadsställe (förval); the F
+    // verification carries them on the revenue row only.
+    costCenterId: uuid("cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

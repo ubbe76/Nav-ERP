@@ -83,6 +83,9 @@ export interface SieVerificationRow {
   debit: string;
   credit: string;
   description: string | null;
+  // Kostnadsställen och projekt: the row's object codes (null = none).
+  costCenterCode?: string | null;
+  projectCode?: string | null;
 }
 
 export interface SieVerification {
@@ -102,6 +105,8 @@ export interface SieRepositoryReader {
     offset: number;
   }): Promise<{ rows: { number: string; name: string }[]; total: number }>;
   listVerificationsForSie(fiscalYearId: string): Promise<SieVerification[]>;
+  // Kostnadsställen och projekt: every object of the two registers (#OBJEKT).
+  listSieObjects(): Promise<{ dimension: 1 | 6; code: string; name: string }[]>;
   findOpeningBalanceVerification(fiscalYearId: string): Promise<{ displayNumber: string } | null>;
   findLatestBookedDateBefore(date: string): Promise<string | null>;
   findAccountByNumberTx(tx: Tx, number: string): Promise<{ id: string } | null>;
@@ -155,6 +160,7 @@ export function createSieService(deps: {
         }));
 
       const verifications = await repo.listVerificationsForSie(fiscalYearId);
+      const objects = await repo.listSieObjects();
 
       const data: SieExportData = {
         program: { name: "Nav-ERP", version: programVersion },
@@ -183,8 +189,11 @@ export function createSieService(deps: {
             // #TRANS is debit-positive like the balances.
             amount: Number(row.debit) - Number(row.credit),
             description: row.description,
+            costCenterCode: row.costCenterCode,
+            projectCode: row.projectCode,
           })),
         })),
+        objects,
       };
 
       return {

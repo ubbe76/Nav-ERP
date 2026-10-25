@@ -1044,6 +1044,13 @@
       "when": 1792903779268,
       "tag": "0148_bankavstamning",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1792920682051,
+      "tag": "0149_kostnadsstallen",
+      "breakpoints": true
     }
   ]
 }

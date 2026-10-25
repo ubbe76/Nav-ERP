@@ -24,3 +24,7 @@ Rapporter-modulen och dess `rapporter`-rättighet; alla filter i URL:en.
 ## Offertuppföljning
 
 - `GET /reports/quote-followup` + `/csv` (rena `quote-followup.ts`), sidan `/rapporter/offertuppfoljning`. Utfall vunnen = confirmed/in_production/delivered/invoiced; hit rate = vunna/(vunna+förlorade) i antal och värde; makulerade utanför; värde = radernas nuvarande värde exkl. moms; Stockholmsmånad på skapandet; tak 10 000 ⇒ 400 `quote-followup-too-large`. Bara poster med `quoted = true` räknas (äldre ordrar inte, eftersom Ny kundorder också loggar `confirmed`). Statusarna och förlustorsakerna: `sales.md`.
+
+## Projektrapport
+
+- `GET /reports/project-report?projectId&from?&to?` + `/csv` (regel `rapporter`), sidan `/rapporter/projektrapport`. Rena `project-report.ts` (`buildProjectReport`) räknar bara **resultatkonton** (klass 3 intäkt kredit-positiv, 4–8 kostnad debet-positiv; ett balanskonto som bär projektet utelämnas) ur bokförda rader med `verification_rows.project_id`; `from`/`to` utelämnade = alla tider och svaret ekar då första/sista bokförda dag (null utan rader). Kundordrarna med `sales_orders.project_id` listas med radvärdet i SEK som offertuppföljningen. Okänt projekt ⇒ 404 `project-not-found`. Invarianterna för dimensionerna: `economy.md`.

@@ -36,6 +36,17 @@ import { classifyAccount } from "./bas-report-lines.js";
 // every economy error, same trick as generateMonthlyPeriods below.
 import { AccountingPeriodLockedError, FiscalYearClosedError } from "./accounting-period-lock.js";
 export { AccountingPeriodLockedError, FiscalYearClosedError };
+// Kostnadsställen och projekt: the dimension rule and its errors live in the
+// leaf dimension-check.ts (sales/purchase/banking share it); re-exported so
+// routes and tests keep one import surface for economy's errors.
+import { CostCenterRequiredError } from "./dimension-check.js";
+export {
+  CostCenterInactiveError,
+  CostCenterNotFoundError,
+  CostCenterRequiredError,
+  ProjectClosedError,
+  ProjectNotFoundError,
+} from "./dimension-check.js";
 // Month generation itself is a pure, DB-free helper that lives in the
 // leaf-like month-periods.ts (imported by economy.repository.ts too, inside
 // its create transaction) — re-exported here so this aggregator keeps
@@ -360,15 +371,24 @@ export function displayNumber(v: { status: string; seriesCode: string; yearLabel
 // and be active, and amounts are round2:ed before storage — zod's XOR refine
 // (verificationRowInputSchema) already guarantees the debit/credit shape by
 // the time input reaches here.
-async function resolveVerificationRow(repo: EconomyRepository, input: VerificationRowInput): Promise<VerificationRowWrite> {
+// `existing` (a PATCH of one row): an omitted dimension keeps the row's, and a
+// kept inactive/closed object is allowed — only a new choice is held to the
+// rule (dimension-check.ts).
+async function resolveVerificationRow(
+  repo: EconomyRepository,
+  input: VerificationRowInput,
+  existing: { costCenterId: string | null; projectId: string | null } | null = null
+): Promise<VerificationRowWrite> {
   const account = await repo.findAccountById(input.accountId);
   if (!account) throw new AccountNotFoundError(input.accountId);
   if (!account.active) throw new InactiveAccountError(input.accountId);
+  const dimensions = await repo.resolveRowDimensions(input, existing);
   return {
     accountId: input.accountId,
     debit: round2(input.debit),
     credit: round2(input.credit),
     description: input.description ?? null,
+    ...dimensions,
   };
 }
 
@@ -397,9 +417,29 @@ export function bookFailureError(id: string, failure: BookFailure): Error {
       return new AccountingPeriodLockedError(failure.date);
     case "no_period":
       return new NoAccountingPeriodError(failure.date);
+    case "cost_center_required":
+      return new CostCenterRequiredError(failure.accountNumbers);
     case "race":
       return new InvalidVerificationStateError(`Cannot book verification ${id}: it is no longer a draft`);
   }
+}
+
+// Kräver kostnadsställe, as the card shows it: one text per row on such an
+// account without a cost center. Derived at every read — a manual
+// verification can never be booked like this (the booking refuses), so a
+// booked one with warnings came from the automatkontering (or had the flag
+// set after the fact); the alert cost_center_missing lists the same rows.
+export function costCenterWarnings(
+  rows: { accountNumber: string; accountName: string; accountCostCenterRequired: boolean; costCenterId: string | null }[]
+): string[] {
+  const seen = new Set<string>();
+  const warnings: string[] = [];
+  for (const row of rows) {
+    if (!row.accountCostCenterRequired || row.costCenterId !== null || seen.has(row.accountNumber)) continue;
+    seen.add(row.accountNumber);
+    warnings.push(`Konto ${row.accountNumber} ${row.accountName} kräver kostnadsställe — raden saknar det`);
+  }
+  return warnings;
 }
 
 // What a create-and-book composition hands in: the header without the fiscal
@@ -440,7 +480,12 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       // stays null (the user chose "Ej angiven").
       const vatBox = input.vatBox === undefined ? defaultVatBox(input.number) : input.vatBox;
       try {
-        return await repo.createAccount({ number: input.number, name: input.name, vatBox });
+        return await repo.createAccount({
+          number: input.number,
+          name: input.name,
+          vatBox,
+          ...(input.costCenterRequired !== undefined ? { costCenterRequired: input.costCenterRequired } : {}),
+        });
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateAccountNumberError(input.number);
         throw err;
@@ -614,7 +659,16 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       const files = await repo.listVerificationFiles(id);
       const fixedAsset = await repo.findFixedAssetLink(id);
       const yearEnd = await repo.findYearEndLink(id);
-      return { ...verification, displayNumber: displayNumber(verification), reversedBy, files, fixedAsset, yearEnd };
+      return {
+        ...verification,
+        displayNumber: displayNumber(verification),
+        reversedBy,
+        files,
+        fixedAsset,
+        yearEnd,
+        // Kostnadsställen och projekt: Kräver kostnadsställe without one.
+        warnings: costCenterWarnings(verification.rows),
+      };
     },
 
     // --- Underlag (kvitto, kontoutdrag, avtal) ---
@@ -792,11 +846,15 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
           warnings.push(`Konto ${row.accountNumber} ${row.accountName} är inaktivt — raden utelämnades`);
           continue;
         }
+        // The objects follow — a closed project on the source stays on the
+        // copy (it is the same booking again); the register decides later.
         rows.push({
           accountId: row.accountId,
           debit: round2(Number(row.debit)),
           credit: round2(Number(row.credit)),
           description: row.description,
+          costCenterId: row.costCenterId,
+          projectId: row.projectId,
         });
       }
 
@@ -884,7 +942,11 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       const existingRow = await repo.findRow(verificationId, rowId);
       if (!existingRow) throw new VerificationRowNotFoundError(rowId);
 
-      const row = await repo.updateRow(verificationId, rowId, await resolveVerificationRow(repo, input));
+      const row = await repo.updateRow(
+        verificationId,
+        rowId,
+        await resolveVerificationRow(repo, input, { costCenterId: existingRow.costCenterId, projectId: existingRow.projectId })
+      );
       if (!row) {
         throw new InvalidVerificationStateError(`Cannot change rows on verification ${verificationId}: it is no longer a draft`);
       }
@@ -983,11 +1045,15 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
       // draft must not land in a closed year (createVerification's guard).
       if (year.status === "closed") throw new FiscalYearClosedError(year.label);
 
+      // The objects mirror too, so source + reversal net to zero per
+      // account AND per dimension.
       const mirroredRows: VerificationRowWrite[] = sourceDetail.rows.map((row) => ({
         accountId: row.accountId,
         debit: round2(Number(row.credit)),
         credit: round2(Number(row.debit)),
         description: row.description,
+        costCenterId: row.costCenterId,
+        projectId: row.projectId,
       }));
 
       let header;
@@ -1039,7 +1105,11 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
         query.from && classifyAccount(account.number).report !== "balanceSheet"
           ? (await repo.findFiscalYearForDate(query.from))?.startDate
           : undefined;
-      const { openingBalance, rows } = await repo.getLedger(query.accountId, query.from, query.to, openingFrom);
+      const filter = {
+        ...(query.costCenterId ? { costCenterId: query.costCenterId } : {}),
+        ...(query.projectId ? { projectId: query.projectId } : {}),
+      };
+      const { openingBalance, rows } = await repo.getLedger(query.accountId, query.from, query.to, openingFrom, filter);
 
       let running = round2(Number(openingBalance));
       const openingBalanceNumber = running;
@@ -1061,6 +1131,8 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
           credit: row.credit,
           verificationId: row.verificationId,
           balance: running,
+          costCenter: row.costCenter,
+          project: row.project,
         };
       });
 

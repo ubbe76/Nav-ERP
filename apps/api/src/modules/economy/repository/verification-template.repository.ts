@@ -1,6 +1,9 @@
 import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   accounts,
+  costCenters,
+  projects,
   recurringVerifications,
   verificationSeries,
   verificationTemplateRows,
@@ -18,7 +21,13 @@ export type TemplateRowWrite = {
   description: string | null;
   debit: number | null;
   credit: number | null;
+  // Kostnadsställen och projekt — carried onto the verification rows.
+  costCenterId: string | null;
+  projectId: string | null;
 };
+
+const rowCostCenters = alias(costCenters, "template_row_cost_centers");
+const rowProjects = alias(projects, "template_row_projects");
 
 export type TemplateHeaderWrite = {
   name: string;
@@ -35,6 +44,10 @@ export interface VerificationTemplateRowView {
   description: string | null;
   debit: number | null;
   credit: number | null;
+  costCenterId: string | null;
+  projectId: string | null;
+  costCenter: { id: string; code: string; name: string } | null;
+  project: { id: string; code: string; name: string } | null;
   sortOrder: number;
 }
 
@@ -63,10 +76,16 @@ export function createVerificationTemplateRepository(db: Db) {
         description: verificationTemplateRows.description,
         debit: verificationTemplateRows.debit,
         credit: verificationTemplateRows.credit,
+        costCenterId: verificationTemplateRows.costCenterId,
+        projectId: verificationTemplateRows.projectId,
+        costCenter: { id: rowCostCenters.id, code: rowCostCenters.code, name: rowCostCenters.name },
+        project: { id: rowProjects.id, code: rowProjects.code, name: rowProjects.name },
         sortOrder: verificationTemplateRows.sortOrder,
       })
       .from(verificationTemplateRows)
       .leftJoin(accounts, eq(accounts.number, verificationTemplateRows.accountNumber))
+      .leftJoin(rowCostCenters, eq(rowCostCenters.id, verificationTemplateRows.costCenterId))
+      .leftJoin(rowProjects, eq(rowProjects.id, verificationTemplateRows.projectId))
       .where(inArray(verificationTemplateRows.templateId, templateIds))
       .orderBy(asc(verificationTemplateRows.templateId), asc(verificationTemplateRows.sortOrder));
     for (const row of rows) {
@@ -78,6 +97,10 @@ export function createVerificationTemplateRepository(db: Db) {
         description: row.description,
         debit: row.debit === null ? null : Number(row.debit),
         credit: row.credit === null ? null : Number(row.credit),
+        costCenterId: row.costCenterId,
+        projectId: row.projectId,
+        costCenter: row.costCenter,
+        project: row.project,
         sortOrder: row.sortOrder,
       });
       byTemplate.set(row.templateId, list);
@@ -112,6 +135,8 @@ export function createVerificationTemplateRepository(db: Db) {
         description: row.description,
         debit: row.debit === null ? null : String(row.debit),
         credit: row.credit === null ? null : String(row.credit),
+        costCenterId: row.costCenterId,
+        projectId: row.projectId,
         sortOrder: index,
       }))
     );
