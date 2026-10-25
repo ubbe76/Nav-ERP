@@ -227,6 +227,19 @@ describe("huvudboken och verifikationslistan", () => {
     const csv = await reports.getVerificationListCsv({ projectId: project.id });
     expect(csv.content.split("\n")[0]).toContain("Kostnadsställe;Projekt");
   });
+
+  it("filters the paginated verification list (the Verifikat page) on the objects, total included", async () => {
+    const { workshop, assembly, project, v1, v3 } = await setup();
+    const base = { limit: 50, offset: 0 };
+    const byWorkshop = await economy.listVerifications({ ...base, costCenterId: workshop.id });
+    expect(byWorkshop.rows.map((v) => v.id).sort()).toEqual([v1.id, v3.id].sort());
+    expect(byWorkshop.total).toBe(2);
+    const byAssembly = await economy.listVerifications({ ...base, costCenterId: assembly.id });
+    expect(byAssembly.total).toBe(1);
+    const both = await economy.listVerifications({ ...base, costCenterId: assembly.id, projectId: project.id });
+    expect(both.total).toBe(0);
+    expect((await economy.listVerifications(base)).total).toBe(4);
+  });
 });
 
 describe("projektrapporten", () => {

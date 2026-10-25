@@ -255,7 +255,7 @@ function CostCenterForm({
   const del = useDeleteWithMove<CostCenter>({
     basePath: "/api/v1/cost-centers",
     entry: costCenter ?? { id: "", code: "", name: "", active: true },
-    others: costCenters.filter((c) => c.id !== costCenter?.id),
+    others: costCenters.filter((c) => c.id !== costCenter?.id && c.active),
     singular: "kostnadsstället",
     onDone,
     onError: setError,
@@ -438,7 +438,7 @@ function ProjectForm({
   const del = useDeleteWithMove<Project>({
     basePath: "/api/v1/projects",
     entry: project ?? { id: "", code: "", name: "", active: true, status: "open", customerId: null, customerName: null, startDate: null, endDate: null },
-    others: projects.filter((p) => p.id !== project?.id),
+    others: projects.filter((p) => p.id !== project?.id && p.active && p.status === "open"),
     singular: "projektet",
     onDone,
     onError: setError,

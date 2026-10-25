@@ -162,6 +162,9 @@ export const listVerificationsQuerySchema = listQuerySchema.extend({
   fiscalYearId: z.string().uuid().optional(),
   seriesId: z.string().uuid().optional(),
   status: statusListParam(verificationStatusSchema.options),
+  // Verifications with at least one row on the kostnadsställe/projekt.
+  costCenterId: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
 });
 export type ListVerificationsQuery = z.infer<typeof listVerificationsQuerySchema>;
 

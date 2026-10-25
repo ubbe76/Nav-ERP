@@ -181,6 +181,16 @@ const rowDimensionColumns = {
   },
 };
 
+// Kostnadsställen och projekt: verifications with at least one row on the
+// object(s). Shared by the list page and the verifikationslista printout.
+function verificationDimensionCondition(query: { costCenterId?: string; projectId?: string }) {
+  const dimensionConditions = [];
+  if (query.costCenterId) dimensionConditions.push(eq(verificationRows.costCenterId, query.costCenterId));
+  if (query.projectId) dimensionConditions.push(eq(verificationRows.projectId, query.projectId));
+  if (dimensionConditions.length === 0) return undefined;
+  return sql`exists (select 1 from ${verificationRows} where ${verificationRows.verificationId} = ${verifications.id} and ${and(...dimensionConditions)})`;
+}
+
 // drizzle hands a nested selection off a LEFT JOIN back as null when the
 // join found nothing, so the { id, code, name } | null shape needs no
 // post-processing.
@@ -561,6 +571,8 @@ export function createEconomyRepository(db: Db) {
       if (query.fiscalYearId) conditions.push(eq(verifications.fiscalYearId, query.fiscalYearId));
       if (query.seriesId) conditions.push(eq(verifications.seriesId, query.seriesId));
       if (query.status) conditions.push(inArray(verifications.status, query.status));
+      const dimensionCondition = verificationDimensionCondition(query);
+      if (dimensionCondition) conditions.push(dimensionCondition);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       // seriesCode/yearLabel joined here so the service can build the
@@ -605,16 +617,9 @@ export function createEconomyRepository(db: Db) {
       if (query.status) conditions.push(inArray(verifications.status, query.status));
       if (query.from) conditions.push(gte(verifications.date, query.from));
       if (query.to) conditions.push(lte(verifications.date, query.to));
-      // Kostnadsställen och projekt: verifications with at least one row on
-      // the object(s) — every row of those verifications is then listed.
-      const dimensionConditions = [];
-      if (query.costCenterId) dimensionConditions.push(eq(verificationRows.costCenterId, query.costCenterId));
-      if (query.projectId) dimensionConditions.push(eq(verificationRows.projectId, query.projectId));
-      if (dimensionConditions.length > 0) {
-        conditions.push(
-          sql`exists (select 1 from ${verificationRows} where ${verificationRows.verificationId} = ${verifications.id} and ${and(...dimensionConditions)})`
-        );
-      }
+      // Every row of the matching verifications is then listed.
+      const dimensionCondition = verificationDimensionCondition(query);
+      if (dimensionCondition) conditions.push(dimensionCondition);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       const headers = await db
