@@ -83,7 +83,7 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
     slug: "forsaljning",
     title: "Försäljning",
     file: "forsaljning.md",
-    description: "Kunder med import från CSV, offert, kundorder, leverans och fakturering.",
+    description: "Kunder med import från CSV, offert, kundorder, leverans, fakturering och räntefakturering.",
     group: "Flöden",
   },
   {
@@ -118,7 +118,7 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
     slug: "ekonomi",
     title: "Ekonomi",
     file: "ekonomi.md",
-    description: "Kontoplan, räkenskapsår och perioder, verifikat, huvudboken, momskoder, momsrapporten med fil till Skatteverket, importmoms, periodisk sammanställning, valutakurser från Riksbanken, automatkontering, konteringsregler, balansräkning, resultaträkning och SIE-filer.",
+    description: "Kontoplan, räkenskapsår och perioder, verifikat, huvudboken, momskoder, momsrapporten med fil till Skatteverket, importmoms, periodisk sammanställning, valutakurser från Riksbanken, referensränta för dröjsmålsränta, automatkontering, konteringsregler, balansräkning, resultaträkning och SIE-filer.",
     group: "Flöden",
   },
   {

@@ -938,6 +938,16 @@ function VillkorTab({
   const [collectiveInvoicing, setCollectiveInvoicing] = useState(
     isCustomer ? (partner as Customer).collectiveInvoicing : false
   );
+  // Dröjsmålsränta (Räntefakturering): charged unless switched off for this
+  // customer; Avtalad räntesats blank = enligt räntelagen; Förseningsersättning
+  // never applies to a privatperson.
+  const [lateInterest, setLateInterest] = useState(isCustomer ? (partner as Customer).lateInterest : true);
+  const [lateInterestRate, setLateInterestRate] = useState(
+    isCustomer && (partner as Customer).lateInterestRate !== null && (partner as Customer).lateInterestRate !== undefined
+      ? String(Number((partner as Customer).lateInterestRate))
+      : ""
+  );
+  const [lateFee, setLateFee] = useState(isCustomer ? (partner as Customer).lateFee : true);
   const [invoiceDelivery, setInvoiceDelivery] = useState<"email" | "peppol">(
     isCustomer ? (partner as Customer).invoiceDelivery : "email"
   );
@@ -992,6 +1002,13 @@ function VillkorTab({
       setError("Transportdagar måste vara ett heltal 0–60 eller tomt för systemets förval");
       return;
     }
+    // Avtalad räntesats: blank = null (enligt räntelagen), else a % at or above 0.
+    const agreedRateText = lateInterestRate.trim().replace(",", ".");
+    const agreedRate = agreedRateText === "" ? null : Number(agreedRateText);
+    if (isCustomer && agreedRate !== null && (!Number.isFinite(agreedRate) || agreedRate < 0)) {
+      setError("Avtalad räntesats måste vara ett tal som är 0 eller större, eller tomt för räntelagens ränta");
+      return;
+    }
     setPending(true);
     try {
       await apiFetch(`${endpointBase}/${partner.id}`, {
@@ -1013,6 +1030,11 @@ function VillkorTab({
             ? { discountPercent: discountPercent.trim() === "" ? 0 : Number(discountPercent) }
             : {}),
           ...(isCustomer ? { privatePerson, collectiveInvoicing, reverseChargeConstruction } : {}),
+          // Förseningsersättning is hidden for a privatperson — what is sent
+          // stays as it was saved.
+          ...(isCustomer
+            ? { lateInterest, lateInterestRate: agreedRate, ...(!privatePerson ? { lateFee } : {}) }
+            : {}),
           ...(!isCustomer ? { defaultVatCodeId: defaultVatCodeId || null, defaultCostCenterId: defaultCostCenterId || null } : {}),
           // E-faktura: a private person never gets Peppol invoices, so the
           // fields are hidden — and what is sent stays as it was saved.
@@ -1071,6 +1093,42 @@ function VillkorTab({
               Tjänsterader till en svensk kund som själv är byggföretag får momskoden Omvänd betalningsskyldighet,
               Sverige — fakturan skrivs ut utan moms och kräver kundens VAT-nummer på formen SE + tio siffror + 01.
               Varor påverkas inte.
+            </FormHint>
+            <FormRow>
+              <Field label="Dröjsmålsränta" htmlFor="lateInterest">
+                <Toggle id="lateInterest" checked={lateInterest} onChange={(e) => setLateInterest(e.target.checked)} />
+              </Field>
+              {!privatePerson && (
+                <Field label="Förseningsersättning" htmlFor="lateFee">
+                  <Toggle id="lateFee" checked={lateFee} onChange={(e) => setLateFee(e.target.checked)} />
+                </Field>
+              )}
+            </FormRow>
+            {lateInterest && (
+              <>
+                <Field label="Avtalad räntesats (%)" htmlFor="lateInterestRate">
+                  <Input
+                    id="lateInterestRate"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    size="sm"
+                    value={lateInterestRate}
+                    onChange={(e) => setLateInterestRate(e.target.value)}
+                  />
+                </Field>
+                <FormHint attached>
+                  Tomt = enligt räntelagen (referensräntan plus räntemarginalen). En avtalad räntesats är den totala
+                  räntan i procent per år och gäller i stället för räntelagens.
+                </FormHint>
+              </>
+            )}
+            <FormHint attached>
+              Dröjsmålsränta och förseningsersättning debiteras bara när Debitera dröjsmålsränta är på under
+              Konteringsregler, och faktureras under Försäljning → Räntefakturering.
+              {privatePerson
+                ? " Förseningsersättning (450 kr) gäller bara fakturor till företag och kan inte debiteras en privatperson."
+                : ""}
             </FormHint>
           </>
         )}

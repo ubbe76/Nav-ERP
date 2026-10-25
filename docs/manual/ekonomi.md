@@ -2,7 +2,7 @@
 
 Ekonomimodulen i Nav|ERP är grundbokföringen: kontoplan, räkenskapsår med löpande perioder, manuella verifikat som bokförs till ett löpnummer, och den härledda huvudboken som visar ett valt kontos rörelser och saldon. Manuella verifikat registreras direkt i en tabell med kontosök, automatisk motrad och momshjälp, och återkommande bokningar och kostnader som ska fördelas över flera månader sköts med **Verifikatmallar** och **Återkommande verifikat**, se [Verifikat](#verifikat), [Verifikatmallar](#verifikatmallar) och [Återkommande verifikat](#aterkommande-verifikat). Utöver de manuella verifikaten bokför **automatkonteringen** kund- och leverantörsfakturor åt dig, se [Automatkontering](#automatkontering) och [Konteringsregler](#konteringsregler) nedan. Hur en rad beskattas — svensk moms, EU-handel, export, omvänd moms eller import — avgörs av **momskoderna**, se [Momskoder](#momskoder), och **momsrapporten** sammanställer momsdeklarationens alla rutor per period och ger dig deklarationen som fil till Skatteverket, se [Momsrapport](#momsrapport) och [Importmoms](#importmoms). Har du sålt till företag i andra EU-länder sammanställer **Periodisk sammanställning** försäljningen per köparens momsnummer och ger dig filen till Skatteverket, se [Periodisk sammanställning](#periodisk-sammanstallning). **Bankavstämning** stämmer av bankkontot mot kontoutdraget från banken och visar vad som saknas i bokföringen, se [Bankavstämning](#bankavstamning). Leverantörsfakturor och utbetalningar i utländsk valuta räknas om till kronor med **valutakurser** från Riksbanken eller egna kurser, se [Valutakurser](#valutakurser). Resultatet kan följas per avdelning och projekt med **kostnadsställen** och **projekt**, se [Kostnadsställen och projekt](#kostnadsstallen-och-projekt). Ovanpå grundbokföringen finns även de härledda ekonomirapporterna **balansräkning** och **resultaträkning**, se [Balansräkning](#balansrakning) och [Resultaträkning](#resultatrakning). Med **Budget** planerar du intäkter och kostnader per konto, månad och kostnadsställe och jämför dem mot utfallet i resultaträkningen, se [Budget](#budget). Hela Ekonomi-sektionen kräver rättigheten **Ekonomi** i användarens behörighetsgrupp (administratörer har den alltid) — varken menyn eller sidorna visas för andra, se [Behörighetsgrupper](/hjalp/system#behorighetsgrupper).
 
-Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, **Verifikatmallar**, **Återkommande verifikat**, Huvudbok, **Bankavstämning**, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, **Budget**, **Periodisk sammanställning**, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, **Bankkonton**, **Bankregler**, **Valutakurser**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
+Menyvalet **Ekonomi** öppnar modulens sida, där ekonomifunktionerna ligger grupperade i ett rutnät: **Bokföring** (Verifikat, **Verifikatmallar**, **Återkommande verifikat**, Huvudbok, **Bankavstämning**, Anläggningsregister, Bokslut), **Rapporter** (Balansräkning, Resultaträkning, Momsrapport, **Budget**, **Periodisk sammanställning**, Avskrivningsplan) och **Grunddata** (Kontoplan, Räkenskapsår, Konteringsregler, **Momskoder**, **Bankkonton**, **Bankregler**, **Valutakurser**, **Referensränta**, Anläggningsgrupper, SIE-filer). Hela modulen kräver rättigheten **Ekonomi**.
 
 ## Kontoplan
 
@@ -436,6 +436,16 @@ Listan visar kurserna med den nyaste dagen först: **Datum**, **Valuta**, **Kurs
 
 Hela sidan kräver rättigheten **Ekonomi**, som resten av modulen.
 
+## Referensränta
+
+**Ekonomi → Referensränta** håller Riksbankens referensränta per kalenderhalvår — grunden för [dröjsmålsräntan](/hjalp/forsaljning#rantefakturering). Räntan fastställs den 1 januari och den 1 juli, och dröjsmålsräntan är referensräntan för halvåret plus **Räntemarginal (procentenheter)** (8 enligt räntelagen). Sidan öppnas av den som har rättigheten **Ekonomi** eller **Försäljning**; knapparna visas för den som får skriva, alltså **Försäljning**, som för kundfakturorna.
+
+Listan visar halvåren med det senaste först: **Gäller från** (1 januari eller 1 juli), halvåret, **Räntesats** och **Källa** (**Sveriges Riksbank** eller **Manuell**).
+
+**Hämta från Riksbanken** öppnar en dialog med **Från** och **Till** (förvalt de senaste fyra halvåren) och hämtar referensräntan för varje halvår perioden berör. Notisen berättar hur många räntor som hämtades — *2 referensräntor hämtade (2026-01-01 – 2026-10-25). Källa: Sveriges Riksbank.* Svarar Riksbanken inte får du ett felmeddelande och kan försöka igen eller lägga in räntan själv. Räntefakturering hämtar dessutom saknade halvår av sig själv när listan öppnas.
+
+**Lägg till** lägger in en egen ränta med **År**, **Halvår** (**Första halvåret (från 1 januari)** eller **Andra halvåret (från 1 juli)**) och **Räntesats (%)**. En egen ränta går före Riksbankens för samma halvår och ersätter en tidigare egen ränta för halvåret. **Ta bort** finns bara på egna räntor (bekräftas först); en ränta hämtad från Riksbanken kan inte tas bort — lägg in en egen för halvåret om den ska ersättas.
+
 ## SIE-filer
 
 **Ekonomi → SIE-filer** hanterar utbyte av bokföring med revisor eller ett annat bokföringsprogram, i det svenska SIE-formatet (typ 4). Sidan har två flikar: **Export och ingående balanser** och **Importera verifikat**. Kräver rättigheten **Ekonomi**, som resten av modulen.
@@ -739,7 +749,7 @@ Momskoden avgör också momsen: utgående moms bokförs på kodens konto för ut
 
 ## Konteringsregler
 
-**Ekonomi → Konteringsregler** styr automatkonteringen: dels **standardkontona** som gäller när ingen regel matchar, dels **konteringsreglerna** som styr enskilda artikelgrupper. Allt på sidan — standardkontona, beloppen under **Kundreskontra** och reglerna — kan ändras av alla med rättigheten **Ekonomi**; övriga inställningar under **System → Inställningar** är fortfarande bara för administratörer.
+**Ekonomi → Konteringsregler** styr automatkonteringen: dels **standardkontona** som gäller när ingen regel matchar, dels **konteringsreglerna** som styr enskilda artikelgrupper. Allt på sidan — standardkontona, beloppen under **Kundreskontra**, inställningarna för dröjsmålsränta och reglerna — kan ändras av alla med rättigheten **Ekonomi**; övriga inställningar under **System → Inställningar** är fortfarande bara för administratörer.
 
 ### Standardkonton
 
@@ -754,6 +764,10 @@ Sektionen **Standardkonton** listar de tolv konton automatkonteringen faller til
 ### Kundreskontra
 
 Sektionen **Kundreskontra** styr två belopp: **Betalningstolerans (kr)** — hur mycket en kundbetalning får avvika från fakturans resterande belopp och ändå räknas som fullt betald — och **Påminnelseavgift (kr)** — avgiften som läggs på en betalningspåminnelse. Betalningstoleransen gäller även leverantörsreskontrans utbetalningar. På en faktura i utländsk valuta räknas toleransen om till fakturans valuta med fakturans kurs — 5 kr vid kursen 11,13 är 0,44 EUR (avrundat nedåt, så avskrivningen aldrig överstiger inställningen). Till skillnad från standardkontona ovan har fälten inget "Återställ till standard": ett belopp måste alltid anges (0 eller större). Klicka **Spara** — bara de fält du faktiskt ändrat skickas.
+
+### Dröjsmålsränta och förseningsersättning
+
+Sektionen **Dröjsmålsränta och förseningsersättning** styr [Räntefakturering](/hjalp/forsaljning#rantefakturering). Den har kryssrutorna **Debitera dröjsmålsränta** och **Debitera förseningsersättning** (båda av från början), **Räntemarginal (procentenheter)** (förvalt 8,00 — räntelagen 6 §), **Minsta räntebelopp** (förvalt 100 kr, gäller räntan per räntefaktura) och kontona **Dröjsmålsränta** (förval 8313 Ränteintäkter från kortfristiga fordringar) och **Förseningsersättning** (förval 3990). Kontona väljs som standardkontona ovan, med **Återställ till standard** överst i listan. **Debitera dröjsmålsränta** måste vara på för att Räntefakturering ska öppnas, och då skriver fakturornas PDF att dröjsmålsränta debiteras vid betalning efter förfallodagen. Är **Debitera förseningsersättning** av erbjuder Räntefakturering bara ränta. Procentsatsen och beloppen anges med två decimaler. Klicka **Spara** — bara de fält du faktiskt ändrat skickas.
 
 ### Regler per artikelgrupp
 

@@ -1115,6 +1115,14 @@ export interface Customer extends PartnerCardFields {
   // Valuta: the customer's currency (ISO 4217, "SEK" by default). New quotes
   // and orders take it with today's rate; the customer's särpriser are in it.
   currency: string;
+  // Dröjsmålsränta (Försäljning → Räntefakturering): whether late interest is
+  // charged on the customer's overdue invoices (förval ja), the Avtalad
+  // räntesats (total %, numeric(5,2) so it may arrive as a string; null =
+  // enligt räntelagen: referensränta + räntemarginal) and whether
+  // förseningsersättning is charged (ignored for a privatperson).
+  lateInterest: boolean;
+  lateInterestRate: string | number | null;
+  lateFee: boolean;
   active: boolean;
   createdAt: string;
 }
@@ -1528,6 +1536,10 @@ export interface InvoiceRow {
   projectId?: string | null;
   costCenter?: DimensionRef | null;
   project?: DimensionRef | null;
+  // Dröjsmålsränta: the account the row books against, set by Räntefakturering
+  // on an interest invoice's rows (8313 / 3990) — wins over the konteringsregel
+  // and the momskod's account. null on every other row.
+  revenueAccount?: string | null;
 }
 
 // Kundreskontra (B3): one settlement row from the invoice's own point of
@@ -1599,6 +1611,24 @@ export interface InvoiceDetail extends InvoiceHeader {
   // targets this invoice. invoiceNumber is null for a still-draft credit;
   // the card labels that "Utkast" rather than hiding the link.
   creditedBy: { id: string; invoiceNumber: string | null }[];
+  // Dröjsmålsränta: what Räntefakturering has charged on this (source) invoice
+  // and whether this invoice is itself a räntefaktura. `active` is derived by
+  // the API: false when the räntefaktura is cancelled or fully credited.
+  lateInterestCharges?: InvoiceLateInterestCharge[];
+  isLateInterestInvoice?: boolean;
+}
+
+export interface InvoiceLateInterestCharge {
+  id: string;
+  // null on a pure förseningsersättning row.
+  fromDate: string | null;
+  toDate: string | null;
+  days: number;
+  amount: string | number;
+  fee: string | number;
+  chargeInvoiceId: string;
+  chargeInvoiceNumber: string | null;
+  active: boolean;
 }
 
 export interface InvoiceableOrderRow {
@@ -2588,6 +2618,100 @@ export interface SystemSettings {
   // Offertens giltighetstid (dagar), 0–365; 0 = ingen giltighetstid.
   quoteValidityDays: number;
   publicBaseUrl: string;
+  // Dröjsmålsränta och förseningsersättning (Ekonomi → Konteringsregler):
+  // both switches default off; margin in procentenheter over referensräntan
+  // (räntelagen 6 §: 8), minsta räntebelopp per räntefaktura in kr, and the
+  // two posting accounts (same 4-digit / ""-to-reset convention as above).
+  lateInterestEnabled: boolean;
+  lateInterestMargin: number;
+  lateInterestMinAmount: number;
+  lateFeeEnabled: boolean;
+  postingLateInterest: string;
+  postingLateFee: string;
+}
+
+// --- Dröjsmålsränta (Försäljning → Räntefakturering, Ekonomi → Referensränta) ---
+
+// GET /reference-rates row — Riksbankens referensränta for one calendar half
+// year (validFrom is always 1 January or 1 July).
+export interface ReferenceRateEntry {
+  id: string;
+  validFrom: string;
+  rate: number;
+  source: "riksbank" | "manual";
+}
+
+// POST /reference-rates/fetch.
+export interface ReferenceRateFetchResult {
+  fetched: number;
+  rows: ReferenceRateEntry[];
+}
+
+export interface LateInterestSegment {
+  from: string;
+  to: string;
+  days: number;
+  rate: number;
+  amount: number;
+}
+
+// GET /late-interest/candidates row.
+export interface LateInterestCandidate {
+  invoiceId: string;
+  invoiceNumber: string;
+  customerId: string;
+  customerName: string;
+  privatePerson: boolean;
+  dueDate: string;
+  paidDate: string | null;
+  // Brutto and what is still open on the invoice.
+  principal: number;
+  openAmount: number;
+  // The interest period (day after the due date, or after the last charged
+  // period, through the payment date or asOf).
+  fromDate: string;
+  toDate: string;
+  days: number;
+  // One rate for the whole period, or null when it spans several (see rates).
+  rate: number | null;
+  rates: number[];
+  // null when a reference rate is missing for the period.
+  interest: number | null;
+  // Suggested förseningsersättning (450 minus a charged påminnelseavgift).
+  fee: number;
+  // The interest alone is under Minsta räntebelopp — selectable but not
+  // preselected.
+  belowMinimum: boolean;
+  rateMissing: boolean;
+  segments: LateInterestSegment[];
+}
+
+export interface LateInterestCandidates {
+  asOf: string;
+  rows: LateInterestCandidate[];
+  // Half-year starts ("YYYY-01-01" / "YYYY-07-01") without a referensränta.
+  rateMissing: string[];
+}
+
+export interface LateInterestRunItem {
+  invoiceId: string;
+  fromDate: string;
+  includeInterest: boolean;
+  includeFee: boolean;
+  fee: number;
+}
+
+// POST /late-interest/invoices.
+export interface LateInterestRunResult {
+  created: {
+    invoiceId: string;
+    invoiceNumber: string | null;
+    customerName: string;
+    status: string;
+    total: number;
+  }[];
+  skipped: { customerName: string; reason: string }[];
+  issueFailed: { invoiceId: string; error: string }[];
 }
 
 // "actual" = the moving average at the consumption date, derived from the stock

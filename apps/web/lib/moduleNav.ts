@@ -219,6 +219,11 @@ export const FORSALJNING_SECTIONS: ModuleNavSection[] = [
         description: "En faktura per kund för alla levererade, ofakturerade order hos kunder med Samlingsfaktura.",
       },
       {
+        href: "/forsaljning/rantefakturering",
+        title: "Räntefakturering",
+        description: "Dröjsmålsränta och förseningsersättning på förfallna och sent betalda fakturor — en räntefaktura per kund.",
+      },
+      {
         href: "/forsaljning/prislistor",
         title: "Prislistor",
         description: "Prislistor med staffelpriser som kunder kopplas till — grunden i priskedjan.",
@@ -562,6 +567,11 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
         href: "/ekonomi/valutakurser",
         title: "Valutakurser",
         description: "Dagskurser från Riksbanken och egna kurser för fakturor och utbetalningar i utländsk valuta.",
+      },
+      {
+        href: "/ekonomi/referensranta",
+        title: "Referensränta",
+        description: "Riksbankens referensränta per halvår — grunden för dröjsmålsräntan på räntefakturorna.",
       },
       {
         href: "/ekonomi/anlaggningsgrupper",

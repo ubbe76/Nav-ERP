@@ -7,7 +7,7 @@ import { Table } from "../ui/Table";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
-import { Field, Input, Select } from "../ui/Field";
+import { Field, Input, Select, Toggle } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -158,6 +158,9 @@ export function KonteringsreglerPageClient({
       <StandardAccountsSection settings={settings} accounts={accounts} />
       <div style={{ marginTop: 20 }}>
         <KundreskontraSection settings={settings} />
+      </div>
+      <div style={{ marginTop: 20 }}>
+        <LateInterestSection settings={settings} accounts={accounts} />
       </div>
       <div style={{ marginTop: 20 }}>
         <PostingRulesSection
@@ -399,6 +402,181 @@ function KundreskontraSection({ settings }: { settings: SystemSettings }) {
               />
             </Field>
           ))}
+        </FormRow>
+
+        <FormActions>
+          <Button type="submit" variant="primary" disabled={pending || changedKeys.length === 0}>
+            {pending ? "Sparar…" : "Spara"}
+          </Button>
+          {saved && <FormSaved>Sparat</FormSaved>}
+        </FormActions>
+      </Form>
+    </Card>
+  );
+}
+
+// Dröjsmålsränta och förseningsersättning: the two switches (both off from
+// the start), the räntemarginal (räntelagen 6 §: 8 procentenheter over the
+// referensränta), the smallest ränta worth an invoice and the two posting
+// accounts. Same diff-baseline idiom as the sections above: only changed
+// fields go on the wire and the baseline advances from the save response.
+type LateInterestValues = {
+  lateInterestEnabled: boolean;
+  lateInterestMargin: string;
+  lateInterestMinAmount: string;
+  lateFeeEnabled: boolean;
+  postingLateInterest: string;
+  postingLateFee: string;
+};
+
+function lateInterestValues(settings: SystemSettings): LateInterestValues {
+  return {
+    lateInterestEnabled: settings.lateInterestEnabled,
+    lateInterestMargin: String(settings.lateInterestMargin),
+    lateInterestMinAmount: String(settings.lateInterestMinAmount),
+    lateFeeEnabled: settings.lateFeeEnabled,
+    postingLateInterest: settings.postingLateInterest,
+    postingLateFee: settings.postingLateFee,
+  };
+}
+
+function LateInterestSection({ settings, accounts }: { settings: SystemSettings; accounts: Account[] }) {
+  const [initial, setInitial] = useState<LateInterestValues>(() => lateInterestValues(settings));
+  const [values, setValues] = useState<LateInterestValues>(() => lateInterestValues(settings));
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  const keys = Object.keys(values) as (keyof LateInterestValues)[];
+  const changedKeys = keys.filter((key) => values[key] !== initial[key]);
+
+  function set<K extends keyof LateInterestValues>(key: K, value: LateInterestValues[K]) {
+    setSaved(false);
+    setValues((v) => ({ ...v, [key]: value }));
+  }
+
+  async function handleSave(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaved(false);
+    if (changedKeys.length === 0) return;
+
+    const body: Record<string, boolean | number | string> = {};
+    for (const key of changedKeys) {
+      if (key === "lateInterestMargin" || key === "lateInterestMinAmount") {
+        const parsed = Number(values[key].replace(",", "."));
+        if (values[key].trim() === "" || !Number.isFinite(parsed) || parsed < 0) {
+          setError("Räntemarginalen och minsta räntebelopp måste vara tal som är 0 eller större");
+          return;
+        }
+        body[key] = parsed;
+      } else {
+        body[key] = values[key];
+      }
+    }
+
+    setPending(true);
+    try {
+      const updated = await apiFetch<SystemSettings>("/api/v1/settings/posting", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      const resolved = lateInterestValues(updated);
+      setValues(resolved);
+      setInitial(resolved);
+      setSaved(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Kunde inte spara inställningarna"));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Card maxWidth="none">
+      <div style={{ fontWeight: 600, fontSize: 15 }}>Dröjsmålsränta och förseningsersättning</div>
+      <FormHint>
+        Styr Försäljning → <GatedLink href="/forsaljning/rantefakturering">Räntefakturering</GatedLink>. Dröjsmålsräntan
+        är Riksbankens <GatedLink href="/ekonomi/referensranta">referensränta</GatedLink> för halvåret plus
+        räntemarginalen, räknad från förfallodagen. Förseningsersättningen är lagens fasta 450 kr per faktura till
+        företag; en påminnelseavgift på samma faktura räknas av mot den. Ränta och förseningsersättning är utanför
+        momsens tillämpningsområde.
+      </FormHint>
+
+      <Form onSubmit={handleSave}>
+        <FormError>{error}</FormError>
+
+        <FormRow>
+          <Field label="Debitera dröjsmålsränta" htmlFor="lateInterestEnabled">
+            <Toggle
+              id="lateInterestEnabled"
+              checked={values.lateInterestEnabled}
+              onChange={(e) => set("lateInterestEnabled", e.target.checked)}
+            />
+          </Field>
+          <Field label="Debitera förseningsersättning" htmlFor="lateFeeEnabled">
+            <Toggle
+              id="lateFeeEnabled"
+              checked={values.lateFeeEnabled}
+              onChange={(e) => set("lateFeeEnabled", e.target.checked)}
+            />
+          </Field>
+        </FormRow>
+        <FormHint attached>
+          Av från början. Dröjsmålsränta på: fakturornas PDF skriver att ränta debiteras vid betalning efter
+          förfallodagen, och Räntefakturering öppnas.
+        </FormHint>
+
+        <FormRow>
+          <Field label="Räntemarginal (procentenheter)" htmlFor="lateInterestMargin">
+            <Input
+              id="lateInterestMargin"
+              type="number"
+              min={0}
+              step="0.01"
+              size="sm"
+              value={values.lateInterestMargin}
+              onChange={(e) => set("lateInterestMargin", e.target.value)}
+            />
+          </Field>
+          <Field label="Minsta räntebelopp" htmlFor="lateInterestMinAmount">
+            <Input
+              id="lateInterestMinAmount"
+              type="number"
+              min={0}
+              step="0.01"
+              size="sm"
+              value={values.lateInterestMinAmount}
+              onChange={(e) => set("lateInterestMinAmount", e.target.value)}
+            />
+          </Field>
+        </FormRow>
+        <FormHint attached>
+          Minsta räntebelopp (kr) gäller räntan per räntefaktura: är kundens ränta lägre skapas ingen räntefaktura för
+          den, men förseningsersättningen faktureras ändå.
+        </FormHint>
+
+        <FormRow>
+          <Field label="Dröjsmålsränta" htmlFor="postingLateInterest">
+            <Select
+              id="postingLateInterest"
+              value={values.postingLateInterest}
+              onChange={(e) => set("postingLateInterest", e.target.value)}
+            >
+              <option value="">Återställ till standard (8313)</option>
+              {accountNumberOptions(accounts, values.postingLateInterest)}
+            </Select>
+          </Field>
+          <Field label="Förseningsersättning" htmlFor="postingLateFee">
+            <Select
+              id="postingLateFee"
+              value={values.postingLateFee}
+              onChange={(e) => set("postingLateFee", e.target.value)}
+            >
+              <option value="">Återställ till standard (3990)</option>
+              {accountNumberOptions(accounts, values.postingLateFee)}
+            </Select>
+          </Field>
         </FormRow>
 
         <FormActions>

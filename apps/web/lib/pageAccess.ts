@@ -18,6 +18,9 @@ const ENTRIES: readonly Entry[] = [
   { path: "/hjalp", rule: ["any"] },
   { path: "/ingen-behorighet", rule: ["any"] },
   { path: "/system", rule: ["admin"] },
+  // Referensränta follows the customer invoices' API rule (read office, write
+  // forsaljning) — the Räntefakturering routine sends its user there.
+  { path: "/ekonomi/referensranta", rule: ["ekonomi", "forsaljning"] },
   { path: "/ekonomi", rule: ["ekonomi"] },
   { path: "/rapporter", rule: ["rapporter"] },
   { path: "/artiklar", exact: true, rule: ["artiklar", "artikeloversikt"] },

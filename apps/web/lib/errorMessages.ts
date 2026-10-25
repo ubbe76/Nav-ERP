@@ -196,6 +196,20 @@ const MESSAGES: Record<string, MessageEntry> = {
     const currency = (err.body as { currency?: string } | undefined)?.currency;
     return `Påminnelseavgift kan bara tas ut på fakturor i SEK${currency ? ` — fakturan är i ${currency}` : ""}. Skicka påminnelsen utan avgift.`;
   },
+  // Dröjsmålsränta och förseningsersättning
+  "late-interest-disabled":
+    "Dröjsmålsränta är avstängd — slå på Debitera dröjsmålsränta under Ekonomi → Konteringsregler.",
+  "late-interest-already-charged": (err) => {
+    const ids = (err.body as { invoiceIds?: unknown } | undefined)?.invoiceIds;
+    const n = Array.isArray(ids) ? ids.length : 0;
+    return n > 0
+      ? `Ränta eller förseningsersättning har redan debiterats på ${n} ${n === 1 ? "faktura" : "fakturor"} sedan listan hämtades — uppdatera listan och försök igen.`
+      : "Ränta eller förseningsersättning har redan debiterats sedan listan hämtades — uppdatera listan och försök igen.";
+  },
+  "reminder-fee-after-late-fee":
+    "Förseningsersättning är debiterad på fakturan — påminnelseavgiften ryms i ersättningen. Skicka påminnelsen utan avgift.",
+  "reference-rate-riksbank":
+    "Räntan är hämtad från Riksbanken och kan inte tas bort — lägg in en egen ränta för halvåret om den ska ersättas.",
   "customer-payment-amount-sek": (err) => {
     const body = err.body as { reason?: string; currency?: string } | undefined;
     switch (body?.reason) {

@@ -36,6 +36,7 @@ import {
   type Article,
   type InvoiceDetail,
   type InvoicePaymentEntry,
+  type InvoiceLateInterestCharge,
   type InvoiceReminderEntry,
   type InvoiceRow,
   type RegisterEntry,
@@ -112,6 +113,10 @@ export function InvoiceCard({
   // context.chargedFee > 0 check, derived client-side from the same history
   // the card already renders instead of a second round trip.
   const feeAlreadyCharged = invoice.reminders.some((r) => Number(r.fee) > 0);
+  // Dröjsmålsränta: an active förseningsersättning already covers a påminnelse-
+  // avgift (409 reminder-fee-after-late-fee otherwise).
+  const lateInterestCharges = invoice.lateInterestCharges ?? [];
+  const lateFeeCharged = lateInterestCharges.some((c) => c.active && Number(c.fee) > 0);
 
   async function statusAction(action: "issue" | "cancel") {
     if (action === "issue") {
@@ -247,6 +252,7 @@ export function InvoiceCard({
             {foreign && invoice.openAmountSek !== null && ` (${formatMoney(invoice.openAmountSek)} kr bokfört)`}
           </span>
         )}
+        {invoice.isLateInterestInvoice && <span>Räntefaktura</span>}
         {isCredit && invoice.creditedInvoiceId && (
           <span>
             Krediterar faktura{" "}
@@ -386,6 +392,10 @@ export function InvoiceCard({
                   <>
                     {row.description}
                     <ConfigurationLines configuration={row.configuration} />
+                    {/* Räntefaktura: the account Räntefakturering booked the row to. */}
+                    {row.revenueAccount && (
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Konto {row.revenueAccount}</div>
+                    )}
                   </>
                 );
               case "articleNumber":
@@ -631,6 +641,48 @@ export function InvoiceCard({
         </>
       )}
 
+      {lateInterestCharges.length > 0 && (
+        <>
+          <SectionHeading spaced>Räntefakturerad</SectionHeading>
+          <Table<InvoiceLateInterestCharge>
+            columns={[
+              { key: "period", label: "Period", width: "200px" },
+              { key: "days", label: "Dagar", width: "70px", align: "right" },
+              { key: "amount", label: "Ränta", width: "130px", align: "right" },
+              { key: "fee", label: "Förseningsersättning", width: "190px", align: "right" },
+              { key: "chargeInvoice", label: "Räntefaktura", width: "1fr" },
+            ]}
+            rows={lateInterestCharges}
+            renderCell={(row, key) => {
+              switch (key) {
+                case "period":
+                  return row.fromDate && row.toDate ? `${row.fromDate}–${row.toDate}` : "–";
+                case "days":
+                  return row.days > 0 ? row.days.toLocaleString("sv-SE") : "–";
+                case "amount":
+                  return Number(row.amount) > 0 ? `${formatMoney(row.amount)} kr` : "–";
+                case "fee":
+                  return Number(row.fee) > 0 ? `${formatMoney(row.fee)} kr` : "–";
+                case "chargeInvoice":
+                  return (
+                    <>
+                      <Link href={`/forsaljning/fakturor/${row.chargeInvoiceId}`}>{row.chargeInvoiceNumber ?? "Utkast"}</Link>
+                      {!row.active && (
+                        <>
+                          {" "}
+                          <StatusPill status="stopped" label="makulerad" compact />
+                        </>
+                      )}
+                    </>
+                  );
+                default:
+                  return null;
+              }
+            }}
+          />
+        </>
+      )}
+
       <div style={{ marginTop: 20, display: "flex", gap: 16, flexWrap: "wrap" }}>
         {editable && (
           <AddRowForm
@@ -689,6 +741,7 @@ export function InvoiceCard({
           defaultTo={reminderDefaultTo}
           reminderFee={reminderFee}
           feeAlreadyCharged={feeAlreadyCharged}
+          lateFeeCharged={lateFeeCharged}
           onClose={() => setReminderOpen(false)}
           onSent={() => {
             setReminderOpen(false);
@@ -708,6 +761,7 @@ function ReminderDialog({
   defaultTo,
   reminderFee,
   feeAlreadyCharged,
+  lateFeeCharged,
   onClose,
   onSent,
 }: {
@@ -715,6 +769,7 @@ function ReminderDialog({
   defaultTo: string;
   reminderFee: number;
   feeAlreadyCharged: boolean;
+  lateFeeCharged: boolean;
   onClose: () => void;
   onSent: () => void;
 }) {
@@ -781,13 +836,18 @@ function ReminderDialog({
           <input
             type="checkbox"
             checked={withFee}
-            disabled={feeAlreadyCharged || feeNotAllowed}
+            disabled={feeAlreadyCharged || feeNotAllowed || lateFeeCharged}
             onChange={(e) => setWithFee(e.target.checked)}
           />
           Lägg till påminnelseavgift ({formatMoney(reminderFee)} kr)
         </label>
         {feeAlreadyCharged && (
           <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>Avgift redan tillagd</p>
+        )}
+        {lateFeeCharged && (
+          <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
+            Förseningsersättning är debiterad på fakturan — påminnelseavgiften ryms i ersättningen.
+          </p>
         )}
         {feeNotAllowed && (
           <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
