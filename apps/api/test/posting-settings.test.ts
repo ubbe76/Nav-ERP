@@ -40,6 +40,14 @@ const DEFAULTS = {
   postingBankFees: "6570",
   paymentTolerance: 5,
   reminderFee: 60,
+  // Dröjsmålsränta och förseningsersättning (etapp 5 C): both off until the
+  // company decides, räntelagen's 8 procentenheter, 100 kr minimum, 8313/3990.
+  lateInterestEnabled: false,
+  lateInterestMargin: 8,
+  lateInterestMinAmount: 100,
+  lateFeeEnabled: false,
+  postingLateInterest: "8313",
+  postingLateFee: "3990",
 };
 
 describe("posting-settings leaf — readPostingSettings", () => {

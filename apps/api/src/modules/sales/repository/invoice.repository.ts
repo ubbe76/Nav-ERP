@@ -52,6 +52,7 @@ import { readPostingSettings } from "../../system/service/posting-settings.js";
 import { domesticVatCodeIdSql, loadVatCodeBook, postingVatCodeColumns } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
 import { computeOpenAmounts, computeOpenAmountsSek } from "./open-amounts.js";
+import { chargesByInvoice, isLateInterestInvoice, paymentsByInvoice } from "./late-interest.repository.js";
 import { ShipmentNotBillableError, VatNumberRequiredError } from "../service/sales.errors.js";
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle.
@@ -293,6 +294,10 @@ export type InvoiceRowWrite = {
   // the order header's, the article group's default). Omitted = none.
   costCenterId?: string | null;
   projectId?: string | null;
+  // Dröjsmålsränta: the row's own revenue account (räntefaktura rows —
+  // posting_late_interest / posting_late_fee), copied by a credit note.
+  // Omitted = none (the konteringsregel / momskod decides).
+  revenueAccount?: string | null;
 };
 
 // The row's objects as { id, code, name } | null on every row read.
@@ -315,7 +320,7 @@ function rowVatCodeId(row: InvoiceRowWrite) {
 // Thrown INSIDE its transaction so the reminder row and the fee posting roll
 // back together, and normalized outside into a discriminated result the
 // SERVICE turns into an error (the IssueRaceError convention).
-type ReminderGuardReason = "not_found" | "not_issued" | "not_open" | "fee_already_charged";
+type ReminderGuardReason = "not_found" | "not_issued" | "not_open" | "fee_already_charged" | "late_fee_charged";
 
 class ReminderGuardError extends Error {
   constructor(public reason: ReminderGuardReason) {
@@ -486,7 +491,7 @@ export function createInvoiceRepository(db: Db) {
     return rows.map((r) => ({ ...r, customerPrice: r.customerPrice! }));
   }
 
-  return {
+  const repository = {
     async findCustomerById(id: string) {
       const [row] = await db.select().from(customers).where(eq(customers.id, id));
       return row ?? null;
@@ -833,63 +838,74 @@ export function createInvoiceRepository(db: Db) {
     // Header + rows in one transaction — no number allocation here (the FA
     // number is assigned at issue, Task 4).
     async create(header: InvoiceHeaderWrite, rows: InvoiceRowWrite[], createdBy: string) {
-      return db.transaction(async (tx) => {
-        const [invoice] = await tx
-          .insert(invoices)
-          .values({
-            customerId: header.customerId,
-            paymentTermId: header.paymentTermId,
-            note: header.note,
-            type: header.type ?? "invoice",
-            creditedInvoiceId: header.creditedInvoiceId ?? null,
-            // Valuta: SEK is always rate 1; another currency carries its
-            // typed rate (or a credit note's source rate), else null until
-            // Utfärda.
-            currency: header.currency ?? SEK,
-            exchangeRate:
-              (header.currency ?? SEK) === SEK ? "1" : header.exchangeRate == null ? null : String(header.exchangeRate),
-            exchangeRateManual: header.exchangeRateManual ?? false,
-            createdBy,
-          })
-          .returning();
-        await assertShipmentsBillable(tx, rows);
-        if (rows.length > 0) {
-          // createdAt is stamped explicitly, one tick per row, instead of
-          // relying on the column's now()-default: Postgres evaluates now()
-          // once per transaction, so every row in this single multi-row
-          // INSERT would otherwise share the exact same timestamp — leaving
-          // listRows' `ORDER BY createdAt` with nothing to break the tie,
-          // so ties resolve however the planner's access path happens to
-          // visit them (occasionally NOT insertion order). Explicit,
-          // strictly-increasing timestamps make that order deterministic
-          // and match input order (same fix as verificationRows below).
-          const now = Date.now();
-          await tx.insert(invoiceRows).values(
-            rows.map((r, i) => ({
-              invoiceId: invoice!.id,
-              articleId: r.articleId,
-              salesOrderRowId: r.salesOrderRowId,
-              shipmentId: r.shipmentId,
-              description: r.description,
-              quantity: String(r.quantity),
-              unitPrice: String(r.unitPrice),
-              discountPercent: String(r.discountPercent),
-              unitId: r.unitId,
-              unitFactor: r.unitFactor !== null ? String(r.unitFactor) : null,
-              vatRate: String(r.vatRate),
-              vatCodeId: rowVatCodeId(r),
-              lineAmount: String(r.lineAmount),
-              vatAmount: String(r.vatAmount),
-              deliveryDate: r.deliveryDate ?? null,
-              configuration: r.configuration,
-              costCenterId: r.costCenterId ?? null,
-              projectId: r.projectId ?? null,
-              createdAt: new Date(now + i),
-            }))
-          );
-        }
-        return invoice!;
-      });
+      return db.transaction(async (tx) => (await repository.createInTx(tx, header, rows, createdBy)).invoice);
+    },
+
+    // The insert itself, in the CALLER's transaction — Räntefakturering
+    // writes its invoices and their late_interest_charges rows (which
+    // reference the row ids returned here) in one transaction. Row ids come
+    // back in input order.
+    async createInTx(tx: Tx, header: InvoiceHeaderWrite, rows: InvoiceRowWrite[], createdBy: string) {
+      const [invoice] = await tx
+        .insert(invoices)
+        .values({
+          customerId: header.customerId,
+          paymentTermId: header.paymentTermId,
+          note: header.note,
+          type: header.type ?? "invoice",
+          creditedInvoiceId: header.creditedInvoiceId ?? null,
+          // Valuta: SEK is always rate 1; another currency carries its
+          // typed rate (or a credit note's source rate), else null until
+          // Utfärda.
+          currency: header.currency ?? SEK,
+          exchangeRate:
+            (header.currency ?? SEK) === SEK ? "1" : header.exchangeRate == null ? null : String(header.exchangeRate),
+          exchangeRateManual: header.exchangeRateManual ?? false,
+          createdBy,
+        })
+        .returning();
+      await assertShipmentsBillable(tx, rows);
+      if (rows.length === 0) return { invoice: invoice!, rowIds: [] as string[] };
+      // createdAt is stamped explicitly, one tick per row, instead of
+      // relying on the column's now()-default: Postgres evaluates now()
+      // once per transaction, so every row in this single multi-row
+      // INSERT would otherwise share the exact same timestamp — leaving
+      // listRows' `ORDER BY createdAt` with nothing to break the tie,
+      // so ties resolve however the planner's access path happens to
+      // visit them (occasionally NOT insertion order). Explicit,
+      // strictly-increasing timestamps make that order deterministic
+      // and match input order (same fix as verificationRows below).
+      const now = Date.now();
+      const inserted = await tx
+        .insert(invoiceRows)
+        .values(
+          rows.map((r, i) => ({
+            invoiceId: invoice!.id,
+            articleId: r.articleId,
+            salesOrderRowId: r.salesOrderRowId,
+            shipmentId: r.shipmentId,
+            description: r.description,
+            quantity: String(r.quantity),
+            unitPrice: String(r.unitPrice),
+            discountPercent: String(r.discountPercent),
+            unitId: r.unitId,
+            unitFactor: r.unitFactor !== null ? String(r.unitFactor) : null,
+            vatRate: String(r.vatRate),
+            vatCodeId: rowVatCodeId(r),
+            lineAmount: String(r.lineAmount),
+            vatAmount: String(r.vatAmount),
+            deliveryDate: r.deliveryDate ?? null,
+            configuration: r.configuration,
+            costCenterId: r.costCenterId ?? null,
+            projectId: r.projectId ?? null,
+            revenueAccount: r.revenueAccount ?? null,
+            createdAt: new Date(now + i),
+          }))
+        )
+        .returning({ id: invoiceRows.id, createdAt: invoiceRows.createdAt });
+      // Input order = createdAt order (stamped one tick apart above).
+      inserted.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      return { invoice: invoice!, rowIds: inserted.map((row) => row.id) };
     },
 
     async list(query: ListInvoicesQuery) {
@@ -1247,6 +1263,8 @@ export function createInvoiceRepository(db: Db) {
               // Kostnadsställen och projekt: onto the revenue row only.
               costCenterId: invoiceRows.costCenterId,
               projectId: invoiceRows.projectId,
+              // Dröjsmålsränta: the row's own revenue account (8313/3990).
+              revenueAccount: invoiceRows.revenueAccount,
             })
             .from(invoiceRows)
             .innerJoin(vatCodes, eq(vatCodes.id, invoiceRows.vatCodeId))
@@ -1290,6 +1308,7 @@ export function createInvoiceRepository(db: Db) {
               vatCode: postingRow.vatCode,
               costCenterId: postingRow.costCenterId,
               projectId: postingRow.projectId,
+              revenueAccount: postingRow.revenueAccount,
             })),
             userId
           );
@@ -1331,6 +1350,35 @@ export function createInvoiceRepository(db: Db) {
         if (err instanceof CommitOverCreditingError) return { ok: false, reason: "over_crediting" };
         throw err;
       }
+    },
+
+    // Dröjsmålsränta: the charges made ON this source invoice (with the
+    // derived `active`), and whether the invoice is itself a räntefaktura.
+    async listLateInterestCharges(invoiceId: string) {
+      return (await chargesByInvoice(db, [invoiceId])).get(invoiceId) ?? [];
+    },
+
+    async isLateInterestInvoice(invoiceId: string) {
+      return isLateInterestInvoice(db, invoiceId);
+    },
+
+    // The live payment rows as the dröjsmålsränta reads them (day, amount).
+    async listLateInterestPayments(invoiceId: string) {
+      return (await paymentsByInvoice(db, [invoiceId])).get(invoiceId) ?? [];
+    },
+
+    // The dröjsmålsränta slice of the posting settings (the invoice text,
+    // the reminder's accrued interest). Same leaf as getReminderFee.
+    async getLateInterestSettings() {
+      const settings = await readPostingSettings(db);
+      return {
+        lateInterestEnabled: settings.lateInterestEnabled,
+        lateInterestMargin: settings.lateInterestMargin,
+        lateInterestMinAmount: settings.lateInterestMinAmount,
+        lateFeeEnabled: settings.lateFeeEnabled,
+        postingLateInterest: settings.postingLateInterest,
+        postingLateFee: settings.postingLateFee,
+      };
     },
 
     // Kundreskontra (B3): what is still open on this invoice, and which
@@ -1461,6 +1509,11 @@ export function createInvoiceRepository(db: Db) {
               .from(invoiceReminders)
               .where(and(eq(invoiceReminders.invoiceId, invoiceId), sql`${invoiceReminders.fee} > 0`));
             if (charged) throw new ReminderGuardError("fee_already_charged");
+            // Dröjsmålsränta: an active förseningsersättning covers the fee
+            // (inkassokostnadslagen 5 §) — re-checked under the lock, since
+            // Skapa räntefakturor takes the same lock.
+            const charges = (await chargesByInvoice(tx, [invoiceId])).get(invoiceId) ?? [];
+            if (charges.some((charge) => charge.active && charge.fee > 0)) throw new ReminderGuardError("late_fee_charged");
           }
 
           const [reminder] = await tx
@@ -1567,6 +1620,7 @@ export function createInvoiceRepository(db: Db) {
             configuration: row.configuration,
             costCenterId: row.costCenterId ?? null,
             projectId: row.projectId ?? null,
+            revenueAccount: row.revenueAccount ?? null,
           })
           .returning();
         return inserted ?? null;
@@ -1606,6 +1660,7 @@ export function createInvoiceRepository(db: Db) {
             configuration: row.configuration,
             costCenterId: row.costCenterId ?? null,
             projectId: row.projectId ?? null,
+            revenueAccount: row.revenueAccount ?? null,
           })
           .where(and(eq(invoiceRows.id, rowId), eq(invoiceRows.invoiceId, invoiceId)))
           .returning();
@@ -1666,6 +1721,7 @@ export function createInvoiceRepository(db: Db) {
       return row!;
     },
   };
+  return repository;
 }
 
 export type InvoiceRepository = ReturnType<typeof createInvoiceRepository>;

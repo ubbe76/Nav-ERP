@@ -265,6 +265,10 @@ export interface DocumentPdfInput {
   // The company's own customer number at the order's carrier — printed after
   // the carrier when the company pays the freight (purchase documents only).
   carrierCustomerNumber?: string | null;
+  // Dröjsmålsränta (invoice only): "Vid betalning efter förfallodagen
+  // debiteras dröjsmålsränta enligt räntelagen." under the terms, when the
+  // routine is on and the customer has Dröjsmålsränta.
+  lateInterestText?: string | null;
 }
 
 // Plocklista — picking instructions for a sales order delivery: remaining
@@ -359,6 +363,10 @@ export interface PaymentReminderPdfInput {
   feeAmount: number;
   amountDue: number;
   payment?: { ocrNumber: string | null; dueDate: Date | null } | null;
+  // Dröjsmålsränta: the terms text and "Upplupen dröjsmålsränta t.o.m. …"
+  // — information under the body text, never a charge on this document.
+  lateInterestText?: string | null;
+  accruedInterestText?: string | null;
 }
 
 // Löneunderlag — the printable payroll basis for a period: one section per
@@ -1140,6 +1148,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       input.carrier
         ? `Speditör: ${input.carrier}${input.carrierCustomerNumber ? ` · Vårt kundnr: ${input.carrierCustomerNumber}` : ""}`
         : null,
+      input.lateInterestText ?? null,
     ].filter((line): line is string => Boolean(line));
     if (termLines.length > 0) {
       doc.font("Helvetica").fontSize(10).fillColor("#444444");
@@ -1435,7 +1444,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     const body = "Vi kan inte se att nedanstående faktura har betalats. Vänligen betala snarast.";
     doc.text(body, left, y, { width: CONTENT_WIDTH });
-    y += doc.heightOfString(body, { width: CONTENT_WIDTH }) + 16;
+    y += doc.heightOfString(body, { width: CONTENT_WIDTH }) + 4;
+    // Dröjsmålsränta: the terms and the accrued interest, as information.
+    for (const line of [input.lateInterestText, input.accruedInterestText]) {
+      if (!line) continue;
+      doc.text(line, left, y, { width: CONTENT_WIDTH });
+      y += doc.heightOfString(line, { width: CONTENT_WIDTH }) + 4;
+    }
+    y += 12;
 
     // Amount summary. Labels right-aligned into a wide column, amounts
     // right-aligned at the content edge — the same shape as the invoice's

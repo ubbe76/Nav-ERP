@@ -41,8 +41,10 @@ import {
 import {
   InvoiceExchangeRateError,
   InvoiceRowCurrencyMismatchError,
+  ReminderFeeAfterLateFeeError,
   ReminderFeeCurrencyError,
 } from "../src/modules/sales/service/invoice.service.js";
+import { LateInterestAlreadyChargedError, LateInterestDisabledError } from "../src/modules/sales/service/late-interest.service.js";
 import { CustomerPaymentAmountSekError } from "../src/modules/sales/service/payment.service.js";
 import {
   PluginAccessDeniedError,
@@ -299,7 +301,11 @@ import {
   SupplierInvoiceExchangeRateMissingError,
   SupplierInvoiceInPaymentBatchError,
 } from "../src/modules/purchase/service/supplier-invoice.service.js";
-import { ExchangeRateUnavailableError, RiksbankUnavailableError } from "../src/modules/system/service/exchange-rates.js";
+import {
+  ExchangeRateUnavailableError,
+  ReferenceRateRiksbankError,
+  RiksbankUnavailableError,
+} from "../src/modules/system/service/exchange-rates.js";
 
 import { SeriesExhaustedError } from "../src/modules/system/service/number-series.js";
 import { BuiltInNumberSeriesError, DuplicateNumberSeriesNameError } from "../src/modules/system/service/system.service.js";
@@ -782,6 +788,11 @@ const cases: Array<[Error, string]> = [
   [new BudgetNoPreviousYearError("2027"), ERROR_CODES.BUDGET_NO_PREVIOUS_YEAR],
   [new BudgetNotCombinableError(), ERROR_CODES.BUDGET_NOT_COMBINABLE],
   [new BudgetRangeOutsideYearError("2026-12-01", "2027-01-31", "2027"), ERROR_CODES.BUDGET_RANGE_OUTSIDE_YEAR],
+  // Dröjsmålsränta och förseningsersättning
+  [new LateInterestDisabledError(), ERROR_CODES.LATE_INTEREST_DISABLED],
+  [new LateInterestAlreadyChargedError(["x"]), ERROR_CODES.LATE_INTEREST_ALREADY_CHARGED],
+  [new ReminderFeeAfterLateFeeError("x"), ERROR_CODES.REMINDER_FEE_AFTER_LATE_FEE],
+  [new ReferenceRateRiksbankError("2026-07-01"), ERROR_CODES.REFERENCE_RATE_RIKSBANK],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

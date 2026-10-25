@@ -16,12 +16,16 @@ import { BAS_STANDARD_ACCOUNTS } from "../src/modules/economy/service/bas-accoun
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/db/drizzle/", import.meta.url));
 const migrationFile = readdirSync(MIGRATIONS).find((file) => file.endsWith("_vat_codes.sql"))!;
 const migrationText = readFileSync(join(MIGRATIONS, migrationFile), "utf8");
+// Dröjsmålsränta (0151) seeds UTM into the same table — re-run with the
+// 0142 seed so the catalog is whole again for the files that follow.
+const lateInterestFile = readdirSync(MIGRATIONS).find((file) => file.endsWith("_drojsmalsranta.sql"))!;
+const lateInterestText = readFileSync(join(MIGRATIONS, lateInterestFile), "utf8");
 
-function block(name: string): string[] {
-  const start = migrationText.indexOf(`-- ${name}:start`);
-  const end = migrationText.indexOf(`-- ${name}:end`);
-  if (start < 0 || end < start) throw new Error(`block ${name} not found in ${migrationFile}`);
-  return migrationText
+function block(name: string, text = migrationText, file = migrationFile): string[] {
+  const start = text.indexOf(`-- ${name}:start`);
+  const end = text.indexOf(`-- ${name}:end`);
+  if (start < 0 || end < start) throw new Error(`block ${name} not found in ${file}`);
+  return text
     .slice(start, end)
     .split("--> statement-breakpoint")
     .map((chunk) => chunk.trim())
@@ -59,6 +63,7 @@ async function reseedDefaults() {
   await db.delete(systemSettings).where(inArray(systemSettings.key, LEGACY_KEYS));
   await db.execute(sql`TRUNCATE vat_codes CASCADE`);
   await run(db, "vat-codes-seed");
+  for (const statement of block("utm-seed", lateInterestText, lateInterestFile)) await db.execute(sql.raw(statement));
 }
 
 afterAll(async () => {
@@ -123,7 +128,10 @@ describe("0142 — vat_codes seed", () => {
 });
 
 describe("0142 — accounts", () => {
-  const catalogNumbers = [...new Set(VAT_CODE_CATALOG.flatMap((entry) => Object.values(entry.slots).map((slot) => slot.account)))];
+  // UTM (0151) came later: its 3990 is added by that migration, not 0142.
+  const catalogNumbers = [
+    ...new Set(VAT_CODE_CATALOG.filter((entry) => entry.code !== "UTM").flatMap((entry) => Object.values(entry.slots).map((slot) => slot.account))),
+  ];
 
   it("adds nothing to an empty chart of accounts", async () => {
     await db.execute(sql`TRUNCATE accounts CASCADE`);

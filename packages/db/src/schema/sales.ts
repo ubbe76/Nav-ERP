@@ -140,12 +140,21 @@ export const customers = pgTable("customers", {
   // takes it (and today's rate); the customer's särpriser (customer_prices)
   // are in it.
   currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+  // Dröjsmålsränta (migration 0151): whether the customer's overdue SEK
+  // invoices are offered in Räntefakturering (förval ja), the Avtalad
+  // räntesats (the TOTAL rate in %, replacing referensränta + marginal; null
+  // = enligt räntelagen) and whether förseningsersättning (450 kr,
+  // inkassokostnadslagen 4 a §) is charged — ignored for a privatperson.
+  lateInterest: boolean("late_interest").notNull().default(true),
+  lateInterestRate: numeric("late_interest_rate", { precision: 5, scale: 2 }),
+  lateFee: boolean("late_fee").notNull().default(true),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check("customers_delivery_weekdays", sql`${table.deliveryWeekdays} <@ '{1,2,3,4,5,6,7}'::smallint[]`),
   check("customers_transit_days", sql`${table.transitDays} between 0 and 60`),
   check("customers_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+  check("customers_late_interest_rate", sql`${table.lateInterestRate} IS NULL OR ${table.lateInterestRate} >= 0`),
 ]);
 
 // Multiple delivery addresses per customer; at most one is the default,
@@ -600,6 +609,11 @@ export const invoiceRows = pgTable(
     // verification carries them on the revenue row only.
     costCenterId: uuid("cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
     projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
+    // Dröjsmålsränta (migration 0151): the row's own revenue account — wins
+    // over the konteringsregel and the momskod's account in the poster.
+    // Written by Räntefakturering (8313 for the interest, 3990 for the
+    // förseningsersättning), copied by a credit note, never client input.
+    revenueAccount: varchar("revenue_account", { length: 4 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -785,5 +799,50 @@ export const customerPaymentRows = pgTable(
   (table) => [
     index("idx_customer_payment_rows_payment").on(table.paymentId),
     index("idx_customer_payment_rows_invoice").on(table.invoiceId),
+  ]
+);
+
+// Dröjsmålsränta och förseningsersättning (migration 0151, bokförings-
+// granskningen etapp 5 del C). One row per charge made by Räntefakturering:
+// the SOURCE invoice (invoice_id) and the period of late interest
+// (from_date–to_date, days, amount) or the förseningsersättning (fee, no
+// period) that its row on the räntefaktura (charge_invoice_row_id) bills.
+// Interest and fee for the same source invoice in the same run are TWO rows
+// (one per invoice row). Nothing here is a status: a charge is ACTIVE —
+// blocks the period / the fee from being charged again — exactly while its
+// räntefaktura is not cancelled and not fully credited (derived at read time,
+// late-interest.repository.ts). Deleting the row on a draft räntefaktura
+// deletes the charge (cascade), so the period is free again at once.
+export const lateInterestCharges = pgTable(
+  "late_interest_charges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    invoiceId: uuid("invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    fromDate: date("from_date"),
+    toDate: date("to_date"),
+    days: integer("days").notNull().default(0),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    fee: numeric("fee", { precision: 14, scale: 2 }).notNull().default("0"),
+    chargeInvoiceId: uuid("charge_invoice_id")
+      .notNull()
+      .references(() => invoices.id, { onDelete: "restrict" }),
+    chargeInvoiceRowId: uuid("charge_invoice_row_id")
+      .notNull()
+      .references(() => invoiceRows.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_late_interest_charges_invoice").on(table.invoiceId),
+    index("idx_late_interest_charges_charge_invoice").on(table.chargeInvoiceId),
+    check(
+      "late_interest_charges_period",
+      sql`(${table.fromDate} IS NULL AND ${table.toDate} IS NULL) OR (${table.fromDate} IS NOT NULL AND ${table.toDate} IS NOT NULL AND ${table.toDate} >= ${table.fromDate})`
+    ),
+    check("late_interest_charges_amount", sql`${table.amount} >= 0`),
+    check("late_interest_charges_fee", sql`${table.fee} >= 0`),
+    check("late_interest_charges_days", sql`${table.days} >= 0`),
   ]
 );

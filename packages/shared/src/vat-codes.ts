@@ -24,6 +24,7 @@ export const VAT_CODES = [
   "EXV",
   "EXT",
   "OB",
+  "UTM",
   "IEUV25",
   "IEUV12",
   "IEUV6",
@@ -58,6 +59,9 @@ export type VatCodeDirection = (typeof VAT_CODE_DIRECTIONS)[number];
 //   non_eu_goods     — goods from outside the EU: no VAT on the invoice, the
 //                      importmoms is its own event (tullbeslutet)
 //   import           — importmoms on the tax base from the customs decision
+//   out_of_scope     — utanför momsens tillämpningsområde (dröjsmålsränta,
+//                      förseningsersättning): no VAT, revenue on the code's
+//                      account, no declaration box, no invoice text
 export const VAT_CODE_KINDS = [
   "domestic",
   "eu_sale",
@@ -66,6 +70,7 @@ export const VAT_CODE_KINDS = [
   "reverse_purchase",
   "non_eu_goods",
   "import",
+  "out_of_scope",
 ] as const;
 export type VatCodeKind = (typeof VAT_CODE_KINDS)[number];
 
@@ -189,6 +194,18 @@ export const VAT_CODE_CATALOG: readonly VatCodeCatalogEntry[] = [
     slots: { revenue: slot("3231", "41") },
     invoiceText: "Omvänd betalningsskyldighet",
     requiresBuyerVatNumber: true,
+  },
+  {
+    // Dröjsmålsränta och förseningsersättning: the rows of a räntefaktura.
+    // Never derived by salesVatCode — set explicitly by Räntefakturering.
+    code: "UTM",
+    label: "Utanför momsens tillämpningsområde",
+    direction: "sales",
+    kind: "out_of_scope",
+    rate: 0,
+    slots: { revenue: slot("3990", "none") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
   },
   {
     code: "IEUV25",

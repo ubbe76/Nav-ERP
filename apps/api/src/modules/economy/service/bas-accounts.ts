@@ -156,6 +156,9 @@ export const BAS_STANDARD_ACCOUNTS: { number: string; name: string; vatBox?: Vat
   { number: "7970", name: "Förlust vid avyttring av anläggningstillgångar" },
   { number: "7990", name: "Övriga rörelsekostnader" },
   { number: "8310", name: "Ränteintäkter från omsättningstillgångar" },
+  // Dröjsmålsränta: the default posting_late_interest account (migration
+  // 0151 adds it to an existing chart of accounts).
+  { number: "8313", name: "Ränteintäkter från kortfristiga fordringar" },
   { number: "8410", name: "Räntekostnader för skulder" },
   { number: "8423", name: "Räntekostnader för skatter och avgifter" },
   { number: "8811", name: "Avsättning till periodiseringsfond" },

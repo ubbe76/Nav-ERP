@@ -43,6 +43,17 @@ export const POSTING_BANK_FEES_KEY = "posting_bank_fees";
 // count as fully paid (kr), and the fee charged per payment reminder (kr).
 export const PAYMENT_TOLERANCE_KEY = "payment_tolerance";
 export const REMINDER_FEE_KEY = "reminder_fee";
+// Dröjsmålsränta och förseningsersättning (etapp 5 C): the routine and the
+// invoice text are on, the räntemarginal over Riksbankens referensränta
+// (räntelagen 6 §: 8 procentenheter), the smallest ränta worth a
+// räntefaktura (kr), the förseningsersättning is on, and the two revenue
+// accounts the räntefaktura's rows carry (revenue_account on the row).
+export const LATE_INTEREST_ENABLED_KEY = "late_interest_enabled";
+export const LATE_INTEREST_MARGIN_KEY = "late_interest_margin";
+export const LATE_INTEREST_MIN_AMOUNT_KEY = "late_interest_min_amount";
+export const LATE_FEE_ENABLED_KEY = "late_fee_enabled";
+export const POSTING_LATE_INTEREST_KEY = "posting_late_interest";
+export const POSTING_LATE_FEE_KEY = "posting_late_fee";
 
 export const POSTING_SETTINGS_KEYS = [
   POSTING_ACCOUNTS_RECEIVABLE_KEY,
@@ -59,6 +70,12 @@ export const POSTING_SETTINGS_KEYS = [
   POSTING_BANK_FEES_KEY,
   PAYMENT_TOLERANCE_KEY,
   REMINDER_FEE_KEY,
+  LATE_INTEREST_ENABLED_KEY,
+  LATE_INTEREST_MARGIN_KEY,
+  LATE_INTEREST_MIN_AMOUNT_KEY,
+  LATE_FEE_ENABLED_KEY,
+  POSTING_LATE_INTEREST_KEY,
+  POSTING_LATE_FEE_KEY,
 ] as const;
 
 export interface PostingSettings {
@@ -76,6 +93,13 @@ export interface PostingSettings {
   postingBankFees: string;
   paymentTolerance: number;
   reminderFee: number;
+  // Dröjsmålsränta och förseningsersättning.
+  lateInterestEnabled: boolean;
+  lateInterestMargin: number;
+  lateInterestMinAmount: number;
+  lateFeeEnabled: boolean;
+  postingLateInterest: string;
+  postingLateFee: string;
 }
 
 // PAXml löneart codes and posting-account codes are stored as plain
@@ -120,6 +144,16 @@ export function decodePostingSettings(get: (key: string) => string | null): Post
     postingBankFees: codeSetting(get(POSTING_BANK_FEES_KEY), "6570"),
     paymentTolerance: amountSetting(get(PAYMENT_TOLERANCE_KEY), 5.0),
     reminderFee: amountSetting(get(REMINDER_FEE_KEY), 60.0),
+    // Both toggles default OFF: the invoice text and the routine are a
+    // decision the company makes, never a surprise on an upgrade.
+    lateInterestEnabled: get(LATE_INTEREST_ENABLED_KEY) === "true",
+    lateInterestMargin: amountSetting(get(LATE_INTEREST_MARGIN_KEY), 8.0),
+    lateInterestMinAmount: amountSetting(get(LATE_INTEREST_MIN_AMOUNT_KEY), 100.0),
+    lateFeeEnabled: get(LATE_FEE_ENABLED_KEY) === "true",
+    // 8313 Ränteintäkter från kortfristiga fordringar, 3990 Övriga
+    // ersättningar och intäkter.
+    postingLateInterest: codeSetting(get(POSTING_LATE_INTEREST_KEY), "8313"),
+    postingLateFee: codeSetting(get(POSTING_LATE_FEE_KEY), "3990"),
   };
 }
 

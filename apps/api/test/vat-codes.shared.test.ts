@@ -58,6 +58,7 @@ describe("the momskod catalog", () => {
         reverse_purchase: ["cost", "inputVat", "outputVat"],
         non_eu_goods: [],
         import: ["base", "baseCounter", "inputVat", "outputVat"],
+        out_of_scope: ["revenue"],
       }[entry.kind];
       expect({ code: entry.code, slots }).toEqual({ code: entry.code, slots: expected });
     }

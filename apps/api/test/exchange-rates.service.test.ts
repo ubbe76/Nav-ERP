@@ -1,9 +1,10 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { db, exchangeRates } from "@navet/db";
+import { db, exchangeRates, referenceRates } from "@navet/db";
 import {
   createExchangeRateService,
   ExchangeRateUnavailableError,
+  ReferenceRateRiksbankError,
   RiksbankUnavailableError,
   type ExchangeRateServiceDeps,
 } from "../src/modules/system/service/exchange-rates.js";
@@ -247,5 +248,84 @@ describe("settings", () => {
     expect((await svc.readSettings()).apiKey).toBe("very-secret");
     await svc.updateSettings({ apiKey: null }, null);
     expect(await svc.viewSettings()).toEqual({ source: "manual", apiKeySet: false });
+  });
+});
+
+// Referensränta (dröjsmålsränta): the SWEA series SECBREFEFF per half-year.
+describe("referensränta", () => {
+  const REF = (value: number, date: string) => [{ date, value }];
+
+  beforeEach(async () => {
+    await db.delete(referenceRates);
+  });
+
+  it("fetches each half-year in the interval from SECBREFEFF (first observation = the rate), including 0 and negative", async () => {
+    const { svc, calls } = service([
+      { status: 200, body: REF(-0.5, "2025-01-02") },
+      { status: 200, body: REF(0, "2025-07-01") },
+      { status: 200, body: [...REF(2.25, "2026-01-02"), ...REF(9, "2026-01-05")] },
+      { status: 204 },
+    ]);
+    const result = await svc.fetchReferenceRates({});
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://api.riksbank.se/swea/v1/Observations/SECBREFEFF/2025-01-01/2025-01-11",
+      "https://api.riksbank.se/swea/v1/Observations/SECBREFEFF/2025-07-01/2025-07-11",
+      "https://api.riksbank.se/swea/v1/Observations/SECBREFEFF/2026-01-01/2026-01-11",
+      "https://api.riksbank.se/swea/v1/Observations/SECBREFEFF/2026-07-01/2026-07-11",
+    ]);
+    expect(result.fetched).toBe(3);
+    expect(result.rows.map((row) => [row.validFrom, row.rate, row.source])).toEqual([
+      ["2026-01-01", 2.25, "riksbank"],
+      ["2025-07-01", 0, "riksbank"],
+      ["2025-01-01", -0.5, "riksbank"],
+    ]);
+    // An explicit interval, never a half-year after today.
+    const { svc: later, calls: laterCalls } = service([{ status: 200, body: REF(2, "2026-07-01") }]);
+    await later.fetchReferenceRates({ from: "2026-07-01", to: "2027-03-01" });
+    expect(laterCalls.map((call) => call.url)).toEqual(["https://api.riksbank.se/swea/v1/Observations/SECBREFEFF/2026-07-01/2026-07-11"]);
+  });
+
+  it("refuses with RiksbankUnavailableError when Riksbanken does not answer, and keeps what it has", async () => {
+    const { svc } = service([{ status: 200, body: REF(2, "2026-01-02") }, "throw"]);
+    await expect(svc.fetchReferenceRates({ from: "2026-01-01", to: "2026-07-01" })).rejects.toBeInstanceOf(RiksbankUnavailableError);
+    expect((await svc.listReferenceRates()).rows.map((row) => row.validFrom)).toEqual(["2026-01-01"]);
+  });
+
+  it("a manual rate wins over Riksbanken's for the half-year and is the only kind that can be deleted", async () => {
+    const { svc } = service([{ status: 200, body: REF(2, "2026-07-01") }, { status: 200, body: REF(2, "2026-07-01") }]);
+    await svc.fetchReferenceRates({ from: "2026-07-01", to: "2026-07-01" });
+    const manual = await svc.createManualReferenceRate({ validFrom: "2026-07-01", rate: 3.5 }, null);
+    expect(manual).toMatchObject({ validFrom: "2026-07-01", rate: 3.5, source: "manual" });
+    // A re-fetch leaves the manual row alone.
+    await svc.fetchReferenceRates({ from: "2026-07-01", to: "2026-07-01" });
+    expect((await svc.listReferenceRates()).rows).toEqual([manual]);
+    expect(await svc.ensureReferenceRates(["2026-07-01"])).toEqual(new Map([["2026-07-01", 3.5]]));
+    expect(await svc.deleteReferenceRate(manual.id, null)).toBe(true);
+    expect(await svc.deleteReferenceRate(manual.id, null)).toBe(false);
+
+    const { svc: fresh } = service([{ status: 200, body: REF(2, "2026-07-01") }]);
+    await fresh.fetchReferenceRates({ from: "2026-07-01", to: "2026-07-01" });
+    const riksbank = (await fresh.listReferenceRates()).rows[0]!;
+    await expect(fresh.deleteReferenceRate(riksbank.id, null)).rejects.toBeInstanceOf(ReferenceRateRiksbankError);
+  });
+
+  it("ensureReferenceRates fetches only the missing half-years, once, and reports what is still missing by leaving it out", async () => {
+    const { svc, calls } = service([{ status: 200, body: REF(2, "2026-01-02") }, { status: 204 }]);
+    await svc.createManualReferenceRate({ validFrom: "2025-07-01", rate: 1 }, null);
+    const rates = await svc.ensureReferenceRates(["2025-07-01", "2026-01-01", "2026-07-01"]);
+    expect([...rates]).toEqual([
+      ["2025-07-01", 1],
+      ["2026-01-01", 2],
+    ]);
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://api.riksbank.se/swea/v1/Observations/SECBREFEFF/2026-01-01/2026-01-11",
+      "https://api.riksbank.se/swea/v1/Observations/SECBREFEFF/2026-07-01/2026-07-11",
+    ]);
+    // The unpublished half-year is not asked for again within the window.
+    await svc.ensureReferenceRates(["2026-07-01"]);
+    expect(calls).toHaveLength(2);
+    // A transport failure is not an error here: the caller shows rateMissing.
+    const { svc: down } = service(["throw"]);
+    expect(await down.ensureReferenceRates(["2027-01-01"])).toEqual(new Map());
   });
 });

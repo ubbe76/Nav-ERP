@@ -47,8 +47,19 @@ import { CustomerNotFoundError, InvalidStatusTransitionError } from "./sales.ser
 // sales.service.ts's identical comment) so the many pre-existing test call
 // sites keep compiling; app.ts wires the real one.
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
-import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
+import {
+  ExchangeRateUnavailableError,
+  type ExchangeRateReader,
+  type ReferenceRateReader,
+} from "../../system/service/exchange-rates.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
+import {
+  accruedInterestText,
+  addDays as addCalendarDays,
+  halfYearStartsBetween,
+  LATE_INTEREST_TERMS_TEXT,
+  lateInterest,
+} from "./late-interest.js";
 
 // Narrow slices of mail/pdf services — same cross-module pattern as
 // StockBalanceReader in sales.service.ts. No CompanyInfoReader here: the
@@ -316,6 +327,17 @@ export class NothingToRemindError extends Error {
 // invoice. Further reminders are free of charge — this is what refuses the
 // second fee (the partial unique index invoice_reminders_one_fee is the
 // backstop for anything that races past the check).
+// Dröjsmålsränta (inkassokostnadslagen 5 § andra stycket): a påminnelse-
+// avgift is payable only to the extent it exceeds the förseningsersättning
+// — once an active förseningsersättning is charged on the invoice, the
+// reminder goes without a fee. 409 reminder-fee-after-late-fee.
+export class ReminderFeeAfterLateFeeError extends Error {
+  constructor(public invoiceId: string) {
+    super(`Invoice ${invoiceId} already carries a förseningsersättning — the reminder fee is covered by it`);
+    this.name = "ReminderFeeAfterLateFeeError";
+  }
+}
+
 export class ReminderFeeAlreadyChargedError extends Error {
   constructor(id: string) {
     super(`Invoice ${id} has already been charged a reminder fee`);
@@ -370,6 +392,10 @@ type RowInput = {
   // an override that differs is the user's choice and held to the rule.
   // Never client input.
   sourceDimensions?: { costCenterId: string | null; projectId: string | null };
+  // Dröjsmålsränta: the row's own revenue account (räntefaktura rows); a
+  // credit note copies it. undefined on a PATCH keeps the row's. Never
+  // client input — the route schemas have no such field.
+  revenueAccount?: string | null;
 };
 
 // What every row of one create/addRow/PATCH needs to know once: the
@@ -394,6 +420,7 @@ type ExistingRowState = {
   deliveryDate?: string | null;
   costCenterId?: string | null;
   projectId?: string | null;
+  revenueAccount?: string | null;
 };
 
 export function createInvoiceService(
@@ -415,7 +442,11 @@ export function createInvoiceService(
   // freight row whose shipment has no order rate to take. Optional so the
   // fixtures that only invoice in SEK need not wire it; without it a foreign
   // invoice needs a rate typed in (else 409 exchange-rate-unavailable).
-  rates: ExchangeRateReader | null = null
+  rates: ExchangeRateReader | null = null,
+  // Dröjsmålsränta: the referensräntor for the reminder PDF's "Upplupen
+  // dröjsmålsränta" line (fetched from Riksbanken when missing, before any
+  // transaction). Optional: without it the line is simply left out.
+  referenceRates: ReferenceRateReader | null = null
 ) {
   // Valuta: the rate for a currency and day (SEK = 1), looked up BEFORE any
   // transaction — it may call Riksbanken.
@@ -506,6 +537,11 @@ export function createInvoiceService(
       rate === null ? 0 : invoiceSekAmounts({ rate, rows: rows.map((r) => ({ lineAmount: Number(r.lineAmount), vatAmount: Number(r.vatAmount) })) }).vatAmount;
     const vatInSek = rate !== null && vatSek !== 0 ? { amount: sign * vatSek, rate } : null;
 
+    // Dröjsmålsränta (kontrakt, beslut 15): the terms text under the
+    // payment terms when the routine is on and the customer has
+    // Dröjsmålsränta — on an invoice, never a credit note or a räntefaktura.
+    const lateInterestText = !isCredit && (await lateInterestTermsText(invoice)) ? LATE_INTEREST_TERMS_TEXT : null;
+
     const content = await pdf.render({
       title: isCredit ? "Kreditfaktura" : "Faktura",
       documentNumber: invoice.invoiceNumber!,
@@ -572,6 +608,7 @@ export function createInvoiceService(
       dueDate,
       orderReference: creditReference,
       ourSupplierNumberAtCustomer: customer?.ourSupplierNumber ?? null,
+      lateInterestText,
       // Snapshot column only — never the live customer (same rule as the
       // address block above).
       partnerNumber: invoice.customerNumber,
@@ -587,6 +624,62 @@ export function createInvoiceService(
 
     const prefix = isCredit ? "Kreditfaktura" : "Faktura";
     return { filename: `${prefix}-${invoice.invoiceNumber}.pdf`, content };
+  }
+
+  // Whether the invoice's PDF/reminder carries the dröjsmålsränta terms
+  // text: Debitera dröjsmålsränta is on, the customer has Dröjsmålsränta,
+  // and the invoice is not itself a räntefaktura.
+  async function lateInterestTermsText(invoice: RawInvoice): Promise<boolean> {
+    const settings = await repo.getLateInterestSettings();
+    if (!settings.lateInterestEnabled) return false;
+    const customer = await repo.findCustomerById(invoice.customerId);
+    if (!customer?.lateInterest) return false;
+    return !(await repo.isLateInterestInvoice(invoice.id));
+  }
+
+  // "Upplupen dröjsmålsränta t.o.m. {i dag}: {belopp} kr" for the reminder
+  // — information only, computed by the same lateInterest as the routine
+  // (from the day after the due date, or after the last active charged
+  // period, through today). Null when nothing applies, when the reference
+  // rate is missing, or when the interest is 0. Reads referensräntor
+  // before any transaction (Riksbanken may be called).
+  async function accruedInterestLine(invoice: RawInvoice): Promise<string | null> {
+    if (invoice.type !== "invoice" || invoice.currency !== SEK || !invoice.dueDate) return null;
+    if (!(await lateInterestTermsText(invoice))) return null;
+    const settings = await repo.getLateInterestSettings();
+    const customer = await repo.findCustomerById(invoice.customerId);
+    const today = stockholmToday();
+    const charges = await repo.listLateInterestCharges(invoice.id);
+    const lastCharged = charges
+      .filter((charge) => charge.active && charge.toDate !== null)
+      .map((charge) => charge.toDate!)
+      .sort()
+      .at(-1);
+    // lateInterest starts the day after `dueDate`: hand it the last charged
+    // day as the "due date" so the accrued period starts after it.
+    const dueDate = lastCharged && lastCharged > invoice.dueDate ? lastCharged : invoice.dueDate;
+    if (dueDate >= today) return null;
+    const agreedRate = customer?.lateInterestRate === null || customer?.lateInterestRate === undefined ? null : Number(customer.lateInterestRate);
+    const starts = agreedRate === null ? halfYearStartsBetween(addCalendarDays(dueDate, 1), today) : [];
+    const rates = starts.length > 0 && referenceRates ? await referenceRates.ensureReferenceRates(starts) : new Map<string, number>();
+    const rows = await repo.listRows(invoice.id);
+    const principal = round2(rows.reduce((sum, row) => sum + Number(row.lineAmount) + Number(row.vatAmount), 0));
+    const result = lateInterest({
+      principal,
+      dueDate,
+      through: today,
+      payments: await repo.listLateInterestPayments(invoice.id),
+      rates: [...rates].map(([validFrom, rate]) => ({ validFrom, rate })),
+      margin: settings.lateInterestMargin,
+      agreedRate,
+    });
+    if (result.amount === null || result.amount <= 0) return null;
+    return accruedInterestText(today, result.amount);
+  }
+
+  // Dröjsmålsränta: an active förseningsersättning on the invoice.
+  async function hasActiveLateFee(invoiceId: string): Promise<boolean> {
+    return (await repo.listLateInterestCharges(invoiceId)).some((charge) => charge.active && charge.fee > 0);
   }
 
   // Everything a reminder needs to know about the invoice's money, read once.
@@ -622,6 +715,10 @@ export function createInvoiceService(
     printedAt: Date
   ) {
     const dueDate = invoice.dueDate ? new Date(invoice.dueDate) : null;
+    // Dröjsmålsränta: the terms text and the accrued interest (information,
+    // never charged by the reminder).
+    const lateInterestText = (await lateInterestTermsText(invoice)) ? LATE_INTEREST_TERMS_TEXT : null;
+    const accruedInterest = lateInterestText ? await accruedInterestLine(invoice) : null;
     const content = await pdf.renderPaymentReminder({
       level,
       documentNumber: invoice.invoiceNumber!,
@@ -644,6 +741,8 @@ export function createInvoiceService(
       feeAmount: round2(context.chargedFee + newFee),
       amountDue: round2(context.open + newFee),
       payment: { ocrNumber: invoice.ocrNumber, dueDate },
+      lateInterestText,
+      accruedInterestText: accruedInterest,
     });
     return { filename: `Betalningspåminnelse-${invoice.invoiceNumber}.pdf`, content };
   }
@@ -872,6 +971,7 @@ export function createInvoiceService(
       deliveryDate,
       configuration,
       ...dimensions,
+      revenueAccount: input.revenueAccount !== undefined ? input.revenueAccount : (existingRow?.revenueAccount ?? null),
     };
   }
 
@@ -952,14 +1052,17 @@ export function createInvoiceService(
     async getInvoice(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
-      const [rows, openAmount, openAmountSek, payments, reminders, creditedBy] = await Promise.all([
-        repo.listRows(id),
-        repo.getOpenAmount(id),
-        repo.getOpenAmountSek(id),
-        repo.listPaymentsForInvoice(id),
-        repo.listRemindersForInvoice(id),
-        repo.listCreditedBy(id),
-      ]);
+      const [rows, openAmount, openAmountSek, payments, reminders, creditedBy, lateInterestCharges, isLateInterestInvoice] =
+        await Promise.all([
+          repo.listRows(id),
+          repo.getOpenAmount(id),
+          repo.getOpenAmountSek(id),
+          repo.listPaymentsForInvoice(id),
+          repo.listRemindersForInvoice(id),
+          repo.listCreditedBy(id),
+          repo.listLateInterestCharges(id),
+          repo.isLateInterestInvoice(id),
+        ]);
       let buyerVatNumber = header.vatNumber;
       let vatNumberProblem: ReturnType<typeof buyerVatNumberProblem> = null;
       let vatNumberWarning: ReturnType<typeof buyerVatNumberWarning> = null;
@@ -994,6 +1097,21 @@ export function createInvoiceService(
         payments,
         reminders,
         creditedBy,
+        // Dröjsmålsränta: the charges made on this source invoice (period,
+        // amounts, the räntefaktura, derived `active`) and whether the
+        // invoice is itself a räntefaktura.
+        lateInterestCharges: lateInterestCharges.map((charge) => ({
+          id: charge.id,
+          fromDate: charge.fromDate,
+          toDate: charge.toDate,
+          days: charge.days,
+          amount: charge.amount,
+          fee: charge.fee,
+          chargeInvoiceId: charge.chargeInvoiceId,
+          chargeInvoiceNumber: charge.chargeInvoiceNumber,
+          active: charge.active,
+        })),
+        isLateInterestInvoice,
       };
     },
 
@@ -1125,6 +1243,8 @@ export function createInvoiceService(
           costCenterId: r.costCenterId,
           projectId: r.projectId,
           sourceDimensions: { costCenterId: r.costCenterId, projectId: r.projectId },
+          // Dröjsmålsränta: a credit of a räntefaktura nets the same account.
+          revenueAccount: r.revenueAccount,
         }));
       }
 
@@ -1294,6 +1414,7 @@ export function createInvoiceService(
             deliveryDate: existing.deliveryDate,
             costCenterId: existing.costCenterId,
             projectId: existing.projectId,
+            revenueAccount: existing.revenueAccount,
           },
           undefined,
           invoice.type
@@ -1717,7 +1838,9 @@ export function createInvoiceService(
       if (withFee && invoice.currency !== SEK) throw new ReminderFeeCurrencyError(invoice.currency);
       const context = await reminderContext(invoice);
       if (context.open <= 0) throw new NothingToRemindError(id);
-      const fee = withFee && context.chargedFee === 0 ? await repo.getReminderFee() : 0;
+      // Dröjsmålsränta: an active förseningsersättning covers the fee —
+      // the preview drops it quietly, like an already charged fee.
+      const fee = withFee && context.chargedFee === 0 && !(await hasActiveLateFee(invoice.id)) ? await repo.getReminderFee() : 0;
       return buildReminderPdf(invoice, context, context.reminders.length + 1, fee, new Date());
     },
 
@@ -1761,6 +1884,9 @@ export function createInvoiceService(
       const context = await reminderContext(invoice);
       if (context.open <= 0) throw new NothingToRemindError(id);
       if (input.withFee && context.chargedFee > 0) throw new ReminderFeeAlreadyChargedError(id);
+      // Dröjsmålsränta (inkassokostnadslagen 5 §): the fee is covered by an
+      // active förseningsersättning — refused before anything is sent.
+      if (input.withFee && (await hasActiveLateFee(id))) throw new ReminderFeeAfterLateFeeError(id);
 
       const fee = input.withFee ? await repo.getReminderFee() : 0;
       // The poster refuses a zero fee (rightly — it would be an empty
@@ -1814,6 +1940,8 @@ export function createInvoiceService(
             throw new NothingToRemindError(id);
           case "fee_already_charged":
             throw new ReminderFeeAlreadyChargedError(id);
+          case "late_fee_charged":
+            throw new ReminderFeeAfterLateFeeError(id);
         }
       }
       await audit.log({

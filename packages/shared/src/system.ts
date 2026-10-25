@@ -160,6 +160,18 @@ const systemSettingsFieldsSchema = z.object({
     // these two (unlike the account codes, an empty amount is not valid).
     paymentTolerance: z.number().min(0).max(100000).optional(),
     reminderFee: z.number().min(0).max(100000).optional(),
+    // Dröjsmålsränta och förseningsersättning (etapp 5 C): whether the
+    // routine (and the invoice text) is on, the räntemarginal in
+    // procentenheter over Riksbankens referensränta (räntelagen 6 §: 8),
+    // the smallest ränta worth a räntefaktura (kr), whether the
+    // förseningsersättning is charged, and the two revenue accounts (same
+    // 4-digit/"" convention as the other posting accounts).
+    lateInterestEnabled: z.boolean().optional(),
+    lateInterestMargin: z.number().min(0).max(100).optional(),
+    lateInterestMinAmount: z.number().min(0).max(100000).optional(),
+    lateFeeEnabled: z.boolean().optional(),
+    postingLateInterest: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
+    postingLateFee: z.union([z.literal(""), z.string().regex(/^[0-9]{4}$/)]).optional(),
     // Aviseringar: when the daily digest is sent (Stockholm time, HH:MM),
     // how far ahead "Leverantörsfakturor att betala" looks (days), and Navs
     // adress for the links in the digest mail — a http(s) URL or "" (= no
@@ -214,6 +226,12 @@ export const POSTING_SETTINGS_KEYS = [
   "postingBankFees",
   "paymentTolerance",
   "reminderFee",
+  "lateInterestEnabled",
+  "lateInterestMargin",
+  "lateInterestMinAmount",
+  "lateFeeEnabled",
+  "postingLateInterest",
+  "postingLateFee",
 ] as const;
 
 export const updatePostingSettingsSchema = systemSettingsFieldsSchema

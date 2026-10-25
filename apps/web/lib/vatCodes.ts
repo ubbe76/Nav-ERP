@@ -23,6 +23,7 @@ export const VAT_CODES = [
   "EXV",
   "EXT",
   "OB",
+  "UTM",
   "IEUV25",
   "IEUV12",
   "IEUV6",
@@ -52,6 +53,7 @@ export const VAT_CODE_KINDS = [
   "reverse_purchase",
   "non_eu_goods",
   "import",
+  "out_of_scope",
 ] as const;
 export type VatCodeKind = (typeof VAT_CODE_KINDS)[number];
 
@@ -163,6 +165,17 @@ export const VAT_CODE_CATALOG: readonly VatCodeCatalogEntry[] = [
     slots: { revenue: slot("3231", "41") },
     invoiceText: "Omvänd betalningsskyldighet",
     requiresBuyerVatNumber: true,
+  },
+  {
+    // Dröjsmålsränta och förseningsersättning: the rows of a räntefaktura.
+    code: "UTM",
+    label: "Utanför momsens tillämpningsområde",
+    direction: "sales",
+    kind: "out_of_scope",
+    rate: 0,
+    slots: { revenue: slot("3990", "none") },
+    invoiceText: null,
+    requiresBuyerVatNumber: false,
   },
   {
     code: "IEUV25",
@@ -689,6 +702,7 @@ export const VAT_CODE_KIND_LABELS: Record<VatCodeKind, string> = {
   reverse_purchase: "Omvänd moms, inköp",
   non_eu_goods: "Inköp utanför EU",
   import: "Importmoms",
+  out_of_scope: "Utanför momsens tillämpningsområde",
 };
 
 // The role labels in the Momskoder table, where a code's accounts share a

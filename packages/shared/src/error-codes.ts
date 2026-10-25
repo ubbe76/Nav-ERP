@@ -466,6 +466,16 @@ export const ERROR_CODES = {
   // date under the lock / no manufactured shortage to make a TO for.
   DELIVERY_TIME_CHANGED: "delivery-time-changed",
   NOTHING_TO_RESERVE: "nothing-to-reserve",
+  // Dröjsmålsränta och förseningsersättning (bokföringsgranskningen etapp 5 C)
+  // Räntefakturering while Debitera dröjsmålsränta is off (409)
+  LATE_INTEREST_DISABLED: "late-interest-disabled",
+  // Skapa räntefakturor: the period/fee the client sent no longer matches
+  // (charged meanwhile, or no longer a candidate) — 409, body.invoiceIds
+  LATE_INTEREST_ALREADY_CHARGED: "late-interest-already-charged",
+  // Påminnelseavgift on an invoice with an active förseningsersättning (409)
+  REMINDER_FEE_AFTER_LATE_FEE: "reminder-fee-after-late-fee",
+  // DELETE /reference-rates/:id on a Riksbanken row (409)
+  REFERENCE_RATE_RIKSBANK: "reference-rate-riksbank",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

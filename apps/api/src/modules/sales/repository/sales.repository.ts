@@ -320,8 +320,14 @@ export function createSalesRepository(db: Db) {
       // fail the query, so an omitted value is left out of the insert
       // entirely and falls through to the column's own DEFAULT 0 — same
       // guard updateCustomer already applies below.
-      const { discountPercent, ...rest } = input;
-      const values = discountPercent === undefined ? rest : { ...rest, discountPercent: String(discountPercent) };
+      // Dröjsmålsränta: lateInterestRate is numeric(5,2) — the same
+      // string/omit treatment as discountPercent (null clears).
+      const { discountPercent, lateInterestRate, ...rest } = input;
+      const values = {
+        ...rest,
+        ...(discountPercent === undefined ? {} : { discountPercent: String(discountPercent) }),
+        ...(lateInterestRate === undefined ? {} : { lateInterestRate: lateInterestRate === null ? null : String(lateInterestRate) }),
+      };
       // Tillägg: customer.created commits with the customer.
       const insert = (customerNumber: string) =>
         db.transaction(async (tx) => {
@@ -338,8 +344,12 @@ export function createSalesRepository(db: Db) {
     },
 
     async updateCustomer(id: string, input: UpdateCustomerInput) {
-      const { discountPercent, ...rest } = input;
-      const set = discountPercent === undefined ? rest : { ...rest, discountPercent: String(discountPercent) };
+      const { discountPercent, lateInterestRate, ...rest } = input;
+      const set = {
+        ...rest,
+        ...(discountPercent === undefined ? {} : { discountPercent: String(discountPercent) }),
+        ...(lateInterestRate === undefined ? {} : { lateInterestRate: lateInterestRate === null ? null : String(lateInterestRate) }),
+      };
       return db.transaction(async (tx) => {
         const [row] = await tx.update(customers).set(set).where(eq(customers.id, id)).returning();
         if (row) await pluginEvents.emit(tx, { type: "customer.updated", entityId: row.id, entityNumber: row.customerNumber });

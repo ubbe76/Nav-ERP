@@ -137,3 +137,31 @@ export const exchangeRates = pgTable(
     check("exchange_rates_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$' AND ${table.currency} <> 'SEK'`),
   ]
 );
+
+// Referensränta (migration 0151): Riksbankens referensränta per calendar
+// half-year (räntelagen 9 §, fastställd 1 januari och 1 juli) — the base of
+// the dröjsmålsränta (referensränta + 8 procentenheter, 6 §). One row per
+// half-year (valid_from UNIQUE, CHECK 1 January or 1 July): fetched from
+// Riksbanken (SWEA series SECBREFEFF, source "riksbank") or entered by hand
+// (source "manual"). A manual row wins — Hämta från Riksbanken never
+// overwrites one (system/service/exchange-rates.ts, the only file that knows
+// SWEA). The rate may be zero or negative (it was 0,00 and −0,50 in the
+// 2010s), unlike an exchange rate.
+export const referenceRates = pgTable(
+  "reference_rates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    validFrom: date("valid_from").notNull().unique(),
+    rate: numeric("rate", { precision: 5, scale: 2 }).notNull(),
+    source: varchar("source", { length: 10 }).notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("reference_rates_source_valid", sql`${table.source} IN ('riksbank', 'manual')`),
+    check(
+      "reference_rates_half_year",
+      sql`EXTRACT(DAY FROM ${table.validFrom}) = 1 AND EXTRACT(MONTH FROM ${table.validFrom}) IN (1, 7)`
+    ),
+  ]
+);

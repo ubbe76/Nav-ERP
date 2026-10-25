@@ -39,6 +39,7 @@ import {
   ShipmentAlreadyInvoicedError,
   InvoiceExchangeRateError,
   InvoiceRowCurrencyMismatchError,
+  ReminderFeeAfterLateFeeError,
   ReminderFeeCurrencyError,
 } from "../service/invoice.service.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
@@ -114,6 +115,8 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
       // the partial unique index's 23505 (the service normalizes it).
       err instanceof NothingToRemindError ||
       err instanceof ReminderFeeAlreadyChargedError ||
+      // Dröjsmålsränta: the fee is covered by an active förseningsersättning.
+      err instanceof ReminderFeeAfterLateFeeError ||
       // Frakt etapp 2: the same freight is already on an invoice (pre-check
       // or the unique index behind it).
       err instanceof ShipmentAlreadyInvoicedError ||

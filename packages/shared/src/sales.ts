@@ -86,6 +86,10 @@ export const countryCodeSchema = z
   .toUpperCase()
   .regex(/^[A-Z]{2}$/, "Country must be an ISO 3166-1 alpha-2 code");
 
+// Avtalad räntesats (%) on the customer: the total dröjsmålsränta, 0–100
+// with two decimals (numeric(5,2)); blank clears it in the forms.
+export const lateInterestRateSchema = blankSafe(z.coerce.number().min(0).max(100));
+
 export const createCustomerSchema = z.object({
   name: z.string().min(1).max(255),
   // Kundnummer — omitted = allocated from the "customer" number series.
@@ -138,6 +142,12 @@ export const createCustomerSchema = z.object({
   // Valuta: the customer's currency (ISO 4217, "eur" → "EUR"). New orders
   // take it with today's rate; the customer's särpriser are in it.
   currency: currencyCodeSchema.default("SEK"),
+  // Dröjsmålsränta: charged on overdue invoices (förval ja), the Avtalad
+  // räntesats (total %, null = referensränta + marginal enligt räntelagen)
+  // and förseningsersättning (förval ja, ignored for a privatperson).
+  lateInterest: z.boolean().default(true),
+  lateInterestRate: lateInterestRateSchema.nullable().optional(),
+  lateFee: z.boolean().default(true),
   active: z.boolean().default(true),
   ...partnerDeliveryFields,
 });
@@ -184,6 +194,9 @@ export const updateCustomerSchema = z
     // Valuta: not nullable — a customer always has a currency. Existing
     // orders keep theirs.
     currency: currencyCodeSchema.optional(),
+    lateInterest: z.boolean().optional(),
+    lateInterestRate: lateInterestRateSchema.nullable().optional(),
+    lateFee: z.boolean().optional(),
     active: z.boolean().optional(),
     ...partnerDeliveryFields,
   })

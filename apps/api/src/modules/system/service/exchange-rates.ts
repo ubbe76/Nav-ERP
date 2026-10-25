@@ -10,6 +10,16 @@ import {
 } from "@navet/shared";
 import type { AuditWriter } from "../repository/audit.repository.js";
 import {
+  deleteReferenceRateRow,
+  findReferenceRateById,
+  listReferenceRates,
+  referenceRatesFor,
+  upsertManualReferenceRate,
+  upsertRiksbankReferenceRate,
+  type ReferenceRateRow,
+} from "../repository/reference-rates.js";
+import { halfYearStart, halfYearStartsBetween, previousHalfYearStart } from "./half-years.js";
+import {
   EXCHANGE_RATE_SETTING_KEYS,
   findRateById,
   listRates,
@@ -42,6 +52,15 @@ import { addDays, stockholmToday } from "./delivery-days.js";
 // and the cause's code only, the caller a fixed Swedish message.
 
 export const RIKSBANK_BASE_URL = "https://api.riksbank.se/swea/v1";
+// Referensränta (räntelagen 9 §): the SWEA series of Riksbankens
+// referensränta, in percent. Verified 2026-10-25:
+// /Observations/SECBREFEFF/2026-07-01/2026-07-11 → [{ date, value }]. The
+// first observation on or after a half-year start is that half-year's rate;
+// an empty answer (204) means it is not published (yet).
+export const REFERENCE_RATE_SERIES = "SECBREFEFF";
+const REFERENCE_RATE_WINDOW_DAYS = 10;
+// How many half-years Hämta från Riksbanken takes by default.
+const REFERENCE_RATE_DEFAULT_HALF_YEARS = 4;
 const TIMEOUT_MS = 10_000;
 // How far back the interval reaches: longer than any run of Swedish
 // non-banking days (Christmas–New Year is at most five in a row).
@@ -86,6 +105,23 @@ export class RiksbankUnavailableError extends Error {
   }
 }
 
+// DELETE /reference-rates/:id on a row Riksbanken gave: 409
+// reference-rate-riksbank — add a manual rate for the half-year instead.
+export class ReferenceRateRiksbankError extends Error {
+  constructor(public validFrom: string) {
+    super(`Referensräntan från ${validFrom} är hämtad från Riksbanken och kan inte tas bort`);
+    this.name = "ReferenceRateRiksbankError";
+  }
+}
+
+// Dröjsmålsränta: the slice the sales side reads — the referensräntor for
+// the half-years a period touches, fetched from Riksbanken first when
+// missing (never inside a transaction). Half-years still missing are absent
+// from the map.
+export interface ReferenceRateReader {
+  ensureReferenceRates(halfYearStarts: string[]): Promise<Map<string, number>>;
+}
+
 export type ExchangeRateLookup = {
   currency: string;
   // The day asked for, and the day of the rate that answered (the latest
@@ -128,7 +164,9 @@ function transportSummary(err: unknown): string {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CURRENCY = /^[A-Z]{3}$/;
 
-function parseObservations(text: string): Observation[] | null {
+// An exchange rate is always positive; the referensränta may be zero or
+// negative (0,00 and −0,50 in the 2010s), so the series decides the check.
+function parseObservations(text: string, opts: { allowNonPositive: boolean }): Observation[] | null {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -140,7 +178,8 @@ function parseObservations(text: string): Observation[] | null {
   for (const item of data) {
     const entry = item as { date?: unknown; value?: unknown };
     if (typeof entry?.date !== "string" || !ISO_DATE.test(entry.date)) return null;
-    if (typeof entry.value !== "number" || !Number.isFinite(entry.value) || entry.value <= 0) return null;
+    if (typeof entry.value !== "number" || !Number.isFinite(entry.value)) return null;
+    if (!opts.allowNonPositive && entry.value <= 0) return null;
     observations.push({ date: entry.date, value: Math.round(entry.value * 1e6) / 1e6 });
   }
   return observations;
@@ -193,8 +232,10 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
     };
   }
 
-  async function fetchObservations(currency: string, from: string, to: string, apiKey: string | null): Promise<FetchResult> {
-    const path = `/Observations/SEK${currency}PMI/${from}/${to}`;
+  // One SWEA observations call. `series` is the exchange rate's SEK{CCY}PMI
+  // or the referensränta's SECBREFEFF; `currency` labels the log entry.
+  async function fetchSeries(series: string, currency: string, from: string, to: string, apiKey: string | null): Promise<FetchResult> {
+    const path = `/Observations/${series}/${from}/${to}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res: Response;
@@ -233,12 +274,46 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
       log({ currency, from, to, status: res.status, detail: "error" });
       return { ok: false, reason: "unavailable" };
     }
-    const observations = parseObservations(text);
+    const observations = parseObservations(text, { allowNonPositive: series === REFERENCE_RATE_SERIES });
     if (observations === null) {
       log({ currency, from, to, status: res.status, detail: "unexpected body" });
       return { ok: false, reason: "unexpected" };
     }
     return { ok: true, observations: observations.filter((o) => o.date >= from && o.date <= to) };
+  }
+
+  async function fetchObservations(currency: string, from: string, to: string, apiKey: string | null): Promise<FetchResult> {
+    return fetchSeries(`SEK${currency}PMI`, currency, from, to, apiKey);
+  }
+
+  // Riksbankens referensränta for one half-year: the first observation in
+  // [start, start + 10 days]. ok with rate null = not published.
+  async function fetchReferenceRate(
+    validFrom: string,
+    apiKey: string | null
+  ): Promise<{ ok: true; rate: number | null } | { ok: false; reason: RiksbankFailure }> {
+    const result = await fetchSeries(REFERENCE_RATE_SERIES, REFERENCE_RATE_SERIES, validFrom, addDays(validFrom, REFERENCE_RATE_WINDOW_DAYS), apiKey);
+    if (!result.ok) return result;
+    const first = [...result.observations].sort((a, b) => a.date.localeCompare(b.date))[0];
+    return { ok: true, rate: first ? Math.round(first.value * 100) / 100 : null };
+  }
+
+  // The half-years Hämta från Riksbanken takes: [from, to] when given, else
+  // the latest REFERENCE_RATE_DEFAULT_HALF_YEARS through today.
+  function referenceHalfYears(input: { from?: string; to?: string }): string[] {
+    const todayDate = today();
+    const to = input.to ?? todayDate;
+    let from = input.from;
+    if (from === undefined) {
+      from = halfYearStart(to);
+      for (let i = 1; i < REFERENCE_RATE_DEFAULT_HALF_YEARS; i++) from = previousHalfYearStart(from);
+    }
+    // A half-year after today's is not published yet — never asked for.
+    return halfYearStartsBetween(from, to).filter((start) => start <= todayDate);
+  }
+
+  function referenceFetchedKey(validFrom: string) {
+    return `${REFERENCE_RATE_SERIES}|${validFrom}`;
   }
 
   function lookup(currency: string, requestedDate: string, rate: StoredRate): ExchangeRateLookup {
@@ -361,6 +436,78 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
         fetched: result.observations.length,
         rates: rates.filter((rate) => rate.source === "riksbank"),
       };
+    },
+
+    // --- Referensränta (dröjsmålsränta) ---
+
+    async listReferenceRates(): Promise<{ rows: ReferenceRateRow[]; total: number }> {
+      const rows = await listReferenceRates(db);
+      return { rows, total: rows.length };
+    },
+
+    // Lägg till (manual) — upsert for the half-year; wins over Riksbanken's.
+    async createManualReferenceRate(input: { validFrom: string; rate: number }, userId: string | null): Promise<ReferenceRateRow> {
+      const { row, previous } = await upsertManualReferenceRate(db, input, userId);
+      await audit.log({
+        entityType: "reference_rate",
+        entityId: input.validFrom,
+        action: previous ? "updated" : "created",
+        detail: previous ? { before: { rate: previous.rate, source: previous.source }, after: { rate: input.rate } } : { rate: input.rate },
+        userId,
+      });
+      return row;
+    },
+
+    // Only a manual row can be removed; Riksbanken's answers 409.
+    async deleteReferenceRate(id: string, userId: string | null): Promise<boolean> {
+      const row = await findReferenceRateById(db, id);
+      if (!row) return false;
+      if (row.source !== "manual") throw new ReferenceRateRiksbankError(row.validFrom);
+      await deleteReferenceRateRow(db, id);
+      await audit.log({ entityType: "reference_rate", entityId: row.validFrom, action: "deleted", detail: { rate: row.rate }, userId });
+      return true;
+    },
+
+    // Hämta från Riksbanken for the half-years in [from, to] (default the
+    // latest four through today) — every published half-year stored (a
+    // manual row is never overwritten). One call per half-year; a failure
+    // is the same 502 as the exchange rates' fetch.
+    async fetchReferenceRates(input: { from?: string; to?: string }): Promise<{ fetched: number; rows: ReferenceRateRow[] }> {
+      const settings = await readSettings();
+      let fetchedCount = 0;
+      for (const validFrom of referenceHalfYears(input)) {
+        const result = await fetchReferenceRate(validFrom, settings.apiKey);
+        if (!result.ok) throw new RiksbankUnavailableError(result.reason);
+        markFetched(REFERENCE_RATE_SERIES, validFrom);
+        if (result.rate === null) continue;
+        await upsertRiksbankReferenceRate(db, validFrom, result.rate);
+        fetchedCount += 1;
+      }
+      return { fetched: fetchedCount, rows: await listReferenceRates(db) };
+    },
+
+    // The referensräntor for the given half-year starts, fetching the
+    // missing ones from Riksbanken first (best effort: a failure or an
+    // unpublished half-year simply leaves it out — the caller reports
+    // rateMissing). Never called inside a transaction. A half-year asked
+    // for recently is not asked again (the fetch memo), so a list reload
+    // does not hammer Riksbanken for a rate that is not published.
+    async ensureReferenceRates(halfYearStarts: string[]): Promise<Map<string, number>> {
+      const wanted = [...new Set(halfYearStarts)].sort();
+      let stored = await referenceRatesFor(db, wanted);
+      const todayDate = today();
+      const missing = wanted.filter((start) => !stored.has(start) && start <= todayDate && !fetchedRecently(REFERENCE_RATE_SERIES, start));
+      if (missing.length > 0) {
+        const settings = await readSettings();
+        for (const validFrom of missing) {
+          const result = await fetchReferenceRate(validFrom, settings.apiKey);
+          if (!result.ok) break;
+          markFetched(REFERENCE_RATE_SERIES, validFrom);
+          if (result.rate !== null) await upsertRiksbankReferenceRate(db, validFrom, result.rate);
+        }
+        stored = await referenceRatesFor(db, wanted);
+      }
+      return new Map([...stored].map(([start, row]) => [start, row.rate] as const));
     },
   };
 

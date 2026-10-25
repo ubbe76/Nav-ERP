@@ -1058,6 +1058,13 @@
       "when": 1792945833072,
       "tag": "0150_budget",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1792953223535,
+      "tag": "0151_drojsmalsranta",
+      "breakpoints": true
     }
   ]
 }

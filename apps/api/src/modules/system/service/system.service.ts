@@ -33,6 +33,12 @@ import {
   POSTING_FX_LOSS_KEY,
   POSTING_BANK_FEES_KEY,
   REMINDER_FEE_KEY,
+  LATE_INTEREST_ENABLED_KEY,
+  LATE_INTEREST_MARGIN_KEY,
+  LATE_INTEREST_MIN_AMOUNT_KEY,
+  LATE_FEE_ENABLED_KEY,
+  POSTING_LATE_INTEREST_KEY,
+  POSTING_LATE_FEE_KEY,
 } from "./posting-settings.js";
 import { isUniqueViolation } from "./db-errors.js";
 import { decodeLongOperationWeeks, PLANNING_LONG_OPERATION_WEEKS_KEY } from "./plan-settings.js";
@@ -647,6 +653,15 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         await set(PAYMENT_TOLERANCE_KEY, String(round2(input.paymentTolerance)));
       }
       if (input.reminderFee !== undefined) await set(REMINDER_FEE_KEY, String(round2(input.reminderFee)));
+      // Dröjsmålsränta och förseningsersättning.
+      if (input.lateInterestEnabled !== undefined) await set(LATE_INTEREST_ENABLED_KEY, String(input.lateInterestEnabled));
+      if (input.lateInterestMargin !== undefined) await set(LATE_INTEREST_MARGIN_KEY, String(round2(input.lateInterestMargin)));
+      if (input.lateInterestMinAmount !== undefined) {
+        await set(LATE_INTEREST_MIN_AMOUNT_KEY, String(round2(input.lateInterestMinAmount)));
+      }
+      if (input.lateFeeEnabled !== undefined) await set(LATE_FEE_ENABLED_KEY, String(input.lateFeeEnabled));
+      if (input.postingLateInterest !== undefined) await set(POSTING_LATE_INTEREST_KEY, input.postingLateInterest);
+      if (input.postingLateFee !== undefined) await set(POSTING_LATE_FEE_KEY, input.postingLateFee);
 
       if (changedKeys.length > 0) {
         await audit.log({ entityType: "system_settings", entityId: null, action: "updated", detail: { changedKeys }, userId });

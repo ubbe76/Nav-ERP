@@ -330,6 +330,10 @@ export type PostingVatCode = {
 // Kostnadsställen och projekt: the row's dimensions go on its REVENUE row
 // only — never on the receivable or the VAT (the reskontra and the
 // declaration are not per object).
+// Dröjsmålsränta: revenueAccount is the row's own account (invoice_rows.
+// revenue_account, written by Räntefakturering) — it wins over the
+// konteringsregel and the momskod's account, and must exist and be active
+// like every other posting account (MissingPostingAccountError).
 export type CustomerInvoiceDocumentRow = {
   articleGroupId: string | null;
   lineAmount: number;
@@ -338,6 +342,7 @@ export type CustomerInvoiceDocumentRow = {
   vatCode: PostingVatCode;
   costCenterId?: string | null;
   projectId?: string | null;
+  revenueAccount?: string | null;
 };
 
 // vatCode = the header's momskod: rows without one of their own and the
@@ -912,6 +917,7 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
         vatCode: resolveVatCode(row.vatCode, "sales"),
         costCenterId: row.costCenterId ?? null,
         projectId: row.projectId ?? null,
+        revenueAccount: row.revenueAccount ?? null,
       }));
 
       // The rate and VAT checks run before anything is resolved, so a data
@@ -939,7 +945,10 @@ export function createVerificationPoster(settings: PostingSettingsReader) {
       amounts.add(await resolveAccount(postingAccounts.postingAccountsReceivable, "accounts receivable"), sign * gross);
 
       for (const row of documentRows) {
-        const ruleRevenue = ruleAccount(row.articleGroupId, row.vatCode, "revenue", "posting rule revenue account");
+        // The row's own account (räntefaktura) → rule → the code's account.
+        const ruleRevenue = row.revenueAccount
+          ? await resolveAccount(row.revenueAccount, "row revenue account")
+          : ruleAccount(row.articleGroupId, row.vatCode, "revenue", "posting rule revenue account");
         const revenueAccountId =
           ruleRevenue ??
           (await resolveAccount(vatCodeAccount(row.vatCode, "revenue", "revenue"), `revenue (momskod ${row.vatCode.code})`));

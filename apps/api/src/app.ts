@@ -127,6 +127,8 @@ import { createConfiguratorService, type ConfiguredStructureReader } from "./mod
 import { createInvoiceRepository } from "./modules/sales/repository/invoice.repository.js";
 import { createInvoiceService } from "./modules/sales/service/invoice.service.js";
 import { invoiceRoutes } from "./modules/sales/routes/invoice.routes.js";
+import { createLateInterestService } from "./modules/sales/service/late-interest.service.js";
+import { lateInterestRoutes } from "./modules/sales/routes/late-interest.routes.js";
 import { createPaymentRepository } from "./modules/sales/repository/payment.repository.js";
 import { receivableForeignItemsAsOf, receivablesTotalAsOf } from "./modules/sales/repository/open-amounts.js";
 import { createPaymentService } from "./modules/sales/service/payment.service.js";
@@ -155,6 +157,7 @@ import { readPostingSettings } from "./modules/system/service/posting-settings.j
 import { systemRoutes } from "./modules/system/routes/system.routes.js";
 import { createExchangeRateService } from "./modules/system/service/exchange-rates.js";
 import { exchangeRateRoutes } from "./modules/system/routes/exchange-rates.routes.js";
+import { referenceRateRoutes } from "./modules/system/routes/reference-rates.routes.js";
 import { auditLogRoutes } from "./modules/system/routes/audit-log.routes.js";
 import { createTimeReportRepository } from "./modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "./modules/timereport/service/timereport.service.js";
@@ -476,8 +479,9 @@ export function buildApp(database: Db = db) {
   // invoicing. mail/pdf are the same shared services, satisfied structurally
   // by the invoice service's narrow InvoiceMailSender/InvoicePdfRenderer;
   // verificationPoster books the F verification at issue (B2).
+  const invoiceRepository = createInvoiceRepository(database);
   const invoiceService = createInvoiceService(
-    createInvoiceRepository(database),
+    invoiceRepository,
     mailService,
     documentPdfService,
     verificationPoster,
@@ -487,8 +491,20 @@ export function buildApp(database: Db = db) {
     { freightArticleId: async () => (await freightSettingsService.read()).freightArticleId },
     // Valuta: the invoice date's rate at Utfärda, today's rate for a freight
     // row on a foreign invoice without an order to take it from.
+    exchangeRateService,
+    // Dröjsmålsränta: the referensräntor for the reminder's accrued interest.
     exchangeRateService
   );
+  // Räntefakturering: one invoice per customer with the interest/fee rows,
+  // issued through the ordinary path; referensräntor via the same service
+  // that knows Riksbanken.
+  const lateInterestService = createLateInterestService({
+    db: database,
+    invoiceRepo: invoiceRepository,
+    invoices: { issue: (id, userId) => invoiceService.issue(id, userId) },
+    referenceRates: exchangeRateService,
+    audit: auditRepository,
+  });
   // E-faktura via Peppol (B2Brouter): reads the issued invoice, its archived
   // PDF and the customer through narrow readers into sales, and the company
   // data through the system service. The provider factory defaults to
@@ -839,6 +855,10 @@ export function buildApp(database: Db = db) {
         await registerModule(protectedRoutes, bankReconciliationRoutes, { service: bankReconciliationService }, { read: ["ekonomi"], write: ["ekonomi"] });
         await registerModule(protectedRoutes, salesRoutes, { service: salesService }, { read: office, write: ["forsaljning"] });
         await registerModule(protectedRoutes, invoiceRoutes, { service: invoiceService }, { read: office, write: ["forsaljning"] });
+        await registerModule(protectedRoutes, lateInterestRoutes, { service: lateInterestService }, { read: office, write: ["forsaljning"] });
+        // Referensränta follows the customer invoices' rule (the routine
+        // fetches and adds rates), unlike the exchange rates (ekonomi).
+        await registerModule(protectedRoutes, referenceRateRoutes, { service: exchangeRateService }, { read: office, write: ["forsaljning"] });
         await registerModule(protectedRoutes, paymentRoutes, { service: paymentService }, { read: office, write: ["forsaljning"] });
         await registerModule(
           protectedRoutes,
