@@ -5120,17 +5120,28 @@ export interface BankRuleSuggestion {
   vatCode: string | null;
 }
 
-export interface BankStatementEntry {
+// An entry on the statement as the repository reads it (StatementEntryView);
+// `details` is the parsed camt.053 detail block, read by nothing on the web.
+export interface BankStatementEntryBase {
   id: string;
+  bankAccountId: string;
+  bankStatementId: string;
   bookingDate: string;
   valueDate: string | null;
   amount: number;
+  currency: string;
   text: string;
   reference: string | null;
   counterparty: string | null;
   details: unknown;
   reversal: boolean;
   bankFileId: string;
+  createdAt: string;
+}
+
+// An unmatched entry in the reconciliation view: the base plus the one bank
+// rule that recognises it (null when none or several do).
+export interface BankStatementEntry extends BankStatementEntryBase {
   ruleSuggestion: BankRuleSuggestion | null;
 }
 
@@ -5147,12 +5158,15 @@ export interface BankLedgerRow {
 
 export type BankMatchKind = "auto" | "manual" | "created";
 
+// A matching. The view lists live ones only; POST /bank-matches/:id/undo
+// answers the match stamped `undoneAt`. The entries carry no ruleSuggestion.
 export interface BankMatch {
   id: string;
   kind: BankMatchKind;
   createdAt: string;
   createdBy: string | null;
-  entries: BankStatementEntry[];
+  undoneAt: string | null;
+  entries: BankStatementEntryBase[];
   rows: BankLedgerRow[];
 }
 
@@ -5255,7 +5269,10 @@ export interface BankRule {
   sortOrder: number;
 }
 
+// POST /bank-statement-entries/book-by-rule: one verification per entry, each
+// in its own transaction; a failed entry carries the API's error body (the
+// same `{ error, code }` envelope a 4xx answer has) so the web can translate it.
 export interface BankBookByRuleResult {
   booked: { entryId: string; verificationId: string; displayNumber: string }[];
-  failed: { entryId: string; error: string }[];
+  failed: { entryId: string; error: { error: string; code?: string } }[];
 }

@@ -125,7 +125,11 @@ function ImportForm({
   }
 
   const isCsv = preview?.format === "csv";
-  const needsAccount = preview !== null && (isCsv || preview.unknownAccounts.length > 0);
+  // A CSV always needs the account; a camt.053 only when exactly ONE of its
+  // accounts is unknown — the API assigns the chosen account to that one and
+  // learns its identifier. With several unknown accounts nothing can be
+  // chosen: the blocker says to create them under Bankkonton first.
+  const needsAccount = preview !== null && (isCsv || preview.unknownAccounts.length === 1);
   const newTotal = preview?.statements.reduce((sum, s) => sum + s.newEntryCount, 0) ?? 0;
   const duplicateTotal = preview?.statements.reduce((sum, s) => sum + s.duplicateCount, 0) ?? 0;
   const canImport =

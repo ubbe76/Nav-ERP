@@ -33,6 +33,12 @@ const serverMessage =
   (err) =>
     err.message || fallback;
 
+// "1 234,56" for a number (or numeric string) in an error body, else null.
+const moneyOrNull = (value: unknown): string | null =>
+  typeof value === "number" || (typeof value === "string" && value !== "" && Number.isFinite(Number(value)))
+    ? Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : null;
+
 const MESSAGES: Record<string, MessageEntry> = {
   // article register (inline editing)
   "base-unit-locked": "Standardenheten kan inte ändras så länge artikeln har alternativa enheter.",
@@ -540,36 +546,74 @@ const MESSAGES: Record<string, MessageEntry> = {
       ? `Ingenting importerades: ${blockers.join(" ")}`
       : "Ingenting importerades — filen har fel som måste rättas först.";
   },
-  // Bankavstämning (bankkonton, matchning, Bokför på en post, Avstämd t.o.m.)
+  // Bankavstämning (bankkonton, kontoutdrag, matchning, Bokför på en post,
+  // bankregler, Avstämd t.o.m.) — mirrors banking.errors.ts's etapp 4 block.
+  "bank-account-not-found": "Bankkontot hittades inte — ladda om sidan.",
   "bank-account-identifier-taken": "Ett bankkonto med den IBAN eller det kontonumret finns redan.",
-  "bank-account-ledger-missing": "Huvudbokskontot finns inte i kontoplanen — välj ett befintligt konto.",
+  "bank-account-ledger-missing": "Huvudbokskontot finns inte i kontoplanen eller är inaktivt — välj ett befintligt konto.",
+  "bank-account-required": "Välj vilket bankkonto kontoutdraget gäller.",
+  "bank-statement-format": "Filen är inte ett kontoutdrag i camt.053 (version 001.02). En camt.054-avi läses in under Bankfiler.",
+  "bank-statement-csv-mapping": serverMessage("CSV-filen kunde inte läsas med kolumnmappningen — kontrollera avgränsare, rader att hoppa över och kolumnerna."),
+  "bank-statement-account-unknown": (err) => {
+    const body = err.body as { identifiers?: unknown } | undefined;
+    const ids = Array.isArray(body?.identifiers) ? body!.identifiers.map(String).filter(Boolean) : [];
+    return ids.length > 0
+      ? `Kontoutdraget gäller ett konto som inte finns under Bankkonton (${ids.join(", ")}) — lägg upp det eller välj vilket bankkonto det är.`
+      : "Kontoutdraget gäller ett konto som inte finns under Bankkonton — lägg upp det eller välj vilket bankkonto det är.";
+  },
+  "bank-statement-account-mismatch": "Kontoutdragets konto hör till ett annat bankkonto än det valda.",
+  "bank-statement-currency": "Kontoutdraget är i en annan valuta än bankkontot.",
+  "bank-statement-entry-not-found": "Posten på kontoutdraget hittades inte — ladda om sidan.",
+  "bank-match-not-found": "Matchningen hittades inte — ladda om sidan.",
   "bank-match-sum-mismatch": (err) => {
     const body = err.body as { entriesSum?: unknown; rowsSum?: unknown } | undefined;
-    const money = (value: unknown) =>
-      typeof value === "number" || (typeof value === "string" && value !== "" && Number.isFinite(Number(value)))
-        ? Number(value).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        : null;
-    const entries = money(body?.entriesSum);
-    const rows = money(body?.rowsSum);
+    const entries = moneyOrNull(body?.entriesSum);
+    const rows = moneyOrNull(body?.rowsSum);
     return entries !== null && rows !== null
       ? `Summorna är olika: posterna på kontoutdraget ${entries} kr, raderna i bokföringen ${rows} kr. En matchning kräver lika summor.`
       : "Posterna på kontoutdraget och raderna i bokföringen har olika summor — en matchning kräver lika summor.";
   },
   "bank-match-already-matched": "En av posterna eller raderna är redan matchad — ladda om sidan.",
-  "bank-match-wrong-account": "Posterna och raderna hör till olika bankkonton.",
+  "bank-match-wrong-account": "Posterna och raderna hör inte till det här bankkontot, eller så är verifikatet inte bokfört.",
+  "bank-match-already-undone": "Matchningen är redan ångrad — ladda om sidan.",
   "bank-entry-book-mismatch":
     "Verifikatet ska ha en rad på bankkontots huvudbokskonto med exakt postens belopp, på rätt sida (debet för en inbetalning, kredit för en utbetalning).",
+  "bank-rule-not-found": "Bankregeln hittades inte — ladda om sidan.",
+  "bank-rule-missing": "Ingen aktiv bankregel känner igen posten — bokför den med Bokför i stället.",
+  "bank-rule-ambiguous": (err) => {
+    const ids = (err.body as { ruleIds?: unknown } | undefined)?.ruleIds;
+    const n = Array.isArray(ids) ? ids.length : 0;
+    return n > 1
+      ? `${n} bankregler träffar posten — bokför den med Bokför och välj konto själv, eller gör reglerna entydiga.`
+      : "Flera bankregler träffar posten — bokför den med Bokför och välj konto själv, eller gör reglerna entydiga.";
+  },
+  "bank-rule-account-missing": (err) => {
+    const number = (err.body as { accountNumber?: unknown } | undefined)?.accountNumber;
+    return typeof number === "string" && number !== ""
+      ? `Konto ${number} finns inte i kontoplanen eller är inaktivt — rätta regeln eller kontot.`
+      : "Regelns konto (eller momskodens momskonto) finns inte i kontoplanen eller är inaktivt — rätta regeln eller kontot.";
+  },
   "bank-reconciliation-incomplete": (err) => {
-    const reason = (err.body as { reason?: unknown } | undefined)?.reason;
-    switch (reason) {
+    const body = err.body as { reason?: unknown; count?: unknown; statementBalance?: unknown; ledgerBalance?: unknown } | undefined;
+    const count = typeof body?.count === "number" ? body.count : null;
+    switch (body?.reason) {
       case "no-statement-balance":
         return "Kontoutdragets saldo saknas för det datumet — importera ett kontoutdrag som sträcker sig till datumet.";
       case "unmatched-entries":
-        return "Det finns omatchade poster på kontoutdraget till och med datumet — matcha eller bokför dem först.";
+        return count !== null
+          ? `${count} ${count === 1 ? "post" : "poster"} på kontoutdraget till och med datumet är omatchade — matcha eller bokför dem först.`
+          : "Det finns omatchade poster på kontoutdraget till och med datumet — matcha eller bokför dem först.";
       case "unmatched-rows":
-        return "Det finns omatchade rader i bokföringen till och med datumet — matcha dem först.";
-      case "balance-mismatch":
-        return "Kontoutdragets saldo stämmer inte med bokföringens saldo per datumet.";
+        return count !== null
+          ? `${count} ${count === 1 ? "rad" : "rader"} i bokföringen till och med datumet är omatchade — matcha dem först.`
+          : "Det finns omatchade rader i bokföringen till och med datumet — matcha dem först.";
+      case "balance-mismatch": {
+        const statement = moneyOrNull(body?.statementBalance);
+        const ledger = moneyOrNull(body?.ledgerBalance);
+        return statement !== null && ledger !== null
+          ? `Kontoutdragets saldo ${statement} kr stämmer inte med bokföringens saldo ${ledger} kr per datumet.`
+          : "Kontoutdragets saldo stämmer inte med bokföringens saldo per datumet.";
+      }
       default:
         return "Allt till och med datumet måste vara matchat och kontoutdragets saldo måste stämma med bokföringens innan perioden kan markeras som avstämd.";
     }

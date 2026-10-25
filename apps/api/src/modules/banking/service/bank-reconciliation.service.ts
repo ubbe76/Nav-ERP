@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { auditLog, type BankCsvMapping, type Db, type Tx } from "@navet/db";
 import {
+  isCompleteCsvMapping,
   normalizeBankIdentifier,
   round2,
   vatCodeEntry,
@@ -485,13 +486,19 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
       const parsed = parseCamt053(data.toString("utf8"));
       return { sha256, format: "camt.053", messageId: parsed.messageId, statements: parsed.statements, warnings: parsed.warnings, csvHeaders: null, needsMapping: false, mappingUsed: null };
     }
-    // CSV: the account decides the mapping (given, else saved on it).
+    // CSV: the account decides the mapping (given, else saved on it). A given
+    // mapping without the three required columns is the dialog's Läs om
+    // rubriker — the header row is read with ITS delimiter/skipRows and the
+    // columns are asked for; the account's saved mapping is deliberately not
+    // used then (the user is choosing anew).
     const account = fields.bankAccountId ? await repo.findAccount(db, fields.bankAccountId) : null;
     if (fields.bankAccountId && !account) throw new BankAccountNotFoundError(fields.bankAccountId);
-    const mapping = fields.csvMapping ?? account?.csvMapping ?? null;
+    const given = fields.csvMapping ?? null;
+    const mapping: BankCsvMappingInput | null = given ? (isCompleteCsvMapping(given) ? given : null) : (account?.csvMapping ?? null);
+    const headerOptions = given ?? mapping;
     const headers = (() => {
       try {
-        return readBankCsvHeaders(data, { delimiter: mapping?.delimiter, skipRows: mapping?.skipRows });
+        return readBankCsvHeaders(data, { delimiter: headerOptions?.delimiter, skipRows: headerOptions?.skipRows });
       } catch {
         return [];
       }
@@ -666,7 +673,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
     },
 
     // `autoMatch` defaults to true (the zod field does the same for the form).
-    async import(upload: { filename: string; contentType: string; data: Buffer }, fields: BankStatementPreviewFields & Partial<Pick<BankStatementImportFields, "autoMatch">>, userId: string) {
+    async import(upload: { filename: string; contentType: string; data: Buffer }, fields: Omit<BankStatementImportFields, "autoMatch"> & Partial<Pick<BankStatementImportFields, "autoMatch">>, userId: string) {
       const parsed = await parseUpload(upload.data, fields, false);
       const warnings = [...parsed.warnings];
       const result = await db.transaction(async (tx) => {

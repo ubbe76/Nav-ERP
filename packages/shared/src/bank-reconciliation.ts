@@ -28,18 +28,43 @@ export const CSV_DELIMITERS = [";", ",", "\t"] as const;
 // How a CSV export from the internet bank maps onto a statement entry
 // (column = header name as it stands in the file's first row, after
 // `skipRows`). Saved on the bank account by the import.
+const csvColumn = z.string().trim().min(1).max(100);
 export const bankCsvMappingSchema = z.object({
   delimiter: z.enum(CSV_DELIMITERS).optional(),
-  dateColumn: z.string().trim().min(1).max(100),
-  amountColumn: z.string().trim().min(1).max(100),
-  textColumn: z.string().trim().min(1).max(100),
-  balanceColumn: z.string().trim().min(1).max(100).optional(),
-  valueDateColumn: z.string().trim().min(1).max(100).optional(),
-  referenceColumn: z.string().trim().min(1).max(100).optional(),
+  dateColumn: csvColumn,
+  amountColumn: csvColumn,
+  textColumn: csvColumn,
+  balanceColumn: csvColumn.optional(),
+  valueDateColumn: csvColumn.optional(),
+  referenceColumn: csvColumn.optional(),
   decimalComma: z.boolean().optional(),
   skipRows: z.number().int().min(0).max(50).optional(),
 });
 export type BankCsvMappingInput = z.infer<typeof bankCsvMappingSchema>;
+
+// The preview's mapping: the three required columns may still be unchosen
+// (the dialog's **Läs om rubriker** re-reads the header row with another
+// delimiter or skipRows before any column can be picked) — an empty string
+// counts as unchosen. The import requires the full mapping.
+const draftColumn = z
+  .string()
+  .trim()
+  .max(100)
+  .optional()
+  .transform((v) => (v === "" ? undefined : v));
+export const bankCsvMappingDraftSchema = bankCsvMappingSchema.extend({
+  dateColumn: draftColumn,
+  amountColumn: draftColumn,
+  textColumn: draftColumn,
+  balanceColumn: draftColumn,
+  valueDateColumn: draftColumn,
+  referenceColumn: draftColumn,
+});
+export type BankCsvMappingDraft = z.infer<typeof bankCsvMappingDraftSchema>;
+
+export function isCompleteCsvMapping(draft: BankCsvMappingDraft): draft is BankCsvMappingInput {
+  return draft.dateColumn !== undefined && draft.amountColumn !== undefined && draft.textColumn !== undefined;
+}
 
 const accountNumberSchema = z.string().regex(/^[0-9]{4}$/, "Kontonummer är fyra siffror");
 
@@ -74,7 +99,7 @@ export type ListBankAccountsQuery = z.infer<typeof listBankAccountsQuerySchema>;
 
 // The multipart text fields beside the file on preview/import. csvMapping
 // travels as a JSON string in the form.
-const jsonMapping = z
+const jsonField = z
   .string()
   .trim()
   .optional()
@@ -86,16 +111,17 @@ const jsonMapping = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "csvMapping är inte giltig JSON" });
       return z.NEVER;
     }
-  })
-  .pipe(bankCsvMappingSchema.optional());
+  });
 
 export const bankStatementPreviewFieldsSchema = z.object({
   bankAccountId: z.string().uuid().optional(),
-  csvMapping: jsonMapping,
+  csvMapping: jsonField.pipe(bankCsvMappingDraftSchema.optional()),
 });
 export type BankStatementPreviewFields = z.infer<typeof bankStatementPreviewFieldsSchema>;
 
-export const bankStatementImportFieldsSchema = bankStatementPreviewFieldsSchema.extend({
+export const bankStatementImportFieldsSchema = z.object({
+  bankAccountId: z.string().uuid().optional(),
+  csvMapping: jsonField.pipe(bankCsvMappingSchema.optional()),
   autoMatch: z
     .union([z.boolean(), z.enum(["true", "false"])])
     .optional()

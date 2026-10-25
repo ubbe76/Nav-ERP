@@ -11,7 +11,7 @@ import { useListNavigation } from "../ui/ListControls";
 import { SectionHeading } from "../ui/SectionHeading";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { Table } from "../ui/Table";
-import { apiFetch } from "../../lib/api";
+import { ApiError, apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { BANK_MATCH_KIND_LABELS, isIsoDate, sumAmounts } from "../../lib/bankReconciliation";
@@ -107,7 +107,10 @@ export function BankavstamningPageClient({
   const chosenRows = rows.filter((r) => selRows.has(r.id));
   const entriesSum = sumAmounts(chosenEntries);
   const rowsSum = sumAmounts(chosenRows);
-  const canMatch = chosenEntries.length > 0 && chosenRows.length > 0 && round2(entriesSum - rowsSum) === 0;
+  // The sums must be equal; one side may be empty — a reversal netted against
+  // its original (entries only) or two rows cancelling each other (rows only)
+  // is a matching too, as long as the chosen side sums to 0.
+  const canMatch = chosenEntries.length + chosenRows.length > 0 && round2(entriesSum - rowsSum) === 0;
   const ruleEntries = chosenEntries.filter((e) => e.ruleSuggestion !== null);
 
   async function run(action: () => Promise<void>, fallback: string) {
@@ -151,7 +154,15 @@ export function BankavstamningPageClient({
           verificationRowIds: chosenRows.map((r) => r.id),
         }),
       });
-      setNotice(`${chosenEntries.length} ${chosenEntries.length === 1 ? "post" : "poster"} matchades mot ${chosenRows.length} ${chosenRows.length === 1 ? "rad" : "rader"}.`);
+      const posts = `${chosenEntries.length} ${chosenEntries.length === 1 ? "post" : "poster"}`;
+      const lines = `${chosenRows.length} ${chosenRows.length === 1 ? "rad" : "rader"}`;
+      setNotice(
+        chosenRows.length === 0
+          ? `${posts} på kontoutdraget nettades mot varandra.`
+          : chosenEntries.length === 0
+            ? `${lines} i bokföringen nettades mot varandra.`
+            : `${posts} matchades mot ${lines}.`
+      );
       router.refresh();
     }, "Matchningen misslyckades");
   }
@@ -200,8 +211,13 @@ export function BankavstamningPageClient({
         `${result.booked.length} ${result.booked.length === 1 ? "post bokfördes" : "poster bokfördes"} enligt regel` +
           (result.booked.length > 0 ? `: ${result.booked.map((b) => b.displayNumber).join(", ")}.` : ".")
       );
+      // Each failure carries the API's error envelope — translate it like a
+      // 4xx answer.
       setFailures(
-        result.failed.map((f) => `${entries.find((e) => e.id === f.entryId)?.text ?? f.entryId}: ${f.error}`)
+        result.failed.map(
+          (f) =>
+            `${entries.find((e) => e.id === f.entryId)?.text ?? f.entryId}: ${apiErrorMessage(new ApiError(f.error.error, 409, f.error.code, f.error), "Posten kunde inte bokföras")}`
+        )
       );
       router.refresh();
     }, "Posterna kunde inte bokföras");
@@ -271,6 +287,10 @@ export function BankavstamningPageClient({
 
   const bankAccount = view?.bankAccount ?? null;
   const summary = view?.summary ?? null;
+  // The day the summary is measured on: the latest statement balance on or
+  // before Till (else Till itself) — the ledger balance and the unmatched
+  // sums are taken through that day, not just within the period.
+  const balanceDate = summary?.statementBalanceDate ?? view?.to ?? to;
   const activeAccounts = bankAccounts.filter((a) => a.active || a.id === selectedId);
 
   return (
@@ -349,38 +369,38 @@ export function BankavstamningPageClient({
             <Tile
               label="Saldo i bokföringen"
               value={`${formatMoney(summary.ledgerBalance)} kr`}
-              sub={`konto ${bankAccount.ledgerAccount} per ${summary.statementBalanceDate ?? view.to}`}
+              sub={`konto ${bankAccount.ledgerAccount} per ${balanceDate}`}
             />
             <Tile
               label="Omatchade poster"
               value={`${formatMoney(summary.unmatchedEntriesSum)} kr`}
-              sub={`${entries.length} ${entries.length === 1 ? "post" : "poster"} på kontoutdraget`}
+              sub={`t.o.m. ${balanceDate} · ${entries.length} ${entries.length === 1 ? "post" : "poster"} i perioden`}
             />
             <Tile
               label="Omatchade rader"
               value={`${formatMoney(summary.unmatchedRowsSum)} kr`}
-              sub={`${rows.length} ${rows.length === 1 ? "rad" : "rader"} i bokföringen`}
+              sub={`t.o.m. ${balanceDate} · ${rows.length} ${rows.length === 1 ? "rad" : "rader"} i perioden`}
             />
             <Tile
               label="Skillnad"
               value={summary.difference === null ? "–" : `${formatMoney(summary.difference)} kr`}
-              sub="kontoutdraget minus bokföringen"
+              sub={`kontoutdraget minus bokföringen per ${balanceDate}`}
             />
           </div>
           {summary.difference === null ? (
             <div className={`${styles.verdict} ${styles.verdictNeutral}`}>
-              Det finns inget saldo på kontoutdraget för perioden. Importera kontoutdraget så kan saldona jämföras.
+              Det finns inget kontoutdragssaldo till och med {view.to}. Importera kontoutdraget så kan saldona jämföras.
             </div>
           ) : summary.explained ? (
             <div className={`${styles.verdict} ${styles.verdictOk}`}>
-              Skillnaden är förklarad: den motsvarar de omatchade posterna minus de omatchade raderna (
-              {formatMoney(round2(summary.unmatchedEntriesSum - summary.unmatchedRowsSum))} kr).
+              Skillnaden per {balanceDate} är förklarad: den motsvarar de omatchade posterna minus de omatchade raderna till och med den
+              dagen ({formatMoney(round2(summary.unmatchedEntriesSum - summary.unmatchedRowsSum))} kr).
             </div>
           ) : (
             <div className={`${styles.verdict} ${styles.verdictBad}`}>
-              Avvikelse: skillnaden på {formatMoney(summary.difference)} kr förklaras inte av de omatchade posterna och raderna (
-              {formatMoney(round2(summary.unmatchedEntriesSum - summary.unmatchedRowsSum))} kr). Det beror oftast på att ett
-              kontoutdrag saknas för en del av perioden, eller att något har ändrats efter importen.
+              Avvikelse per {balanceDate}: skillnaden på {formatMoney(summary.difference)} kr förklaras inte av de omatchade posterna
+              och raderna till och med den dagen ({formatMoney(round2(summary.unmatchedEntriesSum - summary.unmatchedRowsSum))} kr). Det
+              beror oftast på att ett kontoutdrag saknas för en del av perioden, eller att något har ändrats efter importen.
             </div>
           )}
 

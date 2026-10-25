@@ -207,6 +207,11 @@ describe("import av kontoutdrag", () => {
     const preview = await service.preview({ data: Buffer.from(csv) }, { bankAccountId: account.id });
     expect(preview).toMatchObject({ needsMapping: false });
     expect(preview.statements[0]).toMatchObject({ duplicateCount: 2, closingBalance: 107580 });
+    // A draft mapping (columns unchosen) reads the headers with its own
+    // delimiter and asks for the columns — the saved mapping is not used.
+    const draft = await service.preview({ data: Buffer.from(csv) }, { bankAccountId: account.id, csvMapping: { delimiter: "\t" } });
+    expect(draft).toMatchObject({ needsMapping: true, csvHeaders: ["Bokföringsdag;Text;Belopp;Saldo"], statements: [] });
+    expect(draft.blockers).toHaveLength(1);
     const view = await service.reconciliationView({ bankAccountId: account.id, from: `${BANK_YEAR}-10-01`, to: `${BANK_YEAR}-10-31` });
     expect(view.summary).toMatchObject({ statementBalance: 107580, statementBalanceDate: `${BANK_YEAR}-10-09`, ledgerBalance: 0, unmatchedEntriesSum: -1049, difference: 107580, explained: false });
   });
@@ -514,7 +519,7 @@ describe("årsbokslut och avisering", () => {
     });
     const { groups } = await alerts.computeAlerts(["bank_unreconciled"]);
     expect(groups[0]).toMatchObject({ kind: "bank_unreconciled", label: "Omatchade bankposter", severity: "yellow", count: 3, error: false });
-    expect(groups[0]!.items[0]).toMatchObject({ href: `/ekonomi/bankavstamning?bankAccountId=${account.id}`, primary: `${BANK_YEAR}-10-09 BG INBETALNINGAR 551-2348`, date: `${BANK_YEAR}-10-09` });
+    expect(groups[0]!.items[0]).toMatchObject({ href: `/ekonomi/bankavstamning?account=${account.id}`, primary: `${BANK_YEAR}-10-09 BG INBETALNINGAR 551-2348`, date: `${BANK_YEAR}-10-09` });
     expect(groups[0]!.items[0]!.secondary).toBe(`${(26180).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr · Företagskonto · 11 dagar försenad`);
     // Matched entries and younger ones are left out.
     await bookOnBank(`${BANK_YEAR}-10-09`, -150);

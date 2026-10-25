@@ -415,12 +415,12 @@ Välj **Bankkonto**, **Från** och **Till** överst — valen ligger i adressen,
 
 **Sammanställningen** överst jämför de två sidorna:
 
-- **Saldo enligt kontoutdraget** — kontoutdragets utgående saldo, med datumet det gäller. Saknas kontoutdrag står det **Saknas**.
+- **Saldo enligt kontoutdraget** — det senaste utgående saldot på ett importerat kontoutdrag till och med **Till**, med datumet det gäller. Saknas kontoutdrag står det **Saknas**.
 - **Saldo i bokföringen** — bankkontots saldo i huvudboken per samma dag.
-- **Omatchade poster** och **Omatchade rader** — summan och antalet av det som ännu inte är matchat på respektive sida.
-- **Skillnad** — kontoutdragets saldo minus bokföringens.
+- **Omatchade poster** och **Omatchade rader** — summan av det som ännu inte är matchat på respektive sida **till och med den dagen** (allt sedan start, inte bara perioden), och antalet i den valda perioden.
+- **Skillnad** — kontoutdragets saldo minus bokföringens, per samma dag.
 
-Skillnaden ska precis motsvara de omatchade posterna minus de omatchade raderna: en insättning som står på kontoutdraget men ännu inte är bokförd förklarar skillnaden, och försvinner så fort den matchats eller bokförts. Stämmer det visas **Skillnaden är förklarad**. Stämmer det inte visas en röd **Avvikelse** — oftast saknas ett kontoutdrag för en del av perioden, eller så har något ändrats efter importen.
+Hela sammanställningen mäts alltså på kontoutdragets saldodag, inte på **Till** — dagen står i rutorna och i omdömet. Skillnaden ska precis motsvara de omatchade posterna minus de omatchade raderna: en insättning som står på kontoutdraget men ännu inte är bokförd förklarar skillnaden, och försvinner så fort den matchats eller bokförts. Stämmer det visas **Skillnaden är förklarad**. Stämmer det inte visas en röd **Avvikelse** — oftast saknas ett kontoutdrag för en del av perioden, eller så har något ändrats efter importen.
 
 ### Bankkonton
 
@@ -437,9 +437,9 @@ Klicka **Importera kontoutdrag** och välj filen. Nav läser den och visar en **
 
 Förhandsgranskningen visar per kontoutdrag konto, period, saldon och antalet poster, **nya** och **dubbletter**, och de första posterna med status **Ny** eller **Dubblett** (**Ny · regel** när en [bankregel](#bankregler) känner igen posten). Varningar visas i gult och fel som stoppar importen i rött.
 
-**Dubbletter.** Samma post importeras aldrig två gånger: en post som redan finns (samma bankreferens, eller samma dag, belopp och text) hoppas över och räknas som dubblett. Du kan alltså importera överlappande perioder eller samma fil igen utan risk — är alla poster dubbletter står det **Alla posterna är redan importerade** och **Importera** är avstängd.
+**Dubbletter.** Samma post importeras aldrig två gånger: en post som redan finns på kontot hoppas över och räknas som dubblett. Posten känns igen på bankens egen referens på posten (camt.053) eller, när den saknas (alltid i CSV), på dag, belopp och text — två likadana poster i samma fil räknas som två poster, men samma fil igen ger bara dubbletter. Du kan alltså importera överlappande perioder eller samma fil igen utan risk — är alla poster dubbletter står det **Alla posterna är redan importerade** och **Importera** är avstängd.
 
-Med kryssrutan **Matcha automatiskt efter import** (förvald) matchas posterna direkt när de lagts in. Efteråt visar sidan hur många poster som importerades, hur många dubbletter som hoppades över, hur många som matchades automatiskt och hur många som bokfördes direkt enligt en bankregel.
+Med kryssrutan **Matcha automatiskt efter import** (förvald) matchas posterna direkt när de lagts in; därefter bokförs nya poster som fortfarande är omatchade enligt bankregler med **Bokför direkt**. Efteråt visar sidan hur många poster som importerades, hur många dubbletter som hoppades över, hur många som matchades automatiskt och hur många som bokfördes direkt enligt en bankregel. En post som en regel skulle ha bokfört men inte kunde (till exempel låst period) visas som en varning och ligger kvar omatchad — själva importen påverkas inte.
 
 ### Matchning
 
@@ -452,7 +452,7 @@ En **matchning** knyter ihop en eller flera poster på kontoutdraget med en elle
 
 Är det inte entydigt matchas ingenting automatiskt. Raderna får i stället en markering: **Förslag · referens** eller **Förslag · belopp och datum** för ett säkert förslag, och **Flera möjliga** när flera rader eller poster passar. **Markera förslaget** (eller **Markera kandidaterna**) kryssar i de ingående posterna och raderna, så att du kan kontrollera och klicka **Matcha**.
 
-**Manuell matchning.** Kryssa i en eller flera poster och en eller flera rader. Fältet över listorna visar de **Markerade posterna**, **Markerade raderna** och **Skillnad**. När skillnaden är 0,00 aktiveras **Matcha**. En post kan matchas mot flera rader (och tvärtom) — till exempel en utbetalning som bokförts som två leverantörsbetalningar.
+**Manuell matchning.** Kryssa i en eller flera poster och en eller flera rader. Fältet över listorna visar de **Markerade posterna**, **Markerade raderna** och **Skillnad**. När skillnaden är 0,00 aktiveras **Matcha**. En post kan matchas mot flera rader (och tvärtom) — till exempel en utbetalning som bokförts som två leverantörsbetalningar. Ena sidan får vara tom när den markerade sidan summerar till 0,00: en **Återföring** på kontoutdraget nettas mot sin ursprungliga post utan någon rad i bokföringen, och två rader som tar ut varandra nettas på samma sätt.
 
 **Ångra.** Under **Matchat** fäller du ut en matchning och klickar **Ångra**, efter en bekräftelse. Posterna och raderna blir omatchade igen; matchningen raderas aldrig utan sparas som ångrad. Är matchningen **Bokförd från posten** ligger verifikatet kvar — rätta det med en omföring om det var fel.
 
@@ -475,12 +475,12 @@ Med flera poster som en regel känner igen kryssar du i dem och klickar **Bokfö
 - **Texten innehåller** — texten som ska finnas i postens text (skiftläge spelar ingen roll).
 - **Riktning** — **In** (insättningar), **Ut** (uttag) eller **Båda**.
 - **Konto** — motkontot som föreslås när posten bokförs.
-- **Momskod** — valfri; beloppet tolkas då som inklusive moms och momsraden läggs till.
+- **Momskod** — valfri, bara en inhemsk kod (**MP25**, **MP12**, **MP6** eller **MF**); beloppet tolkas då som inklusive moms och momsraden läggs till på kodens konto för utgående moms (insättning) eller ingående moms (uttag). MF lägger inte till någon momsrad.
 - **Beskrivning** — texten på motkontots rad; tom ⇒ postens egen text.
-- **Bokför direkt** — poster som regeln träffar bokförs direkt vid import. Det gäller bara när regeln är entydig och kontot är aktivt; träffar flera regler samma post lämnas den till dig. **Bokför direkt är avstängt som förval** — slå på det först när du litar på regeln.
+- **Bokför direkt** — nya poster som regeln träffar bokförs direkt vid import, efter den automatiska matchningen. Det gäller bara när **exakt en** aktiv regel träffar posten och kontot (och momskodens momskonto) är aktivt; träffar flera regler samma post lämnas den till dig. **Bokför direkt är avstängt som förval** — slå på det först när du litar på regeln.
 - **Aktiv** — en inaktiv regel används inte men finns kvar.
 
-I listan över omatchade poster visas regelns förslag under posten (*Regel: konto 6570 …*).
+I listan över omatchade poster visas regelns förslag under posten (*Regel: konto 6570 …*) — bara när exakt en regel träffar posten; **Bokför enligt regel** gäller samma poster.
 
 ### Avstämd t.o.m.
 
@@ -492,7 +492,7 @@ Avstämningen är ingen spärr — du kan fortfarande bokföra — men [årsboks
 
 ### Aviseringen
 
-[Aviseringen](/hjalp/aviseringar) **Omatchade bankposter** (rättighet **Ekonomi**) listar poster på kontoutdraget som är äldre än 10 dagar och ännu inte matchade, så att inget glöms bort mellan avstämningarna.
+[Aviseringen](/hjalp/aviseringar) **Omatchade bankposter** (gul, rättighet **Ekonomi**) listar poster på kontoutdraget som är äldre än 10 dagar och ännu inte matchade, så att inget glöms bort mellan avstämningarna.
 
 ## Anläggningsregister
 

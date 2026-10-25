@@ -13,10 +13,9 @@ import { confirmDelete } from "../../lib/confirm";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { BANK_RULE_DIRECTION_LABELS } from "../../lib/bankReconciliation";
-import { splitVatApplies } from "../../lib/splitVat";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { useVatCodes } from "../../lib/useVatCodes";
-import { vatCodeOptionLabel } from "../../lib/vatCodes";
+import { DOMESTIC_VAT_CODES, vatCodeOptionLabel } from "../../lib/vatCodes";
 import type { Account, BankRule, BankRuleDirection } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 
@@ -173,10 +172,11 @@ function RuleForm({
       active !== (rule?.active ?? true));
   useUnsavedGuard(dirty);
 
-  // The codes a bank entry can carry VAT under (the same set the Momskod cell
-  // of the verification table splits), plus the rule's own code when it is no
-  // longer offered so that saving never changes it silently.
-  const options = vatCodes.filter((c) => (c.active && splitVatApplies(c)) || c.code === rule?.vatCode);
+  // Exactly the codes the API's createBankRuleSchema takes: the domestic ones
+  // (MP25/MP12/MP6/MF — the gross amount on the entry is split into net + VAT
+  // on the code's account; MF adds no VAT row), plus the rule's own code when
+  // it is inactive so that saving never changes it silently.
+  const options = vatCodes.filter((c) => (DOMESTIC_VAT_CODES as readonly string[]).includes(c.code) && (c.active || c.code === rule?.vatCode));
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -258,7 +258,9 @@ function RuleForm({
               ))}
             </Select>
           </Field>
-          <FormHint attached>Med en momskod tolkas beloppet på posten som inklusive moms och momsraden läggs till vid bokföringen.</FormHint>
+          <FormHint attached>
+            Bara inhemska koder. Med en momskod tolkas beloppet på posten som inklusive moms och momsraden läggs till vid bokföringen.
+          </FormHint>
           <Field label="Beskrivning" htmlFor="bankRuleDescription">
             <Input
               id="bankRuleDescription"

@@ -291,7 +291,9 @@ export function createAlertsService(deps: {
       return rows.map((r) => ({
         key: r.id,
         severity: "yellow" as const,
-        href: `/ekonomi/bankavstamning?bankAccountId=${r.bankAccountId}`,
+        // The page's own query parameter (`?account=`, see
+        // apps/web/app/ekonomi/bankavstamning/page.tsx).
+        href: `/ekonomi/bankavstamning?account=${r.bankAccountId}`,
         primary: `${r.bookingDate} ${r.text}`,
         secondary: `${formatAmount(r.amount)} ${r.currency === "SEK" ? "kr" : r.currency} · ${r.accountName} · ${daysLateText(r.bookingDate, today)}`,
         date: r.bookingDate,

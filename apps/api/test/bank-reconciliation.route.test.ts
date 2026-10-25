@@ -123,6 +123,11 @@ describe("/bank-statements", () => {
     const csv = ["Datum;Text;Belopp", `${BANK_YEAR}-10-09;AVGIFT;-150,00`].join("\n");
     const needs = await ekonomi().inject({ method: "POST", url: "/bank-statements/preview", ...multipartWithFields("k.csv", csv, { bankAccountId: account.id }, "text/csv") });
     expect(needs.json()).toMatchObject({ format: "csv", needsMapping: true, csvHeaders: ["Datum", "Text", "Belopp"] });
+    // Läs om rubriker: a draft mapping with the delimiter alone (the columns
+    // empty) re-reads the header row with that delimiter — never 400.
+    const reread = await ekonomi().inject({ method: "POST", url: "/bank-statements/preview", ...multipartWithFields("k.csv", csv, { bankAccountId: account.id, csvMapping: JSON.stringify({ delimiter: ",", skipRows: 0, dateColumn: "", amountColumn: "", textColumn: "" }) }, "text/csv") });
+    expect(reread.statusCode).toBe(200);
+    expect(reread.json()).toMatchObject({ format: "csv", needsMapping: true, csvHeaders: ["Datum;Text;Belopp"], statements: [] });
     const mapping = JSON.stringify({ dateColumn: "Datum", amountColumn: "Belopp", textColumn: "Text" });
     const imported = await ekonomi().inject({ method: "POST", url: "/bank-statements/import", ...multipartWithFields("k.csv", csv, { bankAccountId: account.id, csvMapping: mapping }, "text/csv") });
     expect(imported.statusCode).toBe(201);
