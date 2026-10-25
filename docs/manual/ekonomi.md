@@ -357,6 +357,8 @@ Med **kostnadsställen** och **projekt** kan du följa resultatet per avdelning 
 
 **Ta bort** fungerar som i övriga register: används objektet visas vad det är kopplat till, och du väljer ett annat objekt att **Flytta och ta bort** kopplingarna till. Vill du behålla historiken ungefär som den är, inaktivera objektet i stället.
 
+Används objektet på **bokförda** verifikatrader går det aldrig att ta bort, eftersom bokföringen inte kan ändras. Då visar **Ta bort** i stället listan över kopplingarna (där de bokförda raderna står som *bokförda verifikatrader*) och texten *"… används på bokförda verifikat. Bokföringen kan inte ändras, så posten kan inte tas bort eller flyttas — inaktivera den i stället."* Ingen ersättare kan väljas; knappen **Inaktivera** gör objektet inaktivt, så att det inte kan väljas på nya rader men finns kvar på det som redan bokats. Ett projekt kan också sättas till **Stängt**.
+
 ### Var objekten sätts
 
 - **Verifikat** — kolumnerna **Kostnadsställe** och **Projekt** i verifikattabellen, se [Kostnadsställe och projekt på raderna](#kostnadsstalle-och-projekt-pa-raderna). Mallar och återkommande verifikat bär dem.

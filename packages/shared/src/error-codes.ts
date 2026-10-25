@@ -150,14 +150,22 @@ export const ERROR_CODES = {
   // four digits and so cannot be created (400, body.accounts)
   SIE_INVALID_ACCOUNT_NUMBER: "sie-invalid-account-number",
   // Kostnadsställen och projekt (bokföringsgranskningen etapp 5 del A).
-  // Only the codes the web dictionary maps are listed; the other dimension
-  // errors (cost-center-not-found, project-not-found, cost-center-inactive)
-  // still derive their code from the class name (error-body.ts).
   // POST/PATCH /cost-centers|/projects with a code another entry has (409)
   COST_CENTER_CODE_TAKEN: "cost-center-code-taken",
   PROJECT_CODE_TAKEN: "project-code-taken",
   // A closed project picked on a NEW row (400)
   PROJECT_CLOSED: "project-closed",
+  // An inactive cost center picked on a NEW row (400)
+  COST_CENTER_INACTIVE: "cost-center-inactive",
+  // An unknown cost center / project id on a row, header or register route (404)
+  COST_CENTER_NOT_FOUND: "cost-center-not-found",
+  PROJECT_NOT_FOUND: "project-not-found",
+  // POST/PATCH /projects with a customerId that does not exist (404)
+  PROJECT_CUSTOMER_NOT_FOUND: "project-customer-not-found",
+  // PATCH /projects that would put the end date before the start date (400)
+  PROJECT_DATES: "project-dates",
+  // DELETE of a cost center / project carried by booked verification rows (409)
+  DIMENSION_BOOKED: "dimension-booked",
   // Bokför of a manual verification with a row on an account that has Kräver
   // kostnadsställe but no cost center (409, body.accounts = the numbers)
   COST_CENTER_REQUIRED: "cost-center-required",

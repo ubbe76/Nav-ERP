@@ -8,6 +8,10 @@ import type { CostCenter, Project } from "../../lib/types";
 // Pickers for the two accounting dimensions. A selected value that is no
 // longer offered (a deactivated cost centre, a closed project) stays in the
 // list marked as such, so opening an old document never silently changes it.
+// Select value for an explicit "no cost center" — distinct from "" (leave it
+// to the server's default), so a form can send null instead of omitting.
+export const NO_OBJECT = "__none__";
+
 interface Common extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "value" | "onChange" | "children"> {
   value: string;
   onChange: (id: string) => void;
@@ -18,14 +22,16 @@ export function CostCenterSelect({
   value,
   onChange,
   emptyLabel = "—",
+  noneLabel,
   all,
   size,
   ...rest
-}: Common & { all: CostCenter[]; size?: "xs" | "sm" | "md" }) {
-  const current = value ? all.find((c) => c.id === value) : undefined;
+}: Common & { all: CostCenter[]; size?: "xs" | "sm" | "md"; noneLabel?: string }) {
+  const current = value && value !== NO_OBJECT ? all.find((c) => c.id === value) : undefined;
   return (
     <Select size={size} value={value} onChange={(e) => onChange(e.target.value)} {...rest}>
       <option value="">{emptyLabel}</option>
+      {noneLabel && <option value={NO_OBJECT}>{noneLabel}</option>}
       {all
         .filter((c) => c.active || c.id === value)
         .map((c) => (
@@ -34,7 +40,7 @@ export function CostCenterSelect({
             {c.active ? "" : " (inaktivt)"}
           </option>
         ))}
-      {value && !current && <option value={value}>(okänt kostnadsställe)</option>}
+      {value && value !== NO_OBJECT && !current && <option value={value}>(okänt kostnadsställe)</option>}
     </Select>
   );
 }

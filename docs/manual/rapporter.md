@@ -86,7 +86,7 @@ Kolumnerna är **Nettoomsättning**, **Självkostnad**, **TB** (täckningsbidrag
 
 ## Projektrapport
 
-**Rapporter → Projektrapport** visar **intäkter**, **kostnader** och **resultat** för ett projekt ur bokföringen. Välj **Projekt** (öppna och stängda), och ange vid behov **Från** och **Till** — lämnas de tomma gäller hela projektets bokföring. Filtren ligger i adressen, så vyn går att spara som bokmärke.
+**Rapporter → Projektrapport** visar **intäkter**, **kostnader** och **resultat** för ett projekt ur bokföringen. Välj **Projekt** (öppna och stängda), och ange vid behov **Från** och **Till** — lämnas de tomma gäller hela projektets bokföring, och texten under nyckeltalen visar då det första och sista bokförda datumet (eller *alla datum* om projektet inte har några bokförda rader än). Filtren ligger i adressen, så vyn går att spara som bokmärke.
 
 Under de tre nyckeltalen visas projektet **per månad** (**Intäkter**, **Kostnader**, **Resultat**), **per konto** och **Kundordrar på projektet** — de kundordrar som har projektet i sitt huvud, med status och värde, klickbara till ordern. Siffrorna är de bokförda verifikatrader som bär projektet; hur projekt sätts på rader beskrivs under [Kostnadsställen och projekt](/hjalp/ekonomi#kostnadsstallen-och-projekt). **Exportera CSV** ger samma rapport. Rapporten kräver rättigheten **Rapporter**.
 

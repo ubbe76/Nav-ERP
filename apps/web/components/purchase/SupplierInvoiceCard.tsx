@@ -1,6 +1,6 @@
 "use client";
 
-import { CostCenterSelect, ProjectSelect, DimensionFields } from "../economy/DimensionSelect";
+import { CostCenterSelect, ProjectSelect, DimensionFields, NO_OBJECT } from "../economy/DimensionSelect";
 import { dimensionText, headerDimensionFields, useDimensions } from "../../lib/dimensions";
 import { confirmDelete } from "../../lib/confirm";
 import { useState, type FormEvent } from "react";
@@ -685,8 +685,11 @@ function AddRowForm({
           unitPrice: unitPrice.trim() ? Number(unitPrice) : 0,
           vatCodeId: vatCodeId || undefined,
           purchaseOrderRowId: poRowId || undefined,
-          costCenterId: costCenterId || undefined,
-          projectId: projectId || undefined,
+          // Omitted = the server's default (the article group's cost center);
+          // null = the row follows the invoice's own; an id = the row's own.
+          costCenterId: costCenterId === NO_OBJECT ? null : costCenterId || undefined,
+          // Projects have no row default, so omitted and null both follow the invoice.
+          projectId: projectId || null,
         }),
       });
       setCostCenterId("");
@@ -700,7 +703,7 @@ function AddRowForm({
       setMatchOptions([]);
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte lägga till raden");
+      setError(apiErrorMessage(err, "Kunde inte lägga till raden"));
     } finally {
       setPending(false);
     }
@@ -743,7 +746,15 @@ function AddRowForm({
         {(dims.allCostCenters.length > 0 || dims.allProjects.length > 0) && (
           <FormRow>
             <Field label="Kostnadsställe" htmlFor="rowCostCenter">
-              <CostCenterSelect id="rowCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Följer fakturan" />
+              <CostCenterSelect
+                id="rowCostCenter"
+                all={dims.allCostCenters}
+                value={costCenterId}
+                onChange={setCostCenterId}
+                // Without an article there is no group default to take, so the two choices coincide.
+                emptyLabel={article ? "Artikelgruppens förval" : "Följer fakturan"}
+                noneLabel={article ? "Följer fakturan" : undefined}
+              />
             </Field>
             <Field label="Projekt" htmlFor="rowProject">
               <ProjectSelect id="rowProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Följer fakturan" />

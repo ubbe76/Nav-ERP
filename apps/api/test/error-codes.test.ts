@@ -390,8 +390,20 @@ import {
   SupplierInvoiceNotFoundError,
 } from "../src/modules/economy/service/fixed-asset.service.js";
 import { FixedAssetVerificationError } from "../src/modules/economy/service/economy.service.js";
-import { CostCenterRequiredError, ProjectClosedError } from "../src/modules/economy/service/dimension-check.js";
-import { CostCenterCodeTakenError, ProjectCodeTakenError } from "../src/modules/economy/service/dimension.service.js";
+import {
+  CostCenterInactiveError,
+  CostCenterNotFoundError,
+  CostCenterRequiredError,
+  DimensionBookedError,
+  ProjectClosedError,
+  ProjectNotFoundError,
+} from "../src/modules/economy/service/dimension-check.js";
+import {
+  CostCenterCodeTakenError,
+  ProjectCodeTakenError,
+  ProjectCustomerNotFoundError,
+  ProjectDatesError,
+} from "../src/modules/economy/service/dimension.service.js";
 
 const cases: Array<[Error, string]> = [
   // payroll / timereport
@@ -746,6 +758,12 @@ const cases: Array<[Error, string]> = [
   [new ProjectCodeTakenError("P1"), ERROR_CODES.PROJECT_CODE_TAKEN],
   [new ProjectClosedError("P1"), ERROR_CODES.PROJECT_CLOSED],
   [new CostCenterRequiredError(["5010"]), ERROR_CODES.COST_CENTER_REQUIRED],
+  [new CostCenterInactiveError("100"), ERROR_CODES.COST_CENTER_INACTIVE],
+  [new CostCenterNotFoundError("c-1"), ERROR_CODES.COST_CENTER_NOT_FOUND],
+  [new ProjectNotFoundError("p-1"), ERROR_CODES.PROJECT_NOT_FOUND],
+  [new ProjectCustomerNotFoundError("k-1"), ERROR_CODES.PROJECT_CUSTOMER_NOT_FOUND],
+  [new ProjectDatesError(), ERROR_CODES.PROJECT_DATES],
+  [new DimensionBookedError("project", "P1"), ERROR_CODES.DIMENSION_BOOKED],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

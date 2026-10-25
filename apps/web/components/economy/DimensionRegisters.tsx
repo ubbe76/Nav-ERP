@@ -21,7 +21,7 @@ import shellStyles from "../AppShell.module.css";
 // inactivate freely, and delete with "move the references first" when the
 // entry is used (GET …/usage, DELETE with replacementId).
 
-type Entry = { id: string; code: string; name: string };
+type Entry = { id: string; code: string; name: string; active: boolean };
 
 interface DeleteMoveProps<T extends Entry> {
   basePath: string;
@@ -32,12 +32,21 @@ interface DeleteMoveProps<T extends Entry> {
   onError: (message: string | null) => void;
 }
 
+// Booked verification rows are immutable (the bookkeeping lock), so an entry
+// they carry can never be moved or deleted — only deactivated. The usage
+// lists them as their own reference ("bokförd verifikatrad").
+const hasBookedRows = (usage: RegisterUsage) =>
+  usage.references.some((ref) => ref.table === "verification_rows" && ref.labelOne.startsWith("bokförd"));
+
 // The delete button of an edit dialog; swaps the dialog for the move step
 // when something still points at the entry.
 function useDeleteWithMove<T extends Entry>({ basePath, entry, others, singular, onDone, onError }: DeleteMoveProps<T>) {
   const [usage, setUsage] = useState<RegisterUsage | null>(null);
   const [replacementId, setReplacementId] = useState("");
   const [pending, setPending] = useState(false);
+  // The move/deactivate step replaces the dialog's form, so its errors are
+  // shown inside it (the parent's error line is hidden meanwhile).
+  const [stepError, setStepError] = useState<string | null>(null);
 
   async function start() {
     onError(null);
@@ -59,10 +68,22 @@ function useDeleteWithMove<T extends Entry>({ basePath, entry, others, singular,
     }
   }
 
+  async function deactivate() {
+    setStepError(null);
+    setPending(true);
+    try {
+      await apiFetch(`${basePath}/${entry.id}`, { method: "PATCH", body: JSON.stringify({ active: false }) });
+      onDone();
+    } catch (err) {
+      setStepError(apiErrorMessage(err, `Kunde inte inaktivera ${singular}`));
+      setPending(false);
+    }
+  }
+
   async function move(e: FormEvent) {
     e.preventDefault();
     if (!replacementId) return;
-    onError(null);
+    setStepError(null);
     setPending(true);
     try {
       await apiFetch(`${basePath}/${entry.id}?replacementId=${encodeURIComponent(replacementId)}`, {
@@ -71,13 +92,16 @@ function useDeleteWithMove<T extends Entry>({ basePath, entry, others, singular,
       });
       onDone();
     } catch (err) {
-      onError(apiErrorMessage(err, `Kunde inte flytta och ta bort ${singular}`));
+      setStepError(apiErrorMessage(err, `Kunde inte flytta och ta bort ${singular}`));
       setPending(false);
     }
   }
 
+  const booked = usage ? hasBookedRows(usage) : false;
+
   const moveForm = usage ? (
     <Form onSubmit={move}>
+      <FormError>{stepError}</FormError>
       <h3 style={{ margin: "0 0 4px", font: "inherit", fontWeight: 600, fontSize: 15 }}>Ta bort {entry.name}</h3>
       <p style={{ margin: 0, fontFamily: "var(--font-body)", fontSize: 13 }}>Posten används av:</p>
       <ul style={{ margin: "0 0 4px", paddingLeft: 20, fontFamily: "var(--font-body)", fontSize: 13 }}>
@@ -87,7 +111,12 @@ function useDeleteWithMove<T extends Entry>({ basePath, entry, others, singular,
           </li>
         ))}
       </ul>
-      {others.length > 0 ? (
+      {booked ? (
+        <FormHint>
+          {entry.name} används på bokförda verifikat. Bokföringen kan inte ändras, så posten kan inte tas bort eller flyttas —{" "}
+          {entry.active ? "inaktivera den i stället." : "den är redan inaktiv och kan inte väljas på nya rader."}
+        </FormHint>
+      ) : others.length > 0 ? (
         <>
           <Field label="Flytta kopplingarna till" htmlFor="dimensionReplacement">
             <Select id="dimensionReplacement" required value={replacementId} onChange={(e) => setReplacementId(e.target.value)}>
@@ -108,10 +137,15 @@ function useDeleteWithMove<T extends Entry>({ basePath, entry, others, singular,
         <FormHint>Lägg först till den post kopplingarna ska flyttas till — eller inaktivera posten i stället.</FormHint>
       )}
       <FormActions>
-        <Button type="button" variant="secondary" disabled={pending} onClick={() => setUsage(null)}>
+        <Button type="button" variant="secondary" disabled={pending} onClick={() => { setUsage(null); setStepError(null); }}>
           Avbryt
         </Button>
-        {others.length > 0 && (
+        {booked && entry.active && (
+          <Button type="button" variant="primary" disabled={pending} onClick={() => void deactivate()}>
+            {pending ? "Inaktiverar…" : "Inaktivera"}
+          </Button>
+        )}
+        {!booked && others.length > 0 && (
           <Button type="submit" variant="primary" disabled={pending || !replacementId}>
             {pending ? "Tar bort…" : "Flytta och ta bort"}
           </Button>

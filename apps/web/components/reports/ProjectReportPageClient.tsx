@@ -20,8 +20,10 @@ import styles from "./OrderRegister.module.css";
 // Mirror of GET /reports/project-report (bokföringsgranskningen etapp 5 del A).
 interface ProjectReport {
   project: { id: string; code: string; name: string };
-  from: string;
-  to: string;
+  // Echo of the range; with no range given the API answers the first/last
+  // booked day, or null when the project has no booked rows.
+  from: string | null;
+  to: string | null;
   revenue: number;
   costs: number;
   result: number;
@@ -38,6 +40,14 @@ export interface ProjectReportDefaults {
 
 const ENDPOINT = "/api/v1/reports/project-report";
 const kr = (n: number) => `${formatMoney(n)} kr`;
+
+// "alla datum" when the project has no booked rows (the API echoes null).
+function rangeText(from: string | null, to: string | null): string {
+  if (from && to) return `${from} till och med ${to}`;
+  if (from) return `från ${from}`;
+  if (to) return `till och med ${to}`;
+  return "alla datum";
+}
 
 function Scroller({ children }: { children: React.ReactNode }) {
   return <div style={{ overflowX: "auto", maxWidth: "100%" }}>{children}</div>;
@@ -141,7 +151,7 @@ export function ProjectReportPageClient({ defaults }: { defaults: ProjectReportD
             <KpiTile label="Resultat" value={kr(data.result)} signal={`${data.project.code} · ${data.project.name}`} tone={data.result < 0 ? "alert" : "neutral"} />
           </KpiRow>
           <FormHint>
-            Intäkter och kostnader är de bokförda verifikatraderna som bär projektet — {data.from} till och med {data.to}.
+            Intäkter och kostnader är de bokförda verifikatraderna som bär projektet — {rangeText(data.from, data.to)}.
             Kundordrarna nedan är de som har projektet i sitt huvud.
           </FormHint>
 

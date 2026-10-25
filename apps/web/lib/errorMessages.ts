@@ -582,6 +582,13 @@ const MESSAGES: Record<string, MessageEntry> = {
   "cost-center-code-taken": "Koden används redan av ett annat kostnadsställe — välj en annan kod.",
   "project-code-taken": "Koden används redan av ett annat projekt — välj en annan kod.",
   "project-closed": "Projektet är stängt och kan inte väljas på nya rader — öppna projektet igen eller välj ett annat.",
+  "cost-center-inactive": serverMessage("Kostnadsstället är inaktivt och kan inte väljas på nya rader — välj ett annat."),
+  "cost-center-not-found": "Kostnadsstället hittades inte — ladda om sidan.",
+  "project-not-found": "Projektet hittades inte — ladda om sidan.",
+  "project-customer-not-found": "Kunden som projektet kopplats till hittades inte — ladda om sidan.",
+  "project-dates": "Slutdatum kan inte vara före startdatum.",
+  // The server names the object ("Kostnadsstället 100 används på bokförda verifikat …").
+  "dimension-booked": serverMessage("Objektet används på bokförda verifikat och kan inte tas bort — inaktivera det i stället."),
   "cost-center-required": (err) => {
     const accounts = (err.body as { accounts?: unknown } | undefined)?.accounts;
     const list = Array.isArray(accounts) ? accounts.filter((a): a is string => typeof a === "string") : [];
