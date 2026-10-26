@@ -21,6 +21,7 @@
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.0.3",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.4.299",
     "pdfkit": "^0.19.1",
     "qrcode": "^1.5.4",
     "read-excel-file": "^9.3.10",

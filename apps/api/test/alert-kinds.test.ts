@@ -34,6 +34,7 @@ describe("the catalog", () => {
       "purchase_order_late",
       "manufacturing_order_late",
       "purchase_needed",
+      "invoice_scans_pending",
       "manufacture_needed",
       "bank_unreconciled",
       "cost_center_missing",
@@ -60,7 +61,7 @@ describe("visibleKinds", () => {
   });
 
   it("Inköp alone gives the purchase kinds only", () => {
-    expect(visibleKinds(user(["inkop"]))).toEqual(["supplier_invoice_due", "purchase_order_late", "purchase_needed"]);
+    expect(visibleKinds(user(["inkop"]))).toEqual(["supplier_invoice_due", "purchase_order_late", "purchase_needed", "invoice_scans_pending"]);
   });
 
   it("Försäljning gives the customer kinds, Tillverkning the TO kinds, Lager the stock kind", () => {
@@ -87,6 +88,7 @@ describe("visibleKinds", () => {
       "supplier_invoice_due",
       "purchase_order_late",
       "purchase_needed",
+      "invoice_scans_pending",
     ]);
   });
 });

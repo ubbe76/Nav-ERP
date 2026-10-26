@@ -478,6 +478,14 @@ export const ERROR_CODES = {
   REMINDER_FEE_AFTER_LATE_FEE: "reminder-fee-after-late-fee",
   // DELETE /reference-rates/:id on a Riksbanken row (409)
   REFERENCE_RATE_RIKSBANK: "reference-rate-riksbank",
+  // Fakturaskanning: the same file is already in the Fakturainkorg (409,
+  // body.existing { id, scanNumber, status }) — uppladdningen reports it in
+  // duplicates[] instead, Återställ answers with this
+  INVOICE_SCAN_DUPLICATE: "invoice-scan-duplicate",
+  // Tolka med AI without a configured AI interpretation (409)
+  INVOICE_SCAN_AI_NOT_CONFIGURED: "invoice-scan-ai-not-configured",
+  // DELETE of the underlag the Fakturainkorg created the invoice from (409)
+  SUPPLIER_INVOICE_FILE_FROM_SCAN: "supplier-invoice-file-from-scan",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

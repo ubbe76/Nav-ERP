@@ -21,6 +21,8 @@ import {
   SieVerificationImportBlockedError,
 } from "../src/modules/economy/service/sie-verification-import.service.js";
 import { SieInvalidAccountNumberError } from "../src/modules/economy/service/sie.service.js";
+import { InvoiceScanAiNotConfiguredError, InvoiceScanDuplicateError } from "../src/modules/purchase/service/invoice-scan.service.js";
+import { SupplierInvoiceFileFromScanError } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES } from "@navet/shared";
@@ -794,6 +796,10 @@ const cases: Array<[Error, string]> = [
   [new LateInterestAlreadyChargedError(["x"]), ERROR_CODES.LATE_INTEREST_ALREADY_CHARGED],
   [new ReminderFeeAfterLateFeeError("x"), ERROR_CODES.REMINDER_FEE_AFTER_LATE_FEE],
   [new ReferenceRateRiksbankError("2026-07-01"), ERROR_CODES.REFERENCE_RATE_RIKSBANK],
+  // Fakturaskanning
+  [new InvoiceScanDuplicateError({ id: "s-1", scanNumber: "FI-1", status: "new" }), ERROR_CODES.INVOICE_SCAN_DUPLICATE],
+  [new InvoiceScanAiNotConfiguredError(), ERROR_CODES.INVOICE_SCAN_AI_NOT_CONFIGURED],
+  [new SupplierInvoiceFileFromScanError("FI-1"), ERROR_CODES.SUPPLIER_INVOICE_FILE_FROM_SCAN],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

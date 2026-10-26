@@ -6,6 +6,7 @@ import {
   einvoiceTransmissions,
   emailLog,
   invoices,
+  invoiceScans,
   manufacturingOrders,
   paymentBatchItems,
   paymentTerms,
@@ -180,6 +181,26 @@ export function createAlertsRepository(db: Db) {
         byVerification.set(row.verificationId, entry);
       }
       return [...byVerification.values()];
+    },
+
+    // Fakturor i inkorgen att granska: status new/interpreted (the derived
+    // Att granska), with the interpreted supplier and invoice number.
+    async pendingInvoiceScans() {
+      return db
+        .select({
+          id: invoiceScans.id,
+          scanNumber: invoiceScans.scanNumber,
+          filename: invoiceScans.filename,
+          source: invoiceScans.source,
+          emailFrom: invoiceScans.emailFrom,
+          createdAt: invoiceScans.createdAt,
+          supplierName: suppliers.name,
+          invoiceNumber: sql<string | null>`${invoiceScans.result} #>> '{invoiceNumber,value}'`,
+        })
+        .from(invoiceScans)
+        .leftJoin(suppliers, sql`${suppliers.id} = NULLIF(${invoiceScans.result} #>> '{supplier,matchedSupplierId}', '')::uuid`)
+        .where(inArray(invoiceScans.status, ["new", "interpreted"]))
+        .orderBy(asc(invoiceScans.createdAt), asc(invoiceScans.scanNumber));
     },
 
     // Negativt saldo: the article's total over every location < 0 — the

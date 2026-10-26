@@ -16,9 +16,10 @@ import {
   type UpdateSupplierInvoiceRowInput,
 } from "@navet/shared";
 import { supplierInvoiceWarnings } from "./supplier-invoice-warnings.js";
-import type {
-  SupplierInvoiceRepository,
-  SupplierInvoiceRowWrite,
+import {
+  createSupplierInvoiceRepository,
+  type SupplierInvoiceRepository,
+  type SupplierInvoiceRowWrite,
 } from "../repository/supplier-invoice.repository.js";
 import { InvalidStatusTransitionError, SupplierNotFoundError } from "./purchase.service.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
@@ -173,6 +174,12 @@ export class SupplierInvoiceExchangeRateMissingError extends Error {
 
 type ResolvedRate = { exchangeRate: number; exchangeRateSource: DocumentRateSource | null; exchangeRateDate: string | null };
 
+// What prepareCreate resolves before the create's transaction.
+export interface PreparedSupplierInvoice {
+  supplier: NonNullable<Awaited<ReturnType<SupplierInvoiceRepository["findSupplierById"]>>>;
+  rate: ResolvedRate;
+}
+
 const SEK_RATE: ResolvedRate = { exchangeRate: 1, exchangeRateSource: null, exchangeRateDate: null };
 
 // Underlag (the supplier's invoice as a file): same formats and size cap as
@@ -201,6 +208,15 @@ export class SupplierInvoiceFileLockedError extends Error {
   constructor() {
     super("Underlaget kan bara tas bort medan fakturan är ett utkast — efter attest är det räkenskapsinformation");
     this.name = "SupplierInvoiceFileLockedError";
+  }
+}
+
+// Fakturaskanning: the underlag the Fakturainkorg created the invoice from
+// is the received invoice itself — the scan keeps pointing at it. 409.
+export class SupplierInvoiceFileFromScanError extends Error {
+  constructor(public scanNumber: string) {
+    super(`Underlaget kom från fakturainkorgen (${scanNumber}) och kan inte tas bort — det är den mottagna fakturan`);
+    this.name = "SupplierInvoiceFileFromScanError";
   }
 }
 
@@ -295,6 +311,7 @@ export function createSupplierInvoiceService(
   // must be a purchase code (both/purchase) and active — unless it is the
   // code the row already carries (`keepVatCodeId`, a PATCH leaving it alone).
   async function resolveRow(
+    r: SupplierInvoiceRepository,
     input: RowInput,
     book: VatCodeBook,
     keepVatCodeId?: string | null,
@@ -313,7 +330,7 @@ export function createSupplierInvoiceService(
     // still reconciles price and quantity against the order. The article must
     // line up — that is what the variance is computed on.
     if (purchaseOrderRowId) {
-      const poRow = await repo.findPurchaseOrderRowForMatch(purchaseOrderRowId);
+      const poRow = await r.findPurchaseOrderRowForMatch(purchaseOrderRowId);
       if (!poRow) throw new PoMatchMismatchError("The matched purchase order row does not exist");
       if (articleId === null || poRow.articleId !== articleId) {
         throw new PoMatchMismatchError("The matched purchase order row is for a different article");
@@ -324,11 +341,11 @@ export function createSupplierInvoiceService(
     const vatAmount = vatRate !== null ? round2(lineAmount * (vatRate / 100)) : 0;
     // Kostnadsställen och projekt: a new row without its own takes the
     // article group's Kostnadsställe (förval); null stays null (= the header's).
-    const dimensions = await repo.resolveDimensions(
+    const dimensions = await r.resolveDimensions(
       { costCenterId: input.costCenterId, projectId: input.projectId },
       {
         existing: existingDimensions ?? null,
-        fallback: existingDimensions || !articleId ? null : { costCenterId: await repo.findArticleGroupDefaultCostCenter(articleId), projectId: null },
+        fallback: existingDimensions || !articleId ? null : { costCenterId: await r.findArticleGroupDefaultCostCenter(articleId), projectId: null },
       }
     );
     return {
@@ -465,9 +482,24 @@ export function createSupplierInvoiceService(
       };
     },
 
-    async create(input: CreateSupplierInvoiceInput, createdBy: string) {
+    // Everything a create needs before its transaction: the supplier and the
+    // rate — the rate lookup may call Riksbanken, which never happens inside
+    // a transaction (CLAUDE.md, Inga DB-transaktioner över HTTP).
+    async prepareCreate(input: CreateSupplierInvoiceInput): Promise<PreparedSupplierInvoice> {
       const supplier = await repo.findSupplierById(input.supplierId);
       if (!supplier) throw new SupplierNotFoundError(input.supplierId);
+      const rate = await resolveRate(supplier.currency, input.invoiceDate, input.exchangeRate, input.purchaseOrderId ?? null);
+      return { supplier, rate };
+    },
+
+    // The supplier invoice draft inside the caller's transaction — the
+    // Fakturainkorg's conversion (Db | Tx: every read and write below goes
+    // through a repository bound to `tx`). Writes no audit entry; the caller
+    // logs after its commit (auditCreated). A duplicate invoice number
+    // aborts the caller's transaction (DuplicateSupplierInvoiceNumberError).
+    async createInTx(tx: Tx, input: CreateSupplierInvoiceInput, createdBy: string, prepared: PreparedSupplierInvoice) {
+      const r = createSupplierInvoiceRepository(tx);
+      const { supplier, rate } = prepared;
       // Leverantörsreskontra (B4): an explicitly supplied dueDate always wins
       // — the paper invoice's own förfallodatum is the obligation. Only when
       // the client leaves it out is it derived from the supplier's payment
@@ -476,29 +508,29 @@ export function createSupplierInvoiceService(
       let dueDate = input.dueDate ?? null;
       if (dueDate === null) {
         const paymentTermCode = supplier.paymentTermId
-          ? await repo.findPaymentTermCode(supplier.paymentTermId)
+          ? await r.findPaymentTermCode(supplier.paymentTermId)
           : null;
         dueDate = computeDueDate(input.invoiceDate, paymentTermCode);
       }
-      const book = await repo.vatCodeBook();
+      const book = await r.vatCodeBook();
       const vatCodeId = headerVatCodeId(book, supplier, input.vatCodeId);
-      const rows = await Promise.all(input.rows.map((r) => resolveRow(r, book)));
-      const rate = await resolveRate(supplier.currency, input.invoiceDate, input.exchangeRate, input.purchaseOrderId ?? null);
+      const rows: SupplierInvoiceRowWrite[] = [];
+      for (const row of input.rows) rows.push(await resolveRow(r, row, book));
       // Kostnadsställen och projekt (header = the rows' default): the
       // supplier's Kostnadsställe (förval) and the linked purchase order's
       // project unless the caller says otherwise.
-      const dimensions = await repo.resolveDimensions(
+      const dimensions = await r.resolveDimensions(
         { costCenterId: input.costCenterId, projectId: input.projectId },
         {
           fallback: {
             costCenterId: supplier.defaultCostCenterId,
-            projectId: input.purchaseOrderId ? await repo.findPurchaseOrderProject(input.purchaseOrderId) : null,
+            projectId: input.purchaseOrderId ? await r.findPurchaseOrderProject(input.purchaseOrderId) : null,
           },
         }
       );
-      let invoice;
       try {
-        invoice = await repo.create(
+        return await r.createInTx(
+          tx,
           {
             supplierId: input.supplierId,
             invoiceNumber: input.invoiceNumber,
@@ -524,6 +556,10 @@ export function createSupplierInvoiceService(
         if (isUniqueViolation(err)) throw new DuplicateSupplierInvoiceNumberError(input.invoiceNumber);
         throw err;
       }
+    },
+
+    // The `created` audit entry, after the transaction that created it.
+    async auditCreated(invoice: { registrationNumber: string; invoiceNumber: string; grossAmount: string; currency: string; exchangeRate: string; exchangeRateSource: string | null }, createdBy: string, extra: Record<string, unknown> = {}) {
       await audit.log({
         entityType: "supplier_invoice",
         entityId: invoice.registrationNumber,
@@ -532,9 +568,16 @@ export function createSupplierInvoiceService(
           supplierInvoiceNumber: invoice.invoiceNumber,
           grossAmount: invoice.grossAmount,
           ...(invoice.currency === SEK ? {} : { currency: invoice.currency, exchangeRate: invoice.exchangeRate, exchangeRateSource: invoice.exchangeRateSource }),
+          ...extra,
         },
         userId: createdBy,
       });
+    },
+
+    async create(input: CreateSupplierInvoiceInput, createdBy: string) {
+      const prepared = await service.prepareCreate(input);
+      const invoice = await repo.transaction((tx) => service.createInTx(tx, input, createdBy, prepared));
+      await service.auditCreated(invoice, createdBy);
       return service.getInvoice(invoice.id);
     },
 
@@ -716,7 +759,7 @@ export function createSupplierInvoiceService(
       if (invoice.status !== "draft") {
         throw new InvalidStatusTransitionError(`Cannot change rows on a supplier invoice in status "${invoice.status}"`);
       }
-      return repo.addRow(invoiceId, await resolveRow(input, await repo.vatCodeBook()));
+      return repo.addRow(invoiceId, await resolveRow(repo, input, await repo.vatCodeBook()));
     },
 
     async updateRow(invoiceId: string, rowId: string, input: UpdateSupplierInvoiceRowInput) {
@@ -745,7 +788,7 @@ export function createSupplierInvoiceService(
       const row = await repo.updateRow(
         invoiceId,
         rowId,
-        await resolveRow(merged, await repo.vatCodeBook(), existing.vatCodeId, { costCenterId: existing.costCenterId, projectId: existing.projectId })
+        await resolveRow(repo, merged, await repo.vatCodeBook(), existing.vatCodeId, { costCenterId: existing.costCenterId, projectId: existing.projectId })
       );
       if (!row) throw new SupplierInvoiceRowNotFoundError(rowId);
       return row;
@@ -890,6 +933,7 @@ export function createSupplierInvoiceService(
       const result = await repo.deleteFileIfDraft(invoiceId, fileId);
       if (!result.ok) {
         if (result.reason === "locked") throw new SupplierInvoiceFileLockedError();
+        if (result.reason === "from_scan") throw new SupplierInvoiceFileFromScanError(result.scanNumber);
         throw new SupplierInvoiceFileNotFoundError(fileId);
       }
       await audit.log({

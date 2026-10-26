@@ -12,6 +12,7 @@ import {
   DuplicateSupplierInvoiceNumberError,
   InvalidSupplierInvoiceFileTypeError,
   MAX_SUPPLIER_INVOICE_FILE_BYTES,
+  SupplierInvoiceFileFromScanError,
   SupplierInvoiceFileLockedError,
   SupplierInvoiceFileNotFoundError,
   PoMatchMismatchError,
@@ -45,83 +46,86 @@ import {
 import { InvalidVatCodeError } from "../../economy/service/document-vat-code.js";
 import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 
+// Shared error mapper for the supplier-invoice routes (and the
+// Fakturainkorg's conversion, which creates one).
+export function invoiceError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
+  // Momskoder: the chosen code (header, row or the supplier's förval) is
+  // unknown, inactive or not a purchase code.
+  if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
+  // Valuta: no rate for the invoice's currency and date (Riksbanken has
+  // none or did not answer, no manual rate, no purchase order rate) — the
+  // client asks the user to type the rate.
+  if (err instanceof ExchangeRateUnavailableError) {
+    return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
+  }
+  if (
+    err instanceof SupplierInvoiceNotFoundError ||
+    err instanceof SupplierInvoiceRowNotFoundError ||
+    err instanceof SupplierInvoiceFileNotFoundError ||
+    err instanceof SupplierNotFoundError ||
+    err instanceof CostCenterNotFoundError ||
+    err instanceof ProjectNotFoundError
+  ) {
+    return reply.code(404).send(errorBody(err as Error));
+  }
+  // Kostnadsställen och projekt: an inactive/closed object on the header or a row.
+  if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
+  if (
+    err instanceof InvalidStatusTransitionError ||
+    err instanceof DuplicateSupplierInvoiceNumberError ||
+    // The posting refused, so the transition never happened — a conflict
+    // with the current state of the books, not a bad request.
+    //
+    // Auth asymmetry, deliberate: every /economy route is admin-only, but
+    // these supplier-invoice routes are plain-auth — so a non-admin
+    // approving or cancelling an invoice writes (or reverses) a
+    // verification as a side effect, and sees these bookkeeping errors,
+    // without being allowed to open Ekonomi. The posting is a consequence
+    // of the purchase transition it is already entitled to make, never a
+    // free hand into the books: it is a fixed, server-derived posting with
+    // no client-supplied accounts or amounts.
+    err instanceof AccountingPeriodLockedError ||
+    err instanceof NoAccountingPeriodForPostingError ||
+    err instanceof MissingPostingAccountError ||
+    err instanceof UnknownVatRateError ||
+    err instanceof ZeroAmountPostingError ||
+    err instanceof SupplierInvoiceAmountMismatchError ||
+    // Momskoder: charged VAT under a code that cannot carry it, a code that
+    // is not a purchase code, or an omvänd code whose two VAT accounts
+    // coincide — refused at attest.
+    err instanceof SupplierInvoiceVatCodeError ||
+    err instanceof VatCodeNotApplicableError ||
+    err instanceof VatCodeAccountConflictError ||
+    // Valuta: a foreign invoice saved before rates existed, without one.
+    err instanceof SupplierInvoiceExchangeRateMissingError ||
+    err instanceof VerificationAlreadyReversedError ||
+    // Leverantörsreskontra (B4): makulering refused because live payments
+    // still point at the invoice — a conflict with the current state of the
+    // ledger, same shape as the bookkeeping refusals above.
+    err instanceof SupplierInvoiceHasPaymentsError ||
+    // Bankfiler: reserved in a live payment batch (makulering, betalningsreferens).
+    err instanceof SupplierInvoiceInPaymentBatchError ||
+    // Underlag on an attested/cancelled invoice is räkenskapsinformation.
+    err instanceof SupplierInvoiceFileLockedError ||
+    // Fakturaskanning: the received invoice the inbox created it from.
+    err instanceof SupplierInvoiceFileFromScanError
+  ) {
+    return reply.code(409).send(errorBody(err as Error));
+  }
+  if (
+    err instanceof PoMatchMismatchError ||
+    err instanceof InvalidSupplierInvoiceFileTypeError ||
+    err instanceof SupplierInvoiceExchangeRateError
+  ) {
+    return reply.code(400).send(errorBody(err));
+  }
+  throw err;
+}
+
 // This module is registered inside app.ts's protected route scope, so
 // requireAuth has already run and req.user is guaranteed to be set.
 export async function supplierInvoiceRoutes(app: FastifyInstance, opts: { service: SupplierInvoiceService }) {
   const { service } = opts;
-
-  // Shared error mapper for the supplier-invoice routes.
-  function invoiceError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
-    // Momskoder: the chosen code (header, row or the supplier's förval) is
-    // unknown, inactive or not a purchase code.
-    if (err instanceof InvalidVatCodeError) return reply.code(400).send({ ...errorBody(err), reason: err.reason });
-    // Valuta: no rate for the invoice's currency and date (Riksbanken has
-    // none or did not answer, no manual rate, no purchase order rate) — the
-    // client asks the user to type the rate.
-    if (err instanceof ExchangeRateUnavailableError) {
-      return reply.code(409).send({ ...errorBody(err), currency: err.currency, date: err.date });
-    }
-    if (
-      err instanceof SupplierInvoiceNotFoundError ||
-      err instanceof SupplierInvoiceRowNotFoundError ||
-      err instanceof SupplierInvoiceFileNotFoundError ||
-      err instanceof SupplierNotFoundError ||
-      err instanceof CostCenterNotFoundError ||
-      err instanceof ProjectNotFoundError
-    ) {
-      return reply.code(404).send(errorBody(err as Error));
-    }
-    // Kostnadsställen och projekt: an inactive/closed object on the header or a row.
-    if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
-    if (
-      err instanceof InvalidStatusTransitionError ||
-      err instanceof DuplicateSupplierInvoiceNumberError ||
-      // The posting refused, so the transition never happened — a conflict
-      // with the current state of the books, not a bad request.
-      //
-      // Auth asymmetry, deliberate: every /economy route is admin-only, but
-      // these supplier-invoice routes are plain-auth — so a non-admin
-      // approving or cancelling an invoice writes (or reverses) a
-      // verification as a side effect, and sees these bookkeeping errors,
-      // without being allowed to open Ekonomi. The posting is a consequence
-      // of the purchase transition it is already entitled to make, never a
-      // free hand into the books: it is a fixed, server-derived posting with
-      // no client-supplied accounts or amounts.
-      err instanceof AccountingPeriodLockedError ||
-      err instanceof NoAccountingPeriodForPostingError ||
-      err instanceof MissingPostingAccountError ||
-      err instanceof UnknownVatRateError ||
-      err instanceof ZeroAmountPostingError ||
-      err instanceof SupplierInvoiceAmountMismatchError ||
-      // Momskoder: charged VAT under a code that cannot carry it, a code that
-      // is not a purchase code, or an omvänd code whose two VAT accounts
-      // coincide — refused at attest.
-      err instanceof SupplierInvoiceVatCodeError ||
-      err instanceof VatCodeNotApplicableError ||
-      err instanceof VatCodeAccountConflictError ||
-      // Valuta: a foreign invoice saved before rates existed, without one.
-      err instanceof SupplierInvoiceExchangeRateMissingError ||
-      err instanceof VerificationAlreadyReversedError ||
-      // Leverantörsreskontra (B4): makulering refused because live payments
-      // still point at the invoice — a conflict with the current state of the
-      // ledger, same shape as the bookkeeping refusals above.
-      err instanceof SupplierInvoiceHasPaymentsError ||
-      // Bankfiler: reserved in a live payment batch (makulering, betalningsreferens).
-      err instanceof SupplierInvoiceInPaymentBatchError ||
-      // Underlag on an attested/cancelled invoice is räkenskapsinformation.
-      err instanceof SupplierInvoiceFileLockedError
-    ) {
-      return reply.code(409).send(errorBody(err as Error));
-    }
-    if (
-      err instanceof PoMatchMismatchError ||
-      err instanceof InvalidSupplierInvoiceFileTypeError ||
-      err instanceof SupplierInvoiceExchangeRateError
-    ) {
-      return reply.code(400).send(errorBody(err));
-    }
-    throw err;
-  }
 
   app.get("/supplier-invoices", async (req) =>
     service.list(listSupplierInvoicesQuerySchema.parse(req.query))

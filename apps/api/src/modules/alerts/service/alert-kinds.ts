@@ -92,6 +92,15 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["inkop"],
     listHref: "/tillverkning/behovsberakning",
   },
+  // Fakturaskanning: files in the Fakturainkorg still to review (new +
+  // interpreted) — Att granska.
+  {
+    kind: "invoice_scans_pending",
+    label: "Fakturor i inkorgen att granska",
+    severity: "yellow",
+    rule: ["inkop"],
+    listHref: "/inkop/fakturainkorg",
+  },
   {
     kind: "manufacture_needed",
     label: "Behöver tillverkas",

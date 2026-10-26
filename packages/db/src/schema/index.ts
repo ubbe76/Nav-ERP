@@ -25,3 +25,4 @@ export * from "./manual-bookkeeping";
 export * from "./bank-reconciliation";
 export * from "./dimensions";
 export * from "./budget";
+export * from "./invoice-scan";

@@ -113,7 +113,7 @@ describe("GET /alerts", () => {
     const res = await app.inject({ url: "/api/v1/alerts", headers: { cookie: await userCookie(["inkop"]) } });
     expect(res.statusCode).toBe(200);
     const body = res.json() as AlertsResponse;
-    expect(body.groups.map((g) => g.kind)).toEqual(["supplier_invoice_due", "purchase_order_late", "purchase_needed"]);
+    expect(body.groups.map((g) => g.kind)).toEqual(["supplier_invoice_due", "purchase_order_late", "purchase_needed", "invoice_scans_pending"]);
   });
 
   it("lets a read-only account read it", async () => {
@@ -127,6 +127,7 @@ describe("GET /alerts", () => {
       "sales_order_late",
       "purchase_order_late",
       "purchase_needed",
+      "invoice_scans_pending",
     ]);
   });
 });

@@ -211,6 +211,15 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Förseningsersättning är debiterad på fakturan — påminnelseavgiften ryms i ersättningen. Skicka påminnelsen utan avgift.",
   "reference-rate-riksbank":
     "Räntan är hämtad från Riksbanken och kan inte tas bort — lägg in en egen ränta för halvåret om den ska ersättas.",
+  // Fakturaskanning
+  "invoice-scan-duplicate": (err) => {
+    const existing = (err.body as { existing?: { scanNumber?: string } } | undefined)?.existing;
+    return `Samma fil finns redan i fakturainkorgen${existing?.scanNumber ? ` (${existing.scanNumber})` : ""}.`;
+  },
+  "invoice-scan-ai-not-configured":
+    "AI-tolkning är inte inställd — välj läge och ange API-nyckel under System → Fakturaskanning.",
+  "supplier-invoice-file-from-scan":
+    "Underlaget kom från fakturainkorgen och är den mottagna fakturan — det kan inte tas bort.",
   "customer-payment-amount-sek": (err) => {
     const body = err.body as { reason?: string; currency?: string } | undefined;
     switch (body?.reason) {

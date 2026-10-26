@@ -1065,6 +1065,13 @@
       "when": 1792953223535,
       "tag": "0151_drojsmalsranta",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1792990173818,
+      "tag": "0152_fakturaskanning",
+      "breakpoints": true
     }
   ]
 }

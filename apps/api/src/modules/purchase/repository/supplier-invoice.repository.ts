@@ -5,6 +5,7 @@ import {
   articles,
   costCenters,
   fiscalYears,
+  invoiceScans,
   projects,
   paymentBatches,
   paymentBatchItems,
@@ -183,8 +184,17 @@ const headerProjects = alias(projects, "si_projects");
 const rowCostCenters = alias(costCenters, "si_row_cost_centers");
 const rowProjects = alias(projects, "si_row_projects");
 
-export function createSupplierInvoiceRepository(db: Db) {
-  return {
+// Bound to the app's connection, or to a transaction: the Fakturainkorg
+// creates the supplier invoice inside its own conversion transaction through
+// the same reads and writes (the service's createInTx binds a repository to
+// the tx), like the other Db | Tx helpers. On a transaction, the
+// repository's own `db.transaction` calls become savepoints.
+export function createSupplierInvoiceRepository(db: Db | Tx) {
+  const repository = {
+    async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+      return (db as Db).transaction(fn);
+    },
+
     // Momskoder: the company's codes, once per operation.
     async vatCodeBook() {
       return loadVatCodeBook(db);
@@ -250,64 +260,68 @@ export function createSupplierInvoiceRepository(db: Db) {
     // insert. A duplicate (supplierId, invoiceNumber) aborts the tx so the
     // number isn't burned.
     async create(header: SupplierInvoiceHeaderWrite, rows: SupplierInvoiceRowWrite[], createdBy: string) {
-      return db.transaction(async (tx) => {
-        const registrationNumber = await getNextOrderNumber(tx, "supplier_invoice");
-        const [invoice] = await tx
-          .insert(supplierInvoices)
-          .values({
-            registrationNumber,
-            invoiceNumber: header.invoiceNumber,
-            supplierId: header.supplierId,
-            purchaseOrderId: header.purchaseOrderId,
-            invoiceDate: header.invoiceDate,
-            dueDate: header.dueDate,
-            currency: header.currency,
-            exchangeRate: String(header.exchangeRate),
-            exchangeRateSource: header.exchangeRateSource,
-            exchangeRateDate: header.exchangeRateDate,
-            netAmount: String(header.netAmount),
-            vatAmount: String(header.vatAmount),
-            grossAmount: String(header.grossAmount),
-            note: header.note,
-            paymentReferenceKind: header.paymentReferenceKind,
-            paymentReference: header.paymentReference,
-            vatCodeId: header.vatCodeId ?? domesticVatCodeIdSql("MP25"),
-            costCenterId: header.costCenterId ?? null,
-            projectId: header.projectId ?? null,
-            createdBy,
-          })
-          .returning();
-        if (rows.length > 0) {
-          // createdAt is stamped explicitly, one tick per row, instead of
-          // relying on the column's now()-default: Postgres evaluates now()
-          // once per transaction, so every row in this single multi-row
-          // INSERT would otherwise share the exact same timestamp — leaving
-          // the `ORDER BY createdAt` reads (listRows, and the automatkontering
-          // posting's row order) with nothing to break the tie, so ties
-          // resolve however the planner's access path happens to visit them
-          // (occasionally NOT insertion order). Same idiom as sales'
-          // invoice.repository create.
-          const now = Date.now();
-          await tx.insert(supplierInvoiceRows).values(
-            rows.map((r, i) => ({
-              supplierInvoiceId: invoice!.id,
-              articleId: r.articleId,
-              purchaseOrderRowId: r.purchaseOrderRowId,
-              description: r.description,
-              quantity: String(r.quantity),
-              unitPrice: String(r.unitPrice),
-              lineAmount: String(r.lineAmount),
-              vatAmount: String(r.vatAmount),
-              vatRate: r.vatRate === null ? null : String(r.vatRate),
-              vatCodeId: r.vatCodeId,
-              costCenterId: r.costCenterId,
-              projectId: r.projectId,
-              createdAt: new Date(now + i),
-            }))
-          );
-        }
-        return invoice!;
-      });
+      return (db as Db).transaction((tx) => repository.createInTx(tx, header, rows, createdBy));
+    },
+
+    // The same inside the caller's transaction (the Fakturainkorg's
+    // conversion): a duplicate aborts the caller's whole transaction.
+    async createInTx(tx: Tx, header: SupplierInvoiceHeaderWrite, rows: SupplierInvoiceRowWrite[], createdBy: string) {
+      const registrationNumber = await getNextOrderNumber(tx, "supplier_invoice");
+      const [invoice] = await tx
+        .insert(supplierInvoices)
+        .values({
+          registrationNumber,
+          invoiceNumber: header.invoiceNumber,
+          supplierId: header.supplierId,
+          purchaseOrderId: header.purchaseOrderId,
+          invoiceDate: header.invoiceDate,
+          dueDate: header.dueDate,
+          currency: header.currency,
+          exchangeRate: String(header.exchangeRate),
+          exchangeRateSource: header.exchangeRateSource,
+          exchangeRateDate: header.exchangeRateDate,
+          netAmount: String(header.netAmount),
+          vatAmount: String(header.vatAmount),
+          grossAmount: String(header.grossAmount),
+          note: header.note,
+          paymentReferenceKind: header.paymentReferenceKind,
+          paymentReference: header.paymentReference,
+          vatCodeId: header.vatCodeId ?? domesticVatCodeIdSql("MP25"),
+          costCenterId: header.costCenterId ?? null,
+          projectId: header.projectId ?? null,
+          createdBy,
+        })
+        .returning();
+      if (rows.length > 0) {
+        // createdAt is stamped explicitly, one tick per row, instead of
+        // relying on the column's now()-default: Postgres evaluates now()
+        // once per transaction, so every row in this single multi-row
+        // INSERT would otherwise share the exact same timestamp — leaving
+        // the `ORDER BY createdAt` reads (listRows, and the automatkontering
+        // posting's row order) with nothing to break the tie, so ties
+        // resolve however the planner's access path happens to visit them
+        // (occasionally NOT insertion order). Same idiom as sales'
+        // invoice.repository create.
+        const now = Date.now();
+        await tx.insert(supplierInvoiceRows).values(
+          rows.map((r, i) => ({
+            supplierInvoiceId: invoice!.id,
+            articleId: r.articleId,
+            purchaseOrderRowId: r.purchaseOrderRowId,
+            description: r.description,
+            quantity: String(r.quantity),
+            unitPrice: String(r.unitPrice),
+            lineAmount: String(r.lineAmount),
+            vatAmount: String(r.vatAmount),
+            vatRate: r.vatRate === null ? null : String(r.vatRate),
+            vatCodeId: r.vatCodeId,
+            costCenterId: r.costCenterId,
+            projectId: r.projectId,
+            createdAt: new Date(now + i),
+          }))
+        );
+      }
+      return invoice!;
     },
 
     async list(query: ListSupplierInvoicesQuery) {
@@ -854,7 +868,9 @@ export function createSupplierInvoiceRepository(db: Db) {
     async deleteFileIfDraft(
       invoiceId: string,
       fileId: string
-    ): Promise<{ ok: true; filename: string; sha256: string } | { ok: false; reason: "not_found" | "locked" }> {
+    ): Promise<
+      { ok: true; filename: string; sha256: string } | { ok: false; reason: "not_found" | "locked" } | { ok: false; reason: "from_scan"; scanNumber: string }
+    > {
       return db.transaction(async (tx) => {
         const [invoice] = await tx
           .select({ status: supplierInvoices.status })
@@ -863,6 +879,13 @@ export function createSupplierInvoiceRepository(db: Db) {
           .for("update");
         if (!invoice) return { ok: false, reason: "not_found" };
         if (invoice.status !== "draft") return { ok: false, reason: "locked" };
+        // Fakturaskanning: the file the Fakturainkorg moved here IS the
+        // received invoice (its scan points at it, FK restrict) — it stays.
+        const [scan] = await tx
+          .select({ scanNumber: invoiceScans.scanNumber })
+          .from(invoiceScans)
+          .where(eq(invoiceScans.supplierInvoiceFileId, fileId));
+        if (scan) return { ok: false, reason: "from_scan", scanNumber: scan.scanNumber };
         const [row] = await tx
           .delete(supplierInvoiceFiles)
           .where(and(eq(supplierInvoiceFiles.id, fileId), eq(supplierInvoiceFiles.supplierInvoiceId, invoiceId)))
@@ -871,6 +894,7 @@ export function createSupplierInvoiceRepository(db: Db) {
       });
     },
   };
+  return repository;
 }
 
 export type SupplierInvoiceRepository = ReturnType<typeof createSupplierInvoiceRepository>;

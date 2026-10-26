@@ -44,6 +44,9 @@ export const AUDIT_ENTITY_TYPE_LABELS: Record<string, string> = {
   bank_file: "Bankfil",
   bank_settings: "Bankinställningar",
   einvoice_settings: "E-fakturainställningar",
+  // Fakturaskanning.
+  invoice_scan: "Fakturainkorg",
+  invoice_scan_settings: "Fakturaskanningsinställningar",
   theme: "Tema",
   plugin: "Tillägg",
 };
@@ -55,6 +58,12 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   vat_code_changed: "Momskod ändrad",
   onboarding_number_series_reviewed: "Nummerserier granskade",
   deleted: "Borttagen",
+  // Fakturaskanning: a file arrived in the inbox / was turned into a
+  // supplier invoice / was rejected / restored.
+  received: "Mottagen",
+  converted: "Leverantörsfaktura skapad",
+  rejected: "Avvisad",
+  restored: "Återställd",
   set: "Satt",
   cleared: "Rensad",
   attested: "Attesterad",

@@ -300,6 +300,26 @@ export function createAlertsService(deps: {
       }));
     },
 
+    // Fakturor i inkorgen att granska: every scan in new/interpreted, oldest
+    // first — the inbox's own Att granska.
+    async invoice_scans_pending() {
+      const rows = await repo.pendingInvoiceScans();
+      return rows.map((r) => ({
+        key: r.id,
+        severity: "yellow" as const,
+        href: `/inkop/fakturainkorg/${r.id}`,
+        primary: `${r.scanNumber} ${r.filename}`,
+        secondary: [
+          r.source === "email" ? (r.emailFrom ? `E-post från ${r.emailFrom}` : "E-post") : "Uppladdad",
+          r.supplierName,
+          r.invoiceNumber ? `fakturanr ${r.invoiceNumber}` : null,
+        ]
+          .filter((part): part is string => part !== null && part !== "")
+          .join(" · "),
+        date: stockholmNow(r.createdAt).date,
+      }));
+    },
+
     // Bokningar utan kostnadsställe: one row per booked verification.
     async cost_center_missing() {
       const rows = await repo.verificationsMissingCostCenter();

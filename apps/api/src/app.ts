@@ -97,6 +97,10 @@ import { purchaseRoutes } from "./modules/purchase/routes/purchase.routes.js";
 import { createSupplierInvoiceRepository } from "./modules/purchase/repository/supplier-invoice.repository.js";
 import { createSupplierInvoiceService } from "./modules/purchase/service/supplier-invoice.service.js";
 import { supplierInvoiceRoutes } from "./modules/purchase/routes/supplier-invoice.routes.js";
+import { createInvoiceScanRepository } from "./modules/purchase/repository/invoice-scan.repository.js";
+import { createInvoiceScanService } from "./modules/purchase/service/invoice-scan.service.js";
+import { createInvoiceScanSettingsService } from "./modules/purchase/service/invoice-scan-settings.service.js";
+import { invoiceScanRoutes } from "./modules/purchase/routes/invoice-scan.routes.js";
 import { createSupplierPaymentRepository } from "./modules/purchase/repository/supplier-payment.repository.js";
 import { payableForeignItemsAsOf, payablesTotalAsOf } from "./modules/purchase/repository/open-amounts.js";
 import { createSupplierPaymentService } from "./modules/purchase/service/supplier-payment.service.js";
@@ -419,6 +423,19 @@ export function buildApp(database: Db = db) {
     auditRepository,
     exchangeRateService
   );
+  // Fakturaskanning: the Fakturainkorg turns a received file into a supplier
+  // invoice draft through supplierInvoiceService's own createInTx (one
+  // transaction); the company's identifiers are filtered out of the rules.
+  const invoiceScanRepository = createInvoiceScanRepository(database);
+  const invoiceScanSettingsService = createInvoiceScanSettingsService({ repo: invoiceScanRepository, audit: auditRepository });
+  const invoiceScanService = createInvoiceScanService({
+    repo: invoiceScanRepository,
+    supplierInvoices: supplierInvoiceService,
+    company: systemService,
+    settings: invoiceScanSettingsService,
+    audit: auditRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
   // articleService is the price writer for "Sätt standardpris"/"Sätt
   // försäljningspris" on a saved calculation — injected so the standard cost
   // travels the same path the article card uses and gets its history row.
@@ -849,6 +866,12 @@ export function buildApp(database: Db = db) {
         );
         await registerModule(protectedRoutes, purchaseRoutes, { service: purchaseService }, { read: office, write: ["inkop"] });
         await registerModule(protectedRoutes, supplierInvoiceRoutes, { service: supplierInvoiceService }, { read: office, write: ["inkop"] });
+        await registerModule(
+          protectedRoutes,
+          invoiceScanRoutes,
+          { service: invoiceScanService, settings: invoiceScanSettingsService },
+          { read: office, write: ["inkop"] }
+        );
         await registerModule(protectedRoutes, supplierPaymentRoutes, { service: supplierPaymentService }, { read: office, write: ["inkop"] });
         await registerModule(protectedRoutes, bankSettingsRoutes, { service: bankSettingsService }, { read: ["inkop", "forsaljning", "ekonomi"], write: ["admin"] });
         await registerModule(protectedRoutes, paymentBatchRoutes, { service: paymentBatchService }, { read: ["inkop", "ekonomi"], write: ["inkop"] });

@@ -31,6 +31,12 @@ describe("händelseloggens etiketter", () => {
     ["action", "plugin_key_rotated"],
     ["action", "plugin_secret_rotated"],
     ["action", "plugin_uninstalled"],
+    ["entity", "invoice_scan"],
+    ["entity", "invoice_scan_settings"],
+    ["action", "received"],
+    ["action", "converted"],
+    ["action", "rejected"],
+    ["action", "restored"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);
