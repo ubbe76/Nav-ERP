@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Table } from "../ui/Table";
 import { StatusPill } from "../ui/StatusPill";
 import { Modal } from "../ui/Modal";
@@ -11,12 +11,28 @@ import buttonStyles from "../ui/Button.module.css";
 import { NewSupplierForm } from "./NewSupplierForm";
 import { ListExportLink, ListToolbar, Pagination } from "../ui/ListControls";
 import type { Paged, Supplier } from "../../lib/types";
+import { safeReturnTo, SUPPLIER_PREFILL_KEYS, type SupplierPrefill } from "../../lib/invoiceScan";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 
 export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<Supplier>; pageSize: number }) {
   const router = useRouter();
-  const [modalOpen, setModalOpen] = useState(false);
+  const searchParams = useSearchParams();
+  // Skapa leverantör on a Fakturainkorg scan arrives as
+  // /leverantorer?ny=1&name=…&returnTo=/inkop/fakturainkorg/<id>: the dialog
+  // opens filled in and, once the supplier exists, goes back to the scan.
+  const [prefill] = useState<SupplierPrefill | null>(() => {
+    if (searchParams.get("ny") !== "1") return null;
+    const values: SupplierPrefill = {};
+    for (const key of SUPPLIER_PREFILL_KEYS) {
+      const value = searchParams.get(key);
+      if (value) values[key] = value;
+    }
+    return values;
+  });
+  const [returnTo] = useState(() => safeReturnTo(searchParams.get("returnTo")));
+  const [modalOpen, setModalOpen] = useState(prefill !== null);
+  const [usePrefill, setUsePrefill] = useState(prefill !== null);
 
   return (
     <>
@@ -32,7 +48,14 @@ export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<
           <Link href="/leverantorer/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Importera
           </Link>
-          <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => {
+              setUsePrefill(false);
+              setModalOpen(true);
+            }}
+          >
             + Ny leverantör
           </Button>
           <HelpLink chapter="inkop" anchor="leverantorer" label="Hjälp om leverantörer" />
@@ -83,8 +106,14 @@ export function SuppliersPageClient({ suppliers, pageSize }: { suppliers: Paged<
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Ny leverantör">
         <NewSupplierForm
-          onSuccess={() => {
+          initial={usePrefill && prefill ? prefill : {}}
+          onSuccess={(supplierId) => {
             setModalOpen(false);
+            if (usePrefill && returnTo) {
+              // The scan picks the new supplier up from ?supplierId=.
+              router.push(`${returnTo}${returnTo.includes("?") ? "&" : "?"}supplierId=${supplierId}`);
+              return;
+            }
             router.refresh();
           }}
         />

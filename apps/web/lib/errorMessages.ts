@@ -220,6 +220,11 @@ const MESSAGES: Record<string, MessageEntry> = {
     "AI-tolkning är inte inställd — välj läge och ange API-nyckel under System → Fakturaskanning.",
   "supplier-invoice-file-from-scan":
     "Underlaget kom från fakturainkorgen och är den mottagna fakturan — det kan inte tas bort.",
+  "invoice-scan-not-found": "Fakturan finns inte i fakturainkorgen längre — ladda om sidan.",
+  "invoice-scan-busy": "En AI-tolkning av filen pågår redan — vänta tills den är klar och försök igen.",
+  // The server names what went wrong with the key / the mailbox.
+  "invoice-scan-ai-test-failed": serverMessage("AI-tjänsten svarade inte med den här nyckeln och modellen."),
+  "invoice-scan-mail-test-failed": serverMessage("Kunde inte ansluta till e-postlådan."),
   "customer-payment-amount-sek": (err) => {
     const body = err.body as { reason?: string; currency?: string } | undefined;
     switch (body?.reason) {

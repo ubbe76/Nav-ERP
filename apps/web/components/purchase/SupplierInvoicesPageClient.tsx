@@ -31,7 +31,6 @@ import {
   VAT_RATES,
   type Paged,
   type PurchaseOrder,
-  type PurchaseOrderRow,
   type Supplier,
   type SupplierInvoice,
   type SupplierInvoiceDetail,
@@ -41,6 +40,7 @@ import listStyles from "../../app/inkop/ordrar/page.module.css";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { UNDERLAG_ACCEPT, uploadUnderlag } from "../documents/UnderlagSection";
 import { InvoiceRateField, SekAmountsLine } from "./InvoiceRateField";
+import { basisRowsSum, fetchPurchaseOrderBasis, type PreviewRow } from "../../lib/supplierInvoiceBasis";
 
 export function SupplierInvoicesPageClient({
   invoices,
@@ -138,18 +138,6 @@ export function SupplierInvoicesPageClient({
     </>
   );
 }
-
-// One previewed line built from a purchase-order row (invoice basis).
-// articleId is null and purchaseOrderRowId absent on a lego row's ställpris
-// line — a fee line, not goods, and PO-row matching compares unit prices.
-type PreviewRow = {
-  id: string;
-  description: string;
-  articleId: string | null;
-  quantity: number;
-  unitPrice: number;
-  purchaseOrderRowId?: string;
-};
 
 // Create dialog — the rows (and PO-matching) can be pulled from a received
 // purchase order, or left empty and built by hand on the invoice card.
@@ -323,36 +311,11 @@ export function NewSupplierInvoiceForm({
     if (!orderId) return;
     setError(null);
     try {
-      const rows = await apiFetch<PurchaseOrderRow[]>(`/api/v1/purchase-orders/${orderId}/rows`);
-      const built: PreviewRow[] = [];
-      for (const r of rows) {
-        if (qtyBasis === "received" ? Number(r.quantityReceived) === 0 : Number(r.quantityOrdered) === 0) continue;
-        built.push({
-          id: r.id,
-          description: `${r.articleNumber} — ${r.articleName}`,
-          articleId: r.articleId,
-          quantity: qtyBasis === "received" ? Number(r.quantityReceived) : Number(r.quantityOrdered),
-          unitPrice: Number(r.unitPrice),
-          purchaseOrderRowId: r.id,
-        });
-        // Lego row: the one-off ställpris is part of what the subcontractor
-        // invoices — its own fee line (it is not per unit, so it cannot ride
-        // in unitPrice), without article/PO-row match.
-        if (r.setupPrice != null && Number(r.setupPrice) > 0) {
-          built.push({
-            id: `${r.id}-setup`,
-            description: `Ställpris — ${r.articleNumber}`,
-            articleId: null,
-            quantity: 1,
-            unitPrice: Number(r.setupPrice),
-          });
-        }
-      }
+      const built = await fetchPurchaseOrderBasis(orderId, qtyBasis);
       setPreviewRows(built);
       // Fill the net amount from the row sum when it is still empty — the
       // VAT and gross follow from it (see the prefill effect above).
-      const sum = round2(built.reduce((acc, r) => acc + r.quantity * r.unitPrice, 0));
-      if (isEmptyAmount(netAmount)) setNetAmount(String(sum));
+      if (isEmptyAmount(netAmount)) setNetAmount(String(basisRowsSum(built)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte hämta orderraderna");
     }

@@ -93,6 +93,41 @@ Börja i **Sandbox**: testa med en egen testfaktura och byt sedan till **Produkt
 
 Sektionen **Företagsuppgifter som skickas** visar vad som skrivs i e-fakturan som säljare: företagets namn, organisationsnummer, VAT-nummer, adress, bankgiro, plusgiro, IBAN och BIC. Uppgifterna hämtas från [Företagsinformation](#foretagsinformation) och ändras där (länken öppnar sidan). Saknas något som e-fakturan kräver listas det som en varning — till exempel "Organisationsnummer saknas" — och sändningen stoppas på fakturakortet tills det är åtgärdat.
 
+## Fakturaskanning
+
+**System → Fakturaskanning** (bara administratörer) styr hur inkomna leverantörsfakturor tolkas i [Fakturainkorgen](/hjalp/inkop#fakturainkorg). Sidan har fyra delar och en gemensam knapp **Spara**; fälten sparas inte förrän du klickar på den.
+
+### AI-tolkning
+
+Reglerna, som läser PDF:ens textlager helt lokalt, används alltid. **AI-tolkning** är ett tillägg för fakturor som reglerna inte klarar, och för foton och inskannade PDF utan textlager (Nav har ingen lokal teckenigenkänning). Utan API-nyckel lämnar ingen fil Nav.
+
+- **Läge**: **Av** (ingen AI), **Automatiskt när reglerna inte räcker** (AI körs på inkomna fakturor där reglerna inte hittar leverantör, fakturanummer, datum och belopp med säkerhet, eller som saknar textlager; för e-post bara om avsändarens domän hör till en leverantör eller en användare) eller **Bara med knappen** (AI körs bara när någon trycker **Tolka med AI** på en faktura).
+- **API-nyckel**: företagets egen nyckel hos Anthropic. Nyckeln visas aldrig igen: ett tomt fält behåller den sparade (fältet visar **Nyckel sparad**) och **Ta bort nyckel** raderar den.
+- **Modell**: vilken modell som tolkar fakturorna — **Claude Opus 5.5 (noggrannast)**, **Claude Sonnet 5.5** eller **Claude Haiku 5.5 (snabbast, billigast)**.
+- **Testa anslutning** gör ett litet anrop med nyckeln i fältet (är det tomt testas den sparade) och vald modell, och visar om det fungerade. Inget sparas av testet.
+
+Det som skickas till AI-tjänsten är **fakturafilen och företagets namn och organisationsnummer** — inget annat. Leverantörsregistret och inköpsordrarna skickas aldrig; leverantören och inköpsordern matchas i Nav på svaret. Inget skickas utan företagets egen API-nyckel, och inget skickas i läget **Av**. AI:ns svar är bara ett förslag som en människa granskar innan leverantörsfakturan skapas.
+
+### Inköpsorder
+
+**Matcha mot inköpsorder** (förval på) låter tolkningen föreslå vilken inlevererad inköpsorder fakturan hör till och koppla fakturans rader till orderraderna. Av ger inga inköpsordersförslag, och raderna från AI blir fria rader utan koppling till artiklar.
+
+### E-postlåda
+
+Nav kan läsa en IMAP-låda och lägga bifogade fakturor i Fakturainkorgen. Använd gärna en egen låda för fakturor.
+
+- **Aktiverad** slår på läsningen; **TLS** krypterar anslutningen (förval på, port 993).
+- **Server**, **Port**, **Användare** och **Lösenord**: lösenordet visas aldrig igen — ett tomt fält behåller det sparade (**Lösenord sparat**) och **Ta bort lösenord** raderar det.
+- **Mapp** är mappen som läses (förval `INBOX`) och **Mapp för inlästa** dit lästa brev flyttas (förval `Nav/Inlästa`; skapas vid första körningen om den saknas).
+- **Intervall (minuter)** anger hur ofta lådan läses (1–60, förval 5). Högst 50 brev läses per körning.
+- **Testa anslutning** loggar in med fälten på sidan och visar hur många olästa brev mappen har och om mappen för inlästa finns eller skapas. Inget sparas.
+
+Under fälten visas **Senaste körning** och, om den misslyckades, orsaken; aviseringen **E-postlådan för fakturor kunde inte läsas** på [Aviseringar](/hjalp/aviseringar) pekar hit. Nav försöker igen vid nästa körning.
+
+### Senast lästa brev
+
+Listan **Senast lästa brev** visar de senaste breven som lästes: **Körd**, **Avsändare**, **Ämne**, **Resultat** och **Detalj** med länk till fakturorna som skapades. Resultatet är **Inläst**, **Ingen bilaga**, **Fanns redan** (samma fil fanns i inkorgen), **För stor**, **Filtypen stöds inte** (t.ex. XML) eller **Fel**. **Uppdatera** hämtar listan igen.
+
 ## Bank
 
 Under **System → Bank** väljer du företagets bank och fyller i uppgifterna banken kräver i betalfilerna. Nav gör betalfiler (pain.001) för leverantörsbetalningar — inrikes, SEPA och internationella (se [Utlandsbetalningar](/hjalp/inkop#utlandsbetalningar)) — och läser bankens avier (camt.054) för inbetalningar och bekräftade utbetalningar, även i utländsk valuta. Filerna laddas upp och ner i internetbankens filöverföring. Ett avtal om filöverföring med banken krävs.

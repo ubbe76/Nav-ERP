@@ -1,13 +1,13 @@
 # Inköp
 
-Inköpsmodulen i Nav|ERP omfattar leverantörsregistret, förfrågningar (prisförfrågningar), inköpsorder med mottagning, fakturaunderlag och leverantörsfakturor.
+Inköpsmodulen i Nav|ERP omfattar leverantörsregistret, förfrågningar (prisförfrågningar), inköpsorder med mottagning, fakturaunderlag, fakturainkorg och leverantörsfakturor.
 
 ## Översikt
 
 Menyvalet **Inköp** öppnar modulens sida, där alla inköpsfunktioner ligger grupperade i ett rutnät:
 
 - **Inköp** — **Inköpsorder**, **Förfrågningar** och **Inleverans**.
-- **Leverantörsfakturor** — **Leverantörsfakturor** och **Fakturaunderlag**.
+- **Leverantörsfakturor** — **Leverantörsfakturor**, **Fakturainkorg** och **Fakturaunderlag**.
 - **Reskontra** — **Öppna poster** och **Betalningar**.
 - **Register** — **Leverantörer** och **Grunddata**.
 
@@ -420,6 +420,96 @@ På fakturakortet visas **Verifikat L-…** med en länk till verifikatet (t.ex.
 - **Fakturan har moms men momskoden tar ingen debiterad moms** — omvänd moms, momsfritt eller import. Välj en svensk momskod eller sätt **Momsbelopp** till 0.
 - **Fakturan är i utländsk valuta men saknar kurs.** Gäller bara ett äldre utkast som sparades innan kurser fanns: **Godkänn** avvisas med *Fakturan är i utländsk valuta men saknar kurs — ange kursen innan fakturan godkänns.* Fältet **Kurs** i huvudet visar kursen för fakturadatumet: bekräfta den med **Spara faktura** (eller skriv en egen kurs först) och godkänn igen.
 - **Fakturans bruttobelopp är noll.** Det finns ingenting att bokföra.
+
+## Fakturainkorg
+
+**Inköp → Fakturainkorg** tar emot leverantörsfakturor som PDF, foto eller e-post och tolkar dem till ett **förslag**. Du granskar förslaget bredvid originalet och trycker **Skapa leverantörsfaktura** — då skapas en leverantörsfaktura som **utkast**, med filen som underlag. Fakturan attesteras och bokförs sedan som vanligt (se [Leverantörsfakturor](#leverantorsfakturor)): **inget sker automatiskt**, varken attest eller bokföring.
+
+Sidan och inställningarna kräver menyn **Inköp**; inställningarna under **System → Fakturaskanning** är bara för administratörer, se [Fakturaskanning](/hjalp/system#fakturaskanning).
+
+### Ladda upp och fota
+
+Överst på sidan finns uppladdningsytan. **Dra och släpp** en eller flera filer på den, eller klicka **Ladda upp filer**. Filerna ska vara PDF, JPEG eller PNG, högst 20 MB per fil och högst 20 filer åt gången. På en mobil visas också **Fota faktura**, som öppnar kameran — fota fakturan rakt uppifrån med hela sidan i bild.
+
+Under uppladdningsytan visas resultatet: vilka filer som lästes in (med länk till posten, t.ex. **FI-12**), vilka som redan fanns i inkorgen (*finns redan i inkorgen som FI-7 (Tolkad)*) och vilka som inte kunde läsas in, med orsak (t.ex. *Filtypen stöds inte — ladda upp PDF, JPEG eller PNG*). En dubblett eller en felaktig fil stoppar inte de övriga filerna. Samma fil kan inte ligga i inkorgen två gånger; en avvisad fil räknas inte som dubblett.
+
+Varje fil får ett eget **FI**-nummer.
+
+### E-postlådan
+
+Nav kan också läsa en e-postlåda och lägga fakturorna i brevens bilagor i inkorgen, se [Fakturaskanning](/hjalp/system#fakturaskanning). Posterna har då **E-post** som **Källa**, med avsändaren efter. Bilagor av typen PDF läses in; JPEG och PNG läses bara in när brevet saknar PDF, och små bilder (t.ex. signaturlogotyper) hoppas över. Andra filtyper, som XML, läses inte in. Brevet flyttas till mappen för inlästa.
+
+### Listan
+
+Flikarna ovanför listan väljer vad som visas:
+
+- **Att granska** — fakturor som är **Ny**, **Tolkad** eller **Osäker** (förval).
+- **Skapade** — fakturor som blivit leverantörsfakturor.
+- **Avvisade** — fakturor som avvisats.
+- **Alla**.
+
+Kolumnerna är **Nr**, **Inkommen**, **Källa** (**Uppladdad** eller **E-post** med avsändare), **Fil**, **Leverantör** (den tolkade), **Fakturanr**, **Att betala** och **Status**. Sökfältet söker på filnamn, FI-nummer, avsändare, ämne, leverantör och fakturanummer, och filtret **Alla källor** väljer uppladdade eller e-postade fakturor.
+
+Statusen är:
+
+- **Ny** — filen är inläst men har ännu inte tolkats.
+- **Tolkad** — ett förslag finns och alla viktiga fält är säkra.
+- **Osäker** — ett förslag finns, men leverantören, fakturanumret, fakturadatumet, förfallodatumet eller beloppet är inte säkert. Kontrollera dem mot originalet.
+- **Skapad** — leverantörsfakturan är skapad; registreringsnumret (t.ex. **LF-31**) är en länk till den.
+- **Avvisad** — fakturan är avvisad.
+
+Aviseringen **Fakturor i inkorgen att granska** på [Aviseringar](/hjalp/aviseringar) och på Översikten räknar fakturorna under **Att granska**.
+
+### Granska en faktura
+
+Klicka på en post i listan. På en bred skärm ligger **Originalet** till vänster och förslaget till höger; på en mobil ligger originalet överst och kan fällas ihop med **Dölj originalet** (och fram igen med **Visa originalet**). En PDF visas i sidan, en bild kan **Förstoras** och **Förminskas**, och **Öppna i ny flik** visar filen i fullstorlek.
+
+Förslaget har samma fält som **+ Ny leverantörsfaktura**: **Leverantör**, **Leverantörens fakturanummer**, **Fakturadatum**, **Förfallodatum**, **Betalningsreferens** (**OCR** eller **Meddelande**), **Inköpsorder**, **Momskod**, **Nettobelopp**, **Momssats**, **Momsbelopp**, **Bruttobelopp**, **Kostnadsställe** och **Projekt** (när sådana finns), **Notering** och **Rader**. Momskoden väljs som på en vanlig leverantörsfaktura, se [Momskod och omvänd moms](#momskod-och-omvand-moms); en leverantör i utländsk valuta får samma **Kurs** som där, se [Leverantörsfaktura i utländsk valuta](#leverantorsfaktura-i-utlandsk-valuta).
+
+**Det du skriver gäller.** Ett fält du har ändrat skrivs aldrig över när du trycker **Tolka igen** eller **Tolka med AI** — den nya tolkningen fyller bara i de fält du inte rört. Skriver du i **Nettobelopp** räknas **Momsbelopp** och **Bruttobelopp** om, tills du skrivit i dem själv.
+
+Ovanför formuläret kan en gul ruta visa:
+
+- kontrollerna som tolkningen gjorde, t.ex. att netto + moms inte stämmer med beloppet att betala;
+- *Leverantören har redan en faktura med det här fakturanumret* med länk till den, om det är en dubblett;
+- **Osäker** — något viktigt fält är inte säkert tolkat;
+- om AI-tolkningen misslyckades, med orsaken.
+
+#### Osäker, AI och Inlärt
+
+Under ett fält kan det stå var värdet kommer ifrån eller att det inte är säkert:
+
+- **Osäker — kontrollera mot originalet** — värdet hittades men tolkningen är inte säker på det.
+- **Hittades inte — fyll i för hand** — fältet gick inte att läsa ut.
+- **AI** — värdet kommer från AI-tolkningen.
+- **Inlärt** — värdet hittades med en etikett som Nav lärt sig av en tidigare faktura från samma leverantör. Varje gång du skapar en leverantörsfaktura från inkorgen lär sig Nav var den leverantörens fakturanummer, datum och belopp står, så nästa faktura tolkas säkrare.
+- **Från inköpsorder** — värdet eller raden kommer från inköpsordern.
+
+Meddelandena försvinner under ett fält när du själv skrivit i det.
+
+**Reglerna och AI.** Tolkningen använder alltid reglerna först: de läser PDF:ens textlager helt lokalt. Foton och inskannade PDF utan textlager kan inte tolkas av reglerna — då visas bilden bredvid ett tomt förslag som du fyller i för hand, eller med **Tolka med AI** om den är inställd (se [Fakturaskanning](/hjalp/system#fakturaskanning)). **Tolka igen** kör reglerna på nytt. **Tolka med AI** visas bara när AI-tolkning är inställd; knapparna visar **Tolkar…** medan tolkningen pågår — AI-tolkning kan ta upp till en minut, och under tiden kan du inte skapa eller avvisa fakturan.
+
+#### Vad som skickas till AI-tjänsten
+
+Utan en API-nyckel lämnar ingen fil Nav. Med företagets egen API-nyckel skickas **bara fakturafilen och företagets namn och organisationsnummer** till AI-tjänsten (Anthropic), och bara när AI-tolkning körs — automatiskt i läget **Automatiskt när reglerna inte räcker** (för e-post bara när avsändarens domän hör till en leverantör eller en användare, så att reklam inte kostar pengar), annars när du trycker **Tolka med AI**. Leverantörsregistret och inköpsordrarna skickas aldrig; leverantören och inköpsordern matchas i Nav på svaret. AI:ns svar är bara ett förslag som du granskar.
+
+#### Leverantör som saknas
+
+Matchar ingen leverantör fakturan visas *Ingen leverantör matchade fakturan.* och knappen **Skapa leverantör**. Den öppnar **Ny leverantör** förifylld med namn, organisationsnummer, VAT-nummer, adress och betalningsuppgifter (bankgiro, plusgiro eller IBAN) från fakturan. När du tryckt **Skapa leverantör** där kommer du tillbaka till fakturan, med den nya leverantören vald. Passar flera leverantörer visas *Flera leverantörer passar fakturan — välj rätt i listan ovan.*
+
+#### Rader och inköpsorder
+
+Har AI läst raderna visas de under **Rader**, annars är listan tom. Varje rad har **Beskrivning**, **Antal**, **À-pris** och **Belopp**, kan tas bort med **Ta bort** och nya rader läggs till med **+ Rad**. En rad som tolkningen inte är säker på märks **Osäker**.
+
+Med inställningen **Matcha mot inköpsorder** föreslår Nav vilken inlevererad inköpsorder fakturan hör till (fältet **Inköpsorder**, märkt **Från inköpsorder**). Har fakturan inga rader från AI byggs raderna av inköpsordern, som med **Hämta orderrader** i **+ Ny leverantörsfaktura** — mottaget antal och inköpsorderns à-pris, märkta **Från inköpsorder**. **Hämta orderrader** med **Mottaget antal** eller **Beställt antal** ersätter raderna med ordern. Raderna kopplas till orderraderna så att pris- och antalsavvikelser visas på leverantörsfakturan, se [IO-matchning](#io-matchning).
+
+#### Skapa leverantörsfaktura
+
+**Skapa leverantörsfaktura** skapar leverantörsfakturan som utkast och öppnar den. Filen följer med som **Underlag** och ligger kvar som räkenskapsinformation; den kan inte tas bort från utkastet. Är fakturanumret redan använt för leverantören visas felet och ingenting skapas. Inkorgsposten blir **Skapad** och kan inte ändras.
+
+#### Avvisa, Återställ och Radera
+
+**Avvisa…** flyttar en faktura som inte ska bokföras (reklam, en dubblett, fel mottagare) till **Avvisade**; du anger en **Orsak**. En avvisad faktura visar orsaken, vem som avvisade och när. **Återställ** lägger tillbaka den under **Att granska**. **Radera** tar bort posten och filen för alltid och frågar först; bara en avvisad faktura kan raderas, och en skapad faktura sparas som underlag på leverantörsfakturan.
 
 ## Leverantörsreskontra
 

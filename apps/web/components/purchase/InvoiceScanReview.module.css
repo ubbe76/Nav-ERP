@@ -1,0 +1,214 @@
+/* Granskningssidan: the original beside the form on a wide screen, stacked
+   (original first, collapsible) on a phone. Every cell is allowed to shrink
+   (min-width: 0) and nothing has a fixed pixel width — a page wider than the
+   screen makes iOS Safari zoom everything out. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (min-width: 1100px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .layout[data-original="hidden"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .original {
+    position: sticky;
+    top: var(--space-4);
+  }
+}
+
+.original,
+.panel {
+  min-width: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-kpi-card);
+  padding: var(--space-4);
+}
+
+.originalHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.originalTitle {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.originalTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.originalTools a {
+  color: var(--accent-fg);
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.viewer {
+  margin-top: var(--space-3);
+  height: 62vh;
+  min-height: 320px;
+  overflow: auto;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+}
+
+@media (min-width: 1100px) {
+  .viewer {
+    height: calc(100vh - 150px);
+  }
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.image {
+  display: block;
+  max-width: none;
+  height: auto;
+}
+
+.statusLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-3);
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.statusLine a {
+  color: var(--accent-fg);
+}
+
+.notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.notices a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.noticeList {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.fieldNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-family: var(--font-body);
+  font-size: 12px;
+}
+
+.chip,
+.lowChip,
+.missing {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  font-weight: 500;
+}
+
+.chip {
+  background: var(--status-done-bg);
+  color: var(--status-done-text);
+}
+
+.lowChip {
+  background: var(--status-delayed-bg);
+  color: var(--status-delayed-text);
+}
+
+.missing {
+  color: var(--color-text-muted);
+  padding-left: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.rowCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control-sm);
+  background: var(--color-bg);
+}
+
+.rowHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.rowTitle {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.rowAmount {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  padding-top: 11px;
+}
+
+.readonlyList {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 6px var(--space-4);
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.readonlyList dt {
+  color: var(--color-text-secondary);
+}
+
+.readonlyList dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}

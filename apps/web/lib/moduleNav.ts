@@ -125,6 +125,11 @@ export const INKOP_SECTIONS: ModuleNavSection[] = [
         description: "Registrera och attestera leverantörsfakturor, med valfri matchning mot inköpsorderraden.",
       },
       {
+        href: "/inkop/fakturainkorg",
+        title: "Fakturainkorg",
+        description: "Inkomna leverantörsfakturor som PDF, foto eller e-post — tolkas till ett förslag som du granskar innan fakturan skapas.",
+      },
+      {
         href: "/inkop/fakturaunderlag",
         title: "Fakturaunderlag",
         description: "Inlevererade inköpsordrar som väntar på leverantörsfaktura.",
@@ -684,6 +689,11 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
         href: "/system/e-faktura",
         title: "E-faktura",
         description: "B2Brouter-koppling för Peppol — nyckel, miljö, testa anslutningen och se vilka företagsuppgifter som skickas.",
+      },
+      {
+        href: "/system/fakturaskanning",
+        title: "Fakturaskanning",
+        description: "Tolkning av inkomna leverantörsfakturor — AI-nyckel, matchning mot inköpsorder och e-postlådan som läses.",
       },
       {
         href: "/system/tillagg",
