@@ -100,6 +100,9 @@ describe("genvägarnas deviationId", () => {
     expect(await linksOf(s.complaint.id)).toEqual([
       expect.objectContaining({ documentType: "credit_invoice", documentId: created.json().id }),
     ]);
+    // The credit note's own card finds the case (invoiceId matches a linked kreditfaktura).
+    const onCredit = (await admin.get(`/deviations?invoiceId=${created.json().id}&status=all`)).json();
+    expect(onCredit.rows.map((r: { id: string }) => r.id)).toEqual([s.complaint.id]);
     const card = (await admin.get(`/deviations/${s.complaint.id}`)).json();
     expect(card.links[0]).toMatchObject({ documentType: "credit_invoice", documentStatus: "draft" });
     expect(card.events.map((e: { event: string }) => e.event)).toContain("link_added");
@@ -140,6 +143,9 @@ describe("genvägarnas deviationId", () => {
     const ok = await admin.post("/purchase-orders", { supplierId: s.supplier.id, deviationId: s.supplierCase.id });
     expect(ok.statusCode).toBe(201);
     expect(await linksOf(s.supplierCase.id)).toEqual([expect.objectContaining({ documentType: "purchase_order", documentId: ok.json().id })]);
+    // The new IO's Avvikelser section finds the case through the link.
+    const onOrder = (await admin.get(`/deviations?purchaseOrderId=${ok.json().id}&status=all`)).json();
+    expect(onOrder.rows.map((r: { id: string }) => r.id)).toEqual([s.supplierCase.id]);
     // Inköp alone: 403, nothing created.
     const purchase = api(await cookieWith(["inkop"], "Inkopare"));
     expect((await purchase.post("/purchase-orders", { supplierId: s.supplier.id, deviationId: s.supplierCase.id })).statusCode).toBe(403);
@@ -158,6 +164,8 @@ describe("genvägarnas deviationId", () => {
     const ok = await admin.post("/manufacturing-orders", { articleId: s.article.id, quantity: 2, deviationId: s.internal.id });
     expect(ok.statusCode).toBe(201);
     expect(await linksOf(s.internal.id)).toEqual([expect.objectContaining({ documentType: "manufacturing_order", documentId: ok.json().id })]);
+    const onMo = (await admin.get(`/deviations?manufacturingOrderId=${ok.json().id}&status=all`)).json();
+    expect(onMo.rows.map((r: { id: string }) => r.id)).toEqual([s.internal.id]);
     const forComplaint = await admin.post("/manufacturing-orders", { articleId: s.article.id, quantity: 1, deviationId: s.complaint.id });
     expect(forComplaint.statusCode).toBe(201);
     // Kvalitet + Tillverkning together may link; Tillverkning alone may not.

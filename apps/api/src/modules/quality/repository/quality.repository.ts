@@ -157,10 +157,24 @@ export function createQualityRepository(db: Db) {
     if (query.customerId) conditions.push(eq(deviations.customerId, query.customerId));
     if (query.supplierId) conditions.push(eq(deviations.supplierId, query.supplierId));
     if (query.articleId) conditions.push(eq(deviations.articleId, query.articleId));
-    if (query.salesOrderId) conditions.push(eq(deviations.salesOrderId, query.salesOrderId));
-    if (query.invoiceId) conditions.push(eq(deviations.invoiceId, query.invoiceId));
-    if (query.purchaseOrderId) conditions.push(eq(deviations.purchaseOrderId, query.purchaseOrderId));
-    if (query.manufacturingOrderId) conditions.push(eq(deviations.manufacturingOrderId, query.manufacturingOrderId));
+    // A document's Avvikelser section shows both the cases that point at it
+    // (the reklamerad order) and the cases it was created for or linked to
+    // (a följddokument in deviation_links) — a kreditfaktura is an invoice.
+    const linkedTo = (types: string[], documentId: string) =>
+      sql`exists (select 1 from ${deviationLinks} where ${deviationLinks.deviationId} = ${deviations.id} and ${deviationLinks.documentType} in (${sql.join(
+        types.map((t) => sql`${t}`),
+        sql`, `
+      )}) and ${deviationLinks.documentId} = ${documentId})`;
+    if (query.salesOrderId)
+      conditions.push(or(eq(deviations.salesOrderId, query.salesOrderId), linkedTo(["sales_order"], query.salesOrderId)));
+    if (query.invoiceId)
+      conditions.push(or(eq(deviations.invoiceId, query.invoiceId), linkedTo(["credit_invoice"], query.invoiceId)));
+    if (query.purchaseOrderId)
+      conditions.push(or(eq(deviations.purchaseOrderId, query.purchaseOrderId), linkedTo(["purchase_order"], query.purchaseOrderId)));
+    if (query.manufacturingOrderId)
+      conditions.push(
+        or(eq(deviations.manufacturingOrderId, query.manufacturingOrderId), linkedTo(["manufacturing_order"], query.manufacturingOrderId))
+      );
     if (query.responsibleUserId) conditions.push(eq(deviations.responsibleUserId, query.responsibleUserId));
     if (query.overdue) {
       conditions.push(inArray(deviations.status, [...DEVIATION_OPEN_STATUSES]), lt(deviations.dueDate, today));

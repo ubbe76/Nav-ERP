@@ -1163,11 +1163,6 @@ function CompleteOperationsList({
                 />
               </Field>
             </FormRow>
-            <FormActions>
-              <Button type="button" variant="secondary" size="small" disabled={pendingId !== null} onClick={() => complete(op)}>
-                {pendingId === op.id ? "…" : "Slutför"}
-              </Button>
-            </FormActions>
             {Number(scrapped[op.id]) > 0 && (
               <ScrapReasonFields
                 idPrefix={`scrap-${op.id}`}
@@ -1178,6 +1173,11 @@ function CompleteOperationsList({
                 onText={(text) => setScrapReasons((prev) => ({ ...prev, [op.id]: text }))}
               />
             )}
+            <FormActions>
+              <Button type="button" variant="secondary" size="small" disabled={pendingId !== null} onClick={() => complete(op)}>
+                {pendingId === op.id ? "…" : "Slutför"}
+              </Button>
+            </FormActions>
           </div>
         ))}
       </FormStack>
