@@ -195,6 +195,10 @@ export const createPurchaseOrderSchema = z.object({
   ourReference: z.string().max(100).optional(),
   // Projekt (kostnadsställen och projekt): follows into the supplier invoice.
   projectId: z.string().uuid().nullable().optional(),
+  // Avvikelser: the deviation this document is created for (Skapa
+  // kreditfaktura/ersättningsorder/inköpsorder/tillverkningsorder) — linked in
+  // deviation_links in the document's own create transaction; needs Kvalitet.
+  deviationId: z.string().uuid().optional(),
 });
 export type CreatePurchaseOrderInput = z.infer<typeof createPurchaseOrderSchema>;
 

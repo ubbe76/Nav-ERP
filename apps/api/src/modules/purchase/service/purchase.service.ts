@@ -10,6 +10,7 @@ import {
   toUnitQuantity,
   type SupplierPaymentDetails,
 } from "@navet/shared";
+import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
 import type {
   CreateArticleSupplierInput,
   CreateContactInput,
@@ -854,7 +855,16 @@ export function createPurchaseService(
       if (!supplier) throw new SupplierNotFoundError(input.supplierId);
       // Projekt (kostnadsställen och projekt): must exist and be open.
       const { projectId } = await repo.resolveDimensions({ projectId: input.projectId });
-      return repo.createPurchaseOrder({ ...input, projectId }, createdBy, supplier.currency);
+      // Avvikelser (Skapa inköpsorder): the case link in the IO's transaction.
+      const deviationId = input.deviationId;
+      return repo.createPurchaseOrder(
+        { ...input, projectId },
+        createdBy,
+        supplier.currency,
+        deviationId
+          ? (tx, orderId) => linkDeviationInTx(tx, { deviationId, documentType: "purchase_order", documentId: orderId, userId: createdBy })
+          : undefined
+      );
     },
 
     // Header fields (leveransdatum, notering, växelkurs, Er/Vår referens,

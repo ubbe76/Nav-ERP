@@ -837,8 +837,19 @@ export function createInvoiceRepository(db: Db) {
 
     // Header + rows in one transaction — no number allocation here (the FA
     // number is assigned at issue, Task 4).
-    async create(header: InvoiceHeaderWrite, rows: InvoiceRowWrite[], createdBy: string) {
-      return db.transaction(async (tx) => (await repository.createInTx(tx, header, rows, createdBy)).invoice);
+    // `inTx` runs last inside the create transaction (Avvikelser: the case
+    // link of Skapa kreditfaktura).
+    async create(
+      header: InvoiceHeaderWrite,
+      rows: InvoiceRowWrite[],
+      createdBy: string,
+      inTx?: (tx: Tx, invoiceId: string) => Promise<unknown>
+    ) {
+      return db.transaction(async (tx) => {
+        const { invoice } = await repository.createInTx(tx, header, rows, createdBy);
+        if (inTx) await inTx(tx, invoice.id);
+        return invoice;
+      });
     },
 
     // The insert itself, in the CALLER's transaction — Räntefakturering

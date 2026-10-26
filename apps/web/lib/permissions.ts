@@ -13,6 +13,7 @@ export const MENU_PERMISSIONS = [
   "tillverkning",
   "lager",
   "personal",
+  "kvalitet",
   "ekonomi",
   "rapporter",
 ] as const;
@@ -27,6 +28,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   tillverkning: "Tillverkning",
   lager: "Lager",
   personal: "Personal & lön",
+  kvalitet: "Kvalitet",
   ekonomi: "Ekonomi",
   rapporter: "Rapporter",
   terminal: "Stämpelterminal",

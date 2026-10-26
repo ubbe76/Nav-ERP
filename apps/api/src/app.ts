@@ -192,6 +192,9 @@ import { createAlertDigestRepository } from "./modules/alerts/repository/alert-d
 import { createAlertDigestService } from "./modules/alerts/service/alert-digest.service.js";
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
 import { isBookkeepingLockViolation } from "./modules/system/service/db-errors.js";
+import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
+import { createQualityService } from "./modules/quality/service/quality.service.js";
+import { qualityRoutes } from "./modules/quality/routes/quality.routes.js";
 
 // TRUST_PROXY → Fastify's trustProxy: "true", a hop count ("1") or a
 // comma-separated list of proxy addresses/CIDRs. Unset = req.ip is the socket
@@ -692,9 +695,18 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   app.decorate("alertDigest", alertDigestService);
+  // Reklamationer och avvikelser (Kvalitet): documents only — the shortcuts
+  // link their documents through the quality leaf linkDeviationInTx inside
+  // their own create transactions; the PDF and the mail are the shared ones.
+  const qualityService = createQualityService({
+    repo: createQualityRepository(database),
+    pdf: documentPdfService,
+    mail: mailService,
+  });
   // Rapporter (F1) — read-only derived reports, admin-only in the routes.
-  // costingService supplies the self cost the margin report measures against.
-  const reportsService = createReportsService(createReportsRepository(database), costingService);
+  // costingService supplies the self cost the margin report measures against;
+  // the quality service the leveransprecision's kvalitetsdel.
+  const reportsService = createReportsService(createReportsRepository(database), costingService, qualityService);
   const orderRegisterService = createOrderRegisterService(createOrderRegisterRepository(database), documentPdfService);
   const quoteFollowupService = createQuoteFollowupService(createQuoteFollowupRepository(database));
   // Projektrapport (kostnadsställen och projekt): one project's result out
@@ -934,6 +946,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         // Aviseringar: one read, every office user; the kinds are filtered per
         // user in the service (admin-only Utskick som misslyckades included).
         await registerModule(protectedRoutes, alertsRoutes, { service: alertsService }, { read: office, write: ["admin"] });
+        // Kvalitet → Avvikelser: every office user reads (the order cards
+        // list their cases), Kvalitet writes.
+        await registerModule(protectedRoutes, qualityRoutes, { service: qualityService }, { read: office, write: ["kvalitet"] });
         await registerModule(
           protectedRoutes,
           reportsRoutes,
@@ -996,8 +1011,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(
           protectedRoutes,
           mailRoutes,
-          { service: mailService, purchaseService, salesService, invoiceService },
-          { read: office, write: ["inkop", "forsaljning"] }
+          { service: mailService, purchaseService, salesService, invoiceService, qualityService },
+          // Skicka om narrows per document type (resendAccessRule).
+          { read: office, write: ["inkop", "forsaljning", "kvalitet"] }
         );
       });
 

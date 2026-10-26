@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq, inArray, sql } from "drizzle-orm";
-import { db, articleGroups, customers, numberSeries, paymentTerms, stockCountSessions, stockLocations, stockTransactions, units, users, warehouses } from "@navet/db";
+import { db, articleGroups, customers, numberSeries, paymentTerms, stockCountSessions, stockLocations, stockTransactions, units, users, warehouses, deviationReasons } from "@navet/db";
 import { getOrCreateFallbackLocation } from "../src/modules/stock/service/location-resolver.js";
 import bcrypt from "bcryptjs";
 import { buildApp } from "../src/app.js";
@@ -9,7 +9,7 @@ import { DEMO_DATA, DEMO_LOCATIONS } from "../src/modules/demo/service/demo-data
 // System → Exempeldata through the real app: the empty-register guard, the
 // one-transaction write and the admin-only access.
 
-const TRUNCATE = sql`TRUNCATE articles, customers, suppliers, work_centers, production_groups, article_groups, payment_terms, audit_log, user_settings, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE articles, customers, suppliers, work_centers, production_groups, article_groups, payment_terms, deviation_reasons, audit_log, user_settings, users CASCADE`;
 const PASSWORD = "ett-tillräckligt-långt-lösenord";
 
 let app: ReturnType<typeof buildApp>;
@@ -79,6 +79,21 @@ describe("exempeldata — rutterna", () => {
     expect(plateRow?.transactionType).toBe("inventory_adjustment");
     expect(Number(plateRow?.unitCost)).toBe(780);
     expect((await get()).json()).toEqual({ available: false, blockers: ["articles", "customers", "suppliers", "workCenters"] });
+
+    // Kvalitet: the Avvikelseorsaker with their flags.
+    const reasons = await db.select().from(deviationReasons);
+    expect(reasons.map((r) => r.name).sort()).toEqual(DEMO_DATA.deviationReasons.map((r) => r.name).sort());
+    expect(reasons.find((r) => r.code === "MASKIN")).toMatchObject({ appliesInternal: true, appliesScrap: true, appliesCustomer: false });
+  });
+
+  it("keeps an Avvikelseorsak that already exists under the same code or name", async () => {
+    await db.insert(deviationReasons).values({ code: "TRANSP", name: "Skadad i transport", appliesSupplier: true });
+    await db.insert(deviationReasons).values({ code: "MF", name: "Maskinfel", appliesInternal: true });
+    expect((await post()).statusCode).toBe(201);
+    const reasons = await db.select().from(deviationReasons);
+    expect(reasons).toHaveLength(DEMO_DATA.deviationReasons.length);
+    expect(reasons.find((r) => r.code === "TRANSP")!.name).toBe("Skadad i transport");
+    expect(reasons.find((r) => r.name === "Maskinfel")!.code).toBe("MF");
   });
 
   it("refuses a second run with 409 and the blockers", async () => {

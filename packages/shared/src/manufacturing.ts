@@ -298,6 +298,10 @@ export const createManufacturingOrderSchema = z
     // sales order row (Ny tillverkningsorder). With salesOrderRowId the row
     // owns the choices and this must be absent (400).
     configuration: z.object({ selection: configuratorSelectionSchema.default({}) }).optional(),
+    // Avvikelser: the deviation this document is created for (Skapa
+    // kreditfaktura/ersättningsorder/inköpsorder/tillverkningsorder) — linked in
+    // deviation_links in the document's own create transaction; needs Kvalitet.
+    deviationId: z.string().uuid().optional(),
   })
   .refine((data) => data.articleId !== undefined || data.salesOrderRowId !== undefined, {
     message: "articleId is required unless salesOrderRowId is given",
@@ -346,10 +350,14 @@ export const completeOperationSchema = z
     quantityCompleted: z.coerce.number().nonnegative().optional(),
     quantityScrapped: z.coerce.number().nonnegative().default(0),
     scrapReason: z.string().trim().max(500).optional(),
+    // Kvalitet: the Avvikelseorsak (applies_scrap) — required by the API when
+    // the register has an active scrap reason; scrapReason is then the
+    // optional comment. Without any such reason the free text is the reason.
+    scrapReasonId: z.string().uuid().optional(),
     locationId: z.string().uuid().optional(),
     allowMaterialShortage: materialShortageOverrideSchema,
   })
-  .refine((data) => data.quantityScrapped === 0 || (data.scrapReason ?? "").length > 0, {
+  .refine((data) => data.quantityScrapped === 0 || data.scrapReasonId !== undefined || (data.scrapReason ?? "").length > 0, {
     message: "Ange en kassationsorsak när kasserat antal är större än 0",
     path: ["scrapReason"],
   });

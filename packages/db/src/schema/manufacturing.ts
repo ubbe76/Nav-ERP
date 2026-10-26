@@ -25,7 +25,7 @@ import { users } from "./auth";
 // purchase_order_rows → mo_operations FK is declared by hand in its
 // migration, same precedent as workCenters.weekScheduleId below).
 import { purchaseOrders, suppliers } from "./purchase";
-import { units } from "./register";
+import { deviationReasons, units } from "./register";
 import { salesOrderRows } from "./sales";
 import { stockLocations } from "./stock";
 
@@ -353,15 +353,20 @@ export const moOperationPlanWeeks = pgTable(
   ]
 );
 
-// One row per scrap report on an operation — quantity, mandatory reason and
-// who reported it (employee via the stamp terminal, user via the MO card).
+// One row per scrap report on an operation — quantity, the reason and who
+// reported it (employee via the stamp terminal, user via the MO card).
+// Kvalitet (migration 0153): `reason_id` is the Avvikelseorsak chosen from
+// the register (applies_scrap); `reason` is the free-text comment — and the
+// whole reason on rows from before the register, or on an installation
+// without any scrap reasons (the service decides which is required).
 export const moOperationScrap = pgTable("mo_operation_scrap", {
   id: uuid("id").primaryKey().defaultRandom(),
   moOperationId: uuid("mo_operation_id")
     .notNull()
     .references(() => moOperations.id, { onDelete: "cascade" }),
   quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
-  reason: text("reason").notNull(),
+  reasonId: uuid("reason_id").references(() => deviationReasons.id, { onDelete: "restrict" }),
+  reason: text("reason"),
   // FK to employees declared in the migration by hand — timereport.ts already
   // imports from this module, so importing employees here would be circular.
   employeeId: uuid("employee_id"),
@@ -370,7 +375,9 @@ export const moOperationScrap = pgTable("mo_operation_scrap", {
   moReportId: uuid("mo_report_id").references(() => moReports.id, { onDelete: "set null" }),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+},
+  (table) => [check("mo_operation_scrap_reason", sql`${table.reasonId} IS NOT NULL OR ${table.reason} IS NOT NULL`)]
+);
 
 // Rapporteringslogg: one row per reporting event on a TO — a stamp-out in
 // the terminal (also a time-only one), the card's Slutför operation, a lego

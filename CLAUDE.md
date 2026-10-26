@@ -94,7 +94,8 @@ Varje fil har `paths:` i sin frontmatter och läses bara in när du läser en fi
 | `alerts.md` | aviseringarna och den dagliga sammanställningen |
 | `mail.md` | e-post, e-postloggen, dokumentutskick, PDF-fällor |
 | `register.md` | grunddata-registren, villkor på dokumenten, radering med kopplingsflytt |
-| `reports.md` | orderförteckning, offertuppföljning |
+| `reports.md` | orderförteckning, offertuppföljning, leveransprecision per motpart |
+| `quality.md` | reklamationer och avvikelser, Avvikelseorsaker, genvägarnas `deviationId`, reklamationsrapporten |
 | `system.md` | exempeldata, Kom igång, favoriter, extern backup |
 | `web-theme.md` | färgteman och tokens |
 

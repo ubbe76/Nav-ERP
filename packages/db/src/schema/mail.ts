@@ -7,6 +7,7 @@ import { boolean, pgEnum, pgTable, text, timestamp, uuid, varchar } from "drizzl
 // the invoice card's send history shows invoice and reminder emails together.
 // "alert_digest" is the daily aviseringar sammanställning (migration 0134):
 // no documentId, and never resent — the content would be stale.
+// "deviation" is the reklamationsrapport of an avvikelse (migration 0153).
 export const emailDocumentTypeEnum = pgEnum("email_document_type", [
   "inquiry",
   "purchase_order",
@@ -16,6 +17,7 @@ export const emailDocumentTypeEnum = pgEnum("email_document_type", [
   "payment_reminder",
   "test",
   "alert_digest",
+  "deviation",
 ]);
 
 export const emailStatusEnum = pgEnum("email_status", ["sent", "failed"]);
@@ -36,6 +38,9 @@ export const emailLog = pgTable("email_log", {
   // Visa tilläggspriser as sent (quote/order confirmation only; null = not
   // applicable) — reused on resend (configurator 4b).
   showConfigurationPrices: boolean("show_configuration_prices"),
+  // Avvikelser (migration 0153): the reklamationsrapport was sent with
+  // Orsaksanalys/Åtgärd/Beslut — reused on resend. Null = not applicable.
+  includeDetails: boolean("include_details"),
   status: emailStatusEnum("status").notNull(),
   error: text("error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

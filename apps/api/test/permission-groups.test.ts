@@ -43,8 +43,9 @@ describe("migration seed", () => {
     );
     // Spread: postgres-js returns a RowList (Array subclass with count/command).
     expect([...rows]).toEqual([
-      // 0137 gave every group with Tillverkning the new Personal & lön.
-      { code: "ALLA", permissions: ["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal"] },
+      // 0137 gave every group with Tillverkning the new Personal & lön, 0153
+      // every group with Försäljning/Inköp/Tillverkning the new Kvalitet.
+      { code: "ALLA", permissions: ["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "kvalitet"] },
       { code: "VERKSTAD", permissions: ["terminal", "artikeloversikt", "tillverkningsorder_las"] },
     ]);
   });
@@ -82,7 +83,7 @@ describe("migration seed", () => {
     });
     // And the sessions now carry ALLA's effective permissions.
     expect((await authService.verifyToken(tokenFor(user.id, "user")))!.permissions).toEqual([
-      "artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "terminal", "artikeloversikt", "tillverkningsorder_las",
+      "artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "kvalitet", "terminal", "artikeloversikt", "tillverkningsorder_las",
     ]);
   });
 
@@ -118,6 +119,42 @@ describe("migration seed", () => {
   });
 });
 
+// Kvalitet: re-run 0153's UPDATE — read from the migration file — on groups
+// as they looked before it: every group with Försäljning, Inköp or
+// Tillverkning gains kvalitet exactly once, nothing else changes.
+describe("0153: kvalitet", () => {
+  it("gives kvalitet to every group with forsaljning, inkop or tillverkning and to no other", async () => {
+    const migration = readFileSync(new URL("../../../packages/db/drizzle/0153_avvikelser.sql", import.meta.url), "utf8");
+    const start = migration.search(/^UPDATE "permission_groups"/m);
+    expect(start, "0153 must contain the UPDATE").toBeGreaterThan(-1);
+    const updateSql = migration.slice(start).split("--> statement-breakpoint")[0]!;
+
+    const sales = await makeGroup("K-SALES", ["forsaljning"]);
+    const purchase = await makeGroup("K-PUR", ["inkop", "lager"]);
+    const prod = await makeGroup("K-PROD", ["tillverkning", "personal"]);
+    const already = await makeGroup("K-BOTH", ["inkop", "kvalitet"]);
+    const economy = await makeGroup("K-EKO", ["ekonomi", "rapporter"]);
+    const workshop = await makeGroup("K-SHOP", ["terminal", "tillverkningsorder_las"]);
+
+    await db.execute(sql.raw(updateSql));
+    // Idempotent: a second run adds nothing.
+    await db.execute(sql.raw(updateSql));
+
+    const rows = await db.execute<{ id: string; permissions: string[] }>(sql`
+      SELECT id, permissions FROM permission_groups
+      WHERE id IN (${sales.id}, ${purchase.id}, ${prod.id}, ${already.id}, ${economy.id}, ${workshop.id})
+    `);
+    expect(Object.fromEntries([...rows].map((r) => [r.id, r.permissions]))).toEqual({
+      [sales.id]: ["forsaljning", "kvalitet"],
+      [purchase.id]: ["inkop", "lager", "kvalitet"],
+      [prod.id]: ["tillverkning", "personal", "kvalitet"],
+      [already.id]: ["inkop", "kvalitet"],
+      [economy.id]: ["ekonomi", "rapporter"],
+      [workshop.id]: ["terminal", "tillverkningsorder_las"],
+    });
+  });
+});
+
 describe("permissions in the session", () => {
   it("expands the group's permissions with implications", async () => {
     const group = await makeGroup("T-PROD", ["tillverkning"]);
@@ -133,7 +170,7 @@ describe("permissions in the session", () => {
     const plain = await authService.createUser({ email: "n@example.com", password: "correcthorse", name: "N", role: "user" });
     expect((await authService.verifyToken(tokenFor(plain.id, "user")))!.permissions).toEqual([]);
     const admin = await authService.createUser({ email: "a@example.com", password: "correcthorse", name: "A", role: "admin" });
-    expect((await authService.verifyToken(tokenFor(admin.id, "admin")))!.permissions).toHaveLength(11);
+    expect((await authService.verifyToken(tokenFor(admin.id, "admin")))!.permissions).toHaveLength(12);
   });
 
   it("reflects a changed group on the very next request (no re-login)", async () => {

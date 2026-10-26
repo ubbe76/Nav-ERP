@@ -20,6 +20,7 @@ import type {
   UpdateRoutingOperationInput,
   UpdateWorkCenterInput,
 } from "@navet/shared";
+import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
 import { roundUpToMultiple, toUnitQuantity } from "@navet/shared";
 import type { ManufacturingMaterialShortage, PalletCardCode } from "@navet/shared";
 import type {
@@ -110,6 +111,23 @@ export interface LegoOperationOption {
   supplierId: string | null;
   setupPrice: string | null;
   unitPrice: string | null;
+}
+
+// Kassation (Kvalitet): the register has active scrap reasons, so one must be
+// chosen (400 scrap-reason-required); without any, a free-text reason.
+export class ScrapReasonRequiredError extends Error {
+  constructor(registerInUse: boolean) {
+    super(registerInUse ? "Välj en kassationsorsak" : "Ange en kassationsorsak när kasserat antal är större än 0");
+    this.name = "ScrapReasonRequiredError";
+  }
+}
+
+// The chosen reason is missing, inactive or not a scrap reason (400).
+export class ScrapReasonInvalidError extends Error {
+  constructor() {
+    super("Kassationsorsaken finns inte, är inaktiv eller gäller inte kassation");
+    this.name = "ScrapReasonInvalidError";
+  }
 }
 
 export class WorkCenterNotFoundError extends Error {
@@ -612,6 +630,22 @@ export function createManufacturingService(
   // refused inside its own transaction. `preflightInBlockMode` says whether
   // "block" is checked up front too (the terminal) or left to the real
   // report's in-transaction refusal (the lego receipt).
+  // Kassationsorsaken — the API decides the rule (it knows the register):
+  // with an active Avvikelseorsak for kassation a reasonId is required and
+  // the free text is an optional comment; without one the free text is the
+  // reason, as before. Checked before anything is written (the terminal runs
+  // it in its preflight, before the time report).
+  async function assertScrapReason(input: { quantityScrapped: number; scrapReasonId?: string; scrapReason?: string }) {
+    if (input.quantityScrapped <= 0) return;
+    const rules = await repo.scrapReasonRules(input.scrapReasonId);
+    if (input.scrapReasonId) {
+      if (!rules.reason || !rules.reason.active || !rules.reason.appliesScrap) throw new ScrapReasonInvalidError();
+      return;
+    }
+    if (rules.registerHasScrapReasons) throw new ScrapReasonRequiredError(true);
+    if (!input.scrapReason?.trim()) throw new ScrapReasonRequiredError(false);
+  }
+
   async function assertMaterialBeforeReport(
     operationId: string,
     input: ReportOperationQuantitiesInput,
@@ -1291,12 +1325,24 @@ export function createManufacturingService(
     // in_production as its last step, atomically with the MO insert.
     async createManufacturingOrder(input: CreateManufacturingOrderInput, createdBy: string | null) {
       const prepared = await prepareCreate(input);
+      // Avvikelser (Skapa tillverkningsorder): the case link is written in
+      // the TO's create transaction, after the plan — the TO and its link
+      // commit together or not at all.
+      const plan = planning ? (tx: Tx, moId: string) => planning.planNewOrderInTx(tx, moId) : undefined;
+      const deviationId = input.deviationId;
+      const planAndLink = deviationId
+        ? async (tx: Tx, moId: string) => {
+            const warnings = plan ? await plan(tx, moId) : [];
+            await linkDeviationInTx(tx, { deviationId, documentType: "manufacturing_order", documentId: moId, userId: createdBy });
+            return warnings;
+          }
+        : plan;
       const result = await repo.createManufacturingOrder(
         { ...input, articleId: prepared.articleId, quantity: prepared.quantity },
         createdBy,
         prepared.linkedSalesOrder,
         prepared.configured,
-        planning ? (tx, moId) => planning.planNewOrderInTx(tx, moId) : undefined
+        planAndLink
       );
       if (!result.ok) throw new RowConfigurationChangedError();
       await audit.log({ entityType: "manufacturing_order", entityId: result.order.orderNumber, action: "released", userId: createdBy });
@@ -1593,6 +1639,8 @@ export function createManufacturingService(
         quantityOk: number;
         quantityScrapped: number;
         scrapReason?: string;
+        // Kvalitet: the Avvikelseorsak (see assertScrapReason).
+        scrapReasonId?: string;
         actualTime?: number;
         locationId?: string;
         markDone: boolean;
@@ -1619,6 +1667,10 @@ export function createManufacturingService(
     ) {
       const operation = await repo.findOperationById(operationId);
       if (!operation) throw new MOOperationNotFoundError(operationId);
+      // The terminal's preflight (materialShortageChecked) already checked
+      // the scrap reason before its time report was written — this report
+      // must not be refused after that.
+      if (!input.materialShortageChecked) await assertScrapReason(input);
 
       const { allowMaterialShortage, materialShortageChecked, ...report } = input;
       const result = await repo.reportOperationQuantities(operationId, {
@@ -1678,6 +1730,7 @@ export function createManufacturingService(
         quantityOk: input.quantityCompleted ?? remaining,
         quantityScrapped: input.quantityScrapped ?? 0,
         scrapReason: input.scrapReason,
+        scrapReasonId: input.scrapReasonId,
         actualTime: input.actualTime,
         locationId: input.locationId,
         markDone: true,
@@ -1702,12 +1755,15 @@ export function createManufacturingService(
         quantityOk: number;
         quantityScrapped: number;
         scrapReason?: string;
+        scrapReasonId?: string;
         markDone: boolean;
         employeeId?: string;
         createdBy: string | null;
       },
       allow: boolean | undefined
     ) {
+      // The scrap reason too, while nothing is written yet.
+      await assertScrapReason(input);
       await assertMaterialBeforeReport(operationId, { ...input, source: "terminal" }, allow, true);
     },
 

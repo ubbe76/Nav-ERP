@@ -659,7 +659,14 @@ export function createPurchaseRepository(db: Db) {
       });
     },
 
-    async createPurchaseOrder(input: CreatePurchaseOrderInput, createdBy: string, currency: string) {
+    // `inTx` runs last inside the create transaction (Avvikelser: the case
+    // link of Skapa inköpsorder).
+    async createPurchaseOrder(
+      input: CreatePurchaseOrderInput,
+      createdBy: string,
+      currency: string,
+      inTx?: (tx: Tx, orderId: string) => Promise<unknown>
+    ) {
       return db.transaction(async (tx) => {
         // Terms snapshotted from the supplier at creation, like currency.
         const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, input.supplierId));
@@ -685,6 +692,7 @@ export function createPurchaseRepository(db: Db) {
           .returning();
         // Tillägg: purchase_order.created, with the order.
         await pluginEvents.emit(tx, { type: "purchase_order.created", entityId: row!.id, entityNumber: row!.orderNumber });
+        if (inTx) await inTx(tx, row!.id);
         return row!;
       });
     },

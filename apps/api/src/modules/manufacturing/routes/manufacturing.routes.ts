@@ -1,4 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { deviationLinkForbidden } from "../../quality/service/deviation-link-access.js";
+import { DeviationLinkNotAllowedError } from "../../quality/service/deviation-errors.js";
 import { articleCardWrite, canSeePrices, MO_READ, TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import {
@@ -66,6 +68,8 @@ import {
   OperationHasLinkedMaterialError,
   OverConsumptionError,
   MaterialShortageError,
+  ScrapReasonInvalidError,
+  ScrapReasonRequiredError,
   ProductionGroupNotFoundError,
   RoutingOperationNotFoundError,
   WeekScheduleNotFoundError,
@@ -350,6 +354,8 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
 
   app.post("/manufacturing-orders", async (req, reply) => {
     const input = createManufacturingOrderSchema.parse(req.body);
+    const forbidden = deviationLinkForbidden(input.deviationId, req.user);
+    if (forbidden) return reply.code(403).send(errorBody(forbidden));
     try {
       const order = await service.createManufacturingOrder(input, req.user!.id);
       return reply.code(201).send(order);
@@ -365,6 +371,8 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
       if (err instanceof RowConfigurationChangedError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfiguratorNotToOrderModeError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
+      // Avvikelser: the case cannot take the link (closed, wrong type).
+      if (err instanceof DeviationLinkNotAllowedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
@@ -710,6 +718,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
         if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
         if (err instanceof MaterialShortageError) return reply.code(409).send(materialShortageBody(err));
+        if (err instanceof ScrapReasonRequiredError || err instanceof ScrapReasonInvalidError) return reply.code(400).send(errorBody(err));
         throw err;
       }
     }

@@ -136,6 +136,14 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["ekonomi"],
     listHref: "/ekonomi/verifikat",
   },
+  // Kvalitet: open avvikelser whose Åtgärd senast has passed.
+  {
+    kind: "deviations_overdue",
+    label: "Avvikelser som passerat Åtgärd senast",
+    severity: "yellow",
+    rule: ["kvalitet"],
+    listHref: "/kvalitet/avvikelser?overdue=1",
+  },
 ];
 
 const BY_KIND = new Map(ALERT_KIND_CATALOG.map((def) => [def.kind, def] as const));

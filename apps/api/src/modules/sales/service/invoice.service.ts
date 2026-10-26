@@ -1,4 +1,5 @@
 import type { Db, Tx } from "@navet/db";
+import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
 import type {
   CreateCreditInvoiceInput,
   CreateInvoiceInput,
@@ -1282,7 +1283,13 @@ export function createInvoiceService(
           exchangeRateManual: false,
         },
         rows,
-        createdBy
+        createdBy,
+        // Avvikelser (Skapa kreditfaktura): the case link in the credit
+        // note's own transaction.
+        input.deviationId
+          ? (tx, creditId) =>
+              linkDeviationInTx(tx, { deviationId: input.deviationId!, documentType: "credit_invoice", documentId: creditId, userId: createdBy })
+          : undefined
       );
       // Logged under the SOURCE invoice (it already has an FA number; the
       // new credit note is still a numberless draft) — visible on the

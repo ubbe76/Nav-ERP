@@ -303,6 +303,10 @@ export type UpdateSalesOrderHeaderInput = z.infer<typeof updateSalesOrderHeaderS
 
 export const createQuoteSchema = z.object({
   customerId: z.string().uuid(),
+  // Avvikelser: the deviation this document is created for (Skapa
+  // kreditfaktura/ersättningsorder/inköpsorder/tillverkningsorder) — linked in
+  // deviation_links in the document's own create transaction; needs Kvalitet.
+  deviationId: z.string().uuid().optional(),
   expectedDeliveryDate: businessDateSchema.optional(),
   note: z.string().optional(),
   rows: z.array(quoteRowSchema).min(1),
@@ -478,6 +482,10 @@ export type UpdateInvoiceHeaderInput = z.infer<typeof updateInvoiceHeaderSchema>
 // may be overridden at create (partial credit) or edited afterwards.
 export const createCreditInvoiceSchema = z.object({
   rows: z.array(invoiceRowInputSchema).optional(),
+  // Avvikelser: the deviation this document is created for (Skapa
+  // kreditfaktura/ersättningsorder/inköpsorder/tillverkningsorder) — linked in
+  // deviation_links in the document's own create transaction; needs Kvalitet.
+  deviationId: z.string().uuid().optional(),
 });
 export type CreateCreditInvoiceInput = z.infer<typeof createCreditInvoiceSchema>;
 

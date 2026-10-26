@@ -369,6 +369,23 @@ export interface PaymentReminderPdfInput {
   accruedInterestText?: string | null;
 }
 
+// Reklamationsrapport (Kvalitet): one avvikelse as a letter — Reklamation to
+// a supplier, Reklamationsbesked to a customer, Avvikelserapport internally.
+// Everything arrives pre-formatted from the quality service; no costs and no
+// prices ever reach this renderer. `details` (the dialog's choice) adds the
+// investigation and the decision.
+export interface DeviationReportPdfInput {
+  title: string;
+  // Outgoing letters get the company footer; the internal report page numbers.
+  outgoing: boolean;
+  documentNumber: string;
+  date: string;
+  partnerLabel: string | null;
+  partner: PartnerBlock | null;
+  references: { label: string; value: string }[];
+  sections: { label: string; text: string }[];
+}
+
 // Löneunderlag — the printable payroll basis for a period: one section per
 // employee with pre-formatted label/hours rows (formatting, zero-row
 // skipping and Swedish labels all happen in the payroll service; this
@@ -1485,6 +1502,59 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     if (input.payment) y = drawPaymentBox(doc, company, y, input.payment);
 
     drawFooter(doc, company);
+    doc.end();
+    return finished;
+  }
+
+  async function renderDeviationReport(input: DeviationReportPdfInput): Promise<Buffer> {
+    const { doc, finished, company } = await startDocument();
+    const left = PAGE_MARGIN;
+
+    let y = 130;
+    doc.font("Helvetica-Bold").fontSize(18).text(input.title, left, y);
+    y += 26;
+    doc.font("Helvetica").fontSize(10).fillColor("#444444");
+    doc.text(`Nummer: ${input.documentNumber}`, left, y);
+    y += 14;
+    doc.text(`Datum: ${input.date}`, left, y);
+    y += 14;
+    for (const ref of input.references) {
+      doc.text(`${ref.label}: ${ref.value}`, left, y, { width: CONTENT_WIDTH });
+      y += 14;
+    }
+    doc.fillColor("#000000");
+    y += 10;
+
+    if (input.partner) {
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(input.partnerLabel ?? "", left, y);
+      y += 13;
+      doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.partner.name, left, y);
+      y += 15;
+      doc.font("Helvetica").fontSize(10);
+      for (const line of addressLines(input.partner)) {
+        doc.text(line, left, y);
+        y += 14;
+      }
+      y += 16;
+    }
+
+    // One labelled paragraph per section; a section that would collide with
+    // the footer starts on a fresh page (long texts flow on from there).
+    for (const section of input.sections) {
+      doc.font("Helvetica").fontSize(10);
+      const height = doc.heightOfString(section.text, { width: CONTENT_WIDTH });
+      if (y + 14 + Math.min(height, 60) > TABLE_BOTTOM) {
+        doc.addPage();
+        y = PAGE_MARGIN;
+      }
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(section.label.toUpperCase(), left, y);
+      y += 13;
+      doc.font("Helvetica").fontSize(10).fillColor("#000000").text(section.text, left, y, { width: CONTENT_WIDTH });
+      y = doc.y + 12;
+    }
+
+    if (input.outgoing) drawFooter(doc, company);
+    else drawPageNumbers(doc);
     doc.end();
     return finished;
   }
@@ -2782,6 +2852,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   return {
     render,
     renderPaymentReminder,
+    renderDeviationReport,
     renderPickList,
     renderStockCountSheet,
     renderDeliveryNote,

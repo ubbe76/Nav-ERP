@@ -294,6 +294,8 @@ describe("resendAccessRule", () => {
     for (const type of ["quote", "order_confirmation", "invoice", "payment_reminder"]) {
       expect(resendAccessRule(type)).toEqual(["forsaljning"]);
     }
+    // Avvikelsens reklamationsrapport: Kvalitet.
+    expect(resendAccessRule("deviation")).toEqual(["kvalitet"]);
     expect(resendAccessRule("test")).toEqual(["admin"]);
     // The digest is never resent (409 before the rule); fail-closed here.
     expect(resendAccessRule("alert_digest")).toEqual(["admin"]);

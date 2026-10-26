@@ -41,7 +41,7 @@ import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { DIRECTORY_READ, MO_READ, PERSONAL, TERMINAL_READ, TERMINAL_WRITE } from "../../auth/middleware/access-rules.js";
 import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
 import { materialShortageBody } from "../../manufacturing/service/material-shortage.js";
-import { MaterialShortageError } from "../../manufacturing/service/manufacturing.service.js";
+import { MaterialShortageError, ScrapReasonInvalidError, ScrapReasonRequiredError } from "../../manufacturing/service/manufacturing.service.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { timeReportExportColumns } from "../service/export-columns.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -188,6 +188,8 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
       // Materialbrist: refused before anything was written — the session is
       // still open and no time report exists.
       if (err instanceof MaterialShortageError) return reply.code(409).send(materialShortageBody(err));
+      // Kassationsorsaken: refused in the same preflight, nothing written.
+      if (err instanceof ScrapReasonRequiredError || err instanceof ScrapReasonInvalidError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

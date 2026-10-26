@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import { deviationLinkForbidden } from "../../quality/service/deviation-link-access.js";
+import { DeviationLinkNotAllowedError } from "../../quality/service/deviation-errors.js";
 import { createQuoteSchema, priceQuoteQuerySchema } from "@navet/shared";
 import type { ArticleService } from "../../article/service/article.service.js";
 import type { SalesService } from "../../sales/service/sales.service.js";
@@ -58,6 +60,10 @@ export async function configuratorRoutes(
     if (!clientCustomerAllowed(req, input.customerId)) {
       return reply.code(403).send(errorBody(new ClientCustomerMismatchError()));
     }
+    // Avvikelser (Skapa ersättningsorder): linking the order to a case is a
+    // Kvalitet write — never for an API client.
+    const forbidden = deviationLinkForbidden(input.deviationId, req.user);
+    if (forbidden) return reply.code(403).send(errorBody(forbidden));
     // A client bound to a customer never sets the price: Nav prices every row
     // from the customer's price chain (customer price, price list, discount,
     // the configurator's own price for configured rows). An unbound internal
@@ -98,6 +104,8 @@ export async function configuratorRoutes(
     } catch (err) {
       // The delivery address must belong to the quote's customer.
       if (err instanceof DeliveryAddressNotFoundError) return reply.code(400).send(errorBody(err));
+      // Avvikelser: the case cannot take the link (closed, wrong type, other customer).
+      if (err instanceof DeviationLinkNotAllowedError) return reply.code(409).send(errorBody(err));
       // Kostnadsställen och projekt on the header: unknown (404), inactive/closed (400).
       if (err instanceof CostCenterNotFoundError || err instanceof ProjectNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof CostCenterInactiveError || err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));

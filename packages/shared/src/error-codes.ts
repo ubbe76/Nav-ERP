@@ -497,6 +497,24 @@ export const ERROR_CODES = {
   INVOICE_SCAN_MAIL_FOLDERS_EQUAL: "invoice-scan-mail-folders-equal",
   // DELETE of the underlag the Fakturainkorg created the invoice from (409)
   SUPPLIER_INVOICE_FILE_FROM_SCAN: "supplier-invoice-file-from-scan",
+
+  // Reklamationer och avvikelser (Kvalitet)
+  DEVIATION_NOT_FOUND: "deviation-not-found",
+  // 400 with `field` and a Swedish message naming the problem
+  DEVIATION_LINK_MISMATCH: "deviation-link-mismatch",
+  // 409, Swedish message: closed/cancelled case, wrong type, other counterparty
+  DEVIATION_LINK_NOT_ALLOWED: "deviation-link-not-allowed",
+  DEVIATION_REASON_NOT_APPLICABLE: "deviation-reason-not-applicable",
+  // 409 with `missing`: ["correctiveAction" | "decision"]
+  DEVIATION_CLOSE_REQUIREMENTS: "deviation-close-requirements",
+  DEVIATION_NOT_EDITABLE: "deviation-not-editable",
+  DEVIATION_COST_NOT_FOUND: "deviation-cost-not-found",
+  DEVIATION_LINK_NOT_FOUND: "deviation-link-not-found",
+  DEVIATION_FILE_NOT_FOUND: "deviation-file-not-found",
+  INVALID_DEVIATION_FILE_TYPE: "invalid-deviation-file-type",
+  // Kassation with the Avvikelseorsaker register (400)
+  SCRAP_REASON_REQUIRED: "scrap-reason-required",
+  SCRAP_REASON_INVALID: "scrap-reason-invalid",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

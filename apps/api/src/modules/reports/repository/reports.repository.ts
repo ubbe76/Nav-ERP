@@ -3,6 +3,7 @@ import {
   articles,
   costCalculations,
   customers,
+  deviationReasons,
   deliveries,
   deliveryRows,
   invoiceRows,
@@ -78,12 +79,19 @@ export function createReportsRepository(db: Db) {
           AND EXISTS (SELECT 1 FROM ${deliveryRows} r WHERE r.delivery_id = d.id AND r.undone_at IS NULL))`;
       const rows = await db
         .select({
+          orderId: salesOrders.id,
+          counterpartyId: salesOrders.customerId,
+          counterpartyName: customers.name,
           expectedDeliveryDate: salesOrders.expectedDeliveryDate,
           completedAt: lastDelivery,
         })
         .from(salesOrders)
+        .innerJoin(customers, eq(customers.id, salesOrders.customerId))
         .where(inArray(salesOrders.status, ["delivered", "invoiced"]));
       return rows.map((r) => ({
+        orderId: r.orderId,
+        counterpartyId: r.counterpartyId,
+        counterpartyName: r.counterpartyName,
         expectedDeliveryDate: r.expectedDeliveryDate,
         completedAt: toIso(r.completedAt),
       }));
@@ -99,12 +107,19 @@ export function createReportsRepository(db: Db) {
       >`(SELECT MAX(st.created_at) FROM ${stockTransactions} st WHERE st.reference_id = ${sql.raw('"purchase_orders"."id"')} AND st.transaction_type = 'purchase_receipt' AND st.quantity_delta > 0 AND NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = st.id AND pr.undone_at IS NOT NULL))`;
       const rows = await db
         .select({
+          orderId: purchaseOrders.id,
+          counterpartyId: purchaseOrders.supplierId,
+          counterpartyName: suppliers.name,
           expectedDeliveryDate: purchaseOrders.expectedDeliveryDate,
           completedAt: lastReceipt,
         })
         .from(purchaseOrders)
+        .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
         .where(inArray(purchaseOrders.status, ["received", "closed"]));
       return rows.map((r) => ({
+        orderId: r.orderId,
+        counterpartyId: r.counterpartyId,
+        counterpartyName: r.counterpartyName,
         expectedDeliveryDate: r.expectedDeliveryDate,
         completedAt: toIso(r.completedAt),
       }));
@@ -391,7 +406,7 @@ export function createReportsRepository(db: Db) {
     // filtering never disagree. `reason` groups by the exact string as typed
     // in the terminal/MO card — "Spån" and "spån" are deliberately kept as
     // separate rows (no normalization) so the register mirrors what
-    // operators actually typed.
+    // operators actually typed; a reason from the register groups on it.
     async loadScrapStatistics(query: Pick<ScrapStatisticsQuery, "groupBy"> & { from: string; to: string }) {
       const monthExpr = sql<string>`to_char(${moOperationScrap.createdAt} AT TIME ZONE 'Europe/Stockholm', 'YYYY-MM')`;
       const dateFilter = and(gte(monthExpr, query.from), lte(monthExpr, query.to));
@@ -456,13 +471,19 @@ export function createReportsRepository(db: Db) {
         }));
       }
 
-      // groupBy === "reason" — exact string, no normalization.
+      // groupBy === "reason" — Kvalitet (0153): a row with an Avvikelseorsak
+      // groups on the reason (its comment is ignored); an older free-text
+      // row groups on the exact string, no normalization, labelled
+      // "… (fritext)".
+      const reasonKey = sql<string>`CASE WHEN ${moOperationScrap.reasonId} IS NOT NULL THEN ${moOperationScrap.reasonId}::text ELSE 'text:' || ${moOperationScrap.reason} END`;
+      const reasonLabel = sql<string>`CASE WHEN ${moOperationScrap.reasonId} IS NOT NULL THEN ${deviationReasons.name} ELSE ${moOperationScrap.reason} || ' (fritext)' END`;
       const rows = await db
-        .select({ key: moOperationScrap.reason, label: moOperationScrap.reason, scrappedQuantity, reportCount })
+        .select({ key: reasonKey, label: reasonLabel, scrappedQuantity, reportCount })
         .from(moOperationScrap)
         .innerJoin(moOperations, eq(moOperations.id, moOperationScrap.moOperationId))
+        .leftJoin(deviationReasons, eq(deviationReasons.id, moOperationScrap.reasonId))
         .where(dateFilter)
-        .groupBy(moOperationScrap.reason)
+        .groupBy(sql`1`, sql`2`)
         .orderBy(sql`${scrappedQuantity} DESC`);
       return rows.map((r) => ({
         key: r.key,

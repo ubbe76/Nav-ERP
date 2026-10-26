@@ -1,4 +1,5 @@
-import { boolean, numeric, pgEnum, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { boolean, check, numeric, pgEnum, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 
 // Small shared base-data registers (Monitor-style grunddata): terms and
 // carriers referenced by both customers and suppliers. Code + name + an
@@ -63,6 +64,35 @@ export const quoteLossReasons = pgTable("quote_loss_reasons", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Avvikelseorsaker (Kvalitet, migration 0153): why a deviation happened —
+// shared by the deviation register (deviations.reason_id, filtered on the
+// deviation's type) and the scrap reporting (mo_operation_scrap.reason_id,
+// applies_scrap). Same register behaviour as quote_loss_reasons: code
+// (upper-case letters/digits, max 10) and name unique, `active` hides a
+// reason from the pickers, delete with reassignment via the register's
+// reference map. At least one of the four "applies to" flags is set.
+export const deviationReasons = pgTable(
+  "deviation_reasons",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: varchar("code", { length: 10 }).notNull().unique(),
+    name: varchar("name", { length: 100 }).notNull().unique(),
+    appliesCustomer: boolean("applies_customer").notNull().default(false),
+    appliesSupplier: boolean("applies_supplier").notNull().default(false),
+    appliesInternal: boolean("applies_internal").notNull().default(false),
+    appliesScrap: boolean("applies_scrap").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "deviation_reasons_applies_any",
+      sql`${table.appliesCustomer} OR ${table.appliesSupplier} OR ${table.appliesInternal} OR ${table.appliesScrap}`
+    ),
+  ]
+);
 
 // Kolliart (frakt): Sendify's PACKAGE / PALLET / UNSPECIFIED. "other" is only
 // produced by the kolliförslag (weight without any freight description).

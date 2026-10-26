@@ -222,6 +222,20 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Underlaget kom från fakturainkorgen och är den mottagna fakturan — det kan inte tas bort.",
   "invoice-scan-not-found": "Fakturan finns inte i fakturainkorgen längre — ladda om sidan.",
   "invoice-scan-busy": "En AI-tolkning av filen pågår redan — vänta tills den är klar och försök igen.",
+  // Reklamationer och avvikelser (Kvalitet)
+  "deviation-not-found": "Avvikelsen finns inte längre — ladda om sidan.",
+  // The server names the field and the document (Swedish).
+  "deviation-link-mismatch": serverMessage("Kopplingarna hör inte ihop — kontrollera kund/leverantör, order, rad och artikel."),
+  "deviation-link-not-allowed": serverMessage("Dokumentet kan inte kopplas till avvikelsen."),
+  "deviation-reason-not-applicable": serverMessage("Orsaken gäller inte den här typen av avvikelse."),
+  "deviation-close-requirements": serverMessage("Fyll i Åtgärd (och Beslut) innan avvikelsen avslutas."),
+  "deviation-not-editable": "Avvikelsen är avslutad eller makulerad — öppna den igen för att ändra.",
+  "deviation-cost-not-found": "Kostnadsraden finns inte längre — ladda om sidan.",
+  "deviation-link-not-found": "Kopplingen finns inte längre — ladda om sidan.",
+  "deviation-file-not-found": "Filen finns inte längre — ladda om sidan.",
+  "invalid-deviation-file-type": "Filtypen stöds inte — ladda upp PDF, JPEG eller PNG.",
+  "scrap-reason-required": serverMessage("Välj en kassationsorsak."),
+  "scrap-reason-invalid": "Kassationsorsaken finns inte, är inaktiv eller gäller inte kassation — välj en annan.",
   // The server names what went wrong with the key / the mailbox.
   "invoice-scan-ai-test-failed": serverMessage("AI-tjänsten svarade inte med den här nyckeln och modellen."),
   "invoice-scan-mail-test-failed": serverMessage("Kunde inte ansluta till e-postlådan."),

@@ -1072,6 +1072,13 @@
       "when": 1792990173818,
       "tag": "0152_fakturaskanning",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1793015793730,
+      "tag": "0153_avvikelser",
+      "breakpoints": true
     }
   ]
 }

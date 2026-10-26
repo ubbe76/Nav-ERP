@@ -54,12 +54,27 @@ export const scrapStatisticsQuerySchema = z
   .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
 export type ScrapStatisticsQuery = z.infer<typeof scrapStatisticsQuerySchema>;
 
+// Leveransprecision: Gruppera Månad (default, the original view) or Motpart
+// (Kvalitet: per supplier/customer with the quality columns).
+export const DELIVERY_PRECISION_GROUPINGS = ["month", "counterparty"] as const;
+export type DeliveryPrecisionGrouping = (typeof DELIVERY_PRECISION_GROUPINGS)[number];
+
+export const deliveryPrecisionQuerySchema = z
+  .object({
+    from: monthParam.optional(),
+    to: monthParam.optional(),
+    groupBy: z.enum(DELIVERY_PRECISION_GROUPINGS).default("month"),
+  })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
+export type DeliveryPrecisionQuery = z.infer<typeof deliveryPrecisionQuerySchema>;
+
 // CSV variant of delivery precision exports one side at a time.
 export const deliveryPrecisionCsvQuerySchema = z
   .object({
     from: monthParam.optional(),
     to: monthParam.optional(),
     kind: z.enum(["sales", "purchase"]),
+    groupBy: z.enum(DELIVERY_PRECISION_GROUPINGS).default("month"),
   })
   .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });
 export type DeliveryPrecisionCsvQuery = z.infer<typeof deliveryPrecisionCsvQuerySchema>;

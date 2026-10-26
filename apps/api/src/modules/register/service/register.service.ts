@@ -157,6 +157,8 @@ export function createRegisterService(repo: RegisterRepository) {
     // Förlustorsaker (uppföljning av offerter): same CRUD/usage/delete flow,
     // its own input shape (code/name/active).
     quoteLossReasons: forRegister(repo.quoteLossReasons),
+    // Avvikelseorsaker (Kvalitet): the deviations' and the scrap's reasons.
+    deviationReasons: forRegister(repo.deviationReasons),
 
     // Idempotent: creates the Combiterms entries that are missing and skips
     // the rest, so customized codes/names survive re-runs.

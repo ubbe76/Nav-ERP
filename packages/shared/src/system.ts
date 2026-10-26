@@ -260,7 +260,8 @@ export type UpdateCompanyCarrierInput = z.infer<typeof updateCompanyCarrierSchem
 // were seeded in C1/B3/B4 but this list had fallen behind. "payment_batch"
 // (BO-, betalningsomgångar) arrived with bankfiler. "quote" (OF-, Offert)
 // arrived with Offerter (migration 0138). "invoice_scan" (FI-, Fakturainkorg)
-// arrived with fakturaskanningen (migration 0152).
+// arrived with fakturaskanningen (migration 0152). "deviation" (AV-,
+// Avvikelser) arrived with Kvalitet (migration 0153).
 export const numberSeriesKeys = [
   "purchase_order",
   "sales_order",
@@ -277,6 +278,7 @@ export const numberSeriesKeys = [
   "fixed_asset",
   "payment_batch",
   "invoice_scan",
+  "deviation",
   "article",
 ] as const;
 export type NumberSeriesKey = (typeof numberSeriesKeys)[number];

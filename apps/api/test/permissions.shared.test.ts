@@ -14,9 +14,9 @@ import {
 import * as web from "../../web/lib/permissions.js";
 
 describe("permission catalog", () => {
-  it("has exactly the eleven agreed codes", () => {
+  it("has exactly the twelve agreed codes", () => {
     expect([...PERMISSIONS]).toEqual([
-      "artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "ekonomi", "rapporter",
+      "artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "kvalitet", "ekonomi", "rapporter",
       "terminal", "artikeloversikt", "tillverkningsorder_las",
     ]);
     expect([...MENU_PERMISSIONS, ...WORKSHOP_PERMISSIONS]).toEqual([...PERMISSIONS]);

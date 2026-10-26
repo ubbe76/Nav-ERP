@@ -4,6 +4,7 @@
 // (@navet/shared's buildCsv).
 import { buildCsv, type CsvColumn } from "@navet/shared";
 import type { PrecisionMonth } from "./delivery-precision-calc.js";
+import type { CounterpartyPrecisionRow, CounterpartyPrecisionTotals } from "./delivery-quality-calc.js";
 import type { OutcomeRow } from "./calc-outcome-calc.js";
 import type { MarginGroup } from "./order-margin-calc.js";
 import type {
@@ -25,6 +26,30 @@ const PRECISION_COLUMNS: CsvColumn<PrecisionMonth>[] = [
 
 export function buildDeliveryPrecisionCsv(months: PrecisionMonth[]): string {
   return buildCsv(PRECISION_COLUMNS, months);
+}
+
+// Gruppera: Motpart — one row per supplier/customer plus a Totalt row.
+// Reklamerat antal is blank where the units are mixed (the web shows "—").
+export function buildCounterpartyPrecisionCsv(
+  grouped: { rows: CounterpartyPrecisionRow[]; totals: CounterpartyPrecisionTotals },
+  opts: { kind: "sales" | "purchase"; seePrices: boolean }
+): string {
+  type Row = Omit<CounterpartyPrecisionRow, "counterpartyId">;
+  const columns: CsvColumn<Row>[] = [
+    { label: opts.kind === "sales" ? "Kund" : "Leverantör", value: (r) => r.counterpartyName },
+    { label: "Antal ordrar", value: (r) => r.total },
+    { label: "I tid", value: (r) => r.onTime },
+    { label: "Försenade", value: (r) => r.late },
+    { label: "Precision %", value: (r) => r.precisionPct },
+    { label: "Snitt försening (dagar)", value: (r) => r.avgDaysLate, format: "number" },
+    { label: "Avvikelser", value: (r) => r.deviations },
+    { label: "Order med avvikelse", value: (r) => r.ordersWithDeviation },
+    { label: "Andel felfria %", value: (r) => r.defectFreePct },
+    { label: "Reklamerat antal", value: (r) => r.claimedQuantity, format: "number" },
+    { label: "Enhet", value: (r) => r.claimedUnit },
+    ...(opts.seePrices ? [{ label: "Avvikelsekostnad", value: (r: Row) => r.deviationCost, format: "money" as const }] : []),
+  ];
+  return buildCsv(columns, [...grouped.rows, { ...grouped.totals, counterpartyName: "Totalt" }]);
 }
 
 const STATISTICS_COLUMNS: CsvColumn<StatisticsRowResponse>[] = [

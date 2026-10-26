@@ -1,0 +1,28 @@
+---
+paths:
+  - "apps/api/src/modules/quality/**"
+  - "apps/web/app/kvalitet/**"
+  - "apps/web/components/quality/**"
+  - "packages/shared/src/quality.ts"
+  - "packages/db/src/schema/quality.ts"
+  - "apps/api/test/deviation*"
+  - "apps/api/test/reports-delivery-quality*"
+  - "apps/api/test/delivery-quality*"
+---
+
+# Kvalitet: reklamationer och avvikelser (migration 0153)
+
+Spec `private/superpowers/specs/2026-10-26-reklamationer-avvikelser-design.md`.
+
+- **Ett register, tre typer** (`deviations.type` customer/supplier/internal) med AV-serien `deviation`. Ärendet **bokför inget och flyttar inget lager** — kostnaderna är uppföljning, genvägarna skapar vanliga dokument genom sina egna rutiner. Modulen `quality` registreras `{ read: office, write: ["kvalitet"] }`; `kvalitet` är en menyrättighet (0153 gav den till varje grupp med `forsaljning`/`inkop`/`tillverkning`, `permission-groups.test.ts` kör om UPDATE:n).
+- **Statusvitlistan** är rena `quality/service/deviation-status.ts` (Börja utreda/Avsluta/Makulera/Öppna igen, `allowedActions`, `closeRequirementsMissing`). `repo.transition` låser raden `FOR UPDATE`, kör vitlistan och bygg-funktionen (Avslutas krav prövas på den **låsta** raden) och skriver `status_changed` i samma transaktion. CHECK:arna `closed ⇔ closed_at`, `cancelled ⇔ cancelled_at`. Öppna igen nollar `closed_*`, behåller beslut och texter.
+- **Redigering** (fält, kostnader, kopplingar, filer) bara i registered/investigating: varje skrivning tar `lockEditable` (409 `deviation-not-editable`). Typen ändras aldrig. PATCH skriver bara ändrade fält och loggar `updated` med before/after.
+- **Kopplingskontrollerna** är rena `deviation-link-check.ts` över fakta som repositoryt laddar (null = finns inte): typens motpart och dokument, raden ⇒ dess order (förifylls), operationen ⇒ dess TO, KO/faktura tillhör kunden, IO tillhör leverantören, artikeln = radens/TO:ns (förifylls från första). Fel ⇒ 400 `deviation-link-mismatch` med `field`. Orsaken måste vara aktiv och gälla typen (400 `deviation-reason-not-applicable`; en oförändrad inaktiv orsak får stå kvar). DB-CHECK:arna vaktar typ ↔ motpart/dokumentkolumner.
+- **Genvägarna** (`deviationId` på `POST /invoices/:id/credit`, `POST /quotes` — det finns ingen `POST /sales-orders`, Ny kundorder är `/quotes` med `confirm` —, `POST /purchase-orders`, `POST /manufacturing-orders`) länkar via lövet `quality/repository/deviation-link-tx.ts` (`linkDeviationInTx`, bara schemaimporter) som **sista steg i dokumentets egen create-transaktion** (repo-parametern `inTx`; TO:n komponerar den med planeraren). Lövet låser ärendet `FOR UPDATE` och vägrar (409 `deviation-link-not-allowed`, inget dokument blir kvar): saknat/avslutat/makulerat ärende, dokumenttyp som inte passar typen (`LINK_DOCUMENT_CASE_TYPES`: kreditfaktura/KO ⇒ kund, IO/leverantörsfaktura ⇒ leverantör, TO ⇒ kund eller intern), annan motpart, redan kopplad. Rutterna kräver `kvalitet` när `deviationId` skickas (`deviationLinkForbidden`, 403; en API-klient länkar aldrig). **Koppla dokument** går samma löv. `deviation_links` är polymorf utan FK — läsningen visar `deleted: true` för ett försvunnet dokument.
+- **Nettokostnaden** räknas bara i rena `deviation-costs.ts` (`summarizeDeviationCosts`; recovery drar ifrån). Härledda rader (`repo.derivedCostLines`): kopplad kreditfaktura i issued/paid = Kreditering med Σ `line_amount_sek`; kopplad leverantörsfaktura i approved/paid **med negativt netto** = Ersättning (−netto × kurs). Utkast/makulerade och positiva leverantörsfakturor räknas aldrig. Belopp döljs (`costs: null`, `netCost: null`) utan `canSeePrices`.
+- **Filer** (`deviation_files`) som underlaget men **inte räkenskapsinformation**: PDF/JPEG/PNG med rätt filsignatur (`hasSignature`, delad med fakturainkorgen), 20 MB, nedladdning med `nosniff`; lägg till och ta bort bara i öppet ärende.
+- **Historiken** är `deviation_events` (append-only), inte audit-loggen — kortets historik ska synas för Kvalitet, audit-loggen är admin. Händelseloggen (admin) får alltså inga avvikelserader.
+- **PDF/e-post:** `renderDeviationReport` i `document-pdf.ts` (Reklamation/Reklamationsbesked/Avvikelserapport; aldrig kostnader eller priser; TO-numret bara på den interna). `POST /deviations/:id/email` loggar `email_log` med dokumenttypen `deviation` och `include_details`; Skicka om spelar upp valet och kräver `kvalitet` (`resendAccessRule`, mailmodulens skrivregel innehåller `kvalitet`). Ingen statusändring; `email_sent` bara efter lyckat utskick.
+- **Aviseringen** `deviations_overdue` (gul, `["kvalitet"]`, `/kvalitet/avvikelser?overdue=1`) = listans `overdue`: öppen och `due_date` < i dag (Stockholm). `deviations_unassigned` byggdes inte (brus).
+- **Orsaksregistret** `deviation_reasons` ligger i register-modulen (`/deviation-reasons`, skriv `kvalitet`, radera admin med kopplingsflytt — referenskartan har `deviations.reason_id` och `mo_operation_scrap.reason_id`; listan är `TERMINAL_READ` eftersom terminalen väljer kassationsorsak). Exempeldata har åtta orsaker.
+- Tester: `deviation-rules.test.ts` (vitlistan, kraven, nettot, varje mismatch), `deviations.route.test.ts` (svar, kontroller, flöde, kostnader med härledda belopp, Koppla dokument, filer, PDF, CSV, aviseringen, behörigheter), `deviation-shortcuts.route.test.ts` (länk i samma tx, vägrad länk lämnar inget dokument, 403 utan Kvalitet), `deviation-mail.test.ts`, `deviation-reasons.test.ts` (registret, kopplingsflytten, kassationsorsaken, kassationsrapporten), `delivery-quality-calc.test.ts` + `reports-delivery-quality.route.test.ts`. **Testfällor:** en test som skapar en aktiv orsak med `applies_scrap` måste tömma `deviation_reasons` efteråt — annars kräver alla senare kassationstester med fritext en orsak.

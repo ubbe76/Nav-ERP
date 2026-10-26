@@ -9,11 +9,14 @@ import {
   costCalculationMaterialRows,
   customers,
   deliveryTerms,
+  deviationReasons,
+  deviations,
   inquiries,
   inquiryRows,
   invoiceRows,
   invoices,
   moMaterialConsumptions,
+  moOperationScrap,
   packageTypes,
   paymentTerms,
   purchaseOrderRows,
@@ -27,6 +30,7 @@ import {
 } from "@navet/db";
 import type {
   CreateRegisterEntryInput,
+  DeviationReasonInput,
   PackageTypeFreightInput,
   QuoteLossReasonInput,
   UpdateRegisterEntryInput,
@@ -101,7 +105,7 @@ const PARTNER_AND_DOCUMENT_REFERENCES = {
 } satisfies Record<string, RegisterReference[]>;
 
 export const REGISTER_REFERENCES: Record<
-  "deliveryTerms" | "paymentTerms" | "carriers" | "units" | "packageTypes" | "quoteLossReasons",
+  "deliveryTerms" | "paymentTerms" | "carriers" | "units" | "packageTypes" | "quoteLossReasons" | "deviationReasons",
   RegisterReference[]
 > = {
   deliveryTerms: PARTNER_AND_DOCUMENT_REFERENCES.deliveryTerm,
@@ -126,6 +130,11 @@ export const REGISTER_REFERENCES: Record<
   packageTypes: [ref(articles, "articles", "artikel|artiklar", articles.packageTypeId)],
   // Förlustorsaker: the lost quotes carrying the reason (reopen clears it).
   quoteLossReasons: [ref(salesOrders, "sales_orders", "förlorad offert|förlorade offerter", salesOrders.lostReasonId)],
+  // Avvikelseorsaker (Kvalitet): the cases and the scrap rows carrying it.
+  deviationReasons: [
+    ref(deviations, "deviations", "avvikelse|avvikelser", deviations.reasonId),
+    ref(moOperationScrap, "mo_operation_scrap", "kassationsrad|kassationsrader", moOperationScrap.reasonId),
+  ],
 };
 
 export function createRegisterRepository(db: Db) {
@@ -269,6 +278,40 @@ export function createRegisterRepository(db: Db) {
     },
   };
 
+  // Avvikelseorsaker: the same generic machinery with the register's own
+  // shape (the four "applies to" flags + active).
+  const deviationReasonsBase = forTable(deviationReasons as unknown as RegisterTable, REGISTER_REFERENCES.deviationReasons);
+  const deviationReasonEntries = {
+    ...deviationReasonsBase,
+    async list() {
+      return db.select().from(deviationReasons).orderBy(asc(deviationReasons.code));
+    },
+    async findById(id: string) {
+      const [row] = await db.select().from(deviationReasons).where(eq(deviationReasons.id, id));
+      return row ?? null;
+    },
+    async findByCode(code: string) {
+      const [row] = await db.select().from(deviationReasons).where(eq(deviationReasons.code, code));
+      return row ?? null;
+    },
+    async findByName(name: string) {
+      const [row] = await db.select().from(deviationReasons).where(eq(deviationReasons.name, name));
+      return row ?? null;
+    },
+    async create(input: DeviationReasonInput) {
+      const [row] = await db.insert(deviationReasons).values(input).returning();
+      return row!;
+    },
+    async update(id: string, input: DeviationReasonInput) {
+      const [row] = await db
+        .update(deviationReasons)
+        .set({ ...input, updatedAt: new Date() })
+        .where(eq(deviationReasons.id, id))
+        .returning();
+      return row ?? null;
+    },
+  };
+
   return {
     deliveryTerms: forTable(deliveryTerms, REGISTER_REFERENCES.deliveryTerms),
     paymentTerms: forTable(paymentTerms as unknown as RegisterTable, REGISTER_REFERENCES.paymentTerms),
@@ -276,6 +319,7 @@ export function createRegisterRepository(db: Db) {
     units: forTable(units as unknown as RegisterTable, REGISTER_REFERENCES.units),
     packageTypes: forTable(packageTypes as unknown as RegisterTable, REGISTER_REFERENCES.packageTypes),
     quoteLossReasons: lossReasons,
+    deviationReasons: deviationReasonEntries,
     // Kollitypens fraktfält (frakt) — outside the generic code/name register.
     async updatePackageTypeFreight(id: string, input: PackageTypeFreightInput) {
       const num = (v: number | null) => (v === null ? null : String(v));

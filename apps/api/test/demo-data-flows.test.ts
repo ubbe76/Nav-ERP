@@ -11,7 +11,7 @@ import { DEMO_DATA, DEMO_LOCATIONS } from "../src/modules/demo/service/demo-data
 // order, a manufacturing order with the phantom dissolved, the costing and
 // the requirements calculation. One company for the whole file.
 
-const TRUNCATE = sql`TRUNCATE articles, customers, suppliers, work_centers, production_groups, article_groups, payment_terms, audit_log, user_settings, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE articles, customers, suppliers, work_centers, production_groups, article_groups, payment_terms, deviation_reasons, audit_log, user_settings, users CASCADE`;
 const PASSWORD = "ett-tillräckligt-långt-lösenord";
 const app = buildApp();
 let cookie = "";

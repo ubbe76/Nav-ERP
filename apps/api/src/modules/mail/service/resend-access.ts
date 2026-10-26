@@ -20,6 +20,9 @@ export function resendAccessRule(documentType: string): AccessRule {
     case "invoice":
     case "payment_reminder":
       return ["forsaljning"];
+    // Avvikelsens reklamationsrapport: Kvalitet.
+    case "deviation":
+      return ["kvalitet"];
     case "alert_digest":
     default:
       return ["admin"];

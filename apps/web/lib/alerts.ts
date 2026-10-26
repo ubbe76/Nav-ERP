@@ -18,6 +18,7 @@ export const ALERT_KINDS = [
   "cost_center_missing",
   "invoice_scans_pending",
   "invoice_scan_mail_failed",
+  "deviations_overdue",
 ] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 

@@ -1,4 +1,5 @@
 import type {
+  DeliveryPrecisionQuery,
   OrderMarginQuery,
   ReportRangeQuery,
   SalesStatisticsQuery,
@@ -6,15 +7,41 @@ import type {
   ScrapStatisticsQuery,
 } from "@navet/shared";
 import type { ReportsRepository } from "../repository/reports.repository.js";
-import { bucketDeliveryPrecision, type PrecisionSection } from "./delivery-precision-calc.js";
+import { bucketDeliveryPrecision, type PrecisionOrderInput, type PrecisionSection } from "./delivery-precision-calc.js";
+import {
+  groupPrecisionByCounterparty,
+  measuredOrderIds,
+  monthRangeDates,
+  type CounterpartyPrecisionRow,
+  type CounterpartyPrecisionTotals,
+  type QualityDeviationInput,
+} from "./delivery-quality-calc.js";
 import { pairCalculationOutcomes, type OutcomeResult } from "./calc-outcome-calc.js";
 import { groupOrderMargin } from "./order-margin-calc.js";
+
+// Gruppera: Motpart adds the per-counterparty rows to each side; the month
+// view (groupBy month, the default) is unchanged.
+export interface DeliveryPrecisionSide extends PrecisionSection {
+  counterparties?: { rows: CounterpartyPrecisionRow[]; totals: CounterpartyPrecisionTotals };
+}
 
 export interface DeliveryPrecisionResponse {
   from: string;
   to: string;
-  sales: PrecisionSection;
-  purchase: PrecisionSection;
+  groupBy: DeliveryPrecisionQuery["groupBy"];
+  sales: DeliveryPrecisionSide;
+  purchase: DeliveryPrecisionSide;
+}
+
+// The quality module, narrowed (QualityService satisfies it): the period's
+// cases of the side's type with their net cost, and which measured orders
+// carry a case.
+export interface PrecisionQualityReader {
+  precisionQuality(
+    kind: "sales" | "purchase",
+    range: { fromDate: string; toDate: string },
+    measuredOrderIds: string[]
+  ): Promise<{ deviations: QualityDeviationInput[]; ordersWithDeviation: ReadonlySet<string> }>;
 }
 
 export interface CalculationOutcomeResponse extends OutcomeResult {
@@ -103,7 +130,22 @@ export interface ArticleSelfCostReader {
   ): Promise<Map<string, { selfCostPerUnit: number; calculationId: string; calculatedAt: string; quantity: number }>>;
 }
 
-export function createReportsService(repo: ReportsRepository, selfCosts: ArticleSelfCostReader) {
+export function createReportsService(repo: ReportsRepository, selfCosts: ArticleSelfCostReader, quality?: PrecisionQualityReader) {
+  async function precisionSide(
+    kind: "sales" | "purchase",
+    orders: PrecisionOrderInput[],
+    range: { from: string; to: string },
+    groupBy: DeliveryPrecisionQuery["groupBy"],
+    seePrices: boolean
+  ): Promise<DeliveryPrecisionSide> {
+    const section = bucketDeliveryPrecision(orders, range);
+    if (groupBy !== "counterparty") return section;
+    const q = quality
+      ? await quality.precisionQuality(kind, monthRangeDates(range), measuredOrderIds(orders, range))
+      : { deviations: [], ordersWithDeviation: new Set<string>() };
+    return { ...section, counterparties: groupPrecisionByCounterparty(orders, range, q, { seePrices }) };
+  }
+
   return {
     // Marginalrapport. The self cost is each article's LATEST pre-calculation,
     // so this applies today's cost picture to historical revenue — a
@@ -121,16 +163,21 @@ export function createReportsService(repo: ReportsRepository, selfCosts: Article
       return { ...range, groupBy: query.groupBy, ...groupOrderMargin(rows, perUnit, query.groupBy) };
     },
 
-    async getDeliveryPrecision(query: ReportRangeQuery): Promise<DeliveryPrecisionResponse> {
+    async getDeliveryPrecision(
+      query: ReportRangeQuery & { groupBy?: DeliveryPrecisionQuery["groupBy"] },
+      opts: { seePrices: boolean } = { seePrices: true }
+    ): Promise<DeliveryPrecisionResponse> {
       const range = resolveReportRange(query, stockholmToday());
+      const groupBy = query.groupBy ?? "month";
       const [sales, purchase] = await Promise.all([
         repo.loadSalesPrecisionOrders(),
         repo.loadPurchasePrecisionOrders(),
       ]);
       return {
         ...range,
-        sales: bucketDeliveryPrecision(sales, range),
-        purchase: bucketDeliveryPrecision(purchase, range),
+        groupBy,
+        sales: await precisionSide("sales", sales, range, groupBy, opts.seePrices),
+        purchase: await precisionSide("purchase", purchase, range, groupBy, opts.seePrices),
       };
     },
 
@@ -138,12 +185,13 @@ export function createReportsService(repo: ReportsRepository, selfCosts: Article
     // paying for both and discarding half.
     async getDeliveryPrecisionSection(
       kind: "sales" | "purchase",
-      query: ReportRangeQuery
-    ): Promise<{ from: string; to: string; section: PrecisionSection }> {
+      query: ReportRangeQuery & { groupBy?: DeliveryPrecisionQuery["groupBy"] },
+      opts: { seePrices: boolean } = { seePrices: true }
+    ): Promise<{ from: string; to: string; section: DeliveryPrecisionSide }> {
       const range = resolveReportRange(query, stockholmToday());
       const orders =
         kind === "sales" ? await repo.loadSalesPrecisionOrders() : await repo.loadPurchasePrecisionOrders();
-      return { ...range, section: bucketDeliveryPrecision(orders, range) };
+      return { ...range, section: await precisionSide(kind, orders, range, query.groupBy ?? "month", opts.seePrices) };
     },
 
     async getCalculationOutcome(query: ReportRangeQuery): Promise<CalculationOutcomeResponse> {

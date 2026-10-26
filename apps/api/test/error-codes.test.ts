@@ -372,6 +372,19 @@ import { ReadOnlyAccountError } from "../src/modules/auth/middleware/auth.middle
 import { LoginThrottledError } from "../src/modules/auth/service/login-throttle.js";
 import { ClientCustomerMismatchError, ClientPriceNotAllowedError, ClientScopeMissingError } from "../src/modules/auth/middleware/permission.middleware.js";
 import { ApiClientCustomerNotFoundError } from "../src/modules/oauth/service/oauth.service.js";
+import {
+  DeviationCloseRequirementsError,
+  DeviationCostNotFoundError,
+  DeviationFileNotFoundError,
+  DeviationLinkMismatchError,
+  DeviationLinkNotAllowedError,
+  DeviationLinkNotFoundError,
+  DeviationNotEditableError,
+  DeviationNotFoundError,
+  DeviationReasonNotApplicableError,
+  InvalidDeviationFileTypeError,
+} from "../src/modules/quality/service/deviation-errors.js";
+import { ScrapReasonInvalidError, ScrapReasonRequiredError } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { DemoDataNotAvailableError } from "../src/modules/demo/service/demo-data.service.js";
 import {
   DuplicatePermissionGroupCodeError,
@@ -815,6 +828,19 @@ const cases: Array<[Error, string]> = [
   [new InvoiceScanMailPasswordRequiredError(), ERROR_CODES.INVOICE_SCAN_MAIL_PASSWORD_REQUIRED],
   [new InvoiceScanMailFoldersEqualError(), ERROR_CODES.INVOICE_SCAN_MAIL_FOLDERS_EQUAL],
   [new SupplierInvoiceFileFromScanError("FI-1"), ERROR_CODES.SUPPLIER_INVOICE_FILE_FROM_SCAN],
+  // Reklamationer och avvikelser
+  [new DeviationNotFoundError("x"), ERROR_CODES.DEVIATION_NOT_FOUND],
+  [new DeviationLinkMismatchError("salesOrderId", "KO-1 tillhör en annan kund"), ERROR_CODES.DEVIATION_LINK_MISMATCH],
+  [new DeviationLinkNotAllowedError("AV-1 är avslutad"), ERROR_CODES.DEVIATION_LINK_NOT_ALLOWED],
+  [new DeviationReasonNotApplicableError("Orsaken gäller inte"), ERROR_CODES.DEVIATION_REASON_NOT_APPLICABLE],
+  [new DeviationCloseRequirementsError(["correctiveAction"]), ERROR_CODES.DEVIATION_CLOSE_REQUIREMENTS],
+  [new DeviationNotEditableError("AV-1"), ERROR_CODES.DEVIATION_NOT_EDITABLE],
+  [new DeviationCostNotFoundError("x"), ERROR_CODES.DEVIATION_COST_NOT_FOUND],
+  [new DeviationLinkNotFoundError("x"), ERROR_CODES.DEVIATION_LINK_NOT_FOUND],
+  [new DeviationFileNotFoundError("x"), ERROR_CODES.DEVIATION_FILE_NOT_FOUND],
+  [new InvalidDeviationFileTypeError("text/plain"), ERROR_CODES.INVALID_DEVIATION_FILE_TYPE],
+  [new ScrapReasonRequiredError(true), ERROR_CODES.SCRAP_REASON_REQUIRED],
+  [new ScrapReasonInvalidError(), ERROR_CODES.SCRAP_REASON_INVALID],
 ];
 
 describe("error class name -> ERROR_CODES derivation", () => {

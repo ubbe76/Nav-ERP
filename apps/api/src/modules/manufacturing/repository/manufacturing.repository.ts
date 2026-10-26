@@ -3,6 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import {
   articles,
   bomComponents,
+  deviationReasons,
   employees,
   manufacturingOrders,
   moMaterialConsumptions,
@@ -145,6 +146,8 @@ export interface ReportOperationQuantitiesInput {
   quantityOk: number;
   quantityScrapped: number;
   scrapReason?: string;
+  // Kvalitet: the Avvikelseorsak (validated by the service).
+  scrapReasonId?: string;
   actualTime?: number;
   locationId?: string;
   markDone: boolean;
@@ -489,7 +492,9 @@ async function reportOperationQuantitiesInTx(
     const [scrapRow] = await tx.insert(moOperationScrap).values({
       moOperationId: operationId,
       quantity: String(input.quantityScrapped),
-      reason: input.scrapReason ?? "",
+      reasonId: input.scrapReasonId ?? null,
+      // The comment (or, without the register, the whole reason).
+      reason: input.scrapReason?.trim() ? input.scrapReason.trim() : null,
       employeeId: input.employeeId ?? null,
       createdBy: input.createdBy,
     }).returning({ id: moOperationScrap.id });
@@ -1782,6 +1787,23 @@ export function createManufacturingRepository(db: Db) {
       });
     },
 
+    // Kassationsorsaken (Kvalitet): does the register have an active scrap
+    // reason (then one is required), and the chosen reason's state.
+    async scrapReasonRules(reasonId: string | undefined) {
+      const [any] = await db
+        .select({ id: deviationReasons.id })
+        .from(deviationReasons)
+        .where(and(eq(deviationReasons.active, true), eq(deviationReasons.appliesScrap, true)))
+        .limit(1);
+      const [reason] = reasonId
+        ? await db
+            .select({ active: deviationReasons.active, appliesScrap: deviationReasons.appliesScrap, name: deviationReasons.name })
+            .from(deviationReasons)
+            .where(eq(deviationReasons.id, reasonId))
+        : [];
+      return { registerHasScrapReasons: any !== undefined, reason: reason ?? null };
+    },
+
     // Scrap log for a whole order, newest first, with the operation's
     // sequence number and who reported it.
     async listScrapForOrder(moId: string) {
@@ -1792,12 +1814,18 @@ export function createManufacturingRepository(db: Db) {
           sequenceNo: moOperations.sequenceNo,
           workCenterName: workCenters.name,
           quantity: moOperationScrap.quantity,
+          // Kvalitet: the Avvikelseorsak; `reason` is its comment (or an
+          // older row's whole free-text reason).
+          reasonId: moOperationScrap.reasonId,
+          reasonCode: deviationReasons.code,
+          reasonName: deviationReasons.name,
           reason: moOperationScrap.reason,
           employeeName: employees.name,
           createdAt: moOperationScrap.createdAt,
         })
         .from(moOperationScrap)
         .innerJoin(moOperations, eq(moOperations.id, moOperationScrap.moOperationId))
+        .leftJoin(deviationReasons, eq(deviationReasons.id, moOperationScrap.reasonId))
         .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
         .leftJoin(employees, eq(employees.id, moOperationScrap.employeeId))
         .where(eq(moOperations.manufacturingOrderId, moId))

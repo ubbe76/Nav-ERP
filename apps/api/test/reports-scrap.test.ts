@@ -95,11 +95,13 @@ describe("reports service — scrap statistics", () => {
 
     expect(result.rows).toHaveLength(2);
     // Sorted by scrappedQuantity descending.
-    expect(result.rows[0]!.key).toBe("Spån");
-    expect(result.rows[0]!.label).toBe("Spån");
+    // Kvalitet (0153): free-text rows (no Avvikelseorsak) are labelled
+    // "(fritext)" and keyed apart from the register's reason ids.
+    expect(result.rows[0]!.key).toBe("text:Spån");
+    expect(result.rows[0]!.label).toBe("Spån (fritext)");
     expect(result.rows[0]!.scrappedQuantity).toBe(3);
     expect(result.rows[0]!.reportCount).toBe(1);
-    expect(result.rows[1]!.key).toBe("spån");
+    expect(result.rows[1]!.key).toBe("text:spån");
     expect(result.rows[1]!.scrappedQuantity).toBe(2);
     expect(result.totalScrapped).toBe(5);
   });

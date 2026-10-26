@@ -2769,6 +2769,8 @@ export type EmailDocumentType =
   | "payment_reminder"
   // Aviseringar: the daily digest — cannot be resent (the API answers 409).
   | "alert_digest"
+  // Kvalitet: an avvikelse's reklamationsrapport.
+  | "deviation"
   | "test";
 export type EmailStatus = "sent" | "failed";
 
@@ -2780,6 +2782,7 @@ export const EMAIL_DOCUMENT_TYPE_LABELS: Record<EmailDocumentType, string> = {
   invoice: "Faktura",
   payment_reminder: "Betalningspåminnelse",
   alert_digest: "Daglig sammanställning",
+  deviation: "Avvikelse",
   test: "Testmejl",
 };
 
@@ -2872,7 +2875,8 @@ export type NumberSeriesKey =
   | "shipment"
   | "stock_count"
   | "quote"
-  | "invoice_scan";
+  | "invoice_scan"
+  | "deviation";
 
 export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
   article: "Artikelnummer",
@@ -2893,6 +2897,7 @@ export const NUMBER_SERIES_LABELS: Record<NumberSeriesKey, string> = {
   shipment: "Försändelse",
   stock_count: "Inventering",
   invoice_scan: "Fakturainkorg",
+  deviation: "Avvikelse",
 };
 
 export interface NumberSeries {

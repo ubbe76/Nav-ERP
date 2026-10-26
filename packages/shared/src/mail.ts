@@ -5,7 +5,8 @@ import { listQuerySchema, statusListParam } from "./list.js";
 // a short plain-text message the user can edit in the send dialog.
 // payment_reminder (B3) logs against the INVOICE's id — the reminder is an
 // event on the invoice, not a document of its own. alert_digest is the daily
-// aviseringar sammanställning — no documentId, and never resent.
+// aviseringar sammanställning — no documentId, and never resent. deviation
+// is an avvikelse's reklamationsrapport (Kvalitet).
 export const emailDocumentTypes = [
   "inquiry",
   "purchase_order",
@@ -15,6 +16,7 @@ export const emailDocumentTypes = [
   "payment_reminder",
   "test",
   "alert_digest",
+  "deviation",
 ] as const;
 export type EmailDocumentType = (typeof emailDocumentTypes)[number];
 

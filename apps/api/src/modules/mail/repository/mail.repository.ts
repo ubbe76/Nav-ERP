@@ -17,6 +17,8 @@ export interface NewEmailLogEntry {
   attachDrawings: boolean;
   // Konfigurator 4b: Visa tilläggspriser as sent; null = not applicable.
   showConfigurationPrices: boolean | null;
+  // Avvikelser: the reklamationsrapport's details choice; null = not applicable.
+  includeDetails?: boolean | null;
   status: EmailStatus;
   error: string | null;
 }

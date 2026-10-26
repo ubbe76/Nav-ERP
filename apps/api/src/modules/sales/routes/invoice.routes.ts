@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import { deviationLinkForbidden } from "../../quality/service/deviation-link-access.js";
+import { DeviationLinkNotAllowedError } from "../../quality/service/deviation-errors.js";
 import { z } from "zod";
 import {
   createCreditInvoiceSchema,
@@ -233,9 +235,13 @@ export async function invoiceRoutes(app: FastifyInstance, opts: { service: Invoi
   // Raises a credit note (draft) against an issued/paid original invoice.
   app.post<{ Params: { id: string } }>("/invoices/:id/credit", async (req, reply) => {
     const input = createCreditInvoiceSchema.parse(req.body);
+    // Avvikelser (Skapa kreditfaktura): linking is a Kvalitet write.
+    const forbidden = deviationLinkForbidden(input.deviationId, req.user);
+    if (forbidden) return reply.code(403).send(errorBody(forbidden));
     try {
       return reply.code(201).send(await service.createCredit(req.params.id, input, req.user!.id));
     } catch (err) {
+      if (err instanceof DeviationLinkNotAllowedError) return reply.code(409).send(errorBody(err));
       return invoiceError(err, reply);
     }
   });

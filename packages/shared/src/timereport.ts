@@ -283,6 +283,10 @@ export const stampOutSchema = z
     quantityOk: z.coerce.number().nonnegative().default(0),
     quantityScrapped: z.coerce.number().nonnegative().default(0),
     scrapReason: z.string().trim().max(500).optional(),
+    // Kvalitet: the Avvikelseorsak (applies_scrap) — required by the API when
+    // the register has an active scrap reason; scrapReason is then the
+    // optional comment. Without any such reason the free text is the reason.
+    scrapReasonId: z.string().uuid().optional(),
     // Also mark the operation as done (operationen är klar) when clocking out.
     markOperationDone: z.boolean().optional(),
     // Materialbrist: report anyway after a 409 material-shortage in mode
@@ -293,7 +297,7 @@ export const stampOutSchema = z
     // everyone else; the terminal never sends it.
     stoppedAt: z.string().datetime({ offset: true }).optional(),
   })
-  .refine((data) => data.quantityScrapped === 0 || (data.scrapReason ?? "").length > 0, {
+  .refine((data) => data.quantityScrapped === 0 || data.scrapReasonId !== undefined || (data.scrapReason ?? "").length > 0, {
     message: "Ange en kassationsorsak när kasserat antal är större än 0",
     path: ["scrapReason"],
   });

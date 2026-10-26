@@ -3,6 +3,7 @@ import {
   accounts,
   articles,
   customers,
+  deviations,
   einvoiceTransmissions,
   emailLog,
   invoices,
@@ -186,6 +187,24 @@ export function createAlertsRepository(db: Db) {
 
     // Fakturor i inkorgen att granska: status new/interpreted (the derived
     // Att granska), with the interpreted supplier and invoice number.
+    // Åtgärd senast passerad: open cases (Registrerad/Utreds) whose due
+    // date is before today — the list's own `overdue` filter.
+    async overdueDeviations(today: string) {
+      return db
+        .select({
+          id: deviations.id,
+          deviationNumber: deviations.deviationNumber,
+          title: deviations.title,
+          dueDate: deviations.dueDate,
+          counterpartyName: sql<string | null>`coalesce(${customers.name}, ${suppliers.name})`,
+        })
+        .from(deviations)
+        .leftJoin(customers, eq(customers.id, deviations.customerId))
+        .leftJoin(suppliers, eq(suppliers.id, deviations.supplierId))
+        .where(and(inArray(deviations.status, ["registered", "investigating"]), sql`${deviations.dueDate} < ${today}::date`))
+        .orderBy(asc(deviations.dueDate), asc(deviations.deviationNumber));
+    },
+
     async pendingInvoiceScans() {
       return db
         .select({

@@ -20,7 +20,7 @@ paths:
 ## Exempeldata
 
 - Modulen `demo` (`GET/POST /demo-data`, admin) skapar det påhittade storköksföretaget i `demo/service/demo-data.ts` (ren datafil) i EN transaktion under `pg_advisory_xact_lock(hashtext('demo_data'))`, bara när artiklar, kunder, leverantörer och resurser alla är tomma (annars 409 `demo-data-not-available` med `blockers`). Ingen borttagning (append-only lager). Sidan `/system/exempeldata`.
-- Grunddata återanvänds: artikelgrupper, betalningsvillkor och enheter vid samma kod ELLER namn (båda är unika), produktionsgrupper vid samma kod, lagerplatser vid samma namn — och lagerplatserna läggs aldrig under reservlagret `***` (på en ny installation det enda lagret) utan under ett eget *Huvudlager*.
+- Grunddata återanvänds: Avvikelseorsakerna (åtta, Kvalitet) vid samma kod eller namn, artikelgrupper, betalningsvillkor och enheter vid samma kod ELLER namn (båda är unika), produktionsgrupper vid samma kod, lagerplatser vid samma namn — och lagerplatserna läggs aldrig under reservlagret `***` (på en ny installation det enda lagret) utan under ett eget *Huvudlager*.
 - Skrivningen (`demo-data.repository.ts`) går genom de befintliga Tx-hjälparna (`insertArticle`, `insertRoutingOperations`, `insertBomRows`, `replacePriceBreaks`, `resolveStockLocation`, `getNextOrderNumber`). De tillverkade artiklarnas standardpris är kalkylens TVK/st vid antal 1 — `demo-data-flows.test.ts` håller dem i synk, så **en kalkyländring kan kräva nya värden i datafilen**.
 
 ## Kom igång (onboarding)

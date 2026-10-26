@@ -32,6 +32,7 @@ import type {
   UpdateSalesOrderHeaderInput,
   UpdateSalesOrderRowInput,
 } from "@navet/shared";
+import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
 import type { Tx } from "@navet/db";
 import type { RowConfigurationMutationResult, SalesRepository, SalesRowWrite } from "../repository/sales.repository.js";
 import { ROW_ARTICLE_UNIQUE } from "../repository/sales.repository.js";
@@ -1061,7 +1062,16 @@ export function createSalesService(
       const dimensions = await repo.resolveDimensions({ costCenterId: input.costCenterId, projectId: input.projectId });
       let created;
       try {
-        created = await repo.createQuote({ ...input, ...dimensions, rows, quoteValidUntil, currency, exchangeRate }, createdBy);
+        // Avvikelser (Skapa ersättningsorder): the case link in the order's
+        // own transaction.
+        const deviationId = input.deviationId;
+        created = await repo.createQuote(
+          { ...input, ...dimensions, rows, quoteValidUntil, currency, exchangeRate },
+          createdBy,
+          deviationId
+            ? (tx, orderId) => linkDeviationInTx(tx, { deviationId, documentType: "sales_order", documentId: orderId, userId: createdBy })
+            : undefined
+        );
       } catch (err) {
         // Backstop for the index, caught outside the repository's transaction
         // (which has already rolled back).

@@ -39,6 +39,7 @@ describe("the catalog", () => {
       "manufacture_needed",
       "bank_unreconciled",
       "cost_center_missing",
+      "deviations_overdue",
     ]);
   });
 
@@ -75,10 +76,12 @@ describe("visibleKinds", () => {
     expect(visibleKinds(user(["tillverkning"]))).toEqual(["manufacturing_order_late", "manufacture_needed"]);
     expect(visibleKinds(user(["lager"]))).toEqual(["stock_negative"]);
     expect(visibleKinds(user(["ekonomi"]))).toEqual(["recurring_verification_failed", "bank_unreconciled", "cost_center_missing"]);
+    // Kvalitet: the open avvikelser past Åtgärd senast.
+    expect(visibleKinds(user(["kvalitet"]))).toEqual(["deviations_overdue"]);
   });
 
   it("Utskick som misslyckades, Tillägg and the invoice mailbox are admin-only: every menu together still does not give them", () => {
-    const all = user(["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "ekonomi", "rapporter"]);
+    const all = user(["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "kvalitet", "ekonomi", "rapporter"]);
     expect(visibleKinds(all)).toEqual(
       ALERT_KIND_CATALOG.map((d) => d.kind).filter((k) => k !== "email_failed" && k !== "plugin_delivery_failed" && k !== "invoice_scan_mail_failed")
     );

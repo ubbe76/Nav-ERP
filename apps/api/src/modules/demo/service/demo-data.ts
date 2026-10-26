@@ -77,8 +77,18 @@ export interface DemoArticle {
   openingStock?: number;
 }
 
+// Avvikelseorsaker (Kvalitet): which kinds of case — and the scrap
+// reporting — each reason applies to.
+export interface DemoDeviationReason extends DemoCode {
+  customer: boolean;
+  supplier: boolean;
+  internal: boolean;
+  scrap: boolean;
+}
+
 export interface DemoData {
   articleGroups: DemoCode[];
+  deviationReasons: DemoDeviationReason[];
   paymentTerm: DemoCode;
   productionGroups: DemoCode[];
   workCenters: DemoWorkCenter[];
@@ -101,6 +111,16 @@ export const DEMO_DATA: DemoData = {
   ],
   // The code is the number of days — computeDueDate reads it that way.
   paymentTerm: { code: "30", name: "30 dagar netto" },
+  deviationReasons: [
+    { code: "TRANSP", name: "Transportskada", customer: true, supplier: true, internal: false, scrap: false },
+    { code: "FELART", name: "Fel artikel", customer: true, supplier: true, internal: false, scrap: false },
+    { code: "FELANT", name: "Fel antal", customer: true, supplier: true, internal: false, scrap: false },
+    { code: "MATT", name: "Måttfel", customer: true, supplier: true, internal: true, scrap: true },
+    { code: "YTA", name: "Ytskada", customer: true, supplier: true, internal: true, scrap: true },
+    { code: "MATFEL", name: "Materialfel", customer: false, supplier: true, internal: true, scrap: true },
+    { code: "RITN", name: "Felaktig ritning", customer: false, supplier: false, internal: true, scrap: true },
+    { code: "MASKIN", name: "Maskinfel", customer: false, supplier: false, internal: true, scrap: true },
+  ],
   productionGroups: [
     { code: "PV", name: "Plåtverkstad" },
     { code: "MO", name: "Montering" },

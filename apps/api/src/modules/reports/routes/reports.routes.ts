@@ -6,12 +6,14 @@ import {
   purchaseStatisticsQuerySchema,
   scrapStatisticsQuerySchema,
   deliveryPrecisionCsvQuerySchema,
+  deliveryPrecisionQuerySchema,
   purchaseOrderRegisterQuerySchema,
   projectReportQuerySchema,
   quoteFollowupQuerySchema,
   salesOrderRegisterQuerySchema,
 } from "@navet/shared";
 import { requirePermission } from "../../auth/middleware/permission.middleware.js";
+import { canSeePrices } from "../../auth/middleware/access-rules.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import type { ReportsService } from "../service/reports.service.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -25,6 +27,7 @@ import { ProjectNotFoundError, type ProjectReportService } from "../service/proj
 import {
   buildCalculationOutcomeCsv,
   buildDeliveryPrecisionCsv,
+  buildCounterpartyPrecisionCsv,
   buildPurchaseStatisticsCsv,
   buildSalesStatisticsCsv,
   buildScrapStatisticsCsv,
@@ -48,14 +51,21 @@ export async function reportsRoutes(
     return reply.send(content);
   }
 
+  // Gruppera: Månad (default) | Motpart — the latter with the quality
+  // columns (Kvalitet); Avvikelsekostnad follows canSeePrices.
   app.get("/reports/delivery-precision", async (req) => {
-    const query = reportRangeSchema.parse(req.query);
-    return service.getDeliveryPrecision(query);
+    const query = deliveryPrecisionQuerySchema.parse(req.query);
+    return service.getDeliveryPrecision(query, { seePrices: canSeePrices(req.user!) });
   });
 
   app.get("/reports/delivery-precision/csv", async (req, reply) => {
     const query = deliveryPrecisionCsvQuerySchema.parse(req.query);
-    const result = await service.getDeliveryPrecisionSection(query.kind, query);
+    const seePrices = canSeePrices(req.user!);
+    const result = await service.getDeliveryPrecisionSection(query.kind, query, { seePrices });
+    if (query.groupBy === "counterparty") {
+      const filename = `leveransprecision-${query.kind}-motpart-${result.from}-${result.to}.csv`;
+      return sendCsv(reply, filename, buildCounterpartyPrecisionCsv(result.section.counterparties!, { kind: query.kind, seePrices }));
+    }
     const filename = `leveransprecision-${query.kind}-${result.from}-${result.to}.csv`;
     return sendCsv(reply, filename, buildDeliveryPrecisionCsv(result.section.months));
   });

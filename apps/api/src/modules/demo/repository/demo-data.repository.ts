@@ -7,6 +7,7 @@ import {
   customerContacts,
   customerDeliveryAddresses,
   customers,
+  deviationReasons,
   paymentTerms,
   productionGroups,
   stockLocations,
@@ -124,6 +125,22 @@ export async function writeDemoData(tx: Tx, data: DemoData, userId: string | nul
     .where(or(eq(paymentTerms.code, data.paymentTerm.code), eq(paymentTerms.name, data.paymentTerm.name)))
     .limit(1);
   const paymentTermId = term?.id ?? (await tx.insert(paymentTerms).values(data.paymentTerm).returning({ id: paymentTerms.id }))[0]!.id;
+
+  // Avvikelseorsaker: unique on both code and name — an existing one (either
+  // matching) is left as it is.
+  for (const reason of data.deviationReasons) {
+    await tx
+      .insert(deviationReasons)
+      .values({
+        code: reason.code,
+        name: reason.name,
+        appliesCustomer: reason.customer,
+        appliesSupplier: reason.supplier,
+        appliesInternal: reason.internal,
+        appliesScrap: reason.scrap,
+      })
+      .onConflictDoNothing();
+  }
 
   const workCenterIds = new Map<string, string>();
   for (const wc of data.workCenters) {

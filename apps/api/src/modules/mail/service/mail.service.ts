@@ -45,6 +45,9 @@ export interface OutgoingMail {
   // order confirmation only) — logged so Skicka om renders the same
   // attachment. Omitted/null = not applicable to the document type.
   showConfigurationPrices?: boolean | null;
+  // Avvikelser: the reklamationsrapport's Orsaksanalys/Åtgärd/Beslut choice —
+  // logged so Skicka om renders the same attachment. Null = not applicable.
+  includeDetails?: boolean | null;
 }
 
 // Minimal slice of nodemailer's Transporter — lets tests inject a fake
@@ -107,6 +110,7 @@ export function createMailService(
           message: mail.message,
           attachDrawings: mail.attachDrawings ?? false,
           showConfigurationPrices: mail.showConfigurationPrices ?? null,
+          includeDetails: mail.includeDetails ?? null,
           status: "failed",
           error: cause,
         });
@@ -121,6 +125,7 @@ export function createMailService(
         message: mail.message,
         attachDrawings: mail.attachDrawings ?? false,
         showConfigurationPrices: mail.showConfigurationPrices ?? null,
+        includeDetails: mail.includeDetails ?? null,
         status: "sent",
         error: null,
       });

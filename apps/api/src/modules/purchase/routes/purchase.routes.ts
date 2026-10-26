@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import { deviationLinkForbidden } from "../../quality/service/deviation-link-access.js";
+import { DeviationLinkNotAllowedError } from "../../quality/service/deviation-errors.js";
 import { articleCardWrite } from "../../auth/middleware/access-rules.js";
 import {
   createArticleSupplierSchema,
@@ -423,11 +425,15 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
 
   app.post("/purchase-orders", async (req, reply) => {
     const input = createPurchaseOrderSchema.parse(req.body);
+    const forbidden = deviationLinkForbidden(input.deviationId, req.user);
+    if (forbidden) return reply.code(403).send(errorBody(forbidden));
     try {
       const order = await service.createPurchaseOrder(input, req.user!.id);
       return reply.code(201).send(order);
     } catch (err) {
       if (err instanceof SupplierNotFoundError || err instanceof ProjectNotFoundError) return reply.code(404).send(errorBody(err));
+      // Avvikelser: the case cannot take the link (closed, wrong type, other supplier).
+      if (err instanceof DeviationLinkNotAllowedError) return reply.code(409).send(errorBody(err));
       if (err instanceof ProjectClosedError) return reply.code(400).send(errorBody(err));
       throw err;
     }

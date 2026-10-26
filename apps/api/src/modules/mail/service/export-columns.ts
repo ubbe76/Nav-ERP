@@ -15,6 +15,7 @@ const EMAIL_DOCUMENT_TYPE_LABELS: Record<EmailDocumentType, string> = {
   payment_reminder: "Betalningspåminnelse",
   test: "Testmejl",
   alert_digest: "Daglig sammanställning",
+  deviation: "Avvikelse",
 };
 
 const EMAIL_STATUS_LABELS: Record<EmailStatus, string> = {

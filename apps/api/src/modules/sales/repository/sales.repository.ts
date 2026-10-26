@@ -648,7 +648,10 @@ export function createSalesRepository(db: Db) {
         currency?: string;
         exchangeRate?: number;
       },
-      createdBy: string | null
+      createdBy: string | null,
+      // Runs last inside the create transaction (Avvikelser: the case link of
+      // Skapa ersättningsorder).
+      inTx?: (tx: Tx, orderId: string) => Promise<unknown>
     ) {
       return db.transaction(async (tx) => {
         // Terms are snapshotted from the customer at creation (like the PO's
@@ -726,6 +729,7 @@ export function createSalesRepository(db: Db) {
         if (!input.confirm) {
           await pluginEvents.emit(tx, { type: "quote.created", entityId: order!.id, entityNumber: order!.orderNumber });
         }
+        if (inTx) await inTx(tx, order!.id);
 
         return { order: withDocumentKind(order!), rows };
       });

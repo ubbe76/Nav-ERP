@@ -11,6 +11,8 @@ import { EmailLogEntryNotFoundError, MailSendError, SmtpNotConfiguredError } fro
 import type { PurchaseService } from "../../purchase/service/purchase.service.js";
 import type { SalesService } from "../../sales/service/sales.service.js";
 import type { InvoiceService } from "../../sales/service/invoice.service.js";
+import type { QualityService } from "../../quality/service/quality.service.js";
+import { DeviationNotFoundError } from "../../quality/service/deviation-errors.js";
 import {
   InquiryNotFoundError,
   InvalidStatusTransitionError as PurchaseInvalidStatusTransitionError,
@@ -33,16 +35,18 @@ export async function mailRoutes(
     purchaseService: PurchaseService;
     salesService: SalesService;
     invoiceService: InvoiceService;
+    qualityService: QualityService;
   }
 ) {
-  const { service, purchaseService, salesService, invoiceService } = opts;
+  const { service, purchaseService, salesService, invoiceService, qualityService } = opts;
 
   function mailError(err: unknown, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) {
     if (
       err instanceof EmailLogEntryNotFoundError ||
       err instanceof InquiryNotFoundError ||
       err instanceof PurchaseOrderNotFoundError ||
-      err instanceof SalesOrderNotFoundError
+      err instanceof SalesOrderNotFoundError ||
+      err instanceof DeviationNotFoundError
     ) {
       return reply.code(404).send({ error: (err as Error).message });
     }
@@ -128,6 +132,13 @@ export async function mailRoutes(
           return await invoiceService.sendReminder(entry.documentId!, { ...input, withFee: false }, req.user!.id);
         case "test":
           return await service.sendTestMail(entry.recipient);
+        // Avvikelser: the reklamationsrapport with the logged details choice.
+        case "deviation":
+          return await qualityService.sendEmail(
+            entry.documentId!,
+            { to: entry.recipient, subject: entry.subject, message: entry.message, includeDetails: entry.includeDetails ?? false },
+            req.user!.id
+          );
         case "alert_digest":
           throw new AlertDigestResendError();
       }

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   createRegisterEntrySchema,
   deleteRegisterEntrySchema,
+  deviationReasonInputSchema,
   packageTypeFreightSchema,
   quoteLossReasonInputSchema,
   updateRegisterEntrySchema,
@@ -16,6 +17,7 @@ import {
   RegisterEntryNotFoundError,
 } from "../service/register.service.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
+import { TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 import { errorBody } from "../../system/service/error-body.js";
 
 // Base-data registers (grunddata): leveransvillkor, betalningsvillkor,
@@ -62,9 +64,10 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
     path: string,
     entries: RegisterEntries<TInput>,
     schemas: { create: z.ZodType<TInput, z.ZodTypeDef, unknown>; update: z.ZodType<TInput, z.ZodTypeDef, unknown> },
-    write?: { config: { access: AccessRule } }
+    write?: { config: { access: AccessRule } },
+    read?: { config: { access: AccessRule } }
   ) {
-    app.get(path, async () => entries.list());
+    app.get(path, read ?? {}, async () => entries.list());
 
     app.post(path, write ?? {}, async (req, reply) => {
       const input = schemas.create.parse(req.body);
@@ -128,5 +131,14 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
     service.quoteLossReasons,
     { create: quoteLossReasonInputSchema, update: quoteLossReasonInputSchema },
     { config: { access: ["forsaljning"] } }
+  );
+  // Avvikelseorsaker belong to Kvalitet; the stamp terminal reads them for
+  // the scrap reason (applies_scrap), so the list is a terminal read too.
+  register(
+    "/deviation-reasons",
+    service.deviationReasons,
+    { create: deviationReasonInputSchema, update: deviationReasonInputSchema },
+    { config: { access: ["kvalitet"] } },
+    { config: { access: TERMINAL_READ } }
   );
 }

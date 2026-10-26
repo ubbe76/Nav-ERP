@@ -314,7 +314,7 @@ export function createTimeReportService(
     if (hasQuantities) {
       await manufacturing.assertMaterialBeforeOperationReport(
         session.moOperationId,
-        { quantityOk, quantityScrapped, scrapReason: input.scrapReason, markDone, employeeId: session.employeeId, createdBy },
+        { quantityOk, quantityScrapped, scrapReason: input.scrapReason, scrapReasonId: input.scrapReasonId, markDone, employeeId: session.employeeId, createdBy },
         input.allowMaterialShortage
       );
     }
@@ -347,6 +347,7 @@ export function createTimeReportService(
         quantityOk,
         quantityScrapped,
         scrapReason: input.scrapReason,
+        scrapReasonId: input.scrapReasonId,
         actualTime: totalHours,
         markDone,
         employeeId: session.employeeId,

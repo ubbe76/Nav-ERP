@@ -87,6 +87,7 @@ const EMAIL_DOCUMENT_TEXT: Record<string, string> = {
   invoice: "Faktura",
   payment_reminder: "Betalningspåminnelse",
   alert_digest: "Daglig sammanställning",
+  deviation: "Avvikelse",
 };
 
 // The card the failed e-mail's document is fixed on; the log itself when
@@ -106,6 +107,8 @@ function emailDocumentHref(documentType: string, documentId: string | null): str
       case "invoice":
       case "payment_reminder":
         return `/forsaljning/fakturor/${documentId}`;
+      case "deviation":
+        return `/kvalitet/avvikelser/${documentId}`;
     }
   }
   return "/system/e-postlogg";
@@ -302,6 +305,21 @@ export function createAlertsService(deps: {
 
     // Fakturor i inkorgen att granska: every scan in new/interpreted, oldest
     // first — the inbox's own Att granska.
+    // Avvikelser som passerat Åtgärd senast: open cases, oldest due first.
+    async deviations_overdue(today) {
+      const rows = await repo.overdueDeviations(today);
+      return rows.map((r) => ({
+        key: r.id,
+        severity: "yellow" as const,
+        href: `/kvalitet/avvikelser/${r.id}`,
+        primary: `${r.deviationNumber} ${r.title}`,
+        secondary: [`Åtgärd senast ${r.dueDate} (${daysLateText(r.dueDate!, today)})`, r.counterpartyName]
+          .filter((part): part is string => part !== null && part !== "")
+          .join(" · "),
+        date: r.dueDate,
+      }));
+    },
+
     async invoice_scans_pending() {
       const rows = await repo.pendingInvoiceScans();
       return rows.map((r) => ({
