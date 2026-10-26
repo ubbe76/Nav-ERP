@@ -210,7 +210,7 @@ Kontrollen gäller utstämpling i [stämpelterminalen](/hjalp/terminal) och på 
 
 ### Avrapportera operation
 
-I rutan **Slutför operation** visas under varje operation **Planerat** (orderns antal), **Klart** (antal OK som redan rapporterats, t.ex. från stämpelterminalen), **Kasserat** när något kasserats och **Kvar** (planerat minus klart — kasserade enheter måste göras om och minskar inte Kvar). Där anges **Antal klart** (förifyllt med vad som **återstår** av orderns antal — delrapporter från stämpelterminalen räknas alltså inte dubbelt), **Kasserat** med **kassationsorsak** (obligatorisk när kasserat > 0) och eventuell **Faktisk tid**, sedan **Slutför**. Operationen markeras **Klar** först när totalt **Antal OK** når orderns antal; rapporterar du färre ligger den kvar som **Väntar** och kan rapporteras vidare här eller i [stämpelterminalen](/hjalp/terminal). Kasserade enheter räknas inte — de måste göras om.
+I rutan **Slutför operation** visas under varje operation **Planerat** (orderns antal), **Klart** (antal OK som redan rapporterats, t.ex. från stämpelterminalen), **Kasserat** när något kasserats och **Kvar** (planerat minus klart — kasserade enheter måste göras om och minskar inte Kvar). Där anges **Antal klart** (förifyllt med vad som **återstår** av orderns antal — delrapporter från stämpelterminalen räknas alltså inte dubbelt), **Kasserat** med **kassationsorsak** (obligatorisk när kasserat > 0; finns det [kvalitetsorsaker](/hjalp/kvalitet#kassation-och-orsaker) för kassation väljs en **Orsak** i listan och fritexten blir en valfri **Kommentar**) och eventuell **Faktisk tid**, sedan **Slutför**. Operationen markeras **Klar** först när totalt **Antal OK** når orderns antal; rapporterar du färre ligger den kvar som **Väntar** och kan rapporteras vidare här eller i [stämpelterminalen](/hjalp/terminal). Kasserade enheter räknas inte — de måste göras om.
 
 Material som är kopplat till operationen i beredningen (se [Artiklar](/hjalp/artiklar)) **dras automatiskt från lagret** för **antal OK + kasserat** — kasserade enheter förbrukar också komponenter:
 
@@ -219,7 +219,7 @@ Material som är kopplat till operationen i beredningen (se [Artiklar](/hjalp/ar
 - Rapporteras färre dras materialet proportionellt.
 - Har material redan förbrukats manuellt på raden fylls bara mellanskillnaden på — inget dubbeluttag.
 
-Antalen kan också rapporteras löpande vid varje utstämpling i [stämpelterminalen](/hjalp/terminal); allt ackumuleras på operationen. Operationstabellen visar **Antal OK** och **Kasserat**, och varje kassation loggas med tid, antal, orsak och anställd i sektionen **Kassationer** på detaljsidan.
+Antalen kan också rapporteras löpande vid varje utstämpling i [stämpelterminalen](/hjalp/terminal); allt ackumuleras på operationen. Operationstabellen visar **Antal OK** och **Kasserat**, och varje kassation loggas med tid, antal, orsak och anställd i sektionen **Kassationer** på detaljsidan. Orsaken visas med namn ur kvalitetsorsakerna, följd av kommentaren; äldre kassationer visar sin fritext. Med rättigheten **Kvalitet** finns **Skapa avvikelse** på raden, som öppnar en ny [intern avvikelse](/hjalp/kvalitet#ny-avvikelse) med tillverkningsorder, operation, artikel och antal ifyllda. Tillverkningsordern har också sektionen **Avvikelser** med ärendena som gäller den och knappen **Ny avvikelse**.
 
 ### Inleverans från sista operationen
 
@@ -439,7 +439,7 @@ När en operation blir klar — någon kryssar **Operationen är klar** vid utst
 
 ### Stämpla ut
 
-Administratörer och arbetsledare har en knapp **Stämpla ut** på varje rad, för att stämpla ut någon som glömt det. **Sluttid** är förifylld med när arbetet pausades (om den anställde har gått hem) eller med nu; ändra den till när arbetet faktiskt slutade. Tiden som rapporteras visas under fältet, och tidrapporten dateras på sluttidens dag. En sluttid i en låst löneperiod går inte att spara. Dialogen visar Planerat / Klart / Kvar och frågar efter **Antal OK**, **Kasserat**, **Kassationsorsak** (krävs när kasserat är större än 0), **Operationen är klar** och **Notering**. Effekten är densamma som när den anställde stämplar ut i [stämpelterminalen](/hjalp/terminal): en tidrapport skapas, material som är kopplat till operationen förbrukas och kassationer loggas.
+Administratörer och arbetsledare har en knapp **Stämpla ut** på varje rad, för att stämpla ut någon som glömt det. **Sluttid** är förifylld med när arbetet pausades (om den anställde har gått hem) eller med nu; ändra den till när arbetet faktiskt slutade. Tiden som rapporteras visas under fältet, och tidrapporten dateras på sluttidens dag. En sluttid i en låst löneperiod går inte att spara. Dialogen visar Planerat / Klart / Kvar och frågar efter **Antal OK**, **Kasserat**, **Kassationsorsak** (krävs när kasserat är större än 0; med kvalitetsorsaker för kassation väljs en **Orsak** och fritexten blir **Kommentar**), **Operationen är klar** och **Notering**. Effekten är densamma som när den anställde stämplar ut i [stämpelterminalen](/hjalp/terminal): en tidrapport skapas, material som är kopplat till operationen förbrukas och kassationer loggas.
 
 ## Tidrapporter
 

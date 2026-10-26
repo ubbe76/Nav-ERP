@@ -22,6 +22,7 @@ Typerna visas i fast ordning: röda före gula. Inom en typ står det äldsta el
 | **Återkommande verifikat som misslyckats** | röd | En rad för **varje** månad som en återkommande post inte kunde skapa och som ännu inte rättats — till exempel en låst period (i läget Bokför direkt) eller ett inaktiverat konto i mallen — med orsaken. Månader som hoppats över medan posten var pausad räknas inte. Raden länkar till [Återkommande verifikat](/hjalp/ekonomi#aterkommande-verifikat), där **Kör nu** försöker igen; aviseringen försvinner när månaden skapats eller posten tagits bort. |
 | **E-postlådan för fakturor kunde inte läsas** | röd | E-postlådan som läses av [Fakturaskanning](/hjalp/system#fakturaskanning) har inte gått att läsa vid senaste körningen. Raden visar orsaken och länkar till inställningssidan, där **Testa anslutning** kan hjälpa. Aviseringen försvinner när en körning lyckas. Bara administratörer ser typen. |
 | **Fakturor i inkorgen att granska** | gul | Fakturor i [Fakturainkorgen](/hjalp/inkop#fakturainkorg) som är **Ny**, **Tolkad** eller **Osäker**, alltså de som visas under **Att granska**. Raden länkar till inkorgen. Menyn **Inköp** krävs. |
+| **Avvikelser som passerat Åtgärd senast** | gul | Öppna [avvikelser](/hjalp/kvalitet) (**Registrerad** eller **Utreds**) där **Åtgärd senast** har passerat, äldsta först. Raden visar numret, rubriken, datumet och motparten och länkar till avvikelsen; listan är avvikelserna med rutan **Försenade** ibockad. |
 | **Försenade kundordrar** | gul | Order med status bekräftad eller under tillverkning där en rad med rest har ett leveransdatum som har passerat. Offerter och levererade ordrar räknas aldrig. |
 | **Försenade inköpsordrar** | gul | Order med status utkast, bekräftad eller delvis mottagen där en rad med rest har ett ankomstdatum som har passerat. Bekräftat leveransdatum gäller före önskat. |
 | **Sena tillverkningsordrar** | gul | Frisläppta tillverkningsordrar och pågående tillverkningsordrar som är **Sena** enligt produktionsplaneringen, alltså samma **Sen** som tillverkningsorderlistan och tillverkningsordern visar. |
@@ -41,6 +42,7 @@ Du ser bara de typer som din behörighetsgrupp ger:
 - **Leverantörsfakturor att betala**, **Försenade inköpsordrar**, **Behöver beställas** och **Fakturor i inkorgen att granska**: menyn **Inköp**.
 - **Sena tillverkningsordrar** och **Behöver tillverkas**: menyn **Tillverkning**.
 - **Återkommande verifikat som misslyckats**, **Bokningar utan kostnadsställe** och **Omatchade bankposter**: menyn **Ekonomi**.
+- **Avvikelser som passerat Åtgärd senast**: menyn **Kvalitet**.
 - **Utskick som misslyckades** och **E-postlådan för fakturor kunde inte läsas**: bara administratörer.
 
 Administratörer ser allt. Sidan kräver minst en meny. Även ett konto med **Endast läsning** ser aviseringarna.

@@ -9,7 +9,9 @@ import { satisfiesRule, type AccessToken, type Permission } from "./permissions"
 export type PageRule = readonly (AccessToken | "any")[];
 type Entry = { path: string; exact?: boolean; rule: PageRule };
 
-const SHARED_REGISTERS: PageRule = ["artiklar", "inkop", "forsaljning"];
+// Kvalitet reads the base-data registers too: Kvalitetsorsaker is a Grunddata
+// tab (its writes are the Kvalitet permission's).
+const SHARED_REGISTERS: PageRule = ["artiklar", "inkop", "forsaljning", "kvalitet"];
 
 const ENTRIES: readonly Entry[] = [
   { path: "/", exact: true, rule: ["office"] },
@@ -35,6 +37,7 @@ const ENTRIES: readonly Entry[] = [
   { path: "/kunder", rule: ["forsaljning"] },
   { path: "/lager", rule: ["lager"] },
   { path: "/personal", rule: ["personal"] },
+  { path: "/kvalitet", rule: ["kvalitet"] },
   { path: "/tillverkning", exact: true, rule: ["tillverkning", "terminal", "tillverkningsorder_las"] },
   { path: "/tillverkning/terminal", rule: ["terminal"] },
   { path: "/tillverkning/ordrar", rule: ["tillverkningsorder_las"] },

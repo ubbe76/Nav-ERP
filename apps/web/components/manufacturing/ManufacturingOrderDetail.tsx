@@ -1,5 +1,8 @@
 "use client";
 
+import { RowDeviationLink } from "../quality/RowDeviationLink";
+import { ScrapReasonFields } from "../quality/ScrapReasonFields";
+import { useScrapReasons } from "../../lib/useScrapReasons";
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -87,6 +90,8 @@ export function ManufacturingOrderDetail({
   const can = useCan();
   const canOpen = useCanOpen();
   const isAdmin = can(["admin"]);
+  // Skapa avvikelse per kassationsrad.
+  const canReportDeviation = can(["kvalitet"]);
   // Workshop profile: the card is read-only (no actions, calculations or due date).
   const readOnly = !can(["tillverkning"]);
   const pill = MANUFACTURING_ORDER_STATUS_PILL[order.status];
@@ -523,6 +528,7 @@ export function ManufacturingOrderDetail({
               { key: "quantity", label: "Antal", width: "90px", align: "right" },
               { key: "reason", label: "Orsak", width: "2fr" },
               { key: "employeeName", label: "Anställd", width: "1fr" },
+              ...(canReportDeviation ? [{ key: "id", label: "", width: "140px", align: "right" as const }] : []),
             ]}
             rows={scrap}
             renderCell={(row, key) => {
@@ -535,6 +541,26 @@ export function ManufacturingOrderDetail({
                   return Number(row.quantity);
                 case "employeeName":
                   return row.employeeName ?? "–";
+                case "reason":
+                  // Orsak from the register, then the comment (older rows: the free text alone).
+                  return row.reasonName
+                    ? `${row.reasonName}${row.reason ? ` — ${row.reason}` : ""}`
+                    : (row.reason ?? "–");
+                case "id":
+                  return (
+                    <RowDeviationLink
+                      label="Skapa avvikelse"
+                      params={{
+                        type: "internal",
+                        manufacturingOrderId: order.id,
+                        moOperationId: row.moOperationId,
+                        articleId: order.articleId,
+                        quantity: Number(row.quantity),
+                        reasonId: row.reasonId ?? undefined,
+                        title: `Kassation operation ${row.sequenceNo}`,
+                      }}
+                    />
+                  );
                 default:
                   return row[key as keyof ScrapEntry] as string;
               }
@@ -999,6 +1025,10 @@ function CompleteOperationsList({
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [scrapped, setScrapped] = useState<Record<string, string>>({});
   const [scrapReasons, setScrapReasons] = useState<Record<string, string>>({});
+  // Kassationsorsaker from Kvalitetsorsaker: Orsak is chosen, scrapReasons holds the Kommentar.
+  const scrapReasonOptions = useScrapReasons();
+  const [scrapReasonIds, setScrapReasonIds] = useState<Record<string, string>>({});
+  const reasonRegister = scrapReasonOptions !== null && scrapReasonOptions.length > 0;
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1012,7 +1042,11 @@ function CompleteOperationsList({
   async function complete(op: MOOperation) {
     const opId = op.id;
     const scrapQty = Number(scrapped[opId]) || 0;
-    if (scrapQty > 0 && (scrapReasons[opId] ?? "").trim() === "") {
+    if (scrapQty > 0 && reasonRegister && (scrapReasonIds[opId] ?? "") === "") {
+      setError("Välj en orsak när kasserat antal är större än 0.");
+      return;
+    }
+    if (scrapQty > 0 && !reasonRegister && (scrapReasons[opId] ?? "").trim() === "") {
       setError("Ange en kassationsorsak när kasserat antal är större än 0.");
       return;
     }
@@ -1028,6 +1062,7 @@ function CompleteOperationsList({
             ...(actualTime ? { actualTime: Number(actualTime) } : {}),
             quantityCompleted: Number(quantityCompleted) || 0,
             quantityScrapped: scrapQty,
+            ...(scrapQty > 0 && reasonRegister ? { scrapReasonId: scrapReasonIds[opId] } : {}),
             scrapReason: (scrapReasons[opId] ?? "").trim() || undefined,
             locationId: locationId || undefined,
             allowMaterialShortage,
@@ -1134,15 +1169,14 @@ function CompleteOperationsList({
               </Button>
             </FormActions>
             {Number(scrapped[op.id]) > 0 && (
-              <Field label="Kassationsorsak" htmlFor={`scrapReason-${op.id}`}>
-                <Input
-                  id={`scrapReason-${op.id}`}
-                  required
-                  placeholder="T.ex. repor, måttfel…"
-                  value={scrapReasons[op.id] ?? ""}
-                  onChange={(e) => setScrapReasons((prev) => ({ ...prev, [op.id]: e.target.value }))}
-                />
-              </Field>
+              <ScrapReasonFields
+                idPrefix={`scrap-${op.id}`}
+                reasons={scrapReasonOptions}
+                reasonId={scrapReasonIds[op.id] ?? ""}
+                text={scrapReasons[op.id] ?? ""}
+                onReasonId={(id) => setScrapReasonIds((prev) => ({ ...prev, [op.id]: id }))}
+                onText={(text) => setScrapReasons((prev) => ({ ...prev, [op.id]: text }))}
+              />
             )}
           </div>
         ))}

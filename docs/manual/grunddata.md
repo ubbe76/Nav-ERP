@@ -1,6 +1,6 @@
 # Grunddata
 
-**Inköp → Grunddata** i Nav|ERP (även under Försäljning och Artiklar) samlar de små register som delas av flera moduler: leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper och förlustorsaker. Varje post har en **kod** och en **benämning**, båda unika inom sitt register.
+**Inköp → Grunddata** i Nav|ERP (även under Försäljning och Artiklar) samlar de små register som delas av flera moduler: leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper, förlustorsaker och kvalitetsorsaker. Varje post har en **kod** och en **benämning**, båda unika inom sitt register.
 
 ## Leveransvillkor
 
@@ -42,6 +42,15 @@ Orsakerna man väljer när en offert markeras som **Förlorad** (se [Giltighetst
 - **+ Ny förlustorsak** för egna orsaker. **Kod** skrivs med versaler och siffror (högst 10 tecken), **Benämning** högst 100; båda måste vara unika.
 - **Aktiv**: en inaktiv orsak kan inte väljas när en ny offert markeras som förlorad, men finns kvar på de offerter som redan använder den och i [Offertuppföljningen](/hjalp/rapporter#offertuppfoljning).
 - Borttagning och flytt av kopplingar fungerar som för övriga register (se nedan); offerterna som använde orsaken flyttas då till den du väljer.
+
+## Kvalitetsorsaker
+
+Orsakerna som [avvikelser](/hjalp/kvalitet) och kassationer väljer ur, t.ex. `TRANSPORT · Transportskada` och `MATERIAL · Materialfel`. Registret finns som fliken **Kvalitetsorsaker** här och under **Kvalitet → Kvalitetsorsaker**. Kolumnerna och kryssrutorna **Kund**, **Leverantör**, **Intern** och **Kassation** styr var orsaken kan väljas: på kundreklamationer, leverantörsavvikelser, interna avvikelser och när kasserat antal rapporteras. Minst en måste vara ikryssad.
+
+- **+ Ny kvalitetsorsak** för egna orsaker. **Kod** skrivs med versaler och siffror (högst 10 tecken), **Benämning** högst 100; båda måste vara unika. Att skapa och ändra orsaker kräver rättigheten **Kvalitet**.
+- **Aktiv**: en inaktiv orsak kan inte väljas på nya avvikelser eller kassationer, men finns kvar där den redan används.
+- **Ta bort** (administratörer) fungerar som för övriga register: används orsaken flyttas avvikelserna och kassationerna som använder den till en annan orsak du väljer under **Flytta kopplingarna till**.
+- Finns minst en aktiv orsak med **Kassation** krävs en orsak vid kassation; annars anges den som fritext som tidigare. Se [Kvalitet](/hjalp/kvalitet#kassation-och-orsaker).
 
 ## Användning och regler
 

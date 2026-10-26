@@ -15,6 +15,8 @@ import { useRole } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { toDateTimeLocalValue } from "../../lib/date";
+import { ScrapReasonFields } from "../quality/ScrapReasonFields";
+import { useScrapReasons } from "../../lib/useScrapReasons";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { formatElapsed, formatQuantity, operationProgress } from "../../lib/stampSessions";
 import type { AttendanceSession, StampSession } from "../../lib/types";
@@ -208,6 +210,10 @@ function StampOutForm({
   const [quantityOk, setQuantityOk] = useState("");
   const [quantityScrapped, setQuantityScrapped] = useState("");
   const [scrapReason, setScrapReason] = useState("");
+  // Kassationsorsaker from Kvalitetsorsaker: Orsak is chosen, scrapReason holds the Kommentar.
+  const scrapReasonOptions = useScrapReasons();
+  const [scrapReasonId, setScrapReasonId] = useState("");
+  const reasonRegister = scrapReasonOptions !== null && scrapReasonOptions.length > 0;
   const [markDone, setMarkDone] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -222,7 +228,11 @@ function StampOutForm({
       return;
     }
     const scrapped = Number(quantityScrapped) || 0;
-    if (scrapped > 0 && !scrapReason.trim()) {
+    if (scrapped > 0 && reasonRegister && !scrapReasonId) {
+      setError("Välj en orsak när kasserat antal är större än 0");
+      return;
+    }
+    if (scrapped > 0 && !reasonRegister && !scrapReason.trim()) {
       setError("Ange en kassationsorsak när kasserat antal är större än 0");
       return;
     }
@@ -235,6 +245,7 @@ function StampOutForm({
             stoppedAt: new Date(stopAt).toISOString(),
             quantityOk: Number(quantityOk) || 0,
             quantityScrapped: scrapped,
+            ...(scrapped > 0 && reasonRegister ? { scrapReasonId } : {}),
             scrapReason: scrapReason.trim() || undefined,
             markOperationDone: markDone,
             note: note.trim() || undefined,
@@ -284,9 +295,15 @@ function StampOutForm({
           onChange={(e) => setQuantityScrapped(e.target.value)}
         />
       </Field>
-      <Field label="Kassationsorsak" htmlFor="so-reason">
-        <Input id="so-reason" value={scrapReason} onChange={(e) => setScrapReason(e.target.value)} />
-      </Field>
+      <ScrapReasonFields
+        idPrefix="so"
+        reasons={scrapReasonOptions}
+        reasonId={scrapReasonId}
+        text={scrapReason}
+        onReasonId={setScrapReasonId}
+        onText={setScrapReason}
+        required={(Number(quantityScrapped) || 0) > 0}
+      />
       <label className={styles.checkRow}>
         <Checkbox checked={markDone} onChange={(e) => setMarkDone(e.target.checked)} />
         Operationen är klar

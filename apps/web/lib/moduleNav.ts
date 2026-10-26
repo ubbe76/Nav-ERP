@@ -394,6 +394,45 @@ export const PERSONAL_SECTIONS: ModuleNavSection[] = [
   },
 ];
 
+export const KVALITET_SECTIONS: ModuleNavSection[] = [
+  {
+    title: "Avvikelser",
+    items: [
+      {
+        href: "/kvalitet/avvikelser",
+        title: "Avvikelser",
+        description:
+          "Kundreklamationer, leverantörsavvikelser och interna avvikelser — orsak, utredning, åtgärd, kostnad och kopplade dokument.",
+      },
+    ],
+  },
+  {
+    title: "Uppföljning",
+    items: [
+      {
+        href: "/rapporter/leveransprecision",
+        title: "Leveransprecision",
+        description: "Leveransprecision per månad eller per kund och leverantör, med avvikelser och andel felfria leveranser.",
+      },
+      {
+        href: "/rapporter/kassation",
+        title: "Kassation",
+        description: "Kasserade antal per månad, artikel, resurs och orsak.",
+      },
+    ],
+  },
+  {
+    title: "Grunddata",
+    items: [
+      {
+        href: "/kvalitet/orsaker",
+        title: "Kvalitetsorsaker",
+        description: "Orsakerna som avvikelser och kassationer väljer ur — för kund, leverantör, intern och kassation.",
+      },
+    ],
+  },
+];
+
 export const LAGER_SECTIONS: ModuleNavSection[] = [
   {
     title: "Saldon & rörelser",

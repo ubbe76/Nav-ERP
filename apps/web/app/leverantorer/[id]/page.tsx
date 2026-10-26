@@ -6,6 +6,7 @@ import { NewOrderFromSupplierButton } from "../../../components/purchase/NewOrde
 import { apiGet } from "../../../lib/api";
 import type { PartnerContact, RegisterEntry, Supplier, SupplierDeliveryAddress, SystemSettings } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
+import { DeviationsSection } from "../../../components/quality/DeviationsSection";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
 // Leverantörskort — tabbed supplier view (Allmänt / Villkor & frakt), same
@@ -52,6 +53,12 @@ export default async function SupplierDetailPage(props: { params: Promise<{ id: 
         deliveryDayDefaults={
           settings ? { mode: settings.supplierDeliveryDayMode, transitDays: settings.supplierTransitDays } : null
         }
+      />
+
+      <DeviationsSection
+        filter={{ supplierId: supplier.id }}
+        newDeviation={{ type: "supplier", supplierId: supplier.id }}
+        buttonLabel="Ny avvikelse"
       />
     </AppShell>
   );

@@ -101,6 +101,13 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
     group: "Flöden",
   },
   {
+    slug: "kvalitet",
+    title: "Kvalitet",
+    file: "kvalitet.md",
+    description: "Reklamationer och avvikelser: kundreklamationer, leverantörsavvikelser och interna avvikelser med kostnader, genvägar och kvalitetsorsaker.",
+    group: "Flöden",
+  },
+  {
     slug: "lon",
     title: "Personal & lön",
     file: "lon.md",

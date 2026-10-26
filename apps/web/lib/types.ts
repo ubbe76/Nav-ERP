@@ -388,8 +388,13 @@ export interface RegisterEntry {
   description?: string | null;
   // Kollityper only (frakt) — absent on the other registers.
   parcelKind?: "package" | "pallet" | "other";
-  // Förlustorsaker only — absent on the other registers.
+  // Förlustorsaker and Kvalitetsorsaker only — absent on the other registers.
   active?: boolean;
+  // Kvalitetsorsaker only: which cases (and the kassation) the reason applies to.
+  appliesCustomer?: boolean;
+  appliesSupplier?: boolean;
+  appliesInternal?: boolean;
+  appliesScrap?: boolean;
   lengthMm?: string | null;
   widthMm?: string | null;
   heightMm?: string | null;
@@ -2170,7 +2175,12 @@ export interface ScrapEntry {
   sequenceNo: number;
   workCenterName: string;
   quantity: string;
-  reason: string;
+  // Orsak from Kvalitetsorsaker (null on older rows, which keep their free text).
+  reasonId: string | null;
+  reasonCode: string | null;
+  reasonName: string | null;
+  // The comment, or the older free-text reason (null when there is none).
+  reason: string | null;
   employeeName: string | null;
   createdAt: string;
 }
@@ -2810,6 +2820,8 @@ export interface EmailLogEntry {
   // Konfigurator 4b: Visa tilläggspriser as sent (quote/order confirmation);
   // null = not applicable to the document type.
   showConfigurationPrices: boolean | null;
+  // Avvikelse mails: whether Orsaksanalys/Åtgärd/Beslut were included (null on other documents).
+  includeDetails?: boolean | null;
 }
 
 export interface ApiClient {
@@ -4199,8 +4211,39 @@ export interface PrecisionMonth {
   avgDaysLate: number | null;
 }
 
+// Leveransprecision, Gruppera Motpart (Kvalitet): per customer/supplier, with
+// the quality columns. defectFreePct is a whole percent; deviationCost is null
+// without prices; claimedQuantity is null for mixed units (see claimedByArticle).
+export interface PrecisionCounterpartyFigures {
+  total: number;
+  onTime: number;
+  late: number;
+  precisionPct: number | null;
+  avgDaysLate: number | null;
+  deviations: number;
+  ordersWithDeviation: number;
+  defectFreePct: number | null;
+  claimedQuantity: number | null;
+  claimedUnit: string | null;
+  claimedByArticle: {
+    articleId: string | null;
+    articleNumber: string | null;
+    articleName: string | null;
+    unitCode: string | null;
+    quantity: number;
+  }[];
+  deviationCost: number | null;
+}
+
+export interface PrecisionCounterparty extends PrecisionCounterpartyFigures {
+  counterpartyId: string;
+  counterpartyName: string;
+}
+
 export interface PrecisionSection {
   months: PrecisionMonth[];
+  // Only with groupBy=counterparty.
+  counterparties?: { rows: PrecisionCounterparty[]; totals: PrecisionCounterpartyFigures };
   totals: {
     total: number;
     onTime: number;
@@ -4214,6 +4257,7 @@ export interface PrecisionSection {
 export interface DeliveryPrecisionResponse {
   from: string;
   to: string;
+  groupBy?: "month" | "counterparty";
   sales: PrecisionSection;
   purchase: PrecisionSection;
 }

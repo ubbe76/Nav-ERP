@@ -7,6 +7,7 @@ import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
 import { FreightQuoteDialog } from "../shipping/FreightQuoteDialog";
 import { formatSek } from "../../lib/shipping";
 import Link from "next/link";
+import { RowDeviationLink } from "../quality/RowDeviationLink";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { GatedLink } from "../ui/GatedLink";
 import { StatusPill } from "../ui/StatusPill";
@@ -96,6 +97,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // "Skapa tillverkningsorder" posts to the manufacturing module, which only
   // Tillverkning may write — hidden for everyone else.
   const canCreateMo = useCan()(["tillverkning"]);
+  // Kvalitet: Reklamera per orderrad, once the order is a confirmed order.
+  const canReclaim =
+    useCan()(["kvalitet"]) && ["confirmed", "in_production", "delivered", "invoiced"].includes(order.status);
   // Leveranstidskontroll is open to Försäljning and Tillverkning alike.
   const canCheckDelivery = useCan()(["forsaljning", "tillverkning"]);
   const [dtcOpen, setDtcOpen] = useState(false);
@@ -254,6 +258,22 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   function refresh() {
     setModal(null);
     router.refresh();
+  }
+
+  // Reklamera: Ny avvikelse prefilled from the row (RowDeviationLink hides itself without Kvalitet).
+  function reclaimLink(row: SalesOrderRow) {
+    return (
+      <RowDeviationLink
+        label="Reklamera"
+        params={{
+          type: "customer",
+          customerId: order.customerId,
+          salesOrderId: order.id,
+          salesOrderRowId: row.id,
+          articleId: row.articleId,
+        }}
+      />
+    );
   }
 
   function startEditRow(row: SalesOrderRow) {
@@ -500,7 +520,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             { key: "unitPrice", label: "Á-pris", width: "90px", align: "right" },
             { key: "discountPercent", label: "Rabatt", width: "60px", align: "right" },
             { key: "lineAmount", label: "Belopp", width: "90px", align: "right" },
-            ...(rowsEditable ? ([{ key: "id", label: "", width: "220px", align: "right" }] as const) : []),
+            ...(rowsEditable || canReclaim ? ([{ key: "id", label: "", width: "220px", align: "right" }] as const) : []),
           ]}
           rows={rows}
           footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(total)} ${order.currency}` }}
@@ -625,6 +645,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                   Number(row.quantityOrdered) * Number(row.unitPrice) * (1 - Number(row.discountPercent) / 100)
                 );
               case "id":
+                if (!rowsEditable) return reclaimLink(row);
                 return editingRowId === row.id ? (
                   <span style={{ display: "inline-flex", gap: 8 }}>
                     <Button type="button" size="small" variant="primary" disabled={rowPending} onClick={() => saveRow(row)}>
@@ -668,6 +689,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                             : `Skapa TO för resten (${toUnitQuantity(moRemaining(row), row.unitFactor)} ${row.unitCode})`}
                         </Button>
                       )}
+                    {canReclaim && reclaimLink(row)}
                   </span>
                 );
               default:

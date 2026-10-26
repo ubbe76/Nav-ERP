@@ -39,6 +39,7 @@ export default async function LeveransprecisionPage(props: { searchParams: Promi
       <LeveransprecisionPageClient
         defaultFrom={singleParam(searchParams.from)}
         defaultTo={singleParam(searchParams.to)}
+        defaultGroupBy={singleParam(searchParams.groupBy)}
       />
     </AppShell>
   );

@@ -40,6 +40,8 @@ function documentHref(entry: EmailLogEntry): string | null {
     // itself, so it links to the invoice card rather than the order.
     case "payment_reminder":
       return `/forsaljning/fakturor/${entry.documentId}`;
+    case "deviation":
+      return `/kvalitet/avvikelser/${entry.documentId}`;
     default:
       return null;
   }

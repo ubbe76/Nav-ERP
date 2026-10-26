@@ -16,6 +16,7 @@ import type {
   TimeReport,
 } from "../../../../lib/types";
 import shellStyles from "../../../../components/AppShell.module.css";
+import { DeviationsSection } from "../../../../components/quality/DeviationsSection";
 import { HelpLink } from "../../../../components/ui/HelpLink";
 
 export default async function ManufacturingOrderDetailPage(props: { params: Promise<{ id: string }> }) {
@@ -68,6 +69,12 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
         scrap={scrap}
         reports={reports}
         canUndoReports={canUndoReports}
+      />
+
+      <DeviationsSection
+        filter={{ manufacturingOrderId: order.id }}
+        newDeviation={{ type: "internal", manufacturingOrderId: order.id, articleId: order.articleId }}
+        buttonLabel="Ny avvikelse"
       />
     </AppShell>
   );

@@ -16,6 +16,7 @@ import type {
   SystemSettings,
 } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
+import { DeviationsSection } from "../../../components/quality/DeviationsSection";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
 // Kundkort — tabbed customer view (Allmänt / Villkor & frakt), same pattern
@@ -69,6 +70,12 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
         deliveryDayDefaults={
           settings ? { mode: settings.customerDeliveryDayMode, transitDays: settings.customerTransitDays } : null
         }
+      />
+
+      <DeviationsSection
+        filter={{ customerId: customer.id }}
+        newDeviation={{ type: "customer", customerId: customer.id }}
+        buttonLabel="Ny reklamation"
       />
     </AppShell>
   );

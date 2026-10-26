@@ -4,6 +4,7 @@ import { AppShell } from "../../../../components/AppShell";
 import { PurchaseOrderDetail } from "../../../../components/purchase/PurchaseOrderDetail";
 import { ReceiptsSection } from "../../../../components/purchase/ReceiptsSection";
 import { MailSection } from "../../../../components/mail/MailSection";
+import { DeviationsSection } from "../../../../components/quality/DeviationsSection";
 import { AuditTrailSection } from "../../../../components/system/AuditTrailSection";
 import { apiGet } from "../../../../lib/api";
 import { countDrawings, getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
@@ -57,6 +58,12 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
       />
 
       <ReceiptsSection orderId={order.id} orderStatus={order.status} receipts={receipts} rows={rows} />
+
+      <DeviationsSection
+        filter={{ purchaseOrderId: order.id }}
+        newDeviation={{ type: "supplier", supplierId: order.supplierId, purchaseOrderId: order.id }}
+        buttonLabel="Ny avvikelse"
+      />
 
       <MailSection
         emails={emails}

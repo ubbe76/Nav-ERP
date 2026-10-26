@@ -3,6 +3,8 @@
 import { confirmDelete } from "../../lib/confirm";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { RowDeviationLink } from "../quality/RowDeviationLink";
+import { useCan } from "../PermissionsProvider";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -59,6 +61,20 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   // per-row guards (quantity ≥ received, no delete with receipts) are
   // enforced by the API and mirrored in the UI below.
   const rowsEditable = order.status === "draft" || order.status === "confirmed" || order.status === "partially_received";
+  // Kvalitet: Avvikelse per orderrad on an order that has been placed.
+  const canDeviate = useCan()(["kvalitet"]) && order.status !== "draft" && order.status !== "cancelled";
+  const deviationLink = (row: PurchaseOrderRow) => (
+    <RowDeviationLink
+      label="Avvikelse"
+      params={{
+        type: "supplier",
+        supplierId: order.supplierId,
+        purchaseOrderId: order.id,
+        purchaseOrderRowId: row.id,
+        articleId: row.articleId,
+      }}
+    />
+  );
 
   const [modal, setModal] = useState<"header" | "addRow" | "receive" | null>(null);
   const dims = useDimensions();
@@ -253,7 +269,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
             { key: "quantityReceived", label: "Mottaget", width: "100px", align: "right" },
             { key: "unitPrice", label: "Á-pris", width: "130px", align: "right" },
             { key: "lineAmount", label: "Belopp", width: "130px", align: "right" },
-            ...(rowsEditable ? ([{ key: "id", label: "", width: "180px", align: "right" }] as const) : []),
+            ...(rowsEditable || canDeviate ? ([{ key: "id", label: "", width: "180px", align: "right" }] as const) : []),
           ]}
           rows={rows}
           footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(total)} ${order.currency}` }}
@@ -400,6 +416,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
               case "lineAmount":
                 return formatMoney(rowAmount(row));
               case "id":
+                if (!rowsEditable) return deviationLink(row);
                 return editingRowId === row.id ? (
                   <span style={{ display: "inline-flex", gap: 8 }}>
                     <Button type="button" size="small" variant="primary" disabled={rowPending} onClick={() => saveRow(row)}>
@@ -419,6 +436,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                         Ta bort
                       </Button>
                     )}
+                    {canDeviate && deviationLink(row)}
                   </span>
                 );
               default:

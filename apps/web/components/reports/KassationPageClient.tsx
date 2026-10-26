@@ -133,8 +133,8 @@ export function KassationPageClient({
 
           {groupBy === "reason" && (
             <FormHint>
-              Orsaken är fritext från avrapporteringen och grupperas på exakt text — skriv orsaker konsekvent för
-              användbar statistik.
+              Orsaken är det som valts ur Kvalitetsorsaker vid avrapporteringen. Äldre kassationer som rapporterats med
+              fritext grupperas på exakt text och märks (fritext).
             </FormHint>
           )}
         </>

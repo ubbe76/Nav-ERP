@@ -15,9 +15,29 @@ import shellStyles from "../../components/AppShell.module.css";
 import tabStyles from "./PartnerTabs.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
+import { useCan } from "../PermissionsProvider";
+import type { AccessRule } from "../../lib/permissions";
 
-const TABS = ["Leveransvillkor", "Betalningsvillkor", "Speditörer", "Enheter", "Kollityper", "Förlustorsaker"] as const;
+const TABS = [
+  "Leveransvillkor",
+  "Betalningsvillkor",
+  "Speditörer",
+  "Enheter",
+  "Kollityper",
+  "Förlustorsaker",
+  "Kvalitetsorsaker",
+] as const;
 type Tab = (typeof TABS)[number];
+
+// Kvalitetsorsaker: which kinds of case (and the kassation) a reason can be
+// chosen for. The API wants at least one of them.
+const REASON_FLAGS = [
+  { key: "appliesCustomer", label: "Kund" },
+  { key: "appliesSupplier", label: "Leverantör" },
+  { key: "appliesInternal", label: "Intern" },
+  { key: "appliesScrap", label: "Kassation" },
+] as const;
+type ReasonFlagKey = (typeof REASON_FLAGS)[number]["key"];
 
 const TAB_CONFIG: Record<
   Tab,
@@ -28,6 +48,13 @@ const TAB_CONFIG: Record<
     showDescription?: boolean;
     // Förlustorsaker: Aktiv flag, upper-case codes of at most 10 characters.
     showActive?: boolean;
+    activeHint?: string;
+    // Kvalitetsorsaker: the Kund/Leverantör/Intern/Kassation checkboxes.
+    showReasonFlags?: boolean;
+    // Writes are the Kvalitet permission's, deleting is the administrator's.
+    writeRule?: AccessRule;
+    deleteRule?: AccessRule;
+    moveHint?: string;
   }
 > = {
   Leveransvillkor: {
@@ -50,7 +77,22 @@ const TAB_CONFIG: Record<
     singular: "kollityp",
     seed: { label: "Lägg till standardkollityper", path: "/api/v1/package-types/generate-standard" },
   },
-  Förlustorsaker: { basePath: "/api/v1/quote-loss-reasons", singular: "förlustorsak", showActive: true },
+  Förlustorsaker: {
+    basePath: "/api/v1/quote-loss-reasons",
+    singular: "förlustorsak",
+    showActive: true,
+    activeHint: "Inaktiva orsaker kan inte väljas när en offert markeras som förlorad.",
+  },
+  Kvalitetsorsaker: {
+    basePath: "/api/v1/deviation-reasons",
+    singular: "kvalitetsorsak",
+    showActive: true,
+    activeHint: "Inaktiva orsaker kan inte väljas på nya avvikelser eller kassationer.",
+    showReasonFlags: true,
+    writeRule: ["kvalitet"],
+    deleteRule: ["admin"],
+    moveHint: "Alla kopplade avvikelser och kassationer flyttas till den valda orsaken; därefter tas orsaken bort.",
+  },
 };
 
 export function GrunddataPageClient({
@@ -60,6 +102,7 @@ export function GrunddataPageClient({
   units,
   packageTypes,
   lossReasons,
+  deviationReasons,
 }: {
   deliveryTerms: RegisterEntry[];
   paymentTerms: RegisterEntry[];
@@ -67,6 +110,7 @@ export function GrunddataPageClient({
   units: RegisterEntry[];
   packageTypes: RegisterEntry[];
   lossReasons: RegisterEntry[];
+  deviationReasons: RegisterEntry[];
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("Leveransvillkor");
   const entriesByTab: Record<Tab, RegisterEntry[]> = {
@@ -76,6 +120,7 @@ export function GrunddataPageClient({
     Enheter: units,
     Kollityper: packageTypes,
     Förlustorsaker: lossReasons,
+    Kvalitetsorsaker: deviationReasons,
   };
 
   return (
@@ -83,7 +128,7 @@ export function GrunddataPageClient({
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Grunddata</div>
-          <div className={shellStyles.meta}>Leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper och förlustorsaker</div>
+          <div className={shellStyles.meta}>Leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper, förlustorsaker och kvalitetsorsaker</div>
         </div>
         <HelpLink chapter="grunddata" label="Hjälp om grunddata" />
       </div>
@@ -107,14 +152,20 @@ export function GrunddataPageClient({
   );
 }
 
-function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
+// Also used on its own by /kvalitet/orsaker (the Kvalitetsorsaker register
+// opened from the Kvalitet menu).
+export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
   const router = useRouter();
+  const can = useCan();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<RegisterEntry | null>(null);
   const [freightEditing, setFreightEditing] = useState<RegisterEntry | null>(null);
   const [seedNotice, setSeedNotice] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
-  const { basePath, singular, seed, showDescription, showActive } = TAB_CONFIG[tab];
+  const { basePath, singular, seed, showDescription, showActive, activeHint, showReasonFlags, writeRule, deleteRule, moveHint } =
+    TAB_CONFIG[tab];
+  const canWrite = writeRule ? can(writeRule) : true;
+  const canDelete = deleteRule ? can(deleteRule) : true;
 
   async function runSeed() {
     if (!seed) return;
@@ -148,9 +199,11 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
             {seeding ? "Förifyller…" : seed.label}
           </Button>
         )}
-        <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
-          + Ny {singular}
-        </Button>
+        {canWrite && (
+          <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
+            + Ny {singular}
+          </Button>
+        )}
       </div>
 
       <Table<RegisterEntry>
@@ -159,6 +212,7 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
           { key: "name", label: "Benämning", width: "2fr" },
           ...(showDescription ? [{ key: "description", label: "Förklaring", width: "3fr" }] : []),
           ...(tab === "Kollityper" ? [{ key: "freight", label: "Frakt", width: "2fr" }] : []),
+          ...(showReasonFlags ? REASON_FLAGS.map((f) => ({ key: f.key, label: f.label, width: "0.5fr" })) : []),
           ...(showActive ? [{ key: "active", label: "Status", width: "0.6fr" }] : []),
         ]}
         rows={entries}
@@ -168,6 +222,7 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
             case "code":
               return entry.code;
             case "name":
+              if (!canWrite) return <strong>{entry.name}</strong>;
               return (
                 <button
                   type="button"
@@ -192,6 +247,9 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
                 </button>
               );
             default:
+              if (showReasonFlags && REASON_FLAGS.some((f) => f.key === key)) {
+                return entry[key as ReasonFlagKey] ? "Ja" : "–";
+              }
               return null;
           }
         }}
@@ -202,6 +260,8 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
           basePath={basePath}
           showDescription={showDescription}
           showActive={showActive}
+          activeHint={activeHint}
+          showReasonFlags={showReasonFlags}
           onSuccess={() => {
             setModalOpen(false);
             router.refresh();
@@ -218,6 +278,10 @@ function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry[] }) {
             singular={singular}
             showDescription={showDescription}
             showActive={showActive}
+            activeHint={activeHint}
+            showReasonFlags={showReasonFlags}
+            canDelete={canDelete}
+            moveHint={moveHint}
             onSuccess={() => {
               setEditing(null);
               router.refresh();
@@ -333,6 +397,10 @@ function RegisterEntryForm({
   singular,
   showDescription,
   showActive,
+  activeHint,
+  showReasonFlags,
+  canDelete = true,
+  moveHint,
   onSuccess,
 }: {
   basePath: string;
@@ -341,12 +409,22 @@ function RegisterEntryForm({
   singular?: string;
   showDescription?: boolean;
   showActive?: boolean;
+  activeHint?: string;
+  showReasonFlags?: boolean;
+  canDelete?: boolean;
+  moveHint?: string;
   onSuccess: () => void;
 }) {
   const [code, setCode] = useState(entry?.code ?? "");
   const [name, setName] = useState(entry?.name ?? "");
   const [description, setDescription] = useState(entry?.description ?? "");
   const [active, setActive] = useState(entry?.active ?? true);
+  const [flags, setFlags] = useState<Record<ReasonFlagKey, boolean>>({
+    appliesCustomer: entry?.appliesCustomer ?? false,
+    appliesSupplier: entry?.appliesSupplier ?? false,
+    appliesInternal: entry?.appliesInternal ?? false,
+    appliesScrap: entry?.appliesScrap ?? false,
+  });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -368,9 +446,11 @@ function RegisterEntryForm({
       const body = JSON.stringify(
         showDescription
           ? { code, name, description: description.trim() || null }
-          : showActive
-            ? { code: code.trim().toUpperCase(), name, active }
-            : { code, name }
+          : showReasonFlags
+            ? { code: code.trim().toUpperCase(), name, active, ...flags }
+            : showActive
+              ? { code: code.trim().toUpperCase(), name, active }
+              : { code, name }
       );
       if (entry) {
         await apiFetch(`${basePath}/${entry.id}`, { method: "PATCH", body });
@@ -379,7 +459,7 @@ function RegisterEntryForm({
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara");
+      setError(apiErrorMessage(err, "Kunde inte spara"));
       setPending(false);
     }
   }
@@ -458,8 +538,8 @@ function RegisterEntryForm({
               </Select>
             </Field>
             <FormHint>
-              Alla kopplade kunder, leverantörer och dokument flyttas till den valda posten; därefter tas {entry.name}{" "}
-              bort.
+              {moveHint ??
+                `Alla kopplade kunder, leverantörer och dokument flyttas till den valda posten; därefter tas ${entry.name} bort.`}
             </FormHint>
           </>
         ) : (
@@ -513,7 +593,28 @@ function RegisterEntryForm({
           Aktiv
         </label>
       )}
-      {showActive && <FormHint>Inaktiva orsaker kan inte väljas när en offert markeras som förlorad.</FormHint>}
+      {showActive && activeHint && <FormHint>{activeHint}</FormHint>}
+
+      {showReasonFlags && (
+        <fieldset style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <legend style={{ fontFamily: "var(--font-body)", fontSize: 13, fontWeight: 600, padding: 0, marginBottom: 6 }}>
+            Gäller för
+          </legend>
+          {REASON_FLAGS.map((flag) => (
+            <label key={flag.key} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Checkbox
+                checked={flags[flag.key]}
+                onChange={(e) => setFlags((prev) => ({ ...prev, [flag.key]: e.target.checked }))}
+              />
+              {flag.label}
+            </label>
+          ))}
+          <FormHint>
+            Kund, Leverantör och Intern styr vilka avvikelser orsaken kan väljas på. Kassation gör den valbar när
+            kasserat antal rapporteras.
+          </FormHint>
+        </fieldset>
+      )}
 
       {showDescription && (
         <Field label="Förklaring (valfritt)" htmlFor="registerDescription">
@@ -529,8 +630,8 @@ function RegisterEntryForm({
         </Field>
       )}
 
-      <FormActions style={{ justifyContent: entry ? "space-between" : "flex-end" }}>
-        {entry && (
+      <FormActions style={{ justifyContent: entry && canDelete ? "space-between" : "flex-end" }}>
+        {entry && canDelete && (
           <Button
             type="button"
             variant="danger"

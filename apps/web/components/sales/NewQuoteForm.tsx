@@ -62,15 +62,27 @@ interface QuoteRow {
   deliveryDate: string;
 }
 
+// Skapa ersättningsorder (Kvalitet): the avvikelse the order is created for.
+// The row starts as the claimed article and quantity at à-pris 0, the note
+// names the case, and deviationId links the order to it in the create call.
+export interface NewOrderDeviation {
+  id: string;
+  number: string;
+  article: Article | null;
+  quantity: number | null;
+}
+
 // Pass `lockedCustomer` (e.g. from the customer card) to skip the customer
 // picker and create the quote for that customer directly. mode "order"
 // creates a confirmed kundorder instead of a quote (confirm: true).
 export function NewQuoteForm({
   lockedCustomer,
   mode = "quote",
+  deviation,
 }: {
   lockedCustomer?: Customer;
   mode?: "quote" | "order";
+  deviation?: NewOrderDeviation;
 }) {
   const router = useRouter();
   const [customer, setCustomer] = useState<Customer | null>(lockedCustomer ?? null);
@@ -127,7 +139,7 @@ export function NewQuoteForm({
     if (dateTouched) return;
     setExpectedDeliveryDate(suggestion?.date ?? "");
   }, [suggestion, dateTouched]);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(deviation ? `Ersättning för ${deviation.number}` : "");
   // A quote answers the customer's inquiry (Kundens förfrågan); a direct
   // order carries their PO number (Kundens ordernummer).
   const [customerOrderNumber, setCustomerOrderNumber] = useState("");
@@ -140,7 +152,22 @@ export function NewQuoteForm({
   const [deliveryAddresses, setDeliveryAddresses] = useState<CustomerDeliveryAddress[]>([]);
   const [newDeliveryAddress, setNewDeliveryAddress] = useState<DeliveryAddressDraft>(emptyDeliveryAddressDraft());
   const [rows, setRows] = useState<QuoteRow[]>([
-    { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1, deliveryDate: "" },
+    deviation?.article
+      ? // Ersättningsorder: the claimed article in its base unit at à-pris 0
+        // (priceTouched, so the price chain does not fill a price in).
+        {
+          article: deviation.article,
+          quantity: String(deviation.quantity ?? 1),
+          unitPrice: "0",
+          discountPercent: "0",
+          unitId: "",
+          priceTouched: true,
+          variantInfo: null,
+          configuration: null,
+          unitFactor: 1,
+          deliveryDate: "",
+        }
+      : { article: null, quantity: "1", unitPrice: "0", discountPercent: "0", unitId: "", priceTouched: false, variantInfo: null, configuration: null, unitFactor: 1, deliveryDate: "" },
   ]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -244,6 +271,7 @@ export function NewQuoteForm({
           projectId: projectId || undefined,
           ...deliveryAddressPayload(deliveryAddressId, newDeliveryAddress, undefined),
           confirm: mode === "order",
+          ...(deviation ? { deviationId: deviation.id } : {}),
           ...(mode === "order" || quoteValidUntil === null ? {} : { quoteValidUntil: quoteValidUntil === "" ? null : quoteValidUntil }),
           rows: rows.map((r) => ({
             articleId: r.article!.id,

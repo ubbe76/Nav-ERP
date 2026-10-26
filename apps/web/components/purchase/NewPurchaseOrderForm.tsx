@@ -6,17 +6,30 @@ import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { useSupplierDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
-import type { PurchaseOrder, Supplier } from "../../lib/types";
+import type { Article, PurchaseOrder, Supplier, SupplierPriceQuote } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
+
+// Skapa inköpsorder (Kvalitet): the avvikelse the order is created for. The
+// note names the case, deviationId links the order to it in the create call,
+// and the claimed article and quantity are added as the order's first row.
+export interface NewPurchaseOrderDeviation {
+  id: string;
+  number: string;
+  article: Article | null;
+  quantity: number | null;
+}
 
 // Pass `lockedSupplier` (e.g. from the supplier card) to skip the supplier
 // picker and create the order for that supplier directly.
 export function NewPurchaseOrderForm({
   lockedSupplier,
+  deviation,
 }: {
   lockedSupplier?: Supplier;
+  deviation?: NewPurchaseOrderDeviation;
 }) {
   const router = useRouter();
   const [supplier, setSupplier] = useState<Supplier | null>(lockedSupplier ?? null);
@@ -33,7 +46,7 @@ export function NewPurchaseOrderForm({
     if (dateTouched) return;
     setExpectedDeliveryDate(suggestion?.date ?? "");
   }, [suggestion, dateTouched]);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(deviation ? `Ersättning för ${deviation.number}` : "");
   const [exchangeRate, setExchangeRate] = useState("1");
   const [yourReference, setYourReference] = useState("");
   const [ourReference, setOurReference] = useState("");
@@ -58,11 +71,33 @@ export function NewPurchaseOrderForm({
           exchangeRate: Number(exchangeRate),
           yourReference: yourReference.trim() || undefined,
           ourReference: ourReference.trim() || undefined,
+          ...(deviation ? { deviationId: deviation.id } : {}),
         }),
       });
+      if (deviation?.article && deviation.quantity != null) {
+        // The order exists and is linked; the first row is best effort — a
+        // failure here still lands on the order, where the row can be added.
+        try {
+          const quote = await apiFetch<SupplierPriceQuote>(
+            `/api/v1/supplier-price-quote?supplierId=${supplier.id}&articleId=${deviation.article.id}&quantity=${deviation.quantity}`
+          ).catch(() => null);
+          const catalogPrice = quote?.price && quote.price.currency === order.currency ? quote.price.unitPrice : 0;
+          await apiFetch(`/api/v1/purchase-orders/${order.id}/rows`, {
+            method: "POST",
+            body: JSON.stringify({
+              articleId: deviation.article.id,
+              quantity: deviation.quantity,
+              unitPrice: catalogPrice,
+              bumpRevision: false,
+            }),
+          });
+        } catch {
+          // keep going to the order
+        }
+      }
       router.push(`/inkop/ordrar/${order.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa inköpsordern");
+      setError(apiErrorMessage(err, "Kunde inte skapa inköpsordern"));
       setPending(false);
     }
   }

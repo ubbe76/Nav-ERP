@@ -68,6 +68,18 @@ describe("page access table", () => {
     expect(landingFor(personal)).toBe("/");
   });
 
+  it("gives Kvalitet its own menu permission and lets it read the Grunddata registers", () => {
+    const quality = { role: "user" as const, permissions: ["kvalitet"] as const };
+    expect(canOpen(quality, "/kvalitet")).toBe(true);
+    expect(canOpen(quality, "/kvalitet/avvikelser/x1")).toBe(true);
+    expect(canOpen(quality, "/kvalitet/orsaker")).toBe(true);
+    // Kvalitetsorsaker is also a Grunddata tab, so Kvalitet reaches /grunddata.
+    expect(canOpen(quality, "/grunddata")).toBe(true);
+    expect(canOpen(sales, "/kvalitet/avvikelser")).toBe(false);
+    expect(canOpen(quality, "/forsaljning/ordrar")).toBe(false);
+    expect(landingFor(quality)).toBe("/");
+  });
+
   it("keeps System admin-only and Ekonomi behind its permission", () => {
     expect(canOpen(sales, "/system/anvandare")).toBe(false);
     expect(canOpen(admin, "/system/behorighetsgrupper")).toBe(true);

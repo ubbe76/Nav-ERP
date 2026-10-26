@@ -44,6 +44,17 @@ Definitionerna:
 - **Ej mätbara** redovisas separat: ordrar utan förväntat leveransdatum, och äldre kundordrar som levererades innan leveranstillfällen infördes (de saknar leveransdatum i systemet).
 - Delvis levererade ordrar syns inte förrän de är färdiglevererade — rapporten mäter hela ordern mot dess sista leverans.
 
+### Gruppera per motpart
+
+Urvalet **Gruppera** väljer mellan **Månad** (som ovan) och **Motpart**. Med **Motpart** visas en rad per kund (under **Kundordrar**) respektive leverantör (under **Inköpsordrar**) med kolumnerna **Order**, **I tid**, **Sena**, **Precision** och **Snittförsening** samt kvalitetskolumnerna ur [avvikelserna](/hjalp/kvalitet):
+
+- **Avvikelser** — antal ärenden av motsvarande typ (kundreklamationer för kunder, leverantörsavvikelser för leverantörer) med rapporteringsdatum i perioden. Makulerade räknas inte.
+- **Order med avvikelse** och **Andel felfria** — av motpartens mätta ordrar, hur många som har ett kopplat ärende och andelen som saknar ett.
+- **Reklamerat antal** — summan av ärendenas antal. Har ärendena olika enheter går de inte att summera: kolumnen visar **—**, och klickar du på den ser du antalet per artikel.
+- **Avvikelsekostnad** — ärendenas nettokostnad (bara för den som får se priser).
+
+**Exportera CSV** följer valet.
+
 ## Försäljningsstatistik
 
 **Rapporter → Försäljningsstatistik** summerar fakturerad nettoomsättning ur kundfakturorna (status **Utfärdad** eller **Betald**; utkast och makulerade räknas inte). Kreditfakturor dras av. Gruppera per **Månad** (fakturadatum), **Kund** eller **Artikel** — artikelgrupperingen visar även fakturerat antal, och fritextrader utan artikel samlas under **(Fritextrader)**.
@@ -56,7 +67,7 @@ Definitionerna:
 
 **Rapporter → Kassationsstatistik** summerar kassationerna från tillverkningens avrapporteringar. Gruppera per **Månad**, **Artikel** (tillverkningsorderns artikel), **Resurs** eller **Orsak**. Kolumnerna visar **Antal kasserade** och **Antal rapporter**.
 
-Orsaken är fritext från avrapporteringen och grupperas på exakt text — "Materialfel" och "materialfel" blir två rader. Skriv orsaker konsekvent för användbar statistik.
+Orsaken är den som valts ur [Kvalitetsorsaker](/hjalp/kvalitet#kvalitetsorsaker) vid avrapporteringen, så gruppen följer orsakens namn. Äldre kassationer som rapporterades med fritext grupperas på exakt text och märks **(fritext)** — "Materialfel (fritext)" och "materialfel (fritext)" blir två rader. Installationer utan kassationsorsaker fortsätter med fritext.
 
 ## Kalkylutfall
 

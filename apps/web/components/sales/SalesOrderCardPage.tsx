@@ -25,6 +25,7 @@ import Link from "next/link";
 import buttonStyles from "../ui/Button.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { SectionHeading } from "../ui/SectionHeading";
+import { DeviationsSection } from "../quality/DeviationsSection";
 
 // Ångra utleverans: a följesedel whose rows are all undone.
 function isUndone(delivery: SalesDelivery) {
@@ -195,6 +196,14 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
             }}
           />
         </div>
+      )}
+
+      {kind === "order" && (
+        <DeviationsSection
+          filter={{ salesOrderId: order.id }}
+          newDeviation={{ type: "customer", customerId: order.customerId, salesOrderId: order.id }}
+          buttonLabel="Ny reklamation"
+        />
       )}
 
       <MailSection

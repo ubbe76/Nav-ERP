@@ -1,5 +1,6 @@
 "use client";
 
+import { useScrapReasons } from "../../lib/useScrapReasons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Wordmark } from "../ui/Wordmark";
@@ -126,6 +127,10 @@ export function StampTerminal({
   const [quantityOk, setQuantityOk] = useState("");
   const [quantityScrapped, setQuantityScrapped] = useState("");
   const [scrapReason, setScrapReason] = useState("");
+  // Kassationsorsaker from Kvalitetsorsaker: Orsak is chosen, scrapReason holds the Kommentar.
+  const [scrapReasonId, setScrapReasonId] = useState("");
+  const scrapReasonOptions = useScrapReasons(step.name === "stampOut");
+  const scrapReasonRegister = scrapReasonOptions !== null && scrapReasonOptions.length > 0;
   const [atfHours, setAtfHours] = useState("");
   const [forgottenStop, setForgottenStop] = useState("");
   // Avvikelseorsaker for the deviation step: fetched again every time the
@@ -731,7 +736,11 @@ export function StampTerminal({
   });
 
   async function stampOut(employee: EmployeeDirectoryEntry, session: StampSession) {
-    if (Number(quantityScrapped) > 0 && scrapReason.trim() === "") {
+    if (Number(quantityScrapped) > 0 && scrapReasonRegister && scrapReasonId === "") {
+      setError("Välj en orsak när kasserat antal är större än 0.");
+      return;
+    }
+    if (Number(quantityScrapped) > 0 && !scrapReasonRegister && scrapReason.trim() === "") {
       setError("Ange en kassationsorsak när kasserat antal är större än 0.");
       return;
     }
@@ -744,6 +753,7 @@ export function StampTerminal({
             note: note.trim() || undefined,
             quantityOk: Number(quantityOk) || 0,
             quantityScrapped: Number(quantityScrapped) || 0,
+            ...(Number(quantityScrapped) > 0 && scrapReasonRegister ? { scrapReasonId } : {}),
             scrapReason: scrapReason.trim() || undefined,
             markOperationDone: markDone,
             allowMaterialShortage,
@@ -772,6 +782,7 @@ export function StampTerminal({
       setQuantityOk("");
       setQuantityScrapped("");
       setScrapReason("");
+      setScrapReasonId("");
       setError(null);
       setStep({ name: "home", employee });
     } catch (err) {
@@ -788,6 +799,7 @@ export function StampTerminal({
         setQuantityOk("");
         setQuantityScrapped("");
         setScrapReason("");
+        setScrapReasonId("");
         setStep({ name: "home", employee });
       }
       setError(apiErrorMessage(err, "Utstämplingen misslyckades."));
@@ -1058,7 +1070,31 @@ export function StampTerminal({
                 />
               </label>
             </div>
-            {Number(quantityScrapped) > 0 && (
+            {Number(quantityScrapped) > 0 && scrapReasonRegister && (
+              <>
+                <select
+                  className={styles.select}
+                  aria-label="Orsak"
+                  value={scrapReasonId}
+                  onChange={(e) => setScrapReasonId(e.target.value)}
+                >
+                  <option value="">Orsak (obligatorisk)</option>
+                  {scrapReasonOptions!.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+                <textarea
+                  className={styles.note}
+                  placeholder="Kommentar (valfritt)"
+                  value={scrapReason}
+                  onChange={(e) => setScrapReason(e.target.value)}
+                  rows={2}
+                />
+              </>
+            )}
+            {Number(quantityScrapped) > 0 && !scrapReasonRegister && (
               <textarea
                 className={styles.note}
                 placeholder="Kassationsorsak (obligatorisk)"

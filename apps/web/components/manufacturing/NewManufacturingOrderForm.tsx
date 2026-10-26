@@ -9,17 +9,28 @@ import { ConfigureModal } from "../configurator/ConfigureModal";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
 import type { ResolveVariantResult, RowConfigurationDraft } from "../../lib/configurator";
 import { apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import { stashReleaseWarnings } from "../../lib/releaseWarnings";
 import type { Article, ManufacturingOrder } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { SuggestedDueDateField } from "./SuggestedDueDateField";
 
-export function NewManufacturingOrderForm() {
+// Skapa tillverkningsorder (Kvalitet): the avvikelse the order is made for —
+// article and quantity start as the claimed ones, the note names the case and
+// deviationId links the order to it in the create call.
+export interface NewMoDeviation {
+  id: string;
+  number: string;
+  article: Article | null;
+  quantity: number | null;
+}
+
+export function NewManufacturingOrderForm({ deviation }: { deviation?: NewMoDeviation } = {}) {
   const router = useRouter();
-  const [article, setArticle] = useState<Article | null>(null);
-  const [quantity, setQuantity] = useState("1");
+  const [article, setArticle] = useState<Article | null>(deviation?.article ?? null);
+  const [quantity, setQuantity] = useState(deviation?.quantity != null ? String(deviation.quantity) : "1");
   const [dueDate, setDueDate] = useState("");
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(deviation ? `Omarbete/ersättning för ${deviation.number}` : "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [configureTemplate, setConfigureTemplate] = useState<Article | null>(null);
@@ -75,13 +86,14 @@ export function NewManufacturingOrderForm() {
           quantity: Number(quantity),
           dueDate: dueDate || undefined,
           note: note || undefined,
+          ...(deviation ? { deviationId: deviation.id } : {}),
           ...(rowConfiguration ? { configuration: { selection: rowConfiguration.selection } } : {}),
         }),
       });
       stashReleaseWarnings(order.id, order.releaseWarnings);
       router.push(`/tillverkning/ordrar/${order.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa tillverkningsordern");
+      setError(apiErrorMessage(err, "Kunde inte skapa tillverkningsordern"));
       setPending(false);
     }
   }

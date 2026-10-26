@@ -25,6 +25,7 @@ Filerna i den här mappen är källan. Ändra här, så följer appen och webbpl
 - [Försäljning](https://naverp.se/hjalp/forsaljning/) ([källfil](forsaljning.md)) — Kunder med import från CSV, offert, kundorder, leverans och fakturering.
 - [Tillverkning](https://naverp.se/hjalp/tillverkning/) ([källfil](tillverkning.md)) — Tillverkningsorder, resurser, produktionsgrupper och efterkalkyl.
 - [Stämpelterminalen](https://naverp.se/hjalp/terminal/) ([källfil](terminal.md)) — Närvarostämpling, orderstämpling och ATF-uttag i verkstaden.
+- [Kvalitet](https://naverp.se/hjalp/kvalitet/) ([källfil](kvalitet.md)) — Reklamationer och avvikelser: kundreklamationer, leverantörsavvikelser och interna avvikelser med kostnader, genvägar och kvalitetsorsaker.
 - [Personal & lön](https://naverp.se/hjalp/lon/) ([källfil](lon.md)) — Anställda, frånvaro, OB, attestering, löneunderlag och PAXml-export.
 - [Lager](https://naverp.se/hjalp/lager/) ([källfil](lager.md)) — Saldon, transaktionslogg, lagerplatser, lagerflytt, inventering, justeringar och lagervärdering.
 - [Ekonomi](https://naverp.se/hjalp/ekonomi/) ([källfil](ekonomi.md)) — Kontoplan, räkenskapsår och perioder, verifikat, huvudboken, momskoder, momsrapporten med fil till Skatteverket, importmoms, periodisk sammanställning, automatkontering, konteringsregler, balansräkning, resultaträkning och SIE-filer.

@@ -1,0 +1,183 @@
+/* Avvikelser — the list, the card and the sections on other documents. Colours
+   come from semantic tokens only (tokens.css); widths are never fixed px, so a
+   375px phone never scrolls the page sideways. */
+
+.rowLink {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.rowLink:hover {
+  color: var(--accent-fg);
+}
+
+.titleLink {
+  color: var(--color-text-primary);
+}
+.titleLink:hover {
+  color: var(--accent-fg);
+}
+
+.plainLink {
+  color: inherit;
+}
+a.plainLink:hover {
+  color: var(--accent-fg);
+}
+
+.overdue {
+  color: var(--status-stopped-text);
+  font-weight: 600;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+/* --- the card --- */
+
+.headerCard {
+  margin-bottom: 20px;
+}
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.stripMeta {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.stripActions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.notice {
+  margin-top: 12px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 14px 24px;
+}
+.gridLabel {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-bottom: 3px;
+}
+.gridValue {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+.wide {
+  grid-column: 1 / -1;
+}
+.pre {
+  white-space: pre-wrap;
+}
+
+.section {
+  margin-top: 28px;
+}
+
+.totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin-top: 12px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+.totals strong {
+  color: var(--color-text-primary);
+}
+
+.inlineForm {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr) minmax(0, 140px) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 14px;
+}
+@media (max-width: 720px) {
+  .inlineForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.uploadRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: center;
+  margin: 12px 0;
+}
+.hiddenInput {
+  display: none;
+}
+
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.historyItem {
+  display: grid;
+  grid-template-columns: minmax(0, 150px) minmax(0, 150px) minmax(0, 1fr);
+  gap: 4px 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-divider);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--color-text-primary);
+}
+.historyItem:last-child {
+  border-bottom: none;
+}
+.historyWhen,
+.historyWho {
+  color: var(--color-text-secondary);
+}
+@media (max-width: 720px) {
+  .historyItem {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.photoLink {
+  font-weight: 600;
+  color: inherit;
+}

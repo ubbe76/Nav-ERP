@@ -4,6 +4,7 @@ import { AppShell } from "../../../../components/AppShell";
 import { InvoiceCard } from "../../../../components/sales/InvoiceCard";
 import { EInvoiceSection } from "../../../../components/sales/EInvoiceSection";
 import { MailSection, type SendButtonConfig } from "../../../../components/mail/MailSection";
+import { DeviationsSection } from "../../../../components/quality/DeviationsSection";
 import { AuditTrailSection } from "../../../../components/system/AuditTrailSection";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { canOpen } from "../../../../lib/pageAccess";
@@ -107,6 +108,14 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
             : null
         }
       />
+
+      {invoice.type === "invoice" && invoice.invoiceNumber && (
+        <DeviationsSection
+          filter={{ invoiceId: invoice.id }}
+          newDeviation={{ type: "customer", customerId: invoice.customerId, invoiceId: invoice.id }}
+          buttonLabel="Ny reklamation"
+        />
+      )}
 
       {canMail && invoice.invoiceNumber && (
         <EInvoiceSection invoiceId={invoice.id} invoiceNumber={invoice.invoiceNumber} />
