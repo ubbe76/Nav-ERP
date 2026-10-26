@@ -8,7 +8,6 @@ import { freightModeText } from "../../lib/shipping";
 import { apiFetch } from "../../lib/api";
 import {
   ARTICLE_TYPE_LABELS,
-  VAT_RATES,
   type Article,
   type ArticleGroup,
   type ArticleUnit,
@@ -31,10 +30,11 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
   const [unitId, setUnitId] = useState(article.unitId);
   const [purchaseUnitId, setPurchaseUnitId] = useState(article.purchaseUnitId ?? "");
   const [salesUnitId, setSalesUnitId] = useState(article.salesUnitId ?? "");
-  const [vatRate, setVatRate] = useState(String(Math.round(Number(article.vatRate))));
   const [salesPrice, setSalesPrice] = useState(article.salesPrice ?? "");
   const [active, setActive] = useState(article.active);
   const [groupId, setGroupId] = useState(article.groupId ?? "");
+  const [articleCodeId, setArticleCodeId] = useState(article.articleCodeId ?? "");
+  const [articleCodes, setArticleCodes] = useState<RegisterEntry[]>([]);
   const [defaultLocationId, setDefaultLocationId] = useState(article.defaultLocationId ?? "");
   const [weight, setWeight] = useState(article.weight ?? "");
   const [length, setLength] = useState(article.length ?? "");
@@ -61,8 +61,17 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
     apiFetch<StockLocation[]>("/api/v1/stock/locations").then(setLocations).catch(() => setLocations([]));
     apiFetch<RegisterEntry[]>("/api/v1/units").then(setAllUnits).catch(() => setAllUnits([]));
     apiFetch<RegisterEntry[]>("/api/v1/package-types").then(setPackageTypes).catch(() => setPackageTypes([]));
+    apiFetch<RegisterEntry[]>("/api/v1/article-codes").then(setArticleCodes).catch(() => setArticleCodes([]));
     loadArticleUnits();
   }, [loadArticleUnits]);
+
+  // Momssats is read-only: it comes from the varugrupp (25 % without one).
+  const vatRateText = (() => {
+    if (groupId === "") return "25 % (ingen varugrupp)";
+    const rate =
+      groupId === (article.groupId ?? "") ? article.vatRate : groups.find((g) => g.id === groupId)?.vatRate;
+    return rate === undefined ? "–" : `${Number(rate)} % (från varugruppen)`;
+  })();
 
   const baseUnitCode = allUnits.find((u) => u.id === unitId)?.code ?? article.unit;
   // The base unit is locked while alternative units exist — changing it
@@ -94,9 +103,9 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
           purchaseUnitId: purchaseUnitId === "" ? null : purchaseUnitId,
           salesUnitId: salesUnitId === "" ? null : salesUnitId,
           active,
-          vatRate: Number(vatRate),
           salesPrice: salesPrice.trim() === "" ? null : Number(salesPrice),
           groupId: groupId === "" ? null : groupId,
+          articleCodeId: articleCodeId === "" ? null : articleCodeId,
           defaultLocationId: defaultLocationId === "" ? null : defaultLocationId,
           weight: weight.trim() === "" ? null : Number(weight),
           length: length.trim() === "" ? null : Number(length),
@@ -171,12 +180,35 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
                 <Input id="name" required value={name} onChange={(e) => setName(e.target.value)} />
               </Field>
             </div>
-            <Field label="Artikelgrupp" htmlFor="groupId">
+            <Field label="Varugrupp" htmlFor="groupId">
               <Select id="groupId" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-                <option value="">Ingen grupp</option>
+                <option value="">Ingen varugrupp</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.code} · {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {/* The rate follows the varugrupp. For the saved group it is the
+                server's own value (article.vatRate); a group picked but not
+                yet saved previews that group's rate. */}
+            <Field label="Momssats" htmlFor="vatRateInfo">
+              <Input id="vatRateInfo" size="md" readOnly value={vatRateText} />
+            </Field>
+            <Field label="Artikelkod" htmlFor="articleCodeId">
+              <Select id="articleCodeId" value={articleCodeId} onChange={(e) => setArticleCodeId(e.target.value)}>
+                <option value="">–</option>
+                {/* A code that is no longer listed (deleted elsewhere) stays
+                    selectable so opening the card doesn't silently reset it. */}
+                {articleCodeId && !articleCodes.some((c) => c.id === articleCodeId) && (
+                  <option value={articleCodeId}>
+                    {article.articleCodeCode ?? "Okänd"} · {article.articleCodeName ?? ""}
+                  </option>
+                )}
+                {articleCodes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} · {c.name}
                   </option>
                 ))}
               </Select>
@@ -252,15 +284,6 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
         <section className={styles.section}>
           <SectionHeading>Försäljning</SectionHeading>
           <div className={styles.grid}>
-            <Field label="Momssats" htmlFor="vatRate">
-              <Select id="vatRate" size="xs" value={vatRate} onChange={(e) => setVatRate(e.target.value)}>
-                {VAT_RATES.map((rate) => (
-                  <option key={rate} value={String(rate)}>
-                    {rate} %
-                  </option>
-                ))}
-              </Select>
-            </Field>
             <Field label="Försäljningspris (kr)" htmlFor="salesPrice">
               <Input
                 id="salesPrice"

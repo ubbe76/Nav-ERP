@@ -1142,7 +1142,7 @@ function AddRowForm({
               </Field>
             </FormRow>
             <FormHint>
-              Förval är kundorderns kostnadsställe, annars artikelgruppens, och kundorderns projekt; Inget ger raden inget
+              Förval är kundorderns kostnadsställe, annars varugruppens, och kundorderns projekt; Inget ger raden inget
               objekt. Objekten bokförs på intäktsraden.
             </FormHint>
           </>

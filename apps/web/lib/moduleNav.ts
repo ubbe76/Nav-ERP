@@ -82,14 +82,14 @@ export const ARTIKLAR_SECTIONS: ModuleNavSection[] = [
     title: "Grunddata",
     items: [
       {
-        href: "/artikelgrupper",
-        title: "Artikelgrupper",
-        description: "Grupper för kontering, statistik och rapportuppdelning — 3–4-siffrig kod per grupp.",
+        href: "/varugrupper",
+        title: "Varugrupper",
+        description: "Grupper som styr artikelns kontering och moms — 1–4-siffrig kod per grupp.",
       },
       {
         href: "/grunddata",
         title: "Grunddata",
-        description: "Enheter med omräkningsfaktor, kollityper, leverans- och betalningsvillkor samt speditörer.",
+        description: "Enheter med omräkningsfaktor, artikelkoder, kollityper, leverans- och betalningsvillkor samt speditörer.",
       },
     ],
   },
@@ -590,7 +590,7 @@ export const EKONOMI_SECTIONS: ModuleNavSection[] = [
       {
         href: "/ekonomi/konteringsregler",
         title: "Konteringsregler",
-        description: "Styr vilket konto en rad hamnar på, per artikelgrupp och momskod.",
+        description: "Styr vilket konto en rad hamnar på, per varugrupp och momskod.",
       },
       {
         href: "/ekonomi/momskoder",

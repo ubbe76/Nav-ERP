@@ -4,7 +4,7 @@ import { VarderingPageClient } from "../../../components/stock/VarderingPageClie
 import { HelpLink } from "../../../components/ui/HelpLink";
 import { apiGet, getCurrentUser } from "../../../lib/api";
 import type { PageSearchParams } from "../../../lib/listQuery";
-import type { ArticleGroup } from "../../../lib/types";
+import type { ArticleGroup, RegisterEntry } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 
 function singleParam(value: string | string[] | undefined): string | undefined {
@@ -26,7 +26,10 @@ export default async function LagervarderingPage(props: { searchParams: Promise<
     );
   }
 
-  const groups = await apiGet<ArticleGroup[]>("/api/v1/article-groups", cookieHeader);
+  const [groups, articleCodes] = await Promise.all([
+    apiGet<ArticleGroup[]>("/api/v1/article-groups", cookieHeader),
+    apiGet<RegisterEntry[]>("/api/v1/article-codes", cookieHeader),
+  ]);
 
   return (
     <AppShell active="Lager">
@@ -42,9 +45,12 @@ export default async function LagervarderingPage(props: { searchParams: Promise<
 
       <VarderingPageClient
         groups={groups}
+        articleCodes={articleCodes}
         defaultAsOf={singleParam(searchParams.asOf)}
         defaultMethod={singleParam(searchParams.method)}
         defaultGroupId={singleParam(searchParams.groupId)}
+        defaultArticleCodeId={singleParam(searchParams.articleCodeId)}
+        defaultGroupBy={singleParam(searchParams.groupBy)}
       />
     </AppShell>
   );

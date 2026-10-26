@@ -1187,7 +1187,7 @@ function VillkorTab({
                   <CostCenterSelect id="defaultCostCenterId" all={dims.allCostCenters} value={defaultCostCenterId} onChange={setDefaultCostCenterId} />
                 </Field>
                 <FormHint attached>
-                  Förvalt kostnadsställe på nya leverantörsfakturor; saknas det används artikelgruppens.
+                  Förvalt kostnadsställe på nya leverantörsfakturor; saknas det används varugruppens.
                 </FormHint>
               </>
             )}
@@ -1313,7 +1313,7 @@ function VillkorTab({
         <FormHint>
           Leveransvillkor, betalningsvillkor och speditörer underhålls under Grunddata.
           {isCustomer &&
-            " Kundrabatten läggs på prislistepriset eller, saknas det, artikelns försäljningspris — men bara när ingen kundspecifik prisregel för artikeln eller artikelgruppen (fliken Priser) matchar. Se Kundpriser i hjälpen."}
+            " Kundrabatten läggs på prislistepriset eller, saknas det, artikelns försäljningspris — men bara när ingen kundspecifik prisregel för artikeln eller varugruppen (fliken Priser) matchar. Se Kundpriser i hjälpen."}
         </FormHint>
 
         <FormActions>

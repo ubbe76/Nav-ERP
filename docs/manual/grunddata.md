@@ -1,6 +1,6 @@
 # Grunddata
 
-**Inköp → Grunddata** i Nav|ERP (även under Försäljning och Artiklar) samlar de små register som delas av flera moduler: leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper, förlustorsaker och kvalitetsorsaker. Varje post har en **kod** och en **benämning**, båda unika inom sitt register.
+**Inköp → Grunddata** i Nav|ERP (även under Försäljning och Artiklar) samlar de små register som delas av flera moduler: leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper, artikelkoder, förlustorsaker och kvalitetsorsaker. Varje post har en **kod** och en **benämning**, båda unika inom sitt register.
 
 ## Leveransvillkor
 
@@ -34,6 +34,10 @@ Förpackningstyper för artiklar, t.ex. `EUR · EUR-pall` och `KRT · Kartong`. 
 - **+ Ny kollityp** för egna typer.
 - Kollitypernas kolumn **Frakt** sammanfattar fraktuppgifterna; klicka på den för dialogen **Fraktuppgifter — <kollityp>**. Fälten är **Kolliart** (Paket eller Pall), **Längd (mm)**, **Bredd (mm)** och **Höjd (mm)** för full förpackning, **Egenvikt (kg)**, **Flakmeter** (tomt = transportören räknar från måtten) och **Stapelbar**. De används för kolliförslaget på en [försändelse](/hjalp/forsaljning#frakt). Standardkollityperna EUR-pall, halvpall och kvartspall får fotavtryck och egenvikt när de läggs in med **Lägg till standardkollityper**.
 - **+ Ny enhet** för egna enheter.
+
+## Artikelkoder
+
+Koderna som artiklar kan märkas med för urval och gruppering i listor, t.ex. `PLAT · Plåtdelar`. Varje post har **kod**, **benämning** och en valfri **Beskrivning** (högst 300 tecken, visas som kolumn). Skapa med **+ Ny artikelkod** — det kräver behörigheten **Artiklar**. Koden sätts på artikelkortet och i Ny artikel; se [Artikelkoder](/hjalp/artiklar#artikelkoder) i kapitlet Artiklar. Används en artikelkod på artiklar flyttas de till en annan kod du väljer när du tar bort den (administratörer).
 
 ## Förlustorsaker
 

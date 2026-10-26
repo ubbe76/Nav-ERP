@@ -475,8 +475,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         <ListFilterSelect param="kind" allLabel="Alla" ariaLabel="Filtrera på artikel/lego" options={KIND_OPTIONS} />
         <ListFilterSelect
           param="groupId"
-          allLabel="Alla artikelgrupper"
-          ariaLabel="Filtrera på artikelgrupp"
+          allLabel="Alla varugrupper"
+          ariaLabel="Filtrera på varugrupp"
           options={groups.map((g) => ({ value: g.id, label: `${g.code} · ${g.name}` }))}
         />
         <ListToggleFilter param="showAll" label="Visa alla artiklar" />

@@ -599,7 +599,7 @@ function HeaderForm({
         {(dims.allCostCenters.length > 0 || dims.allProjects.length > 0) && (
           <FormHint>
             Gäller alla rader utan eget kostnadsställe och projekt, och bokförs på kostnadsraden (restraden tar alltid
-            fakturans). Förval är leverantörens kostnadsställe, annars artikelgruppens, och inköpsorderns projekt.
+            fakturans). Förval är leverantörens kostnadsställe, annars varugruppens, och inköpsorderns projekt.
           </FormHint>
         )}
         <Field label="Notering" htmlFor="hdrNote">
@@ -752,7 +752,7 @@ function AddRowForm({
                 value={costCenterId}
                 onChange={setCostCenterId}
                 // Without an article there is no group default to take, so the two choices coincide.
-                emptyLabel={article ? "Artikelgruppens förval" : "Följer fakturan"}
+                emptyLabel={article ? "Varugruppens förval" : "Följer fakturan"}
                 noneLabel={article ? "Följer fakturan" : undefined}
               />
             </Field>

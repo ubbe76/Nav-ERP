@@ -24,6 +24,7 @@ const TABS = [
   "Speditörer",
   "Enheter",
   "Kollityper",
+  "Artikelkoder",
   "Förlustorsaker",
   "Kvalitetsorsaker",
 ] as const;
@@ -46,6 +47,8 @@ const TAB_CONFIG: Record<
     singular: string;
     seed?: { label: string; path: string };
     showDescription?: boolean;
+    // Column and field label for the description (default "Förklaring").
+    descriptionLabel?: string;
     // Förlustorsaker: Aktiv flag, upper-case codes of at most 10 characters.
     showActive?: boolean;
     activeHint?: string;
@@ -77,6 +80,15 @@ const TAB_CONFIG: Record<
     singular: "kollityp",
     seed: { label: "Lägg till standardkollityper", path: "/api/v1/package-types/generate-standard" },
   },
+  Artikelkoder: {
+    basePath: "/api/v1/article-codes",
+    singular: "artikelkod",
+    showDescription: true,
+    descriptionLabel: "Beskrivning",
+    writeRule: ["artiklar"],
+    deleteRule: ["admin"],
+    moveHint: "Alla artiklar med artikelkoden flyttas till den valda artikelkoden; därefter tas artikelkoden bort.",
+  },
   Förlustorsaker: {
     basePath: "/api/v1/quote-loss-reasons",
     singular: "förlustorsak",
@@ -101,6 +113,7 @@ export function GrunddataPageClient({
   carriers,
   units,
   packageTypes,
+  articleCodes,
   lossReasons,
   deviationReasons,
 }: {
@@ -109,6 +122,7 @@ export function GrunddataPageClient({
   carriers: RegisterEntry[];
   units: RegisterEntry[];
   packageTypes: RegisterEntry[];
+  articleCodes: RegisterEntry[];
   lossReasons: RegisterEntry[];
   deviationReasons: RegisterEntry[];
 }) {
@@ -119,6 +133,7 @@ export function GrunddataPageClient({
     Speditörer: carriers,
     Enheter: units,
     Kollityper: packageTypes,
+    Artikelkoder: articleCodes,
     Förlustorsaker: lossReasons,
     Kvalitetsorsaker: deviationReasons,
   };
@@ -128,7 +143,7 @@ export function GrunddataPageClient({
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Grunddata</div>
-          <div className={shellStyles.meta}>Leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper, förlustorsaker och kvalitetsorsaker</div>
+          <div className={shellStyles.meta}>Leveransvillkor, betalningsvillkor, speditörer, enheter, kollityper, artikelkoder, förlustorsaker och kvalitetsorsaker</div>
         </div>
         <HelpLink chapter="grunddata" label="Hjälp om grunddata" />
       </div>
@@ -162,7 +177,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
   const [freightEditing, setFreightEditing] = useState<RegisterEntry | null>(null);
   const [seedNotice, setSeedNotice] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
-  const { basePath, singular, seed, showDescription, showActive, activeHint, showReasonFlags, writeRule, deleteRule, moveHint } =
+  const { basePath, singular, seed, showDescription, descriptionLabel, showActive, activeHint, showReasonFlags, writeRule, deleteRule, moveHint } =
     TAB_CONFIG[tab];
   const canWrite = writeRule ? can(writeRule) : true;
   const canDelete = deleteRule ? can(deleteRule) : true;
@@ -210,7 +225,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
         columns={[
           { key: "code", label: "Kod", width: "0.4fr" },
           { key: "name", label: "Benämning", width: "2fr" },
-          ...(showDescription ? [{ key: "description", label: "Förklaring", width: "3fr" }] : []),
+          ...(showDescription ? [{ key: "description", label: descriptionLabel ?? "Förklaring", width: "3fr" }] : []),
           ...(tab === "Kollityper" ? [{ key: "freight", label: "Frakt", width: "2fr" }] : []),
           ...(showReasonFlags ? REASON_FLAGS.map((f) => ({ key: f.key, label: f.label, width: "0.5fr" })) : []),
           ...(showActive ? [{ key: "active", label: "Status", width: "0.6fr" }] : []),
@@ -259,6 +274,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
         <RegisterEntryForm
           basePath={basePath}
           showDescription={showDescription}
+          descriptionLabel={descriptionLabel}
           showActive={showActive}
           activeHint={activeHint}
           showReasonFlags={showReasonFlags}
@@ -277,6 +293,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
             entries={entries}
             singular={singular}
             showDescription={showDescription}
+            descriptionLabel={descriptionLabel}
             showActive={showActive}
             activeHint={activeHint}
             showReasonFlags={showReasonFlags}
@@ -396,6 +413,7 @@ function RegisterEntryForm({
   entries,
   singular,
   showDescription,
+  descriptionLabel,
   showActive,
   activeHint,
   showReasonFlags,
@@ -408,6 +426,7 @@ function RegisterEntryForm({
   entries?: RegisterEntry[];
   singular?: string;
   showDescription?: boolean;
+  descriptionLabel?: string;
   showActive?: boolean;
   activeHint?: string;
   showReasonFlags?: boolean;
@@ -617,7 +636,7 @@ function RegisterEntryForm({
       )}
 
       {showDescription && (
-        <Field label="Förklaring (valfritt)" htmlFor="registerDescription">
+        <Field label={`${descriptionLabel ?? "Förklaring"} (valfritt)`} htmlFor="registerDescription">
           <textarea
             id="registerDescription"
             rows={2}

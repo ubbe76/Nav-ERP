@@ -11,10 +11,10 @@ Statistikrapporterna filtreras med ett månadsintervall (**Från månad** / **Ti
 Urvalet:
 
 - **Datum avser** — **Orderdatum** (dagen ordern skapades) eller **Leveransdatum**, med **Från** och **Till**. Leveransdatum är radens eget datum, annars orderns; på inköpsordrar går **Bekräftat leveransdatum** före **Önskat leveransdatum**, samma regel som planeringen använder. Tomma datum = inget datumurval.
-- **Kund** / **Leverantör**, **Status** (förvalt **Öppna ordrar**: Offert, Bekräftad och Under tillverkning för kundordrar; Utkast, Bekräftad och Delvis mottagen för inköpsordrar), **Artikelgrupp** och **Artikel**.
+- **Kund** / **Leverantör**, **Status** (förvalt **Öppna ordrar**: Offert, Bekräftad och Under tillverkning för kundordrar; Utkast, Bekräftad och Delvis mottagen för inköpsordrar), **Varugrupp**, **Artikelkod** och **Artikel**.
 - **Bara rader med rest** — bara rader som inte är fullt levererade eller mottagna.
 
-Urvalet gäller **orderraderna**: leveransdatum, artikel, artikelgrupp och rest väljer rader, och en order visas med de rader som kom med — dess ordervärde och restvärde summerar bara dem. Ordrar utan rader visas inte.
+Urvalet gäller **orderraderna**: leveransdatum, artikel, varugrupp, artikelkod och rest väljer rader, och en order visas med de rader som kom med — dess ordervärde och restvärde summerar bara dem. Ordrar utan rader visas inte.
 
 Värdena räknas per rad: antal × à-pris med radens rabatt (kundorder) och ställpriset (inköp; ställpriset räknas som rest tills något på raden är mottaget). Inköpsordrar i annan valuta visas i sin valuta; summorna överst och på utskriften är omräknade till SEK med orderns växelkurs. Antal och à-pris visas i radens enhet.
 
@@ -57,7 +57,7 @@ Urvalet **Gruppera** väljer mellan **Månad** (som ovan) och **Motpart**. Med *
 
 ## Försäljningsstatistik
 
-**Rapporter → Försäljningsstatistik** summerar fakturerad nettoomsättning ur kundfakturorna (status **Utfärdad** eller **Betald**; utkast och makulerade räknas inte). Kreditfakturor dras av. Gruppera per **Månad** (fakturadatum), **Kund** eller **Artikel** — artikelgrupperingen visar även fakturerat antal, och fritextrader utan artikel samlas under **(Fritextrader)**.
+**Rapporter → Försäljningsstatistik** summerar fakturerad nettoomsättning ur kundfakturorna (status **Utfärdad** eller **Betald**; utkast och makulerade räknas inte). Kreditfakturor dras av. Gruppera per **Månad** (fakturadatum), **Kund** eller **Artikel** — varugrupperingen visar även fakturerat antal, och fritextrader utan artikel samlas under **(Fritextrader)**.
 
 ## Inköpsstatistik
 

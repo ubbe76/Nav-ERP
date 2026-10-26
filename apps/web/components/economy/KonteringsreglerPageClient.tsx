@@ -635,7 +635,7 @@ function PostingRulesSection({
         </Button>
       </div>
       <FormHint>
-        Styr vilket intäkts- eller kostnadskonto en fakturarad bokförs mot, per artikelgrupp och momskod. En regel
+        Styr vilket intäkts- eller kostnadskonto en fakturarad bokförs mot, per varugrupp och momskod. En regel
         med momskod &quot;Alla momskoder&quot; gäller när ingen regel finns för radens exakta momskod — annars
         används kontot på momskoden (intäkter) eller standardkontot Kostnad, standard (kostnader).
       </FormHint>
@@ -656,7 +656,7 @@ function PostingRulesSection({
 
       <Table<PostingRule>
         columns={[
-          { key: "group", label: "Artikelgrupp", width: "1.3fr" },
+          { key: "group", label: "Varugrupp", width: "1.3fr" },
           { key: "vatCode", label: "Momskod", width: "1.1fr" },
           { key: "revenue", label: "Intäktskonto", width: "1.4fr" },
           { key: "cost", label: "Kostnadskonto", width: "1.4fr" },
@@ -764,7 +764,7 @@ function PostingRuleForm({
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!articleGroupId) {
-      setError("Välj en artikelgrupp");
+      setError("Välj en varugrupp");
       return;
     }
     if (!revenueAccountId && !costAccountId) {
@@ -798,9 +798,9 @@ function PostingRuleForm({
     <Form onSubmit={submit}>
       <FormError>{error}</FormError>
 
-      <Field label="Artikelgrupp" htmlFor="postingRuleGroup">
+      <Field label="Varugrupp" htmlFor="postingRuleGroup">
         <Select id="postingRuleGroup" value={articleGroupId} onChange={(e) => setArticleGroupId(e.target.value)}>
-          <option value="">— Välj artikelgrupp —</option>
+          <option value="">— Välj varugrupp —</option>
           {articleGroups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.code} · {g.name}

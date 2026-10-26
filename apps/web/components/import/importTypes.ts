@@ -73,7 +73,8 @@ export const ACTION_LABELS: Record<PreviewRow["action"], string> = {
 // keys) — later entity imports add their own keys here.
 export const REGISTER_LABELS: Record<string, string> = {
   units: "Enheter",
-  articleGroups: "Artikelgrupper",
+  articleGroups: "Varugrupper",
+  articleCodes: "Artikelkoder",
   articles: "Artiklar",
   paymentTerms: "Betalningsvillkor",
   deliveryTerms: "Leveransvillkor",

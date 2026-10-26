@@ -44,7 +44,7 @@ Hur en fakturarad beskattas avgörs av radens **Momskod** (se [Momskoder](/hjalp
 | Annat EU-land, utan VAT-nummer | Artikelns svenska moms | Artikelns svenska moms |
 | Land utanför EU | **Export av varor** | **Tjänster till land utanför EU** |
 
-**Artikelns svenska moms** är momskoden för artikelns momssats: **Moms 25 %**, **Moms 12 %**, **Moms 6 %** eller **Momsfri**. **Varor** är alla artiklar som inte är tjänsteartiklar, samt fraktartikeln (frakt följer varuleveransen) och fria rader utan artikel. En privatperson utanför EU får alltså export utan moms för varor (varor som lämnar EU är undantagna oavsett köpare) men svensk moms för tjänster; distansförsäljning till privatpersoner i andra EU-länder (OSS) ingår inte i Nav.
+**Artikelns svenska moms** är momskoden för artikelns momssats (den följer artikelns [varugrupp](/hjalp/artiklar#varugrupper), eller 25 % utan varugrupp): **Moms 25 %**, **Moms 12 %**, **Moms 6 %** eller **Momsfri**. **Varor** är alla artiklar som inte är tjänsteartiklar, samt fraktartikeln (frakt följer varuleveransen) och fria rader utan artikel. En privatperson utanför EU får alltså export utan moms för varor (varor som lämnar EU är undantagna oavsett köpare) men svensk moms för tjänster; distansförsäljning till privatpersoner i andra EU-länder (OSS) ingår inte i Nav.
 
 **Momsbehandling** på fliken **Villkor & frakt** visar vad kunden får: **Svensk moms**, **Svensk moms (saknar momsnummer)**, **EU — utan moms**, **Export — utan moms**, **Privatperson i annat EU-land — svensk moms** eller **Privatperson utanför EU — export utan moms för varor**. Raden räknas ut av kundens **sparade** **Land** (fliken **Allmänt**) och av **VAT-nummer**, **Privatperson** och **Omvänd betalningsskyldighet för byggtjänster** som de står i formuläret. De tre sistnämnda följer dina ändringar medan du fyller i, men ett ändrat **Land** räknas först när **Allmänt** är sparat — och på fakturaraderna gäller allt först när kortet är sparat. Några lägen ger en varning på kortet:
 
@@ -162,11 +162,11 @@ Utöver prislistorna kan varje kund ha egna prisregler, oberoende av vilken pris
 
 - Tabellen visar kundens registrerade regler: **Artikel/Grupp**, **Från antal**, **Pris**, **Rabatt %**. Har kunden en annan valuta än SEK står den i kolumnrubriken, t.ex. **Pris (EUR)**.
 - **+ Ny prisregel** öppnar en dialog:
-  - **Måltyp** — radioknapparna **Artikel** eller **Artikelgrupp** väljer om regeln gäller en enskild artikel (artikelväljaren) eller en hel artikelgrupp (dropdown ur artikelgruppsregistret).
+  - **Måltyp** — radioknapparna **Artikel** eller **Varugrupp** väljer om regeln gäller en enskild artikel (artikelväljaren) eller en hel varugrupp (dropdown ur varugruppsregistret).
   - **Från antal** — staffelgränsen, precis som på prislistan.
   - **Pristyp** — radioknapparna **Specialpris (kr)** eller **Rabatt (%)** väljer om regeln sätter ett fast pris eller en procentuell rabatt. Ett specialpris anges i **kundens valuta**, så för en kund i EUR heter alternativet **Specialpris (EUR)**.
   - Beroende på valet visas fältet **Specialpris (kr)** (respektive kundens valuta) eller **Rabatt (%)**.
-  - Målet (artikel eller artikelgrupp) låses när regeln väl är skapad — **Ändra** visar det som ett skrivskyddat fält; är regeln fel skapad tas den bort och läggs till på nytt.
+  - Målet (artikel eller varugrupp) låses när regeln väl är skapad — **Ändra** visar det som ett skrivskyddat fält; är regeln fel skapad tas den bort och läggs till på nytt.
 - **Ta bort** tar bort en regel efter bekräftelse.
 
 ### Priskedjan
@@ -174,7 +174,7 @@ Utöver prislistorna kan varje kund ha egna prisregler, oberoende av vilken pris
 Priset på en orderrad slås upp i fem steg, mest specifika regel vinner:
 
 1. **Kundens egen prisregel för artikeln** (Priser-fliken, Måltyp Artikel).
-2. **Kundens prisregel för artikelns artikelgrupp** (Priser-fliken, Måltyp Artikelgrupp).
+2. **Kundens prisregel för artikelns varugrupp** (Priser-fliken, Måltyp Varugrupp).
 3. **Kundens prislista** (kundkortets Villkor & frakt-flik).
 4. **Artikelns eget försäljningspris** (artikelkortets fält **Försäljningspris (kr)**, se [Artiklar](/hjalp/artiklar)).
 5. **Kundens rabatt (%)** (kundkortets Villkor & frakt-flik, fältet **Kundrabatt (%)**) — bara när inget av steg 1–2 gav en träff. Rabatten läggs på priset från steg 3 eller, saknas det, steg 4; finns inget sådant grundpris ger den inget pris alls.
@@ -439,7 +439,7 @@ En fakturarad som hämtats från en konfigurerad orderrad bär en kopia av raden
 
 Finns det kostnadsställen eller projekt (se [Kostnadsställen och projekt](/hjalp/ekonomi#kostnadsstallen-och-projekt)) har kundordern och offerten fälten **Kostnadsställe** och **Projekt** — i **Ny offert**/**Ny kundorder** och under **Ändra** på orderhuvudet — och de visas i orderhuvudet när de är satta. De är förval för fakturaraderna.
 
-På fakturan har varje rad ett kostnadsställe och ett projekt: kolumnen **Kostnadsställe / projekt**, ändringsbara med **Ändra** på raden i ett utkast, och **Kostnadsställe (valfritt)** och **Projekt (valfritt)** i **Lägg till rad**. Båda listorna har valen **Förval** (raden får förvalet nedan) och **Inget** (raden får inget objekt) utöver objekten. Förval för kostnadsstället är orderns **Kostnadsställe** när raden hämtas från en order, annars artikelgruppens **Kostnadsställe (förval)** (se [Artiklar](/hjalp/artiklar#artikelgrupper)); förval för projektet är orderns **Projekt**. Objekten bokförs på intäktsraden när fakturan utfärdas, inte på kundfordran eller momsen. Ett stängt projekt kan inte väljas på en ny rad. En kreditfaktura kopierar källradernas objekt som de är, även om ett projekt stängts sedan dess.
+På fakturan har varje rad ett kostnadsställe och ett projekt: kolumnen **Kostnadsställe / projekt**, ändringsbara med **Ändra** på raden i ett utkast, och **Kostnadsställe (valfritt)** och **Projekt (valfritt)** i **Lägg till rad**. Båda listorna har valen **Förval** (raden får förvalet nedan) och **Inget** (raden får inget objekt) utöver objekten. Förval för kostnadsstället är orderns **Kostnadsställe** när raden hämtas från en order, annars varugruppens **Kostnadsställe (förval)** (se [Artiklar](/hjalp/artiklar#varugrupper)); förval för projektet är orderns **Projekt**. Objekten bokförs på intäktsraden när fakturan utfärdas, inte på kundfordran eller momsen. Ett stängt projekt kan inte väljas på en ny rad. En kreditfaktura kopierar källradernas objekt som de är, även om ett projekt stängts sedan dess.
 
 ### Momskod och leveransdatum på raden
 
@@ -565,7 +565,7 @@ Statusen uppdateras automatiskt av ett bakgrundsjobb (intervallet ställs in und
 Konteringen ser ut så här (en faktura i utländsk valuta bokförs på samma sätt i SEK med fakturans kurs, se [Faktura i utländsk valuta](#faktura-i-utlandsk-valuta)):
 
 - **Kundfordran** debiteras med bruttobeloppet (standardkonto **1510 Kundfordringar**).
-- **Försäljningsintäkten** krediteras rad för rad, på ett konto som avgörs av radens [momskod](/hjalp/ekonomi#momskoder): först en konteringsregel för radens artikelgrupp och exakt den momskoden; annars en regel för artikelgruppen med **Alla momskoder** — men den gäller bara svensk moms och momsfritt, så att en EU-försäljning aldrig hamnar på ett konto med ruta 05; annars kontot på momskoden själv. För svensk moms är det **3001** (**Moms 25 %**), **3002** (12 %), **3003** (6 %) och **3004** (**Momsfri**); för EU-försäljning **3108** (varor) och **3308** (tjänster), export **3105** (varor) och **3305** (tjänster) och omvänd betalningsskyldighet **3231**. Kontona kan ändras under **Ekonomi → Momskoder**.
+- **Försäljningsintäkten** krediteras rad för rad, på ett konto som avgörs av radens [momskod](/hjalp/ekonomi#momskoder): först en konteringsregel för radens varugrupp och exakt den momskoden; annars en regel för varugruppen med **Alla momskoder** — men den gäller bara svensk moms och momsfritt, så att en EU-försäljning aldrig hamnar på ett konto med ruta 05; annars kontot på momskoden själv. För svensk moms är det **3001** (**Moms 25 %**), **3002** (12 %), **3003** (6 %) och **3004** (**Momsfri**); för EU-försäljning **3108** (varor) och **3308** (tjänster), export **3105** (varor) och **3305** (tjänster) och omvänd betalningsskyldighet **3231**. Kontona kan ändras under **Ekonomi → Momskoder**.
 - **Utgående moms** krediteras per rad på momskodens konto för utgående moms: **2610** (25 %), **2620** (12 %) och **2630** (6 %). En rad med en 0 %-kod ger ingen momsrad alls — och har en 0 %-rad ändå ett momsbelopp avvisas bokföringen.
 
 En **kreditfaktura** bokförs som en spegling av samma konton — kundfordran krediteras, intäkt och moms debiteras. Den är ett eget verifikat, inte en omföring av originalfakturans.

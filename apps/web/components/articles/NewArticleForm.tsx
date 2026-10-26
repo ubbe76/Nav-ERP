@@ -40,6 +40,8 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
   const [units, setUnits] = useState<RegisterEntry[]>([]);
   const [standardCost, setStandardCost] = useState("");
   const [groupId, setGroupId] = useState("");
+  const [articleCodeId, setArticleCodeId] = useState("");
+  const [articleCodes, setArticleCodes] = useState<RegisterEntry[]>([]);
   const [defaultLocationId, setDefaultLocationId] = useState("");
   const [locations, setLocations] = useState<StockLocation[]>([]);
 
@@ -54,6 +56,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
       .catch(() => setSeriesOptions([]));
     apiFetch<StockLocation[]>("/api/v1/stock/locations").then(setLocations).catch(() => setLocations([]));
     apiFetch<RegisterEntry[]>("/api/v1/units").then(setUnits).catch(() => setUnits([]));
+    apiFetch<RegisterEntry[]>("/api/v1/article-codes").then(setArticleCodes).catch(() => setArticleCodes([]));
   }, []);
   function changeGroup(next: string) {
     setGroupId(next);
@@ -102,6 +105,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
       setUnitId(source.unit === "st" ? "" : source.unitId);
       setStandardCost(source.standardCost === null ? "" : String(Number(source.standardCost)));
       changeGroup(source.groupId ?? "");
+      setArticleCodeId(source.articleCodeId ?? "");
       // Only an active location is in the list; otherwise *** (standard).
       setDefaultLocationId(locations.some((l) => l.id === source.defaultLocationId) ? source.defaultLocationId! : "");
     }
@@ -147,6 +151,7 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
           unitId: unitId === "" ? undefined : unitId,
           standardCost: standardCost === "" ? undefined : Number(standardCost),
           groupId: groupId === "" ? undefined : groupId,
+          articleCodeId: articleCodeId === "" ? undefined : articleCodeId,
           defaultLocationId: defaultLocationId === "" ? undefined : defaultLocationId,
           copyFrom: copySource && copyParts.length > 0 ? { articleId: copySource.id, parts: copyParts } : undefined,
         }),
@@ -312,9 +317,9 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
         </FormRow>
 
         <FormRow>
-          <Field label="Artikelgrupp (valfritt)" htmlFor="groupId">
+          <Field label="Varugrupp (valfritt)" htmlFor="groupId">
             <Select id="groupId" value={groupId} onChange={(e) => changeGroup(e.target.value)}>
-              <option value="">Ingen grupp</option>
+              <option value="">Ingen varugrupp</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>
                   {g.code} · {g.name}
@@ -322,6 +327,19 @@ export function NewArticleForm({ groups, attachToArticleId, onSuccess }: NewArti
               ))}
             </Select>
           </Field>
+          <Field label="Artikelkod (valfritt)" htmlFor="newArticleCode">
+            <Select id="newArticleCode" value={articleCodeId} onChange={(e) => setArticleCodeId(e.target.value)}>
+              <option value="">–</option>
+              {articleCodes.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.code} · {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </FormRow>
+
+        <FormRow>
           <Field label="Lagerplats" htmlFor="newArticleLocation">
             {/* Empty = the auto-created "***" fallback location. */}
             <Select id="newArticleLocation" value={defaultLocationId} onChange={(e) => setDefaultLocationId(e.target.value)}>
