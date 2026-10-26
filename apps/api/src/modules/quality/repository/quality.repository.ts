@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, getTableColumns, gte, ilike, inArray, isNotNull, lt, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, gte, ilike, inArray, isNotNull, isNull, lt, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { alias, type PgSelect } from "drizzle-orm/pg-core";
 import {
   articles,
@@ -60,6 +60,9 @@ const responsibleUsers = alias(users, "deviation_responsible_users");
 const createdUsers = alias(users, "deviation_created_users");
 const closedUsers = alias(users, "deviation_closed_users");
 const cancelledUsers = alias(users, "deviation_cancelled_users");
+
+// ordersWithDeviation's IN-list size (exported for its test).
+export const ORDER_ID_BATCH = 5000;
 
 export type DeviationRow = typeof deviations.$inferSelect;
 export type DeviationWrite = Partial<Omit<typeof deviations.$inferInsert, "id" | "deviationNumber" | "createdAt">>;
@@ -253,40 +256,40 @@ export function createQualityRepository(db: Db) {
       purchaseOrderRowId: string | null;
       moOperationId: string | null;
       invoiceId: string | null;
-    }): Promise<DeviationLinkFacts> {
+    }, executor: Db | Tx = db): Promise<DeviationLinkFacts> {
       const facts: DeviationLinkFacts = {};
       if (ids.customerId) {
-        facts.customerExists = (await db.select({ id: customers.id }).from(customers).where(eq(customers.id, ids.customerId))).length > 0;
+        facts.customerExists = (await executor.select({ id: customers.id }).from(customers).where(eq(customers.id, ids.customerId))).length > 0;
       }
       if (ids.supplierId) {
-        facts.supplierExists = (await db.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.id, ids.supplierId))).length > 0;
+        facts.supplierExists = (await executor.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.id, ids.supplierId))).length > 0;
       }
       if (ids.articleId) {
-        facts.articleExists = (await db.select({ id: articles.id }).from(articles).where(eq(articles.id, ids.articleId))).length > 0;
+        facts.articleExists = (await executor.select({ id: articles.id }).from(articles).where(eq(articles.id, ids.articleId))).length > 0;
       }
       if (ids.salesOrderRowId) {
-        const [row] = await db
+        const [row] = await executor
           .select({ salesOrderId: salesOrderRows.salesOrderId, articleId: salesOrderRows.articleId })
           .from(salesOrderRows)
           .where(eq(salesOrderRows.id, ids.salesOrderRowId));
         facts.salesOrderRow = row ?? null;
       }
       if (ids.purchaseOrderRowId) {
-        const [row] = await db
+        const [row] = await executor
           .select({ purchaseOrderId: purchaseOrderRows.purchaseOrderId, articleId: purchaseOrderRows.articleId })
           .from(purchaseOrderRows)
           .where(eq(purchaseOrderRows.id, ids.purchaseOrderRowId));
         facts.purchaseOrderRow = row ?? null;
       }
       if (ids.moOperationId) {
-        const [row] = await db
+        const [row] = await executor
           .select({ manufacturingOrderId: moOperations.manufacturingOrderId })
           .from(moOperations)
           .where(eq(moOperations.id, ids.moOperationId));
         facts.moOperation = row ?? null;
       }
       if (ids.invoiceId) {
-        const [row] = await db
+        const [row] = await executor
           .select({ customerId: invoices.customerId, invoiceNumber: invoices.invoiceNumber })
           .from(invoices)
           .where(eq(invoices.id, ids.invoiceId));
@@ -296,24 +299,27 @@ export function createQualityRepository(db: Db) {
     },
 
     // The orders (given or implied by a row/operation).
-    async loadOrderFacts(ids: { salesOrderId: string | null; purchaseOrderId: string | null; manufacturingOrderId: string | null }) {
+    async loadOrderFacts(
+      ids: { salesOrderId: string | null; purchaseOrderId: string | null; manufacturingOrderId: string | null },
+      executor: Db | Tx = db
+    ) {
       const facts: Pick<DeviationLinkFacts, "salesOrder" | "purchaseOrder" | "manufacturingOrder"> = {};
       if (ids.salesOrderId) {
-        const [row] = await db
+        const [row] = await executor
           .select({ customerId: salesOrders.customerId, orderNumber: salesOrders.orderNumber })
           .from(salesOrders)
           .where(eq(salesOrders.id, ids.salesOrderId));
         facts.salesOrder = row ?? null;
       }
       if (ids.purchaseOrderId) {
-        const [row] = await db
+        const [row] = await executor
           .select({ supplierId: purchaseOrders.supplierId, orderNumber: purchaseOrders.orderNumber })
           .from(purchaseOrders)
           .where(eq(purchaseOrders.id, ids.purchaseOrderId));
         facts.purchaseOrder = row ?? null;
       }
       if (ids.manufacturingOrderId) {
-        const [row] = await db
+        const [row] = await executor
           .select({ articleId: manufacturingOrders.articleId, orderNumber: manufacturingOrders.orderNumber })
           .from(manufacturingOrders)
           .where(eq(manufacturingOrders.id, ids.manufacturingOrderId));
@@ -322,13 +328,23 @@ export function createQualityRepository(db: Db) {
       return facts;
     },
 
-    async findReason(id: string) {
-      const [row] = await db.select().from(deviationReasons).where(eq(deviationReasons.id, id));
+    async findReason(id: string, executor: Db | Tx = db) {
+      const [row] = await executor.select().from(deviationReasons).where(eq(deviationReasons.id, id));
       return row ?? null;
     },
 
-    async userExists(id: string) {
-      return (await db.select({ id: users.id }).from(users).where(eq(users.id, id))).length > 0;
+    // Active person accounts (read-only accounts included; integration
+    // accounts and removed users not), by name — only id and name.
+    async responsibleOptions(): Promise<{ id: string; name: string }[]> {
+      return db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(and(eq(users.active, true), isNull(users.deletedAt), eq(users.kind, "person")))
+        .orderBy(asc(users.name), asc(users.id));
+    },
+
+    async userExists(id: string, executor: Db | Tx = db) {
+      return (await executor.select({ id: users.id }).from(users).where(eq(users.id, id))).length > 0;
     },
 
     // --- writes ---
@@ -345,14 +361,42 @@ export function createQualityRepository(db: Db) {
       });
     },
 
-    // Field edits, only while the case is open. `changes` is the history
-    // row's before/after per field.
-    async update(id: string, set: DeviationWrite, changes: Record<string, { before: unknown; after: unknown }>, userId: string | null) {
+    // Field edits, only while the case is open. Like transition: the row is
+    // locked first and the caller's build function merges the input onto the
+    // LOCKED row and runs the reason/link checks there (reading through the
+    // transaction), so two concurrent PATCHes never store a combination
+    // neither of them checked. `changes` is the history row's before/after
+    // per field; an empty `set` writes nothing.
+    async update(
+      id: string,
+      build: (
+        row: DeviationRow,
+        tx: Tx
+      ) => Promise<{ set: DeviationWrite; changes: Record<string, { before: unknown; after: unknown }> }>,
+      userId: string | null
+    ) {
       return db.transaction(async (tx) => {
-        await lockEditable(tx, id);
+        const row = await lockEditable(tx, id);
+        const { set, changes } = await build(row, tx);
+        if (Object.keys(set).length === 0) return;
         await tx.update(deviations).set({ ...set, updatedAt: sql`now()` }).where(eq(deviations.id, id));
         if (Object.keys(changes).length > 0) await event(tx, id, "updated", { changes }, userId);
       });
+    },
+
+    // The case's links to documents that carry a counterparty (kreditfaktura
+    // and KO ⇒ customer, IO and leverantörsfaktura ⇒ supplier) — a PATCH may
+    // not move the case to another counterparty while they are linked.
+    async counterpartyLinks(executor: Db | Tx, deviationId: string) {
+      return executor
+        .select({ documentType: deviationLinks.documentType, documentId: deviationLinks.documentId })
+        .from(deviationLinks)
+        .where(
+          and(
+            eq(deviationLinks.deviationId, deviationId),
+            inArray(deviationLinks.documentType, ["credit_invoice", "sales_order", "purchase_order", "supplier_invoice"])
+          )
+        );
     },
 
     // A status action under the case's row lock: the whitelist, then the
@@ -670,14 +714,26 @@ export function createQualityRepository(db: Db) {
     },
 
     // Which of these orders carry a case that is not cancelled (any date).
+    // The measured orders of a long period can be many thousands — read in
+    // batches so one IN list never nears Postgres's 65 535-parameter cap.
     async ordersWithDeviation(type: "customer" | "supplier", orderIds: string[]): Promise<Set<string>> {
-      if (orderIds.length === 0) return new Set();
       const column = type === "customer" ? deviations.salesOrderId : deviations.purchaseOrderId;
-      const rows = await db
-        .selectDistinct({ orderId: column })
-        .from(deviations)
-        .where(and(eq(deviations.type, type), ne(deviations.status, "cancelled"), isNotNull(column), inArray(column, orderIds)));
-      return new Set(rows.map((r) => r.orderId!));
+      const found = new Set<string>();
+      for (let i = 0; i < orderIds.length; i += ORDER_ID_BATCH) {
+        const rows = await db
+          .selectDistinct({ orderId: column })
+          .from(deviations)
+          .where(
+            and(
+              eq(deviations.type, type),
+              ne(deviations.status, "cancelled"),
+              isNotNull(column),
+              inArray(column, orderIds.slice(i, i + ORDER_ID_BATCH))
+            )
+          );
+        for (const r of rows) found.add(r.orderId!);
+      }
+      return found;
     },
   };
   return repo;

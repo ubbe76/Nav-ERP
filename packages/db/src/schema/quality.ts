@@ -12,6 +12,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -179,6 +180,13 @@ export const deviationLinks = pgTable(
   (table) => [
     unique("deviation_links_unique").on(table.deviationId, table.documentType, table.documentId),
     index("idx_deviation_links_document").on(table.documentType, table.documentId),
+    // A kreditfaktura / leverantörskreditnota belongs to at most ONE case —
+    // its amount is a derived cost line, and two cases would count it twice
+    // (0154). The index, not a check under the case lock, is the guard: two
+    // Koppla dokument on DIFFERENT cases lock different rows.
+    uniqueIndex("deviation_links_one_case_per_invoice")
+      .on(table.documentType, table.documentId)
+      .where(sql`${table.documentType} in ('credit_invoice', 'supplier_invoice')`),
   ]
 );
 

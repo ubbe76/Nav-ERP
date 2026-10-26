@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Db, Tx } from "@navet/db";
 import {
   DEVIATION_COST_KIND_LABELS,
   DEVIATION_DECISION_LABELS,
@@ -12,11 +13,19 @@ import {
   type SendDeviationEmailInput,
   type UpdateDeviationInput,
 } from "@navet/shared";
-import type { DocumentPdfService } from "../../mail/service/document-pdf.js";
+import { formatNumber, type DocumentPdfService } from "../../mail/service/document-pdf.js";
 import type { MailService } from "../../mail/service/mail.service.js";
 import { hasSignature } from "../../purchase/service/invoice-scan/file-signature.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
-import type { DerivedCostLine, DeviationRow, DeviationWrite, DetailRow, ListRow, QualityRepository } from "../repository/quality.repository.js";
+import {
+  ORDER_ID_BATCH,
+  type DerivedCostLine,
+  type DeviationRow,
+  type DeviationWrite,
+  type DetailRow,
+  type ListRow,
+  type QualityRepository,
+} from "../repository/quality.repository.js";
 import { summarizeDeviationCosts, type DeviationCostLine } from "./deviation-costs.js";
 import {
   DeviationCloseRequirementsError,
@@ -73,8 +82,11 @@ const EDITABLE_FIELDS = [
 ] as const;
 type EditableField = (typeof EDITABLE_FIELDS)[number];
 
+// The PDF's quantity: formatNumber (never sv-SE's U+2212 minus, mail.md)
+// with up to four decimals and no trailing zeros.
 function formatQuantity(value: number): string {
-  return value.toLocaleString("sv-SE", { maximumFractionDigits: 4 }).replace("−", "-");
+  const decimals = Number.isInteger(value) ? 0 : Math.min(4, String(value).split(".")[1]?.length ?? 4);
+  return formatNumber(value, decimals);
 }
 
 // Comparable form of a stored or incoming value (numeric columns come back
@@ -97,13 +109,18 @@ export function createQualityService(deps: {
   const isOverdue = (row: { status: string; dueDate: string | null }, day: string) =>
     (row.status === "registered" || row.status === "investigating") && row.dueDate !== null && row.dueDate < day;
 
+  // In batches like ordersWithDeviation: the leveransprecision's period
+  // can hold more cases than one IN list should carry.
   async function netCosts(ids: string[]): Promise<Map<string, number>> {
-    const [manual, derived] = await Promise.all([repo.manualCostLines(ids), repo.derivedCostLines(ids)]);
     const lines = new Map<string, DeviationCostLine[]>();
-    for (const line of [...manual, ...derived]) {
-      const list = lines.get(line.deviationId) ?? [];
-      list.push({ kind: line.kind, amount: line.amount });
-      lines.set(line.deviationId, list);
+    for (let i = 0; i < ids.length; i += ORDER_ID_BATCH) {
+      const batch = ids.slice(i, i + ORDER_ID_BATCH);
+      const [manual, derived] = await Promise.all([repo.manualCostLines(batch), repo.derivedCostLines(batch)]);
+      for (const line of [...manual, ...derived]) {
+        const list = lines.get(line.deviationId) ?? [];
+        list.push({ kind: line.kind, amount: line.amount });
+        lines.set(line.deviationId, list);
+      }
     }
     return new Map(ids.map((id) => [id, summarizeDeviationCosts(lines.get(id) ?? []).netCost]));
   }
@@ -120,8 +137,8 @@ export function createQualityService(deps: {
 
   // The reason must exist, be active and apply to the case's type. An
   // unchanged reason on PATCH is kept even if it has since been deactivated.
-  async function assertReason(type: DeviationType, reasonId: string) {
-    const reason = await repo.findReason(reasonId);
+  async function assertReason(type: DeviationType, reasonId: string, executor?: Db | Tx) {
+    const reason = await repo.findReason(reasonId, executor);
     if (!reason) throw new DeviationReasonNotApplicableError("Orsaken finns inte");
     if (!reason.active) throw new DeviationReasonNotApplicableError(`Orsaken ${reason.name} är inaktiv`);
     const applies = type === "customer" ? reason.appliesCustomer : type === "supplier" ? reason.appliesSupplier : reason.appliesInternal;
@@ -133,16 +150,16 @@ export function createQualityService(deps: {
 
   // Runs the link check over the facts and returns the resolved ids (the
   // implied order of a row, the article of a row/TO).
-  async function resolveLinks(input: DeviationLinkInput): Promise<DeviationLinkInput> {
-    const facts = await repo.loadLinkFacts(input);
-    Object.assign(facts, await repo.loadOrderFacts(impliedParents(input, facts)));
+  async function resolveLinks(input: DeviationLinkInput, executor?: Db | Tx): Promise<DeviationLinkInput> {
+    const facts = await repo.loadLinkFacts(input, executor);
+    Object.assign(facts, await repo.loadOrderFacts(impliedParents(input, facts), executor));
     const result = checkDeviationLinks(input, facts);
     if (!result.ok) throw new DeviationLinkMismatchError(result.field, result.message);
     return result.resolved;
   }
 
-  async function assertResponsible(userId: string | null | undefined) {
-    if (userId && !(await repo.userExists(userId))) {
+  async function assertResponsible(userId: string | null | undefined, executor?: Db | Tx) {
+    if (userId && !(await repo.userExists(userId, executor))) {
       throw new DeviationLinkMismatchError("responsibleUserId", "Användaren finns inte");
     }
   }
@@ -175,6 +192,10 @@ export function createQualityService(deps: {
       const { rows, total } = await repo.list(query, day);
       const costs = opts.seePrices ? await netCosts(rows.map((r) => r.id)) : new Map<string, number>();
       return { rows: rows.map((r) => listRow(r, day, opts.seePrices ? (costs.get(r.id) ?? 0) : null)), total };
+    },
+
+    async responsibleOptions() {
+      return repo.responsibleOptions();
     },
 
     async get(id: string, opts: { seePrices: boolean }) {
@@ -253,47 +274,67 @@ export function createQualityService(deps: {
     },
 
     async update(id: string, input: UpdateDeviationInput, userId: string | null, opts: { seePrices: boolean }) {
-      const current = await requireRaw(id);
-      // A read-side refusal before the validation's error messages; the
-      // repository checks again under the row lock.
-      if (!isEditable(current.status)) throw new DeviationNotEditableError(current.deviationNumber);
       if (input.title === null) delete (input as { title?: unknown }).title;
       if (input.reportedDate === null) delete (input as { reportedDate?: unknown }).reportedDate;
-      const merged = { ...current, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) } as DeviationRow & {
-        quantity: string | number | null;
-      };
-      if (input.reasonId && input.reasonId !== current.reasonId) await assertReason(current.type, input.reasonId);
-      if (input.responsibleUserId && input.responsibleUserId !== current.responsibleUserId) await assertResponsible(input.responsibleUserId);
-      if (current.type === "internal" && merged.decision) {
-        throw new DeviationLinkMismatchError("decision", "En intern avvikelse har inget beslut");
-      }
-      const links = await resolveLinks(linkInputOf(current.type, merged));
-      const { type: _type, ...linkValues } = links;
-      const next: Record<EditableField, unknown> = {
-        title: merged.title,
-        description: merged.description ?? null,
-        reportedDate: merged.reportedDate,
-        reasonId: merged.reasonId ?? null,
-        responsibleUserId: merged.responsibleUserId ?? null,
-        dueDate: merged.dueDate ?? null,
-        counterpartyReference: merged.counterpartyReference ?? null,
-        ...linkValues,
-        quantity: merged.quantity == null ? null : String(merged.quantity),
-        causeAnalysis: merged.causeAnalysis ?? null,
-        correctiveAction: merged.correctiveAction ?? null,
-        preventiveAction: merged.preventiveAction ?? null,
-        decision: merged.decision ?? null,
-      };
-      const set: Record<string, unknown> = {};
-      const changes: Record<string, { before: unknown; after: unknown }> = {};
-      for (const field of EDITABLE_FIELDS) {
-        const before = comparable(field, current[field]);
-        const after = comparable(field, next[field]);
-        if (before === after) continue;
-        set[field] = next[field];
-        changes[field] = { before, after };
-      }
-      if (Object.keys(set).length > 0) await repo.update(id, set as DeviationWrite, changes, userId);
+      const given = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined));
+      // Everything below runs on the LOCKED row (repo.update): the merge, the
+      // reason and the link checks, and the counterparty rule — a concurrent
+      // PATCH waits and then merges onto what this one stored.
+      await repo.update(
+        id,
+        async (current, tx) => {
+          const merged = { ...current, ...given } as DeviationRow & { quantity: string | number | null };
+          if (input.reasonId && input.reasonId !== current.reasonId) await assertReason(current.type, input.reasonId, tx);
+          if (input.responsibleUserId && input.responsibleUserId !== current.responsibleUserId) {
+            await assertResponsible(input.responsibleUserId, tx);
+          }
+          if (current.type === "internal" && merged.decision) {
+            throw new DeviationLinkMismatchError("decision", "En intern avvikelse har inget beslut");
+          }
+          const links = await resolveLinks(linkInputOf(current.type, merged), tx);
+          const { type: _type, ...linkValues } = links;
+          // Another counterparty: the linked kreditfakturor/KO/IO/
+          // leverantörsfakturor are the current one's (the link checked
+          // that) — they would stay linked, and counted, on the wrong case.
+          for (const field of ["customerId", "supplierId"] as const) {
+            if ((linkValues[field] ?? null) === (current[field] ?? null)) continue;
+            const bound = await repo.counterpartyLinks(tx, id);
+            if (bound.length > 0) {
+              const who = field === "customerId" ? "kunden" : "leverantören";
+              throw new DeviationLinkMismatchError(
+                field,
+                `${current.deviationNumber} har kopplade dokument från den nuvarande ${who}. Ta bort kopplingarna först.`
+              );
+            }
+          }
+          const next: Record<EditableField, unknown> = {
+            title: merged.title,
+            description: merged.description ?? null,
+            reportedDate: merged.reportedDate,
+            reasonId: merged.reasonId ?? null,
+            responsibleUserId: merged.responsibleUserId ?? null,
+            dueDate: merged.dueDate ?? null,
+            counterpartyReference: merged.counterpartyReference ?? null,
+            ...linkValues,
+            quantity: merged.quantity == null ? null : String(merged.quantity),
+            causeAnalysis: merged.causeAnalysis ?? null,
+            correctiveAction: merged.correctiveAction ?? null,
+            preventiveAction: merged.preventiveAction ?? null,
+            decision: merged.decision ?? null,
+          };
+          const set: Record<string, unknown> = {};
+          const changes: Record<string, { before: unknown; after: unknown }> = {};
+          for (const field of EDITABLE_FIELDS) {
+            const before = comparable(field, current[field]);
+            const after = comparable(field, next[field]);
+            if (before === after) continue;
+            set[field] = next[field];
+            changes[field] = { before, after };
+          }
+          return { set: set as DeviationWrite, changes };
+        },
+        userId
+      );
       return service.get(id, opts);
     },
 

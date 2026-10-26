@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
 import { DeviationsPageClient } from "../../../components/quality/DeviationsPageClient";
-import { apiGet, getCurrentUser } from "../../../lib/api";
+import { apiGet } from "../../../lib/api";
 import { listApiQuery, type PageSearchParams } from "../../../lib/listQuery";
 import { getListPageSize } from "../../../lib/listPageSize";
 import { getResponsibleCandidates, type DeviationListRow, type DeviationReason } from "../../../lib/quality";
@@ -31,11 +31,10 @@ export default async function DeviationsPage(props: { searchParams: Promise<Page
   const searchParams = await props.searchParams;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const pageSize = await getListPageSize();
-  const user = await getCurrentUser(cookieHeader);
   const [deviations, reasons, responsible] = await Promise.all([
     apiGet<Paged<DeviationListRow>>(`/api/v1/deviations${listApiQuery(searchParams, FILTER_KEYS, pageSize)}`, cookieHeader),
     apiGet<DeviationReason[]>("/api/v1/deviation-reasons", cookieHeader),
-    getResponsibleCandidates(cookieHeader, user),
+    getResponsibleCandidates(cookieHeader),
   ]);
 
   return (

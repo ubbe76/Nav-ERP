@@ -74,6 +74,15 @@ describe("klienträttigheter per rutt", () => {
     expect(ok.json().order.status).toBe("confirmed");
   });
 
+  // Avvikelsernas genväg: deviationId writes into a case — a Kvalitet write
+  // a client never has (deviationLinkForbidden), so nothing is created.
+  it("refuses deviationId on POST /quotes for a client (403, no order)", async () => {
+    const client = await clientToken(["quotes:create", "orders:confirm"]);
+    const denied = await call("POST", "/quotes", client.auth, { ...quote(ownCustomer, true), deviationId: NO_ID });
+    expect(denied.statusCode).toBe(403);
+    expect(await db.select().from(salesOrders)).toHaveLength(0);
+  });
+
   it("needs orders:confirm to confirm an order", async () => {
     const order = (await call("POST", "/quotes", (await clientToken(["quotes:create"])).auth, quote(ownCustomer))).json().order;
     expect((await call("POST", `/sales-orders/${order.id}/confirm`, (await clientToken(["quotes:create"])).auth)).json().code).toBe("client-scope-missing");

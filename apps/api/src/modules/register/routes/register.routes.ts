@@ -58,7 +58,7 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
     create(input: TInput): Promise<unknown>;
     update(id: string, input: TInput): Promise<unknown>;
     usage(id: string): Promise<unknown>;
-    remove(id: string, replacementId: string | null): Promise<unknown>;
+    remove(id: string, replacementId: string | null, userId?: string | null): Promise<unknown>;
   };
   function register<TInput>(
     path: string,
@@ -107,7 +107,7 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
     app.delete<{ Params: { id: string } }>(`${path}/:id`, admin, async (req, reply) => {
       const input = deleteRegisterEntrySchema.parse(req.body ?? {});
       try {
-        await entries.remove(req.params.id, input.replacementId ?? null);
+        await entries.remove(req.params.id, input.replacementId ?? null, req.user?.id ?? null);
         return reply.code(204).send();
       } catch (err) {
         if (err instanceof RegisterEntryNotFoundError) return reply.code(404).send(errorBody(err));

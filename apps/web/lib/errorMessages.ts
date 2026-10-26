@@ -234,6 +234,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "deviation-link-not-found": "Kopplingen finns inte längre — ladda om sidan.",
   "deviation-file-not-found": "Filen finns inte längre — ladda om sidan.",
   "invalid-deviation-file-type": "Filtypen stöds inte — ladda upp PDF, JPEG eller PNG.",
+  "deviation-file-too-large": "Filen är för stor — max 20 MB.",
   "scrap-reason-required": serverMessage("Välj en kassationsorsak."),
   "scrap-reason-invalid": "Kassationsorsaken finns inte, är inaktiv eller gäller inte kassation — välj en annan.",
   // The server names what went wrong with the key / the mailbox.

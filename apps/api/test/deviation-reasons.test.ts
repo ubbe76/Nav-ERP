@@ -145,6 +145,60 @@ describe("registret Avvikelseorsaker", () => {
     expect((await db.select().from(deviations).where(eq(deviations.id, c.id)))[0]!.reasonId).toBe(replacement.id);
     expect((await db.select().from(moOperationScrap))[0]!.reasonId).toBe(replacement.id);
   });
+
+  it("the replacement must be active and apply to what moves; every moved case — closed and cancelled too — gets a history row", async () => {
+    const admin = await cookieWith("admin", "Admin");
+    const customer = (await admin.post("/customers", { name: "Exempelkrogen AB" })).json();
+    const old = (await admin.post("/deviation-reasons", { code: "TRP", name: "Transportskada", appliesCustomer: true, appliesInternal: true })).json();
+    const reason = (body: Record<string, unknown>) => admin.post("/deviation-reasons", body).then((r) => r.json());
+    const scrapOnly = await reason({ code: "MSK", name: "Maskinfel", appliesScrap: true });
+    const internalOnly = await reason({ code: "INT", name: "Hantering", appliesInternal: true });
+    const inactive = await reason({ code: "OLD", name: "Gammal", appliesCustomer: true, appliesInternal: true, active: false });
+    const good = await reason({ code: "TRP2", name: "Skada i transport", appliesCustomer: true, appliesInternal: true });
+
+    const open = (await admin.post("/deviations", { type: "customer", title: "Repad", customerId: customer.id, reasonId: old.id })).json();
+    const closed = (await admin.post("/deviations", { type: "internal", title: "Tappad", reasonId: old.id, correctiveAction: "Ok" })).json();
+    expect((await admin.post(`/deviations/${closed.id}/close`, {})).statusCode).toBe(200);
+    const cancelled = (await admin.post("/deviations", { type: "internal", title: "Fel", reasonId: old.id })).json();
+    expect((await admin.post(`/deviations/${cancelled.id}/cancel`, { reason: "Dubblett" })).statusCode).toBe(200);
+
+    for (const [replacement, text] of [
+      [scrapOnly, "gäller inte kundreklamationer och interna avvikelser"],
+      [internalOnly, "gäller inte kundreklamationer"],
+      [inactive, "är inaktiv"],
+    ] as const) {
+      const refused = await admin.delete(`/deviation-reasons/${old.id}`, { replacementId: replacement.id });
+      expect(refused.statusCode).toBe(400);
+      expect(refused.json().code).toBe("invalid-replacement");
+      expect(refused.json().error).toContain(text);
+    }
+    // Nothing moved, nothing logged.
+    expect((await db.select().from(deviations).where(eq(deviations.reasonId, old.id)))).toHaveLength(3);
+
+    expect((await admin.delete(`/deviation-reasons/${old.id}`, { replacementId: good.id })).statusCode).toBe(204);
+    for (const c of [open, closed, cancelled]) {
+      const card = (await admin.get(`/deviations/${c.id}`)).json();
+      expect(card.reasonId).toBe(good.id);
+      const updated = card.events.filter((e: { event: string }) => e.event === "updated");
+      expect(updated).toEqual([
+        expect.objectContaining({
+          detail: { changes: { reasonId: { before: old.id, after: good.id } }, via: "register-replace" },
+          userName: "Admin",
+        }),
+      ]);
+    }
+    expect((await admin.get(`/deviations/${closed.id}`)).json().status).toBe("closed");
+
+    // Scrap rows need a Kassation reason; an unused reason deletes freely.
+    const scrapOld = await reason({ code: "SKR", name: "Skrapad", appliesScrap: true });
+    const { operation } = await releasedOperation(admin.userId);
+    await mfg.reportOperationQuantities(operation.id, { quantityOk: 1, quantityScrapped: 1, scrapReasonId: scrapOld.id, markDone: false, createdBy: admin.userId });
+    const noScrap = await admin.delete(`/deviation-reasons/${scrapOld.id}`, { replacementId: good.id });
+    expect(noScrap.statusCode).toBe(400);
+    expect(noScrap.json().error).toContain("gäller inte kassation");
+    expect((await admin.delete(`/deviation-reasons/${scrapOld.id}`, { replacementId: scrapOnly.id })).statusCode).toBe(204);
+    expect((await admin.delete(`/deviation-reasons/${internalOnly.id}`, { replacementId: inactive.id })).statusCode).toBe(204);
+  });
 });
 
 describe("kassationsorsaken", () => {

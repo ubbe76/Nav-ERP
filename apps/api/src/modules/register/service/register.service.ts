@@ -81,7 +81,7 @@ interface RegisterEntries<TInput extends { code: string; name: string }, TRow ex
   update(id: string, input: TInput): Promise<TRow | null>;
   exists(id: string): Promise<boolean>;
   countReferences(id: string): Promise<RegisterUsage>;
-  deleteWithReassign(id: string, replacementId: string | null): Promise<{ moved: { table: string; count: number }[] } | null>;
+  deleteWithReassign(id: string, replacementId: string | null, userId?: string | null): Promise<{ moved: { table: string; count: number }[] } | null>;
 }
 
 export function createRegisterService(repo: RegisterRepository) {
@@ -132,7 +132,7 @@ export function createRegisterService(repo: RegisterRepository) {
       // partners and documents alike — is moved to it first. Checking the
       // replacement against this register's own table is what enforces
       // "same register": an id from another register simply does not exist here.
-      async remove(id: string, replacementId?: string | null) {
+      async remove(id: string, replacementId?: string | null, userId: string | null = null) {
         const entry = await entries.findById(id);
         if (!entry) throw new RegisterEntryNotFoundError(id);
         if (replacementId) {
@@ -141,7 +141,7 @@ export function createRegisterService(repo: RegisterRepository) {
         }
         const usage = await entries.countReferences(id);
         if (usage.total > 0 && !replacementId) throw new RegisterEntryInUseError(entry.code, usage);
-        const result = await entries.deleteWithReassign(id, replacementId ?? null);
+        const result = await entries.deleteWithReassign(id, replacementId ?? null, userId);
         if (!result) throw new RegisterEntryNotFoundError(id);
         return result;
       },

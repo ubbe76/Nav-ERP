@@ -41,7 +41,7 @@ Välj **Typ** först (hoppas över när du kommer från ett kort) och fyll sedan
 
 I ett öppet ärende är fälten redigerbara; spara med **Spara**. Osparade ändringar varnar innan du lämnar sidan, och statusknapparna väntar tills du sparat.
 
-- **Rubrik**, **Datum** (förval i dag), **Orsak**, **Ansvarig** och **Åtgärd senast**. **Orsak** visar de aktiva [Kvalitetsorsaker](#kvalitetsorsaker) som gäller ärendets typ. Listan **Ansvarig** visar dig själv; en administratör ser alla användare.
+- **Rubrik**, **Datum** (förval i dag), **Orsak**, **Ansvarig** och **Åtgärd senast**. **Orsak** visar de aktiva [Kvalitetsorsaker](#kvalitetsorsaker) som gäller ärendets typ. Listan **Ansvarig** visar alla aktiva användare.
 - **Kund** eller **Leverantör** och **Kundens referens** respektive **Leverantörens referens** — motpartens eget ärendenummer.
 - **Gäller**: **Kundorder** och **Orderrad**, **Faktura** (kund), **Inköpsorder** och **Orderrad** (leverantör), **Tillverkningsorder** och **Operation**, **Artikel** och **Antal**. Antalet anges i artikelns lagerenhet. Väljer du en orderrad eller en tillverkningsorder sätts artikeln till radens respektive ordens artikel; byter du rad eller order nollställs eller byts artikeln. Dokumenten måste höra ihop: kundordern och fakturan till kunden, inköpsordern till leverantören, raden till sin order och operationen till sin tillverkningsorder — annars visas ett felmeddelande som säger vilket fält det gäller. Kunden eller leverantören kan inte bytas så länge ärendet har kopplade dokument; ta bort kopplingarna först.
 - **Beskrivning**, **Orsaksanalys**, **Åtgärd** och **Förebyggande åtgärd**.

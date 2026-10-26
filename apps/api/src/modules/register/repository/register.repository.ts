@@ -9,6 +9,7 @@ import {
   costCalculationMaterialRows,
   customers,
   deliveryTerms,
+  deviationEvents,
   deviationReasons,
   deviations,
   inquiries,
@@ -27,6 +28,7 @@ import {
   suppliers,
   units,
   type Db,
+  type Tx,
 } from "@navet/db";
 import type {
   CreateRegisterEntryInput,
@@ -36,7 +38,7 @@ import type {
   UpdateRegisterEntryInput,
 } from "@navet/shared";
 import { isForeignKeyViolation } from "../../system/service/db-errors.js";
-import { RegisterEntryInUseError, type RegisterUsage } from "../service/register.errors.js";
+import { InvalidReplacementError, RegisterEntryInUseError, type RegisterUsage } from "../service/register.errors.js";
 
 // The five terms-style registers share the exact same column shape, so one
 // table-parameterized accessor serves all of them. The casts below are safe
@@ -137,8 +139,13 @@ export const REGISTER_REFERENCES: Record<
   ],
 };
 
+// A register's own step inside the delete transaction, before the
+// referencing rows move: refuse a replacement that cannot carry them, and
+// write what the move needs besides the UPDATE (history rows).
+type BeforeReassign = (tx: Tx, id: string, replacementId: string, userId: string | null) => Promise<void>;
+
 export function createRegisterRepository(db: Db) {
-  function forTable(table: RegisterTable, references: RegisterReference[]) {
+  function forTable(table: RegisterTable, references: RegisterReference[], beforeReassign?: BeforeReassign) {
     async function countReferences(executor: Db, id: string): Promise<RegisterUsage> {
       const found: RegisterUsage["references"] = [];
       for (const r of references) {
@@ -204,13 +211,14 @@ export function createRegisterRepository(db: Db) {
       // final DELETE's FK violation is the race guard: a row linked to the
       // entry after its reassignment (or with no replacement given) makes
       // Postgres refuse, and that surfaces as RegisterEntryInUseError.
-      async deleteWithReassign(id: string, replacementId: string | null) {
+      async deleteWithReassign(id: string, replacementId: string | null, userId: string | null = null) {
         const entry = await this.findById(id);
         if (!entry) return null;
         try {
           return await db.transaction(async (tx) => {
             const moved: { table: string; count: number }[] = [];
             if (replacementId) {
+              if (beforeReassign) await beforeReassign(tx, id, replacementId, userId);
               for (const r of references) {
                 const column = sql.identifier(r.column.name);
                 if (r.uniqueWith !== undefined) {
@@ -280,7 +288,54 @@ export function createRegisterRepository(db: Db) {
 
   // Avvikelseorsaker: the same generic machinery with the register's own
   // shape (the four "applies to" flags + active).
-  const deviationReasonsBase = forTable(deviationReasons as unknown as RegisterTable, REGISTER_REFERENCES.deviationReasons);
+  // The replacement must be able to carry what moves: active, and applying
+  // to every case type among the moved cases (and to Kassation when scrap
+  // rows move) — otherwise a customer case would end up with a scrap-only
+  // or inactive reason the case card itself refuses. The replacement is
+  // locked FOR SHARE so its flags cannot change before the commit. Every
+  // moved case — closed and cancelled included, the reason has to go — gets
+  // an `updated` history row like a PATCH (via: "register-replace").
+  const beforeDeviationReasonReassign: BeforeReassign = async (tx, id, replacementId, userId) => {
+    const [replacement] = await tx.select().from(deviationReasons).where(eq(deviationReasons.id, replacementId)).for("share");
+    if (!replacement) throw new InvalidReplacementError("unknown");
+    const moved = await tx
+      .select({ id: deviations.id, type: deviations.type })
+      .from(deviations)
+      .where(eq(deviations.reasonId, id))
+      .for("update");
+    const [scrap] = await tx.select({ n: count() }).from(moOperationScrap).where(eq(moOperationScrap.reasonId, id));
+    const scrapMoves = Number(scrap?.n ?? 0) > 0;
+    if (moved.length === 0 && !scrapMoves) return;
+    if (!replacement.active) throw new InvalidReplacementError("inactive", `Ersättaren ${replacement.name} är inaktiv`);
+    const missing: string[] = [];
+    const types = new Set(moved.map((m) => m.type));
+    if (types.has("customer") && !replacement.appliesCustomer) missing.push("kundreklamationer");
+    if (types.has("supplier") && !replacement.appliesSupplier) missing.push("leverantörsavvikelser");
+    if (types.has("internal") && !replacement.appliesInternal) missing.push("interna avvikelser");
+    if (scrapMoves && !replacement.appliesScrap) missing.push("kassation");
+    if (missing.length > 0) {
+      const list = missing.length === 1 ? missing[0] : `${missing.slice(0, -1).join(", ")} och ${missing.at(-1)}`;
+      throw new InvalidReplacementError("not-applicable", `Ersättaren ${replacement.name} gäller inte ${list}`);
+    }
+    if (moved.length === 0) return;
+    await tx.insert(deviationEvents).values(
+      moved.map((m) => ({
+        deviationId: m.id,
+        event: "updated" as const,
+        detail: { changes: { reasonId: { before: id, after: replacementId } }, via: "register-replace" },
+        userId,
+      }))
+    );
+    await tx
+      .update(deviations)
+      .set({ updatedAt: sql`now()` })
+      .where(eq(deviations.reasonId, id));
+  };
+  const deviationReasonsBase = forTable(
+    deviationReasons as unknown as RegisterTable,
+    REGISTER_REFERENCES.deviationReasons,
+    beforeDeviationReasonReassign
+  );
   const deviationReasonEntries = {
     ...deviationReasonsBase,
     async list() {

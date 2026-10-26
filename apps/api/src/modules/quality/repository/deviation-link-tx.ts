@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   deviationEvents,
   deviationLinks,
@@ -26,7 +26,8 @@ import { LINK_DOCUMENT_CASE_TYPES } from "../service/deviation-link-check.js";
 // same status as Avsluta/Makulera, which update the row). Everything that
 // refuses is DeviationLinkNotAllowedError (409 deviation-link-not-allowed):
 // missing or closed/cancelled case, a document type that does not fit the
-// case type, a missing document, another counterparty, already linked.
+// case type, a missing document, another counterparty, already linked —
+// to this case, or (a kreditfaktura/leverantörsfaktura) to another one.
 
 export interface LinkedDocumentFacts {
   number: string | null;
@@ -120,12 +121,28 @@ export async function linkDeviationInTx(
     throw new DeviationLinkNotAllowedError(`${name} tillhör en annan leverantör än ${deviation.number}`);
   }
 
+  // Two unique guards end here: the (case, type, document) triple, and the
+  // partial index deviation_links_one_case_per_invoice (0154) — a
+  // kreditfaktura/leverantörsfaktura belongs to at most one case, or its
+  // derived amount would count on both. ON CONFLICT waits for a concurrent
+  // insert to commit, so the follow-up read (a new statement) sees the holder.
   const [link] = await tx
     .insert(deviationLinks)
     .values({ deviationId: deviation.id, documentType: input.documentType, documentId: input.documentId, createdBy: input.userId })
     .onConflictDoNothing()
     .returning({ id: deviationLinks.id });
-  if (!link) throw new DeviationLinkNotAllowedError(`${name} är redan kopplad till ${deviation.number}`);
+  if (!link) {
+    const holders = await tx
+      .select({ deviationId: deviationLinks.deviationId, number: deviations.deviationNumber })
+      .from(deviationLinks)
+      .innerJoin(deviations, eq(deviations.id, deviationLinks.deviationId))
+      .where(and(eq(deviationLinks.documentType, input.documentType), eq(deviationLinks.documentId, input.documentId)));
+    const other = holders.find((h) => h.deviationId !== deviation.id);
+    if (other && !holders.some((h) => h.deviationId === deviation.id)) {
+      throw new DeviationLinkNotAllowedError(`${name} hör redan till ${other.number} — ett dokument kan bara kopplas till en avvikelse`);
+    }
+    throw new DeviationLinkNotAllowedError(`${name} är redan kopplad till ${deviation.number}`);
+  }
   await tx.insert(deviationEvents).values({
     deviationId: deviation.id,
     event: "link_added",

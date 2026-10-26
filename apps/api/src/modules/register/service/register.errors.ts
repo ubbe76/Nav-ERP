@@ -44,12 +44,18 @@ export class RegisterEntryInUseError extends Error {
 
 // The replacement must be another entry of the SAME register: not the entry
 // itself, and not an id from a different register (or none at all).
+// A register may add its own rules (Avvikelseorsaker: active, and applying to
+// what moves — `inactive`/`not-applicable` carry a Swedish message).
 export class InvalidReplacementError extends Error {
-  constructor(reason: "same" | "unknown") {
+  constructor(
+    readonly reason: "same" | "unknown" | "inactive" | "not-applicable",
+    message?: string
+  ) {
     super(
-      reason === "same"
-        ? "The replacement cannot be the entry being deleted"
-        : "The replacement must be an existing entry of the same register"
+      message ??
+        (reason === "same"
+          ? "The replacement cannot be the entry being deleted"
+          : "The replacement must be an existing entry of the same register")
     );
     this.name = "InvalidReplacementError";
   }

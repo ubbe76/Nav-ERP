@@ -3,7 +3,7 @@ import { AppShell } from "../../../../components/AppShell";
 import { NewDeviationForm } from "../../../../components/quality/NewDeviationForm";
 import { emptyDraft, type DeviationDraft } from "../../../../components/quality/deviationDraft";
 import { HelpLink } from "../../../../components/ui/HelpLink";
-import { apiGet, getCurrentUser } from "../../../../lib/api";
+import { apiGet } from "../../../../lib/api";
 import type { PageSearchParams } from "../../../../lib/listQuery";
 import {
   DEVIATION_TYPES,
@@ -49,11 +49,10 @@ export default async function NewDeviationPage(props: { searchParams: Promise<Pa
   const salesOrderRowId = single(sp.salesOrderRowId);
   const purchaseOrderRowId = single(sp.purchaseOrderRowId);
 
-  const user = await getCurrentUser(cookieHeader);
   const [reasons, responsible, customer, supplier, salesOrder, salesRows, invoice, purchaseOrder, purchaseRows, mo, article] =
     await Promise.all([
       apiGet<DeviationReason[]>("/api/v1/deviation-reasons", cookieHeader),
-      getResponsibleCandidates(cookieHeader, user),
+      getResponsibleCandidates(cookieHeader),
       get<Customer>(customerId ? `/api/v1/customers/${customerId}` : null),
       get<Supplier>(supplierId ? `/api/v1/suppliers/${supplierId}` : null),
       get<SalesOrder>(salesOrderId ? `/api/v1/sales-orders/${salesOrderId}` : null),

@@ -1079,6 +1079,13 @@
       "when": 1793015793730,
       "tag": "0153_avvikelser",
       "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1793021006176,
+      "tag": "0154_avvikelser_en_faktura_per_arende",
+      "breakpoints": true
     }
   ]
 }

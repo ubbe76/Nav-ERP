@@ -97,3 +97,12 @@ export class InvalidDeviationFileTypeError extends Error {
     this.name = "InvalidDeviationFileTypeError";
   }
 }
+
+// 400: the file is over 20 MB (@fastify/multipart's FST_REQ_FILE_TOO_LARGE,
+// or a truncated stream, mapped by the route).
+export class DeviationFileTooLargeError extends Error {
+  constructor() {
+    super("Filen är för stor — max 20 MB");
+    this.name = "DeviationFileTooLargeError";
+  }
+}

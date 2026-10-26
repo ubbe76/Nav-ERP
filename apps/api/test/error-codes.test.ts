@@ -383,6 +383,7 @@ import {
   DeviationNotFoundError,
   DeviationReasonNotApplicableError,
   InvalidDeviationFileTypeError,
+  DeviationFileTooLargeError,
 } from "../src/modules/quality/service/deviation-errors.js";
 import { ScrapReasonInvalidError, ScrapReasonRequiredError } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { DemoDataNotAvailableError } from "../src/modules/demo/service/demo-data.service.js";
@@ -839,6 +840,7 @@ const cases: Array<[Error, string]> = [
   [new DeviationLinkNotFoundError("x"), ERROR_CODES.DEVIATION_LINK_NOT_FOUND],
   [new DeviationFileNotFoundError("x"), ERROR_CODES.DEVIATION_FILE_NOT_FOUND],
   [new InvalidDeviationFileTypeError("text/plain"), ERROR_CODES.INVALID_DEVIATION_FILE_TYPE],
+  [new DeviationFileTooLargeError(), ERROR_CODES.DEVIATION_FILE_TOO_LARGE],
   [new ScrapReasonRequiredError(true), ERROR_CODES.SCRAP_REASON_REQUIRED],
   [new ScrapReasonInvalidError(), ERROR_CODES.SCRAP_REASON_INVALID],
 ];

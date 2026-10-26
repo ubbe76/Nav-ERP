@@ -22,6 +22,7 @@ import {
   DeviationCloseRequirementsError,
   DeviationCostNotFoundError,
   DeviationFileNotFoundError,
+  DeviationFileTooLargeError,
   DeviationLinkMismatchError,
   DeviationLinkNotAllowedError,
   DeviationLinkNotFoundError,
@@ -66,6 +67,10 @@ const CSV_COLUMNS = (seePrices: boolean): CsvColumn<DeviationListRow>[] => [
 export async function qualityRoutes(app: FastifyInstance, opts: { service: QualityService }) {
   const { service } = opts;
 
+  function isFileTooLarge(err: unknown): boolean {
+    return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "FST_REQ_FILE_TOO_LARGE";
+  }
+
   function qualityError(err: unknown, reply: Reply) {
     if (
       err instanceof DeviationNotFoundError ||
@@ -103,6 +108,11 @@ export async function qualityRoutes(app: FastifyInstance, opts: { service: Quali
     columns: (req) => CSV_COLUMNS(seePrices(req)),
     fetch: (query, req) => service.list(query, { seePrices: seePrices(req) }),
   });
+
+  // Ansvarig: the people the card's select and the list's filter offer —
+  // id and name of every active person account, nothing else (the user
+  // register with e-mails and roles is admin-only).
+  app.get("/deviations/responsible-options", async () => service.responsibleOptions());
 
   app.post("/deviations", async (req, reply) => {
     const input = createDeviationSchema.parse(req.body);
@@ -219,11 +229,21 @@ export async function qualityRoutes(app: FastifyInstance, opts: { service: Quali
   });
 
   app.post<{ Params: { id: string } }>("/deviations/:id/files", async (req, reply) => {
-    const file = await req.file({ limits: { fileSize: MAX_DEVIATION_FILE_BYTES } });
-    if (!file) return reply.code(400).send({ error: "Ingen fil skickades", code: "validation-failed" });
-    const data = await file.toBuffer();
-    // fastify-multipart truncates instead of throwing once the limit is hit.
-    if (file.file.truncated) return reply.code(400).send({ error: "Filen är för stor — max 20 MB", code: "deviation-file-too-large" });
+    // @fastify/multipart's toBuffer() THROWS FST_REQ_FILE_TOO_LARGE (413)
+    // once the limit is hit (throwFileSizeLimit is on by default) — caught
+    // here so the user gets 400 deviation-file-too-large in Swedish; the
+    // truncated check covers a stream read without the throw.
+    let file: Awaited<ReturnType<typeof req.file>>;
+    let data: Buffer;
+    try {
+      file = await req.file({ limits: { fileSize: MAX_DEVIATION_FILE_BYTES } });
+      if (!file) return reply.code(400).send({ error: "Ingen fil skickades", code: "validation-failed" });
+      data = await file.toBuffer();
+    } catch (err) {
+      if (isFileTooLarge(err)) return reply.code(400).send(errorBody(new DeviationFileTooLargeError()));
+      throw err;
+    }
+    if (file.file.truncated) return reply.code(400).send(errorBody(new DeviationFileTooLargeError()));
     try {
       const row = await service.addFile(req.params.id, { filename: file.filename, contentType: file.mimetype, data }, req.user!.id);
       return reply.code(201).send(row);

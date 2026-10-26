@@ -303,8 +303,6 @@ export function createAlertsService(deps: {
       }));
     },
 
-    // Fakturor i inkorgen att granska: every scan in new/interpreted, oldest
-    // first — the inbox's own Att granska.
     // Avvikelser som passerat Åtgärd senast: open cases, oldest due first.
     async deviations_overdue(today) {
       const rows = await repo.overdueDeviations(today);
@@ -320,6 +318,8 @@ export function createAlertsService(deps: {
       }));
     },
 
+    // Fakturor i inkorgen att granska: every scan in new/interpreted, oldest
+    // first — the inbox's own Att granska.
     async invoice_scans_pending() {
       const rows = await repo.pendingInvoiceScans();
       return rows.map((r) => ({

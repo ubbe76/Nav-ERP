@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Fastify, { type FastifyInstance, type RouteOptions } from "fastify";
-import { inArray, sql } from "drizzle-orm";
-import { db, emailLog, employees, permissionGroups } from "@navet/db";
+import { eq, inArray, sql } from "drizzle-orm";
+import { db, emailLog, employees, permissionGroups, users } from "@navet/db";
 import { API_CLIENT_SCOPES, effectivePermissions, satisfiesRule } from "@navet/shared";
 import { buildApp } from "../src/app.js";
 import { enforceAccess, registerModule, resolveRule } from "../src/modules/auth/middleware/permission.middleware.js";
@@ -483,6 +483,21 @@ describe("profiles against the real app", () => {
     } finally {
       await db.execute(sql`DELETE FROM employees WHERE employee_number LIKE ${tag + "-%"}`);
     }
+  });
+
+  it("Avvikelsernas Ansvarig: office reads id and name of the active person accounts, the workshop nothing", async () => {
+    const sales = await sessionFor(["forsaljning"]);
+    const workshop = await sessionFor(["terminal"]);
+    const tag = crypto.randomUUID().slice(0, 8);
+    const gone = await authService.createUser({ email: `g-${tag}@example.com`, password: "correcthorse", name: `${tag} Borta`, role: "user" });
+    await db.update(users).set({ active: false }).where(eq(users.id, gone.id));
+    const res = await app.inject({ method: "GET", url: "/api/v1/deviations/responsible-options", headers: { cookie: sales } });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json() as Record<string, unknown>[];
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    for (const row of rows) expect(Object.keys(row).sort()).toEqual(["id", "name"]);
+    expect(rows.map((r) => r.id)).not.toContain(gone.id);
+    expect(await status(workshop, "GET", "/deviations/responsible-options")).toBe(403);
   });
 
   it("sales-only: reads are shared, writes only in Försäljning", async () => {

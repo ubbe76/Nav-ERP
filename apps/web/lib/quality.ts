@@ -3,14 +3,13 @@
 // Reklamationer och avvikelser (Kvalitet, migration 0153). NO imports other
 // than types: the list/card/forms all read their labels from here.
 
-import { apiGet, type SessionUser } from "./api";
+import { apiGet } from "./api";
 import {
   INVOICE_STATUS_PILL,
   MANUFACTURING_ORDER_STATUS_PILL,
   PURCHASE_ORDER_STATUS_PILL,
   SALES_ORDER_STATUS_PILL,
   SUPPLIER_INVOICE_STATUS_PILL,
-  type AdminUser,
 } from "./types";
 import type { Status } from "../components/ui/StatusPill";
 
@@ -328,9 +327,7 @@ export function scrapReasonsOf(reasons: DeviationReason[]): DeviationReason[] {
   return reasons.filter((r) => r.active && r.appliesScrap);
 }
 
-// A person the Ansvarig lists offer. The API has no user directory for
-// Kvalitet users, so a non-admin sees themselves (and the case's current
-// responsible person) — admins get everyone.
+// A person the Ansvarig lists offer (GET /deviations/responsible-options).
 export interface ResponsibleCandidate {
   id: string;
   name: string;
@@ -344,20 +341,18 @@ export function formatDeviationQuantity(quantity: number | null, unitCode: strin
   return unitCode ? `${text} ${unitCode}` : text;
 }
 
-// Server-side: the people the Ansvarig select/filter offers. Admins read the
-// user register; everyone else gets themselves plus whoever is already set on
-// the case (so a saved value never disappears from the select).
+// Server-side: the people the Ansvarig select/filter offers — every active
+// person account from GET /deviations/responsible-options (id and name only,
+// readable by every office user), plus whoever is already set on the case
+// (a deactivated person never disappears from a saved select).
 export async function getResponsibleCandidates(
   cookieHeader: string | undefined,
-  user: SessionUser | null,
   alsoInclude: ResponsibleCandidate[] = []
 ): Promise<ResponsibleCandidate[]> {
-  const byId = new Map<string, ResponsibleCandidate>();
-  if (user?.role === "admin") {
-    const users = await apiGet<AdminUser[]>("/api/v1/auth/users", cookieHeader).catch(() => [] as AdminUser[]);
-    for (const u of users) if (u.active) byId.set(u.id, { id: u.id, name: u.name });
-  }
-  if (user) byId.set(user.id, { id: user.id, name: user.name });
-  for (const c of alsoInclude) byId.set(c.id, c);
+  const options = await apiGet<ResponsibleCandidate[]>("/api/v1/deviations/responsible-options", cookieHeader).catch(
+    () => [] as ResponsibleCandidate[]
+  );
+  const byId = new Map<string, ResponsibleCandidate>(options.map((o) => [o.id, { id: o.id, name: o.name }]));
+  for (const c of alsoInclude) if (!byId.has(c.id)) byId.set(c.id, c);
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "sv"));
 }

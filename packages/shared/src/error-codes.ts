@@ -512,6 +512,8 @@ export const ERROR_CODES = {
   DEVIATION_LINK_NOT_FOUND: "deviation-link-not-found",
   DEVIATION_FILE_NOT_FOUND: "deviation-file-not-found",
   INVALID_DEVIATION_FILE_TYPE: "invalid-deviation-file-type",
+  // 400: the upload is over 20 MB
+  DEVIATION_FILE_TOO_LARGE: "deviation-file-too-large",
   // Kassation with the Avvikelseorsaker register (400)
   SCRAP_REASON_REQUIRED: "scrap-reason-required",
   SCRAP_REASON_INVALID: "scrap-reason-invalid",

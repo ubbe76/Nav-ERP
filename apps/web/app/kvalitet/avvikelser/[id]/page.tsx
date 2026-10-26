@@ -6,7 +6,7 @@ import { DeviationCard } from "../../../../components/quality/DeviationCard";
 import { MailSection } from "../../../../components/mail/MailSection";
 import buttonStyles from "../../../../components/ui/Button.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
-import { apiGet, getCurrentUser } from "../../../../lib/api";
+import { apiGet } from "../../../../lib/api";
 import { getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
 import { DEVIATION_TYPE_LABELS, getResponsibleCandidates, type Deviation, type DeviationReason } from "../../../../lib/quality";
 import shellStyles from "../../../../components/AppShell.module.css";
@@ -22,12 +22,10 @@ export default async function DeviationPage(props: { params: Promise<{ id: strin
   const deviation = await apiGet<Deviation>(`/api/v1/deviations/${id}`, cookieHeader).catch(() => null);
   if (!deviation) notFound();
 
-  const user = await getCurrentUser(cookieHeader);
   const [reasons, responsible, emails] = await Promise.all([
     apiGet<DeviationReason[]>("/api/v1/deviation-reasons", cookieHeader),
     getResponsibleCandidates(
       cookieHeader,
-      user,
       deviation.responsibleUserId ? [{ id: deviation.responsibleUserId, name: deviation.responsibleUserName ?? "–" }] : []
     ),
     getDocumentEmails(deviation.id, cookieHeader),

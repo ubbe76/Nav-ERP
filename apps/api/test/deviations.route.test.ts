@@ -6,6 +6,7 @@ import { buildApp } from "../src/app.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createAuthService } from "../src/modules/auth/service/auth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
+import { createQualityRepository, ORDER_ID_BATCH } from "../src/modules/quality/repository/quality.repository.js";
 import { pdfText } from "./helpers/pdf.js";
 
 // Reklamationer och avvikelser through the real app: the register's routes
@@ -511,5 +512,161 @@ describe("avvikelser: behörigheter och avisering", () => {
     await quality.patch(`/deviations/${id}`, { correctiveAction: "Omsvetsad" });
     await quality.post(`/deviations/${id}/close`, {});
     expect((await quality.get("/alerts")).json().groups.find((g: { kind: string }) => g.kind === "deviations_overdue").count).toBe(0);
+  });
+});
+
+describe("avvikelser: granskningsfynden", () => {
+  async function issuedCredit(customerId: string) {
+    const [vat] = await db.select().from(vatCodes).where(eq(vatCodes.code, "MP25"));
+    const [credit] = await db
+      .insert(invoices)
+      .values({ customerId, type: "credit", status: "issued", invoiceNumber: `KF-${crypto.randomUUID().slice(0, 5)}` })
+      .returning();
+    await db.insert(invoiceRows).values({
+      invoiceId: credit!.id,
+      description: "Kreditering",
+      quantity: "1",
+      unitPrice: "300",
+      vatRate: "25",
+      vatCodeId: vat!.id,
+      lineAmount: "300",
+      vatAmount: "75",
+      lineAmountSek: "300",
+    });
+    return credit!;
+  }
+
+  it("refuses another counterparty on PATCH while the current one's documents are linked", async () => {
+    const admin = api(await cookieWith("admin", "Admin"));
+    const f = await fixtures(admin);
+    const c = (await admin.post("/deviations", { type: "customer", title: "Skadad", customerId: f.customer.id })).json();
+    const credit = await issuedCredit(f.customer.id);
+    expect((await admin.post(`/deviations/${c.id}/links`, { documentType: "credit_invoice", documentId: credit.id })).statusCode).toBe(201);
+
+    const moved = await admin.patch(`/deviations/${c.id}`, { customerId: f.otherCustomer.id });
+    expect(moved.statusCode).toBe(400);
+    expect(moved.json()).toMatchObject({ code: "deviation-link-mismatch", field: "customerId" });
+    expect(moved.json().error).toContain("Ta bort kopplingarna först");
+    const card = (await admin.get(`/deviations/${c.id}`)).json();
+    expect(card.customerId).toBe(f.customer.id);
+    expect(card.netCost).toBe(300);
+    // Other fields still change; without the link the customer may change.
+    expect((await admin.patch(`/deviations/${c.id}`, { title: "Skadad vid leverans" })).statusCode).toBe(200);
+    await admin.delete(`/deviations/${c.id}/links/${card.links[0].id}`);
+    const after = await admin.patch(`/deviations/${c.id}`, { customerId: f.otherCustomer.id });
+    expect(after.statusCode).toBe(200);
+    expect(after.json().customerId).toBe(f.otherCustomer.id);
+
+    // The supplier side: a linked IO keeps the supplier.
+    const otherSupplier = (await admin.post("/suppliers", { name: "Annan Stål AB" })).json();
+    const s = (await admin.post("/deviations", { type: "supplier", title: "Fel antal", supplierId: f.supplier.id })).json();
+    expect((await admin.post(`/deviations/${s.id}/links`, { documentType: "purchase_order", documentId: f.po.id })).statusCode).toBe(201);
+    const sMoved = await admin.patch(`/deviations/${s.id}`, { supplierId: otherSupplier.id });
+    expect(sMoved.json()).toMatchObject({ code: "deviation-link-mismatch", field: "supplierId" });
+  });
+
+  it("checks a PATCH on the locked row — two concurrent PATCHes never store a row and an order that do not belong together", async () => {
+    const admin = api(await cookieWith("admin", "Admin"));
+    const f = await fixtures(admin);
+    for (let round = 0; round < 3; round++) {
+      const c = (await admin.post("/deviations", { type: "customer", title: `Race ${round}`, customerId: f.customer.id })).json();
+      const second = (
+        await admin.post("/quotes", { customerId: f.customer.id, confirm: true, rows: [{ articleId: f.article.id, quantity: 1, unitPrice: 100 }] })
+      ).json();
+      const results = await Promise.all([
+        admin.patch(`/deviations/${c.id}`, { salesOrderRowId: f.orderRow.id }),
+        admin.patch(`/deviations/${c.id}`, { salesOrderId: second.order.id }),
+      ]);
+      expect(results.map((r) => r.statusCode).sort()).toEqual([200, 400]);
+      const stored = (await admin.get(`/deviations/${c.id}`)).json();
+      if (stored.salesOrderRowId) expect(stored.salesOrderId).toBe(f.order.id);
+      else expect(stored.salesOrderId).toBe(second.order.id);
+    }
+  });
+
+  it("links a kreditfaktura or leverantörsfaktura to one case only (409 naming the case that has it)", async () => {
+    const admin = api(await cookieWith("admin", "Admin"));
+    const f = await fixtures(admin);
+    const a = (await admin.post("/deviations", { type: "customer", title: "A", customerId: f.customer.id })).json();
+    const b = (await admin.post("/deviations", { type: "customer", title: "B", customerId: f.customer.id })).json();
+    const credit = await issuedCredit(f.customer.id);
+    expect((await admin.post(`/deviations/${a.id}/links`, { documentType: "credit_invoice", documentId: credit.id })).statusCode).toBe(201);
+    const twice = await admin.post(`/deviations/${b.id}/links`, { documentType: "credit_invoice", documentId: credit.id });
+    expect(twice.statusCode).toBe(409);
+    expect(twice.json().code).toBe("deviation-link-not-allowed");
+    expect(twice.json().error).toContain(a.deviationNumber);
+    expect((await admin.get(`/deviations/${b.id}`)).json().netCost).toBe(0);
+    // The same case again: "already linked to this case".
+    const again = await admin.post(`/deviations/${a.id}/links`, { documentType: "credit_invoice", documentId: credit.id });
+    expect(again.json().error).toContain(`redan kopplad till ${a.deviationNumber}`);
+    // A KO may be linked to several cases (no amount of its own).
+    expect((await admin.post(`/deviations/${a.id}/links`, { documentType: "sales_order", documentId: f.order.id })).statusCode).toBe(201);
+    expect((await admin.post(`/deviations/${b.id}/links`, { documentType: "sales_order", documentId: f.order.id })).statusCode).toBe(201);
+
+    // Skapa kreditfaktura with deviationId: the new credit note belongs to A,
+    // so Koppla dokument on B is refused.
+    const [source] = await db
+      .insert(invoices)
+      .values({ customerId: f.customer.id, type: "invoice", status: "issued", invoiceNumber: `F-${crypto.randomUUID().slice(0, 5)}` })
+      .returning();
+    const shortcut = await admin.post(`/invoices/${source!.id}/credit`, { rows: [], deviationId: a.id });
+    expect(shortcut.statusCode).toBe(201);
+    const fromShortcut = await admin.post(`/deviations/${b.id}/links`, { documentType: "credit_invoice", documentId: shortcut.json().id });
+    expect(fromShortcut.statusCode).toBe(409);
+    expect(fromShortcut.json().error).toContain(a.deviationNumber);
+
+    // Leverantörsfaktura: the same rule.
+    const [vat] = await db.select().from(vatCodes).where(eq(vatCodes.code, "MP25"));
+    const [note] = await db
+      .insert(supplierInvoices)
+      .values({
+        registrationNumber: `LF-T${crypto.randomUUID().slice(0, 6)}`,
+        invoiceNumber: "KN-2",
+        supplierId: f.supplier.id,
+        invoiceDate: todayStockholm(),
+        vatCodeId: vat!.id,
+        netAmount: "-400",
+        vatAmount: "-100",
+        grossAmount: "-500",
+        status: "approved",
+      })
+      .returning();
+    const s1 = (await admin.post("/deviations", { type: "supplier", title: "S1", supplierId: f.supplier.id })).json();
+    const s2 = (await admin.post("/deviations", { type: "supplier", title: "S2", supplierId: f.supplier.id })).json();
+    const [l1, l2] = await Promise.all([
+      admin.post(`/deviations/${s1.id}/links`, { documentType: "supplier_invoice", documentId: note!.id }),
+      admin.post(`/deviations/${s2.id}/links`, { documentType: "supplier_invoice", documentId: note!.id }),
+    ]);
+    expect([l1.statusCode, l2.statusCode].sort()).toEqual([201, 409]);
+    const nets = [(await admin.get(`/deviations/${s1.id}`)).json().netCost, (await admin.get(`/deviations/${s2.id}`)).json().netCost];
+    expect(nets.sort()).toEqual([-400, 0]);
+  });
+
+  it("answers a file over 20 MB with 400 deviation-file-too-large", async () => {
+    const admin = api(await cookieWith("admin", "Admin"));
+    const c = (await admin.post("/deviations", { type: "internal", title: "Stor fil" })).json();
+    const big = Buffer.concat([PNG, Buffer.alloc(21 * 1024 * 1024, 1)]);
+    const res = await admin.upload(`/deviations/${c.id}/files`, "stor.png", "image/png", big);
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: "deviation-file-too-large", error: "Filen är för stor — max 20 MB" });
+    expect((await admin.get(`/deviations/${c.id}/files`)).json()).toHaveLength(0);
+  });
+
+  it("reads the leveransprecision's orders with a case in batches — 70 000 ids stay under the parameter cap", async () => {
+    const admin = api(await cookieWith("admin", "Admin"));
+    const f = await fixtures(admin);
+    await admin.post("/deviations", { type: "customer", title: "Sen", customerId: f.customer.id, salesOrderId: f.order.id });
+    const ids = Array.from({ length: 70_000 }, () => crypto.randomUUID());
+    ids.splice(ORDER_ID_BATCH + 7, 0, f.order.id);
+    const found = await createQualityRepository(db).ordersWithDeviation("customer", ids);
+    expect([...found]).toEqual([f.order.id]);
+  });
+
+  it("prints a decimal quantity through formatNumber (comma, no trailing zeros)", async () => {
+    const admin = api(await cookieWith("admin", "Admin"));
+    const c = (await admin.post("/deviations", { type: "internal", title: "Spill", quantity: 2.5 })).json();
+    const text = pdfText((await admin.get(`/deviations/${c.id}/pdf`)).rawPayload);
+    expect(text).toContain("2,5");
+    expect(text).not.toContain("2,5000");
   });
 });
