@@ -255,6 +255,16 @@ export const updateInvoiceScanSettingsSchema = z
   .strict();
 export type UpdateInvoiceScanSettingsInput = z.infer<typeof updateInvoiceScanSettingsSchema>;
 
+// Testa anslutning (AI): the key typed in the form (omitted or "" = the
+// saved one) and the model (omitted = the saved one). Saves nothing.
+export const testInvoiceScanAiSchema = z
+  .object({
+    apiKey: z.string().max(500).regex(/^[\x20-\x7E]*$/, "API-nyckeln får bara innehålla vanliga tecken").optional(),
+    model: z.enum(INVOICE_SCAN_AI_MODELS).optional(),
+  })
+  .strict();
+export type TestInvoiceScanAiInput = z.infer<typeof testInvoiceScanAiSchema>;
+
 export interface InvoiceScanSettingsView {
   aiMode: InvoiceScanAiMode;
   aiApiKeySet: boolean;

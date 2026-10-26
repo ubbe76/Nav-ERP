@@ -484,6 +484,10 @@ export const ERROR_CODES = {
   INVOICE_SCAN_DUPLICATE: "invoice-scan-duplicate",
   // Tolka med AI without a configured AI interpretation (409)
   INVOICE_SCAN_AI_NOT_CONFIGURED: "invoice-scan-ai-not-configured",
+  // Tolka med AI while another AI call on the same scan runs (409)
+  INVOICE_SCAN_BUSY: "invoice-scan-busy",
+  // Testa anslutning (AI) failed — body.message/error is the Swedish reason (409)
+  INVOICE_SCAN_AI_TEST_FAILED: "invoice-scan-ai-test-failed",
   // DELETE of the underlag the Fakturainkorg created the invoice from (409)
   SUPPLIER_INVOICE_FILE_FROM_SCAN: "supplier-invoice-file-from-scan",
 } as const;

@@ -101,6 +101,7 @@ import { createInvoiceScanRepository } from "./modules/purchase/repository/invoi
 import { createInvoiceScanService } from "./modules/purchase/service/invoice-scan.service.js";
 import { createInvoiceScanSettingsService } from "./modules/purchase/service/invoice-scan-settings.service.js";
 import { invoiceScanRoutes } from "./modules/purchase/routes/invoice-scan.routes.js";
+import type { InvoiceInterpreterFactory } from "./modules/purchase/service/invoice-scan/invoice-interpreter.js";
 import { createSupplierPaymentRepository } from "./modules/purchase/repository/supplier-payment.repository.js";
 import { payableForeignItemsAsOf, payablesTotalAsOf } from "./modules/purchase/repository/open-amounts.js";
 import { createSupplierPaymentService } from "./modules/purchase/service/supplier-payment.service.js";
@@ -201,7 +202,13 @@ function trustProxyFromEnv(): boolean | number | string {
   return raw;
 }
 
-export function buildApp(database: Db = db) {
+// External seams a test can replace without touching the network. Only the
+// AI interpretation of the Fakturainkorg for now (Claude by default).
+export interface BuildAppOptions {
+  invoiceInterpreters?: InvoiceInterpreterFactory;
+}
+
+export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   const trustProxy = trustProxyFromEnv();
   const app = Fastify({ logger: true, trustProxy });
   const credentialThrottles: CredentialThrottles = {
@@ -427,13 +434,18 @@ export function buildApp(database: Db = db) {
   // invoice draft through supplierInvoiceService's own createInTx (one
   // transaction); the company's identifiers are filtered out of the rules.
   const invoiceScanRepository = createInvoiceScanRepository(database);
-  const invoiceScanSettingsService = createInvoiceScanSettingsService({ repo: invoiceScanRepository, audit: auditRepository });
+  const invoiceScanSettingsService = createInvoiceScanSettingsService({
+    repo: invoiceScanRepository,
+    audit: auditRepository,
+    interpreters: options.invoiceInterpreters,
+  });
   const invoiceScanService = createInvoiceScanService({
     repo: invoiceScanRepository,
     supplierInvoices: supplierInvoiceService,
     company: systemService,
     settings: invoiceScanSettingsService,
     audit: auditRepository,
+    interpreters: options.invoiceInterpreters,
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   // articleService is the price writer for "Sätt standardpris"/"Sätt

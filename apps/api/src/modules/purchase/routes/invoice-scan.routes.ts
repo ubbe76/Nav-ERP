@@ -6,18 +6,20 @@ import {
   interpretInvoiceScanSchema,
   listInvoiceScansQuerySchema,
   rejectInvoiceScanSchema,
+  testInvoiceScanAiSchema,
   updateInvoiceScanSettingsSchema,
 } from "@navet/shared";
 import { errorBody } from "../../system/service/error-body.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import {
   InvoiceScanAiNotConfiguredError,
+  InvoiceScanBusyError,
   InvoiceScanDuplicateError,
   InvoiceScanNotFoundError,
   type InvoiceScanService,
   type UploadedFile,
 } from "../service/invoice-scan.service.js";
-import type { InvoiceScanSettingsService } from "../service/invoice-scan-settings.service.js";
+import { InvoiceScanAiTestFailedError, type InvoiceScanSettingsService } from "../service/invoice-scan-settings.service.js";
 import { InvalidStatusTransitionError } from "../service/purchase.service.js";
 import { invoiceError } from "./supplier-invoice.routes.js";
 
@@ -31,7 +33,12 @@ const ADMIN = { config: { access: ["admin"] as const } };
 function scanError(err: unknown, reply: FastifyReply) {
   if (err instanceof InvoiceScanNotFoundError) return reply.code(404).send(errorBody(err));
   if (err instanceof InvoiceScanDuplicateError) return reply.code(409).send({ ...errorBody(err), existing: err.existing });
-  if (err instanceof InvoiceScanAiNotConfiguredError || err instanceof InvalidStatusTransitionError) {
+  if (err instanceof InvoiceScanAiTestFailedError) return reply.code(409).send({ ...errorBody(err), message: err.message });
+  if (
+    err instanceof InvoiceScanAiNotConfiguredError ||
+    err instanceof InvoiceScanBusyError ||
+    err instanceof InvalidStatusTransitionError
+  ) {
     return reply.code(409).send(errorBody(err));
   }
   // The conversion creates a supplier invoice: its own refusals as there.
@@ -73,7 +80,8 @@ export async function invoiceScanRoutes(
 
   // { created: [listRow…], duplicates: [{ filename, existing: { id,
   // scanNumber, status } }], rejected: [{ filename, reason }] } — 201 when
-  // something was created, else 200.
+  // something was created, else 200. Automatic AI (läge Automatiskt) on the
+  // created scans starts AFTER the answer, outside any transaction.
   app.post("/invoice-scans", async (req, reply) => {
     if (!req.isMultipart()) return reply.code(400).send({ error: "Ingen fil skickades" });
     const files = await readFiles(req);
@@ -82,7 +90,9 @@ export async function invoiceScanRoutes(
     }
     if (files.length === 0) return reply.code(400).send({ error: "Ingen fil skickades" });
     const result = await service.upload(files, req.user!.id);
-    return reply.code(result.created.length > 0 ? 201 : 200).send(result);
+    await reply.code(result.created.length > 0 ? 201 : 200).send(result);
+    if (result.created.length > 0) void service.automaticAi(result.created.map((scan) => scan.id));
+    return reply;
   });
 
   app.get<{ Params: { id: string } }>("/invoice-scans/:id", async (req, reply) => run(reply, () => service.get(req.params.id)));
@@ -137,5 +147,11 @@ export async function invoiceScanRoutes(
   app.get("/settings/invoice-scan", ADMIN, async () => settings.view());
   app.patch("/settings/invoice-scan", ADMIN, async (req) =>
     settings.update(updateInvoiceScanSettingsSchema.parse(req.body), req.user!.id)
+  );
+  // Testa anslutning (AI): { ok: true, model } or 409
+  // invoice-scan-ai-test-failed with the Swedish reason. Saves nothing, but
+  // calls out with a key — not readOnlySafe.
+  app.post("/settings/invoice-scan/test-ai", ADMIN, async (req, reply) =>
+    run(reply, () => settings.testAi(testInvoiceScanAiSchema.parse(req.body ?? {})))
   );
 }

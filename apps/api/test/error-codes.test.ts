@@ -21,7 +21,12 @@ import {
   SieVerificationImportBlockedError,
 } from "../src/modules/economy/service/sie-verification-import.service.js";
 import { SieInvalidAccountNumberError } from "../src/modules/economy/service/sie.service.js";
-import { InvoiceScanAiNotConfiguredError, InvoiceScanDuplicateError } from "../src/modules/purchase/service/invoice-scan.service.js";
+import {
+  InvoiceScanAiNotConfiguredError,
+  InvoiceScanBusyError,
+  InvoiceScanDuplicateError,
+} from "../src/modules/purchase/service/invoice-scan.service.js";
+import { InvoiceScanAiTestFailedError } from "../src/modules/purchase/service/invoice-scan-settings.service.js";
 import { SupplierInvoiceFileFromScanError } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -799,6 +804,8 @@ const cases: Array<[Error, string]> = [
   // Fakturaskanning
   [new InvoiceScanDuplicateError({ id: "s-1", scanNumber: "FI-1", status: "new" }), ERROR_CODES.INVOICE_SCAN_DUPLICATE],
   [new InvoiceScanAiNotConfiguredError(), ERROR_CODES.INVOICE_SCAN_AI_NOT_CONFIGURED],
+  [new InvoiceScanBusyError(), ERROR_CODES.INVOICE_SCAN_BUSY],
+  [new InvoiceScanAiTestFailedError("API-nyckeln godkändes inte"), ERROR_CODES.INVOICE_SCAN_AI_TEST_FAILED],
   [new SupplierInvoiceFileFromScanError("FI-1"), ERROR_CODES.SUPPLIER_INVOICE_FILE_FROM_SCAN],
 ];
 

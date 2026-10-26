@@ -5,6 +5,7 @@ import {
   INVOICE_SCAN_FILE_TYPES,
   invoiceScanResultSchema,
   isUncertain,
+  rulesSufficient,
   type CreateSupplierInvoiceInput,
   type InvoiceScanEngine,
   type InvoiceScanResult,
@@ -21,6 +22,17 @@ import { canPerform, type InvoiceScanAction } from "./invoice-scan/invoice-scan-
 import { allLines, extractPdfText, hasTextLayer, PDF_MAX_PAGES, PdfUnreadableError, type PdfText, type PdfTextLine } from "./invoice-scan/pdf-text.js";
 import { interpretRules, learnLabels, matchSupplier, type CompanyIdentity, type FinalValues, type HintLabel } from "./invoice-scan/rules-interpreter.js";
 import { matchInvoiceRows, matchPurchaseOrder, purchaseOrderTokens } from "./invoice-scan/po-matching.js";
+import { AI_IMAGE_MAX_BASE64_CHARS, AI_PDF_MAX_PAGES, aiInvoiceFieldsSchema, base64Length } from "./invoice-scan/ai-fields.js";
+import { interpretAiAnswer } from "./invoice-scan/ai-postprocess.js";
+import { claudeInterpreterFactory } from "./invoice-scan/claude-interpreter.js";
+import {
+  AI_ERROR_TEXTS,
+  AI_TEXTS,
+  InvoiceInterpreterError,
+  type InvoiceInterpreterFactory,
+  type InvoiceInterpreterFile,
+} from "./invoice-scan/invoice-interpreter.js";
+import { senderAllowsAutomaticAi } from "./invoice-scan/sender-rule.js";
 
 // Fakturaskanning — the Fakturainkorg (spec §2–§5). Files come in, the rules
 // interpret them to a proposal, a person reviews and creates the supplier
@@ -43,12 +55,21 @@ export class InvoiceScanDuplicateError extends Error {
   }
 }
 
-// Tolka med AI without a configured AI interpretation (always, until the AI
-// step of the spec is built). 409.
+// Tolka med AI without a configured AI interpretation (läge Av, or no API
+// key). 409.
 export class InvoiceScanAiNotConfiguredError extends Error {
   constructor() {
     super("AI-tolkning är inte inställd — välj läge och ange API-nyckel under System → Fakturaskanning");
     this.name = "InvoiceScanAiNotConfiguredError";
+  }
+}
+
+// Tolka med AI while another AI call on the same scan is running (the
+// reservation in ai_started_at). 409.
+export class InvoiceScanBusyError extends Error {
+  constructor() {
+    super("En AI-tolkning av filen pågår redan");
+    this.name = "InvoiceScanBusyError";
   }
 }
 
@@ -110,6 +131,8 @@ export function createInvoiceScanService(deps: {
   today?: () => string;
   // The PDF text extraction; the tests may inject a failing one.
   extractText?: (data: Buffer) => Promise<PdfText>;
+  // The AI interpretation (spec §3.5): Claude by default, a fake in tests.
+  interpreters?: InvoiceInterpreterFactory;
   log?: (msg: string, extra?: unknown) => void;
 }) {
   const { repo, supplierInvoices, company, settings } = deps;
@@ -117,6 +140,9 @@ export function createInvoiceScanService(deps: {
   const today = deps.today ?? stockholmToday;
   const extract = deps.extractText ?? ((data: Buffer) => extractPdfText(data));
   const log = deps.log ?? ((msg: string, extra?: unknown) => console.error(msg, extra));
+  const interpreters = deps.interpreters ?? claudeInterpreterFactory;
+  // Automatic AI runs one scan at a time in this process (spec §3.4).
+  let automaticQueue: Promise<void> = Promise.resolve();
 
   function assertAllowed(action: InvoiceScanAction, status: InvoiceScanStatus) {
     if (!canPerform(action, status)) {
@@ -224,6 +250,114 @@ export function createInvoiceScanService(deps: {
     });
   }
 
+  // --- AI-tolkningen (spec §3.4–§3.5) ---
+
+  // One AI call on one scan, never inside a transaction: reserve
+  // (ai_started_at, atomic UPDATE) → the file and its text layer → the call
+  // without any lock → the answer through the same local checks as the rules
+  // → written only while the reservation is still ours and the scan pending
+  // (a concurrent Avvisa/Skapa wins and the answer is dropped). A failure is
+  // not an HTTP error: ai_error gets the Swedish text, never err.message.
+  // "manual" (Tolka med AI) throws 404/409 like the other actions;
+  // "automatic" quietly does nothing when the scan is not up for it.
+  async function runAi(id: string, mode: "manual" | "automatic"): Promise<void> {
+    const scan = await repo.findById(id);
+    if (!scan) {
+      if (mode === "manual") throw new InvoiceScanNotFoundError(id);
+      return;
+    }
+    if (mode === "manual") assertAllowed("interpret", scan.status);
+    else if (!canPerform("interpret", scan.status)) return;
+    const config = await settings.read();
+    if (config.aiMode === "off" || config.aiApiKey === null || (mode === "automatic" && config.aiMode !== "fallback")) {
+      if (mode === "manual") throw new InvoiceScanAiNotConfiguredError();
+      return;
+    }
+
+    const reservedAt = await repo.reserveAi(id, new Date());
+    if (!reservedAt) {
+      if (mode === "automatic") return;
+      const now = await repo.findById(id);
+      if (!now) throw new InvoiceScanNotFoundError(id);
+      assertAllowed("interpret", now.status);
+      throw new InvoiceScanBusyError();
+    }
+
+    const fail = async (text: string) => {
+      const written = await repo.writeAiError(id, reservedAt, text);
+      if (!written) log("invoice scan: AI error dropped, the scan changed meanwhile", { scan: scan.scanNumber });
+    };
+    try {
+      const file = await repo.findWithData(id);
+      // Converted meanwhile (data moved): the conditional write drops it.
+      if (!file?.data) return await fail(AI_ERROR_TEXTS.unexpected);
+      const contentType = file.contentType as InvoiceInterpreterFile["contentType"];
+      if (contentType !== "application/pdf" && base64Length(file.data.length) > AI_IMAGE_MAX_BASE64_CHARS) {
+        return await fail(AI_TEXTS.imageTooLarge);
+      }
+
+      // The text layer (when the PDF has one): page count, the rounding line
+      // and the purchase order tokens for the local checks.
+      let lines: PdfTextLine[] = [];
+      let textLayer = file.hasTextLayer;
+      let pageCount = file.pageCount;
+      if (contentType === "application/pdf") {
+        try {
+          const text = await extract(file.data);
+          textLayer = hasTextLayer(text);
+          pageCount = text.pageCount;
+          if (textLayer) lines = allLines(text);
+        } catch {
+          // pdfjs could not read it — the AI service may still.
+        }
+        if (pageCount !== null && pageCount > AI_PDF_MAX_PAGES) return await fail(AI_TEXTS.tooManyPages);
+      }
+
+      const companyId = await companyIdentity();
+      const answer = await interpreters({ apiKey: config.aiApiKey, model: config.aiModel }).interpret(
+        { contentType, data: file.data },
+        { companyName: companyId.name, companyOrgNumber: companyId.orgNumber, today: today() }
+      );
+      const fields = aiInvoiceFieldsSchema.safeParse(answer.fields);
+      if (!fields.success) throw new InvoiceInterpreterError("invalid_response", "AiInvoiceFields");
+
+      const result = interpretAiAnswer({ fields: fields.data, company: companyId, suppliers: await repo.supplierIdentities(), today: today(), lines });
+      await postProcess(result, lines);
+      const written = await repo.writeAiResult(id, reservedAt, {
+        result,
+        aiError: answer.truncated ? AI_TEXTS.truncated : null,
+        hasTextLayer: textLayer,
+        pageCount,
+      });
+      if (!written) log("invoice scan: AI answer dropped, the scan changed meanwhile", { scan: scan.scanNumber });
+    } catch (err) {
+      if (err instanceof InvoiceInterpreterError) {
+        log("invoice scan: AI interpretation failed", { scan: scan.scanNumber, kind: err.kind, detail: err.detail });
+        await fail(AI_ERROR_TEXTS[err.kind]);
+      } else {
+        // Never err.message: it may carry the provider's text.
+        log("invoice scan: AI interpretation crashed", { scan: scan.scanNumber, error: (err as Error)?.name });
+        await fail(AI_ERROR_TEXTS.unexpected).catch(() => {});
+      }
+    }
+  }
+
+  // Automatic AI (läge "Automatiskt när reglerna inte räcker"): after the
+  // rules, when they were not enough (rulesSufficient false, no text layer,
+  // an image or an unreadable PDF). An e-mailed scan only when the sender
+  // passes avsändarregeln. Skipped silently otherwise.
+  async function automaticAiFor(id: string): Promise<void> {
+    const scan = await repo.findById(id);
+    if (!scan || !canPerform("interpret", scan.status) || scan.interpretedBy === "ai") return;
+    const config = await settings.read();
+    if (config.aiMode !== "fallback" || config.aiApiKey === null) return;
+    const result = parseResult(scan.result);
+    const rulesEnough = scan.contentType === "application/pdf" && scan.hasTextLayer === true && result !== null && rulesSufficient(result);
+    if (rulesEnough) return;
+    if (scan.source === "email" && !senderAllowsAutomaticAi(scan.emailFrom, await repo.knownSenderAddresses())) return;
+    await runAi(id, "automatic");
+  }
+
   function listRow(row: Awaited<ReturnType<InvoiceScanRepository["list"]>>["rows"][number]) {
     const { result: raw, ...columns } = row;
     const result = parseResult(raw);
@@ -249,16 +383,16 @@ export function createInvoiceScanService(deps: {
       if (!row) throw new InvoiceScanNotFoundError(id);
       const { result: raw, ...columns } = row;
       const result = parseResult(raw);
-      const { poMatching } = await settings.read();
+      const { poMatching, aiMode, aiApiKey } = await settings.read();
       return {
         ...columns,
         result,
         // A stored result in an unknown shape — Tolka igen replaces it.
         resultOutdated: raw !== null && result === null,
         uncertain: result !== null && isUncertain(result),
-        // Tolka med AI: built in the AI step of the spec; until then never
-        // available (POST …/interpret with engine "ai" answers 409).
-        aiAvailable: false,
+        // Tolka med AI is offered: a key is set and the mode is not Av
+        // (derived, never stored).
+        aiAvailable: aiMode !== "off" && aiApiKey !== null,
         poMatching,
       };
     },
@@ -326,12 +460,16 @@ export function createInvoiceScanService(deps: {
       return { created, duplicates, rejected };
     },
 
-    // Tolka igen (rules) — Tolka med AI arrives with the AI step.
+    // Tolka igen (rules) or Tolka med AI (synchronous, 10–60 s; an AI
+    // failure answers with the detail and its aiError, not an HTTP error).
     async interpret(id: string, engine: InvoiceScanEngine) {
       const scan = await repo.findById(id);
       if (!scan) throw new InvoiceScanNotFoundError(id);
       assertAllowed("interpret", scan.status);
-      if (engine === "ai") throw new InvoiceScanAiNotConfiguredError();
+      if (engine === "ai") {
+        await runAi(id, "manual");
+        return service.get(id);
+      }
       const written = await runRules(id);
       if (!written) {
         const now = await repo.findById(id);
@@ -339,6 +477,24 @@ export function createInvoiceScanService(deps: {
         assertAllowed("interpret", now.status);
       }
       return service.get(id);
+    },
+
+    // Automatic AI on newly arrived scans (the upload route after its
+    // answer, the e-mail job after the letter's import): queued so that one
+    // scan at a time goes to the AI service in this process, never in a
+    // transaction. Never throws; resolves when these scans are done.
+    automaticAi(ids: string[]): Promise<void> {
+      const run = automaticQueue.then(async () => {
+        for (const id of ids) {
+          try {
+            await automaticAiFor(id);
+          } catch (err) {
+            log("invoice scan: automatic AI failed", { scan: id, error: (err as Error)?.name });
+          }
+        }
+      });
+      automaticQueue = run;
+      return run;
     },
 
     // Skapa leverantörsfaktura: ONE transaction — the scan locked FOR

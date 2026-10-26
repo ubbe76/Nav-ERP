@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, like, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, isNotNull, isNull, like, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   articles,
   articleSuppliers,
@@ -9,6 +9,7 @@ import {
   purchaseOrders,
   supplierInvoiceFiles,
   supplierInvoiceRows,
+  supplierContacts,
   supplierInvoices,
   suppliers,
   systemSettings,
@@ -28,6 +29,10 @@ export const INVOICE_SCAN_SERIES = { key: "invoice_scan", prefix: "FI-" } as con
 const SHA256_INDEX = "invoice_scans_sha256_live";
 // At most this many learned labels per supplier and field.
 export const MAX_HINTS_PER_FIELD = 5;
+// An AI reservation older than this is taken over (a process that died
+// mid-call). Longer than the client's worst case: 120 s timeout × 3 attempts
+// plus backoff.
+export const AI_RESERVATION_STALE_MINUTES = 10;
 
 const PENDING: InvoiceScanStatus[] = ["new", "interpreted"];
 const LIST_STATUSES: Record<ListInvoiceScansQuery["status"], InvoiceScanStatus[] | null> = {
@@ -235,6 +240,85 @@ export function createInvoiceScanRepository(db: Db) {
         .where(and(eq(invoiceScans.id, id), inArray(invoiceScans.status, PENDING)))
         .returning(scanColumns);
       return row ?? null;
+    },
+
+    // --- AI-tolkningen (spec §3.5): no transaction over HTTP ---
+
+    // Reserves the scan for one AI call: an atomic UPDATE that only takes a
+    // pending scan without a live reservation (a stale one — a process that
+    // died mid-call — is taken over after AI_RESERVATION_STALE_MINUTES).
+    // The reservation value is set from the app (millisecond precision) so
+    // the conditional writes below compare it exactly. null = not reserved.
+    async reserveAi(id: string, at: Date): Promise<Date | null> {
+      const [row] = await db
+        .update(invoiceScans)
+        .set({ aiStartedAt: at })
+        .where(
+          and(
+            eq(invoiceScans.id, id),
+            inArray(invoiceScans.status, PENDING),
+            or(
+              isNull(invoiceScans.aiStartedAt),
+              sql`${invoiceScans.aiStartedAt} < now() - make_interval(mins => ${AI_RESERVATION_STALE_MINUTES})`
+            )
+          )
+        )
+        .returning({ aiStartedAt: invoiceScans.aiStartedAt });
+      return row?.aiStartedAt ?? null;
+    },
+
+    // The AI's result, only when the reservation is still ours and the scan
+    // still pending — a concurrent Avvisa/Skapa (which clear ai_started_at)
+    // wins and the answer is dropped. The reservation is released in the
+    // same UPDATE; aiError carries the truncation note or null.
+    async writeAiResult(
+      id: string,
+      reservedAt: Date,
+      write: { result: unknown; aiError: string | null; hasTextLayer: boolean | null; pageCount: number | null }
+    ): Promise<InvoiceScanRow | null> {
+      const now = new Date();
+      const [row] = await db
+        .update(invoiceScans)
+        .set({
+          result: write.result,
+          hasTextLayer: write.hasTextLayer,
+          pageCount: write.pageCount,
+          status: "interpreted",
+          interpretedBy: "ai",
+          interpretedAt: now,
+          aiError: write.aiError,
+          aiStartedAt: null,
+          updatedAt: now,
+        })
+        .where(and(eq(invoiceScans.id, id), eq(invoiceScans.aiStartedAt, reservedAt), inArray(invoiceScans.status, PENDING)))
+        .returning(scanColumns);
+      return row ?? null;
+    },
+
+    // A failed AI call: the Swedish text, on the same condition; the
+    // previous result stays.
+    async writeAiError(id: string, reservedAt: Date, aiError: string): Promise<InvoiceScanRow | null> {
+      const [row] = await db
+        .update(invoiceScans)
+        .set({ aiError: aiError.slice(0, 200), aiStartedAt: null, updatedAt: new Date() })
+        .where(and(eq(invoiceScans.id, id), eq(invoiceScans.aiStartedAt, reservedAt), inArray(invoiceScans.status, PENDING)))
+        .returning(scanColumns);
+      return row ?? null;
+    },
+
+    // Avsändarregeln: the e-mail addresses that may trigger automatic AI —
+    // active suppliers', their contacts' and the company's active users'.
+    async knownSenderAddresses(): Promise<string[]> {
+      const [own, contacts, people] = await Promise.all([
+        db.select({ email: suppliers.email }).from(suppliers).where(and(eq(suppliers.active, true), isNotNull(suppliers.email))),
+        db
+          .select({ email: supplierContacts.email })
+          .from(supplierContacts)
+          .innerJoin(suppliers, eq(suppliers.id, supplierContacts.supplierId))
+          .where(and(eq(suppliers.active, true), isNotNull(supplierContacts.email))),
+        db.select({ email: users.email }).from(users).where(eq(users.active, true)),
+      ]);
+      return [...own, ...contacts, ...people].map((r) => r.email).filter((e): e is string => e !== null && e !== "");
     },
 
     async reject(id: string, reason: string, userId: string | null): Promise<InvoiceScanRow | null> {

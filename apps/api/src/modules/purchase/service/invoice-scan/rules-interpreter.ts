@@ -310,10 +310,10 @@ function ownIdentifiers(company: CompanyIdentity) {
   };
 }
 
-// First unique hit in the order orgnr → momsnr → bankgiro → plusgiro →
-// IBAN; without one an exact normalized name match (one supplier only) as
-// low. Several suppliers on the same identifier ⇒ candidates, low.
-export function matchSupplier(lines: PdfTextLine[], company: CompanyIdentity, suppliers: SupplierIdentity[]): SupplierMatch {
+export type FoundIdentifiers = SupplierMatch["found"];
+
+// The identifiers on the invoice's lines that are not the company's own.
+function identifiersOnLines(lines: PdfTextLine[], company: CompanyIdentity): FoundIdentifiers {
   const own = ownIdentifiers(company);
   const collect = (finder: (line: string) => string[], ownValue: string | null) => {
     const values = new Set<string>();
@@ -327,13 +327,47 @@ export function matchSupplier(lines: PdfTextLine[], company: CompanyIdentity, su
   // A Swedish VAT number carries the organisationsnummer.
   const orgFromVat = vatNumbers.filter((v) => v.startsWith("SE")).map((v) => v.slice(2, 12));
   const orgNumbers = [...new Set([...collect(findOrgNumbers, own.orgNumber), ...orgFromVat.filter((o) => o !== own.orgNumber)])];
-  const found = {
+  return {
     orgNumbers,
     vatNumbers,
     bankgiros: collect(findBankgiros, own.bankgiro),
     plusgiros: collect(findPlusgiros, own.plusgiro),
     ibans: collect(findIbans, own.iban),
     bics: collect(findBics, null),
+  };
+}
+
+// First unique hit in the order orgnr → momsnr → bankgiro → plusgiro →
+// IBAN; without one an exact normalized name match (one supplier only) as
+// low. Several suppliers on the same identifier ⇒ candidates, low.
+export function matchSupplier(lines: PdfTextLine[], company: CompanyIdentity, suppliers: SupplierIdentity[]): SupplierMatch {
+  // Name: a cell (or a whole line) that IS a supplier's name.
+  const texts: string[] = [];
+  for (const line of lines) {
+    texts.push(line.text);
+    for (const cell of line.cells) texts.push(cell.text);
+  }
+  return matchSupplierOnIdentifiers(identifiersOnLines(lines, company), texts, company, suppliers);
+}
+
+// The same matching on identifiers read some other way (the AI's answer):
+// `found` is normalized (identifiers.ts) — the company's own values are
+// dropped here too — and `names` are texts that may BE a supplier's name.
+export function matchSupplierOnIdentifiers(
+  found: FoundIdentifiers,
+  names: string[],
+  company: CompanyIdentity,
+  suppliers: SupplierIdentity[]
+): SupplierMatch {
+  const own = ownIdentifiers(company);
+  const notOwn = (values: string[], ownValue: string | null) => [...new Set(values)].filter((v) => v !== ownValue);
+  found = {
+    orgNumbers: notOwn(found.orgNumbers, own.orgNumber),
+    vatNumbers: notOwn(found.vatNumbers, own.vatNumber),
+    bankgiros: notOwn(found.bankgiros, own.bankgiro),
+    plusgiros: notOwn(found.plusgiros, own.plusgiro),
+    ibans: notOwn(found.ibans, own.iban),
+    bics: [...new Set(found.bics)],
   };
 
   const tiers: { by: SupplierMatchedBy; values: string[]; of: (s: SupplierIdentity) => string | null }[] = [
@@ -358,12 +392,8 @@ export function matchSupplier(lines: PdfTextLine[], company: CompanyIdentity, su
     }
   }
 
-  // Name: a cell (or a whole line) that IS a supplier's name, normalized.
-  const texts = new Set<string>();
-  for (const line of lines) {
-    texts.add(normalizeName(line.text));
-    for (const cell of line.cells) texts.add(normalizeName(cell.text));
-  }
+  // Name: a text that IS a supplier's name, normalized.
+  const texts = new Set(names.map(normalizeName));
   const byName = suppliers.filter((s) => {
     const name = normalizeName(s.name);
     return name !== "" && name !== own.name && texts.has(name);

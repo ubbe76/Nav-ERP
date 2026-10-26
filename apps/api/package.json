@@ -11,6 +11,7 @@
     "test": "DATABASE_URL=${DATABASE_URL:-postgresql://erp:erp_dev_password@localhost:5433/erp_test} vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@fastify/cookie": "^9.4.0",
     "@fastify/cors": "^8.5.0",
     "@fastify/multipart": "^8.3.0",

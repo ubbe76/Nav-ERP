@@ -16,5 +16,11 @@ globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeo
   if (/^https?:\/\/[^/]*riksbank\.se/i.test(url)) {
     return Promise.reject(new TypeError("Riksbanken must not be called from tests — inject a fetch"));
   }
+  // Fakturaskanning: the AI interpretation goes through a fake
+  // (helpers/fake-invoice-interpreter.ts); only the sandbox test, run with
+  // its own key in the environment, may reach Anthropic.
+  if (/^https?:\/\/[^/]*anthropic\.com/i.test(url) && !process.env.ANTHROPIC_SANDBOX_API_KEY) {
+    return Promise.reject(new TypeError("Anthropic must not be called from tests — inject a fake interpreter"));
+  }
   return realFetch(input, init);
 }) as typeof fetch;

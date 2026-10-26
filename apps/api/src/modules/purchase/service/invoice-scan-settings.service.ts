@@ -9,10 +9,13 @@ import {
   type InvoiceScanAiMode,
   type InvoiceScanAiModel,
   type InvoiceScanSettingsView,
+  type TestInvoiceScanAiInput,
   type UpdateInvoiceScanSettingsInput,
 } from "@navet/shared";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import type { InvoiceScanRepository } from "../repository/invoice-scan.repository.js";
+import { claudeInterpreterFactory } from "./invoice-scan/claude-interpreter.js";
+import { AI_TEXTS, aiErrorText, type InvoiceInterpreterFactory } from "./invoice-scan/invoice-interpreter.js";
 
 // Fakturaskanning — the settings (System → Fakturaskanning, admin): keys
 // invoice_scan_* in system_settings, the e-invoice settings' shape. The API
@@ -40,6 +43,15 @@ export const INVOICE_SCAN_SETTING_KEYS = {
   mailLastError: "invoice_scan_mail_last_error",
 } as const;
 
+// Testa anslutning (AI) failed — the message is the Swedish text the page
+// shows. 409.
+export class InvoiceScanAiTestFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvoiceScanAiTestFailedError";
+  }
+}
+
 export interface InvoiceScanSettings {
   aiMode: InvoiceScanAiMode;
   aiApiKey: string | null;
@@ -60,8 +72,14 @@ export interface InvoiceScanSettings {
 
 const blankToNull = (v: string | null | undefined) => (v && v.trim() !== "" ? v.trim() : null);
 
-export function createInvoiceScanSettingsService(deps: { repo: InvoiceScanRepository; audit: AuditWriter }) {
+export function createInvoiceScanSettingsService(deps: {
+  repo: InvoiceScanRepository;
+  audit: AuditWriter;
+  // The AI interpretation (Testa anslutning): Claude by default, a fake in tests.
+  interpreters?: InvoiceInterpreterFactory;
+}) {
   const { repo, audit } = deps;
+  const interpreters = deps.interpreters ?? claudeInterpreterFactory;
   const K = INVOICE_SCAN_SETTING_KEYS;
 
   async function read(): Promise<InvoiceScanSettings> {
@@ -140,6 +158,22 @@ export function createInvoiceScanSettingsService(deps: { repo: InvoiceScanReposi
         await audit.log({ entityType: "invoice_scan_settings", entityId: null, action: "updated", detail: { keys: changed }, userId });
       }
       return view();
+    },
+
+    // Testa anslutning: a minimal call with the key typed in the form (else
+    // the saved one) and the chosen model (else the saved one). Nothing is
+    // saved — the form stores the key through update() on Spara.
+    async testAi(input: TestInvoiceScanAiInput = {}) {
+      const saved = await read();
+      const apiKey = input.apiKey && input.apiKey.trim() !== "" ? input.apiKey.trim() : saved.aiApiKey;
+      if (!apiKey) throw new InvoiceScanAiTestFailedError(AI_TEXTS.testNoKey);
+      const model = input.model ?? saved.aiModel;
+      try {
+        await interpreters({ apiKey, model }).testConnection();
+      } catch (err) {
+        throw new InvoiceScanAiTestFailedError(aiErrorText(err));
+      }
+      return { ok: true as const, model };
     },
   };
 }
