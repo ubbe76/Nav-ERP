@@ -19,7 +19,9 @@
     "@navet/shared": "*",
     "bcryptjs": "^3.0.3",
     "fastify": "^4.28.1",
+    "imapflow": "^2.4.0",
     "jsonwebtoken": "^9.0.3",
+    "mailparser": "^3.9.38",
     "nodemailer": "^9.0.3",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.4.299",
@@ -30,6 +32,7 @@
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/mailparser": "^3.9.0",
     "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
     "@types/qrcode": "^1.5.6",

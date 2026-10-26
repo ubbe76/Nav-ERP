@@ -333,6 +333,25 @@ export function createAlertsService(deps: {
       }));
     },
 
+    // E-postlådan för fakturor kunde inte läsas: the job's last run failed
+    // while the box is turned on (derived from invoice_scan_mail_last_error,
+    // which a successful run clears).
+    async invoice_scan_mail_failed() {
+      const state = await repo.invoiceScanMailState();
+      if (!state.enabled || !state.lastError) return [];
+      const since = state.lastSuccessAt ? stockholmNow(state.lastSuccessAt) : null;
+      return [
+        {
+          key: "invoice_scan_mail",
+          severity: "red" as const,
+          href: "/system/fakturaskanning",
+          primary: state.lastError,
+          secondary: since ? `Senast lästes lådan ${since.date} ${since.time}` : "Lådan har inte lästs någon gång",
+          date: state.lastRunAt ? stockholmNow(state.lastRunAt).date : null,
+        },
+      ];
+    },
+
     async plugin_delivery_failed() {
       const since = new Date(nowFn().getTime() - PLUGIN_FAILED_DAYS * DAY_MS);
       const rows = await repo.failedPluginDeliveries(since);

@@ -23,6 +23,7 @@ export const ALERT_KINDS = [
   "bank_unreconciled",
   "cost_center_missing",
   "invoice_scans_pending",
+  "invoice_scan_mail_failed",
 ] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export const alertKindSchema = z.enum(ALERT_KINDS);

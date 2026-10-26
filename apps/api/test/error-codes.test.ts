@@ -27,6 +27,7 @@ import {
   InvoiceScanDuplicateError,
 } from "../src/modules/purchase/service/invoice-scan.service.js";
 import { InvoiceScanAiTestFailedError } from "../src/modules/purchase/service/invoice-scan-settings.service.js";
+import { InvoiceScanMailTestFailedError } from "../src/modules/purchase/service/invoice-scan-mail.service.js";
 import { SupplierInvoiceFileFromScanError } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -806,6 +807,7 @@ const cases: Array<[Error, string]> = [
   [new InvoiceScanAiNotConfiguredError(), ERROR_CODES.INVOICE_SCAN_AI_NOT_CONFIGURED],
   [new InvoiceScanBusyError(), ERROR_CODES.INVOICE_SCAN_BUSY],
   [new InvoiceScanAiTestFailedError("API-nyckeln godkändes inte"), ERROR_CODES.INVOICE_SCAN_AI_TEST_FAILED],
+  [new InvoiceScanMailTestFailedError("Inloggningen misslyckades"), ERROR_CODES.INVOICE_SCAN_MAIL_TEST_FAILED],
   [new SupplierInvoiceFileFromScanError("FI-1"), ERROR_CODES.SUPPLIER_INVOICE_FILE_FROM_SCAN],
 ];
 

@@ -4,9 +4,11 @@ import {
   INVOICE_SCAN_MAX_FILE_BYTES,
   INVOICE_SCAN_MAX_FILES_PER_UPLOAD,
   interpretInvoiceScanSchema,
+  listInvoiceScanMailLogQuerySchema,
   listInvoiceScansQuerySchema,
   rejectInvoiceScanSchema,
   testInvoiceScanAiSchema,
+  testInvoiceScanMailSchema,
   updateInvoiceScanSettingsSchema,
 } from "@navet/shared";
 import { errorBody } from "../../system/service/error-body.js";
@@ -20,6 +22,7 @@ import {
   type UploadedFile,
 } from "../service/invoice-scan.service.js";
 import { InvoiceScanAiTestFailedError, type InvoiceScanSettingsService } from "../service/invoice-scan-settings.service.js";
+import { InvoiceScanMailTestFailedError, type InvoiceScanMailService } from "../service/invoice-scan-mail.service.js";
 import { InvalidStatusTransitionError } from "../service/purchase.service.js";
 import { invoiceError } from "./supplier-invoice.routes.js";
 
@@ -33,7 +36,9 @@ const ADMIN = { config: { access: ["admin"] as const } };
 function scanError(err: unknown, reply: FastifyReply) {
   if (err instanceof InvoiceScanNotFoundError) return reply.code(404).send(errorBody(err));
   if (err instanceof InvoiceScanDuplicateError) return reply.code(409).send({ ...errorBody(err), existing: err.existing });
-  if (err instanceof InvoiceScanAiTestFailedError) return reply.code(409).send({ ...errorBody(err), message: err.message });
+  if (err instanceof InvoiceScanAiTestFailedError || err instanceof InvoiceScanMailTestFailedError) {
+    return reply.code(409).send({ ...errorBody(err), message: err.message });
+  }
   if (
     err instanceof InvoiceScanAiNotConfiguredError ||
     err instanceof InvoiceScanBusyError ||
@@ -64,9 +69,9 @@ async function readFiles(req: FastifyRequest): Promise<UploadedFile[] | "too_man
 
 export async function invoiceScanRoutes(
   app: FastifyInstance,
-  opts: { service: InvoiceScanService; settings: InvoiceScanSettingsService }
+  opts: { service: InvoiceScanService; settings: InvoiceScanSettingsService; mail: InvoiceScanMailService }
 ) {
-  const { service, settings } = opts;
+  const { service, settings, mail } = opts;
 
   async function run<T>(reply: FastifyReply, fn: () => Promise<T>) {
     try {
@@ -154,4 +159,12 @@ export async function invoiceScanRoutes(
   app.post("/settings/invoice-scan/test-ai", ADMIN, async (req, reply) =>
     run(reply, () => settings.testAi(testInvoiceScanAiSchema.parse(req.body ?? {})))
   );
+  // Testa anslutning (e-postlådan): { ok: true, unseen, processedFolderExists }
+  // or 409 invoice-scan-mail-test-failed with the Swedish reason. Saves
+  // nothing, but logs in with a password — not readOnlySafe.
+  app.post("/settings/invoice-scan/test-mail", ADMIN, async (req, reply) =>
+    run(reply, () => mail.testMail(testInvoiceScanMailSchema.parse(req.body ?? {})))
+  );
+  // Senast lästa brev: { rows } newest first.
+  app.get("/settings/invoice-scan/mail-log", ADMIN, async (req) => mail.mailLog(listInvoiceScanMailLogQuerySchema.parse(req.query)));
 }

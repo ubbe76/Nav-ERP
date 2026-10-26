@@ -3,6 +3,7 @@ import {
   articles,
   articleSuppliers,
   invoiceScanHints,
+  invoiceScanMailLog,
   invoiceScans,
   numberSeries,
   purchaseOrderRows,
@@ -17,7 +18,7 @@ import {
   type Db,
   type Tx,
 } from "@navet/db";
-import { ilikePattern, type InvoiceScanHintField, type InvoiceScanSource, type InvoiceScanStatus, type ListInvoiceScansQuery } from "@navet/shared";
+import { ilikePattern, type InvoiceScanHintField, type InvoiceScanMailOutcome, type InvoiceScanSource, type InvoiceScanStatus, type ListInvoiceScansQuery } from "@navet/shared";
 import { getNextOrderNumber, NumberSeriesNotConfiguredError } from "../../system/service/number-series.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 
@@ -27,6 +28,12 @@ import { isUniqueViolation } from "../../system/service/db-errors.js";
 
 export const INVOICE_SCAN_SERIES = { key: "invoice_scan", prefix: "FI-" } as const;
 const SHA256_INDEX = "invoice_scans_sha256_live";
+// The e-mail job's own keys in system_settings (never written by the
+// settings' update()).
+const MAIL_LEASE_KEY = "invoice_scan_mail_lease_until";
+const MAIL_RUN_KEY = "invoice_scan_mail_last_run_at";
+const MAIL_ERROR_KEY = "invoice_scan_mail_last_error";
+const MAIL_SUCCESS_KEY = "invoice_scan_mail_last_success_at";
 // At most this many learned labels per supplier and field.
 export const MAX_HINTS_PER_FIELD = 5;
 // An AI reservation older than this is taken over (a process that died
@@ -81,6 +88,95 @@ async function findLiveBySha(db: Db | Tx, sha256: string): Promise<ExistingScan 
   return row ?? null;
 }
 
+async function findByEmailKey(db: Db | Tx, messageId: string, attachmentIndex: number): Promise<ExistingScan | null> {
+  const [row] = await db
+    .select({ id: invoiceScans.id, scanNumber: invoiceScans.scanNumber, status: invoiceScans.status })
+    .from(invoiceScans)
+    .where(and(eq(invoiceScans.emailMessageId, messageId), eq(invoiceScans.emailAttachmentIndex, attachmentIndex)));
+  return row ?? null;
+}
+
+export interface NewScanInput {
+  source: InvoiceScanSource;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  data: Buffer;
+  uploadedBy: string | null;
+  // E-post: the idempotency key (Message-ID, attachment index) and the
+  // letter's headers.
+  email?: {
+    messageId: string;
+    attachmentIndex: number;
+    from: string | null;
+    subject: string | null;
+    receivedAt: Date | null;
+  };
+}
+
+export type InsertScanOutcome =
+  | { ok: true; scan: InvoiceScanRow }
+  // The same file is live in the inbox (the dubblettspärr on sha256).
+  | { ok: false; reason: "duplicate"; existing: ExistingScan }
+  // This letter's attachment was imported by an earlier run (the move to
+  // the processed folder failed and the letter was read again).
+  | { ok: false; reason: "already_imported"; existing: ExistingScan };
+
+class AlreadyImported extends Error {}
+
+// A new scan (status new) with its FI- number, inside the caller's
+// transaction but in a SAVEPOINT of its own: a duplicate (the partial unique
+// index on sha256) or an attachment already imported (ON CONFLICT on the
+// e-mail key) rolls back to it, so the FI- number is not burned and the
+// caller's transaction goes on.
+async function insertScanInTx(tx: Tx, input: NewScanInput): Promise<InsertScanOutcome> {
+  const { email, ...file } = input;
+  try {
+    const scan = await tx.transaction(async (sp) => {
+      const scanNumber = await nextScanNumber(sp);
+      const values = {
+        ...file,
+        scanNumber,
+        status: "new" as const,
+        ...(email
+          ? {
+              emailMessageId: email.messageId,
+              emailAttachmentIndex: email.attachmentIndex,
+              emailFrom: email.from,
+              emailSubject: email.subject,
+              emailReceivedAt: email.receivedAt,
+            }
+          : {}),
+      };
+      const insert = sp.insert(invoiceScans).values(values);
+      const rows = email
+        ? await insert
+            .onConflictDoNothing({
+              target: [invoiceScans.emailMessageId, invoiceScans.emailAttachmentIndex],
+              where: sql`email_message_id IS NOT NULL`,
+            })
+            .returning(scanColumns)
+        : await insert.returning(scanColumns);
+      if (rows.length === 0) throw new AlreadyImported();
+      return rows[0]!;
+    });
+    return { ok: true, scan };
+  } catch (err) {
+    if (err instanceof AlreadyImported && email) {
+      const existing = await findByEmailKey(tx, email.messageId, email.attachmentIndex);
+      if (existing) return { ok: false, reason: "already_imported", existing };
+      throw err;
+    }
+    if (!isUniqueViolation(err, SHA256_INDEX)) throw err;
+    // The live scan was rejected or deleted in between: report it as a
+    // duplicate of nothing rather than retrying blindly.
+    const existing = await findLiveBySha(tx, input.sha256);
+    if (!existing) throw err;
+    return { ok: false, reason: "duplicate", existing };
+  }
+}
+
 export function createInvoiceScanRepository(db: Db) {
   // The list's columns: the scan without its file, the matched supplier's
   // name and the created supplier invoice's LF- number.
@@ -100,35 +196,83 @@ export function createInvoiceScanRepository(db: Db) {
       return db.transaction(fn);
     },
 
-    // A new scan (status new) with its FI- number, in one transaction so a
-    // duplicate does not burn a number. The dubblettspärr is the partial
-    // unique index on sha256 — its violation answers with the live scan.
-    async insert(input: {
-      source: InvoiceScanSource;
-      filename: string;
-      contentType: string;
-      sizeBytes: number;
-      sha256: string;
-      data: Buffer;
-      uploadedBy: string | null;
-    }): Promise<{ ok: true; scan: InvoiceScanRow } | { ok: false; existing: ExistingScan }> {
-      try {
-        const scan = await db.transaction(async (tx) => {
-          const scanNumber = await nextScanNumber(tx);
-          const [row] = await tx
-            .insert(invoiceScans)
-            .values({ ...input, scanNumber, status: "new" })
-            .returning(scanColumns);
-          return row!;
-        });
-        return { ok: true, scan };
-      } catch (err) {
-        if (!isUniqueViolation(err, SHA256_INDEX)) throw err;
-        const existing = await findLiveBySha(db, input.sha256);
-        // The live scan was rejected or deleted in between: report it as a
-        // duplicate of nothing rather than retrying blindly.
-        if (!existing) throw err;
-        return { ok: false, existing };
+    // An uploaded file as a new scan (status new) with its FI- number, in
+    // one transaction so a duplicate does not burn a number. The
+    // dubblettspärr is the partial unique index on sha256 — its violation
+    // answers with the live scan.
+    async insert(input: Omit<NewScanInput, "email">): Promise<{ ok: true; scan: InvoiceScanRow } | { ok: false; existing: ExistingScan }> {
+      const outcome = await db.transaction((tx) => insertScanInTx(tx, input));
+      return outcome.ok ? outcome : { ok: false, existing: outcome.existing };
+    },
+
+    // --- E-postlådan (spec §4) ---
+
+    // One letter's scans and its log row in the caller's transaction.
+    insertScanInTx,
+
+    async insertMailLogInTx(
+      tx: Tx,
+      row: {
+        messageId: string | null;
+        emailFrom: string | null;
+        emailSubject: string | null;
+        receivedAt: Date | null;
+        outcome: InvoiceScanMailOutcome;
+        detail: string | null;
+        scanIds: string[];
+      }
+    ) {
+      await tx.insert(invoiceScanMailLog).values(row);
+    },
+
+    // Senast lästa brev: the newest first.
+    async listMailLog(limit: number) {
+      const rows = await db
+        .select()
+        .from(invoiceScanMailLog)
+        .orderBy(desc(invoiceScanMailLog.runAt), desc(invoiceScanMailLog.id))
+        .limit(limit);
+      return rows.map((r) => ({
+        id: r.id,
+        runAt: r.runAt.toISOString(),
+        messageId: r.messageId,
+        emailFrom: r.emailFrom,
+        emailSubject: r.emailSubject,
+        receivedAt: r.receivedAt ? r.receivedAt.toISOString() : null,
+        outcome: r.outcome,
+        detail: r.detail,
+        scanIds: r.scanIds,
+      }));
+    },
+
+    // The job's lease (same atomic-upsert pattern as the e-invoice status
+    // job): a run holds it at most ttlMs; one that dies lets it expire.
+    async claimMailLease(now: Date, ttlMs: number): Promise<string | null> {
+      const until = new Date(now.getTime() + ttlMs).toISOString();
+      const rows = await db.execute(sql`
+        INSERT INTO system_settings (key, value) VALUES (${MAIL_LEASE_KEY}, ${until})
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        WHERE system_settings.value = '' OR system_settings.value::timestamptz <= ${now.toISOString()}::timestamptz
+        RETURNING key`);
+      return rows.length > 0 ? until : null;
+    },
+
+    // Owner-checked: only the run that wrote `until` releases.
+    async releaseMailLease(until: string) {
+      await db.delete(systemSettings).where(and(eq(systemSettings.key, MAIL_LEASE_KEY), eq(systemSettings.value, until)));
+    },
+
+    // After every run: when it ran, and its error as Swedish text (null =
+    // it went through, which also stamps the last successful read).
+    async stampMailRun(at: Date, error: string | null) {
+      const upsert = (key: string, value: string) =>
+        db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+      await upsert(MAIL_RUN_KEY, at.toISOString());
+      if (error === null) {
+        await db.delete(systemSettings).where(eq(systemSettings.key, MAIL_ERROR_KEY));
+        await upsert(MAIL_SUCCESS_KEY, at.toISOString());
+      } else {
+        await upsert(MAIL_ERROR_KEY, error);
       }
     },
 

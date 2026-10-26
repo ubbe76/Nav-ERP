@@ -72,7 +72,7 @@ Varje fil har `paths:` i sin frontmatter och läses bara in när du läser en fi
 | `article.md` | artikelkortet, typer, nummerserier, kopiera, artikelfiler |
 | `stock.md` | lagerplatser, resolvern, flytt, tomma platser, kostnad på lagerraden |
 | `purchase.md` | förfrågan, IO, inleverans och ångra, leverantörskatalog, staffel, leverantörsfaktura |
-| `invoice-scan.md` | fakturaskanning: Fakturainkorgen, regeltolkning, konvertering till LF-utkast, inlärning, IO-matchning |
+| `invoice-scan.md` | fakturaskanning: Fakturainkorgen, regeltolkning, konvertering till LF-utkast, inlärning, IO-matchning, AI-tolkning, e-postlådan |
 | `sales.md` | offert/kundorder, OF-/KO-nummer, Förlorad, kunder och adresser, utleverans och ångra, samlingsfaktura |
 | `order-dates.md` | önskat/bekräftat leveransdatum på order och rader, effektiva datum |
 | `ledgers.md` | kund- och leverantörsreskontra, betalningar, `paid` som sidoeffekt |

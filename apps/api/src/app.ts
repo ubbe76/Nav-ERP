@@ -100,8 +100,10 @@ import { supplierInvoiceRoutes } from "./modules/purchase/routes/supplier-invoic
 import { createInvoiceScanRepository } from "./modules/purchase/repository/invoice-scan.repository.js";
 import { createInvoiceScanService } from "./modules/purchase/service/invoice-scan.service.js";
 import { createInvoiceScanSettingsService } from "./modules/purchase/service/invoice-scan-settings.service.js";
+import { createInvoiceScanMailService } from "./modules/purchase/service/invoice-scan-mail.service.js";
 import { invoiceScanRoutes } from "./modules/purchase/routes/invoice-scan.routes.js";
 import type { InvoiceInterpreterFactory } from "./modules/purchase/service/invoice-scan/invoice-interpreter.js";
+import type { InvoiceMailboxFactory } from "./modules/purchase/service/invoice-scan/invoice-mailbox.js";
 import { createSupplierPaymentRepository } from "./modules/purchase/repository/supplier-payment.repository.js";
 import { payableForeignItemsAsOf, payablesTotalAsOf } from "./modules/purchase/repository/open-amounts.js";
 import { createSupplierPaymentService } from "./modules/purchase/service/supplier-payment.service.js";
@@ -202,10 +204,12 @@ function trustProxyFromEnv(): boolean | number | string {
   return raw;
 }
 
-// External seams a test can replace without touching the network. Only the
-// AI interpretation of the Fakturainkorg for now (Claude by default).
+// External seams a test can replace without touching the network: the
+// Fakturainkorg's AI interpretation (Claude by default) and its e-mail box.
 export interface BuildAppOptions {
   invoiceInterpreters?: InvoiceInterpreterFactory;
+  // The Fakturainkorg's e-mail box (imapflow by default).
+  invoiceMailboxes?: InvoiceMailboxFactory;
 }
 
 export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
@@ -448,6 +452,17 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     interpreters: options.invoiceInterpreters,
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
+  // Fakturaskanning: the e-mail box. Decorated for server.ts's scheduler like
+  // einvoiceStatus — never run from buildApp.
+  const invoiceScanMailService = createInvoiceScanMailService({
+    repo: invoiceScanRepository,
+    settings: invoiceScanSettingsService,
+    scans: invoiceScanService,
+    mailboxes: options.invoiceMailboxes,
+    audit: auditRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
+  app.decorate("invoiceScanMail", invoiceScanMailService);
   // articleService is the price writer for "Sätt standardpris"/"Sätt
   // försäljningspris" on a saved calculation — injected so the standard cost
   // travels the same path the article card uses and gets its history row.
@@ -881,7 +896,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(
           protectedRoutes,
           invoiceScanRoutes,
-          { service: invoiceScanService, settings: invoiceScanSettingsService },
+          { service: invoiceScanService, settings: invoiceScanSettingsService, mail: invoiceScanMailService },
           { read: office, write: ["inkop"] }
         );
         await registerModule(protectedRoutes, supplierPaymentRoutes, { service: supplierPaymentService }, { read: office, write: ["inkop"] });

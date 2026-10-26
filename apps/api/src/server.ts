@@ -10,9 +10,10 @@ const app = buildApp();
 let scheduler: ReturnType<typeof startScheduler> | null = null;
 let pluginScheduler: ReturnType<typeof startScheduler> | null = null;
 let recurringScheduler: ReturnType<typeof startScheduler> | null = null;
+let invoiceMailScheduler: ReturnType<typeof startScheduler> | null = null;
 app.addHook("onClose", async () => {
   app.pluginDispatcher.disableKick();
-  await Promise.all([scheduler?.stop(), pluginScheduler?.stop(), recurringScheduler?.stop()]);
+  await Promise.all([scheduler?.stop(), pluginScheduler?.stop(), recurringScheduler?.stop(), invoiceMailScheduler?.stop()]);
   await app.pluginDispatcher.idle();
 });
 
@@ -70,6 +71,13 @@ app
     recurringScheduler = startScheduler(
       [{ name: "recurring_verifications", run: () => app.recurringVerifications.runDue() }],
       { intervalMs: 60 * 60_000, firstDelayMs: 90_000, log: (msg, extra) => app.log.error(extra ?? {}, msg) }
+    );
+    // Fakturaskanning: the e-mail box, on a one-minute tick so Intervall
+    // (1–60 minutes) holds; the job itself checks the interval, whether the
+    // box is turned on and its lease (invoice_scan_mail_lease_until).
+    invoiceMailScheduler = startScheduler(
+      [{ name: "invoice_scan_mail", run: () => app.invoiceScanMail.runMailIfDue() }],
+      { intervalMs: 60_000, firstDelayMs: 75_000, log: (msg, extra) => app.log.error(extra ?? {}, msg) }
     );
     return printSetupCode();
   })

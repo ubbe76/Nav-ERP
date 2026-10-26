@@ -265,6 +265,38 @@ export const testInvoiceScanAiSchema = z
   .strict();
 export type TestInvoiceScanAiInput = z.infer<typeof testInvoiceScanAiSchema>;
 
+// Testa anslutning (e-postlådan): the form's mail fields — each omitted one
+// is the saved value (the password too; "" counts as omitted). Saves nothing.
+export const testInvoiceScanMailSchema = z
+  .object({
+    mailHost: z.string().trim().max(255).nullable().optional(),
+    mailPort: z.coerce.number().int().min(1).max(65535).optional(),
+    mailTls: z.boolean().optional(),
+    mailUser: z.string().trim().max(320).nullable().optional(),
+    mailPassword: z.string().max(500).regex(/^[\x20-\x7E]*$/, "Lösenordet får bara innehålla vanliga tecken").optional(),
+    mailFolder: z.string().trim().min(1).max(200).optional(),
+    mailProcessedFolder: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+export type TestInvoiceScanMailInput = z.infer<typeof testInvoiceScanMailSchema>;
+
+// Senast lästa brev (GET /settings/invoice-scan/mail-log).
+export const listInvoiceScanMailLogQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
+export type ListInvoiceScanMailLogQuery = z.infer<typeof listInvoiceScanMailLogQuerySchema>;
+
+export interface InvoiceScanMailLogRow {
+  id: string;
+  runAt: string;
+  messageId: string | null;
+  emailFrom: string | null;
+  emailSubject: string | null;
+  receivedAt: string | null;
+  outcome: InvoiceScanMailOutcome;
+  detail: string | null;
+  // The scans the letter created (outcome imported).
+  scanIds: string[];
+}
+
 export interface InvoiceScanSettingsView {
   aiMode: InvoiceScanAiMode;
   aiApiKeySet: boolean;

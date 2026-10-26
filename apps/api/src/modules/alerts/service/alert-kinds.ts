@@ -61,6 +61,15 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["admin"],
     listHref: "/system/tillagg",
   },
+  // Fakturaskanning: the e-mail box could not be read at the last run —
+  // System → Fakturaskanning is an admin page.
+  {
+    kind: "invoice_scan_mail_failed",
+    label: "E-postlådan för fakturor kunde inte läsas",
+    severity: "red",
+    rule: ["admin"],
+    listHref: "/system/fakturaskanning",
+  },
   // Återkommande verifikat: a month the job could not create (locked
   // period, inactive account …) — fixed and retried with Kör nu.
   {

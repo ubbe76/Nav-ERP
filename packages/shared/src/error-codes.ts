@@ -488,6 +488,8 @@ export const ERROR_CODES = {
   INVOICE_SCAN_BUSY: "invoice-scan-busy",
   // Testa anslutning (AI) failed — body.message/error is the Swedish reason (409)
   INVOICE_SCAN_AI_TEST_FAILED: "invoice-scan-ai-test-failed",
+  // Testa anslutning (e-postlådan) failed — body.message/error is the Swedish reason (409)
+  INVOICE_SCAN_MAIL_TEST_FAILED: "invoice-scan-mail-test-failed",
   // DELETE of the underlag the Fakturainkorg created the invoice from (409)
   SUPPLIER_INVOICE_FILE_FROM_SCAN: "supplier-invoice-file-from-scan",
 } as const;

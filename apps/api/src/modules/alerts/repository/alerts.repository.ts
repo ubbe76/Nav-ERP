@@ -22,6 +22,7 @@ import {
   stockTransactions,
   supplierInvoices,
   suppliers,
+  systemSettings,
   verificationRows,
   verificationSeries,
   fiscalYears,
@@ -467,6 +468,33 @@ export function createAlertsRepository(db: Db) {
     // was sent) and Skicka testhändelse's plugin.test don't count: the
     // first isn't the plugin failing to answer, the second the
     // administrator already saw.
+    // Fakturaskanning: the e-mail job's own keys in system_settings.
+    async invoiceScanMailState(): Promise<{ enabled: boolean; lastError: string | null; lastRunAt: Date | null; lastSuccessAt: Date | null }> {
+      const rows = await db
+        .select()
+        .from(systemSettings)
+        .where(
+          inArray(systemSettings.key, [
+            "invoice_scan_mail_enabled",
+            "invoice_scan_mail_last_error",
+            "invoice_scan_mail_last_run_at",
+            "invoice_scan_mail_last_success_at",
+          ])
+        );
+      const value = new Map(rows.map((r) => [r.key, r.value]));
+      const instant = (key: string) => {
+        const ms = Date.parse(value.get(key) ?? "");
+        return Number.isFinite(ms) ? new Date(ms) : null;
+      };
+      const lastError = value.get("invoice_scan_mail_last_error")?.trim();
+      return {
+        enabled: value.get("invoice_scan_mail_enabled") === "true",
+        lastError: lastError ? lastError : null,
+        lastRunAt: instant("invoice_scan_mail_last_run_at"),
+        lastSuccessAt: instant("invoice_scan_mail_last_success_at"),
+      };
+    },
+
     async failedPluginDeliveries(since: Date): Promise<FailedPluginRow[]> {
       const rows = await db.execute<{
         plugin_id: string;

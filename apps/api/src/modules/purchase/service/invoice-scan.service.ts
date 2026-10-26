@@ -33,6 +33,7 @@ import {
   type InvoiceInterpreterFile,
 } from "./invoice-scan/invoice-interpreter.js";
 import { senderAllowsAutomaticAi } from "./invoice-scan/sender-rule.js";
+import { hasSignature } from "./invoice-scan/file-signature.js";
 
 // Fakturaskanning — the Fakturainkorg (spec §2–§5). Files come in, the rules
 // interpret them to a proposal, a person reviews and creates the supplier
@@ -103,15 +104,6 @@ const TEXTS = {
   wrongType: "Filtypen stöds inte — ladda upp PDF, JPEG eller PNG",
   notMatchingType: "Filens innehåll är inte en PDF, JPEG eller PNG",
 };
-
-// The first bytes of each accepted type — a browser's mimetype alone is not
-// enough to let a file into the bookkeeping.
-function hasSignature(contentType: string, data: Buffer): boolean {
-  if (contentType === "application/pdf") return data.subarray(0, 1024).includes("%PDF-");
-  if (contentType === "image/jpeg") return data.length > 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
-  if (contentType === "image/png") return data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  return false;
-}
 
 // The stored jsonb, validated on read. An unknown version (or anything that
 // does not parse) is reported as no result — Tolka igen gives a new one.
@@ -477,6 +469,19 @@ export function createInvoiceScanService(deps: {
         assertAllowed("interpret", now.status);
       }
       return service.get(id);
+    },
+
+    // The rules on scans the e-mail job just imported (after the letter's
+    // transaction and its move): one at a time, outside any transaction; a
+    // crash is logged and leaves the scan in new — never thrown.
+    async interpretReceived(ids: string[]): Promise<void> {
+      for (const id of ids) {
+        try {
+          await runRules(id);
+        } catch (err) {
+          log("invoice scan: interpretation failed", { scan: id, error: (err as Error)?.name });
+        }
+      }
     },
 
     // Automatic AI on newly arrived scans (the upload route after its
