@@ -55,9 +55,11 @@ export function parseDate(text: string): string | null {
 // An amount as invoices print it: 1 234,50 · 1.234,50 · 1,234.50 · 1234.50
 // · 1234,50 · −1 234,50 · 1 234,50- — two decimals required (an integer
 // is a quantity or a number far more often than an amount). Never part of a
-// date (30.11.2026) or a percentage (25,00 %).
+// date (30.11.2026) or a percentage (25,00 %). A minus sign counts only
+// directly against the number (or right after it): "Att betala – 1 234,50"
+// is a label, a dash and a positive amount.
 const AMOUNT_RE =
-  /(?<![\d.,])([-−–]\s?)?(\d{1,3}(?:[   .,']\d{3})+|\d+)([.,])(\d{2})(?![\d.,])(-(?![\d]))?(?!\s?%)/g;
+  /(?<![\d.,])([-−–])?(\d{1,3}(?:[   .,']\d{3})+|\d+)([.,])(\d{2})(?![\d.,])(-(?![\d]))?(?!\s?%)/g;
 
 export function findAmounts(text: string): FoundValue<number>[] {
   const found: FoundValue<number>[] = [];

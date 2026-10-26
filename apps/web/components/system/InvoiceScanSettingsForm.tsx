@@ -36,6 +36,20 @@ function testErrorText(err: unknown, fallback: string): string {
   return apiErrorMessage(err, fallback);
 }
 
+// Mapp and Mapp för inlästa must differ (the API refuses it too, 400
+// invoice-scan-mail-folders-equal) — compared as the API does: level by
+// level, trimmed, case-insensitive.
+const FOLDERS_EQUAL_TEXT = "Mapp för inlästa får inte vara samma mapp som den som läses.";
+function sameFolder(a: string, b: string): boolean {
+  const canon = (path: string) =>
+    path
+      .split("/")
+      .map((part) => part.trim().toLowerCase())
+      .filter((part) => part !== "")
+      .join("/");
+  return canon(a) === canon(b);
+}
+
 export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSettings }) {
   const [aiMode, setAiMode] = useState<InvoiceScanAiMode>(initial.aiMode);
   const [aiApiKey, setAiApiKey] = useState("");
@@ -93,6 +107,10 @@ export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSetti
     const minutes = Number(mailInterval);
     if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) {
       setError("Intervallet måste vara ett heltal mellan 1 och 60 minuter");
+      return;
+    }
+    if (sameFolder(mailFolder, mailProcessedFolder)) {
+      setError(FOLDERS_EQUAL_TEXT);
       return;
     }
     setPending(true);
@@ -159,6 +177,10 @@ export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSetti
 
   async function testMail() {
     setMailTestNotice(null);
+    if (sameFolder(mailFolder, mailProcessedFolder)) {
+      setMailTestNotice({ ok: false, text: FOLDERS_EQUAL_TEXT });
+      return;
+    }
     setMailTesting(true);
     try {
       const res = await apiFetch<{ ok: boolean; unseen: number; processedFolderExists: boolean }>(
@@ -250,6 +272,12 @@ export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSetti
           {aiTestNotice &&
             (aiTestNotice.ok ? <FormHint>{aiTestNotice.text}</FormHint> : <FormNotice>{aiTestNotice.text}</FormNotice>)}
           <FormHint>
+            I läget Automatiskt när reglerna inte räcker tolkas fakturor från e-postlådan bara när avsändaren är känd —
+            en leverantörs eller dess kontakters domän, eller en användares exakta adress — och e-postservern har
+            verifierat avsändarens domän (DKIM eller DMARC godkänd). Andra brev väntar på knappen Tolka med AI. Högst 100
+            automatiska AI-tolkningar görs per dag; därefter väntar fakturorna på knappen.
+          </FormHint>
+          <FormHint>
             Nyckeln är företagets egen nyckel hos Anthropic och visas aldrig här; lämna fältet tomt för att behålla den
             sparade. Testet sparar ingenting.
           </FormHint>
@@ -271,7 +299,8 @@ export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSetti
           <SectionHeading spaced>E-postlåda</SectionHeading>
           <FormHint>
             Nav kan läsa en IMAP-låda och lägga bifogade fakturor (PDF, och JPEG/PNG när brevet saknar PDF) i
-            Fakturainkorgen. Lästa brev flyttas till mappen för inlästa. Använd en egen låda för fakturor.
+            Fakturainkorgen, högst 10 bilagor per brev. Lästa brev flyttas till mappen för inlästa, som inte får vara
+            samma mapp som den som läses. Använd en egen låda för fakturor.
           </FormHint>
           <FormRow>
             <Field label="Aktiverad" htmlFor="scanMailEnabled">
@@ -281,6 +310,9 @@ export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSetti
               <Toggle id="scanMailTls" checked={mailTls} onChange={(e) => setMailTls(e.target.checked)} />
             </Field>
           </FormRow>
+          <FormHint>
+            Med TLS av krävs STARTTLS — en server som inte erbjuder kryptering får aldrig lösenordet i klartext.
+          </FormHint>
           <FormRow>
             <Field label="Server" htmlFor="scanMailHost">
               <Input id="scanMailHost" value={mailHost} maxLength={255} placeholder="imap.example.se" onChange={(e) => setMailHost(e.target.value)} />
@@ -304,6 +336,12 @@ export function InvoiceScanSettingsForm({ initial }: { initial: InvoiceScanSetti
               />
             </Field>
           </FormRow>
+          {mailPasswordSet && (
+            <FormHint>
+              Byter du server eller användare måste lösenordet skrivas in igen — det sparade lösenordet skickas aldrig till
+              en annan server eller användare.
+            </FormHint>
+          )}
           {mailPasswordSet && (
             <div>
               <Button type="button" variant="ghost" size="small" onClick={() => removeSecret("mailPassword")}>

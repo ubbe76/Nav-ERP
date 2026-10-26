@@ -58,6 +58,7 @@ export type InvoiceMailboxErrorKind =
   | "folder_missing" // `folder` does not exist
   | "processed_folder" // `processedFolder` could not be created
   | "move_failed" // a letter could not be moved to `processedFolder`
+  | "fetch_failed" // a letter could not be fetched (it stays and is read again)
   | "unexpected";
 
 export class InvoiceMailboxError extends Error {
@@ -94,6 +95,8 @@ export function mailboxErrorText(kind: InvoiceMailboxErrorKind, config?: { folde
       return config
         ? `Lästa brev kunde inte flyttas till mappen ${config.processedFolder} — de läses igen vid nästa körning`
         : "Lästa brev kunde inte flyttas till mappen för inlästa";
+    case "fetch_failed":
+      return "Brev kunde inte hämtas från e-postservern — de läses igen vid nästa körning";
     case "unexpected":
       return "Oväntat fel när e-postlådan lästes";
   }

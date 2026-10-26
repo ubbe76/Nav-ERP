@@ -21,7 +21,12 @@ import {
   type InvoiceScanService,
   type UploadedFile,
 } from "../service/invoice-scan.service.js";
-import { InvoiceScanAiTestFailedError, type InvoiceScanSettingsService } from "../service/invoice-scan-settings.service.js";
+import {
+  InvoiceScanAiTestFailedError,
+  InvoiceScanMailFoldersEqualError,
+  InvoiceScanMailPasswordRequiredError,
+  type InvoiceScanSettingsService,
+} from "../service/invoice-scan-settings.service.js";
 import { InvoiceScanMailTestFailedError, type InvoiceScanMailService } from "../service/invoice-scan-mail.service.js";
 import { InvalidStatusTransitionError } from "../service/purchase.service.js";
 import { invoiceError } from "./supplier-invoice.routes.js";
@@ -36,6 +41,11 @@ const ADMIN = { config: { access: ["admin"] as const } };
 function scanError(err: unknown, reply: FastifyReply) {
   if (err instanceof InvoiceScanNotFoundError) return reply.code(404).send(errorBody(err));
   if (err instanceof InvoiceScanDuplicateError) return reply.code(409).send({ ...errorBody(err), existing: err.existing });
+  // The settings' own refusals, with the Swedish text as message (the form
+  // shows it).
+  if (err instanceof InvoiceScanMailPasswordRequiredError || err instanceof InvoiceScanMailFoldersEqualError) {
+    return reply.code(400).send({ ...errorBody(err), message: err.message });
+  }
   if (err instanceof InvoiceScanAiTestFailedError || err instanceof InvoiceScanMailTestFailedError) {
     return reply.code(409).send({ ...errorBody(err), message: err.message });
   }
@@ -106,6 +116,9 @@ export async function invoiceScanRoutes(
     try {
       const file = await service.readFile(req.params.id);
       reply.header("Content-Type", file.contentType);
+      // The type is the one the upload checked against the file's signature;
+      // the browser must not second-guess it.
+      reply.header("X-Content-Type-Options", "nosniff");
       reply.header("Content-Disposition", contentDisposition(file.filename, "inline"));
       return reply.send(file.data);
     } catch (err) {
@@ -150,9 +163,12 @@ export async function invoiceScanRoutes(
   // --- Inställningar (admin) ---
 
   app.get("/settings/invoice-scan", ADMIN, async () => settings.view());
-  app.patch("/settings/invoice-scan", ADMIN, async (req) =>
-    settings.update(updateInvoiceScanSettingsSchema.parse(req.body), req.user!.id)
-  );
+  // 400 invoice-scan-mail-password-required when the server or user changes
+  // without the password typed again, 400 invoice-scan-mail-folders-equal.
+  app.patch("/settings/invoice-scan", ADMIN, async (req, reply) => {
+    const input = updateInvoiceScanSettingsSchema.parse(req.body);
+    return run(reply, () => settings.update(input, req.user!.id));
+  });
   // Testa anslutning (AI): { ok: true, model } or 409
   // invoice-scan-ai-test-failed with the Swedish reason. Saves nothing, but
   // calls out with a key — not readOnlySafe.

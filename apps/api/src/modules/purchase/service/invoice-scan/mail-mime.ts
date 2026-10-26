@@ -13,6 +13,10 @@ export interface ParsedInvoiceMail {
   from: string | null;
   subject: string | null;
   date: Date | null;
+  // The topmost Authentication-Results header as it stood (the receiving
+  // server's verdict on SPF/DKIM/DMARC — avsändarregeln reads it), null
+  // when the letter has none.
+  authenticationResults: string | null;
   attachments: MailAttachment[];
 }
 
@@ -45,6 +49,8 @@ export async function parseInvoiceMail(source: Buffer): Promise<ParsedInvoiceMai
     from: from ? from.trim().toLowerCase().slice(0, 320) : null,
     subject: parsed.subject?.trim() ? parsed.subject.trim().slice(0, 998) : null,
     date,
+    // headerLines keeps the header order: the first one is the topmost.
+    authenticationResults: (parsed.headerLines ?? []).find((h) => h.key === "authentication-results")?.line ?? null,
     attachments: (parsed.attachments ?? []).map((a, index) => {
       const content = Buffer.isBuffer(a.content) ? a.content : Buffer.alloc(0);
       return {

@@ -6,6 +6,8 @@ import {
   INVOICE_SCAN_MAIL_INTERVAL_DEFAULT,
   INVOICE_SCAN_MAIL_PORT_DEFAULT,
   INVOICE_SCAN_MAIL_PROCESSED_FOLDER_DEFAULT,
+  INVOICE_SCAN_MAIL_FOLDERS_EQUAL_TEXT,
+  sameMailFolder,
   type InvoiceScanAiMode,
   type InvoiceScanAiModel,
   type InvoiceScanSettingsView,
@@ -49,6 +51,37 @@ export class InvoiceScanAiTestFailedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvoiceScanAiTestFailedError";
+  }
+}
+
+// Värd or användare changed (compared with the saved ones) without the
+// password typed again: the saved password is never sent to another server
+// or account. 400.
+export class InvoiceScanMailPasswordRequiredError extends Error {
+  constructor() {
+    super("Skriv in lösenordet igen när server eller användare ändras — det sparade lösenordet skickas inte till en annan server eller användare");
+    this.name = "InvoiceScanMailPasswordRequiredError";
+  }
+}
+
+const sameMailAccountValue = (a: string | null, b: string | null) => (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+
+// True when the saved password may be used for this host and user: they are
+// the saved ones (case and surrounding space aside).
+export function savedPasswordApplies(
+  saved: { mailHost: string | null; mailUser: string | null },
+  wanted: { mailHost: string | null; mailUser: string | null }
+): boolean {
+  return sameMailAccountValue(saved.mailHost, wanted.mailHost) && sameMailAccountValue(saved.mailUser, wanted.mailUser);
+}
+
+// Mapp and Mapp för inlästa are the same folder (a letter would be moved
+// onto itself and read again every run). 400; the shared zod refine catches
+// it when both come in the same body.
+export class InvoiceScanMailFoldersEqualError extends Error {
+  constructor() {
+    super(INVOICE_SCAN_MAIL_FOLDERS_EQUAL_TEXT);
+    this.name = "InvoiceScanMailFoldersEqualError";
   }
 }
 
@@ -140,6 +173,26 @@ export function createInvoiceScanSettingsService(deps: {
           await set(key, value.trim());
         }
       };
+      // Checked before anything is written: the saved password never follows
+      // a changed server or user, and the two folders are never the same.
+      const before = await read();
+      const nextHost = input.mailHost !== undefined ? blankToNull(input.mailHost) : before.mailHost;
+      const nextUser = input.mailUser !== undefined ? blankToNull(input.mailUser) : before.mailUser;
+      const typedPassword = input.mailPassword !== undefined && input.mailPassword !== null && input.mailPassword.trim() !== "";
+      if (
+        before.mailPassword !== null &&
+        input.mailPassword !== null &&
+        !typedPassword &&
+        nextHost !== null &&
+        nextUser !== null &&
+        !savedPasswordApplies(before, { mailHost: nextHost, mailUser: nextUser })
+      ) {
+        throw new InvoiceScanMailPasswordRequiredError();
+      }
+      const nextFolder = input.mailFolder ?? before.mailFolder;
+      const nextProcessed = input.mailProcessedFolder ?? before.mailProcessedFolder;
+      if (sameMailFolder(nextFolder, nextProcessed)) throw new InvoiceScanMailFoldersEqualError();
+
       if (input.aiMode !== undefined) await set(K.aiMode, input.aiMode);
       await secret(K.aiApiKey, input.aiApiKey);
       if (input.aiModel !== undefined) await set(K.aiModel, input.aiModel);

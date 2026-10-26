@@ -490,6 +490,11 @@ export const ERROR_CODES = {
   INVOICE_SCAN_AI_TEST_FAILED: "invoice-scan-ai-test-failed",
   // Testa anslutning (e-postlådan) failed — body.message/error is the Swedish reason (409)
   INVOICE_SCAN_MAIL_TEST_FAILED: "invoice-scan-mail-test-failed",
+  // Server or användare changed without the password typed again — the
+  // saved password never goes to another server/account (400, Swedish message)
+  INVOICE_SCAN_MAIL_PASSWORD_REQUIRED: "invoice-scan-mail-password-required",
+  // Mapp för inlästa is the folder that is read (400, Swedish message)
+  INVOICE_SCAN_MAIL_FOLDERS_EQUAL: "invoice-scan-mail-folders-equal",
   // DELETE of the underlag the Fakturainkorg created the invoice from (409)
   SUPPLIER_INVOICE_FILE_FROM_SCAN: "supplier-invoice-file-from-scan",
 } as const;

@@ -287,13 +287,9 @@ describe("Skapa leverantörsfaktura (convert)", () => {
 
     const hints = await db.select().from(invoiceScanHints).where(eq(invoiceScanHints.supplierId, supplier.id));
     expect(hints.map((h) => [h.field, h.label]).sort()).toEqual(
+      // The rules' own labels (Fakturadatum, Att betala …) are not learned.
       [
-        ["dueDate", "förfallodatum"],
-        ["grossAmount", "att betala"],
-        ["invoiceDate", "fakturadatum"],
         ["invoiceNumber", "verifikat"],
-        ["netAmount", "summa exkl. moms"],
-        ["paymentReference", "ocr-nummer"],
         ["vatAmount", "moms 25 %"],
       ].sort()
     );
@@ -313,6 +309,21 @@ describe("Skapa leverantörsfaktura (convert)", () => {
       .from(invoiceScanHints)
       .where(and(eq(invoiceScanHints.supplierId, supplier.id), eq(invoiceScanHints.field, "invoiceNumber")));
     expect(hint!.hits).toBe(2);
+  });
+
+  it("shows the created supplier invoice's supplier, number and amount for a converted scan — not the proposal's", async () => {
+    await makeSupplier();
+    const chosen = await makeSupplier({ name: "Betalas Till Exempel AB", orgNumber: null });
+    const created = await uploadOne(await invoicePdf());
+    expect(created).toMatchObject({ invoiceNumber: "10045", grossAmount: 1250, supplierName: FAKE_SUPPLIER.name });
+    await service.convert(created.id, convertInput(chosen.id, { invoiceNumber: "10045-B", netAmount: 1040, vatAmount: 260, grossAmount: 1300 }), userId);
+    const { rows } = await service.list({ status: "converted", limit: 50, offset: 0 });
+    expect(rows[0]).toMatchObject({ id: created.id, supplierId: chosen.id, supplierName: "Betalas Till Exempel AB", invoiceNumber: "10045-B", grossAmount: 1300, currency: "SEK" });
+    const detail = await service.get(created.id);
+    expect(detail.supplierName).toBe("Betalas Till Exempel AB");
+    expect(detail.createdInvoice).toMatchObject({ supplierId: chosen.id, invoiceNumber: "10045-B", invoiceDate: "2026-10-01", grossAmount: 1300, currency: "SEK" });
+    // Searchable on what was created.
+    expect((await service.list({ status: "all", search: "10045-B", limit: 50, offset: 0 })).total).toBe(1);
   });
 
   it("changes nothing when the invoice number already exists for the supplier", async () => {

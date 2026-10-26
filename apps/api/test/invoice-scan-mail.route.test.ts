@@ -96,11 +96,33 @@ describe("POST /settings/invoice-scan/test-mail", () => {
       url: "/api/v1/settings/invoice-scan/test-mail",
       headers: { cookie: admin },
       // The web's body: blank password and folders left out.
-      payload: { mailHost: "imap.test.example", mailPort: 993, mailTls: true, mailUser: "fakturor@navkund.example" },
+      payload: { mailHost: "imap.navkund.example", mailPort: 143, mailTls: false, mailUser: "fakturor@navkund.example" },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: true, unseen: 7, processedFolderExists: false });
-    expect(mailbox.configs.at(-1)).toMatchObject({ host: "imap.test.example", password: "losen-som-sparats", folder: "INBOX", processedFolder: "Nav/Inlästa" });
+    expect(mailbox.configs.at(-1)).toMatchObject({ host: "imap.navkund.example", port: 143, tls: false, password: "losen-som-sparats", folder: "INBOX", processedFolder: "Nav/Inlästa" });
+  });
+
+  it("never tries the saved password on another server (400 invoice-scan-mail-password-required)", async () => {
+    const admin = await adminCookie();
+    await saveMailbox(admin);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/settings/invoice-scan/test-mail",
+      headers: { cookie: admin },
+      payload: { mailHost: "imap.test.example", mailUser: "fakturor@navkund.example" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ code: "invoice-scan-mail-password-required", message: expect.stringMatching(/^Skriv in lösenordet igen/) });
+    expect(mailbox.configs).toHaveLength(0);
+    const typed = await app.inject({
+      method: "POST",
+      url: "/api/v1/settings/invoice-scan/test-mail",
+      headers: { cookie: admin },
+      payload: { mailHost: "imap.test.example", mailUser: "fakturor@navkund.example", mailPassword: "skrivet-igen" },
+    });
+    expect(typed.statusCode).toBe(200);
+    expect(mailbox.configs.at(-1)).toMatchObject({ host: "imap.test.example", password: "skrivet-igen" });
   });
 
   it("answers 409 invoice-scan-mail-test-failed with the Swedish reason in error and message", async () => {

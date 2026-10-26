@@ -437,7 +437,7 @@ Varje fil får ett eget **FI**-nummer.
 
 ### E-postlådan
 
-Nav kan också läsa en e-postlåda och lägga fakturorna i brevens bilagor i inkorgen, se [Fakturaskanning](/hjalp/system#fakturaskanning). Posterna har då **E-post** som **Källa**, med avsändaren efter. Bilagor av typen PDF läses in; JPEG och PNG läses bara in när brevet saknar PDF, och små bilder (t.ex. signaturlogotyper) hoppas över. Andra filtyper, som XML, läses inte in. Brevet flyttas till mappen för inlästa.
+Nav kan också läsa en e-postlåda och lägga fakturorna i brevens bilagor i inkorgen, se [Fakturaskanning](/hjalp/system#fakturaskanning). Posterna har då **E-post** som **Källa**, med avsändaren efter. Bilagor av typen PDF läses in; JPEG och PNG läses bara in när brevet saknar PDF, och små bilder (t.ex. signaturlogotyper) hoppas över. Andra filtyper, som XML, läses inte in, och högst 10 bilagor per brev läses in. Brevet flyttas till mappen för inlästa.
 
 ### Listan
 
@@ -448,7 +448,7 @@ Flikarna ovanför listan väljer vad som visas:
 - **Avvisade** — fakturor som avvisats.
 - **Alla**.
 
-Kolumnerna är **Nr**, **Inkommen**, **Källa** (**Uppladdad** eller **E-post** med avsändare), **Fil**, **Leverantör** (den tolkade), **Fakturanr**, **Att betala** och **Status**. Sökfältet söker på filnamn, FI-nummer, avsändare, ämne, leverantör och fakturanummer, och filtret **Alla källor** väljer uppladdade eller e-postade fakturor.
+Kolumnerna är **Nr**, **Inkommen**, **Källa** (**Uppladdad** eller **E-post** med avsändare), **Fil**, **Leverantör** (den tolkade), **Fakturanr**, **Att betala** och **Status**. För en **Skapad** faktura visar **Leverantör**, **Fakturanr** och **Att betala** den skapade leverantörsfakturans värden, så som de sparades. Sökfältet söker på filnamn, FI-nummer, avsändare, ämne, leverantör och fakturanummer, och filtret **Alla källor** väljer uppladdade eller e-postade fakturor.
 
 Statusen är:
 
@@ -487,11 +487,11 @@ Under ett fält kan det stå var värdet kommer ifrån eller att det inte är s�
 
 Meddelandena försvinner under ett fält när du själv skrivit i det.
 
-**Reglerna och AI.** Tolkningen använder alltid reglerna först: de läser PDF:ens textlager helt lokalt. Foton och inskannade PDF utan textlager kan inte tolkas av reglerna — då visas bilden bredvid ett tomt förslag som du fyller i för hand, eller med **Tolka med AI** om den är inställd (se [Fakturaskanning](/hjalp/system#fakturaskanning)). **Tolka igen** kör reglerna på nytt. **Tolka med AI** visas bara när AI-tolkning är inställd; knapparna visar **Tolkar…** medan tolkningen pågår — AI-tolkning kan ta upp till en minut, och under tiden kan du inte skapa eller avvisa fakturan.
+**Reglerna och AI.** Tolkningen använder alltid reglerna först: de läser PDF:ens textlager helt lokalt. Foton och inskannade PDF utan textlager kan inte tolkas av reglerna — då visas bilden bredvid ett tomt förslag som du fyller i för hand, eller med **Tolka med AI** om den är inställd (se [Fakturaskanning](/hjalp/system#fakturaskanning)). **Tolka igen** kör reglerna på nytt; knappen visas bara för PDF:er med textlager, eftersom reglerna inte kan läsa en bild eller en inskannad PDF. Ett förslag från AI skrivs aldrig över av reglerna. **Tolka med AI** visas bara när AI-tolkning är inställd; knapparna visar **Tolkar…** medan tolkningen pågår — AI-tolkning kan ta upp till en minut, och under tiden kan du inte skapa eller avvisa fakturan.
 
 #### Vad som skickas till AI-tjänsten
 
-Utan en API-nyckel lämnar ingen fil Nav. Med företagets egen API-nyckel skickas **bara fakturafilen och företagets namn och organisationsnummer** till AI-tjänsten (Anthropic), och bara när AI-tolkning körs — automatiskt i läget **Automatiskt när reglerna inte räcker** (för e-post bara när avsändarens domän hör till en leverantör eller en användare, så att reklam inte kostar pengar), annars när du trycker **Tolka med AI**. Leverantörsregistret och inköpsordrarna skickas aldrig; leverantören och inköpsordern matchas i Nav på svaret. AI:ns svar är bara ett förslag som du granskar.
+Utan en API-nyckel lämnar ingen fil Nav. Med företagets egen API-nyckel skickas **bara fakturafilen och företagets namn och organisationsnummer** till AI-tjänsten (Anthropic), och bara när AI-tolkning körs — automatiskt i läget **Automatiskt när reglerna inte räcker** (för e-post bara när avsändaren är en känd leverantör eller användare och e-postservern har verifierat avsändarens domän, så att reklam och förfalskade avsändare inte kostar pengar; högst 100 per dag), annars när du trycker **Tolka med AI**. Leverantörsregistret och inköpsordrarna skickas aldrig; leverantören och inköpsordern matchas i Nav på svaret. AI:ns svar är bara ett förslag som du granskar.
 
 #### Leverantör som saknas
 
@@ -501,7 +501,7 @@ Matchar ingen leverantör fakturan visas *Ingen leverantör matchade fakturan.* 
 
 Har AI läst raderna visas de under **Rader**, annars är listan tom. Varje rad har **Beskrivning**, **Antal**, **À-pris** och **Belopp**, kan tas bort med **Ta bort** och nya rader läggs till med **+ Rad**. En rad som tolkningen inte är säker på märks **Osäker**.
 
-Med inställningen **Matcha mot inköpsorder** föreslår Nav vilken inlevererad inköpsorder fakturan hör till (fältet **Inköpsorder**, märkt **Från inköpsorder**). Har fakturan inga rader från AI byggs raderna av inköpsordern, som med **Hämta orderrader** i **+ Ny leverantörsfaktura** — mottaget antal och inköpsorderns à-pris, märkta **Från inköpsorder**. **Hämta orderrader** med **Mottaget antal** eller **Beställt antal** ersätter raderna med ordern. Raderna kopplas till orderraderna så att pris- och antalsavvikelser visas på leverantörsfakturan, se [IO-matchning](#io-matchning).
+Med inställningen **Matcha mot inköpsorder** föreslår Nav vilken inlevererad inköpsorder fakturan hör till (fältet **Inköpsorder**, märkt **Från inköpsorder**). Har fakturan inga rader från AI byggs raderna av inköpsordern, som med **Hämta orderrader** i **+ Ny leverantörsfaktura** — mottaget antal och inköpsorderns à-pris, märkta **Från inköpsorder**. **Hämta orderrader** med **Mottaget antal** eller **Beställt antal** ersätter raderna med ordern. Raderna kopplas till orderraderna så att pris- och antalsavvikelser visas på leverantörsfakturan, se [IO-matchning](#io-matchning). Står bara ett nummer utan inköpsorderns prefix på fakturan (t.ex. *Ordernummer 1005*) märks förslaget **Osäker** — det kan vara leverantörens eget ordernummer. Byter du **Leverantör** töms **Inköpsorder**, raderna från ordern tas bort och övriga rader förlorar sin koppling till orderraderna.
 
 #### Skapa leverantörsfaktura
 

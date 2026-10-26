@@ -225,7 +225,9 @@ function valueNearLabel<T>(lines: PdfTextLine[], lineIndex: number, match: RegEx
   const line = lines[lineIndex]!;
   const { index: cellIndex, start } = cellAt(line, match.index);
   const cell = line.cells[cellIndex]!;
-  const remainder = cell.text.slice(Math.max(0, match.index + match[0].length - start)).replace(/^[\s:.#=-]+/, "");
+  // The separators after the label go — but not a minus sign that stands
+  // directly against a number (a credit note's amount).
+  const remainder = cell.text.slice(Math.max(0, match.index + match[0].length - start)).replace(/^(?:[\s:.#=]|-(?!\d))+/, "");
   if (remainder !== "") {
     const value = parse(remainder);
     if (value !== null) return value;
@@ -247,6 +249,34 @@ function valueNearLabel<T>(lines: PdfTextLine[], lineIndex: number, match: RegEx
   return null;
 }
 
+// A learned label as a pattern: the same word boundaries as the standard
+// labels (B/E), any run of whitespace where the label has a space — so
+// "datum" never answers inside "Orderdatum".
+function learnedLabelPattern(normalized: string): RegExp {
+  const body = normalized.split(" ").map(escapeRegExp).join("\\s+");
+  return new RegExp(`${B}${body}${E}`, "iu");
+}
+
+// The standard labels anchored to the whole text — "is this label one of the
+// field's own?" (the alternatives' word boundaries are zero-width, so
+// ^…$ around the pattern is a full match).
+const STANDARD_LABEL_FULL: Record<InvoiceScanHintField, RegExp[]> = Object.fromEntries(
+  Object.entries(LABELS).map(([f, set]) => [f, set.labels.map((re) => new RegExp(`^(?:${re.source})$`, "iu"))])
+) as Record<InvoiceScanHintField, RegExp[]>;
+
+// A learned label is at least this long — "nr" or "nr." would answer inside
+// "Org.nr" and "Kundnr".
+export const MIN_LEARNED_LABEL_LENGTH = 4;
+
+// True when a (normalized) label may be learned or used as learned: long
+// enough, with a letter, and not one of the standard labels of ANY field —
+// a field's own standard label adds nothing, another field's would make
+// that field's label answer here ("Datum" learned for the due date).
+export function learnableLabel(normalized: string): boolean {
+  if (normalized.length < MIN_LEARNED_LABEL_LENGTH || !/\p{L}/u.test(normalized)) return false;
+  return !Object.values(STANDARD_LABEL_FULL).some((patterns) => patterns.some((re) => re.test(normalized)));
+}
+
 function findLabelled<T>(
   lines: PdfTextLine[],
   field: InvoiceScanHintField,
@@ -254,7 +284,10 @@ function findLabelled<T>(
   parse: (text: string) => T | null
 ): LabelledValue<T> | null {
   const set = LABELS[field];
-  const learned = hints.filter((h) => h.field === field).map((h) => new RegExp(escapeRegExp(h.label), "iu"));
+  // Hints stored before the boundary rule are filtered the same way here.
+  const learned = hints
+    .filter((h) => h.field === field && learnableLabel(normalizeLabel(h.label)))
+    .map((h) => learnedLabelPattern(normalizeLabel(h.label)));
   const attempts: { re: RegExp; source: "rules" | "learned" }[] = [
     ...learned.map((re) => ({ re, source: "learned" as const })),
     ...set.labels.map((re) => ({ re, source: "rules" as const })),
@@ -662,9 +695,15 @@ function valueOffset(fieldName: InvoiceScanHintField, cellText: string, value: s
   }
 }
 
+// The normalized text as a label candidate: null when it has no letter.
+function labelText(raw: string): string | null {
+  const normalized = normalizeLabel(raw);
+  return /\p{L}/u.test(normalized) ? normalized : null;
+}
+
 function usableLabel(raw: string): string | null {
   const normalized = normalizeLabel(raw);
-  return normalized.length >= 2 && /\p{L}/u.test(normalized) ? normalized : null;
+  return learnableLabel(normalized) ? normalized : null;
 }
 
 // For each field with a final value: the first place the value stands in
@@ -678,16 +717,21 @@ export function learnLabels(lines: PdfTextLine[], finals: FinalValues): HintLabe
   for (const [name, value] of Object.entries(finals) as [InvoiceScanHintField, string | number | null | undefined][]) {
     if (value === null || value === undefined || value === "") continue;
     let fromAbove: string | null = null;
-    let found: string | null = null;
+    // undefined = no label on the value's own line was found.
+    let found: string | null | undefined;
     search: for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
       for (let c = 0; c < line.cells.length; c++) {
         const cell = line.cells[c]!;
         const offset = valueOffset(name, cell.text, value);
         if (offset < 0) continue;
-        const sameLine = usableLabel(cell.text.slice(0, offset)) ?? (c > 0 ? usableLabel(line.cells[c - 1]!.text) : null);
-        if (sameLine) {
-          found = sameLine;
+        // The label on the same line: the text before the value in its cell,
+        // else the cell to its left. When there is one but it may not be
+        // learned (a standard label, too short), nothing is learned — the
+        // cell above would only be a column header.
+        const before = labelText(cell.text.slice(0, offset)) ?? (c > 0 ? labelText(line.cells[c - 1]!.text) : null);
+        if (before !== null) {
+          found = learnableLabel(before) ? before : null;
           break search;
         }
         if (fromAbove === null) {
@@ -700,7 +744,7 @@ export function learnLabels(lines: PdfTextLine[], finals: FinalValues): HintLabe
         }
       }
     }
-    const label = found ?? fromAbove;
+    const label = found === undefined ? fromAbove : found;
     if (label) learned.push({ field: name, label });
   }
   return learned;

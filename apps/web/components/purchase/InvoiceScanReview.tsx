@@ -285,6 +285,12 @@ function StatusLine({ scan }: { scan: InvoiceScanDetail }) {
 }
 
 function ConvertedView({ scan }: { scan: InvoiceScanDetail }) {
+  // What was created (the values typed in on Skapa), else the proposal.
+  const created = scan.createdInvoice ?? null;
+  const invoiceNumber = created ? created.invoiceNumber : scan.result?.invoiceNumber.value;
+  const invoiceDate = created ? created.invoiceDate : scan.result?.invoiceDate.value;
+  const gross = created ? created.grossAmount : scan.result?.grossAmount.value;
+  const currency = created ? created.currency : scan.result?.currency.value;
   return (
     <>
       <FormHint>
@@ -303,17 +309,13 @@ function ConvertedView({ scan }: { scan: InvoiceScanDetail }) {
         <dt>Filnamn</dt>
         <dd>{scan.filename}</dd>
         <dt>Leverantör</dt>
-        <dd>{scan.supplierName ?? "–"}</dd>
+        <dd>{created?.supplierName ?? scan.supplierName ?? "–"}</dd>
         <dt>Fakturanummer</dt>
-        <dd>{scan.result?.invoiceNumber.value ?? "–"}</dd>
+        <dd>{invoiceNumber ?? "–"}</dd>
         <dt>Fakturadatum</dt>
-        <dd>{scan.result?.invoiceDate.value ?? "–"}</dd>
+        <dd>{invoiceDate ?? "–"}</dd>
         <dt>Att betala</dt>
-        <dd>
-          {scan.result?.grossAmount.value != null
-            ? `${formatMoney(scan.result.grossAmount.value)} ${scan.result.currency.value ?? ""}`.trim()
-            : "–"}
-        </dd>
+        <dd>{gross != null ? `${formatMoney(gross)} ${currency ?? ""}`.trim() : "–"}</dd>
       </dl>
     </>
   );
@@ -430,6 +432,8 @@ function ReviewForm({
   const isTouched = (key: FieldKey) => touched.current.has(key);
 
   const [supplier, setSupplier] = useState<Supplier | null>(null);
+  const supplierRef = useRef<Supplier | null>(null);
+  supplierRef.current = supplier;
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -536,6 +540,9 @@ function ReviewForm({
 
   function applyResult(next: InvoiceScanResult) {
     scanRateRef.current = next.vatRate.value;
+    // A supplier picked by hand that is not the interpretation's: the
+    // proposal's purchase order and its row links belong to another supplier.
+    const otherSupplier = isTouched("supplier") && supplierRef.current?.id !== next.supplier.matchedSupplierId;
     if (!isTouched("supplier")) loadSupplier(next.supplier.matchedSupplierId);
     if (!isTouched("invoiceNumber")) setInvoiceNumber(next.invoiceNumber.value ?? "");
     if (!isTouched("invoiceDate")) setInvoiceDate(next.invoiceDate.value ?? "");
@@ -548,17 +555,18 @@ function ReviewForm({
     if (!isTouched("vat")) setVatAmount(numStr(next.vatAmount.value));
     if (!isTouched("gross")) setGrossAmount(numStr(next.grossAmount.value));
     if (!isTouched("vatRate") && isVatRate(next.vatRate.value)) setVatRate(next.vatRate.value);
-    if (!isTouched("order")) setOrderId(scan.poMatching ? (next.purchaseOrderId.value ?? "") : "");
+    if (!isTouched("order")) setOrderId(scan.poMatching && !otherSupplier ? (next.purchaseOrderId.value ?? "") : "");
     if (!isTouched("rows")) {
       if (next.rows.length > 0) {
         wantBasisRef.current = null;
-        setRows(rowsFromResult(next));
+        const proposed = rowsFromResult(next);
+        setRows(otherSupplier ? proposed.map((row) => ({ ...row, purchaseOrderRowId: null })) : proposed);
       } else {
         setRows([]);
         // The purchase order is proposed without rows from the AI: build the
         // rows the way Hämta orderrader does, once the supplier's orders are
         // loaded.
-        wantBasisRef.current = scan.poMatching ? next.purchaseOrderId.value : null;
+        wantBasisRef.current = scan.poMatching && !otherSupplier ? next.purchaseOrderId.value : null;
         maybeLoadBasis();
       }
     }
@@ -717,7 +725,8 @@ function ReviewForm({
           grossAmount: grossAmount.trim() ? Number(grossAmount) : 0,
           note: note.trim() || undefined,
           paymentReference: refValue.trim() ? { kind: refKind, value: refValue.trim() } : undefined,
-          purchaseOrderId: orderId || undefined,
+          // Only an order of this supplier's loaded list.
+          purchaseOrderId: orderId && orders.some((o) => o.id === orderId) ? orderId : undefined,
           vatCodeId: vatCodeId || undefined,
           // Only a rate typed in; otherwise the API looks it up for the date.
           exchangeRate:
@@ -741,6 +750,10 @@ function ReviewForm({
     }
   }
 
+  // Tolka igen only where the rules can read something: a PDF with a text
+  // layer (or one whose text layer is not known yet). For an image or a
+  // scanned PDF it would only repeat the check — the AI result stays anyway.
+  const canRunRules = scan.resultOutdated || (scan.contentType === "application/pdf" && scan.hasTextLayer !== false);
   const checks = result?.checks ?? [];
   const noSupplierMatch = result !== null && supplier === null && !isTouched("supplier");
 
@@ -781,9 +794,11 @@ function ReviewForm({
 
       {canWrite && (
         <div className={styles.toolbar}>
-          <Button type="button" variant="secondary" disabled={busy} onClick={() => void interpret("rules")}>
-            {interpreting === "rules" ? "Tolkar…" : "Tolka igen"}
-          </Button>
+          {canRunRules && (
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => void interpret("rules")}>
+              {interpreting === "rules" ? "Tolkar…" : "Tolka igen"}
+            </Button>
+          )}
           {scan.aiAvailable && (
             <Button type="button" variant="secondary" disabled={busy} onClick={() => void interpret("ai")}>
               {interpreting === "ai" ? "Tolkar…" : "Tolka med AI"}
@@ -806,6 +821,16 @@ function ReviewForm({
           onChange={(s) => {
             touch("supplier");
             supplierSeq.current += 1;
+            if (s?.id !== supplier?.id) {
+              // Another supplier: the purchase order and every link to its
+              // rows belonged to the old one (as on Ny leverantörsfaktura).
+              setOrderId("");
+              wantBasisRef.current = null;
+              basisSeq.current += 1;
+              setRows((all) =>
+                all.filter((row) => row.origin !== "order").map((row) => ({ ...row, purchaseOrderRowId: null }))
+              );
+            }
             setSupplier(s);
           }}
           formatLabel={(s) => `${s.supplierNumber} — ${s.name}`}

@@ -12,6 +12,11 @@ import { hasSignature } from "./file-signature.js";
 // - XML (e-faktura, out of scope) and every other type: unsupported.
 // - Over 20 MB (the underlag's cap): too_large.
 
+// At most this many attachments of one letter become scans (the first ones,
+// in the letter's order); the rest are logged as too_many_attachments — a
+// letter is never a way to fill the inbox (or the AI bill) in one go.
+export const MAIL_MAX_ATTACHMENTS = 10;
+
 // Smaller images are logos, icons and tracking pixels.
 export const MAIL_IMAGE_MIN_BYTES = 30 * 1024;
 
@@ -38,7 +43,7 @@ export interface SelectedAttachment {
   content: Buffer;
 }
 
-export type MailSkipReason = "inline_image" | "small_image" | "image_beside_pdf" | "unsupported" | "wrong_content" | "empty" | "too_large";
+export type MailSkipReason = "inline_image" | "small_image" | "image_beside_pdf" | "unsupported" | "wrong_content" | "empty" | "too_large" | "too_many_attachments";
 
 export interface SkippedAttachment {
   index: number;
@@ -136,6 +141,10 @@ export function selectMailAttachments(attachments: MailAttachment[]): MailSelect
       skip("wrong_content");
       continue;
     }
+    if (selected.length >= MAIL_MAX_ATTACHMENTS) {
+      skip("too_many_attachments");
+      continue;
+    }
     selected.push({ index: attachment.index, filename, contentType: type, content: attachment.content });
   }
   return { selected, skipped };
@@ -150,15 +159,19 @@ export const MAIL_SKIP_TEXTS: Record<MailSkipReason, string> = {
   wrong_content: "innehållet är inte en PDF, JPEG eller PNG",
   empty: "tom fil",
   too_large: "större än 20 MB",
+  too_many_attachments: `fler än ${MAIL_MAX_ATTACHMENTS} fakturabilagor i brevet — lästes inte in`,
 };
 
 // The letter's one outcome: imported when at least one attachment became a
-// scan; otherwise the most telling reason why none did.
+// scan; otherwise the most telling reason why none did. Attachments over
+// MAIL_MAX_ATTACHMENTS only ever stand beside ten selected ones, so such a
+// letter is imported (or duplicate when all ten were already in the inbox);
+// the skipped ones are named in the detail.
 export function mailOutcome(input: { created: number; duplicates: number; skipped: SkippedAttachment[] }): InvoiceScanMailOutcome {
   if (input.created > 0) return "imported";
   if (input.duplicates > 0) return "duplicate";
   if (input.skipped.some((s) => s.reason === "too_large")) return "too_large";
-  if (input.skipped.some((s) => s.reason === "unsupported" || s.reason === "wrong_content" || s.reason === "empty")) return "unsupported";
+  if (input.skipped.some((s) => s.reason === "unsupported" || s.reason === "wrong_content" || s.reason === "empty" || s.reason === "too_many_attachments")) return "unsupported";
   return "no_attachment";
 }
 

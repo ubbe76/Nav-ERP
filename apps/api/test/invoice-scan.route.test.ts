@@ -121,7 +121,21 @@ describe("/invoice-scans", () => {
     expect(file.statusCode).toBe(200);
     expect(file.headers["content-type"]).toBe("application/pdf");
     expect(String(file.headers["content-disposition"])).toMatch(/^inline/);
+    expect(file.headers["x-content-type-options"]).toBe("nosniff");
     expect(file.rawPayload.equals(pdf)).toBe(true);
+  });
+
+  it("refuses more than 20 files in one upload (400) and creates none", async () => {
+    const cookie = await adminCookie();
+    const files = Array.from({ length: 21 }, (_, i) => ({
+      filename: `foto-${i}.jpg`,
+      contentType: "image/jpeg",
+      data: Buffer.concat([jpegImage(), Buffer.from([i])]),
+    }));
+    const res = await upload(cookie, files);
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("Högst 20 filer per uppladdning");
+    expect((await app.inject({ url: "/api/v1/invoice-scans?status=all", headers: { cookie } })).json().total).toBe(0);
   });
 
   it("converts to a supplier invoice draft and maps the refusals", async () => {
@@ -252,6 +266,27 @@ describe("/settings/invoice-scan", () => {
     expect(kept.json().aiApiKeySet).toBe(true);
     const removed = await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { aiApiKey: null }, headers: { cookie: admin } });
     expect(removed.json().aiApiKeySet).toBe(false);
+
+    // The saved password never follows a changed server or user (400 with
+    // the Swedish text); typed again, it is fine.
+    const account = await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { mailUser: "fakturor@example.com", mailPassword: "hemligt-losen" }, headers: { cookie: admin } });
+    expect(account.statusCode).toBe(200);
+    const otherHost = await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { mailHost: "imap.annan.example", mailPassword: "" }, headers: { cookie: admin } });
+    expect(otherHost.statusCode).toBe(400);
+    expect(otherHost.json()).toMatchObject({ code: "invoice-scan-mail-password-required", message: expect.stringMatching(/^Skriv in lösenordet igen/) });
+    expect((await app.inject({ url: "/api/v1/settings/invoice-scan", headers: { cookie: admin } })).json().mailHost).toBe("imap.example.com");
+    const sameHost = await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { mailHost: " IMAP.example.com " }, headers: { cookie: admin } });
+    expect(sameHost.statusCode).toBe(200);
+    const retyped = await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { mailHost: "imap.annan.example", mailUser: "ny@example.com", mailPassword: "nytt-losen" }, headers: { cookie: admin } });
+    expect(retyped.statusCode).toBe(200);
+    expect((await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { mailUser: "tredje@example.com" }, headers: { cookie: admin } })).statusCode).toBe(400);
+
+    // Mapp för inlästa is never the folder that is read.
+    const sameBody = await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { mailFolder: "INBOX", mailProcessedFolder: "inbox" }, headers: { cookie: admin } });
+    expect(sameBody.statusCode).toBe(400);
+    const againstSaved = await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { mailProcessedFolder: "INBOX" }, headers: { cookie: admin } });
+    expect(againstSaved.statusCode).toBe(400);
+    expect(againstSaved.json()).toMatchObject({ code: "invoice-scan-mail-folders-equal", message: "Mapp för inlästa får inte vara samma mapp som den som läses" });
 
     expect((await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { aiModel: "gpt-x" }, headers: { cookie: admin } })).statusCode).toBe(400);
     expect((await app.inject({ method: "PATCH", url: "/api/v1/settings/invoice-scan", payload: { mailIntervalMinutes: 0 }, headers: { cookie: admin } })).statusCode).toBe(400);

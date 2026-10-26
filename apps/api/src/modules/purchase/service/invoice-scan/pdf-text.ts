@@ -11,6 +11,9 @@
 
 export const PDF_MAX_PAGES = 20;
 export const PDF_TIMEOUT_MS = 15_000;
+// pdfjs's own teardown gets at most this long: a document that hangs pdfjs
+// must not hang the upload's answer on destroy() as well.
+export const PDF_DESTROY_TIMEOUT_MS = 2_000;
 // Below this many characters in the whole document there is no usable text
 // layer (a scanned PDF).
 export const TEXT_LAYER_MIN_CHARS = 50;
@@ -131,7 +134,9 @@ export async function extractPdfText(
     throw new PdfUnreadableError();
   } finally {
     clearTimeout(timer);
-    await task.destroy().catch(() => {});
+    // Never let the teardown block the answer: at most PDF_DESTROY_TIMEOUT_MS,
+    // then it finishes (or not) on its own.
+    await settleWithin(task.destroy(), PDF_DESTROY_TIMEOUT_MS);
   }
 
   async function read(): Promise<PdfText> {
@@ -153,6 +158,25 @@ export async function extractPdfText(
       page.cleanup();
     }
     return { pages, charCount, pageCount, truncated: pageCount > maxPages };
+  }
+}
+
+// Waits for the promise at most `ms` (its rejection swallowed); true when it
+// settled in time. The timer never keeps the process alive.
+export async function settleWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const settled = promise.then(
+    () => true,
+    () => true
+  );
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([settled, late]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

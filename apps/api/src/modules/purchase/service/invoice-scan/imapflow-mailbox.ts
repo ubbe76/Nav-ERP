@@ -1,4 +1,4 @@
-import type { ImapFlow, MailboxLockObject } from "imapflow";
+import type { ImapFlow, ImapFlowOptions, MailboxLockObject } from "imapflow";
 import {
   InvoiceMailboxError,
   type InvoiceMailbox,
@@ -64,14 +64,17 @@ function folderSegments(path: string): string[] {
     .filter((s) => s !== "");
 }
 
-async function createClient(config: InvoiceMailboxConfig): Promise<ImapFlow> {
-  const { ImapFlow } = await import("imapflow");
-  const client = new ImapFlow({
+// The client's options (exported for the tests: the STARTTLS requirement and
+// that the password sits only in auth).
+export function imapflowOptions(config: InvoiceMailboxConfig): ImapFlowOptions {
+  return {
     host: config.host,
     port: config.port,
     secure: config.tls,
-    // TLS off: upgrade with STARTTLS when the server offers it (imapflow's
-    // default) — a plain port is still encrypted where possible.
+    // TLS off: STARTTLS is REQUIRED (doSTARTTLS: true) — a server that does
+    // not offer it (or a man in the middle stripping it) fails the login with
+    // tlsFailed instead of sending the password in clear text.
+    ...(config.tls ? {} : { doSTARTTLS: true }),
     auth: { user: config.user, pass: config.password },
     logger: false,
     emitLogs: false,
@@ -81,7 +84,12 @@ async function createClient(config: InvoiceMailboxConfig): Promise<ImapFlow> {
     socketTimeout: SOCKET_TIMEOUT_MS,
     maxLiteralSize: MAX_LITERAL_BYTES,
     maxResponseSize: MAX_LITERAL_BYTES + 1024 * 1024,
-  });
+  };
+}
+
+async function createClient(config: InvoiceMailboxConfig): Promise<ImapFlow> {
+  const { ImapFlow } = await import("imapflow");
+  const client = new ImapFlow(imapflowOptions(config));
   // An unhandled 'error' event would take the process down; the failing
   // command rejects on its own.
   client.on("error", () => {});

@@ -95,6 +95,17 @@ export interface UploadedFile {
   truncated: boolean;
 }
 
+// Dagens tak: at most this many automatic AI calls per Stockholm day (the
+// counter in system_settings); above it a scan waits for Tolka med AI.
+export const AI_AUTOMATIC_DAILY_MAX = 100;
+export const AI_DAILY_CAP_TEXT = "Dagens tak för automatisk AI-tolkning är nått — tryck Tolka med AI";
+
+// What the e-mail job knows about the letter a scan came in: the From
+// domains the receiving server authenticated (avsändarregeln).
+export interface AutomaticAiMailContext {
+  authenticatedDomains: string[];
+}
+
 const TEXTS = {
   unreadable: "PDF:en gick inte att läsa",
   noTextLayer: "PDF:en saknar textlager (skannad) — den kan tolkas med AI, annars fyll i fälten för hand",
@@ -205,10 +216,22 @@ export function createInvoiceScanService(deps: {
   // leaves the scan where it was with the check; never throws for the file's
   // sake. null when the scan is gone or no longer pending (a concurrent
   // Avvisa/Skapa won).
+  //
+  // Where the rules cannot read anything — an image, a PDF without text
+  // layer, a PDF pdfjs cannot read — an existing result (an AI
+  // interpretation, or what was typed into an earlier one) is KEPT: only the
+  // check is added when it is missing, interpreted_by and the status stay.
   async function runRules(id: string): Promise<InvoiceScanRow | null> {
     const scan = await repo.findWithData(id);
     if (!scan || !canPerform("interpret", scan.status) || !scan.data) return null;
+    const existing = parseResult(scan.result);
+    const keepWith = (check: string, file: { hasTextLayer: boolean | null; pageCount: number | null }) => {
+      const kept = existing!;
+      if (!kept.checks.includes(check)) kept.checks.push(check);
+      return repo.writeResult(id, { result: kept, interpretedBy: null, ...file, interpreted: false });
+    };
     if (scan.contentType !== "application/pdf") {
+      if (existing) return keepWith(TEXTS.image, { hasTextLayer: scan.hasTextLayer, pageCount: scan.pageCount });
       return repo.writeResult(id, {
         result: emptyInvoiceScanResult([TEXTS.image]),
         interpretedBy: "rules",
@@ -222,6 +245,7 @@ export function createInvoiceScanService(deps: {
       text = await extract(scan.data);
     } catch (err) {
       if (!(err instanceof PdfUnreadableError)) log("invoice scan: text extraction failed", { scan: scan.scanNumber, error: (err as Error)?.name });
+      if (existing) return keepWith(TEXTS.unreadable, { hasTextLayer: scan.hasTextLayer, pageCount: scan.pageCount });
       return repo.writeResult(id, {
         result: emptyInvoiceScanResult([TEXTS.unreadable]),
         interpretedBy: null,
@@ -231,6 +255,7 @@ export function createInvoiceScanService(deps: {
       });
     }
     const textLayer = hasTextLayer(text);
+    if (!textLayer && existing) return keepWith(TEXTS.noTextLayer, { hasTextLayer: false, pageCount: text.pageCount });
     const result = textLayer ? await rulesResult(text) : emptyInvoiceScanResult([TEXTS.noTextLayer]);
     if (text.truncated) result.checks.push(`PDF:en har ${text.pageCount} sidor — bara de ${PDF_MAX_PAGES} första lästes`);
     return repo.writeResult(id, {
@@ -305,6 +330,12 @@ export function createInvoiceScanService(deps: {
         if (pageCount !== null && pageCount > AI_PDF_MAX_PAGES) return await fail(AI_TEXTS.tooManyPages);
       }
 
+      // Dagens tak, counted atomically right before the call (a scan that
+      // never reaches the service costs nothing).
+      if (mode === "automatic" && !(await repo.claimAutomaticAiCall(today(), AI_AUTOMATIC_DAILY_MAX))) {
+        return await fail(AI_DAILY_CAP_TEXT);
+      }
+
       const companyId = await companyIdentity();
       const answer = await interpreters({ apiKey: config.aiApiKey, model: config.aiModel }).interpret(
         { contentType, data: file.data },
@@ -337,8 +368,10 @@ export function createInvoiceScanService(deps: {
   // Automatic AI (läge "Automatiskt när reglerna inte räcker"): after the
   // rules, when they were not enough (rulesSufficient false, no text layer,
   // an image or an unreadable PDF). An e-mailed scan only when the sender
-  // passes avsändarregeln. Skipped silently otherwise.
-  async function automaticAiFor(id: string): Promise<void> {
+  // passes avsändarregeln — which needs the letter's authenticated domains
+  // from the e-mail job; without them nothing runs. Skipped silently
+  // otherwise.
+  async function automaticAiFor(id: string, mail: AutomaticAiMailContext | undefined): Promise<void> {
     const scan = await repo.findById(id);
     if (!scan || !canPerform("interpret", scan.status) || scan.interpretedBy === "ai") return;
     const config = await settings.read();
@@ -346,19 +379,59 @@ export function createInvoiceScanService(deps: {
     const result = parseResult(scan.result);
     const rulesEnough = scan.contentType === "application/pdf" && scan.hasTextLayer === true && result !== null && rulesSufficient(result);
     if (rulesEnough) return;
-    if (scan.source === "email" && !senderAllowsAutomaticAi(scan.emailFrom, await repo.knownSenderAddresses())) return;
+    if (scan.source === "email") {
+      if (!mail || !senderAllowsAutomaticAi(scan.emailFrom, await repo.knownSenderAddresses(), mail.authenticatedDomains)) return;
+    }
     await runAi(id, "automatic");
+  }
+
+  // A converted scan shows the created supplier invoice's supplier, number,
+  // date and amount (what was typed in on Skapa), not the proposal's.
+  type CreatedColumns = {
+    supplierInvoiceRegistrationNumber: string | null;
+    createdSupplierId: string | null;
+    createdSupplierName: string | null;
+    createdInvoiceNumber: string | null;
+    createdInvoiceDate: string | null;
+    createdGrossAmount: string | null;
+    createdCurrency: string | null;
+  };
+  function createdInvoice(row: CreatedColumns) {
+    if (row.createdInvoiceNumber === null || row.createdSupplierId === null) return null;
+    return {
+      registrationNumber: row.supplierInvoiceRegistrationNumber,
+      supplierId: row.createdSupplierId,
+      supplierName: row.createdSupplierName,
+      invoiceNumber: row.createdInvoiceNumber,
+      invoiceDate: row.createdInvoiceDate,
+      grossAmount: row.createdGrossAmount === null ? null : Number(row.createdGrossAmount),
+      currency: row.createdCurrency,
+    };
+  }
+  function stripCreated<T extends CreatedColumns>(row: T) {
+    const {
+      createdSupplierId: _a,
+      createdSupplierName: _b,
+      createdInvoiceNumber: _c,
+      createdInvoiceDate: _d,
+      createdGrossAmount: _e,
+      createdCurrency: _f,
+      ...rest
+    } = row;
+    return rest;
   }
 
   function listRow(row: Awaited<ReturnType<InvoiceScanRepository["list"]>>["rows"][number]) {
     const { result: raw, ...columns } = row;
     const result = parseResult(raw);
+    const created = row.status === "converted" ? createdInvoice(row) : null;
     return {
-      ...columns,
-      supplierId: result?.supplier.matchedSupplierId ?? null,
-      invoiceNumber: result?.invoiceNumber.value ?? null,
-      grossAmount: result?.grossAmount.value ?? null,
-      currency: result?.currency.value ?? null,
+      ...stripCreated(columns),
+      supplierName: created ? created.supplierName : row.supplierName,
+      supplierId: created ? created.supplierId : (result?.supplier.matchedSupplierId ?? null),
+      invoiceNumber: created ? created.invoiceNumber : (result?.invoiceNumber.value ?? null),
+      grossAmount: created ? created.grossAmount : (result?.grossAmount.value ?? null),
+      currency: created ? created.currency : (result?.currency.value ?? null),
       // Osäker: a pending scan whose main fields are not all sure.
       uncertain: result !== null && (row.status === "new" || row.status === "interpreted") && isUncertain(result),
     };
@@ -376,8 +449,12 @@ export function createInvoiceScanService(deps: {
       const { result: raw, ...columns } = row;
       const result = parseResult(raw);
       const { poMatching, aiMode, aiApiKey } = await settings.read();
+      const created = row.status === "converted" ? createdInvoice(row) : null;
       return {
-        ...columns,
+        ...stripCreated(columns),
+        supplierName: created ? created.supplierName : row.supplierName,
+        // Skapad: the supplier invoice as it was created (null otherwise).
+        createdInvoice: created,
         result,
         // A stored result in an unknown shape — Tolka igen replaces it.
         resultOutdated: raw !== null && result === null,
@@ -487,12 +564,13 @@ export function createInvoiceScanService(deps: {
     // Automatic AI on newly arrived scans (the upload route after its
     // answer, the e-mail job after the letter's import): queued so that one
     // scan at a time goes to the AI service in this process, never in a
-    // transaction. Never throws; resolves when these scans are done.
-    automaticAi(ids: string[]): Promise<void> {
+    // transaction. Never throws; resolves when these scans are done. `mail`
+    // is the letter's authentication (the e-mail job only).
+    automaticAi(ids: string[], mail?: AutomaticAiMailContext): Promise<void> {
       const run = automaticQueue.then(async () => {
         for (const id of ids) {
           try {
-            await automaticAiFor(id);
+            await automaticAiFor(id, mail);
           } catch (err) {
             log("invoice scan: automatic AI failed", { scan: id, error: (err as Error)?.name });
           }

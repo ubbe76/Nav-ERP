@@ -3,7 +3,14 @@ import type { InvoiceScanMailOutcome, ListInvoiceScanMailLogQuery, TestInvoiceSc
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import type { InvoiceScanRepository, InvoiceScanRow } from "../repository/invoice-scan.repository.js";
 import type { InvoiceScanService } from "./invoice-scan.service.js";
-import type { InvoiceScanSettings, InvoiceScanSettingsService } from "./invoice-scan-settings.service.js";
+import { sameMailFolder } from "@navet/shared";
+import {
+  InvoiceScanMailFoldersEqualError,
+  InvoiceScanMailPasswordRequiredError,
+  savedPasswordApplies,
+  type InvoiceScanSettings,
+  type InvoiceScanSettingsService,
+} from "./invoice-scan-settings.service.js";
 import { imapflowMailboxFactory } from "./invoice-scan/imapflow-mailbox.js";
 import {
   InvoiceMailboxError,
@@ -15,6 +22,7 @@ import {
   type MailboxMessageRef,
 } from "./invoice-scan/invoice-mailbox.js";
 import { parseInvoiceMail, type ParsedInvoiceMail } from "./invoice-scan/mail-mime.js";
+import { authenticatedDomains } from "./invoice-scan/sender-rule.js";
 import { MAIL_SKIP_TEXTS, mailOutcome, messageIdKey, selectMailAttachments, syntheticMessageId } from "./invoice-scan/mail-selection.js";
 
 // Fakturaskanning — the e-mail box (spec §4). The job `invoice_scan_mail`
@@ -37,6 +45,10 @@ import { MAIL_SKIP_TEXTS, mailOutcome, messageIdKey, selectMailAttachments, synt
 // logged.
 
 export const MAIL_LEASE_MS = 10 * 60_000;
+// A run stops taking new letters after this long (the lease is renewed after
+// every letter, but a run never goes on for ever); the next run takes the
+// rest.
+export const MAIL_RUN_BUDGET_MS = 8 * 60_000;
 // Letters per run; the rest wait for the next run.
 export const MAIL_MAX_LETTERS = 50;
 // A letter larger than this is not fetched at all (20 MB attachments, base64
@@ -102,7 +114,14 @@ export interface MailRunResult {
   scanIds: string[];
   // Letters that could not be moved to the processed folder.
   moveFailed: number;
+  // Letters that could not be fetched (they stay in the folder).
+  fetchFailed: number;
+  // The run stopped before the list was done: the time budget ran out or
+  // the lease was lost. The next run takes the rest.
+  stoppedEarly: boolean;
 }
+
+const emptyRun = (): MailRunResult => ({ letters: 0, scanIds: [], moveFailed: 0, fetchFailed: 0, stoppedEarly: false });
 
 export function createInvoiceScanMailService(deps: {
   repo: InvoiceScanRepository;
@@ -204,8 +223,12 @@ export function createInvoiceScanMailService(deps: {
     }
   }
 
-  // One letter, steps 1–5. Returns the new scans and whether it was moved.
-  async function processLetter(mailbox: InvoiceMailbox, ref: MailboxMessageRef): Promise<{ created: InvoiceScanRow[]; moved: boolean }> {
+  // One letter, steps 1–5. Returns the new scans, whether it was moved and
+  // whether it could be fetched at all.
+  async function processLetter(
+    mailbox: InvoiceMailbox,
+    ref: MailboxMessageRef
+  ): Promise<{ created: InvoiceScanRow[]; moved: boolean; fetchFailed?: boolean }> {
     const blank = { messageId: null, emailFrom: null, emailSubject: null, receivedAt: null };
     if (ref.size !== null && ref.size > MAIL_MAX_MESSAGE_BYTES) {
       await writeLog({ ...blank, outcome: "too_large", detail: LETTER_TEXTS.tooLargeLetter });
@@ -220,7 +243,7 @@ export function createInvoiceScanMailService(deps: {
       if (FATAL_KINDS.has(e.kind)) throw e;
       log("invoice scan mail: could not fetch a letter", { uid: ref.uid, kind: e.kind, detail: e.detail });
       await writeLog({ ...blank, outcome: "error", detail: LETTER_TEXTS.fetchFailed });
-      return { created: [], moved: false };
+      return { created: [], moved: false, fetchFailed: true };
     }
 
     let mail: ParsedInvoiceMail;
@@ -247,22 +270,43 @@ export function createInvoiceScanMailService(deps: {
       const ids = created.map((s) => s.id);
       await scans.interpretReceived(ids);
       // Queued one scan at a time in this process; the run does not wait.
-      void scans.automaticAi(ids);
+      // Avsändarregeln reads the receiving server's verdict on the From
+      // domain (the topmost Authentication-Results).
+      void scans.automaticAi(ids, { authenticatedDomains: authenticatedDomains(mail.authenticationResults) });
     }
     return { created, moved };
   }
 
-  async function runMail(config: InvoiceMailboxConfig): Promise<MailRunResult> {
+  // `lease` (the scheduler's run): renewed after every letter while it is
+  // still ours; a lost lease or the spent time budget stops the run.
+  async function runMail(config: InvoiceMailboxConfig, lease?: { until: string }): Promise<MailRunResult> {
     const mailbox = mailboxes(config);
-    const result: MailRunResult = { letters: 0, scanIds: [], moveFailed: 0 };
+    const result = emptyRun();
+    const started = now().getTime();
     try {
       await mailbox.connect();
       const refs = await mailbox.listUnprocessed(MAIL_MAX_LETTERS);
-      for (const ref of refs) {
+      for (const [i, ref] of refs.entries()) {
         const letter = await processLetter(mailbox, ref);
         result.letters++;
         result.scanIds.push(...letter.created.map((s) => s.id));
-        if (!letter.moved) result.moveFailed++;
+        if (letter.fetchFailed) result.fetchFailed++;
+        else if (!letter.moved) result.moveFailed++;
+        if (i === refs.length - 1) break;
+        const at = now();
+        if (at.getTime() - started >= MAIL_RUN_BUDGET_MS) {
+          result.stoppedEarly = true;
+          break;
+        }
+        if (lease) {
+          const renewed = await repo.renewMailLease(lease.until, new Date(at.getTime() + MAIL_LEASE_MS));
+          if (!renewed) {
+            log("invoice scan mail: lease lost, the run stops", { letters: result.letters });
+            result.stoppedEarly = true;
+            break;
+          }
+          lease.until = renewed;
+        }
       }
       return result;
     } finally {
@@ -278,18 +322,22 @@ export function createInvoiceScanMailService(deps: {
     if (!s.mailEnabled) return "disabled";
     const at = now();
     if (!isMailDue(s.mailLastRunAt, s.mailIntervalMinutes, at)) return "not-due";
-    const lease = await repo.claimMailLease(at, MAIL_LEASE_MS);
-    if (!lease) return "busy";
+    const claimed = await repo.claimMailLease(at, MAIL_LEASE_MS);
+    if (!claimed) return "busy";
+    const lease = { until: claimed };
     try {
       const config = mailboxConfig(s);
-      let result: MailRunResult = { letters: 0, scanIds: [], moveFailed: 0 };
+      let result = emptyRun();
       let error: string | null = null;
       if (!config) {
         error = mailboxErrorText("not_configured");
       } else {
         try {
-          result = await runMail(config);
-          if (result.moveFailed > 0) error = mailboxErrorText("move_failed", config);
+          result = await runMail(config, lease);
+          const problems: string[] = [];
+          if (result.moveFailed > 0) problems.push(mailboxErrorText("move_failed", config));
+          if (result.fetchFailed > 0) problems.push(mailboxErrorText("fetch_failed", config));
+          error = problems.length > 0 ? problems.join("; ") : null;
         } catch (err) {
           const e = asMailboxError(err);
           // Never err.message: it may carry the server's answer.
@@ -300,8 +348,8 @@ export function createInvoiceScanMailService(deps: {
       await repo.stampMailRun(at, error);
       return { ...result, error };
     } finally {
-      // Owner-checked: releases only the lease this run claimed.
-      await repo.releaseMailLease(lease);
+      // Owner-checked: releases only the lease this run (still) holds.
+      await repo.releaseMailLease(lease.until);
     }
   }
 
@@ -316,14 +364,24 @@ export function createInvoiceScanMailService(deps: {
       const saved = await settings.read();
       const pick = <T>(value: T | undefined, fallback: T) => (value === undefined ? fallback : value);
       const blankToNull = (v: string | null) => (v && v.trim() !== "" ? v.trim() : null);
+      const mailHost = blankToNull(pick(input.mailHost, saved.mailHost));
+      const mailUser = blankToNull(pick(input.mailUser, saved.mailUser));
+      const typed = input.mailPassword && input.mailPassword !== "" ? input.mailPassword : null;
+      // The saved password only goes to the saved server and user.
+      if (typed === null && saved.mailPassword !== null && mailHost !== null && mailUser !== null && !savedPasswordApplies(saved, { mailHost, mailUser })) {
+        throw new InvoiceScanMailPasswordRequiredError();
+      }
+      const mailFolder = pick(input.mailFolder, saved.mailFolder);
+      const mailProcessedFolder = pick(input.mailProcessedFolder, saved.mailProcessedFolder);
+      if (sameMailFolder(mailFolder, mailProcessedFolder)) throw new InvoiceScanMailFoldersEqualError();
       const config = mailboxConfig({
-        mailHost: blankToNull(pick(input.mailHost, saved.mailHost)),
+        mailHost,
         mailPort: pick(input.mailPort, saved.mailPort),
         mailTls: pick(input.mailTls, saved.mailTls),
-        mailUser: blankToNull(pick(input.mailUser, saved.mailUser)),
-        mailPassword: input.mailPassword && input.mailPassword !== "" ? input.mailPassword : saved.mailPassword,
-        mailFolder: pick(input.mailFolder, saved.mailFolder),
-        mailProcessedFolder: pick(input.mailProcessedFolder, saved.mailProcessedFolder),
+        mailUser,
+        mailPassword: typed ?? saved.mailPassword,
+        mailFolder,
+        mailProcessedFolder,
       });
       if (!config) throw new InvoiceScanMailTestFailedError(mailboxErrorText("not_configured"));
       try {

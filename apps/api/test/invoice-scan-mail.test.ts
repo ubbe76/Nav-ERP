@@ -13,11 +13,17 @@ import {
   createInvoiceScanMailService,
   InvoiceScanMailTestFailedError,
   isMailDue,
+  MAIL_LEASE_MS,
   MAIL_MAX_LETTERS,
   MAIL_MAX_MESSAGE_BYTES,
 } from "../src/modules/purchase/service/invoice-scan-mail.service.js";
 import { InvoiceMailboxError } from "../src/modules/purchase/service/invoice-scan/invoice-mailbox.js";
-import { toMailboxError } from "../src/modules/purchase/service/invoice-scan/imapflow-mailbox.js";
+import { imapflowOptions, toMailboxError } from "../src/modules/purchase/service/invoice-scan/imapflow-mailbox.js";
+import { MAIL_MAX_ATTACHMENTS } from "../src/modules/purchase/service/invoice-scan/mail-selection.js";
+import {
+  InvoiceScanMailFoldersEqualError,
+  InvoiceScanMailPasswordRequiredError,
+} from "../src/modules/purchase/service/invoice-scan-settings.service.js";
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { DEFAULT_POSTING_SETTINGS } from "./helpers/services.js";
@@ -418,12 +424,16 @@ describe("automatic AI after the import", () => {
     await settings.update({ aiMode: "fallback", aiApiKey: "sk-test-key" }, userId);
   }
 
-  it("runs on the new scans when the rules were not enough and the sender is a supplier's", async () => {
+  it("runs on the new scans when the rules were not enough and the sender is a supplier's, authenticated", async () => {
     await enableMail();
     await aiFallback();
     await db.insert(suppliers).values({ supplierNumber: "L1", name: FAKE_SUPPLIER.name, orgNumber: FAKE_SUPPLIER.orgNumber, currency: "SEK", email: "info@platgrossisten.example" });
     mailbox.deliver(
-      await buildLetter({ from: "ekonomi@platgrossisten.example", attachments: [{ filename: "foto.jpg", content: bigJpeg(), contentType: "image/jpeg" }] })
+      await buildLetter({
+        from: "ekonomi@platgrossisten.example",
+        authenticationResults: ["mx.navkund.example; dkim=pass header.d=platgrossisten.example; dmarc=pass header.from=platgrossisten.example"],
+        attachments: [{ filename: "foto.jpg", content: bigJpeg(), contentType: "image/jpeg" }],
+      })
     );
     await run();
     expect(fake.calls).toHaveLength(1);
@@ -431,16 +441,125 @@ describe("automatic AI after the import", () => {
     expect(scan!.interpretedBy).toBe("ai");
   });
 
+  it("never trusts From alone: no Authentication-Results, a failed check, or a forged header below the server's", async () => {
+    await enableMail();
+    await aiFallback();
+    await db.insert(suppliers).values({ supplierNumber: "L1", name: FAKE_SUPPLIER.name, orgNumber: FAKE_SUPPLIER.orgNumber, currency: "SEK", email: "info@platgrossisten.example" });
+    const photo = (n: number) => [{ filename: `foto-${n}.jpg`, content: Buffer.concat([bigJpeg(), Buffer.from([n])]), contentType: "image/jpeg" }];
+    mailbox.deliver(await buildLetter({ from: "ekonomi@platgrossisten.example", subject: "Utan", attachments: photo(1) }));
+    mailbox.deliver(
+      await buildLetter({
+        from: "ekonomi@platgrossisten.example",
+        subject: "Underkänd",
+        authenticationResults: ["mx.navkund.example; dkim=fail header.d=platgrossisten.example; dmarc=fail header.from=platgrossisten.example"],
+        attachments: photo(2),
+      })
+    );
+    // The sender's own "pass" sits below the receiving server's verdict.
+    mailbox.deliver(
+      await buildLetter({
+        from: "ekonomi@platgrossisten.example",
+        subject: "Förfalskad",
+        authenticationResults: [
+          "mx.navkund.example; dmarc=fail header.from=platgrossisten.example",
+          "mx.navkund.example; dmarc=pass header.from=platgrossisten.example",
+        ],
+        attachments: photo(3),
+      })
+    );
+    await run();
+    expect(fake.calls).toHaveLength(0);
+    expect((await scans()).map((s) => s.interpretedBy)).toEqual(["rules", "rules", "rules"]);
+  });
+
   it("leaves a scan from an unknown sender to the button (avsändarregeln)", async () => {
     await enableMail();
     await aiFallback();
     mailbox.deliver(
-      await buildLetter({ from: "reklam@okand.example", attachments: [{ filename: "foto.jpg", content: bigJpeg(), contentType: "image/jpeg" }] })
+      await buildLetter({
+        from: "reklam@okand.example",
+        authenticationResults: ["mx.navkund.example; dmarc=pass header.from=okand.example"],
+        attachments: [{ filename: "foto.jpg", content: bigJpeg(), contentType: "image/jpeg" }],
+      })
     );
     await run();
     expect(fake.calls).toHaveLength(0);
     const [scan] = await scans();
     expect(scan).toMatchObject({ status: "interpreted", interpretedBy: "rules" });
+  });
+});
+
+describe("the run's limits", () => {
+  it(`imports at most ${MAIL_MAX_ATTACHMENTS} attachments of one letter and names the rest`, async () => {
+    await enableMail();
+    const attachments = [];
+    for (let i = 1; i <= MAIL_MAX_ATTACHMENTS + 2; i++) attachments.push(await pdfAttachment(`M-${i}`, `faktura-${i}.pdf`));
+    mailbox.deliver(await buildLetter({ attachments }));
+    await run();
+    expect(await scans()).toHaveLength(MAIL_MAX_ATTACHMENTS);
+    const [entry] = await mailLog();
+    expect(entry!.outcome).toBe("imported");
+    expect(entry!.detail).toContain(`faktura-${MAIL_MAX_ATTACHMENTS + 1}.pdf: fler än ${MAIL_MAX_ATTACHMENTS} fakturabilagor i brevet — lästes inte in`);
+    expect(entry!.detail).toContain(`faktura-${MAIL_MAX_ATTACHMENTS + 2}.pdf: fler än`);
+    expect(mailbox.state.processed).toHaveLength(1);
+  });
+
+  it("renews its lease after every letter and stops after the time budget — the next run takes the rest", async () => {
+    await enableMail();
+    for (let i = 1; i <= 4; i++) mailbox.deliver(await buildLetter({ subject: `Brev ${i}`, attachments: [await pdfAttachment(`T-${i}`)] }));
+    // A clock that moves three minutes on every reading.
+    let t = new Date("2026-10-21T10:00:00Z").getTime();
+    const leases: string[] = [];
+    const ticking = createInvoiceScanMailService({
+      repo,
+      settings,
+      scans: scanService,
+      mailboxes: mailbox.factory,
+      audit,
+      now: () => {
+        const at = new Date(t);
+        t += 3 * 60_000;
+        return at;
+      },
+      log,
+    });
+    const renew = repo.renewMailLease.bind(repo);
+    repo.renewMailLease = async (until, next) => {
+      const value = await renew(until, next);
+      if (value) leases.push(value);
+      return value;
+    };
+    try {
+      const result = await ticking.runMailIfDue();
+      expect(result).toMatchObject({ letters: 3, stoppedEarly: true, error: null });
+      // Renewed after letters 1 and 2 (each time MAIL_LEASE_MS ahead), then the budget ran out.
+      expect(leases).toHaveLength(2);
+      expect(new Date(leases[1]!).getTime() - new Date(leases[0]!).getTime()).toBe(3 * 60_000);
+      expect(MAIL_LEASE_MS).toBe(10 * 60_000);
+      // The lease was released.
+      expect(await setting("invoice_scan_mail_lease_until")).toBeNull();
+    } finally {
+      repo.renewMailLease = renew;
+    }
+    expect(mailbox.state.inbox).toHaveLength(1);
+    // The shared clock after the ticking run's stamp.
+    clock = new Date("2026-10-21T12:00:00Z");
+    await run();
+    expect(mailbox.state.inbox).toHaveLength(0);
+    expect(await scans()).toHaveLength(4);
+  });
+
+  it("stops when another run has taken the lease over", async () => {
+    await enableMail();
+    for (let i = 1; i <= 3; i++) mailbox.deliver(await buildLetter({ subject: `Brev ${i}`, attachments: [await pdfAttachment(`L-${i}`)] }));
+    const renew = repo.renewMailLease.bind(repo);
+    repo.renewMailLease = async () => null;
+    try {
+      expect(await run()).toMatchObject({ letters: 1, stoppedEarly: true });
+    } finally {
+      repo.renewMailLease = renew;
+    }
+    expect(mailbox.state.inbox).toHaveLength(2);
   });
 });
 
@@ -479,6 +598,17 @@ describe("a mailbox that cannot be read", () => {
     expect((await scans()).map((s) => s.emailSubject)).toEqual(["Ett", "Två"]);
   });
 
+  it("says a letter could not be fetched — not that it could not be moved", async () => {
+    await enableMail();
+    const letter = mailbox.deliver(await buildLetter({ attachments: [await pdfAttachment()] }));
+    mailbox.state.fetchErrors.set(letter.uid, new InvoiceMailboxError("unexpected", "NO"));
+    expect(await run()).toMatchObject({ letters: 1, fetchFailed: 1, moveFailed: 0 });
+    expect(await setting("invoice_scan_mail_last_error")).toBe("Brev kunde inte hämtas från e-postservern — de läses igen vid nästa körning");
+    expect(mailbox.state.inbox).toHaveLength(1);
+    mailbox.state.fetchErrors.clear();
+    expect(await run()).toMatchObject({ error: null });
+  });
+
   it("logs an empty letter and moves it", async () => {
     await enableMail();
     const letter = mailbox.deliver(Buffer.alloc(0));
@@ -509,7 +639,7 @@ describe("toMailboxError", () => {
 describe("Testa anslutning", () => {
   it("uses the form's fields, the saved password when none is typed, and saves nothing", async () => {
     await enableMail({ mailFolder: "Fakturor" });
-    expect(await mail.testMail({ mailHost: "imap.annan.example", mailUser: "ny@navkund.example" })).toEqual({
+    expect(await mail.testMail({ mailHost: "imap.annan.example", mailUser: "ny@navkund.example", mailPassword: PASSWORD })).toEqual({
       ok: true,
       unseen: 3,
       processedFolderExists: true,
@@ -527,6 +657,37 @@ describe("Testa anslutning", () => {
     expect(mailbox.configs.at(-1)).toMatchObject({ password: "nytt-losen", processedFolder: "Arkiv/Fakturor", tls: false, port: 143 });
     expect(await setting("invoice_scan_mail_password")).toBe(PASSWORD);
     expect(await setting("invoice_scan_mail_host")).toBe("imap.navkund.example");
+  });
+
+  it("never sends the saved password to another server or user", async () => {
+    await enableMail();
+    await expect(mail.testMail({ mailHost: "imap.annan.example" })).rejects.toBeInstanceOf(InvoiceScanMailPasswordRequiredError);
+    await expect(mail.testMail({ mailUser: "annan@navkund.example" })).rejects.toBeInstanceOf(InvoiceScanMailPasswordRequiredError);
+    expect(mailbox.configs).toHaveLength(0);
+    // The saved server and user (case aside) are fine without it.
+    await mail.testMail({ mailHost: "IMAP.navkund.example", mailUser: "fakturor@navkund.example" });
+    expect(mailbox.configs.at(-1)).toMatchObject({ password: PASSWORD });
+    // The settings refuse the same, before anything is written.
+    await expect(settings.update({ mailHost: "imap.annan.example", mailPassword: "" }, userId)).rejects.toBeInstanceOf(InvoiceScanMailPasswordRequiredError);
+    expect(await setting("invoice_scan_mail_host")).toBe("imap.navkund.example");
+    await settings.update({ mailHost: "imap.annan.example", mailPassword: "nytt-losen" }, userId);
+    expect(await setting("invoice_scan_mail_host")).toBe("imap.annan.example");
+  });
+
+  it("refuses the processed folder being the folder that is read", async () => {
+    await enableMail();
+    await expect(mail.testMail({ mailProcessedFolder: "inbox" })).rejects.toBeInstanceOf(InvoiceScanMailFoldersEqualError);
+    await expect(settings.update({ mailFolder: "Nav/Inlästa/" }, userId)).rejects.toBeInstanceOf(InvoiceScanMailFoldersEqualError);
+    expect(await setting("invoice_scan_mail_folder")).toBeNull();
+  });
+
+  it("requires STARTTLS when TLS is off — never a clear-text login", () => {
+    const base = { host: "imap.navkund.example", port: 143, user: "u", password: PASSWORD, folder: "INBOX", processedFolder: "Nav/Inlästa" };
+    expect(imapflowOptions({ ...base, tls: false })).toMatchObject({ secure: false, doSTARTTLS: true });
+    const tls = imapflowOptions({ ...base, tls: true, port: 993 });
+    expect(tls.secure).toBe(true);
+    expect(tls).not.toHaveProperty("doSTARTTLS");
+    expect(tls.logger).toBe(false);
   });
 
   it("fails with the Swedish reason", async () => {

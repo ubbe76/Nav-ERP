@@ -12,9 +12,18 @@ import {
   normalizeOrgNumber,
 } from "../src/modules/purchase/service/invoice-scan/identifiers.js";
 import { findAmounts, findDates, parseLastAmount, plausibleDueDate, plausibleInvoiceDate } from "../src/modules/purchase/service/invoice-scan/invoice-values.js";
-import { allLines, buildLines, extractPdfText, hasTextLayer, PdfUnreadableError, type PdfTextLine } from "../src/modules/purchase/service/invoice-scan/pdf-text.js";
+import {
+  allLines,
+  buildLines,
+  extractPdfText,
+  hasTextLayer,
+  PdfUnreadableError,
+  settleWithin,
+  type PdfTextLine,
+} from "../src/modules/purchase/service/invoice-scan/pdf-text.js";
 import {
   interpretRules,
+  learnableLabel,
   learnLabels,
   matchSupplier,
   normalizeLabel,
@@ -131,6 +140,10 @@ describe("dates and amounts", () => {
     expect(values("1234.50 SEK")).toEqual([1234.5]);
     expect(values("−1 234,50 kr")).toEqual([-1234.5]);
     expect(values("1 234,50-")).toEqual([-1234.5]);
+    // A dash with a space before the number is a separator, not a sign.
+    expect(values("Att betala – 1 234,50")).toEqual([1234.5]);
+    expect(values("Att betala - 1 234,50")).toEqual([1234.5]);
+    expect(values("Att betala -1 234,50")).toEqual([-1234.5]);
     expect(values("30.11.2026")).toEqual([]);
     expect(values("25,00 %")).toEqual([]);
     expect(values("1250")).toEqual([]);
@@ -170,6 +183,15 @@ describe("pdf-text", () => {
     expect(text.pageCount).toBe(3);
     expect(text.pages).toHaveLength(2);
     expect(text.truncated).toBe(true);
+  });
+
+  it("never waits longer than the limit for pdfjs's teardown", async () => {
+    const hanging = new Promise(() => {});
+    const started = Date.now();
+    expect(await settleWithin(hanging, 50)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(await settleWithin(Promise.resolve(), 50)).toBe(true);
+    expect(await settleWithin(Promise.reject(new Error("x")), 50)).toBe(true);
   });
 
   it("groups items into lines on y and cells on the gap", () => {
@@ -278,6 +300,21 @@ describe("interpretRules on a generated invoice", () => {
     expect(result.vatAmount.value).toBe(-250);
   });
 
+  it("reads a dash between the label and the amount as a separator, not a credit note", () => {
+    const lines = buildLines(
+      [
+        { text: "Summa exkl. moms – 1 000,00", x: 40, y: 100, width: 200 },
+        { text: "Moms – 250,00", x: 40, y: 120, width: 200 },
+        { text: "Att betala – 1 250,00", x: 40, y: 140, width: 200 },
+      ],
+      1
+    );
+    const result = interpretRules({ lines, company, suppliers: [supplier], hints: [], today: TODAY });
+    expect(result.grossAmount).toMatchObject({ value: 1250, confidence: "high" });
+    expect(result.netAmount.value).toBe(1000);
+    expect(result.isCreditNote.value).toBe(false);
+  });
+
   it("proposes an OCR without a valid check digit as a message (low)", async () => {
     const lines = await linesOf(invoicePdf({ ocr: "471100017" }));
     const result = interpretRules({ lines, company, suppliers: [supplier], hints: [], today: TODAY });
@@ -319,17 +356,69 @@ describe("interpretRules on a generated invoice", () => {
 
 describe("learnLabels", () => {
   it("finds the label to the left of, or above, the confirmed value", async () => {
-    const beside = await linesOf(invoicePdf());
-    expect(
-      learnLabels(beside, { invoiceNumber: "10045", invoiceDate: "2026-10-01", grossAmount: 1250, paymentReference: FAKE_OCR })
-    ).toEqual([
-      { field: "invoiceNumber", label: "fakturanummer" },
-      { field: "invoiceDate", label: "fakturadatum" },
-      { field: "grossAmount", label: "att betala" },
-      { field: "paymentReference", label: "ocr-nummer" },
+    const beside = await linesOf(invoicePdf({ labels: { invoiceNumber: "Verifikat:", gross: "Slutsumma:" } }));
+    expect(learnLabels(beside, { invoiceNumber: "10045", grossAmount: 1250 })).toEqual([
+      { field: "invoiceNumber", label: "verifikat" },
+      { field: "grossAmount", label: "slutsumma" },
     ]);
     const above = await linesOf(invoicePdf({ headerRow: true, ocr: null, labels: { invoiceNumber: "Fakt.nr" } }));
     expect(learnLabels(above, { invoiceNumber: "10045" })).toEqual([{ field: "invoiceNumber", label: "fakt.nr" }]);
+  });
+
+  it("never learns a standard label (of any field), nor a label under four characters", async () => {
+    // The rules already know these: nothing to learn.
+    const beside = await linesOf(invoicePdf());
+    expect(
+      learnLabels(beside, { invoiceNumber: "10045", invoiceDate: "2026-10-01", grossAmount: 1250, paymentReference: FAKE_OCR })
+    ).toEqual([]);
+    // A short label beside the value learns nothing — and the cell above is
+    // not taken instead.
+    const short = buildLines(
+      [
+        { text: "Verifikat", x: 40, y: 100, width: 60 },
+        { text: "Nr: 10045", x: 40, y: 120, width: 60 },
+      ],
+      1
+    );
+    expect(learnLabels(short, { invoiceNumber: "10045" })).toEqual([]);
+    // Another field's standard label ("Datum" learned for the due date).
+    const other = buildLines([{ text: "Datum 2026-10-31", x: 40, y: 100, width: 100 }], 1);
+    expect(learnLabels(other, { dueDate: "2026-10-31" })).toEqual([]);
+    expect(learnableLabel("nr")).toBe(false);
+    expect(learnableLabel("datum")).toBe(false);
+    expect(learnableLabel("förfallodatum")).toBe(false);
+    expect(learnableLabel("att betala")).toBe(false);
+    expect(learnableLabel("verifikat")).toBe(true);
+    expect(learnableLabel("levdatum")).toBe(true);
+  });
+
+  it("uses learned labels on word boundaries only, and ignores stored labels that break the rule", () => {
+    const lines = buildLines(
+      [
+        { text: "Org.nr 559900-1236", x: 40, y: 100, width: 150 },
+        { text: "Orderdatum 2026-09-01", x: 40, y: 120, width: 150 },
+        { text: "Slutlevdatum 2026-09-15", x: 40, y: 140, width: 150 },
+        { text: "Fakturadatum 2026-10-01", x: 40, y: 160, width: 150 },
+        { text: "Levdatum 2026-10-31", x: 40, y: 180, width: 150 },
+      ],
+      1
+    );
+    const result = interpretRules({
+      lines,
+      company,
+      suppliers: [supplier],
+      // Stored before the rule: too short / a standard label.
+      hints: [
+        { field: "invoiceNumber", label: "nr" },
+        { field: "invoiceDate", label: "datum" },
+        { field: "dueDate", label: "levdatum" },
+      ],
+      today: TODAY,
+    });
+    expect(result.invoiceNumber.value).toBeNull();
+    expect(result.invoiceDate).toEqual({ value: "2026-10-01", confidence: "high", source: "rules" });
+    // "levdatum" answers on its own word, never inside "Slutlevdatum".
+    expect(result.dueDate).toEqual({ value: "2026-10-31", confidence: "high", source: "learned" });
   });
 
   it("learns nothing for a value that is not in the text", async () => {
@@ -409,8 +498,15 @@ describe("purchase order matching", () => {
 
   it("matches the reference with or without the series prefix", () => {
     expect(matchPurchaseOrder({ reference: "IO-1007", tokens: [], orders, prefix: "IO-" })).toEqual({ purchaseOrderId: "po-2", confidence: "high" });
-    expect(matchPurchaseOrder({ reference: "1005", tokens: [], orders, prefix: "IO-" })).toEqual({ purchaseOrderId: "po-1", confidence: "high" });
     expect(matchPurchaseOrder({ reference: "io 1005", tokens: [], orders, prefix: "IO-" })).toEqual({ purchaseOrderId: "po-1", confidence: "high" });
+    expect(matchPurchaseOrder({ reference: null, tokens: ["IO1005"], orders, prefix: "IO-" })).toEqual({ purchaseOrderId: "po-1", confidence: "high" });
+  });
+
+  it("is only low on a bare number without the series' prefix (it may be the supplier's own order number)", () => {
+    expect(matchPurchaseOrder({ reference: "1005", tokens: [], orders, prefix: "IO-" })).toEqual({ purchaseOrderId: "po-1", confidence: "low" });
+    // A series without prefix: every reference is a bare number.
+    const bare = [{ ...orders[0]!, orderNumber: "1005" }];
+    expect(matchPurchaseOrder({ reference: "1005", tokens: [], orders: bare, prefix: "" })).toEqual({ purchaseOrderId: "po-1", confidence: "low" });
   });
 
   it("takes the latest of several candidates as low", () => {

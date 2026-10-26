@@ -101,10 +101,14 @@ Sektionen **Företagsuppgifter som skickas** visar vad som skrivs i e-fakturan s
 
 Reglerna, som läser PDF:ens textlager helt lokalt, används alltid. **AI-tolkning** är ett tillägg för fakturor som reglerna inte klarar, och för foton och inskannade PDF utan textlager (Nav har ingen lokal teckenigenkänning). Utan API-nyckel lämnar ingen fil Nav.
 
-- **Läge**: **Av** (ingen AI), **Automatiskt när reglerna inte räcker** (AI körs på inkomna fakturor där reglerna inte hittar leverantör, fakturanummer, datum och belopp med säkerhet, eller som saknar textlager; för e-post bara om avsändarens domän hör till en leverantör eller en användare) eller **Bara med knappen** (AI körs bara när någon trycker **Tolka med AI** på en faktura).
+- **Läge**: **Av** (ingen AI), **Automatiskt när reglerna inte räcker** (AI körs på inkomna fakturor där reglerna inte hittar leverantör, fakturanummer, datum och belopp med säkerhet, eller som saknar textlager; för e-post bara när avsändaren är känd och verifierad, se nedan) eller **Bara med knappen** (AI körs bara när någon trycker **Tolka med AI** på en faktura).
 - **API-nyckel**: företagets egen nyckel hos Anthropic. Nyckeln visas aldrig igen: ett tomt fält behåller den sparade (fältet visar **Nyckel sparad**) och **Ta bort nyckel** raderar den.
 - **Modell**: vilken modell som tolkar fakturorna — **Claude Opus 5.5 (noggrannast)**, **Claude Sonnet 5.5** eller **Claude Haiku 5.5 (snabbast, billigast)**.
 - **Testa anslutning** gör ett litet anrop med nyckeln i fältet (är det tomt testas den sparade) och vald modell, och visar om det fungerade. Inget sparas av testet.
+
+**Automatisk AI på e-post.** En faktura från e-postlådan tolkas automatiskt bara när avsändaren är känd — avsändaradressens domän är en aktiv leverantörs eller dess kontakters (för publika e-posttjänster som Gmail krävs den exakta adressen), eller adressen är exakt en användares — **och** den mottagande e-postservern har verifierat avsändarens domän (DKIM eller DMARC godkänd i brevets översta Authentication-Results-rubrik). Ett brev utan sådan verifiering, eller med en avsändare som bara utger sig för att vara leverantören, tolkas inte automatiskt; fakturan väntar då på **Tolka med AI**.
+
+**Dagens tak.** Högst 100 automatiska AI-tolkningar görs per dag. När taket är nått väntar nya fakturor på knappen, och fakturan visar *Dagens tak för automatisk AI-tolkning är nått — tryck Tolka med AI*. Knappen **Tolka med AI** räknas inte mot taket.
 
 Det som skickas till AI-tjänsten är **fakturafilen och företagets namn och organisationsnummer** — inget annat. Leverantörsregistret och inköpsordrarna skickas aldrig; leverantören och inköpsordern matchas i Nav på svaret. Inget skickas utan företagets egen API-nyckel, och inget skickas i läget **Av**. AI:ns svar är bara ett förslag som en människa granskar innan leverantörsfakturan skapas.
 
@@ -116,10 +120,10 @@ Det som skickas till AI-tjänsten är **fakturafilen och företagets namn och or
 
 Nav kan läsa en IMAP-låda och lägga bifogade fakturor i Fakturainkorgen. Använd gärna en egen låda för fakturor.
 
-- **Aktiverad** slår på läsningen; **TLS** krypterar anslutningen (förval på, port 993).
-- **Server**, **Port**, **Användare** och **Lösenord**: lösenordet visas aldrig igen — ett tomt fält behåller det sparade (**Lösenord sparat**) och **Ta bort lösenord** raderar det.
-- **Mapp** är mappen som läses (förval `INBOX`) och **Mapp för inlästa** dit lästa brev flyttas (förval `Nav/Inlästa`; skapas vid första körningen om den saknas).
-- **Intervall (minuter)** anger hur ofta lådan läses (1–60, förval 5). Högst 50 brev läses per körning.
+- **Aktiverad** slår på läsningen; **TLS** krypterar anslutningen (förval på, port 993). Med **TLS** av krävs STARTTLS: en server som inte erbjuder kryptering får aldrig lösenordet i klartext, och anslutningen misslyckas.
+- **Server**, **Port**, **Användare** och **Lösenord**: lösenordet visas aldrig igen — ett tomt fält behåller det sparade (**Lösenord sparat**) och **Ta bort lösenord** raderar det. Byter du **Server** eller **Användare** måste lösenordet skrivas in igen, både för **Spara** och **Testa anslutning** — det sparade lösenordet skickas aldrig till en annan server eller användare.
+- **Mapp** är mappen som läses (förval `INBOX`) och **Mapp för inlästa** dit lästa brev flyttas (förval `Nav/Inlästa`; skapas vid första körningen om den saknas). De två får inte vara samma mapp.
+- **Intervall (minuter)** anger hur ofta lådan läses (1–60, förval 5). Högst 50 brev läses per körning, och en körning slutar ta nya brev efter 8 minuter — resten läses vid nästa körning. Högst 10 bilagor per brev läses in; övriga nämns under **Detalj** i **Senast lästa brev**.
 - **Testa anslutning** loggar in med fälten på sidan och visar hur många olästa brev mappen har och om mappen för inlästa finns eller skapas. Inget sparas.
 
 Under fälten visas **Senaste körning** och, om den misslyckades, orsaken; aviseringen **E-postlådan för fakturor kunde inte läsas** på [Aviseringar](/hjalp/aviseringar) pekar hit. Nav försöker igen vid nästa körning.

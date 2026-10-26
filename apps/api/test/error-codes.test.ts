@@ -26,7 +26,11 @@ import {
   InvoiceScanBusyError,
   InvoiceScanDuplicateError,
 } from "../src/modules/purchase/service/invoice-scan.service.js";
-import { InvoiceScanAiTestFailedError } from "../src/modules/purchase/service/invoice-scan-settings.service.js";
+import {
+  InvoiceScanAiTestFailedError,
+  InvoiceScanMailFoldersEqualError,
+  InvoiceScanMailPasswordRequiredError,
+} from "../src/modules/purchase/service/invoice-scan-settings.service.js";
 import { InvoiceScanMailTestFailedError } from "../src/modules/purchase/service/invoice-scan-mail.service.js";
 import { SupplierInvoiceFileFromScanError } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import { readFileSync } from "node:fs";
@@ -808,6 +812,8 @@ const cases: Array<[Error, string]> = [
   [new InvoiceScanBusyError(), ERROR_CODES.INVOICE_SCAN_BUSY],
   [new InvoiceScanAiTestFailedError("API-nyckeln godkändes inte"), ERROR_CODES.INVOICE_SCAN_AI_TEST_FAILED],
   [new InvoiceScanMailTestFailedError("Inloggningen misslyckades"), ERROR_CODES.INVOICE_SCAN_MAIL_TEST_FAILED],
+  [new InvoiceScanMailPasswordRequiredError(), ERROR_CODES.INVOICE_SCAN_MAIL_PASSWORD_REQUIRED],
+  [new InvoiceScanMailFoldersEqualError(), ERROR_CODES.INVOICE_SCAN_MAIL_FOLDERS_EQUAL],
   [new SupplierInvoiceFileFromScanError("FI-1"), ERROR_CODES.SUPPLIER_INVOICE_FILE_FROM_SCAN],
 ];
 

@@ -225,6 +225,9 @@ const MESSAGES: Record<string, MessageEntry> = {
   // The server names what went wrong with the key / the mailbox.
   "invoice-scan-ai-test-failed": serverMessage("AI-tjänsten svarade inte med den här nyckeln och modellen."),
   "invoice-scan-mail-test-failed": serverMessage("Kunde inte ansluta till e-postlådan."),
+  "invoice-scan-mail-password-required":
+    "Skriv in lösenordet igen när server eller användare ändras — det sparade lösenordet skickas inte till en annan server eller användare.",
+  "invoice-scan-mail-folders-equal": "Mapp för inlästa får inte vara samma mapp som den som läses.",
   "customer-payment-amount-sek": (err) => {
     const body = err.body as { reason?: string; currency?: string } | undefined;
     switch (body?.reason) {

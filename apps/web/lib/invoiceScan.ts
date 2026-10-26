@@ -99,7 +99,7 @@ export interface InvoiceScanListRow {
   rejectedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  // The matched supplier, null when none.
+  // The matched supplier (a converted scan: the created invoice's), null when none.
   supplierName: string | null;
   supplierInvoiceRegistrationNumber: string | null;
   supplierId: string | null;
@@ -109,8 +109,21 @@ export interface InvoiceScanListRow {
   uncertain: boolean;
 }
 
+// A converted scan: the supplier invoice as it was created.
+export interface InvoiceScanCreatedInvoice {
+  registrationNumber: string | null;
+  supplierId: string;
+  supplierName: string | null;
+  invoiceNumber: string;
+  invoiceDate: string | null;
+  grossAmount: number | null;
+  currency: string | null;
+}
+
 // GET /invoice-scans/:id.
 export interface InvoiceScanDetail extends Omit<InvoiceScanListRow, "supplierId" | "invoiceNumber" | "grossAmount" | "currency"> {
+  // Skapad: the created supplier invoice's values (null otherwise).
+  createdInvoice: InvoiceScanCreatedInvoice | null;
   result: InvoiceScanResult | null;
   // A stored result in an unknown shape — Tolka igen replaces it.
   resultOutdated: boolean;
@@ -269,10 +282,23 @@ export function newSupplierHref(supplier: InvoiceScanSupplier, returnTo: string)
 }
 
 // returnTo comes from the URL: only a path inside the app is followed (no
-// "//host", no scheme), anything else is dropped.
+// "//host", no scheme), anything else is dropped. Browsers strip tab and
+// newline out of a URL ("/\t/evil.example" becomes "//evil.example") and read
+// "\" as "/", so control characters and backslashes are refused outright, and
+// what is left must resolve to this very origin. Pure (no window): the
+// origin is a placeholder that only the path itself could change.
+const RETURN_TO_BASE = "https://nav.invalid";
 export function safeReturnTo(value: string | null | undefined): string | null {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return null;
-  return value;
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return null;
+  let url: URL;
+  try {
+    url = new URL(value, RETURN_TO_BASE);
+  } catch {
+    return null;
+  }
+  if (url.origin !== RETURN_TO_BASE) return null;
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 // The scan's value for a main field is "uncertain" when something was found

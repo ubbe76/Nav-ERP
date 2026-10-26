@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, like, sql } from "drizzle-orm";
-import { companyInfo, db, invoiceScans, supplierContacts, suppliers, systemSettings } from "@navet/db";
+import { companyInfo, db, invoiceScans, supplierContacts, suppliers, systemSettings, users } from "@navet/db";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService } from "../src/modules/system/service/system.service.js";
@@ -8,6 +8,8 @@ import { createSupplierInvoiceRepository } from "../src/modules/purchase/reposit
 import { createSupplierInvoiceService } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import { createInvoiceScanRepository } from "../src/modules/purchase/repository/invoice-scan.repository.js";
 import {
+  AI_AUTOMATIC_DAILY_MAX,
+  AI_DAILY_CAP_TEXT,
   createInvoiceScanService,
   InvoiceScanAiNotConfiguredError,
   InvoiceScanBusyError,
@@ -323,6 +325,54 @@ describe("Tolka med AI", () => {
   });
 });
 
+describe("Tolka igen after an AI interpretation", () => {
+  it("keeps the AI's result for an image and a PDF without text layer — only the check is added", async () => {
+    await enableAi("manual");
+    const photo = await jpeg();
+    const scanned = await pdf(await imageOnlyPdf());
+    for (const id of [photo.id, scanned.id]) {
+      const ai = await service.interpret(id, "ai");
+      expect(ai.interpretedBy).toBe("ai");
+      const again = await service.interpret(id, "rules");
+      expect(again.interpretedBy).toBe("ai");
+      expect(again.status).toBe("interpreted");
+      expect(again.result!.grossAmount.value).toBe(ai.result!.grossAmount.value);
+      expect(again.result!.invoiceNumber).toEqual(ai.result!.invoiceNumber);
+      expect(again.result!.checks.filter((c) => /Bilder tolkas inte lokalt|saknar textlager/.test(c))).toHaveLength(1);
+      // Twice: the check is not repeated.
+      const third = await service.interpret(id, "rules");
+      expect(third.result!.checks).toEqual(again.result!.checks);
+    }
+  });
+
+  it("keeps the result when the PDF cannot be read any more", async () => {
+    await enableAi("manual");
+    let broken = false;
+    const flaky = createInvoiceScanService({
+      repo,
+      supplierInvoices: supplierInvoiceService,
+      company: systemService,
+      settings,
+      audit,
+      interpreters: fake.factory,
+      today: () => TODAY,
+      extractText: async (data) => {
+        if (broken) throw new TypeError("boom");
+        const { extractPdfText } = await import("../src/modules/purchase/service/invoice-scan/pdf-text.js");
+        return extractPdfText(data);
+      },
+      log: () => {},
+    });
+    const created = (await flaky.upload([{ filename: "f.pdf", contentType: "application/pdf", data: await imageOnlyPdf(), truncated: false }], userId)).created[0]!;
+    await flaky.interpret(created.id, "ai");
+    broken = true;
+    const again = await flaky.interpret(created.id, "rules");
+    expect(again).toMatchObject({ status: "interpreted", interpretedBy: "ai" });
+    expect(again.result!.grossAmount.value).not.toBeNull();
+    expect(again.result!.checks).toContain("PDF:en gick inte att läsa");
+  });
+});
+
 describe("automatic AI (Automatiskt när reglerna inte räcker)", () => {
   it("leaves a PDF alone when the rules were enough", async () => {
     await makeSupplier();
@@ -366,21 +416,77 @@ describe("automatic AI (Automatiskt när reglerna inte räcker)", () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it("follows avsändarregeln for e-mailed scans", async () => {
+  it("follows avsändarregeln for e-mailed scans — only with the letter's authenticated domain", async () => {
     const supplier = await makeSupplier({ email: "info@platgrossisten.example" });
     await db.insert(supplierContacts).values({ supplierId: supplier.id, name: "Ekonomi", email: "ekonomi@kontakt.example" });
     await enableAi("fallback");
-    const asEmail = async (from: string, filler: number) => {
-      const scan = await jpeg(Buffer.concat([jpegImage(), Buffer.from([filler])]));
+    let filler = 3;
+    const asEmail = async (from: string) => {
+      const scan = await jpeg(Buffer.concat([jpegImage(), Buffer.from([filler++])]));
       await db.update(invoiceScans).set({ source: "email", emailFrom: from }).where(eq(invoiceScans.id, scan.id));
       return scan.id;
     };
-    const known = await asEmail("Plåtgrossisten <faktura@platgrossisten.example>", 3);
-    const contact = await asEmail("ekonomi@kontakt.example", 4);
-    const spam = await asEmail("erbjudande@reklam.example", 5);
-    await service.automaticAi([known, contact, spam]);
+    const authenticated = { authenticatedDomains: ["platgrossisten.example", "kontakt.example", "reklam.example"] };
+    const known = await asEmail("Plåtgrossisten <faktura@platgrossisten.example>");
+    const contact = await asEmail("ekonomi@kontakt.example");
+    const spam = await asEmail("erbjudande@reklam.example");
+    await service.automaticAi([known, contact, spam], authenticated);
     expect(fake.calls).toHaveLength(2);
     expect((await service.get(spam)).interpretedBy).toBe("rules");
+
+    // A forged From: the domain is a supplier's, but the receiving server
+    // did not authenticate it — and without the letter's context at all.
+    const forged = await asEmail("faktura@platgrossisten.example");
+    await service.automaticAi([forged], { authenticatedDomains: ["annan.example"] });
+    await service.automaticAi([forged]);
+    expect(fake.calls).toHaveLength(2);
+    expect((await service.get(forged)).interpretedBy).toBe("rules");
+  });
+
+  it("lets the company's own users through on the exact address only", async () => {
+    await enableAi("fallback");
+    await db.update(users).set({ email: "inkop@navkund.example" }).where(eq(users.id, userId));
+    let filler = 20;
+    const asEmail = async (from: string) => {
+      const scan = await jpeg(Buffer.concat([jpegImage(), Buffer.from([filler++])]));
+      await db.update(invoiceScans).set({ source: "email", emailFrom: from }).where(eq(invoiceScans.id, scan.id));
+      return scan.id;
+    };
+    const auth = { authenticatedDomains: ["navkund.example"] };
+    const colleague = await asEmail("annan@navkund.example");
+    const self = await asEmail("Inköp <inkop@navkund.example>");
+    await service.automaticAi([colleague, self], auth);
+    expect(fake.calls).toHaveLength(1);
+    expect((await service.get(self)).interpretedBy).toBe("ai");
+  });
+
+  it("stops at the day's cap and leaves the scan to the button with the reason", async () => {
+    await enableAi("fallback");
+    // The day's counter already at the cap.
+    await db.insert(systemSettings).values({ key: "invoice_scan_ai_auto_count", value: `${TODAY}|${AI_AUTOMATIC_DAILY_MAX}` });
+    const scan = await jpeg();
+    await service.automaticAi([scan.id]);
+    expect(fake.calls).toHaveLength(0);
+    const detail = await service.get(scan.id);
+    expect(detail.aiError).toBe(AI_DAILY_CAP_TEXT);
+    expect(detail.aiStartedAt).toBeNull();
+    // The button is not capped.
+    expect((await service.interpret(scan.id, "ai")).interpretedBy).toBe("ai");
+    expect(fake.calls).toHaveLength(1);
+    // Yesterday's count does not hold today back, and every automatic call counts.
+    await db.update(systemSettings).set({ value: `2026-10-14|${AI_AUTOMATIC_DAILY_MAX}` }).where(eq(systemSettings.key, "invoice_scan_ai_auto_count"));
+    const next = await jpeg(Buffer.concat([jpegImage(), Buffer.from([9])]));
+    await service.automaticAi([next.id]);
+    expect(fake.calls).toHaveLength(2);
+    const [counter] = await db.select().from(systemSettings).where(eq(systemSettings.key, "invoice_scan_ai_auto_count"));
+    expect(counter!.value).toBe(`${TODAY}|1`);
+  });
+
+  it("counts the day's calls atomically", async () => {
+    const results = await Promise.all(Array.from({ length: 8 }, () => repo.claimAutomaticAiCall(TODAY, 5)));
+    expect(results.filter(Boolean)).toHaveLength(5);
+    const [counter] = await db.select().from(systemSettings).where(eq(systemSettings.key, "invoice_scan_ai_auto_count"));
+    expect(counter!.value).toBe(`${TODAY}|5`);
   });
 
   it("runs one scan at a time", async () => {

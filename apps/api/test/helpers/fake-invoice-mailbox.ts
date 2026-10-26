@@ -138,6 +138,9 @@ export async function buildLetter(opts: {
   date?: Date;
   messageId?: string | null;
   attachments?: LetterAttachment[];
+  // Authentication-Results headers put on top of the letter, first = topmost
+  // (what the receiving server adds). Omitted = none.
+  authenticationResults?: string[];
 }): Promise<Buffer> {
   const inline = (opts.attachments ?? []).filter((a) => a.cid);
   const composer = new MailComposer({
@@ -155,7 +158,8 @@ export async function buildLetter(opts: {
       ...(a.cid ? { cid: a.cid, contentDisposition: "inline" as const } : {}),
     })),
   });
-  const built = await new Promise<Buffer>((resolve, reject) => composer.compile().build((err, message) => (err ? reject(err) : resolve(message))));
-  if (opts.messageId === null) return Buffer.from(built.toString("latin1").replace(/^Message-ID: .*\r\n/im, ""), "latin1");
-  return built;
+  let built = await new Promise<Buffer>((resolve, reject) => composer.compile().build((err, message) => (err ? reject(err) : resolve(message))));
+  if (opts.messageId === null) built = Buffer.from(built.toString("latin1").replace(/^Message-ID: .*\r\n/im, ""), "latin1");
+  const auth = (opts.authenticationResults ?? []).map((value) => `Authentication-Results: ${value}\r\n`).join("");
+  return auth ? Buffer.concat([Buffer.from(auth, "latin1"), built]) : built;
 }

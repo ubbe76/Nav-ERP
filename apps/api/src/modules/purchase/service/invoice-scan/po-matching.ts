@@ -21,18 +21,23 @@ function canon(value: string): string {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-// The order numbers the reference can mean: the number itself, and with or
-// without the series prefix ("1005" ⇔ "IO-1005").
-function referenceMatches(reference: string, orderNumber: string, prefix: string): boolean {
+// How the reference names the order: "full" — with the series' own prefix
+// ("IO-1005", "io 1005"); "number" — only the number part ("1005", what a
+// generic label like Ordernummer or PO usually carries — the supplier's own
+// order number may be the same digits); null — not this order.
+function referenceMatch(reference: string, orderNumber: string, prefix: string): "full" | "number" | null {
   const ref = canon(reference);
-  if (ref === "") return false;
+  if (ref === "") return null;
   const full = canon(orderNumber);
-  if (ref === full) return true;
+  // A reference that IS the order number counts as named with the prefix
+  // when the number carries letters at all (a series without prefix gives
+  // bare numbers only).
+  if (ref === full) return /[A-Z]/.test(full) ? "full" : "number";
   if (prefix !== "" && orderNumber.toUpperCase().startsWith(prefix.toUpperCase())) {
     const numberPart = canon(orderNumber.slice(prefix.length));
-    if (ref === numberPart) return true;
+    if (ref === numberPart) return "number";
   }
-  return false;
+  return null;
 }
 
 // Tokens in the text layer that look like a number in the series (the
@@ -52,9 +57,10 @@ export interface PurchaseOrderMatch {
   confidence: "high" | "low";
 }
 
-// A unique candidate on the reference (or the text's tokens) ⇒ high; several
-// ⇒ low with the latest. No reference and no token, but exactly one
-// received order that is not fully invoiced ⇒ low.
+// A unique candidate on the reference (or the text's tokens) ⇒ high when it
+// was named with the series' prefix (a token always is), low when only the
+// bare number matched; several ⇒ low with the latest. No reference and no
+// token, but exactly one received order that is not fully invoiced ⇒ low.
 export function matchPurchaseOrder(input: {
   reference: string | null;
   tokens: string[];
@@ -64,9 +70,13 @@ export function matchPurchaseOrder(input: {
   const latest = (orders: PurchaseOrderCandidate[]) => [...orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]!;
   const wanted = [...(input.reference ? [input.reference] : []), ...input.tokens];
   if (wanted.length > 0) {
-    const hits = input.orders.filter((o) => wanted.some((w) => referenceMatches(w, o.orderNumber, input.prefix)));
-    if (hits.length === 1) return { purchaseOrderId: hits[0]!.id, confidence: "high" };
-    if (hits.length > 1) return { purchaseOrderId: latest(hits).id, confidence: "low" };
+    const how = (o: PurchaseOrderCandidate) => {
+      const kinds = wanted.map((w) => referenceMatch(w, o.orderNumber, input.prefix));
+      return kinds.includes("full") ? "full" : kinds.includes("number") ? "number" : null;
+    };
+    const hits = input.orders.map((o) => ({ order: o, how: how(o) })).filter((h) => h.how !== null);
+    if (hits.length === 1) return { purchaseOrderId: hits[0]!.order.id, confidence: hits[0]!.how === "full" ? "high" : "low" };
+    if (hits.length > 1) return { purchaseOrderId: latest(hits.map((h) => h.order)).id, confidence: "low" };
   }
   if (input.reference === null && input.tokens.length === 0) {
     const open = input.orders.filter((o) => !o.fullyInvoiced);

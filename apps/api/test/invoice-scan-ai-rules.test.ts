@@ -11,7 +11,7 @@ import {
 } from "../src/modules/purchase/service/invoice-scan/claude-interpreter.js";
 import { InvoiceInterpreterError } from "../src/modules/purchase/service/invoice-scan/invoice-interpreter.js";
 import type { CompanyIdentity, SupplierIdentity } from "../src/modules/purchase/service/invoice-scan/rules-interpreter.js";
-import { emailAddress, senderAllowsAutomaticAi } from "../src/modules/purchase/service/invoice-scan/sender-rule.js";
+import { authenticatedDomains, emailAddress, senderAllowsAutomaticAi } from "../src/modules/purchase/service/invoice-scan/sender-rule.js";
 import { sampleAiFields } from "./helpers/fake-invoice-interpreter.js";
 import { FAKE_BUYER, FAKE_OCR, FAKE_SUPPLIER } from "./helpers/invoice-pdf.js";
 
@@ -340,22 +340,57 @@ describe("the Claude wire format", () => {
 });
 
 describe("avsändarregeln", () => {
-  const known = ["faktura@platgrossisten.example", "Inköp <inkop@navtest.example>", "kalle@gmail.com", null];
+  const known = {
+    suppliers: ["faktura@platgrossisten.example", "Inköp <inkop@navtest.example>", "kalle@gmail.com", null],
+    users: ["ekonomi@navkund.example"],
+  };
+  const all = ["platgrossisten.example", "navtest.example", "gmail.com", "reklam.example", "navkund.example"];
 
   it("reads the address out of a From header", () => {
     expect(emailAddress("Plåtgrossisten <Faktura@Platgrossisten.Example>")).toBe("faktura@platgrossisten.example");
     expect(emailAddress("not an address")).toBeNull();
   });
 
-  it("lets a known domain through and nothing else", () => {
-    expect(senderAllowsAutomaticAi("Ekonomi <ekonomi@platgrossisten.example>", known)).toBe(true);
-    expect(senderAllowsAutomaticAi("bob@navtest.example", known)).toBe(true);
-    expect(senderAllowsAutomaticAi("offers@reklam.example", known)).toBe(false);
-    expect(senderAllowsAutomaticAi(null, known)).toBe(false);
+  it("lets a known, authenticated domain through and nothing else", () => {
+    expect(senderAllowsAutomaticAi("Ekonomi <ekonomi@platgrossisten.example>", known, all)).toBe(true);
+    expect(senderAllowsAutomaticAi("bob@navtest.example", known, all)).toBe(true);
+    expect(senderAllowsAutomaticAi("offers@reklam.example", known, all)).toBe(false);
+    expect(senderAllowsAutomaticAi(null, known, all)).toBe(false);
+  });
+
+  it("never trusts a From domain the receiving server did not authenticate", () => {
+    expect(senderAllowsAutomaticAi("faktura@platgrossisten.example", known, [])).toBe(false);
+    expect(senderAllowsAutomaticAi("faktura@platgrossisten.example", known, ["annan.example"])).toBe(false);
+    // A parent or sibling domain is not the From domain.
+    expect(senderAllowsAutomaticAi("faktura@mail.platgrossisten.example", known, ["platgrossisten.example"])).toBe(false);
   });
 
   it("needs the exact address on a public mail provider", () => {
-    expect(senderAllowsAutomaticAi("Kalle <kalle@gmail.com>", known)).toBe(true);
-    expect(senderAllowsAutomaticAi("spam@gmail.com", known)).toBe(false);
+    expect(senderAllowsAutomaticAi("Kalle <kalle@gmail.com>", known, all)).toBe(true);
+    expect(senderAllowsAutomaticAi("spam@gmail.com", known, all)).toBe(false);
+  });
+
+  it("lets the company's users through on the exact address only", () => {
+    expect(senderAllowsAutomaticAi("ekonomi@navkund.example", known, all)).toBe(true);
+    expect(senderAllowsAutomaticAi("vem-som-helst@navkund.example", known, all)).toBe(false);
+    expect(senderAllowsAutomaticAi("ekonomi@navkund.example", known, [])).toBe(false);
+  });
+
+  it("reads dmarc=pass and dkim=pass out of Authentication-Results", () => {
+    // Gmail's form: authserv-id first, comments, header.i with @.
+    expect(
+      authenticatedDomains(
+        "Authentication-Results: mx.google.com;\r\n       dkim=pass header.i=@platgrossisten.example header.s=sel header.b=abc;\r\n       spf=pass (google.com: domain of x@y designates 1.2.3.4) smtp.mailfrom=bounce@esp.example;\r\n       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=platgrossisten.example"
+      )
+    ).toEqual(["platgrossisten.example"]);
+    // Microsoft's form: no authserv-id, header.d.
+    expect(
+      authenticatedDomains(
+        "Authentication-Results: spf=pass (sender IP is 1.2.3.4) smtp.mailfrom=esp.example; dkim=pass (signature was verified) header.d=Kontakt.Example;dmarc=fail action=none header.from=platgrossisten.example;compauth=pass reason=100"
+      )
+    ).toEqual(["kontakt.example"]);
+    expect(authenticatedDomains("Authentication-Results: mx.example; dkim=fail header.d=a.example; dmarc=none header.from=a.example")).toEqual([]);
+    expect(authenticatedDomains("Authentication-Results: mx.example; spf=pass smtp.mailfrom=a.example")).toEqual([]);
+    expect(authenticatedDomains(null)).toEqual([]);
   });
 });

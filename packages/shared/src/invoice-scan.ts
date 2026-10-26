@@ -230,6 +230,24 @@ export const INVOICE_SCAN_MAIL_FOLDER_DEFAULT = "INBOX";
 export const INVOICE_SCAN_MAIL_PROCESSED_FOLDER_DEFAULT = "Nav/Inlästa";
 export const INVOICE_SCAN_MAIL_INTERVAL_DEFAULT = 5;
 
+// Mapp and Mapp för inlästa must differ: a letter moved onto its own folder
+// would be read again every run. Compared level by level ("/"), trimmed and
+// case-insensitive (INBOX is case-insensitive in IMAP, and a server that
+// folds the rest would make them the same folder anyway).
+export const INVOICE_SCAN_MAIL_FOLDERS_EQUAL_TEXT = "Mapp för inlästa får inte vara samma mapp som den som läses";
+export function sameMailFolder(a: string, b: string): boolean {
+  const canon = (path: string) =>
+    path
+      .split("/")
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s !== "")
+      .join("/");
+  return canon(a) === canon(b);
+}
+const foldersDiffer = (v: { mailFolder?: string; mailProcessedFolder?: string }) =>
+  v.mailFolder === undefined || v.mailProcessedFolder === undefined || !sameMailFolder(v.mailFolder, v.mailProcessedFolder);
+const foldersDifferIssue = { message: INVOICE_SCAN_MAIL_FOLDERS_EQUAL_TEXT, path: ["mailProcessedFolder"] };
+
 // Write-only secrets: "" = keep the stored value (the form never sees it),
 // null = remove it. Printable characters only — they reach a header or an
 // IMAP command.
@@ -252,7 +270,8 @@ export const updateInvoiceScanSettingsSchema = z
     mailProcessedFolder: z.string().trim().min(1).max(200).optional(),
     mailIntervalMinutes: z.coerce.number().int().min(1).max(60).optional(),
   })
-  .strict();
+  .strict()
+  .refine(foldersDiffer, foldersDifferIssue);
 export type UpdateInvoiceScanSettingsInput = z.infer<typeof updateInvoiceScanSettingsSchema>;
 
 // Testa anslutning (AI): the key typed in the form (omitted or "" = the
@@ -277,7 +296,8 @@ export const testInvoiceScanMailSchema = z
     mailFolder: z.string().trim().min(1).max(200).optional(),
     mailProcessedFolder: z.string().trim().min(1).max(200).optional(),
   })
-  .strict();
+  .strict()
+  .refine(foldersDiffer, foldersDifferIssue);
 export type TestInvoiceScanMailInput = z.infer<typeof testInvoiceScanMailSchema>;
 
 // Senast lästa brev (GET /settings/invoice-scan/mail-log).

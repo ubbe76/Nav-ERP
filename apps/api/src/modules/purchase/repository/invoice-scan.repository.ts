@@ -1,3 +1,4 @@
+import { alias } from "drizzle-orm/pg-core";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, isNotNull, isNull, like, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   articles,
@@ -34,6 +35,8 @@ const MAIL_LEASE_KEY = "invoice_scan_mail_lease_until";
 const MAIL_RUN_KEY = "invoice_scan_mail_last_run_at";
 const MAIL_ERROR_KEY = "invoice_scan_mail_last_error";
 const MAIL_SUCCESS_KEY = "invoice_scan_mail_last_success_at";
+// Automatic AI calls on the current Stockholm day ("YYYY-MM-DD|n").
+const AI_AUTO_COUNT_KEY = "invoice_scan_ai_auto_count";
 // At most this many learned labels per supplier and field.
 export const MAX_HINTS_PER_FIELD = 5;
 // An AI reservation older than this is taken over (a process that died
@@ -177,19 +180,35 @@ async function insertScanInTx(tx: Tx, input: NewScanInput): Promise<InsertScanOu
   }
 }
 
+// The created supplier invoice's supplier (a converted scan shows what was
+// created, not the proposal).
+const createdSuppliers = alias(suppliers, "created_suppliers");
+
+// The created supplier invoice's values, for a converted scan.
+const createdColumns = {
+  createdSupplierId: supplierInvoices.supplierId,
+  createdSupplierName: createdSuppliers.name,
+  createdInvoiceNumber: supplierInvoices.invoiceNumber,
+  createdInvoiceDate: supplierInvoices.invoiceDate,
+  createdGrossAmount: supplierInvoices.grossAmount,
+  createdCurrency: supplierInvoices.currency,
+};
+
 export function createInvoiceScanRepository(db: Db) {
   // The list's columns: the scan without its file, the matched supplier's
-  // name and the created supplier invoice's LF- number.
+  // name and the created supplier invoice's LF- number and values.
   const listSelect = () =>
     db
       .select({
         ...scanColumns,
         supplierName: suppliers.name,
         supplierInvoiceRegistrationNumber: supplierInvoices.registrationNumber,
+        ...createdColumns,
       })
       .from(invoiceScans)
       .leftJoin(suppliers, sql`${suppliers.id} = ${matchedSupplierIdSql}`)
-      .leftJoin(supplierInvoices, eq(supplierInvoices.id, invoiceScans.supplierInvoiceId));
+      .leftJoin(supplierInvoices, eq(supplierInvoices.id, invoiceScans.supplierInvoiceId))
+      .leftJoin(createdSuppliers, eq(createdSuppliers.id, supplierInvoices.supplierId));
 
   return {
     async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -257,6 +276,18 @@ export function createInvoiceScanRepository(db: Db) {
       return rows.length > 0 ? until : null;
     },
 
+    // Extends the run's lease to `next`, only while it is still `until` (ours):
+    // the new value, or null when another run has taken over.
+    async renewMailLease(until: string, next: Date): Promise<string | null> {
+      const value = next.toISOString();
+      const rows = await db
+        .update(systemSettings)
+        .set({ value })
+        .where(and(eq(systemSettings.key, MAIL_LEASE_KEY), eq(systemSettings.value, until)))
+        .returning({ key: systemSettings.key });
+      return rows.length > 0 ? value : null;
+    },
+
     // Owner-checked: only the run that wrote `until` releases.
     async releaseMailLease(until: string) {
       await db.delete(systemSettings).where(and(eq(systemSettings.key, MAIL_LEASE_KEY), eq(systemSettings.value, until)));
@@ -290,7 +321,10 @@ export function createInvoiceScanRepository(db: Db) {
             ilike(invoiceScans.emailFrom, pattern),
             ilike(invoiceScans.emailSubject, pattern),
             ilike(suppliers.name, pattern),
-            sql`${interpretedInvoiceNumberSql} ILIKE ${pattern}`
+            sql`${interpretedInvoiceNumberSql} ILIKE ${pattern}`,
+            // A converted scan: the created supplier invoice's values.
+            ilike(createdSuppliers.name, pattern),
+            ilike(supplierInvoices.invoiceNumber, pattern)
           )
         );
       }
@@ -305,6 +339,8 @@ export function createInvoiceScanRepository(db: Db) {
           .select({ total: count() })
           .from(invoiceScans)
           .leftJoin(suppliers, sql`${suppliers.id} = ${matchedSupplierIdSql}`)
+          .leftJoin(supplierInvoices, eq(supplierInvoices.id, invoiceScans.supplierInvoiceId))
+          .leftJoin(createdSuppliers, eq(createdSuppliers.id, supplierInvoices.supplierId))
           .where(where),
       ]);
       return { rows, total: totals[0]!.total };
@@ -324,10 +360,12 @@ export function createInvoiceScanRepository(db: Db) {
           supplierName: suppliers.name,
           supplierInvoiceRegistrationNumber: supplierInvoices.registrationNumber,
           rejectedByName: rejectedByUsers.name,
+          ...createdColumns,
         })
         .from(invoiceScans)
         .leftJoin(suppliers, sql`${suppliers.id} = ${matchedSupplierIdSql}`)
         .leftJoin(supplierInvoices, eq(supplierInvoices.id, invoiceScans.supplierInvoiceId))
+        .leftJoin(createdSuppliers, eq(createdSuppliers.id, supplierInvoices.supplierId))
         .leftJoin(rejectedByUsers, eq(rejectedByUsers.id, invoiceScans.rejectedBy))
         .where(eq(invoiceScans.id, id));
       return row ?? null;
@@ -451,8 +489,9 @@ export function createInvoiceScanRepository(db: Db) {
     },
 
     // Avsändarregeln: the e-mail addresses that may trigger automatic AI —
-    // active suppliers', their contacts' and the company's active users'.
-    async knownSenderAddresses(): Promise<string[]> {
+    // active suppliers' and their contacts' (the domain counts), and the
+    // company's active users' (only the exact address counts).
+    async knownSenderAddresses(): Promise<{ suppliers: string[]; users: string[] }> {
       const [own, contacts, people] = await Promise.all([
         db.select({ email: suppliers.email }).from(suppliers).where(and(eq(suppliers.active, true), isNotNull(suppliers.email))),
         db
@@ -462,7 +501,26 @@ export function createInvoiceScanRepository(db: Db) {
           .where(and(eq(suppliers.active, true), isNotNull(supplierContacts.email))),
         db.select({ email: users.email }).from(users).where(eq(users.active, true)),
       ]);
-      return [...own, ...contacts, ...people].map((r) => r.email).filter((e): e is string => e !== null && e !== "");
+      const present = (rows: { email: string | null }[]) => rows.map((r) => r.email).filter((e): e is string => e !== null && e !== "");
+      return { suppliers: present([...own, ...contacts]), users: present(people) };
+    },
+
+    // Dagens tak för automatisk AI-tolkning: one atomic upsert counts the
+    // call on the Stockholm day `day` ("YYYY-MM-DD|n" in system_settings) —
+    // a new day starts over at 1. false (nothing written) when the day's
+    // count already is `max`.
+    async claimAutomaticAiCall(day: string, max: number): Promise<boolean> {
+      const rows = await db.execute(sql`
+        INSERT INTO system_settings (key, value) VALUES (${AI_AUTO_COUNT_KEY}, ${`${day}|1`})
+        ON CONFLICT (key) DO UPDATE SET value = CASE
+            WHEN split_part(system_settings.value, '|', 1) = ${day}
+              THEN ${day} || '|' || (COALESCE(NULLIF(split_part(system_settings.value, '|', 2), ''), '0')::int + 1)::text
+            ELSE ${`${day}|1`}
+          END
+        WHERE split_part(system_settings.value, '|', 1) <> ${day}
+           OR COALESCE(NULLIF(split_part(system_settings.value, '|', 2), ''), '0')::int < ${max}
+        RETURNING key`);
+      return rows.length > 0;
     },
 
     async reject(id: string, reason: string, userId: string | null): Promise<InvoiceScanRow | null> {
