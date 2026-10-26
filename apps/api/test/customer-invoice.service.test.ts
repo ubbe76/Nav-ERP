@@ -34,6 +34,7 @@ import { createVerificationPoster } from "../src/modules/economy/service/verific
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
+import { vatRateGroupId } from "./helpers/vat-group.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -123,7 +124,7 @@ async function makeArticle(vatRate?: number) {
     name: "Fakturaartikel",
     type: "manufactured",
     active: true,
-    ...(vatRate !== undefined ? { vatRate } : {}),
+    ...(vatRate !== undefined ? { groupId: await vatRateGroupId(vatRate) } : {}),
   });
 }
 

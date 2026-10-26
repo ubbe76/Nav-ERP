@@ -39,10 +39,12 @@ function serverValue(article: Article, field: EditField): string {
 export function ArticlesPageClient({
   articles,
   groups,
+  articleCodes,
   pageSize,
 }: {
   articles: Paged<Article>;
   groups: ArticleGroup[];
+  articleCodes: RegisterEntry[];
   pageSize: number;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
@@ -242,8 +244,8 @@ export function ArticlesPageClient({
           <div className={shellStyles.meta}>{articles.total.toLocaleString("sv-SE")} artiklar</div>
         </div>
         <div className={shellStyles.topbarActions}>
-          <Link href="/artikelgrupper" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
-            Artikelgrupper
+          <Link href="/varugrupper" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
+            Varugrupper
           </Link>
           <Link href="/artiklar/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Importera
@@ -274,9 +276,15 @@ export function ArticlesPageClient({
         />
         <ListFilterSelect
           param="groupId"
-          allLabel="Alla grupper"
-          ariaLabel="Filtrera på artikelgrupp"
+          allLabel="Alla varugrupper"
+          ariaLabel="Filtrera på varugrupp"
           options={groups.map((g) => ({ value: g.id, label: `${g.code} · ${g.name}` }))}
+        />
+        <ListFilterSelect
+          param="articleCodeId"
+          allLabel="Alla artikelkoder"
+          ariaLabel="Filtrera på artikelkod"
+          options={articleCodes.map((c) => ({ value: c.id, label: `${c.code} · ${c.name}` }))}
         />
         <ListExportLink endpoint="/api/v1/articles/csv" />
       </ListToolbar>
@@ -289,7 +297,8 @@ export function ArticlesPageClient({
             { key: "articleNumber", label: "Artikelnummer", width: "160px" },
             { key: "name", label: "Benämning", width: "minmax(200px, 1fr)" },
             { key: "type", label: "Typ", width: editable ? "170px" : "160px" },
-            { key: "groupName", label: "Grupp", width: editable ? "190px" : "140px" },
+            { key: "groupName", label: "Varugrupp", width: editable ? "190px" : "140px" },
+            { key: "articleCodeName", label: "Artikelkod", width: "140px" },
             { key: "unit", label: "Standardenhet", width: editable ? "140px" : "130px" },
             { key: "standardCost", label: "Standardkostnad", width: "160px", align: "right" },
             { key: "active", label: "Status", width: "120px" },
@@ -356,7 +365,7 @@ export function ArticlesPageClient({
                     <Select
                       disabled={saving}
                       value={current(article, "groupId")}
-                      aria-label={`Grupp för ${article.articleNumber}`}
+                      aria-label={`Varugrupp för ${article.articleNumber}`}
                       data-inline={`groupId-${index}`}
                       onChange={(e) => setField(article, "groupId", e.target.value)}
                       onKeyDown={(e) => onCellKeyDown(e, article, "groupId", index)}
@@ -370,6 +379,8 @@ export function ArticlesPageClient({
                     </Select>
                   </div>
                 );
+              case "articleCodeName":
+                return article.articleCodeName ?? "–";
               case "unit":
                 if (!editable) return article.unit;
                 return (

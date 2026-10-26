@@ -78,7 +78,7 @@ function SeriesRow({
   async function handleDelete() {
     if (
       !(await confirmDelete(
-        `Ta bort nummerserien ${seriesLabel(series)}? Artikelgrupper som använder den får standardserien Artikelnummer.`
+        `Ta bort nummerserien ${seriesLabel(series)}? Varugrupper som använder den får standardserien Artikelnummer.`
       ))
     )
       return;

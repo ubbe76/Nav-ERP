@@ -30,17 +30,17 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
     <>
       <div className={shellStyles.topbar}>
         <div>
-          <div className={shellStyles.title}>Artikelgrupper</div>
-          <div className={shellStyles.meta}>{groups.length} grupper</div>
+          <div className={shellStyles.title}>Varugrupper</div>
+          <div className={shellStyles.meta}>{groups.length} varugrupper</div>
         </div>
         <div className={shellStyles.topbarActions}>
           <Link href="/artiklar/register" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Artiklar
           </Link>
           <Button type="button" variant="primary" onClick={() => setModalOpen(true)}>
-            + Ny grupp
+            + Ny varugrupp
           </Button>
-          <HelpLink chapter="artiklar" anchor="artikelgrupper" label="Hjälp om artikelgrupper" />
+          <HelpLink chapter="artiklar" anchor="varugrupper" label="Hjälp om varugrupper" />
         </div>
       </div>
 
@@ -48,6 +48,7 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
         columns={[
           { key: "code", label: "Kod", width: "0.4fr" },
           { key: "name", label: "Namn", width: "1.2fr" },
+          { key: "vat", label: "Moms", width: "0.5fr" },
           { key: "series", label: "Nummerserie", width: "1fr" },
           { key: "description", label: "Beskrivning", width: "minmax(0, 2.4fr)" },
         ]}
@@ -66,6 +67,8 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
                   <strong>{group.name}</strong>
                 </button>
               );
+            case "vat":
+              return `${Number(group.vatRate)} %`;
             case "series":
               return group.numberSeriesKey ? (seriesNames[group.numberSeriesKey] ?? group.numberSeriesKey) : "Standard";
             case "description":
@@ -85,7 +88,7 @@ export function ArticleGroupsPageClient({ groups }: { groups: ArticleGroup[] }) 
         }}
       />
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Ny artikelgrupp">
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Ny varugrupp">
         <NewArticleGroupForm
           onSuccess={() => {
             setModalOpen(false);

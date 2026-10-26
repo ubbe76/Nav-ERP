@@ -407,6 +407,8 @@ export function createImportService(repo: ImportRepository) {
     registersCreated: {
       units: string[];
       articleGroups: string[];
+      // Artikelkoder — only the article import fills it.
+      articleCodes?: string[];
       articles?: string[];
       paymentTerms?: string[];
       deliveryTerms?: string[];

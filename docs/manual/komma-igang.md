@@ -44,7 +44,7 @@ Stationerna, raderna och knappen **+ Ny order** följer din behörighetsgrupp: d
 Alla registerlistor (artiklar, kunder, leverantörer, ordrar, saldon, transaktioner, tidrapporter…) fungerar likadant:
 
 - **Sökfältet** ovanför tabellen söker medan du skriver — t.ex. på artikelnummer/benämning eller ordernummer/namn beroende på lista.
-- **Filterval** (artikeltyp, artikelgrupp, orderstatus…) ligger bredvid sökfältet.
+- **Filterval** (artikeltyp, varugrupp, orderstatus…) ligger bredvid sökfältet.
 - **Bläddring**: listan visar 50 rader åt gången som standard; under tabellen står "Visar X–Y av Z" med sidknappar.
 - **Rader per sida**: bredvid "Visar X–Y av Z" finns valet **Rader per sida** (25/50/100/250). Valet sparas på ditt konto och gäller sedan alla listor du öppnar, tills du ändrar det igen.
 - Sökning, filter och sida ligger i sidans adress — du kan bokmärka eller dela en filtrerad vy.

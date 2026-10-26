@@ -864,10 +864,12 @@ export function createConfiguratorService(deps: {
     const created = await deps.writers.insertArticle(tx, {
       articleNumber: row.articleNumber!, name: row.name!, type: "manufactured", isPhantom: false, active: true,
       unitId: templateArticle.unitId, groupId: templateArticle.groupId ?? undefined,
+      articleCodeId: templateArticle.articleCodeId ?? undefined,
       defaultLocationId: templateArticle.defaultLocationId ?? undefined,
       salesPrice: row.salesPrice ?? undefined, standardCost: row.standardCost ?? undefined,
       ...row.articleFields,
-      // Information (vat, weight, dimensions, planning, alternative units) from the template, like Kopiera från.
+      // Information (weight, dimensions, planning, alternative units) from the template, like Kopiera från;
+      // the VAT rate follows the varugrupp.
       copyFrom: { articleId, parts: ["information"] },
     });
     // The template is locked, so the copy source cannot have vanished.

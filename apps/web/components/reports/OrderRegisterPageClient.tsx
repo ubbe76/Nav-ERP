@@ -19,6 +19,7 @@ import {
   type ArticleGroup,
   type Customer,
   type Paged,
+  type RegisterEntry,
   type Supplier,
 } from "../../lib/types";
 import buttonStyles from "../ui/Button.module.css";
@@ -101,6 +102,7 @@ export interface OrderRegisterDefaults {
   openOnly?: string;
   articleId?: string;
   articleGroupId?: string;
+  articleCodeId?: string;
   withRows?: string;
 }
 
@@ -128,10 +130,12 @@ export function OrderRegisterPageClient({
   const [article, setArticle] = useState<ArticlePickerValue | null>(null);
   const [articleId, setArticleId] = useState(defaults.articleId ?? "");
   const [articleGroupId, setArticleGroupId] = useState(defaults.articleGroupId ?? "");
+  const [articleCodeId, setArticleCodeId] = useState(defaults.articleCodeId ?? "");
   const [withRows, setWithRows] = useState(defaults.withRows === "true");
 
   const [partners, setPartners] = useState<{ id: string; label: string }[]>([]);
   const [groups, setGroups] = useState<ArticleGroup[]>([]);
+  const [articleCodes, setArticleCodes] = useState<RegisterEntry[]>([]);
   const [data, setData] = useState<RegisterResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -150,6 +154,9 @@ export function OrderRegisterPageClient({
     apiFetch<ArticleGroup[]>("/api/v1/article-groups")
       .then(setGroups)
       .catch(() => setGroups([]));
+    apiFetch<RegisterEntry[]>("/api/v1/article-codes")
+      .then(setArticleCodes)
+      .catch(() => setArticleCodes([]));
   }, [side.partnersEndpoint]);
 
   // An article chosen in the URL is shown by number once it is looked up.
@@ -169,6 +176,7 @@ export function OrderRegisterPageClient({
   if (openOnly) qs.set("openOnly", "true");
   if (articleId) qs.set("articleId", articleId);
   if (articleGroupId) qs.set("articleGroupId", articleGroupId);
+  if (articleCodeId) qs.set("articleCodeId", articleCodeId);
   if (withRows) qs.set("withRows", "true");
   const qsString = qs.toString();
 
@@ -247,9 +255,9 @@ export function OrderRegisterPageClient({
                 ))}
               </Select>
             </Field>
-            <Field label="Artikelgrupp" htmlFor="registerGroup">
+            <Field label="Varugrupp" htmlFor="registerGroup">
               <Select id="registerGroup" value={articleGroupId} onChange={(e) => setArticleGroupId(e.target.value)}>
-                <option value="">Alla artikelgrupper</option>
+                <option value="">Alla varugrupper</option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.code} {g.name}
@@ -268,6 +276,16 @@ export function OrderRegisterPageClient({
                   setArticleId(a?.id ?? "");
                 }}
               />
+            </Field>
+            <Field label="Artikelkod" htmlFor="registerArticleCode">
+              <Select id="registerArticleCode" value={articleCodeId} onChange={(e) => setArticleCodeId(e.target.value)}>
+                <option value="">Alla artikelkoder</option>
+                {articleCodes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} {c.name}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </FormRow>
           <div className={styles.toggles}>

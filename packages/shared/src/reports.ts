@@ -81,7 +81,7 @@ export type DeliveryPrecisionCsvQuery = z.infer<typeof deliveryPrecisionCsvQuery
 
 // Orderförteckning — one register per side (kundorder / inköpsorder). The
 // selection works on ORDER ROWS: a date range on the order date or the row's
-// effective delivery date, article/article group and "rest kvar" pick rows,
+// effective delivery date, article/varugrupp/artikelkod and "rest kvar" pick rows,
 // and an order is listed with the rows that matched (its values sum only
 // those). Status and partner filter the order. Dates are YYYY-MM-DD.
 const dayParam = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ange datum som ÅÅÅÅ-MM-DD");
@@ -115,6 +115,7 @@ function orderRegisterQuerySchema<T extends readonly [string, ...string[]]>(stat
       openOnly: flagParam,
       articleId: z.string().uuid().optional(),
       articleGroupId: z.string().uuid().optional(),
+      articleCodeId: z.string().uuid().optional(),
       withRows: flagParam,
     })
     .refine((q) => !q.from || !q.to || q.from <= q.to, { message: "from måste vara före to" });

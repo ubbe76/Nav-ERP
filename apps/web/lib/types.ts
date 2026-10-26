@@ -52,7 +52,8 @@ export interface Article {
   salesUnitCode?: string | null;
   standardCost: string | null;
   salesPrice: string | null;
-  // Default VAT rate (moms) for sales/invoice rows — inherited by invoice rows.
+  // VAT rate (moms) for sales/invoice rows — derived from the varugrupp
+  // (25 % without one), read-only on the article.
   vatRate: string;
   // Nettovikt (kg) and dimensions (mm).
   weight: string | null;
@@ -73,6 +74,12 @@ export interface Article {
   packageTypeName?: string | null;
   groupId: string | null;
   groupName: string | null;
+  // Only on GET :id.
+  groupCode?: string | null;
+  // Artikelkod (Grunddata register): selection/grouping concept in lists.
+  articleCodeId: string | null;
+  articleCodeCode: string | null;
+  articleCodeName: string | null;
   // Default stock location — transactions without an explicit location land
   // here (null = the auto-created "***" location). Names only on GET :id.
   defaultLocationId: string | null;
@@ -92,13 +99,14 @@ export interface Article {
 
 export interface ArticleGroup {
   id: string;
-  // Exactly 3 digits; the hundreds digit forms a derived huvudgrupp
-  // (310/320 belong to 300).
+  // 1–4 digits.
   code: string;
   name: string;
   description: string | null;
   // null = the default article number series.
   numberSeriesKey: string | null;
+  // VAT rate (moms) every article in the group gets, e.g. "25.00".
+  vatRate: string;
   // Kostnadsställe (förval) for the revenue/cost rows of this group's articles.
   defaultCostCenterId?: string | null;
   createdAt: string;
@@ -246,6 +254,7 @@ export interface ValuationRow {
 }
 
 export interface ValuationGroup {
+  // The bucket's id — a varugrupp or an artikelkod depending on groupBy.
   groupId: string | null;
   groupName: string;
   rows: ValuationRow[];
@@ -256,6 +265,8 @@ export interface ValuationGroup {
 export interface ValuationResponse {
   asOf: string;
   method: ValuationMethod;
+  // What groups[] are: varugrupper or artikelkoder.
+  groupBy: "group" | "articleCode";
   groups: ValuationGroup[];
   // Excludes rows with value === null, same as every group total.
   totalValue: number;
@@ -3482,7 +3493,7 @@ export interface LedgerResponse {
 
 // --- Automatkontering (B2): konteringsregler ---
 // GET /posting-rules row — postingRules table columns plus the joined
-// artikelgrupp/konto names (economy.repository.ts's listPostingRules), a
+// varugrupp/konto names (economy.repository.ts's listPostingRules), a
 // plain array (no pagination). vatCodeId null is the catch-all rule ("Alla
 // momskoder" in the UI): the poster applies it to svensk moms, momsfritt and
 // goods from outside the EU only. revenue-/costAccountVatBox are the chart's

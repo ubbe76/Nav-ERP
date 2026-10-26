@@ -320,7 +320,8 @@ export function createConfiguratorRepository() {
       const query = ex
         .select({
           id: articles.id, articleNumber: articles.articleNumber, name: articles.name, type: articles.type, isPhantom: articles.isPhantom,
-          unitId: articles.unitId, groupId: articles.groupId, defaultLocationId: articles.defaultLocationId, orderQuantity: articles.orderQuantity,
+          unitId: articles.unitId, groupId: articles.groupId, articleCodeId: articles.articleCodeId,
+          defaultLocationId: articles.defaultLocationId, orderQuantity: articles.orderQuantity,
         })
         .from(articles)
         .where(eq(articles.id, articleId));

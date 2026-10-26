@@ -20,6 +20,7 @@ export interface ArticleExportRow {
   type: ArticleType;
   isPhantom: boolean;
   groupName: string | null;
+  articleCodeName: string | null;
   unit: string;
   standardCost: string | number | null;
   surfaceTreatment: string | null;
@@ -31,7 +32,8 @@ export const articleExportColumns: CsvColumn<ArticleExportRow>[] = [
   { label: "Artikelnummer", value: (r) => r.articleNumber },
   { label: "Benämning", value: (r) => r.name },
   { label: "Typ", value: (r) => `${ARTICLE_TYPE_LABELS[r.type]}${r.isPhantom ? " · Fantom" : ""}` },
-  { label: "Grupp", value: (r) => r.groupName },
+  { label: "Varugrupp", value: (r) => r.groupName },
+  { label: "Artikelkod", value: (r) => r.articleCodeName },
   { label: "Enhet", value: (r) => r.unit },
   { label: "Standardkostnad", value: (r) => r.standardCost, format: "money" },
   { label: "Status", value: (r) => (r.active ? "Aktiv" : "Inaktiv") },

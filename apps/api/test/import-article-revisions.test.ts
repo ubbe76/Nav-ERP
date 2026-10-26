@@ -52,6 +52,9 @@ function fakeDeps(existing: ExistingArticle[] = []): ArticleImportDeps {
     async groupsByCode() {
       return new Map();
     },
+    async articleCodesByCode() {
+      return new Map();
+    },
     async resolveDefaults() {
       return { unitId: "unit-st", locationId: "loc-fallback" };
     },

@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { db, units } from "@navet/db";
+import { articleCodes, db, units } from "@navet/db";
 import { createArticleSchema, updateArticleSchema, createArticleGroupSchema, updateArticleGroupSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import {
@@ -11,6 +11,7 @@ import {
   DuplicateArticleGroupError,
   DuplicateArticleNumberError,
   DuplicateBomComponentError,
+  InvalidReferenceError,
 } from "../src/modules/article/service/article.service.js";
 
 const repo = createArticleRepository(db);
@@ -27,11 +28,11 @@ async function makeArticle(articleNumber: string) {
 }
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups CASCADE`);
+  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups, article_codes CASCADE`);
 });
 
 afterAll(async () => {
-  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups CASCADE`);
+  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups, article_codes CASCADE`);
 });
 
 describe("article service — BOM structure", () => {
@@ -189,15 +190,42 @@ describe("article service — general update", () => {
     await expect(service.updateArticle(fakeId, { name: "X" })).rejects.toThrow(ArticleNotFoundError);
   });
 
-  it("defaults vatRate to 25 and round-trips explicit rates", async () => {
+  it("takes the varugrupp's VAT rate: 25 % without a group, the group's rate with one, following a change", async () => {
     const created = await service.createArticle({
       articleNumber: `VAT-${crypto.randomUUID().slice(0, 8)}`,
       name: "Momsartikel",
       type: "purchased",
     });
     expect(created.vatRate).toBe("25.00");
-    const updated = await service.updateArticle(created.id, { vatRate: 12 });
+    const group = await service.createArticleGroup({ code: "7", name: `Livsmedel ${crypto.randomUUID()}`, vatRate: 12 });
+    expect(group.vatRate).toBe("12.00");
+    const updated = await service.updateArticle(created.id, { groupId: group.id });
     expect(updated!.vatRate).toBe("12.00");
+    // The rate lives on the group only: changing it moves every article along.
+    await service.updateArticleGroup(group.id, { code: "7", name: group.name, vatRate: 6 });
+    expect((await service.getArticle(created.id))!.vatRate).toBe("6.00");
+    // A single-digit code is a valid varugrupp code since 0155; 5 digits is not.
+    await expect(service.createArticleGroup({ code: "12345", name: "För lång" } as never)).rejects.toThrow();
+  });
+
+  it("stores the artikelkod, filters the list on it and refuses an unknown one", async () => {
+    const [code] = await db.insert(articleCodes).values({ code: "100", name: "Plåt" }).returning();
+    const created = await service.createArticle({
+      articleNumber: `AK-${crypto.randomUUID().slice(0, 8)}`,
+      name: "Kodad",
+      type: "purchased",
+      articleCodeId: code!.id,
+    });
+    expect(created).toMatchObject({ articleCodeId: code!.id, articleCodeCode: "100", articleCodeName: "Plåt" });
+    await service.createArticle({ articleNumber: `AK-${crypto.randomUUID().slice(0, 8)}`, name: "Okodad", type: "purchased" });
+    const list = await service.listArticles({ articleCodeId: code!.id, limit: 50, offset: 0 });
+    expect(list.rows.map((r) => r.id)).toEqual([created.id]);
+    expect(list.rows[0]).toMatchObject({ articleCodeName: "Plåt", vatRate: "25.00" });
+    await expect(
+      service.createArticle({ articleNumber: "AK-X", name: "X", type: "purchased", articleCodeId: crypto.randomUUID() })
+    ).rejects.toThrow(InvalidReferenceError);
+    const cleared = await service.updateArticle(created.id, { articleCodeId: null });
+    expect(cleared!.articleCodeId).toBeNull();
   });
 
   it("stores salesPrice on create, updates and clears it via update", async () => {

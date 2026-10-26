@@ -10,11 +10,13 @@ import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { useDimensions } from "../../lib/dimensions";
 import { CostCenterSelect } from "../economy/DimensionSelect";
 
-// Creates an article group, or renames one when `group` is passed.
+// Creates a varugrupp (article group), or renames one when `group` is passed.
 export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup; onSuccess: () => void }) {
   const [code, setCode] = useState(group?.code ?? "");
   const [name, setName] = useState(group?.name ?? "");
   const [description, setDescription] = useState(group?.description ?? "");
+  // The VAT rate (moms) every article in the group gets.
+  const [vatRate, setVatRate] = useState(String(Number(group?.vatRate ?? 25)));
   // "" = the default series.
   const [numberSeriesKey, setNumberSeriesKey] = useState(group?.numberSeriesKey ?? "");
   const dims = useDimensions();
@@ -34,7 +36,7 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
     setError(null);
     setPending(true);
     try {
-      const body = JSON.stringify({ code, name, description, numberSeriesKey: numberSeriesKey === "" ? null : numberSeriesKey,
+      const body = JSON.stringify({ code, name, description, vatRate: Number(vatRate), numberSeriesKey: numberSeriesKey === "" ? null : numberSeriesKey,
         defaultCostCenterId: defaultCostCenterId || null,
       });
       if (group) {
@@ -44,7 +46,7 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
       }
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte skapa artikelgruppen");
+      setError(err instanceof Error ? err.message : "Kunde inte spara varugruppen");
       setPending(false);
     }
   }
@@ -53,14 +55,14 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
     <Form onSubmit={handleSubmit}>
       <FormError>{error}</FormError>
 
-      <Field label="Kod (3–4 siffror)" htmlFor="code">
+      <Field label="Kod (1–4 siffror)" htmlFor="code">
         <Input
           id="code"
           required
           inputMode="numeric"
-          pattern="\d{3,4}"
+          pattern="\d{1,4}"
           maxLength={4}
-          title="3–4 siffror"
+          title="1–4 siffror"
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
         />
@@ -68,6 +70,16 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
 
       <Field label="Namn" htmlFor="name">
         <Input id="name" required value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+
+      <Field label="Momssats" htmlFor="vatRate">
+        <Select id="vatRate" value={vatRate} onChange={(e) => setVatRate(e.target.value)}>
+          <option value="25">25 %</option>
+          <option value="12">12 %</option>
+          <option value="6">6 %</option>
+          <option value="0">0 %</option>
+        </Select>
+        <FormHint>Gäller för alla artiklar i varugruppen. Artiklar utan varugrupp får 25 %.</FormHint>
       </Field>
 
       <Field label="Beskrivning" htmlFor="description">
@@ -102,7 +114,7 @@ export function NewArticleGroupForm({ group, onSuccess }: { group?: ArticleGroup
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? "Sparar…" : group ? "Spara grupp" : "Skapa artikelgrupp"}
+          {pending ? "Sparar…" : group ? "Spara varugrupp" : "Skapa varugrupp"}
         </Button>
       </FormActions>
     </Form>

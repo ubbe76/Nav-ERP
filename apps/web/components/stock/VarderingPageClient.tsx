@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Card } from "../ui/Card";
 import { Field, Input, Select } from "../ui/Field";
-import { FormError, FormHint, FormRow } from "../ui/Form";
+import { FormError, FormHint, FormRow, FormStack } from "../ui/Form";
 import { Table } from "../ui/Table";
 import { API_URL, apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
@@ -12,6 +12,7 @@ import buttonStyles from "../ui/Button.module.css";
 import {
   VALUATION_METHOD_LABELS,
   type ArticleGroup,
+  type RegisterEntry,
   type ValuationMethod,
   type ValuationResponse,
 } from "../../lib/types";
@@ -62,14 +63,20 @@ function flatten(report: ValuationResponse): ValuationDisplayRow[] {
 
 export function VarderingPageClient({
   groups,
+  articleCodes,
   defaultAsOf,
   defaultMethod,
   defaultGroupId,
+  defaultArticleCodeId,
+  defaultGroupBy,
 }: {
   groups: ArticleGroup[];
+  articleCodes: RegisterEntry[];
   defaultAsOf?: string;
   defaultMethod?: string;
   defaultGroupId?: string;
+  defaultArticleCodeId?: string;
+  defaultGroupBy?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -80,13 +87,17 @@ export function VarderingPageClient({
     isValuationMethod(defaultMethod) ? defaultMethod : "standard"
   );
   const [groupId, setGroupId] = useState(defaultGroupId ?? "");
+  const [articleCodeId, setArticleCodeId] = useState(defaultArticleCodeId ?? "");
+  // What the report is split by: varugrupp (default) or artikelkod.
+  const [groupBy, setGroupBy] = useState<"group" | "articleCode">(defaultGroupBy === "articleCode" ? "articleCode" : "group");
   const [report, setReport] = useState<ValuationResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   function queryString(): string {
-    const params = new URLSearchParams({ asOf, method });
+    const params = new URLSearchParams({ asOf, method, groupBy });
     if (groupId) params.set("groupId", groupId);
+    if (articleCodeId) params.set("articleCodeId", articleCodeId);
     return params.toString();
   }
 
@@ -111,42 +122,62 @@ export function VarderingPageClient({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- queryString() is derived from these
-  }, [asOf, method, groupId]);
+  }, [asOf, method, groupId, articleCodeId, groupBy]);
 
   useEffect(() => {
     router.replace(`${pathname}?${queryString()}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- queryString() is derived from these
-  }, [asOf, method, groupId, pathname, router]);
+  }, [asOf, method, groupId, articleCodeId, groupBy, pathname, router]);
 
   const rows = report ? flatten(report) : [];
 
   return (
     <>
       <Card maxWidth="none" style={{ marginBottom: 20 }}>
-        <FormRow columns={3}>
-          <Field label="Per datum" htmlFor="valAsOf">
-            <Input id="valAsOf" type="date" size="sm" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
-          </Field>
-          <Field label="Metod" htmlFor="valMethod">
-            <Select id="valMethod" value={method} onChange={(e) => setMethod(e.target.value as ValuationMethod)}>
-              {VALUATION_METHODS.map((m) => (
-                <option key={m} value={m}>
-                  {VALUATION_METHOD_LABELS[m]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Artikelgrupp" htmlFor="valGroup">
-            <Select id="valGroup" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
-              <option value="">Alla artikelgrupper</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.code} {g.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </FormRow>
+        <FormStack>
+          <FormRow columns={3}>
+            <Field label="Per datum" htmlFor="valAsOf">
+              <Input id="valAsOf" type="date" size="sm" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+            </Field>
+            <Field label="Metod" htmlFor="valMethod">
+              <Select id="valMethod" value={method} onChange={(e) => setMethod(e.target.value as ValuationMethod)}>
+                {VALUATION_METHODS.map((m) => (
+                  <option key={m} value={m}>
+                    {VALUATION_METHOD_LABELS[m]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Gruppera" htmlFor="valGroupBy">
+              <Select id="valGroupBy" value={groupBy} onChange={(e) => setGroupBy(e.target.value as "group" | "articleCode")}>
+                <option value="group">Varugrupp</option>
+                <option value="articleCode">Artikelkod</option>
+              </Select>
+            </Field>
+          </FormRow>
+          <FormRow columns={3}>
+            <Field label="Varugrupp" htmlFor="valGroup">
+              <Select id="valGroup" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+                <option value="">Alla varugrupper</option>
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.code} {g.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Artikelkod" htmlFor="valArticleCode">
+              <Select id="valArticleCode" value={articleCodeId} onChange={(e) => setArticleCodeId(e.target.value)}>
+                <option value="">Alla artikelkoder</option>
+                {articleCodes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} {c.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </FormRow>
+        </FormStack>
         {report && (
           <a
             href={`${API_URL}/api/v1/stock/valuation/pdf?${queryString()}`}

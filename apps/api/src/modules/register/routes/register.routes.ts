@@ -21,7 +21,7 @@ import { TERMINAL_READ } from "../../auth/middleware/access-rules.js";
 import { errorBody } from "../../system/service/error-body.js";
 
 // Base-data registers (grunddata): leveransvillkor, betalningsvillkor,
-// speditörer, enheter, kollityper, förlustorsaker. Registered inside app.ts's
+// speditörer, enheter, kollityper, artikelkoder, förlustorsaker. Registered inside app.ts's
 // protected route scope.
 export async function registerRoutes(app: FastifyInstance, opts: { service: RegisterService }) {
   const { service } = opts;
@@ -126,6 +126,8 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
   register("/carriers", service.carriers, termSchemas);
   register("/units", service.units, termSchemas);
   register("/package-types", service.packageTypes, termSchemas);
+  // Artikelkoder (selection/grouping in the lists) belong to Artiklar.
+  register("/article-codes", service.articleCodes, termSchemas, { config: { access: ["artiklar"] } });
   register(
     "/quote-loss-reasons",
     service.quoteLossReasons,

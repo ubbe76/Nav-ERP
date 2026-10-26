@@ -180,7 +180,7 @@ function CustomerPriceForm({
       return;
     }
     if (!isEdit && targetType === "group" && !articleGroupId) {
-      setError("Välj en artikelgrupp");
+      setError("Välj en varugrupp");
       return;
     }
     if (valueType === "price" && unitPrice.trim() === "") {
@@ -255,7 +255,7 @@ function CustomerPriceForm({
                   checked={targetType === "group"}
                   onChange={() => setTargetType("group")}
                 />
-                Artikelgrupp
+                Varugrupp
               </label>
             </div>
           </Field>
@@ -265,13 +265,13 @@ function CustomerPriceForm({
               <ArticlePicker id="customerPriceArticle" value={article} onChange={setArticle} />
             </Field>
           ) : (
-            <Field label="Artikelgrupp" htmlFor="customerPriceArticleGroup">
+            <Field label="Varugrupp" htmlFor="customerPriceArticleGroup">
               <Select
                 id="customerPriceArticleGroup"
                 value={articleGroupId}
                 onChange={(e) => setArticleGroupId(e.target.value)}
               >
-                <option value="">— Välj artikelgrupp —</option>
+                <option value="">— Välj varugrupp —</option>
                 {articleGroups.map((group) => (
                   <option key={group.id} value={group.id}>
                     {group.code} · {group.name}

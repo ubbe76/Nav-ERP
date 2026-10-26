@@ -17,7 +17,7 @@ import styles from "./NewArticleForm.module.css";
 
 const PART_DESCRIPTIONS: Record<ArticleCopyPart, string> = {
   information:
-    "Typ, grundenhet, standardkostnad, artikelgrupp, lagerplats och fantomartikel förifylls i formuläret. Övriga uppgifter på Allmänt, planeringen och de alternativa enheterna kopieras när artikeln skapas.",
+    "Typ, grundenhet, standardkostnad, varugrupp, artikelkod, lagerplats och fantomartikel förifylls i formuläret. Övriga uppgifter på Allmänt, planeringen och de alternativa enheterna kopieras när artikeln skapas.",
   beredning: "Strukturens komponenter och operationerna, med materialets koppling till operationerna.",
   inkop: "Leverantörerna med huvudleverantör och stafflade priser.",
   filer: "Ritningsnummer och bifogade filer.",

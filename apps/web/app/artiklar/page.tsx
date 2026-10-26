@@ -25,7 +25,7 @@ export default async function ArticlesPage() {
       <div className={shellStyles.topbar}>
         <div>
           <div className={shellStyles.title}>Artiklar</div>
-          <div className={shellStyles.meta}>Artikelregister, artikelgrupper och import</div>
+          <div className={shellStyles.meta}>Artikelregister, varugrupper och import</div>
         </div>
         <HelpLink chapter="artiklar" label="Hjälp om artikelmodulen" />
       </div>

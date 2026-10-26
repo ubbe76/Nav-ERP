@@ -17,6 +17,8 @@ const nextConfig = {
   // "Maskiner" was renamed to "Resurser" — keep old bookmarks working.
   async redirects() {
     return [
+      // Artikelgrupper was renamed Varugrupper — keep old bookmarks working.
+      { source: "/artikelgrupper", destination: "/varugrupper", permanent: false },
       { source: "/tillverkning/maskiner", destination: "/tillverkning/resurser", permanent: true },
       // Personal & lön became its own main menu — keep old bookmarks working.
       { source: "/tillverkning/personal", destination: "/personal/anstallda", permanent: false },

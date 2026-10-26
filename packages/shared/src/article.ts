@@ -2,7 +2,7 @@ import { z } from "zod";
 import { listQuerySchema } from "./list.js";
 import { parcelKindSchema } from "./shipping.js";
 // vatRates/vatRateSchema moved to vat.ts in B5 — imported here for the
-// article schemas below, re-exported to consumers via index.ts.
+// varugrupp schemas below, re-exported to consumers via index.ts.
 import { vatRateSchema } from "./vat.js";
 import { optionalText } from "./coerce.js";
 
@@ -20,6 +20,8 @@ export type ArticleType = z.infer<typeof articleTypeSchema>;
 export const listArticlesQuerySchema = listQuerySchema.extend({
   type: articleTypeSchema.optional(),
   groupId: z.string().uuid().optional(),
+  // Artikelkod (Grunddata) — the list's selection besides the varugrupp.
+  articleCodeId: z.string().uuid().optional(),
   // Only articles that can be put on an order row: excludes a template (mall)
   // in configurator mode `variants` — its variants are what gets ordered.
   // Omitted ⇒ the list is unchanged.
@@ -73,9 +75,7 @@ export const createArticleSchema = z.object({
   salesUnitId: z.string().uuid().nullable().optional(),
   standardCost: z.coerce.number().nonnegative().optional(),
   salesPrice: z.coerce.number().nonnegative().optional(),
-  // Default VAT rate (moms) for sales/invoice rows — omitted = 25 % (the
-  // column default). Invoice rows snapshot the rate at entry time.
-  vatRate: vatRateSchema.optional(),
+  // No VAT rate of its own since 0155: the varugrupp's (groupId) applies.
   // Nettovikt (kg) and dimensions (mm) — used later for volume/transport.
   weight: z.coerce.number().nonnegative().optional(),
   length: z.coerce.number().nonnegative().optional(),
@@ -101,6 +101,8 @@ export const createArticleSchema = z.object({
   surfaceTreatment: optionalText(200).optional(),
   colour: optionalText(200).optional(),
   groupId: z.string().uuid().optional(),
+  // Artikelkod (Grunddata): selection/grouping in the lists only.
+  articleCodeId: z.string().uuid().optional(),
   // Default stock location; omitted = the auto-created "***" location.
   defaultLocationId: z.string().uuid().optional(),
   active: z.boolean().default(true),
@@ -121,8 +123,8 @@ export const updateStandardCostSchema = z.object({
 export type UpdateStandardCostInput = z.infer<typeof updateStandardCostSchema>;
 
 // Everything on the article is editable, including articleNumber (unique —
-// duplicates come back as 409), type and isPhantom. groupId is nullable to
-// allow clearing the group.
+// duplicates come back as 409), type and isPhantom. groupId/articleCodeId
+// are nullable to allow clearing them.
 export const updateArticleSchema = z
   .object({
     articleNumber: z.string().min(1).max(50).optional(),
@@ -136,9 +138,9 @@ export const updateArticleSchema = z
     salesUnitId: z.string().uuid().nullable().optional(),
     active: z.boolean().optional(),
     salesPrice: z.coerce.number().nonnegative().nullable().optional(),
-    // Default VAT rate (moms) for sales/invoice rows.
-    vatRate: vatRateSchema.optional(),
+    // The varugrupp also sets the article's VAT rate (no rate of its own).
     groupId: z.string().uuid().nullable().optional(),
+    articleCodeId: z.string().uuid().nullable().optional(),
     // Null resets to the "***" fallback behavior.
     defaultLocationId: z.string().uuid().nullable().optional(),
     // Nettovikt (kg) and dimensions (mm); null clears the value.
@@ -210,8 +212,8 @@ export const updateBomComponentSchema = z
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateBomComponentInput = z.infer<typeof updateBomComponentSchema>;
 
-// Fritt definierbara artikelgrupper (Monitor-style), för kontering/statistik/rapportuppdelning.
-export const articleGroupCodeSchema = z.string().regex(/^\d{3,4}$/, "Koden ska vara 3–4 siffror");
+// Varugrupper (artikelgrupper in the code, Monitor-style): kontering, momssats, statistik/rapportuppdelning.
+export const articleGroupCodeSchema = z.string().regex(/^\d{1,4}$/, "Koden ska vara 1–4 siffror");
 
 export const createArticleGroupSchema = z.object({
   code: articleGroupCodeSchema,
@@ -222,6 +224,8 @@ export const createArticleGroupSchema = z.object({
   numberSeriesKey: z.string().min(1).max(50).nullable().optional(),
   // Kostnadsställe (förval) for invoice/supplier invoice rows in the group.
   defaultCostCenterId: z.string().uuid().nullable().optional(),
+  // Momssats: the rate of every article in the group; omitted = 25 %.
+  vatRate: vatRateSchema.optional(),
 });
 export type CreateArticleGroupInput = z.infer<typeof createArticleGroupSchema>;
 
@@ -231,6 +235,8 @@ export const updateArticleGroupSchema = z.object({
   description: optionalText(500).optional(),
   numberSeriesKey: z.string().min(1).max(50).nullable().optional(),
   defaultCostCenterId: z.string().uuid().nullable().optional(),
+  // Omitted = unchanged.
+  vatRate: vatRateSchema.optional(),
 });
 export type UpdateArticleGroupInput = z.infer<typeof updateArticleGroupSchema>;
 

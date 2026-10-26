@@ -26,7 +26,7 @@ import {
 
 const service = createRegisterService(createRegisterRepository(db));
 
-const TRUNCATE = sql`TRUNCATE delivery_terms, payment_terms, carriers, units, package_types, customers, suppliers, sales_orders, invoices, company_carriers, articles CASCADE`;
+const TRUNCATE = sql`TRUNCATE delivery_terms, payment_terms, carriers, units, package_types, article_codes, customers, suppliers, sales_orders, invoices, company_carriers, articles CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -220,5 +220,28 @@ describe("register delete — merge semantics for unique link tables", () => {
     expect(r!.unitId).toBe(st.id);
     expect(r!.unitFactor).toBe("12.000000");
     expect((await service.units.list()).map((u) => u.code)).toEqual(["kg", "st"]);
+  });
+});
+
+describe("register delete — artikelkoder", () => {
+  it("lists the articles carrying the code and moves them to the replacement", async () => {
+    const st = await service.units.create({ code: "st-ak", name: "Styck AK" });
+    const old = await service.articleCodes.create({ code: "100", name: "Plåt" });
+    const replacement = await service.articleCodes.create({ code: "120", name: "Plåt, rostfri" });
+    const [article] = await db
+      .insert(articles)
+      .values({ articleNumber: "AK-1", name: "Kodad", type: "purchased", unitId: st.id, articleCodeId: old.id })
+      .returning();
+
+    expect(await service.articleCodes.usage(old.id)).toEqual({
+      total: 1,
+      references: [{ table: "articles", label: "artiklar", labelOne: "artikel", count: 1 }],
+    });
+    await expect(service.articleCodes.remove(old.id)).rejects.toThrow(RegisterEntryInUseError);
+
+    await service.articleCodes.remove(old.id, replacement.id);
+    const [moved] = await db.select({ articleCodeId: articles.articleCodeId }).from(articles).where(eq(articles.id, article!.id));
+    expect(moved!.articleCodeId).toBe(replacement.id);
+    expect((await service.articleCodes.list()).map((c) => c.code)).toEqual(["120"]);
   });
 });

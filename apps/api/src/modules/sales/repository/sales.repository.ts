@@ -71,6 +71,7 @@ import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/d
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { getInvoicedQuantitiesWith } from "./invoice.repository.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
+import { articleVatRateSql } from "../../article/repository/article-vat-rate.js";
 
 // users joined a second time for "who marked the quote lost" (the order's
 // created_by is not the same person).
@@ -1266,7 +1267,7 @@ export function createSalesRepository(db: Db) {
           articleSurfaceTreatment: articles.surfaceTreatment,
           articleColour: articles.colour,
           // Privatperson documents gross the printed prices up by this rate.
-          articleVatRate: articles.vatRate,
+          articleVatRate: articleVatRateSql,
           // The unit the row displays in: the entered unit, falling back to
           // the article's base unit.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,

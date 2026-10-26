@@ -538,7 +538,8 @@ BOM-formulär görs med en sökbar artikelväljare i stället för dropdowns.
 Alla register och strukturer är fullt redigerbara i efterhand:
 
 - **Artikelregister** — lista/skapa/redigera (inkl. artikelnummer, typ och
-  fantomflagga), artikelgrupper (3–4-siffrig kod), artikelkort med flikar
+  fantomflagga), varugrupper (1–4-siffrig kod, styr kontering och
+  momssats), artikelkoder för urval och gruppering, artikelkort med flikar
   för Struktur (BOM, redigerbara rader med cykelskydd), Rutt (redigerbara
   operationer), lagersaldo, kalkyl (för-/efterkalkyl-underlag) och
   **filer** (ritningar i PDF/JPEG/PNG, max 20 MB, som följer med
@@ -650,14 +651,14 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   bär inköpskostnaden `unit_cost` i SEK), inventering samt
   **lagervärdering** (`/lager/vardering`, administratörer): lagrets värde
   per valfritt datum med tre metoder — standardpris, senaste inköp eller
-  vägt snitt — uppdelat per artikelgrupp och nedladdningsbart som PDF
+  vägt snitt — uppdelat per varugrupp eller artikelkod och nedladdningsbart som PDF
 - **Ekonomi** (rättigheten Ekonomi) — full redovisning: **Kontoplan** med
   BAS-seedning i ett klick, **Räkenskapsår** med automatiskt genererade
   perioder och låsning, **Verifikat** i egna verifikatserier (bokförs
   append-only, kan omföras, utskrivbara som verifikatlista), härledd
   **Huvudbok** (enkonto eller kontointervall), **automatkontering** som
   bokför kund- och leverantörsfakturor direkt vid fakturering styrd av
-  **konteringsregler** (artikelgrupp + momssats mot standardkonton), kund-
+  **konteringsregler** (varugrupp + momskod mot standardkonton), kund-
   och leverantörsreskontra med betalningsregistrering (OCR-matchning,
   tolerans, kvittning) och betalningspåminnelser, **Momsrapport** per
   månad/kvartal med Skatteverkets rutor och bokförd momsomföring, härledda
@@ -682,7 +683,7 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   inköp (ordervärde och restvärde per order eller rad, som PDF och CSV),
   **offertuppföljning** (hit rate i antal och värde), marginal och kalkylutfall
 - **System** (admin) — företagsinformation med logotyp, nummerserier
-  (även för **artikelnummer**, med egna serier per artikelgrupp),
+  (även för **artikelnummer**, med egna serier per varugrupp),
   användare och behörighetsgrupper (med konton för **endast läsning**),
   API-klienter (OAuth2) för integrationer, **tillägg** (externa
   program med egen API-nyckel som får signerade webhooks och kan visa

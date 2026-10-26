@@ -45,6 +45,7 @@ export default async function OrderforteckningKundorderPage(props: { searchParam
           openOnly: singleParam(searchParams.openOnly),
           articleId: singleParam(searchParams.articleId),
           articleGroupId: singleParam(searchParams.articleGroupId),
+          articleCodeId: singleParam(searchParams.articleCodeId),
           withRows: singleParam(searchParams.withRows),
         }}
       />

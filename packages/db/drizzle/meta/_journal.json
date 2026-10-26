@@ -1086,6 +1086,20 @@
       "when": 1793021006176,
       "tag": "0154_avvikelser_en_faktura_per_arende",
       "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1793037666186,
+      "tag": "0155_varugrupp_artikelkod",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1793037680249,
+      "tag": "0156_artikel_utan_momssats",
+      "breakpoints": true
     }
   ]
 }

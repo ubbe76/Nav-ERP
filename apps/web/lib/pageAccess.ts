@@ -28,7 +28,7 @@ const ENTRIES: readonly Entry[] = [
   { path: "/artiklar", exact: true, rule: ["artiklar", "artikeloversikt"] },
   { path: "/artiklar/oversikt", rule: ["artikeloversikt"] },
   { path: "/artiklar", rule: ["artiklar"] },
-  { path: "/artikelgrupper", rule: ["artiklar"] },
+  { path: "/varugrupper", rule: ["artiklar"] },
   { path: "/grunddata", rule: SHARED_REGISTERS },
   { path: "/inkop", rule: ["inkop"] },
   { path: "/leverantorer", rule: ["inkop"] },

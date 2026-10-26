@@ -100,7 +100,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "inactive-account": "Ett av kontona på raderna är inaktivt",
   "already-reversed": "Verifikatet är redan omfört",
   "invalid-verification-state": "Verifikatet är i fel status för åtgärden",
-  "duplicate-posting-rule": "Det finns redan en regel för den artikelgruppen och momskoden",
+  "duplicate-posting-rule": "Det finns redan en regel för den varugruppen och momskoden",
   "posting-rule-no-accounts": "Minst ett konto (intäkt eller kostnad) måste anges",
   // momskoder
   "vat-code-not-found": "Momskoden hittades inte — ladda om sidan.",

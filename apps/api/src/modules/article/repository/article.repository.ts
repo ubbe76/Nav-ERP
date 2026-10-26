@@ -12,6 +12,7 @@ import {
   articleDrawingRevisions,
   articleDrawings,
   articleFiles,
+  articleCodes,
   articleGroups,
   articleRevisions,
   articleStandardCostHistory,
@@ -44,6 +45,7 @@ import {
 } from "@navet/shared";
 import { getOrCreateFallbackLocation } from "../../stock/service/location-resolver.js";
 import { applyInformation, copyArticleParts, readCopySource } from "./article-copy.js";
+import { articleVatRateSql } from "./article-vat-rate.js";
 
 // Append-only write for article_standard_cost_history (D1) — called by the
 // three standard-cost writers (create, updateStandardCost, CSV import) in
@@ -101,7 +103,6 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     salesUnitId: input.salesUnitId ?? null,
     standardCost: input.standardCost !== undefined ? String(input.standardCost) : undefined,
     salesPrice: input.salesPrice !== undefined ? String(input.salesPrice) : undefined,
-    vatRate: input.vatRate !== undefined ? String(input.vatRate) : undefined,
     weight: input.weight !== undefined ? String(input.weight) : undefined,
     length: input.length !== undefined ? String(input.length) : undefined,
     width: input.width !== undefined ? String(input.width) : undefined,
@@ -116,6 +117,7 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     palletSpaces: input.palletSpaces !== undefined ? String(input.palletSpaces) : undefined,
     loadingMeters: input.loadingMeters !== undefined ? String(input.loadingMeters) : undefined,
     groupId: input.groupId,
+    articleCodeId: input.articleCodeId,
     defaultLocationId: input.defaultLocationId,
     active: input.active,
     surfaceTreatment: input.surfaceTreatment ?? null,
@@ -140,7 +142,7 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
 // caller's transaction.
 async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleInput): Promise<typeof articles.$inferSelect | null> {
   // numeric(…) columns take strings — convert weight/dimensions/qty-per-kolli
-  // (null clears), salesPrice (null clears) and vatRate. packageTypeId
+  // (null clears) and salesPrice (null clears). packageTypeId
   // (uuid) passes through in ...rest.
   const {
     weight,
@@ -149,7 +151,6 @@ async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleIn
     height,
     quantityPerPackage,
     salesPrice,
-    vatRate,
     reorderPoint,
     orderQuantity,
     rounding,
@@ -173,7 +174,6 @@ async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleIn
       palletSpaces: numeric(palletSpaces),
       loadingMeters: numeric(loadingMeters),
       salesPrice: numeric(salesPrice),
-      vatRate: vatRate !== undefined ? String(vatRate) : undefined,
       updatedAt: new Date(),
     })
     .where(eq(articles.id, id))
@@ -288,6 +288,11 @@ export function createArticleRepository(db: Db) {
           purchaseUnitCode: purchaseUnits.code,
           salesUnitCode: salesUnits.code,
           groupName: articleGroups.name,
+          groupCode: articleGroups.code,
+          // Varugrupp styr momsen: the group's rate (25 % without one).
+          vatRate: articleVatRateSql,
+          articleCodeCode: articleCodes.code,
+          articleCodeName: articleCodes.name,
           packageTypeCode: packageTypes.code,
           packageTypeName: packageTypes.name,
           defaultLocationName: stockLocations.name,
@@ -303,6 +308,7 @@ export function createArticleRepository(db: Db) {
         .leftJoin(purchaseUnits, eq(purchaseUnits.id, articles.purchaseUnitId))
         .leftJoin(salesUnits, eq(salesUnits.id, articles.salesUnitId))
         .leftJoin(articleGroups, eq(articleGroups.id, articles.groupId))
+        .leftJoin(articleCodes, eq(articleCodes.id, articles.articleCodeId))
         .leftJoin(packageTypes, eq(packageTypes.id, articles.packageTypeId))
         .leftJoin(stockLocations, eq(stockLocations.id, articles.defaultLocationId))
         .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
@@ -319,6 +325,7 @@ export function createArticleRepository(db: Db) {
       }
       if (query.type) conditions.push(eq(articles.type, query.type));
       if (query.groupId) conditions.push(eq(articles.groupId, query.groupId));
+      if (query.articleCodeId) conditions.push(eq(articles.articleCodeId, query.articleCodeId));
       // ?orderable=true: the pickers on order forms — a template in EITHER mode
       // is excluded (variants: its variants are what gets ordered; to_order: it
       // needs a configuration, and purchase can never buy it) unless the form
@@ -342,11 +349,15 @@ export function createArticleRepository(db: Db) {
             ...getTableColumns(articles),
             unit: units.code,
             groupName: articleGroups.name,
+            vatRate: articleVatRateSql,
+            articleCodeCode: articleCodes.code,
+            articleCodeName: articleCodes.name,
             configuratorMode: configuratorTemplates.mode,
           })
           .from(articles)
           .innerJoin(units, eq(units.id, articles.unitId))
           .leftJoin(articleGroups, eq(articleGroups.id, articles.groupId))
+          .leftJoin(articleCodes, eq(articleCodes.id, articles.articleCodeId))
           .leftJoin(configuratorTemplates, eq(configuratorTemplates.articleId, articles.id))
           .where(where)
           .orderBy(asc(articles.articleNumber))
@@ -445,12 +456,21 @@ export function createArticleRepository(db: Db) {
     },
 
     async createArticleGroup(input: CreateArticleGroupInput) {
-      const [row] = await db.insert(articleGroups).values(input).returning();
+      const { vatRate, ...rest } = input;
+      const [row] = await db
+        .insert(articleGroups)
+        .values({ ...rest, vatRate: vatRate !== undefined ? String(vatRate) : undefined })
+        .returning();
       return row!;
     },
 
     async updateArticleGroup(id: string, input: UpdateArticleGroupInput) {
-      const [row] = await db.update(articleGroups).set(input).where(eq(articleGroups.id, id)).returning();
+      const { vatRate, ...rest } = input;
+      const [row] = await db
+        .update(articleGroups)
+        .set({ ...rest, vatRate: vatRate !== undefined ? String(vatRate) : undefined })
+        .where(eq(articleGroups.id, id))
+        .returning();
       return row ?? null;
     },
 
@@ -471,6 +491,11 @@ export function createArticleRepository(db: Db) {
     async findArticleGroupByName(name: string) {
       const [row] = await db.select().from(articleGroups).where(eq(articleGroups.name, name));
       return row ?? null;
+    },
+
+    async articleCodeExists(id: string) {
+      const [row] = await db.select({ id: articleCodes.id }).from(articleCodes).where(eq(articleCodes.id, id));
+      return row !== undefined;
     },
 
     async articleGroupExists(id: string) {

@@ -39,7 +39,7 @@ export const MANUAL_CHAPTERS: ManualChapter[] = [
     slug: "artiklar",
     title: "Artiklar",
     file: "artiklar.md",
-    description: "Artikelregistret, artikelkortet, struktur/beredning, import från CSV och artikelgrupper.",
+    description: "Artikelregistret, artikelkortet, struktur/beredning, import från CSV och varugrupper.",
     group: "Register",
   },
   {

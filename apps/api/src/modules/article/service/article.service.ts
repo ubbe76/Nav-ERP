@@ -333,6 +333,9 @@ export function createArticleService(repo: ArticleRepository) {
       if (input.groupId && !(await repo.articleGroupExists(input.groupId))) {
         throw new InvalidReferenceError("Unknown article group");
       }
+      if (input.articleCodeId && !(await repo.articleCodeExists(input.articleCodeId))) {
+        throw new InvalidReferenceError("Unknown article code");
+      }
       if (input.packageTypeId && !(await repo.packageTypeExists(input.packageTypeId))) {
         throw new InvalidReferenceError("Unknown package type");
       }
@@ -363,7 +366,9 @@ export function createArticleService(repo: ArticleRepository) {
         const created = await repo.create({ ...fields, articleNumber: number, loadingMeters, unitId, defaultLocationId });
         // The source was deleted between the check above and the transaction.
         if (!created) throw new ArticleNotFoundError(copy!.articleId);
-        return created;
+        // Re-read joined so the response carries what the GET does (unit
+        // codes, the varugrupp's vatRate).
+        return (await repo.findById(created.id))!;
       };
 
       if (articleNumber !== undefined) {
@@ -424,6 +429,9 @@ export function createArticleService(repo: ArticleRepository) {
 
       if (input.groupId && !(await repo.articleGroupExists(input.groupId))) {
         throw new InvalidReferenceError("Unknown article group");
+      }
+      if (input.articleCodeId && !(await repo.articleCodeExists(input.articleCodeId))) {
+        throw new InvalidReferenceError("Unknown article code");
       }
 
       if (input.unitId !== undefined && input.unitId !== article.unitId) {
