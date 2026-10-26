@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { articleFiles, articleUnits, articles, bomComponents, configuratorVariants, customers, db, routingOperations, salesOrderRows, salesOrders, units } from "@navet/db";
+import { articleCodes, articleFiles, articleUnits, articles, bomComponents, configuratorVariants, customers, db, routingOperations, salesOrderRows, salesOrders, units } from "@navet/db";
 import type { VariantSelectionEntry } from "@navet/shared";
 import {
   ConfiguratorCodeLockedError, ConfiguratorNotVariantModeError, ConfiguratorReferenceInUseError, ConfiguratorTemplateHasVariantsError,
@@ -10,6 +10,7 @@ import { createManufacturingRepository } from "../src/modules/manufacturing/repo
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { makeArticle, makeVariantService, resetConfigurator, testCostingSettings, variantWriters } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
+import { vatRateGroupId } from "./helpers/vat-group.js";
 
 // Delprojekt 3, Task 4: stocked variants — preview, creation in ONE
 // transaction (article + route + structure + link), the code lock and the
@@ -97,7 +98,9 @@ async function articleCount() {
 describe("createVariants", () => {
   it("creates one variant: article fields, Information copied, structure and route derived, link row stored", async () => {
     const s = await build();
-    await testArticleService.updateArticle(s.article.id, { vatRate: 12, weight: 3.5 } as never);
+    // The varugrupp (and with it the 12 % rate) follows like the article code.
+    const [code] = await db.insert(articleCodes).values({ code: `K${crypto.randomUUID().slice(0, 6)}`, name: `Kod ${crypto.randomUUID()}` }).returning();
+    await testArticleService.updateArticle(s.article.id, { groupId: await vatRateGroupId(12), articleCodeId: code!.id, weight: 3.5 });
     // units is never truncated, so the alternative unit gets a code and name of its own.
     const tag = crypto.randomUUID().slice(0, 6);
     const kg = (await db.insert(units).values({ code: `KG${tag}`, name: `Kilogram ${tag}` }).returning())[0]!;
@@ -116,7 +119,7 @@ describe("createVariants", () => {
     const variant = (await testArticleService.getArticle(row.articleId!))!;
     expect(variant).toMatchObject({
       articleNumber: row.articleNumber, name: row.name, type: "manufactured", isPhantom: false, colour: "Röd", active: true,
-      unitId: s.article.unitId, vatRate: "12.00", weight: "3.500",
+      unitId: s.article.unitId, vatRate: "12.00", articleCodeId: code!.id, weight: "3.500",
     });
     // The engine's price (base 1000 + A 0 + RD 0), not the template's copied value by accident.
     const evaluation = await service.evaluate(s.article.id, { selection: { LOCK: "A", BREDD: 1200 }, quantity: 1 });

@@ -28,7 +28,8 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Benämning** | Nej | Artikelns namn, max 255 tecken. Krävs för nya artiklar. Tom cell lämnar fältet orört på en befintlig post. | Diskbänk 1200 mm, rostfri |
 | **Artikeltyp** | Nej | Tillverkad (även M), Köpt (även P eller K), Tjänst (även Lego) eller Fiktiv (även F) — Fiktiv ger en tillverkad fantomartikel. Tom cell ger guidens Standardtyp för nya artiklar. Typen och fantomflaggan ändras aldrig på befintliga artiklar — en avvikelse ger en varning. | Tillverkad |
 | **Enhet** | Nej | Grundenhetens kod, max 20 tecken (t.ex. st, kg, m). En okänd kod skapas i enhetsregistret med koden som namn; tom cell ger st för nya artiklar. Grundenheten ändras aldrig på befintliga artiklar. | st |
-| **Artikelgrupp (kod)** | Nej | Artikelgruppens kod, 3–4 siffror. En kod som saknas i registret skapas med koden som namn. Tom cell lämnar fältet orört på en befintlig post. | 300 |
+| **Varugrupp (kod)** | Nej | Varugruppens kod, 1–4 siffror. Varugruppen styr artikelns kontering och momssats. En kod som saknas i registret skapas med koden som namn och 25 % moms. Tom cell lämnar fältet orört på en befintlig post. | 1 |
+| **Artikelkod** | Nej | Artikelkodens kod, max 20 tecken — ett urvals- och grupperingsbegrepp i listorna (Grunddata → Artikelkoder). En kod som saknas i registret skapas med koden som namn. Tom cell lämnar fältet orört på en befintlig post. | 100 |
 | **Standardpris** | Nej | Standardkostnad per grundenhet i SEK, decimalkomma eller punkt, aldrig negativ (t.ex. 1 250,50). Tom cell lämnar fältet orört; ett annat värde än det sparade uppdaterar artikeln. | 1250,50 |
 | **Vikt (kg)** | Nej | Vikt i kilogram per grundenhet, decimalkomma eller punkt, aldrig negativ. Tom cell lämnar fältet orört på en befintlig post. | 18,5 |
 | **Ytbehandling** | Nej | Fritext, max 200 tecken. Tom cell lämnar fältet orört på en befintlig post. | Borstad |

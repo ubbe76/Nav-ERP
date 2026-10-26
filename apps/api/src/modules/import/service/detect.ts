@@ -59,6 +59,8 @@ export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
       "avrundningsantal",
       "partiformningsregel",
       "artikelgrupp",
+      "varugrupp",
+      "varugruppkod",
       "aktiv",
     ],
   },

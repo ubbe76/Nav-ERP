@@ -118,16 +118,24 @@ export const updateStockLocationSchema = z
 export type UpdateStockLocationInput = z.infer<typeof updateStockLocationSchema>;
 
 // Lagervärdering (D1) — GET /stock/valuation[/pdf]. asOf defaults to today
-// (server-side, sv-SE) when omitted; groupId narrows to one article group.
+// (server-side, sv-SE) when omitted; groupId narrows to one varugrupp and
+// articleCodeId to one artikelkod; groupBy picks what the report is
+// subtotalled on (default the varugrupp).
 export const valuationMethodSchema = z.enum(["standard", "latest_purchase", "moving_average"]);
 export type ValuationMethod = z.infer<typeof valuationMethodSchema>;
+
+export const valuationGroupBySchema = z.enum(["group", "articleCode"]);
+export type ValuationGroupBy = z.infer<typeof valuationGroupBySchema>;
 
 export const valuationQuerySchema = z.object({
   asOf: z.string().date().optional(),
   method: valuationMethodSchema,
   groupId: z.string().uuid().optional(),
+  articleCodeId: z.string().uuid().optional(),
+  groupBy: valuationGroupBySchema.default("group"),
 });
-export type ValuationQuery = z.infer<typeof valuationQuerySchema>;
+// Input type: groupBy may be omitted by direct callers (the year-end closing).
+export type ValuationQuery = z.input<typeof valuationQuerySchema>;
 
 // --- Inventering (D2) — stock-count sessions ---
 

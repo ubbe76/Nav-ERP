@@ -33,12 +33,12 @@ const FAKE_UUID = "00000000-0000-0000-0000-000000000000";
 const TEST_UNIT_CODES = ["pall", "PALL", "kartong9"];
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups CASCADE`);
+  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups, article_codes CASCADE`);
   await db.delete(units).where(inArray(units.code, TEST_UNIT_CODES));
 });
 
 afterAll(async () => {
-  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups CASCADE`);
+  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups, article_codes CASCADE`);
   await db.delete(units).where(inArray(units.code, TEST_UNIT_CODES));
 });
 
@@ -94,7 +94,8 @@ describe("createArticle — semantik importen beror på (bugfixar)", () => {
 function fakeDeps(
   existing: ExistingArticle[] = [],
   unitCodes: string[] = ["st"],
-  groupCodes: string[] = []
+  groupCodes: string[] = [],
+  articleCodes: string[] = []
 ): ArticleImportDeps {
   return {
     async articlesByNumber(numbers) {
@@ -107,6 +108,9 @@ function fakeDeps(
     },
     async groupsByCode() {
       return new Map(groupCodes.map((code) => [code, `group-${code}`]));
+    },
+    async articleCodesByCode() {
+      return new Map(articleCodes.map((code) => [code, `code-${code}`]));
     },
     async resolveDefaults() {
       return { unitId: "unit-st", locationId: "loc-fallback" };
@@ -168,10 +172,9 @@ describe("suggestArticleMapping", () => {
     expect(suggested["Kulor"]).toBe("colour");
   });
 
-  // The header row of the real Monitor G5 export. Artikelkod and Varugrupp
-  // carry Monitor's own classification codes but are deliberately NOT guessed
-  // as artikelgrupp — they are mapped by hand if wanted (Varugrupp's
-  // single-digit values would not even pass the 3-4 digit rule).
+  // The header row of the real Monitor G5 export: Artikelkod is the
+  // artikelkod and Varugrupp the varugrupp (groupCode); Artikelkategori and
+  // the stock columns have no target.
   it("maps the real Monitor G5 export header row", () => {
     const suggested = suggestArticleMapping([
       "Artikelnummer",
@@ -191,8 +194,8 @@ describe("suggestArticleMapping", () => {
       "type",
       "standardCost",
       null,
-      null,
-      null,
+      "articleCode",
+      "groupCode",
       "unitCode",
       null,
       null,
@@ -220,6 +223,7 @@ describe("planArticleImport", () => {
         isPhantom: false,
         unitCode: "st",
         groupCode: null,
+        articleCode: null,
         standardCost: 1234.56,
         weight: 2.5,
         surfaceTreatment: null,
@@ -508,13 +512,51 @@ describe("planArticleImport", () => {
     expect(plan.creates).toHaveLength(1);
   });
 
-  it("errors on group codes that are not 3-4 digits", async () => {
+  it("errors on group codes that are not 1-4 digits, takes Monitor's single-digit varugrupp", async () => {
     const plan = await planArticleImport(
-      { mapping: MAPPING, rows: [["G-1", "x", "", "", "12x", "", "", ""]] },
+      {
+        mapping: MAPPING,
+        rows: [
+          ["G-1", "x", "", "", "12x", "", "", ""],
+          ["G-2", "x", "", "", "12345", "", "", ""],
+          ["G-3", "x", "", "", "8", "", "", ""],
+        ],
+      },
       fakeDeps()
     );
-    expect(plan.rows[0]!.errors[0]).toContain("Ogiltig artikelgruppkod");
-    expect(plan.willCreate.articleGroups).toEqual([]);
+    expect(plan.rows[0]!.errors[0]).toContain("Ogiltig varugruppskod");
+    expect(plan.rows[1]!.errors[0]).toContain("Ogiltig varugruppskod");
+    expect(plan.rows[2]!.errors).toEqual([]);
+    expect(plan.willCreate.articleGroups).toEqual(["8"]);
+  });
+
+  it("reads Artikelkod: unknown codes in willCreate, a known one resolves, a changed one patches, too long errors", async () => {
+    const mapping = { Artikelnummer: "articleNumber", Benämning: "name", Artikelkod: "articleCode" };
+    const existing = {
+      id: "a-1", articleNumber: "K-1", name: "Finns", type: "purchased", unitCode: "st", unitId: "unit-st",
+      isPhantom: false, groupCode: null, articleCode: "100", standardCost: null, weight: null,
+      surfaceTreatment: null, colour: null, active: true,
+    } satisfies ExistingArticle;
+    const plan = await planArticleImport(
+      {
+        mapping,
+        rows: [
+          ["K-1", "", "120"],
+          ["K-2", "Ny", "100"],
+          ["K-3", "Ny", "330"],
+          ["K-4", "Ny", "x".repeat(21)],
+          ["K-5", "Ny", ""],
+        ],
+      },
+      fakeDeps([existing], ["st"], [], ["100"])
+    );
+    expect(plan.willCreate.articleCodes).toEqual(["120", "330"]);
+    expect(plan.updates).toEqual([{ id: "a-1", patch: { articleCode: "120" } }]);
+    expect(plan.creates.map((c) => [c.articleNumber, c.articleCode])).toEqual([["K-2", "100"], ["K-3", "330"], ["K-5", null]]);
+    expect(plan.rows[3]!.errors[0]).toContain("Artikelkoden är för lång");
+    // The same code as stored stages no patch.
+    const again = await planArticleImport({ mapping, rows: [["K-1", "", "100"]] }, fakeDeps([existing], ["st"], [], ["100"]));
+    expect(again.updates).toEqual([{ id: "a-1", patch: {} }]);
   });
 
   it("collects unknown units and groups in willCreate, case-insensitively for units", async () => {
@@ -739,7 +781,7 @@ async function emptyPlan(): Promise<ArticleImportPlan> {
   return {
     rows: [],
     summary: { create: 0, update: 0, skip: 0, error: 0, warning: 0 },
-    willCreate: { units: [], articleGroups: [] },
+    willCreate: { units: [], articleGroups: [], articleCodes: [] },
     creates: [],
     updates: [],
     fallbackUnitId: fallback.unitId,
@@ -784,7 +826,7 @@ describe("import repository — executeArticlePlan", () => {
   it("creates, updates and auto-creates registers in one transaction", async () => {
     const existing = await makeArticle("EXEC-1", "Före");
     const plan = await emptyPlan();
-    plan.willCreate = { units: ["pall"], articleGroups: ["9990"] };
+    plan.willCreate = { units: ["pall"], articleGroups: ["9990"], articleCodes: ["100"] };
     plan.creates = [
       {
         articleNumber: "EXEC-2",
@@ -793,6 +835,7 @@ describe("import repository — executeArticlePlan", () => {
         isPhantom: true,
         unitCode: "pall",
         groupCode: "9990",
+        articleCode: "100",
         standardCost: 12.5,
         weight: null,
         surfaceTreatment: null,
@@ -819,12 +862,14 @@ describe("import repository — executeArticlePlan", () => {
     expect(result).toEqual({
       created: 2,
       updated: 1,
-      registersCreated: { units: ["pall"], articleGroups: ["9990"] },
+      registersCreated: { units: ["pall"], articleGroups: ["9990"], articleCodes: ["100"] },
     });
 
     const created = await importRepo.articlesByNumber(["EXEC-2", "EXEC-3"]);
     expect(created.get("EXEC-2")!.unitCode).toBe("pall");
     expect(created.get("EXEC-2")!.groupCode).toBe("9990");
+    expect(created.get("EXEC-2")!.articleCode).toBe("100");
+    expect(created.get("EXEC-3")!.articleCode).toBeNull();
     // is_phantom is written from the plan, not left to the column default.
     expect(created.get("EXEC-2")!.isPhantom).toBe(true);
     expect(created.get("EXEC-3")!.unitCode).toBe("st"); // fallback unit
@@ -859,7 +904,7 @@ describe("import repository — executeArticlePlan", () => {
     const [{ value: before }] = await db.select({ value: count() }).from(articles);
 
     const plan = await emptyPlan();
-    plan.willCreate = { units: ["kartong9"], articleGroups: [] };
+    plan.willCreate = { units: ["kartong9"], articleGroups: [], articleCodes: [] };
     plan.creates = [
       { articleNumber: "ATOM-2", name: "Går in", type: "purchased", unitCode: "kartong9", groupCode: null, standardCost: null, weight: null, surfaceTreatment: null, colour: null, active: true },
       // Collides with ATOM-1 -> unique violation -> whole tx rolls back.
@@ -995,7 +1040,7 @@ describe("import service — preview & commit", () => {
       updated: 1,
       skipped: 0,
       skippedRows: [],
-      registersCreated: { units: ["pall"], articleGroups: [] },
+      registersCreated: { units: ["pall"], articleGroups: [], articleCodes: [] },
     });
     const rows = await importRepo.articlesByNumber(["COM-1", "COM-2"]);
     expect(rows.get("COM-1")!.name).toBe("Efter");

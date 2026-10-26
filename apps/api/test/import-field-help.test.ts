@@ -276,7 +276,7 @@ describe("field help — the examples parse", () => {
     expect(parseRoutingTimeUnit(example("routing", "timeUnit"))).not.toBeNull();
     expect(parseWorkCenterType(example("workCenters", "type"))).toBe("machine");
     expect(example("articles", "lotSizingRule").toLowerCase().replace(/[^a-zåäö]/g, "")).toBe("fastorderstorlek");
-    expect(example("articles", "groupCode")).toMatch(/^[0-9]{3,4}$/);
+    expect(example("articles", "groupCode")).toMatch(/^[0-9]{1,4}$/);
     for (const entity of ["routing", "workCenters", "legoWorkCenters"] as const) {
       const field = entity === "routing" ? "workCenterCode" : "code";
       expect(example(entity, field), entity).toMatch(/^[0-9]{3}$/);

@@ -154,6 +154,7 @@ export function createRegisterService(repo: RegisterRepository) {
     carriers: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["carriers"]["create"]>>>(repo.carriers),
     units: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["units"]["create"]>>>(repo.units),
     packageTypes: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["packageTypes"]["create"]>>>(repo.packageTypes),
+    articleCodes: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["articleCodes"]["create"]>>>(repo.articleCodes),
     // Förlustorsaker (uppföljning av offerter): same CRUD/usage/delete flow,
     // its own input shape (code/name/active).
     quoteLossReasons: forRegister(repo.quoteLossReasons),

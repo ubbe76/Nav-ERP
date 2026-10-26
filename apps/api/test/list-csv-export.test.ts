@@ -181,7 +181,7 @@ describe("GET /articles/csv", () => {
     // Same column order as ArticlesPageClient.tsx's Table, plus the
     // export-only Ytbehandling/Färg columns appended at the end.
     expect(
-      res.body.startsWith("﻿Artikelnummer;Benämning;Typ;Grupp;Enhet;Standardkostnad;Status;Ytbehandling;Färg")
+      res.body.startsWith("﻿Artikelnummer;Benämning;Typ;Varugrupp;Artikelkod;Enhet;Standardkostnad;Status;Ytbehandling;Färg")
     ).toBe(true);
     expect(res.body).toContain("Skruv 8x40");
     expect(res.body).not.toContain("Annan artikel");

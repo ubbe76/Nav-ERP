@@ -13,11 +13,10 @@ import { insertBomRows } from "./bom-write.js";
 // Information: the Allmänt/planning columns the new-article form does NOT
 // carry. Each is taken from the source unless the request sent it — the
 // request always wins. The form's own fields (type, isPhantom, unitId,
-// standardCost, groupId, defaultLocationId) are pre-filled client-side and
+// standardCost, groupId, articleCodeId, defaultLocationId) are pre-filled client-side and
 // never read from the source here; articleNumber/name/active never are.
 export const COPIED_INFORMATION_FIELDS = [
   "salesPrice",
-  "vatRate",
   "weight",
   "length",
   "width",

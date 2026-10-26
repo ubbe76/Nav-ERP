@@ -76,6 +76,7 @@ export function createOrderRegisterRepository(db: Db) {
       if (query.openOnly) conditions.push(gt(salesOrderRows.quantityOrdered, salesOrderRows.quantityDelivered));
       if (query.articleId) conditions.push(eq(salesOrderRows.articleId, query.articleId));
       if (query.articleGroupId) conditions.push(eq(articles.groupId, query.articleGroupId));
+      if (query.articleCodeId) conditions.push(eq(articles.articleCodeId, query.articleCodeId));
 
       const rows = await db
         .select({
@@ -126,6 +127,7 @@ export function createOrderRegisterRepository(db: Db) {
       if (query.openOnly) conditions.push(gt(purchaseOrderRows.quantityOrdered, purchaseOrderRows.quantityReceived));
       if (query.articleId) conditions.push(eq(purchaseOrderRows.articleId, query.articleId));
       if (query.articleGroupId) conditions.push(eq(articles.groupId, query.articleGroupId));
+      if (query.articleCodeId) conditions.push(eq(articles.articleCodeId, query.articleCodeId));
 
       const rows = await db
         .select({

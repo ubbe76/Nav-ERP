@@ -1,6 +1,7 @@
 import { asc, count, eq, sql } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import {
+  articleCodes,
   articles,
   articleUnits,
   bomComponents,
@@ -107,7 +108,14 @@ const PARTNER_AND_DOCUMENT_REFERENCES = {
 } satisfies Record<string, RegisterReference[]>;
 
 export const REGISTER_REFERENCES: Record<
-  "deliveryTerms" | "paymentTerms" | "carriers" | "units" | "packageTypes" | "quoteLossReasons" | "deviationReasons",
+  | "deliveryTerms"
+  | "paymentTerms"
+  | "carriers"
+  | "units"
+  | "packageTypes"
+  | "quoteLossReasons"
+  | "deviationReasons"
+  | "articleCodes",
   RegisterReference[]
 > = {
   deliveryTerms: PARTNER_AND_DOCUMENT_REFERENCES.deliveryTerm,
@@ -130,6 +138,8 @@ export const REGISTER_REFERENCES: Record<
     ref(costCalculationMaterialRows, "cost_calculation_material_rows", "kalkylrad|kalkylrader", costCalculationMaterialRows.unitId),
   ],
   packageTypes: [ref(articles, "articles", "artikel|artiklar", articles.packageTypeId)],
+  // Artikelkoder: the articles carrying the code (selection/grouping only).
+  articleCodes: [ref(articles, "articles", "artikel|artiklar", articles.articleCodeId)],
   // Förlustorsaker: the lost quotes carrying the reason (reopen clears it).
   quoteLossReasons: [ref(salesOrders, "sales_orders", "förlorad offert|förlorade offerter", salesOrders.lostReasonId)],
   // Avvikelseorsaker (Kvalitet): the cases and the scrap rows carrying it.
@@ -373,6 +383,7 @@ export function createRegisterRepository(db: Db) {
     carriers: forTable(carriers as unknown as RegisterTable, REGISTER_REFERENCES.carriers),
     units: forTable(units as unknown as RegisterTable, REGISTER_REFERENCES.units),
     packageTypes: forTable(packageTypes as unknown as RegisterTable, REGISTER_REFERENCES.packageTypes),
+    articleCodes: forTable(articleCodes as unknown as RegisterTable, REGISTER_REFERENCES.articleCodes),
     quoteLossReasons: lossReasons,
     deviationReasons: deviationReasonEntries,
     // Kollitypens fraktfält (frakt) — outside the generic code/name register.

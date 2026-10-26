@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
+  articleCodes,
   articleGroups,
   articleRevisions,
   articleSuppliers,
@@ -94,6 +95,16 @@ function chunk<T>(items: T[], size = CHUNK_SIZE): T[][] {
 // description), same as register.repository.ts's forTable — the cast at
 // each call site is safe for the same reason.
 type NamedRegisterTable = typeof deliveryTerms;
+
+// A name for an auto-created register entry (name = code) that no other
+// entry already carries: "120", else "120 (2)", "120 (3)" … — the names are
+// unique too, and a silent conflict skip would leave the code unresolved.
+function freeName(code: string, taken: Set<string>): string {
+  let name = code;
+  for (let n = 2; taken.has(name); n++) name = `${code} (${n})`;
+  taken.add(name);
+  return name;
+}
 
 // Creates whatever names planCustomerImport's willCreate.<register> list
 // still needs (case-insensitive misses against the register at plan time),
@@ -382,6 +393,7 @@ export function createImportRepository(db: Db) {
             unitId: articles.unitId,
             isPhantom: articles.isPhantom,
             groupCode: articleGroups.code,
+            articleCode: articleCodes.code,
             standardCost: articles.standardCost,
             weight: articles.weight,
             surfaceTreatment: articles.surfaceTreatment,
@@ -392,6 +404,7 @@ export function createImportRepository(db: Db) {
           .from(articles)
           .innerJoin(units, eq(units.id, articles.unitId))
           .leftJoin(articleGroups, eq(articleGroups.id, articles.groupId))
+          .leftJoin(articleCodes, eq(articleCodes.id, articles.articleCodeId))
           // At most one active revision per article (partial unique index).
           .leftJoin(articleRevisions, and(eq(articleRevisions.articleId, articles.id), eq(articleRevisions.isActive, true)))
           .where(inArray(articles.articleNumber, part));
@@ -407,9 +420,15 @@ export function createImportRepository(db: Db) {
       return new Map(rows.map((row) => [row.code.toLowerCase(), row]));
     },
 
-    // Group codes are 3-4 digits — exact keys.
+    // Group codes are 1-4 digits — exact keys.
     async groupsByCode(): Promise<Map<string, string>> {
       const rows = await db.select({ id: articleGroups.id, code: articleGroups.code }).from(articleGroups);
+      return new Map(rows.map((row) => [row.code, row.id]));
+    },
+
+    // Artikelkoder — exact keys, like the groups.
+    async articleCodesByCode(): Promise<Map<string, string>> {
+      const rows = await db.select({ id: articleCodes.id, code: articleCodes.code }).from(articleCodes);
       return new Map(rows.map((row) => [row.code, row.id]));
     },
 
@@ -450,12 +469,31 @@ export function createImportRepository(db: Db) {
           createdGroups.push(...rows.map((row) => row.code));
         }
 
+        // Artikelkoder the same way (name = code). A code whose name is
+        // already another code's is skipped by the conflict guard and then
+        // fails to resolve below — so it is given a suffixed name instead.
+        const createdArticleCodes: string[] = [];
+        if (plan.willCreate.articleCodes.length > 0) {
+          const taken = new Set((await tx.select({ name: articleCodes.name }).from(articleCodes)).map((row) => row.name));
+          for (const part of chunk(plan.willCreate.articleCodes)) {
+            if (part.length === 0) continue;
+            const rows = await tx
+              .insert(articleCodes)
+              .values(part.map((code) => ({ code, name: freeName(code, taken) })))
+              .onConflictDoNothing()
+              .returning({ code: articleCodes.code });
+            createdArticleCodes.push(...rows.map((row) => row.code));
+          }
+        }
+
         // Re-read code -> id INSIDE the tx so the just-created registers
         // resolve. Same lowercased keying as unitsByCode.
         const unitRows = await tx.select({ id: units.id, code: units.code }).from(units);
         const unitIds = new Map(unitRows.map((row) => [row.code.toLowerCase(), row.id]));
         const groupRows = await tx.select({ id: articleGroups.id, code: articleGroups.code }).from(articleGroups);
         const groupIds = new Map(groupRows.map((row) => [row.code, row.id]));
+        const articleCodeRows = await tx.select({ id: articleCodes.id, code: articleCodes.code }).from(articleCodes);
+        const articleCodeIds = new Map(articleCodeRows.map((row) => [row.code, row.id]));
 
         // Revisioner, applied once every article exists (applyImportedRevisions).
         const revisionRows: ImportedRevisions[] = [];
@@ -476,6 +514,7 @@ export function createImportRepository(db: Db) {
                 isPhantom: create.isPhantom,
                 unitId: create.unitCode ? resolveNewUnitId(unitIds, create.unitCode) : plan.fallbackUnitId,
                 groupId: create.groupCode ? groupIds.get(create.groupCode)! : null,
+                articleCodeId: create.articleCode ? articleCodeIds.get(create.articleCode)! : null,
                 standardCost: create.standardCost !== null ? String(create.standardCost) : undefined,
                 weight: create.weight !== null ? String(create.weight) : undefined,
                 surfaceTreatment: create.surfaceTreatment,
@@ -521,6 +560,9 @@ export function createImportRepository(db: Db) {
             .set({
               ...(update.patch.name !== undefined ? { name: update.patch.name } : {}),
               ...(update.patch.groupCode !== undefined ? { groupId: groupIds.get(update.patch.groupCode)! } : {}),
+              ...(update.patch.articleCode !== undefined
+                ? { articleCodeId: articleCodeIds.get(update.patch.articleCode)! }
+                : {}),
               ...(update.patch.standardCost !== undefined ? { standardCost: String(update.patch.standardCost) } : {}),
               ...(update.patch.weight !== undefined ? { weight: String(update.patch.weight) } : {}),
               ...(update.patch.surfaceTreatment !== undefined
@@ -549,7 +591,7 @@ export function createImportRepository(db: Db) {
         return {
           created: plan.creates.length,
           updated,
-          registersCreated: { units: createdUnits, articleGroups: createdGroups },
+          registersCreated: { units: createdUnits, articleGroups: createdGroups, articleCodes: createdArticleCodes },
         };
       });
     },

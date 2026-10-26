@@ -103,14 +103,13 @@ async function makeArticleGroup(code: string, name: string) {
   return row!;
 }
 
-async function makeArticle(opts: { groupId?: string; vatRate?: number } = {}) {
+async function makeArticle(opts: { groupId?: string } = {}) {
   return articleService.createArticle({
     articleNumber: `ART-POST-${crypto.randomUUID()}`,
     name: "Konteringsartikel",
     type: "manufactured",
     active: true,
     ...(opts.groupId !== undefined ? { groupId: opts.groupId } : {}),
-    ...(opts.vatRate !== undefined ? { vatRate: opts.vatRate } : {}),
   });
 }
 

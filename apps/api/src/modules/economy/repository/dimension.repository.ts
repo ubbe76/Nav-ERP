@@ -159,7 +159,7 @@ function references(dimension: "costCenter" | "project"): DimensionReference[] {
     ref(bankRules, "bank_rules", "bankregel|bankregler", column(bankRules)),
     ...(dimension === "costCenter"
       ? [
-          ref(articleGroups, "article_groups", "artikelgrupp (förval)|artikelgrupper (förval)", articleGroups.defaultCostCenterId),
+          ref(articleGroups, "article_groups", "varugrupp (förval)|varugrupper (förval)", articleGroups.defaultCostCenterId),
           ref(suppliers, "suppliers", "leverantör (förval)|leverantörer (förval)", suppliers.defaultCostCenterId),
           ref(fixedAssetCategories, "fixed_asset_categories", "tillgångsgrupp (förval)|tillgångsgrupper (förval)", fixedAssetCategories.defaultCostCenterId),
           { ...ref(budgetLines, "budget_lines", "budgetrad|budgetrader", budgetLines.costCenterId), move: moveBudgetLines },

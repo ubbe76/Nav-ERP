@@ -15,7 +15,7 @@ import {
   varchar,
   boolean,
 } from "drizzle-orm/pg-core";
-import { packageTypes, parcelKindEnum, units } from "./register";
+import { articleCodes, packageTypes, parcelKindEnum, units } from "./register";
 import { users } from "./auth";
 import { numberSeries } from "./system";
 // Last on purpose: dimensions.ts reaches sales.ts, which cycles back here —
@@ -32,14 +32,18 @@ export const articleTypeEnum = pgEnum("article_type", [
   "service",
 ]);
 
-// Free-form, user-defined groups for accounting/statistics/reporting
-// breakdown (Monitor-style artikelgrupper) — a small table the article
-// references, not a hardcoded field.
+// Varugrupper (Monitor-style; called artikelgrupper in the code and the
+// database, renamed in the UI in 0155): user-defined groups that steer the
+// article's posting (posting_rules) and VAT rate (vatRate below), plus
+// statistics/report breakdown — a small table the article references, not a
+// hardcoded field. The free selection/grouping concept is the artikelkod
+// (article_codes in register.ts).
 export const articleGroups = pgTable(
   "article_groups",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // Numeric code, 3 or 4 digits — a flat register with no huvudgrupp level.
+    // Numeric code, 1–4 digits (3–4 before 0155; Monitor's varugrupper are
+    // single digits) — a flat register with no huvudgrupp level.
     code: varchar("code", { length: 4 }).notNull().unique(),
     name: varchar("name", { length: 100 }).notNull().unique(),
     // Free-text note on what the group covers (Beskrivning), max 500 chars.
@@ -53,9 +57,16 @@ export const articleGroups = pgTable(
     // Kostnadsställe (förval): what an invoice/supplier invoice row for an
     // article in this group gets when the document header has none.
     defaultCostCenterId: uuid("default_cost_center_id").references(() => costCenters.id, { onDelete: "restrict" }),
+    // Momssats: the group's articles take this rate on sales/invoice rows
+    // (an article without a group gets 25 %) — the article has no rate of
+    // its own since 0155, see articleVatRateSql. Invoice rows snapshot it.
+    vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("25"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [check("code_three_or_four_digits", sql`${table.code} ~ '^[0-9]{3,4}$'`)]
+  (table) => [
+    check("article_groups_code_digits", sql`${table.code} ~ '^[0-9]{1,4}$'`),
+    check("article_groups_vat_rate_check", sql`${table.vatRate} IN (25, 12, 6, 0)`),
+  ]
 );
 
 export const articles = pgTable("articles", {
@@ -84,9 +95,6 @@ export const articles = pgTable("articles", {
   // the price chain (customer price → price list → this). Null = no base
   // price; never 0 as a stand-in.
   salesPrice: numeric("sales_price", { precision: 14, scale: 4 }),
-  // Default VAT rate (moms) for sales/invoice rows. Stored as a plain rate —
-  // the momskod register comes with block B5; invoice rows snapshot the rate.
-  vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("25"),
   // Physical attributes for volume/shipping (used later for transport
   // booking). Nettovikt in kilograms; length/width/height in millimetres.
   weight: numeric("weight", { precision: 12, scale: 3 }),
@@ -123,6 +131,9 @@ export const articles = pgTable("articles", {
   palletSpaces: numeric("pallet_spaces", { precision: 8, scale: 2 }),
   loadingMeters: numeric("loading_meters", { precision: 8, scale: 2 }),
   groupId: uuid("group_id").references(() => articleGroups.id, { onDelete: "set null" }),
+  // Artikelkod (Grunddata): selection/grouping in the lists only. restrict —
+  // the register's delete moves the articles to a replacement first.
+  articleCodeId: uuid("article_code_id").references(() => articleCodes.id, { onDelete: "restrict" }),
   // The article's default stock location — transactions without an explicit
   // location resolve here, and null falls through to the auto-created "***"
   // location (see stock's location-resolver.ts). FK declared in stock.ts to

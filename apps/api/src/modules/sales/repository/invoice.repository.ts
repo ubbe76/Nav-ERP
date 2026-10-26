@@ -54,6 +54,7 @@ import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions }
 import { computeOpenAmounts, computeOpenAmountsSek } from "./open-amounts.js";
 import { chargesByInvoice, isLateInterestInvoice, paymentsByInvoice } from "./late-interest.repository.js";
 import { ShipmentNotBillableError, VatNumberRequiredError } from "../service/sales.errors.js";
+import { articleVatFacts, articleVatRateSql } from "../../article/repository/article-vat-rate.js";
 // Type-only (erased at compile time), so declaring the poster interface at
 // the consuming service does not create a runtime import cycle.
 import type { CustomerInvoicePoster, InvoiceReminderPoster } from "../service/invoice.service.js";
@@ -497,21 +498,16 @@ export function createInvoiceRepository(db: Db) {
       return row ?? null;
     },
 
-    // The article's current default VAT rate — the fallback when a row
-    // doesn't specify vatRate explicitly.
+    // The article's current VAT rate (its varugrupp's) — the fallback when
+    // a row doesn't specify vatRate explicitly.
     async findArticleVatRate(articleId: string) {
-      const [row] = await db.select({ vatRate: articles.vatRate }).from(articles).where(eq(articles.id, articleId));
-      return row ? Number(row.vatRate) : null;
+      return (await articleVatFacts(db, articleId))?.vatRate ?? null;
     },
 
     // Momskoder: the article facts salesVatCode reads — its rate (the
     // domestic code) and its type (goods or service).
     async findArticleForVat(articleId: string) {
-      const [row] = await db
-        .select({ vatRate: articles.vatRate, type: articles.type })
-        .from(articles)
-        .where(eq(articles.id, articleId));
-      return row ? { vatRate: Number(row.vatRate), type: row.type as string } : null;
+      return articleVatFacts(db, articleId);
     },
 
     // Momskoder: the company's codes (name, invoice text, active), once per
@@ -728,7 +724,7 @@ export function createInvoiceRepository(db: Db) {
           // The unit the row displays in — same coalesce-to-base-unit rule as
           // sales.repository's listRowsByOrder.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
-          vatRate: articles.vatRate,
+          vatRate: articleVatRateSql,
           // Momskoder: goods or service for the row's derived code.
           articleType: articles.type,
           quantityDelivered: salesOrderRows.quantityDelivered,

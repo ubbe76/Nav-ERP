@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { articleStandardCostHistory, db, stockTransactions } from "@navet/db";
+import { articleCodes, articleStandardCostHistory, db, stockTransactions } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
@@ -23,7 +23,7 @@ const stockRepo = createStockRepository(db);
 const stockService = createStockService(stockRepo);
 const valuationService = createValuationService({ db, pdf: testDocumentPdfService });
 
-const TRUNCATE = sql`TRUNCATE stock_transactions, stock_locations, warehouses, sales_order_rows, sales_orders, customers, purchase_order_rows, purchase_orders, suppliers, mo_material_consumptions, manufacturing_orders, bom_components, article_standard_cost_history, article_groups, articles, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE stock_transactions, stock_locations, warehouses, sales_order_rows, sales_orders, customers, purchase_order_rows, purchase_orders, suppliers, mo_material_consumptions, manufacturing_orders, bom_components, article_standard_cost_history, article_groups, article_codes, articles, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -226,7 +226,7 @@ describe("getValuation — moving_average method", () => {
 });
 
 // Group name is picked so plain alphabetical order would NOT put
-// "Utan artikelgrupp" last on its own ("A-gruppen" < "Utan..." < "Ö-gruppen")
+// "Utan varugrupp" last on its own ("A-gruppen" < "Utan..." < "Ö-gruppen")
 // — the null-group-last rule has to be doing real work for this to pass.
 async function setupGroupingFixture(location: { id: string }) {
   const groupHigh = await articleService.createArticleGroup({ code: "501", name: "Ö-gruppen" });
@@ -265,7 +265,7 @@ async function setupGroupingFixture(location: { id: string }) {
     createdAt: new Date("2020-01-01T10:00:00Z"),
   });
 
-  // No group -> falls into "Utan artikelgrupp".
+  // No group -> falls into "Utan varugrupp".
   const articleW = await makeArticle();
   await insertHistory(articleW.id, 50, new Date("2000-01-01T12:00:00Z"));
   await insertTransaction({
@@ -285,7 +285,8 @@ describe("getValuation — grouping, zero-net exclusion, totals", () => {
 
     const result = await valuationService.getValuation({ asOf: "2020-06-01", method: "standard" });
 
-    expect(result.groups.map((g) => g.groupName)).toEqual(["A-gruppen", "Ö-gruppen", "Utan artikelgrupp"]);
+    expect(result.groupBy).toBe("group");
+    expect(result.groups.map((g) => g.groupName)).toEqual(["A-gruppen", "Ö-gruppen", "Utan varugrupp"]);
 
     const allArticleIds = result.groups.flatMap((g) => g.rows.map((r) => r.articleId));
     expect(allArticleIds).not.toContain(articleY.id);
@@ -298,7 +299,7 @@ describe("getValuation — grouping, zero-net exclusion, totals", () => {
     const groupO = result.groups.find((g) => g.groupName === "Ö-gruppen")!;
     expect(groupO.total).toBe(1000);
 
-    const groupNone = result.groups.find((g) => g.groupName === "Utan artikelgrupp")!;
+    const groupNone = result.groups.find((g) => g.groupName === "Utan varugrupp")!;
     expect(groupNone.total).toBe(150);
 
     expect(result.totalValue).toBe(1150); // excludes articleZ's null value
@@ -320,6 +321,29 @@ describe("getValuation — grouping, zero-net exclusion, totals", () => {
     expect(result.groups[0]!.rows.map((r) => r.articleId)).toEqual([articleZ.id]);
     expect(result.totalValue).toBe(0);
     expect(result.unvaluedCount).toBe(1);
+  });
+
+  it("groupBy articleCode subtotals per artikelkod (none last) and articleCodeId narrows to one", async () => {
+    const location = await makeLocation();
+    const { articleX, articleZ, articleW } = await setupGroupingFixture(location);
+    const [plat] = await db.insert(articleCodes).values({ code: "100", name: "Plåt" }).returning();
+    const [ror] = await db.insert(articleCodes).values({ code: "200", name: "Rör" }).returning();
+    // X (varugrupp Ö) and Z (varugrupp A) share a code across groups; W has none.
+    await articleService.updateArticle(articleX.id, { articleCodeId: ror!.id });
+    await articleService.updateArticle(articleZ.id, { articleCodeId: plat!.id });
+
+    const result = await valuationService.getValuation({ asOf: "2020-06-01", method: "standard", groupBy: "articleCode" });
+    expect(result.groupBy).toBe("articleCode");
+    expect(result.groups.map((g) => [g.groupId, g.groupName, g.rows.map((r) => r.articleId)])).toEqual([
+      [plat!.id, "Plåt", [articleZ.id]],
+      [ror!.id, "Rör", [articleX.id]],
+      [null, "Utan artikelkod", [articleW.id]],
+    ]);
+    expect(result.totalValue).toBe(1150);
+
+    const narrowed = await valuationService.getValuation({ asOf: "2020-06-01", method: "standard", articleCodeId: ror!.id });
+    expect(narrowed.groups.map((g) => g.groupName)).toEqual(["Ö-gruppen"]);
+    expect(narrowed.groups[0]!.rows.map((r) => r.articleId)).toEqual([articleX.id]);
   });
 });
 

@@ -24,6 +24,7 @@ export const ARTICLE_IMPORT_FIELDS = [
   "type",
   "unitCode",
   "groupCode",
+  "articleCode",
   "standardCost",
   "weight",
   "surfaceTreatment",
@@ -45,10 +46,11 @@ export const ARTICLE_IMPORT_FIELDS = [
 ] as const;
 
 // Normalized header -> target field (see normalizeHeader: "Benämning" ->
-// "benamning", "Art.nr" -> "artnr"). Monitor's own classification columns
-// (Artikelkod, Varugrupp, Artikelkategori) and the stock columns (Totalt
-// saldo, Lagerplatsurval) are deliberately absent — they have no target
-// field here and must be mapped by hand if a site wants them. The planning
+// "benamning", "Art.nr" -> "artnr"). Monitor's Varugrupp is the varugrupp
+// (groupCode, the old "Artikelgrupp" headings still map) and its Artikelkod
+// the artikelkod; Artikelkategori and the stock columns (Totalt saldo,
+// Lagerplatsurval) are deliberately absent — they have no target field here
+// and must be mapped by hand if a site wants them. The planning
 // export's Min. kvantitet, Säkerhetslager, Ledtid etc. are likewise absent:
 // order_quantity already acts as the minimum, and the rest have no field.
 export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
@@ -69,8 +71,11 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   artikeltyp: "type",
   typ: "type",
   enhet: "unitCode",
+  varugrupp: "groupCode",
+  varugruppkod: "groupCode",
   artikelgrupp: "groupCode",
   artikelgruppkod: "groupCode",
+  artikelkod: "articleCode",
   standardpris: "standardCost",
   standardkostnad: "standardCost",
   kostnad: "standardCost",
@@ -112,6 +117,8 @@ export interface ExistingArticle {
   unitId: string;
   isPhantom: boolean;
   groupCode: string | null;
+  // Optional: only the article import reads it.
+  articleCode?: string | null;
   standardCost: string | null;
   weight: string | null;
   surfaceTreatment: string | null;
@@ -130,6 +137,8 @@ export interface ArticleImportDeps {
   // of creating a case-variant duplicate.
   unitsByCode(): Promise<Map<string, { id: string; code: string }>>;
   groupsByCode(): Promise<Map<string, string>>;
+  // Artikelkoder keyed by their exact code.
+  articleCodesByCode(): Promise<Map<string, string>>;
   // The same fallbacks createArticle uses ("st" + the "***" location),
   // resolved ONCE before rows are built.
   resolveDefaults(): Promise<{ unitId: string; locationId: string }>;
@@ -154,6 +163,8 @@ export interface ArticleCreatePlan {
   isPhantom: boolean;
   unitCode: string | null; // null = the fallback "st" unit
   groupCode: string | null;
+  // Optional: the bom import's article creates carry none.
+  articleCode?: string | null;
   standardCost: number | null;
   weight: number | null;
   surfaceTreatment: string | null;
@@ -173,6 +184,7 @@ export interface ArticleUpdatePlan {
   patch: {
     name?: string;
     groupCode?: string; // resolved to groupId inside the commit transaction
+    articleCode?: string; // resolved to articleCodeId the same way
     standardCost?: number;
     weight?: number;
     surfaceTreatment?: string | null;
@@ -188,7 +200,7 @@ export interface ArticleUpdatePlan {
 export interface ArticleImportPlan {
   rows: ImportRowResult[];
   summary: ImportSummary;
-  willCreate: { units: string[]; articleGroups: string[] };
+  willCreate: { units: string[]; articleGroups: string[]; articleCodes: string[] };
   creates: ArticleCreatePlan[];
   updates: ArticleUpdatePlan[];
   fallbackUnitId: string;
@@ -196,7 +208,10 @@ export interface ArticleImportPlan {
   hasErrors: boolean;
 }
 
-const GROUP_CODE_PATTERN = /^[0-9]{3,4}$/;
+// Varugruppskod: 1–4 digits (Monitor's Varugrupp is a single digit).
+const GROUP_CODE_PATTERN = /^[0-9]{1,4}$/;
+// Artikelkod: the register's code column (article_codes.code varchar(20)).
+const ARTICLE_CODE_MAX = 20;
 
 // The registers' own limits (article_revisions/article_drawing_revisions.revision
 // varchar(20), article_drawings.drawing_number varchar(50)).
@@ -246,6 +261,7 @@ export async function planArticleImport(
   const fallback = await deps.resolveDefaults();
   const unitMap = await deps.unitsByCode();
   const groupMap = await deps.groupsByCode();
+  const articleCodeMap = await deps.articleCodesByCode();
 
   // One record per CSV row: target field -> trimmed cell (mapped columns only).
   const records = input.rows.map((row) => {
@@ -265,6 +281,7 @@ export async function planArticleImport(
   // Lowercased code -> the first-seen original casing (what gets created).
   const newUnits = new Map<string, string>();
   const newGroups = new Set<string>();
+  const newArticleCodes = new Set<string>();
   const seenNumbers = new Set<string>();
 
   records.forEach((record, index) => {
@@ -346,11 +363,21 @@ export async function planArticleImport(
     const groupCode = record["groupCode"] ?? "";
     if (groupCode !== "") {
       if (!GROUP_CODE_PATTERN.test(groupCode)) {
-        errors.push(`Ogiltig artikelgruppkod: "${groupCode}" (3–4 siffror)`);
+        errors.push(`Ogiltig varugruppskod: "${groupCode}" (1–4 siffror)`);
       } else {
         values["groupCode"] = groupCode;
         if (!groupMap.has(groupCode)) newGroups.add(groupCode);
       }
+    }
+
+    // Artikelkod — same rule as the varugrupp: a code missing from the
+    // register is created (name = code), an empty cell leaves it untouched.
+    const articleCode = record["articleCode"] ?? "";
+    if (articleCode.length > ARTICLE_CODE_MAX) {
+      errors.push(`Artikelkoden är för lång (max ${ARTICLE_CODE_MAX} tecken)`);
+    } else if (articleCode !== "") {
+      values["articleCode"] = articleCode;
+      if (!articleCodeMap.has(articleCode)) newArticleCodes.add(articleCode);
     }
 
     const costCell = record["standardCost"] ?? "";
@@ -525,6 +552,7 @@ export async function planArticleImport(
         isPhantom: parsedType?.isPhantom ?? false,
         unitCode: unitCode === "" ? null : unitCode,
         groupCode: groupCode === "" ? null : groupCode,
+        articleCode: articleCode === "" || articleCode.length > ARTICLE_CODE_MAX ? null : articleCode,
         standardCost,
         weight,
         surfaceTreatment,
@@ -542,6 +570,9 @@ export async function planArticleImport(
       if (name !== "") patch.name = name;
       if (groupCode !== "" && GROUP_CODE_PATTERN.test(groupCode) && groupCode !== existing.groupCode) {
         patch.groupCode = groupCode;
+      }
+      if (articleCode !== "" && articleCode.length <= ARTICLE_CODE_MAX && articleCode !== (existing.articleCode ?? null)) {
+        patch.articleCode = articleCode;
       }
       if (standardCost !== null) {
         // Same "only patch when it differs" rule as groupCode above — without
@@ -569,7 +600,11 @@ export async function planArticleImport(
   return {
     rows,
     summary: summarize(rows),
-    willCreate: { units: [...newUnits.values()], articleGroups: [...newGroups].sort() },
+    willCreate: {
+      units: [...newUnits.values()],
+      articleGroups: [...newGroups].sort(),
+      articleCodes: [...newArticleCodes].sort(),
+    },
     creates,
     updates,
     fallbackUnitId: fallback.unitId,

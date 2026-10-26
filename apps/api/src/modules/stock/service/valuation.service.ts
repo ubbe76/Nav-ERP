@@ -12,6 +12,7 @@
 // and a movement can never be backdated onto an earlier valuation.
 import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
+  articleCodes,
   articleGroups,
   articles,
   articleStandardCostHistory,
@@ -20,7 +21,7 @@ import {
   units,
   type Db,
 } from "@navet/db";
-import { round2, type ValuationMethod, type ValuationQuery } from "@navet/shared";
+import { round2, type ValuationGroupBy, type ValuationMethod, type ValuationQuery } from "@navet/shared";
 import { computeMovingAverage, type MovingAverageRow } from "./moving-average.js";
 import { formatNumber, type FinancialStatementPdfInput } from "../../mail/service/document-pdf.js";
 
@@ -36,6 +37,9 @@ export interface ValuationRow {
   value: number | null;
 }
 
+// One subtotal bucket: a varugrupp or an artikelkod, per the query's
+// groupBy (groupId/groupName name the bucket either way; null = the
+// articles without one, always last).
 export interface ValuationGroup {
   groupId: string | null;
   groupName: string;
@@ -47,13 +51,14 @@ export interface ValuationGroup {
 export interface ValuationResponse {
   asOf: string;
   method: ValuationMethod;
+  groupBy: ValuationGroupBy;
   groups: ValuationGroup[];
   // Excludes rows with value === null, same as every group total.
   totalValue: number;
   unvaluedCount: number;
 }
 
-const NO_GROUP_NAME = "Utan artikelgrupp";
+const NO_GROUP_NAME: Record<ValuationGroupBy, string> = { group: "Utan varugrupp", articleCode: "Utan artikelkod" };
 
 // Exported: the year-end closing's lagerförändring names the method the same
 // way in its verification text.
@@ -219,6 +224,8 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
   const service = {
     async getValuation(query: ValuationQuery): Promise<ValuationResponse> {
       const asOf = query.asOf ?? new Date().toLocaleDateString("sv-SE");
+      // Direct service callers (tests, the year-end closing) may omit it.
+      const groupBy: ValuationGroupBy = query.groupBy ?? "group";
 
       // One sweep: net quantity per article within the bound, joined to
       // every field the report/grouping needs. unitId is NOT NULL (inner
@@ -232,16 +239,20 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
           unit: units.code,
           groupId: articles.groupId,
           groupName: articleGroups.name,
+          articleCodeId: articles.articleCodeId,
+          articleCodeName: articleCodes.name,
           quantity: sql<string>`sum(${stockTransactions.quantityDelta})`,
         })
         .from(stockTransactions)
         .innerJoin(articles, eq(articles.id, stockTransactions.articleId))
         .innerJoin(units, eq(units.id, articles.unitId))
         .leftJoin(articleGroups, eq(articleGroups.id, articles.groupId))
+        .leftJoin(articleCodes, eq(articleCodes.id, articles.articleCodeId))
         .where(
           and(
             sql`${stockTransactions.createdAt}::date <= ${asOf}::date`,
-            query.groupId ? eq(articles.groupId, query.groupId) : undefined
+            query.groupId ? eq(articles.groupId, query.groupId) : undefined,
+            query.articleCodeId ? eq(articles.articleCodeId, query.articleCodeId) : undefined
           )
         )
         .groupBy(
@@ -251,7 +262,9 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
           articles.active,
           units.code,
           articles.groupId,
-          articleGroups.name
+          articleGroups.name,
+          articles.articleCodeId,
+          articleCodes.name
         );
 
       // Drop articles netting to 0 — a netted-out article carries no
@@ -261,7 +274,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
         .filter((row) => row.quantity !== 0);
 
       if (nonZero.length === 0) {
-        return { asOf, method: query.method, groups: [], totalValue: 0, unvaluedCount: 0 };
+        return { asOf, method: query.method, groupBy, groups: [], totalValue: 0, unvaluedCount: 0 };
       }
 
       const articleIds = nonZero.map((row) => row.articleId);
@@ -281,12 +294,10 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
           unitCost: price,
           value,
         };
-        const bucket = groupsMap.get(row.groupId) ?? {
-          groupName: row.groupName ?? NO_GROUP_NAME,
-          rows: [],
-        };
+        const [key, name] = groupBy === "articleCode" ? [row.articleCodeId, row.articleCodeName] : [row.groupId, row.groupName];
+        const bucket = groupsMap.get(key) ?? { groupName: name ?? NO_GROUP_NAME[groupBy], rows: [] };
         bucket.rows.push(valuationRow);
-        groupsMap.set(row.groupId, bucket);
+        groupsMap.set(key, bucket);
       }
 
       let totalValue = 0;
@@ -303,13 +314,13 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
           return { groupId, groupName, rows, total: groupTotal };
         })
         .sort((a, b) => {
-          // Null group ("Utan artikelgrupp") always last, everyone else by name.
+          // Null bucket ("Utan varugrupp"/"Utan artikelkod") always last, everyone else by name.
           if (a.groupId === null) return 1;
           if (b.groupId === null) return -1;
           return a.groupName.localeCompare(b.groupName, "sv");
         });
 
-      return { asOf, method: query.method, groups, totalValue, unvaluedCount };
+      return { asOf, method: query.method, groupBy, groups, totalValue, unvaluedCount };
     },
 
     // --- PDF ---

@@ -25,6 +25,7 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { pdfText } from "./helpers/pdf.js";
 import { DEFAULT_POSTING_SETTINGS, setupPostingBaseline } from "./helpers/services.js";
 import { resetVatCodes, vatCodeId } from "./helpers/vat-codes.js";
+import { vatRateGroupId } from "./helpers/vat-group.js";
 
 // Momskoder steg 2 (spec 4.1–4.5): the customer invoice rows get their
 // momskod from salesVatCode (explicit vatCodeId wins, a bare vatRate is its
@@ -112,7 +113,7 @@ async function makeArticle(type: "manufactured" | "purchased" | "service" = "pur
     name: type === "service" ? "Montagetjänst" : "Bänkskiva",
     type,
     active: true,
-    ...(vatRate !== undefined ? { vatRate } : {}),
+    ...(vatRate !== undefined ? { groupId: await vatRateGroupId(vatRate) } : {}),
   } as Parameters<typeof articleService.createArticle>[0]);
 }
 

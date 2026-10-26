@@ -22,6 +22,17 @@ export const deliveryTerms = pgTable("delivery_terms", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Artikelkoder (Grunddata): a free selection and grouping concept for the
+// lists (article list filter/column, orderförteckning, lagervärdering) —
+// unlike the varugrupp (article_groups) it steers neither posting nor VAT.
+export const articleCodes = pgTable("article_codes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: varchar("code", { length: 20 }).notNull().unique(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  description: text("description"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Betalningsvillkor (e.g. 30 / "30 dagar netto")
 export const paymentTerms = pgTable("payment_terms", {
   id: uuid("id").primaryKey().defaultRandom(),
