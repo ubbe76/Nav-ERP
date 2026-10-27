@@ -4,9 +4,9 @@ Detta är kontextfilen för Claude Code i det här projektet. Läs `docs/archite
 
 ## Projektöversikt
 
-Ett öppet källkod-ERP för mindre/medelstora svenska tillverkande företag, inspirerat av Monitor G5 men avsevärt förenklat. Byggs av en person med daglig praktisk erfarenhet av Monitor G5 (inköp, tillverkning, lager, kalkyl).
+Ett öppet källkod-ERP för mindre/medelstora svenska tillverkande företag. Byggs av en person med daglig praktisk erfarenhet av affärssystem i tillverkande industri (inköp, tillverkning, lager, kalkyl).
 
-**Mål:** Ett självhostat, Docker-baserat system som täcker kärnflödet artikel → lager → inköp/försäljning → tillverkningsorder → tidrapportering → kalkyl, utan Monitors komplexitet kring t.ex. fleranvändarrättigheter, EDI och avancerad kapacitetsplanering.
+**Mål:** Ett självhostat, Docker-baserat system som täcker kärnflödet artikel → lager → inköp/försäljning → tillverkningsorder → tidrapportering → kalkyl, utan onödig komplexitet kring t.ex. fleranvändarrättigheter, EDI och avancerad kapacitetsplanering.
 
 ## Teknikstack
 
@@ -25,14 +25,14 @@ Ett öppet källkod-ERP för mindre/medelstora svenska tillverkande företag, in
 2. **Explicita statusflöden.** Varje order/tillverkningsorder har en status-enum och tillståndsövergångar valideras i domänlagret, inte bara i UI. Statusmängder är vitlistor.
 3. **Materialuttag kan styras av rutten.** En BOM-rad kan peka på en av artikelns egna operationer; vid frisläpp snapshotas kopplingen till TO:n. En ny TO frisläpps i sin egen create-transaktion, antal rapporteras inkrementellt och materialet dras enligt top-up-regeln (`manufacturing.md`).
 4. **BOM är self-referencing.** En artikel kan vara både komponent och slutprodukt (viktigt för diskbänkskonfiguratorn — moduler/underrede).
-5. **API:et ska vara integrationsvänligt** eftersom en extern produktkonfigurator (separat projekt) ska kunna skapa offert/order programmatiskt, ungefär som Monitors REST-API (OAuth 2.0) tillåter idag.
+5. **API:et ska vara integrationsvänligt** eftersom en extern produktkonfigurator (separat projekt) ska kunna skapa offert/order programmatiskt via REST-API:t med OAuth 2.0 (client credentials).
 6. **Skippa medvetet i v1:** avancerad kapacitetsplanering, EDI, komplexa multivaluta-flöden, granulär fältnivårättighetsstyrning, inbyggd rapportgenerator.
-7. **Artikelmodulen ska likna Monitor G5 i uppbyggnad och arbetsflöde** — flikar på artikelkortet, Monitors begrepp (`article.md`).
+7. **Artikelmodulen följer etablerade svenska ERP-konventioner i uppbyggnad och arbetsflöde** — flikar på artikelkortet, vedertagna svenska begrepp (`article.md`).
 8. **Webben ska klara framtida färgteman.** Varje färg är en temaberoende token i `apps/web/styles/tokens.css`; komponenter använder bara semantiska tokens — inga hex/rgb/hsl, inga `--neutral-*`, inga `var(--x, fallback)`. `theme-tokens.test.ts` vaktar, även WCAG AA (`web-theme.md`).
 
 ## Kodkonventioner
 
-- All kod och kommentarer på engelska, domänbegrepp får gärna ha svenska motsvarigheter i kommentarer där Monitor-terminologi är relevant (t.ex. `// MO = Manufacturing Order / tillverkningsorder`)
+- All kod och kommentarer på engelska, domänbegrepp får gärna ha svenska motsvarigheter i kommentarer där den svenska branschtermen är relevant (t.ex. `// MO = Manufacturing Order / tillverkningsorder`)
 - Zod för all input-validering i API-lagret
 - Varje modul (`apps/api/src/modules/<modul>`) har egen mapp med `routes/`, `service/`, `repository/`. Domänlogik (statusövergångar, lagertransaktioner, avrundning) i servicelagret, aldrig i route-handlers.
 - **`Db | Tx`-mönstret:** hjälpare som ska kunna köras inne i en annan rutins transaktion tar `Db | Tx` och bor gärna i en lövfil (`resolveStockLocation`, `allocateVerificationNumber`, `VerificationPoster`, `replacePriceBreaks` …). Tvärmodulsläsning går via injicerade läsargränssnitt (`RegisterReferenceReader`, `StockBalanceReader`, `ArticleFileReader` …); där modulerna annars skulle bli cykliska binds läsaren sent i `app.ts` (`variantPriceRef`, `planReaderRef` …).
@@ -49,7 +49,7 @@ Ett öppet källkod-ERP för mindre/medelstora svenska tillverkande företag, in
 - **Bekräftelser:** webben anropar aldrig `window.confirm` — Safari på iPhone kan sluta visa den och svarar då tyst Avbryt. Använd `confirmDialog(message, { confirmLabel?, danger? })` eller `confirmDelete(message)` ur `apps/web/lib/confirm.ts` (Promise<boolean>, appens dialog `ConfirmDialogHost` i `AppShell`; sidor utan AppShell monterar den själva). Vakten för osparade ändringar (`confirmLeave` i `lib/unsavedGuard.ts`) är därför också asynkron: länkklick stoppas alltid och navigeringen spelas upp igen med `router.push` efter **Lämna sidan**. `web-confirm-dialog.test.ts` underkänner varje `confirm(`-anrop utanför `lib/confirm.ts`.
 - **Numeriska formulärfält:** `min` är webbläsarens *utgångspunkt för stegningen* (step base), och Firefox respekterar den även när `step="any"` — ett fält med `min="0.0001"` stegar därför 1 → 1.0001 → 2.0001. Därför: **antal `min="0" step="any"`**, **pris `step="0.01"`**, **standardkostnad (4 decimaler, numeric(14,4)) `min="0" step="any"`**, sex-decimalersfält som växelkurs `min="0" step="any"`. Aldrig ett brutet tal som `min` och aldrig `step` under 0.01. Nollor stoppas av servern (`z.coerce.number().positive()`), inte av `min`.
 - **Förifyllda fält:** när servern föreslår ett värde (à-pris, kurs, leverans-/färdigdatum, moms) gäller "manuellt vinner" — en touched-flagga och en request-sekvens så ett sent svar aldrig skriver över det användaren skrivit.
-- **Publikt och privat:** repot är publikt. Det privata materialet ligger i det separata privata repot `private/` i arbetskopian (ignorerat av `.gitignore`): planer/specar (`docs/superpowers` är en symlänk dit), TODO-arkivet och e2e-testerna mot de riktiga Monitor-exporterna (`private/api-tests/*.real-files.test.ts`, som `apps/api/vitest.config.ts` tar med när katalogen finns). Inga riktiga företags-, kund- eller leverantörsuppgifter, artikelnummer eller filsökvägar ur exporterna får hamna i det publika repot — testdata är påhittad.
+- **Publikt och privat:** repot är publikt. Det privata materialet ligger i det separata privata repot `private/` i arbetskopian (ignorerat av `.gitignore`): planer/specar (`docs/superpowers` är en symlänk dit), TODO-arkivet och e2e-testerna mot de riktiga exportfilerna från det tidigare affärssystemet (`private/api-tests/*.real-files.test.ts`, som `apps/api/vitest.config.ts` tar med när katalogen finns). Inga riktiga företags-, kund- eller leverantörsuppgifter, artikelnummer eller filsökvägar ur exporterna får hamna i det publika repot — testdata är påhittad.
 - Migrationer: Drizzle Kit, aldrig manuell schemaändring i produktion.
 
 ## Tester
