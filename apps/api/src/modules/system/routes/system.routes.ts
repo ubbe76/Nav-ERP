@@ -121,6 +121,15 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
   // files live in bytea columns). Admin, like the backup next to it.
   app.get("/storage", { preHandler: requireRole("admin") }, async () => service.storageUsage());
 
+  // Exportera filer: every stored file as one zip, streamed while it is built
+  // (admin — it holds the bookkeeping documents too).
+  app.get("/storage/export", { preHandler: requireRole("admin") }, async (_req, reply) => {
+    const { filename, stream } = service.exportFiles();
+    reply.header("Content-Type", "application/zip");
+    reply.header("Content-Disposition", contentDisposition(filename));
+    return reply.send(stream);
+  });
+
   // --- Company carrier accounts (Företagsinformation → Speditörer) ---
 
   app.get("/company-carriers", { preHandler: requireRole("admin") }, async () => service.listCompanyCarriers());

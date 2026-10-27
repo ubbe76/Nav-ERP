@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import type {
   CostingMaterialSource,
   CostingSupplierPriceTier,
@@ -62,6 +63,8 @@ import { UnknownThemeError } from "./themes.errors.js";
 // other key here (no special case needed: since only keys are logged, its
 // value never even reaches the detail object).
 import type { AuditWriter } from "../repository/audit.repository.js";
+import type { ExportedFile } from "../repository/file-export.js";
+import { safeSegment, UniquePaths, ZipStreamWriter } from "./zip-stream.js";
 
 // Percent settings are stored as plain strings — an absent or unparsable key
 // means "no markup" rather than NaN leaking into a calculation.
@@ -228,6 +231,22 @@ export class DuplicateCompanyCarrierError extends Error {
 // manufacturing/stock-count/auth (whose test surface is much narrower);
 // app.ts always passes the real auditRepository.
 const NOOP_AUDIT: AuditWriter = { async log() {} };
+
+// nav-filer-2026-10-27_0905.zip — UTC, like the backup's name.
+export function fileExportFilename(now: Date): string {
+  const iso = now.toISOString();
+  return `nav-filer-${iso.slice(0, 10)}_${iso.slice(11, 16).replace(":", "")}.zip`;
+}
+
+async function* zipStoredFiles(files: AsyncIterable<ExportedFile>): AsyncGenerator<Buffer> {
+  const zip = new ZipStreamWriter();
+  const paths = new UniquePaths();
+  for await (const file of files) {
+    const folder = file.folder.map((segment) => safeSegment(segment, "okänd")).join("/");
+    yield* zip.add(paths.claim(folder, safeSegment(file.filename)), file.data, file.modified);
+  }
+  yield zip.finish();
+}
 
 export function createSystemService(repo: SystemRepository, audit: AuditWriter = NOOP_AUDIT) {
   // Typed view over the system_settings key–value rows. Absent keys fall
@@ -419,6 +438,13 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     // Lagringsutrymme: the database size and the stored files per kind.
     async storageUsage() {
       return repo.storageUsage();
+    },
+
+    // Exportera filer: every stored file as a streamed zip, one folder per
+    // kind (Artikelfiler/<artikelnummer>/…). Nothing is held in memory but
+    // the batch being written and the zip's central directory.
+    exportFiles(now: Date = new Date()) {
+      return { filename: fileExportFilename(now), stream: Readable.from(zipStoredFiles(repo.storedFiles()), { objectMode: false }) };
     },
 
     // --- Company carrier accounts (Företagsinformation → Speditörer) ---
