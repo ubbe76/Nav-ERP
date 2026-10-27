@@ -86,8 +86,9 @@ export const importCommitSchema = z.object({
   // stället för raden. Av som standard, precis som kryssrutan på
   // artikelkortets operation. Övriga entiteter ignorerar flaggan tyst.
   printCommentOnWorkCard: z.boolean().optional(),
-  // "Uppdatera befintliga operationer" — bara operationsimporten (routing)
-  // läser den. En operation som redan finns (artikel + sekvensnr) får
+  // "Uppdatera befintliga operationer" (routing) / "Uppdatera befintliga
+  // strukturrader" (bom — antal, enhet, operationskoppling när kolumnen är
+  // mappad och Pos.) — bara de två importerna läser den. En operation som redan finns (artikel + sekvensnr) får
   // resurs, tider, tidsenhet, Kalkyl och de textfält filen fyller i
   // överskrivna i stället för att bli ett radfel. Snapshoten på
   // mo_operations (frisläppta TO) rörs aldrig — samma regel som PATCH på

@@ -49,3 +49,8 @@ Artikelregistret är grunden för allt annat och ska kännas igen av någon som 
 
 - `article_files` (bytea i Postgres, PDF/JPEG/PNG, max 20 MB) är subresursen `/articles/:id/files` med fliken **Filer**. Repositoryts listnings-queries får **aldrig selecta `data`-kolumnen**.
 - Tvärmodulsläsning via `ArticleFileReader` (`listFiles`/`filesWithData`): **TO-utskriften** (`GET /manufacturing-orders/:id/pdf`, `renderManufacturingOrder` + `appendFilesToPdf` i `pdf-merge.ts` med pdf-lib) bakar in ritningarna som extra sidor, och **ordermejl** bifogar dem när `attachDrawings` är satt (loggas på `email_log` så omskick återanvänder valet).
+
+## Extra benämning, Pos. och Cykeltid (0157–0159)
+
+- `articles.extra_description` (flerradig, max 2000) skrivs ut på de dokument inställningen `extra_description_documents` listar (JSON-lista i `system_settings`, `EXTRA_DESCRIPTION_DOCUMENTS` i shared, webbspegel i `lib/types.ts`; trasigt värde ⇒ inga). EN regel för alla anropsställen: `extraDescriptionFor(settings, kind)` i `document-pdf.ts`; läses live som Ytbehandling/Färg. Plocklistan och följesedeln mäter infotexterna med `measureInfoLines` (flerradigt/radbrytning ⇒ 11pt per tryckt rad). Inte i Ny artikel-dialogen ⇒ **Kopiera från → Information** kopierar den på servern.
+- `bom_components.position` (Pos., fritext ≤ 20) och `routing_operations.cycle_time_per_unit` (Cykeltid, produktiv tid, min/st som stycktiden och i samma visningsenhet) är rena informationsfält — varken frisläpp/snapshot, kalkyl eller beläggning läser dem ännu.

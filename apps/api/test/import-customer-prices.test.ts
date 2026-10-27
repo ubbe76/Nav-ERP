@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { articles as articlesTable, customerPrices, customers, db, units } from "@navet/db";
+import { articles as articlesTable, customerArticleNumbers, customerPrices, customers, db, units } from "@navet/db";
 import { importEntitySchema } from "@navet/shared";
 import { createImportRepository } from "../src/modules/import/repository/import.repository.js";
 import { createImportService } from "../src/modules/import/service/import.service.js";
@@ -54,7 +54,8 @@ function article(articleNumber: string, id: string): ExistingArticle {
 function fakeDeps(
   articles: ExistingArticle[] = [],
   customerNumbers: string[] = ["6252", "1132"],
-  existing: { customerNumber: string; articleId: string; id: string }[] = []
+  existing: { customerNumber: string; articleId: string; id: string }[] = [],
+  existingNumbers: { customerNumber: string; articleId: string; number: string }[] = []
 ): CustomerPriceImportDeps {
   return {
     async articlesByNumber(numbers) {
@@ -66,11 +67,14 @@ function fakeDeps(
     async customerArticlePrices() {
       return new Map(existing.map((e) => [`cust-${e.customerNumber}#${e.articleId}`, { id: e.id }]));
     },
+    async customerArticleNumbers() {
+      return new Map(existingNumbers.map((e) => [`cust-${e.customerNumber}#${e.articleId}`, e.number]));
+    },
   };
 }
 
 describe("suggestCustomerPriceMapping", () => {
-  it("maps Monitor's Prislista Försäljning, leaving Kundens art.nummer/Ställpris/Prisdatum alone", () => {
+  it("maps Monitor's Prislista Försäljning, Kundens art.nummer included, leaving Ställpris/Prisdatum alone", () => {
     expect(suggestCustomerPriceMapping(MONITOR_HEADERS)).toEqual({
       Artikelnummer: "articleNumber",
       Artikelbenämning: null,
@@ -78,7 +82,7 @@ describe("suggestCustomerPriceMapping", () => {
       Artikelkod: null,
       Kund: "customerNumber",
       Namn: null,
-      "Kundens art.nummer": null,
+      "Kundens art.nummer": "customerArticleNumber",
       Pris: "price",
       Ställpris: null,
       Rabatt: "discountPercent",
@@ -116,10 +120,10 @@ describe("planCustomerPriceImport", () => {
     expect(update.updates).toEqual([{ id: "rule-1", unitPrice: 10 }]);
 
     const skip = await planCustomerPriceImport({ mapping: MAPPING, rows: [["A", "6252", "10", ""]], skipExisting: true }, deps);
-    expect(skip.rows[0]).toMatchObject({ action: "skip", skipReason: "Kunden 6252 har redan ett pris på artikel A" });
+    expect(skip.rows[0]).toMatchObject({ action: "skip", skipReason: "Kunden 6252 har redan en koppling till artikel A" });
   });
 
-  it("errors on unknown customers/articles, a missing price, bad discounts and in-file duplicates", async () => {
+  it("errors on unknown customers/articles, bad discounts and in-file duplicates; skips a row without price", async () => {
     const plan = await planCustomerPriceImport(
       {
         mapping: MAPPING,
@@ -138,18 +142,54 @@ describe("planCustomerPriceImport", () => {
     expect(plan.rows.map((row) => row.errors)).toEqual([
       ["Artikeln SAKNAS finns inte i artikelregistret"],
       ["Kunden 9999 finns inte i kundregistret"],
-      ["Pris saknas"],
+      [],
       ["Rabatten måste vara mellan 0 och 100 procent"],
       ['Ogiltigt pris: "x"'],
       [],
       ["Kundpriset för 6252 / A förekommer flera gånger i filen"],
     ]);
+    expect(plan.rows[2]).toMatchObject({ action: "skip", skipReason: "Varken pris eller kundens artikelnummer på raden" });
   });
 
-  it("requires article, customer and price columns", async () => {
+  it("requires the article and customer columns, not the price", async () => {
+    await expect(
+      planCustomerPriceImport({ mapping: { Artikelnummer: "articleNumber", Pris: "price" }, rows: [] }, fakeDeps())
+    ).rejects.toThrow(/customerNumber/);
     await expect(
       planCustomerPriceImport({ mapping: { Artikelnummer: "articleNumber", Kund: "customerNumber" }, rows: [] }, fakeDeps())
-    ).rejects.toThrow(/price/);
+    ).resolves.toMatchObject({ hasErrors: false });
+  });
+
+  // Monitor's "Artikellista, Kundkopplingar": every article, most without a
+  // customer, some with only the customer's article number.
+  it("reads Kundkopplingar: skips rows without a customer, stores the customer's article number", async () => {
+    const mapping = { ...MAPPING, "Kundens art.nr": "customerArticleNumber" };
+    const plan = await planCustomerPriceImport(
+      {
+        mapping,
+        rows: [
+          ["A", "", "", "", ""],
+          ["B", "6252", "", "", "KND-2"],
+          ["C", "6252", "15", "", "KND-3"],
+          ["D", "6252", "", "10", ""],
+          ["A", "6252", "", "", "x".repeat(51)],
+        ],
+      },
+      fakeDeps(
+        [article("A", "id-1"), article("B", "id-2"), article("C", "id-3"), article("D", "id-4")],
+        ["6252"],
+        [],
+        [{ customerNumber: "6252", articleId: "id-3", number: "KND-3" }]
+      )
+    );
+    expect(plan.rows[0]).toMatchObject({ action: "skip", skipReason: "Ingen kundkoppling på raden" });
+    expect(plan.rows[1]).toMatchObject({ action: "create", errors: [] });
+    // C's number is already stored — only the price is written.
+    expect(plan.rows[2]).toMatchObject({ action: "update", errors: [] });
+    expect(plan.rows[3]).toMatchObject({ action: "skip" });
+    expect(plan.rows[4]!.errors).toEqual(["Kundens artikelnummer är för långt (51 tecken, max 50)"]);
+    expect(plan.creates).toEqual([{ customerId: "cust-6252", articleId: "id-3", unitPrice: 15 }]);
+    expect(plan.articleNumbers).toEqual([{ customerId: "cust-6252", articleId: "id-2", customerArticleNumber: "KND-2" }]);
   });
 });
 
@@ -211,5 +251,19 @@ describe("customer price import — repository and service", () => {
       skipExisting: true,
     });
     expect(second).toMatchObject({ created: 0, updated: 0, skipped: 1 });
+  });
+});
+
+describe("customer price import — Kundens artikelnummer end to end", () => {
+  it("upserts the customer's article number without a price, and replaces it on re-import", async () => {
+    const articleId = await seedArticle("ART-1");
+    const customerId = await seedCustomer("6252");
+    const mapping = { Artikelnummer: "articleNumber", Kund: "customerNumber", Pris: "price", "Kundens art.nr": "customerArticleNumber" };
+    const first = await importService.commit("customerPrices", { mapping, rows: [["ART-1", "6252", "", "KND-1"]] });
+    expect(first).toMatchObject({ created: 1, updated: 0 });
+    await importService.commit("customerPrices", { mapping, rows: [["ART-1", "6252", "", "KND-1B"]] });
+    const stored = await db.select().from(customerArticleNumbers);
+    expect(stored).toMatchObject([{ customerId, articleId, customerArticleNumber: "KND-1B" }]);
+    expect(await db.select().from(customerPrices)).toHaveLength(0);
   });
 });

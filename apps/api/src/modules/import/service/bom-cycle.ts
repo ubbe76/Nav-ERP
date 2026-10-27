@@ -10,6 +10,8 @@
 export interface BomEdge {
   parentId: string;
   componentId: string;
+  /** The bom_components row — set on the stored edges (the import's update path). */
+  id?: string;
 }
 
 function addEdge(graph: Map<string, Set<string>>, edge: BomEdge): void {

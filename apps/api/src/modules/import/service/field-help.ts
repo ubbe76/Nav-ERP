@@ -123,6 +123,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Rostfri",
     },
     {
+      field: "extraDescription",
+      label: "Extra benämning",
+      required: false,
+      header: "Extra benämning",
+      description: `Fritext bredvid benämningen, max 2 000 tecken — radbrytningar i cellen behålls (Alt+Enter i Excel). Skrivs ut på de dokument som valts under System → Inställningar. ${UNTOUCHED}`,
+      example: "Rostfritt slipat, levereras i delar",
+    },
+    {
       field: "active",
       label: "Aktiv",
       required: false,
@@ -194,6 +202,24 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
         "Den aktiva revisionen för ritningsnumret på samma rad, max 20 tecken — kräver Ritningsnummer på raden. Saknas revisionen läggs den till; den blir aktiv och den tidigare aktiva ligger kvar som inaktiv. Tom cell lämnar ritningens revisioner orörda.",
       example: "C",
       text: true,
+    },
+    {
+      field: "quantityPerPackage",
+      label: "Antal per förpackning",
+      required: false,
+      header: "Antal per förpackning",
+      description: `Hur många av artikelns grundenhet som ryms i en förpackning (Inköp-fliken). ${DECIMAL_CAP}, högst 4 decimaler — fler avrundas med en varning. 0 tömmer fältet. ${UNTOUCHED}`,
+      example: "25",
+    },
+    {
+      field: "primarySupplierNumber",
+      label: "Leverantörsnr",
+      required: false,
+      header: "Leverantörsnummer",
+      text: true,
+      description:
+        "Artikelns förvalda leverantör på Inköp-fliken. Leverantören måste finnas i leverantörsregistret — importera leverantörerna först. Har artikeln ingen rad för leverantören läggs en till utan pris (priserna kommer med inköpsprislistan); den tidigare förvalda leverantören blir kvar men inte förvald. Tom cell lämnar leverantörerna orörda.",
+      example: "20015",
     },
   ],
 
@@ -276,17 +302,17 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
     {
       field: "setupTime",
       label: "Ställtid",
-      required: true,
+      required: false,
       header: "Ställtid",
-      description: `Omställningstid per order i den enhet Tidsenhet anger — minuter när den kolumnen saknas eller är tom, timmar vid antal/timme. ${DECIMAL_CAP}, aldrig negativ. Skriv 0 när momentet saknar ställtid; kolumnen måste finnas med.`,
+      description: `Omställningstid per order i den enhet Tidsenhet anger — minuter när den kolumnen saknas eller är tom, timmar vid antal/timme. ${DECIMAL_CAP}, aldrig negativ. Skriv 0 när momentet saknar ställtid — en rad på en vanlig resurs utan ställtid blir ett radfel. På en legoresurs sparas alltid 0, och kolumnen behövs inte.`,
       example: "15",
     },
     {
       field: "runTimePerUnit",
       label: "Stycktid / Tid per enhet",
-      required: true,
+      required: false,
       header: "Stycktid",
-      description: `Tid per styck i den enhet Tidsenhet anger — minuter per styck när den kolumnen saknas; vid antal/timme är värdet i stället antal styck per timme (360 blir 0,1667 min/st). ${DECIMAL_CAP}, aldrig negativ. Skriv 0 när momentet saknar stycktid; kolumnen måste finnas med.`,
+      description: `Tid per styck i den enhet Tidsenhet anger — minuter per styck när den kolumnen saknas; vid antal/timme är värdet i stället antal styck per timme (360 blir 0,1667 min/st). ${DECIMAL_CAP}, aldrig negativ. Skriv 0 när momentet saknar stycktid — en rad på en vanlig resurs utan stycktid blir ett radfel. På en legoresurs sparas alltid 0, och kolumnen behövs inte.`,
       example: "2,5",
     },
     {
@@ -332,6 +358,40 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description:
         "Packinstruktion för operationen, max 1 000 tecken. Tom cell lämnar en befintlig orörd vid uppdatering.",
       example: "Mellanlägg av papp mellan varje enhet",
+    },
+    {
+      field: "subcontractSupplierNumber",
+      label: "Legoleverantör",
+      required: false,
+      header: "Leverantör",
+      text: true,
+      description:
+        "Bara för operationer på en legoresurs: leverantören som utför arbetet. Måste finnas i leverantörsregistret. Tom cell ger legoresursens egen leverantör på en ny operation och lämnar en befintlig orörd. På en vanlig resurs ignoreras kolumnen med en varning.",
+      example: "20015",
+    },
+    {
+      field: "setupPrice",
+      label: "Ställpris",
+      required: false,
+      header: "Ställpris",
+      description: `Bara för legooperationer: engångskostnaden per order i kronor. ${DECIMAL_CAP}, aldrig negativ, högst 2 decimaler — fler avrundas med en varning. ${UNTOUCHED}`,
+      example: "150",
+    },
+    {
+      field: "unitPrice",
+      label: "Styckpris",
+      required: false,
+      header: "Styckpris",
+      description: `Bara för legooperationer: kostnaden per styck i kronor. ${DECIMAL_CAP}, aldrig negativ, högst 4 decimaler — fler avrundas med en varning. ${UNTOUCHED}`,
+      example: "4,50",
+    },
+    {
+      field: "cycleTimePerUnit",
+      label: "Cykeltid",
+      required: false,
+      header: "Cykeltid",
+      description: `Operationens produktiva tid per styck, i samma enhet som Stycktid (Tidsenhet). ${DECIMAL_CAP}, aldrig negativ; 0 betyder ingen cykeltid. Ignoreras på legoresurser. ${UNTOUCHED}`,
+      example: "1,5",
     },
   ],
 
@@ -382,6 +442,16 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description:
         "Sekvensnumret (heltal större än 0) på en av den överordnade artikelns operationer, som materialet dras vid. Tom cell, eller en operation som inte finns, ger ingen koppling — materialet dras då i takt med inleveransen av färdiga varor (en operation som inte finns ger en varning). En kalkyloperation ger ett fel.",
       example: "10",
+    },
+    {
+      field: "position",
+      label: "Pos.",
+      required: false,
+      header: "Pos.",
+      text: true,
+      description:
+        "Radens position på ritningen, max 20 tecken (siffror eller text). Visas i strukturen på artikelkortets Beredning-flik. Med Uppdatera befintliga strukturrader lämnar en tom cell det sparade värdet orört.",
+      example: "3",
     },
     {
       field: "componentName",
@@ -507,9 +577,9 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
     {
       field: "price",
       label: "Pris",
-      required: true,
+      required: false,
       header: "Pris",
-      description: `Kundens pris per grundenhet i SEK, ${DECIMAL}, aldrig negativt. Sparas med fyra decimaler som kundens artikelpris från antal 1 och ersätter ett tidigare pris på samma artikel.`,
+      description: `Kundens pris per grundenhet i SEK, ${DECIMAL}, aldrig negativt. Sparas med fyra decimaler som kundens artikelpris från antal 1 och ersätter ett tidigare pris på samma artikel. Tom cell lämnar priset orört — en rad med varken pris eller kundens artikelnummer hoppas över.`,
       example: "1890,00",
     },
     {
@@ -521,6 +591,16 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description:
         "Procentavdrag från 0 upp till (men inte med) 100 som bakas in i priset — Pris × (1 − Rabatt/100) — med en varning, eftersom kundpriset lagras som nettopris. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. Tom cell betyder ingen rabatt.",
       example: "5",
+    },
+    {
+      field: "customerArticleNumber",
+      label: "Kundens artikelnummer",
+      required: false,
+      header: "Kundens artikelnummer",
+      text: true,
+      description:
+        "Vad kunden kallar artikeln, max 50 tecken. Sparas på kundkortet och skrivs ut som \"Ert art.nr\" på offert, orderbekräftelse, plocklista, följesedel och faktura. Ersätter ett tidigare nummer för samma kund och artikel; tom cell lämnar det orört.",
+      example: "KND-4711",
     },
   ],
 

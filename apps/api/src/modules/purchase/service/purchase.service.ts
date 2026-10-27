@@ -8,6 +8,7 @@ import {
   toBaseQuantity,
   toUnitPrice,
   toUnitQuantity,
+  type ExtraDescriptionDocument,
   type SupplierPaymentDetails,
 } from "@navet/shared";
 import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
@@ -49,7 +50,12 @@ import type { DocumentPdfService } from "../../mail/service/document-pdf.js";
 import { mergePdfs } from "../../mail/service/pdf-merge.js";
 import type { ArticleFileReader, ArticleRevisionReader, ArticleUnitReader } from "../../article/service/article.service.js";
 import { ArticleNotFoundError, assertPurchasableArticle } from "../../article/service/article.service.js";
-import { formatArticleAttributes, formatRevisionInfo, type DocumentSettingsReader } from "../../mail/service/document-pdf.js";
+import {
+  extraDescriptionFor,
+  formatArticleAttributes,
+  formatRevisionInfo,
+  type DocumentSettingsReader,
+} from "../../mail/service/document-pdf.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import type {
   SupplierDeliveryDateQuery,
@@ -433,6 +439,7 @@ export interface PurchaseSettingsReader extends DocumentSettingsReader {
   getSettings(): Promise<{
     showRevisionsOnDocuments: boolean;
     showOrderRevisionOnDocuments: boolean;
+    extraDescriptionDocuments?: ExtraDescriptionDocument[];
     purchaseOverReceiptPercent: number | null;
     // Inherited from DocumentSettingsReader (the pallet card is sales/
     // manufacturing's, never printed from here).
@@ -566,10 +573,12 @@ export function createPurchaseService(
   // Assembles the printable PDF for an inquiry — shared by the download
   // endpoint and the email flow.
   async function renderInquiryPdf(inquiry: NonNullable<Awaited<ReturnType<PurchaseRepository["findInquiryById"]>>>) {
-    const [supplier, rows] = await Promise.all([
+    const [supplier, rows, documentSettings] = await Promise.all([
       repo.findSupplierById(inquiry.supplierId),
       repo.listInquiryRows(inquiry.id),
+      settings.getSettings(),
     ]);
+    const extraDescription = extraDescriptionFor(documentSettings, "inquiry");
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
     // Our own carrier customer number, printed only when we pay the freight.
     const carrierCustomerNumber =
@@ -600,6 +609,7 @@ export function createPurchaseService(
           articleInfo: isLego
             ? formatArticleAttributes({ surfaceTreatment: r.articleSurfaceTreatment, colour: r.articleColour })
             : null,
+          extraDescription: extraDescription(r.articleExtraDescription),
           moReference:
             isLego && r.legoSequenceNo !== null
               ? legoReference(r.moOrderNumber, r.legoSequenceNo, r.legoDescription)
@@ -627,11 +637,13 @@ export function createPurchaseService(
   async function renderPurchaseOrderPdf(
     order: NonNullable<Awaited<ReturnType<PurchaseRepository["findPurchaseOrderById"]>>>
   ) {
-    const [supplier, rows, { showOrderRevisionOnDocuments }] = await Promise.all([
+    const [supplier, rows, documentSettings] = await Promise.all([
       repo.findSupplierById(order.supplierId),
       repo.listRowsByOrder(order.id),
       settings.getSettings(),
     ]);
+    const { showOrderRevisionOnDocuments } = documentSettings;
+    const extraDescription = extraDescriptionFor(documentSettings, "purchaseOrder");
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
     // Our own carrier customer number, printed only when we pay the freight.
     const carrierCustomerNumber =
@@ -661,6 +673,7 @@ export function createPurchaseService(
           articleInfo: isLego
             ? formatArticleAttributes({ surfaceTreatment: r.articleSurfaceTreatment, colour: r.articleColour })
             : null,
+          extraDescription: extraDescription(r.articleExtraDescription),
           moReference: isLego
             ? legoReference(r.moOrderNumber, r.moOperationSequenceNo!, r.moOperationDescription)
             : null,

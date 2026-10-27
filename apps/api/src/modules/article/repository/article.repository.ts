@@ -122,6 +122,7 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     active: input.active,
     surfaceTreatment: input.surfaceTreatment ?? null,
     colour: input.colour ?? null,
+    extraDescription: input.extraDescription ?? null,
   };
   const copyUnits = source !== null && source.unitId === input.unitId;
   if (copy && source && copy.parts.includes("information")) {
@@ -540,6 +541,7 @@ export function createArticleRepository(db: Db) {
           unitId: input.unitId,
           unitFactor: input.unitFactor !== null ? String(input.unitFactor) : null,
           routingOperationId: input.routingOperationId ?? null,
+          position: input.position ?? null,
         })
         .returning();
       return row;
@@ -564,11 +566,13 @@ export function createArticleRepository(db: Db) {
         unitId?: string | null;
         unitFactor?: string | null;
         routingOperationId?: string | null;
+        position?: string | null;
       } = {};
       if (input.quantity !== undefined) patch.quantity = String(input.quantity);
       if (input.unitId !== undefined) patch.unitId = input.unitId;
       if (input.unitFactor !== undefined) patch.unitFactor = input.unitFactor !== null ? String(input.unitFactor) : null;
       if (input.routingOperationId !== undefined) patch.routingOperationId = input.routingOperationId;
+      if (input.position !== undefined) patch.position = input.position;
       const [row] = await db
         .update(bomComponents)
         .set(patch)
@@ -609,6 +613,7 @@ export function createArticleRepository(db: Db) {
           // the component's base unit.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
           routingOperationId: bomComponents.routingOperationId,
+          position: bomComponents.position,
           // Null when the row isn't linked (left join) — the UI shows "—".
           routingOperationSequenceNo: routingOperations.sequenceNo,
         })

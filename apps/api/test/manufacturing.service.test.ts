@@ -174,6 +174,25 @@ describe("manufacturing service — release at creation", () => {
   });
 });
 
+describe("manufacturing service — Cykeltid on the routing", () => {
+  it("stores the productive time per unit, updates and clears it", async () => {
+    const { parent } = await makeParentWithBom(1);
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    const op = await mfgService.createRoutingOperation(parent.id, {
+      sequenceNo: 10,
+      workCenterId: workCenter.id,
+      setupTime: 10,
+      runTimePerUnit: 2,
+      cycleTimePerUnit: 1.5,
+    });
+    expect(op.cycleTimePerUnit).toBe("1.5000");
+    const updated = await mfgService.updateRoutingOperation(parent.id, op.id, { cycleTimePerUnit: 1.25 });
+    expect(updated.cycleTimePerUnit).toBe("1.2500");
+    const cleared = await mfgService.updateRoutingOperation(parent.id, op.id, { cycleTimePerUnit: null });
+    expect(cleared.cycleTimePerUnit).toBeNull();
+  });
+});
+
 describe("manufacturing service — release", () => {
   it("snapshots BOM x MO quantity into material consumption and Routing into operations", async () => {
     const { order, component, parent, user } = await makeMO(5);

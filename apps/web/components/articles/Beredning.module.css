@@ -144,6 +144,17 @@
   min-width: 0;
 }
 
+/* Pos. — the drawing position, a fixed-width leading column so the numbers
+   line up from row to row. */
+.compPosition {
+  flex: 0 0 4.5ch;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
+
 .compNumber {
   font-weight: 600;
   white-space: nowrap;
@@ -306,4 +317,19 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* Tid/enhet plus the optional Cykeltid line underneath — a secondary line
+   rather than a sixth column, so the grid keeps its width on a phone. */
+.timeStack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.cycleTime {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }

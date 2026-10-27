@@ -18,12 +18,12 @@ import { operationLabel } from "./operation-label";
 import type { ArticleGroup, BomComponent, RoutingOperation, WorkCenter } from "../../lib/types";
 import styles from "./Beredning.module.css";
 
-// Tid/enhet is always stored/returned in minutes per unit — the per-operation
-// timeUnit is a pure display preference. Guard: 0 (or less) has no
-// meaningful st/h conversion, so it always renders in minutes.
-function formatRunTimePerUnit(op: RoutingOperation): string {
-  const minutes = Number(op.runTimePerUnit);
-  if (op.timeUnit === "units_per_hour" && minutes > 0) {
+// Tid/enhet and Cykeltid are always stored/returned in minutes per unit — the
+// per-operation timeUnit is a pure display preference. Guard: 0 (or less) has
+// no meaningful st/h conversion, so it always renders in minutes.
+function formatMinutesPerUnit(minutesText: string, timeUnit: RoutingOperation["timeUnit"]): string {
+  const minutes = Number(minutesText);
+  if (timeUnit === "units_per_hour" && minutes > 0) {
     return `${minutesPerUnitToUnitsPerHour(minutes).toLocaleString("sv-SE")} st/h`;
   }
   return `${minutes.toLocaleString("sv-SE", { maximumFractionDigits: 4 })} min`;
@@ -135,6 +135,9 @@ export function BeredningView({
       <div key={row.id} className={styles.compRow}>
         <span className={styles.prepCell}>
           <span className={styles.compName}>
+            <span className={styles.compPosition} title={row.position ? `Pos. ${row.position}` : "Pos."}>
+              {row.position ?? "—"}
+            </span>
             <span className={styles.compNumber}>{row.componentArticleNumber}</span>
             <span className={styles.compBenaming} title={row.componentName}>
               {row.componentIsPhantom ? `${row.componentName} · Fantom` : row.componentName}
@@ -195,7 +198,7 @@ export function BeredningView({
         ) : (
           <>
             <div className={styles.prepHeader}>
-              <span className={styles.prepHeaderCell}>Operation / komponent</span>
+              <span className={styles.prepHeaderCell}>Operation / Pos. · komponent</span>
               <span className={styles.prepHeaderCell} data-align="right">
                 Ställtid
               </span>
@@ -270,8 +273,9 @@ export function BeredningView({
                       // dialog — a pure display preference, saved on its own
                       // without opening the operation. st/h needs a stycktid
                       // > 0 (0 st/h has no meaning), same rule as the dialog.
+                      <span className={styles.timeStack}>
                       <span className={styles.timeCell}>
-                        {formatRunTimePerUnit(op)}
+                        {formatMinutesPerUnit(op.runTimePerUnit, op.timeUnit)}
                         <SegmentedToggle
                           size="small"
                           value={op.timeUnit}
@@ -288,6 +292,12 @@ export function BeredningView({
                             },
                           ]}
                         />
+                      </span>
+                      {op.cycleTimePerUnit != null && (
+                        <span className={styles.cycleTime}>
+                          Cykeltid {formatMinutesPerUnit(op.cycleTimePerUnit, op.timeUnit)}
+                        </span>
+                      )}
                       </span>
                     )}
                   </span>

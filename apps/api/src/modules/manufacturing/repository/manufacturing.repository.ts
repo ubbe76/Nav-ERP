@@ -1067,6 +1067,7 @@ export function createManufacturingRepository(db: Db) {
           workCenterId: input.workCenterId,
           setupTime: String(input.setupTime),
           runTimePerUnit: String(input.runTimePerUnit),
+          cycleTimePerUnit: input.cycleTimePerUnit != null ? String(input.cycleTimePerUnit) : null,
           timeUnit: input.timeUnit ?? "minutes_per_unit",
           costingOnly: input.costingOnly ?? false,
           comment: blankToNull(input.comment),
@@ -1090,6 +1091,12 @@ export function createManufacturingRepository(db: Db) {
           ...input,
           setupTime: input.setupTime === undefined ? undefined : String(input.setupTime),
           runTimePerUnit: input.runTimePerUnit === undefined ? undefined : String(input.runTimePerUnit),
+          cycleTimePerUnit:
+            input.cycleTimePerUnit === undefined
+              ? undefined
+              : input.cycleTimePerUnit === null
+                ? null
+                : String(input.cycleTimePerUnit),
           comment: input.comment === undefined ? undefined : blankToNull(input.comment),
           packingInstructions:
             input.packingInstructions === undefined ? undefined : blankToNull(input.packingInstructions),
@@ -1396,6 +1403,8 @@ export function createManufacturingRepository(db: Db) {
           ...getTableColumns(manufacturingOrders),
           articleNumber: articles.articleNumber,
           articleName: articles.name,
+          // Extra benämning — printed on the TO when the setting lists it.
+          articleExtraDescription: articles.extraDescription,
           // The article's base unit — MO quantities are always base-unit.
           // Printed on the pallet card (Etapp F).
           articleUnitCode: units.code,

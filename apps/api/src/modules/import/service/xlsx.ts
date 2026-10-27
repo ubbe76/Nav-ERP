@@ -17,12 +17,25 @@ export type ParsedXlsx = {
   rows: string[][];
 };
 
+// OOXML writes characters XML cannot hold as "_xHHHH_" (ST_Xstring), and
+// Monitor's multi-line cells arrive as "Rad 1_x000d_\nRad 2" — read-excel-file
+// leaves the escape in place. "_x005F_" escapes a literal underscore, so
+// "_x005F_x000d_" is the text "_x000d_". Line breaks then collapse to "\n"
+// (CR, CRLF and the escaped CR before a real LF are all ONE break), which is
+// what the card's text areas store.
+export function decodeOoxmlText(value: string): string {
+  const decoded = value.includes("_x")
+    ? value.replace(/_x([0-9a-fA-F]{4})_/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+    : value;
+  return decoded.includes("\r") ? decoded.replace(/\r+\n|\r/g, "\n") : decoded;
+}
+
 // read-excel-file hands back typed cells; every planner downstream consumes
 // string[][] and parses numbers with normalizeDecimal, so everything is
 // stringified here — losslessly and locale-free.
 function cellToString(value: unknown): string {
   if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value.trim();
+  if (typeof value === "string") return decodeOoxmlText(value).trim();
   // String(2.5) is "2.5" — a dot decimal, which normalizeDecimal handles.
   if (typeof value === "number") return String(value);
   // Matches the Ja/Nej/1/0/true/false vocabulary the boolean fields accept.

@@ -170,6 +170,8 @@ export const createRoutingOperationSchema = z.object({
   workCenterId: z.string().uuid(),
   setupTime: z.coerce.number().nonnegative(),
   runTimePerUnit: z.coerce.number().nonnegative(),
+  // "Cykeltid" — productive time, minutes per unit like runTimePerUnit; null = none.
+  cycleTimePerUnit: z.coerce.number().nonnegative().nullable().optional(),
   timeUnit: z.enum(operationTimeUnits).optional(),
   // "Kalkyl" — time counted in the pre-calculation only; the operation is
   // skipped when the routing is snapshotted at release.
@@ -196,6 +198,8 @@ export const updateRoutingOperationSchema = z
     workCenterId: z.string().uuid().optional(),
     setupTime: z.coerce.number().nonnegative().optional(),
     runTimePerUnit: z.coerce.number().nonnegative().optional(),
+    // "Cykeltid"; null clears.
+    cycleTimePerUnit: z.coerce.number().nonnegative().nullable().optional(),
     timeUnit: z.enum(operationTimeUnits).optional(),
     costingOnly: z.boolean().optional(),
     // Nullable so the comment can be cleared.

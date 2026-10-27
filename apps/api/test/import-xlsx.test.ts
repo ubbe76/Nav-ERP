@@ -6,7 +6,7 @@ import {
   UnreadableImportFileError,
   normalizeDecimal,
 } from "../src/modules/import/service/csv.js";
-import { parseXlsxBuffer } from "../src/modules/import/service/xlsx.js";
+import { decodeOoxmlText, parseXlsxBuffer } from "../src/modules/import/service/xlsx.js";
 import { parseImportFile } from "../src/modules/import/service/parse-file.js";
 import { buildXlsxBuffer } from "./helpers/xlsx-fixture.js";
 
@@ -23,6 +23,19 @@ describe("buildXlsxBuffer — the fixture is a workbook read-excel-file accepts"
     const parsed = await parseXlsxBuffer(buf);
     expect(parsed.headers).toEqual(["Artikelnummer", "Antal"]);
     expect(parsed.rows).toEqual([["ART-1", "2"]]);
+  });
+});
+
+describe("decodeOoxmlText", () => {
+  it("decodes _xHHHH_ escapes and collapses every line break to one LF", () => {
+    expect(decodeOoxmlText("A_x000d_\nB")).toBe("A\nB");
+    expect(decodeOoxmlText("A_x000d_\r\nB")).toBe("A\nB");
+    expect(decodeOoxmlText("A_x000D_B")).toBe("A\nB");
+    expect(decodeOoxmlText("A\r\nB\rC")).toBe("A\nB\nC");
+    expect(decodeOoxmlText("Tab_x0009_här")).toBe("Tab\thär");
+    // _x005F_ escapes the underscore itself — the text "_x000d_" survives.
+    expect(decodeOoxmlText("Kod_x005F_x000d_")).toBe("Kod_x000d_");
+    expect(decodeOoxmlText("RU_2000")).toBe("RU_2000");
   });
 });
 
@@ -86,6 +99,20 @@ describe("parseXlsxBuffer", () => {
       },
     ]);
     await expect(parseXlsxBuffer(tooMany)).rejects.toBeInstanceOf(CsvRowLimitError);
+  });
+
+  it("decodes Monitor's escaped line breaks in multi-line cells", async () => {
+    const buf = buildXlsxBuffer([
+      {
+        name: "Blad1",
+        rows: [
+          ["Artikelnummer", "Extra benämning"],
+          ["ART-1", "Obehandlad_x000d_\nLevereras i delar_x000d_\n_x000d_\nTyp 12"],
+        ],
+      },
+    ]);
+    const parsed = await parseXlsxBuffer(buf);
+    expect(parsed.rows[0]![1]).toBe("Obehandlad\nLevereras i delar\n\nTyp 12");
   });
 
   it("turns a zip that is not a workbook into a Swedish error", async () => {

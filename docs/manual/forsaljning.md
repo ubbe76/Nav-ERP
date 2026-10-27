@@ -19,7 +19,7 @@ Offertlistan och offertkorten ligger under **Försäljning → Offerter** (`/for
 
 **Försäljning → Kunder** listar alla kunder med kolumnen **Kundnr** först; sökrutan matchar kundnummer och namn, och kolumnen **Valuta** visar kundens valuta. **+ Ny kund** registrerar **Kundnummer** (valfritt — lämnas fältet tomt tilldelas nästa nummer automatiskt ur nummerserien, se [Nummerserier](/hjalp/system#nummerserier)), namn och adress med postnummer/postort/**Land** samt **Valuta** (förvalt SEK, se [Försäljning i utländsk valuta](#forsaljning-i-utlandsk-valuta)) — kontaktpersoner läggs upp på kundkortets flik **Kontakter**. Knappen **Importera** läser in kunder, kontakter och leveransadresser från exportfiler (se [Importera kunder](#importera-kunder)).
 
-Klicka på kundens namn för att öppna **kundkortet** med fem flikar — samma upplägg som leverantörskortet, plus en adressflik och en prisflik:
+Klicka på kundens namn för att öppna **kundkortet** med sex flikar — samma upplägg som leverantörskortet, plus en adressflik och två priser-/artikelnummerflikar:
 
 - **Allmänt** — **Kundnummer** (unikt; kan skrivas över i efterhand, upptagna nummer avvisas), namn, aktiv och **Besöksadress** med postnummer/postort/**Land** (ISO-2-kod, t.ex. "SE"; standardvärde "SE"). **Valuta** är kundens valuta (tre bokstäver, t.ex. SEK eller EUR): nya offerter och kundorder tas i den med dagens kurs, och kundens särpriser på fliken **Priser** anges i den — se [Försäljning i utländsk valuta](#forsaljning-i-utlandsk-valuta). Kundnumret skrivs ut som **Kundnr** på offert och orderbekräftelse, och fryses på fakturan när den utfärdas — en senare omnumrering ändrar inte redan utfärdade fakturor. Landet skrivs bara ut på dokumenten när det avviker från Sverige. **Vårt leverantörsnummer** (fritext) är det nummer kunden själv har på oss som leverantör i sitt system — det skrivs ut på offert, orderbekräftelse och faktura som "Vårt leverantörsnr hos er: …" och hämtas alltid från kundkortets aktuella värde, även på en redan utfärdad faktura. **Webbsida** visas på kundkortet som en klickbar länk; saknas protokoll läggs `https://` till automatiskt. Fältet **Kod på pallkort** (**Systemets förval**, **Ingen**, **Streckkod**, **QR-kod**) styr om kundens pallkort får en kod; **Systemets förval** följer systeminställningen. Kryssrutan **Visa tilläggspriser** styr förvalet när offert och orderbekräftelse med konfigurerade rader skrivs ut eller mejlas (varje vals tillägg skrivs då ut efter valet) och vad fakturan visar när den utfärdas — se [Kundorder](#kundorder).
 - **Adresser** — kundens övriga adresser:
@@ -28,6 +28,7 @@ Klicka på kundens namn för att öppna **kundkortet** med fem flikar — samma 
 - **Villkor & frakt** — organisationsnummer, VAT-nummer, leveransvillkor, betalningsvillkor, speditör, kundnummer hos speditör (väljs ur [Grunddata](/hjalp/grunddata)-registren och visas med sitt namn, t.ex. "30 dagar netto"), **Prislista** — kopplar kunden till en registrerad prislista (se [Prislistor](#prislistor)); en lista i annan valuta än SEK visas med valutan efter namnet, t.ex. *Exportlista (EUR)*, och kortet varnar när listans valuta skiljer sig från kundens (*Prislistan är i EUR men kundens valuta är SEK. Listan används bara på ordrar i EUR; kundens vanliga ordrar prissätts utan den.*); standardvalet är **Ingen prislista** — och **Kundrabatt (%)**, en generell rabatt som slår igenom sist i priskedjan, se [Priskedjan](#priskedjan) nedan. Kryssrutan **Privatperson** byter etiketten **Organisationsnummer** till **Personnummer** och gör att offert, orderbekräftelse och faktura till kunden visar priser inklusive moms — raden "Priser inklusive moms" ovanför radtabellen, à-pris och radsumma inklusive moms, och summablocket blir **Summa inkl. moms** (offert/orderbekräftelse) respektive **Att betala** (faktura) följt av **Varav moms**; bokföringen påverkas inte, fakturan bokförs precis som vanligt, och visningen fryses vid utfärdandet så att ett senare ändrat kryss inte ändrar en redan utfärdad faktura. Kryssrutan **Samlingsfaktura** gör att kunden faktureras via rutinen [Samlingsfakturering](#samlingsfakturering) i stället för från fakturadialogen — se nedan. Kryssrutan **Omvänd betalningsskyldighet för byggtjänster** och raden **Momsbehandling** styr hur kundens fakturarader beskattas, se [Momsbehandling](#momsbehandling). **Dröjsmålsränta** (förvalt ja) avgör om kunden får ränta på förfallna fakturor, **Avtalad räntesats (%)** — visas när **Dröjsmålsränta** är på — är en avtalad total räntesats per år som gäller i stället för räntelagens (tomt = enligt räntelagen: referensräntan plus räntemarginalen), och **Förseningsersättning** (förvalt ja) avgör om kunden får förseningsersättning på 450 kr. **Förseningsersättning** visas inte för en **Privatperson** — lagen ger bara företag rätt till den. Se [Räntefakturering](#rantefakturering). **Förvald fraktprodukt** väljer kundens standardtransport, se [Förvald fraktprodukt](#forvald-fraktprodukt). Här anges också kundens **Leveransdagar**, **Dagarna avser** och **Transportdagar**, se [Leveransdagar](#leveransdagar). Under organisationsnummer och VAT-nummer väljer **Fakturaleverans** hur kunden vill ha sina fakturor — **E-post** (förvalet) eller **E-faktura (Peppol)** — och **Peppol-id** anger kundens adress i Peppol-nätet (`0007:5560000000`: schemat `0007` är svenskt organisationsnummer, sedan numret utan bindestreck). Tomt **Peppol-id** betyder `0007:` följt av kundens organisationsnummer. Knappen **Kontrollera** frågar Peppols katalog om id:t (det som står i fältet, även osparat) och svarar **Finns i Peppol** med företagets registrerade namn och vilka dokument det tar emot, **Finns inte i Peppol**, eller ett felmeddelande; i sandboxmiljön står det att svaret kommer därifrån. Fälten visas inte för **Privatperson**. Se [E-faktura (Peppol)](#e-faktura-peppol).
 - **Kontakter** — flera kontakter med namn, telefon, mobil, e-post, kommentar och möjlighet att markera en **Huvudkontakt**.
 - **Priser** — kundens egna prisregler, se [Kundpriser](#kundpriser) nedan.
+- **Kundens artikelnummer** — vad kunden själv kallar våra artiklar, se [Kundens artikelnummer](#kundens-artikelnummer) nedan.
 
 Uppe till höger på kortet finns **+ Ny offert** och **+ Ny kundorder** — båda skapas med kunden förvald.
 
@@ -169,6 +170,18 @@ Utöver prislistorna kan varje kund ha egna prisregler, oberoende av vilken pris
   - Målet (artikel eller varugrupp) låses när regeln väl är skapad — **Ändra** visar det som ett skrivskyddat fält; är regeln fel skapad tas den bort och läggs till på nytt.
 - **Ta bort** tar bort en regel efter bekräftelse.
 
+### Kundens artikelnummer
+
+Många kunder har egna artikelnummer för det de köper av oss. På **kundkortets flik Kundens artikelnummer** registrerar du vad kunden kallar varje artikel — ett nummer per kund och artikel:
+
+- Tabellen visar **Artikelnummer**, **Benämning** och **Kundens artikelnummer**, sorterade efter artikelnummer.
+- **+ Nytt artikelnummer** öppnar en dialog där du väljer **Artikel** (den sökbara artikelväljaren) och skriver **Kundens artikelnummer** (högst 50 tecken, inledande och avslutande blanksteg tas bort). Har kunden redan ett nummer för artikeln visas *Kunden har redan ett artikelnummer för den här artikeln.*
+- **Ändra** ändrar bara kundens artikelnummer; artikeln visas skrivskyddad. Är artikeln fel tar du bort raden och lägger till den på nytt.
+- **Ta bort** tar bort numret efter bekräftelse.
+- Fliken kräver samma behörighet som kundens prisregler på fliken **Priser**.
+
+Numret skrivs ut som **Ert art.nr: …** på första raden under artikelns benämning på **offert, orderbekräftelse, plocklista, följesedel och faktura**. Det hämtas alltid från kundkortets aktuella värde när dokumentet skrivs ut — men en redan utfärdad faktura behåller det nummer den hade när den utfärdades, eftersom fakturans PDF arkiveras. Kundens artikelnummer kan också läsas in med [Importera kundpriser](#importera-kundpriser).
+
 ### Priskedjan
 
 Priset på en orderrad slås upp i fem steg, mest specifika regel vinner:
@@ -200,14 +213,20 @@ För att en order i EUR ska få egna priser i stället för omräknade SEK-prise
 
 ## Importera kundpriser
 
-Fliken **Kundpriser** på **Artiklar → Importera** läser in kundernas artikelpriser (kundkortets flik **Priser**, se [Kundpriser](#kundpriser)) från exporten **Prislista Försäljning** — en rad per kund och artikel med rubrikerna **Kund** (kundnumret), **Pris** och **Rabatt**, som känns igen automatiskt. Kolumner: **Artikelnummer**, **Kundnummer** och **Pris** är obligatoriska; **Rabatt (%)** är valfri. Namn, Kundens art.nummer, Ställpris och Prisdatum importeras inte (kundens eget artikelnummer har inget fält i systemet).
+Fliken **Kundpriser** på **Artiklar → Importera** läser in kundernas artikelpriser (kundkortets flik **Priser**, se [Kundpriser](#kundpriser)) och kundernas egna artikelnummer (flik **Kundens artikelnummer**, se [Kundens artikelnummer](#kundens-artikelnummer)). Två exporter från det tidigare affärssystemet känns igen automatiskt: **Prislista Försäljning** — en rad per kund och artikel med rubrikerna **Kund** (kundnumret), **Pris** och **Rabatt** — och **Artikellista, Kundkopplingar**, som kopplar artiklar till kunder med kundens eget artikelnummer.
+
+Kolumner: **Artikelnummer** och **Kundnummer** är obligatoriska; **Pris**, **Rabatt (%)** och **Kundens artikelnummer** är valfria. Rubrikerna **Kundens art.nr** och **Kundens art.nummer** pekar på **Kundens artikelnummer**. En rad måste ha minst ett pris eller ett kundens artikelnummer — en rad kan alltså bära enbart kundens artikelnummer.
+
+Från **Artikellista, Kundkopplingar** importeras **Artikelnummer**, **Kundnummer** (från kolumnen Kund), **Pris**, **Rabatt** och **Kundens art.nr**. Kundnamn, Valuta, Enh., Ställpris och Ledtid importeras inte.
 
 Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kundpriser).
 
 - Kunden (matchad på **kundnummer**) och artikeln måste redan finnas.
-- Priset sparas som en **artikelregel med Specialpris (kr)** från antal 1 — exportfilen bär ingen staffel.
+- Rader utan kund (i exporten står **Kundkoppling saknas**) och rader med varken pris eller kundens artikelnummer hoppas över och listas som överhoppade.
+- Priset sparas som en **artikelregel med Specialpris (kr)** från antal 1 — exportfilen bär ingen staffel. En rad utan **Pris** skapar ingen prisregel.
 - **Rabatten räknas in i priset.** En prisregel är antingen ett pris eller en rabatt, så importen sparar nettopriset Pris × (1 − Rabatt/100) och varnar på raden att rabatten bakats in.
-- Har kunden redan en regel för artikeln (från antal 1) uppdateras den till det nya priset — även en regel som var en rabatt blir då ett specialpris. Med **Hoppa över rader som redan finns** lämnas den orörd. Samma kund och artikel två gånger i filen är ett fel.
+- **Kundens artikelnummer** sparas på kundkortets flik **Kundens artikelnummer**. Läses samma kund och artikel in igen ersätts det befintliga numret med filens.
+- Har kunden redan en regel för artikeln (från antal 1) uppdateras den till det nya priset — även en regel som var en rabatt blir då ett specialpris. Med **Hoppa över rader som redan finns** lämnas ett befintligt pris eller artikelnummer orört. Samma kund och artikel två gånger i filen är ett fel.
 
 ## Offerter
 

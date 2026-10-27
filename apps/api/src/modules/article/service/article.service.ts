@@ -661,6 +661,7 @@ export function createArticleService(repo: ArticleRepository) {
         ...unitPatch,
         quantity: input.quantity !== undefined ? toBaseQuantity(input.quantity, effectiveFactor) : undefined,
         routingOperationId: input.routingOperationId,
+        position: input.position,
       });
       if (!row) throw new BomComponentNotFoundError(rowId);
       return row;

@@ -20,6 +20,7 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "weight", label: "Vikt (kg)" },
   { field: "surfaceTreatment", label: "Ytbehandling" },
   { field: "colour", label: "Färg" },
+  { field: "extraDescription", label: "Extra benämning" },
   { field: "active", label: "Aktiv" },
   // Monitor's Planering export (Beställningspunkt, Orderkvantitet,
   // Avrundningsantal, Partiformningsregel).
@@ -32,6 +33,9 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "articleRevision", label: "Artikelrevision" },
   { field: "drawingNumber", label: "Ritningsnummer" },
   { field: "drawingRevision", label: "Ritningsrevision" },
+  // Monitor's Inköp export: Antal/kolli and the primary supplier.
+  { field: "quantityPerPackage", label: "Antal per förpackning" },
+  { field: "primarySupplierNumber", label: "Leverantörsnr" },
 ];
 
 // Mirrors ARTICLE_UNIT_IMPORT_FIELDS in
@@ -61,12 +65,14 @@ export const SUPPLIER_PRICE_IMPORT_FIELDS: ImportFieldConfig[] = [
 
 // Mirrors CUSTOMER_PRICE_IMPORT_FIELDS in
 // apps/api/src/modules/import/service/customer-prices.ts (Monitor's
-// "Prislista Försäljning").
+// "Prislista Försäljning" and "Artikellista, Kundkopplingar"). Pris is not
+// required: a row may carry only Kundens artikelnummer.
 export const CUSTOMER_PRICE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "articleNumber", label: "Artikelnummer", required: true },
   { field: "customerNumber", label: "Kundnummer", required: true },
-  { field: "price", label: "Pris", required: true },
+  { field: "price", label: "Pris" },
   { field: "discountPercent", label: "Rabatt (%)" },
+  { field: "customerArticleNumber", label: "Kundens artikelnummer" },
 ];
 
 // Mirrors CUSTOMER_IMPORT_FIELDS in
@@ -170,7 +176,7 @@ export const SUPPLIER_DELIVERY_ADDRESS_IMPORT_FIELDS: ImportFieldConfig[] = [
 
 // Mirrors BOM_IMPORT_FIELDS in apps/api/src/modules/import/service/bom.ts.
 // articleNumber is the PARENT article; the component sits in its own column.
-// Create-only: a component already in the structure is a row error.
+// Create-only unless "Uppdatera befintliga strukturrader" is ticked.
 export const BOM_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "articleNumber", label: "Artikelnummer", required: true },
   { field: "componentNumber", label: "Komponentnummer", required: true },
@@ -179,6 +185,8 @@ export const BOM_IMPORT_FIELDS: ImportFieldConfig[] = [
   // that exists, and the base unit for one the import creates.
   { field: "unitCode", label: "Enhet" },
   { field: "operationSequenceNo", label: "Operation" },
+  // Monitor's "Pos." — the position on the drawing.
+  { field: "position", label: "Pos." },
   // Read only for components missing from the article register, and only with
   // "Skapa saknade artiklar". Labelled "Artikelbenämning" because that is what
   // the column is called in the files people import — the parenthesis says
@@ -220,10 +228,9 @@ export const CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS: ImportFieldConfig[] = [
 ];
 
 // Mirrors ROUTING_IMPORT_FIELDS in
-// apps/api/src/modules/import/service/routing.ts. Both times are required —
-// setup_time and run_time_per_unit are NOT NULL without a default, so an
-// unmapped column would have to be guessed as 0 and silently skew the
-// pre-calculation.
+// apps/api/src/modules/import/service/routing.ts. The times are not required
+// columns — Monitor's lego export has none — but a row on an ordinary
+// resource without both is a row error (never guessed as 0).
 export const ROUTING_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "articleNumber", label: "Artikelnummer", required: true },
   { field: "sequenceNo", label: "Sekvensnr", required: true },
@@ -231,8 +238,8 @@ export const ROUTING_IMPORT_FIELDS: ImportFieldConfig[] = [
   // Both times are read in the unit the Tidsenhet column names (Monitor's
   // "Enhet": antal/timme = st/h with the setup time in hours); unmapped, they
   // are minutes.
-  { field: "setupTime", label: "Ställtid", required: true },
-  { field: "runTimePerUnit", label: "Stycktid / Tid per enhet", required: true },
+  { field: "setupTime", label: "Ställtid" },
+  { field: "runTimePerUnit", label: "Stycktid / Tid per enhet" },
   { field: "timeUnit", label: "Tidsenhet" },
   { field: "costingOnly", label: "Kalkyl" },
   // Monitor G5 heads this column "Instruktion".
@@ -240,6 +247,12 @@ export const ROUTING_IMPORT_FIELDS: ImportFieldConfig[] = [
   // Monitor G5 heads this column "Operationens benämning".
   { field: "description", label: "Beskrivning" },
   { field: "packingInstructions", label: "Packinstruktion" },
+  // Lego operations (Monitor's Operationslista, Lego).
+  { field: "subcontractSupplierNumber", label: "Legoleverantör" },
+  { field: "setupPrice", label: "Ställpris" },
+  { field: "unitPrice", label: "Styckpris" },
+  // Monitor's "Cykeltid" — the productive time, same unit as Stycktid.
+  { field: "cycleTimePerUnit", label: "Cykeltid" },
 ];
 
 // Mirrors WORK_CENTER_IMPORT_FIELDS in

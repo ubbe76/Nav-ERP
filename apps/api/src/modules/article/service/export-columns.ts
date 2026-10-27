@@ -25,6 +25,7 @@ export interface ArticleExportRow {
   standardCost: string | number | null;
   surfaceTreatment: string | null;
   colour: string | null;
+  extraDescription: string | null;
   active: boolean;
 }
 
@@ -39,4 +40,5 @@ export const articleExportColumns: CsvColumn<ArticleExportRow>[] = [
   { label: "Status", value: (r) => (r.active ? "Aktiv" : "Inaktiv") },
   { label: "Ytbehandling", value: (r) => r.surfaceTreatment },
   { label: "Färg", value: (r) => r.colour },
+  { label: "Extra benämning", value: (r) => r.extraDescription },
 ];

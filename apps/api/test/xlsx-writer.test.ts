@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { validateXML } from "xmllint-wasm";
-import { db } from "@navet/db";
+import { db, suppliers } from "@navet/db";
 import type { ImportEntity } from "@navet/shared";
 import { parseXlsxBuffer } from "../src/modules/import/service/xlsx.js";
 import { noteRows, readStoredZipEntries, writeXlsx, xmlText } from "../src/modules/import/service/xlsx-writer.js";
@@ -241,6 +241,9 @@ describe("round trip: a template with one row of the examples goes through parse
   }
 
   it.each(["articles", "customers", "suppliers"] as const)("%s", async (entity) => {
+    // The article template's Leverantörsnummer must name a supplier that exists.
+    const supplierExample = IMPORT_FIELD_HELP.articles.find((h) => h.field === "primarySupplierNumber")!.example;
+    if (entity === "articles") await db.insert(suppliers).values({ supplierNumber: supplierExample, name: "Exempelleverantören" });
     const parsed = await importService.parse(entity, filledTemplate(entity));
     expect(parsed.headers).toEqual(IMPORT_FIELD_HELP[entity].map((h) => h.header));
     // Every column of the template is recognised.

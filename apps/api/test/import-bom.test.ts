@@ -176,7 +176,7 @@ describe("suggestBomMapping", () => {
       Status: null,
       Beredare: null,
       "Spärrad (material)": null,
-      "Pos.": null,
+      "Pos.": "position",
       // Secondary alias: articleNumber was claimed by Huvudartikel.
       Artikelnummer: "componentNumber",
       "Artikelbenämning (2)": "componentName",
@@ -904,7 +904,7 @@ describe("bom import — repository", () => {
     const componentId = await seedArticle("K-1", "purchased");
     await db.insert(bomComponents).values({ parentArticleId: parentId, componentArticleId: componentId, quantity: "2" });
 
-    expect(await repo.allBomEdges()).toEqual([{ parentId, componentId }]);
+    expect(await repo.allBomEdges()).toEqual([{ id: expect.any(String), parentId, componentId }]);
   });
 
   it("maps a component's alternative unit factors", async () => {
@@ -1220,5 +1220,70 @@ describe("import service — bom entity", () => {
       "Komponenten K-1 finns redan i strukturen för A-1 — ta bort raden ur filen",
     ]);
     expect(preview.summary.error).toBe(1);
+  });
+});
+
+// --- Pos. and "Uppdatera befintliga strukturrader" (importfält 2026-10) ---
+describe("bom import — Pos. and updateExisting", () => {
+  const POS_MAPPING = { ...MAPPING, "Pos.": "position" };
+
+  it("maps Monitor's Pos. and stores it on new rows", async () => {
+    expect(suggestBomMapping(["Huvudartikel", "Pos.", "Artikelnummer", "Kvantitet"])["Pos."]).toBe("position");
+    const plan = await planBomImport(
+      { mapping: POS_MAPPING, rows: [["A-1", "K-1", "2", "", "", "12"]] },
+      fakeDeps({ articles: [article("A-1", "id-a"), article("K-1", "id-k", { type: "purchased" })] })
+    );
+    expect(plan.creates[0]).toMatchObject({ componentArticleId: "id-k", position: "12" });
+
+    const tooLong = await planBomImport(
+      { mapping: POS_MAPPING, rows: [["A-1", "K-1", "2", "", "", "x".repeat(21)]] },
+      fakeDeps({ articles: [article("A-1", "id-a"), article("K-1", "id-k", { type: "purchased" })] })
+    );
+    expect(tooLong.rows[0]!.errors).toEqual(["Pos. är för lång (21 tecken, max 20)"]);
+  });
+
+  it("rewrites an existing row with updateExisting instead of erroring", async () => {
+    const deps = fakeDeps({
+      articles: [article("A-1", "id-a"), article("K-1", "id-k", { type: "purchased" })],
+      edges: [{ id: "row-1", parentId: "id-a", componentId: "id-k" }],
+      operations: [{ articleId: "id-a", sequenceNo: 10 }],
+    });
+    const plain = await planBomImport({ mapping: POS_MAPPING, rows: [["A-1", "K-1", "3", "", "10", "7"]] }, deps);
+    expect(plain.rows[0]!.errors[0]).toContain("finns redan i strukturen");
+
+    const plan = await planBomImport(
+      { mapping: POS_MAPPING, rows: [["A-1", "K-1", "3", "", "10", "7"]], updateExisting: true },
+      deps
+    );
+    expect(plan.rows[0]!.action).toBe("update");
+    expect(plan.creates).toEqual([]);
+    expect(plan.updates).toEqual([
+      { id: "row-1", patch: { quantity: 3, unitId: null, unitFactor: null, routingOperationId: "op-id-a-10", position: "7" } },
+    ]);
+
+    // Without the operation column the link is left alone; an empty Pos. too.
+    const noOperation = await planBomImport(
+      { mapping: { ...MAPPING, Operation: null, "Pos.": "position" }, rows: [["A-1", "K-1", "3", "", "", ""]], updateExisting: true },
+      deps
+    );
+    expect(noOperation.updates![0]!.patch).toEqual({ quantity: 3, unitId: null, unitFactor: null });
+
+    await expect(
+      planBomImport({ mapping: POS_MAPPING, rows: [], updateExisting: true, skipExisting: true }, deps)
+    ).rejects.toBeInstanceOf(ImportMappingError);
+  });
+
+  it("commits the update end-to-end", async () => {
+    await seedArticle("A-1");
+    await seedArticle("K-1", "purchased");
+    await importService.commit("bom", { mapping: MAPPING, rows: [["A-1", "K-1", "2", "", ""]] });
+    const result = await importService.commit("bom", {
+      mapping: { ...MAPPING, "Pos.": "position" },
+      rows: [["A-1", "K-1", "5", "", "", "4"]],
+      updateExisting: true,
+    });
+    expect(result).toMatchObject({ created: 0, updated: 1 });
+    const [stored] = await db.select().from(bomComponents);
+    expect(stored).toMatchObject({ quantity: "5.0000", position: "4" });
   });
 });

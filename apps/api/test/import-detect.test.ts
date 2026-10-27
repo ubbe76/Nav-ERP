@@ -11,6 +11,7 @@ const HEADERS = {
   enheter: ["Artikelnummer", "Artikelbenämning", "Enh.", "Förvald", "Omr.faktor", "Materialuttag", "Inköpsorder", "Rapportera inleverans", "Kundorder", "Packa för leverans", "Rapportera utleverans", "Lagerrapportering", "Statistik"],
   materiallista: ["Huvudartikel", "Artikelbenämning", "Status", "Beredare", "Spärrad (material)", "Pos.", "Artikelnummer", "Artikelbenämning (2)", "A", "Ersättningsartikel", "Artikeltyp", "Till operation", "Pgrp", "Inst.kvant.", "Extra %", "Kvantitet", "Enhet", "Standardpris", "End. kal.", "Instruktion", "Filer (material)", "Villkor", "Från och med", "Till och med"],
   operationslista: ["Artikelnummer", "Artikelbenämning", "Produktionsgrupp", "Op.", "Operationens benämning", "Antal maskiner/personer per order", "Ställantal", "Extra %", "Ställtid", "Stycktid", "Cykeltid", "Fördelningstid", "Enhet", "ÖL", "Kötid", "Bem.fakt. ställ", "Bem.fakt. styck", "Fast ledtid", "Und. K-faktor ställ", "Und. K-faktor styck", "Endast kalkyl", "Instruktion", "Filer", "Villkor", "Från och med", "Till och med"],
+  operationslistaLego: ["Produktionsgrupp", "Namn", "Leverantör", "Namn", "Artikelnummer", "Artikelbenämning", "Legoartikelnummer", "Op.", "Operationens benämning", "Ställkostnad", "Styckkostnad", "Kötid", "Transportkostnad", "Lev.adress – Rad 1", "Lev.adress – Rad 2", "Lev.adress – Rad 3", "Lev.adress – Rad 4", "Lev.adress – Rad 5", "Lev.adress – Land", "Färg"],
   prislistaInkop: ["Artikelnummer", "Artikelbenämning", "Artikeltyp", "Artikelkod", "Förvald", "Leverantör", "Namn", "Lev. art.nr", "Pris", "Ställpris", "Rabatt", "Prisdatum"],
   prislistaInkopStafflat: ["Artikelnummer", "Artikelbenämning", "Artikeltyp", "Artikelkod", "Leverantör", "Namn", "Lev. art.nr", "Pris", "Ställpris", "Rabatt", "Prisdatum", "Gränsvärde antal", "Pris (2)"],
   prislistaForsaljning: ["Artikelnummer", "Artikelbenämning", "Artikeltyp", "Artikelkod", "Kund", "Namn", "Kundens art.nummer", "Pris", "Ställpris", "Rabatt", "Prisdatum"],
@@ -25,6 +26,9 @@ describe("detectImportEntity", () => {
     expect(detectImportEntity(HEADERS.enheter)).toBe("articleUnits");
     expect(detectImportEntity(HEADERS.materiallista)).toBe("bom");
     expect(detectImportEntity(HEADERS.operationslista)).toBe("routing");
+    // No time columns — it used to fall through to the article list, whose
+    // "Namn" alias took the resource name as every article's Benämning.
+    expect(detectImportEntity(HEADERS.operationslistaLego)).toBe("routing");
     expect(detectImportEntity(HEADERS.prislistaInkop)).toBe("supplierPrices");
     expect(detectImportEntity(HEADERS.prislistaInkopStafflat)).toBe("supplierPrices");
     expect(detectImportEntity(HEADERS.prislistaForsaljning)).toBe("customerPrices");

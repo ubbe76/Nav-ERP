@@ -17,6 +17,8 @@ interface Signature {
   all: string[];
   /** At least one of these must be present (when the list is non-empty). */
   any?: string[];
+  /** Also requires one of ROUTING_TIME_HEADINGS (the internal Operationslista). */
+  needsTimeColumn?: true;
 }
 
 export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
@@ -30,8 +32,12 @@ export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
   { entity: "articleUnits", all: ["artikelnummer", "enhet", "omrakningsfaktor"] },
   { entity: "supplierPrices", all: ["artikelnummer", "leverantorsnummer", "pris"] },
   { entity: "customerPrices", all: ["artikelnummer", "kundnummer", "pris"] },
+  // Operationslista, Lego: no times, but the lego prices. Without this rule
+  // the file fell through to the article list, whose alias "namn" took the
+  // resource name as every article's Benämning.
+  { entity: "routing", all: ["artikelnummer", "op"], any: ["stallkostnad", "styckkostnad", "legoartikelnummer"] },
   // Operationslista: article + resource/sequence + a time column.
-  { entity: "routing", all: ["artikelnummer"], any: ["produktionsgrupp", "op", "sekvensnr"] },
+  { entity: "routing", all: ["artikelnummer"], any: ["produktionsgrupp", "op", "sekvensnr"], needsTimeColumn: true },
   // Artikellista, Enheter: the conversion factor is unique to it.
   { entity: "articleUnits", all: ["artikelnummer", "omrfaktor"] },
   // Prislista Inköp (plain and stafflat): supplier + price.
@@ -50,6 +56,7 @@ export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
       "enhet",
       "standardpris",
       "farg",
+      "extrabenamning",
       "ytbehandling",
       "vikt",
       "nettovikt",
@@ -78,7 +85,7 @@ export function detectImportEntity(headers: string[]): ImportEntity | null {
   for (const signature of IMPORT_ENTITY_SIGNATURES) {
     if (!signature.all.every((heading) => present.has(heading))) continue;
     if (signature.any && !signature.any.some((heading) => present.has(heading))) continue;
-    if (signature.entity === "routing" && !ROUTING_TIME_HEADINGS.some((heading) => present.has(heading))) continue;
+    if (signature.needsTimeColumn && !ROUTING_TIME_HEADINGS.some((heading) => present.has(heading))) continue;
     return signature.entity;
   }
   return null;

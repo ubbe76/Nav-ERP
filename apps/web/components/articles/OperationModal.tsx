@@ -41,6 +41,9 @@ export interface OperationPayload {
   workCenterId: string;
   setupTime: number;
   runTimePerUnit: number;
+  // Routing only (an MO operation has no Cykeltid yet) — minutes per unit,
+  // null = not set.
+  cycleTimePerUnit?: number | null;
   timeUnit: "minutes_per_unit" | "units_per_hour";
   costingOnly?: boolean;
   comment: string;
@@ -151,6 +154,16 @@ function OperationForm({
     }
     return String(minutes);
   });
+  // Cykeltid — typed in the SAME unit as Tid/enhet; "" = not set.
+  const [cycleTime, setCycleTime] = useState(() => {
+    const stored = routingEditing?.cycleTimePerUnit;
+    if (stored == null) return "";
+    const minutes = Number(stored);
+    if (editing?.timeUnit === "units_per_hour" && minutes > 0) {
+      return String(minutesPerUnitToUnitsPerHour(minutes));
+    }
+    return String(minutes);
+  });
   const [costingOnly, setCostingOnly] = useState(routingEditing?.costingOnly ?? false);
   const [comment, setComment] = useState(editing?.comment ?? "");
   const [printOnWorkCard, setPrintOnWorkCard] = useState(editing?.printOnWorkCard ?? false);
@@ -193,6 +206,13 @@ function OperationForm({
         String(next === "units_per_hour" ? minutesPerUnitToUnitsPerHour(current) : unitsPerHourToMinutesPerUnit(current))
       );
     }
+    // Cykeltid follows the same unit as Tid/enhet.
+    const currentCycle = Number(cycleTime);
+    if (cycleTime.trim() !== "" && Number.isFinite(currentCycle) && currentCycle > 0) {
+      setCycleTime(
+        String(next === "units_per_hour" ? minutesPerUnitToUnitsPerHour(currentCycle) : unitsPerHourToMinutesPerUnit(currentCycle))
+      );
+    }
     setTimeUnit(next);
   }
 
@@ -215,6 +235,12 @@ function OperationForm({
       setError("Antal per timme måste vara större än 0");
       return;
     }
+    // Same rule for Cykeltid: an empty field means none, but a typed 0 st/h
+    // has no meaning (and would convert to Infinity minutes).
+    if (!isLego && !moMode && timeUnit === "units_per_hour" && cycleTime.trim() !== "" && !(Number(cycleTime) > 0)) {
+      setError("Cykeltid i st/h måste vara större än 0 (lämna fältet tomt för ingen cykeltid)");
+      return;
+    }
     setPending(true);
     try {
       const payload: OperationPayload = {
@@ -230,6 +256,18 @@ function OperationForm({
           : timeUnit === "units_per_hour"
             ? unitsPerHourToMinutesPerUnit(Number(runTimePerUnit))
             : Number(runTimePerUnit),
+        // Cykeltid: same conversion as Tid/enhet; empty = null (clears). Lego
+        // has no times, so it always clears; an MO operation has no field.
+        ...(moMode
+          ? {}
+          : {
+              cycleTimePerUnit:
+                isLego || cycleTime.trim() === ""
+                  ? null
+                  : timeUnit === "units_per_hour"
+                    ? unitsPerHourToMinutesPerUnit(Number(cycleTime))
+                    : Number(cycleTime),
+            }),
         // Lego hides the time fields entirely, so it always forces minutes —
         // a stray st/h preference from before the resource switch must not
         // survive the save.
@@ -474,6 +512,25 @@ function OperationForm({
             </div>
           </Field>
         </FormRow>
+      )}
+      {!isLego && !moMode && (
+        <>
+          <Field label={`Cykeltid (${timeUnit === "units_per_hour" ? "st/h" : "min/st"}, valfritt)`} htmlFor="cycleTimePerUnit">
+            <Input
+              id="cycleTimePerUnit"
+              type="number"
+              size="sm"
+              min="0"
+              step="any"
+              value={cycleTime}
+              onChange={(e) => setCycleTime(e.target.value)}
+            />
+          </Field>
+          <FormHint attached>
+            Operationens produktiva tid per styck, i samma enhet som Tid/enhet. Används inte i kalkylen eller
+            beläggningen ännu.
+          </FormHint>
+        </>
       )}
 
       {/* Checkbox (ui/Field.tsx) has no `label` prop — the visible text

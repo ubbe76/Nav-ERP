@@ -6,6 +6,7 @@ import {
   createPriceListSchema,
   createSalesOrderRowSchema,
   customerDeliveryDateQuerySchema,
+  customerArticleNumberInputSchema,
   customerPriceInputSchema,
   deliverBatchSchema,
   deliveryPalletCardQuerySchema,
@@ -21,6 +22,7 @@ import {
   setRowConfigurationSchema,
   setSalesOrderStatusSchema,
   updateContactSchema,
+  updateCustomerArticleNumberSchema,
   updateCustomerPriceSchema,
   updateCustomerSchema,
   updateDeliveryAddressSchema,
@@ -56,6 +58,8 @@ import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   CustomerPriceNotFoundError,
+  CustomerArticleNumberNotFoundError,
+  DuplicateCustomerArticleNumberError,
   DuplicateCustomerPriceError,
   DuplicatePriceListError,
   DuplicatePriceListRowError,
@@ -299,6 +303,59 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         return reply.code(204).send();
       } catch (err) {
         if (err instanceof CustomerPriceNotFoundError) return reply.code(404).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // --- Kundens artikelnummer (customer card) — same shape as the prices ---
+  app.get<{ Params: { id: string } }>("/customers/:id/article-numbers", async (req, reply) => {
+    try {
+      return await service.listCustomerArticleNumbers(req.params.id);
+    } catch (err) {
+      if (err instanceof CustomerNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/customers/:id/article-numbers", async (req, reply) => {
+    const input = customerArticleNumberInputSchema.parse(req.body);
+    try {
+      return reply.code(201).send(await service.addCustomerArticleNumber(req.params.id, input, req.user!.id));
+    } catch (err) {
+      if (err instanceof CustomerNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      if (err instanceof DuplicateCustomerArticleNumberError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  app.patch<{ Params: { id: string; articleNumberId: string } }>(
+    "/customers/:id/article-numbers/:articleNumberId",
+    async (req, reply) => {
+      const input = updateCustomerArticleNumberSchema.parse(req.body);
+      try {
+        return await service.updateCustomerArticleNumber(
+          req.params.id,
+          req.params.articleNumberId,
+          input.customerArticleNumber,
+          req.user!.id
+        );
+      } catch (err) {
+        if (err instanceof CustomerArticleNumberNotFoundError) return reply.code(404).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  app.delete<{ Params: { id: string; articleNumberId: string } }>(
+    "/customers/:id/article-numbers/:articleNumberId",
+    async (req, reply) => {
+      try {
+        await service.deleteCustomerArticleNumber(req.params.id, req.params.articleNumberId, req.user!.id);
+        return reply.code(204).send();
+      } catch (err) {
+        if (err instanceof CustomerArticleNumberNotFoundError) return reply.code(404).send(errorBody(err));
         throw err;
       }
     }

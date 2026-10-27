@@ -29,6 +29,8 @@ export const ARTICLE_IMPORT_FIELDS = [
   "weight",
   "surfaceTreatment",
   "colour",
+  // Monitor's "Extra benämning" (Artikellista, Extra fält) — multi-line.
+  "extraDescription",
   "active",
   // Planning fields — Monitor's "Artikellista, Planering" export. 0 means
   // "none" there and clears the field here; lotSizingRule gates
@@ -43,6 +45,11 @@ export const ARTICLE_IMPORT_FIELDS = [
   "articleRevision",
   "drawingNumber",
   "drawingRevision",
+  // Monitor's Inköp tab: Antal/kolli and the article's Leverantörsnr — the
+  // supplier becomes the article's primary supplier (Inköp tab), without a
+  // price; prices come from the Prislista Inköp import.
+  "quantityPerPackage",
+  "primarySupplierNumber",
 ] as const;
 
 // Normalized header -> target field (see normalizeHeader: "Benämning" ->
@@ -86,6 +93,7 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   ytbehandling: "surfaceTreatment",
   farg: "colour",
   kulor: "colour",
+  extrabenamning: "extraDescription",
   aktiv: "active",
   status: "active",
   artikelrevision: "articleRevision",
@@ -98,6 +106,15 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   ritningsrevision: "drawingRevision",
   ritningsrev: "drawingRevision",
   ritnrev: "drawingRevision",
+  // "Antal/kolli (Inköp)" in Monitor's export.
+  antalkolli: "quantityPerPackage",
+  antalkolliinkop: "quantityPerPackage",
+  antalperforpackning: "quantityPerPackage",
+  forpackningsantal: "quantityPerPackage",
+  leverantorsnr: "primarySupplierNumber",
+  leverantorsnummer: "primarySupplierNumber",
+  leverantor: "primarySupplierNumber",
+  primarleverantor: "primarySupplierNumber",
 };
 
 export function suggestArticleMapping(headers: string[]): Record<string, string | null> {
@@ -139,6 +156,8 @@ export interface ArticleImportDeps {
   groupsByCode(): Promise<Map<string, string>>;
   // Artikelkoder keyed by their exact code.
   articleCodesByCode(): Promise<Map<string, string>>;
+  // Leverantörsnr -> supplier, for the primary-supplier column.
+  suppliersByNumber(numbers: string[]): Promise<Map<string, { id: string }>>;
   // The same fallbacks createArticle uses ("st" + the "***" location),
   // resolved ONCE before rows are built.
   resolveDefaults(): Promise<{ unitId: string; locationId: string }>;
@@ -169,11 +188,16 @@ export interface ArticleCreatePlan {
   weight: number | null;
   surfaceTreatment: string | null;
   colour: string | null;
+  // Optional: the bom import's article creates carry none.
+  extraDescription?: string | null;
   active: boolean;
   reorderPoint: number | null;
   orderQuantity: number | null;
   rounding: number | null;
   revisions?: ArticleRevisionPlan;
+  // Optional: the bom import's article creates carry neither.
+  quantityPerPackage?: number | null;
+  primarySupplierId?: string | null;
 }
 
 export interface ArticleUpdatePlan {
@@ -189,12 +213,17 @@ export interface ArticleUpdatePlan {
     weight?: number;
     surfaceTreatment?: string | null;
     colour?: string | null;
+    extraDescription?: string;
     active?: boolean;
     reorderPoint?: number | null;
     orderQuantity?: number | null;
     rounding?: number | null;
+    quantityPerPackage?: number | null;
   };
   revisions?: ArticleRevisionPlan;
+  // Becomes the article's primary supplier (article_suppliers), added
+  // without a price when the article has no row for it yet.
+  primarySupplierId?: string;
 }
 
 export interface ArticleImportPlan {
@@ -274,6 +303,8 @@ export async function planArticleImport(
 
   const numbers = records.map((r) => r["articleNumber"] ?? "").filter((n) => n !== "");
   const existingByNumber = await deps.articlesByNumber(numbers);
+  const supplierNumbers = records.map((r) => r["primarySupplierNumber"] ?? "").filter((n) => n !== "");
+  const suppliersByNumber = supplierNumbers.length > 0 ? await deps.suppliersByNumber(supplierNumbers) : new Map();
 
   const rows: ImportRowResult[] = [];
   const creates: ArticleCreatePlan[] = [];
@@ -435,6 +466,20 @@ export async function planArticleImport(
       }
     }
 
+    // Extra benämning — multi-line free text (xlsx.ts has already turned
+    // Monitor's _x000d_ breaks into "\n"). Same 2000-character ceiling as
+    // the article card; a longer text is a row error, never truncated.
+    const extraDescriptionCell = record["extraDescription"] ?? "";
+    let extraDescription: string | null = null;
+    if (extraDescriptionCell !== "") {
+      if (extraDescriptionCell.length > 2000) {
+        errors.push(`Extra benämning är för lång (${extraDescriptionCell.length} tecken, max 2000)`);
+      } else {
+        extraDescription = extraDescriptionCell;
+        values["extraDescription"] = extraDescriptionCell;
+      }
+    }
+
     const activeCell = record["active"] ?? "";
     let active: boolean | null = null;
     if (activeCell !== "") {
@@ -535,6 +580,33 @@ export async function planArticleImport(
     const revisions =
       revisionPlan.articleRevision !== null || revisionPlan.drawingNumber !== null ? revisionPlan : undefined;
 
+    // Antal/kolli: 0 is Monitor's "none" and clears the field, like the
+    // planning fields; numeric(14,4) rounds further decimals with a warning.
+    const packageCell = record["quantityPerPackage"] ?? "";
+    let quantityPerPackage: number | null | undefined;
+    if (packageCell !== "") {
+      const parsed = normalizeDecimal(packageCell);
+      if (parsed === null) errors.push(`Ogiltigt antal per förpackning: "${packageCell}"`);
+      else if (parsed < 0) errors.push("Antal per förpackning kan inte vara negativt");
+      else {
+        const rounded = Math.round(parsed * 10000) / 10000;
+        if (rounded !== parsed) warnings.push(`Antal per förpackning ${packageCell} avrundas till ${rounded} (högst 4 decimaler)`);
+        quantityPerPackage = rounded === 0 ? null : rounded;
+        values["quantityPerPackage"] = quantityPerPackage;
+      }
+    }
+
+    // Leverantörsnr — an unknown supplier is a row error like every other
+    // register reference (import the suppliers first).
+    const supplierCell = record["primarySupplierNumber"] ?? "";
+    let primarySupplierId: string | null = null;
+    if (supplierCell !== "") {
+      values["primarySupplierNumber"] = supplierCell;
+      const supplier = suppliersByNumber.get(supplierCell);
+      if (!supplier) errors.push(`Leverantören ${supplierCell} finns inte i leverantörsregistret`);
+      else primarySupplierId = supplier.id;
+    }
+
     rows.push({ rowNumber, action, errors, warnings, values });
     if (errors.length > 0) return;
 
@@ -557,11 +629,14 @@ export async function planArticleImport(
         weight,
         surfaceTreatment,
         colour,
+        ...(extraDescription !== null ? { extraDescription } : {}),
         active: active ?? true,
         reorderPoint: planning.reorderPoint ?? null,
         orderQuantity: planning.orderQuantity ?? null,
         rounding: planning.rounding ?? null,
         ...(revisions ? { revisions } : {}),
+        ...(quantityPerPackage != null ? { quantityPerPackage } : {}),
+        ...(primarySupplierId !== null ? { primarySupplierId } : {}),
       });
     } else {
       // Empty cell on update = leave the existing value untouched (never
@@ -589,11 +664,18 @@ export async function planArticleImport(
         patch.surfaceTreatment = surfaceTreatment;
       }
       if (colour !== null && colour !== existing.colour) patch.colour = colour;
+      if (extraDescription !== null) patch.extraDescription = extraDescription;
       if (active !== null) patch.active = active;
       if (planning.reorderPoint !== undefined) patch.reorderPoint = planning.reorderPoint;
       if (planning.orderQuantity !== undefined) patch.orderQuantity = planning.orderQuantity;
       if (planning.rounding !== undefined) patch.rounding = planning.rounding;
-      updates.push({ id: existing.id, patch, ...(revisions ? { revisions } : {}) });
+      if (quantityPerPackage !== undefined) patch.quantityPerPackage = quantityPerPackage;
+      updates.push({
+        id: existing.id,
+        patch,
+        ...(revisions ? { revisions } : {}),
+        ...(primarySupplierId !== null ? { primarySupplierId } : {}),
+      });
     }
   });
 

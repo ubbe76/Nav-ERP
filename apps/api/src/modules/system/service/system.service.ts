@@ -4,6 +4,7 @@ import type {
   CostingSupplierPriceTier,
   CreateArticleNumberSeriesInput,
   CreateCompanyCarrierInput,
+  ExtraDescriptionDocument,
   ManufacturingMaterialShortage,
   PalletCardCode,
   UpdateCompanyCarrierInput,
@@ -11,7 +12,7 @@ import type {
   UpdateNumberSeriesInput,
   UpdateSystemSettingsInput,
 } from "@navet/shared";
-import { round2 } from "@navet/shared";
+import { EXTRA_DESCRIPTION_DOCUMENTS, round2 } from "@navet/shared";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_ARTICLE_SERIES_KEY } from "./number-series.js";
 import type { SystemRepository } from "../repository/system.repository.js";
@@ -81,6 +82,7 @@ const DATABASE_URL_FALLBACK = "postgresql://erp:erp_dev_password@localhost:5432/
 const ALLOW_MULTIPLE_STAMPS_KEY = "allow_multiple_stamps";
 const SHOW_REVISIONS_ON_DOCUMENTS_KEY = "show_revisions_on_documents";
 const SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY = "show_order_revision_on_documents";
+const EXTRA_DESCRIPTION_DOCUMENTS_KEY = "extra_description_documents";
 const ATF_MINUTES_PER_WEEK_KEY = "atf_minutes_per_week";
 const PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY = "payroll_overtime_threshold_minutes";
 const ATTENDANCE_REASON_REQUIRED_KEY = "attendance_reason_required";
@@ -238,6 +240,19 @@ export function fileExportFilename(now: Date): string {
   return `nav-filer-${iso.slice(0, 10)}_${iso.slice(11, 16).replace(":", "")}.zip`;
 }
 
+// The stored JSON list, unknown or malformed entries dropped — never throws,
+// a broken value reads as "no documents".
+function decodeExtraDescriptionDocuments(raw: string | null): ExtraDescriptionDocument[] {
+  if (raw === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return EXTRA_DESCRIPTION_DOCUMENTS.filter((kind) => parsed.includes(kind));
+  } catch {
+    return [];
+  }
+}
+
 async function* zipStoredFiles(files: AsyncIterable<ExportedFile>): AsyncGenerator<Buffer> {
   const zip = new ZipStreamWriter();
   const paths = new UniquePaths();
@@ -266,6 +281,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       showRevisionsOnDocuments: get(SHOW_REVISIONS_ON_DOCUMENTS_KEY) === "true",
       // Unlike the other toggles this one defaults ON when never set.
       showOrderRevisionOnDocuments: get(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY) !== "false",
+      extraDescriptionDocuments: decodeExtraDescriptionDocuments(get(EXTRA_DESCRIPTION_DOCUMENTS_KEY)),
       atfMinutesPerWeek: get(ATF_MINUTES_PER_WEEK_KEY) === null ? 0 : Number(get(ATF_MINUTES_PER_WEEK_KEY)),
       payrollOvertimeThresholdMinutes:
         get(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY) === null ? 0 : Number(get(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY)),
@@ -562,6 +578,14 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.showOrderRevisionOnDocuments !== undefined) {
         await set(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY, String(input.showOrderRevisionOnDocuments));
+      }
+      if (input.extraDescriptionDocuments !== undefined) {
+        // Stored in the catalog's order, without duplicates.
+        const chosen = new Set(input.extraDescriptionDocuments);
+        await set(
+          EXTRA_DESCRIPTION_DOCUMENTS_KEY,
+          JSON.stringify(EXTRA_DESCRIPTION_DOCUMENTS.filter((kind) => chosen.has(kind)))
+        );
       }
       if (input.atfMinutesPerWeek !== undefined) {
         await set(ATF_MINUTES_PER_WEEK_KEY, String(input.atfMinutesPerWeek));

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, asc, count, desc, eq, getTableColumns, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { customerArticleNumberMap } from "./customer-article-numbers.js";
 import {
   articleGroups,
   articles,
@@ -1022,6 +1023,11 @@ export function createInvoiceRepository(db: Db) {
         .orderBy(asc(invoices.createdAt));
     },
 
+    // Kundens artikelnummer for the invoice PDF's rows.
+    async customerArticleNumberMap(customerId: string, articleIds: (string | null)[]) {
+      return customerArticleNumberMap(db, customerId, articleIds);
+    },
+
     async listRows(invoiceId: string) {
       const rowUnits = alias(units, "row_units");
       return db
@@ -1029,6 +1035,8 @@ export function createInvoiceRepository(db: Db) {
           ...getTableColumns(invoiceRows),
           articleNumber: articles.articleNumber,
           articleName: articles.name,
+          // Extra benämning — live, printed when the setting lists the invoice.
+          articleExtraDescription: articles.extraDescription,
           salesOrderNumber: salesOrders.orderNumber,
           // Printed with the order number under the row on the invoice PDF —
           // a samlingsfaktura mixes orders, so "Ert ordernummer" is per row.

@@ -12,6 +12,12 @@ import {
   type ImportService,
 } from "../service/import.service.js";
 
+// Preview and commit carry the parsed rows back as JSON, and Fastify's 1 MB
+// default refused a file well inside the row cap: 10 000 rows of Monitor's
+// Operationslista are ~2.3 MB, the widest exports (Kundlista, Övrigt: 35
+// columns) about three times that. The limit leaves room for those.
+const IMPORT_ROWS_BODY_LIMIT = 16 * 1024 * 1024;
+
 // CSV import (Monitor G5). All three endpoints are admin-only — imports can
 // create register rows and overwrite article data in bulk.
 export async function importRoutes(app: FastifyInstance, opts: { service: ImportService }) {
@@ -90,7 +96,7 @@ export async function importRoutes(app: FastifyInstance, opts: { service: Import
 
   app.post<{ Params: { entity: string } }>(
     "/imports/:entity/preview",
-    { preHandler: requireRole("admin") },
+    { preHandler: requireRole("admin"), bodyLimit: IMPORT_ROWS_BODY_LIMIT },
     async (req, reply) => {
       const entity = parseEntity(req.params.entity, reply);
       if (!entity) return reply;
@@ -106,7 +112,7 @@ export async function importRoutes(app: FastifyInstance, opts: { service: Import
 
   app.post<{ Params: { entity: string } }>(
     "/imports/:entity/commit",
-    { preHandler: requireRole("admin") },
+    { preHandler: requireRole("admin"), bodyLimit: IMPORT_ROWS_BODY_LIMIT },
     async (req, reply) => {
       const entity = parseEntity(req.params.entity, reply);
       if (!entity) return reply;

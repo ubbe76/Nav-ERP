@@ -1,0 +1,1 @@
+ALTER TABLE "bom_components" ADD COLUMN "position" varchar(20);

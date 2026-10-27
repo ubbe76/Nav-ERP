@@ -33,7 +33,8 @@ import {
 } from "@navet/shared";
 import { rowConfigurationLines } from "../../configurator/service/configuration-lines.js";
 import type { InvoiceableShipment, InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
-import type { DocumentPdfInput, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
+import type { DocumentPdfInput, DocumentSettingsReader, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
+import { extraDescriptionFor } from "../../mail/service/document-pdf.js";
 import { ZeroAmountPostingError, type PostingVatCode } from "../../economy/service/verification-poster.js";
 import {
   documentVatCode,
@@ -447,7 +448,10 @@ export function createInvoiceService(
   // Dröjsmålsränta: the referensräntor for the reminder PDF's "Upplupen
   // dröjsmålsränta" line (fetched from Riksbanken when missing, before any
   // transaction). Optional: without it the line is simply left out.
-  referenceRates: ReferenceRateReader | null = null
+  referenceRates: ReferenceRateReader | null = null,
+  // Extra benämning: whether the invoice is among the documents that print
+  // it. Optional: without it no invoice prints the text.
+  documentSettings: DocumentSettingsReader | null = null
 ) {
   // Valuta: the rate for a currency and day (SEK = 1), looked up BEFORE any
   // transaction — it may call Riksbanken.
@@ -497,6 +501,11 @@ export function createInvoiceService(
   // sendInvoiceEmail pair) while building the PDF exactly once per call.
   async function buildPdf(invoice: RawInvoice) {
     const rows = await repo.listRows(invoice.id);
+    const extraDescription = extraDescriptionFor(
+      documentSettings ? await documentSettings.getSettings() : {},
+      "invoice"
+    );
+    const customerArticleNumbers = await repo.customerArticleNumberMap(invoice.customerId, rows.map((r) => r.articleId));
     const isCredit = invoice.type === "credit";
     // Credits: quantities stay positive, unit prices (and thus every
     // downstream line amount / total / Att betala) are negated — the
@@ -597,6 +606,8 @@ export function createInvoiceService(
         // PDF is built — i.e. at issue, since the PDF is archived right then
         // and every later print serves the archived bytes.
         configurationLines: rowConfigurationLines(r.configuration, customer?.showConfigurationPrices ?? false),
+        extraDescription: extraDescription(r.articleExtraDescription),
+        customerArticleNumber: r.articleId ? (customerArticleNumbers.get(r.articleId) ?? null) : null,
       })),
       showTotal: true,
       vat: { perRow: true },

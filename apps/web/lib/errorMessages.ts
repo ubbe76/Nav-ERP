@@ -329,6 +329,8 @@ const MESSAGES: Record<string, MessageEntry> = {
       : "Mottaget antal skulle överskrida beställt antal på raden.";
   },
   "price-list-in-use": "Prislistan används av en kund och kan inte tas bort.",
+  "duplicate-customer-article-number": "Kunden har redan ett artikelnummer för den här artikeln.",
+  "customer-article-number-not-found": "Kundens artikelnummer finns inte längre.",
   "duplicate-price-list-row": "Prislistan har redan en rad för artikeln vid den mängdgränsen.",
   "invalid-ocr": "Ogiltigt OCR-nummer — ingen öppen post hittades.",
   "payment-exceeds-open-amount": "Beloppet överstiger fakturans öppna belopp.",

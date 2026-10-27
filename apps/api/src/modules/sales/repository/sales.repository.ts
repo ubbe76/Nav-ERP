@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { customerArticleNumberMap } from "./customer-article-numbers.js";
 import {
   articleGroups,
   articles,
@@ -9,6 +10,7 @@ import {
   projects,
   customerContacts,
   customerDeliveryAddresses,
+  customerArticleNumbers,
   customerPrices,
   customers,
   deliveries,
@@ -1266,6 +1268,8 @@ export function createSalesRepository(db: Db) {
           // invoice PDF, which shares this same row query.
           articleSurfaceTreatment: articles.surfaceTreatment,
           articleColour: articles.colour,
+          // Extra benämning — printed on the documents the setting lists.
+          articleExtraDescription: articles.extraDescription,
           // Privatperson documents gross the printed prices up by this rate.
           articleVatRate: articleVatRateSql,
           // The unit the row displays in: the entered unit, falling back to
@@ -1545,6 +1549,7 @@ export function createSalesRepository(db: Db) {
           deliveredAt: deliveries.deliveredAt,
           salesOrderId: deliveries.salesOrderId,
           orderNumber: salesOrders.orderNumber,
+          customerId: salesOrders.customerId,
           customerName: customers.name,
           customerOrderNumber: salesOrders.customerOrderNumber,
           customerReference: salesOrders.customerReference,
@@ -1578,7 +1583,9 @@ export function createSalesRepository(db: Db) {
             undoneByName: undoneByUser.name,
             stockTransactionId: deliveryRows.stockTransactionId,
             articleNumber: articles.articleNumber,
+            articleId: salesOrderRows.articleId,
             articleName: articles.name,
+            articleExtraDescription: articles.extraDescription,
             unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
             unitFactor: salesOrderRows.unitFactor,
             quantityDelivered: salesOrderRows.quantityDelivered,
@@ -1629,7 +1636,9 @@ export function createSalesRepository(db: Db) {
         rows: rows.map((r) => ({
           deliveryRowId: r.deliveryRowId,
           articleNumber: r.articleNumber,
+          articleId: r.articleId,
           articleName: r.articleName,
+          articleExtraDescription: r.articleExtraDescription,
           quantity: r.quantity,
           unitCode: r.unitCode,
           unitFactor: r.unitFactor,
@@ -1796,6 +1805,52 @@ export function createSalesRepository(db: Db) {
         .leftJoin(articleGroups, eq(articleGroups.id, customerPrices.articleGroupId))
         .where(eq(customerPrices.customerId, customerId))
         .orderBy(asc(articles.articleNumber), asc(articleGroups.name), asc(customerPrices.fromQuantity));
+    },
+
+    // --- Kundens artikelnummer ---
+    async listCustomerArticleNumbers(customerId: string) {
+      return db
+        .select({
+          id: customerArticleNumbers.id,
+          articleId: customerArticleNumbers.articleId,
+          articleNumber: articles.articleNumber,
+          articleName: articles.name,
+          customerArticleNumber: customerArticleNumbers.customerArticleNumber,
+        })
+        .from(customerArticleNumbers)
+        .innerJoin(articles, eq(articles.id, customerArticleNumbers.articleId))
+        .where(eq(customerArticleNumbers.customerId, customerId))
+        .orderBy(asc(articles.articleNumber));
+    },
+
+    async addCustomerArticleNumber(customerId: string, articleId: string, customerArticleNumber: string) {
+      const [row] = await db
+        .insert(customerArticleNumbers)
+        .values({ customerId, articleId, customerArticleNumber })
+        .returning();
+      return row!;
+    },
+
+    async updateCustomerArticleNumber(customerId: string, id: string, customerArticleNumber: string) {
+      const [row] = await db
+        .update(customerArticleNumbers)
+        .set({ customerArticleNumber })
+        .where(and(eq(customerArticleNumbers.id, id), eq(customerArticleNumbers.customerId, customerId)))
+        .returning();
+      return row ?? null;
+    },
+
+    async deleteCustomerArticleNumber(customerId: string, id: string) {
+      const [row] = await db
+        .delete(customerArticleNumbers)
+        .where(and(eq(customerArticleNumbers.id, id), eq(customerArticleNumbers.customerId, customerId)))
+        .returning();
+      return row ?? null;
+    },
+
+    // articleId -> the customer's number for it, for the document rows.
+    async customerArticleNumberMap(customerId: string, articleIds: (string | null)[]) {
+      return customerArticleNumberMap(db, customerId, articleIds);
     },
 
     // Existence check for the customer-price rule's articleGroupId target —

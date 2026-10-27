@@ -540,7 +540,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // row on a foreign invoice without an order to take it from.
     exchangeRateService,
     // Dröjsmålsränta: the referensräntor for the reminder's accrued interest.
-    exchangeRateService
+    exchangeRateService,
+    // Extra benämning on the invoice (System → Inställningar).
+    systemService
   );
   // Räntefakturering: one invoice per customer with the interest/fee rows,
   // issued through the ordinary path; referensräntor via the same service

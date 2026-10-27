@@ -1100,6 +1100,34 @@
       "when": 1793037680249,
       "tag": "0156_artikel_utan_momssats",
       "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1793088718283,
+      "tag": "0157_extra_benamning",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1793091720837,
+      "tag": "0158_strukturrad_pos",
+      "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 1793092073081,
+      "tag": "0159_operation_cykeltid",
+      "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1793092329488,
+      "tag": "0160_kundens_artikelnummer",
+      "breakpoints": true
     }
   ]
 }

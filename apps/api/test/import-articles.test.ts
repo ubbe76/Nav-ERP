@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { count, eq, inArray, sql } from "drizzle-orm";
-import { articleGroups, articles, db, stockLocations, units } from "@navet/db";
+import { articleGroups, articleSuppliers, articles, db, stockLocations, suppliers, units } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import {
   createArticleService,
@@ -33,12 +33,12 @@ const FAKE_UUID = "00000000-0000-0000-0000-000000000000";
 const TEST_UNIT_CODES = ["pall", "PALL", "kartong9"];
 
 beforeEach(async () => {
-  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups, article_codes CASCADE`);
+  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups, article_codes, suppliers CASCADE`);
   await db.delete(units).where(inArray(units.code, TEST_UNIT_CODES));
 });
 
 afterAll(async () => {
-  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups, article_codes CASCADE`);
+  await db.execute(sql`TRUNCATE bom_components, stock_transactions, articles, article_groups, article_codes, suppliers CASCADE`);
   await db.delete(units).where(inArray(units.code, TEST_UNIT_CODES));
 });
 
@@ -111,6 +111,9 @@ function fakeDeps(
     },
     async articleCodesByCode() {
       return new Map(articleCodes.map((code) => [code, `code-${code}`]));
+    },
+    async suppliersByNumber(numbers) {
+      return new Map(numbers.filter((n) => n.startsWith("L")).map((n) => [n, { id: `sup-${n}` }]));
     },
     async resolveDefaults() {
       return { unitId: "unit-st", locationId: "loc-fallback" };
@@ -1082,3 +1085,98 @@ describe("import service — preview & commit", () => {
     expect(after).toBe(before);
   });
 });
+
+// Monitor's "Artikellista, Inköp": Antal/kolli and the article's Leverantörsnr.
+describe("article import — Antal/kolli and Leverantörsnr", () => {
+  const mapping = {
+    Artikelnummer: "articleNumber",
+    Artikelbenämning: "name",
+    "Antal/kolli (Inköp)": "quantityPerPackage",
+    Leverantörsnr: "primarySupplierNumber",
+  };
+
+  it("suggests both columns from Monitor's headings", () => {
+    const suggested = suggestArticleMapping(["Artikelnummer", "Antal/kolli (Inköp)", "Leverantörsnr"]);
+    expect(suggested["Antal/kolli (Inköp)"]).toBe("quantityPerPackage");
+    expect(suggested["Leverantörsnr"]).toBe("primarySupplierNumber");
+  });
+
+  it("plans the quantity (0 clears) and the supplier, and errors on an unknown supplier", async () => {
+    const plan = await planArticleImport(
+      {
+        mapping,
+        rows: [
+          ["A-1", "Ett", "12", "L100"],
+          ["A-2", "Två", "0,123456", ""],
+          ["A-3", "Tre", "", "X9"],
+          ["A-4", "Fyra", "-1", ""],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.creates[0]).toMatchObject({ articleNumber: "A-1", quantityPerPackage: 12, primarySupplierId: "sup-L100" });
+    expect(plan.creates[1]).toMatchObject({ articleNumber: "A-2", quantityPerPackage: 0.1235 });
+    expect(plan.rows[1]!.warnings).toEqual(["Antal per förpackning 0,123456 avrundas till 0.1235 (högst 4 decimaler)"]);
+    expect(plan.rows[2]!.errors).toEqual(["Leverantören X9 finns inte i leverantörsregistret"]);
+    expect(plan.rows[3]!.errors).toEqual(["Antal per förpackning kan inte vara negativt"]);
+
+    const update = await planArticleImport(
+      { mapping, rows: [["A-1", "", "0", "L100"]] },
+      fakeDeps([
+        {
+          id: "id-1",
+          articleNumber: "A-1",
+          name: "Ett",
+          type: "purchased",
+          unitCode: "st",
+          unitId: "unit-st",
+          isPhantom: false,
+          groupCode: null,
+          standardCost: null,
+          weight: null,
+          surfaceTreatment: null,
+          colour: null,
+          active: true,
+        },
+      ])
+    );
+    expect(update.updates[0]).toMatchObject({ patch: { quantityPerPackage: null }, primarySupplierId: "sup-L100" });
+  });
+
+  it("makes the supplier primary, demoting the old one and adding a priceless row when missing", async () => {
+    const [oldSupplier, newSupplier] = await db
+      .insert(suppliers)
+      .values([
+        { supplierNumber: "L-1", name: "Gamla leverantören" },
+        { supplierNumber: "L-2", name: "Nya leverantören", currency: "EUR" },
+      ])
+      .returning({ id: suppliers.id });
+    const existing = await makeArticle("INK-1");
+    await db.insert(articleSuppliers).values({ articleId: existing.id, supplierId: oldSupplier!.id, price: "10", isPrimary: true });
+
+    const rows = [
+      ["INK-1", "", "", "L-2"],
+      ["INK-2", "Ny artikel", "25", "L-1"],
+    ];
+    await importService.commit("articles", { mapping, rows });
+    // Re-running the same file changes nothing (still one primary each).
+    await importService.commit("articles", { mapping, rows });
+
+    const links = await db.select().from(articleSuppliers);
+    const forExisting = links.filter((link) => link.articleId === existing.id);
+    expect(forExisting).toHaveLength(2);
+    expect(forExisting.find((link) => link.supplierId === oldSupplier!.id)).toMatchObject({ isPrimary: false, price: "10.0000" });
+    expect(forExisting.find((link) => link.supplierId === newSupplier!.id)).toMatchObject({
+      isPrimary: true,
+      price: null,
+      currency: "EUR",
+    });
+
+    const [created] = await db.select().from(articles).where(eq(articles.articleNumber, "INK-2"));
+    expect(created!.quantityPerPackage).toBe("25.0000");
+    expect(links.filter((link) => link.articleId === created!.id)).toMatchObject([
+      { supplierId: oldSupplier!.id, isPrimary: true, currency: "SEK" },
+    ]);
+  });
+});
+

@@ -254,6 +254,8 @@ export const ERROR_CODES = {
   PURCHASE_RECEIPT_MANUFACTURING_ORDER_LOCKED: "purchase-receipt-manufacturing-order-locked",
   PRICE_LIST_IN_USE: "price-list-in-use",
   DUPLICATE_PRICE_LIST_ROW: "duplicate-price-list-row",
+  DUPLICATE_CUSTOMER_ARTICLE_NUMBER: "duplicate-customer-article-number",
+  CUSTOMER_ARTICLE_NUMBER_NOT_FOUND: "customer-article-number-not-found",
   INVALID_OCR: "invalid-ocr",
   COLLECTIVE_INVOICING_CUSTOMER: "collective-invoicing-customer",
   INVALID_SHIPMENT_INVOICE_ROW: "invalid-shipment-invoice-row",

@@ -2,9 +2,11 @@
 // entity-specific planner lives here and builds on the shared machinery in
 // import.service.ts; all database work lives in import.repository.ts.
 //
-// CREATE-ONLY, like the routing import: a component that is already in the
-// structure is a row error, not an update — or a SKIP, with
-// input.skipExisting.
+// CREATE-ONLY by default, like the routing import: a component that is
+// already in the structure is a row error, not an update — or a SKIP, with
+// input.skipExisting. With input.updateExisting (opt-in, mutually exclusive
+// with skipExisting) the existing row is rewritten: antal and enhet always,
+// the operation link when the column is mapped, Pos. when the cell is filled.
 import type { ArticleType, ImportCommitInput } from "@navet/shared";
 import { toBaseQuantity } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
@@ -12,6 +14,7 @@ import type { ExistingArticle, ParsedArticleType } from "./articles.js";
 import { parseArticleType } from "./articles.js";
 import { findCyclicRows, type BomEdge } from "./bom-cycle.js";
 import {
+  ImportMappingError,
   normalizeHeader,
   resolveColumns,
   suggestMapping,
@@ -30,6 +33,8 @@ export const BOM_IMPORT_FIELDS = [
   "quantity",
   "unitCode",
   "operationSequenceNo",
+  // "Pos." — the row's position on the drawing.
+  "position",
   // Read ONLY for components missing from the article register, and ONLY with
   // input.createMissingArticles. An existing article is never touched by this
   // import — not even when the file disagrees with it.
@@ -81,6 +86,11 @@ export const BOM_HEADER_ALIASES: Record<string, string> = {
   opnr: "operationSequenceNo",
   arbetsmoment: "operationSequenceNo",
   tilloperation: "operationSequenceNo",
+  // Monitor's Materiallista heads it "Pos." (normalizeHeader drops the dot).
+  pos: "position",
+  position: "position",
+  positionsnummer: "position",
+  posnr: "position",
   komponentbenamning: "componentName",
   komponentnamn: "componentName",
   komponentensbenamning: "componentName",
@@ -185,6 +195,23 @@ export interface BomCreatePlan {
   /** Snapshot of article_units.quantity_per_base at import time. */
   unitFactor: number | null;
   routingOperationId: string | null;
+  /** "Pos." — null when the cell is empty. */
+  position?: string | null;
+}
+
+// An existing structure row rewritten under input.updateExisting. Antal and
+// enhet are always set (the quantity column is required); the operation link
+// only when its column is mapped (an empty cell then unlinks); Pos. only
+// from a filled cell — an empty one never blanks a stored value.
+export interface BomUpdatePlan {
+  id: string;
+  patch: {
+    quantity: number;
+    unitId: string | null;
+    unitFactor: number | null;
+    routingOperationId?: string | null;
+    position?: string;
+  };
 }
 
 export interface BomImportPlan {
@@ -195,6 +222,8 @@ export interface BomImportPlan {
   // is the receiving OPERATION's production group, not the component's).
   willCreate: { units: string[]; articleGroups: string[]; articles: string[] };
   creates: BomCreatePlan[];
+  /** Optional so hand-built plans in tests need not carry it. */
+  updates?: BomUpdatePlan[];
   /** Written BEFORE creates, in the same transaction. */
   articleCreates: BomArticleCreatePlan[];
   /** Resolved only when articleCreates is non-empty. */
@@ -204,7 +233,15 @@ export interface BomImportPlan {
 }
 
 export async function planBomImport(input: ImportCommitInput, deps: BomImportDeps): Promise<BomImportPlan> {
+  // Not a per-row error: the two options contradict each other for EVERY
+  // existing row (same rule as the routing import).
+  if (input.skipExisting && input.updateExisting) {
+    throw new ImportMappingError(
+      "Välj antingen Hoppa över rader som redan finns eller Uppdatera befintliga strukturrader, inte båda"
+    );
+  }
   const columns = resolveColumns(input.mapping, [...BOM_IMPORT_FIELDS], REQUIRED_FIELDS);
+  const operationMapped = columns.includes("operationSequenceNo");
 
   const records = input.rows.map((row) => {
     const record: Record<string, string> = {};
@@ -234,7 +271,7 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
 
   // The same query answers both questions: which (parent, component) pairs
   // already exist, and what the graph looks like for the cycle check.
-  const existingPairs = new Set(existingEdges.map((e) => `${e.parentId}#${e.componentId}`));
+  const existingPairs = new Map<string, string>(existingEdges.map((e) => [`${e.parentId}#${e.componentId}`, e.id ?? ""]));
 
   // resolveDefaults() creates the "st" unit and the "***" location on first
   // use, so it is called only when the flag is actually on.
@@ -245,6 +282,7 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
   // Parallel to `rows` — the create is staged here and only harvested after
   // the cycle pass, which may still invalidate a row.
   const staged: (BomCreatePlan | null)[] = [];
+  const updates: BomUpdatePlan[] = [];
   const seen = new Set<string>();
   // articleNumber -> the article staged for creation. The FIRST row that names
   // a missing component defines it; later rows may only warn about a
@@ -261,6 +299,8 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
     const errors: string[] = [];
     const warnings: string[] = [];
     const values: Record<string, unknown> = {};
+    // Set when the row rewrites an existing structure row (updateExisting).
+    let existingRowId: string | null = null;
 
     const articleNumber = record["articleNumber"] ?? "";
     values["articleNumber"] = articleNumber;
@@ -314,9 +354,13 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
           staged.push(null);
           return;
         }
-        errors.push(
-          `Komponenten ${componentNumber} finns redan i strukturen för ${articleNumber} — ta bort raden ur filen`
-        );
+        if (input.updateExisting) {
+          existingRowId = existingPairs.get(key) || null;
+        } else {
+          errors.push(
+            `Komponenten ${componentNumber} finns redan i strukturen för ${articleNumber} — ta bort raden ur filen`
+          );
+        }
       }
       if (seen.has(key)) {
         errors.push(`Komponenten ${componentNumber} för artikel ${articleNumber} förekommer flera gånger i filen`);
@@ -515,7 +559,33 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
       }
     }
 
-    rows.push({ rowNumber, action: "create", errors, warnings, values });
+    // Pos. — free text like the card's field (varchar(20)); longer is a row
+    // error, never a silent truncation.
+    const rawPosition = record["position"] ?? "";
+    let position: string | null = null;
+    if (rawPosition !== "") {
+      values["position"] = rawPosition;
+      if (rawPosition.length > 20) errors.push(`Pos. är för lång (${rawPosition.length} tecken, max 20)`);
+      else position = rawPosition;
+    }
+
+    rows.push({ rowNumber, action: existingRowId ? "update" : "create", errors, warnings, values });
+
+    if (existingRowId) {
+      // The edge already exists, so the row adds nothing to the cycle check.
+      staged.push(null);
+      if (errors.length === 0 && quantity !== null) {
+        const patch: BomUpdatePlan["patch"] = {
+          quantity: unitFactor === null ? quantity : toBaseQuantity(quantity, unitFactor),
+          unitId,
+          unitFactor,
+        };
+        if (operationMapped) patch.routingOperationId = routingOperationId;
+        if (position !== null) patch.position = position;
+        updates.push({ id: existingRowId, patch });
+      }
+      return;
+    }
 
     if (errors.length === 0 && parent && (component || pending) && quantity !== null) {
       staged.push({
@@ -526,6 +596,7 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
         unitId,
         unitFactor,
         routingOperationId,
+        ...(position !== null ? { position } : {}),
       });
     } else {
       staged.push(null);
@@ -571,6 +642,7 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
       articles: [...pendingArticles.keys()],
     },
     creates: staged.filter((create): create is BomCreatePlan => create !== null),
+    updates,
     articleCreates: [...pendingArticles.values()],
     fallbackUnitId: fallback?.unitId ?? null,
     fallbackLocationId: fallback?.locationId ?? null,

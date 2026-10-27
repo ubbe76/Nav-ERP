@@ -74,6 +74,7 @@ function ComponentForm({
   );
   const [unitId, setUnitId] = useState(editing?.unitId ?? ""); // "" = the component's base unit
   const [operationId, setOperationId] = useState(editing ? (editing.routingOperationId ?? "") : presetOperationId);
+  const [position, setPosition] = useState(editing?.position ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -116,6 +117,7 @@ function ComponentForm({
             quantity: Number(quantity),
             unitId: unitId === "" ? null : unitId,
             routingOperationId: operationId || null,
+            position: position.trim(),
           }),
         });
       } else {
@@ -126,6 +128,7 @@ function ComponentForm({
             quantity: Number(quantity),
             unitId: unitId === "" ? null : unitId,
             routingOperationId: operationId || null,
+            position: position.trim(),
           }),
         });
       }
@@ -181,6 +184,17 @@ function ComponentForm({
           />
         </Field>
       </FormRow>
+
+      <Field label="Pos. (valfritt)" htmlFor="bomPosition">
+        <Input
+          id="bomPosition"
+          size="sm"
+          maxLength={20}
+          placeholder="Ritningsposition"
+          value={position}
+          onChange={(e) => setPosition(e.target.value)}
+        />
+      </Field>
 
       {/* Linking to an operation makes the component draw automatically
           when that operation is reported complete. */}

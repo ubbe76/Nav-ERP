@@ -2,8 +2,14 @@
 
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
-import { Select } from "../ui/Field";
-import type { DeliveryDayMode, SystemSettings } from "../../lib/types";
+import { Checkbox, Select } from "../ui/Field";
+import {
+  EXTRA_DESCRIPTION_DOCUMENTS,
+  EXTRA_DESCRIPTION_DOCUMENT_LABELS,
+  type DeliveryDayMode,
+  type ExtraDescriptionDocument,
+  type SystemSettings,
+} from "../../lib/types";
 import styles from "./SettingsForm.module.css";
 
 export function SettingsForm({ settings }: { settings: SystemSettings }) {
@@ -11,6 +17,9 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   const [showRevisionsOnDocuments, setShowRevisionsOnDocuments] = useState(settings.showRevisionsOnDocuments);
   const [showOrderRevisionOnDocuments, setShowOrderRevisionOnDocuments] = useState(
     settings.showOrderRevisionOnDocuments
+  );
+  const [extraDescriptionDocuments, setExtraDescriptionDocuments] = useState<ExtraDescriptionDocument[]>(
+    settings.extraDescriptionDocuments
   );
   const [atfMinutesPerWeek, setAtfMinutesPerWeek] = useState(String(settings.atfMinutesPerWeek));
   const [atfSaved, setAtfSaved] = useState(false);
@@ -66,6 +75,15 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   async function toggleShowOrderRevision() {
     const updated = await save({ showOrderRevisionOnDocuments: !showOrderRevisionOnDocuments });
     if (updated) setShowOrderRevisionOnDocuments(updated.showOrderRevisionOnDocuments);
+  }
+
+  // Saves the whole list in canonical order; the checkbox follows the server's answer.
+  async function toggleExtraDescriptionDocument(kind: ExtraDescriptionDocument) {
+    const next = EXTRA_DESCRIPTION_DOCUMENTS.filter((k) =>
+      k === kind ? !extraDescriptionDocuments.includes(k) : extraDescriptionDocuments.includes(k)
+    );
+    const updated = await save({ extraDescriptionDocuments: next });
+    if (updated) setExtraDescriptionDocuments(updated.extraDescriptionDocuments);
   }
 
   async function saveAtf() {
@@ -236,6 +254,26 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
         >
           <span className={styles.knob} aria-hidden="true" />
         </button>
+      </div>
+      <div className={styles.section}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Extra benämning på dokument</div>
+          <div className={styles.description}>
+            Artikelns extra benämning skrivs ut under benämningen på de valda dokumenten.
+          </div>
+        </div>
+        <div className={styles.checkGrid}>
+          {EXTRA_DESCRIPTION_DOCUMENTS.map((kind) => (
+            <label key={kind} className={styles.check}>
+              <Checkbox
+                checked={extraDescriptionDocuments.includes(kind)}
+                disabled={pending}
+                onChange={() => toggleExtraDescriptionDocument(kind)}
+              />
+              {EXTRA_DESCRIPTION_DOCUMENT_LABELS[kind]}
+            </label>
+          ))}
+        </div>
       </div>
       <div className={styles.row}>
         <div className={styles.texts}>

@@ -10,6 +10,7 @@ import {
   carriers,
   customerContacts,
   customerDeliveryAddresses,
+  customerArticleNumbers,
   customerPrices,
   customers,
   deliveryTerms,
@@ -29,6 +30,7 @@ import { getOrCreateFallbackLocation } from "../../stock/service/location-resolv
 import { recordStandardCostHistory } from "../../article/repository/article.repository.js";
 import type { ArticleImportPlan, ExistingArticle } from "../service/articles.js";
 import { applyImportedRevisions, type ImportedRevisions } from "./article-revisions.js";
+import { applyPrimarySuppliers } from "./article-primary-suppliers.js";
 import {
   assignRegisterCodes,
   generatePaymentTermCode,
@@ -497,6 +499,8 @@ export function createImportRepository(db: Db) {
 
         // Revisioner, applied once every article exists (applyImportedRevisions).
         const revisionRows: ImportedRevisions[] = [];
+        // Leverantörsnr, applied the same way (applyPrimarySuppliers).
+        const primarySuppliers: { articleId: string; supplierId: string }[] = [];
         for (const part of chunk(plan.creates)) {
           if (part.length === 0) continue;
           // RETURNING id + articleNumber (not just id) so the history rows
@@ -519,6 +523,7 @@ export function createImportRepository(db: Db) {
                 weight: create.weight !== null ? String(create.weight) : undefined,
                 surfaceTreatment: create.surfaceTreatment,
                 colour: create.colour,
+                extraDescription: create.extraDescription ?? null,
                 defaultLocationId: plan.fallbackLocationId,
                 active: create.active,
                 // != null: the bom import's own article creates (and older
@@ -526,12 +531,16 @@ export function createImportRepository(db: Db) {
                 reorderPoint: create.reorderPoint != null ? String(create.reorderPoint) : undefined,
                 orderQuantity: create.orderQuantity != null ? String(create.orderQuantity) : undefined,
                 rounding: create.rounding != null ? String(create.rounding) : undefined,
+                quantityPerPackage: create.quantityPerPackage != null ? String(create.quantityPerPackage) : undefined,
               }))
             )
             .returning({ id: articles.id, articleNumber: articles.articleNumber });
           const idByNumber = new Map(inserted.map((row) => [row.articleNumber, row.id]));
           for (const create of part) {
             if (create.revisions) revisionRows.push({ articleId: idByNumber.get(create.articleNumber)!, ...create.revisions });
+            if (create.primarySupplierId) {
+              primarySuppliers.push({ articleId: idByNumber.get(create.articleNumber)!, supplierId: create.primarySupplierId });
+            }
           }
           const historyRows = part
             .filter((create) => create.standardCost !== null)
@@ -551,6 +560,7 @@ export function createImportRepository(db: Db) {
         for (const update of plan.updates) {
           updated++;
           if (update.revisions) revisionRows.push({ articleId: update.id, ...update.revisions });
+          if (update.primarySupplierId) primarySuppliers.push({ articleId: update.id, supplierId: update.primarySupplierId });
           if (Object.keys(update.patch).length === 0) continue;
           if (update.patch.standardCost !== undefined) {
             costHistoryRows.push({ articleId: update.id, cost: update.patch.standardCost });
@@ -569,6 +579,7 @@ export function createImportRepository(db: Db) {
                 ? { surfaceTreatment: update.patch.surfaceTreatment }
                 : {}),
               ...(update.patch.colour !== undefined ? { colour: update.patch.colour } : {}),
+              ...(update.patch.extraDescription !== undefined ? { extraDescription: update.patch.extraDescription } : {}),
               ...(update.patch.active !== undefined ? { active: update.patch.active } : {}),
               ...(update.patch.reorderPoint !== undefined
                 ? { reorderPoint: update.patch.reorderPoint === null ? null : String(update.patch.reorderPoint) }
@@ -579,6 +590,12 @@ export function createImportRepository(db: Db) {
               ...(update.patch.rounding !== undefined
                 ? { rounding: update.patch.rounding === null ? null : String(update.patch.rounding) }
                 : {}),
+              ...(update.patch.quantityPerPackage !== undefined
+                ? {
+                    quantityPerPackage:
+                      update.patch.quantityPerPackage === null ? null : String(update.patch.quantityPerPackage),
+                  }
+                : {}),
               updatedAt: new Date(),
             })
             .where(eq(articles.id, update.id));
@@ -587,6 +604,7 @@ export function createImportRepository(db: Db) {
           await recordStandardCostHistory(tx, part);
         }
         await applyImportedRevisions(tx, revisionRows);
+        await applyPrimarySuppliers(tx, primarySuppliers);
 
         return {
           created: plan.creates.length,
@@ -946,21 +964,25 @@ export function createImportRepository(db: Db) {
 
     // work_centers.code is exactly three digits and unique, so no case
     // folding is needed and the whole register fits in one query. `type`
-    // rides along so the routing planner can tell a legoresurs apart.
-    async workCentersByCode(): Promise<Map<string, { id: string; code: string; type: string }>> {
+    // rides along so the routing planner can tell a legoresurs apart, and
+    // `supplierId` is a new lego operation's default legoleverantör.
+    async workCentersByCode(): Promise<
+      Map<string, { id: string; code: string; type: string; supplierId: string | null }>
+    > {
       const rows = await db
-        .select({ id: workCenters.id, code: workCenters.code, type: workCenters.type })
+        .select({ id: workCenters.id, code: workCenters.code, type: workCenters.type, supplierId: workCenters.supplierId })
         .from(workCenters);
       return new Map(rows.map((row) => [row.code, row]));
     },
 
     // articleId -> sequenceNo -> operation. Shared by both importers: the
-    // routing import checks for duplicates, the BOM import resolves the
-    // Operation column (and rejects Kalkyl operations).
+    // routing import checks for duplicates (and whether an updated operation
+    // carries lego fields to clear), the BOM import resolves the Operation
+    // column (and rejects Kalkyl operations).
     async routingOperationsByArticle(
       articleIds: string[]
-    ): Promise<Map<string, Map<number, { id: string; costingOnly: boolean }>>> {
-      const map = new Map<string, Map<number, { id: string; costingOnly: boolean }>>();
+    ): Promise<Map<string, Map<number, { id: string; costingOnly: boolean; hasLegoFields: boolean }>>> {
+      const map = new Map<string, Map<number, { id: string; costingOnly: boolean; hasLegoFields: boolean }>>();
       for (const part of chunk([...new Set(articleIds)])) {
         if (part.length === 0) continue;
         const rows = await db
@@ -969,12 +991,14 @@ export function createImportRepository(db: Db) {
             articleId: routingOperations.articleId,
             sequenceNo: routingOperations.sequenceNo,
             costingOnly: routingOperations.costingOnly,
+            hasLegoFields: sql<boolean>`(${routingOperations.subcontractSupplierId} is not null or ${routingOperations.setupPrice} is not null or ${routingOperations.unitPrice} is not null or ${routingOperations.showNetWeight})`,
           })
           .from(routingOperations)
           .where(inArray(routingOperations.articleId, part));
         for (const row of rows) {
-          const perArticle = map.get(row.articleId) ?? new Map<number, { id: string; costingOnly: boolean }>();
-          perArticle.set(row.sequenceNo, { id: row.id, costingOnly: row.costingOnly });
+          const perArticle =
+            map.get(row.articleId) ?? new Map<number, { id: string; costingOnly: boolean; hasLegoFields: boolean }>();
+          perArticle.set(row.sequenceNo, { id: row.id, costingOnly: row.costingOnly, hasLegoFields: row.hasLegoFields });
           map.set(row.articleId, perArticle);
         }
       }
@@ -1182,6 +1206,24 @@ export function createImportRepository(db: Db) {
       return map;
     },
 
+    // "<customerId>#<articleId>" -> the stored Kundens artikelnummer.
+    async customerArticleNumbers(customerIds: string[]): Promise<Map<string, string>> {
+      const map = new Map<string, string>();
+      for (const part of chunk([...new Set(customerIds)])) {
+        if (part.length === 0) continue;
+        const rows = await db
+          .select({
+            customerId: customerArticleNumbers.customerId,
+            articleId: customerArticleNumbers.articleId,
+            number: customerArticleNumbers.customerArticleNumber,
+          })
+          .from(customerArticleNumbers)
+          .where(inArray(customerArticleNumbers.customerId, part));
+        for (const row of rows) map.set(`${row.customerId}#${row.articleId}`, row.number);
+      }
+      return map;
+    },
+
     // Creates + updates in ONE transaction. An update clears discount_percent
     // so customer_prices_value_check (price XOR discount) holds whatever form
     // the stored rule had.
@@ -1205,9 +1247,22 @@ export function createImportRepository(db: Db) {
             .set({ unitPrice: String(update.unitPrice), discountPercent: null })
             .where(eq(customerPrices.id, update.id));
         }
+        // Kundens artikelnummer, upserted on (customer, article).
+        for (const part of chunk(plan.articleNumbers ?? [])) {
+          if (part.length === 0) continue;
+          await tx
+            .insert(customerArticleNumbers)
+            .values(part)
+            .onConflictDoUpdate({
+              target: [customerArticleNumbers.customerId, customerArticleNumbers.articleId],
+              set: { customerArticleNumber: sql`excluded.customer_article_number` },
+            });
+        }
+        // Per ROW, like the preview: a row that only carries the customer's
+        // article number counts too.
         return {
-          created: plan.creates.length,
-          updated: plan.updates.length,
+          created: plan.summary.create,
+          updated: plan.summary.update,
           registersCreated: { units: [] as string[], articleGroups: [] as string[] },
         };
       });
@@ -1221,7 +1276,7 @@ export function createImportRepository(db: Db) {
     // A recursive CTE is the right upgrade if that table ever grows large.
     async allBomEdges(): Promise<BomEdge[]> {
       return db
-        .select({ parentId: bomComponents.parentArticleId, componentId: bomComponents.componentArticleId })
+        .select({ id: bomComponents.id, parentId: bomComponents.parentArticleId, componentId: bomComponents.componentArticleId })
         .from(bomComponents);
     },
 
@@ -1245,17 +1300,26 @@ export function createImportRepository(db: Db) {
               printOnWorkCard: row.printOnWorkCard,
               description: row.description,
               packingInstructions: row.packingInstructions,
+              cycleTimePerUnit: row.cycleTimePerUnit != null ? String(row.cycleTimePerUnit) : null,
+              subcontractSupplierId: row.subcontractSupplierId ?? null,
+              setupPrice: row.setupPrice != null ? String(row.setupPrice) : null,
+              unitPrice: row.unitPrice != null ? String(row.unitPrice) : null,
             }))
           );
         }
         for (const update of plan.updates) {
-          const { setupTime, runTimePerUnit, ...rest } = update.patch;
+          const { setupTime, runTimePerUnit, setupPrice, unitPrice, cycleTimePerUnit, ...rest } = update.patch;
           await tx
             .update(routingOperations)
             .set({
               ...rest,
               setupTime: String(setupTime),
               runTimePerUnit: String(runTimePerUnit),
+              ...(setupPrice !== undefined ? { setupPrice: setupPrice === null ? null : String(setupPrice) } : {}),
+              ...(unitPrice !== undefined ? { unitPrice: unitPrice === null ? null : String(unitPrice) } : {}),
+              ...(cycleTimePerUnit !== undefined
+                ? { cycleTimePerUnit: cycleTimePerUnit === null ? null : String(cycleTimePerUnit) }
+                : {}),
             })
             .where(eq(routingOperations.id, update.id));
         }
@@ -1336,15 +1400,24 @@ export function createImportRepository(db: Db) {
               unitId: row.unitId,
               unitFactor: row.unitFactor === null ? null : String(row.unitFactor),
               routingOperationId: row.routingOperationId,
+              position: row.position ?? null,
             }))
           );
+        }
+        // 4. Uppdatera befintliga strukturrader (updateExisting).
+        for (const update of plan.updates ?? []) {
+          const { quantity, unitFactor, ...rest } = update.patch;
+          await tx
+            .update(bomComponents)
+            .set({ ...rest, quantity: String(quantity), unitFactor: unitFactor === null ? null : String(unitFactor) })
+            .where(eq(bomComponents.id, update.id));
         }
         return {
           // Structure rows only. Folding the new articles in here would turn
           // "975 skapade" into "1154 skapade" and make the result unreadable —
           // they are reported under registersCreated.articles instead.
           created: plan.creates.length,
-          updated: 0,
+          updated: plan.updates?.length ?? 0,
           registersCreated: {
             units: createdUnits,
             articleGroups: [] as string[],

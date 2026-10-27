@@ -29,6 +29,7 @@ export const COPIED_INFORMATION_FIELDS = [
   "loadingMeters",
   "surfaceTreatment",
   "colour",
+  "extraDescription",
   "reorderPoint",
   "orderQuantity",
   "rounding",
@@ -116,6 +117,7 @@ async function copyBeredning(tx: Tx, sourceId: string, targetId: string) {
       // The transaction reads the source from one snapshot (repeatable
       // read), so every link points at an operation copied above.
       routingOperationId: row.routingOperationId ? operationMap.get(row.routingOperationId)! : null,
+      position: row.position,
     }))
   );
 }

@@ -649,6 +649,19 @@ export const updateCustomerPriceSchema = z
   });
 export type UpdateCustomerPriceInput = z.infer<typeof updateCustomerPriceSchema>;
 
+// Kundens artikelnummer — one per customer and article (customer card).
+export const customerArticleNumberInputSchema = z.object({
+  articleId: z.string().uuid(),
+  customerArticleNumber: z.string().trim().min(1).max(50),
+});
+export type CustomerArticleNumberInput = z.infer<typeof customerArticleNumberInputSchema>;
+
+// The article never changes on an update — remove + add instead.
+export const updateCustomerArticleNumberSchema = z.object({
+  customerArticleNumber: z.string().trim().min(1).max(50),
+});
+export type UpdateCustomerArticleNumberInput = z.infer<typeof updateCustomerArticleNumberSchema>;
+
 // Valuta: the price in a currency — salesOrderId takes the order's currency
 // and rate (and wins); else currency (default the customer's) and
 // exchangeRate (default today's rate, 409 exchange-rate-unavailable when

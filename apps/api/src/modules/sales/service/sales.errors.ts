@@ -73,6 +73,20 @@ export class DuplicateCustomerPriceError extends Error {
   }
 }
 
+export class DuplicateCustomerArticleNumberError extends Error {
+  constructor() {
+    super("This customer already has an article number for this article");
+    this.name = "DuplicateCustomerArticleNumberError";
+  }
+}
+
+export class CustomerArticleNumberNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Customer article number ${id} not found`);
+    this.name = "CustomerArticleNumberNotFoundError";
+  }
+}
+
 export class CustomerPriceNotFoundError extends Error {
   constructor(id: string) {
     super(`Customer price ${id} not found`);

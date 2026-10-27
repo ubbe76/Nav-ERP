@@ -17,6 +17,8 @@ export type BomRowInsert = {
   unitId: string | null;
   unitFactor: string | null;
   routingOperationId: string | null;
+  // "Pos." — optional so callers without one (the configurator) need not say so.
+  position?: string | null;
 };
 
 // No-op on [] — drizzle's insert refuses an empty values list.
@@ -30,6 +32,7 @@ export async function insertBomRows(tx: Tx, parentArticleId: string, rows: BomRo
       unitId: row.unitId,
       unitFactor: row.unitFactor,
       routingOperationId: row.routingOperationId,
+      position: row.position ?? null,
     }))
   );
 }

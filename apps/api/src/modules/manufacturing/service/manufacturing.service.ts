@@ -13,6 +13,7 @@ import type {
   CreateProductionGroupInput,
   CreateRoutingOperationInput,
   CreateWorkCenterInput,
+  ExtraDescriptionDocument,
   ListManufacturingOrdersQuery,
   ListWorkCentersQuery,
   SetProductionGroupWorkCentersInput,
@@ -38,6 +39,7 @@ import type { PlannedWeek } from "../../planning/service/capacity-calc.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
+import { extraDescriptionFor } from "../../mail/service/document-pdf.js";
 import { appendFilesToPdf, mergePdfs } from "../../mail/service/pdf-merge.js";
 import { ArticleNotFoundError, assertOrderableArticle, type ArticleFileReader, type ArticleUnitReader } from "../../article/service/article.service.js";
 import type { MaterialRow, OperationRowView } from "../repository/order-edit.js";
@@ -477,6 +479,8 @@ export interface MaterialShortageSettingsReader {
     // Kod på pallkort — the default code type on the pallet cards (the
     // customer's own choice wins on the final card). Omitted reader ⇒ none.
     palletCardCode: PalletCardCode;
+    // The documents that print Extra benämning (the TO is one of them).
+    extraDescriptionDocuments?: ExtraDescriptionDocument[];
   }>;
 }
 
@@ -1997,6 +2001,10 @@ export function createManufacturingService(
       ]);
 
       const quantity = Number(order.quantity);
+      const extraDescription = extraDescriptionFor(
+        settings ? await settings.getSettings() : {},
+        "manufacturingOrder"
+      )(order.articleExtraDescription);
       // Used to badge each material row with the operation it is consumed
       // at, mirroring the linked-material concept from mo_material_consumptions.
       const seqByOpId = new Map(operations.map((op) => [op.id, op.sequenceNo]));
@@ -2018,6 +2026,7 @@ export function createManufacturingService(
         configurationLines: order.configuration
           ? configurationLines((order.configuration as ManufacturingOrderConfiguration).selection)
           : undefined,
+        extraDescription,
         operations: operations.map((op) => ({
           sequenceNo: op.sequenceNo,
           workCenterName: op.workCenterName,

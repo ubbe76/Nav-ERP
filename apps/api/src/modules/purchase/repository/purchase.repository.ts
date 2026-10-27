@@ -472,6 +472,7 @@ export function createPurchaseRepository(db: Db) {
           articleWeight: articles.weight,
           articleSurfaceTreatment: articles.surfaceTreatment,
           articleColour: articles.colour,
+          articleExtraDescription: articles.extraDescription,
           // Lego row context — the operation heading comes from the MO
           // snapshot when the row was raised for a TO, else live from the
           // article's routing (TO-less price inquiry).
@@ -934,6 +935,7 @@ export function createPurchaseRepository(db: Db) {
           articleWeight: articles.weight,
           articleSurfaceTreatment: articles.surfaceTreatment,
           articleColour: articles.colour,
+          articleExtraDescription: articles.extraDescription,
           moOrderNumber: manufacturingOrders.orderNumber,
           moOperationDescription: moOperations.description,
           moOperationSequenceNo: moOperations.sequenceNo,

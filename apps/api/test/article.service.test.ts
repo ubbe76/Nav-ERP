@@ -36,6 +36,17 @@ afterAll(async () => {
 });
 
 describe("article service — BOM structure", () => {
+  it("stores, updates and clears a row's Pos.", async () => {
+    const parent = await makeArticle("PARENT-POS");
+    const child = await makeArticle("CHILD-POS");
+    const row = await service.addBomComponent(parent.id, { componentArticleId: child.id, quantity: 1, position: "12" });
+    expect((await service.getBom(parent.id))[0]?.position).toBe("12");
+    await service.updateBomComponent(parent.id, row!.id, { position: "12a" });
+    expect((await service.getBom(parent.id))[0]?.position).toBe("12a");
+    await service.updateBomComponent(parent.id, row!.id, { position: null });
+    expect((await service.getBom(parent.id))[0]?.position).toBeNull();
+  });
+
   it("adds a direct component to a parent article", async () => {
     const parent = await makeArticle("PARENT-1");
     const child = await makeArticle("CHILD-1");

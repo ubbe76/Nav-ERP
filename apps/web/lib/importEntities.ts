@@ -97,8 +97,15 @@ export const IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
     fields: BOM_IMPORT_FIELDS,
     defaults: { articleType: "purchased" },
     skipExistingHint:
-      "Komponenter som redan ligger i artikelns struktur hoppas över i stället för att stoppa hela importen. Befintliga strukturrader ändras aldrig.",
+      "Komponenter som redan ligger i artikelns struktur hoppas över i stället för att stoppa hela importen. Befintliga strukturrader ändras inte.",
     extraOptions: [
+      {
+        key: "updateExisting",
+        label: "Uppdatera befintliga strukturrader",
+        hint:
+          "Komponenter som redan ligger i artikelns struktur skrivs över med filens antal och enhet, operationskopplingen (när kolumnen Operation är mappad) och Pos. i stället för att stoppa importen. En tom Pos.-cell lämnar det sparade värdet orört. Frisläppta tillverkningsordrar påverkas inte. Kan inte kombineras med Hoppa över rader som redan finns.",
+        exclusiveWithSkipExisting: true,
+      },
       {
         key: "createMissingArticles",
         label: "Skapa saknade artiklar",
@@ -132,9 +139,9 @@ export const IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
     anchor: "importera-kundpriser",
     fields: CUSTOMER_PRICE_IMPORT_FIELDS,
     notice:
-      "Priset sparas som kundens artikelpris (från antal 1). Rabatt räknas in i priset. Kundens art.nummer, Ställpris och Prisdatum importeras inte.",
+      "Priset sparas som kundens artikelpris (från antal 1). Rabatt räknas in i priset. Kundens artikelnummer sparas på kundkortet. Rader utan kund (Kundkoppling saknas) och rader med varken pris eller kundens artikelnummer hoppas över. Ställpris och Prisdatum importeras inte.",
     skipExistingHint:
-      "Kunder som redan har ett pris på artikeln behåller det. Utan kryss uppdateras priset med filens värde.",
+      "Kunder som redan har ett pris eller ett artikelnummer på artikeln behåller det. Utan kryss uppdateras de med filens värden.",
   },
 };
 

@@ -12,6 +12,7 @@ import { apiFetch } from "../../lib/api";
 import type {
   ArticleGroup,
   Customer,
+  CustomerArticleNumber,
   CustomerDeliveryAddress,
   CustomerPrice,
   FreightProduct,
@@ -28,6 +29,7 @@ import { CurrencyInput } from "../ui/CurrencyInput";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 import { SupplierPaymentDetailsSection } from "../banking/SupplierPaymentDetailsSection";
 import { CustomerPricesTab } from "./CustomerPricesTab";
+import { CustomerArticleNumbersTab } from "./CustomerArticleNumbersTab";
 import { PeppolFields } from "./PeppolFields";
 import { useDimensions } from "../../lib/dimensions";
 import { CostCenterSelect } from "../economy/DimensionSelect";
@@ -49,7 +51,7 @@ function websiteHref(value: string): string {
   return value.includes("://") ? value : `https://${value}`;
 }
 
-type Tab = "Allmänt" | "Adresser" | "Villkor & frakt" | "Kontakter" | "Priser";
+type Tab = "Allmänt" | "Adresser" | "Villkor & frakt" | "Kontakter" | "Priser" | "Kundens artikelnummer";
 
 // The common shape of a delivery address regardless of which partner it
 // belongs to — everything AdresserTab/DeliveryAddressForm needs, without the
@@ -83,6 +85,8 @@ interface PartnerTabsProps {
   priceLists?: PriceList[];
   // Customers only (C3 Kundpriser): enables the Priser tab.
   customerPrices?: CustomerPrice[];
+  // Customers only: enables the Kundens artikelnummer tab.
+  customerArticleNumbers?: CustomerArticleNumber[];
   articleGroups?: ArticleGroup[];
   // System default delivery-day mode/transit days for this side (from
   // GET /settings), only used to name the defaults on Villkor & frakt.
@@ -102,6 +106,7 @@ export function PartnerTabs({
   deliveryAddresses,
   priceLists,
   customerPrices,
+  customerArticleNumbers,
   articleGroups,
   deliveryDayDefaults = null,
 }: PartnerTabsProps) {
@@ -116,7 +121,7 @@ export function PartnerTabs({
     ...(showAddresses ? (["Adresser"] as Tab[]) : []),
     "Villkor & frakt",
     "Kontakter",
-    ...(isCustomer ? (["Priser"] as Tab[]) : []),
+    ...(isCustomer ? (["Priser", "Kundens artikelnummer"] as Tab[]) : []),
   ];
 
   return (
@@ -177,6 +182,12 @@ export function PartnerTabs({
           pricesBase={`${endpointBase}/${partner.id}/prices`}
           articleGroups={articleGroups ?? []}
           currency={(partner as Customer).currency}
+        />
+      )}
+      {activeTab === "Kundens artikelnummer" && isCustomer && (
+        <CustomerArticleNumbersTab
+          numbers={customerArticleNumbers ?? []}
+          numbersBase={`${endpointBase}/${partner.id}/article-numbers`}
         />
       )}
       {activePluginTab && <PluginTabContent key={pluginTabId(activePluginTab)} tab={activePluginTab} entityId={partner.id} />}

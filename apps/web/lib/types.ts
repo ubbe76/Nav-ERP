@@ -63,6 +63,9 @@ export interface Article {
   // Surface treatment (ytbehandling) and colour (färg) — free text.
   surfaceTreatment: string | null;
   colour: string | null;
+  // Extra benämning — multi-line free text (max 2 000 characters), printed
+  // under the article name on the documents chosen in the system settings.
+  extraDescription: string | null;
   // Standard packaging: base units per kolli + the kolli type (register).
   quantityPerPackage: string | null;
   packageTypeId: string | null;
@@ -150,6 +153,8 @@ export interface BomComponent {
   // is drawn from stock when that operation is reported complete.
   routingOperationId: string | null;
   routingOperationSequenceNo: number | null;
+  // "Pos." — free-text drawing position (max 20), null when not set.
+  position: string | null;
 }
 
 // Node in GET /articles/:id/bom-tree — the structure as authored (phantoms
@@ -1212,6 +1217,18 @@ export interface CustomerPrice {
   discountPercent: string | null;
 }
 
+// One customer article number (kundkortets flik Kundens artikelnummer) — a row
+// from GET /customers/:id/article-numbers: what the customer calls one of our
+// articles. One per customer and article; the article never changes on an
+// update (remove and add instead).
+export interface CustomerArticleNumber {
+  id: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  customerArticleNumber: string;
+}
+
 export type SalesOrderStatus =
   | "quote"
   | "confirmed"
@@ -1883,9 +1900,12 @@ export interface RoutingOperation {
   workCenterCode: string;
   setupTime: string;
   runTimePerUnit: string;
-  // Display preference for runTimePerUnit — always stored/returned in
-  // minutes per unit regardless of this value; conversion happens at the
-  // edges (OperationModal, BeredningView) via lib/units.ts.
+  // "Cykeltid" — the operation's productive time, minutes per unit like
+  // runTimePerUnit and shown in the same timeUnit. null = not set.
+  cycleTimePerUnit: string | null;
+  // Display preference for runTimePerUnit (and cycleTimePerUnit) — always
+  // stored/returned in minutes per unit regardless of this value; conversion
+  // happens at the edges (OperationModal, BeredningView) via lib/units.ts.
   timeUnit: "minutes_per_unit" | "units_per_hour";
   // "Kalkyl" — priced into the pre-calculation but skipped at release, so it
   // never reaches the MO.
@@ -2530,6 +2550,23 @@ export interface StampSession {
   absentToday?: boolean;
 }
 
+// Mirrors EXTRA_DESCRIPTION_DOCUMENTS in packages/shared/src/system.ts — the
+// web cannot import @navet/shared. Same ids in the same (canonical) order.
+export const EXTRA_DESCRIPTION_DOCUMENT_LABELS = {
+  inquiry: "Förfrågan",
+  purchaseOrder: "Inköpsorder",
+  quote: "Offert",
+  orderConfirmation: "Orderbekräftelse",
+  pickList: "Plocklista",
+  deliveryNote: "Följesedel",
+  invoice: "Faktura",
+  manufacturingOrder: "Tillverkningsorder",
+} as const;
+export type ExtraDescriptionDocument = keyof typeof EXTRA_DESCRIPTION_DOCUMENT_LABELS;
+export const EXTRA_DESCRIPTION_DOCUMENTS = Object.keys(
+  EXTRA_DESCRIPTION_DOCUMENT_LABELS
+) as ExtraDescriptionDocument[];
+
 export interface SystemSettings {
   // Egna teman: the company's default theme (a built-in id or a custom
   // theme's key) and whether users may pick their own.
@@ -2538,6 +2575,9 @@ export interface SystemSettings {
   allowMultipleStamps: boolean;
   // Print active article/drawing revisions per row on external documents.
   showRevisionsOnDocuments: boolean;
+  // Documents that print the article's Extra benämning under the name, in
+  // EXTRA_DESCRIPTION_DOCUMENTS order (empty = none).
+  extraDescriptionDocuments: ExtraDescriptionDocument[];
   // Print the order's own revision after the document number
   // ("Inköpsorder IO2500123 / 2") on offert/orderbekräftelse/inköpsorder.
   showOrderRevisionOnDocuments: boolean;

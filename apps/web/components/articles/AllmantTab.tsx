@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
-import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
+import { Checkbox, Field, Input, Select, Textarea, Toggle } from "../ui/Field";
 import { freightModeText } from "../../lib/shipping";
 import { apiFetch } from "../../lib/api";
 import {
@@ -42,6 +42,7 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
   const [height, setHeight] = useState(article.height ?? "");
   const [surfaceTreatment, setSurfaceTreatment] = useState(article.surfaceTreatment ?? "");
   const [colour, setColour] = useState(article.colour ?? "");
+  const [extraDescription, setExtraDescription] = useState(article.extraDescription ?? "");
   const [quantityPerPackage, setQuantityPerPackage] = useState(article.quantityPerPackage ?? "");
   const [packageTypeId, setPackageTypeId] = useState(article.packageTypeId ?? "");
   const [parcelKind, setParcelKind] = useState(article.parcelKind ?? "");
@@ -113,6 +114,8 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
           height: height.trim() === "" ? null : Number(height),
           surfaceTreatment: surfaceTreatment.trim() === "" ? null : surfaceTreatment,
           colour: colour.trim() === "" ? null : colour,
+          // "" clears it; the newlines are kept.
+          extraDescription: extraDescription.trim() === "" ? "" : extraDescription,
           quantityPerPackage: quantityPerPackage.trim() === "" ? null : Number(quantityPerPackage),
           packageTypeId: packageTypeId === "" ? null : packageTypeId,
           parcelKind: parcelKind === "" ? null : parcelKind,
@@ -178,6 +181,17 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
             <div className={styles.spanAll}>
               <Field label="Benämning" htmlFor="name">
                 <Input id="name" required value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+            </div>
+            <div className={styles.spanAll}>
+              <Field label="Extra benämning" htmlFor="extraDescription">
+                <Textarea
+                  id="extraDescription"
+                  rows={3}
+                  maxLength={2000}
+                  value={extraDescription}
+                  onChange={(e) => setExtraDescription(e.target.value)}
+                />
               </Field>
             </div>
             <Field label="Varugrupp" htmlFor="groupId">

@@ -42,20 +42,25 @@ export const ROUTING_IMPORT_FIELDS = [
   "comment",
   "description",
   "packingInstructions",
+  // Lego (legoresurs) operations — Monitor's Operationslista, Lego: the
+  // supplier doing the work and its Ställkostnad/Styckkostnad, which land on
+  // the operation's legoleverantör/ställpris/styckpris (the Beredning dialog's
+  // lego fields). Ignored, with a warning, on an ordinary resource.
+  "subcontractSupplierNumber",
+  "setupPrice",
+  "unitPrice",
+  // Monitor's "Cykeltid" — the productive time, in the same unit as Stycktid.
+  "cycleTimePerUnit",
 ] as const;
 export type RoutingImportField = (typeof ROUTING_IMPORT_FIELDS)[number];
 
 // setup_time and run_time_per_unit are NOT NULL without a default, and
 // createRoutingOperationSchema demands both. Defaulting an unmapped column to
 // 0 would quietly wreck the pre-calculation across thousands of articles, so
-// the columns are required and the user writes 0 where a step has no setup.
-const REQUIRED_FIELDS: RoutingImportField[] = [
-  "articleNumber",
-  "sequenceNo",
-  "workCenterCode",
-  "setupTime",
-  "runTimePerUnit",
-];
+// a row on an ordinary resource without both times is a ROW error. They are
+// not required columns: the lego export has no times at all, and a lego
+// operation stores 0/0 whatever the file says.
+const REQUIRED_FIELDS: RoutingImportField[] = ["articleNumber", "sequenceNo", "workCenterCode"];
 
 // work_centers.code is varchar(3) with a check constraint of exactly three
 // digits (packages/db/src/schema/manufacturing.ts).
@@ -103,8 +108,11 @@ export const ROUTING_HEADER_ALIASES: Record<string, string> = {
   enhetstid: "runTimePerUnit",
   styckstid: "runTimePerUnit",
   stycktid: "runTimePerUnit",
-  cykeltid: "runTimePerUnit",
   maskintid: "runTimePerUnit",
+  // Cykeltid is its own field (the productive time), not the Stycktid.
+  cykeltid: "cycleTimePerUnit",
+  cykeltidperenhet: "cycleTimePerUnit",
+  produktivtid: "cycleTimePerUnit",
   // Monitor G5's Operationslista heads the time-unit column "Enhet" —
   // "antal/timme" there means Stycktid is pieces per hour and Ställtid is
   // in HOURS. See parseRoutingTimeUnit/convertRoutingTimes below.
@@ -132,6 +140,17 @@ export const ROUTING_HEADER_ALIASES: Record<string, string> = {
   packinstruktion: "packingInstructions",
   packinstruktioner: "packingInstructions",
   packning: "packingInstructions",
+  // Lego. Monitor's Operationslista, Lego heads them "Leverantör",
+  // "Ställkostnad" and "Styckkostnad"; Nav's dialog says Ställpris/Styckpris.
+  leverantor: "subcontractSupplierNumber",
+  leverantorsnummer: "subcontractSupplierNumber",
+  leverantorsnr: "subcontractSupplierNumber",
+  levnr: "subcontractSupplierNumber",
+  legoleverantor: "subcontractSupplierNumber",
+  stallkostnad: "setupPrice",
+  stallpris: "setupPrice",
+  styckkostnad: "unitPrice",
+  styckpris: "unitPrice",
 };
 
 export function suggestRoutingMapping(headers: string[]): Record<string, string | null> {
@@ -234,15 +253,33 @@ export function convertRoutingTimes(
   }
 }
 
+// Cykeltid in the file's time unit -> minutes per unit, like Stycktid. 0 is
+// Monitor's "none" (most rows) and stores nothing.
+export function convertCycleTime(unit: RoutingFileTimeUnit, value: number): number | null {
+  if (value === 0) return null;
+  const round4 = (n: number) => Math.round(n * 10000) / 10000;
+  switch (unit) {
+    case "minutes_per_unit":
+      return round4(value);
+    case "hours_per_unit":
+      return round4(value * 60);
+    case "seconds_per_unit":
+      return round4(value / 60);
+    case "units_per_hour":
+      return unitsPerHourToMinutesPerUnit(value);
+  }
+}
+
 // Narrow lookups the planner runs against — implemented structurally by
 // createImportRepository, stubbed with Maps in tests. `type` on the work
 // centre is what tells a legoresurs apart — lego operations carry no times.
 export interface RoutingImportDeps {
   articlesByNumber(numbers: string[]): Promise<Map<string, ExistingArticle>>;
-  workCentersByCode(): Promise<Map<string, { id: string; code: string; type?: string }>>;
+  workCentersByCode(): Promise<Map<string, { id: string; code: string; type?: string; supplierId?: string | null }>>;
+  suppliersByNumber(numbers: string[]): Promise<Map<string, { id: string }>>;
   routingOperationsByArticle(
     articleIds: string[]
-  ): Promise<Map<string, Map<number, { id: string; costingOnly: boolean }>>>;
+  ): Promise<Map<string, Map<number, { id: string; costingOnly: boolean; hasLegoFields?: boolean }>>>;
 }
 
 export interface RoutingCreatePlan {
@@ -253,6 +290,8 @@ export interface RoutingCreatePlan {
   setupTime: number;
   /** Minutes per unit. */
   runTimePerUnit: number;
+  /** "Cykeltid", minutes per unit; omitted/null = none. */
+  cycleTimePerUnit?: number | null;
   /** Display preference saved with the operation (see convertRoutingTimes). */
   timeUnit: "minutes_per_unit" | "units_per_hour";
   costingOnly: boolean;
@@ -264,6 +303,11 @@ export interface RoutingCreatePlan {
   description: string | null;
   /** "Packinstruktion" — same field as the article card's Beredning-flik. Null when empty. */
   packingInstructions: string | null;
+  /** Lego only: the file's Leverantör, else the legoresurs's own supplier (as the dialog). */
+  subcontractSupplierId?: string | null;
+  /** Lego only: Ställpris (kr) and Styckpris (kr/st). Null when empty. */
+  setupPrice?: number | null;
+  unitPrice?: number | null;
 }
 
 // An existing operation rewritten under input.updateExisting. The required
@@ -279,10 +323,20 @@ export interface RoutingUpdatePlan {
     runTimePerUnit: number;
     timeUnit: "minutes_per_unit" | "units_per_hour";
     costingOnly: boolean;
+    // Cykeltid: set from a filled cell only (0 clears).
+    cycleTimePerUnit?: number | null;
     comment?: string;
     printOnWorkCard?: boolean;
     description?: string;
     packingInstructions?: string;
+    // Lego: set only from a filled cell. An operation that carries lego
+    // fields and moves to an ordinary resource gets all four cleared
+    // (CLEARED_LEGO_FIELDS in the manufacturing service — same rule as the
+    // dialog).
+    subcontractSupplierId?: string | null;
+    setupPrice?: number | null;
+    unitPrice?: number | null;
+    showNetWeight?: false;
   };
 }
 
@@ -323,6 +377,8 @@ export async function planRoutingImport(
   const numbers = records.map((r) => r["articleNumber"] ?? "").filter((n) => n !== "");
   const articlesByNumber = await deps.articlesByNumber(numbers);
   const workCenters = await deps.workCentersByCode();
+  const supplierNumbers = records.map((r) => r["subcontractSupplierNumber"] ?? "").filter((n) => n !== "");
+  const suppliersByNumber = await deps.suppliersByNumber(supplierNumbers);
   const existingOperations = await deps.routingOperationsByArticle([...articlesByNumber.values()].map((a) => a.id));
 
   const rows: ImportRowResult[] = [];
@@ -367,6 +423,7 @@ export async function planRoutingImport(
 
     // Set when the row rewrites an existing operation (input.updateExisting).
     let existingOperationId: string | null = null;
+    let existingHasLegoFields = false;
     if (article && sequenceNo !== null) {
       const key = `${article.id}#${sequenceNo}`;
       const existingOperation = existingOperations.get(article.id)?.get(sequenceNo);
@@ -388,6 +445,7 @@ export async function planRoutingImport(
         }
         if (input.updateExisting) {
           existingOperationId = existingOperation.id;
+          existingHasLegoFields = existingOperation.hasLegoFields === true;
         } else {
           errors.push(`Operation ${sequenceNo} finns redan på artikel ${articleNumber} — ta bort raden ur filen`);
         }
@@ -402,6 +460,7 @@ export async function planRoutingImport(
     values["workCenterCode"] = rawCode;
     let workCenterId: string | null = null;
     let isSubcontract = false;
+    let workCenterSupplierId: string | null = null;
     if (rawCode === "") {
       errors.push("Resurs saknas");
     } else {
@@ -416,6 +475,7 @@ export async function planRoutingImport(
         } else {
           workCenterId = workCenter.id;
           isSubcontract = workCenter.type === "subcontract";
+          workCenterSupplierId = workCenter.supplierId ?? null;
         }
       }
     }
@@ -430,7 +490,9 @@ export async function planRoutingImport(
       const raw = record[field] ?? "";
       values[field] = raw;
       if (raw === "") {
-        errors.push(`${timeLabels[field]} saknas`);
+        // A lego operation carries no times (stored 0/0 below).
+        if (isSubcontract) times[field] = 0;
+        else errors.push(`${timeLabels[field]} saknas`);
         continue;
       }
       const parsed = normalizeDecimal(raw);
@@ -466,6 +528,17 @@ export async function planRoutingImport(
         converted = convertRoutingTimes(fileTimeUnit, times.setupTime, times.runTimePerUnit);
         if (converted.warning) warnings.push(converted.warning);
       }
+    }
+
+    // Cykeltid — same unit as the Stycktid column; ignored on a legoresurs.
+    const rawCycleTime = record["cycleTimePerUnit"] ?? "";
+    let cycleTimePerUnit: number | null | undefined;
+    if (rawCycleTime !== "") {
+      values["cycleTimePerUnit"] = rawCycleTime;
+      const parsed = normalizeDecimal(rawCycleTime);
+      if (parsed === null) errors.push(`Ogiltig cykeltid: "${rawCycleTime}"`);
+      else if (parsed < 0) errors.push("Cykeltiden kan inte vara negativ");
+      else if (!isSubcontract) cycleTimePerUnit = convertCycleTime(fileTimeUnit, parsed);
     }
 
     const rawCostingOnly = record["costingOnly"] ?? "";
@@ -519,6 +592,53 @@ export async function planRoutingImport(
       }
     }
 
+    // Lego fields. On a legoresurs a filled cell is taken (the supplier must
+    // exist); on an ordinary resource the cells are ignored with a warning —
+    // the manufacturing service refuses lego fields there, and one stray
+    // value must not block a whole routing file.
+    const rawSupplier = record["subcontractSupplierNumber"] ?? "";
+    const rawSetupPrice = record["setupPrice"] ?? "";
+    const rawUnitPrice = record["unitPrice"] ?? "";
+    let subcontractSupplierId: string | null = null;
+    let setupPrice: number | null = null;
+    let unitPrice: number | null = null;
+    if (rawSupplier !== "") values["subcontractSupplierNumber"] = rawSupplier;
+    if (rawSetupPrice !== "") values["setupPrice"] = rawSetupPrice;
+    if (rawUnitPrice !== "") values["unitPrice"] = rawUnitPrice;
+    if (workCenterId !== null && !isSubcontract) {
+      if (rawSupplier !== "" || rawSetupPrice !== "" || rawUnitPrice !== "") {
+        warnings.push("Leverantör, ställpris och styckpris gäller bara legoresurser — ignoreras");
+      }
+    } else if (isSubcontract) {
+      if (rawSupplier !== "") {
+        const supplier = suppliersByNumber.get(rawSupplier);
+        if (!supplier) errors.push(`Leverantören ${rawSupplier} finns inte i leverantörsregistret`);
+        else subcontractSupplierId = supplier.id;
+      }
+      // numeric(12,2) / numeric(12,4): more decimals are rounded with a
+      // warning, like the article import's Avrundning.
+      const prices = [
+        { raw: rawSetupPrice, label: "ställpris", decimals: 2, set: (n: number) => (setupPrice = n) },
+        { raw: rawUnitPrice, label: "styckpris", decimals: 4, set: (n: number) => (unitPrice = n) },
+      ];
+      for (const price of prices) {
+        if (price.raw === "") continue;
+        const parsed = normalizeDecimal(price.raw);
+        if (parsed === null) {
+          errors.push(`Ogiltigt ${price.label}: "${price.raw}"`);
+        } else if (parsed < 0) {
+          errors.push(`${price.label[0]!.toUpperCase()}${price.label.slice(1)}et kan inte vara negativt`);
+        } else {
+          const factor = 10 ** price.decimals;
+          const rounded = Math.round(parsed * factor) / factor;
+          if (rounded !== parsed) {
+            warnings.push(`${price.label[0]!.toUpperCase()}${price.label.slice(1)}et ${price.raw} avrundas till ${rounded}`);
+          }
+          price.set(rounded);
+        }
+      }
+    }
+
     rows.push({ rowNumber, action: existingOperationId ? "update" : "create", errors, warnings, values });
 
     if (errors.length === 0 && article && sequenceNo !== null && workCenterId !== null && converted !== null) {
@@ -530,12 +650,20 @@ export async function planRoutingImport(
           timeUnit: converted.timeUnit,
           costingOnly,
         };
+        if (cycleTimePerUnit !== undefined) patch.cycleTimePerUnit = cycleTimePerUnit;
         if (comment !== null) {
           patch.comment = comment;
           patch.printOnWorkCard = input.printCommentOnWorkCard === true;
         }
         if (description !== null) patch.description = description;
         if (packingInstructions !== null) patch.packingInstructions = packingInstructions;
+        if (isSubcontract) {
+          if (subcontractSupplierId !== null) patch.subcontractSupplierId = subcontractSupplierId;
+          if (setupPrice !== null) patch.setupPrice = setupPrice;
+          if (unitPrice !== null) patch.unitPrice = unitPrice;
+        } else if (existingHasLegoFields) {
+          Object.assign(patch, { subcontractSupplierId: null, setupPrice: null, unitPrice: null, showNetWeight: false });
+        }
         updates.push({ id: existingOperationId, patch });
       } else {
         creates.push({
@@ -545,6 +673,7 @@ export async function planRoutingImport(
           setupTime: converted.setupTime,
           runTimePerUnit: converted.runTimePerUnit,
           timeUnit: converted.timeUnit,
+          ...(cycleTimePerUnit != null ? { cycleTimePerUnit } : {}),
           costingOnly,
           comment,
           // A row without a comment has nothing to print, so the flag stays off
@@ -552,6 +681,9 @@ export async function planRoutingImport(
           printOnWorkCard: comment !== null && input.printCommentOnWorkCard === true,
           description,
           packingInstructions,
+          ...(isSubcontract
+            ? { subcontractSupplierId: subcontractSupplierId ?? workCenterSupplierId, setupPrice, unitPrice }
+            : {}),
         });
       }
     }

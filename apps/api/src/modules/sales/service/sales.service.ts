@@ -6,6 +6,7 @@ import type {
   CreatePriceListInput,
   CreateQuoteInput,
   CreateSalesOrderRowInput,
+  CustomerArticleNumberInput,
   CustomerPriceInput,
   DeliverBatchInput,
   DeliveryPalletCardRow,
@@ -70,7 +71,12 @@ import {
 } from "../../system/service/delivery-days.js";
 import type { ArticleFileReader, ArticleRevisionReader, ArticleUnitReader } from "../../article/service/article.service.js";
 import { ArticleGroupNotFoundError, ArticleNotFoundError, assertOrderableArticle } from "../../article/service/article.service.js";
-import { formatArticleAttributes, formatRevisionInfo, type DocumentSettingsReader } from "../../mail/service/document-pdf.js";
+import {
+  extraDescriptionFor,
+  formatArticleAttributes,
+  formatRevisionInfo,
+  type DocumentSettingsReader,
+} from "../../mail/service/document-pdf.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 // Konfigurator 4b: the configurator's pure pieces only — the stored-entries
 // → selection mapper (variant-identity.ts has no DB imports) and the error
@@ -89,6 +95,8 @@ import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   CustomerPriceNotFoundError,
+  CustomerArticleNumberNotFoundError,
+  DuplicateCustomerArticleNumberError,
   DuplicateCustomerPriceError,
   DuplicatePriceListError,
   DuplicatePriceListRowError,
@@ -618,13 +626,16 @@ export function createSalesService(
     variant: "quote" | "confirmation",
     showConfigurationPrices: boolean
   ) {
-    const [customer, rows, { showOrderRevisionOnDocuments }, vatCodeTexts, freightArticleId] = await Promise.all([
+    const [customer, rows, documentSettings, vatCodeTexts, freightArticleId] = await Promise.all([
       repo.findCustomerById(order.customerId),
       repo.listRowsByOrder(order.id),
       settings.getSettings(),
       repo.vatCodeInvoiceTexts(),
       freight.freightArticleId(),
     ]);
+    const { showOrderRevisionOnDocuments } = documentSettings;
+    const extraDescription = extraDescriptionFor(documentSettings, variant === "quote" ? "quote" : "orderConfirmation");
+    const customerArticleNumbers = await repo.customerArticleNumberMap(order.customerId, rows.map((r) => r.articleId));
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
     // Momskoder (spec 4.5): each row's VAT follows the momskod the invoice
     // row will get (salesVatCode) — an EU customer sees 0 % already on the
@@ -672,6 +683,8 @@ export function createSalesService(
           surfaceTreatment: r.articleSurfaceTreatment,
           colour: r.articleColour,
         }),
+        extraDescription: extraDescription(r.articleExtraDescription),
+        customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
         configurationLines: rowConfigurationLines(r.configuration, showConfigurationPrices),
         deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
       })),
@@ -1522,6 +1535,8 @@ export function createSalesService(
       const rows = await repo.listRowsByOrder(orderId);
       const openRows = rows.filter((r) => Number(r.quantityDelivered) < Number(r.quantityOrdered));
       const balances = await stock.balancesForArticles(openRows.map((r) => r.articleId));
+      const extraDescription = extraDescriptionFor(await settings.getSettings(), "pickList");
+      const customerArticleNumbers = await repo.customerArticleNumberMap(order.customerId, openRows.map((r) => r.articleId));
 
       const content = await pdf.renderPickList({
         documentNumber: order.orderNumber,
@@ -1549,6 +1564,8 @@ export function createSalesService(
           unit: r.unitCode,
           // Shop-floor document: the choices, never their prices.
           configurationLines: rowConfigurationLines(r.configuration, false),
+          extraDescription: extraDescription(r.articleExtraDescription),
+          customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
           deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
           locations: balances
             .filter((b) => b.articleId === r.articleId)
@@ -1875,6 +1892,11 @@ export function createSalesService(
     async deliveryNotePdf(deliveryId: string) {
       const delivery = await repo.getDeliveryForPdf(deliveryId);
       if (!delivery) throw new DeliveryNotFoundError(deliveryId);
+      const extraDescription = extraDescriptionFor(await settings.getSettings(), "deliveryNote");
+      const customerArticleNumbers = await repo.customerArticleNumberMap(
+        delivery.customerId,
+        delivery.rows.map((r) => r.articleId)
+      );
 
       // Frakt: carrier + fraktsedelsnummer only once the shipment is booked —
       // a draft has neither, and a cancelled one is no longer live.
@@ -1912,6 +1934,8 @@ export function createSalesService(
           undoneAt: r.undoneAt,
           // The delivery note carries no prices at all — choices only.
           configurationLines: rowConfigurationLines(r.configuration, false),
+          extraDescription: extraDescription(r.articleExtraDescription),
+          customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
         })),
       });
       return { pdf: content, filename: `foljesedel-${delivery.deliveryNumber}.pdf`, deliveryNumber: delivery.deliveryNumber };
@@ -2219,6 +2243,58 @@ export function createSalesService(
         detail: existing
           ? { fromQuantity: existing.fromQuantity, unitPrice: existing.unitPrice, discountPercent: existing.discountPercent }
           : null,
+        userId: userId ?? null,
+      });
+    },
+
+    // --- Kundens artikelnummer (customer card) ---
+    async listCustomerArticleNumbers(customerId: string) {
+      if (!(await repo.findCustomerById(customerId))) throw new CustomerNotFoundError(customerId);
+      return repo.listCustomerArticleNumbers(customerId);
+    },
+
+    async addCustomerArticleNumber(customerId: string, input: CustomerArticleNumberInput, userId?: string | null) {
+      if (!(await repo.findCustomerById(customerId))) throw new CustomerNotFoundError(customerId);
+      if (!(await articleFiles.getArticle(input.articleId))) throw new ArticleNotFoundError(input.articleId);
+      let row;
+      try {
+        row = await repo.addCustomerArticleNumber(customerId, input.articleId, input.customerArticleNumber);
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new DuplicateCustomerArticleNumberError();
+        throw err;
+      }
+      await audit.log({
+        entityType: "customer_article_number",
+        entityId: row.id,
+        action: "created",
+        detail: { customerId, articleId: row.articleId, customerArticleNumber: row.customerArticleNumber },
+        userId: userId ?? null,
+      });
+      return row;
+    },
+
+    async updateCustomerArticleNumber(customerId: string, id: string, customerArticleNumber: string, userId?: string | null) {
+      const before = (await repo.listCustomerArticleNumbers(customerId)).find((r) => r.id === id);
+      const row = await repo.updateCustomerArticleNumber(customerId, id, customerArticleNumber);
+      if (!row) throw new CustomerArticleNumberNotFoundError(id);
+      await audit.log({
+        entityType: "customer_article_number",
+        entityId: row.id,
+        action: "updated",
+        detail: { before: before?.customerArticleNumber ?? null, after: row.customerArticleNumber },
+        userId: userId ?? null,
+      });
+      return row;
+    },
+
+    async deleteCustomerArticleNumber(customerId: string, id: string, userId?: string | null) {
+      const row = await repo.deleteCustomerArticleNumber(customerId, id);
+      if (!row) throw new CustomerArticleNumberNotFoundError(id);
+      await audit.log({
+        entityType: "customer_article_number",
+        entityId: id,
+        action: "deleted",
+        detail: { customerId, articleId: row.articleId, customerArticleNumber: row.customerArticleNumber },
         userId: userId ?? null,
       });
     },

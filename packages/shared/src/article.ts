@@ -100,6 +100,9 @@ export const createArticleSchema = z.object({
   // articles schema); blank = not filled in.
   surfaceTreatment: optionalText(200).optional(),
   colour: optionalText(200).optional(),
+  // "Extra benämning" — multi-line free text, printed on the documents the
+  // setting extraDescriptionDocuments lists; blank = none.
+  extraDescription: optionalText(2000).optional(),
   groupId: z.string().uuid().optional(),
   // Artikelkod (Grunddata): selection/grouping in the lists only.
   articleCodeId: z.string().uuid().optional(),
@@ -163,6 +166,8 @@ export const updateArticleSchema = z
     // "Ytbehandling" / "Färg" — free text printed on documents; "" clears.
     surfaceTreatment: optionalText(200).optional(),
     colour: optionalText(200).optional(),
+    // "Extra benämning"; "" clears.
+    extraDescription: optionalText(2000).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateArticleInput = z.infer<typeof updateArticleSchema>;
@@ -196,6 +201,8 @@ export const createBomComponentSchema = z.object({
   // Optional link to one of the parent article's routing operations — the
   // component is drawn from stock when that operation is reported complete.
   routingOperationId: z.string().uuid().nullable().optional(),
+  // "Pos." — the position on the drawing; blank = none.
+  position: optionalText(20).optional(),
 });
 export type CreateBomComponentInput = z.infer<typeof createBomComponentSchema>;
 
@@ -208,6 +215,8 @@ export const updateBomComponentSchema = z
     // Null switches the row back to the component's base unit.
     unitId: z.string().uuid().nullable().optional(),
     routingOperationId: z.string().uuid().nullable().optional(),
+    // "Pos."; "" clears.
+    position: optionalText(20).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateBomComponentInput = z.infer<typeof updateBomComponentSchema>;

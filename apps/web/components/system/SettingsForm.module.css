@@ -13,7 +13,8 @@
   gap: 20px;
 }
 
-.row + .row {
+.row + .row,
+.section + .row {
   margin-top: 18px;
   padding-top: 18px;
   border-top: 1px solid var(--color-border);
@@ -156,4 +157,20 @@
   font-family: var(--font-body);
   font-size: 13px;
   color: var(--color-text-secondary);
+}
+
+/* Extra benämning på dokument: one checkbox per document kind. */
+.checkGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-text-primary);
 }

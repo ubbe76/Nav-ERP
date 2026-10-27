@@ -7,6 +7,7 @@ import { apiGet } from "../../../lib/api";
 import type {
   ArticleGroup,
   Customer,
+  CustomerArticleNumber,
   CustomerDeliveryAddress,
   CustomerPrice,
   Paged,
@@ -28,7 +29,7 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
   const customer = await apiGet<Customer>(`/api/v1/customers/${params.id}`, cookieHeader).catch(() => null);
   if (!customer) notFound();
 
-  const [deliveryTerms, paymentTerms, carriers, contacts, deliveryAddresses, priceLists, customerPrices, articleGroups, settings] =
+  const [deliveryTerms, paymentTerms, carriers, contacts, deliveryAddresses, priceLists, customerPrices, customerArticleNumbers, articleGroups, settings] =
     await Promise.all([
       apiGet<RegisterEntry[]>("/api/v1/delivery-terms", cookieHeader),
       apiGet<RegisterEntry[]>("/api/v1/payment-terms", cookieHeader),
@@ -37,6 +38,7 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
       apiGet<CustomerDeliveryAddress[]>(`/api/v1/customers/${params.id}/delivery-addresses`, cookieHeader),
       apiGet<Paged<PriceList>>("/api/v1/price-lists?limit=1000", cookieHeader),
       apiGet<CustomerPrice[]>(`/api/v1/customers/${params.id}/prices`, cookieHeader),
+      apiGet<CustomerArticleNumber[]>(`/api/v1/customers/${params.id}/article-numbers`, cookieHeader),
       apiGet<ArticleGroup[]>("/api/v1/article-groups", cookieHeader),
       // Only names the delivery-day defaults on Villkor & frakt — the card
       // works without them.
@@ -66,6 +68,7 @@ export default async function CustomerDetailPage(props: { params: Promise<{ id: 
         deliveryAddresses={deliveryAddresses}
         priceLists={priceLists.rows}
         customerPrices={customerPrices}
+        customerArticleNumbers={customerArticleNumbers}
         articleGroups={articleGroups}
         deliveryDayDefaults={
           settings ? { mode: settings.customerDeliveryDayMode, transitDays: settings.customerTransitDays } : null

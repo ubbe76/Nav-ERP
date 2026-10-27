@@ -109,6 +109,10 @@ export const articles = pgTable("articles", {
   // whenever set (never on invoices). Null = not filled in.
   surfaceTreatment: text("surface_treatment"),
   colour: text("colour"),
+  // "Extra benämning" — multi-line free text beside the name (Monitor's
+  // Artikellista, Extra fält). Printed under the name on the documents the
+  // system setting extra_description_documents lists. Null = none.
+  extraDescription: text("extra_description"),
   // Planning fields (E1 behovsberäkning). Reorder point (beställningspunkt)
   // triggers a proposal when the projected balance falls below it; null = only
   // propose on negative projected balance. Order quantity (orderkvantitet)
@@ -293,6 +297,9 @@ export const bomComponents = pgTable(
     // reported complete. FK declared in manufacturing.ts to avoid a circular
     // import between the two schema modules.
     routingOperationId: uuid("routing_operation_id"),
+    // "Pos." — the row's position on the drawing (Monitor's Materiallista),
+    // free text. Null = none.
+    position: varchar("position", { length: 20 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

@@ -1,0 +1,1 @@
+ALTER TABLE "routing_operations" ADD COLUMN "cycle_time_per_unit" numeric(10, 4);

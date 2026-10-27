@@ -45,6 +45,8 @@ import {
 } from "../src/modules/system/service/themes.errors.js";
 import { errorBody } from "../src/modules/system/service/error-body.js";
 import {
+  CustomerArticleNumberNotFoundError,
+  DuplicateCustomerArticleNumberError,
   PriceListCurrencyLockedError,
   SalesOrderCurrencyChangedError,
   SalesOrderCurrencyLockedError,
@@ -573,6 +575,8 @@ const cases: Array<[Error, string]> = [
   [new ShipmentDeliveryUndoneError("FS-1"), ERROR_CODES.SHIPMENT_DELIVERY_UNDONE],
   [new PriceListInUseError("PL1"), ERROR_CODES.PRICE_LIST_IN_USE],
   [new DuplicatePriceListRowError(10), ERROR_CODES.DUPLICATE_PRICE_LIST_ROW],
+  [new DuplicateCustomerArticleNumberError(), ERROR_CODES.DUPLICATE_CUSTOMER_ARTICLE_NUMBER],
+  [new CustomerArticleNumberNotFoundError("x"), ERROR_CODES.CUSTOMER_ARTICLE_NUMBER_NOT_FOUND],
   [new InvalidOcrError("123"), ERROR_CODES.INVALID_OCR],
   [new PaymentExceedsOpenAmountError("F-1", 100, 150), ERROR_CODES.PAYMENT_EXCEEDS_OPEN_AMOUNT],
   [new VerificationAlreadyReversedError(), ERROR_CODES.VERIFICATION_ALREADY_REVERSED],

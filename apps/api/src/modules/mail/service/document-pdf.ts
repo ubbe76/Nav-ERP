@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
-import { minutesPerUnitToUnitsPerHour, VAT_CODES } from "@navet/shared";
+import { minutesPerUnitToUnitsPerHour, VAT_CODES, type ExtraDescriptionDocument } from "@navet/shared";
 import { CODE128_QUIET_ZONE, code128TotalModules, encodeCode128 } from "./code128.js";
 import type { SystemService } from "../../system/service/system.service.js";
 
@@ -23,6 +23,13 @@ export interface DocumentPdfRow {
   // rows carry it: lego rows on IO/RFQ, every row on quote/confirmation,
   // never invoices.
   articleInfo?: string | null;
+  // The article's "Extra benämning" (multi-line), printed right after the
+  // articleInfo line. The callsite sets it only when the document kind is in
+  // the setting extraDescriptionDocuments (see extraDescriptionFor).
+  extraDescription?: string | null;
+  // Sales documents: Kundens artikelnummer — printed as "Ert art.nr: X", the
+  // first info line under the name.
+  customerArticleNumber?: string | null;
   // Invoice-only: this row's VAT rate, used to group the perRow VAT summary
   // (DocumentPdfInput.vat = { perRow: true }) — ignored by every other
   // document type and by the single-rate vat: { rate } branch.
@@ -83,9 +90,22 @@ export interface DocumentSettingsReader {
   getSettings(): Promise<{
     showRevisionsOnDocuments: boolean;
     showOrderRevisionOnDocuments: boolean;
+    // The documents that print the article's Extra benämning. Optional so
+    // the many narrow settings fakes need not carry it — absent = none.
+    extraDescriptionDocuments?: ExtraDescriptionDocument[];
     // Kod på pallkort — the system default the services fall back on.
     palletCardCode: PalletCardCodeType;
   }>;
+}
+
+// The Extra benämning a row prints on `kind`: the article's text when the
+// setting lists the document, else null. ONE rule for every callsite.
+export function extraDescriptionFor(
+  settings: { extraDescriptionDocuments?: ExtraDescriptionDocument[] },
+  kind: ExtraDescriptionDocument
+): (text: string | null | undefined) => string | null {
+  const on = settings.extraDescriptionDocuments?.includes(kind) ?? false;
+  return (text) => (on && text ? text : null);
 }
 
 // "Ytbehandling: Pulverlack RAL 9010 · Färg: Vit" — an empty half is left
@@ -285,6 +305,10 @@ export interface PickListRow {
   // The row's own Leveransdatum — the callsite sets it only when it differs
   // from the order's (printed in the header).
   deliveryDate?: string | null;
+  // Extra benämning (multi-line) — set when the setting lists the pick list.
+  extraDescription?: string | null;
+  // Kundens artikelnummer — "Ert art.nr: X".
+  customerArticleNumber?: string | null;
 }
 
 export interface PickListPdfInput {
@@ -317,6 +341,10 @@ export interface DeliveryNoteRow {
   // Konfigurator 4b: the configured row's choices under the name — never
   // with prices (the delivery note carries no prices at all).
   configurationLines?: string[];
+  // Extra benämning (multi-line) — set when the setting lists the delivery note.
+  extraDescription?: string | null;
+  // Kundens artikelnummer — "Ert art.nr: X".
+  customerArticleNumber?: string | null;
   // Ångra utleverans: the row was undone — printed as a line under the name.
   undoneAt?: Date | null;
 }
@@ -537,6 +565,9 @@ export interface ManufacturingOrderPdfInput {
   // Konfigurator 4c: a beställningsvara's choices, "Grupp: Värde" (no prices) —
   // printed under the article line in the header. Omitted/empty ⇒ nothing.
   configurationLines?: string[];
+  // The article's Extra benämning (multi-line) — printed under the article
+  // line when the setting lists the manufacturing order.
+  extraDescription?: string | null;
   operations: {
     sequenceNo: number;
     workCenterName: string;
@@ -888,6 +919,36 @@ function vatGroupLabel(group: PerRowVatGroup): string {
   return group.rate !== 0 ? `Moms (${group.rate} %)` : (group.name ?? "Moms (0 %)");
 }
 
+// 8pt grey info lines under a row's name. A line may hold "\n" (Extra
+// benämning) or wrap in the column, so each takes 11pt per PRINTED line —
+// measured here once and reused by the drawing, so the row height and the
+// drawing can never disagree.
+function measureInfoLines(doc: PDFKit.PDFDocument, lines: string[], width: number) {
+  doc.fontSize(8);
+  const single = doc.heightOfString("X", { width });
+  const counts = lines.map((line) => Math.max(1, Math.round(doc.heightOfString(line, { width }) / single)));
+  doc.fontSize(9);
+  return { single, counts, height: counts.reduce((sum, count) => sum + count, 0) * 11 };
+}
+
+function drawInfoLines(
+  doc: PDFKit.PDFDocument,
+  lines: string[],
+  measured: ReturnType<typeof measureInfoLines>,
+  x: number,
+  y: number,
+  width: number
+) {
+  if (lines.length === 0) return;
+  doc.fontSize(8).fillColor("#666666");
+  let infoY = y;
+  lines.forEach((line, i) => {
+    doc.text(line, x, infoY, { width, lineGap: 11 - measured.single });
+    infoY += measured.counts[i]! * 11;
+  });
+  doc.fontSize(9).fillColor("#000000");
+}
+
 export function createDocumentPdfService(system: Pick<SystemService, "getCompanyInfo" | "getLogo">) {
   // Shared scaffolding: a new A4 document with the company header + logo
   // drawn, plus the promise that resolves to the finished buffer.
@@ -1212,8 +1273,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // reference / ställpris / nettovikt (each on its own line), and the
       // configured row's choices (konfigurator 4b).
       const infoLines = [
+        row.customerArticleNumber ? `Ert art.nr: ${row.customerArticleNumber}` : null,
         row.revisionInfo ?? null,
         row.articleInfo ?? null,
+        row.extraDescription ?? null,
         ...(row.configurationLines ?? []),
         row.moReference ?? null,
         // The order reference and the invoice row's Leveransdatum share one
@@ -1618,10 +1681,15 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // Konfigurator 4b: 8pt choice lines under the name, then the row's own
       // date, counted into the row height (a plain row has none, so it is
       // laid out exactly as before).
-      const infoLines = [...(row.configurationLines ?? []), ...(row.deliveryDate ? [`Leveransdatum: ${row.deliveryDate}`] : [])];
-      const cfgHeight = infoLines.length * 11;
+      const infoLines = [
+        ...(row.customerArticleNumber ? [`Ert art.nr: ${row.customerArticleNumber}`] : []),
+        ...(row.extraDescription ? [row.extraDescription] : []),
+        ...(row.configurationLines ?? []),
+        ...(row.deliveryDate ? [`Leveransdatum: ${row.deliveryDate}`] : []),
+      ];
+      const measured = measureInfoLines(doc, infoLines, PICK_COLS.articleName.w);
       const rowHeight =
-        Math.max(nameHeight + cfgHeight, doc.heightOfString(locationText, { width: PICK_COLS.locations.w }), 11) + 8;
+        Math.max(nameHeight + measured.height, doc.heightOfString(locationText, { width: PICK_COLS.locations.w }), 11) + 8;
       if (y + rowHeight > TABLE_BOTTOM) {
         doc.addPage();
         y = PAGE_MARGIN;
@@ -1640,15 +1708,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(locationText, left + PICK_COLS.locations.x, y, { width: PICK_COLS.locations.w });
       // Empty line for the picker to tick off by hand.
       doc.text("____", left + PICK_COLS.picked.x, y, { width: PICK_COLS.picked.w, align: "right" });
-      if (infoLines.length > 0) {
-        doc.fontSize(8).fillColor("#666666");
-        let infoY = y + nameHeight + 1;
-        for (const line of infoLines) {
-          doc.text(line, left + PICK_COLS.articleName.x, infoY, { width: PICK_COLS.articleName.w });
-          infoY += 11;
-        }
-        doc.fontSize(9).fillColor("#000000");
-      }
+      drawInfoLines(doc, infoLines, measured, left + PICK_COLS.articleName.x, y + nameHeight + 1, PICK_COLS.articleName.w);
       y += rowHeight;
     }
 
@@ -1821,9 +1881,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // Konfigurator 4b: 8pt choice lines under the name, counted into the
       // row height (a plain row has none, so it is laid out exactly as before).
       // An undone row gets one more 8pt line of the same kind.
-      const infoLines = [...(row.configurationLines ?? []), ...(row.undoneAt ? [`Ångrad ${formatStockholmDateTime(row.undoneAt)}`] : [])];
-      const cfgHeight = infoLines.length * 11;
-      const rowHeight = Math.max(nameHeight + cfgHeight, 11) + 8;
+      const infoLines = [
+        ...(row.customerArticleNumber ? [`Ert art.nr: ${row.customerArticleNumber}`] : []),
+        ...(row.extraDescription ? [row.extraDescription] : []),
+        ...(row.configurationLines ?? []),
+        ...(row.undoneAt ? [`Ångrad ${formatStockholmDateTime(row.undoneAt)}`] : []),
+      ];
+      const measured = measureInfoLines(doc, infoLines, DELIVERY_NOTE_COLS.articleName.w);
+      const rowHeight = Math.max(nameHeight + measured.height, 11) + 8;
       if (y + rowHeight > TABLE_BOTTOM) {
         doc.addPage();
         y = PAGE_MARGIN;
@@ -1845,15 +1910,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         width: DELIVERY_NOTE_COLS.priorDelivered.w,
         align: "right",
       });
-      if (infoLines.length > 0) {
-        doc.fontSize(8).fillColor("#666666");
-        let infoY = y + nameHeight + 1;
-        for (const line of infoLines) {
-          doc.text(line, left + DELIVERY_NOTE_COLS.articleName.x, infoY, { width: DELIVERY_NOTE_COLS.articleName.w });
-          infoY += 11;
-        }
-        doc.fontSize(9).fillColor("#000000");
-      }
+      drawInfoLines(
+        doc,
+        infoLines,
+        measured,
+        left + DELIVERY_NOTE_COLS.articleName.x,
+        y + nameHeight + 1,
+        DELIVERY_NOTE_COLS.articleName.w
+      );
       y += rowHeight;
     }
 
@@ -1894,6 +1958,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const heading = `${input.articleNumber} — ${input.articleName}`;
     doc.font("Helvetica-Bold").fontSize(13).text(heading, left, y, { width: CONTENT_WIDTH });
     y += doc.heightOfString(heading, { width: CONTENT_WIDTH }) + 5;
+    if (input.extraDescription) {
+      doc.font("Helvetica").fontSize(9).fillColor("#444444");
+      doc.text(input.extraDescription, left, y, { width: CONTENT_WIDTH });
+      y += doc.heightOfString(input.extraDescription, { width: CONTENT_WIDTH }) + 6;
+      doc.fillColor("#000000");
+    }
     // Konfigurator 4c: the choice lines under the article — the same 8 pt
     // grey sub-lines the customer documents print under a configured row.
     if (input.configurationLines && input.configurationLines.length > 0) {

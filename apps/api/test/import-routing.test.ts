@@ -1,6 +1,15 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { articles as articlesTable, db, manufacturingOrders, moOperations, routingOperations, units, workCenters } from "@navet/db";
+import {
+  articles as articlesTable,
+  db,
+  manufacturingOrders,
+  moOperations,
+  routingOperations,
+  suppliers,
+  units,
+  workCenters,
+} from "@navet/db";
 import { importEntitySchema } from "@navet/shared";
 import { createImportRepository } from "../src/modules/import/repository/import.repository.js";
 import {
@@ -52,6 +61,9 @@ function fakeDeps(
     },
     async workCentersByCode() {
       return new Map(workCenterCodes.map((code) => [code, { id: `wc-${code}`, code }]));
+    },
+    async suppliersByNumber(numbers) {
+      return new Map(numbers.filter((n) => n.startsWith("L")).map((n) => [n, { id: `sup-${n}` }]));
     },
     async routingOperationsByArticle() {
       const map = new Map<string, Map<number, { id: string; costingOnly: boolean }>>();
@@ -679,7 +691,7 @@ describe("planRoutingImport", () => {
     });
   });
 
-  it("requires the five mandatory columns to be mapped", async () => {
+  it("requires the three mandatory columns to be mapped — the times are row-level", async () => {
     await expect(
       planRoutingImport(
         { mapping: { Artikelnummer: "articleNumber", Sekvensnr: "sequenceNo" }, rows: [] },
@@ -689,12 +701,180 @@ describe("planRoutingImport", () => {
   });
 });
 
+// --- Monitor's Operationslista, Lego: no times, a supplier and prices per
+// operation, landing on the Beredning dialog's lego fields. ---
+const LEGO_HEADERS = [
+  "Produktionsgrupp",
+  "Namn",
+  "Leverantör",
+  "Namn (2)",
+  "Artikelnummer",
+  "Artikelbenämning",
+  "Legoartikelnummer",
+  "Op.",
+  "Operationens benämning",
+  "Ställkostnad",
+  "Styckkostnad",
+  "Kötid",
+  "Transportkostnad",
+  "Färg",
+];
+const LEGO_MAPPING = {
+  Artikelnummer: "articleNumber",
+  "Op.": "sequenceNo",
+  Produktionsgrupp: "workCenterCode",
+  "Leverantör": "subcontractSupplierNumber",
+  "Ställkostnad": "setupPrice",
+  Styckkostnad: "unitPrice",
+};
+
+function legoDeps(existingOperations: { articleId: string; sequenceNo: number; hasLegoFields?: boolean }[] = []) {
+  const deps = fakeDeps([article("A-1", "id-1")], ["110"]);
+  deps.workCentersByCode = async () =>
+    new Map([
+      ["110", { id: "wc-110", code: "110", type: "machine", supplierId: null }],
+      ["930", { id: "wc-930", code: "930", type: "subcontract", supplierId: "sup-default" }],
+    ]);
+  deps.routingOperationsByArticle = async () => {
+    const perArticle = new Map<number, { id: string; costingOnly: boolean; hasLegoFields?: boolean }>();
+    for (const op of existingOperations) {
+      perArticle.set(op.sequenceNo, { id: `op-${op.sequenceNo}`, costingOnly: false, hasLegoFields: op.hasLegoFields });
+    }
+    return new Map([["id-1", perArticle]]);
+  };
+  return deps;
+}
+
+describe("planRoutingImport — lego operations", () => {
+  it("suggests the lego columns from Monitor's headings, the resource name left alone", () => {
+    const suggested = suggestRoutingMapping(LEGO_HEADERS);
+    expect(suggested).toMatchObject({
+      Produktionsgrupp: "workCenterCode",
+      "Leverantör": "subcontractSupplierNumber",
+      Artikelnummer: "articleNumber",
+      "Op.": "sequenceNo",
+      "Operationens benämning": "description",
+      "Ställkostnad": "setupPrice",
+      Styckkostnad: "unitPrice",
+    });
+    expect(suggested["Namn"]).toBeNull();
+    expect(suggested["Artikelbenämning"]).toBeNull();
+  });
+
+  it("imports a lego operation without time columns: supplier, prices and 0/0 times", async () => {
+    const plan = await planRoutingImport(
+      { mapping: LEGO_MAPPING, rows: [["A-1", "20", "930", "L100", "150", "4,5"]] },
+      legoDeps()
+    );
+    expect(plan.rows[0]!.errors).toEqual([]);
+    expect(plan.rows[0]!.warnings).toEqual([]);
+    expect(plan.creates[0]).toMatchObject({
+      sequenceNo: 20,
+      workCenterId: "wc-930",
+      setupTime: 0,
+      runTimePerUnit: 0,
+      timeUnit: "minutes_per_unit",
+      subcontractSupplierId: "sup-L100",
+      setupPrice: 150,
+      unitPrice: 4.5,
+    });
+  });
+
+  it("defaults the supplier from the legoresurs like the dialog, and leaves empty prices unset", async () => {
+    const plan = await planRoutingImport(
+      { mapping: LEGO_MAPPING, rows: [["A-1", "20", "930", "", "", ""]] },
+      legoDeps()
+    );
+    expect(plan.creates[0]).toMatchObject({ subcontractSupplierId: "sup-default", setupPrice: null, unitPrice: null });
+  });
+
+  it("errors on an unknown supplier or a bad price, rounds extra decimals with a warning", async () => {
+    const plan = await planRoutingImport(
+      {
+        mapping: LEGO_MAPPING,
+        rows: [
+          ["A-1", "20", "930", "X9", "150", "4"],
+          ["A-1", "30", "930", "", "-5", "abc"],
+          ["A-1", "40", "930", "", "150,555", "4,123456"],
+        ],
+      },
+      legoDeps()
+    );
+    expect(plan.rows[0]!.errors).toEqual(["Leverantören X9 finns inte i leverantörsregistret"]);
+    expect(plan.rows[1]!.errors).toEqual(["Ställpriset kan inte vara negativt", 'Ogiltigt styckpris: "abc"']);
+    expect(plan.rows[2]!.errors).toEqual([]);
+    expect(plan.rows[2]!.warnings).toEqual([
+      "Ställpriset 150,555 avrundas till 150.56",
+      "Styckpriset 4,123456 avrundas till 4.1235",
+    ]);
+    expect(plan.creates).toHaveLength(1);
+    expect(plan.creates[0]).toMatchObject({ setupPrice: 150.56, unitPrice: 4.1235 });
+  });
+
+  it("still demands both times on an ordinary resource, and ignores lego cells there with a warning", async () => {
+    const plan = await planRoutingImport(
+      {
+        mapping: LEGO_MAPPING,
+        rows: [["A-1", "10", "110", "L100", "150", "4"]],
+      },
+      legoDeps()
+    );
+    expect(plan.rows[0]!.errors).toEqual(["Ställtid saknas", "Tid per enhet saknas"]);
+    expect(plan.rows[0]!.warnings).toEqual(["Leverantör, ställpris och styckpris gäller bara legoresurser — ignoreras"]);
+
+    const withTimes = await planRoutingImport(
+      {
+        mapping: { ...LEGO_MAPPING, "Ställtid": "setupTime", Stycktid: "runTimePerUnit" },
+        rows: [["A-1", "10", "110", "L100", "150", "4", "5", "2"]],
+      },
+      legoDeps()
+    );
+    expect(withTimes.rows[0]!.errors).toEqual([]);
+    expect(withTimes.creates[0]).not.toHaveProperty("subcontractSupplierId");
+    expect(withTimes.creates[0]).not.toHaveProperty("setupPrice");
+  });
+
+  it("updates only the filled lego cells, and clears lego fields when an operation moves to an ordinary resource", async () => {
+    const lego = await planRoutingImport(
+      { mapping: LEGO_MAPPING, rows: [["A-1", "20", "930", "", "", "6"]], updateExisting: true },
+      legoDeps([{ articleId: "id-1", sequenceNo: 20, hasLegoFields: true }])
+    );
+    expect(lego.updates[0]!.patch).toEqual({
+      workCenterId: "wc-930",
+      setupTime: 0,
+      runTimePerUnit: 0,
+      timeUnit: "minutes_per_unit",
+      costingOnly: false,
+      unitPrice: 6,
+    });
+
+    const internalMapping = { ...MAPPING, Resurs: "workCenterCode" };
+    const moved = await planRoutingImport(
+      { mapping: internalMapping, rows: [["A-1", "20", "110", "1", "1", "Nej"]], updateExisting: true },
+      legoDeps([{ articleId: "id-1", sequenceNo: 20, hasLegoFields: true }])
+    );
+    expect(moved.updates[0]!.patch).toMatchObject({
+      workCenterId: "wc-110",
+      subcontractSupplierId: null,
+      setupPrice: null,
+      unitPrice: null,
+      showNetWeight: false,
+    });
+
+    const plain = await planRoutingImport(
+      { mapping: internalMapping, rows: [["A-1", "20", "110", "1", "1", "Nej"]], updateExisting: true },
+      legoDeps([{ articleId: "id-1", sequenceNo: 20 }])
+    );
+    expect(plain.updates[0]!.patch).not.toHaveProperty("subcontractSupplierId");
+  });
+});
+
 // --- Integration: repository and service against a real Postgres ---
 
 const repo = createImportRepository(db);
 const importService = createImportService(repo);
 
-const TRUNCATE = sql`TRUNCATE mo_operations, manufacturing_orders, routing_operations, bom_components, articles, work_centers CASCADE`;
+const TRUNCATE = sql`TRUNCATE mo_operations, manufacturing_orders, routing_operations, bom_components, articles, work_centers, suppliers CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
@@ -731,7 +911,7 @@ describe("routing import — repository", () => {
   it("maps work centres by their three-digit code", async () => {
     const id = await seedWorkCenter("110");
     const map = await repo.workCentersByCode();
-    expect(map.get("110")).toEqual({ id, code: "110", type: "machine" });
+    expect(map.get("110")).toEqual({ id, code: "110", type: "machine", supplierId: null });
   });
 
   it("maps existing operations per article, carrying the Kalkyl flag", async () => {
@@ -951,5 +1131,100 @@ describe("import service — routing entity", () => {
       })
     ).rejects.toBeInstanceOf(ImportValidationError);
     expect(await db.select().from(routingOperations)).toHaveLength(0);
+  });
+
+  it("commits a lego operation list: the supplier, prices and the resource's supplier as default", async () => {
+    const articleId = await seedArticle("A-1");
+    const [defaultSupplier, fileSupplier] = await db
+      .insert(suppliers)
+      .values([
+        { supplierNumber: "L-1", name: "Lackeri Ett" },
+        { supplierNumber: "L-2", name: "Lackeri Två" },
+      ])
+      .returning({ id: suppliers.id });
+    await db
+      .insert(workCenters)
+      .values({ code: "930", name: "Lackering", type: "subcontract", supplierId: defaultSupplier!.id });
+
+    const result = await importService.commit("routing", {
+      mapping: LEGO_MAPPING,
+      rows: [
+        ["A-1", "20", "930", "L-2", "150", "4,5"],
+        ["A-1", "30", "930", "", "", ""],
+      ],
+    });
+    expect(result.created).toBe(2);
+
+    const rows = await db
+      .select()
+      .from(routingOperations)
+      .where(sql`${routingOperations.articleId} = ${articleId}`)
+      .orderBy(routingOperations.sequenceNo);
+    expect(rows[0]).toMatchObject({
+      sequenceNo: 20,
+      setupTime: "0.00",
+      runTimePerUnit: "0.0000",
+      subcontractSupplierId: fileSupplier!.id,
+      setupPrice: "150.00",
+      unitPrice: "4.5000",
+    });
+    expect(rows[1]).toMatchObject({ sequenceNo: 30, subcontractSupplierId: defaultSupplier!.id, setupPrice: null, unitPrice: null });
+
+    // routingOperationsByArticle reports the lego fields for the update path.
+    const map = await repo.routingOperationsByArticle([articleId]);
+    expect(map.get(articleId)!.get(20)!.hasLegoFields).toBe(true);
+  });
+});
+
+// --- Cykeltid (importfält 2026-10): the productive time, its own field ---
+describe("planRoutingImport — Cykeltid", () => {
+  const CYCLE_MAPPING = { ...MAPPING, Enhet: "timeUnit", Cykeltid: "cycleTimePerUnit" };
+
+  it("maps Cykeltid to its own field, not to the Stycktid", () => {
+    const suggested = suggestRoutingMapping(["Artikelnummer", "Op.", "Produktionsgrupp", "Ställtid", "Stycktid", "Cykeltid"]);
+    expect(suggested["Stycktid"]).toBe("runTimePerUnit");
+    expect(suggested["Cykeltid"]).toBe("cycleTimePerUnit");
+  });
+
+  it("converts it with the file's time unit, 0 meaning none", async () => {
+    const plan = await planRoutingImport(
+      {
+        mapping: CYCLE_MAPPING,
+        rows: [
+          ["A-1", "10", "110", "0,2", "60", "Nej", "antal/timme", "120"],
+          ["A-1", "20", "110", "5", "2", "Nej", "minuter", "1,5"],
+          ["A-1", "30", "110", "5", "2", "Nej", "", "0"],
+          ["A-1", "40", "110", "5", "2", "Nej", "", "-1"],
+        ],
+      },
+      fakeDeps([article("A-1", "id-1")])
+    );
+    expect(plan.creates[0]).toMatchObject({ sequenceNo: 10, runTimePerUnit: 1, cycleTimePerUnit: 0.5 });
+    expect(plan.creates[1]).toMatchObject({ sequenceNo: 20, cycleTimePerUnit: 1.5 });
+    expect(plan.creates[2]).not.toHaveProperty("cycleTimePerUnit");
+    expect(plan.rows[3]!.errors).toEqual(["Cykeltiden kan inte vara negativ"]);
+  });
+
+  it("patches it on update only from a filled cell, 0 clearing it", async () => {
+    const deps = fakeDeps([article("A-1", "id-1")], ["110"], [
+      { articleId: "id-1", sequenceNo: 10 },
+      { articleId: "id-1", sequenceNo: 20 },
+      { articleId: "id-1", sequenceNo: 30 },
+    ]);
+    const plan = await planRoutingImport(
+      {
+        mapping: CYCLE_MAPPING,
+        rows: [
+          ["A-1", "10", "110", "1", "1", "Nej", "", "2"],
+          ["A-1", "20", "110", "1", "1", "Nej", "", "0"],
+          ["A-1", "30", "110", "1", "1", "Nej", "", ""],
+        ],
+        updateExisting: true,
+      },
+      deps
+    );
+    expect(plan.updates[0]!.patch.cycleTimePerUnit).toBe(2);
+    expect(plan.updates[1]!.patch.cycleTimePerUnit).toBeNull();
+    expect(plan.updates[2]!.patch).not.toHaveProperty("cycleTimePerUnit");
   });
 });

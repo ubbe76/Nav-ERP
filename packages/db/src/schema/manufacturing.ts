@@ -144,6 +144,11 @@ export const routingOperations = pgTable(
       .references(() => workCenters.id, { onDelete: "restrict" }),
     setupTime: numeric("setup_time", { precision: 10, scale: 2 }).notNull(),
     runTimePerUnit: numeric("run_time_per_unit", { precision: 10, scale: 4 }).notNull(),
+    // "Cykeltid" — the operation's PRODUCTIVE time per unit (Monitor's
+    // Operationslista), minutes per unit like runTimePerUnit and shown in the
+    // same timeUnit. Informational: neither the calculation nor the load view
+    // reads it yet. Null = not given.
+    cycleTimePerUnit: numeric("cycle_time_per_unit", { precision: 10, scale: 4 }),
     // Display preference for runTimePerUnit — see operationTimeUnitEnum above.
     timeUnit: operationTimeUnitEnum("time_unit").notNull().default("minutes_per_unit"),
     // "Kalkyl" — the row exists only to carry time into the pre-calculation

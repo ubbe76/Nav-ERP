@@ -274,6 +274,29 @@ export const customerPrices = pgTable(
   ]
 );
 
+// Kundens artikelnummer — what a customer calls one of our articles
+// (Monitor's Kundkopplingar, "Kundens art.nr"). One per customer and article,
+// edited on the customer card and printed as "Ert art.nr" on the sales
+// documents. Read live at print time, like the article's own fields.
+export const customerArticleNumbers = pgTable(
+  "customer_article_numbers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    customerArticleNumber: varchar("customer_article_number", { length: 50 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("customer_article_numbers_customer_article_unique").on(table.customerId, table.articleId),
+    index("idx_customer_article_numbers_article").on(table.articleId),
+  ]
+);
+
 export const salesOrders = pgTable("sales_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   // KO-5001, KO-5002, ... (Kundorder) — issued by number-series.ts's

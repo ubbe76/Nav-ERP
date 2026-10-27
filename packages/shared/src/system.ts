@@ -39,6 +39,21 @@ export const updateCompanyInfoSchema = z
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateCompanyInfoInput = z.infer<typeof updateCompanyInfoSchema>;
 
+// The documents the article's "Extra benämning" can be printed on — the
+// setting extraDescriptionDocuments lists the chosen ones (none by default).
+export const EXTRA_DESCRIPTION_DOCUMENTS = [
+  "inquiry",
+  "purchaseOrder",
+  "quote",
+  "orderConfirmation",
+  "pickList",
+  "deliveryNote",
+  "invoice",
+  "manufacturingOrder",
+] as const;
+export type ExtraDescriptionDocument = (typeof EXTRA_DESCRIPTION_DOCUMENTS)[number];
+export const extraDescriptionDocumentSchema = z.enum(EXTRA_DESCRIPTION_DOCUMENTS);
+
 // System-wide behavior toggles, stored as key–value rows in system_settings.
 // atfMinutesPerWeek is the company-wide ATF accrual (0 = ATF off); employees
 // can override it individually on the personalkort.
@@ -54,6 +69,9 @@ const systemSettingsFieldsSchema = z.object({
     // ("Inköpsorder IO2500123 / 2") on offert/orderbekräftelse/inköpsorder.
     // Defaults ON when the key was never set.
     showOrderRevisionOnDocuments: z.boolean().optional(),
+    // The documents that print the article's Extra benämning under the name
+    // (the whole list; [] = none).
+    extraDescriptionDocuments: z.array(extraDescriptionDocumentSchema).max(EXTRA_DESCRIPTION_DOCUMENTS.length).optional(),
     atfMinutesPerWeek: z.number().int().min(0).max(600).optional(),
     // Daily overtime grace period (minutes) — worked time past schedule must
     // exceed this before it counts as overtime on a scheduled day. 0 = every
