@@ -53,6 +53,10 @@ Spec `docs/superpowers/specs/2026-10-22-importmallar-design.md`.
 
 - **Cykeltid** (0159) är eget fält `cycleTimePerUnit` — aliaset `cykeltid` pekade tidigare på stycktiden. Omräknas med filens tidsenhet (`convertCycleTime`, ren), 0 ⇒ null, ignoreras på legoresurs, i `updateExisting` bara från ifylld cell.
 
+## Kundens leveransadresser
+
+- Läser både Leveransadress-filen och **Alternativa leveransadresser** (där två kolumner heter "Namn": den första är kundens och lämnas, upprepningen mappas till `label` via sekundäraliaset). Kolumnen **Förvald** (`isDefault`) avgör per rad när den är mappad, annars gäller `setAsDefault`; en kund med förvald adress får aldrig en till (varning).
+
 ## Strukturimporten
 
 - **Pos.** (`position`, 0158, varchar 20) och **`updateExisting`** (*Uppdatera befintliga strukturrader*, utesluter `skipExisting` ⇒ 400): befintlig (förälder, komponent) skrivs om med antal + enhet alltid, operationslänken bara när kolumnen är mappad (tom ⇒ avlänkad), Pos. bara från ifylld cell. `allBomEdges` bär radens `id`; uppdaterade rader lägger inga kanter i cykelkontrollen.

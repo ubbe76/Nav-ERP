@@ -466,3 +466,45 @@ describe("import service — customerDeliveryAddresses entity", () => {
     expect(row!.isDefault).toBe(true);
   });
 });
+
+// The alternative-addresses export: "Namn" twice (customer, then the
+// address's own name) and a per-row Förvald.
+describe("customer delivery addresses — Alternativa leveransadresser", () => {
+  const HEADERS = ["Kund", "Namn", "Förvald", "Aktiv", "Namn (2)", "Adressrad 1", "Adressrad 2", "Postnummer", "Stad", "Leveransvillkor"];
+
+  it("maps the repeated Namn as the address's name and Förvald per row", () => {
+    expect(suggestCustomerDeliveryAddressMapping(HEADERS)).toEqual({
+      Kund: "customerNumber",
+      Namn: null,
+      "Förvald": "isDefault",
+      Aktiv: null,
+      "Namn (2)": "label",
+      "Adressrad 1": "address",
+      "Adressrad 2": "address2",
+      Postnummer: "postalCode",
+      Stad: "city",
+      Leveransvillkor: null,
+    });
+  });
+
+  it("lets the Förvald column decide the default instead of the wizard option", async () => {
+    const mapping = suggestCustomerDeliveryAddressMapping(HEADERS);
+    const plan = await planCustomerDeliveryAddressImport(
+      {
+        mapping,
+        rows: [
+          ["1001", "Kund AB", "0", "1", "Lager Syd", "Ängsvägen 1", "", "123 45", "Ort", "1"],
+          ["1001", "Kund AB", "1", "1", "Lager Nord", "Björkvägen 2", "", "123 46", "Ort", "1"],
+          ["1001", "Kund AB", "kanske", "1", "Lager Väst", "Tallvägen 3", "", "123 47", "Ort", "1"],
+        ],
+        setAsDefault: true,
+      },
+      fakeDeps({ "1001": customer() })
+    );
+    expect(plan.creates.map((c) => [c.label, c.isDefault])).toEqual([
+      ["Lager Syd", false],
+      ["Lager Nord", true],
+    ]);
+    expect(plan.rows[2]!.errors).toEqual(["Ogiltigt värde för 'Förvald': \"kanske\" (Ja/Nej)"]);
+  });
+});

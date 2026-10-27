@@ -229,6 +229,7 @@ export const CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "postalCode", label: "Postnummer" },
   { field: "city", label: "Stad" },
   { field: "country", label: "Land" },
+  { field: "isDefault", label: "Förvald" },
 ];
 
 // Mirrors ROUTING_IMPORT_FIELDS in

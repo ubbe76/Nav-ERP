@@ -25,6 +25,9 @@ export const CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS = [
   "postalCode",
   "city",
   "country",
+  // Förvald — per row; when mapped it decides instead of the wizard's
+  // "Sätt som förvald leveransadress".
+  "isDefault",
 ] as const;
 export type CustomerDeliveryAddressImportField = (typeof CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS)[number];
 
@@ -47,6 +50,7 @@ const FIELD_LABELS: Record<CustomerDeliveryAddressImportField, string> = {
   postalCode: "Postnummer",
   city: "Stad",
   country: "Land",
+  isDefault: "Förvald",
 };
 
 // Normalized header -> target field (see import.service.ts's normalizeHeader:
@@ -75,10 +79,27 @@ export const CUSTOMER_DELIVERY_ADDRESS_HEADER_ALIASES: Record<string, string> = 
   leveransadresspostnummer: "postalCode",
   leveransadressstad: "city",
   leveransadressland: "country",
+  forvald: "isDefault",
+};
+
+// Second chance (see suggestMapping): the alternative-addresses export heads
+// BOTH the customer's name and the address's own name "Namn" — the first is
+// the customer's (left unmapped), the repeat is the address's.
+const CUSTOMER_DELIVERY_ADDRESS_SECONDARY_ALIASES: Record<string, string> = {
+  namn: "label",
 };
 
 export function suggestCustomerDeliveryAddressMapping(headers: string[]): Record<string, string | null> {
-  return suggestMapping(headers, CUSTOMER_DELIVERY_ADDRESS_HEADER_ALIASES);
+  return suggestMapping(headers, CUSTOMER_DELIVERY_ADDRESS_HEADER_ALIASES, CUSTOMER_DELIVERY_ADDRESS_SECONDARY_ALIASES);
+}
+
+// Ja/Nej/1/0/X/true/false — the same vocabulary as the contact import's
+// Förvald column.
+function parseBoolCell(cell: string): boolean | null {
+  const value = cell.trim().toLowerCase();
+  if (value === "ja" || value === "1" || value === "true" || value === "x") return true;
+  if (value === "nej" || value === "0" || value === "false") return false;
+  return null;
 }
 
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
@@ -160,8 +181,10 @@ export async function planCustomerDeliveryAddressImport(
     ["customerNumber"]
   );
   // "Sätt som förvald leveransadress" — top-level flag, default true when
-  // omitted (see importCommitSchema in packages/shared/src/import.ts).
+  // omitted (see importCommitSchema in packages/shared/src/import.ts). A
+  // mapped Förvald column decides per row instead.
   const setAsDefault = input.setAsDefault ?? true;
+  const defaultMapped = columns.includes("isDefault");
 
   // One record per CSV row: target field -> trimmed cell (mapped columns only).
   const records = input.rows.map((row) => {
@@ -257,6 +280,14 @@ export async function planCustomerDeliveryAddressImport(
       }
     }
 
+    const defaultCell = record["isDefault"] ?? "";
+    let rowDefault: boolean | null = null;
+    if (defaultCell !== "") {
+      rowDefault = parseBoolCell(defaultCell);
+      if (rowDefault === null) errors.push(`Ogiltigt värde för 'Förvald': "${defaultCell}" (Ja/Nej)`);
+      else values["isDefault"] = rowDefault;
+    }
+
     if (errors.length > 0) {
       rows.push({ rowNumber, action: "create", errors, warnings, values });
       return;
@@ -297,7 +328,8 @@ export async function planCustomerDeliveryAddressImport(
     claimedKeysByCustomer.set(customerId, claimedKeys);
 
     let isDefault = false;
-    if (setAsDefault) {
+    const wantsDefault = defaultMapped ? rowDefault === true : setAsDefault;
+    if (wantsDefault) {
       if (hasDefault.has(customerId)) {
         warnings.push("Kunden har redan en förvald leveransadress");
       } else {

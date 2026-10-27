@@ -1072,6 +1072,15 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description: "Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Tom cell ger SE.",
       example: "SE",
     },
+    {
+      field: "isDefault",
+      label: "Förvald",
+      required: false,
+      header: "Förvald",
+      text: true,
+      description: `${YES_NO_X} — Ja gör adressen till kundens förvalda leveransadress. Är kolumnen med avgör den per rad i stället för kryssrutan Sätt som förvald leveransadress; har kunden redan en förvald adress blir det en varning och adressen läggs till utan att vara förvald.`,
+      example: "Nej",
+    },
   ],
 
   suppliers: [

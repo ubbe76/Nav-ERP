@@ -195,6 +195,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Postnummer** | Nej | Max 20 tecken. | 123 42 |
 | **Stad** | Nej | Max 100 tecken. | Exempelby |
 | **Land** | Nej | Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Tom cell ger SE. | SE |
+| **Förvald** | Nej | Ja/Nej, 1/0, X eller true/false — Ja gör adressen till kundens förvalda leveransadress. Är kolumnen med avgör den per rad i stället för kryssrutan Sätt som förvald leveransadress; har kunden redan en förvald adress blir det en varning och adressen läggs till utan att vara förvald. | Nej |
 
 ## Leverantörer
 

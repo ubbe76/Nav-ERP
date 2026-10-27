@@ -66,7 +66,7 @@ const TABS: TabConfig[] = [
         key: "setAsDefault",
         label: "Sätt som förvald leveransadress",
         hint:
-          "En kund som ännu inte har någon förvald leveransadress får sin första importerade adress som förvald. En kund som redan har en förvald behåller den — importen sätter aldrig en ny förvald adress åt en kund som redan har en.",
+          "En kund som ännu inte har någon förvald leveransadress får sin första importerade adress som förvald. En kund som redan har en förvald behåller den — importen sätter aldrig en ny förvald adress åt en kund som redan har en. Är kolumnen Förvald mappad avgör den per rad i stället.",
         defaultChecked: true,
       },
     ],

@@ -138,12 +138,13 @@ Läser exportens **Referenser**-fil. Mappningsbara fält (filens rubrik inom cit
 
 ### Fliken Leveransadresser
 
-Läser exportens **Leveransadress**-fil. Mappningsbara fält (filens rubriker "Leveransadress – …" känns igen automatiskt): Kundnummer ("Kund"), Namn ("Leveransadress – Namn" — etiketten på adressen; saknas den blir den "Leveransadress"), Adressrad 1–3 (slås ihop som på kundfliken), Postnummer, Stad, Land.
+Läser exportens **Leveransadress**-fil och filen **Alternativa leveransadresser**. Mappningsbara fält (filens rubriker "Leveransadress – …" känns igen automatiskt): Kundnummer ("Kund"), Namn ("Leveransadress – Namn" — etiketten på adressen; saknas den blir den "Leveransadress"), Adressrad 1–3 (slås ihop som på kundfliken), Postnummer, Stad, Land och **Förvald**. I filen Alternativa leveransadresser heter två kolumner "Namn": den första är kundens namn och lämnas omappad, den andra (**Namn (2)** i kolumnväljaren) är adressens namn. Leveransvillkor, Leveranssätt, Kundgrupp och momsregistreringsnumret per adress har ingen motsvarighet och importeras inte.
 
 - Kunden måste redan finnas i registret.
 - En rad utan adress (exporten skriver en rad per kund även när ingen leveransadress är registrerad) hoppas över, liksom en adress som är identisk med kundens egen adress (postnummer, ort och land normaliserade).
 - En adress som redan finns registrerad på kunden hoppas också över.
 - Kryssrutan **Sätt som förvald leveransadress** gör att en kund som ännu saknar en förvald adress får sin första importerade adress som förvald — aldrig en till om kunden redan har en förvald sedan tidigare.
+- Är kolumnen **Förvald** mappad avgör den per rad i stället för kryssrutan (Ja/Nej, 1/0, X eller true/false). Har kunden redan en förvald adress läggs raden till utan att vara förvald, med en varning.
 
 ## Prislistor
 
