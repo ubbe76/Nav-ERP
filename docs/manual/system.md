@@ -496,6 +496,14 @@ Använd den för att ta en kopia innan du gör något riskabelt, eller för att 
 
 Utöver knappen körs en **automatisk säkerhetskopia varje natt** på servern. Den ligger på samma disk som databasen, så bokföringslagens krav på att räkenskapsinformationen bevaras betryggande i sju år uppfylls av den **krypterade externa säkerhetskopian** med årsarkiv — den sätts upp på servern, se [Krypterad extern backup](/hjalp/drift-utveckling#krypterad-extern-backup-bokforingslagen). Att **återställa** en kopia (eller flytta systemet till en ny server) görs på servern enligt drift-guiden — se [Drift & utveckling](/hjalp/drift-utveckling).
 
+### Lagringsutrymme
+
+Överst på sidan visar tabellen **Lagringsutrymme** hur mycket de uppladdade filerna tar, per slag: **Artikelfiler och ritningar**, **Filer på operationer**, **Bilder och filer på avvikelser**, **Underlag på leverantörsfakturor**, **Fakturainkorgen**, **Underlag på verifikat**, **Arkiverade kundfakturor**, **Skickade e-fakturor**, **Fraktsedlar och etiketter**, **Bankfiler** och **Företagslogotyp** — med **Antal** och **Storlek** och raden **Summa filer**. Slag utan filer visas inte. Under tabellen står hur stor hela databasen är, ungefär så stor som en säkerhetskopia blir innan den komprimeras.
+
+Alla filer ligger i databasen, inte som lösa filer på serverns disk. Det håller ihop filen med posten den hör till, en enda säkerhetskopia räcker och bokföringens arkiverade fakturor och låsta underlag kan skyddas mot ändring. Databasen klarar tiotals gigabyte filer utan problem; det som växer är säkerhetskopiorna, som tar med alla filer varje gång. Tar filerna över 50 GB visas en påminnelse om det — då kan det vara värt att flytta artikelfilerna till lagring utanför databasen. PDF-filer och bilder är redan komprimerade, så säkerhetskopian krymper inte mycket av komprimeringen. Tänk också på att **Kopiera från befintlig artikel** med delen **Ritningar och filer** lägger en egen kopia av varje fil på den nya artikeln.
+
+En enskild fil hämtas ut där den laddades upp, t.ex. på artikelkortets flik **Filer**.
+
 ## Händelselogg
 
 **System → Händelselogg** (endast administratörer) listar statusövergångar och radändringar i hela systemet — vem gjorde vad och när. Varje rad visar tid, användare, typ (t.ex. Kundorder, Inköpsorder, Tillverkningsorder, Faktura, Leverantörsfaktura, Verifikat, Användare, Inställningar), id (dokumentets nummer, t.ex. KO2500123 eller LF2500045), händelse (t.ex. Bekräftad, Ändrad, Borttagen, Bokförd) och en kort detalj — en radändring visas som **fält: gammalt värde → nytt värde**.

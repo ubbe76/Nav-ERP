@@ -117,6 +117,10 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
     return reply.send(stream);
   });
 
+  // Lagringsutrymme: database size and the stored files per kind (all
+  // files live in bytea columns). Admin, like the backup next to it.
+  app.get("/storage", { preHandler: requireRole("admin") }, async () => service.storageUsage());
+
   // --- Company carrier accounts (Företagsinformation → Speditörer) ---
 
   app.get("/company-carriers", { preHandler: requireRole("admin") }, async () => service.listCompanyCarriers());

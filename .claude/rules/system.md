@@ -36,3 +36,7 @@ paths:
 ## Extern backup
 
 - `scripts/offsite-backup.sh` (gpg AES-256 → rclone till `REMOTES` i `~/.config/nav-erp-backup/config`; `daglig/` `DAILY_DAYS`, `manad/` `MONTHLY_YEARS`, `arkiv/ÅÅÅÅ/` raderas aldrig och får SIE 4 via `scripts/lib/export-sie.sh`, som signerar en 5-minuterstoken med `.env`:s `JWT_SECRET`), `scripts/offsite-restore.sh` (lista/hämta/verifiera) och `scripts/offsite-backup-setup.sh` (installation från grunden, behåller befintlig lösenfras). Kompletterar — ersätter inte — den lokala `scripts/backup-db.sh`.
+
+## Lagringsutrymme
+
+- Alla uppladdade/arkiverade filer ligger i bytea-kolumner. `GET /storage` (admin, sektionen överst på `/system/sakerhetskopiering`) summerar dem per slag via `STORED_FILE_KINDS` i lövet `system/repository/storage.ts` (`octet_length` läser längden ur TOAST-pekaren, filinnehållet hämtas aldrig) plus `pg_database_size`. **En ny bytea-kolumn ska in i listan** — `system-storage.test.ts` jämför den mot `information_schema` och faller annars. Webben påminner när filerna passerar 50 GB (`FILES_GUIDELINE_BYTES` i `StorageSection.tsx`, manualens Lagringsutrymme).
