@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.5.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.6.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -550,7 +550,11 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   per leverantör, en huvudleverantör) samt läs-loggar för inleveranser,
   inköpspriser och leverantörsfakturor; artikelregistret kan **CSV-importeras**
   (admin, egen guide med kolumnmappning, förhandsgranskning
-  och atomiskt genomförande — samma flöde som leverantörs- och kundimporten)
+  och atomiskt genomförande — samma flöde som leverantörs- och kundimporten);
+  artikeln har även **extra benämning** (flerradig, utskrivbar på valda
+  dokument), **säkerhetslager** för behovsberäkningen, **Pos.** på
+  strukturraden och **cykeltid** och **transportkostnad** (lego) på
+  operationen
 - **Inköp** — leverantörer med leverantörskort (flikar Allmänt /
   Villkor & frakt / Kontakter: adress med postnummer/postort,
   organisationsnummer, VAT-nummer, leverans-/betalningsvillkor, speditör
@@ -577,7 +581,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
 - **Försäljning** — kunder med kundkort (samma flikupplägg som
   leverantörskortet plus fliken **Adresser**: besöksadress på Allmänt,
   fakturaadress med **e-post för faktura**, och flera valbara
-  **leveransadresser** med förvaldsmarkering), **CSV-import av kunder** (admin, samma guide som leverantörs- och artikelimporten),
+  **leveransadresser** med förvaldsmarkering) och **kundens artikelnummer**
+  (utskrivet som "Ert art.nr" på dokumenten), **CSV-import av kunder** (admin, samma guide som leverantörs- och artikelimporten),
   offert/order med fullt
   statusflöde (offert → bekräftad → tillverkning → levererad →
   fakturerad); ordern bär **kundens ordernummer**, **referens** och vald
@@ -593,7 +598,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   QR-kod, eget antal per kolli) och möjlighet att **ångra en utleverans**
   per leveransrad så länge den inte är fakturerad; ny offert eller kundorder (skapas
   direkt som bekräftad) från kundkortet eller listan; offerter med
-  **giltighetstid** som kan markeras **Förlorad** med förlustorsak; kundfakturor med
+  **giltighetstid** som kan markeras **Förlorad** med förlustorsak; kundpriser med
+  **ställpris** som läggs på ordern som en egen ställkostnadsrad; kundfakturor med
   prislistor/kundpriser, och **utfärdade fakturor och påminnelser
   arkiveras som PDF** exakt som de skickades; **e-faktura via Peppol**
   (Peppol BIS Billing 3, faktura och kreditfaktura till svenska kunder,
