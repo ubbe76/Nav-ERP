@@ -502,7 +502,14 @@ Utöver knappen körs en **automatisk säkerhetskopia varje natt** på servern. 
 
 Alla filer ligger i databasen, inte som lösa filer på serverns disk. Det håller ihop filen med posten den hör till, en enda säkerhetskopia räcker och bokföringens arkiverade fakturor och låsta underlag kan skyddas mot ändring. Databasen klarar tiotals gigabyte filer utan problem; det som växer är säkerhetskopiorna, som tar med alla filer varje gång. Tar filerna över 50 GB visas en påminnelse om det — då kan det vara värt att flytta artikelfilerna till lagring utanför databasen. PDF-filer och bilder är redan komprimerade, så säkerhetskopian krymper inte mycket av komprimeringen. Tänk också på att **Kopiera från befintlig artikel** med delen **Ritningar och filer** lägger en egen kopia av varje fil på den nya artikeln.
 
-En enskild fil hämtas ut där den laddades upp, t.ex. på artikelkortets flik **Filer**.
+En enskild fil hämtas ut där den laddades upp, t.ex. på artikelkortets flik **Filer**. Vill du ha ut alla filer som vanliga filer laddar knappen **Exportera filer** under tabellen ner dem som en zip-fil, med en mapp per slag och därunder en mapp per post:
+
+- **Artikelfiler**/*artikelnummer* och **Operationer**/*artikelnummer*/**Op** *nummer*
+- **Avvikelser**/*AV-nummer*, **Leverantörsfakturor**/*LF-nummer*, **Fakturainkorgen**/*inkorgsnummer*
+- **Verifikat**/*serie-år-nummer* (t.ex. `A-2026-17`), **Kundfakturor**/*fakturanummer*, **E-fakturor**/*fakturanummer*
+- **Fraktsedlar**/*sändningsnummer*, **Bankfiler**/**Utgående** eller **Inkommande**, **Logotyp**
+
+Filerna behåller sina namn; två filer med samma namn i samma mapp får ` (2)`, ` (3)` … efter namnet, och tecken som inte får finnas i filnamn (t.ex. `/` i ett artikelnummer) blir `_`. Exporten ändrar ingenting i systemet — filerna ligger kvar. Zip-filen byggs medan den laddas ner, så stora mängder filer går bra, och den kan öppnas i Windows, macOS och Linux även när den blir större än 4 GB.
 
 ## Händelselogg
 

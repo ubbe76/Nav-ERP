@@ -4,6 +4,10 @@ import { db } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { readStorageUsage, STORED_FILE_KINDS } from "../src/modules/system/repository/storage.js";
+import { FILE_EXPORT_KINDS } from "../src/modules/system/repository/file-export.js";
+import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
+import { createSystemService } from "../src/modules/system/service/system.service.js";
+import { readStoredZipEntries } from "../src/modules/import/service/xlsx-writer.js";
 
 // Lagringsutrymme: the file sizes per kind, read without fetching the bytes,
 // and a guard that every bytea column in the schema is counted.
@@ -47,4 +51,26 @@ describe("readStorageUsage", () => {
     const listed = STORED_FILE_KINDS.map((k) => `${getTableName(k.table)}.${k.column.name}`).sort();
     expect(rows.map((r) => `${r.table_name}.${r.column_name}`)).toEqual(listed);
   });
+
+  it("exports the same kinds of files it counts", () => {
+    expect(FILE_EXPORT_KINDS.map((k) => k.key)).toEqual(STORED_FILE_KINDS.map((k) => k.key));
+  });
 });
+
+describe("exportFiles", () => {
+  it("streams every stored file into a zip under its kind and article number, numbering repeated names", async () => {
+    const article = await articleService.createArticle({ articleNumber: "EXP-1/A", name: "Exporterad", type: "purchased" });
+    await articleService.addFile(article.id, { filename: "ritning.pdf", contentType: "application/pdf", data: Buffer.from("ett") });
+    await articleService.addFile(article.id, { filename: "ritning.pdf", contentType: "application/pdf", data: Buffer.from("två") });
+
+    const { filename, stream } = createSystemService(createSystemRepository(db)).exportFiles(new Date("2026-10-27T08:05:00Z"));
+    expect(filename).toBe("nav-filer-2026-10-27_0805.zip");
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    const entries = readStoredZipEntries(Buffer.concat(chunks));
+    // The slash in the article number cannot open a sub-folder.
+    expect(entries.get("Artikelfiler/EXP-1_A/ritning.pdf")?.toString()).toBe("ett");
+    expect(entries.get("Artikelfiler/EXP-1_A/ritning (2).pdf")?.toString()).toBe("två");
+  });
+});
+

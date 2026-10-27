@@ -9,6 +9,7 @@ import type {
 import { DEFAULT_THEME_KEY } from "../service/theme-settings.js";
 import { lockThemeForSetting } from "./themes.repository.js";
 import { readStorageUsage } from "./storage.js";
+import { exportStoredFiles } from "./file-export.js";
 
 // Never selects `logo` (bytea) as part of a normal row — that would put
 // binary data in a JSON response. Callers that need the actual bytes use
@@ -39,6 +40,11 @@ export function createSystemRepository(db: Db) {
   return {
     async storageUsage() {
       return readStorageUsage(db);
+    },
+
+    // Exportera filer: every stored file with its folder, bytes read in batches.
+    storedFiles() {
+      return exportStoredFiles(db);
     },
 
     // Singleton table — exactly one row, seeded by the migration.

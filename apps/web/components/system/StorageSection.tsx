@@ -1,4 +1,6 @@
+import { API_URL } from "../../lib/api";
 import type { StorageUsage } from "../../lib/types";
+import buttonStyles from "../ui/Button.module.css";
 import { Card } from "../ui/Card";
 import { FormHint, FormStack } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
@@ -47,6 +49,21 @@ export function StorageSection({ usage }: { usage: StorageUsage }) {
           Databasen tar totalt <strong>{formatBytes(usage.databaseBytes)}</strong> — ungefär så stor blir en
           säkerhetskopia innan komprimering. Filerna ligger i databasen och följer med i varje säkerhetskopia.
         </p>
+        {usage.filesBytes > 0 && (
+          <>
+            <div>
+              {/* Plain <a download> like the backup: the API streams the zip and
+                  its Content-Disposition names the file. */}
+              <a className={`${buttonStyles.button} ${buttonStyles.ghost}`} href={`${API_URL}/api/v1/storage/export`} download>
+                Exportera filer
+              </a>
+            </div>
+            <FormHint>
+              Laddar ner alla filer som en zip-fil med en mapp per slag, t.ex. Artikelfiler/1001/ritning.pdf
+              eller Verifikat/A-2026-17/kvitto.pdf. Filerna ligger kvar i systemet.
+            </FormHint>
+          </>
+        )}
         {usage.filesBytes >= FILES_GUIDELINE_BYTES && (
           <FormHint>
             Filerna tar över 50 GB. Säkerhetskopiorna blir stora och tar lång tid att återställa — se
