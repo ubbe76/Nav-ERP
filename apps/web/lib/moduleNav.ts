@@ -797,7 +797,7 @@ export const SYSTEM_SECTIONS: ModuleNavSection[] = [
       {
         href: "/system/sakerhetskopiering",
         title: "Säkerhetskopiering",
-        description: "Ladda ner en säkerhetskopia av databasen och se när den senast togs.",
+        description: "Se hur mycket utrymme de uppladdade filerna tar och ladda ner en säkerhetskopia av databasen.",
       },
       {
         href: "/system/handelselogg",

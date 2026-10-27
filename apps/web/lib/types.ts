@@ -5694,3 +5694,11 @@ export interface BudgetCsvParseResult {
   lines: BudgetGridLine[];
   errors: { row: number; message: string }[];
 }
+
+// Lagringsutrymme (GET /storage, admin): the database size and the stored
+// files per kind — all uploaded files live in the database.
+export interface StorageUsage {
+  databaseBytes: number;
+  filesBytes: number;
+  kinds: { key: string; label: string; count: number; bytes: number }[];
+}

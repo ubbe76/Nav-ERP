@@ -8,6 +8,7 @@ import type {
 } from "@navet/shared";
 import { DEFAULT_THEME_KEY } from "../service/theme-settings.js";
 import { lockThemeForSetting } from "./themes.repository.js";
+import { readStorageUsage } from "./storage.js";
 
 // Never selects `logo` (bytea) as part of a normal row — that would put
 // binary data in a JSON response. Callers that need the actual bytes use
@@ -36,6 +37,10 @@ const companyInfoPublicColumns = {
 
 export function createSystemRepository(db: Db) {
   return {
+    async storageUsage() {
+      return readStorageUsage(db);
+    },
+
     // Singleton table — exactly one row, seeded by the migration.
     async getCompanyInfo() {
       const [row] = await db.select(companyInfoPublicColumns).from(companyInfo);

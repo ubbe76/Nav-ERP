@@ -416,6 +416,11 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       return createDatabaseBackup(process.env.DATABASE_URL ?? DATABASE_URL_FALLBACK, new Date());
     },
 
+    // Lagringsutrymme: the database size and the stored files per kind.
+    async storageUsage() {
+      return repo.storageUsage();
+    },
+
     // --- Company carrier accounts (Företagsinformation → Speditörer) ---
 
     async listCompanyCarriers() {
