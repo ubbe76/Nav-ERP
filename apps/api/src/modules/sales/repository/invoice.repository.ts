@@ -1030,6 +1030,9 @@ export function createInvoiceRepository(db: Db) {
 
     async listRows(invoiceId: string) {
       const rowUnits = alias(units, "row_units");
+      // Ställkostnad: the order row the charge belongs to, and its article.
+      const setupMainRows = alias(salesOrderRows, "setup_main_rows");
+      const setupMainArticles = alias(articles, "setup_main_articles");
       return db
         .select({
           ...getTableColumns(invoiceRows),
@@ -1041,6 +1044,8 @@ export function createInvoiceRepository(db: Db) {
           // Printed with the order number under the row on the invoice PDF —
           // a samlingsfaktura mixes orders, so "Ert ordernummer" is per row.
           customerOrderNumber: salesOrders.customerOrderNumber,
+          // "Ställkostnad för <artikelnummer>" under a setup charge row.
+          setupForArticleNumber: setupMainArticles.articleNumber,
           // The unit the row displays in: the row's own snapshot unit,
           // falling back to the article's base unit — null for a free row
           // (no article to derive a base unit from). Mirrors
@@ -1067,6 +1072,8 @@ export function createInvoiceRepository(db: Db) {
         .leftJoin(rowUnits, eq(rowUnits.id, invoiceRows.unitId))
         .leftJoin(salesOrderRows, eq(salesOrderRows.id, invoiceRows.salesOrderRowId))
         .leftJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
+        .leftJoin(setupMainRows, eq(setupMainRows.id, salesOrderRows.setupForRowId))
+        .leftJoin(setupMainArticles, eq(setupMainArticles.id, setupMainRows.articleId))
         .leftJoin(shipments, eq(shipments.id, invoiceRows.shipmentId))
         .leftJoin(rowCostCenters, eq(rowCostCenters.id, invoiceRows.costCenterId))
         .leftJoin(rowProjects, eq(rowProjects.id, invoiceRows.projectId))

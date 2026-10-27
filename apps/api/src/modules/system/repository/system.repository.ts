@@ -1,5 +1,5 @@
 import { asc, eq, getTableColumns, sql } from "drizzle-orm";
-import { carriers, companyCarriers, companyInfo, numberSeries, systemSettings, type Db } from "@navet/db";
+import { articles, carriers, companyCarriers, companyInfo, numberSeries, systemSettings, type Db } from "@navet/db";
 import type {
   CreateArticleNumberSeriesInput,
   CreateCompanyCarrierInput,
@@ -115,6 +115,12 @@ export function createSystemRepository(db: Db) {
     // trips (one per key, via Promise.all).
     async getAllSettings() {
       return db.select({ key: systemSettings.key, value: systemSettings.value }).from(systemSettings);
+    },
+
+    // Ställkostnadsartikel: the setting must name an article that exists.
+    async articleExists(id: string) {
+      const [row] = await db.select({ id: articles.id }).from(articles).where(eq(articles.id, id));
+      return row !== undefined;
     },
 
     async setSetting(key: string, value: string) {

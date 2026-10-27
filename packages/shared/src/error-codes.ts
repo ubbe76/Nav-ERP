@@ -256,6 +256,7 @@ export const ERROR_CODES = {
   DUPLICATE_PRICE_LIST_ROW: "duplicate-price-list-row",
   DUPLICATE_CUSTOMER_ARTICLE_NUMBER: "duplicate-customer-article-number",
   CUSTOMER_ARTICLE_NUMBER_NOT_FOUND: "customer-article-number-not-found",
+  SETUP_CHARGE_ARTICLE_NOT_FOUND: "setup-charge-article-not-found",
   INVALID_OCR: "invalid-ocr",
   COLLECTIVE_INVOICING_CUSTOMER: "collective-invoicing-customer",
   INVALID_SHIPMENT_INVOICE_ROW: "invalid-shipment-invoice-row",

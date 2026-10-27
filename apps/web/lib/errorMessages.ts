@@ -366,6 +366,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "built-in-number-series": "Den inbyggda nummerserien kan inte byta namn eller tas bort.",
   "order-register-too-large": "Urvalet har fler än 10 000 orderrader — avgränsa med datum, status eller kund/leverantör.",
   "quote-followup-too-large": "Urvalet har fler än 10 000 offerter — korta ned perioden eller välj en kund.",
+  "setup-charge-article-not-found": "Artikeln finns inte — välj en annan ställkostnadsartikel.",
   "quote-loss-reason-invalid": "Förlustorsaken finns inte eller är inaktiv — välj en annan orsak.",
   "unknown-theme": "Temat finns inte längre — välj ett annat tema.",
   "theme-invalid": "Temat innehåller fel eller klarar inte kontrastkravet (4,5:1) och kan inte sparas.",

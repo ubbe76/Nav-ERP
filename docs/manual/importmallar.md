@@ -121,6 +121,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Pris** | Nej | Kundens pris per grundenhet i SEK, decimalkomma eller punkt, aldrig negativt. Sparas med fyra decimaler som kundens artikelpris från antal 1 och ersätter ett tidigare pris på samma artikel. Tom cell lämnar priset orört — en rad med varken pris eller kundens artikelnummer hoppas över. | 1890,00 |
 | **Rabatt (%)** | Nej | Procentavdrag från 0 upp till (men inte med) 100 som bakas in i priset — Pris × (1 − Rabatt/100) — med en varning, eftersom kundpriset lagras som nettopris. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. Tom cell betyder ingen rabatt. | 5 |
 | **Kundens artikelnummer** | Nej | Vad kunden kallar artikeln, max 50 tecken. Sparas på kundkortet och skrivs ut som "Ert art.nr" på offert, orderbekräftelse, plocklista, följesedel och faktura. Ersätter ett tidigare nummer för samma kund och artikel; tom cell lämnar det orört. | KND-4711 |
+| **Ställpris** | Nej | Engångskostnad per orderrad i SEK, decimalkomma eller punkt, aldrig negativ — sparas på kundpriset och läggs som en egen Ställkostnad-rad på nya offert- och orderrader när en ställkostnadsartikel är vald under System → Inställningar. Kräver Pris på raden. 0 betyder inget ställpris; tom cell lämnar det orört. | 400 |
 
 ## Kunder
 

@@ -201,6 +201,9 @@ const systemSettingsFieldsSchema = z.object({
     // Offertens giltighetstid (dagar): the default Giltig t.o.m. of a new
     // quote = today + N; 0 = no validity date.
     quoteValidityDays: z.number().int().min(0).max(365).optional(),
+    // Ställkostnadsartikel: the article a customer price's ställpris is
+    // charged on, as its own row under the article row. Null = off.
+    setupChargeArticleId: z.string().uuid().nullable().optional(),
     // Egna teman: the company's default theme (a built-in id or a custom
     // theme's key — the service checks it exists) and Lås temat för alla
     // användare.

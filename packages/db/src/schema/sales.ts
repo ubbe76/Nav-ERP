@@ -260,9 +260,15 @@ export const customerPrices = pgTable(
     fromQuantity: numeric("from_quantity", { precision: 14, scale: 4 }).notNull().default("1"),
     unitPrice: numeric("unit_price", { precision: 14, scale: 4 }),
     discountPercent: numeric("discount_percent", { precision: 5, scale: 2 }),
+    // Ställpris — a one-off charge per order row, in the rule's own currency
+    // (like unit_price). A new quote/order row on a rule with a ställpris
+    // gets a linked row with the Ställkostnadsartikel (setup_for_row_id
+    // below). Null = none.
+    setupPrice: numeric("setup_price", { precision: 14, scale: 4 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check("customer_prices_setup_price_nonnegative", sql`setup_price IS NULL OR setup_price >= 0`),
     check("customer_prices_target_check", sql`(article_id IS NULL) <> (article_group_id IS NULL)`),
     check("customer_prices_value_check", sql`(unit_price IS NULL) <> (discount_percent IS NULL)`),
     uniqueIndex("uq_customer_prices_article")
@@ -419,6 +425,12 @@ export const salesOrderRows = pgTable(
     // business. Written by sales on create, Ändra konfiguration and every
     // quantity change.
     configurationCost: jsonb("configuration_cost"),
+    // Ställkostnad: this row is the setup charge of the row it points at
+    // (the customer price's ställpris on the Ställkostnadsartikel). Exempt
+    // from the one-article-per-order index below, so several articles can
+    // each carry their own. set null: the charge stays a plain row if its
+    // article row goes (the service removes an undelivered one with it).
+    setupForRowId: uuid("setup_for_row_id").references((): AnyPgColumn => salesOrderRows.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -427,7 +439,7 @@ export const salesOrderRows = pgTable(
     // with different choices.
     uniqueIndex("sales_order_rows_order_article_unique")
       .on(table.salesOrderId, table.articleId)
-      .where(sql`${table.configuration} IS NULL`),
+      .where(sql`${table.configuration} IS NULL AND ${table.setupForRowId} IS NULL`),
   ]
 );
 

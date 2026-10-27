@@ -1238,13 +1238,20 @@ export function createImportRepository(db: Db) {
               fromQuantity: "1",
               unitPrice: String(create.unitPrice),
               discountPercent: null,
+              setupPrice: create.setupPrice != null ? String(create.setupPrice) : null,
             }))
           );
         }
         for (const update of plan.updates) {
           await tx
             .update(customerPrices)
-            .set({ unitPrice: String(update.unitPrice), discountPercent: null })
+            .set({
+              unitPrice: String(update.unitPrice),
+              discountPercent: null,
+              ...(update.setupPrice !== undefined
+                ? { setupPrice: update.setupPrice === null ? null : String(update.setupPrice) }
+                : {}),
+            })
             .where(eq(customerPrices.id, update.id));
         }
         // Kundens artikelnummer, upserted on (customer, article).

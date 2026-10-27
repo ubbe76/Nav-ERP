@@ -619,6 +619,8 @@ export const customerPriceInputSchema = z
     fromQuantity: blankSafe(z.coerce.number().positive()).default(1),
     unitPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).nullable().optional(),
+    // Ställpris — charged as its own Ställkostnad row on new order rows; null/0 = none.
+    setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
   })
   .refine((data) => (data.articleId != null) !== (data.articleGroupId != null), {
     message: "Exactly one of articleId and articleGroupId must be set",
@@ -641,6 +643,8 @@ export const updateCustomerPriceSchema = z
     fromQuantity: blankSafe(z.coerce.number().positive()).optional(),
     unitPrice: blankSafe(z.coerce.number().nonnegative()).optional(),
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
+    // Ställpris; null clears.
+    setupPrice: blankSafe(z.coerce.number().nonnegative()).nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided")
   .refine((data) => !(data.unitPrice !== undefined && data.discountPercent !== undefined), {

@@ -35,6 +35,8 @@ export const CUSTOMER_PRICE_IMPORT_FIELDS = [
   "price",
   "discountPercent",
   "customerArticleNumber",
+  // Ställpris — charged as a Ställkostnad row on new order rows.
+  "setupPrice",
 ] as const;
 export type CustomerPriceImportField = (typeof CUSTOMER_PRICE_IMPORT_FIELDS)[number];
 
@@ -45,8 +47,8 @@ const REQUIRED_FIELDS: CustomerPriceImportField[] = ["articleNumber", "customerN
 // customer_article_numbers.customer_article_number varchar(50).
 const CUSTOMER_ARTICLE_NUMBER_MAX = 50;
 
-// Normalized header -> target field. Namn, Ställpris, Prisdatum, Artikeltyp
-// and Artikelkod have no target and stay unmapped.
+// Normalized header -> target field. Namn, Prisdatum, Artikeltyp and
+// Artikelkod have no target and stay unmapped.
 export const CUSTOMER_PRICE_HEADER_ALIASES: Record<string, string> = {
   artikelnummer: "articleNumber",
   artikelnr: "articleNumber",
@@ -66,6 +68,8 @@ export const CUSTOMER_PRICE_HEADER_ALIASES: Record<string, string> = {
   kundensartnummer: "customerArticleNumber",
   kundensartikelnummer: "customerArticleNumber",
   kundartikelnummer: "customerArticleNumber",
+  stallpris: "setupPrice",
+  stallkostnad: "setupPrice",
 };
 
 export function suggestCustomerPriceMapping(headers: string[]): Record<string, string | null> {
@@ -87,11 +91,15 @@ export interface CustomerPriceCreatePlan {
   customerId: string;
   articleId: string;
   unitPrice: number;
+  /** Ställpris; omitted/null = none. */
+  setupPrice?: number | null;
 }
 
 export interface CustomerPriceUpdatePlan {
   id: string;
   unitPrice: number;
+  /** Set only from a filled cell (0 clears); omitted = untouched. */
+  setupPrice?: number | null;
 }
 
 /** Upserted on (customer, article) — only staged when the number changes. */
@@ -205,6 +213,20 @@ export async function planCustomerPriceImport(
       warnings.push("Rabatten hoppas över — raden saknar pris");
     }
 
+    // Ställpris rides on the price rule, so it needs the row's price; 0 is
+    // Monitor's "none".
+    const rawSetupPrice = record["setupPrice"] ?? "";
+    let setupPrice: number | null | undefined;
+    if (rawSetupPrice !== "") {
+      values["setupPrice"] = rawSetupPrice;
+      const parsed = normalizeDecimal(rawSetupPrice);
+      if (parsed === null) errors.push(`Ogiltigt ställpris: "${rawSetupPrice}"`);
+      else if (parsed < 0) errors.push("Ställpriset kan inte vara negativt");
+      else if (rawPrice === "") {
+        if (parsed > 0) warnings.push("Ställpriset hoppas över — raden saknar pris");
+      } else setupPrice = parsed === 0 ? null : Math.round(parsed * 10000) / 10000;
+    }
+
     let customerArticleNumber: string | null = null;
     if (rawCustomerArticleNumber !== "") {
       values["customerArticleNumber"] = rawCustomerArticleNumber;
@@ -240,8 +262,9 @@ export async function planCustomerPriceImport(
 
     rows.push({ rowNumber, action: current || currentNumber !== undefined ? "update" : "create", errors, warnings, values });
     if (unitPrice !== null) {
-      if (current) updates.push({ id: current.id, unitPrice });
-      else creates.push({ customerId: customer.id, articleId: article.id, unitPrice });
+      const setup = setupPrice !== undefined ? { setupPrice } : {};
+      if (current) updates.push({ id: current.id, unitPrice, ...setup });
+      else creates.push({ customerId: customer.id, articleId: article.id, unitPrice, ...setup });
     }
     // Re-importing an unchanged file stages no write.
     if (customerArticleNumber !== null && customerArticleNumber !== currentNumber) {

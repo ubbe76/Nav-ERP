@@ -5,7 +5,7 @@ import { PayrollSettingsForm } from "../../../components/system/PayrollSettingsF
 import { AlertSettingsForm } from "../../../components/system/AlertSettingsForm";
 import { SmtpSettingsForm } from "../../../components/system/SmtpSettingsForm";
 import { getCurrentUser, apiGet } from "../../../lib/api";
-import type { SystemSettings } from "../../../lib/types";
+import type { Article, SystemSettings } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
@@ -25,6 +25,12 @@ export default async function SettingsPage() {
 
   const settings = await apiGet<SystemSettings>("/api/v1/settings", cookieHeader);
 
+  // Ställkostnadsartikel: the picker shows number and benämning, which the
+  // settings only carry as an id. A deleted article reads as "none".
+  const setupChargeArticle = settings.setupChargeArticleId
+    ? await apiGet<Article>(`/api/v1/articles/${settings.setupChargeArticleId}`, cookieHeader).catch(() => null)
+    : null;
+
   return (
     <AppShell active="System">
       <div className={shellStyles.topbar}>
@@ -35,7 +41,14 @@ export default async function SettingsPage() {
         <HelpLink chapter="system" anchor="installningar" label="Hjälp om inställningar" />
       </div>
 
-      <SettingsForm settings={settings} />
+      <SettingsForm
+        settings={settings}
+        setupChargeArticle={
+          setupChargeArticle
+            ? { id: setupChargeArticle.id, articleNumber: setupChargeArticle.articleNumber, name: setupChargeArticle.name }
+            : null
+        }
+      />
       <AlertSettingsForm settings={settings} />
       <PayrollSettingsForm settings={settings} />
       <SmtpSettingsForm settings={settings} />

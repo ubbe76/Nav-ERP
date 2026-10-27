@@ -602,6 +602,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
         "Vad kunden kallar artikeln, max 50 tecken. Sparas på kundkortet och skrivs ut som \"Ert art.nr\" på offert, orderbekräftelse, plocklista, följesedel och faktura. Ersätter ett tidigare nummer för samma kund och artikel; tom cell lämnar det orört.",
       example: "KND-4711",
     },
+    {
+      field: "setupPrice",
+      label: "Ställpris",
+      required: false,
+      header: "Ställpris",
+      description: `Engångskostnad per orderrad i SEK, ${DECIMAL}, aldrig negativ — sparas på kundpriset och läggs som en egen Ställkostnad-rad på nya offert- och orderrader när en ställkostnadsartikel är vald under System → Inställningar. Kräver Pris på raden. 0 betyder inget ställpris; tom cell lämnar det orört.`,
+      example: "400",
+    },
   ],
 
   customers: [

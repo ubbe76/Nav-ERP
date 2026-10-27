@@ -608,6 +608,7 @@ export function createInvoiceService(
         configurationLines: rowConfigurationLines(r.configuration, customer?.showConfigurationPrices ?? false),
         extraDescription: extraDescription(r.articleExtraDescription),
         customerArticleNumber: r.articleId ? (customerArticleNumbers.get(r.articleId) ?? null) : null,
+        setupForArticleNumber: r.setupForArticleNumber,
       })),
       showTotal: true,
       vat: { perRow: true },

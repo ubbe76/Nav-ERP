@@ -44,6 +44,7 @@ import {
   UnknownThemeError,
 } from "../src/modules/system/service/themes.errors.js";
 import { errorBody } from "../src/modules/system/service/error-body.js";
+import { SetupChargeArticleNotFoundError } from "../src/modules/system/service/system.service.js";
 import {
   CustomerArticleNumberNotFoundError,
   DuplicateCustomerArticleNumberError,
@@ -577,6 +578,7 @@ const cases: Array<[Error, string]> = [
   [new DuplicatePriceListRowError(10), ERROR_CODES.DUPLICATE_PRICE_LIST_ROW],
   [new DuplicateCustomerArticleNumberError(), ERROR_CODES.DUPLICATE_CUSTOMER_ARTICLE_NUMBER],
   [new CustomerArticleNumberNotFoundError("x"), ERROR_CODES.CUSTOMER_ARTICLE_NUMBER_NOT_FOUND],
+  [new SetupChargeArticleNotFoundError("x"), ERROR_CODES.SETUP_CHARGE_ARTICLE_NOT_FOUND],
   [new InvalidOcrError("123"), ERROR_CODES.INVALID_OCR],
   [new PaymentExceedsOpenAmountError("F-1", 100, 150), ERROR_CODES.PAYMENT_EXCEEDS_OPEN_AMOUNT],
   [new VerificationAlreadyReversedError(), ERROR_CODES.VERIFICATION_ALREADY_REVERSED],

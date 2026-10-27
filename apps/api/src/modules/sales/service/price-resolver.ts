@@ -2,7 +2,10 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { articles, customerPrices, customers, priceListRows, priceLists, type Db, type Tx } from "@navet/db";
 import { fromSek, SEK, type PriceSource } from "@navet/shared";
 
-export type ResolvedPrice = { unitPrice: number; discountPercent: number; source: PriceSource };
+// setupPrice: the matched customer rule's ställpris (> 0 only), in the same
+// currency as unitPrice — a customer rule only applies in the customer's own
+// currency, so it never needs converting.
+export type ResolvedPrice = { unitPrice: number; discountPercent: number; source: PriceSource; setupPrice?: number };
 export type PriceResolution = { articleNumber: string; price: ResolvedPrice | null } | null; // null = unknown article
 
 // Konfigurator 4a (beslut C): the variant step. `undefined` = the article is
@@ -102,7 +105,11 @@ export async function resolvePrice(
 
   const ruleFor = async (where: ReturnType<typeof and>) => {
     const [rule] = await dbc
-      .select({ unitPrice: customerPrices.unitPrice, discountPercent: customerPrices.discountPercent })
+      .select({
+        unitPrice: customerPrices.unitPrice,
+        discountPercent: customerPrices.discountPercent,
+        setupPrice: customerPrices.setupPrice,
+      })
       .from(customerPrices)
       .where(where)
       .orderBy(desc(customerPrices.fromQuantity))
@@ -138,11 +145,15 @@ export async function resolvePrice(
   const matched: [typeof articleRule, PriceSource][] = [[articleRule, "customer_article"], [groupRule, "customer_group"]];
   for (const [rule, source] of matched) {
     if (!rule) continue;
+    const setup = rule.setupPrice !== null && Number(rule.setupPrice) > 0 ? { setupPrice: Number(rule.setupPrice) } : {};
     if (rule.unitPrice !== null) {
-      return { articleNumber: article.articleNumber, price: { unitPrice: Number(rule.unitPrice), discountPercent: 0, source } };
+      return { articleNumber: article.articleNumber, price: { unitPrice: Number(rule.unitPrice), discountPercent: 0, source, ...setup } };
     }
     if (basePrice === null) return none;
-    return { articleNumber: article.articleNumber, price: { unitPrice: basePrice, discountPercent: Number(rule.discountPercent), source } };
+    return {
+      articleNumber: article.articleNumber,
+      price: { unitPrice: basePrice, discountPercent: Number(rule.discountPercent), source, ...setup },
+    };
   }
 
   if (basePrice === null) return none;

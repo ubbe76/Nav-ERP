@@ -205,7 +205,13 @@ export interface ManufacturingCoverageReader {
 // Offertens giltighetstid (quote-settings.ts) — the same "extend the PDF
 // reader" shape as PurchaseSettingsReader.
 export interface SalesSettingsReader extends DocumentSettingsReader {
-  getSettings(): Promise<Awaited<ReturnType<DocumentSettingsReader["getSettings"]>> & { quoteValidityDays: number }>;
+  getSettings(): Promise<
+    Awaited<ReturnType<DocumentSettingsReader["getSettings"]>> & {
+      quoteValidityDays: number;
+      // Ställkostnadsartikel — optional so settings fakes need not carry it.
+      setupChargeArticleId?: string | null;
+    }
+  >;
 }
 
 export class CustomerNotFoundError extends Error {
@@ -574,6 +580,8 @@ export function createSalesService(
 
     let unitPrice: number;
     let discountPercent = input.discountPercent ?? 0;
+    // Ställpris of the matched customer rule — undefined until the chain ran.
+    let chainSetupPrice: number | undefined;
     if (input.unitPrice !== undefined) {
       unitPrice = toBasePrice(input.unitPrice, selection.unitFactor);
     } else if (configuration) {
@@ -587,7 +595,9 @@ export function createSalesService(
       if (!resolution?.price) throw new PriceNotFoundError(resolution?.articleNumber ?? input.articleId);
       unitPrice = resolution.price.unitPrice;
       if (input.discountPercent === undefined) discountPercent = resolution.price.discountPercent;
+      chainSetupPrice = resolution.price.setupPrice ?? 0;
     }
+    const setupCharge = configuration ? null : await setupChargeFor(pricing, input.articleId, quantity, chainSetupPrice);
     const { configuration: _raw, ...rest } = input;
     return {
       ...rest,
@@ -598,7 +608,28 @@ export function createSalesService(
       unitFactor: selection.unitFactor,
       configuration,
       configurationCost,
+      setupCharge,
     };
+  }
+
+  // Ställkostnad: the extra row a new ordinary row gets when the customer's
+  // price rule carries a ställpris and a Ställkostnadsartikel is chosen —
+  // even when the seller typed their own à-pris (the chain then runs once
+  // more, for the ställpris alone). Never for the Ställkostnadsartikel itself.
+  async function setupChargeFor(
+    pricing: RowPricing,
+    articleId: string,
+    quantity: number,
+    knownSetupPrice: number | undefined
+  ): Promise<{ articleId: string; unitPrice: number } | null> {
+    const { setupChargeArticleId } = await settings.getSettings();
+    if (!setupChargeArticleId || setupChargeArticleId === articleId) return null;
+    const setupPrice =
+      knownSetupPrice ??
+      (await resolvePrice({ customerId: pricing.customerId, articleId, quantity, ...chainCurrency(pricing) }))?.price
+        ?.setupPrice ??
+      0;
+    return setupPrice > 0 ? { articleId: setupChargeArticleId, unitPrice: setupPrice } : null;
   }
   // A row's own Leveransdatum is worth a document line only when it differs
   // from the order's (a row without one follows the order).
@@ -636,6 +667,7 @@ export function createSalesService(
     const { showOrderRevisionOnDocuments } = documentSettings;
     const extraDescription = extraDescriptionFor(documentSettings, variant === "quote" ? "quote" : "orderConfirmation");
     const customerArticleNumbers = await repo.customerArticleNumberMap(order.customerId, rows.map((r) => r.articleId));
+    const articleNumberByRowId = new Map(rows.map((r) => [r.id, r.articleNumber]));
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
     // Momskoder (spec 4.5): each row's VAT follows the momskod the invoice
     // row will get (salesVatCode) — an EU customer sees 0 % already on the
@@ -685,6 +717,7 @@ export function createSalesService(
         }),
         extraDescription: extraDescription(r.articleExtraDescription),
         customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
+        setupForArticleNumber: r.setupForRowId ? (articleNumberByRowId.get(r.setupForRowId) ?? null) : null,
         configurationLines: rowConfigurationLines(r.configuration, showConfigurationPrices),
         deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
       })),

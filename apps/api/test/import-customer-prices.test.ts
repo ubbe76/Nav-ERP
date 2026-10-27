@@ -74,7 +74,7 @@ function fakeDeps(
 }
 
 describe("suggestCustomerPriceMapping", () => {
-  it("maps Monitor's Prislista Försäljning, Kundens art.nummer included, leaving Ställpris/Prisdatum alone", () => {
+  it("maps Monitor's Prislista Försäljning, Kundens art.nummer and Ställpris included, leaving Prisdatum alone", () => {
     expect(suggestCustomerPriceMapping(MONITOR_HEADERS)).toEqual({
       Artikelnummer: "articleNumber",
       Artikelbenämning: null,
@@ -84,7 +84,7 @@ describe("suggestCustomerPriceMapping", () => {
       Namn: null,
       "Kundens art.nummer": "customerArticleNumber",
       Pris: "price",
-      Ställpris: null,
+      Ställpris: "setupPrice",
       Rabatt: "discountPercent",
       Prisdatum: null,
     });
@@ -267,3 +267,38 @@ describe("customer price import — Kundens artikelnummer end to end", () => {
     expect(await db.select().from(customerPrices)).toHaveLength(0);
   });
 });
+
+describe("customer price import — Ställpris", () => {
+  it("stores it on the price rule, 0 meaning none, skipped with a warning without a price", async () => {
+    const mapping = { ...MAPPING, Ställpris: "setupPrice" };
+    const plan = await planCustomerPriceImport(
+      {
+        mapping,
+        rows: [
+          ["A", "6252", "100", "", "400"],
+          ["B", "6252", "100", "", "0"],
+          ["C", "6252", "", "", "250"],
+          ["D", "6252", "100", "", "-1"],
+        ],
+      },
+      fakeDeps([article("A", "id-1"), article("B", "id-2"), article("C", "id-3"), article("D", "id-4")])
+    );
+    expect(plan.creates).toEqual([
+      { customerId: "cust-6252", articleId: "id-1", unitPrice: 100, setupPrice: 400 },
+      { customerId: "cust-6252", articleId: "id-2", unitPrice: 100, setupPrice: null },
+    ]);
+    expect(plan.rows[2]).toMatchObject({ action: "skip" });
+    expect(plan.rows[3]!.errors).toEqual(["Ställpriset kan inte vara negativt"]);
+  });
+
+  it("commits the ställpris and leaves it alone when the cell is empty", async () => {
+    await seedArticle("ART-1");
+    await seedCustomer("6252");
+    const mapping = { Artikelnummer: "articleNumber", Kund: "customerNumber", Pris: "price", Ställpris: "setupPrice" };
+    await importService.commit("customerPrices", { mapping, rows: [["ART-1", "6252", "100", "400"]] });
+    await importService.commit("customerPrices", { mapping, rows: [["ART-1", "6252", "120", ""]] });
+    const [rule] = await db.select().from(customerPrices);
+    expect(rule).toMatchObject({ unitPrice: "120.0000", setupPrice: "400.0000" });
+  });
+});
+

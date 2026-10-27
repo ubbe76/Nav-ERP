@@ -73,6 +73,7 @@ export const CUSTOMER_PRICE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "price", label: "Pris" },
   { field: "discountPercent", label: "Rabatt (%)" },
   { field: "customerArticleNumber", label: "Kundens artikelnummer" },
+  { field: "setupPrice", label: "Ställpris" },
 ];
 
 // Mirrors CUSTOMER_IMPORT_FIELDS in

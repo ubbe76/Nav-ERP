@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { apiFetch } from "../../lib/api";
 import { Checkbox, Select } from "../ui/Field";
+import { Button } from "../ui/Button";
+import { ArticlePicker, type ArticlePickerValue } from "../ui/ArticlePicker";
 import {
   EXTRA_DESCRIPTION_DOCUMENTS,
   EXTRA_DESCRIPTION_DOCUMENT_LABELS,
@@ -12,7 +14,14 @@ import {
 } from "../../lib/types";
 import styles from "./SettingsForm.module.css";
 
-export function SettingsForm({ settings }: { settings: SystemSettings }) {
+export function SettingsForm({
+  settings,
+  setupChargeArticle,
+}: {
+  settings: SystemSettings;
+  // The chosen Ställkostnadsartikel (loaded by the page), null = none.
+  setupChargeArticle: ArticlePickerValue | null;
+}) {
   const [allowMultipleStamps, setAllowMultipleStamps] = useState(settings.allowMultipleStamps);
   const [showRevisionsOnDocuments, setShowRevisionsOnDocuments] = useState(settings.showRevisionsOnDocuments);
   const [showOrderRevisionOnDocuments, setShowOrderRevisionOnDocuments] = useState(
@@ -33,6 +42,7 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
   const [longOperationSaved, setLongOperationSaved] = useState(false);
   const [quoteValidityDays, setQuoteValidityDays] = useState(String(settings.quoteValidityDays));
   const [quoteValiditySaved, setQuoteValiditySaved] = useState(false);
+  const [setupArticle, setSetupArticle] = useState<ArticlePickerValue | null>(setupChargeArticle);
   const [supplierMode, setSupplierMode] = useState(settings.supplierDeliveryDayMode);
   const [supplierTransit, setSupplierTransit] = useState(String(settings.supplierTransitDays));
   const [customerMode, setCustomerMode] = useState(settings.customerDeliveryDayMode);
@@ -159,6 +169,12 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
       setQuoteValidityDays(String(updated.quoteValidityDays));
       setQuoteValiditySaved(true);
     }
+  }
+
+  // Saved at once; the picker follows the server's answer (a failed save keeps the old pick).
+  async function changeSetupChargeArticle(next: ArticlePickerValue | null) {
+    const updated = await save({ setupChargeArticleId: next ? next.id : null });
+    if (updated) setSetupArticle(updated.setupChargeArticleId ? next : null);
   }
 
   async function changeDeliveryDayMode(side: "supplier" | "customer", next: DeliveryDayMode) {
@@ -450,6 +466,37 @@ export function SettingsForm({ settings }: { settings: SystemSettings }) {
             onBlur={(e) => saveQuoteValidityDays(e.currentTarget.validity.badInput)}
           />
           {quoteValiditySaved && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row} style={{ flexWrap: "wrap" }}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Ställkostnadsartikel</div>
+          <div className={styles.description}>
+            Kundprisets ställpris läggs som en egen rad med den här artikeln när en artikel med ställpris läggs på en
+            offert eller order. Tom = av.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
+          <div style={{ width: 260, maxWidth: "100%" }}>
+            <ArticlePicker
+              id="setupChargeArticle"
+              value={setupArticle}
+              onChange={(article) => {
+                if (article) void changeSetupChargeArticle(article);
+              }}
+            />
+          </div>
+          {setupArticle && (
+            <Button
+              type="button"
+              size="small"
+              variant="ghost"
+              disabled={pending}
+              onClick={() => void changeSetupChargeArticle(null)}
+            >
+              Ingen
+            </Button>
+          )}
         </div>
       </div>
       <div className={styles.section}>

@@ -370,7 +370,15 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   }
 
   async function removeRow(row: SalesOrderRow) {
-    if (!(await confirmDelete(`Ta bort ${row.articleNumber} ur ordern?`))) return;
+    const hasChargeRow = rows.some(
+      (r) => r.setupForRowId === row.id && Number(r.quantityDelivered) === 0
+    );
+    if (
+      !(await confirmDelete(
+        `Ta bort ${row.articleNumber} ur ordern?${hasChargeRow ? " Den tillhörande ställkostnadsraden tas bort med den." : ""}`
+      ))
+    )
+      return;
     const bumpRevision = await askBumpRevision(order.revision);
     setRowError(null);
     setRowPending(true);
@@ -538,6 +546,17 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                   <>
                     {row.articleName}
                     <ConfigurationLines configuration={row.configuration} />
+                    {/* Ställkostnad: the charge row says which article row it belongs to
+                        (nothing if that row is gone). */}
+                    {row.setupForRowId &&
+                      (() => {
+                        const owner = rows.find((r) => r.id === row.setupForRowId);
+                        return owner ? (
+                          <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                            Ställkostnad för {owner.articleNumber}
+                          </div>
+                        ) : null;
+                      })()}
                     {/* The row's own leveransdatum — only shown when it differs
                         from the order's (otherwise the row follows the header). */}
                     {editingRowId !== row.id &&

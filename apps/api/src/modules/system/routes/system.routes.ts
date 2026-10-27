@@ -21,6 +21,7 @@ import {
   DuplicateNumberSeriesNameError,
   DuplicateCompanyCarrierError,
   NumberSeriesNotFoundError,
+  SetupChargeArticleNotFoundError,
 } from "../service/system.service.js";
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
@@ -92,6 +93,7 @@ export async function systemRoutes(app: FastifyInstance, opts: { service: System
       return await service.updateSettings(input, req.user!.id);
     } catch (err) {
       if (err instanceof UnknownThemeError) return reply.code(400).send(errorBody(err));
+      if (err instanceof SetupChargeArticleNotFoundError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

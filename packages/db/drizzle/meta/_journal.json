@@ -1128,6 +1128,13 @@
       "when": 1793092329488,
       "tag": "0160_kundens_artikelnummer",
       "breakpoints": true
+    },
+    {
+      "idx": 161,
+      "version": "7",
+      "when": 1793096807918,
+      "tag": "0161_stallkostnadsrad",
+      "breakpoints": true
     }
   ]
 }

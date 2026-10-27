@@ -30,6 +30,9 @@ export interface DocumentPdfRow {
   // Sales documents: Kundens artikelnummer — printed as "Ert art.nr: X", the
   // first info line under the name.
   customerArticleNumber?: string | null;
+  // Ställkostnad: the article number of the row this setup charge belongs to
+  // — printed as "Ställkostnad för X" (quote, order confirmation, invoice).
+  setupForArticleNumber?: string | null;
   // Invoice-only: this row's VAT rate, used to group the perRow VAT summary
   // (DocumentPdfInput.vat = { perRow: true }) — ignored by every other
   // document type and by the single-rate vat: { rate } branch.
@@ -1274,6 +1277,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // configured row's choices (konfigurator 4b).
       const infoLines = [
         row.customerArticleNumber ? `Ert art.nr: ${row.customerArticleNumber}` : null,
+        row.setupForArticleNumber ? `Ställkostnad för ${row.setupForArticleNumber}` : null,
         row.revisionInfo ?? null,
         row.articleInfo ?? null,
         row.extraDescription ?? null,

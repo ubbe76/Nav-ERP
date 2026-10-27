@@ -67,6 +67,7 @@ export function CustomerPricesTab({
           { key: "fromQuantity", label: "Från antal", width: "120px" },
           { key: "unitPrice", label: currency === SEK ? "Pris" : `Pris (${currency})`, width: "120px" },
           { key: "discountPercent", label: "Rabatt %", width: "120px" },
+          { key: "setupPrice", label: "Ställpris", width: "120px" },
           { key: "id", label: "", width: "160px", align: "right" },
         ]}
         rows={prices}
@@ -88,6 +89,13 @@ export function CustomerPricesTab({
               return price.discountPercent != null
                 ? `${Number(price.discountPercent).toLocaleString("sv-SE")} %`
                 : "–";
+            case "setupPrice":
+              return price.setupPrice != null && Number(price.setupPrice) > 0
+                ? Number(price.setupPrice).toLocaleString("sv-SE", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })
+                : "—";
             case "id":
               return (
                 <span style={{ display: "inline-flex", gap: 8 }}>
@@ -168,6 +176,11 @@ function CustomerPriceForm({
   const [discountPercent, setDiscountPercent] = useState(
     price?.discountPercent != null ? String(Number(price.discountPercent)) : ""
   );
+  // Ställpris: one-off charge in the rule's currency, added as its own
+  // Ställkostnad row on new order rows. Empty = none (sent as null on edit).
+  const [setupPrice, setSetupPrice] = useState(
+    price?.setupPrice != null && Number(price.setupPrice) > 0 ? String(Number(price.setupPrice)) : ""
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -200,6 +213,7 @@ function CustomerPriceForm({
           body: JSON.stringify({
             fromQuantity,
             ...(valueType === "price" ? { unitPrice } : { discountPercent }),
+            setupPrice: setupPrice.trim() === "" ? null : setupPrice,
           }),
         });
       } else {
@@ -211,6 +225,7 @@ function CustomerPriceForm({
             fromQuantity,
             unitPrice: valueType === "price" ? unitPrice : undefined,
             discountPercent: valueType === "discount" ? discountPercent : undefined,
+            setupPrice: setupPrice.trim() === "" ? undefined : setupPrice,
           }),
         });
       }
@@ -343,6 +358,22 @@ function CustomerPriceForm({
           />
         </Field>
       )}
+
+      <Field label={`Ställpris (${currencyLabel(currency)})`} htmlFor="customerPriceSetupPrice">
+        <Input
+          id="customerPriceSetupPrice"
+          type="number"
+          min="0"
+          step="0.01"
+          size="sm"
+          value={setupPrice}
+          onChange={(e) => setSetupPrice(e.target.value)}
+        />
+        <div style={{ marginTop: 4, fontSize: 13, color: "var(--color-text-muted)" }}>
+          Engångsbelopp som läggs som en egen rad med Ställkostnadsartikeln när artikeln läggs på en offert eller order.
+          Tomt = inget ställpris.
+        </div>
+      </Field>
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

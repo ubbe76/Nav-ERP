@@ -139,7 +139,7 @@ export const IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
     anchor: "importera-kundpriser",
     fields: CUSTOMER_PRICE_IMPORT_FIELDS,
     notice:
-      "Priset sparas som kundens artikelpris (från antal 1). Rabatt räknas in i priset. Kundens artikelnummer sparas på kundkortet. Rader utan kund (Kundkoppling saknas) och rader med varken pris eller kundens artikelnummer hoppas över. Ställpris och Prisdatum importeras inte.",
+      "Priset sparas som kundens artikelpris (från antal 1). Rabatt räknas in i priset. Kundens artikelnummer sparas på kundkortet. Rader utan kund (Kundkoppling saknas) och rader med varken pris eller kundens artikelnummer hoppas över. Ställpris sparas på kundpriset (kräver pris på raden). Prisdatum importeras inte.",
     skipExistingHint:
       "Kunder som redan har ett pris eller ett artikelnummer på artikeln behåller det. Utan kryss uppdateras de med filens värden.",
   },

@@ -55,6 +55,9 @@ import {
   PUBLIC_BASE_URL_KEY,
 } from "./alert-settings.js";
 import { decodeQuoteValidityDays, QUOTE_VALIDITY_DAYS_KEY } from "./quote-settings.js";
+
+// Ställkostnadsartikel (sales): "" (cleared) and absent both read as off.
+const SETUP_CHARGE_ARTICLE_KEY = "setup_charge_article_id";
 import { decodeDefaultTheme, DEFAULT_THEME_KEY, THEME_CHOICE_LOCKED_KEY } from "./theme-settings.js";
 import { UnknownThemeError } from "./themes.errors.js";
 // G1: append-only audit trail. system_settings/company_info are singletons —
@@ -204,6 +207,13 @@ export class BuiltInNumberSeriesError extends Error {
 const isOwnArticleSeries = (row: { key: string; forArticles: boolean }) =>
   row.forArticles && row.key !== DEFAULT_ARTICLE_SERIES_KEY;
 
+export class SetupChargeArticleNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Article ${id} not found — cannot be the Ställkostnadsartikel`);
+    this.name = "SetupChargeArticleNotFoundError";
+  }
+}
+
 export class CarrierNotFoundError extends Error {
   constructor(id: string) {
     super(`Carrier ${id} not found`);
@@ -332,6 +342,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       publicBaseUrl: decodePublicBaseUrl(get(PUBLIC_BASE_URL_KEY)),
       // Uppföljning av offerter — quote-settings.ts owns the key and default.
       quoteValidityDays: decodeQuoteValidityDays(get(QUOTE_VALIDITY_DAYS_KEY)),
+      setupChargeArticleId: get(SETUP_CHARGE_ARTICLE_KEY) || null,
       // Egna teman — theme-settings.ts owns the keys and defaults.
       defaultTheme: decodeDefaultTheme(get(DEFAULT_THEME_KEY)),
       themeChoiceLocked: get(THEME_CHOICE_LOCKED_KEY) === "true",
@@ -677,6 +688,12 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         await set(ALERT_QUOTE_FOLLOWUP_DAYS_KEY, String(input.alertQuoteFollowupDays));
       }
       if (input.quoteValidityDays !== undefined) await set(QUOTE_VALIDITY_DAYS_KEY, String(input.quoteValidityDays));
+      if (input.setupChargeArticleId !== undefined) {
+        if (input.setupChargeArticleId !== null && !(await repo.articleExists(input.setupChargeArticleId))) {
+          throw new SetupChargeArticleNotFoundError(input.setupChargeArticleId);
+        }
+        await set(SETUP_CHARGE_ARTICLE_KEY, input.setupChargeArticleId ?? "");
+      }
       if (input.publicBaseUrl !== undefined) await set(PUBLIC_BASE_URL_KEY, decodePublicBaseUrl(input.publicBaseUrl));
       if (input.postingAccountsReceivable !== undefined) {
         await set(POSTING_ACCOUNTS_RECEIVABLE_KEY, input.postingAccountsReceivable);

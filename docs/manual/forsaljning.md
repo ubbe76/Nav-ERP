@@ -161,14 +161,29 @@ Vid prissättning väljs den rad vars **Från antal** är det högsta som fortfa
 
 Utöver prislistorna kan varje kund ha egna prisregler, oberoende av vilken prislista (om någon) kunden är kopplad till. De hanteras på **kundkortets flik Priser**:
 
-- Tabellen visar kundens registrerade regler: **Artikel/Grupp**, **Från antal**, **Pris**, **Rabatt %**. Har kunden en annan valuta än SEK står den i kolumnrubriken, t.ex. **Pris (EUR)**.
+- Tabellen visar kundens registrerade regler: **Artikel/Grupp**, **Från antal**, **Pris**, **Rabatt %**, **Ställpris** (— när regeln saknar ställpris). Har kunden en annan valuta än SEK står den i kolumnrubriken, t.ex. **Pris (EUR)**.
 - **+ Ny prisregel** öppnar en dialog:
   - **Måltyp** — radioknapparna **Artikel** eller **Varugrupp** väljer om regeln gäller en enskild artikel (artikelväljaren) eller en hel varugrupp (dropdown ur varugruppsregistret).
   - **Från antal** — staffelgränsen, precis som på prislistan.
   - **Pristyp** — radioknapparna **Specialpris (kr)** eller **Rabatt (%)** väljer om regeln sätter ett fast pris eller en procentuell rabatt. Ett specialpris anges i **kundens valuta**, så för en kund i EUR heter alternativet **Specialpris (EUR)**.
   - Beroende på valet visas fältet **Specialpris (kr)** (respektive kundens valuta) eller **Rabatt (%)**.
+  - **Ställpris** (valfritt) — ett engångsbelopp i kundens valuta som läggs på ordern som en egen rad, se [Ställpris och ställkostnad](#stallpris-och-stallkostnad). Tomt fält = inget ställpris; tömmer du fältet i **Ändra** tas ett befintligt ställpris bort.
   - Målet (artikel eller varugrupp) låses när regeln väl är skapad — **Ändra** visar det som ett skrivskyddat fält; är regeln fel skapad tas den bort och läggs till på nytt.
 - **Ta bort** tar bort en regel efter bekräftelse.
+
+### Ställpris och ställkostnad
+
+En prisregel kan ha ett **Ställpris**: en engångskostnad (till exempel för inställning eller verktyg) som kunden betalar en gång per orderrad, oavsett antal. Ställpriset anges i regelns valuta, alltså kundens, och gäller regeln som matchar artikeln och antalet enligt [priskedjan](#priskedjan).
+
+Ställpriset blir en **egen orderrad**, en *ställkostnadsrad*:
+
+- **När den läggs till:** när en ny rad läggs på en offert eller order — i **Ny offert**, **Ny kundorder**, **Lägg till rad** på orderkortet eller via API:et — för en artikel vars kundprisregel har ett ställpris över 0, läggs raden direkt efter artikelraden. Den får **Ställkostnadsartikeln** som artikel, antal 1 och ställpriset som à-pris, även om du själv skrev ett eget à-pris på artikelraden. En artikel utan ställpris, eller som är själva Ställkostnadsartikeln, får ingen ställkostnadsrad.
+- **Förutsättning:** en **Ställkostnadsartikel** måste vara vald under **System → Inställningar** ([Ställkostnadsartikel](/hjalp/system#installningar)). Är den tom läggs ingen rad till, och ställpriset används inte.
+- **På orderkortet** visas raden som en vanlig rad med den dämpade texten **Ställkostnad för {artikelnummer}** under benämningen. Den kan ändras och tas bort som andra rader (priset kan alltså justeras för hand), och den levereras och faktureras som andra rader. Flera artiklar på samma order kan ha var sin ställkostnadsrad; regeln att samma artikel bara får ligga en gång på ordern gäller inte ställkostnadsraderna.
+- **Ändras antalet** på artikelraden ändras inte ställkostnadsraden — ställpriset är ett engångsbelopp.
+- **Tas artikelraden bort** tas dess ställkostnadsrad bort med den, så länge den inte är levererad. Bekräftelsen **Ta bort … ur ordern?** nämner det.
+- **Utskrifter:** på offert, orderbekräftelse och faktura skrivs **Ställkostnad för {artikelnummer}** ut under ställkostnadsraden.
+- **Befintliga rader** påverkas inte när ett ställpris läggs till eller ändras på kunden i efterhand — bara nya rader får en ställkostnadsrad.
 
 ### Kundens artikelnummer
 
@@ -215,15 +230,15 @@ För att en order i EUR ska få egna priser i stället för omräknade SEK-prise
 
 Fliken **Kundpriser** på **Artiklar → Importera** läser in kundernas artikelpriser (kundkortets flik **Priser**, se [Kundpriser](#kundpriser)) och kundernas egna artikelnummer (flik **Kundens artikelnummer**, se [Kundens artikelnummer](#kundens-artikelnummer)). Två exporter från det tidigare affärssystemet känns igen automatiskt: **Prislista Försäljning** — en rad per kund och artikel med rubrikerna **Kund** (kundnumret), **Pris** och **Rabatt** — och **Artikellista, Kundkopplingar**, som kopplar artiklar till kunder med kundens eget artikelnummer.
 
-Kolumner: **Artikelnummer** och **Kundnummer** är obligatoriska; **Pris**, **Rabatt (%)** och **Kundens artikelnummer** är valfria. Rubrikerna **Kundens art.nr** och **Kundens art.nummer** pekar på **Kundens artikelnummer**. En rad måste ha minst ett pris eller ett kundens artikelnummer — en rad kan alltså bära enbart kundens artikelnummer.
+Kolumner: **Artikelnummer** och **Kundnummer** är obligatoriska; **Pris**, **Rabatt (%)**, **Ställpris** och **Kundens artikelnummer** är valfria. Rubrikerna **Kundens art.nr** och **Kundens art.nummer** pekar på **Kundens artikelnummer**. En rad måste ha minst ett pris eller ett kundens artikelnummer — en rad kan alltså bära enbart kundens artikelnummer. **Ställpris** kräver att raden har ett **Pris**, och anges i kundens valuta; **0** betyder inget ställpris och en tom cell lämnar ett befintligt ställpris orört. Ställpriset läggs på ordern som en egen rad om en **Ställkostnadsartikel** är vald, se [Ställpris och ställkostnad](#stallpris-och-stallkostnad).
 
-Från **Artikellista, Kundkopplingar** importeras **Artikelnummer**, **Kundnummer** (från kolumnen Kund), **Pris**, **Rabatt** och **Kundens art.nr**. Kundnamn, Valuta, Enh., Ställpris och Ledtid importeras inte.
+Från **Artikellista, Kundkopplingar** importeras **Artikelnummer**, **Kundnummer** (från kolumnen Kund), **Pris**, **Rabatt**, **Ställpris** och **Kundens art.nr**. Kundnamn, Valuta, Enh. och Ledtid importeras inte.
 
 Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#kundpriser).
 
 - Kunden (matchad på **kundnummer**) och artikeln måste redan finnas.
 - Rader utan kund (i exporten står **Kundkoppling saknas**) och rader med varken pris eller kundens artikelnummer hoppas över och listas som överhoppade.
-- Priset sparas som en **artikelregel med Specialpris (kr)** från antal 1 — exportfilen bär ingen staffel. En rad utan **Pris** skapar ingen prisregel.
+- Priset sparas som en **artikelregel med Specialpris (kr)** från antal 1 — exportfilen bär ingen staffel. En rad utan **Pris** skapar ingen prisregel, och därmed inget ställpris heller.
 - **Rabatten räknas in i priset.** En prisregel är antingen ett pris eller en rabatt, så importen sparar nettopriset Pris × (1 − Rabatt/100) och varnar på raden att rabatten bakats in.
 - **Kundens artikelnummer** sparas på kundkortets flik **Kundens artikelnummer**. Läses samma kund och artikel in igen ersätts det befintliga numret med filens.
 - Har kunden redan en regel för artikeln (från antal 1) uppdateras den till det nya priset — även en regel som var en rabatt blir då ett specialpris. Med **Hoppa över rader som redan finns** lämnas ett befintligt pris eller artikelnummer orört. Samma kund och artikel två gånger i filen är ett fel.

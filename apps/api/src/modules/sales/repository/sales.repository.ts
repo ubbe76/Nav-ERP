@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { customerArticleNumberMap } from "./customer-article-numbers.js";
@@ -190,7 +191,34 @@ export type UnitSnapshot = { unitId: string | null; unitFactor: number | null };
 // Konfigurator 4c: `configurationCost` is the configuration's förkalkyl at
 // the row's quantity (null on an ordinary row, or when it is not derivable).
 export type SalesRowWrite = Omit<CreateSalesOrderRowInput, "configuration"> &
-  UnitSnapshot & { configuration?: OrderRowConfiguration | null; configurationCost?: OrderRowConfigurationCost | null };
+  UnitSnapshot & {
+    configuration?: OrderRowConfiguration | null;
+    configurationCost?: OrderRowConfigurationCost | null;
+    // Ställkostnad: written as its own row (quantity 1, the Ställkostnads-
+    // artikel) right after this one, linked by setup_for_row_id.
+    setupCharge?: { articleId: string; unitPrice: number } | null;
+  };
+
+// The linked Ställkostnad row of `mainRowId` — one shape for createQuote and
+// addRow. Base unit, no discount, follows the order's Leveransdatum.
+function setupChargeRowValues(
+  salesOrderId: string,
+  mainRowId: string,
+  charge: { articleId: string; unitPrice: number },
+  createdAt: Date
+) {
+  return {
+    salesOrderId,
+    articleId: charge.articleId,
+    quantityOrdered: "1",
+    unitPrice: String(charge.unitPrice),
+    discountPercent: "0",
+    unitId: null,
+    unitFactor: null,
+    setupForRowId: mainRowId,
+    createdAt,
+  };
+}
 
 export type SalesRowMutationResult =
   | { ok: true; row: typeof salesOrderRows.$inferSelect | null; orderStatus: SalesOrderStatus }
@@ -700,29 +728,39 @@ export function createSalesRepository(db: Db) {
         // fix as invoice.repository's createInvoice rows). Two configured rows
         // of the same template are legal, so the article is no tiebreaker.
         const now = Date.now();
+        // A row with a Ställkostnad gets its id up front, so the charge row
+        // right after it can point at it in the same statement.
+        let stamp = 0;
         const rows = await tx
           .insert(salesOrderRows)
           .values(
-            input.rows.map((r, i) => ({
-              salesOrderId: order!.id,
-              articleId: r.articleId,
-              quantityOrdered: String(r.quantity),
-              unitPrice: String(r.unitPrice),
-              // discountPercent is optional on the input type (the price
-              // chain fills it in when the service calls resolveRowInput,
-              // but direct repository callers — e.g. pre-C3 tests — may omit
-              // it entirely). String(undefined) would send the literal text
-              // "undefined" to a numeric column; default to the column's own
-              // "0" instead.
-              discountPercent: String(r.discountPercent ?? 0),
-              unitId: r.unitId,
-              unitFactor: r.unitFactor !== null ? String(r.unitFactor) : null,
-              configuration: r.configuration ?? null,
-              configurationCost: r.configurationCost ?? null,
-              // null = the row follows the order's Leveransdatum.
-              expectedDeliveryDate: r.expectedDeliveryDate ?? null,
-              createdAt: new Date(now + i),
-            }))
+            input.rows.flatMap((r) => {
+              const id = r.setupCharge ? randomUUID() : undefined;
+              const main = {
+                ...(id ? { id } : {}),
+                salesOrderId: order!.id,
+                articleId: r.articleId,
+                quantityOrdered: String(r.quantity),
+                unitPrice: String(r.unitPrice),
+                // discountPercent is optional on the input type (the price
+                // chain fills it in when the service calls resolveRowInput,
+                // but direct repository callers — e.g. pre-C3 tests — may omit
+                // it entirely). String(undefined) would send the literal text
+                // "undefined" to a numeric column; default to the column's own
+                // "0" instead.
+                discountPercent: String(r.discountPercent ?? 0),
+                unitId: r.unitId,
+                unitFactor: r.unitFactor !== null ? String(r.unitFactor) : null,
+                configuration: r.configuration ?? null,
+                configurationCost: r.configurationCost ?? null,
+                // null = the row follows the order's Leveransdatum.
+                expectedDeliveryDate: r.expectedDeliveryDate ?? null,
+                createdAt: new Date(now + stamp++),
+              };
+              return id && r.setupCharge
+                ? [main, setupChargeRowValues(order!.id, id, r.setupCharge, new Date(now + stamp++))]
+                : [main];
+            })
           )
           .returning();
 
@@ -1022,6 +1060,11 @@ export function createSalesRepository(db: Db) {
             expectedDeliveryDate: input.expectedDeliveryDate ?? null,
           })
           .returning();
+        if (input.setupCharge) {
+          await tx
+            .insert(salesOrderRows)
+            .values(setupChargeRowValues(salesOrderId, row!.id, input.setupCharge, new Date(row!.createdAt.getTime() + 1)));
+        }
         if (input.bumpRevision !== false) await bumpRevision(tx, salesOrderId);
         return row!;
       });
@@ -1205,6 +1248,11 @@ export function createSalesRepository(db: Db) {
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
         if (Number(row.quantityDelivered) > 0) return { ok: false, reason: "row_has_deliveries" };
+        // The row's own Ställkostnad goes with it while undelivered; a
+        // delivered one stays as a plain row (setup_for_row_id set null).
+        await tx
+          .delete(salesOrderRows)
+          .where(and(eq(salesOrderRows.setupForRowId, rowId), eq(salesOrderRows.quantityDelivered, "0")));
 
         // E3: a linked (non-deleted) manufacturing_orders row blocks this
         // DELETE via its restrict FK — caught right here where it's thrown,
@@ -1799,6 +1847,7 @@ export function createSalesRepository(db: Db) {
           fromQuantity: customerPrices.fromQuantity,
           unitPrice: customerPrices.unitPrice,
           discountPercent: customerPrices.discountPercent,
+          setupPrice: customerPrices.setupPrice,
         })
         .from(customerPrices)
         .leftJoin(articles, eq(articles.id, customerPrices.articleId))
@@ -1872,14 +1921,22 @@ export function createSalesRepository(db: Db) {
           fromQuantity: String(input.fromQuantity),
           unitPrice: input.unitPrice != null ? String(input.unitPrice) : null,
           discountPercent: input.discountPercent != null ? String(input.discountPercent) : null,
+          // 0 means none, like an empty field.
+          setupPrice: input.setupPrice ? String(input.setupPrice) : null,
         })
         .returning();
       return row!;
     },
 
     async updateCustomerPrice(customerId: string, priceId: string, input: UpdateCustomerPriceInput) {
-      const values: { fromQuantity?: string; unitPrice?: string | null; discountPercent?: string | null } = {};
+      const values: {
+        fromQuantity?: string;
+        unitPrice?: string | null;
+        discountPercent?: string | null;
+        setupPrice?: string | null;
+      } = {};
       if (input.fromQuantity !== undefined) values.fromQuantity = String(input.fromQuantity);
+      if (input.setupPrice !== undefined) values.setupPrice = input.setupPrice ? String(input.setupPrice) : null;
       // Whichever of unitPrice/discountPercent the caller sends replaces the
       // pair (the other is cleared) — the schema-level refine guarantees
       // they never arrive together, so this keeps the DB CHECK

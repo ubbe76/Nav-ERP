@@ -1215,6 +1215,9 @@ export interface CustomerPrice {
   fromQuantity: string;
   unitPrice: string | null;
   discountPercent: string | null;
+  // Ställpris: one-off charge (rule currency) added as its own Ställkostnad
+  // row on new order rows; null = none.
+  setupPrice: string | null;
 }
 
 // One customer article number (kundkortets flik Kundens artikelnummer) — a row
@@ -1393,6 +1396,9 @@ export interface SalesOrderRow {
   // and the template a variant row belongs to (null when not a variant).
   configuration: OrderRowConfiguration | null;
   variantTemplateArticleId: string | null;
+  // Ställkostnad: set on the automatically added charge row — the id of the
+  // article row it belongs to (null for an ordinary row).
+  setupForRowId: string | null;
 }
 
 // GET /articles/:id/self-cost — the same figure for an article that has no row
@@ -2678,6 +2684,9 @@ export interface SystemSettings {
   alertQuoteFollowupDays: number;
   // Offertens giltighetstid (dagar), 0–365; 0 = ingen giltighetstid.
   quoteValidityDays: number;
+  // Ställkostnadsartikel: the article a customer price's ställpris is charged
+  // on as its own order row; null = off.
+  setupChargeArticleId: string | null;
   publicBaseUrl: string;
   // Dröjsmålsränta och förseningsersättning (Ekonomi → Konteringsregler):
   // both switches default off; margin in procentenheter over referensräntan
