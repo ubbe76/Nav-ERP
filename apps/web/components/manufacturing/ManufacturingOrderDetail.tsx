@@ -457,7 +457,18 @@ export function ManufacturingOrderDetail({
                 // Lego operations carry prices, not times.
                 if (row.workCenterType === "subcontract") {
                   const price = key === "setupTime" ? row.setupPrice : row.unitPrice;
-                  return price != null ? `${Number(price).toLocaleString("sv-SE")} kr` : "–";
+                  const priceText = price != null ? `${Number(price).toLocaleString("sv-SE")} kr` : "–";
+                  if (key === "setupTime" && row.transportPrice != null) {
+                    return (
+                      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                        <span>{priceText}</span>
+                        <span style={{ fontSize: 12, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
+                          Transport {Number(row.transportPrice).toLocaleString("sv-SE")} kr
+                        </span>
+                      </span>
+                    );
+                  }
+                  return priceText;
                 }
                 if (key === "setupTime") return Number(row.setupTime);
                 // Tid/enhet shows the unit the beredning was saved in — see

@@ -640,6 +640,7 @@ async function releaseInTx(tx: Tx, moId: string) {
               // routingOperationId, everything else freezes at release.
               subcontractSupplierId: op.subcontractSupplierId,
               setupPrice: op.setupPrice,
+              transportPrice: op.transportPrice,
               unitPrice: op.unitPrice,
               showNetWeight: op.showNetWeight,
             }))
@@ -1077,6 +1078,7 @@ export function createManufacturingRepository(db: Db) {
           packingInstructions: blankToNull(input.packingInstructions),
           subcontractSupplierId: input.subcontractSupplierId ?? null,
           setupPrice: input.setupPrice != null ? String(input.setupPrice) : null,
+          transportPrice: input.transportPrice != null ? String(input.transportPrice) : null,
           unitPrice: input.unitPrice != null ? String(input.unitPrice) : null,
           showNetWeight: input.showNetWeight ?? false,
           useArticleDrawing: input.useArticleDrawing ?? true,
@@ -1104,6 +1106,8 @@ export function createManufacturingRepository(db: Db) {
             input.packingInstructions === undefined ? undefined : blankToNull(input.packingInstructions),
           description: input.description === undefined ? undefined : blankToNull(input.description),
           setupPrice: input.setupPrice === undefined ? undefined : input.setupPrice === null ? null : String(input.setupPrice),
+          transportPrice:
+            input.transportPrice === undefined ? undefined : input.transportPrice === null ? null : String(input.transportPrice),
           unitPrice: input.unitPrice === undefined ? undefined : input.unitPrice === null ? null : String(input.unitPrice),
         })
         .where(and(eq(routingOperations.id, operationId), eq(routingOperations.articleId, articleId)))

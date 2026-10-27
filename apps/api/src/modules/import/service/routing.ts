@@ -49,6 +49,7 @@ export const ROUTING_IMPORT_FIELDS = [
   "subcontractSupplierNumber",
   "setupPrice",
   "unitPrice",
+  "transportPrice",
   // Monitor's "Cykeltid" — the productive time, in the same unit as Stycktid.
   "cycleTimePerUnit",
 ] as const;
@@ -151,6 +152,8 @@ export const ROUTING_HEADER_ALIASES: Record<string, string> = {
   stallpris: "setupPrice",
   styckkostnad: "unitPrice",
   styckpris: "unitPrice",
+  transportkostnad: "transportPrice",
+  transportpris: "transportPrice",
 };
 
 export function suggestRoutingMapping(headers: string[]): Record<string, string | null> {
@@ -308,6 +311,8 @@ export interface RoutingCreatePlan {
   /** Lego only: Ställpris (kr) and Styckpris (kr/st). Null when empty. */
   setupPrice?: number | null;
   unitPrice?: number | null;
+  /** Lego only: Transportkostnad (kr per order). Null when empty. */
+  transportPrice?: number | null;
 }
 
 // An existing operation rewritten under input.updateExisting. The required
@@ -336,6 +341,7 @@ export interface RoutingUpdatePlan {
     subcontractSupplierId?: string | null;
     setupPrice?: number | null;
     unitPrice?: number | null;
+    transportPrice?: number | null;
     showNetWeight?: false;
   };
 }
@@ -599,15 +605,18 @@ export async function planRoutingImport(
     const rawSupplier = record["subcontractSupplierNumber"] ?? "";
     const rawSetupPrice = record["setupPrice"] ?? "";
     const rawUnitPrice = record["unitPrice"] ?? "";
+    const rawTransportPrice = record["transportPrice"] ?? "";
     let subcontractSupplierId: string | null = null;
     let setupPrice: number | null = null;
     let unitPrice: number | null = null;
+    let transportPrice: number | null = null;
     if (rawSupplier !== "") values["subcontractSupplierNumber"] = rawSupplier;
     if (rawSetupPrice !== "") values["setupPrice"] = rawSetupPrice;
     if (rawUnitPrice !== "") values["unitPrice"] = rawUnitPrice;
+    if (rawTransportPrice !== "") values["transportPrice"] = rawTransportPrice;
     if (workCenterId !== null && !isSubcontract) {
-      if (rawSupplier !== "" || rawSetupPrice !== "" || rawUnitPrice !== "") {
-        warnings.push("Leverantör, ställpris och styckpris gäller bara legoresurser — ignoreras");
+      if (rawSupplier !== "" || rawSetupPrice !== "" || rawUnitPrice !== "" || rawTransportPrice !== "") {
+        warnings.push("Leverantör, ställpris, styckpris och transportkostnad gäller bara legoresurser — ignoreras");
       }
     } else if (isSubcontract) {
       if (rawSupplier !== "") {
@@ -617,22 +626,25 @@ export async function planRoutingImport(
       }
       // numeric(12,2) / numeric(12,4): more decimals are rounded with a
       // warning, like the article import's Avrundning.
+      // The Swedish forms differ (ett ställpris, en transportkostnad), so
+      // each price carries its own words.
       const prices = [
-        { raw: rawSetupPrice, label: "ställpris", decimals: 2, set: (n: number) => (setupPrice = n) },
-        { raw: rawUnitPrice, label: "styckpris", decimals: 4, set: (n: number) => (unitPrice = n) },
+        { raw: rawSetupPrice, invalid: "Ogiltigt ställpris", the: "Ställpriset", negative: "negativt", decimals: 2, set: (n: number) => (setupPrice = n) },
+        { raw: rawUnitPrice, invalid: "Ogiltigt styckpris", the: "Styckpriset", negative: "negativt", decimals: 4, set: (n: number) => (unitPrice = n) },
+        { raw: rawTransportPrice, invalid: "Ogiltig transportkostnad", the: "Transportkostnaden", negative: "negativ", decimals: 2, set: (n: number) => (transportPrice = n) },
       ];
       for (const price of prices) {
         if (price.raw === "") continue;
         const parsed = normalizeDecimal(price.raw);
         if (parsed === null) {
-          errors.push(`Ogiltigt ${price.label}: "${price.raw}"`);
+          errors.push(`${price.invalid}: "${price.raw}"`);
         } else if (parsed < 0) {
-          errors.push(`${price.label[0]!.toUpperCase()}${price.label.slice(1)}et kan inte vara negativt`);
+          errors.push(`${price.the} kan inte vara ${price.negative}`);
         } else {
           const factor = 10 ** price.decimals;
           const rounded = Math.round(parsed * factor) / factor;
           if (rounded !== parsed) {
-            warnings.push(`${price.label[0]!.toUpperCase()}${price.label.slice(1)}et ${price.raw} avrundas till ${rounded}`);
+            warnings.push(`${price.the} ${price.raw} avrundas till ${rounded}`);
           }
           price.set(rounded);
         }
@@ -661,8 +673,15 @@ export async function planRoutingImport(
           if (subcontractSupplierId !== null) patch.subcontractSupplierId = subcontractSupplierId;
           if (setupPrice !== null) patch.setupPrice = setupPrice;
           if (unitPrice !== null) patch.unitPrice = unitPrice;
+          if (transportPrice !== null) patch.transportPrice = transportPrice;
         } else if (existingHasLegoFields) {
-          Object.assign(patch, { subcontractSupplierId: null, setupPrice: null, unitPrice: null, showNetWeight: false });
+          Object.assign(patch, {
+            subcontractSupplierId: null,
+            setupPrice: null,
+            unitPrice: null,
+            transportPrice: null,
+            showNetWeight: false,
+          });
         }
         updates.push({ id: existingOperationId, patch });
       } else {
@@ -682,7 +701,7 @@ export async function planRoutingImport(
           description,
           packingInstructions,
           ...(isSubcontract
-            ? { subcontractSupplierId: subcontractSupplierId ?? workCenterSupplierId, setupPrice, unitPrice }
+            ? { subcontractSupplierId: subcontractSupplierId ?? workCenterSupplierId, setupPrice, unitPrice, transportPrice }
             : {}),
         });
       }

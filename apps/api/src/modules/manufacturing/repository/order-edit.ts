@@ -354,6 +354,7 @@ export async function addOperationInTx(
       packingInstructions: blankToNull(input.packingInstructions),
       subcontractSupplierId: input.subcontractSupplierId ?? null,
       setupPrice: input.setupPrice != null ? String(input.setupPrice) : null,
+      transportPrice: input.transportPrice != null ? String(input.transportPrice) : null,
       unitPrice: input.unitPrice != null ? String(input.unitPrice) : null,
       showNetWeight: input.showNetWeight ?? false,
     })
@@ -419,6 +420,8 @@ export async function updateOperationInTx(
       packingInstructions: input.packingInstructions === undefined ? undefined : blankToNull(input.packingInstructions),
       subcontractSupplierId: input.subcontractSupplierId,
       setupPrice: input.setupPrice === undefined ? undefined : input.setupPrice === null ? null : String(input.setupPrice),
+      transportPrice:
+        input.transportPrice === undefined ? undefined : input.transportPrice === null ? null : String(input.transportPrice),
       unitPrice: input.unitPrice === undefined ? undefined : input.unitPrice === null ? null : String(input.unitPrice),
       showNetWeight: input.showNetWeight,
       // The weeks were booked on the old resource: a locked operation that

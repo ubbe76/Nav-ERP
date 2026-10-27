@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, getTableColumns, inArray, ne, sql } from "drizzle-orm";
+import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import {
   articleSuppliers,
@@ -183,8 +184,9 @@ export function createCostingRepository(db: Db) {
           workCenterType: workCenters.type,
           hourlyRate: workCenters.hourlyRate,
           overheadPercent: workCenters.overheadPercent,
-          // Lego operation pricing (subcontract work centers only).
-          setupPrice: routingOperations.setupPrice,
+          // Lego operation pricing (subcontract work centers only); the
+          // one-off is Ställpris + Transportkostnad.
+          setupPrice: legoOneOffSql(routingOperations),
           unitPrice: routingOperations.unitPrice,
         })
         .from(routingOperations)
@@ -286,7 +288,7 @@ export function createCostingRepository(db: Db) {
           overheadPercent: workCenters.overheadPercent,
           reportedHours: sql<string>`coalesce(sum(${timeReports.hours}), 0)`,
           // Lego snapshot (post-calculation fallback when no IO is linked).
-          setupPrice: moOperations.setupPrice,
+          setupPrice: legoOneOffSql(moOperations),
           unitPrice: moOperations.unitPrice,
           quantityCompleted: moOperations.quantityCompleted,
           quantityScrapped: moOperations.quantityScrapped,

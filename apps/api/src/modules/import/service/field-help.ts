@@ -402,6 +402,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "4,50",
     },
     {
+      field: "transportPrice",
+      label: "Transportkostnad",
+      required: false,
+      header: "Transportkostnad",
+      description: `Bara för legooperationer: frakten till och från leverantören i kronor, en gång per order. ${DECIMAL_CAP}, aldrig negativ, högst 2 decimaler. Läggs ihop med ställpriset på legoinköpsordern och i kalkylen. ${UNTOUCHED}`,
+      example: "300",
+    },
+    {
       field: "cycleTimePerUnit",
       label: "Cykeltid",
       required: false,

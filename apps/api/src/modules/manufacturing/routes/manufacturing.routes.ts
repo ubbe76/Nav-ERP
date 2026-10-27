@@ -421,7 +421,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
   app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/operations", { config: { access: MO_READ } }, async (req) => {
     const operations = await service.listOperations(req.params.id);
     if (canSeePrices(req.user!)) return operations;
-    return operations.map((op) => ({ ...op, setupPrice: null, unitPrice: null }));
+    return operations.map((op) => ({ ...op, setupPrice: null, transportPrice: null, unitPrice: null }));
   });
 
   app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/scrap", { config: { access: MO_READ } }, async (req) => {

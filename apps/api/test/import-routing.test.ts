@@ -820,7 +820,9 @@ describe("planRoutingImport — lego operations", () => {
       legoDeps()
     );
     expect(plan.rows[0]!.errors).toEqual(["Ställtid saknas", "Tid per enhet saknas"]);
-    expect(plan.rows[0]!.warnings).toEqual(["Leverantör, ställpris och styckpris gäller bara legoresurser — ignoreras"]);
+    expect(plan.rows[0]!.warnings).toEqual([
+      "Leverantör, ställpris, styckpris och transportkostnad gäller bara legoresurser — ignoreras",
+    ]);
 
     const withTimes = await planRoutingImport(
       {
@@ -1228,3 +1230,25 @@ describe("planRoutingImport — Cykeltid", () => {
     expect(plan.updates[2]!.patch).not.toHaveProperty("cycleTimePerUnit");
   });
 });
+
+describe("planRoutingImport — lego Transportkostnad", () => {
+  it("reads Transportkostnad onto lego operations, with Swedish messages of its own", async () => {
+    const mapping = { ...LEGO_MAPPING, Transportkostnad: "transportPrice" };
+    expect(suggestRoutingMapping([...LEGO_HEADERS])["Transportkostnad"]).toBe("transportPrice");
+    const plan = await planRoutingImport(
+      {
+        mapping,
+        rows: [
+          ["A-1", "20", "930", "", "150", "4", "300"],
+          ["A-1", "30", "930", "", "150", "4", "-5"],
+          ["A-1", "40", "930", "", "150", "4", "x"],
+        ],
+      },
+      legoDeps()
+    );
+    expect(plan.creates[0]).toMatchObject({ transportPrice: 300 });
+    expect(plan.rows[1]!.errors).toEqual(["Transportkostnaden kan inte vara negativ"]);
+    expect(plan.rows[2]!.errors).toEqual(['Ogiltig transportkostnad: "x"']);
+  });
+});
+

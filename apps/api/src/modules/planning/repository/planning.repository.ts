@@ -1,4 +1,5 @@
 import { and, eq, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
+import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import {
   articles,
   articleSuppliers,
@@ -110,7 +111,8 @@ export function createPlanningRepository(db: Db) {
         orderedQuantity: sql<string>`coalesce((select sum(por.quantity_ordered) from ${purchaseOrderRows} por join ${purchaseOrders} po on po.id = por.purchase_order_id where por.mo_operation_id = ${moOperations}.id and po.status <> 'cancelled'), 0)`,
         supplierId: moOperations.subcontractSupplierId,
         supplierName: suppliers.name,
-        setupPrice: moOperations.setupPrice,
+        // Ställpris + Transportkostnad — the lego IO row's one-off.
+        setupPrice: legoOneOffSql(moOperations),
         unitPrice: moOperations.unitPrice,
       })
       .from(moOperations)

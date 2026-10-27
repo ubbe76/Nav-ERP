@@ -503,6 +503,7 @@ const MO_STATUS_LABELS: Record<string, string> = {
 interface LegoFieldInput {
   subcontractSupplierId?: string | null;
   setupPrice?: number | null;
+  transportPrice?: number | null;
   unitPrice?: number | null;
   showNetWeight?: boolean;
   useArticleDrawing?: boolean;
@@ -511,6 +512,7 @@ function hasLegoFields(input: LegoFieldInput): boolean {
   return (
     input.subcontractSupplierId != null ||
     input.setupPrice != null ||
+    input.transportPrice != null ||
     input.unitPrice != null ||
     input.showNetWeight === true ||
     input.useArticleDrawing === false
@@ -533,7 +535,13 @@ function assertLegoFieldsForResource<T extends LegoFieldInput>(
   }
   return input;
 }
-const CLEARED_LEGO_FIELDS = { subcontractSupplierId: null, setupPrice: null, unitPrice: null, showNetWeight: false } as const;
+const CLEARED_LEGO_FIELDS = {
+  subcontractSupplierId: null,
+  setupPrice: null,
+  transportPrice: null,
+  unitPrice: null,
+  showNetWeight: false,
+} as const;
 
 // createManufacturingService is constructed in well over a dozen unrelated
 // test files across payroll/timereport/planning/reports/purchase (it's the

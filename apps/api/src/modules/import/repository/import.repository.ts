@@ -999,7 +999,7 @@ export function createImportRepository(db: Db) {
             articleId: routingOperations.articleId,
             sequenceNo: routingOperations.sequenceNo,
             costingOnly: routingOperations.costingOnly,
-            hasLegoFields: sql<boolean>`(${routingOperations.subcontractSupplierId} is not null or ${routingOperations.setupPrice} is not null or ${routingOperations.unitPrice} is not null or ${routingOperations.showNetWeight})`,
+            hasLegoFields: sql<boolean>`(${routingOperations.subcontractSupplierId} is not null or ${routingOperations.setupPrice} is not null or ${routingOperations.unitPrice} is not null or ${routingOperations.transportPrice} is not null or ${routingOperations.showNetWeight})`,
           })
           .from(routingOperations)
           .where(inArray(routingOperations.articleId, part));
@@ -1319,11 +1319,13 @@ export function createImportRepository(db: Db) {
               subcontractSupplierId: row.subcontractSupplierId ?? null,
               setupPrice: row.setupPrice != null ? String(row.setupPrice) : null,
               unitPrice: row.unitPrice != null ? String(row.unitPrice) : null,
+              transportPrice: row.transportPrice != null ? String(row.transportPrice) : null,
             }))
           );
         }
         for (const update of plan.updates) {
-          const { setupTime, runTimePerUnit, setupPrice, unitPrice, cycleTimePerUnit, ...rest } = update.patch;
+          const { setupTime, runTimePerUnit, setupPrice, unitPrice, transportPrice, cycleTimePerUnit, ...rest } =
+            update.patch;
           await tx
             .update(routingOperations)
             .set({
@@ -1332,6 +1334,9 @@ export function createImportRepository(db: Db) {
               runTimePerUnit: String(runTimePerUnit),
               ...(setupPrice !== undefined ? { setupPrice: setupPrice === null ? null : String(setupPrice) } : {}),
               ...(unitPrice !== undefined ? { unitPrice: unitPrice === null ? null : String(unitPrice) } : {}),
+              ...(transportPrice !== undefined
+                ? { transportPrice: transportPrice === null ? null : String(transportPrice) }
+                : {}),
               ...(cycleTimePerUnit !== undefined
                 ? { cycleTimePerUnit: cycleTimePerUnit === null ? null : String(cycleTimePerUnit) }
                 : {}),

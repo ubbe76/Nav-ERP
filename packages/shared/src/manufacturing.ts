@@ -187,6 +187,8 @@ export const createRoutingOperationSchema = z.object({
   // center is a legoresurs; the service refuses them on other resources. ---
   subcontractSupplierId: z.string().uuid().nullable().optional(),
   setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+  // Transportkostnad (lego) — added to the ställpris on the lego IO and in the costing.
+  transportPrice: z.coerce.number().nonnegative().nullable().optional(),
   unitPrice: z.coerce.number().nonnegative().nullable().optional(),
   showNetWeight: z.boolean().optional(),
   useArticleDrawing: z.boolean().optional(),
@@ -213,6 +215,7 @@ export const updateRoutingOperationSchema = z
     // clear them.
     subcontractSupplierId: z.string().uuid().nullable().optional(),
     setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+    transportPrice: z.coerce.number().nonnegative().nullable().optional(),
     unitPrice: z.coerce.number().nonnegative().nullable().optional(),
     showNetWeight: z.boolean().optional(),
     useArticleDrawing: z.boolean().optional(),
@@ -263,6 +266,8 @@ export const createMoOperationSchema = z.object({
   packingInstructions: routingPackingInstructionsSchema.optional(),
   subcontractSupplierId: z.string().uuid().nullable().optional(),
   setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+  // Transportkostnad (lego) — added to the ställpris on the lego IO and in the costing.
+  transportPrice: z.coerce.number().nonnegative().nullable().optional(),
   unitPrice: z.coerce.number().nonnegative().nullable().optional(),
   showNetWeight: z.boolean().optional(),
 });
@@ -281,6 +286,7 @@ export const updateMoOperationSchema = z
     packingInstructions: routingPackingInstructionsSchema.optional(),
     subcontractSupplierId: z.string().uuid().nullable().optional(),
     setupPrice: z.coerce.number().nonnegative().nullable().optional(),
+    transportPrice: z.coerce.number().nonnegative().nullable().optional(),
     unitPrice: z.coerce.number().nonnegative().nullable().optional(),
     showNetWeight: z.boolean().optional(),
   })

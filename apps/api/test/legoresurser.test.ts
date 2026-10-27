@@ -98,7 +98,12 @@ async function makeLegoCenter(supplierId: string | null, code = "900") {
 
 // Manufactured article with weight, one ordinary and one lego operation, and
 // a BOM component linked to the lego operation (drawn when it reports).
-async function makeLegoRouting(opts?: { setupPrice?: number; unitPrice?: number; showNetWeight?: boolean }) {
+async function makeLegoRouting(opts?: {
+  setupPrice?: number;
+  unitPrice?: number;
+  transportPrice?: number;
+  showNetWeight?: boolean;
+}) {
   const user = await makeUser();
   const supplier = await makeSupplier();
   const machine = await mfgService.createWorkCenter({ code: "100", name: "Svets", type: "machine", active: true });
@@ -134,6 +139,7 @@ async function makeLegoRouting(opts?: { setupPrice?: number; unitPrice?: number;
     runTimePerUnit: 0,
     setupPrice: opts?.setupPrice ?? 500,
     unitPrice: opts?.unitPrice ?? 100,
+    ...(opts?.transportPrice !== undefined ? { transportPrice: opts.transportPrice } : {}),
     showNetWeight: opts?.showNetWeight ?? true,
   });
   await articleService.addBomComponent(parent.id, {
@@ -489,3 +495,40 @@ describe("lego IO PDF", () => {
     expect(text).toContain("Ställpris: 500,00 SEK");
   });
 });
+
+// Transportkostnad (0164): a third lego price, added to the ställpris
+// wherever the lego one-off is used (legoOneOffSql).
+describe("lego Transportkostnad", () => {
+  it("is snapshotted at release, priced into the pre-calculation and added to the IO row's ställpris", async () => {
+    const { parent, user, supplier } = await makeLegoRouting({ setupPrice: 500, unitPrice: 100, transportPrice: 300 });
+
+    const { calculation } = await costingService.preCalculate(parent.id, 4);
+    // 500 + 300 + 100 × 4 = 1200.
+    expect(calculation.subcontractCost).toBe("1200.0000");
+
+    const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 4 }, user.id);
+    const legoOp = (await mfgService.listOperations(order.id)).find((op) => op.sequenceNo === 20)!;
+    expect(legoOp.transportPrice).toBe("300.00");
+
+    // The förfrågan defaults its ställpris from the operation's one-off.
+    const { rows } = await purchaseService.createInquiry(
+      { supplierId: supplier.id, rows: [{ articleId: parent.id, quantity: 4, moOperationId: legoOp.id }] },
+      user.id
+    );
+    expect(rows[0]!.setupPrice).toBe("800.00");
+  });
+
+  it("is a lego field: refused on an ordinary resource", async () => {
+    const { parent, machine } = await makeLegoRouting();
+    await expect(
+      mfgService.createRoutingOperation(parent.id, {
+        sequenceNo: 30,
+        workCenterId: machine.id,
+        setupTime: 1,
+        runTimePerUnit: 1,
+        transportPrice: 100,
+      })
+    ).rejects.toThrow();
+  });
+});
+

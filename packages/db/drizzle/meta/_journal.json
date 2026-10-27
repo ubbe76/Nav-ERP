@@ -1149,6 +1149,13 @@
       "when": 1793101950550,
       "tag": "0163_sakerhetslager",
       "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 1793102617281,
+      "tag": "0164_transportkostnad",
+      "breakpoints": true
     }
   ]
 }

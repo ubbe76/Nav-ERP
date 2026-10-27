@@ -59,3 +59,8 @@ Spec `private/superpowers/specs/2026-10-18-andra-tillverkningsorder-design.md`.
 
 - `GET /terminal/operations` (+ `/terminal/stations`, `TERMINAL_READ`): en rad per stämplingsbar operation (frisläppt/pågående TO, pending, ej lego) med beredskap ur rena `terminal-readiness.ts` — första operationen alltid redo, annars föregående operations OK (även på annan station eller lego); spärrar aldrig. Bara **kopplat** material; `materials` i svaret är listan före materialfiltret.
 - Förvalda stationer per anställd i `employee_work_centers`, bärs av `GET /employees/directory`. Webbens sortering/sök i `lib/terminalOperations.ts`.
+
+## Transportkostnad på legooperationer (migration 0164)
+
+- `routing_operations.transport_price` och `mo_operations.transport_price` (snapshot vid frisläpp, redigerbar i Ändra operationer) är ett legofält som Ställpris/Styckpris (`hasLegoFields`, `CLEARED_LEGO_FIELDS`, döljs utan prisbehörighet). **EN regel för legoorderns engångskostnad:** `legoOneOffSql(table)` i lövet `manufacturing/repository/lego-one-off.ts` = ställpris + transportkostnad (null bara när båda saknas). Den läses av behovsberäkningens legoförslag, förfrågans/IO-radens förifyllda ställpris (`resolveLegoOperationRef`) och för-/efterkalkylen — en ny läsare av legokostnaden ska gå genom den, aldrig läsa `setup_price` direkt.
+

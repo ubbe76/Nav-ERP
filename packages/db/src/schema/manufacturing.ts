@@ -181,6 +181,12 @@ export const routingOperations = pgTable(
     }),
     // Ställpris — one-off setup charge per lego order (SEK-scale money).
     setupPrice: numeric("setup_price", { precision: 12, scale: 2 }),
+    // Transportkostnad — a lego operation's freight to and from the
+    // subcontractor, one-off per order like the ställpris. Wherever the lego
+    // one-off is used (the IO row's ställpris, the costing) it is
+    // setup_price + transport_price — legoOneOffSql in
+    // manufacturing/repository/lego-one-off.ts. Null = none.
+    transportPrice: numeric("transport_price", { precision: 12, scale: 2 }),
     // Styckpris — price per unit, same scale as purchase_order_rows.unit_price.
     unitPrice: numeric("unit_price", { precision: 12, scale: 4 }),
     // Print "Nettovikt" (articles.weight × quantity) on the lego IO PDF.
@@ -306,6 +312,12 @@ export const moOperations = pgTable(
       onDelete: "set null",
     }),
     setupPrice: numeric("setup_price", { precision: 12, scale: 2 }),
+    // Transportkostnad — a lego operation's freight to and from the
+    // subcontractor, one-off per order like the ställpris. Wherever the lego
+    // one-off is used (the IO row's ställpris, the costing) it is
+    // setup_price + transport_price — legoOneOffSql in
+    // manufacturing/repository/lego-one-off.ts. Null = none.
+    transportPrice: numeric("transport_price", { precision: 12, scale: 2 }),
     unitPrice: numeric("unit_price", { precision: 12, scale: 4 }),
     showNetWeight: boolean("show_net_weight").notNull().default(false),
     // --- Produktionsplanering: the operation's planned weeks (planerad

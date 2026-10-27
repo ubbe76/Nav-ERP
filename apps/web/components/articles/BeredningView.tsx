@@ -251,11 +251,20 @@ export function BeredningView({
                     data-align="right"
                     data-label={op.workCenterType === "subcontract" ? "Ställpris" : "Ställtid"}
                   >
-                    {op.workCenterType === "subcontract"
-                      ? op.setupPrice != null
-                        ? `${Number(op.setupPrice).toLocaleString("sv-SE")} kr`
-                        : "—"
-                      : `${Number(op.setupTime).toLocaleString("sv-SE")} min`}
+                    {op.workCenterType === "subcontract" ? (
+                      <span className={styles.timeStack}>
+                        <span>
+                          {op.setupPrice != null ? `${Number(op.setupPrice).toLocaleString("sv-SE")} kr` : "—"}
+                        </span>
+                        {op.transportPrice != null && (
+                          <span className={styles.cycleTime}>
+                            Transport {Number(op.transportPrice).toLocaleString("sv-SE")} kr
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      `${Number(op.setupTime).toLocaleString("sv-SE")} min`
+                    )}
                   </span>
                   <span
                     className={`${styles.prepCell} num`}

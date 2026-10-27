@@ -52,6 +52,7 @@ export interface OperationPayload {
   subcontractSupplierId: string | null;
   setupPrice: number | null;
   unitPrice: number | null;
+  transportPrice: number | null;
   showNetWeight: boolean;
   useArticleDrawing?: boolean;
 }
@@ -172,6 +173,9 @@ function OperationForm({
   const [subcontractSupplierId, setSubcontractSupplierId] = useState(editing?.subcontractSupplierId ?? "");
   const [setupPrice, setSetupPrice] = useState(editing?.setupPrice != null ? String(Number(editing.setupPrice)) : "");
   const [unitPrice, setUnitPrice] = useState(editing?.unitPrice != null ? String(Number(editing.unitPrice)) : "");
+  const [transportPrice, setTransportPrice] = useState(
+    editing?.transportPrice != null ? String(Number(editing.transportPrice)) : "",
+  );
   const [showNetWeight, setShowNetWeight] = useState(editing?.showNetWeight ?? false);
   const [useArticleDrawing, setUseArticleDrawing] = useState(routingEditing?.useArticleDrawing ?? true);
   const [hasFile, setHasFile] = useState(routingEditing?.hasFile ?? false);
@@ -282,6 +286,7 @@ function OperationForm({
         subcontractSupplierId: isLego && subcontractSupplierId !== "" ? subcontractSupplierId : null,
         setupPrice: isLego && setupPrice !== "" ? Number(setupPrice) : null,
         unitPrice: isLego && unitPrice !== "" ? Number(unitPrice) : null,
+        transportPrice: isLego && transportPrice !== "" ? Number(transportPrice) : null,
         showNetWeight: isLego ? showNetWeight : false,
         ...(moMode ? {} : { costingOnly, useArticleDrawing: isLego ? useArticleDrawing : true }),
       };
@@ -423,9 +428,15 @@ function OperationForm({
               <Input id="unitPrice" type="number" size="sm" min="0" step="0.01" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} />
             </Field>
           </FormRow>
+          <FormRow>
+            <Field label="Transportkostnad (kr)" htmlFor="transportPrice">
+              <Input id="transportPrice" type="number" size="sm" min="0" step="0.01" value={transportPrice} onChange={(e) => setTransportPrice(e.target.value)} />
+            </Field>
+          </FormRow>
           <FormHint attached>
-            Ställpriset läggs på en gång per inköpsorder, styckpriset per enhet. Båda räknas in i förkalkylen som
-            legokostnad med LO-påslag.
+            Ställpriset läggs på en gång per inköpsorder, styckpriset per enhet. Transportkostnaden är frakten till och
+            från leverantören, en gång per order — den läggs till ställpriset på inköpsorderraden. Alla tre räknas in i
+            förkalkylen som legokostnad med LO-påslag.
           </FormHint>
 
           <label style={checkboxRowStyle}>

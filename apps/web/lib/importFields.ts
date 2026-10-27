@@ -254,6 +254,7 @@ export const ROUTING_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "subcontractSupplierNumber", label: "Legoleverantör" },
   { field: "setupPrice", label: "Ställpris" },
   { field: "unitPrice", label: "Styckpris" },
+  { field: "transportPrice", label: "Transportkostnad" },
   // Monitor's "Cykeltid" — the productive time, same unit as Stycktid.
   { field: "cycleTimePerUnit", label: "Cykeltid" },
 ];

@@ -79,6 +79,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Leverantör** | Nej | Bara för operationer på en legoresurs: leverantören som utför arbetet. Måste finnas i leverantörsregistret. Tom cell ger legoresursens egen leverantör på en ny operation och lämnar en befintlig orörd. På en vanlig resurs ignoreras kolumnen med en varning. | 20015 |
 | **Ställpris** | Nej | Bara för legooperationer: engångskostnaden per order i kronor. Decimalkomma eller punkt, aldrig negativ, högst 2 decimaler — fler avrundas med en varning. Tom cell lämnar fältet orört på en befintlig post. | 150 |
 | **Styckpris** | Nej | Bara för legooperationer: kostnaden per styck i kronor. Decimalkomma eller punkt, aldrig negativ, högst 4 decimaler — fler avrundas med en varning. Tom cell lämnar fältet orört på en befintlig post. | 4,50 |
+| **Transportkostnad** | Nej | Bara för legooperationer: frakten till och från leverantören i kronor, en gång per order. Decimalkomma eller punkt, aldrig negativ, högst 2 decimaler. Läggs ihop med ställpriset på legoinköpsordern och i kalkylen. Tom cell lämnar fältet orört på en befintlig post. | 300 |
 | **Cykeltid** | Nej | Operationens produktiva tid per styck, i samma enhet som Stycktid (Tidsenhet). Decimalkomma eller punkt, aldrig negativ; 0 betyder ingen cykeltid. Ignoreras på legoresurser. Tom cell lämnar fältet orört på en befintlig post. | 1,5 |
 
 ## Artikelstruktur

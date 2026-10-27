@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNotNull, not, notInArray, or, sql } from "drizzle-orm";
+import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
@@ -506,7 +507,8 @@ export function createPurchaseRepository(db: Db) {
             routingOperationId: moOperations.routingOperationId,
             articleId: manufacturingOrders.articleId,
             workCenterType: workCenters.type,
-            setupPrice: moOperations.setupPrice,
+            // Ställpris + Transportkostnad — the IO row's one-off.
+            setupPrice: legoOneOffSql(moOperations),
             supplierId: moOperations.subcontractSupplierId,
             moOperationStatus: moOperations.status,
             manufacturingOrderStatus: manufacturingOrders.status,
@@ -523,7 +525,7 @@ export function createPurchaseRepository(db: Db) {
             routingOperationId: routingOperations.id,
             articleId: routingOperations.articleId,
             workCenterType: workCenters.type,
-            setupPrice: routingOperations.setupPrice,
+            setupPrice: legoOneOffSql(routingOperations),
             supplierId: routingOperations.subcontractSupplierId,
           })
           .from(routingOperations)

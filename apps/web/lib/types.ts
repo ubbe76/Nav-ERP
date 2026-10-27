@@ -1937,6 +1937,9 @@ export interface RoutingOperation {
   subcontractSupplierName: string | null;
   setupPrice: string | null;
   unitPrice: string | null;
+  // Transportkostnad — freight to and from the subcontractor, one-off per
+  // order; added to the ställpris wherever the lego one-off is used.
+  transportPrice: string | null;
   showNetWeight: boolean;
   useArticleDrawing: boolean;
   // Whether a drawing is uploaded on the operation (routing_operation_files).
@@ -2201,6 +2204,9 @@ export interface MOOperation {
   subcontractSupplierName: string | null;
   setupPrice: string | null;
   unitPrice: string | null;
+  // Transportkostnad — freight to and from the subcontractor, one-off per
+  // order; added to the ställpris wherever the lego one-off is used.
+  transportPrice: string | null;
   showNetWeight: boolean;
   // Produktionsplanering: planned weeks (Mondays), null = unplanned. A locked
   // plan was moved by hand and stays put through Planera.
