@@ -46,6 +46,8 @@ export interface RequirementsArticle {
   unitCode: string | null;
   groupId: string | null;
   reorderPoint: number | null;
+  // Säkerhetslager — optional so fixtures without it plan as before.
+  safetyStock?: number | null;
   orderQuantity: number | null;
   // Avrundning — applied to the proposal after the order-quantity multiple.
   rounding: number | null;
@@ -196,6 +198,7 @@ export interface RequirementRow {
   supplyMo: number;
   projected: number;
   reorderPoint: number | null;
+  safetyStock: number | null;
   orderQuantity: number | null;
   rounding: number | null;
   proposalQuantity: number;
@@ -427,7 +430,9 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
 
     // Reorder point compares against the projected balance (inventory
     // position), not raw on-hand — classic ROP, spelled out in the manual.
-    const target = article.reorderPoint ?? 0;
+    // Säkerhetslager is the same kind of floor: below it a proposal fills the
+    // balance back up to it, so the threshold is the larger of the two.
+    const target = Math.max(article.reorderPoint ?? 0, article.safetyStock ?? 0);
     const rawQuantity = Math.max(0, target - projected);
     let proposalQuantity = 0;
     if (rawQuantity > 0 && article.active && !isConfiguredTemplate) {
@@ -470,6 +475,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
       sMo > 0 ||
       stockQty !== 0 ||
       article.reorderPoint != null ||
+      article.safetyStock != null ||
       proposalQuantity > 0;
     if (!isRelevant) continue;
 
@@ -491,6 +497,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
       supplyMo: sMo,
       projected,
       reorderPoint: article.reorderPoint,
+      safetyStock: article.safetyStock ?? null,
       orderQuantity: article.orderQuantity,
       rounding: article.rounding,
       proposalQuantity,
@@ -545,6 +552,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         supplyMo: 0,
         projected: 0,
         reorderPoint: null,
+        safetyStock: null,
         orderQuantity: null,
         rounding: null,
         proposalQuantity: c.uncoveredQuantity,
@@ -584,6 +592,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         supplyMo: 0,
         projected: 0,
         reorderPoint: null,
+        safetyStock: null,
         orderQuantity: null,
         rounding: null,
         proposalQuantity: remaining,

@@ -111,6 +111,8 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     reorderPoint: input.reorderPoint !== undefined ? String(input.reorderPoint) : undefined,
     orderQuantity: input.orderQuantity !== undefined ? String(input.orderQuantity) : undefined,
     rounding: input.rounding !== undefined ? String(input.rounding) : undefined,
+    safetyStock: input.safetyStock ? String(input.safetyStock) : undefined,
+    stockControlled: input.stockControlled ?? false,
     packageTypeId: input.packageTypeId,
     parcelKind: input.parcelKind ?? null,
     stackable: input.stackable ?? false,
@@ -155,6 +157,7 @@ async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleIn
     reorderPoint,
     orderQuantity,
     rounding,
+    safetyStock,
     palletSpaces,
     loadingMeters,
     ...rest
@@ -172,6 +175,8 @@ async function updateArticleRow(dbc: Db | Tx, id: string, input: UpdateArticleIn
       reorderPoint: numeric(reorderPoint),
       orderQuantity: numeric(orderQuantity),
       rounding: numeric(rounding),
+      // 0 means none, like the reorder point's empty field.
+      safetyStock: safetyStock === 0 ? null : numeric(safetyStock),
       palletSpaces: numeric(palletSpaces),
       loadingMeters: numeric(loadingMeters),
       salesPrice: numeric(salesPrice),

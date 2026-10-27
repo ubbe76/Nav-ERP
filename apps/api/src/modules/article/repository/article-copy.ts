@@ -31,6 +31,8 @@ export const COPIED_INFORMATION_FIELDS = [
   "colour",
   "extraDescription",
   "reorderPoint",
+  "safetyStock",
+  "stockControlled",
   "orderQuantity",
   "rounding",
 ] as const satisfies readonly (keyof CreateArticleInput & keyof typeof articles.$inferSelect)[];

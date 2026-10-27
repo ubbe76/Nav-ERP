@@ -174,6 +174,22 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Fast orderstorlek",
     },
     {
+      field: "safetyStock",
+      label: "Säkerhetslager",
+      required: false,
+      header: "Säkerhetslager",
+      description: `Lägsta beräknade saldo i grundenheten, ${DECIMAL}, aldrig negativt. Faller saldot under det föreslår behovsberäkningen påfyllning upp till säkerhetslagret. 0 tömmer fältet. ${UNTOUCHED}`,
+      example: "20",
+    },
+    {
+      field: "stockControlled",
+      label: "Styrning",
+      required: false,
+      header: "Styrning",
+      description: `Lagerstyrd eller Orderstyrd — sparas som information på Lager-flikens planering. ${UNTOUCHED}`,
+      example: "Lagerstyrd",
+    },
+    {
       field: "articleRevision",
       label: "Artikelrevision",
       required: false,

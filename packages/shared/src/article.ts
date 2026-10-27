@@ -96,6 +96,9 @@ export const createArticleSchema = z.object({
   reorderPoint: z.coerce.number().nonnegative().optional(),
   orderQuantity: z.coerce.number().positive().optional(),
   rounding: roundingSchema.optional(),
+  // Säkerhetslager (base unit) and Styrning Lagerstyrd (true) / Orderstyrd.
+  safetyStock: z.coerce.number().nonnegative().optional(),
+  stockControlled: z.boolean().optional(),
   // "Ytbehandling" / "Färg" — free text printed on documents (see the
   // articles schema); blank = not filled in.
   surfaceTreatment: optionalText(200).optional(),
@@ -163,6 +166,9 @@ export const updateArticleSchema = z
     reorderPoint: z.coerce.number().nonnegative().nullable().optional(),
     orderQuantity: z.coerce.number().positive().nullable().optional(),
     rounding: roundingSchema.nullable().optional(),
+    // Säkerhetslager; null clears. Styrning: true = Lagerstyrd.
+    safetyStock: z.coerce.number().nonnegative().nullable().optional(),
+    stockControlled: z.boolean().optional(),
     // "Ytbehandling" / "Färg" — free text printed on documents; "" clears.
     surfaceTreatment: optionalText(200).optional(),
     colour: optionalText(200).optional(),

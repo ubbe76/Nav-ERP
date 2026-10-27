@@ -890,3 +890,29 @@ describe("konfigurator 4c — beställningsvara", () => {
     expect(rows.find((r) => r.proposalKind === "configured")!.configurationError).toBe("Konfigurationen är inte giltig");
   });
 });
+
+describe("säkerhetslager", () => {
+  it("fills the projected balance up to the safety stock, with order quantity on top", () => {
+    const rows = computeRequirements(
+      calcInput({
+        articles: [
+          art({ articleId: "a", safetyStock: 20 }),
+          art({ articleId: "b", safetyStock: 20, orderQuantity: 50 }),
+          art({ articleId: "c", safetyStock: 5, reorderPoint: 12 }),
+          art({ articleId: "d", safetyStock: 20 }),
+        ],
+        stock: [
+          { articleId: "a", quantity: 8 },
+          { articleId: "b", quantity: 8 },
+          { articleId: "c", quantity: 8 },
+          { articleId: "d", quantity: 20 },
+        ],
+      })
+    );
+    expect(rowFor(rows, "a")).toMatchObject({ proposalQuantity: 12, safetyStock: 20 });
+    expect(rowFor(rows, "b").proposalQuantity).toBe(50);
+    // The larger of the two floors wins.
+    expect(rowFor(rows, "c").proposalQuantity).toBe(4);
+    expect(rowFor(rows, "d").proposalQuantity).toBe(0);
+  });
+});

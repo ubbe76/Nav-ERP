@@ -39,6 +39,9 @@ export const ARTICLE_IMPORT_FIELDS = [
   "orderQuantity",
   "rounding",
   "lotSizingRule",
+  // Säkerhetslager (0 = none) and Styrning (Lagerstyrd/Orderstyrd).
+  "safetyStock",
+  "stockControlled",
   // Revisionsregistren on the card's Revisioner tab — the cell names the
   // revision (or drawing number) that should be there and active; see
   // planArticleImport.
@@ -69,6 +72,8 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   avrundning: "rounding",
   avrundningsantal: "rounding",
   partiformningsregel: "lotSizingRule",
+  sakerhetslager: "safetyStock",
+  styrning: "stockControlled",
   artikelnummer: "articleNumber",
   artikelnr: "articleNumber",
   artnr: "articleNumber",
@@ -195,7 +200,9 @@ export interface ArticleCreatePlan {
   orderQuantity: number | null;
   rounding: number | null;
   revisions?: ArticleRevisionPlan;
-  // Optional: the bom import's article creates carry neither.
+  // Optional: the bom import's article creates carry none of these.
+  safetyStock?: number | null;
+  stockControlled?: boolean;
   quantityPerPackage?: number | null;
   primarySupplierId?: string | null;
 }
@@ -219,6 +226,8 @@ export interface ArticleUpdatePlan {
     orderQuantity?: number | null;
     rounding?: number | null;
     quantityPerPackage?: number | null;
+    safetyStock?: number | null;
+    stockControlled?: boolean;
   };
   revisions?: ArticleRevisionPlan;
   // Becomes the article's primary supplier (article_suppliers), added
@@ -542,6 +551,29 @@ export async function planArticleImport(
       }
     }
 
+    // Säkerhetslager — 0 is "none" like the other planning fields.
+    const safetyStockCell = record["safetyStock"] ?? "";
+    let safetyStock: number | null | undefined;
+    if (safetyStockCell !== "") {
+      const parsed = normalizeDecimal(safetyStockCell);
+      if (parsed === null) errors.push(`Ogiltigt säkerhetslager: "${safetyStockCell}"`);
+      else if (parsed < 0) errors.push("Säkerhetslagret kan inte vara negativt");
+      else {
+        safetyStock = parsed === 0 ? null : Math.round(parsed * 10000) / 10000;
+        values["safetyStock"] = safetyStock;
+      }
+    }
+    // Styrning: Lagerstyrd / Orderstyrd (information only).
+    const stockControlledCell = record["stockControlled"] ?? "";
+    let stockControlled: boolean | undefined;
+    if (stockControlledCell !== "") {
+      const word = stockControlledCell.toLowerCase();
+      if (word.startsWith("lager")) stockControlled = true;
+      else if (word.startsWith("order")) stockControlled = false;
+      else errors.push(`Okänd styrning: "${stockControlledCell}" (Lagerstyrd eller Orderstyrd)`);
+      if (stockControlled !== undefined) values["stockControlled"] = stockControlled;
+    }
+
     // Revisioner. Artikelrevision becomes the article's active revision
     // (added when missing; the previous one stays, inactive) and is only
     // staged when it differs from the active one, so re-importing a file
@@ -636,6 +668,8 @@ export async function planArticleImport(
         rounding: planning.rounding ?? null,
         ...(revisions ? { revisions } : {}),
         ...(quantityPerPackage != null ? { quantityPerPackage } : {}),
+        ...(safetyStock != null ? { safetyStock } : {}),
+        ...(stockControlled !== undefined ? { stockControlled } : {}),
         ...(primarySupplierId !== null ? { primarySupplierId } : {}),
       });
     } else {
@@ -670,6 +704,8 @@ export async function planArticleImport(
       if (planning.orderQuantity !== undefined) patch.orderQuantity = planning.orderQuantity;
       if (planning.rounding !== undefined) patch.rounding = planning.rounding;
       if (quantityPerPackage !== undefined) patch.quantityPerPackage = quantityPerPackage;
+      if (safetyStock !== undefined) patch.safetyStock = safetyStock;
+      if (stockControlled !== undefined) patch.stockControlled = stockControlled;
       updates.push({
         id: existing.id,
         patch,

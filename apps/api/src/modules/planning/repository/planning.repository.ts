@@ -227,6 +227,7 @@ export function createPlanningRepository(db: Db) {
               unitCode: units.code,
               groupId: articles.groupId,
               reorderPoint: articles.reorderPoint,
+              safetyStock: articles.safetyStock,
               orderQuantity: articles.orderQuantity,
               rounding: articles.rounding,
               // Konfigurator: same left join as the article list's configuratorMode.
@@ -318,6 +319,7 @@ export function createPlanningRepository(db: Db) {
           unitCode: r.unitCode,
           groupId: r.groupId,
           reorderPoint: r.reorderPoint === null ? null : Number(r.reorderPoint),
+          safetyStock: r.safetyStock === null ? null : Number(r.safetyStock),
           orderQuantity: r.orderQuantity === null ? null : Number(r.orderQuantity),
           rounding: r.rounding === null ? null : Number(r.rounding),
           configuratorMode: r.configuratorMode,

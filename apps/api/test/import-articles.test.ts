@@ -656,7 +656,8 @@ describe("planArticleImport", () => {
       expect(suggested["Nettovikt"]).toBe("weight");
       // Deliberately without a home.
       expect(suggested["Min. kvantitet"]).toBeNull();
-      expect(suggested["Säkerhetslager"]).toBeNull();
+      expect(suggested["Säkerhetslager"]).toBe("safetyStock");
+      expect(suggested["Styrning"]).toBe("stockControlled");
       expect(suggested["Ledtid"]).toBeNull();
       expect(suggestArticleMapping(["Avrundning", "BP"])).toEqual({ Avrundning: "rounding", BP: "reorderPoint" });
     });
@@ -1176,6 +1177,31 @@ describe("article import — Antal/kolli and Leverantörsnr", () => {
     expect(created!.quantityPerPackage).toBe("25.0000");
     expect(links.filter((link) => link.articleId === created!.id)).toMatchObject([
       { supplierId: oldSupplier!.id, isPrimary: true, currency: "SEK" },
+    ]);
+  });
+});
+
+describe("article import — Säkerhetslager and Styrning", () => {
+  it("reads both from the Planering export", async () => {
+    const mapping = { Artikelnummer: "articleNumber", Artikelbenämning: "name", Säkerhetslager: "safetyStock", Styrning: "stockControlled" };
+    expect(suggestArticleMapping(Object.keys(mapping))).toEqual(mapping);
+    const plan = await planArticleImport(
+      {
+        mapping,
+        rows: [
+          ["A-1", "Ett", "20", "Lagerstyrd"],
+          ["A-2", "Två", "0", "Orderstyrd"],
+          ["A-3", "Tre", "-1", "Kanban"],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.creates[0]).toMatchObject({ safetyStock: 20, stockControlled: true });
+    expect(plan.creates[1]).toMatchObject({ stockControlled: false });
+    expect(plan.creates[1]).not.toHaveProperty("safetyStock");
+    expect(plan.rows[2]!.errors).toEqual([
+      "Säkerhetslagret kan inte vara negativt",
+      'Okänd styrning: "Kanban" (Lagerstyrd eller Orderstyrd)',
     ]);
   });
 });

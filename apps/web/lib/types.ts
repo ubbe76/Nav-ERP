@@ -91,6 +91,11 @@ export interface Article {
   // Behovsberäkning (MRP light, E1): compared against projected stock and
   // used to round proposal quantities up to the nearest multiple.
   reorderPoint: string | null;
+  // Säkerhetslager (base unit): the proposal floor is the larger of
+  // reorderPoint and safetyStock. Null = none.
+  safetyStock: string | null;
+  // Styrning: true = Lagerstyrd, false = Orderstyrd. Information only.
+  stockControlled: boolean;
   orderQuantity: string | null;
   // Avrundning: the step proposals AND order-row quantities are rounded up
   // to (server-side, in the base unit, after orderQuantity). Null = none.
@@ -4125,6 +4130,7 @@ export interface RequirementRow {
   supplyMo: number;
   projected: number;
   reorderPoint: number | null;
+  safetyStock: number | null;
   orderQuantity: number | null;
   rounding: number | null;
   proposalQuantity: number;

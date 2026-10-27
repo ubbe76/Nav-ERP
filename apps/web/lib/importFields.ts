@@ -28,6 +28,8 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "orderQuantity", label: "Orderkvantitet" },
   { field: "rounding", label: "Avrundning" },
   { field: "lotSizingRule", label: "Partiformningsregel" },
+  { field: "safetyStock", label: "Säkerhetslager" },
+  { field: "stockControlled", label: "Styrning" },
   // Revisioner: the article's active revision and a drawing number with its
   // active revision.
   { field: "articleRevision", label: "Artikelrevision" },

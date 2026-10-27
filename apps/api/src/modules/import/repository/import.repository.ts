@@ -534,6 +534,8 @@ export function createImportRepository(db: Db) {
                 orderQuantity: create.orderQuantity != null ? String(create.orderQuantity) : undefined,
                 rounding: create.rounding != null ? String(create.rounding) : undefined,
                 quantityPerPackage: create.quantityPerPackage != null ? String(create.quantityPerPackage) : undefined,
+                safetyStock: create.safetyStock != null ? String(create.safetyStock) : undefined,
+                stockControlled: create.stockControlled ?? false,
               }))
             )
             .returning({ id: articles.id, articleNumber: articles.articleNumber });
@@ -592,6 +594,10 @@ export function createImportRepository(db: Db) {
               ...(update.patch.rounding !== undefined
                 ? { rounding: update.patch.rounding === null ? null : String(update.patch.rounding) }
                 : {}),
+              ...(update.patch.safetyStock !== undefined
+                ? { safetyStock: update.patch.safetyStock === null ? null : String(update.patch.safetyStock) }
+                : {}),
+              ...(update.patch.stockControlled !== undefined ? { stockControlled: update.patch.stockControlled } : {}),
               ...(update.patch.quantityPerPackage !== undefined
                 ? {
                     quantityPerPackage:

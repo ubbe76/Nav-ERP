@@ -638,8 +638,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           { key: "onHand", label: "Saldo", width: "70px", align: "right" },
           { key: "demand", label: "Behov", width: "70px", align: "right" },
           { key: "incoming", label: "Inkommande", width: "80px", align: "right" },
-          { key: "projected", label: "Netto", width: "75px", align: "right" },
-          { key: "reorderPoint", label: "BP", width: "50px", align: "right" },
+          { key: "projected", label: "Netto", width: "70px", align: "right" },
+          { key: "reorderPoint", label: "BP / SL", width: "60px", align: "right" },
           { key: "proposal", label: "Förslag", width: "120px", align: "right" },
           { key: "leadTime", label: "Ledtid", width: "60px", align: "right" },
           { key: "source", label: "Källa", width: "140px" },
@@ -718,7 +718,17 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
                 </span>
               );
             case "reorderPoint":
-              return row.reorderPoint !== null ? row.reorderPoint.toLocaleString("sv-SE") : "—";
+              // BP on the first line, Säkerhetslager (SL) below it when set.
+              return (
+                <span title={`Beställningspunkt: ${row.reorderPoint ?? "—"} · Säkerhetslager: ${row.safetyStock ?? "—"}`}>
+                  {row.reorderPoint !== null ? row.reorderPoint.toLocaleString("sv-SE") : "—"}
+                  {row.safetyStock !== null && (
+                    <span style={{ display: "block", color: "var(--color-text-muted)" }}>
+                      {row.safetyStock.toLocaleString("sv-SE")}
+                    </span>
+                  )}
+                </span>
+              );
             case "proposal":
               if (row.configuredTemplate) {
                 // A beställningsvara template never gets a proposal of its own — its

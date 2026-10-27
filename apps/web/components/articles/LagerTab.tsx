@@ -7,7 +7,7 @@ import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { SectionHeading } from "../ui/SectionHeading";
-import { Field, Input } from "../ui/Field";
+import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { Article, StockBalance } from "../../lib/types";
@@ -21,6 +21,8 @@ interface RowWithId extends StockBalance {
 export function LagerTab({ article, balances }: { article: Article; balances: StockBalance[] }) {
   const router = useRouter();
   const [reorderPoint, setReorderPoint] = useState(article.reorderPoint ?? "");
+  const [safetyStock, setSafetyStock] = useState(article.safetyStock ?? "");
+  const [stockControlled, setStockControlled] = useState(article.stockControlled ? "stock" : "order");
   const [orderQuantity, setOrderQuantity] = useState(article.orderQuantity ?? "");
   const [rounding, setRounding] = useState(article.rounding ?? "");
   const [pending, setPending] = useState(false);
@@ -37,6 +39,8 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
         method: "PATCH",
         body: JSON.stringify({
           reorderPoint: reorderPoint.trim() === "" ? null : Number(reorderPoint),
+          safetyStock: safetyStock.trim() === "" ? null : Number(safetyStock),
+          stockControlled: stockControlled === "stock",
           orderQuantity: orderQuantity.trim() === "" ? null : Number(orderQuantity),
           rounding: rounding.trim() === "" ? null : Number(rounding),
         }),
@@ -58,6 +62,29 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
         <SectionHeading>Planering</SectionHeading>
         <Form onSubmit={savePlanning}>
           <FormError>{error}</FormError>
+          <FormRow columns={2}>
+            <Field label="Styrning" htmlFor="stockControlled">
+              <Select
+                id="stockControlled"
+                value={stockControlled}
+                onChange={(e) => setStockControlled(e.target.value)}
+              >
+                <option value="order">Orderstyrd</option>
+                <option value="stock">Lagerstyrd</option>
+              </Select>
+            </Field>
+            <Field label="Säkerhetslager" htmlFor="safetyStock">
+              <Input
+                id="safetyStock"
+                type="number"
+                size="sm"
+                min="0"
+                step="any"
+                value={safetyStock}
+                onChange={(e) => setSafetyStock(e.target.value)}
+              />
+            </Field>
+          </FormRow>
           <FormRow columns={3}>
             <Field label="Beställningspunkt" htmlFor="reorderPoint">
               <Input
@@ -97,7 +124,8 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
             </Field>
           </FormRow>
           <FormHint attached>
-            Används av behovsberäkningen. Beställningspunkt jämförs mot projicerat saldo; förslag avrundas upp till
+            Används av behovsberäkningen. Beställningspunkt och Säkerhetslager jämförs mot projicerat saldo — det större av dem är golvet, och
+            förslaget fyller upp till det. Styrning (Orderstyrd/Lagerstyrd) är bara information. Förslag avrundas upp till
             närmaste multipel av orderkvantiteten. Avrundning avrundar därefter förslag och orderrader (inköp,
             förfrågan, kundorder, tillverkningsorder) uppåt till närmaste multipel i grundenheten — 1 ger hela tal, 5
             ger 5, 10, 15 …, 7,38 ger hela stänger om 7,38 kg. Högst 3 decimaler.

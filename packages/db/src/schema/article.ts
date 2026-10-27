@@ -125,6 +125,13 @@ export const articles = pgTable("articles", {
   reorderPoint: numeric("reorder_point", { precision: 14, scale: 4 }),
   orderQuantity: numeric("order_quantity", { precision: 14, scale: 4 }),
   rounding: numeric("rounding", { precision: 14, scale: 3 }),
+  // Säkerhetslager — the behovsberäkning proposes when the projected balance
+  // falls below it and fills up to it (the threshold is the larger of this
+  // and the reorder point). Base unit; null = none.
+  safetyStock: numeric("safety_stock", { precision: 14, scale: 4 }),
+  // Styrning (Monitor's Lagerstyrd/Orderstyrd) — information only; the
+  // behovsberäkning reads the reorder point and safety stock, not this flag.
+  stockControlled: boolean("stock_controlled").notNull().default(false),
   packageTypeId: uuid("package_type_id").references(() => packageTypes.id, { onDelete: "restrict" }),
   // Frakt — "egna mått" (used when the article has no package type + antal
   // per kolli): kolliart (null = Paket), stapelbar, pallplatser and flakmeter.
