@@ -224,7 +224,7 @@ describe("field help — the examples parse", () => {
     supplierPrices: ["price", "discountPercent", "breakQuantity", "breakPrice"],
     customerPrices: ["price", "discountPercent"],
     customers: ["discountPercent"],
-    workCenters: ["hourlyRate", "calcRate1", "defaultSetupTime"],
+    workCenters: ["hourlyRate", "calcRate1", "calcRate2", "defaultSetupTime"],
     legoWorkCenters: ["leadTimeDays", "queueTimeDays", "orderLeadTimeDays"],
   };
   const BOOLEAN: Partial<Record<ImportEntity, string[]>> = {

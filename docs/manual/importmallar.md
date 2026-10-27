@@ -260,6 +260,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Avdelningens namn** | Nej | Produktionsgruppens namn, max 100 tecken — används bara när gruppen skapas av importen; en befintlig grupp byter inte namn. | Plåtverkstad |
 | **Timkostnad** | Nej | Resursens kostnad per timme i SEK, decimalkomma eller punkt, aldrig negativ — används i för- och efterkalkylen. Tom cell lämnar fältet orört på en befintlig post. | 950 |
 | **Kalkylpris 1** | Nej | Alternativt timpris i SEK, decimalkomma eller punkt, aldrig negativt. Sparas på resursen men används inte av kalkylen ännu. | 900 |
+| **Kalkylpris 2** | Nej | Ett andra alternativt timpris i SEK, decimalkomma eller punkt, aldrig negativt. Sparas på resursen men används inte av kalkylen ännu. | 600 |
 | **Gäller ställ** | Nej | Ja/Nej, 1/0, X eller true/false — om timkostnaden gäller ställtiden. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. Tom cell lämnar fältet orört på en befintlig post. | Ja |
 | **Gäller styck** | Nej | Ja/Nej, 1/0, X eller true/false — om timkostnaden gäller stycktiden. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. Tom cell lämnar fältet orört på en befintlig post. | Ja |
 | **Förvald ställtid** | Nej | Ställtid i minuter, decimalkomma eller punkt, aldrig negativ. Sparas på resursen som förvalsvärde; används inte av beredningen eller kalkylen ännu. Tom cell lämnar fältet orört på en befintlig post. | 15 |

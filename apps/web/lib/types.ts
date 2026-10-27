@@ -1881,6 +1881,7 @@ export interface WorkCenter {
   rateAppliesToSetup: boolean | null;
   rateAppliesToRun: boolean | null;
   calcRate1: string | null;
+  calcRate2: string | null;
   // Legoresurs only, from the Lego file: lead time to perform the work,
   // queue time before it starts, and lead time to place the order.
   leadTimeDays: string | null;

@@ -269,6 +269,7 @@ export const WORK_CENTER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "productionGroupName", label: "Avdelningens namn" },
   { field: "hourlyRate", label: "Timkostnad" },
   { field: "calcRate1", label: "Kalkylpris 1" },
+  { field: "calcRate2", label: "Kalkylpris 2" },
   { field: "rateAppliesToSetup", label: "Gäller ställ" },
   { field: "rateAppliesToRun", label: "Gäller styck" },
   { field: "defaultSetupTime", label: "Förvald ställtid" },

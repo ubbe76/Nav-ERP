@@ -45,6 +45,9 @@ export function NewWorkCenterForm({
   const [calcRate1, setCalcRate1] = useState(
     workCenter?.calcRate1 != null ? String(Number(workCenter.calcRate1)) : ""
   );
+  const [calcRate2, setCalcRate2] = useState(
+    workCenter?.calcRate2 != null ? String(Number(workCenter.calcRate2)) : ""
+  );
   const [rateAppliesToSetup, setRateAppliesToSetup] = useState(workCenter?.rateAppliesToSetup ?? false);
   const [rateAppliesToRun, setRateAppliesToRun] = useState(workCenter?.rateAppliesToRun ?? false);
   const [defaultSetupTime, setDefaultSetupTime] = useState(
@@ -78,6 +81,7 @@ export function NewWorkCenterForm({
         hoursPerDay: hoursPerDay.trim() === "" ? null : Number(hoursPerDay),
         active,
         calcRate1: calcRate1.trim() === "" ? null : Number(calcRate1),
+        calcRate2: calcRate2.trim() === "" ? null : Number(calcRate2),
         rateAppliesToSetup,
         rateAppliesToRun,
         defaultSetupTime: defaultSetupTime.trim() === "" ? null : Number(defaultSetupTime),
@@ -144,6 +148,9 @@ export function NewWorkCenterForm({
       <FormRow>
         <Field label="Kalkylpris 1" htmlFor="calcRate1">
           <Input id="calcRate1" type="number" min="0" step="0.01" size="sm" value={calcRate1} onChange={(e) => setCalcRate1(e.target.value)} />
+        </Field>
+        <Field label="Kalkylpris 2" htmlFor="calcRate2">
+          <Input id="calcRate2" type="number" min="0" step="0.01" size="sm" value={calcRate2} onChange={(e) => setCalcRate2(e.target.value)} />
         </Field>
         <Field label="Förvald ställtid" htmlFor="defaultSetupTime">
           <Input

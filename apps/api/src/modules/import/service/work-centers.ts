@@ -29,6 +29,7 @@ export const WORK_CENTER_IMPORT_FIELDS = [
   "productionGroupName",
   "hourlyRate",
   "calcRate1",
+  "calcRate2",
   "rateAppliesToSetup",
   "rateAppliesToRun",
   "defaultSetupTime",
@@ -49,6 +50,7 @@ const FIELD_LABELS: Record<WorkCenterImportField, string> = {
   productionGroupName: "Avdelningens namn",
   hourlyRate: "Timkostnad",
   calcRate1: "Kalkylpris 1",
+  calcRate2: "Kalkylpris 2",
   rateAppliesToSetup: "Gäller ställ",
   rateAppliesToRun: "Gäller styck",
   defaultSetupTime: "Förvald ställtid",
@@ -98,7 +100,9 @@ export const WORK_CENTER_HEADER_ALIASES: Record<string, string> = {
   aktuellstd: "hourlyRate",
   timkostnad: "hourlyRate",
   aktuellkpris1: "calcRate1",
+  aktuellkpris2: "calcRate2",
   kalkylpris1: "calcRate1",
+  kalkylpris2: "calcRate2",
   forvstall: "rateAppliesToSetup",
   forvstyck: "rateAppliesToRun",
   forvaldstalltid: "defaultSetupTime",
@@ -145,6 +149,7 @@ export interface WorkCenterCreatePlan {
   productionGroupCode?: string;
   hourlyRate?: number;
   calcRate1?: number;
+  calcRate2?: number;
   rateAppliesToSetup?: boolean;
   rateAppliesToRun?: boolean;
   defaultSetupTime?: number;
@@ -200,7 +205,7 @@ export function parseBoolCell(raw: string): boolean | null {
   return null;
 }
 
-const NUMERIC_FIELDS = ["hourlyRate", "calcRate1", "defaultSetupTime"] as const;
+const NUMERIC_FIELDS = ["hourlyRate", "calcRate1", "calcRate2", "defaultSetupTime"] as const;
 const BOOLEAN_FIELDS = ["rateAppliesToSetup", "rateAppliesToRun"] as const;
 
 // The SAME builder runs for preview and commit — commit never trusts the

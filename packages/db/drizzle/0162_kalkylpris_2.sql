@@ -1,0 +1,1 @@
+ALTER TABLE "work_centers" ADD COLUMN "calc_rate_2" numeric(10, 2);

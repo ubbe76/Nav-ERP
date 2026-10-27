@@ -1135,6 +1135,13 @@
       "when": 1793096807918,
       "tag": "0161_stallkostnadsrad",
       "breakpoints": true
+    },
+    {
+      "idx": 162,
+      "version": "7",
+      "when": 1793101517258,
+      "tag": "0162_kalkylpris_2",
+      "breakpoints": true
     }
   ]
 }

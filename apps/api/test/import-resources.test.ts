@@ -113,7 +113,7 @@ describe("suggestWorkCenterMapping", () => {
       "Förv. styck": "rateAppliesToRun",
       "Aktuell, STD": "hourlyRate",
       "Aktuell, K.pris 1": "calcRate1",
-      "Aktuell, K.pris 2": null,
+      "Aktuell, K.pris 2": "calcRate2",
       "Kommande, STD": null,
       "Kommande, K.pris 1": null,
       "Kommande, K.pris 2": null,

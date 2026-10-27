@@ -327,6 +327,7 @@ function buildWorkCenterInsertValues(
     productionGroupId: resolveGroup(create.productionGroupId, create.productionGroupCode) ?? null,
     hourlyRate: numericString(create.hourlyRate),
     calcRate1: numericString(create.calcRate1),
+    calcRate2: numericString(create.calcRate2),
     rateAppliesToSetup: create.rateAppliesToSetup,
     rateAppliesToRun: create.rateAppliesToRun,
     defaultSetupTime: numericString(create.defaultSetupTime),
@@ -346,6 +347,7 @@ function buildWorkCenterPatchValues(
   if (groupId !== undefined) set.productionGroupId = groupId;
   if (patch.hourlyRate !== undefined) set.hourlyRate = String(patch.hourlyRate);
   if (patch.calcRate1 !== undefined) set.calcRate1 = String(patch.calcRate1);
+  if (patch.calcRate2 !== undefined) set.calcRate2 = String(patch.calcRate2);
   if (patch.rateAppliesToSetup !== undefined) set.rateAppliesToSetup = patch.rateAppliesToSetup;
   if (patch.rateAppliesToRun !== undefined) set.rateAppliesToRun = patch.rateAppliesToRun;
   if (patch.defaultSetupTime !== undefined) set.defaultSetupTime = String(patch.defaultSetupTime);

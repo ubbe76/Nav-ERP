@@ -25,7 +25,7 @@ Timkostnaden ger den direkta lönekostnaden i för- och efterkalkylen, och **TO-
 
 För [beläggningen](#belaggning) och [Leveranstidskontrollen](/hjalp/forsaljning#leveranstidskontroll) har resursen även **Veckoschema (kapacitet)** — ett veckoschema ur schemaregistret som anger resursens tillgängliga tid — eller, enklare, **Kapacitet (timmar per dag)**: så många timmar måndag–fredag, där en röd dag i helgdagskalendern är ledig och en halvdag följer helgdagens dagschema. Har resursen båda gäller veckoschemat. **Kapacitetsfaktor** multiplicerar tiden (t.ex. 2 = två likadana maskiner eller två personer; 0,5 = halvtid). Utan veckoschema och timmar per dag visar beläggningen ingen kapacitet för resursen, bara dess last. I resurslistan heter kolumnen **Kapacitet** och visar veckoschemat eller t.ex. *7,5 h/dag*.
 
-Resursen kan också bära fem förvalsfält som ännu bara sparas — beredningen läser dem inte än: **Förvald ställtid**, **Förvald operationsbenämning**, **Kalkylpris 1**, **Gäller ställ** och **Gäller styck**.
+Resursen kan också bära sex förvalsfält som ännu bara sparas — beredningen läser dem inte än: **Förvald ställtid**, **Förvald operationsbenämning**, **Kalkylpris 1**, **Kalkylpris 2**, **Gäller ställ** och **Gäller styck**.
 
 ## Legoresurser
 
@@ -86,13 +86,13 @@ Läser exportens **Kostnader**- och **Lista**-fil. Kolumner som känns igen auto
 - "Typ" → **Typ**: "Maskin" ger maskin, "Manuellt arbete" ger personal. Ett okänt värde ger maskin och en varning på raden; ett värde som innehåller "lego" hoppas över med en hänvisning till fliken **Legoresurser**.
 - "Avdelning" → **produktionsgrupp**. Finns produktionsgruppen inte skapas den automatiskt — med namn från "Benämning" när den kolumnen är mappad, annars koden.
 - "Aktuell, STD" → **Timkostnad**.
-- "Aktuell, K.pris 1" → **Kalkylpris 1**.
+- "Aktuell, K.pris 1" → **Kalkylpris 1** och "Aktuell, K.pris 2" → **Kalkylpris 2**.
 - "Förv. ställ" / "Förv. styck" → **Gäller ställ** / **Gäller styck**.
 - "Förvald ställtid" → **Förvald ställtid**.
 - "Op. benämning" → **Förvald operationsbenämning**.
 - Kostnader-filens andra "Namn"-kolumn (visas som **"Namn (2)"** i kolumnväljaren eftersom filen har två kolumner med samma rubrik) → **Kostnadsrad**: bara den rad per resurs vars Kostnadsrad börjar med **Ordinarie** importeras (även t.ex. "Ordinarie 1000") — rader märkta **Undantag 1**/**Undantag 2** hoppas över. Saknar en resurs helt en Ordinarie-rad används dess första kostnadsrad, med en varning på raden.
 
-Kolumner som medvetet lämnas omappade: Lagerställe, Planerare namn, Kategori, Ta med delrapporterade i Körklara, Tidshorisont, Förvald fördelningstid, Med i LTK, Mtrl i std.enhet, Auto rapp. antal, Und. autom. rapp. mtrl, samtliga Kommande-kolumner, K.pris 2, Effekt och Öv. utsläpp.
+Kolumner som medvetet lämnas omappade: Lagerställe, Planerare namn, Kategori, Ta med delrapporterade i Körklara, Tidshorisont, Förvald fördelningstid, Med i LTK, Mtrl i std.enhet, Auto rapp. antal, Und. autom. rapp. mtrl, samtliga Kommande-kolumner, Effekt och Öv. utsläpp.
 
 - Ett nummer som redan används av en legoresurs stoppar raden som ett radfel.
 - Tomma celler skriver aldrig över befintliga värden vid uppdatering; en ny resurs måste ha ett namn.

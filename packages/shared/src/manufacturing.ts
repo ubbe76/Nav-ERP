@@ -73,6 +73,7 @@ export const createWorkCenterSchema = z.object({
   rateAppliesToSetup: z.boolean().nullable().optional(),
   rateAppliesToRun: z.boolean().nullable().optional(),
   calcRate1: z.coerce.number().nonnegative().nullable().optional(),
+  calcRate2: z.coerce.number().nonnegative().nullable().optional(),
   // Legoresurs only (days).
   leadTimeDays: z.coerce.number().nonnegative().nullable().optional(),
   queueTimeDays: z.coerce.number().nonnegative().nullable().optional(),
@@ -98,6 +99,7 @@ export const updateWorkCenterSchema = z
     rateAppliesToSetup: z.boolean().nullable().optional(),
     rateAppliesToRun: z.boolean().nullable().optional(),
     calcRate1: z.coerce.number().nonnegative().nullable().optional(),
+    calcRate2: z.coerce.number().nonnegative().nullable().optional(),
     leadTimeDays: z.coerce.number().nonnegative().nullable().optional(),
     queueTimeDays: z.coerce.number().nonnegative().nullable().optional(),
     orderLeadTimeDays: z.coerce.number().nonnegative().nullable().optional(),

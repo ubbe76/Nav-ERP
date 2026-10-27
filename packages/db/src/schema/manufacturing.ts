@@ -112,6 +112,7 @@ export const workCenters = pgTable(
     rateAppliesToSetup: boolean("rate_applies_to_setup"),
     rateAppliesToRun: boolean("rate_applies_to_run"),
     calcRate1: numeric("calc_rate_1", { precision: 10, scale: 2 }),
+    calcRate2: numeric("calc_rate_2", { precision: 10, scale: 2 }),
     // Legoresurs only: lead/queue times in days from Monitor's Lego export.
     leadTimeDays: numeric("lead_time_days", { precision: 6, scale: 1 }),
     queueTimeDays: numeric("queue_time_days", { precision: 6, scale: 1 }),

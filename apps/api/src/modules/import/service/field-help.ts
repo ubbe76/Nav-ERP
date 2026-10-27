@@ -1419,6 +1419,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "900",
     },
     {
+      field: "calcRate2",
+      label: "Kalkylpris 2",
+      required: false,
+      header: "Kalkylpris 2",
+      description: `Ett andra alternativt timpris i SEK, ${DECIMAL}, aldrig negativt. Sparas på resursen men används inte av kalkylen ännu.`,
+      example: "600",
+    },
+    {
       field: "rateAppliesToSetup",
       label: "Gäller ställ",
       required: false,
