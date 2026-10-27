@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { mergeUntouched } from "../../lib/rowStateMerge";
 import { GatedLink } from "../ui/GatedLink";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -86,6 +87,9 @@ interface RowState {
   moOrderNumber: string | null;
   moOperationLabel: string | null;
   unitCode: string | null;
+  // Set once the user changes the selection or the quantity — a touched row
+  // keeps its state across refetches, an untouched one follows the server.
+  touched: boolean;
 }
 
 // A purchase/lego proposal with no supplier can't be ordered, and neither can
@@ -118,6 +122,7 @@ function makeRowState(row: RequirementRow): RowState {
     moOrderNumber: row.moOrderNumber ?? null,
     moOperationLabel: row.moOperationLabel ?? null,
     unitCode: row.unitCode,
+    touched: false,
   };
 }
 
@@ -134,8 +139,9 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   // Keyed by articleId, merged (never wholesale replaced) across refetches —
   // see the fetch effect below — so selections/edits survive pagination and
-  // filter changes. Only a successful order creation clears it, since the
-  // proposals themselves changed at that point.
+  // filter changes, while untouched rows follow the recomputed proposals.
+  // Only a successful order creation clears it, since the proposals
+  // themselves changed at that point.
   const [rowStates, setRowStates] = useState<Record<string, RowState>>({});
   const [reloadKey, setReloadKey] = useState(0);
   // The server caches the computed behovsberäkning for a minute (paging,
@@ -239,18 +245,12 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           paged = { rows: filtered.slice(offset, offset + pageSize), total: filtered.length };
         }
         setData(paged);
-        // Merge: keep any existing entry (a user edit, or a selection from a
-        // page we've since navigated away from) and only initialize rows
-        // we've never seen. reloadKey bumps clear rowStates first (see
-        // confirmCreate), so that path still ends up a full rebuild.
-        setRowStates((prev) => {
-          const next = { ...prev };
-          for (const row of paged.rows) {
-            const key = rowKey(row);
-            if (!(key in next)) next[key] = makeRowState(row);
-          }
-          return next;
-        });
+        // Merge: a row the user touched (selection or quantity) keeps its
+        // state, every other loaded row is rebuilt from the fresh proposal —
+        // so Uppdatera shows recomputed quantities. Entries for rows on other
+        // pages stay as they are. confirmCreate clears rowStates first, so
+        // that path is a full rebuild.
+        setRowStates((prev) => mergeUntouched(prev, paged.rows, rowKey, makeRowState));
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -292,7 +292,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   function toggleRow(row: DisplayRow, selected: boolean) {
     setRowStates((prev) => {
       const current = prev[row.id] ?? makeRowState(row);
-      return { ...prev, [row.id]: { ...current, selected } };
+      return { ...prev, [row.id]: { ...current, selected, touched: true } };
     });
   }
 
@@ -307,7 +307,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     setRowStates((prev) => {
       const next = { ...prev };
       for (const row of selectableRows) {
-        next[row.id] = { ...(prev[row.id] ?? makeRowState(row)), selected };
+        next[row.id] = { ...(prev[row.id] ?? makeRowState(row)), selected, touched: true };
       }
       return next;
     });
@@ -316,7 +316,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   function setQuantity(row: DisplayRow, quantity: string) {
     setRowStates((prev) => {
       const current = prev[row.id] ?? makeRowState(row);
-      return { ...prev, [row.id]: { ...current, quantity } };
+      return { ...prev, [row.id]: { ...current, quantity, touched: true } };
     });
   }
 
