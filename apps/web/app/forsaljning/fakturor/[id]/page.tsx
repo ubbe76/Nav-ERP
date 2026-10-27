@@ -97,6 +97,7 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
         reminderDefaultTo={reminderDefaultTo}
         reminderFee={settings.reminderFee}
         vatCodes={vatCodes}
+        customerOnHold={customer?.invoiceOnHold ?? false}
         customerVat={
           customer
             ? {

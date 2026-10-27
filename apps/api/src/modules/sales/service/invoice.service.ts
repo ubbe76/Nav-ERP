@@ -278,6 +278,9 @@ export type CollectiveInvoicingResult = {
   status: "draft" | "issued" | "skipped" | "failed";
   rowCount: number;
   error: string | null;
+  // Faktura i vänteläge: Utfärda direkt was asked for but the customer's
+  // invoices are reviewed first — the invoice stays a draft.
+  onHold?: boolean;
 };
 
 // Valuta: an order row (or a shipment's order) in another currency than the
@@ -1575,6 +1578,7 @@ export function createInvoiceService(
       // change per customer.
       const freightArticleId = await freight.freightArticleId();
       for (const customerId of input.customerIds) {
+        let customerOnHold = false;
         const base: CollectiveInvoicingResult = {
           customerId,
           customerNumber: null,
@@ -1596,6 +1600,7 @@ export function createInvoiceService(
           if (!customer) throw new CustomerNotFoundError(customerId);
           base.customerNumber = customer.customerNumber;
           base.name = customer.name;
+          customerOnHold = customer.invoiceOnHold;
           if (!customer.collectiveInvoicing) {
             throw new Error(`Customer ${customer.customerNumber} is not flagged for collective invoicing`);
           }
@@ -1653,7 +1658,9 @@ export function createInvoiceService(
             result.invoiceId = invoice!.id;
             result.rowCount = rows.length;
             result.status = "draft";
-            if (input.issue) {
+            if (input.issue && customerOnHold) {
+              result.onHold = true;
+            } else if (input.issue) {
               const issued = await service.issue(invoice!.id, userId);
               result.invoiceNumber = issued!.invoiceNumber;
               result.status = "issued";

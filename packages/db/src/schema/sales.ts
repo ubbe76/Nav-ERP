@@ -111,6 +111,10 @@ export const customers = pgTable("customers", {
   // routine (one invoice per customer across all delivered orders) and the
   // ordinary POST /invoices is refused for them (409).
   collectiveInvoicing: boolean("collective_invoicing").notNull().default(false),
+  // Faktura i vänteläge — the customer's invoices are reviewed before they
+  // go out: Samlingsfakturering's Utfärda direkt leaves them as drafts, and
+  // the invoice card reminds the user. Issuing by hand is unaffected.
+  invoiceOnHold: boolean("invoice_on_hold").notNull().default(false),
   // Privatperson: sales documents print prices including VAT and the card
   // labels org_number as "Personnummer". Bookkeeping is unaffected.
   privatePerson: boolean("private_person").notNull().default(false),

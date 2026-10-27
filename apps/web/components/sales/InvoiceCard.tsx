@@ -56,6 +56,7 @@ export function InvoiceCard({
   reminderFee,
   vatCodes,
   customerVat,
+  customerOnHold = false,
 }: {
   invoice: InvoiceDetail;
   paymentTerms: RegisterEntry[];
@@ -80,6 +81,9 @@ export function InvoiceCard({
   // same). null when the customer could not be read.
   vatCodes: VatCodeView[];
   customerVat: SalesVatCustomer | null;
+  // Faktura i vänteläge on the customer card: a draft should be reviewed
+  // before it is issued by hand.
+  customerOnHold?: boolean;
 }) {
   const router = useRouter();
   const pill = INVOICE_STATUS_PILL[invoice.status];
@@ -287,6 +291,12 @@ export function InvoiceCard({
       </div>
 
       <FormError>{error}</FormError>
+
+      {editable && customerOnHold && (
+        <FormNotice style={{ marginBottom: 20 }}>
+          Kunden har Faktura i vänteläge — granska fakturan innan den utfärdas.
+        </FormNotice>
+      )}
 
       {/* Utfärda refuses an EU sale / omvänd betalningsskyldighet without the
           buyer's momsregistreringsnummer in the right form — warned about

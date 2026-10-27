@@ -894,6 +894,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Nej",
     },
     {
+      field: "invoiceOnHold",
+      label: "Faktura i vänteläge",
+      required: false,
+      header: "Faktura i vänteläge",
+      description: `${YES_NO_X} — Ja betyder att kundens fakturor granskas före utskick: samlingsfaktureringens Utfärda direkt lämnar dem som utkast. ${UNTOUCHED}`,
+      example: "Nej",
+    },
+    {
       field: "privatePerson",
       label: "Privatperson",
       required: false,

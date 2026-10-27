@@ -1,0 +1,1 @@
+ALTER TABLE "customers" ADD COLUMN "invoice_on_hold" boolean DEFAULT false NOT NULL;

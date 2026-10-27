@@ -122,6 +122,8 @@ export const createCustomerSchema = z.object({
   ourSupplierNumber: z.string().max(50).optional(),
   // Samlingsfaktura — billed via the collective invoicing routine only.
   collectiveInvoicing: z.boolean().default(false),
+  // Faktura i vänteläge — invoices are reviewed before they are issued.
+  invoiceOnHold: z.boolean().default(false),
   // Privatperson — documents print prices including VAT.
   privatePerson: z.boolean().default(false),
   // Omvänd betalningsskyldighet för byggtjänster (momskoder): a service row
@@ -183,6 +185,7 @@ export const updateCustomerSchema = z
     discountPercent: blankSafe(z.coerce.number().min(0).max(100)).optional(),
     ourSupplierNumber: z.string().max(50).nullable().optional(),
     collectiveInvoicing: z.boolean().optional(),
+    invoiceOnHold: z.boolean().optional(),
     privatePerson: z.boolean().optional(),
     reverseChargeConstruction: z.boolean().optional(),
     showConfigurationPrices: z.boolean().optional(),

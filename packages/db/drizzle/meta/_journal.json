@@ -1156,6 +1156,13 @@
       "when": 1793102617281,
       "tag": "0164_transportkostnad",
       "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1793103225391,
+      "tag": "0165_faktura_i_vantelage",
+      "breakpoints": true
     }
   ]
 }

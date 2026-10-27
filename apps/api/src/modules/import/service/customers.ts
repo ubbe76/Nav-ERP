@@ -47,6 +47,7 @@ export const CUSTOMER_IMPORT_FIELDS = [
   "invoiceEmail",
   "ourSupplierNumber",
   "collectiveInvoicing",
+  "invoiceOnHold",
   "privatePerson",
   "website",
   "currency",
@@ -112,6 +113,7 @@ const FIELD_LABELS: Record<CustomerImportField, string> = {
   invoiceEmail: "E-post för faktura",
   ourSupplierNumber: "Vårt leverantörsnummer",
   collectiveInvoicing: "Samlingsfaktura",
+  invoiceOnHold: "Faktura i vänteläge",
   privatePerson: "Privatperson",
   website: "Webbsida",
   currency: "Valuta",
@@ -143,6 +145,7 @@ const SPECIAL_FIELDS: ReadonlySet<CustomerImportField> = new Set<CustomerImportF
   "carrier",
   "priceList",
   "collectiveInvoicing",
+  "invoiceOnHold",
   "privatePerson",
   "currency",
 ]);
@@ -233,6 +236,7 @@ export const CUSTOMER_HEADER_ALIASES: Record<string, string> = {
   vartleverantorsnummer: "ourSupplierNumber",
   vartleverantorsnr: "ourSupplierNumber",
   samlingsfaktura: "collectiveInvoicing",
+  fakturaivantelage: "invoiceOnHold",
   privatperson: "privatePerson",
   webbsida: "website",
   hemsida: "website",
@@ -343,6 +347,7 @@ export interface CustomerCreatePlan {
   invoiceEmail?: string;
   ourSupplierNumber?: string;
   collectiveInvoicing?: boolean;
+  invoiceOnHold?: boolean;
   privatePerson?: boolean;
   website?: string;
   currency?: string;
@@ -591,7 +596,7 @@ export async function planCustomerImport(
     // field never written to the patch). Empty cell: unset key (leave
     // untouched on update / default false on create, same as every other
     // field).
-    for (const field of ["collectiveInvoicing", "privatePerson"] as const) {
+    for (const field of ["collectiveInvoicing", "invoiceOnHold", "privatePerson"] as const) {
       const raw = record[field] ?? "";
       if (raw === "") continue;
       values[field] = raw;

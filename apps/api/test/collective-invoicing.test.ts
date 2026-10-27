@@ -88,12 +88,19 @@ async function makeUser() {
 }
 
 async function makeCustomer(
-  opts: { name?: string; collectiveInvoicing?: boolean; privatePerson?: boolean; ourSupplierNumber?: string } = {}
+  opts: {
+    name?: string;
+    collectiveInvoicing?: boolean;
+    invoiceOnHold?: boolean;
+    privatePerson?: boolean;
+    ourSupplierNumber?: string;
+  } = {}
 ) {
   return salesService.createCustomer({
     name: opts.name ?? "Kund AB",
     active: true,
     collectiveInvoicing: opts.collectiveInvoicing ?? false,
+    invoiceOnHold: opts.invoiceOnHold ?? false,
     privatePerson: opts.privatePerson ?? false,
     ...(opts.ourSupplierNumber ? { ourSupplierNumber: opts.ourSupplierNumber } : {}),
   });
@@ -231,6 +238,17 @@ describe("samlingsfakturering — run", () => {
     expect(await orderStatus(b.order.id)).toBe("invoiced");
     // Nothing left to bill.
     expect(await invoiceService.listCollectiveInvoicingCandidates()).toHaveLength(0);
+  });
+
+  it("with issue: true leaves a Faktura i vänteläge customer's invoice as a draft, marked onHold", async () => {
+    const held = await makeCustomer({ collectiveInvoicing: true, invoiceOnHold: true });
+    const order = await makeDeliveredOrderRow({ customer: held, quantity: 2, unitPrice: 10 });
+    const { results } = await invoiceService.runCollectiveInvoicing({ customerIds: [held.id], issue: true }, biller);
+    expect(results[0]).toMatchObject({ status: "draft", onHold: true, error: null, invoiceNumber: null });
+    expect(await orderStatus(order.order.id)).toBe("delivered");
+    // Issuing by hand still works.
+    const issued = await invoiceService.issue(results[0]!.invoiceId!, biller);
+    expect(issued!.invoiceNumber).toMatch(/^FA/);
   });
 
   it("reports per-customer errors and keeps going: unknown id and unflagged customer fail, the flagged one succeeds", async () => {

@@ -1110,6 +1110,9 @@ export interface Customer extends PartnerCardFields {
   // Samlingsfaktura: kunden faktureras via Försäljning →
   // Samlingsfakturering i stället for "Ny faktura" (spärrad server-side).
   collectiveInvoicing: boolean;
+  // Faktura i vänteläge: the customer's invoices are reviewed before they go
+  // out — Samlingsfakturering's "Utfärda direkt" leaves them as drafts.
+  invoiceOnHold: boolean;
   // Frakt etapp 2: kundens förvalda fraktprodukt (nya försändelser ärver den).
   // The id is a column (always returned); the joined names are present on
   // the detail endpoint (GET :id) only, like the term/carrier names above.
@@ -1352,6 +1355,9 @@ export interface CollectiveInvoicingResult {
   // Valuta: one result row per customer and currency (absent on a result for
   // a customer that could not be read).
   currency?: string;
+  // Faktura i vänteläge: "Utfärda direkt" left the draft because the customer
+  // is on hold (status stays "draft"). Absent otherwise.
+  onHold?: boolean;
 }
 
 // E3: linked manufacturing order shown in the row's "I tillverkning" column

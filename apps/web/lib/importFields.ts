@@ -114,6 +114,7 @@ export const CUSTOMER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "invoiceEmail", label: "E-post för faktura" },
   { field: "ourSupplierNumber", label: "Vårt leverantörsnummer" },
   { field: "collectiveInvoicing", label: "Samlingsfaktura" },
+  { field: "invoiceOnHold", label: "Faktura i vänteläge" },
   { field: "privatePerson", label: "Privatperson" },
   { field: "website", label: "Webbsida" },
   { field: "currency", label: "Valuta" },

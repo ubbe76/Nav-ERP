@@ -241,7 +241,11 @@ export function CollectiveInvoicingClient({
               <li key={`${r.customerId}-${r.currency ?? ""}`} style={{ marginBottom: 6 }}>
                 {r.customerNumber ?? "–"} {r.name ?? ""}
                 {r.currency && r.currency !== "SEK" ? ` (${r.currency})` : ""} —{" "}
-                <StatusPill {...RESULT_STATUS[r.status]} compact />
+                <StatusPill
+                  {...RESULT_STATUS[r.status]}
+                  label={r.onHold ? "Utkast — Faktura i vänteläge" : undefined}
+                  compact
+                />
                 {r.invoiceId && (
                   <>
                     {" "}

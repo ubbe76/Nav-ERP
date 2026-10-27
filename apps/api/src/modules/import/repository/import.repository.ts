@@ -200,6 +200,7 @@ const CUSTOMER_PASSTHROUGH_FIELDS = [
   "invoiceEmail",
   "ourSupplierNumber",
   "collectiveInvoicing",
+  "invoiceOnHold",
   "privatePerson",
   "website",
   "currency",

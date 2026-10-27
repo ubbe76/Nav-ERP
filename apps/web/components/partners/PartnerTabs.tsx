@@ -949,6 +949,9 @@ function VillkorTab({
   const [collectiveInvoicing, setCollectiveInvoicing] = useState(
     isCustomer ? (partner as Customer).collectiveInvoicing : false
   );
+  const [invoiceOnHold, setInvoiceOnHold] = useState(
+    isCustomer ? (partner as Customer).invoiceOnHold : false
+  );
   // Dröjsmålsränta (Räntefakturering): charged unless switched off for this
   // customer; Avtalad räntesats blank = enligt räntelagen; Förseningsersättning
   // never applies to a privatperson.
@@ -1040,7 +1043,7 @@ function VillkorTab({
           ...(isCustomer
             ? { discountPercent: discountPercent.trim() === "" ? 0 : Number(discountPercent) }
             : {}),
-          ...(isCustomer ? { privatePerson, collectiveInvoicing, reverseChargeConstruction } : {}),
+          ...(isCustomer ? { privatePerson, collectiveInvoicing, invoiceOnHold, reverseChargeConstruction } : {}),
           // Förseningsersättning is hidden for a privatperson — what is sent
           // stays as it was saved.
           ...(isCustomer
@@ -1085,6 +1088,20 @@ function VillkorTab({
               />
             </Field>
           </FormRow>
+        )}
+        {isCustomer && (
+          <>
+            <Field label="Faktura i vänteläge" htmlFor="invoiceOnHold">
+              <Toggle
+                id="invoiceOnHold"
+                checked={invoiceOnHold}
+                onChange={(e) => setInvoiceOnHold(e.target.checked)}
+              />
+            </Field>
+            <FormHint attached>
+              Kundens fakturor granskas före utskick — samlingsfaktureringens Utfärda direkt lämnar dem som utkast.
+            </FormHint>
+          </>
         )}
         {isCustomer && collectiveInvoicing && (
           <FormHint attached>

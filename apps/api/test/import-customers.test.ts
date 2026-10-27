@@ -247,6 +247,7 @@ describe("suggestCustomerMapping", () => {
     expected["Organisationsnr"] = "orgNumber";
     expected["Vårt leverantörsnummer"] = "ourSupplierNumber";
     expected["Samlingsfaktura"] = "collectiveInvoicing";
+    expected["Faktura i vänteläge"] = "invoiceOnHold";
     expected["Privatperson"] = "privatePerson";
     expected["Webbsida"] = "website";
     expect(suggested).toEqual(expected);
