@@ -37,7 +37,7 @@ function order(operations: {
   description?: string | null;
   packingInstructions?: string | null;
   runTimePerUnit?: string;
-  timeUnit?: "minutes_per_unit" | "units_per_hour";
+  timeUnit?: "minutes_per_unit" | "units_per_hour" | "seconds_per_unit";
 }[]) {
   return {
     orderNumber: "PO-2044",
@@ -129,14 +129,29 @@ describe("arbetskortet — operationens tidsenhet (min/st vs st/h)", () => {
     expect(text).toContain("2 min");
   });
 
-  it("prints the times without trailing zeros but keeps real decimals", async () => {
-    // Ställtid 10, Beräknat 20 (the fixture) and Stycktid 8,5714 — the
-    // screenshot round of 2026-10-28 caught "6,0000 min" on a real card.
+  it("prints the times with at most two decimals and no trailing zeros", async () => {
+    // Ställtid 10, Beräknat 20 (the fixture) and Stycktid 8,5714 — a real
+    // card showed "6,0000 min", and four decimals were too many to read.
     const text = pdfText(await pdf.renderManufacturingOrder(order([{ sequenceNo: 10, runTimePerUnit: "8.5714" }])));
     expect(text).toContain("10 min");
     expect(text).toContain("20 min");
-    expect(text).toContain("8,5714 min");
+    expect(text).toContain("8,57 min");
+    expect(text).not.toContain("8,5714");
     expect(text).not.toMatch(/\d,0+ min/);
+  });
+
+  it("prints Stycktid in seconds for a sek/st operation", async () => {
+    // 0.1167 min/st = 7 s (stored minutes, 4 decimals).
+    const text = pdfText(
+      await pdf.renderManufacturingOrder(order([{ sequenceNo: 10, runTimePerUnit: "0.1167", timeUnit: "seconds_per_unit" }]))
+    );
+    expect(text).toContain("7 sek");
+    expect(text).not.toContain("0,12 min");
+  });
+
+  it("keeps a very short Stycktid visible instead of rounding it to 0 min", async () => {
+    const text = pdfText(await pdf.renderManufacturingOrder(order([{ sequenceNo: 10, runTimePerUnit: "0.0042" }])));
+    expect(text).toContain("0,0042 min");
   });
 });
 

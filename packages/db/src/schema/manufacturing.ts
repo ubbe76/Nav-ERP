@@ -48,12 +48,13 @@ export const moOperationStatusEnum = pgEnum("mo_operation_status", ["pending", "
 export const workCenterTypeEnum = pgEnum("work_center_type", ["machine", "personnel", "subcontract"]);
 
 // Display preference only — runTimePerUnit is always stored/returned in
-// minutes per unit (canonical). "units_per_hour" (st/h) is a pure
-// presentation toggle converted at the edges (OperationModal, BeredningView,
-// ManufacturingOrderDetail, the TO PDF) via packages/shared/src/units.ts's
-// conversion helpers — costing, capacity planning, import and the external
-// configurator API all keep reading/writing minutes untouched.
-export const operationTimeUnitEnum = pgEnum("operation_time_unit", ["minutes_per_unit", "units_per_hour"]);
+// minutes per unit (canonical). "units_per_hour" (st/h) and
+// "seconds_per_unit" (sek/st, 0167) are pure presentation toggles converted
+// at the edges (OperationModal, BeredningView, ManufacturingOrderDetail, the
+// TO PDF) via packages/shared/src/units.ts's conversion helpers — costing,
+// capacity planning, import and the external configurator API all keep
+// reading/writing minutes untouched.
+export const operationTimeUnitEnum = pgEnum("operation_time_unit", ["minutes_per_unit", "units_per_hour", "seconds_per_unit"]);
 
 // Produktionsgrupper — group resources (work centers) for planning. A resource
 // belongs to at most one group via work_centers.production_group_id.

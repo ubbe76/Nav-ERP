@@ -1924,7 +1924,7 @@ export interface RoutingOperation {
   // Display preference for runTimePerUnit (and cycleTimePerUnit) — always
   // stored/returned in minutes per unit regardless of this value; conversion
   // happens at the edges (OperationModal, BeredningView) via lib/units.ts.
-  timeUnit: "minutes_per_unit" | "units_per_hour";
+  timeUnit: "minutes_per_unit" | "units_per_hour" | "seconds_per_unit";
   // "Kalkyl" — priced into the pre-calculation but skipped at release, so it
   // never reaches the MO.
   costingOnly: boolean;
@@ -2188,7 +2188,7 @@ export interface MOOperation {
   runTimePerUnit: string;
   // Snapshot of the routing operation's display preference at release — see
   // RoutingOperation.timeUnit above.
-  timeUnit: "minutes_per_unit" | "units_per_hour";
+  timeUnit: "minutes_per_unit" | "units_per_hour" | "seconds_per_unit";
   status: MOOperationStatus;
   actualTime: string | null;
   // Accumulated OK quantity from stamp-out/completion reports (may exceed

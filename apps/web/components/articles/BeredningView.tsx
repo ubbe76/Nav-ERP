@@ -13,7 +13,7 @@ import { BomComponentModal } from "./BomComponentModal";
 import { LegoInquiryModal } from "./LegoInquiryModal";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
-import { minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
+import { OPERATION_TIME_UNIT_LABELS, minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
 import { operationLabel } from "./operation-label";
 import type { ArticleGroup, BomComponent, RoutingOperation, WorkCenter } from "../../lib/types";
 import styles from "./Beredning.module.css";
@@ -25,6 +25,9 @@ function formatMinutesPerUnit(minutesText: string, timeUnit: RoutingOperation["t
   const minutes = Number(minutesText);
   if (timeUnit === "units_per_hour" && minutes > 0) {
     return `${minutesPerUnitToUnitsPerHour(minutes).toLocaleString("sv-SE")} st/h`;
+  }
+  if (timeUnit === "seconds_per_unit") {
+    return `${minutesPerUnitToSecondsPerUnit(minutes).toLocaleString("sv-SE", { maximumFractionDigits: 2 })} sek`;
   }
   return `${minutes.toLocaleString("sv-SE", { maximumFractionDigits: 4 })} min`;
 }
@@ -97,7 +100,7 @@ export function BeredningView({
     }
   }
 
-  // Per-row min/st | st/h switch. Storage is always minutes per unit, so the
+  // Per-row min/st | sek/st | st/h switch. Storage is always minutes per unit, so the
   // PATCH carries ONLY the display preference — no conversion, nothing else
   // on the operation is touched (same endpoint the dialog uses).
   async function changeTimeUnit(op: RoutingOperation, timeUnit: RoutingOperation["timeUnit"]) {
@@ -278,7 +281,7 @@ export function BeredningView({
                         "—"
                       )
                     ) : (
-                      // The value plus the same min/st | st/h switch as the
+                      // The value plus the same min/st | sek/st | st/h switch as the
                       // dialog — a pure display preference, saved on its own
                       // without opening the operation. st/h needs a stycktid
                       // > 0 (0 st/h has no meaning), same rule as the dialog.
@@ -292,10 +295,11 @@ export function BeredningView({
                           ariaLabel={`Tidsenhet för operation ${op.sequenceNo}`}
                           onChange={(next) => void changeTimeUnit(op, next)}
                           options={[
-                            { value: "minutes_per_unit", label: "min/st" },
+                            { value: "minutes_per_unit", label: OPERATION_TIME_UNIT_LABELS.minutes_per_unit },
+                            { value: "seconds_per_unit", label: OPERATION_TIME_UNIT_LABELS.seconds_per_unit },
                             {
                               value: "units_per_hour",
-                              label: "st/h",
+                              label: OPERATION_TIME_UNIT_LABELS.units_per_hour,
                               disabled: !(Number(op.runTimePerUnit) > 0),
                               title: Number(op.runTimePerUnit) > 0 ? undefined : "Kräver stycktid större än 0",
                             },

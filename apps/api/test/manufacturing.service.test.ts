@@ -316,6 +316,26 @@ describe("manufacturing service — release", () => {
     expect(Number(updated.runTimePerUnit)).toBeCloseTo(8.5714, 4);
   });
 
+  it("stores a sek/st operation as minutes and snapshots the unit at release (0167)", async () => {
+    const { order, parent } = await makeMO(5);
+    const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });
+    // 45 s per unit — the client converts, the API stores minutes.
+    const created = await mfgService.createRoutingOperation(parent.id, {
+      sequenceNo: 1,
+      workCenterId: workCenter.id,
+      setupTime: 10,
+      runTimePerUnit: 0.75,
+      timeUnit: "seconds_per_unit",
+    });
+    expect(created.timeUnit).toBe("seconds_per_unit");
+    expect(Number(created.runTimePerUnit)).toBeCloseTo(0.75, 4);
+
+    await mfgService.release(order.id);
+    const operations = await mfgService.listOperations(order.id);
+    expect(operations[0]?.timeUnit).toBe("seconds_per_unit");
+    expect(Number(operations[0]?.runTimePerUnit)).toBeCloseTo(0.75, 4);
+  });
+
   it("defaults a plain operation's time unit to minutes_per_unit", async () => {
     const { parent } = await makeMO(5);
     const workCenter = await mfgService.createWorkCenter({ code: "100", name: "Svets", active: true });

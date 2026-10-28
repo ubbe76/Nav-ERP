@@ -58,6 +58,55 @@ Mindre uppföljningar från granskningarna — **alla sex avbetade i städsvepet
 - [x] Operationsimporten läser kolumnen **Packinstruktion** (>1000 tecken = radfel).
 - [x] Fakturaunderlagslistan: ren lego-IO visar orderns uppdateringsdatum som mottagningsdatum (dokumenterad approximation).
 
+## Saknas enligt hemsidan — att gå igenom
+
+Punkterna under **Det här saknas i dag** på hemsidans funktionssidor (`hemsida/content/areas.ts`, fältet `limits`), samlade 2026-10-28 för att gå igenom och besluta vad som ska byggas. Texten är hemsidans egen. Fyra punkter visade sig redan vara lösta (valuta i försäljningen och i bokföringen, e-faktura och fakturaskanning, SIE-import av verifikat) och två delvis (momsfilen, budget) — de är strukna eller omskrivna på hemsidan 2026-10-28 och står inte med här. Samma sak som en befintlig punkt ovan står med en hänvisning.
+
+### Tillverkning
+
+- [ ] Planeringen räknar ledig tid per resurs och vecka. Det finns ingen detaljplanering per dag eller timme och ingen köberäkning.
+- [ ] Det finns ännu ingen spårbarhet med batch- eller serienummer. *(Samma som **D3 Spårbarhet batch/serienr** ovan; står även under Lager och artiklar.)*
+- [ ] Det finns ingen koppling mellan en tillverkningsorder och tillverkningsordrarna för dess halvfabrikat. *(Medvetet utanför produktionsplaneringen 2026-10-17: pegging.)*
+- [ ] Planeringen och Leveranstidskontrollen prövar inte alternativa resurser. En operation planeras alltid på den resurs den har på ordern.
+- [ ] Behovsberäkningens förslag är inte tidsfasade. Datumen sätts först när ordrarna skapas.
+
+### Lager och artiklar
+
+- [ ] Det finns ännu ingen spårbarhet på batch- eller serienummer. *(Se Tillverkning.)*
+- [ ] Det finns ännu inget stöd för streckkoder i lagret. Artikel och antal väljs och skrivs in för hand. *(Samma som **Skanning i lagret** ovan.)*
+- [ ] Lagersaldon går inte att importera från fil. Ingående saldon läggs in med inventering eller justering.
+- [ ] Behovsberäkningen räknar på artikelns totala saldo över alla lager. Det går inte att planera eller sätta beställningspunkt per lager.
+- [ ] Det finns ingen FIFO-värdering, och en lagerrörelse kan inte backdateras in i en tidigare värdering.
+
+### Inköp och försäljning
+
+- [ ] E-faktura via Peppol går bara till svenska företagskunder i kronor, och inkommande e-fakturor tas inte emot. Andra fakturor skickas som PDF med e-post. *(Samma som **E-faktura (Peppol), etapp 2** ovan.)*
+- [ ] Det finns ingen EDI för order eller fakturor. *(Medvetet bortvalt i v1 enligt CLAUDE.md.)*
+- [ ] Offert, orderbekräftelse, följesedel och faktura skrivs bara ut på svenska.
+- [ ] Det finns ingen färdig koppling till en webbutik. Externa system kan däremot lägga offerter via API:t.
+
+### Kalkyl
+
+- [ ] Påslagen gäller hela företaget. Bara TO-påslaget sätts per resurs, och det finns inga påslag per artikelgrupp, kund eller order.
+- [ ] Omkostnaderna fördelas med procentuella påslag. Det finns ingen aktivitetsbaserad kalkyl.
+- [ ] Det går inte att pröva andra påslag på en enskild artikel. Förkalkylen räknar alltid med inställningarna under System → Kalkyler.
+- [ ] Leverantörspriser räknas inte om mellan valutor. Med Aktiv leverantörs pris används katalogpriset som det står, även när det är i en annan valuta än kronor.
+- [ ] Det finns ännu ingen automatisk uppdelning av avvikelsen på pris, mängd och tid, och efterkalkylen skiljer inte på ställtid och stycktid.
+
+### Personal, tid och lön
+
+- [ ] Det finns ännu ingen funktion för att radera eller anonymisera en anställds uppgifter. En anställd kan bara markeras som inaktiv.
+- [ ] Nav|ERP är inte ett lönesystem. Det räknar inte ut lön, skatteavdrag eller arbetsgivaravgifter. PAXml-filen innehåller timmar per tidkod och dag, inte belopp. *(Ett val enligt Beslut nedan — snarare en avgränsning än något att bygga.)*
+- [ ] Nav|ERP för inget semestersaldo och inget kompsaldo. Semester och kompledighet registreras som frånvaro i timmar, och kompsaldot förs i lönesystemet.
+- [ ] Det finns inga färdiga kollektivavtal att välja. OB-fönster, övertidströskel och tidkoder lägger ni upp själva.
+- [ ] Det finns ingen koppling till passerkort eller RFID-brickor. Personalen identifierar sig med anställningsnumret.
+- [ ] Det finns ingen mobilapp. Nav|ERP och stämpelterminalen används i webbläsaren.
+
+### Ekonomi
+
+- [ ] Nav|ERP lämnar inte in momsdeklarationen. Ni laddar själva upp filen från Momsrapporten i Skatteverkets e-tjänst.
+- [ ] En installation hanterar ett företag. Flera bolag och koncernredovisning finns inte.
+
 ## Beslut
 
 - Löneunderlag exporteras som **PAXml** (funkar mot Visma Lön, Hogia, Kontek, Agda, Fortnox Lön).

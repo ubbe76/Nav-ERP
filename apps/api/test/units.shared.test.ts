@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  minutesPerUnitToSecondsPerUnit,
   minutesPerUnitToUnitsPerHour,
   roundUpToMultiple,
+  runTimeInUnit,
+  runTimeToMinutes,
+  secondsPerUnitToMinutesPerUnit,
   toBasePrice,
   toBaseQuantity,
   toUnitPrice,
@@ -72,6 +76,31 @@ describe("operation time-unit conversion helpers", () => {
     const minutesPerUnit = unitsPerHourToMinutesPerUnit(7);
     expect(minutesPerUnit).toBe(8.5714);
     expect(minutesPerUnitToUnitsPerHour(minutesPerUnit)).toBe(7);
+  });
+
+  it("converts seconds per unit to minutes (4 decimals) and back (2 decimals)", () => {
+    expect(secondsPerUnitToMinutesPerUnit(30)).toBe(0.5);
+    expect(secondsPerUnitToMinutesPerUnit(7)).toBe(0.1167);
+    expect(minutesPerUnitToSecondsPerUnit(0.1167)).toBe(7);
+    expect(minutesPerUnitToSecondsPerUnit(1.5)).toBe(90);
+    // 0 is a valid run time in seconds, unlike st/h.
+    expect(secondsPerUnitToMinutesPerUnit(0)).toBe(0);
+    expect(minutesPerUnitToSecondsPerUnit(0)).toBe(0);
+  });
+
+  it("round-trips typed seconds unchanged — 7 s, 0,5 s and 12,25 s", () => {
+    for (const seconds of [7, 0.5, 12.25]) {
+      expect(minutesPerUnitToSecondsPerUnit(secondsPerUnitToMinutesPerUnit(seconds))).toBe(seconds);
+    }
+  });
+
+  it("runTimeInUnit / runTimeToMinutes cover all three display units", () => {
+    expect(runTimeInUnit(2, "minutes_per_unit")).toBe(2);
+    expect(runTimeInUnit(2, "seconds_per_unit")).toBe(120);
+    expect(runTimeInUnit(8.5714, "units_per_hour")).toBe(7);
+    expect(runTimeToMinutes(2, "minutes_per_unit")).toBe(2);
+    expect(runTimeToMinutes(45, "seconds_per_unit")).toBe(0.75);
+    expect(runTimeToMinutes(7, "units_per_hour")).toBe(8.5714);
   });
 });
 

@@ -549,7 +549,7 @@ describe("planRoutingImport", () => {
       expect(empty.creates[0]).toMatchObject({ setupTime: 0.2, runTimePerUnit: 360, timeUnit: "minutes_per_unit" });
     });
 
-    it("converts hours and seconds per unit to minutes", async () => {
+    it("converts hours and seconds per unit to minutes, keeping sek/st as the display unit", async () => {
       const plan = await planRoutingImport(
         {
           mapping: UNIT_MAPPING,
@@ -564,7 +564,7 @@ describe("planRoutingImport", () => {
       expect(plan.hasErrors).toBe(false);
       expect(plan.creates.map((c) => [c.setupTime, c.runTimePerUnit, c.timeUnit])).toEqual([
         [30, 15, "minutes_per_unit"],
-        [1.5, 0.5, "minutes_per_unit"],
+        [1.5, 0.5, "seconds_per_unit"],
         [3, 1.5, "minutes_per_unit"],
       ]);
     });

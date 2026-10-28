@@ -12,7 +12,7 @@ import fieldStyles from "../ui/Field.module.css";
 import styles from "./OperationModal.module.css";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { minutesPerUnitToUnitsPerHour, unitsPerHourToMinutesPerUnit } from "../../lib/units";
+import { OPERATION_TIME_UNIT_LABELS, runTimeInUnit, runTimeToMinutes, type OperationTimeUnit } from "../../lib/units";
 import type { MOOperation, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 
@@ -44,7 +44,7 @@ export interface OperationPayload {
   // Routing only (an MO operation has no Cykeltid yet) — minutes per unit,
   // null = not set.
   cycleTimePerUnit?: number | null;
-  timeUnit: "minutes_per_unit" | "units_per_hour";
+  timeUnit: OperationTimeUnit;
   costingOnly?: boolean;
   comment: string;
   printOnWorkCard: boolean;
@@ -142,28 +142,19 @@ function OperationForm({
   // Tid/enhet text is shown in whichever unit the operation was saved with,
   // never the raw stored minutes, so editing an st/h operation doesn't
   // silently flip it back to minutes on open.
-  const [timeUnit, setTimeUnit] = useState<"minutes_per_unit" | "units_per_hour">(
-    editing?.timeUnit ?? "minutes_per_unit"
+  const [timeUnit, setTimeUnit] = useState<OperationTimeUnit>(editing?.timeUnit ?? "minutes_per_unit");
+  // Guard: 0 (or less) has no meaningful st/h conversion (division by
+  // zero/negative) — show it as-is regardless of the stored unit.
+  const shownInUnit = (minutes: number, unit: OperationTimeUnit) =>
+    unit === "units_per_hour" && !(minutes > 0) ? String(minutes) : String(runTimeInUnit(minutes, unit));
+  const [runTimePerUnit, setRunTimePerUnit] = useState(() =>
+    editing ? shownInUnit(Number(editing.runTimePerUnit), editing.timeUnit) : "0"
   );
-  const [runTimePerUnit, setRunTimePerUnit] = useState(() => {
-    if (!editing) return "0";
-    const minutes = Number(editing.runTimePerUnit);
-    // Guard: 0 (or less) has no meaningful st/h conversion (division by
-    // zero/negative) — show it as-is regardless of the stored unit.
-    if (editing.timeUnit === "units_per_hour" && minutes > 0) {
-      return String(minutesPerUnitToUnitsPerHour(minutes));
-    }
-    return String(minutes);
-  });
   // Cykeltid — typed in the SAME unit as Tid/enhet; "" = not set.
   const [cycleTime, setCycleTime] = useState(() => {
     const stored = routingEditing?.cycleTimePerUnit;
     if (stored == null) return "";
-    const minutes = Number(stored);
-    if (editing?.timeUnit === "units_per_hour" && minutes > 0) {
-      return String(minutesPerUnitToUnitsPerHour(minutes));
-    }
-    return String(minutes);
+    return shownInUnit(Number(stored), editing?.timeUnit ?? "minutes_per_unit");
   });
   const [costingOnly, setCostingOnly] = useState(routingEditing?.costingOnly ?? false);
   const [comment, setComment] = useState(editing?.comment ?? "");
@@ -202,21 +193,15 @@ function OperationForm({
   // a different-looking value on toggle. A 0/invalid value is left alone
   // (st/h has no meaningful conversion for it); the >0 validation on submit
   // catches that case.
-  function handleTimeUnitChange(next: "minutes_per_unit" | "units_per_hour") {
+  function handleTimeUnitChange(next: OperationTimeUnit) {
     if (next === timeUnit) return;
+    // Via minutes, so any pair of units converts the same way.
+    const convert = (value: number) => String(runTimeInUnit(runTimeToMinutes(value, timeUnit), next));
     const current = Number(runTimePerUnit);
-    if (Number.isFinite(current) && current > 0) {
-      setRunTimePerUnit(
-        String(next === "units_per_hour" ? minutesPerUnitToUnitsPerHour(current) : unitsPerHourToMinutesPerUnit(current))
-      );
-    }
+    if (Number.isFinite(current) && current > 0) setRunTimePerUnit(convert(current));
     // Cykeltid follows the same unit as Tid/enhet.
     const currentCycle = Number(cycleTime);
-    if (cycleTime.trim() !== "" && Number.isFinite(currentCycle) && currentCycle > 0) {
-      setCycleTime(
-        String(next === "units_per_hour" ? minutesPerUnitToUnitsPerHour(currentCycle) : unitsPerHourToMinutesPerUnit(currentCycle))
-      );
-    }
+    if (cycleTime.trim() !== "" && Number.isFinite(currentCycle) && currentCycle > 0) setCycleTime(convert(currentCycle));
     setTimeUnit(next);
   }
 
@@ -253,24 +238,16 @@ function OperationForm({
         workCenterId,
         // Lego operations carry no times — the columns are NOT NULL, so 0.
         setupTime: isLego ? 0 : Number(setupTime),
-        // Canonical storage is always minutes per unit — st/h is converted
-        // here, once, at the submit boundary.
-        runTimePerUnit: isLego
-          ? 0
-          : timeUnit === "units_per_hour"
-            ? unitsPerHourToMinutesPerUnit(Number(runTimePerUnit))
-            : Number(runTimePerUnit),
+        // Canonical storage is always minutes per unit — st/h and sek/st are
+        // converted here, once, at the submit boundary.
+        runTimePerUnit: isLego ? 0 : runTimeToMinutes(Number(runTimePerUnit), timeUnit),
         // Cykeltid: same conversion as Tid/enhet; empty = null (clears). Lego
         // has no times, so it always clears; an MO operation has no field.
         ...(moMode
           ? {}
           : {
               cycleTimePerUnit:
-                isLego || cycleTime.trim() === ""
-                  ? null
-                  : timeUnit === "units_per_hour"
-                    ? unitsPerHourToMinutesPerUnit(Number(cycleTime))
-                    : Number(cycleTime),
+                isLego || cycleTime.trim() === "" ? null : runTimeToMinutes(Number(cycleTime), timeUnit),
             }),
         // Lego hides the time fields entirely, so it always forces minutes —
         // a stray st/h preference from before the resource switch must not
@@ -516,8 +493,9 @@ function OperationForm({
                 onChange={handleTimeUnitChange}
                 ariaLabel="Tidsenhet"
                 options={[
-                  { value: "minutes_per_unit", label: "min/st" },
-                  { value: "units_per_hour", label: "st/h" },
+                  { value: "minutes_per_unit", label: OPERATION_TIME_UNIT_LABELS.minutes_per_unit },
+                  { value: "seconds_per_unit", label: OPERATION_TIME_UNIT_LABELS.seconds_per_unit },
+                  { value: "units_per_hour", label: OPERATION_TIME_UNIT_LABELS.units_per_hour },
                 ]}
               />
             </div>
@@ -526,7 +504,7 @@ function OperationForm({
       )}
       {!isLego && !moMode && (
         <>
-          <Field label={`Cykeltid (${timeUnit === "units_per_hour" ? "st/h" : "min/st"}, valfritt)`} htmlFor="cycleTimePerUnit">
+          <Field label={`Cykeltid (${OPERATION_TIME_UNIT_LABELS[timeUnit]}, valfritt)`} htmlFor="cycleTimePerUnit">
             <Input
               id="cycleTimePerUnit"
               type="number"

@@ -11,7 +11,7 @@ import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Select } from "../ui/Field";
-import { minutesPerUnitToUnitsPerHour, toBaseQuantity, toUnitQuantity } from "../../lib/units";
+import { minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toBaseQuantity, toUnitQuantity } from "../../lib/units";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
@@ -478,7 +478,10 @@ export function ManufacturingOrderDetail({
                 if (row.timeUnit === "units_per_hour" && runTimePerUnit > 0) {
                   return `${minutesPerUnitToUnitsPerHour(runTimePerUnit).toLocaleString("sv-SE")} st/h`;
                 }
-                return runTimePerUnit;
+                if (row.timeUnit === "seconds_per_unit") {
+                  return `${formatQuantity(minutesPerUnitToSecondsPerUnit(runTimePerUnit))} sek`;
+                }
+                return formatQuantity(runTimePerUnit);
               }
               case "status":
                 return row.status === "done" ? (

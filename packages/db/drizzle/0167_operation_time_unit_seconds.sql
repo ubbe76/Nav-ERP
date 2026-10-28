@@ -1,0 +1,1 @@
+ALTER TYPE "public"."operation_time_unit" ADD VALUE 'seconds_per_unit';
