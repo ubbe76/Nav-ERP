@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   date,
   index,
   integer,
@@ -68,13 +69,30 @@ export const dayScheduleBreaks = pgTable("day_schedule_breaks", {
 
 // Veckoschema — picks a day schedule per weekday. A weekday without a row is
 // a day off (ledig).
-export const weekSchedules = pgTable("week_schedules", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  code: varchar("code", { length: 20 }).notNull().unique(),
-  name: varchar("name", { length: 100 }).notNull(),
-  active: boolean("active").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+//
+// Utjämning (ATF och inarbetning, migration 0166): with ordinaryMinutesPerWeek
+// set — and the schedule_balancing system setting on — ordinary time and ATF
+// are earned per workday and the week's last workday gets whatever the week
+// still owes (schedule-balancing.ts). null = the day schedules as they are.
+export const weekSchedules = pgTable(
+  "week_schedules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: varchar("code", { length: 20 }).notNull().unique(),
+    name: varchar("name", { length: 100 }).notNull(),
+    active: boolean("active").notNull().default(true),
+    ordinaryMinutesPerWeek: integer("ordinary_minutes_per_week"),
+    atfMinutesPerWeek: integer("atf_minutes_per_week").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "week_schedules_ordinary_minutes_range",
+      sql`${table.ordinaryMinutesPerWeek} IS NULL OR ${table.ordinaryMinutesPerWeek} BETWEEN 60 AND 10080`
+    ),
+    check("week_schedules_atf_minutes_range", sql`${table.atfMinutesPerWeek} BETWEEN 0 AND 600`),
+  ]
+);
 
 export const weekScheduleDays = pgTable(
   "week_schedule_days",

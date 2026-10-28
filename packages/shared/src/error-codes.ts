@@ -33,6 +33,8 @@ export const ERROR_CODES = {
   ATTENDANCE_INPUT_REQUIRED: "attendance-input-required",
   ATTENDANCE_REASON_INVALID: "attendance-reason-invalid",
   ATF_TRANSACTION_MISMATCH: "atf-transaction-mismatch",
+  // Utjämning saved on a week schedule while the system setting is off
+  SCHEDULE_BALANCING_OFF: "schedule-balancing-off",
   // A supervisor's correction raced a stamp that changed the session
   ATTENDANCE_SESSION_CHANGED: "attendance-session-changed",
   INVALID_STOP_TIME: "invalid-stop-time",

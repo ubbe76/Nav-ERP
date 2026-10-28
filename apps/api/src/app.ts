@@ -719,11 +719,14 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // that declaration's comment. Payroll/timereport reuse the same instance.
   const timeReportRepository = createTimeReportRepository(database);
   // Schedules and ATF share the employee register with the timereport
-  // service; ATF also reads the system-wide accrual setting.
+  // service; ATF also reads the system-wide accrual setting. Utjämning on the
+  // week schedule reads its system setting and the absences that earn no ATF
+  // (the payroll repository — built above, so no late binding is needed).
   const scheduleService = createScheduleService(
     createScheduleRepository(database),
     timeReportRepository,
-    periodLockChecker
+    periodLockChecker,
+    { settings: systemService, absences: payrollRepository }
   );
   const atfRepository = createAtfRepository(database);
   const atfService = createAtfService(atfRepository, timeReportRepository, systemService, periodLockChecker);

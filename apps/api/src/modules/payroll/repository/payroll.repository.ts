@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, getTableColumns, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, gte, lte, sql } from "drizzle-orm";
 import {
   absences,
   absenceTypes,
@@ -93,7 +93,7 @@ export function createPayrollRepository(db: Db) {
     // Seed helper: inserts the entry unless its code or name already exists
     // (any conflict skips — existing entries are never touched). Returns
     // true when a row was actually created.
-    async createAbsenceTypeIfMissing(input: { code: string; name: string; paxmlCode: string }) {
+    async createAbsenceTypeIfMissing(input: { code: string; name: string; paxmlCode: string; earnsAtf: boolean }) {
       const rows = await db.insert(absenceTypes).values(input).onConflictDoNothing().returning();
       return rows.length > 0;
     },
@@ -189,6 +189,25 @@ export function createPayrollRepository(db: Db) {
         .innerJoin(absenceTypes, eq(absenceTypes.id, absences.absenceTypeId))
         .where(and(...conditions))
         .orderBy(desc(absences.date));
+    },
+
+    // Utjämning: per day, the minutes of absence whose kind earns no ATF
+    // (sjuk/VAB/…) — the schedule resolver lengthens the week's last workday
+    // by the ATF share they lose (AtfAbsenceReader in schedule.service.ts).
+    async listNonEarningAbsences(employeeId: string, from: string, to: string) {
+      return db
+        .select({ date: absences.date, minutes: sql<number>`sum(${absences.minutes})::int` })
+        .from(absences)
+        .innerJoin(absenceTypes, eq(absenceTypes.id, absences.absenceTypeId))
+        .where(
+          and(
+            eq(absences.employeeId, employeeId),
+            eq(absenceTypes.earnsAtf, false),
+            gte(absences.date, from),
+            lte(absences.date, to)
+          )
+        )
+        .groupBy(absences.date);
     },
 
     async findAbsenceById(id: string) {

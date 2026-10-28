@@ -9,6 +9,8 @@ export const createAbsenceTypeSchema = z.object({
   name: z.string().trim().min(1).max(100),
   paxmlCode: z.string().trim().min(1).max(20),
   active: z.boolean().optional(),
+  // Tjänar in ATF — false for sjuk/VAB/föräldraledig/tjänstledig by default.
+  earnsAtf: z.boolean().optional(),
 });
 export const updateAbsenceTypeSchema = createAbsenceTypeSchema.partial()
   .refine((d) => Object.keys(d).length > 0, "At least one field must be provided");

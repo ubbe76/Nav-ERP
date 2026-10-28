@@ -127,11 +127,20 @@ const weekScheduleDaySchema = z.object({
 });
 export type WeekScheduleDayInput = z.infer<typeof weekScheduleDaySchema>;
 
+// Utjämning (ATF och inarbetning): ordinary time and ATF per week, earned per
+// workday; the week's last workday gets what the week still owes. null
+// ordinaryMinutesPerWeek = no balancing. Needs the schedule_balancing system
+// setting (else 400 schedule-balancing-off).
+const ordinaryMinutesPerWeekSchema = z.number().int().min(60).max(10080).nullable();
+const atfMinutesPerWeekSchema = z.number().int().min(0).max(600);
+
 export const createWeekScheduleSchema = z.object({
   code: z.string().min(1).max(20),
   name: z.string().min(1).max(100),
   days: z.array(weekScheduleDaySchema).default([]),
   active: z.boolean().default(true),
+  ordinaryMinutesPerWeek: ordinaryMinutesPerWeekSchema.default(null),
+  atfMinutesPerWeek: atfMinutesPerWeekSchema.default(0),
 });
 export type CreateWeekScheduleInput = z.infer<typeof createWeekScheduleSchema>;
 
@@ -142,9 +151,20 @@ export const updateWeekScheduleSchema = z
     name: z.string().min(1).max(100).optional(),
     days: z.array(weekScheduleDaySchema).optional(),
     active: z.boolean().optional(),
+    ordinaryMinutesPerWeek: ordinaryMinutesPerWeekSchema.optional(),
+    atfMinutesPerWeek: atfMinutesPerWeekSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateWeekScheduleInput = z.infer<typeof updateWeekScheduleSchema>;
+
+// Förhandsvisning of a balanced week (Veckoscheman's form) — the same fields
+// the save validates, computed server-side so the web never does the math.
+export const weekSchedulePreviewSchema = z.object({
+  days: z.array(weekScheduleDaySchema),
+  ordinaryMinutesPerWeek: z.number().int().min(60).max(10080),
+  atfMinutesPerWeek: atfMinutesPerWeekSchema.default(0),
+});
+export type WeekSchedulePreviewInput = z.infer<typeof weekSchedulePreviewSchema>;
 
 // Helgdag — dayScheduleId null/absent = fully off (röd dag), set = reduced
 // day (e.g. halvdag).

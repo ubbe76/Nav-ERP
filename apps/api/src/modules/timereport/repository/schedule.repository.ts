@@ -1,4 +1,4 @@
-import { and, asc, between, eq, inArray } from "drizzle-orm";
+import { and, asc, between, eq, inArray, isNotNull } from "drizzle-orm";
 import {
   dayScheduleBreaks,
   daySchedules,
@@ -179,11 +179,24 @@ export function createScheduleRepository(db: Db) {
       return { ...row, days: dayRows };
     },
 
-    async createWeekSchedule(input: { code: string; name: string; active: boolean; days: WeekScheduleDayInput[] }) {
+    async createWeekSchedule(input: {
+      code: string;
+      name: string;
+      active: boolean;
+      days: WeekScheduleDayInput[];
+      ordinaryMinutesPerWeek: number | null;
+      atfMinutesPerWeek: number;
+    }) {
       return db.transaction(async (tx) => {
         const [row] = await tx
           .insert(weekSchedules)
-          .values({ code: input.code, name: input.name, active: input.active })
+          .values({
+            code: input.code,
+            name: input.name,
+            active: input.active,
+            ordinaryMinutesPerWeek: input.ordinaryMinutesPerWeek,
+            atfMinutesPerWeek: input.atfMinutesPerWeek,
+          })
           .returning();
         if (input.days.length > 0) {
           await tx.insert(weekScheduleDays).values(input.days.map((d) => ({ ...d, weekScheduleId: row!.id })));
@@ -195,7 +208,14 @@ export function createScheduleRepository(db: Db) {
     // `days` is replaced wholesale when provided.
     async updateWeekSchedule(
       id: string,
-      input: { code?: string; name?: string; active?: boolean; days?: WeekScheduleDayInput[] }
+      input: {
+        code?: string;
+        name?: string;
+        active?: boolean;
+        days?: WeekScheduleDayInput[];
+        ordinaryMinutesPerWeek?: number | null;
+        atfMinutesPerWeek?: number;
+      }
     ) {
       return db.transaction(async (tx) => {
         const { days, ...fields } = input;
@@ -225,6 +245,34 @@ export function createScheduleRepository(db: Db) {
         })
         .from(weekScheduleDays)
         .where(inArray(weekScheduleDays.weekScheduleId, weekScheduleIds));
+    },
+
+    // Utjämning fields per week schedule, for the resolver.
+    async listWeekScheduleBalancing(weekScheduleIds: string[]) {
+      if (weekScheduleIds.length === 0) return [];
+      return db
+        .select({
+          id: weekSchedules.id,
+          ordinaryMinutesPerWeek: weekSchedules.ordinaryMinutesPerWeek,
+          atfMinutesPerWeek: weekSchedules.atfMinutesPerWeek,
+        })
+        .from(weekSchedules)
+        .where(inArray(weekSchedules.id, weekScheduleIds));
+    },
+
+    // Balanced week schedules that use a day schedule — a change to the day
+    // schedule must still balance in every one of them.
+    async listBalancedWeekSchedulesUsingDaySchedule(dayScheduleId: string) {
+      return db
+        .selectDistinct({
+          id: weekSchedules.id,
+          code: weekSchedules.code,
+          ordinaryMinutesPerWeek: weekSchedules.ordinaryMinutesPerWeek,
+          atfMinutesPerWeek: weekSchedules.atfMinutesPerWeek,
+        })
+        .from(weekSchedules)
+        .innerJoin(weekScheduleDays, eq(weekScheduleDays.weekScheduleId, weekSchedules.id))
+        .where(and(eq(weekScheduleDays.dayScheduleId, dayScheduleId), isNotNull(weekSchedules.ordinaryMinutesPerWeek)));
     },
 
     // --- Helgdagar ---

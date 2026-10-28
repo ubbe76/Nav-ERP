@@ -9,8 +9,17 @@ import {
   type UpdateDayScheduleInput,
   type UpdateWeekScheduleInput,
   type WeekScheduleDayInput,
+  type WeekSchedulePreviewInput,
 } from "@navet/shared";
 import type { ScheduleRepository } from "../repository/schedule.repository.js";
+import {
+  balanceWeek,
+  describeBalancingProblem,
+  findBalancingProblem,
+  toClock,
+  type BalancedLastDay,
+  type BalancingDaySchedule,
+} from "./schedule-balancing.js";
 import { EmployeeNotFoundError, WeekScheduleNotFoundError } from "./timereport.service.js";
 // Leaf file in the payroll module — no import cycle (see period-lock.ts).
 import { PayrollPeriodLockedError, type PeriodLockChecker } from "../../payroll/service/period-lock.js";
@@ -56,6 +65,23 @@ export class InvalidScheduleError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "InvalidScheduleError";
+  }
+}
+
+// A balanced week schedule (utjämning) that does not add up — Swedish message
+// naming the failing case, shown to the user as-is (400 like the rest).
+export class ScheduleBalancingInvalidError extends InvalidScheduleError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScheduleBalancingInvalidError";
+  }
+}
+
+// Ordinary time per week saved while Tillåt ATF-uttag via schemat is off — 400.
+export class ScheduleBalancingOffError extends Error {
+  constructor() {
+    super("Schedule balancing (ATF via the week schedule) is turned off in the system settings");
+    this.name = "ScheduleBalancingOffError";
   }
 }
 
@@ -172,6 +198,16 @@ export interface EmployeeReader {
   findEmployeeById(id: string): Promise<{ id: string; defaultWeekScheduleId: string | null } | null>;
 }
 
+// Utjämning reads the system setting (systemService satisfies it) and the
+// absences that earn no ATF (the payroll repository satisfies it). Both are
+// optional: without them the calendar resolves exactly as before balancing.
+export interface ScheduleSettingsReader {
+  getSettings(): Promise<{ scheduleBalancing: boolean }>;
+}
+export interface AtfAbsenceReader {
+  listNonEarningAbsences(employeeId: string, from: string, to: string): Promise<{ date: string; minutes: number }[]>;
+}
+
 export type CalendarDaySource = "day-override" | "holiday" | "week-override" | "standard";
 
 // One resolved calendar day for an employee — the element type of
@@ -183,6 +219,9 @@ export interface ResolvedDay {
   weekday: number;
   source: CalendarDaySource | null;
   holidayName?: string;
+  // netMinutes/endTime are what the day is worth: on a balanced week's last
+  // workday the computed values (schedule-balancing.ts), otherwise the day
+  // schedule's own — which scheduleNetMinutes/scheduleEndTime always hold.
   daySchedule: {
     id: string;
     code: string;
@@ -190,14 +229,22 @@ export interface ResolvedDay {
     startTime: string;
     endTime: string;
     netMinutes: number;
+    scheduleEndTime: string;
+    scheduleNetMinutes: number;
     breaks: { type: "unpaid" | "paid"; startTime: string; endTime: string }[];
   } | null;
+  // Set on a balanced week's last workday (for display).
+  balance?: { workdays: number; normalWorkdays: number; weekAtfMinutes: number; lostAtfMinutes: number };
 }
+
+const shiftDate = (date: string, days: number) => toDateString(addDaysUTC(new Date(`${date}T00:00:00Z`), days));
+const mondayOf = (date: string) => shiftDate(date, -((new Date(`${date}T00:00:00Z`).getUTCDay() || 7) - 1));
 
 export function createScheduleService(
   repo: ScheduleRepository,
   employees: EmployeeReader,
-  periodLocks: PeriodLockChecker
+  periodLocks: PeriodLockChecker,
+  balancing?: { settings: ScheduleSettingsReader; absences?: AtfAbsenceReader }
 ) {
   async function requireEmployee(employeeId: string) {
     const employee = await employees.findEmployeeById(employeeId);
@@ -218,6 +265,44 @@ export function createScheduleService(
     const { monday, sunday } = isoWeekRange(isoYear, isoWeek);
     await requireOpenPeriod(monday);
     await requireOpenPeriod(sunday);
+  }
+
+  async function balancingEnabled() {
+    return balancing ? (await balancing.settings.getSettings()).scheduleBalancing : false;
+  }
+
+  // The week schedule's days as the balancing rule sees them; `replace`
+  // swaps in a day schedule's not-yet-saved shape (updateDaySchedule).
+  async function balancingDays(
+    days: WeekScheduleDayInput[],
+    replace?: { id: string; schedule: BalancingDaySchedule }
+  ) {
+    const schedules = new Map(
+      (await repo.listDaySchedulesByIds([...new Set(days.map((d) => d.dayScheduleId))])).map((s) => [
+        s.id,
+        { code: s.code, startTime: s.startTime, endTime: s.endTime, breaks: s.breaks, netMinutes: computeDayScheduleNetMinutes(s) },
+      ])
+    );
+    return days.flatMap((d) => {
+      const schedule = replace?.id === d.dayScheduleId ? { ...schedules.get(d.dayScheduleId)!, ...replace.schedule } : schedules.get(d.dayScheduleId);
+      return schedule ? [{ weekday: d.weekday, dayScheduleId: d.dayScheduleId, schedule }] : [];
+    });
+  }
+
+  function assertBalances(
+    days: { weekday: number; schedule: BalancingDaySchedule }[],
+    ordinaryMinutesPerWeek: number,
+    atfMinutesPerWeek: number,
+    prefix = ""
+  ) {
+    if (!days.some((d) => d.schedule.netMinutes > 0)) {
+      throw new ScheduleBalancingInvalidError(`${prefix}Utjämningen kräver minst en arbetsdag i veckoschemat.`);
+    }
+    if (atfMinutesPerWeek >= ordinaryMinutesPerWeek) {
+      throw new ScheduleBalancingInvalidError(`${prefix}ATF per vecka måste vara mindre än den ordinarie arbetstiden.`);
+    }
+    const problem = findBalancingProblem({ ordinaryMinutesPerWeek, atfMinutesPerWeek, days });
+    if (problem) throw new ScheduleBalancingInvalidError(prefix + describeBalancingProblem(problem));
   }
 
   // Referenced day schedules must exist, and a weekday can only appear once.
@@ -254,11 +339,22 @@ export function createScheduleService(
     async updateDaySchedule(id: string, input: UpdateDayScheduleInput) {
       const existing = await repo.findDayScheduleById(id);
       if (!existing) throw new DayScheduleNotFoundError(id);
-      validateDayScheduleTimes(
-        input.startTime ?? existing.startTime,
-        input.endTime ?? existing.endTime,
-        input.breaks ?? existing.breaks
-      );
+      const candidate = {
+        startTime: input.startTime ?? existing.startTime,
+        endTime: input.endTime ?? existing.endTime,
+        breaks: input.breaks ?? existing.breaks,
+      };
+      validateDayScheduleTimes(candidate.startTime, candidate.endTime, candidate.breaks);
+      // Every balanced week schedule using this day must still add up.
+      for (const week of await repo.listBalancedWeekSchedulesUsingDaySchedule(id)) {
+        const weekSchedule = await repo.findWeekScheduleById(week.id);
+        if (!weekSchedule) continue;
+        const days = await balancingDays(weekSchedule.days, {
+          id,
+          schedule: { ...candidate, netMinutes: computeDayScheduleNetMinutes(candidate) },
+        });
+        assertBalances(days, week.ordinaryMinutesPerWeek!, week.atfMinutesPerWeek, `Veckoschemat ${week.code}: `);
+      }
       try {
         const row = await repo.updateDaySchedule(id, input);
         if (!row) throw new DayScheduleNotFoundError(id);
@@ -282,9 +378,17 @@ export function createScheduleService(
     },
 
     async createWeekSchedule(input: CreateWeekScheduleInput) {
+      // Callers outside the route (fixtures, exempeldata) may leave the
+      // utjämning fields out — that is "no balancing", like the zod default.
+      const ordinaryMinutesPerWeek = input.ordinaryMinutesPerWeek ?? null;
+      const atfMinutesPerWeek = input.atfMinutesPerWeek ?? 0;
+      if (ordinaryMinutesPerWeek !== null && !(await balancingEnabled())) throw new ScheduleBalancingOffError();
       await validateWeekScheduleDays(input.days);
+      if (ordinaryMinutesPerWeek !== null) {
+        assertBalances(await balancingDays(input.days), ordinaryMinutesPerWeek, atfMinutesPerWeek);
+      }
       try {
-        const id = await repo.createWeekSchedule(input);
+        const id = await repo.createWeekSchedule({ ...input, ordinaryMinutesPerWeek, atfMinutesPerWeek });
         return (await repo.findWeekScheduleById(id))!;
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateScheduleCodeError(input.code);
@@ -293,7 +397,19 @@ export function createScheduleService(
     },
 
     async updateWeekSchedule(id: string, input: UpdateWeekScheduleInput) {
+      if (typeof input.ordinaryMinutesPerWeek === "number" && !(await balancingEnabled())) {
+        throw new ScheduleBalancingOffError();
+      }
       if (input.days) await validateWeekScheduleDays(input.days);
+      // The merged result must balance whenever it has ordinary time —
+      // whichever of days/ordinary/ATF this request changes.
+      const existing = await repo.findWeekScheduleById(id);
+      if (!existing) throw new WeekScheduleNotFoundError(id);
+      const ordinary = input.ordinaryMinutesPerWeek !== undefined ? input.ordinaryMinutesPerWeek : existing.ordinaryMinutesPerWeek;
+      if (ordinary !== null) {
+        const days = input.days ?? existing.days.map((d) => ({ weekday: d.weekday, dayScheduleId: d.dayScheduleId }));
+        assertBalances(await balancingDays(days), ordinary, input.atfMinutesPerWeek ?? existing.atfMinutesPerWeek);
+      }
       try {
         const updatedId = await repo.updateWeekSchedule(id, input);
         if (!updatedId) throw new WeekScheduleNotFoundError(id);
@@ -302,6 +418,49 @@ export function createScheduleService(
         if (isUniqueViolation(err)) throw new DuplicateScheduleCodeError(input.code ?? "");
         throw err;
       }
+    },
+
+    // Förhandsvisning for the week schedule form: a plain week and a week
+    // whose last workday is a holiday, computed by the same rule as the
+    // calendar (the web never does the math). Validates like the save.
+    async previewWeekSchedule(input: WeekSchedulePreviewInput) {
+      await validateWeekScheduleDays(input.days);
+      const days = (await balancingDays(input.days)).sort((a, b) => a.weekday - b.weekday);
+      assertBalances(days, input.ordinaryMinutesPerWeek, input.atfMinutesPerWeek);
+      const params = { ordinaryMinutesPerWeek: input.ordinaryMinutesPerWeek, atfMinutesPerWeek: input.atfMinutesPerWeek, days };
+
+      const week = (holidayWeekdays: number[]) => {
+        const result = balanceWeek({ ...params, holidayWeekdays });
+        const rows = days.map((d) => {
+          const holiday = holidayWeekdays.includes(d.weekday);
+          const last = result?.weekday === d.weekday;
+          return {
+            weekday: d.weekday,
+            dayScheduleId: d.dayScheduleId,
+            dayScheduleCode: d.schedule.code,
+            holiday,
+            last,
+            startTime: holiday ? null : d.schedule.startTime,
+            endTime: holiday ? null : last ? result!.endTime : d.schedule.endTime,
+            netMinutes: holiday ? 0 : last ? result!.netMinutes : d.schedule.netMinutes,
+          };
+        });
+        return {
+          days: rows,
+          netMinutes: rows.reduce((sum, r) => sum + r.netMinutes, 0),
+          atfMinutes: result?.weekAtfMinutes ?? 0,
+        };
+      };
+
+      const plain = balanceWeek({ ...params, holidayWeekdays: [] })!;
+      const workdays = days.filter((d) => d.schedule.netMinutes > 0).length;
+      return {
+        normalWorkdays: workdays,
+        ordinaryMinutesPerDay: input.ordinaryMinutesPerWeek / workdays,
+        atfMinutesPerDay: input.atfMinutesPerWeek / workdays,
+        fullWeek: week([]),
+        lastDayHoliday: workdays > 1 ? { holidayWeekday: plain.weekday, ...week([plain.weekday]) } : null,
+      };
     },
 
     // --- Helgdagar ---
@@ -422,7 +581,9 @@ export function createScheduleService(
     // Resolve which day schedule applies per date. Priority, most specific
     // first: employee day override → company holiday → employee week override
     // → standard week schedule → no schedule (ledig). This is the function the
-    // future löneunderlag generation reuses to diff attendance against.
+    // löneunderlag, the terminal's deviation check and the personnel card all
+    // read — so a balanced week's last workday (utjämning) is computed here
+    // and nowhere else.
     async resolveEmployeeCalendar(employeeId: string, from: string, to: string) {
       const employee = await requireEmployee(employeeId);
 
@@ -432,10 +593,20 @@ export function createScheduleService(
       if (spanDays < 1) throw new InvalidScheduleError("'to' must not be before 'from'");
       if (spanDays > 370) throw new InvalidScheduleError("Date range must not exceed 370 days");
 
-      const [dayOverrides, holidayRows, weekOverrides] = await Promise.all([
+      // Utjämning depends on the whole ISO week (its holidays and absences),
+      // so those are read for the full weeks around the range — the
+      // terminal asks for a single day.
+      const balancingOn = await balancingEnabled();
+      const weekFrom = balancingOn ? mondayOf(from) : from;
+      const weekTo = balancingOn ? shiftDate(mondayOf(to), 6) : to;
+
+      const [dayOverrides, holidayRows, weekOverrides, absenceRows] = await Promise.all([
         repo.listDayOverridesInRange(employeeId, from, to),
-        repo.listHolidaysInRange(from, to),
+        repo.listHolidaysInRange(weekFrom, weekTo),
         repo.listWeekOverrides(employeeId),
+        balancingOn && balancing?.absences
+          ? balancing.absences.listNonEarningAbsences(employeeId, weekFrom, weekTo)
+          : Promise.resolve([]),
       ]);
 
       const dayOverrideByDate = new Map(dayOverrides.map((o) => [o.date, o]));
@@ -471,6 +642,8 @@ export function createScheduleService(
             startTime: s.startTime,
             endTime: s.endTime,
             netMinutes: computeDayScheduleNetMinutes(s),
+            scheduleEndTime: s.endTime,
+            scheduleNetMinutes: computeDayScheduleNetMinutes(s),
             // Break windows (already normalized to HH:MM by the repo's
             // hhmm()) so the payroll day-engine can subtract unpaid breaks
             // from attendance presence without a second lookup.
@@ -478,6 +651,46 @@ export function createScheduleService(
           },
         ])
       );
+
+      // The balanced last workday per week (date → result). Holidays of any
+      // kind drop out of the week; employee day overrides do not take part —
+      // they only replace their own day (below).
+      const balancedByDate = new Map<string, BalancedLastDay>();
+      if (balancingOn) {
+        const configById = new Map(
+          (await repo.listWeekScheduleBalancing(weekScheduleIds))
+            .filter((w) => w.ordinaryMinutesPerWeek !== null)
+            .map((w) => [w.id, { ordinary: w.ordinaryMinutesPerWeek!, atf: w.atfMinutesPerWeek }])
+        );
+        const absenceByDate = new Map(absenceRows.map((a) => [a.date, a.minutes]));
+        for (let monday = weekFrom; configById.size > 0 && monday <= weekTo; monday = shiftDate(monday, 7)) {
+          const { isoYear, isoWeek } = isoWeekOf(monday);
+          const weekScheduleId = weekOverrideByWeek.get(`${isoYear}-${isoWeek}`)?.weekScheduleId ?? employee.defaultWeekScheduleId;
+          const config = weekScheduleId ? configById.get(weekScheduleId) : undefined;
+          if (!config) continue;
+
+          const weekDaySchedules: { weekday: number; schedule: BalancingDaySchedule }[] = [];
+          const holidayWeekdays: number[] = [];
+          const nonEarningAbsenceMinutes = new Map<number, number>();
+          for (let weekday = 1; weekday <= 7; weekday++) {
+            const date = shiftDate(monday, weekday - 1);
+            const dayScheduleId = dayScheduleByWeekAndWeekday.get(`${weekScheduleId}:${weekday}`);
+            const schedule = dayScheduleId ? daySchedulesById.get(dayScheduleId) : undefined;
+            if (schedule) weekDaySchedules.push({ weekday, schedule });
+            if (holidayByDate.has(date)) holidayWeekdays.push(weekday);
+            const absent = absenceByDate.get(date);
+            if (absent) nonEarningAbsenceMinutes.set(weekday, absent);
+          }
+          const result = balanceWeek({
+            ordinaryMinutesPerWeek: config.ordinary,
+            atfMinutesPerWeek: config.atf,
+            days: weekDaySchedules,
+            holidayWeekdays,
+            nonEarningAbsenceMinutes,
+          });
+          if (result) balancedByDate.set(shiftDate(monday, result.weekday - 1), result);
+        }
+      }
 
       const days: ResolvedDay[] = [];
 
@@ -508,12 +721,37 @@ export function createScheduleService(
           }
         }
 
+        let daySchedule: ResolvedDay["daySchedule"] = dayScheduleId ? (daySchedulesById.get(dayScheduleId) ?? null) : null;
+        // A balanced last workday comes from the week schedule; a day
+        // override on it (source "day-override") wins as the most specific.
+        const balanced = source === "standard" || source === "week-override" ? balancedByDate.get(date) : undefined;
+        if (daySchedule && balanced) {
+          // Validation keeps the day inside 00:00–24:00; the clamp only
+          // guards the payroll engine's clock arithmetic against a schedule
+          // that was changed past it.
+          daySchedule = {
+            ...daySchedule,
+            netMinutes: Math.max(0, balanced.netMinutes),
+            endTime: toClock(Math.min(balanced.endMinutes, 24 * 60 - 1)),
+          };
+        }
+
         days.push({
           date,
           weekday,
           source,
           ...(holidayName !== undefined ? { holidayName } : {}),
-          daySchedule: dayScheduleId ? (daySchedulesById.get(dayScheduleId) ?? null) : null,
+          daySchedule,
+          ...(daySchedule && balanced
+            ? {
+                balance: {
+                  workdays: balanced.workdays,
+                  normalWorkdays: balanced.normalWorkdays,
+                  weekAtfMinutes: balanced.weekAtfMinutes,
+                  lostAtfMinutes: balanced.lostAtfMinutes,
+                },
+              }
+            : {}),
         });
       }
 

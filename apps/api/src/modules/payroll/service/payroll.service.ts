@@ -552,16 +552,18 @@ function validateObWindow(startTime: string, endTime: string) {
 }
 
 // Standard Swedish absence codes with their PAXml tidkod. The register is
-// fully editable — this is a starting point, not an authority.
+// fully editable — this is a starting point, not an authority. earnsAtf:
+// sjuk, VAB, föräldraledig and tjänstledig earn no ATF (a balanced week
+// schedule's last workday gets longer — schedule-balancing.ts).
 export const STANDARD_ABSENCE_TYPES = [
-  { code: "SJK", name: "Sjukfrånvaro", paxmlCode: "SJK" },
-  { code: "SEM", name: "Semester", paxmlCode: "SEM" },
-  { code: "VAB", name: "Vård av barn", paxmlCode: "VAB" },
-  { code: "FPE", name: "Föräldraledig", paxmlCode: "FPE" },
-  { code: "TJL", name: "Tjänstledig", paxmlCode: "TJL" },
-  { code: "PEM", name: "Permission", paxmlCode: "PEM" },
-  { code: "UTB", name: "Utbildning", paxmlCode: "UTB" },
-  { code: "KOM", name: "Kompledig", paxmlCode: "KOM" },
+  { code: "SJK", name: "Sjukfrånvaro", paxmlCode: "SJK", earnsAtf: false },
+  { code: "SEM", name: "Semester", paxmlCode: "SEM", earnsAtf: true },
+  { code: "VAB", name: "Vård av barn", paxmlCode: "VAB", earnsAtf: false },
+  { code: "FPE", name: "Föräldraledig", paxmlCode: "FPE", earnsAtf: false },
+  { code: "TJL", name: "Tjänstledig", paxmlCode: "TJL", earnsAtf: false },
+  { code: "PEM", name: "Permission", paxmlCode: "PEM", earnsAtf: true },
+  { code: "UTB", name: "Utbildning", paxmlCode: "UTB", earnsAtf: true },
+  { code: "KOM", name: "Kompledig", paxmlCode: "KOM", earnsAtf: true },
 ] as const;
 
 // Registers + absence bookings, the period summary, attestation and period

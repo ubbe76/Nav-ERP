@@ -8,6 +8,7 @@ import {
   setWeekOverrideSchema,
   updateDayScheduleSchema,
   updateWeekScheduleSchema,
+  weekSchedulePreviewSchema,
 } from "@navet/shared";
 import type { ScheduleService } from "../service/schedule.service.js";
 import {
@@ -16,6 +17,7 @@ import {
   DuplicateScheduleCodeError,
   HolidayNotFoundError,
   InvalidScheduleError,
+  ScheduleBalancingOffError,
   ScheduleOverrideNotFoundError,
 } from "../service/schedule.service.js";
 import { EmployeeNotFoundError, WeekScheduleNotFoundError } from "../service/timereport.service.js";
@@ -52,7 +54,9 @@ export async function scheduleRoutes(app: FastifyInstance, opts: { service: Sche
       ) {
         return reply.code(409).send(errorBody(err));
       }
-      if (err instanceof InvalidScheduleError) return reply.code(400).send(errorBody(err));
+      if (err instanceof InvalidScheduleError || err instanceof ScheduleBalancingOffError) {
+        return reply.code(400).send(errorBody(err));
+      }
       throw err;
     }
   }
@@ -81,6 +85,13 @@ export async function scheduleRoutes(app: FastifyInstance, opts: { service: Sche
   app.patch<{ Params: { id: string } }>("/week-schedules/:id", async (req, reply) => {
     const input = updateWeekScheduleSchema.parse(req.body);
     return handle(reply, () => service.updateWeekSchedule(req.params.id, input));
+  });
+
+  // Utjämning: what a balanced week looks like (the form's förhandsvisning).
+  // Computes and answers only — allowed for read-only accounts.
+  app.post("/week-schedules/preview", { config: { readOnlySafe: true } }, async (req, reply) => {
+    const input = weekSchedulePreviewSchema.parse(req.body);
+    return handle(reply, () => service.previewWeekSchedule(input));
   });
 
   // Helgdagar

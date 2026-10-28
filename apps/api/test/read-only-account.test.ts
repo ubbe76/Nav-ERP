@@ -390,6 +390,8 @@ describe("Endast läsning — the allowlist", () => {
         "POST /api/v1/configurator/:articleId/derive",
         "POST /api/v1/configurator/:articleId/evaluate",
         "POST /api/v1/themes/validate",
+        // Utjämning: the week schedule form's förhandsvisning.
+        "POST /api/v1/week-schedules/preview",
         // Tillägg: the manifest preview (admin only) and the context token a
         // plugin page or tab is opened with — computed and signed, nothing written.
         "POST /api/v1/plugins/preview",

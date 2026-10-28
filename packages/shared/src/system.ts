@@ -73,6 +73,10 @@ const systemSettingsFieldsSchema = z.object({
     // (the whole list; [] = none).
     extraDescriptionDocuments: z.array(extraDescriptionDocumentSchema).max(EXTRA_DESCRIPTION_DOCUMENTS.length).optional(),
     atfMinutesPerWeek: z.number().int().min(0).max(600).optional(),
+    // Tillåt ATF-uttag via schemat: week schedules may carry ordinary time and
+    // ATF per week (utjämning — the last workday balances the week). Off =
+    // stored values are ignored and the day schedules apply as they are.
+    scheduleBalancing: z.boolean().optional(),
     // Daily overtime grace period (minutes) — worked time past schedule must
     // exceed this before it counts as overtime on a scheduled day. 0 = every
     // minute past schedule is overtime.

@@ -34,6 +34,10 @@ export const absenceTypes = pgTable("absence_types", {
   name: varchar("name", { length: 100 }).notNull().unique(),
   paxmlCode: varchar("paxml_code", { length: 20 }).notNull(),
   active: boolean("active").notNull().default(true),
+  // Tjänar in ATF: false for sjuk/VAB/föräldraledig/tjänstledig — such a day
+  // earns no ATF share, so the week's last workday gets longer
+  // (schedule-balancing.ts). Only read when the week schedule balances.
+  earnsAtf: boolean("earns_atf").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

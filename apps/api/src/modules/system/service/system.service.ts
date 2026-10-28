@@ -87,6 +87,8 @@ const SHOW_REVISIONS_ON_DOCUMENTS_KEY = "show_revisions_on_documents";
 const SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY = "show_order_revision_on_documents";
 const EXTRA_DESCRIPTION_DOCUMENTS_KEY = "extra_description_documents";
 const ATF_MINUTES_PER_WEEK_KEY = "atf_minutes_per_week";
+// Tillåt ATF-uttag via schemat (utjämning på veckoschemat) — off when unset.
+const SCHEDULE_BALANCING_KEY = "schedule_balancing";
 const PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY = "payroll_overtime_threshold_minutes";
 const ATTENDANCE_REASON_REQUIRED_KEY = "attendance_reason_required";
 const ATTENDANCE_REASON_TOLERANCE_MINUTES_KEY = "attendance_reason_tolerance_minutes";
@@ -293,6 +295,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       showOrderRevisionOnDocuments: get(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY) !== "false",
       extraDescriptionDocuments: decodeExtraDescriptionDocuments(get(EXTRA_DESCRIPTION_DOCUMENTS_KEY)),
       atfMinutesPerWeek: get(ATF_MINUTES_PER_WEEK_KEY) === null ? 0 : Number(get(ATF_MINUTES_PER_WEEK_KEY)),
+      scheduleBalancing: get(SCHEDULE_BALANCING_KEY) === "true",
       payrollOvertimeThresholdMinutes:
         get(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY) === null ? 0 : Number(get(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY)),
       attendanceReasonRequired: get(ATTENDANCE_REASON_REQUIRED_KEY) === "true",
@@ -600,6 +603,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.atfMinutesPerWeek !== undefined) {
         await set(ATF_MINUTES_PER_WEEK_KEY, String(input.atfMinutesPerWeek));
+      }
+      if (input.scheduleBalancing !== undefined) {
+        await set(SCHEDULE_BALANCING_KEY, String(input.scheduleBalancing));
       }
       if (input.payrollOvertimeThresholdMinutes !== undefined) {
         await set(PAYROLL_OVERTIME_THRESHOLD_MINUTES_KEY, String(input.payrollOvertimeThresholdMinutes));

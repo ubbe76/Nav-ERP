@@ -135,6 +135,7 @@ import {
   AttendanceInputRequiredError,
   AttendanceReasonInvalidError,
 } from "../src/modules/timereport/service/attendance-deviation.js";
+import { ScheduleBalancingOffError } from "../src/modules/timereport/service/schedule.service.js";
 
 import {
   AccountNotFoundError,
@@ -464,6 +465,7 @@ const cases: Array<[Error, string]> = [
   [new AttendanceInputRequiredError(null, null), ERROR_CODES.ATTENDANCE_INPUT_REQUIRED],
   [new AttendanceReasonInvalidError("x"), ERROR_CODES.ATTENDANCE_REASON_INVALID],
   [new AtfTransactionMismatchError("x"), ERROR_CODES.ATF_TRANSACTION_MISMATCH],
+  [new ScheduleBalancingOffError(), ERROR_CODES.SCHEDULE_BALANCING_OFF],
   [new AttendanceSessionChangedError("x"), ERROR_CODES.ATTENDANCE_SESSION_CHANGED],
   [new InvalidStopTimeError(), ERROR_CODES.INVALID_STOP_TIME],
   [new StampSessionAlreadyStoppedError(), ERROR_CODES.STAMP_SESSION_ALREADY_STOPPED],

@@ -61,6 +61,21 @@ describe("payroll service — absence types", () => {
     expect(second.skipped).toBe(first.created);
   });
 
+  it("seeds sjuk, VAB, föräldraledig and tjänstledig as not earning ATF", async () => {
+    await service.seedStandardAbsenceTypes();
+    const types = await service.listAbsenceTypes();
+    const notEarning = types.filter((t) => !t.earnsAtf).map((t) => t.code).sort();
+    expect(notEarning).toEqual(["FPE", "SJK", "TJL", "VAB"]);
+    expect(types.find((t) => t.code === "SEM")?.earnsAtf).toBe(true);
+  });
+
+  it("Tjänar in ATF defaults on and can be changed", async () => {
+    const type = await service.createAbsenceType({ code: "UTB", name: "Utbildning", paxmlCode: "UTB" });
+    expect(type.earnsAtf).toBe(true);
+    const updated = await service.updateAbsenceType(type.id, { earnsAtf: false });
+    expect(updated.earnsAtf).toBe(false);
+  });
+
   it("listAbsenceTypes hides inactive unless includeInactive", async () => {
     const sjk = await service.createAbsenceType({ code: "SJK", name: "Sjukfrånvaro", paxmlCode: "SJK" });
     await service.updateAbsenceType(sjk.id, { active: false });
