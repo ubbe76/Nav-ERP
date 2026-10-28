@@ -161,7 +161,8 @@ const routingDescriptionSchema = optionalRoutingText(255);
 // Display preference for runTimePerUnit — always stored/returned in minutes
 // per unit regardless of this value; see operationTimeUnitEnum in
 // packages/db/src/schema/manufacturing.ts.
-export const operationTimeUnits = ["minutes_per_unit", "units_per_hour"] as const;
+export const operationTimeUnits = ["minutes_per_unit", "units_per_hour", "seconds_per_unit"] as const;
+export type OperationTimeUnit = (typeof operationTimeUnits)[number];
 
 // articleId comes from the URL (/articles/:id/routing), matching createBomComponentSchema.
 export const createRoutingOperationSchema = z.object({

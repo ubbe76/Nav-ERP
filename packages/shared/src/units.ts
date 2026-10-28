@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { OperationTimeUnit } from "./manufacturing.js";
 
 // Units register (enheter) + per-article alternative units with conversion
 // factors. Factor semantics everywhere: quantity_per_base = how many of the
@@ -69,6 +70,32 @@ export function unitsPerHourToMinutesPerUnit(unitsPerHour: number): number {
 
 export function minutesPerUnitToUnitsPerHour(minutesPerUnit: number): number {
   return Math.round((60 / minutesPerUnit) * 100) / 100;
+}
+
+// Sekunder (sek/st, migration 0167): the stored minutes keep 4 decimals and
+// the shown seconds 2, so a value typed in seconds reads back unchanged —
+// 7 s → 0.1167 min → 7 s. Unlike st/h, 0 converts fine both ways.
+export function secondsPerUnitToMinutesPerUnit(secondsPerUnit: number): number {
+  return Math.round((secondsPerUnit / 60) * 10000) / 10000;
+}
+
+export function minutesPerUnitToSecondsPerUnit(minutesPerUnit: number): number {
+  return Math.round(minutesPerUnit * 60 * 100) / 100;
+}
+
+// The operation's run time (stored in minutes per unit) in its display unit,
+// and back — the one place the three units meet. 0 has no st/h value; the
+// callers keep their own guard for that (they show it in minutes instead).
+export function runTimeInUnit(minutesPerUnit: number, unit: OperationTimeUnit): number {
+  if (unit === "units_per_hour") return minutesPerUnitToUnitsPerHour(minutesPerUnit);
+  if (unit === "seconds_per_unit") return minutesPerUnitToSecondsPerUnit(minutesPerUnit);
+  return minutesPerUnit;
+}
+
+export function runTimeToMinutes(value: number, unit: OperationTimeUnit): number {
+  if (unit === "units_per_hour") return unitsPerHourToMinutesPerUnit(value);
+  if (unit === "seconds_per_unit") return secondsPerUnitToMinutesPerUnit(value);
+  return value;
 }
 
 // articles.rounding (Avrundning): proposals from behovsberäkningen and the

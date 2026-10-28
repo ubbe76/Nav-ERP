@@ -14,7 +14,7 @@
 // with the wrong time unit gets repaired by re-running the file. Released
 // orders are unaffected either way: their mo_operations snapshot is never
 // touched, same rule as PATCH on the article card.
-import type { ImportCommitInput } from "@navet/shared";
+import type { ImportCommitInput, OperationTimeUnit } from "@navet/shared";
 import { unitsPerHourToMinutesPerUnit } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle } from "./articles.js";
@@ -233,7 +233,7 @@ export function convertRoutingTimes(
   unit: RoutingFileTimeUnit,
   setup: number,
   run: number
-): { setupTime: number; runTimePerUnit: number; timeUnit: "minutes_per_unit" | "units_per_hour"; warning?: string } {
+): { setupTime: number; runTimePerUnit: number; timeUnit: OperationTimeUnit; warning?: string } {
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const round4 = (n: number) => Math.round(n * 10000) / 10000;
   switch (unit) {
@@ -242,7 +242,8 @@ export function convertRoutingTimes(
     case "hours_per_unit":
       return { setupTime: round2(setup * 60), runTimePerUnit: round4(run * 60), timeUnit: "minutes_per_unit" };
     case "seconds_per_unit":
-      return { setupTime: round2(setup / 60), runTimePerUnit: round4(run / 60), timeUnit: "minutes_per_unit" };
+      // Saved with the display unit sek/st (0167), like antal/timme keeps st/h.
+      return { setupTime: round2(setup / 60), runTimePerUnit: round4(run / 60), timeUnit: "seconds_per_unit" };
     case "units_per_hour":
       if (run > 0) {
         return { setupTime: round2(setup * 60), runTimePerUnit: unitsPerHourToMinutesPerUnit(run), timeUnit: "units_per_hour" };
@@ -296,7 +297,7 @@ export interface RoutingCreatePlan {
   /** "Cykeltid", minutes per unit; omitted/null = none. */
   cycleTimePerUnit?: number | null;
   /** Display preference saved with the operation (see convertRoutingTimes). */
-  timeUnit: "minutes_per_unit" | "units_per_hour";
+  timeUnit: OperationTimeUnit;
   costingOnly: boolean;
   /** "Kommentar" — Monitor's "Instruktion". Null when the cell is empty. */
   comment: string | null;
@@ -326,7 +327,7 @@ export interface RoutingUpdatePlan {
     workCenterId: string;
     setupTime: number;
     runTimePerUnit: number;
-    timeUnit: "minutes_per_unit" | "units_per_hour";
+    timeUnit: OperationTimeUnit;
     costingOnly: boolean;
     // Cykeltid: set from a filled cell only (0 clears).
     cycleTimePerUnit?: number | null;

@@ -1,4 +1,5 @@
 // apps/api/src/modules/configurator/service/manufacturing-structure.ts
+import { operationTimeUnits, type OperationTimeUnit } from "@navet/shared";
 import type { DerivedOperationCore } from "./configurator-derive.js";
 import type { ExplodedDerivedMaterial } from "./configurator-explode.js";
 import type { VariantRoutingRow } from "./variant-structure.js";
@@ -12,7 +13,7 @@ import type { VariantRoutingRow } from "./variant-structure.js";
 
 export type ManufacturingOperation = {
   sequenceNo: number; routingOperationId: string | null; workCenterId: string; description: string | null;
-  setupTime: string; runTimePerUnit: string; timeUnit: "minutes_per_unit" | "units_per_hour";
+  setupTime: string; runTimePerUnit: string; timeUnit: OperationTimeUnit;
   comment: string | null; printOnWorkCard: boolean; packingInstructions: string | null;
   subcontractSupplierId: string | null; setupPrice: string | null; unitPrice: string | null; showNetWeight: boolean;
 };
@@ -24,6 +25,9 @@ export type ManufacturingMaterial = {
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const num = (v: number | null): string | null => (v === null ? null : String(v));
 const round4 = (n: number) => Number(n.toFixed(4));
+// The copied row's display unit, or minutes when it carries none we know.
+const timeUnitOf = (v: unknown): OperationTimeUnit =>
+  (operationTimeUnits as readonly unknown[]).includes(v) ? (v as OperationTimeUnit) : "minutes_per_unit";
 
 export function manufacturingOperations(routing: VariantRoutingRow[]): ManufacturingOperation[] {
   return routing
@@ -37,7 +41,7 @@ export function manufacturingOperations(routing: VariantRoutingRow[]): Manufactu
         description: r.description,
         setupTime: String(r.setupTime),
         runTimePerUnit: String(r.runTimePerUnit),
-        timeUnit: c?.timeUnit === "units_per_hour" ? "units_per_hour" : "minutes_per_unit",
+        timeUnit: timeUnitOf(c?.timeUnit),
         comment: str(c?.comment),
         printOnWorkCard: c?.printOnWorkCard === true,
         packingInstructions: str(c?.packingInstructions),

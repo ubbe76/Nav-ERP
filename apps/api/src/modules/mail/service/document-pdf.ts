@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
-import { minutesPerUnitToUnitsPerHour, VAT_CODES, type ExtraDescriptionDocument } from "@navet/shared";
+import { minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, VAT_CODES, type ExtraDescriptionDocument } from "@navet/shared";
 import { CODE128_QUIET_ZONE, code128TotalModules, encodeCode128 } from "./code128.js";
 import type { SystemService } from "../../system/service/system.service.js";
 
@@ -589,7 +589,7 @@ export interface ManufacturingOrderPdfInput {
     // Display preference snapshotted at release — runTimePerUnit is always in
     // minutes per unit; "units_per_hour" prints as "st/h" (60/runTimePerUnit)
     // instead. Optional so existing work-card.test.ts fixtures keep compiling.
-    timeUnit?: "minutes_per_unit" | "units_per_hour";
+    timeUnit?: "minutes_per_unit" | "units_per_hour" | "seconds_per_unit";
     estimatedTime: number;
     // "Kommentar" on the routing operation, snapshotted at release. Rendered
     // as an indented line under the operation row, and only when the
@@ -848,11 +848,14 @@ export function formatStockholmDateTime(date: Date): string {
   return STOCKHOLM_DATE_TIME.format(date);
 }
 
-// Times on the work card: comma decimal and no trailing zeros — "10 min",
-// "6 min", "8,5714 min", "7 st/h" (the manual's own examples), never
-// "6,0000 min". Same WinAnsi minus handling as formatNumber.
-function formatTime(value: number, maxDecimals: number): string {
-  return value.toLocaleString("sv-SE", { maximumFractionDigits: maxDecimals }).replace("−", "-");
+// Times on the work card: comma decimal, at most two decimals and no
+// trailing zeros — "10 min", "6 min", "8,57 min", "7 st/h", never
+// "6,0000 min" or "8,5714 min". A positive time too small for two decimals
+// keeps two significant digits ("0,0042 min") instead of printing "0 min".
+// Same WinAnsi minus handling as formatNumber.
+function formatTime(value: number): string {
+  const options = value > 0 && value < 0.005 ? { maximumSignificantDigits: 2 } : { maximumFractionDigits: 2 };
+  return value.toLocaleString("sv-SE", options).replace("−", "-");
 }
 
 function formatQuantity(raw: string): string {
@@ -2031,7 +2034,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         });
         // Operation times are MINUTES throughout (the beredning input unit;
         // costing divides by 60) — the old "h" suffix here was wrong.
-        doc.text(`${formatTime(Number(op.setupTime), 2)} min`, left + MO_OP_COLS.setup.x, y, {
+        doc.text(`${formatTime(Number(op.setupTime))} min`, left + MO_OP_COLS.setup.x, y, {
           width: MO_OP_COLS.setup.w,
           align: "right",
         });
@@ -2041,13 +2044,15 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         // minutes regardless of the operation's chosen unit.
         const perUnitText =
           op.timeUnit === "units_per_hour" && runTimePerUnit > 0
-            ? `${formatTime(minutesPerUnitToUnitsPerHour(runTimePerUnit), 2)} st/h`
-            : `${formatTime(runTimePerUnit, 4)} min`;
+            ? `${formatTime(minutesPerUnitToUnitsPerHour(runTimePerUnit))} st/h`
+            : op.timeUnit === "seconds_per_unit"
+              ? `${formatTime(minutesPerUnitToSecondsPerUnit(runTimePerUnit))} sek`
+              : `${formatTime(runTimePerUnit)} min`;
         doc.text(perUnitText, left + MO_OP_COLS.perUnit.x, y, {
           width: MO_OP_COLS.perUnit.w,
           align: "right",
         });
-        doc.text(`${formatTime(op.estimatedTime, 2)} min`, left + MO_OP_COLS.estimated.x, y, {
+        doc.text(`${formatTime(op.estimatedTime)} min`, left + MO_OP_COLS.estimated.x, y, {
           width: MO_OP_COLS.estimated.w,
           align: "right",
         });

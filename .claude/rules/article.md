@@ -22,7 +22,7 @@ Artikelregistret är grunden för allt annat och ska kännas igen av någon som 
 - **Typer:** `manufactured`/`purchased`/`service` i `article_type` (`packages/db/src/schema/article.ts`). **Fantomartikel** (lagerhålls aldrig, löses alltid upp till sina komponenter vid tillverkning/kalkyl) är flaggan `is_phantom`, upplöst i `bom-explosion.ts`. **Varugrupper** (`article_groups`, 1–4-siffrig kod, platt register) med UI på `/varugrupper` — se nedan.
 - **BOM är self-referencing** (arkitekturprincip 4). Artikelval i kortets BOM-komponentval görs med `ArticlePicker` (`excludeId` döljer kortets egen artikel).
 - Alla fält är redigerbara i efterhand, även artikelnummer/typ/fantomflagga (dubblett ⇒ 409).
-- Beredningslistans tidsenhet (`routing_operations.time_unit`) växlas per rad i `BeredningView` (delade `ui/SegmentedToggle`, samma kontroll som operationsdialogen, `PATCH /articles/:id/routing/:opId { timeUnit }` utan konvertering; st/h avstängd vid stycktid 0, dold på legorader).
+- Beredningslistans tidsenhet (`routing_operations.time_unit`: min/st, sek/st sedan 0167, st/h) växlas per rad i `BeredningView` (delade `ui/SegmentedToggle`, samma kontroll som operationsdialogen, `PATCH /articles/:id/routing/:opId { timeUnit }` utan konvertering; st/h avstängd vid stycktid 0, dold på legorader). Lagringen är alltid minuter; omräkningen går genom `runTimeInUnit`/`runTimeToMinutes` i `packages/shared/src/units.ts` (spegel `apps/web/lib/units.ts`, där även enhetsetiketterna bor) — sekunder visas med 2 decimaler, så ett inskrivet sekundvärde läses tillbaka oförändrat.
 
 ## Varugrupp och artikelkod (migration 0155/0156)
 
