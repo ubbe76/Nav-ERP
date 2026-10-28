@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.6.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.6.1-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -641,8 +641,11 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   och löneuppgifter, schema och ATF-saldo), **scheman & kalendrar**
   (dagsscheman med raster/pauser, veckoscheman, helgdagar med förifyllda
   svenska helgdagar; standardschema per anställd med kalenderöverstyrning
-  per vecka eller enskild dag), **ATF** (arbetstidsförkortning med
-  intjäning i minuter/vecka, tidbank eller veckouttag per anställd),
+  per vecka eller enskild dag och valfri **utjämning av ATF och
+  inarbetning** i veckoschemat — veckans sista arbetsdag blir kortare och
+  förlängs i veckor med helgdag eller sjuk-/VAB-dagar), **ATF**
+  (arbetstidsförkortning med intjäning i minuter/vecka, tidbank eller
+  veckouttag per anställd),
   **produktionsgrupper** som kopplar personal och resurser samt, under
   **Personal & lön**, **löneunderlaget**: frånvarohantering
   (frånvarokoder mappade mot lönearter, registrering per anställd/dag),
