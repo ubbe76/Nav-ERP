@@ -24,6 +24,7 @@ export function SettingsForm({
 }) {
   const [allowMultipleStamps, setAllowMultipleStamps] = useState(settings.allowMultipleStamps);
   const [showRevisionsOnDocuments, setShowRevisionsOnDocuments] = useState(settings.showRevisionsOnDocuments);
+  const [scheduleBalancing, setScheduleBalancing] = useState(settings.scheduleBalancing);
   const [showOrderRevisionOnDocuments, setShowOrderRevisionOnDocuments] = useState(
     settings.showOrderRevisionOnDocuments
   );
@@ -80,6 +81,11 @@ export function SettingsForm({
   async function toggleShowRevisions() {
     const updated = await save({ showRevisionsOnDocuments: !showRevisionsOnDocuments });
     if (updated) setShowRevisionsOnDocuments(updated.showRevisionsOnDocuments);
+  }
+
+  async function toggleScheduleBalancing() {
+    const updated = await save({ scheduleBalancing: !scheduleBalancing });
+    if (updated) setScheduleBalancing(updated.scheduleBalancing);
   }
 
   async function toggleShowOrderRevision() {
@@ -316,6 +322,28 @@ export function SettingsForm({
           />
           {atfSaved && <span className={styles.saved}>Sparat</span>}
         </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Tillåt ATF-uttag via schemat</div>
+          <div className={styles.description}>
+            På: veckoscheman kan få ordinarie arbetstid och ATF per vecka. ATF och inarbetning räknas per
+            arbetsdag, och veckans sista arbetsdag blir kortare — är den röd blir dagen före kortare. Av:
+            veckoscheman följer bara sina dagsscheman.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={scheduleBalancing}
+          aria-label="Tillåt ATF-uttag via schemat"
+          className={styles.switch}
+          data-on={scheduleBalancing}
+          disabled={pending}
+          onClick={toggleScheduleBalancing}
+        >
+          <span className={styles.knob} aria-hidden="true" />
+        </button>
       </div>
       <div className={styles.row}>
         <div className={styles.texts}>

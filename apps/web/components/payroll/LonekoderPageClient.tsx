@@ -105,11 +105,14 @@ export function LonekoderPageClient({
   absenceTypes,
   obRules,
   deviationReasons,
+  scheduleBalancing,
   initialTab,
 }: {
   absenceTypes: AbsenceType[];
   obRules: ObRule[];
   deviationReasons: AttendanceDeviationReason[];
+  // Shows the "Tjänar in ATF" setting on absence codes.
+  scheduleBalancing: boolean;
   // ?flik=avvikelseorsaker — the settings panel links straight to the register.
   initialTab?: Tab;
 }) {
@@ -131,7 +134,7 @@ export function LonekoderPageClient({
         ))}
       </div>
 
-      {activeTab === "Frånvarokoder" && <AbsenceTypesTab absenceTypes={absenceTypes} />}
+      {activeTab === "Frånvarokoder" && <AbsenceTypesTab absenceTypes={absenceTypes} scheduleBalancing={scheduleBalancing} />}
       {activeTab === "OB-tillägg" && <ObRulesTab obRules={obRules} />}
       {activeTab === "Avvikelseorsaker" && <DeviationReasonsTab reasons={deviationReasons} />}
     </>
@@ -140,7 +143,13 @@ export function LonekoderPageClient({
 
 // --- Frånvarokoder ---
 
-function AbsenceTypesTab({ absenceTypes }: { absenceTypes: AbsenceType[] }) {
+function AbsenceTypesTab({
+  absenceTypes,
+  scheduleBalancing,
+}: {
+  absenceTypes: AbsenceType[];
+  scheduleBalancing: boolean;
+}) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<AbsenceType | null>(null);
@@ -189,6 +198,7 @@ function AbsenceTypesTab({ absenceTypes }: { absenceTypes: AbsenceType[] }) {
           { key: "code", label: "Kod", width: "110px" },
           { key: "name", label: "Namn", width: "1fr" },
           { key: "paxmlCode", label: "PAXml-kod", width: "140px" },
+          ...(scheduleBalancing ? [{ key: "earnsAtf", label: "Tjänar in ATF", width: "130px" }] : []),
           { key: "active", label: "Aktiv", width: "110px" },
         ]}
         rows={absenceTypes}
@@ -209,6 +219,8 @@ function AbsenceTypesTab({ absenceTypes }: { absenceTypes: AbsenceType[] }) {
               );
             case "paxmlCode":
               return <span className="num">{type.paxmlCode}</span>;
+            case "earnsAtf":
+              return type.earnsAtf ? "Ja" : "Nej";
             case "active":
               return type.active ? (
                 <StatusPill status="running" label="Aktiv" compact />
@@ -223,6 +235,7 @@ function AbsenceTypesTab({ absenceTypes }: { absenceTypes: AbsenceType[] }) {
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Ny frånvarokod">
         <AbsenceTypeForm
+          scheduleBalancing={scheduleBalancing}
           onDone={() => {
             setCreateOpen(false);
             router.refresh();
@@ -238,6 +251,7 @@ function AbsenceTypesTab({ absenceTypes }: { absenceTypes: AbsenceType[] }) {
         {editing && (
           <AbsenceTypeForm
             absenceType={editing}
+            scheduleBalancing={scheduleBalancing}
             onDone={() => {
               setEditing(null);
               router.refresh();
@@ -249,11 +263,20 @@ function AbsenceTypesTab({ absenceTypes }: { absenceTypes: AbsenceType[] }) {
   );
 }
 
-function AbsenceTypeForm({ absenceType, onDone }: { absenceType?: AbsenceType; onDone: () => void }) {
+function AbsenceTypeForm({
+  absenceType,
+  scheduleBalancing,
+  onDone,
+}: {
+  absenceType?: AbsenceType;
+  scheduleBalancing: boolean;
+  onDone: () => void;
+}) {
   const [code, setCode] = useState(absenceType?.code ?? "");
   const [name, setName] = useState(absenceType?.name ?? "");
   const [paxmlCode, setPaxmlCode] = useState(absenceType?.paxmlCode ?? "");
   const [active, setActive] = useState(absenceType?.active ?? true);
+  const [earnsAtf, setEarnsAtf] = useState(absenceType?.earnsAtf ?? true);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -262,7 +285,7 @@ function AbsenceTypeForm({ absenceType, onDone }: { absenceType?: AbsenceType; o
     setError(null);
     setPending(true);
     try {
-      const payload = { code, name, paxmlCode, active };
+      const payload = { code, name, paxmlCode, active, ...(scheduleBalancing ? { earnsAtf } : {}) };
       if (absenceType) {
         await apiFetch(`/api/v1/absence-types/${absenceType.id}`, {
           method: "PATCH",
@@ -306,6 +329,16 @@ function AbsenceTypeForm({ absenceType, onDone }: { absenceType?: AbsenceType; o
           onChange={(e) => setPaxmlCode(e.target.value)}
         />
       </Field>
+
+      {scheduleBalancing && (
+        <Field label="Tjänar in ATF" htmlFor="absenceEarnsAtf">
+          <Toggle id="absenceEarnsAtf" checked={earnsAtf} onChange={(e) => setEarnsAtf(e.target.checked)} />
+          <FormHint>
+            Av: en arbetsdag med den här frånvaron tjänar inte in sin ATF-andel, och veckans sista arbetsdag blir så mycket
+            längre (t.ex. sjukdom, VAB).
+          </FormHint>
+        </Field>
+      )}
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

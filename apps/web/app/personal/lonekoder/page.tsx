@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { AppShell } from "../../../components/AppShell";
 import { LonekoderPageClient } from "../../../components/payroll/LonekoderPageClient";
 import { getCurrentUser, apiGet } from "../../../lib/api";
-import type { AbsenceType, AttendanceDeviationReason, ObRule } from "../../../lib/types";
+import type { AbsenceType, AttendanceDeviationReason, ObRule, SystemSettings } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
 
@@ -22,10 +22,11 @@ export default async function LonekoderPage(props: { searchParams: Promise<{ fli
     );
   }
 
-  const [absenceTypes, obRules, deviationReasons] = await Promise.all([
+  const [absenceTypes, obRules, deviationReasons, settings] = await Promise.all([
     apiGet<AbsenceType[]>("/api/v1/absence-types?includeInactive=true", cookieHeader),
     apiGet<ObRule[]>("/api/v1/ob-rules?includeInactive=true", cookieHeader),
     apiGet<AttendanceDeviationReason[]>("/api/v1/attendance-deviation-reasons?includeInactive=true", cookieHeader),
+    apiGet<SystemSettings>("/api/v1/settings", cookieHeader),
   ]);
 
   return (
@@ -42,6 +43,7 @@ export default async function LonekoderPage(props: { searchParams: Promise<{ fli
         absenceTypes={absenceTypes}
         obRules={obRules}
         deviationReasons={deviationReasons}
+        scheduleBalancing={settings.scheduleBalancing}
         initialTab={flik === "avvikelseorsaker" ? "Avvikelseorsaker" : undefined}
       />
     </AppShell>

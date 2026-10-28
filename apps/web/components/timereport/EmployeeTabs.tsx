@@ -664,7 +664,7 @@ function SchemaTab({
               </span>
               <span className={styles.calendarSchedule}>
                 {day.daySchedule
-                  ? `${day.daySchedule.code} · ${day.daySchedule.name} (${day.daySchedule.startTime}–${day.daySchedule.endTime}, ${formatHours(day.daySchedule.netMinutes)})`
+                  ? `${day.daySchedule.code} · ${day.daySchedule.name} (${day.daySchedule.startTime}–${day.daySchedule.endTime}, ${formatHours(day.daySchedule.netMinutes)})${balanceNote(day.balance)}`
                   : "Ledig"}
               </span>
               <FormHint className={styles.calendarSource}>{sourceLabel(day)}</FormHint>
@@ -676,6 +676,17 @@ function SchemaTab({
   );
 }
 
+
+// Short note for the last workday of a balanced week.
+function balanceNote(balance: ResolvedCalendarDay["balance"]): string {
+  if (!balance) return "";
+  const parts: string[] = [];
+  if (balance.workdays < balance.normalWorkdays) parts.push(`kort vecka (${balance.workdays} arbetsdagar)`);
+  if (balance.lostAtfMinutes > 0) {
+    parts.push(`ATF −${String(Math.round(balance.lostAtfMinutes * 10) / 10).replace(".", ",")} min (frånvaro)`);
+  }
+  return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+}
 
 // ATF (arbetstidsförkortning): rule settings, derived balance and the
 // withdrawal/adjustment ledger. Accrual is computed from the rule — only

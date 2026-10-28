@@ -2403,6 +2403,9 @@ export interface WeekSchedule {
   name: string;
   active: boolean;
   days: WeekScheduleDay[];
+  // Minutes; null = no balancing.
+  ordinaryMinutesPerWeek: number | null;
+  atfMinutesPerWeek: number;
   createdAt: string;
 }
 
@@ -2465,8 +2468,18 @@ export interface ResolvedCalendarDay {
     startTime: string;
     endTime: string;
     netMinutes: number;
+    // The day schedule's own values (endTime/netMinutes are the computed ones).
+    scheduleEndTime?: string;
+    scheduleNetMinutes?: number;
     breaks: { type: "unpaid" | "paid"; startTime: string; endTime: string }[];
   } | null;
+  // Set on a balanced week's last workday (a sibling of daySchedule).
+  balance?: {
+    workdays: number;
+    normalWorkdays: number;
+    weekAtfMinutes: number;
+    lostAtfMinutes: number;
+  };
 }
 
 export interface ProductionGroup {
@@ -2608,6 +2621,8 @@ export interface SystemSettings {
   // Company-wide ATF accrual in minutes per completed work week (0 = off);
   // individual employees can override it on the personalkort.
   atfMinutesPerWeek: number;
+  // Week schedules may carry ordinary hours + ATF per week (balancing).
+  scheduleBalancing: boolean;
   // Daily overtime grace period in minutes (löneunderlag) — worked time past
   // schedule must exceed this before it counts as overtime.
   payrollOvertimeThresholdMinutes: number;
@@ -3008,6 +3023,7 @@ export interface AbsenceType {
   code: string;
   name: string;
   paxmlCode: string;
+  earnsAtf: boolean;
   active: boolean;
 }
 

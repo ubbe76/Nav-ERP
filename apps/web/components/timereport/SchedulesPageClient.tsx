@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type InputHTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type InputHTMLAttributes } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -16,6 +16,7 @@ import {
   type Holiday,
   type ScheduleBreak,
   type ScheduleBreakType,
+  type SystemSettings,
   type WeekSchedule,
 } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
@@ -110,10 +111,12 @@ export function SchedulesPageClient({
   daySchedules,
   weekSchedules,
   holidays,
+  scheduleBalancing,
 }: {
   daySchedules: DaySchedule[];
   weekSchedules: WeekSchedule[];
   holidays: Holiday[];
+  scheduleBalancing: SystemSettings["scheduleBalancing"];
 }) {
   const canOpenPersonal = useCanOpenPersonal();
   const [activeTab, setActiveTab] = useState<Tab>("Dagsscheman");
@@ -152,7 +155,13 @@ export function SchedulesPageClient({
       </div>
 
       {activeTab === "Dagsscheman" && <DaySchedulesTab daySchedules={daySchedules} />}
-      {activeTab === "Veckoscheman" && <WeekSchedulesTab weekSchedules={weekSchedules} daySchedules={daySchedules} />}
+      {activeTab === "Veckoscheman" && (
+        <WeekSchedulesTab
+          weekSchedules={weekSchedules}
+          daySchedules={daySchedules}
+          scheduleBalancing={scheduleBalancing}
+        />
+      )}
       {activeTab === "Helgdagar" && <HolidaysTab holidays={holidays} daySchedules={daySchedules} />}
     </>
   );
@@ -369,9 +378,11 @@ function DayScheduleForm({ schedule, onDone }: { schedule?: DaySchedule; onDone:
 function WeekSchedulesTab({
   weekSchedules,
   daySchedules,
+  scheduleBalancing,
 }: {
   weekSchedules: WeekSchedule[];
   daySchedules: DaySchedule[];
+  scheduleBalancing: boolean;
 }) {
   const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
@@ -396,6 +407,12 @@ function WeekSchedulesTab({
           { key: "name", label: "Namn", width: "1fr" },
           { key: "days", label: "Dagar", width: "220px" },
           { key: "net", label: "Nettotid/vecka", width: "130px", align: "right" },
+          ...(scheduleBalancing
+            ? [
+                { key: "ordinary", label: "Ordinarie/vecka", width: "130px", align: "right" as const },
+                { key: "atf", label: "ATF/vecka", width: "110px", align: "right" as const },
+              ]
+            : []),
           { key: "active", label: "Status", width: "120px" },
         ]}
         rows={weekSchedules}
@@ -422,6 +439,18 @@ function WeekSchedulesTab({
               const total = schedule.days.reduce((sum, d) => sum + (netByDaySchedule.get(d.dayScheduleId) ?? 0), 0);
               return <span className="num">{formatHours(total)}</span>;
             }
+            case "ordinary":
+              return schedule.ordinaryMinutesPerWeek === null ? (
+                "—"
+              ) : (
+                <span className="num">{formatHours(schedule.ordinaryMinutesPerWeek)}</span>
+              );
+            case "atf":
+              return schedule.ordinaryMinutesPerWeek === null ? (
+                "—"
+              ) : (
+                <span className="num">{schedule.atfMinutesPerWeek} min</span>
+              );
             case "active":
               return schedule.active ? (
                 <StatusPill status="running" label="Aktiv" compact />
@@ -436,6 +465,7 @@ function WeekSchedulesTab({
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nytt veckoschema">
         <WeekScheduleForm
+          scheduleBalancing={scheduleBalancing}
           daySchedules={daySchedules}
           onDone={() => {
             setCreateOpen(false);
@@ -452,6 +482,7 @@ function WeekSchedulesTab({
         {editing && (
           <WeekScheduleForm
             schedule={editing}
+            scheduleBalancing={scheduleBalancing}
             daySchedules={daySchedules}
             onDone={() => {
               setEditing(null);
@@ -467,10 +498,12 @@ function WeekSchedulesTab({
 function WeekScheduleForm({
   schedule,
   daySchedules,
+  scheduleBalancing,
   onDone,
 }: {
   schedule?: WeekSchedule;
   daySchedules: DaySchedule[];
+  scheduleBalancing: boolean;
   onDone: () => void;
 }) {
   const [code, setCode] = useState(schedule?.code ?? "");
@@ -482,18 +515,34 @@ function WeekScheduleForm({
     for (const day of schedule?.days ?? []) ids[day.weekday - 1] = day.dayScheduleId;
     return ids;
   });
+  // Ordinary hours per week as typed (timmar); empty = no balancing.
+  const [ordinaryHours, setOrdinaryHours] = useState(
+    schedule?.ordinaryMinutesPerWeek != null ? String(schedule.ordinaryMinutesPerWeek / 60) : ""
+  );
+  const [atfMinutes, setAtfMinutes] = useState(String(schedule?.atfMinutesPerWeek ?? 0));
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  const ordinaryMinutes = parseOrdinaryMinutes(ordinaryHours);
+  const atfValue = atfMinutes.trim() === "" ? 0 : Math.round(Number(atfMinutes.replace(",", ".")));
+  const days = dayScheduleIds
+    .map((dayScheduleId, index) => ({ weekday: index + 1, dayScheduleId }))
+    .filter((d) => d.dayScheduleId !== "");
+  const preview = useBalancePreview(
+    scheduleBalancing && ordinaryMinutes !== null && Number.isFinite(atfValue) ? ordinaryMinutes : null,
+    atfValue,
+    days
+  );
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setPending(true);
     try {
-      const days = dayScheduleIds
-        .map((dayScheduleId, index) => ({ weekday: index + 1, dayScheduleId }))
-        .filter((d) => d.dayScheduleId !== "");
-      const payload = { code, name, active, days };
+      const balancing = scheduleBalancing
+        ? { ordinaryMinutesPerWeek: ordinaryMinutes, atfMinutesPerWeek: Number.isFinite(atfValue) ? atfValue : 0 }
+        : {};
+      const payload = { code, name, active, days, ...balancing };
       if (schedule) {
         await apiFetch(`/api/v1/week-schedules/${schedule.id}`, { method: "PATCH", body: JSON.stringify(payload) });
       } else {
@@ -542,12 +591,179 @@ function WeekScheduleForm({
         </Field>
       ))}
 
+      {scheduleBalancing && (
+        <>
+          <FormRow>
+            <Field label="Ordinarie arbetstid per vecka (timmar)" htmlFor="weekOrdinary">
+              <Input
+                id="weekOrdinary"
+                type="number"
+                min="0"
+                step="any"
+                size="md"
+                value={ordinaryHours}
+                onChange={(e) => setOrdinaryHours(e.target.value)}
+              />
+            </Field>
+            <Field label="ATF per vecka (minuter)" htmlFor="weekAtf">
+              <Input
+                id="weekAtf"
+                type="number"
+                min="0"
+                step="any"
+                size="md"
+                value={atfMinutes}
+                onChange={(e) => setAtfMinutes(e.target.value)}
+              />
+            </Field>
+          </FormRow>
+          <FormHint>Tomt = ingen utjämning: veckan följer då bara sina dagsscheman.</FormHint>
+          {preview && <BalancePreview state={preview} />}
+        </>
+      )}
+
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>
           {pending ? "Sparar…" : schedule ? "Spara schema" : "Skapa schema"}
         </Button>
       </FormActions>
     </Form>
+  );
+}
+
+// Hours typed in the form -> whole minutes; null = empty or not a number.
+function parseOrdinaryMinutes(raw: string): number | null {
+  const trimmed = raw.trim().replace(",", ".");
+  if (trimmed === "") return null;
+  const hours = Number(trimmed);
+  if (!Number.isFinite(hours)) return null;
+  return Math.round(hours * 60);
+}
+
+interface PreviewRow {
+  weekday: number;
+  dayScheduleId: string;
+  dayScheduleCode: string;
+  holiday: boolean;
+  last: boolean;
+  startTime: string | null;
+  endTime: string | null;
+  netMinutes: number;
+}
+interface PreviewWeek {
+  days: PreviewRow[];
+  netMinutes: number;
+  atfMinutes: number;
+}
+interface BalancePreviewData {
+  normalWorkdays: number;
+  ordinaryMinutesPerDay: number;
+  atfMinutesPerDay: number;
+  fullWeek: PreviewWeek;
+  lastDayHoliday: (PreviewWeek & { holidayWeekday: number }) | null;
+}
+type PreviewState = { data: BalancePreviewData | null; message: string | null; loading: boolean };
+
+// The server is the only place that computes the balanced week; this just
+// asks it (debounced) and drops answers that arrive after a newer request.
+function useBalancePreview(
+  ordinaryMinutes: number | null,
+  atfMinutes: number,
+  days: { weekday: number; dayScheduleId: string }[]
+): PreviewState | null {
+  const [state, setState] = useState<PreviewState>({ data: null, message: null, loading: false });
+  const seq = useRef(0);
+  const key = JSON.stringify([ordinaryMinutes, atfMinutes, days]);
+
+  useEffect(() => {
+    if (ordinaryMinutes === null) {
+      seq.current += 1;
+      return;
+    }
+    const mine = ++seq.current;
+    setState((s) => ({ ...s, loading: true }));
+    const timer = setTimeout(async () => {
+      try {
+        const data = await apiFetch<BalancePreviewData>("/api/v1/week-schedules/preview", {
+          method: "POST",
+          body: JSON.stringify({ days, ordinaryMinutesPerWeek: ordinaryMinutes, atfMinutesPerWeek: atfMinutes }),
+        });
+        if (mine === seq.current) setState({ data, message: null, loading: false });
+      } catch (err) {
+        if (mine === seq.current) {
+          setState({ data: null, message: err instanceof Error ? err.message : "Kunde inte räkna veckan", loading: false });
+        }
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return ordinaryMinutes === null ? null : state;
+}
+
+// "8 h 00 min" — rounded to whole minutes before splitting, so 479.6 is 8 h 00.
+function formatHoursMinutes(minutes: number): string {
+  const whole = Math.round(minutes);
+  return `${Math.floor(whole / 60)} h ${String(whole % 60).padStart(2, "0")} min`;
+}
+
+function formatMinutesSv(value: number): string {
+  return value.toLocaleString("sv-SE", { maximumFractionDigits: 1 });
+}
+
+function BalancePreview({ state }: { state: PreviewState }) {
+  const { data, message } = state;
+  return (
+    <div aria-live="polite" style={{ opacity: state.loading ? 0.6 : 1 }}>
+      {data && (
+        <>
+          <FormHint>
+            {formatHoursMinutes(data.ordinaryMinutesPerDay)} ordinarie och {formatMinutesSv(data.atfMinutesPerDay)} min ATF per
+            arbetsdag. Veckans sista arbetsdag (i fetstil) får det som återstår av veckan.
+          </FormHint>
+          <PreviewTable title="En hel vecka" week={data.fullWeek} />
+          {data.lastDayHoliday && (
+            <PreviewTable
+              title={`Kort vecka (helgdag på ${WEEKDAY_LABELS[data.lastDayHoliday.holidayWeekday - 1]!.toLowerCase()})`}
+              week={data.lastDayHoliday}
+            />
+          )}
+        </>
+      )}
+      {message && <FormHint>{message}</FormHint>}
+    </div>
+  );
+}
+
+function PreviewTable({ title, week }: { title: string; week: PreviewWeek }) {
+  const cell = { padding: "3px 8px", textAlign: "left" as const, whiteSpace: "nowrap" as const };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <strong>{title}</strong>
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+        <table style={{ borderCollapse: "collapse", fontSize: 13, color: "var(--color-text-primary)" }}>
+          <thead>
+            <tr style={{ color: "var(--color-text-secondary)" }}>
+              <th style={cell}>Dag</th>
+              <th style={cell}>Dagsschema</th>
+              <th style={cell}>Slutar</th>
+              <th style={cell}>Tid</th>
+            </tr>
+          </thead>
+          <tbody>
+            {week.days.map((row) => (
+              <tr key={row.weekday} style={{ borderTop: "1px solid var(--color-divider)", fontWeight: row.last ? 700 : 400 }}>
+                <td style={cell}>{WEEKDAY_SHORT[row.weekday - 1]}</td>
+                <td style={cell}>{row.holiday ? "Helgdag" : row.dayScheduleCode}</td>
+                <td className="num" style={cell}>{row.holiday ? "—" : row.endTime}</td>
+                <td className="num" style={cell}>{row.holiday ? "—" : formatHours(row.netMinutes)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
