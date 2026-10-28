@@ -19,6 +19,7 @@ import {
   type SystemSettings,
   type WeekSchedule,
 } from "../../lib/types";
+import { apiErrorMessage } from "../../lib/errorMessages";
 import shellStyles from "../../components/AppShell.module.css";
 import formStyles from "./EmployeeTabs.module.css";
 import styles from "../../app/tillverkning/tidrapporter/page.module.css";
@@ -517,7 +518,8 @@ function WeekScheduleForm({
   });
   // Ordinary hours per week as typed (timmar); empty = no balancing.
   const [ordinaryHours, setOrdinaryHours] = useState(
-    schedule?.ordinaryMinutesPerWeek != null ? String(schedule.ordinaryMinutesPerWeek / 60) : ""
+    // Two decimals is within half a minute, so saving rounds back to the stored minutes.
+    schedule?.ordinaryMinutesPerWeek != null ? String(Math.round((schedule.ordinaryMinutesPerWeek / 60) * 100) / 100) : ""
   );
   const [atfMinutes, setAtfMinutes] = useState(String(schedule?.atfMinutesPerWeek ?? 0));
   const [error, setError] = useState<string | null>(null);
@@ -550,7 +552,7 @@ function WeekScheduleForm({
       }
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte spara veckoschemat");
+      setError(apiErrorMessage(err, "Kunde inte spara veckoschemat"));
       setPending(false);
     }
   }
@@ -691,7 +693,7 @@ function useBalancePreview(
         if (mine === seq.current) setState({ data, message: null, loading: false });
       } catch (err) {
         if (mine === seq.current) {
-          setState({ data: null, message: err instanceof Error ? err.message : "Kunde inte räkna veckan", loading: false });
+          setState({ data: null, message: apiErrorMessage(err, "Kunde inte räkna veckan"), loading: false });
         }
       }
     }, 400);

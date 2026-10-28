@@ -683,7 +683,7 @@ function balanceNote(balance: ResolvedCalendarDay["balance"]): string {
   const parts: string[] = [];
   if (balance.workdays < balance.normalWorkdays) parts.push(`kort vecka (${balance.workdays} arbetsdagar)`);
   if (balance.lostAtfMinutes > 0) {
-    parts.push(`ATF −${String(Math.round(balance.lostAtfMinutes * 10) / 10).replace(".", ",")} min (frånvaro)`);
+    parts.push(`ATF −${balance.lostAtfMinutes} min (frånvaro)`);
   }
   return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
 }

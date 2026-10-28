@@ -24,6 +24,8 @@ Löneblocket i Nav|ERP täcker flödet frånvaro → attestering → låsning �
 
 Frånvarokoder är de typer av frånvaro som kan registreras (t.ex. sjukfrånvaro eller semester) och vilken PAXml-tidkod respektive typ exporteras med. Varje kod har **Kod**, **Namn**, **PAXml-kod** och **Aktiv**. Klicka på en rad för att öppna den för redigering.
 
+När **Tillåt ATF-uttag via schemat** är på (under [System](/hjalp/system)) har koden också **Tjänar in ATF**. Är den av tjänar en arbetsdag med den frånvaron inte in sin ATF-andel, och veckans sista arbetsdag i ett veckoschema med utjämning blir så mycket längre (se [ATF och inarbetning i veckoschemat](/hjalp/personal-tid#atf-och-inarbetning-i-veckoschemat)). Som förval är den av för sjukfrånvaro, vård av barn, föräldraledighet och tjänstledighet och på för övriga koder.
+
 **Förifyll standardkoder** lägger in en uppsättning vanliga svenska frånvarokoder (sjukfrånvaro, semester, vård av barn, föräldraledighet, tjänstledighet, permission, utbildning och kompledighet) med en förslags-PAXml-kod var. Knappen är säker att köra flera gånger — koder vars kod eller namn redan finns hoppas över, och resultatet visas som "X skapade, Y fanns redan".
 
 > PAXml-koden måste finnas i lönesystemets löneartstabell — en felaktig kod ger en ogiltig exportfil.
@@ -48,7 +50,7 @@ Orsaker kan inte raderas, eftersom stämplingar som redan sparats pekar på dem.
 
 Personalkortets flik **Frånvaro** (se [Anställda](#anstallda)) registrerar frånvaro per anställd och datum.
 
-Kortet **Registrera frånvaro** har fälten **Frånvarokod** (en av frånvarokoderna ovan), **Datum**, **Timmar** och en valfri **Anteckning**. Knappen **Hämta ur schema** fyller i Timmar med den schemalagda nettotiden för valt datum — en hel dag frånvaro motsvarar alltså schemats nettotid, inte alltid 8 timmar. Saknas ett schema för dagen visas ett felmeddelande i stället.
+Kortet **Registrera frånvaro** har fälten **Frånvarokod** (en av frånvarokoderna ovan), **Datum**, **Timmar** och en valfri **Anteckning**. Knappen **Hämta ur schema** fyller i Timmar med den schemalagda nettotiden för valt datum — en hel dag frånvaro motsvarar alltså schemats nettotid, inte alltid 8 timmar. På veckans sista arbetsdag i ett veckoschema med utjämning är det den uträknade tiden. Saknas ett schema för dagen visas ett felmeddelande i stället.
 
 Kortet **Registrerad frånvaro** listar registrerade poster med datum, namn och antal timmar; en **Ta bort**-knapp tar bort en post.
 

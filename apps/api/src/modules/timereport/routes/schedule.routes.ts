@@ -165,7 +165,13 @@ export async function scheduleRoutes(app: FastifyInstance, opts: { service: Sche
       if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
         return reply.code(400).send({ error: "Query params 'from' and 'to' must be YYYY-MM-DD dates" });
       }
-      return handle(reply, () => service.resolveEmployeeCalendar(req.params.id, from, to));
+      // Frånvaro is health data (as absentToday in GET /stamp-sessions): only
+      // admin/supervisor get a calendar that reflects absence — balance's
+      // lostAtfMinutes and the lengthened last workday of a balanced week.
+      const role = req.user!.role;
+      return handle(reply, () =>
+        service.resolveEmployeeCalendar(req.params.id, from, to, { includeAbsence: role === "admin" || role === "supervisor" })
+      );
     }
   );
 }

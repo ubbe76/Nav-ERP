@@ -345,8 +345,10 @@ export function createScheduleService(
         breaks: input.breaks ?? existing.breaks,
       };
       validateDayScheduleTimes(candidate.startTime, candidate.endTime, candidate.breaks);
-      // Every balanced week schedule using this day must still add up.
-      for (const week of await repo.listBalancedWeekSchedulesUsingDaySchedule(id)) {
+      // Every balanced week schedule using this day must still add up — while
+      // the setting is on; off, the stored fields are ignored, also here.
+      const balancedWeeks = (await balancingEnabled()) ? await repo.listBalancedWeekSchedulesUsingDaySchedule(id) : [];
+      for (const week of balancedWeeks) {
         const weekSchedule = await repo.findWeekScheduleById(week.id);
         if (!weekSchedule) continue;
         const days = await balancingDays(weekSchedule.days, {
@@ -402,11 +404,12 @@ export function createScheduleService(
       }
       if (input.days) await validateWeekScheduleDays(input.days);
       // The merged result must balance whenever it has ordinary time —
-      // whichever of days/ordinary/ATF this request changes.
+      // whichever of days/ordinary/ATF this request changes. Off, the stored
+      // fields are ignored (and the form hides them), so nothing to check.
       const existing = await repo.findWeekScheduleById(id);
       if (!existing) throw new WeekScheduleNotFoundError(id);
       const ordinary = input.ordinaryMinutesPerWeek !== undefined ? input.ordinaryMinutesPerWeek : existing.ordinaryMinutesPerWeek;
-      if (ordinary !== null) {
+      if (ordinary !== null && (await balancingEnabled())) {
         const days = input.days ?? existing.days.map((d) => ({ weekday: d.weekday, dayScheduleId: d.dayScheduleId }));
         assertBalances(await balancingDays(days), ordinary, input.atfMinutesPerWeek ?? existing.atfMinutesPerWeek);
       }
@@ -584,7 +587,11 @@ export function createScheduleService(
     // löneunderlag, the terminal's deviation check and the personnel card all
     // read — so a balanced week's last workday (utjämning) is computed here
     // and nowhere else.
-    async resolveEmployeeCalendar(employeeId: string, from: string, to: string) {
+    //
+    // Frånvaro is health data: includeAbsence false (the route's choice for
+    // callers who may not see absence) resolves as if no absence existed, so
+    // neither balance.lostAtfMinutes nor a lengthened last workday reveals it.
+    async resolveEmployeeCalendar(employeeId: string, from: string, to: string, opts: { includeAbsence?: boolean } = {}) {
       const employee = await requireEmployee(employeeId);
 
       const fromDate = new Date(`${from}T00:00:00Z`);
@@ -604,7 +611,7 @@ export function createScheduleService(
         repo.listDayOverridesInRange(employeeId, from, to),
         repo.listHolidaysInRange(weekFrom, weekTo),
         repo.listWeekOverrides(employeeId),
-        balancingOn && balancing?.absences
+        balancingOn && balancing?.absences && opts.includeAbsence !== false
           ? balancing.absences.listNonEarningAbsences(employeeId, weekFrom, weekTo)
           : Promise.resolve([]),
       ]);

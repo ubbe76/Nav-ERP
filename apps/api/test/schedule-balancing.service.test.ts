@@ -117,6 +117,14 @@ describe("the system setting", () => {
     expect(friday.balance).toBeUndefined();
   });
 
+  it("off: stored fields are not validated — a day schedule or the days can change freely", async () => {
+    const { week, monThu, days } = await fixtures();
+    balancingOn = false;
+    // On, both would be refused (Friday would get less than nothing).
+    await expect(service.updateDaySchedule(monThu.id, { endTime: "19:00" })).resolves.toMatchObject({ endTime: "19:00" });
+    await expect(service.updateWeekSchedule(week.id, { days: days.slice(0, 4) })).resolves.toMatchObject({ ordinaryMinutesPerWeek: 2400 });
+  });
+
   it("a service built without the balancing dependencies never balances", async () => {
     const { employee } = await fixtures();
     await service.createHoliday({ date: WED, name: "Röd onsdag" });
@@ -235,6 +243,14 @@ describe("resolveEmployeeCalendar with balancing", () => {
     expect((await day(employee.id, FRI)).daySchedule).toMatchObject({ netMinutes: 354, endTime: "13:14" });
     // The next week is untouched.
     expect((await day(employee.id, "2026-11-13")).daySchedule).toMatchObject({ netMinutes: 338, endTime: "12:58" });
+  });
+
+  it("includeAbsence false resolves as if there were no absence (frånvaro is health data)", async () => {
+    const { employee } = await fixtures();
+    await absence(employee.id, WED, 495, false);
+    const [friday] = await service.resolveEmployeeCalendar(employee.id, FRI, FRI, { includeAbsence: false });
+    expect(friday!.daySchedule).toMatchObject({ netMinutes: 338, endTime: "12:58" });
+    expect(friday!.balance).toMatchObject({ lostAtfMinutes: 0 });
   });
 
   it("absence that earns ATF (semester) changes nothing", async () => {
