@@ -8,14 +8,17 @@ import { Button } from "../ui/Button";
 import { FormError } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
+import { formatStockholmDateTime } from "../../lib/date";
 import type { CostCalculation } from "../../lib/types";
 import { CostSpecification } from "./CostSpecification";
 import styles from "./CostCalculationList.module.css";
 
 const TYPE_LABELS: Record<CostCalculation["type"], string> = { pre: "Förkalkyl", post: "Efterkalkyl" };
 
+// No-break space before "kr", like the thousands separators formatMoney
+// already writes, so an amount never wraps inside its cell.
 function money(value: string | number) {
-  return `${formatMoney(value)} kr`;
+  return `${formatMoney(value)}\u00a0kr`;
 }
 
 // Sales price divided by quantity — "—" rather than Infinity/NaN for the
@@ -76,7 +79,7 @@ export function CostCalculationList({
   // Pre-calculations only: an efterkalkyl is the record of what an order
   // actually cost, and the API refuses to delete one (409).
   async function remove(row: CostCalculation) {
-    if (!(await confirmDelete(`Ta bort förkalkylen från ${new Date(row.calculatedAt).toLocaleString("sv-SE")}?`))) return;
+    if (!(await confirmDelete(`Ta bort förkalkylen från ${formatStockholmDateTime(row.calculatedAt)}?`))) return;
     setError(null);
     setDeletingId(row.id);
     try {
@@ -99,16 +102,18 @@ export function CostCalculationList({
 
       <Table<CostCalculation>
         columns={[
-          { key: "type", label: "Typ", width: "110px" },
-          { key: "quantity", label: "Antal", width: "80px", align: "right" },
-          { key: "materialCost", label: "Material", width: "110px", align: "right" },
-          { key: "subcontractCost", label: "Lego", width: "100px", align: "right" },
-          { key: "laborCost", label: "Lön", width: "100px", align: "right" },
-          { key: "selfCost", label: "Självkostnad", width: "130px", align: "right" },
-          { key: "unitPrice", label: "Styckpris", width: "110px", align: "right" },
-          { key: "salesPrice", label: "Försäljningspris", width: "140px", align: "right" },
-          { key: "calculatedAt", label: "Datum", width: "1fr" },
-          { key: "actions", label: "", width: "110px", align: "right" },
+          // Sized to fit beside the sidebar at 1440 px — wider fixed tracks
+          // squeezed Datum onto three lines and pushed Ta bort off the card.
+          { key: "type", label: "Typ", width: "84px" },
+          { key: "quantity", label: "Antal", width: "52px", align: "right" },
+          { key: "materialCost", label: "Material", width: "96px", align: "right" },
+          { key: "subcontractCost", label: "Lego", width: "86px", align: "right" },
+          { key: "laborCost", label: "Lön", width: "92px", align: "right" },
+          { key: "selfCost", label: "Självkostnad", width: "104px", align: "right" },
+          { key: "unitPrice", label: "Styckpris", width: "96px", align: "right" },
+          { key: "salesPrice", label: "Försäljningspris", width: "124px", align: "right" },
+          { key: "calculatedAt", label: "Datum", width: "118px" },
+          { key: "actions", label: "", width: "1fr", align: "right" },
         ]}
         rows={calculations}
         renderCell={(row, key) => {
@@ -131,7 +136,7 @@ export function CostCalculationList({
             case "unitPrice":
               return unitPrice(row);
             case "calculatedAt":
-              return new Date(row.calculatedAt).toLocaleString("sv-SE");
+              return formatStockholmDateTime(row.calculatedAt);
             case "actions":
               return row.type === "pre" ? (
                 <Button

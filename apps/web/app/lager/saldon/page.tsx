@@ -11,6 +11,7 @@ import { getListPageSize } from "../../../lib/listPageSize";
 import type { Paged, StockBalance } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
+import { formatQuantity } from "../../../lib/format";
 
 interface RowWithId extends StockBalance {
   id: string;
@@ -78,7 +79,7 @@ export default async function StockPage(props: { searchParams: Promise<PageSearc
                 </>
               );
             case "quantityOnHand":
-              return Number(row.quantityOnHand);
+              return formatQuantity(row.quantityOnHand);
             // Stock can be tracked without locations — those rows show "—".
             case "warehouseName":
             case "locationName":

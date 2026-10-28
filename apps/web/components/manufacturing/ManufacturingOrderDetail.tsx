@@ -44,7 +44,7 @@ import {
 import { Card } from "../ui/Card";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
 import { configurationLines } from "../../lib/configurationLines";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatQuantity } from "../../lib/format";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
 import { CostCalculationList } from "../costing/CostCalculationList";
 import { CostChain } from "../ui/CostChain";
@@ -470,7 +470,7 @@ export function ManufacturingOrderDetail({
                   }
                   return priceText;
                 }
-                if (key === "setupTime") return Number(row.setupTime);
+                if (key === "setupTime") return formatQuantity(row.setupTime);
                 // Tid/enhet shows the unit the beredning was saved in — see
                 // packages/shared/src/units.ts. Guard: 0 has no meaningful
                 // st/h conversion, so it always renders in minutes.
@@ -487,9 +487,9 @@ export function ManufacturingOrderDetail({
                   <StatusPill status="draft" label="Väntar" compact />
                 );
               case "quantityCompleted":
-                return row.quantityCompleted !== null ? Number(row.quantityCompleted) : "–";
+                return row.quantityCompleted !== null ? formatQuantity(row.quantityCompleted) : "–";
               case "quantityScrapped":
-                return Number(row.quantityScrapped) > 0 ? Number(row.quantityScrapped) : "–";
+                return Number(row.quantityScrapped) > 0 ? formatQuantity(row.quantityScrapped) : "–";
               case "actualTime":
                 return row.actualTime !== null ? Number(row.actualTime) : "–";
               default:
@@ -518,7 +518,7 @@ export function ManufacturingOrderDetail({
                 case "operationSequenceNo":
                   return `${row.operationSequenceNo} — ${row.workCenterName}`;
                 case "hours":
-                  return Number(row.hours);
+                  return formatQuantity(row.hours);
                 case "note":
                   return row.note ?? "–";
                 default:
@@ -549,7 +549,7 @@ export function ManufacturingOrderDetail({
                 case "sequenceNo":
                   return `${row.sequenceNo} — ${row.workCenterName}`;
                 case "quantity":
-                  return Number(row.quantity);
+                  return formatQuantity(row.quantity);
                 case "employeeName":
                   return row.employeeName ?? "–";
                 case "reason":

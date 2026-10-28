@@ -12,6 +12,14 @@ export function formatSignedMoney(value: string | number): string {
   return n < 0 ? formatMoney(n) : `+${formatMoney(n)}`;
 }
 
+// Quantities, hours and minutes as they're written in Swedish: comma decimal,
+// a space between thousands, at most four decimals (numeric(14,4)) and no
+// trailing zeros — "10,4", "1 936", "0,25". A bare Number() in a table cell
+// renders "10.4".
+export function formatQuantity(value: string | number): string {
+  return Number(value).toLocaleString("sv-SE", { maximumFractionDigits: 4 });
+}
+
 // Percentages as they're written in Swedish: comma decimal, a space before
 // the sign. Used by the Rapporter section (precision, statistics, outcome).
 export function formatPercent(value: number, decimals = 1): string {

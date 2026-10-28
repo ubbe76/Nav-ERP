@@ -16,7 +16,7 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { documentRateSourceText, documentSekAmounts, formatRate, SEK } from "../../lib/currency";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatQuantity } from "../../lib/format";
 import { useInvoiceRate } from "../../lib/useExchangeRate";
 import {
   isVatCode,
@@ -256,7 +256,7 @@ export function SupplierInvoiceCard({
               case "articleNumber":
                 return row.articleNumber ? `${row.articleNumber} — ${row.articleName}` : "–";
               case "quantity":
-                return Number(row.quantity);
+                return formatQuantity(row.quantity);
               case "unitPrice":
                 return formatMoney(row.unitPrice);
               case "lineAmount":

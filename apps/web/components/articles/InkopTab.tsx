@@ -11,7 +11,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Toggle } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatQuantity } from "../../lib/format";
 import {
   SUPPLIER_INVOICE_STATUS_PILL,
   type ArticleSupplier,
@@ -175,7 +175,7 @@ export function InkopTab({ articleId }: { articleId: string }) {
             case "date":
               return formatDate(row.date);
             case "quantity":
-              return Number(row.quantity);
+              return formatQuantity(row.quantity);
             case "unitPrice":
               return `${formatMoney(row.unitPrice)} ${row.currency}`;
             case "locationName":
@@ -206,7 +206,7 @@ export function InkopTab({ articleId }: { articleId: string }) {
             case "unitPrice":
               return formatMoney(row.unitPrice);
             case "quantity":
-              return Number(row.quantity);
+              return formatQuantity(row.quantity);
             default:
               return row[key as keyof PriceHistoryEntry] as string;
           }

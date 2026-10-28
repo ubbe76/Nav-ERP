@@ -14,6 +14,7 @@ import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/tillverkning/tidrapporter/page.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { useCanOpenPersonal } from "../PermissionsProvider";
+import { formatQuantity } from "../../lib/format";
 
 export function TimeReportsPageClient({
   reports,
@@ -75,7 +76,7 @@ export function TimeReportsPageClient({
             case "operationSequenceNo":
               return `${row.operationSequenceNo} — ${row.workCenterName}`;
             case "hours":
-              return Number(row.hours);
+              return formatQuantity(row.hours);
             case "source":
               return row.source === "terminal" ? "Stämpling" : "Manuell";
             case "note":

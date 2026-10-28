@@ -12,9 +12,8 @@ export function formatElapsed(session: Pick<StampSession, "startedAt" | "pausedA
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export function formatQuantity(value: number) {
-  return value.toLocaleString("sv-SE", { maximumFractionDigits: 4 });
-}
+// The terminal's quantities use the app-wide formatter.
+export { formatQuantity } from "./format";
 
 // Planned vs. reported on one operation. Kvar is planned − OK only: scrapped
 // units have to be made again, so they don't shrink what remains.

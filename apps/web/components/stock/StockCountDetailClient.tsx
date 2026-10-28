@@ -21,6 +21,7 @@ import {
   type StockCountPostResult,
   type StockCountRow,
 } from "../../lib/types";
+import { formatQuantity } from "../../lib/format";
 
 const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
 
@@ -225,7 +226,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
             case "unit":
               return row.unit ?? "—";
             case "snapshotQuantity":
-              return Number(row.snapshotQuantity);
+              return formatQuantity(row.snapshotQuantity);
             case "countedQuantity":
               return open ? (
                 <Input

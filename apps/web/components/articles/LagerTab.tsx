@@ -11,6 +11,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { Article, StockBalance } from "../../lib/types";
+import { formatQuantity } from "../../lib/format";
 
 interface RowWithId extends StockBalance {
   id: string;
@@ -156,7 +157,7 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
           ]}
           rows={rows}
           renderCell={(row, key) => {
-            if (key === "quantityOnHand") return Number(row.quantityOnHand);
+            if (key === "quantityOnHand") return formatQuantity(row.quantityOnHand);
             // Stock can be tracked without locations — those rows show "—".
             if (key === "warehouseName" || key === "locationName") return row[key as keyof RowWithId] ?? "—";
             return row[key as keyof RowWithId];
