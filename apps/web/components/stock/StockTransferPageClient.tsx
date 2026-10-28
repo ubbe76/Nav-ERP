@@ -10,6 +10,7 @@ import { apiFetch } from "../../lib/api";
 import type { StockBalance, StockLocation, StockTransferResult } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import { FormError } from "../ui/Form";
+import { formatQuantity } from "../../lib/format";
 
 interface RowWithId extends StockBalance {
   id: string;
@@ -182,7 +183,7 @@ export function StockTransferPageClient({
             renderCell={(row, key) => {
               switch (key) {
                 case "quantityOnHand":
-                  return Number(row.quantityOnHand);
+                  return formatQuantity(row.quantityOnHand);
                 case "id":
                   return (
                     <Input

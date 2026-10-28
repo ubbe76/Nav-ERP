@@ -848,6 +848,13 @@ export function formatStockholmDateTime(date: Date): string {
   return STOCKHOLM_DATE_TIME.format(date);
 }
 
+// Times on the work card: comma decimal and no trailing zeros — "10 min",
+// "6 min", "8,5714 min", "7 st/h" (the manual's own examples), never
+// "6,0000 min". Same WinAnsi minus handling as formatNumber.
+function formatTime(value: number, maxDecimals: number): string {
+  return value.toLocaleString("sv-SE", { maximumFractionDigits: maxDecimals }).replace("−", "-");
+}
+
 function formatQuantity(raw: string): string {
   const n = Number(raw);
   return Number.isInteger(n) ? n.toLocaleString("sv-SE") : formatNumber(n);
@@ -2024,7 +2031,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         });
         // Operation times are MINUTES throughout (the beredning input unit;
         // costing divides by 60) — the old "h" suffix here was wrong.
-        doc.text(`${formatNumber(Number(op.setupTime))} min`, left + MO_OP_COLS.setup.x, y, {
+        doc.text(`${formatTime(Number(op.setupTime), 2)} min`, left + MO_OP_COLS.setup.x, y, {
           width: MO_OP_COLS.setup.w,
           align: "right",
         });
@@ -2034,13 +2041,13 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         // minutes regardless of the operation's chosen unit.
         const perUnitText =
           op.timeUnit === "units_per_hour" && runTimePerUnit > 0
-            ? `${formatNumber(minutesPerUnitToUnitsPerHour(runTimePerUnit), 2)} st/h`
-            : `${formatNumber(runTimePerUnit, 4)} min`;
+            ? `${formatTime(minutesPerUnitToUnitsPerHour(runTimePerUnit), 2)} st/h`
+            : `${formatTime(runTimePerUnit, 4)} min`;
         doc.text(perUnitText, left + MO_OP_COLS.perUnit.x, y, {
           width: MO_OP_COLS.perUnit.w,
           align: "right",
         });
-        doc.text(`${formatNumber(op.estimatedTime)} min`, left + MO_OP_COLS.estimated.x, y, {
+        doc.text(`${formatTime(op.estimatedTime, 2)} min`, left + MO_OP_COLS.estimated.x, y, {
           width: MO_OP_COLS.estimated.w,
           align: "right",
         });

@@ -119,13 +119,24 @@ describe("arbetskortet — operationens tidsenhet (min/st vs st/h)", () => {
         order([{ sequenceNo: 10, runTimePerUnit: "8.5714", timeUnit: "units_per_hour" }])
       )
     );
-    expect(text).toContain("7,00 st/h");
+    expect(text).toContain("7 st/h");
+    expect(text).not.toContain("7,00 st/h");
     expect(text).not.toContain("8,5714 min");
   });
 
   it("prints Stycktid in minutes for a default (minutes_per_unit) operation", async () => {
     const text = pdfText(await pdf.renderManufacturingOrder(order([{ sequenceNo: 10 }])));
-    expect(text).toContain("2,0000 min");
+    expect(text).toContain("2 min");
+  });
+
+  it("prints the times without trailing zeros but keeps real decimals", async () => {
+    // Ställtid 10, Beräknat 20 (the fixture) and Stycktid 8,5714 — the
+    // screenshot round of 2026-10-28 caught "6,0000 min" on a real card.
+    const text = pdfText(await pdf.renderManufacturingOrder(order([{ sequenceNo: 10, runTimePerUnit: "8.5714" }])));
+    expect(text).toContain("10 min");
+    expect(text).toContain("20 min");
+    expect(text).toContain("8,5714 min");
+    expect(text).not.toMatch(/\d,0+ min/);
   });
 });
 
