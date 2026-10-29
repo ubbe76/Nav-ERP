@@ -115,6 +115,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
 - [ ] **Välj vad Översikten visar** → [#17](https://github.com/ubbe76/Nav-ERP/issues/17)
+- [ ] **Leveransprecision:** inställbar marginal i antal dagar för vad som räknas som fel. I dag är varje leverans efter bekräftat datum sen (`daysLate > 0` i `delivery-precision-calc.ts`) och en för tidig leverans räknas som i tid — t.ex. "sen först efter N dagar" och eventuellt "för tidig mer än M dagar före", gärna olika för kund- och leverantörssidan.
 - [ ] **Huvudboken:** kontoväljaren utesluter inaktiva konton med historik ("inkl. inaktiva"-val); IB/UB döljs när intervallet saknar rader (IB = UB ≠ 0 vore informativt); sorteringen ordnar över serier på nummer före serie (tie-breaken otestad).
 - [ ] **Prestanda vid tillväxt:** `openAmountSql` evalueras två gånger i SELECT + WHERE (fullscan); verifikatens `seriesId` och `inquiry_rows.routing_operation_id` saknar index; Översikten driver behovsberäkningen (60 s-cache) och `orderPlanSummaries`; bankfilernas namnmatchning är O(kunder × poster).
 
