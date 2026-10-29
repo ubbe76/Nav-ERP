@@ -49,6 +49,10 @@ const MESSAGES: Record<string, MessageEntry> = {
 
   // payroll / timereport
   "unfinished-attendance": "Medarbetaren har en öppen närvarostämpling — åtgärda i detaljvyn först.",
+  "employee-erasure-blocked":
+    "Den anställde kan inte raderas eller anonymiseras än — markera som inaktiv, stäng öppna stämplingar och lås löneperioderna först.",
+  "employee-has-history": "Den anställde har tid eller lön i systemet och kan bara anonymiseras, inte raderas.",
+  "employee-anonymized": "Den anställde är anonymiserad och kan inte ändras.",
   "already-attested": "Medarbetaren är redan attesterad.",
   "attestation-not-found": "Ingen attestering hittades.",
   "article-not-found": "Artikeln hittades inte.",

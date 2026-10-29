@@ -34,6 +34,15 @@ Behörigheterna för Personal & lön: `permissions.md`. TO-rapporteringen som st
 - `absentToday` i `GET /stamp-sessions` bara för admin/arbetsledare (frånvaro = hälsodata).
 - **Dagarna är Stockholmsdagar** (`localDateOf`); `docker-compose.yml` sätter `TZ: Europe/Stockholm` eftersom lönemotorn (`clockToMs`/`dayBounds`) gör om schemaklockslag med serverns lokala tid.
 
+## Radera eller anonymisera en anställd (GDPR, #2, migration 0170)
+
+Spec `private/superpowers/specs/2026-10-29-radera-anonymisera-anstalld-design.md`.
+
+- **Regeln** är rena `timereport/service/employee-erasure-plan.ts` (`erasurePlan`): ingen historik ⇒ `delete`, historik ⇒ `anonymize`, `anonymized_at` satt ⇒ `anonymized`; spärrar `active`, `open-session`, `open-period` (månader med historik vars löneperiod inte är låst). **Historik** = rad i `time_reports`, `stamp_sessions`, `attendance_sessions`, `absences`, `atf_transactions`, `overtime_dispositions`, `payroll_attestations`, eller med i en låst periods `summary` — SQL:en bor i lövet `timereport/repository/employee-erasure.ts` (sessionernas månader är Stockholmsdagar för både start och stopp).
+- **Skrivningen** (`repo.eraseEmployee`) låser den anställdes rad `FOR UPDATE`, läser fakta igen och låter servicens `decide` välja eller kasta — förhandsvisningen (`GET /employees/:id/erasure`) är bara information. Anonymiseringen: personfälten null, namnet `ANONYMIZED_NAME`, `active = false`, `anonymized_at`; fritexten (närvarons `start_note`/`stop_note`, tidrapporternas, frånvarons och ATF:s `note`) null även i låsta perioder; namnet ersätts i låsta periodernas `summary`; nycklarna `note`/`startNote`/`stopNote` tas bort på alla nivåer i `audit_log.detail` för poster med `detail.employeeId` (`withoutFreeText`). **Anställningsnumret behålls** (användarbeslut — avstämning mot lönesystemet). Händelseloggen: `employee` / `deleted`|`anonymized` med `employeeNumber`, aldrig namnet.
+- **Frysning i databasen:** triggern `nav_employee_anonymized_guard` vägrar UPDATE/DELETE av en anonymiserad anställd och INSERT i tid-, närvaro-, stämplings-, frånvaro-, ATF-, övertids-, schemaöverstyrnings- och stationstabellerna för en (SQLSTATE **NV002** → 409 `employee-anonymized` i den globala felhanteraren, `isEmployeeAnonymizedViolation`). Anonymiseringen uppdaterar `employees` **först** och sedan bara UPDATE:ar på historiken, som triggrarna släpper. `updateEmployee` kollar själv först (snyggare fel). En ny tabell med `employee_id` som tar nya rader ska få samma trigger.
+- **Bara admin** (`PERSONAL` + `requireRole("admin")`) på `GET …/erasure`, `DELETE /employees/:id`, `POST …/anonymize`. Webben: `EmployeeErasureSection` på Allmänt (bara admin), anonymiserad ⇒ `EmployeeTabs` visar bara en banner. Tester: `employee-erasure.route.test.ts`.
+
 ## Avvikelser vid närvarostämpling (migration 0136)
 
 Spec `private/superpowers/specs/2026-10-22-narvaroavvikelser-design.md`.

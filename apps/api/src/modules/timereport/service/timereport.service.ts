@@ -24,6 +24,7 @@ import {
 // Leaf file in the payroll module — no import cycle (see period-lock.ts).
 import { PayrollPeriodLockedError, type PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
+import { erasurePlan, type ErasureBlocker } from "./employee-erasure-plan.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import {
   AtfTransactionMismatchError,
@@ -40,6 +41,34 @@ export class EmployeeNotFoundError extends Error {
   constructor(id: string) {
     super(`Employee ${id} not found`);
     this.name = "EmployeeNotFoundError";
+  }
+}
+
+// GDPR (#2): something still in play blocks Radera/Anonymisera — the
+// employee is active, has an open session, or has time in an unlocked
+// payroll month. 409 employee-erasure-blocked, with the blockers.
+export class EmployeeErasureBlockedError extends Error {
+  constructor(public blockers: ErasureBlocker[]) {
+    super(`Employee cannot be erased yet: ${blockers.map((b) => b.code).join(", ")}`);
+    this.name = "EmployeeErasureBlockedError";
+  }
+}
+
+// Radera is only for an employee who never stamped or got paid; one with
+// history is anonymized instead. 409 employee-has-history.
+export class EmployeeHasHistoryError extends Error {
+  constructor(id: string) {
+    super(`Employee ${id} has time or payroll history and can only be anonymized`);
+    this.name = "EmployeeHasHistoryError";
+  }
+}
+
+// An anonymized employee is frozen. 409 employee-anonymized — the same code
+// the guard triggers (SQLSTATE NV002) map to.
+export class EmployeeAnonymizedError extends Error {
+  constructor(id: string) {
+    super(`Employee ${id} is anonymized and cannot change`);
+    this.name = "EmployeeAnonymizedError";
   }
 }
 
@@ -218,6 +247,28 @@ export function createTimeReportService(
   async function assertActiveReason(reasonId: string) {
     const reason = await repo.findAttendanceDeviationReason(reasonId);
     if (!reason || !reason.active) throw new AttendanceReasonInvalidError(reasonId);
+  }
+
+  // Radera (no history) or Anonymisera (history), decided again inside the
+  // repository's transaction with the employee row locked. The log names the
+  // employee number only — never the name.
+  async function erase(id: string, wanted: "delete" | "anonymize", userId: string) {
+    const result = await repo.eraseEmployee(id, (employee, facts) => {
+      const plan = erasurePlan(employee, facts);
+      if (plan.action === "anonymized") throw new EmployeeAnonymizedError(id);
+      if (wanted === "delete" && plan.action === "anonymize") throw new EmployeeHasHistoryError(id);
+      if (plan.blockers.length > 0) throw new EmployeeErasureBlockedError(plan.blockers);
+      return wanted;
+    });
+    if (!result) throw new EmployeeNotFoundError(id);
+    await audit.log({
+      entityType: "employee",
+      entityId: id,
+      action: result.action === "delete" ? "deleted" : "anonymized",
+      detail: { employeeNumber: result.employee.employeeNumber, auditEntriesScrubbed: result.auditEntriesScrubbed },
+      userId,
+    });
+    return { action: result.action };
   }
 
   async function scheduleOn(employeeId: string, date: string) {
@@ -485,7 +536,25 @@ export function createTimeReportService(
       return doStampOut(sessionId, input, createdBy);
     },
 
+    // GDPR (#2): what Radera/Anonymisera would do for the employee now, and
+    // what blocks it. Null when the employee does not exist.
+    async getEmployeeErasure(id: string) {
+      const employee = await repo.findEmployeeById(id);
+      if (!employee) return null;
+      return erasurePlan(employee, await repo.readErasureFacts(id));
+    },
+
+    async deleteEmployee(id: string, userId: string) {
+      return erase(id, "delete", userId);
+    },
+
+    async anonymizeEmployee(id: string, userId: string) {
+      return erase(id, "anonymize", userId);
+    },
+
     async updateEmployee(id: string, input: UpdateEmployeeInput) {
+      const current = await repo.findEmployeeById(id);
+      if (current?.anonymizedAt) throw new EmployeeAnonymizedError(id);
       if (input.defaultWeekScheduleId != null && !(await repo.weekScheduleExists(input.defaultWeekScheduleId))) {
         throw new WeekScheduleNotFoundError(input.defaultWeekScheduleId);
       }

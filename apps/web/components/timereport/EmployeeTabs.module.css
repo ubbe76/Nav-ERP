@@ -134,3 +134,13 @@
     text-align: right;
   }
 }
+
+/* Personuppgifter (GDPR) — its own card under the Allmänt form. */
+.erasureCard {
+  margin-top: 20px;
+}
+
+.erasureBlockers {
+  margin: 12px 0 16px;
+  padding-left: 20px;
+}

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import {
   attendanceInSchema,
@@ -21,6 +21,9 @@ import {
   AttendanceSessionChangedError,
   AttendanceSessionNotFoundError,
   DuplicateEmployeeNumberError,
+  EmployeeAnonymizedError,
+  EmployeeErasureBlockedError,
+  EmployeeHasHistoryError,
   EmployeeNotFoundError,
   InactiveEmployeeError,
   InvalidAttendanceIntervalError,
@@ -101,7 +104,55 @@ export async function timeReportRoutes(app: FastifyInstance, opts: { service: Ti
         // missing resource at the path.
         if (err instanceof WorkCenterNotFoundError) return reply.code(400).send(errorBody(err));
         if (err instanceof DuplicateEmployeeNumberError) return reply.code(409).send(errorBody(err));
+        if (err instanceof EmployeeAnonymizedError) return reply.code(409).send(errorBody(err));
         throw err;
+      }
+    }
+  );
+
+  // Radera eller anonymisera (GDPR, #2) — admin only, on top of Personal:
+  // neither can be undone. The preview tells the card which button to show
+  // and what blocks it.
+  app.get<{ Params: { id: string } }>(
+    "/employees/:id/erasure",
+    { config: { access: PERSONAL }, preHandler: requireRole("admin") },
+    async (req, reply) => {
+      const plan = await service.getEmployeeErasure(req.params.id);
+      if (!plan) return reply.code(404).send({ error: "Employee not found" });
+      return plan;
+    }
+  );
+
+  const erasureError = (err: unknown, reply: FastifyReply) => {
+    if (err instanceof EmployeeNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof EmployeeErasureBlockedError) return reply.code(409).send({ ...errorBody(err), blockers: err.blockers });
+    if (err instanceof EmployeeHasHistoryError || err instanceof EmployeeAnonymizedError) {
+      return reply.code(409).send(errorBody(err));
+    }
+    throw err;
+  };
+
+  app.delete<{ Params: { id: string } }>(
+    "/employees/:id",
+    { config: { access: PERSONAL }, preHandler: requireRole("admin") },
+    async (req, reply) => {
+      try {
+        await service.deleteEmployee(req.params.id, req.user!.id);
+        return reply.code(204).send();
+      } catch (err) {
+        return erasureError(err, reply);
+      }
+    }
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/employees/:id/anonymize",
+    { config: { access: PERSONAL }, preHandler: requireRole("admin") },
+    async (req, reply) => {
+      try {
+        return await service.anonymizeEmployee(req.params.id, req.user!.id);
+      } catch (err) {
+        return erasureError(err, reply);
       }
     }
   );

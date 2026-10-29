@@ -23,6 +23,13 @@ import {
   type ListQuery,
   type UpdateEmployeeInput,
 } from "@navet/shared";
+import {
+  anonymizeEmployeeInTx,
+  deleteEmployeeInTx,
+  lockEmployee,
+  readErasureFacts,
+  type ErasureFacts,
+} from "./employee-erasure.js";
 
 // Columns shared by every time-report listing; `source` marks whether the row
 // was materialized by a terminal stamp-out (a stamp_sessions row points at it)
@@ -68,6 +75,31 @@ export function createTimeReportRepository(db: Db) {
     async createEmployee(input: CreateEmployeeInput) {
       const [row] = await db.insert(employees).values(input).returning();
       return row!;
+    },
+
+    // GDPR (#2): what the personnel card's Radera/Anonymisera may do.
+    async readErasureFacts(id: string) {
+      return readErasureFacts(db, id);
+    },
+
+    // The erasure itself, in one transaction: the employee row locked, the
+    // facts read again under that lock, and `decide` — the service's rule —
+    // choosing the action or throwing when something blocks it. Null when
+    // the employee does not exist.
+    async eraseEmployee(
+      id: string,
+      decide: (employee: typeof employees.$inferSelect, facts: ErasureFacts) => "delete" | "anonymize"
+    ) {
+      return db.transaction(async (tx) => {
+        const employee = await lockEmployee(tx, id);
+        if (!employee) return null;
+        const action = decide(employee, await readErasureFacts(tx, id));
+        if (action === "delete") {
+          await deleteEmployeeInTx(tx, id);
+          return { action, employee, auditEntriesScrubbed: 0 };
+        }
+        return { action, employee, ...(await anonymizeEmployeeInTx(tx, id)) };
+      });
     },
 
     async findEmployeeById(id: string) {

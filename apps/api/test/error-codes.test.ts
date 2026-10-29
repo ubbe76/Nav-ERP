@@ -129,6 +129,9 @@ import {
   StampSessionAlreadyStoppedError,
   StopTimeNotAllowedError,
   AttendanceSessionChangedError,
+  EmployeeAnonymizedError,
+  EmployeeErasureBlockedError,
+  EmployeeHasHistoryError,
 } from "../src/modules/timereport/service/timereport.service.js";
 import {
   AtfTransactionMismatchError,
@@ -453,6 +456,9 @@ import {
 const cases: Array<[Error, string]> = [
   // payroll / timereport
   [new UnfinishedAttendanceError("emp-1"), ERROR_CODES.UNFINISHED_ATTENDANCE],
+  [new EmployeeErasureBlockedError([{ code: "active" }]), ERROR_CODES.EMPLOYEE_ERASURE_BLOCKED],
+  [new EmployeeHasHistoryError("emp-1"), ERROR_CODES.EMPLOYEE_HAS_HISTORY],
+  [new EmployeeAnonymizedError("emp-1"), ERROR_CODES.EMPLOYEE_ANONYMIZED],
   [new AlreadyAttestedError(), ERROR_CODES.ALREADY_ATTESTED],
   [new AttestationNotFoundError("emp-1"), ERROR_CODES.ATTESTATION_NOT_FOUND],
   [new PayrollPeriodLockedError("2026-01-15"), ERROR_CODES.PAYROLL_PERIOD_LOCKED],

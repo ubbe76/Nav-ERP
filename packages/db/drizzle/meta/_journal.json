@@ -1191,6 +1191,13 @@
       "when": 1793274967415,
       "tag": "0169_prishistorik",
       "breakpoints": true
+    },
+    {
+      "idx": 170,
+      "version": "7",
+      "when": 1793283183099,
+      "tag": "0170_anstalld_anonymiserad",
+      "breakpoints": true
     }
   ]
 }

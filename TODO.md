@@ -182,7 +182,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Hög
 
-- [ ] **Radera eller anonymisera en anställd** (GDPR) → [#2](https://github.com/ubbe76/Nav-ERP/issues/2) *(hemsidan)*
 - [ ] **Import av lagersaldon från fil** → [#3](https://github.com/ubbe76/Nav-ERP/issues/3) *(hemsidan)*
 - [ ] **Skanning i lagret** med streckkod och QR-kod → [#4](https://github.com/ubbe76/Nav-ERP/issues/4) *(hemsidan)*
 - [ ] **E-faktura (Peppol), etapp 2** — mottagning → [#5](https://github.com/ubbe76/Nav-ERP/issues/5); utländska mottagare, valuta och automatisk sändning → [#6](https://github.com/ubbe76/Nav-ERP/issues/6). Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
