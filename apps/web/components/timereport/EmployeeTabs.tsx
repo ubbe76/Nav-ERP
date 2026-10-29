@@ -28,6 +28,8 @@ import {
 } from "../../lib/types";
 import { formatHours } from "./SchedulesPageClient";
 import { FranvaroTab } from "./FranvaroTab";
+import { EmployeeErasureSection } from "./EmployeeErasureSection";
+import { formatStockholmDate } from "../../lib/date";
 import styles from "./EmployeeTabs.module.css";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
@@ -68,6 +70,20 @@ export function EmployeeTabs({
 }: EmployeeTabsProps) {
   const [activeTab, setActiveTab] = useState<Tab>("Allmänt");
 
+  // GDPR (#2): an anonymized employee is frozen — nothing on the card can be
+  // edited, and the personal data is gone. The history stays in Attestering,
+  // Löneunderlag and the time reports under the employee number.
+  if (employee.anonymizedAt) {
+    return (
+      <Card>
+        <p>
+          <strong>Anonymiserad {formatStockholmDate(employee.anonymizedAt)}.</strong> Personuppgifterna är borttagna. Tider,
+          frånvaro och låsta löneunderlag finns kvar under anställningsnummer {employee.employeeNumber}.
+        </p>
+      </Card>
+    );
+  }
+
   return (
     <div>
       <div className={styles.tabStrip}>
@@ -84,7 +100,12 @@ export function EmployeeTabs({
         ))}
       </div>
 
-      {activeTab === "Allmänt" && <AllmantTab employee={employee} stations={stations} />}
+      {activeTab === "Allmänt" && (
+        <>
+          <AllmantTab employee={employee} stations={stations} />
+          {userRole === "admin" && <EmployeeErasureSection employeeId={employee.id} employeeName={employee.name} />}
+        </>
+      )}
       {activeTab === "Anställning" && <AnstallningTab employee={employee} />}
       {activeTab === "Schema" && (
         <SchemaTab

@@ -16,6 +16,21 @@ Löneblocket i Nav|ERP täcker flödet frånvaro → attestering → låsning �
 
 > **Övertidsersättning** anger hur den anställdas övertid ersätts som standard: **Utbetalning** (förvalt) eller **Komptid**. Valet styr vilka tidkoder övertiden får i löneunderlaget och PAXml-exporten, och kan frångås för enskilda dagar i Attesteringens dagdetalj — se [Utbetalning eller komptid](#utbetalning-eller-komptid).
 
+### Radera eller anonymisera en anställd
+
+När en anställd har slutat och personuppgifterna inte längre behövs kan en **administratör** ta bort dem i sektionen **Personuppgifter (GDPR)** längst ned på personalkortets flik **Allmänt**. Nav väljer åtgärd utifrån vad som finns om den anställde:
+
+- **Radera anställd** — för en anställd som aldrig har stämplat, haft frånvaro, ATF eller fått lön i Nav. Den anställde tas bort helt. Rapporter på tillverkningsordrar där personen var vald finns kvar utan namn.
+- **Anonymisera anställd** — för en anställd med tid eller lön. Namn, personnummer, kontaktuppgifter, anställningsdatum, lön och alla kommentarer (på närvaro, tidrapporter, frånvaro och ATF, även i händelseloggen) tas bort, och namnet blir **Anonymiserad anställd** — också i låsta löneunderlag. Tiderna, frånvaron och de låsta löneunderlagen finns kvar under **anställningsnumret**, som behålls så att underlagen går att stämma av mot lönesystemet. Numret kan inte användas för en ny anställd. PAXml för en låst period skickas därefter med anställningsnummer men utan personnummer.
+
+Knappen är avstängd, med skälet listat, så länge något fortfarande pågår:
+
+- den anställde är **aktiv** — stäng av **Aktiv** och spara först,
+- den anställde har en **öppen närvaro eller stämpling**,
+- **löneperioden är inte låst** för en månad med den anställdes tid, frånvaro, ATF eller övertidsval — attestera och lås den under [Attestering](#lasa-perioden).
+
+Båda åtgärderna bekräftas och går inte att ångra. De loggas i händelseloggen med anställningsnumret, aldrig namnet. En anonymiserad anställd visas som **Anonymiserad anställd** i listan; personalkortet visar bara datumet och kan inte ändras, och ingen ny tid, frånvaro, ATF eller schemaändring kan registreras på den.
+
 ## Lönekoder
 
 **Personal & lön → Lönekoder** har tre flikar: **Frånvarokoder**, **OB-tillägg** och **Avvikelseorsaker**.

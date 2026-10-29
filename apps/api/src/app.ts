@@ -191,7 +191,7 @@ import { createAlertsService } from "./modules/alerts/service/alerts.service.js"
 import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
 import { createAlertDigestService } from "./modules/alerts/service/alert-digest.service.js";
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
-import { isBookkeepingLockViolation } from "./modules/system/service/db-errors.js";
+import { isBookkeepingLockViolation, isEmployeeAnonymizedViolation } from "./modules/system/service/db-errors.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
 import { createQualityService } from "./modules/quality/service/quality.service.js";
 import { qualityRoutes } from "./modules/quality/routes/quality.routes.js";
@@ -259,6 +259,13 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
       return reply.code(409).send({
         error: "Bokförd räkenskapsinformation kan inte ändras eller raderas",
         code: "bookkeeping-record-locked",
+      });
+    }
+    // GDPR (#2): the anonymized-employee guard (migration 0170).
+    if (isEmployeeAnonymizedViolation(err)) {
+      return reply.code(409).send({
+        error: "The employee is anonymized and cannot change",
+        code: "employee-anonymized",
       });
     }
     app.log.error(err);

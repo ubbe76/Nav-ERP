@@ -157,6 +157,13 @@ export const employees = pgTable("employees", {
   atfMode: atfModeEnum("atf_mode").notNull().default("bank"),
   atfMinutesPerWeek: integer("atf_minutes_per_week"),
   atfStartDate: date("atf_start_date"),
+  // GDPR (#2, migration 0170): when the personal data was removed. The row
+  // stays — time, absence and frozen payroll bases still point at it — but
+  // name is "Anonymiserad anställd", every personal field is null and the
+  // row can never change again: triggers refuse an UPDATE of an anonymized
+  // employee and any new time, absence, ATF or schedule row for it
+  // (SQLSTATE NV002 → 409 employee-anonymized).
+  anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

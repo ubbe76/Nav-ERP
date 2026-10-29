@@ -20,6 +20,10 @@ export const ERROR_CODES = {
 
   // payroll / timereport
   UNFINISHED_ATTENDANCE: "unfinished-attendance",
+  // GDPR (#2): Radera/Anonymisera a personalkort
+  EMPLOYEE_ERASURE_BLOCKED: "employee-erasure-blocked",
+  EMPLOYEE_HAS_HISTORY: "employee-has-history",
+  EMPLOYEE_ANONYMIZED: "employee-anonymized",
   ALREADY_ATTESTED: "already-attested",
   ATTESTATION_NOT_FOUND: "attestation-not-found",
   PAYROLL_PERIOD_LOCKED: "payroll-period-locked",

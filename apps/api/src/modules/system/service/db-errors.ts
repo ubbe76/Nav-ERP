@@ -63,6 +63,19 @@ export function isBookkeepingLockViolation(err: unknown): boolean {
   );
 }
 
+// GDPR (#2, migration 0170): the guard triggers refuse any change to an
+// anonymized employee and any new time, absence, ATF or schedule row for one
+// with SQLSTATE NV002. The services check first where a user can get there;
+// the global error handler maps a write that slipped past to 409.
+export function isEmployeeAnonymizedViolation(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, cause } = err as { code?: string; cause?: unknown };
+  return (
+    code === "NV002" ||
+    (typeof cause === "object" && cause !== null && (cause as { code?: string }).code === "NV002")
+  );
+}
+
 // Postgres serialization failure (40001) — a repeatable-read transaction
 // locking or changing a row another transaction changed or deleted after
 // its snapshot. Same two-level code/cause check as above.

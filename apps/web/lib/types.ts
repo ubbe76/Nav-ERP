@@ -2324,11 +2324,21 @@ export interface EmployeeDirectoryEntry {
   defaultWorkCenterIds: string[];
 }
 
+// GET /employees/:id/erasure — what Radera/Anonymisera would do now (admin).
+export type EmployeeErasureBlocker = { code: "active" } | { code: "open-session" } | { code: "open-period"; months: string[] };
+export interface EmployeeErasurePlan {
+  action: "delete" | "anonymize" | "anonymized";
+  blockers: EmployeeErasureBlocker[];
+}
+
 export interface Employee {
   id: string;
   employeeNumber: string;
   name: string;
   active: boolean;
+  // GDPR (#2): when the personal data was removed — the row is frozen, the
+  // name is "Anonymiserad anställd" and every personal field is null.
+  anonymizedAt: string | null;
   // Förvalda stationer (work centers preselected in the terminal); not returned by
   // GET /employees or POST /employees, hence optional.
   defaultWorkCenterIds?: string[];
