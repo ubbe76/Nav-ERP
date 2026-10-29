@@ -387,6 +387,20 @@ export function createImportRepository(db: Db) {
     ...createStockBalanceImportRepository(db),
     // Everything the plan builder needs about the numbers that occur in the
     // file. Chunked like the inserts — the file may hold 10 000 numbers.
+    // Streckkod (#4): barcode -> the article number that has it.
+    async articlesByBarcode(codes: string[]): Promise<Map<string, string>> {
+      const map = new Map<string, string>();
+      for (const part of chunk([...new Set(codes)])) {
+        if (part.length === 0) continue;
+        const rows = await db
+          .select({ barcode: articles.barcode, articleNumber: articles.articleNumber })
+          .from(articles)
+          .where(inArray(articles.barcode, part));
+        for (const row of rows) if (row.barcode) map.set(row.barcode, row.articleNumber);
+      }
+      return map;
+    },
+
     async articlesByNumber(numbers: string[]): Promise<Map<string, ExistingArticle>> {
       const map = new Map<string, ExistingArticle>();
       for (const part of chunk([...new Set(numbers)])) {
@@ -403,6 +417,7 @@ export function createImportRepository(db: Db) {
             groupCode: articleGroups.code,
             articleCode: articleCodes.code,
             standardCost: articles.standardCost,
+            barcode: articles.barcode,
             weight: articles.weight,
             surfaceTreatment: articles.surfaceTreatment,
             colour: articles.colour,
@@ -530,6 +545,7 @@ export function createImportRepository(db: Db) {
                 surfaceTreatment: create.surfaceTreatment,
                 colour: create.colour,
                 extraDescription: create.extraDescription ?? null,
+                barcode: create.barcode ?? null,
                 defaultLocationId: plan.fallbackLocationId,
                 active: create.active,
                 // != null: the bom import's own article creates (and older
@@ -588,6 +604,7 @@ export function createImportRepository(db: Db) {
                 : {}),
               ...(update.patch.colour !== undefined ? { colour: update.patch.colour } : {}),
               ...(update.patch.extraDescription !== undefined ? { extraDescription: update.patch.extraDescription } : {}),
+              ...(update.patch.barcode !== undefined ? { barcode: update.patch.barcode } : {}),
               ...(update.patch.active !== undefined ? { active: update.patch.active } : {}),
               ...(update.patch.reorderPoint !== undefined
                 ? { reorderPoint: update.patch.reorderPoint === null ? null : String(update.patch.reorderPoint) }

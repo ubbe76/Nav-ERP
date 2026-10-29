@@ -447,6 +447,11 @@ export const LAGER_SECTIONS: ModuleNavSection[] = [
         title: "Transaktioner",
         description: "Hela lagerloggen — varje in- och utflöde med typ, antal, plats och referens.",
       },
+      {
+        href: "/lager/skanna",
+        title: "Skanna",
+        description: "Skanna en artikel, en lagerplats eller en order och se vad det är — med kamera eller handskanner.",
+      },
     ],
   },
   {

@@ -1,7 +1,6 @@
 import PDFDocument from "pdfkit";
-import QRCode from "qrcode";
 import { minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, VAT_CODES, type ExtraDescriptionDocument } from "@navet/shared";
-import { CODE128_QUIET_ZONE, code128TotalModules, encodeCode128 } from "./code128.js";
+import { drawCode128, drawQrCode } from "./pdf-codes.js";
 import type { SystemService } from "../../system/service/system.service.js";
 
 // One shared A4 layout for all outgoing business documents (förfrågan,
@@ -2209,38 +2208,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.moveTo(x1, y1).lineTo(x2, y2).lineWidth(0.5).strokeColor("#000000").stroke();
     };
 
-    // Code 128 under a value: scaled to the width available (never wider
-    // than maxWidth, modules never thinner than 0.5 pt — below that a
-    // printer cannot hold the bars apart, so a very long text prints no
-    // barcode). Returns whether anything was drawn.
-    const drawBarcode = (text: string, x: number, y: number, maxWidth: number): boolean => {
-      const widths = encodeCode128(text);
-      if (!widths) return false;
-      const modules = code128TotalModules(widths);
-      const moduleWidth = Math.min(1, maxWidth / modules);
-      if (moduleWidth < 0.5) return false;
-      let cursor = x + CODE128_QUIET_ZONE * moduleWidth;
-      widths.forEach((w, i) => {
-        if (i % 2 === 0) doc.rect(cursor, y, w * moduleWidth, BARCODE_HEIGHT).fill("#000000");
-        cursor += w * moduleWidth;
-      });
-      doc.fillColor("#000000");
-      return true;
-    };
-    // QR code (error correction M) in a square of `size` pt including a
-    // 4-module quiet zone on each side. Byte mode carries å/ä/ö, so this
-    // never falls back.
-    const drawQr = (text: string, x: number, y: number, size: number) => {
-      const { modules } = QRCode.create(text, { errorCorrectionLevel: "M" });
-      const cell = size / (modules.size + 8);
-      const origin = 4 * cell;
-      for (let row = 0; row < modules.size; row++) {
-        for (let col = 0; col < modules.size; col++) {
-          if (modules.get(row, col)) doc.rect(x + origin + col * cell, y + origin + row * cell, cell, cell).fill("#000000");
-        }
-      }
-      doc.fillColor("#000000");
-    };
+    // The pallet card's codes — the shared drawing in pdf-codes.ts, at the
+    // card's barcode height. A false from drawBarcode means set B could not
+    // encode the text (or it is too long), and nothing was drawn.
+    const drawBarcode = (text: string, x: number, y: number, maxWidth: number): boolean =>
+      drawCode128(doc, text, x, y, maxWidth, BARCODE_HEIGHT);
+    const drawQr = (text: string, x: number, y: number, size: number) => drawQrCode(doc, text, x, y, size);
 
     // A cell holding a coded value (order number): label, value and the code
     // under (barcode) or beside (QR) it. Returns the cell's content height.

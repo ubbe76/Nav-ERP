@@ -39,6 +39,10 @@ export const CONFIGURE_ROW_WRITE: AccessRule = ["forsaljning", "tillverkning", "
 // one promising the date, so Försäljning alone must reach it; the KO status
 // guard and the manufacturing service's own rules are the double check.
 export const DELIVERY_CHECK: AccessRule = ["forsaljning", "tillverkning"];
+// Etiketter (#4): printing article or lagerplats labels writes nothing, so
+// anyone who may read the registers may print them — not only the menu that
+// edits them (the warehouse staff print article labels).
+export const LABEL_PRINT: AccessRule = ["office"];
 
 // Prices (standard cost, sales price, lego setup/unit prices) are office data.
 // A user without any menu permission — the verkstad profile — reaches a few

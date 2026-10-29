@@ -14,6 +14,35 @@ Varje rad har en **Flytta**-länk som öppnar [lagerflytten](#lagerflytt) med ar
 
 Saldon och transaktioner förs alltid i artikelns **grundenhet** — även när en orderrad är skriven i en alternativ enhet räknas antalet om till grundenheten innan det bokförs (se [Artiklar](/hjalp/artiklar)).
 
+## Skanna
+
+**Lager → Skanna** visar vad en kod är: skanna en artikel, en lagerplats eller en order och se den direkt — en artikel med **saldo per lagerplats** och länk till artikelkortet, en lagerplats med sitt innehåll, en inköps-, kund- eller tillverkningsorder med länk till ordern. Sidan fungerar i mobilen och är också ett enkelt sätt att prova en skanner.
+
+Koden kan läsas på två sätt:
+
+- **Handskanner** — en skanner som skriver som ett tangentbord (USB eller Bluetooth). Ställ markören i skanningsfältet och skanna; skannern skickar koden och Enter.
+- **Kamera** — knappen **Kamera** öppnar mobilens eller datorns kamera. Håll koden framför kameran; den läses automatiskt och dialogen stängs. Webbläsaren frågar första gången om sidan får använda kameran.
+
+Det här känns igen:
+
+- **Artikelnummer** — det som står på pallkortens och artikeletiketternas kod.
+- **Streckkod (EAN)** — tillverkarens kod på förpackningen, när den är ifylld på artikelkortet (se [Artiklar](/hjalp/artiklar#allmant)).
+- **Lagerplatsens etikettkod** — **LP** följt av ett nummer (till exempel **LP0042**), se [Etiketter](#etiketter).
+- **Ordernummer** — inköpsorder, kundorder (även offertnumret) och tillverkningsorder, som på pallkorten.
+
+Koder läses med Code 128, EAN-8, EAN-13, UPC och QR.
+
+## Etiketter
+
+Artiklar och lagerplatser kan få etiketter med en kod att skanna: **Skriv ut etiketter** för de markerade raderna i lagerplatsregistret och i artikelregistret, och **Skriv ut etikett** på artikelkortet. En artikeletikett har artikelnumret, benämningen och artikelnumret som kod (och EAN-koden som text när den finns); en lagerplatsetikett har platsens namn, lagret och platsens **etikettkod**. Koden är en streckkod (Code 128), eller en QR-kod när texten innehåller tecken som en streckkod inte kan bära, till exempel å, ä eller ö.
+
+Välj format i dialogen:
+
+- **A4-ark (70 × 37 mm, 24 per ark)** — vanliga etikettark i en vanlig skrivare. **Börja på etikett** anger var på arket utskriften börjar (1–24, vänster till höger, uppifrån), så att ett halvanvänt ark kan användas igen.
+- **Etikettskrivare (100 × 50 mm)** — en etikett per sida för en etikettskrivare.
+
+**Antal per etikett** skriver ut flera exemplar av varje. Etikettkoden står i lagerplatsregistrets kolumn **Etikettkod**; den byts inte när platsen byter namn, så en uppsatt etikett gäller så länge platsen finns.
+
 ## Transaktioner
 
 **Lager → Transaktioner** (`/lager/transaktioner`) är hela loggen, nyast först. Kolumnerna är **Datum**, **Artikel**, **Lagerplats**, **Typ**, **Mängd** (+/−), **Saldo**, **Källa**, **Vem**, **À-pris**, **Värde** och **Anteckning**. Från artikelkortets Lager-flik öppnar länken **Visa lagerlogg** loggen med artikeln förvald.

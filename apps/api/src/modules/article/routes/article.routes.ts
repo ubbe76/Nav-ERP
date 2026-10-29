@@ -1,3 +1,4 @@
+import { articleLabelsSchema } from "@navet/shared";
 import type { FastifyInstance } from "fastify";
 import { SeriesExhaustedError } from "../../system/service/number-series.js";
 import {
@@ -24,7 +25,7 @@ import { contentDisposition } from "../../system/service/content-disposition.js"
 import { CostCenterInactiveError, CostCenterNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { ConfiguratorModeNotAllowedError } from "../../configurator/service/configurator.errors.js";
-import { canSeePrices, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
+import { canSeePrices, LABEL_PRINT, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
 import { articleExportColumns } from "../service/export-columns.js";
 import type { ArticleService } from "../service/article.service.js";
 import {
@@ -45,6 +46,7 @@ import {
   BomComponentNotFoundError,
   BomCycleError,
   CostingOnlyOperationLinkError,
+  DuplicateArticleBarcodeError,
   DuplicateArticleNumberError,
   DuplicateBomComponentError,
   InvalidFileTypeError,
@@ -83,7 +85,9 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       const article = await service.createArticle(input);
       return reply.code(201).send(article);
     } catch (err) {
-      if (err instanceof DuplicateArticleNumberError) return reply.code(409).send(errorBody(err));
+      if (err instanceof DuplicateArticleNumberError || err instanceof DuplicateArticleBarcodeError) {
+        return reply.code(409).send(errorBody(err));
+      }
       // The article number series kept colliding (or is full).
       if (err instanceof SeriesExhaustedError) return reply.code(409).send(errorBody(err));
       if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
@@ -129,7 +133,9 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       return article;
     } catch (err) {
       if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
-      if (err instanceof DuplicateArticleNumberError) return reply.code(409).send(errorBody(err));
+      if (err instanceof DuplicateArticleNumberError || err instanceof DuplicateArticleBarcodeError) {
+        return reply.code(409).send(errorBody(err));
+      }
       if (err instanceof BaseUnitLockedError) return reply.code(409).send(errorBody(err));
       if (err instanceof InvalidUnitError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
@@ -139,6 +145,21 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
   });
 
   // --- Alternative units (alternativa enheter) ---
+
+  // Etiketter (#4): article labels as a PDF. POST for the id list; prints
+  // and writes nothing, so office may and Endast läsning may.
+  app.post("/articles/labels", { config: { access: LABEL_PRINT, readOnlySafe: true } }, async (req, reply) => {
+    const input = articleLabelsSchema.parse(req.body);
+    try {
+      const pdf = await service.renderArticleLabels(input);
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Content-Disposition", contentDisposition("artikeletiketter.pdf", "inline"));
+      return reply.send(pdf);
+    } catch (err) {
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
 
   // Prishistorik: standardkostnad and försäljningspris, newest first. Office
   // read like the module — prices are kontorsdata.

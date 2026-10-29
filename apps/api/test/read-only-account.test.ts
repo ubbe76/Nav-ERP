@@ -396,6 +396,10 @@ describe("Endast läsning — the allowlist", () => {
         // plugin page or tab is opened with — computed and signed, nothing written.
         "POST /api/v1/plugins/preview",
         "POST /api/v1/plugins/:id/context",
+        // Etiketter (#4): a PDF of article / lagerplats labels — POST only
+        // for the id list, nothing is written.
+        "POST /api/v1/articles/labels",
+        "POST /api/v1/stock/locations/labels",
         // The one route that writes: the account's own preferences.
         "PATCH /api/v1/me/settings",
       ].sort()

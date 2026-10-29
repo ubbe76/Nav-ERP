@@ -131,6 +131,15 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Rostfritt slipat, levereras i delar",
     },
     {
+      field: "barcode",
+      label: "Streckkod (EAN)",
+      required: false,
+      header: "EAN",
+      text: true,
+      description: `Tillverkarens streckkod på förpackningen (EAN/GTIN): 8, 12, 13 eller 14 siffror med rätt kontrollsiffra. Unik — samma kod får inte finnas på en annan artikel. Används när varan skannas. ${UNTOUCHED}`,
+      example: "7350000000016",
+    },
+    {
       field: "active",
       label: "Aktiv",
       required: false,

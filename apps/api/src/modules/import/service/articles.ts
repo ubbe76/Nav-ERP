@@ -1,3 +1,4 @@
+import { isValidGtin, normalizeScanCode } from "@navet/shared";
 // Article import (Monitor G5 CSV): builds an execution plan from mapped
 // rows. The SAME builder runs for preview and commit — commit never trusts
 // the preview round-trip and re-plans from scratch. The customer/supplier
@@ -31,6 +32,8 @@ export const ARTICLE_IMPORT_FIELDS = [
   "colour",
   // Monitor's "Extra benämning" (Artikellista, Extra fält) — multi-line.
   "extraDescription",
+  // Streckkod (EAN/GTIN, #4).
+  "barcode",
   "active",
   // Planning fields — Monitor's "Artikellista, Planering" export. 0 means
   // "none" there and clears the field here; lotSizingRule gates
@@ -99,6 +102,12 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   farg: "colour",
   kulor: "colour",
   extrabenamning: "extraDescription",
+  ean: "barcode",
+  eankod: "barcode",
+  ean13: "barcode",
+  gtin: "barcode",
+  streckkod: "barcode",
+  streckkodean: "barcode",
   aktiv: "active",
   status: "active",
   artikelrevision: "articleRevision",
@@ -142,6 +151,8 @@ export interface ExistingArticle {
   // Optional: only the article import reads it.
   articleCode?: string | null;
   standardCost: string | null;
+  // Optional: only the article import reads it (Streckkod, #4).
+  barcode?: string | null;
   weight: string | null;
   surfaceTreatment: string | null;
   colour: string | null;
@@ -155,6 +166,9 @@ export interface ExistingArticle {
 // createImportRepository, stubbed with Maps in tests.
 export interface ArticleImportDeps {
   articlesByNumber(numbers: string[]): Promise<Map<string, ExistingArticle>>;
+  // Streckkod (#4): barcode -> the article number that already has it. Only
+  // asked when the file carries barcodes.
+  articlesByBarcode(codes: string[]): Promise<Map<string, string>>;
   // Keyed by LOWERCASED code so "ST" in the CSV finds the "st" unit instead
   // of creating a case-variant duplicate.
   unitsByCode(): Promise<Map<string, { id: string; code: string }>>;
@@ -195,6 +209,7 @@ export interface ArticleCreatePlan {
   colour: string | null;
   // Optional: the bom import's article creates carry none.
   extraDescription?: string | null;
+  barcode?: string | null;
   active: boolean;
   reorderPoint: number | null;
   orderQuantity: number | null;
@@ -221,6 +236,7 @@ export interface ArticleUpdatePlan {
     surfaceTreatment?: string | null;
     colour?: string | null;
     extraDescription?: string;
+    barcode?: string;
     active?: boolean;
     reorderPoint?: number | null;
     orderQuantity?: number | null;
@@ -312,6 +328,10 @@ export async function planArticleImport(
 
   const numbers = records.map((r) => r["articleNumber"] ?? "").filter((n) => n !== "");
   const existingByNumber = await deps.articlesByNumber(numbers);
+  const barcodeCells = records.map((r) => normalizeScanCode(r["barcode"] ?? "")).filter((c) => c !== "");
+  const takenBarcodes = barcodeCells.length > 0 ? await deps.articlesByBarcode(barcodeCells) : new Map<string, string>();
+  // Barcode -> the article number that claimed it first in this file.
+  const barcodesInFile = new Map<string, string>();
   const supplierNumbers = records.map((r) => r["primarySupplierNumber"] ?? "").filter((n) => n !== "");
   const suppliersByNumber = supplierNumbers.length > 0 ? await deps.suppliersByNumber(supplierNumbers) : new Map();
 
@@ -489,6 +509,27 @@ export async function planArticleImport(
       }
     }
 
+    // Streckkod (EAN/GTIN): a valid GTIN, unique across the register and the
+    // file. Empty leaves the stored code alone, like the other text fields.
+    const barcodeCell = normalizeScanCode(record["barcode"] ?? "");
+    let barcode: string | null = null;
+    if (barcodeCell !== "") {
+      const rowNumberOf = record["articleNumber"] ?? "";
+      const holder = takenBarcodes.get(barcodeCell);
+      const fileHolder = barcodesInFile.get(barcodeCell);
+      if (!isValidGtin(barcodeCell)) {
+        errors.push(`Ogiltig streckkod "${barcodeCell}" — 8, 12, 13 eller 14 siffror med rätt kontrollsiffra`);
+      } else if (holder !== undefined && holder !== rowNumberOf) {
+        errors.push(`Streckkoden ${barcodeCell} finns redan på artikel ${holder}`);
+      } else if (fileHolder !== undefined && fileHolder !== rowNumberOf) {
+        errors.push(`Streckkoden ${barcodeCell} står också på artikel ${fileHolder} i filen`);
+      } else {
+        barcode = barcodeCell;
+        values["barcode"] = barcodeCell;
+        barcodesInFile.set(barcodeCell, rowNumberOf);
+      }
+    }
+
     const activeCell = record["active"] ?? "";
     let active: boolean | null = null;
     if (activeCell !== "") {
@@ -662,6 +703,7 @@ export async function planArticleImport(
         surfaceTreatment,
         colour,
         ...(extraDescription !== null ? { extraDescription } : {}),
+        ...(barcode !== null ? { barcode } : {}),
         active: active ?? true,
         reorderPoint: planning.reorderPoint ?? null,
         orderQuantity: planning.orderQuantity ?? null,
@@ -699,6 +741,7 @@ export async function planArticleImport(
       }
       if (colour !== null && colour !== existing.colour) patch.colour = colour;
       if (extraDescription !== null) patch.extraDescription = extraDescription;
+      if (barcode !== null && barcode !== existing.barcode) patch.barcode = barcode;
       if (active !== null) patch.active = active;
       if (planning.reorderPoint !== undefined) patch.reorderPoint = planning.reorderPoint;
       if (planning.orderQuantity !== undefined) patch.orderQuantity = planning.orderQuantity;

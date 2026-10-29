@@ -1198,6 +1198,13 @@
       "when": 1793283183099,
       "tag": "0170_anstalld_anonymiserad",
       "breakpoints": true
+    },
+    {
+      "idx": 171,
+      "version": "7",
+      "when": 1793297324768,
+      "tag": "0171_skanning_ean_etikettkod",
+      "breakpoints": true
     }
   ]
 }

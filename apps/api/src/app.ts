@@ -157,6 +157,9 @@ import { createValuationService } from "./modules/stock/service/valuation.servic
 import { createStockCountRepository } from "./modules/stock/repository/stock-count.repository.js";
 import { createStockCountService } from "./modules/stock/service/stock-count.service.js";
 import { stockRoutes } from "./modules/stock/routes/stock.routes.js";
+import { scanRoutes } from "./modules/scan/routes/scan.routes.js";
+import { createScanRepository } from "./modules/scan/repository/scan.repository.js";
+import { createScanService } from "./modules/scan/service/scan.service.js";
 import { createAuditRepository } from "./modules/system/repository/audit.repository.js";
 import { createSystemRepository } from "./modules/system/repository/system.repository.js";
 import { createSystemService } from "./modules/system/service/system.service.js";
@@ -960,6 +963,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
           { read: office, write: ["artiklar", "inkop", "forsaljning"] }
         );
         await registerModule(protectedRoutes, manufacturingRoutes, { service: manufacturingService }, { read: office, write: ["tillverkning"] });
+        // Skanning (#4): read-only "what is this code?" — no writes.
+        await registerModule(protectedRoutes, scanRoutes, { service: createScanService(createScanRepository(database)) }, { read: office, write: ["admin"] });
         await registerModule(protectedRoutes, planningRoutes, { service: planningService }, { read: office, write: ["tillverkning"] });
         // Aviseringar: one read, every office user; the kinds are filtered per
         // user in the service (admin-only Utskick som misslyckades included).

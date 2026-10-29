@@ -1,3 +1,4 @@
+import { locationLabelsSchema } from "@navet/shared";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
   addStockCountRowSchema,
@@ -17,7 +18,7 @@ import {
   valuationQuerySchema,
 } from "@navet/shared";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
-import { canSeeStockCost } from "../../auth/middleware/access-rules.js";
+import { canSeeStockCost, LABEL_PRINT } from "../../auth/middleware/access-rules.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
@@ -71,6 +72,21 @@ export async function stockRoutes(
   app.get("/stock/locations", async (req) =>
     service.listLocations(listStockLocationsQuerySchema.parse(req.query))
   );
+
+  // Etiketter (#4): lagerplats labels as a PDF. POST for the id list;
+  // prints and writes nothing, so office may and Endast läsning may.
+  app.post("/stock/locations/labels", { config: { access: LABEL_PRINT, readOnlySafe: true } }, async (req, reply) => {
+    const input = locationLabelsSchema.parse(req.body);
+    try {
+      const pdf = await service.renderLocationLabels(input);
+      reply.header("Content-Type", "application/pdf");
+      reply.header("Content-Disposition", contentDisposition("lagerplatsetiketter.pdf", "inline"));
+      return reply.send(pdf);
+    } catch (err) {
+      if (err instanceof StockLocationNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
 
   app.patch<{ Params: { id: string } }>("/stock/locations/:id", async (req, reply) => {
     const input = updateStockLocationSchema.parse(req.body);

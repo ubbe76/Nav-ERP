@@ -26,6 +26,7 @@ export interface ArticleExportRow {
   surfaceTreatment: string | null;
   colour: string | null;
   extraDescription: string | null;
+  barcode: string | null;
   active: boolean;
 }
 
@@ -41,4 +42,6 @@ export const articleExportColumns: CsvColumn<ArticleExportRow>[] = [
   { label: "Ytbehandling", value: (r) => r.surfaceTreatment },
   { label: "Färg", value: (r) => r.colour },
   { label: "Extra benämning", value: (r) => r.extraDescription },
+  // Streckkod (#4) — the import reads the heading back as the same field.
+  { label: "EAN", value: (r) => r.barcode },
 ];

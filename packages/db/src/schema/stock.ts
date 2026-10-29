@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
+  integer,
   numeric,
   pgEnum,
   pgTable,
@@ -42,6 +43,11 @@ export const stockLocations = pgTable(
       .references(() => warehouses.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 100 }).notNull(),
     active: boolean("active").notNull().default(true),
+    // Etikettkod (#4): the label and a scan say LP + this number (LP0042) —
+    // short, ASCII only (a name may hold å/ä/ö that Code 128 cannot encode)
+    // and stable when the location is renamed. Existing rows got theirs when
+    // the column was added.
+    labelNumber: integer("label_number").generatedAlwaysAsIdentity().notNull().unique(),
   },
   (table) => [unique().on(table.warehouseId, table.name)]
 );

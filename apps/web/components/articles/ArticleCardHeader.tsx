@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "../ui/Button";
+import { LabelPrintDialog } from "../stock/LabelPrintDialog";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { ArticleOverviewButton } from "./ArticleOverviewButton";
 import { Card } from "../ui/Card";
@@ -18,6 +21,7 @@ import styles from "./ArticleCardHeader.module.css";
 export function ArticleCardHeader({ article, totalOnHand }: { article: Article; totalOnHand: number }) {
   const router = useRouter();
   const variantOf = useVariantOf(article.id);
+  const [labelOpen, setLabelOpen] = useState(false);
 
   return (
     <Card maxWidth="none" className={styles.card}>
@@ -73,9 +77,20 @@ export function ArticleCardHeader({ article, totalOnHand }: { article: Article; 
       </div>
 
       <div className={styles.help}>
+        <Button type="button" size="small" variant="secondary" onClick={() => setLabelOpen(true)}>
+          Skriv ut etikett
+        </Button>
         <ArticleOverviewButton articleId={article.id} articleNumber={article.articleNumber} size="toolbar" />
         <HelpLink chapter="artiklar" anchor="artikelkortet" label="Hjälp om artikelkortet" />
       </div>
+      <LabelPrintDialog
+        open={labelOpen}
+        onClose={() => setLabelOpen(false)}
+        endpoint="/api/v1/articles/labels"
+        idsKey="articleIds"
+        ids={[article.id]}
+        title="Skriv ut artikeletikett"
+      />
     </Card>
   );
 }
