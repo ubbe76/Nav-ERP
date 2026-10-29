@@ -48,6 +48,11 @@ export interface MaterialRowWrite {
   // Materialpåslag lifted up from a "semi" row's sub-calculation, the same
   // way as overheadAmount. 0 on material/lego rows.
   materialMarkupAmount: number;
+  // A supplier price in another currency: the catalog price, its currency
+  // and the rate unitCost was converted at. All three null otherwise.
+  supplierCurrency: string | null;
+  supplierUnitPrice: number | null;
+  exchangeRate: number | null;
 }
 
 export interface OperationRowWrite {
@@ -129,6 +134,7 @@ export function createCostingRepository(db: Db) {
           standardCost: articles.standardCost,
           supplierRowId: articleSuppliers.id,
           supplierPrice: articleSuppliers.price,
+          supplierCurrency: articleSuppliers.currency,
           hasBom: sql<boolean>`exists (select 1 from ${bomComponents} bc where bc.parent_article_id = ${articles.id})`,
           hasRouting: sql<boolean>`exists (select 1 from ${routingOperations} ro where ro.article_id = ${articles.id})`,
         })
@@ -207,6 +213,7 @@ export function createCostingRepository(db: Db) {
           standardCost: articles.standardCost,
           supplierRowId: articleSuppliers.id,
           supplierPrice: articleSuppliers.price,
+          supplierCurrency: articleSuppliers.currency,
         })
         .from(moMaterialConsumptions)
         .innerJoin(articles, eq(articles.id, moMaterialConsumptions.componentArticleId))
@@ -376,6 +383,9 @@ export function createCostingRepository(db: Db) {
               amount: String(r.amount),
               overheadAmount: String(r.overheadAmount),
               materialMarkupAmount: String(r.materialMarkupAmount),
+              supplierCurrency: r.supplierCurrency,
+              supplierUnitPrice: r.supplierUnitPrice === null ? null : String(r.supplierUnitPrice),
+              exchangeRate: r.exchangeRate === null ? null : String(r.exchangeRate),
             }))
           );
         }

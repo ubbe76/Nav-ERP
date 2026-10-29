@@ -16,3 +16,10 @@
 .fallback {
   color: var(--status-stopped-text);
 }
+
+/* A supplier price in another currency: the catalog price and the rate. */
+.foreign {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}

@@ -417,6 +417,8 @@ När en ny version av Nav lägger till en färg saknar redan sparade teman den. 
 
 - **Standardpris** — artikelns **Standardkostnad** på fliken Allmänt. Leverantörspriser påverkar inte kalkylen. Detta är standardvalet.
 - **Aktiv leverantörs pris** — priset hos **huvudleverantören** i artikelns leverantörskatalog på fliken Inköp. Saknar komponenten huvudleverantör, eller saknar huvudleverantören pris, används artikelns standardkostnad i stället och kalkylen visar en varning om vilka rader som föll tillbaka. Saknas båda räknas raden som 0 kr, också med varning.
+  - Är priset i en annan valuta än SEK räknas det om till kronor med **dagens kurs** — samma kurser som på [Valutakurser](/hjalp/ekonomi#valutakurser), från Riksbanken eller inskrivna för hand — med fyra decimaler. Kalkylspecifikationen visar priset i valutan och kursen på raden.
+  - Finns ingen kurs för valutan används standardkostnaden i stället, med en varning som säger vilken valuta som saknar kurs. Priset läses aldrig som kronor.
 - **Verklig kostnad** — vad materialet **faktiskt kostade**: glidande medelpris vid förbrukningstillfället, härlett ur lagertransaktionerna på samma sätt som metoden *Vägt snitt* i [Lagervärdering](/hjalp/lager#lagervardering). Varje uttag värderas till medelpriset just innan det gjordes, och orderns uttag av samma artikel vägs ihop efter antal — en senare inleverans till annat pris ändrar alltså inte vad ett redan gjort uttag kostade.
   - Valet gäller **bara efterkalkylen**. Förkalkylen har inga förbrukningar att prissätta och använder standardpriset, med en varning som säger det.
   - Material som förbrukats innan artikeln fått någon prissatt inleverans har inget medelpris att räkna på. Sådana rader faller tillbaka på standardpriset, med varning.

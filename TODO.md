@@ -22,7 +22,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **Kundorder:** radredigeringen jämför priset mot radens *ursprungliga* basantal (`editInitialBaseQuantityRef` i `SalesOrderDetail.tsx`): antal 10 → 100 → 10 lämnar 100-stegets pris kvar. Spegla inköpssidans `editPricedBaseQuantityRef` och vänta på enhetsfaktorn innan prisfrågan.
 - [ ] **Kreditfaktura:** `createCredit` med explicita rader kopierar inte `revenueAccount`, så krediteringen kan bokas på ett annat intäktskonto än fakturan (t.ex. räntefakturans 8313).
-- [ ] **Kalkyl:** leverantörspriser i utländsk valuta räknas inte om till kronor → [#1](https://github.com/ubbe76/Nav-ERP/issues/1) *(hemsidan)*
 - [ ] **Närvaro:** instämpling av närvaro + arbete är inte atomär och det finns inget unikt index för öppen närvaro — dubbel närvaro är möjlig och ger fel timmar i löneunderlaget.
 - [ ] **Beställningsvara:** radredigeringen skickar alltid à-pris, så serverns 400 för ogiltig sparad konfiguration nås aldrig — evaluate-fel sväljs (`.catch`) och det gamla priset sparas. Visa felet.
 - [ ] **Beställningsvara:** antalsbytets omvärdering jämför inte ny konfigurationsnyckel mot sparad — ett förval som läggs till i mallen senare ger ett pris med tillägg som inte syns i valen.

@@ -1,4 +1,4 @@
-import type { CostingMaterialSource, CostingSupplierPriceTier, CostPriceSource } from "@navet/shared";
+import { SEK, toSekUnitPrice, type CostingMaterialSource, type CostingSupplierPriceTier, type CostPriceSource } from "@navet/shared";
 import { resolveSupplierPrice, type PriceBreak } from "../../purchase/service/supplier-price.js";
 
 // Monitor's påläggskalkyl, as pure arithmetic — no DB, no settings lookup, so
@@ -120,12 +120,33 @@ export interface ArticleCostBasis {
    */
   supplierPriceBreaks?: PriceBreak[];
   /**
+   * The primary supplier's currency (article_suppliers.currency) — the
+   * supplier price and its staffel are in it. Absent or SEK = no conversion.
+   */
+  supplierCurrency?: string | null;
+  /**
+   * SEK per 1 unit of supplierCurrency, looked up by the caller for today
+   * (getRate may call Riksbanken, so this function cannot). Null = no rate
+   * for the currency: the supplier price is then treated as missing rather
+   * than read as kronor. Ignored for SEK.
+   */
+  supplierExchangeRate?: number | null;
+  /**
    * Verklig kostnad: the moving average at the moment the material was
    * actually consumed, derived by the caller (actual-cost.ts) rather than
    * looked up here — this function stays pure and database-free. Null when it
    * could not be derived; absent on every path that does not ask for it.
    */
   actualCost?: number | null;
+}
+
+// A supplier price costed from another currency: the price as the catalog
+// states it and the rate it was converted at. Goes on the saved material row
+// so the specification can show what the kronor figure came from.
+export interface ForeignSupplierPrice {
+  currency: string;
+  unitPrice: number;
+  rate: number;
 }
 
 // The unit cost of one component, per the configured material source. Source
@@ -135,6 +156,12 @@ export interface ArticleCostBasis {
 // `used` is that same information in structured form: it goes on the saved
 // material row, so the specification can mark a row as estimated without
 // re-parsing the warning text.
+//
+// A supplier price in another currency is converted to SEK at
+// supplierExchangeRate (to four decimals, toSekUnitPrice) and reported in
+// `foreign`. Without a rate it falls back exactly like a missing supplier
+// price — reading 10 EUR as 10 kr would understate the cost with no sign of
+// it — and the warning names the currency.
 export function resolveUnitCost(
   basis: ArticleCostBasis | undefined,
   source: CostingMaterialSource,
@@ -143,7 +170,7 @@ export function resolveUnitCost(
   // quantity); "base" — the default — is the grundpris as before. `used`
   // stays "supplier" either way: the row's unitCost records the price.
   tier: { supplierPriceTier: CostingSupplierPriceTier; quantity: number } = { supplierPriceTier: "base", quantity: 1 }
-): { cost: number; used: CostPriceSource; warning: string | null } {
+): { cost: number; used: CostPriceSource; warning: string | null; foreign?: ForeignSupplierPrice } {
   const standardCost = basis?.standardCost ?? null;
   const basePrice = basis?.supplierPrice ?? null;
   const supplierPrice =
@@ -168,11 +195,29 @@ export function resolveUnitCost(
   }
 
   if (source === "supplier") {
-    if (supplierPrice !== null) return { cost: Number(supplierPrice), used: "supplier", warning: null };
-    if (standardCost !== null) {
-      return { cost: Number(standardCost), used: "standard", warning: "inget leverantörspris, använder standardpris" };
+    const currency = basis?.supplierCurrency ?? SEK;
+    const rate = basis?.supplierExchangeRate ?? null;
+    if (supplierPrice !== null && currency === SEK) return { cost: Number(supplierPrice), used: "supplier", warning: null };
+    if (supplierPrice !== null && rate !== null) {
+      const unitPrice = Number(supplierPrice);
+      return {
+        cost: toSekUnitPrice(unitPrice, rate),
+        used: "supplier",
+        warning: null,
+        foreign: { currency, unitPrice, rate },
+      };
     }
-    return { cost: 0, used: "none", warning: "varken leverantörspris eller standardpris, antar 0" };
+    // Either no supplier price at all, or one in a currency without a rate.
+    const missing = supplierPrice === null ? "inget leverantörspris" : `ingen kurs för leverantörspriset i ${currency}`;
+    if (standardCost !== null) {
+      return { cost: Number(standardCost), used: "standard", warning: `${missing}, använder standardpris` };
+    }
+    return {
+      cost: 0,
+      used: "none",
+      warning:
+        supplierPrice === null ? "varken leverantörspris eller standardpris, antar 0" : `${missing} och inget standardpris, antar 0`,
+    };
   }
 
   if (standardCost !== null) return { cost: Number(standardCost), used: "standard", warning: null };

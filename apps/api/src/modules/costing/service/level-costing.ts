@@ -31,7 +31,7 @@ export function buildMaterialRow(
   // the component's total for the calculation (or the consumed quantity).
   supplierPriceTier: CostingSupplierPriceTier = "base"
 ): { row: MaterialRowWrite; warning: string | null } {
-  const { cost, used, warning } = resolveUnitCost(basis, source, { supplierPriceTier, quantity: component.quantity });
+  const { cost, used, warning, foreign } = resolveUnitCost(basis, source, { supplierPriceTier, quantity: component.quantity });
   return {
     row: {
       componentArticleId: component.componentArticleId,
@@ -46,6 +46,9 @@ export function buildMaterialRow(
       // computed on the header's dM + MO, not per row.
       overheadAmount: 0,
       materialMarkupAmount: 0,
+      supplierCurrency: foreign?.currency ?? null,
+      supplierUnitPrice: foreign?.unitPrice ?? null,
+      exchangeRate: foreign?.rate ?? null,
     },
     warning,
   };
@@ -84,6 +87,9 @@ export function buildSemiFinishedRow(
     amount: manufacturingCostTotal,
     overheadAmount: overheadTotal,
     materialMarkupAmount: materialMarkupTotal,
+    supplierCurrency: null,
+    supplierUnitPrice: null,
+    exchangeRate: null,
   };
 }
 
