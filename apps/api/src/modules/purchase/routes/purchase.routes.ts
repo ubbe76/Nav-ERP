@@ -666,6 +666,16 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
     }
   });
 
+  // Prishistorik for the catalog (price, currency, staffel, primary), newest
+  // first.
+  app.get<{ Params: { id: string } }>("/articles/:id/supplier-price-history", async (req, reply) => {
+    try {
+      return await service.listArticleSupplierPriceHistory(req.params.id);
+    } catch (err) {
+      return catalogError(err, reply);
+    }
+  });
+
   // Stafflat leverantörspris for the IO card's à-pris prefill. Quantity is
   // in the article's base unit (like /price-quote); `price: null` is a 200.
   app.get("/supplier-price-quote", async (req, reply) => {

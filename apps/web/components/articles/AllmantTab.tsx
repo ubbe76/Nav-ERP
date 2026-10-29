@@ -15,6 +15,7 @@ import {
   type StockLocation,
 } from "../../lib/types";
 import { EnheterSection } from "./EnheterSection";
+import { PriceHistoryButton } from "./PriceHistoryButton";
 import styles from "./ArticleForm.module.css";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError } from "../ui/Form";
@@ -310,6 +311,9 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
               />
             </Field>
           </div>
+          <div className={styles.historyAction}>
+            <PriceHistoryButton articleId={article.id} kind="salesPrice" />
+          </div>
         </section>
 
         <section className={styles.section}>
@@ -443,6 +447,7 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
             {costPending ? "Sparar…" : "Spara standardkostnad"}
           </Button>
           {costSaved && !costPending && <span>Sparat ✓</span>}
+          <PriceHistoryButton articleId={article.id} kind="standardCost" />
         </FormActions>
       </Form>
 

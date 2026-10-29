@@ -714,6 +714,11 @@ export function createArticleService(repo: ArticleRepository) {
 
     // --- Artikelrevisioner ---
 
+    async listPriceHistory(articleId: string) {
+      if (!(await repo.findById(articleId))) throw new ArticleNotFoundError(articleId);
+      return repo.listPriceHistory(articleId);
+    },
+
     async listRevisions(articleId: string) {
       if (!(await repo.findById(articleId))) throw new ArticleNotFoundError(articleId);
       return repo.listRevisions(articleId);

@@ -281,6 +281,26 @@ export const articleStandardCostHistory = pgTable(
   (table) => [index("idx_std_cost_history_article_from").on(table.articleId, table.validFrom)]
 );
 
+// Append-only history of the article's försäljningspris, the counterpart of
+// the standard cost history above. Written by a trigger on articles
+// (migration 0169), not by the application — the sales price has some eight
+// writers (the card, Sätt försäljningspris, the article and price imports,
+// batch edit, copy, demo data, configurator variants). One row per
+// transaction that changes the value; null = the price was cleared. History
+// starts at the migration (backfill), like D1.
+export const articleSalesPriceHistory = pgTable(
+  "article_sales_price_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    price: numeric("price", { precision: 14, scale: 4 }),
+    validFrom: timestamp("valid_from", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_sales_price_history_article_from").on(table.articleId, table.validFrom)]
+);
+
 // BOM = Bill of Materials / struktur — self-referencing: en artikel kan bestå av komponent-artiklar
 export const bomComponents = pgTable(
   "bom_components",

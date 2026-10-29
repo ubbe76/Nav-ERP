@@ -132,6 +132,12 @@ export interface ArticleCostBasis {
    */
   supplierExchangeRate?: number | null;
   /**
+   * Efterkalkyl: the Stockholm day the standard cost, the supplier price and
+   * the rate were read as of (the component's latest withdrawal). Absent on
+   * the pre-calculation, which reads today's values.
+   */
+  priceDate?: string | null;
+  /**
    * Verklig kostnad: the moving average at the moment the material was
    * actually consumed, derived by the caller (actual-cost.ts) rather than
    * looked up here — this function stays pure and database-free. Null when it

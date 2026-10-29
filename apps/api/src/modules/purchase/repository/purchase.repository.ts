@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import {
+  articleSupplierPriceHistory,
   articleSuppliers,
   articles,
   carriers,
@@ -1209,6 +1210,28 @@ export function createPurchaseRepository(db: Db) {
         .orderBy(desc(articleSuppliers.isPrimary), asc(suppliers.name));
       const breaks = await loadPriceBreaks(db, rows.map((r) => r.id));
       return rows.map((r) => ({ ...r, priceBreaks: breaks.get(r.id) ?? [] }));
+    },
+
+    // Prishistorik for the catalog: every snapshot the triggers wrote
+    // (migration 0169), newest first, with the supplier's name — null when
+    // the supplier has since been merged away.
+    async listArticleSupplierPriceHistory(articleId: string) {
+      return db
+        .select({
+          id: articleSupplierPriceHistory.id,
+          supplierId: articleSupplierPriceHistory.supplierId,
+          supplierName: suppliers.name,
+          price: articleSupplierPriceHistory.price,
+          currency: articleSupplierPriceHistory.currency,
+          priceBreaks: articleSupplierPriceHistory.priceBreaks,
+          isPrimary: articleSupplierPriceHistory.isPrimary,
+          removed: articleSupplierPriceHistory.removed,
+          validFrom: articleSupplierPriceHistory.validFrom,
+        })
+        .from(articleSupplierPriceHistory)
+        .leftJoin(suppliers, eq(suppliers.id, articleSupplierPriceHistory.supplierId))
+        .where(eq(articleSupplierPriceHistory.articleId, articleId))
+        .orderBy(desc(articleSupplierPriceHistory.validFrom), asc(suppliers.name));
     },
 
     async findArticleSupplier(articleId: string, rowId: string) {

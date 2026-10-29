@@ -12,9 +12,11 @@ import { Field, Input, Toggle } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { formatMoney, formatQuantity } from "../../lib/format";
+import { formatStockholmDateTime } from "../../lib/date";
 import {
   SUPPLIER_INVOICE_STATUS_PILL,
   type ArticleSupplier,
+  type ArticleSupplierPriceHistoryEntry,
   type GoodsReceiptLogEntry,
   type Paged,
   type PriceHistoryEntry,
@@ -23,11 +25,13 @@ import {
 } from "../../lib/types";
 import { Form, FormActions, FormError, FormRow } from "../ui/Form";
 
-// Inköp-fliken (Monitor G5 "Inköp"-flik): one tab, four stacked sections —
-// the editable leverantörskatalog on top, then the read-only inleverans-,
-// pris- and leverantörsfakturaloggar. Only shown for köpta/tjänsteartiklar.
+// Inköp-fliken (Monitor G5 "Inköp"-flik): one tab, five stacked sections —
+// the editable leverantörskatalog on top, then the read-only katalogpris-
+// historik and inleverans-, pris- and leverantörsfakturaloggar. Only shown
+// for köpta/tjänsteartiklar.
 export function InkopTab({ articleId }: { articleId: string }) {
   const [catalog, setCatalog] = useState<ArticleSupplier[]>([]);
+  const [catalogHistory, setCatalogHistory] = useState<ArticleSupplierPriceHistoryEntry[]>([]);
   const [receipts, setReceipts] = useState<GoodsReceiptLogEntry[]>([]);
   const [prices, setPrices] = useState<PriceHistoryEntry[]>([]);
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
@@ -39,13 +43,15 @@ export function InkopTab({ articleId }: { articleId: string }) {
   async function load() {
     setError(null);
     try {
-      const [cat, rec, price, inv] = await Promise.all([
+      const [cat, catHistory, rec, price, inv] = await Promise.all([
         apiFetch<ArticleSupplier[]>(`/api/v1/articles/${articleId}/suppliers`),
+        apiFetch<ArticleSupplierPriceHistoryEntry[]>(`/api/v1/articles/${articleId}/supplier-price-history`),
         apiFetch<Paged<GoodsReceiptLogEntry>>(`/api/v1/goods-receipts?articleId=${articleId}&limit=100`),
         apiFetch<Paged<PriceHistoryEntry>>(`/api/v1/price-history?articleId=${articleId}&limit=100`),
         apiFetch<Paged<SupplierInvoice>>(`/api/v1/supplier-invoices?articleId=${articleId}&limit=100`),
       ]);
       setCatalog(cat);
+      setCatalogHistory(catHistory);
       setReceipts(rec.rows);
       setPrices(price.rows);
       setInvoices(inv.rows);
@@ -151,6 +157,41 @@ export function InkopTab({ articleId }: { articleId: string }) {
                   </Button>
                 </span>
               );
+            default:
+              return null;
+          }
+        }}
+      />
+
+      {/* --- Katalogprishistorik: the catalog over time, newest first --- */}
+      <SectionHeading spaced>Katalogprishistorik</SectionHeading>
+      <Table<ArticleSupplierPriceHistoryEntry>
+        columns={[
+          { key: "validFrom", label: "Från och med", width: "150px" },
+          { key: "supplierName", label: "Leverantör", width: "1.4fr" },
+          { key: "price", label: "Pris", width: "110px", align: "right" },
+          { key: "currency", label: "Valuta", width: "80px" },
+          { key: "priceBreaks", label: "Staffel", width: "1.2fr" },
+          { key: "status", label: "Status", width: "140px" },
+        ]}
+        rows={catalogHistory}
+        emptyText="Ingen katalogprishistorik"
+        renderCell={(row, key) => {
+          switch (key) {
+            case "validFrom":
+              return formatStockholmDateTime(row.validFrom);
+            case "supplierName":
+              return row.supplierName ?? "(borttagen leverantör)";
+            case "price":
+              return row.price === null ? "–" : formatMoney(row.price);
+            case "currency":
+              return row.currency;
+            case "priceBreaks":
+              return row.priceBreaks.length === 0
+                ? "–"
+                : row.priceBreaks.map((b) => `från ${formatQuantity(b.fromQuantity)}: ${formatMoney(b.price)}`).join(" · ");
+            case "status":
+              return row.removed ? "Borttagen" : row.isPrimary ? "Huvudleverantör" : "";
             default:
               return null;
           }

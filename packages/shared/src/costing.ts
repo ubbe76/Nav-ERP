@@ -8,9 +8,12 @@ export type CostCalculationType = z.infer<typeof costCalculationTypeSchema>;
 // falling back to the article's standard cost; "standard" = standard cost only;
 // "actual" = the moving average at the consumption date, derived from the stock
 // log. "actual" applies to the POST-calculation only — a pre-calculation has no
-// consumptions to price and falls back to the standard cost with a warning.
+// consumptions to price — so the two calculations have one setting each
+// (System → Kalkyler) and the förkalkyl's cannot be "actual".
 export const costingMaterialSourceSchema = z.enum(["supplier", "standard", "actual"]);
 export type CostingMaterialSource = z.infer<typeof costingMaterialSourceSchema>;
+export const costingPreMaterialSourceSchema = z.enum(["supplier", "standard"]);
+export type CostingPreMaterialSource = z.infer<typeof costingPreMaterialSourceSchema>;
 
 // Only meaningful with source "supplier": "base" = the catalog row's
 // grundpris (quantity 1) regardless of quantity; "tiered" = the staffel step

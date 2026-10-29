@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import type {
   CostingMaterialSource,
+  CostingPreMaterialSource,
   CostingSupplierPriceTier,
   CreateArticleNumberSeriesInput,
   CreateCompanyCarrierInput,
@@ -106,13 +107,19 @@ const SMTP_USER_KEY = "smtp_user";
 const SMTP_PASSWORD_KEY = "smtp_password";
 const SMTP_FROM_NAME_KEY = "smtp_from_name";
 const SMTP_FROM_EMAIL_KEY = "smtp_from_email";
+// Förkalkylens materialkälla (the key predates the split, hence its name) and
+// efterkalkylens own (migration 0169 copied the shared value into it).
 const COSTING_MATERIAL_SOURCE_KEY = "costing_material_source";
+const COSTING_POST_MATERIAL_SOURCE_KEY = "costing_post_material_source";
 
 // system_settings holds free text, so an unknown or absent value has to resolve
 // to something. "standard" is the safe default — it is what the calculation did
-// before the setting existed.
+// before the setting existed. The förkalkyl has nothing to read "actual" from.
 function decodeMaterialSource(raw: string | null | undefined): CostingMaterialSource {
   return raw === "supplier" || raw === "actual" ? raw : "standard";
+}
+function decodePreMaterialSource(raw: string | null | undefined): CostingPreMaterialSource {
+  return raw === "supplier" ? raw : "standard";
 }
 // Stafflade leverantörspriser in the calculation: "base" keeps the pre-staffel
 // behaviour (grundpriset), so an absent setting changes nothing.
@@ -321,7 +328,8 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       // A real decode, not a two-way ternary: the previous
       // `=== "supplier" ? … : "standard"` shape would have swallowed every new
       // member of the enum, storing the setting and then never reading it back.
-      costingMaterialSource: decodeMaterialSource(get(COSTING_MATERIAL_SOURCE_KEY)),
+      costingMaterialSource: decodePreMaterialSource(get(COSTING_MATERIAL_SOURCE_KEY)),
+      costingPostMaterialSource: decodeMaterialSource(get(COSTING_POST_MATERIAL_SOURCE_KEY)),
       costingSupplierPriceTier: decodeSupplierPriceTier(get(COSTING_SUPPLIER_PRICE_TIER_KEY)),
       costingMoPercent: percentSetting(get(COSTING_MO_PERCENT_KEY)),
       costingLoPercent: percentSetting(get(COSTING_LO_PERCENT_KEY)),
@@ -644,6 +652,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       if (input.smtpFromEmail !== undefined) await set(SMTP_FROM_EMAIL_KEY, input.smtpFromEmail);
       if (input.costingMaterialSource !== undefined) {
         await set(COSTING_MATERIAL_SOURCE_KEY, input.costingMaterialSource);
+      }
+      if (input.costingPostMaterialSource !== undefined) {
+        await set(COSTING_POST_MATERIAL_SOURCE_KEY, input.costingPostMaterialSource);
       }
       if (input.costingSupplierPriceTier !== undefined) {
         await set(COSTING_SUPPLIER_PRICE_TIER_KEY, input.costingSupplierPriceTier);

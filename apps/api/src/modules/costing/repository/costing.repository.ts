@@ -1,7 +1,9 @@
-import { and, asc, desc, eq, getTableColumns, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, lt, max, ne, sql } from "drizzle-orm";
 import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import {
+  articleStandardCostHistory,
+  articleSupplierPriceHistory,
   articleSuppliers,
   articles,
   bomComponents,
@@ -24,6 +26,7 @@ import type { CostCalculationType, CostingMaterialSource, CostMaterialRowKind, C
 import { explodeBom } from "../../article/service/bom-explosion.js";
 import { weightedActualCosts } from "../service/actual-cost.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
+import type { StandardCostHistoryRow, SupplierSnapshotRow } from "../service/price-at.js";
 
 // At most one row per article thanks to the article_suppliers_one_primary
 // partial unique index, so this join never fans out.
@@ -53,6 +56,9 @@ export interface MaterialRowWrite {
   supplierCurrency: string | null;
   supplierUnitPrice: number | null;
   exchangeRate: number | null;
+  // Efterkalkyl: the day the standard/supplier price and rate were taken
+  // (YYYY-MM-DD). Null otherwise.
+  priceDate: string | null;
 }
 
 export interface OperationRowWrite {
@@ -229,6 +235,69 @@ export function createCostingRepository(db: Db) {
       }));
     },
 
+    // Efterkalkylen prissätter vid uttaget: when each component was last
+    // taken out for the order — the moment its standard or supplier price and
+    // rate are read as of. Draws only (negative deltas); a component that was
+    // never drawn is absent.
+    async getLatestConsumptionTimes(manufacturingOrderId: string) {
+      const rows = await db
+        .select({ articleId: stockTransactions.articleId, drawnAt: max(stockTransactions.createdAt) })
+        .from(stockTransactions)
+        .where(
+          and(
+            eq(stockTransactions.transactionType, "mo_consumption"),
+            eq(stockTransactions.referenceId, manufacturingOrderId),
+            lt(stockTransactions.quantityDelta, "0")
+          )
+        )
+        .groupBy(stockTransactions.articleId);
+      return new Map(rows.filter((r) => r.drawnAt !== null).map((r) => [r.articleId, new Date(r.drawnAt!)]));
+    },
+
+    // The standard cost (D1) and supplier catalog (migration 0169) histories
+    // of these articles, ascending — resolved per moment by price-at.ts.
+    async getPriceHistories(articleIds: string[]) {
+      const standard = new Map<string, StandardCostHistoryRow[]>();
+      const supplier = new Map<string, SupplierSnapshotRow[]>();
+      if (articleIds.length === 0) return { standard, supplier };
+      const [standardRows, supplierRows] = await Promise.all([
+        db
+          .select({
+            articleId: articleStandardCostHistory.articleId,
+            cost: articleStandardCostHistory.cost,
+            validFrom: articleStandardCostHistory.validFrom,
+          })
+          .from(articleStandardCostHistory)
+          .where(inArray(articleStandardCostHistory.articleId, articleIds))
+          .orderBy(asc(articleStandardCostHistory.validFrom), asc(articleStandardCostHistory.id)),
+        db
+          .select({
+            articleId: articleSupplierPriceHistory.articleId,
+            supplierId: articleSupplierPriceHistory.supplierId,
+            price: articleSupplierPriceHistory.price,
+            currency: articleSupplierPriceHistory.currency,
+            priceBreaks: articleSupplierPriceHistory.priceBreaks,
+            isPrimary: articleSupplierPriceHistory.isPrimary,
+            removed: articleSupplierPriceHistory.removed,
+            validFrom: articleSupplierPriceHistory.validFrom,
+          })
+          .from(articleSupplierPriceHistory)
+          .where(inArray(articleSupplierPriceHistory.articleId, articleIds))
+          .orderBy(asc(articleSupplierPriceHistory.validFrom), asc(articleSupplierPriceHistory.id)),
+      ]);
+      for (const { articleId, ...row } of standardRows) {
+        const list = standard.get(articleId) ?? [];
+        list.push(row);
+        standard.set(articleId, list);
+      }
+      for (const { articleId, ...row } of supplierRows) {
+        const list = supplier.get(articleId) ?? [];
+        list.push({ ...row, priceBreaks: row.priceBreaks.map((b) => ({ fromQuantity: Number(b.fromQuantity), price: Number(b.price) })) });
+        supplier.set(articleId, list);
+      }
+      return { standard, supplier };
+    },
+
     // Verklig kostnad (System → Kalkyler) — what the material a manufacturing
     // order consumed ACTUALLY cost, per component article.
     //
@@ -386,6 +455,7 @@ export function createCostingRepository(db: Db) {
               supplierCurrency: r.supplierCurrency,
               supplierUnitPrice: r.supplierUnitPrice === null ? null : String(r.supplierUnitPrice),
               exchangeRate: r.exchangeRate === null ? null : String(r.exchangeRate),
+              priceDate: r.priceDate,
             }))
           );
         }

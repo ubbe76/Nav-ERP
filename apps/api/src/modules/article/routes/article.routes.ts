@@ -140,6 +140,17 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
 
   // --- Alternative units (alternativa enheter) ---
 
+  // Prishistorik: standardkostnad and försäljningspris, newest first. Office
+  // read like the module — prices are kontorsdata.
+  app.get<{ Params: { id: string } }>("/articles/:id/price-history", async (req, reply) => {
+    try {
+      return await service.listPriceHistory(req.params.id);
+    } catch (err) {
+      if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/articles/:id/units", async (req, reply) => {
     try {
       return await service.listArticleUnits(req.params.id);

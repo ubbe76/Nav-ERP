@@ -6,6 +6,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -421,6 +422,36 @@ export const articleSupplierPriceBreaks = pgTable(
     index("idx_article_supplier_price_breaks_supplier").on(table.articleSupplierId),
     check("article_supplier_price_breaks_from_quantity_check", sql`${table.fromQuantity} > 1`),
   ]
+);
+
+// Prishistorik for the supplier catalog — one snapshot of a catalog row
+// (article, supplier) each time its price picture changes: price, currency,
+// staffel and whether it is the primary supplier; `removed` when the row was
+// taken out of the catalog. Append-only, written by DEFERRED constraint
+// triggers on article_suppliers and article_supplier_price_breaks (migration
+// 0169), never by the application: the catalog has seven writers and the
+// staffel is replaced as a set after the row's own UPDATE, so the snapshot is
+// taken at commit, from the row's final state, and only when it differs from
+// the latest one. The efterkalkyl reads the primary supplier's snapshot as of
+// the material's withdrawal. History starts at the migration (backfill).
+export const articleSupplierPriceHistory = pgTable(
+  "article_supplier_price_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    // set null: the history outlives a supplier that is merged away.
+    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    price: numeric("price", { precision: 14, scale: 4 }),
+    currency: varchar("currency", { length: 3 }).notNull(),
+    // [{ fromQuantity, price }] ascending — the staffel at that moment.
+    priceBreaks: jsonb("price_breaks").$type<{ fromQuantity: number; price: number }[]>().notNull().default([]),
+    isPrimary: boolean("is_primary").notNull(),
+    removed: boolean("removed").notNull().default(false),
+    validFrom: timestamp("valid_from", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_article_supplier_price_history_article").on(table.articleId, table.supplierId, table.validFrom)]
 );
 
 // Leverantörsfaktura (accounts payable). The state machine lives in the

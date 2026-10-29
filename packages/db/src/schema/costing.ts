@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, index, integer, numeric, pgEnum, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, numeric, pgEnum, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { articles } from "./article";
 import { manufacturingOrders, workCenters } from "./manufacturing";
 import { units } from "./register";
@@ -136,6 +136,11 @@ export const costCalculationMaterialRows = pgTable(
     supplierCurrency: varchar("supplier_currency", { length: 3 }),
     supplierUnitPrice: numeric("supplier_unit_price", { precision: 14, scale: 4 }),
     exchangeRate: numeric("exchange_rate", { precision: 14, scale: 6 }),
+    // Efterkalkyl: the day the standard or supplier price (and rate) was
+    // taken — the component's latest withdrawal on the order. Null on
+    // pre-calculations, on Verklig kostnad (weighted per withdrawal) and on
+    // rows saved before the column existed (those used the current price).
+    priceDate: date("price_date"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

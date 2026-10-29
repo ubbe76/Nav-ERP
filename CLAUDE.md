@@ -78,6 +78,7 @@ Varje fil har `paths:` i sin frontmatter och läses bara in när du läser en fi
 | `ledgers.md` | kund- och leverantörsreskontra, betalningar, `paid` som sidoeffekt |
 | `manufacturing.md` | frisläpp, rapportering, top-up, delinleverans, ångra, materialbrist, ändra TO, terminalens lista |
 | `planning.md` | behovsberäkningen och cachen, Skapa ordrar, avrundning, artikelöversikt, färdigdatumsförslag |
+| `costing.md` | kalkylens materialkällor (förkalkyl/efterkalkyl), efterkalkylen prissatt vid uttaget, pris vid tidpunkt |
 | `production-planning.md` | planerade veckor, kapacitet, Leveranstidskontroll och reservationen |
 | `delivery-days.md` | fasta leveransdagar, transport- och arbetsdagar, datumintervallet |
 | `configurator.md` | varianter, beställningsvara, konfigurerad TO, externt API |
