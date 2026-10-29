@@ -126,6 +126,18 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Kundens artikelnummer** | Nej | Vad kunden kallar artikeln, max 50 tecken. Sparas på kundkortet och skrivs ut som "Ert art.nr" på offert, orderbekräftelse, plocklista, följesedel och faktura. Ersätter ett tidigare nummer för samma kund och artikel; tom cell lämnar det orört. | KND-4711 |
 | **Ställpris** | Nej | Engångskostnad per orderrad i SEK, decimalkomma eller punkt, aldrig negativ — sparas på kundpriset och läggs som en egen Ställkostnad-rad på nya offert- och orderrader när en ställkostnadsartikel är vald under System → Inställningar. Kräver Pris på raden. 0 betyder inget ställpris; tom cell lämnar det orört. | 400 |
 
+## Lagersaldon
+
+[Ladda ned mallen](/importmallar/importmall-lagersaldon.xlsx) — importeras på **Artiklar → Importera**, fliken **Lagersaldon**. Reglerna beskrivs i [lager](/hjalp/lager#importera-lagersaldon).
+
+| Kolumn | Obligatorisk | Förklaring | Exempel |
+| --- | --- | --- | --- |
+| **Artikelnummer** | Ja | Numret på en artikel som redan finns i artikelregistret och lagerhålls — inte en tjänst eller en fantomartikel. Samma artikel får bara förekomma en gång per lagerplats i filen. | RS-12 |
+| **Lager** | Nej | Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot på artikelns lagerplats. | Huvudlager |
+| **Lagerplats** | Nej | Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns lagerplats, annars reservplatsen ***. | A1-03 |
+| **Antal** | Ja | Saldot på lagerplatsen efter importen, i artikelns grundenhet, 0 eller mer, decimalkomma eller punkt. Skillnaden mot dagens saldo bokas som en lagerjustering — samma fil två gånger ändrar inget, och 0 tömmer platsen. | 120 |
+| **À-pris** | Nej | Värdet per grundenhet i kronor för det som läggs till, decimalkomma eller punkt. Tom cell betyder artikelns standardkostnad. Används bara när saldot ökar. | 24,50 |
+
 ## Kunder
 
 [Ladda ned mallen](/importmallar/importmall-kunder.xlsx) — importeras på **Försäljning → Kunder → Importera**, fliken **Kunder**. Reglerna beskrivs i [Försäljning](/hjalp/forsaljning#importera-kunder).

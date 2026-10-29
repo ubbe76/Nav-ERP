@@ -80,6 +80,8 @@ export const REGISTER_LABELS: Record<string, string> = {
   deliveryTerms: "Leveransvillkor",
   carriers: "Speditörer",
   priceLists: "Prislistor",
+  warehouses: "Lager",
+  stockLocations: "Lagerplatser",
 };
 
 // A Monitor structure file can bring 179 new components with it — spelling all

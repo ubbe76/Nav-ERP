@@ -55,6 +55,7 @@ import {
   suggestCustomerPriceMapping,
   type CustomerPriceImportPlan,
 } from "./customer-prices.js";
+import { planStockBalanceImport, suggestStockBalanceMapping, type StockBalanceImportPlan } from "./stock-balances.js";
 
 // "skip" = the record already exists and input.skipExisting was set: the row
 // is written nowhere and reported back to the user instead.
@@ -323,6 +324,8 @@ export function createImportService(repo: ImportRepository) {
         return suggestSupplierPriceMapping(headers);
       case "customerPrices":
         return suggestCustomerPriceMapping(headers);
+      case "stockBalances":
+        return suggestStockBalanceMapping(headers);
     }
   }
 
@@ -345,6 +348,7 @@ export function createImportService(repo: ImportRepository) {
     | ArticleUnitImportPlan
     | SupplierPriceImportPlan
     | CustomerPriceImportPlan
+    | StockBalanceImportPlan
   > {
     switch (entity) {
       case "articles":
@@ -387,6 +391,8 @@ export function createImportService(repo: ImportRepository) {
         return planSupplierPriceImport(input, repo);
       case "customerPrices":
         return planCustomerPriceImport(input, repo);
+      case "stockBalances":
+        return planStockBalanceImport(input, repo);
     }
   }
 
@@ -416,6 +422,9 @@ export function createImportService(repo: ImportRepository) {
       priceLists?: string[];
       // Avdelningar created on the fly by the resource import.
       productionGroups?: string[];
+      // Lager and lagerplatser created by the stock balance import.
+      warehouses?: string[];
+      stockLocations?: string[];
     };
   }> {
     switch (entity) {
@@ -449,6 +458,8 @@ export function createImportService(repo: ImportRepository) {
         return repo.executeSupplierPricePlan(plan as SupplierPriceImportPlan);
       case "customerPrices":
         return repo.executeCustomerPricePlan(plan as CustomerPriceImportPlan);
+      case "stockBalances":
+        return repo.executeStockBalancePlan(plan as StockBalanceImportPlan);
     }
   }
 

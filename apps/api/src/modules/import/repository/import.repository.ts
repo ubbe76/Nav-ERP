@@ -65,6 +65,7 @@ import type { ArticleUnitImportPlan } from "../service/article-units.js";
 import type { SupplierPriceImportPlan } from "../service/supplier-prices.js";
 import type { CustomerPriceImportPlan } from "../service/customer-prices.js";
 import { replacePriceBreaks } from "../../purchase/repository/price-breaks.js";
+import { createStockBalanceImportRepository } from "./stock-balances.js";
 
 // Multi-row statements are chunked so a 10 000-row file never produces one
 // statement with tens of thousands of bind parameters.
@@ -382,6 +383,8 @@ function buildLegoWorkCenterPatchValues(
 
 export function createImportRepository(db: Db) {
   return {
+    // Lagersaldon (#3): the planner's lookups and executeStockBalancePlan.
+    ...createStockBalanceImportRepository(db),
     // Everything the plan builder needs about the numbers that occur in the
     // file. Chunked like the inserts — the file may hold 10 000 numbers.
     async articlesByNumber(numbers: string[]): Promise<Map<string, ExistingArticle>> {

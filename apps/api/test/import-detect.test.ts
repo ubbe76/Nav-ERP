@@ -29,6 +29,10 @@ describe("detectImportEntity", () => {
     // No time columns — it used to fall through to the article list, whose
     // "Namn" alias took the resource name as every article's Benämning.
     expect(detectImportEntity(HEADERS.operationslistaLego)).toBe("routing");
+    expect(detectImportEntity(["Artikelnummer", "Lager", "Lagerplats", "Antal", "À-pris"])).toBe("stockBalances");
+    expect(detectImportEntity(["Artikelnummer", "Benämning", "Lagerställe", "Saldo"])).toBe("stockBalances");
+    // A Lagerplats column without a quantity is still the article list.
+    expect(detectImportEntity(["Artikelnummer", "Benämning", "Lagerplats"])).toBe("articles");
     expect(detectImportEntity(HEADERS.prislistaInkop)).toBe("supplierPrices");
     expect(detectImportEntity(HEADERS.prislistaInkopStafflat)).toBe("supplierPrices");
     expect(detectImportEntity(HEADERS.prislistaForsaljning)).toBe("customerPrices");
