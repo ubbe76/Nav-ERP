@@ -30,6 +30,7 @@ import {
   type ListStockLocationsQuery,
   type UpdateStockLocationInput,
   type UpdateWarehouseInput,
+  formatLocationLabelCode,
 } from "@navet/shared";
 import {
   ArticleNotFoundError,
@@ -82,19 +83,33 @@ export function createStockRepository(db: Db) {
 
     // Deactivated locations are the system's "deleted" — only the register page
     // asks for them, every form dropdown gets the active ones.
+    // Etiketter (#4): what a lagerplats label prints, in the order asked for.
+    async labelLocations(ids: string[]) {
+      const rows = await db
+        .select({ id: stockLocations.id, name: stockLocations.name, labelNumber: stockLocations.labelNumber, warehouseName: warehouses.name })
+        .from(stockLocations)
+        .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+        .where(inArray(stockLocations.id, ids));
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+    },
+
     async listLocations(query: ListStockLocationsQuery = { includeInactive: false }) {
-      return db
+      const rows = await db
         .select({
           id: stockLocations.id,
           warehouseId: stockLocations.warehouseId,
           name: stockLocations.name,
           active: stockLocations.active,
           warehouseName: warehouses.name,
+          labelNumber: stockLocations.labelNumber,
         })
         .from(stockLocations)
         .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
         .where(query.includeInactive ? undefined : eq(stockLocations.active, true))
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
+      // Etikettkod (#4): what the location's label and a scan say (LP0042).
+      return rows.map(({ labelNumber, ...row }) => ({ ...row, labelCode: formatLocationLabelCode(labelNumber) }));
     },
 
     async createTransaction(input: CreateStockTransactionInput, createdBy?: string) {

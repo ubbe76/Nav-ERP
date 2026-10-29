@@ -13,6 +13,8 @@ export const ERROR_CODES = {
   INVALID_REFERENCE: "invalid-reference",
   INVALID_UNIT: "invalid-unit",
   ARTICLE_NOT_FOUND: "article-not-found",
+  // Skanning (#4): Streckkod (EAN) is unique
+  DUPLICATE_ARTICLE_BARCODE: "duplicate-article-barcode",
   // Kopiera från befintlig artikel
   ARTICLE_COPY_PART_NOT_ALLOWED: "article-copy-part-not-allowed",
   // Produktkonfigurator: a template in mode variants on a new order row

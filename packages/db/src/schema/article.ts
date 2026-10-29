@@ -113,6 +113,10 @@ export const articles = pgTable("articles", {
   // Artikellista, Extra fält). Printed under the name on the documents the
   // system setting extra_description_documents lists. Null = none.
   extraDescription: text("extra_description"),
+  // Streckkod (EAN/GTIN, #4): the manufacturer's code on the package, so a
+  // scan finds the article. Digits only, 8/12/13/14 long with a valid check
+  // digit (packages/shared/src/gtin.ts); unique when set.
+  barcode: varchar("barcode", { length: 14 }),
   // Planning fields (E1 behovsberäkning). Reorder point (beställningspunkt)
   // triggers a proposal when the projected balance falls below it; null = only
   // propose on negative projected balance. Order quantity (orderkvantitet)
@@ -154,7 +158,12 @@ export const articles = pgTable("articles", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [check("articles_rounding_positive", sql`${table.rounding} > 0`)]
+  (table) => [
+    check("articles_rounding_positive", sql`${table.rounding} > 0`),
+    uniqueIndex("articles_barcode_unique").on(table.barcode).where(sql`${table.barcode} is not null`),
+    // The check digit is the application's (gtin.ts); the database pins the shape.
+    check("articles_barcode_format", sql`${table.barcode} ~ '^([0-9]{8}|[0-9]{12,14})$'`),
+  ]
 );
 
 // Alternative units (alternativa enheter) with conversion factors. The

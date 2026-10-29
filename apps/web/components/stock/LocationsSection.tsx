@@ -11,6 +11,8 @@ import type { StockLocation, Warehouse } from "../../lib/types";
 import { Form, FormActions, FormError } from "../ui/Form";
 import { Card } from "../ui/Card";
 import { SectionHeading } from "../ui/SectionHeading";
+import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
+import { LabelPrintDialog } from "./LabelPrintDialog";
 
 export function LocationsSection({ locations, warehouses }: { locations: StockLocation[]; warehouses: Warehouse[] }) {
   const router = useRouter();
@@ -28,6 +30,20 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
   const [showInactive, setShowInactive] = useState(false);
   const visibleLocations = showInactive ? locations : locations.filter((l) => l.active);
   const inactiveCount = locations.filter((l) => !l.active).length;
+  // Rows ticked for Skriv ut etiketter.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [labelsOpen, setLabelsOpen] = useState(false);
+  const selectedIds = visibleLocations.filter((l) => selected.has(l.id)).map((l) => l.id);
+  const allSelected = visibleLocations.length > 0 && selectedIds.length === visibleLocations.length;
+
+  function toggle(id: string, on: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
 
   async function saveEdit(row: StockLocation) {
     setError(null);
@@ -50,12 +66,19 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
     <div>
       <SectionHeading
         actions={
-          inactiveCount > 0 && (
-            <label style={{ display: "flex", gap: 8, alignItems: "center", fontFamily: "var(--font-body)", fontSize: 13 }}>
-              <Checkbox checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-              Visa inaktiva ({inactiveCount})
-            </label>
-          )
+          <>
+            {selectedIds.length > 0 && (
+              <Button type="button" size="small" variant="secondary" onClick={() => setLabelsOpen(true)}>
+                Skriv ut etiketter ({selectedIds.length})
+              </Button>
+            )}
+            {inactiveCount > 0 && (
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontFamily: "var(--font-body)", fontSize: 13 }}>
+                <Checkbox checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+                Visa inaktiva ({inactiveCount})
+              </label>
+            )}
+          </>
         }
       >
         Lagerplatser
@@ -64,14 +87,36 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
       {visibleLocations.length > 0 ? (
         <Table<StockLocation>
           columns={[
+            {
+              key: "select",
+              label: "Välj",
+              width: "24px",
+              header: (
+                <SelectAllCheckbox
+                  checked={allSelected}
+                  indeterminate={selectedIds.length > 0 && !allSelected}
+                  ariaLabel="Markera alla lagerplatser"
+                  onChange={(on) => setSelected(on ? new Set(visibleLocations.map((l) => l.id)) : new Set())}
+                />
+              ),
+            },
             { key: "warehouseName", label: "Lager", width: "1fr" },
             { key: "name", label: "Namn", width: "1fr" },
+            { key: "labelCode", label: "Etikettkod", width: "110px" },
             { key: "active", label: "Status", width: "140px" },
             { key: "id", label: "", width: "170px", align: "right" },
           ]}
           rows={visibleLocations}
           renderCell={(row, key) => {
             switch (key) {
+              case "select":
+                return (
+                  <Checkbox
+                    checked={selected.has(row.id)}
+                    onChange={(e) => toggle(row.id, e.target.checked)}
+                    aria-label={`Markera ${row.labelCode}`}
+                  />
+                );
               case "warehouseName":
                 return editingId === row.id ? (
                   <Select value={editWarehouseId} onChange={(e) => setEditWarehouseId(e.target.value)} aria-label="Lager">
@@ -131,6 +176,15 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
       ) : (
         <p>Inga lagerplatser tillagda än.</p>
       )}
+
+      <LabelPrintDialog
+        open={labelsOpen}
+        onClose={() => setLabelsOpen(false)}
+        endpoint="/api/v1/stock/locations/labels"
+        idsKey="locationIds"
+        ids={selectedIds}
+        title="Skriv ut lagerplatsetiketter"
+      />
 
       {warehouses.length === 0 ? (
         <p style={{ marginTop: 16 }}>Skapa ett lager ovan innan du kan lägga till en lagerplats.</p>

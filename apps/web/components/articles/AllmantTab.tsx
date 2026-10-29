@@ -18,7 +18,7 @@ import { EnheterSection } from "./EnheterSection";
 import { PriceHistoryButton } from "./PriceHistoryButton";
 import styles from "./ArticleForm.module.css";
 import { Card } from "../ui/Card";
-import { Form, FormActions, FormError } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
 
 export function AllmantTab({ article, groups }: { article: Article; groups: ArticleGroup[] }) {
@@ -28,6 +28,7 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
   const [type, setType] = useState(article.type);
   const [isPhantom, setIsPhantom] = useState(article.isPhantom);
   const [name, setName] = useState(article.name);
+  const [barcode, setBarcode] = useState(article.barcode ?? "");
   const [unitId, setUnitId] = useState(article.unitId);
   const [purchaseUnitId, setPurchaseUnitId] = useState(article.purchaseUnitId ?? "");
   const [salesUnitId, setSalesUnitId] = useState(article.salesUnitId ?? "");
@@ -101,6 +102,8 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
           type,
           isPhantom,
           name,
+          // "" clears it.
+          barcode: barcode.trim(),
           unitId,
           purchaseUnitId: purchaseUnitId === "" ? null : purchaseUnitId,
           salesUnitId: salesUnitId === "" ? null : salesUnitId,
@@ -183,6 +186,19 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
               <Field label="Benämning" htmlFor="name">
                 <Input id="name" required value={name} onChange={(e) => setName(e.target.value)} />
               </Field>
+            </div>
+            <div className={styles.spanAll}>
+              <Field label="Streckkod (EAN)" htmlFor="barcode">
+                <Input
+                  id="barcode"
+                  size="md"
+                  inputMode="numeric"
+                  maxLength={14}
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                />
+              </Field>
+              <FormHint>8, 12, 13 eller 14 siffror — tillverkarens kod på förpackningen</FormHint>
             </div>
             <div className={styles.spanAll}>
               <Field label="Extra benämning" htmlFor="extraDescription">

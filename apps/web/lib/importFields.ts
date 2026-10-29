@@ -21,6 +21,7 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "surfaceTreatment", label: "Ytbehandling" },
   { field: "colour", label: "Färg" },
   { field: "extraDescription", label: "Extra benämning" },
+  { field: "barcode", label: "Streckkod (EAN)" },
   { field: "active", label: "Aktiv" },
   // Monitor's Planering export (Beställningspunkt, Orderkvantitet,
   // Avrundningsantal, Partiformningsregel).

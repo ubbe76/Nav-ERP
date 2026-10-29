@@ -126,6 +126,7 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     surfaceTreatment: input.surfaceTreatment ?? null,
     colour: input.colour ?? null,
     extraDescription: input.extraDescription ?? null,
+    barcode: input.barcode ?? null,
   };
   const copyUnits = source !== null && source.unitId === input.unitId;
   if (copy && source && copy.parts.includes("information")) {
@@ -281,6 +282,16 @@ export function createArticleRepository(db: Db) {
         .from(configuratorTemplates)
         .where(eq(configuratorTemplates.articleId, articleId));
       return row?.mode ?? null;
+    },
+
+    // Etiketter (#4): what an article label prints, in the order asked for.
+    async labelArticles(ids: string[]) {
+      const rows = await db
+        .select({ id: articles.id, articleNumber: articles.articleNumber, name: articles.name, barcode: articles.barcode })
+        .from(articles)
+        .where(inArray(articles.id, ids));
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
     },
 
     async findById(id: string) {

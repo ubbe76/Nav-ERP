@@ -361,6 +361,7 @@ import { DuplicateInquiryRowError, MoOperationNotFoundError } from "../src/modul
 import {
   BaseUnitLockedError,
   CostingOnlyOperationLinkError,
+  DuplicateArticleBarcodeError,
   DuplicateBomComponentError,
   InvalidReferenceError,
   InvalidUnitError,
@@ -713,6 +714,7 @@ const cases: Array<[Error, string]> = [
   [new InvalidReferenceError("x"), ERROR_CODES.INVALID_REFERENCE],
   [new InvalidUnitError(), ERROR_CODES.INVALID_UNIT],
   [new ArticleNotFoundError("a"), ERROR_CODES.ARTICLE_NOT_FOUND],
+  [new DuplicateArticleBarcodeError("7350000000017"), ERROR_CODES.DUPLICATE_ARTICLE_BARCODE],
   [new ArticleCopyPartNotAllowedError("beredning", "purchased"), ERROR_CODES.ARTICLE_COPY_PART_NOT_ALLOWED],
   [new ArticleIsTemplateError("63000"), ERROR_CODES.ARTICLE_IS_TEMPLATE],
   [new InvalidConfiguratorFormulaError("Antal", "Okänd kod LANGD (tecken 1)"), ERROR_CODES.INVALID_CONFIGURATOR_FORMULA],

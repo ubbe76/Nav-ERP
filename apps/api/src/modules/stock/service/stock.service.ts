@@ -1,3 +1,5 @@
+import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
+import { formatLocationLabelCode, type LocationLabelsInput } from "@navet/shared";
 import type {
   CreateStockLocationInput,
   CreateStockTransactionInput,
@@ -56,6 +58,22 @@ export function createStockService(repo: StockRepository) {
       const row = await repo.updateLocation(id, input);
       if (!row) throw new StockLocationNotFoundError(id);
       return row;
+    },
+
+    // Etiketter (#4): lagerplats labels as a PDF, each `copies` times.
+    // Unknown ids are left out; none known is a 404.
+    async renderLocationLabels(input: LocationLabelsInput) {
+      const found = await repo.labelLocations([...new Set(input.locationIds)]);
+      if (found.length === 0) throw new StockLocationNotFoundError(input.locationIds[0]!);
+      const labels: LabelInput[] = found.flatMap((l) =>
+        Array.from({ length: input.copies }, () => ({
+          kind: "location" as const,
+          labelCode: formatLocationLabelCode(l.labelNumber),
+          name: l.name,
+          warehouseName: l.warehouseName,
+        }))
+      );
+      return renderLabelsPdf(labels, input.format, input.start);
     },
 
     async listLocations(query?: ListStockLocationsQuery) {

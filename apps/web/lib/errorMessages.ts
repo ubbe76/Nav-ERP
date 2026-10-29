@@ -56,6 +56,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "already-attested": "Medarbetaren är redan attesterad.",
   "attestation-not-found": "Ingen attestering hittades.",
   "article-not-found": "Artikeln hittades inte.",
+  "duplicate-article-barcode": "En annan artikel har redan den streckkoden (EAN).",
   // The server names the template ("63000 är en mall — välj en variant").
   "article-is-template": serverMessage("Artikeln är en mall — välj en variant."),
   "payroll-period-locked": "Perioden är låst.",

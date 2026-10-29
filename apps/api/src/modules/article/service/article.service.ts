@@ -1,3 +1,5 @@
+import { renderLabelsPdf, type LabelInput } from "../../mail/service/label-pdf.js";
+import type { ArticleLabelsInput } from "@navet/shared";
 import {
   articleCopyPartAllowed,
   deriveLoadingMeters,
@@ -100,6 +102,18 @@ export class ArticleCopyPartNotAllowedError extends Error {
     super(`The part "${part}" cannot be copied to a ${type} article`);
     this.name = "ArticleCopyPartNotAllowedError";
   }
+}
+
+// Streckkod (EAN, #4) is unique when set: 409 duplicate-article-barcode.
+export class DuplicateArticleBarcodeError extends Error {
+  constructor(barcode: string) {
+    super(`Another article already has the barcode "${barcode}"`);
+    this.name = "DuplicateArticleBarcodeError";
+  }
+}
+const ARTICLE_BARCODE_UNIQUE = "articles_barcode_unique";
+function throwIfBarcodeTaken(err: unknown, barcode: string | null | undefined) {
+  if (isUniqueViolation(err, ARTICLE_BARCODE_UNIQUE)) throw new DuplicateArticleBarcodeError(barcode ?? "");
 }
 
 export class DuplicateArticleNumberError extends Error {
@@ -377,6 +391,7 @@ export function createArticleService(repo: ArticleRepository) {
         } catch (err) {
           // Same mapping updateArticle already has — a duplicate number on
           // POST was a raw 500 until the importer needed the 409.
+          throwIfBarcodeTaken(err, input.barcode);
           if (isUniqueViolation(err)) throw new DuplicateArticleNumberError(articleNumber);
           throw err;
         }
@@ -394,6 +409,7 @@ export function createArticleService(repo: ArticleRepository) {
         try {
           return await insert(issued);
         } catch (err) {
+          throwIfBarcodeTaken(err, input.barcode);
           if (!isUniqueViolation(err, ARTICLE_NUMBER_UNIQUE)) throw err;
           if (attempt >= ARTICLE_NUMBER_RETRIES) throw new SeriesExhaustedError(key);
         }
@@ -413,6 +429,17 @@ export function createArticleService(repo: ArticleRepository) {
           nextArticleNumber: await repo.previewArticleNumber(row),
         }))
       );
+    },
+
+    // Etiketter (#4): the labels as a PDF, each article `copies` times in a
+    // row. Unknown ids are left out; none known is a 404.
+    async renderArticleLabels(input: ArticleLabelsInput) {
+      const found = await repo.labelArticles([...new Set(input.articleIds)]);
+      if (found.length === 0) throw new ArticleNotFoundError(input.articleIds[0]!);
+      const labels: LabelInput[] = found.flatMap((a) =>
+        Array.from({ length: input.copies }, () => ({ kind: "article" as const, articleNumber: a.articleNumber, name: a.name, barcode: a.barcode }))
+      );
+      return renderLabelsPdf(labels, input.format, input.start);
     },
 
     async getArticle(id: string) {
@@ -452,6 +479,7 @@ export function createArticleService(repo: ArticleRepository) {
         try {
           await repo.update(id, effective, ex);
         } catch (err) {
+          throwIfBarcodeTaken(err, input.barcode);
           if (isUniqueViolation(err)) throw new DuplicateArticleNumberError(input.articleNumber ?? "");
           throw err;
         }

@@ -39,6 +39,8 @@ export interface Article {
   articleNumber: string;
   name: string;
   type: ArticleType;
+  // Streckkod (EAN/GTIN) — 8, 12, 13 or 14 digits; unique when set.
+  barcode: string | null;
   isPhantom: boolean;
   // Set when the article is a configurator template (left join on the server).
   configuratorMode?: "variants" | "to_order" | null;
@@ -406,6 +408,37 @@ export interface StockLocation {
   name: string;
   active: boolean;
   warehouseName: string;
+  // Etikettkod (LP0042) — stable across renames, what the label's barcode holds.
+  labelCode: string;
+}
+
+// GET /scan?code= — every kind of thing the code can name (mirrors
+// packages/shared/src/scan.ts; the web cannot import @navet/shared).
+export type ScanMatch =
+  | { kind: "location"; id: string; labelCode: string; name: string; warehouseName: string; active: boolean }
+  | {
+      kind: "article";
+      id: string;
+      articleNumber: string;
+      name: string;
+      type: ArticleType;
+      unitCode: string;
+      active: boolean;
+      matchedBy: "barcode" | "articleNumber";
+    }
+  | { kind: "purchaseOrder" | "salesOrder"; id: string; orderNumber: string; status: string; partyName: string }
+  | {
+      kind: "manufacturingOrder";
+      id: string;
+      orderNumber: string;
+      status: string;
+      articleNumber: string;
+      articleName: string;
+    };
+
+export interface ScanResult {
+  code: string;
+  matches: ScanMatch[];
 }
 
 // Base-data register entry (leveransvillkor / betalningsvillkor / speditörer).

@@ -23,6 +23,9 @@ import shellStyles from "../../components/AppShell.module.css";
 import styles from "../../app/artiklar/page.module.css";
 import editStyles from "./ArticleRegister.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { Checkbox } from "../ui/Field";
+import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
+import { LabelPrintDialog } from "../stock/LabelPrintDialog";
 
 // The four columns that can be edited in the list; "" stands for "no group".
 type EditField = "name" | "type" | "groupId" | "unitId";
@@ -66,6 +69,11 @@ export function ArticlesPageClient({
   // Row marked with the arrow keys from the search field (index into rows);
   // Enter opens it. null = none marked, Enter then just searches.
   const [highlighted, setHighlighted] = useState<number | null>(null);
+  // Rows ticked for Skriv ut etiketter; cleared with every new page of results.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [labelsOpen, setLabelsOpen] = useState(false);
+  const selectedIds = rows.filter((r) => selected.has(r.id)).map((r) => r.id);
+  const allSelected = rows.length > 0 && selectedIds.length === rows.length;
 
   // A new page of results (paging, search, filter — all guarded when drafts
   // exist) replaces the rows and starts clean.
@@ -75,6 +83,7 @@ export function ArticlesPageClient({
     setRowErrors({});
     setSaveError(null);
     setHighlighted(null);
+    setSelected(new Set());
   }, [articles]);
 
   // Redigera hands the keys to the cells — drop any marked row.
@@ -247,6 +256,11 @@ export function ArticlesPageClient({
           <Link href="/varugrupper" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Varugrupper
           </Link>
+          {selectedIds.length > 0 && (
+            <Button type="button" variant="secondary" onClick={() => setLabelsOpen(true)}>
+              Skriv ut etiketter ({selectedIds.length})
+            </Button>
+          )}
           <Link href="/artiklar/import" className={`${buttonStyles.button} ${buttonStyles.ghost}`}>
             Importera
           </Link>
@@ -294,6 +308,19 @@ export function ArticlesPageClient({
       <div ref={tableRef}>
         <Table<Article>
           columns={[
+            {
+              key: "select",
+              label: "Välj",
+              width: "24px",
+              header: (
+                <SelectAllCheckbox
+                  checked={allSelected}
+                  indeterminate={selectedIds.length > 0 && !allSelected}
+                  ariaLabel="Markera alla artiklar på sidan"
+                  onChange={(on) => setSelected(on ? new Set(rows.map((r) => r.id)) : new Set())}
+                />
+              ),
+            },
             { key: "articleNumber", label: "Artikelnummer", width: "160px" },
             { key: "name", label: "Benämning", width: "minmax(200px, 1fr)" },
             { key: "type", label: "Typ", width: editable ? "170px" : "160px" },
@@ -310,6 +337,21 @@ export function ArticlesPageClient({
             const index = rows.indexOf(article);
             const marked = (field: EditField) => drafts[article.id]?.[field] !== undefined;
             switch (key) {
+              case "select":
+                return (
+                  <Checkbox
+                    checked={selected.has(article.id)}
+                    onChange={(e) =>
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(article.id);
+                        else next.delete(article.id);
+                        return next;
+                      })
+                    }
+                    aria-label={`Markera ${article.articleNumber}`}
+                  />
+                );
               case "articleNumber":
                 return (
                   <>
@@ -434,6 +476,15 @@ export function ArticlesPageClient({
           </Button>
         </div>
       )}
+
+      <LabelPrintDialog
+        open={labelsOpen}
+        onClose={() => setLabelsOpen(false)}
+        endpoint="/api/v1/articles/labels"
+        idsKey="articleIds"
+        ids={selectedIds}
+        title="Skriv ut artikeletiketter"
+      />
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Ny artikel">
         <NewArticleForm groups={groups} />

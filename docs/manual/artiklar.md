@@ -92,7 +92,7 @@ Benämning, artikeltyp och fantom-/aktivflaggan ändras på fliken [Allmänt](#a
 
 Grunduppgifterna är grupperade i sektioner:
 
-- **Identitet** — artikelnummer, typ, benämning, **Extra benämning** (flerradig fritext, max 2 000 tecken), **Varugrupp**, den skrivskyddade **Momssats** som följer varugruppen, **Artikelkod**, fantomflagga, **Ytbehandling** och **Färg** (fria textfält, max 200 tecken) och aktiv/inaktiv.
+- **Identitet** — artikelnummer, typ, benämning, **Extra benämning** (flerradig fritext, max 2 000 tecken), **Varugrupp**, den skrivskyddade **Momssats** som följer varugruppen, **Artikelkod**, fantomflagga, **Ytbehandling** och **Färg** (fria textfält, max 200 tecken), **Streckkod (EAN)** och aktiv/inaktiv. Streckkoden är tillverkarens kod på förpackningen (EAN/GTIN, 8, 12, 13 eller 14 siffror med rätt kontrollsiffra) och gör att varan hittas när den skannas, se [Skanna](/hjalp/lager#skanna). Samma kod kan bara finnas på en artikel. Fältet kan också fyllas i med artikelimportens kolumn **EAN**.
 - **Enheter** — grundenhet, inköpsenhet och försäljningsenhet.
 - **Försäljning** — **Försäljningspris (kr)**, artikelns grundpris vid försäljning (kr per grundenhet). Grundpriset är sista steget i kundprisernas priskedjan (kundens egen prisregel → kundens prislista → grundpriset) och förifyller à-priset på offert-/kundorderrader när inget mer specifikt pris finns — se [Kundpriser](/hjalp/forsaljning#kundpriser) i Försäljning.
 - **Lager** — **lagerplats** (artikelns standardplats).

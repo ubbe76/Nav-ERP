@@ -1,3 +1,4 @@
+import { articleBarcodeSchema } from "./scan.js";
 import { z } from "zod";
 import { listQuerySchema } from "./list.js";
 import { parcelKindSchema } from "./shipping.js";
@@ -106,6 +107,8 @@ export const createArticleSchema = z.object({
   // "Extra benämning" — multi-line free text, printed on the documents the
   // setting extraDescriptionDocuments lists; blank = none.
   extraDescription: optionalText(2000).optional(),
+  // Streckkod (EAN/GTIN, #4); blank = none.
+  barcode: articleBarcodeSchema.optional(),
   groupId: z.string().uuid().optional(),
   // Artikelkod (Grunddata): selection/grouping in the lists only.
   articleCodeId: z.string().uuid().optional(),
@@ -174,6 +177,8 @@ export const updateArticleSchema = z
     colour: optionalText(200).optional(),
     // "Extra benämning"; "" clears.
     extraDescription: optionalText(2000).optional(),
+    // Streckkod (EAN/GTIN, #4); "" or null clears.
+    barcode: articleBarcodeSchema.nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateArticleInput = z.infer<typeof updateArticleSchema>;

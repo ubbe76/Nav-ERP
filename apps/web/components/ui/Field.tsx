@@ -23,7 +23,8 @@ export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: st
   );
 }
 
-type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "size"> & { size?: FieldSize };
+// Ref-capable (React 19 passes `ref` as a prop) so ScanInput can refocus the field.
+type InputProps = Omit<ComponentPropsWithRef<"input">, "size"> & { size?: FieldSize };
 
 export function Input({ size, className, ...props }: InputProps) {
   return <input className={withSize(styles.input, size, className)} {...props} />;

@@ -24,6 +24,10 @@ Artikelregistret är grunden för allt annat och ska kännas igen av någon som 
 - Alla fält är redigerbara i efterhand, även artikelnummer/typ/fantomflagga (dubblett ⇒ 409).
 - Beredningslistans tidsenhet (`routing_operations.time_unit`: min/st, sek/st sedan 0167, st/h) växlas per rad i `BeredningView` (delade `ui/SegmentedToggle`, samma kontroll som operationsdialogen, `PATCH /articles/:id/routing/:opId { timeUnit }` utan konvertering; st/h avstängd vid stycktid 0, dold på legorader). Lagringen är alltid minuter; omräkningen går genom `runTimeInUnit`/`runTimeToMinutes` i `packages/shared/src/units.ts` (spegel `apps/web/lib/units.ts`, där även enhetsetiketterna bor) — sekunder visas med 2 decimaler, så ett inskrivet sekundvärde läses tillbaka oförändrat.
 
+## Streckkod (EAN, #4, migration 0171)
+
+- `articles.barcode` — se `scan.md` (format, unikhet, 409 före artikelnummerkrocken, aldrig kopierad).
+
 ## Prishistorik (migration 0169)
 
 - **Standardkostnaden** har historik sedan D1 (`article_standard_cost_history`, skriven i **appkoden** av create, `updateStandardCost` och CSV-importen via `recordStandardCostHistory`; plugin-händelsen `article.updated` hänger på samma "ändrades"-beslut) — oförändrad. **Försäljningspriset** (`article_sales_price_history`) skrivs av en **trigger** på `articles` (`nav_article_sales_price_history`): en rad per transaktion som ändrar värdet (en andra ändring i samma transaktion ersätter den första via `valid_from = now()`), inget när värdet är detsamma som senaste raden, null = rensat. Trigger i stället för appkod eftersom priset har ett åttatal skrivvägar (kort, Sätt försäljningspris, importer, massändring, kopiera, exempeldata, konfiguratorns varianter). Katalogen: `purchase.md`.
