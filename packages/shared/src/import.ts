@@ -36,6 +36,9 @@ export const importEntitySchema = z.enum([
   "articleUnits",
   "supplierPrices",
   "customerPrices",
+  // Lagersaldon (#3): the balance per article and location AFTER the import —
+  // the difference to today's balance is booked as a stock adjustment.
+  "stockBalances",
 ]);
 export type ImportEntity = z.infer<typeof importEntitySchema>;
 
@@ -50,6 +53,7 @@ export const IMPORT_ENTITY_ORDER: ImportEntity[] = [
   "bom",
   "supplierPrices",
   "customerPrices",
+  "stockBalances",
 ];
 
 // CSV-header -> target-field name, or null = "importera inte". The KEY ORDER

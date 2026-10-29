@@ -65,6 +65,13 @@ export const IMPORT_TEMPLATES: ImportTemplateInfo[] = [
     chapterLink: "/hjalp/forsaljning#importera-kundpriser",
   },
   {
+    entity: "stockBalances",
+    fileName: "importmall-lagersaldon.xlsx",
+    title: "Lagersaldon",
+    guide: "**Artiklar → Importera**, fliken **Lagersaldon**",
+    chapterLink: "/hjalp/lager#importera-lagersaldon",
+  },
+  {
     entity: "customers",
     fileName: "importmall-kunder.xlsx",
     title: "Kunder",

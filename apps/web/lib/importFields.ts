@@ -51,6 +51,16 @@ export const ARTICLE_UNIT_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "isSalesUnit", label: "Försäljningsenhet (Kundorder)" },
 ];
 
+// Mirrors STOCK_BALANCE_IMPORT_FIELDS in
+// apps/api/src/modules/import/service/stock-balances.ts (Lagersaldon, #3).
+export const STOCK_BALANCE_IMPORT_FIELDS: ImportFieldConfig[] = [
+  { field: "articleNumber", label: "Artikelnummer", required: true },
+  { field: "warehouseName", label: "Lager" },
+  { field: "locationName", label: "Lagerplats" },
+  { field: "quantity", label: "Antal (saldo efter importen)", required: true },
+  { field: "unitCost", label: "À-pris" },
+];
+
 // Mirrors SUPPLIER_PRICE_IMPORT_FIELDS in
 // apps/api/src/modules/import/service/supplier-prices.ts (Monitor's
 // "Prislista Inköp", plain and stafflat).

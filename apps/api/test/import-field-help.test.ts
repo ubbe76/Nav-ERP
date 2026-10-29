@@ -39,6 +39,11 @@ import {
   suggestCustomerMapping,
 } from "../src/modules/import/service/customers.js";
 import {
+  STOCK_BALANCE_IMPORT_FIELDS,
+  planStockBalanceImport,
+  suggestStockBalanceMapping,
+} from "../src/modules/import/service/stock-balances.js";
+import {
   CUSTOMER_CONTACT_IMPORT_FIELDS,
   planCustomerContactImport,
   suggestCustomerContactMapping,
@@ -103,6 +108,7 @@ const ENTITIES: Record<ImportEntity, EntitySpec> = {
   bom: { fields: BOM_IMPORT_FIELDS, suggest: suggestBomMapping, plan: planBomImport as Planner, webConstant: "BOM_IMPORT_FIELDS" },
   supplierPrices: { fields: SUPPLIER_PRICE_IMPORT_FIELDS, suggest: suggestSupplierPriceMapping, plan: planSupplierPriceImport as Planner, webConstant: "SUPPLIER_PRICE_IMPORT_FIELDS" },
   customerPrices: { fields: CUSTOMER_PRICE_IMPORT_FIELDS, suggest: suggestCustomerPriceMapping, plan: planCustomerPriceImport as Planner, webConstant: "CUSTOMER_PRICE_IMPORT_FIELDS" },
+  stockBalances: { fields: STOCK_BALANCE_IMPORT_FIELDS, suggest: suggestStockBalanceMapping, plan: planStockBalanceImport as Planner, webConstant: "STOCK_BALANCE_IMPORT_FIELDS" },
   customers: { fields: CUSTOMER_IMPORT_FIELDS, suggest: suggestCustomerMapping, plan: planCustomerImport as Planner, webConstant: "CUSTOMER_IMPORT_FIELDS" },
   customerContacts: { fields: CUSTOMER_CONTACT_IMPORT_FIELDS, suggest: suggestCustomerContactMapping, plan: planCustomerContactImport as Planner, webConstant: "CUSTOMER_CONTACT_IMPORT_FIELDS" },
   customerDeliveryAddresses: { fields: CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS, suggest: suggestCustomerDeliveryAddressMapping, plan: planCustomerDeliveryAddressImport as Planner, webConstant: "CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS" },
@@ -223,6 +229,7 @@ describe("field help — the examples parse", () => {
     bom: ["quantity", "operationSequenceNo", "componentStandardCost"],
     supplierPrices: ["price", "discountPercent", "breakQuantity", "breakPrice"],
     customerPrices: ["price", "discountPercent"],
+    stockBalances: ["quantity", "unitCost"],
     customers: ["discountPercent"],
     workCenters: ["hourlyRate", "calcRate1", "calcRate2", "defaultSetupTime"],
     legoWorkCenters: ["leadTimeDays", "queueTimeDays", "orderLeadTimeDays"],

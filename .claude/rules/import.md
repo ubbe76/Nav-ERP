@@ -20,7 +20,7 @@ E2e-testerna mot de riktiga exportfilerna ligger i det privata repot (`private/a
 
 Spec `docs/superpowers/specs/2026-10-22-importmallar-design.md`.
 
-- Rena `import/service/field-help.ts` är enda källan för varje importkolumns rubrik, förklaring, exempel och `text`-flagga (alla 15 entiteter; testet kräver täckning åt båda hållen, att varje rubrik kopplas till sitt eget fält av entitetens alias och att `required` stämmer med planern). Serveras till mappningssteget via `GET /imports/:entity/fields` (admin).
+- Rena `import/service/field-help.ts` är enda källan för varje importkolumns rubrik, förklaring, exempel och `text`-flagga (alla 16 entiteter; testet kräver täckning åt båda hållen, att varje rubrik kopplas till sitt eget fält av entitetens alias och att `required` stämmer med planern). Serveras till mappningssteget via `GET /imports/:entity/fields` (admin).
 - `npm run generate:import-templates -w apps/api` genererar de **incheckade** mallarna `apps/web/public/importmallar/importmall-<namn>.xlsx` (blad Import med kommentarer och textformaterade nummer-/kodkolumner, blad Instruktioner; proxyn undantar `importmallar/`) och manualkapitlet `docs/manual/importmallar.md` — **redigera aldrig dem för hand**. `import-templates-generated.test.ts` jämför byte för byte och kräver att katalogen och webbens `IMPORT_TEMPLATE_FILES` är exakt `IMPORT_TEMPLATES`. **Ändras en planer eller en förklaring: uppdatera field-help och kör generatorn.**
 - `xlsx-writer.ts` är handskriven och deterministisk (STORED-zip med `zlib.crc32`, OOXML med legacy-kommentarer + VML) — inget produktionsberoende. Hemsidan synkar mallarna (`hemsida/lib/sync.ts`), så Nav-main måste ha dem innan hemsidan byggs.
 
@@ -44,6 +44,14 @@ Spec `docs/superpowers/specs/2026-10-22-importmallar-design.md`.
 - **Inköp-flikens fält:** `quantityPerPackage` (Antal/kolli, 0 ⇒ null) och `primarySupplierNumber` (Leverantörsnr, okänd ⇒ radfel) — leverantören blir förvald i lövet `import/repository/article-primary-suppliers.ts` (`applyPrimarySuppliers` i `executeArticlePlan`s tx: demotera andra primära i en sats per chunk, sedan upsert på (artikel, leverantör) med `is_primary`; ny rad utan pris i leverantörens valuta).
 - **Extra benämning** (0157): `extraDescription`, flerradig (`decodeOoxmlText`), > 2000 ⇒ radfel, tom cell orörd.
 - **Revisioner:** `articleRevision`/`drawingNumber`/`drawingRevision` (Artikelrevision/Ritningsnummer/Ritningsrevision) är additiva och idempotenta — revisionen blir aktiv (läggs till om den saknas, den gamla blir inaktiv; förhandsgranskningen varnar när den aktiva byts, `articlesByNumber` bär `activeRevision`), ritningsnumret läggs till om det saknas, ritningsrevisionen gäller ritningsnumret på samma rad (krävs, annars radfel); importen tar aldrig bort något. Lövfilen `import/repository/article-revisions.ts` (`applyImportedRevisions` i `executeArticlePlan`s transaktion, ren `revisionChanges`).
+
+## Lagersaldon (#3)
+
+Spec `private/superpowers/specs/2026-10-29-lagersaldoimport-design.md`.
+
+- `stockBalances` (`service/stock-balances.ts`, lövet `repository/stock-balances.ts` som sprids in i import-repositoryt; fliken **Lagersaldon** sist i `IMPORT_ENTITY_ORDER`, identifieras på artikelnummer + lagerplats/lagerställe + antal/saldo före artikellistan). **Antal = saldot efter importen** (användarbeslut): skillnaden mot dagens saldo bokas som `inventory_adjustment` med `note` "Import av lagersaldo" (`STOCK_IMPORT_NOTE`) — samma fil två gånger ⇒ överhoppad, 0 ⇒ platsen töms och `deactivateEmptyLocation`. `skipExisting` = plats där artikeln har saldo ≠ 0 lämnas.
+- **Platsen:** Lager + Lagerplats (saknade **skapas**, användarbeslut; lager matchas på namn utan versaler — flera lager med samma namn ⇒ radfel) · bara Lagerplats ⇒ unikt namn krävs · bara Lager ⇒ radfel · ingen ⇒ `resolveStockLocation` (artikelns aktiva plats, annars `***`). `willCreate`/`registersCreated` bär `warehouses` och `stockLocations` ("Lager / Plats").
+- **Värdet:** ökning stämplar `unit_cost` = À-pris, annars standardkostnaden (som en manuell positiv justering), annars null + varning; minskning utan `unit_cost`. Tjänst/fantom, negativt antal, dubblett (artikel + plats) och plats under spärrande inventering ⇒ radfel; commit kör ändå `assertLocationNotUnderCount` och läser saldot **igen i transaktionen** — planens skillnad är förhandsgranskningens. Tom fil ⇒ tom plan utan uppslag. Tester: `import-stock-balances.test.ts`.
 
 ## Operationsimporten och tidsenhet
 

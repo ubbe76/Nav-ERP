@@ -1595,6 +1595,54 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Laser, kantpress och svets",
     },
   ],
+  stockBalances: [
+    {
+      field: "articleNumber",
+      label: "Artikelnummer",
+      required: true,
+      header: "Artikelnummer",
+      text: true,
+      description:
+        "Numret på en artikel som redan finns i artikelregistret och lagerhålls — inte en tjänst eller en fantomartikel. Samma artikel får bara förekomma en gång per lagerplats i filen.",
+      example: "RS-12",
+    },
+    {
+      field: "warehouseName",
+      label: "Lager",
+      required: false,
+      header: "Lager",
+      text: true,
+      description:
+        "Lagrets namn, max 100 tecken. Ett lager som saknas skapas. Kräver Lagerplats. Lämna både Lager och Lagerplats tomma för att lägga saldot på artikelns lagerplats.",
+      example: "Huvudlager",
+    },
+    {
+      field: "locationName",
+      label: "Lagerplats",
+      required: false,
+      header: "Lagerplats",
+      text: true,
+      description:
+        "Lagerplatsens namn i lagret, max 100 tecken. En plats som saknas skapas i lagret. Utan Lager måste platsnamnet finnas och vara unikt. Tom (och Lager tomt) betyder artikelns lagerplats, annars reservplatsen ***.",
+      example: "A1-03",
+    },
+    {
+      field: "quantity",
+      label: "Antal (saldo efter importen)",
+      required: true,
+      header: "Antal",
+      description: `Saldot på lagerplatsen efter importen, i artikelns grundenhet, 0 eller mer, ${DECIMAL}. Skillnaden mot dagens saldo bokas som en lagerjustering — samma fil två gånger ändrar inget, och 0 tömmer platsen.`,
+      example: "120",
+    },
+    {
+      field: "unitCost",
+      label: "À-pris",
+      required: false,
+      header: "À-pris",
+      description: `Värdet per grundenhet i kronor för det som läggs till, ${DECIMAL}. Tom cell betyder artikelns standardkostnad. Används bara när saldot ökar.`,
+      example: "24,50",
+    },
+  ],
 };
 
 // The wizard's view: everything but the template-only `text` flag.

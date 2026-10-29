@@ -108,6 +108,18 @@ Skriv ut **räknelistan** med **Skriv ut räknelista** — den är avsiktligt *b
 
 Har artikeln alternativa enheter visas en **Enhet**-dropdown vid justeringsfältet — antalet kan då matas in i t.ex. kg och räknas om till grundenheten vid bokföringen (omräkningen visas som hjälptext innan du sparar).
 
+## Importera lagersaldon
+
+Vid start med Nav|ERP läses de ingående saldona in från fil i stället för en justering per artikel: **Artiklar → Importera**, fliken **Lagersaldon** (endast administratörer). Guiden är densamma som för artiklarna — **Fil**, **Kolumner**, **Förhandsgranska** och **Resultat** — och tar CSV eller Excel. Mallen laddas ned med **Ladda ned mall**; kolumnerna förklaras i [Importmallar](/hjalp/importmallar#lagersaldon). Importera artiklarna först — raderna måste peka på artiklar som finns.
+
+En rad per artikel och lagerplats med kolumnerna **Artikelnummer**, **Lager**, **Lagerplats**, **Antal** och **À-pris**:
+
+- **Antal är saldot efter importen**, som vid en inventering. Nav jämför med dagens saldo på platsen och bokar **skillnaden** som en vanlig lagerjustering med anteckningen *Import av lagersaldo* — den syns i [transaktionsloggen](#transaktioner) som alla andra lagerhändelser. Samma fil två gånger ändrar alltså ingenting, en rättad fil rättar saldot och **0** tömmer platsen. En rad där saldot redan stämmer räknas som överhoppad.
+- **Lager och Lagerplats** anger platsen. Ett lager eller en plats som saknas **skapas** — förhandsgranskningen visar vilka under **Skapas automatiskt**. Bara Lagerplats fungerar när platsnamnet finns i ett enda lager. Är båda tomma hamnar saldot på artikelns lagerplats, annars på reservplatsen **`***`**.
+- **À-pris** värderar det som läggs till (kronor per grundenhet), så att [lagervärderingen](#lagervardering) stämmer från första dagen. Tom cell betyder artikelns standardkostnad — samma som en manuell justering. Saknas båda bokas ökningen utan värde, med en varning. En minskning värderas aldrig; den tar det som fanns.
+
+Raden stoppas när artikeln inte finns, är en tjänst eller en fantomartikel, när samma artikel står två gånger på samma plats, när antalet är negativt eller när platsen [inventeras](#inventering) med spärr. **Hoppa över rader som redan finns** lämnar platser där artikeln redan har ett saldo orörda. Importen är allt eller inget: har någon rad fel importeras ingenting.
+
 ## Lagervärdering
 
 **Lager → Lagervärdering** (endast administratörer) visar lagrets värde — saldo gånger ett värderingspris — per valfritt datum, uppdelat per varugrupp med en summarad längst ner. Ange **Per datum**, välj **Metod** och eventuellt en **Varugrupp** eller **Artikelkod** (annars visas alla). Med **Gruppera** väljer du om rapporten delas upp per **Varugrupp** (förvalt, artiklar utan varugrupp hamnar under **Utan varugrupp**) eller per **Artikelkod** (artiklar utan kod under **Utan artikelkod**); valet följer med i PDF:en. Rapporten hämtas direkt när du ändrar ett val, och sidans URL följer med så vyn går att bokmärka. Ladda ner samma rapport som PDF med **Ladda ner PDF**.

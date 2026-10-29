@@ -19,6 +19,8 @@ interface Signature {
   any?: string[];
   /** Also requires one of ROUTING_TIME_HEADINGS (the internal Operationslista). */
   needsTimeColumn?: true;
+  /** Also requires one of STOCK_QUANTITY_HEADINGS (Lagersaldon). */
+  needsQuantity?: true;
 }
 
 export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
@@ -44,6 +46,10 @@ export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
   { entity: "supplierPrices", all: ["artikelnummer", "leverantor", "pris"] },
   // Prislista Försäljning: customer + price.
   { entity: "customerPrices", all: ["artikelnummer", "kund", "pris"] },
+  // Lagersaldon: the article on a place with a quantity — the template's
+  // headings and a stock list's (Lagerställe, Saldo). Ahead of the article
+  // list, which a "Lagerplats" column would otherwise fall into.
+  { entity: "stockBalances", all: ["artikelnummer"], any: ["lagerplats", "lagerstalle"], needsQuantity: true },
   // Artikellista and its sub-exports (Planering, Extra benämning …): the
   // article number plus at least one article field.
   {
@@ -77,6 +83,7 @@ export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
 // so a bare article list with an "Op." column somewhere is not mistaken for
 // a routing — Monitor's Operationslista always has Ställtid/Stycktid.
 const ROUTING_TIME_HEADINGS = ["stalltid", "stycktid", "tidenhet"];
+const STOCK_QUANTITY_HEADINGS = ["antal", "saldo", "lagersaldo"];
 
 export function detectImportEntity(headers: string[]): ImportEntity | null {
   // parse() suffixes repeated headings ("Pris (2)") — strip that before
@@ -86,6 +93,7 @@ export function detectImportEntity(headers: string[]): ImportEntity | null {
     if (!signature.all.every((heading) => present.has(heading))) continue;
     if (signature.any && !signature.any.some((heading) => present.has(heading))) continue;
     if (signature.needsTimeColumn && !ROUTING_TIME_HEADINGS.some((heading) => present.has(heading))) continue;
+    if (signature.needsQuantity && !STOCK_QUANTITY_HEADINGS.some((heading) => present.has(heading))) continue;
     return signature.entity;
   }
   return null;
