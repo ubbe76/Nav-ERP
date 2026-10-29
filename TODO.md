@@ -35,6 +35,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Konfigurator:** `updateRule` med bara ny effekt tolkar det sparade målet med den nya effektens icke-strikta schema — require → exclude kan tappa en operation tyst. Kräv mål när effekten ändras.
 - [ ] **Radordning:** latenta `createdAt`-ties (bulkinsert delar `now()`) i `salesOrderRows`, `costCalculationMaterialRows` och `supplierInvoiceRows` — raderna kan byta ordning.
 - [ ] **Inköp:** IO- och förfrågningsrader ger 500 på `InvalidUnitError`.
+- [ ] **Inköp:** samma artikel två gånger på en IO ger 500 — det unika indexet `purchase_order_rows (purchase_order_id, article_id)` ska bli ett 409 med begripligt fel (gäller troligen förfrågningsraderna också).
 - [ ] **Budget:** CSV-exporten skyddar inte kostnadsställekoder mot formelprefix (`=`, `+`, `-`, `@`) när filen öppnas i Excel.
 - [ ] **Budget:** `calendarMonthMap` ger dubbla MM i ett förlängt målår — beloppen kan hamna på fel månad.
 - [ ] **Konfigurerad tillverkning:** en icke-härledbar struktur accepteras på raden med cost null och syns först när TO:n skapas; datumförslaget ignorerar levererat antal; en inaktiv mall får fortfarande konfigurerade förslag i behovsberäkningen.

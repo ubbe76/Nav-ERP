@@ -28,6 +28,10 @@ export const listPurchaseOrdersQuerySchema = listQuerySchema.extend({
   // Legoinköp: "lego" = orders with at least one row linked to a TO operation
   // (moOperationId), "regular" = orders without one.
   kind: z.enum(["lego", "regular"]).optional(),
+  // Orders with a row of this article still short of its ordered quantity —
+  // the goods receipt's answer to an article scanned before an order is
+  // chosen (skanning, #4).
+  openArticleId: z.string().uuid().optional(),
   // Adds openRowCount (rows still short of their ordered quantity) to each
   // row — an extra correlated subquery, so it's opt-in. NOT z.coerce.boolean()
   // — see listUsersQuerySchema's includeDeleted for the "false" string pitfall.

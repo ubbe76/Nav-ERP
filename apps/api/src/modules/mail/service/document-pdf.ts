@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import { minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, VAT_CODES, type ExtraDescriptionDocument } from "@navet/shared";
-import { drawCode128, drawQrCode } from "./pdf-codes.js";
+import { code128Width, drawCode128, drawQrCode } from "./pdf-codes.js";
 import type { SystemService } from "../../system/service/system.service.js";
 
 // One shared A4 layout for all outgoing business documents (förfrågan,
@@ -238,6 +238,10 @@ export interface DocumentPdfInput {
   // confirmation/PO, not on the invoice. Callsites pass null when the
   // "show_order_revision_on_documents" setting is off.
   revision?: number | null;
+  // Skanning (#4): a Code 128 of the document number at the right end of the
+  // title line, so a printed purchase order can be scanned in Inleverans.
+  // Nothing is drawn for a number Code 128 cannot hold.
+  documentNumberBarcode?: boolean;
   // Invoice-only meta lines under the date.
   dueDate?: Date | null;
   orderReference?: string | null;
@@ -1135,6 +1139,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     let y = 130;
     const numberWithRevision = `${input.documentNumber}${input.revision != null ? ` / ${input.revision}` : ""}`;
     doc.font("Helvetica-Bold").fontSize(18).text(`${input.title} ${numberWithRevision}`, left, y);
+    if (input.documentNumberBarcode) {
+      // Right-aligned beside the title, below the logo; at most 170 pt wide
+      // so it never reaches the title text.
+      const width = code128Width(input.documentNumber, 170);
+      if (width !== null) drawCode128(doc, input.documentNumber, left + CONTENT_WIDTH - width, y - 2, 170, 24);
+    }
     y += 26;
     doc
       .font("Helvetica")

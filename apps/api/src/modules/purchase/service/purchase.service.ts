@@ -651,6 +651,7 @@ export function createPurchaseService(
     const content = await pdf.render({
       title: "Inköpsorder",
       documentNumber: order.orderNumber,
+      documentNumberBarcode: true,
       date: order.createdAt,
       partnerLabel: "Leverantör",
       partner: supplier!,

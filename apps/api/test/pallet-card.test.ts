@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { inflateSync } from "node:zlib";
 import { eq, sql } from "drizzle-orm";
 import { db, moReports, systemSettings } from "@navet/db";
 import {
@@ -9,7 +8,7 @@ import {
   palletCardQuerySchema,
   type PalletCardCode,
 } from "@navet/shared";
-import { pdfPageCount, pdfText } from "./helpers/pdf.js";
+import { pdfPageCount, pdfRectCount, pdfText } from "./helpers/pdf.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -105,31 +104,6 @@ afterEach(async () => {
 afterAll(async () => {
   await db.execute(TRUNCATE);
 });
-
-// Filled rectangles in the PDF's content streams — the title band and the
-// frame are always drawn with rect(); a barcode adds its bars, a QR code its
-// modules. A layout test, not image analysis: the counts tell the three
-// code types apart without decoding anything.
-function pdfRectCount(buffer: Buffer): number {
-  const marker = Buffer.from("stream\n");
-  const end = Buffer.from("endstream");
-  let count = 0;
-  let offset = 0;
-  while (true) {
-    const start = buffer.indexOf(marker, offset);
-    if (start === -1) break;
-    const from = start + marker.length;
-    const to = buffer.indexOf(end, from);
-    if (to === -1) break;
-    try {
-      count += inflateSync(buffer.subarray(from, to)).toString("latin1").match(/ re\n/g)?.length ?? 0;
-    } catch {
-      // Not a deflate stream — skip.
-    }
-    offset = to + end.length;
-  }
-  return count;
-}
 
 async function makeUser(name = "Operator") {
   return authRepo.create({

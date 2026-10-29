@@ -426,7 +426,8 @@ export type ScanMatch =
       active: boolean;
       matchedBy: "barcode" | "articleNumber";
     }
-  | { kind: "purchaseOrder" | "salesOrder"; id: string; orderNumber: string; status: string; partyName: string }
+  | { kind: "purchaseOrder"; id: string; orderNumber: string; status: string; partyName: string }
+  | { kind: "salesOrder"; id: string; orderNumber: string; status: string; partyName: string }
   | {
       kind: "manufacturingOrder";
       id: string;

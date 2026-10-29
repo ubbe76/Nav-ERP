@@ -32,6 +32,8 @@ Det här känns igen:
 
 Koder läses med Code 128, EAN-8, EAN-13, UPC och QR.
 
+Skanningsfältet finns också i [Inleverans](/hjalp/inkop#skanna-i-inleveransen), där en skannad artikel räknas mot inköpsorderns rader.
+
 ## Etiketter
 
 Artiklar och lagerplatser kan få etiketter med en kod att skanna: **Skriv ut etiketter** för de markerade raderna i lagerplatsregistret och i artikelregistret, och **Skriv ut etikett** på artikelkortet. En artikeletikett har artikelnumret, benämningen och artikelnumret som kod (och EAN-koden som text när den finns); en lagerplatsetikett har platsens namn, lagret och platsens **etikettkod**. Koden är en streckkod (Code 128), eller en QR-kod när texten innehåller tecken som en streckkod inte kan bära, till exempel å, ä eller ö.

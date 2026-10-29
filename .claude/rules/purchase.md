@@ -22,7 +22,7 @@ Andra regelfiler: radernas leveransdatum `order-dates.md`, leveransdagar `delive
 
 - **Förfrågan** (RFQ, `inquiries`/`inquiry_rows`, FO-serien `inquiry`): draft → sent → answered → ordered | cancelled i purchase-servicen, rader redigerbara t.o.m. answered; `POST /inquiries/:id/convert-to-order` skapar IO:n transaktionellt (obesvarade priser → 0, förfrågans villkor följer med).
 - **IO-rader** är redigerbara (`PATCH`/`DELETE /purchase-orders/:id/rows/:rowId`) tills ordern är helt mottagen — radlåset i repositoryts transaktion (antal ≥ mottaget, rad med mottag kan inte tas bort); en radändring i Delvis mottagen räknar om orderstatusen precis som receive. Antal avrundas med `roundForArticle` i servicen.
-- **Inleverans** (`/inkop/inleverans`) rapporterar hela ordrar (`?order=<id>`, förifyllda restantal, gemensam lagerplats) genom att loopa per-rad-endpointsen — inga batch-endpoints.
+- **Inleverans** (`/inkop/inleverans`) rapporterar hela ordrar (`?order=<id>`, förifyllda restantal, gemensam lagerplats) genom att loopa per-rad-endpointsen — inga batch-endpoints. Skanningen i rutinen (räkna från noll, `openArticleId`, IO-PDF:ens streckkod) står i `scan.md`.
 - Kort: `/leverantorer/[id]` använder `PartnerTabs.tsx` (Allmänt / Villkor & frakt / Kontakter); kontakter (`supplier_contacts`, `/suppliers/:id/contacts`) med max en huvudkontakt (partiellt unikt index, primärväxling i transaktion).
 
 ## Leverantörskatalog och staffelpriser
