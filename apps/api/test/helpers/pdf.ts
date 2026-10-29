@@ -116,3 +116,28 @@ export function pdfTextRuns(buffer: Buffer): { text: string; y: number }[] {
   }
   return runs;
 }
+
+// Rectangles in the PDF's content streams: a barcode adds its bars and a QR
+// code its modules on top of the frames and bands the layout draws. A layout
+// test, not image analysis: the counts tell the code types apart without
+// decoding anything (the pallet card, the purchase order's header).
+export function pdfRectCount(buffer: Buffer): number {
+  const marker = Buffer.from("stream\n");
+  const end = Buffer.from("endstream");
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const start = buffer.indexOf(marker, offset);
+    if (start === -1) break;
+    const from = start + marker.length;
+    const to = buffer.indexOf(end, from);
+    if (to === -1) break;
+    try {
+      count += inflateSync(buffer.subarray(from, to)).toString("latin1").match(/ re\n/g)?.length ?? 0;
+    } catch {
+      // Not a deflate stream — skip.
+    }
+    offset = to + end.length;
+  }
+  return count;
+}

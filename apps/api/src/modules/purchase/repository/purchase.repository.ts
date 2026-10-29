@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNotNull, not, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNotNull, lt, not, notInArray, or, sql } from "drizzle-orm";
 import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
@@ -784,6 +784,22 @@ export function createPurchaseRepository(db: Db) {
             .where(and(eq(purchaseOrderRows.purchaseOrderId, purchaseOrders.id), isNotNull(purchaseOrderRows.moOperationId)))
         );
         conditions.push(query.kind === "lego" ? hasLegoRow : not(hasLegoRow));
+      }
+      if (query.openArticleId) {
+        conditions.push(
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(purchaseOrderRows)
+              .where(
+                and(
+                  eq(purchaseOrderRows.purchaseOrderId, purchaseOrders.id),
+                  eq(purchaseOrderRows.articleId, query.openArticleId),
+                  lt(purchaseOrderRows.quantityReceived, purchaseOrderRows.quantityOrdered)
+                )
+              )
+          )
+        );
       }
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 

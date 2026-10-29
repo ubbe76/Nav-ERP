@@ -7,7 +7,10 @@ paths:
   - "apps/web/components/ui/ScanInput*"
   - "apps/web/app/lager/skanna/**"
   - "apps/web/components/stock/LabelPrint*"
+  - "apps/web/lib/goodsReceiptScan.ts"
+  - "apps/web/components/purchase/GoodsReceiptPageClient*"
   - "apps/api/test/scan*"
+  - "apps/api/test/web-goods-receipt-scan*"
 ---
 
 # Skanning och etiketter (#4)
@@ -18,3 +21,5 @@ Spec `private/superpowers/specs/2026-10-29-skanning-design.md` — fyra etapper 
 - **`GET /scan?code=`** (modulen `scan`, bara läsning, office): `normalizeScanCode` (tar bort Enter, tab, GS1-separatorn) och svarar med **alla** träffar i fast ordning — plats, artikel på EAN, artikel på nummer, IO/KO (även offertnumret)/TO — så varje rutin väljer den sort den väntar sig. Ingen träff ⇒ tom lista, aldrig 404.
 - **Etiketterna** (`mail/service/label-pdf.ts`, ingen sidhuvud/inställning, importeras direkt av artikel- och lagermodulen): `POST /articles/labels` och `POST /stock/locations/labels` (regeln `LABEL_PRINT` = office, `readOnlySafe` — utskrift skriver inget; listan i `read-only-account.test.ts`), A4-ark 70 × 37 mm (3 × 8, `start` 1–24) eller 100 × 50 mm per sida, högst 2 000 etiketter. Code 128 när texten går att koda och får plats, annars QR. Ritningen av koderna är **en** implementation i `pdf-codes.ts`, delad med pallkortet.
 - **Webben:** `ui/ScanInput` (handskanner = tangentbord + Enter; **Kamera** med `BarcodeDetector`, annars ZXing laddad först när dialogen öppnas — iPhone saknar BarcodeDetector; kräver https), sidan **Lager → Skanna** och etikettdialogen. Tester: `scan.shared.test.ts` (rent), `scan.route.test.ts` (EAN, uppslaget, importen, etiketterna).
+- **Etapp 2 — Inleverans** (ingen migration): skanningsfältet i `/inkop/inleverans`, reglerna i rena `apps/web/lib/goodsReceiptScan.ts` (`web-goods-receipt-scan.test.ts`). `resolveReceiptScan` väljer bland träffarna: plats → artikel med öppen rad på vald order → IO → förklaring (redan mottagen / inte på ordern / leta ordrar / fel sorts order). **Användarbeslut: räkna från noll** — första artikelskanningen nollställer de förifyllda restantalen (inskrivna värden står kvar), varje skanning +1 i radens enhet, rader med 0 tas inte emot; överleverans varnar bara, toleransen är serverns. Skanningarna köas (`scanQueue`) och räknas mot `countRef`, inte mot React-state — snabba handskannerskanningar får aldrig tappas. Artikel utan vald order: `GET /purchase-orders?openArticleId=` (ordrar med en *öppen* rad för artikeln); en träff väljs direkt och skanningen räknas när raderna laddats (`pendingCount`), flera visas som lista. **Användarbeslut:** IO-PDF:en har ordernumret som Code 128 bredvid rubriken (`DocumentPdfInput.documentNumberBarcode`, bara inköpsordern). Test: `scan-receipt.route.test.ts`.
+

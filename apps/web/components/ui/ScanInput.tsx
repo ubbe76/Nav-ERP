@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { Button } from "./Button";
 import { Input } from "./Field";
 import { Modal } from "./Modal";
@@ -19,19 +19,23 @@ const CAMERA_ERROR = "Kameran kunde inte startas — kontrollera att sidan får 
 // Skanningsfält: a text field that takes what a handheld scanner types (the
 // characters, then Enter) plus a Kamera button that decodes with the phone's
 // camera. Both end in onScan(code); the field clears and keeps focus so the
-// next scan can follow straight away.
+// next scan can follow straight away. `inputRef` lets a routine send focus
+// back to the field (Inleverans does after a typed quantity).
 export function ScanInput({
   onScan,
   autoFocus = false,
   placeholder = "Skanna eller skriv en kod…",
+  inputRef: externalRef,
 }: {
   onScan: (code: string) => void;
   autoFocus?: boolean;
   placeholder?: string;
+  inputRef?: RefObject<HTMLInputElement | null>;
 }) {
   const [value, setValue] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const ownRef = useRef<HTMLInputElement>(null);
+  const inputRef = externalRef ?? ownRef;
 
   function submit(raw: string) {
     const code = raw.trim();
