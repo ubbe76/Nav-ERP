@@ -104,6 +104,7 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
   // Same rule for the materialpåslag a halvfabrikat lifted up.
   const hasRowMaterialMarkup = detail.materialRows.some((row) => Number(row.materialMarkupAmount) !== 0);
   const hasForeignPrice = detail.materialRows.some((row) => row.supplierCurrency !== null);
+  const hasPriceDate = detail.materialRows.some((row) => row.priceDate !== null);
 
   return (
     <div>
@@ -113,8 +114,9 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
         {percent(detail.generalMarkupPercent)}, materialpåslag {percent(detail.materialMarkupPercent)}.
         {detail.multiLevel &&
           " Flernivåkalkyl: tillverkade halvfabrikat kostades ur sina egna strukturer och rutter, och bär därför inget MO-påslag här; deras TO-påslag och materialpåslag ingår i kedjans TO-påslag och materialpåslag."}
-        {hasForeignPrice &&
-          " Leverantörspriser i annan valuta är omräknade till kronor med dagens kurs när kalkylen gjordes."}
+        {hasPriceDate
+          ? " Standard- och leverantörspriser, och kurser för priser i annan valuta, är de som gällde när komponenten senast togs ut på ordern."
+          : hasForeignPrice && " Leverantörspriser i annan valuta är omräknade till kronor med dagens kurs när kalkylen gjordes."}
       </FormHint>
 
       {hasRows ? (
@@ -288,23 +290,27 @@ function PriceSourceCell({
   configured: CostCalculationDetail["materialSource"];
 }) {
   if (row.priceSource === "none") return <span className={styles.fallback}>inget pris</span>;
+  // What the kronor à-pris came from: a supplier price in another currency
+  // and its rate, and in an efterkalkyl the day the price was taken.
+  const details: string[] = [];
+  if (row.supplierCurrency !== null && row.supplierUnitPrice !== null && row.exchangeRate !== null) {
+    const price = Number(row.supplierUnitPrice).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    details.push(`${price} ${row.supplierCurrency}`, `kurs ${formatRate(row.exchangeRate)}`);
+  }
+  if (row.priceDate !== null) details.push(`uttag ${row.priceDate}`);
   // Any source other than "standard" that ended up on the standard cost fell
   // back — written as "not standard" rather than "is supplier" so a new source
   // (actual) reports its fallbacks without another edit here.
-  if (configured !== "standard" && row.priceSource === "standard") {
-    return <span className={styles.fallback}>standardpris (fallback)</span>;
-  }
-  // A supplier price in another currency: what the kronor à-pris came from.
-  if (row.supplierCurrency !== null && row.supplierUnitPrice !== null && row.exchangeRate !== null) {
-    const price = Number(row.supplierUnitPrice).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-    return (
-      <>
-        {PRICE_SOURCE_LABELS[row.priceSource]}
-        <span className={styles.foreign}>
-          {price} {row.supplierCurrency} · kurs {formatRate(row.exchangeRate)}
-        </span>
-      </>
+  const label =
+    configured !== "standard" && row.priceSource === "standard" ? (
+      <span className={styles.fallback}>standardpris (fallback)</span>
+    ) : (
+      PRICE_SOURCE_LABELS[row.priceSource]
     );
-  }
-  return <>{PRICE_SOURCE_LABELS[row.priceSource]}</>;
+  return (
+    <>
+      {label}
+      {details.length > 0 && <span className={styles.foreign}>{details.join(" · ")}</span>}
+    </>
+  );
 }

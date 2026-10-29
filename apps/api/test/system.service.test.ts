@@ -316,19 +316,35 @@ describe("system service — settings", () => {
     }
   });
 
-  it("reads the Verklig kostnad material source back after storing it", async () => {
+  it("reads the efterkalkyl's Verklig kostnad back after storing it", async () => {
     // The decode used to be a two-way ternary (=== "supplier" ? … : "standard")
     // which stored any new enum member and then silently answered "standard"
     // on the way out. A round trip is the only shape of test that catches it.
     try {
-      const updated = await systemService.updateSettings({ costingMaterialSource: "actual" });
-      expect(updated.costingMaterialSource).toBe("actual");
+      const updated = await systemService.updateSettings({ costingPostMaterialSource: "actual" });
+      expect(updated.costingPostMaterialSource).toBe("actual");
 
       const reread = await systemService.getSettings();
-      expect(reread.costingMaterialSource).toBe("actual");
+      expect(reread.costingPostMaterialSource).toBe("actual");
     } finally {
-      await systemService.updateSettings({ costingMaterialSource: "standard" });
+      await systemService.updateSettings({ costingPostMaterialSource: "standard" });
     }
+  });
+
+  it("keeps the förkalkyl's and the efterkalkyl's material sources apart", async () => {
+    try {
+      await systemService.updateSettings({ costingMaterialSource: "supplier", costingPostMaterialSource: "actual" });
+      const reread = await systemService.getSettings();
+      expect(reread.costingMaterialSource).toBe("supplier");
+      expect(reread.costingPostMaterialSource).toBe("actual");
+    } finally {
+      await systemService.updateSettings({ costingMaterialSource: "standard", costingPostMaterialSource: "standard" });
+    }
+  });
+
+  it("refuses Verklig kostnad as the förkalkyl's material source", () => {
+    expect(updateSystemSettingsSchema.safeParse({ costingMaterialSource: "actual" }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ costingPostMaterialSource: "actual" }).success).toBe(true);
   });
 
   const PAXML_KEYS = ["paxml_code_worked", "paxml_code_overtime", "paxml_code_overtime_off_schedule", "paxml_code_atf"];

@@ -18,7 +18,8 @@ import { costMultiLevel, type SubAssemblyPort } from "./sub-assembly.js";
 import { explodeDerivedMaterials } from "../../configurator/service/configurator-explode.js";
 import { manufacturingCost, perUnit, selfCost } from "./cost-figures.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
-import { stockholmToday } from "../../system/service/delivery-days.js";
+import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
+import { primarySupplierAt, standardCostAt } from "./price-at.js";
 
 export class ArticleNotFoundError extends Error {
   constructor(id: string) {
@@ -74,7 +75,11 @@ export interface ArticlePriceWriter {
 // Kalkyler) — same pattern as AtfSettingsReader in atf.service.ts.
 export interface CostingSettingsReader {
   getSettings(): Promise<{
+    // Förkalkylens materialkälla (and the configurator's preview).
     costingMaterialSource: CostingMaterialSource;
+    // Efterkalkylens. Optional so stubs that predate the split still satisfy
+    // the interface; absent = the förkalkyl's, the pre-split behaviour.
+    costingPostMaterialSource?: CostingMaterialSource;
     // Optional so test stubs that predate the staffel still satisfy the
     // interface; absent = "base" (grundpriset), the pre-staffel behaviour.
     costingSupplierPriceTier?: CostingSupplierPriceTier;
@@ -95,29 +100,31 @@ function distinct(warnings: string[]) {
   return [...new Set(warnings)];
 }
 
-// Leverantörspris i valuta: today's rate for every currency a calculation run
-// meets, looked up once per currency and BEFORE any arithmetic — getRate may
-// call Riksbanken, and resolveUnitCost stays pure. Only the "supplier" source
-// reads supplier prices, so the other sources never trigger a lookup. A
-// currency without a rate gets null and resolveUnitCost falls back with a
-// warning; any other error is a real failure and propagates.
+// Leverantörspris i valuta: the rate for every currency a calculation run
+// meets — today's, or the day the basis was priced as of (the efterkalkyl's
+// priceDate) — looked up once per currency and day and BEFORE any arithmetic:
+// getRate may call Riksbanken, and resolveUnitCost stays pure. Only the
+// "supplier" source reads supplier prices, so the other sources never trigger
+// a lookup. A currency without a rate gets null and resolveUnitCost falls back
+// with a warning; any other error is a real failure and propagates.
 function createRateAttacher(rates: Pick<ExchangeRateReader, "getRate">, source: CostingMaterialSource, today: string) {
-  const byCurrency = new Map<string, Promise<number | null>>();
-  function rateFor(currency: string) {
-    let rate = byCurrency.get(currency);
+  const byCurrencyAndDay = new Map<string, Promise<number | null>>();
+  function rateFor(currency: string, day: string) {
+    const key = `${currency}|${day}`;
+    let rate = byCurrencyAndDay.get(key);
     if (!rate) {
-      rate = rates.getRate(currency, today).then(
+      rate = rates.getRate(currency, day).then(
         (lookup) => lookup.rate,
         (err: unknown) => {
           if (err instanceof ExchangeRateUnavailableError) return null;
           throw err;
         }
       );
-      byCurrency.set(currency, rate);
+      byCurrencyAndDay.set(key, rate);
     }
     return rate;
   }
-  return async function attachRates<T extends { supplierCurrency?: string | null }>(
+  return async function attachRates<T extends { supplierCurrency?: string | null; priceDate?: string | null }>(
     bases: T[]
   ): Promise<(T & { supplierExchangeRate: number | null })[]> {
     return Promise.all(
@@ -125,7 +132,8 @@ function createRateAttacher(rates: Pick<ExchangeRateReader, "getRate">, source: 
         const currency = basis.supplierCurrency ?? SEK;
         return {
           ...basis,
-          supplierExchangeRate: source === "supplier" && currency !== SEK ? await rateFor(currency) : null,
+          supplierExchangeRate:
+            source === "supplier" && currency !== SEK ? await rateFor(currency, basis.priceDate ?? today) : null,
         };
       })
     );
@@ -323,12 +331,14 @@ export function createCostingService(
 
   async function loadCostingConfig(): Promise<{
     source: CostingMaterialSource;
+    postSource: CostingMaterialSource;
     supplierPriceTier: CostingSupplierPriceTier;
     markups: CostingMarkups;
   }> {
     const s = await settings.getSettings();
     return {
       source: s.costingMaterialSource,
+      postSource: s.costingPostMaterialSource ?? s.costingMaterialSource,
       supplierPriceTier: s.costingSupplierPriceTier ?? "base",
       markups: {
         moPercent: s.costingMoPercent,
@@ -400,6 +410,43 @@ export function createCostingService(
     return { header, materialRows, operationRows, warnings };
   }
 
+  // Efterkalkylen prissätter vid uttaget: with source standard or supplier,
+  // each component is priced as of its latest withdrawal on the order — the
+  // standard cost from its history (D1), the primary supplier's catalog row
+  // from its snapshots (migration 0169), and (via priceDate) the rate of that
+  // day. The calculation then gives the same answer when it is re-run later.
+  // A component never drawn is priced as of now. Verklig kostnad is already
+  // per withdrawal and untouched.
+  async function pricedAtWithdrawal<
+    T extends {
+      componentArticleId: string;
+      standardCost: string | null;
+      supplierPrice: string | null;
+      supplierCurrency: string | null;
+      supplierPriceBreaks: { fromQuantity: number; price: number }[];
+    },
+  >(manufacturingOrderId: string, consumptions: T[], source: CostingMaterialSource): Promise<(T & { priceDate: string | null })[]> {
+    if (source === "actual" || consumptions.length === 0) return consumptions.map((c) => ({ ...c, priceDate: null }));
+    const [drawnAt, histories] = await Promise.all([
+      repo.getLatestConsumptionTimes(manufacturingOrderId),
+      repo.getPriceHistories([...new Set(consumptions.map((c) => c.componentArticleId))]),
+    ]);
+    const now = new Date();
+    return consumptions.map((c) => {
+      const at = drawnAt.get(c.componentArticleId) ?? now;
+      const supplier = primarySupplierAt(histories.supplier.get(c.componentArticleId) ?? [], at);
+      return {
+        ...c,
+        // No history rows at all: the article's current value, as before.
+        standardCost: standardCostAt(histories.standard.get(c.componentArticleId) ?? [], at) ?? c.standardCost,
+        supplierPrice: supplier?.price ?? null,
+        supplierCurrency: supplier?.currency ?? null,
+        supplierPriceBreaks: supplier?.priceBreaks ?? [],
+        priceDate: stockholmDateOf(at),
+      };
+    });
+  }
+
   // Requires an existing MO — actual material consumption x unit cost, actual
   // reported hours per operation x work center hourly rate, then the same
   // markups as the pre-calculation. Read and arithmetic only, as above.
@@ -408,11 +455,10 @@ export function createCostingService(
     if (!order) throw new ManufacturingOrderNotFoundError(manufacturingOrderId);
 
     const warnings: string[] = [];
-    const { source, supplierPriceTier, markups } = await loadCostingConfig();
+    const { postSource: source, supplierPriceTier, markups } = await loadCostingConfig();
 
-    // Supplier prices are today's catalog prices, so they take today's rate.
     const consumptions = await createRateAttacher(rates, source, today())(
-      await repo.getMaterialConsumptionsWithCost(manufacturingOrderId)
+      await pricedAtWithdrawal(manufacturingOrderId, await repo.getMaterialConsumptionsWithCost(manufacturingOrderId), source)
     );
     // Only asked for when the configured source needs it — deriving the moving
     // average costs two queries and a replay, and the other two sources have

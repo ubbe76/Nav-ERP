@@ -1184,6 +1184,13 @@
       "when": 1793269922773,
       "tag": "0168_kalkyl_leverantorspris_valuta",
       "breakpoints": true
+    },
+    {
+      "idx": 169,
+      "version": "7",
+      "when": 1793274967415,
+      "tag": "0169_prishistorik",
+      "breakpoints": true
     }
   ]
 }

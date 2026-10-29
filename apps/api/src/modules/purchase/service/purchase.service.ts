@@ -1602,6 +1602,11 @@ export function createPurchaseService(
       return repo.listArticleSuppliers(articleId);
     },
 
+    async listArticleSupplierPriceHistory(articleId: string) {
+      if (!(await articleFiles.getArticle(articleId))) throw new ArticleNotFoundError(articleId);
+      return repo.listArticleSupplierPriceHistory(articleId);
+    },
+
     async addArticleSupplier(articleId: string, input: CreateArticleSupplierInput) {
       if (!(await articleFiles.getArticle(articleId))) throw new ArticleNotFoundError(articleId);
       const supplier = await repo.findSupplierById(input.supplierId);

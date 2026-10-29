@@ -982,3 +982,87 @@ describe("costing service — supplier price in another currency", () => {
     expect(row).toMatchObject({ supplierCurrency: "USD", supplierUnitPrice: "2.0000", exchangeRate: "10.000000" });
   });
 });
+
+// Efterkalkylen prissätter vid uttaget: with Standardpris or Aktiv
+// leverantörs pris the post-calculation reads each component's price — and
+// the rate — as of its latest withdrawal on the order, from the histories
+// (D1 and migration 0169). And it has its own material source.
+describe("costing service — post-calculation priced at the withdrawal", () => {
+  const lookups: { currency: string; date: string }[] = [];
+  const ratedService = createCostingService(
+    createCostingRepository(db),
+    { getSettings: async () => costingSettings },
+    undefined,
+    {
+      getRate: async (currency, date) => {
+        lookups.push({ currency, date });
+        return { currency, requestedDate: date, date, rate: date === "2026-03-03" ? 11 : 12, source: "riksbank" };
+      },
+    },
+    () => "2026-10-29"
+  );
+
+  beforeEach(() => {
+    lookups.length = 0;
+  });
+
+  // Moves the order's withdrawals and every recorded price of the component
+  // onto fixed days, so "as of the withdrawal" can be told apart from "now".
+  async function backdate(orderId: string, componentId: string, drawnAt: string, firstPriceAt: string) {
+    await db.execute(sql`update stock_transactions set created_at = ${drawnAt}::timestamptz where reference_id = ${orderId} and transaction_type = 'mo_consumption'`);
+    await db.execute(sql`update article_standard_cost_history set valid_from = ${firstPriceAt}::timestamptz where article_id = ${componentId}`);
+    await db.execute(sql`update article_supplier_price_history set valid_from = ${firstPriceAt}::timestamptz where article_id = ${componentId}`);
+  }
+
+  it("prices the standard cost as it was at the withdrawal", async () => {
+    const order = await makeOrderWithReportedWork();
+    const [consumption] = await mfgService.listMaterialConsumptions(order.id);
+    const componentId = consumption!.componentArticleId;
+    await backdate(order.id, componentId, "2026-03-03T09:00:00Z", "2026-03-01T09:00:00Z");
+    await articleService.updateStandardCost(componentId, 20);
+
+    const { calculation } = await ratedService.postCalculate(order.id, true);
+
+    // 8 consumed × 10, the standard cost on 3 March — not today's 20.
+    expect(calculation.materialCost).toBe("80.0000");
+    const [row] = await db.select().from(costCalculationMaterialRows).where(eq(costCalculationMaterialRows.costCalculationId, calculation.id));
+    expect(row).toMatchObject({ priceSource: "standard", priceDate: "2026-03-03" });
+  });
+
+  it("prices the supplier price and its rate as they were at the withdrawal", async () => {
+    const order = await makeOrderWithReportedWork();
+    const [consumption] = await mfgService.listMaterialConsumptions(order.id);
+    const componentId = consumption!.componentArticleId;
+    const supplier = await setPrimarySupplierPrice(componentId, 2, undefined, "EUR");
+    await backdate(order.id, componentId, "2026-03-03T09:00:00Z", "2026-03-01T09:00:00Z");
+    const [catalogRow] = await purchaseService.listArticleSuppliers(componentId);
+    await purchaseService.updateArticleSupplier(componentId, catalogRow!.id, { price: 3 });
+    expect(catalogRow!.supplierId).toBe(supplier.id);
+    costingSettings.costingMaterialSource = "supplier";
+
+    const { calculation } = await ratedService.postCalculate(order.id, true);
+
+    // 8 × (2 EUR × 11, the rate of 3 March) — not today's price 3 or rate 12.
+    expect(calculation.materialCost).toBe("176.0000");
+    expect(lookups).toEqual([{ currency: "EUR", date: "2026-03-03" }]);
+    const [row] = await db.select().from(costCalculationMaterialRows).where(eq(costCalculationMaterialRows.costCalculationId, calculation.id));
+    expect(row).toMatchObject({ supplierUnitPrice: "2.0000", exchangeRate: "11.000000", priceDate: "2026-03-03" });
+  });
+
+  it("uses the efterkalkyl's own material source", async () => {
+    const order = await makeOrderWithReportedWork();
+    const [consumption] = await mfgService.listMaterialConsumptions(order.id);
+    await setPrimarySupplierPrice(consumption!.componentArticleId, 25);
+    Object.assign(costingSettings, { costingMaterialSource: "standard", costingPostMaterialSource: "supplier" });
+    try {
+      const { calculation } = await ratedService.postCalculate(order.id, false);
+      expect(calculation.materialSource).toBe("supplier");
+      expect(calculation.materialCost).toBe("200.0000"); // 8 × 25
+
+      const pre = await ratedService.preCalculate(order.articleId, 5, false);
+      expect(pre.calculation.materialSource).toBe("standard");
+    } finally {
+      delete (costingSettings as { costingPostMaterialSource?: string }).costingPostMaterialSource;
+    }
+  });
+});

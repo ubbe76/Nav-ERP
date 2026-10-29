@@ -49,6 +49,8 @@ export function buildMaterialRow(
       supplierCurrency: foreign?.currency ?? null,
       supplierUnitPrice: foreign?.unitPrice ?? null,
       exchangeRate: foreign?.rate ?? null,
+      // Only a price that was actually read as of that day carries the day.
+      priceDate: used === "standard" || used === "supplier" ? (basis?.priceDate ?? null) : null,
     },
     warning,
   };
@@ -90,6 +92,7 @@ export function buildSemiFinishedRow(
     supplierCurrency: null,
     supplierUnitPrice: null,
     exchangeRate: null,
+    priceDate: null,
   };
 }
 

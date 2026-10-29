@@ -413,14 +413,17 @@ När en ny version av Nav lägger till en färg saknar redan sparade teman den. 
 
 **System → Kalkyler** styr hur för- och efterkalkylen räknar. Inställningarna är systemomfattande och gäller alla artiklar. Kalkylerna körs från artikelkortets flik **Kalkyl** och från tillverkningsordern (se [Artiklar](/hjalp/artiklar) och [Tillverkning](/hjalp/tillverkning)).
 
-### Materialkostnad hämtas från
+### Materialkostnad i förkalkylen och efterkalkylen
+
+Förkalkylen och efterkalkylen har var sin inställning: **Materialkostnad i förkalkylen** (**Standardpris** eller **Aktiv leverantörs pris**) och **Materialkostnad i efterkalkylen** (dessutom **Verklig kostnad**). Konfiguratorns förhandsvisning följer förkalkylens. Valen betyder:
 
 - **Standardpris** — artikelns **Standardkostnad** på fliken Allmänt. Leverantörspriser påverkar inte kalkylen. Detta är standardvalet.
 - **Aktiv leverantörs pris** — priset hos **huvudleverantören** i artikelns leverantörskatalog på fliken Inköp. Saknar komponenten huvudleverantör, eller saknar huvudleverantören pris, används artikelns standardkostnad i stället och kalkylen visar en varning om vilka rader som föll tillbaka. Saknas båda räknas raden som 0 kr, också med varning.
   - Är priset i en annan valuta än SEK räknas det om till kronor med **dagens kurs** — samma kurser som på [Valutakurser](/hjalp/ekonomi#valutakurser), från Riksbanken eller inskrivna för hand — med fyra decimaler. Kalkylspecifikationen visar priset i valutan och kursen på raden.
   - Finns ingen kurs för valutan används standardkostnaden i stället, med en varning som säger vilken valuta som saknar kurs. Priset läses aldrig som kronor.
+- **I efterkalkylen** räknar **Standardpris** och **Aktiv leverantörs pris** med priserna som gällde **när materialet togs ut** på ordern — dagen för komponentens senaste uttag — och priser i annan valuta med den dagens kurs. Standardkostnaden hämtas ur dess historik och leverantörspriset ur katalogprishistoriken på fliken Inköp (se [Artiklar](/hjalp/artiklar#inkop)), så en efterkalkyl ger samma svar om den görs om senare. Historiken började föras när funktionen infördes; för material som togs ut tidigare används det första kända priset.
 - **Verklig kostnad** — vad materialet **faktiskt kostade**: glidande medelpris vid förbrukningstillfället, härlett ur lagertransaktionerna på samma sätt som metoden *Vägt snitt* i [Lagervärdering](/hjalp/lager#lagervardering). Varje uttag värderas till medelpriset just innan det gjordes, och orderns uttag av samma artikel vägs ihop efter antal — en senare inleverans till annat pris ändrar alltså inte vad ett redan gjort uttag kostade.
-  - Valet gäller **bara efterkalkylen**. Förkalkylen har inga förbrukningar att prissätta och använder standardpriset, med en varning som säger det.
+  - Valet finns **bara för efterkalkylen** — förkalkylen har inga förbrukningar att prissätta. Verklig kostnad räknar med den växelkurs inköpsordern hade när materialet levererades in.
   - Material som förbrukats innan artikeln fått någon prissatt inleverans har inget medelpris att räkna på. Sådana rader faller tillbaka på standardpriset, med varning.
   - Samma artikel uttagen vid flera operationer får **ett gemensamt** à-pris: lagerloggen registrerar vilken tillverkningsorder uttaget hörde till, inte vilken operation.
 

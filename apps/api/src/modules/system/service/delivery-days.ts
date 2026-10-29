@@ -342,5 +342,10 @@ export function deliveryHolidayWindow(dates: string[], extraWorkingDays: number)
 
 // Today as a Stockholm day — the "from today" of every suggestion.
 export function stockholmToday(): string {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
+  return stockholmDateOf(new Date());
+}
+
+// The Stockholm day (YYYY-MM-DD) of an instant — the container may run UTC.
+export function stockholmDateOf(instant: Date): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(instant);
 }

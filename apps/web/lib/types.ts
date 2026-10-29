@@ -356,6 +356,9 @@ export interface CostCalculationMaterialRow {
   supplierCurrency: string | null;
   supplierUnitPrice: string | null;
   exchangeRate: string | null;
+  // Efterkalkyl: the day (YYYY-MM-DD) the standard/supplier price and rate
+  // were taken — the component's latest withdrawal. Null otherwise.
+  priceDate: string | null;
   articleNumber: string;
   articleName: string;
   unitCode: string;
@@ -743,6 +746,33 @@ export interface GoodsReceiptLogEntry {
   unitPrice: string;
   currency: string;
   locationName: string | null;
+}
+
+// Prishistorik on the article card (GET /articles/:id/price-history),
+// newest first. value null = the price was cleared.
+export interface ArticlePriceHistoryRow {
+  value: string | null;
+  validFrom: string;
+}
+export interface ArticlePriceHistory {
+  standardCost: ArticlePriceHistoryRow[];
+  salesPrice: ArticlePriceHistoryRow[];
+}
+
+// One snapshot of a catalog row (GET /articles/:id/supplier-price-history),
+// newest first: price, currency and staffel as they stood from validFrom.
+// removed = the row was taken out of the catalog; supplierName null = the
+// supplier has since been merged away.
+export interface ArticleSupplierPriceHistoryEntry {
+  id: string;
+  supplierId: string | null;
+  supplierName: string | null;
+  price: string | null;
+  currency: string;
+  priceBreaks: { fromQuantity: number | string; price: number | string }[];
+  isPrimary: boolean;
+  removed: boolean;
+  validFrom: string;
 }
 
 export interface PriceHistoryEntry {
@@ -2658,7 +2688,11 @@ export interface SystemSettings {
   // Costing (System → Kalkyler). Where a component's unit cost is read from,
   // and the markups that build the sales price. All default to 0 / "standard",
   // which leaves the calculation as it was.
-  costingMaterialSource: CostingMaterialSource;
+  // Förkalkylens materialkälla — never "actual", which only the efterkalkyl
+  // has consumptions for.
+  costingMaterialSource: Exclude<CostingMaterialSource, "actual">;
+  // Efterkalkylens.
+  costingPostMaterialSource: CostingMaterialSource;
   // Stafflade leverantörspriser in the calculation (only with source
   // "supplier"): "base" = grundpriset, "tiered" = the step for the quantity.
   costingSupplierPriceTier: CostingSupplierPriceTier;

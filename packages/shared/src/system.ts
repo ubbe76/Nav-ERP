@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { costingMaterialSourceSchema, costingSupplierPriceTierSchema } from "./costing.js";
+import { costingMaterialSourceSchema, costingPreMaterialSourceSchema, costingSupplierPriceTierSchema } from "./costing.js";
 import { deliveryDayModeSchema, transitDaysSchema } from "./delivery.js";
 import { themeIdSchema } from "./themes.js";
 
@@ -113,7 +113,10 @@ const systemSettingsFieldsSchema = z.object({
     // materialpåslag are outside TVK/SVK. All default to 0 / "standard", so
     // the calculation is unchanged until someone configures it. Decimals
     // allowed (12.5 %).
-    costingMaterialSource: costingMaterialSourceSchema.optional(),
+    // Förkalkylens materialkälla (and the configurator's preview).
+    costingMaterialSource: costingPreMaterialSourceSchema.optional(),
+    // Efterkalkylens — the only one that can read Verklig kostnad.
+    costingPostMaterialSource: costingMaterialSourceSchema.optional(),
     costingSupplierPriceTier: costingSupplierPriceTierSchema.optional(),
     costingMoPercent: z.number().min(0).max(1000).optional(),
     costingLoPercent: z.number().min(0).max(1000).optional(),

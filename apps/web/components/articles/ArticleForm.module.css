@@ -49,3 +49,8 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Historik under a price field — the button sits under the field, not in it. */
+.historyAction {
+  margin-top: 8px;
+}

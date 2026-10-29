@@ -24,7 +24,8 @@ function toPercent(raw: string): number | null {
 }
 
 export function CostingSettingsForm({ settings }: { settings: SystemSettings }) {
-  const [materialSource, setMaterialSource] = useState<CostingMaterialSource>(settings.costingMaterialSource);
+  const [materialSource, setMaterialSource] = useState<Exclude<CostingMaterialSource, "actual">>(settings.costingMaterialSource);
+  const [postMaterialSource, setPostMaterialSource] = useState<CostingMaterialSource>(settings.costingPostMaterialSource);
   const [supplierPriceTier, setSupplierPriceTier] = useState<CostingSupplierPriceTier>(
     settings.costingSupplierPriceTier
   );
@@ -61,6 +62,7 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
         method: "PATCH",
         body: JSON.stringify({
           costingMaterialSource: materialSource,
+          costingPostMaterialSource: postMaterialSource,
           costingSupplierPriceTier: supplierPriceTier,
           ...percents,
         }),
@@ -116,11 +118,28 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
       <Form onSubmit={handleSave}>
         <FormError>{error}</FormError>
 
-        <Field label="Materialkostnad hämtas från" htmlFor="costingMaterialSource">
+        <Field label="Materialkostnad i förkalkylen" htmlFor="costingMaterialSource">
           <Select
             id="costingMaterialSource"
             value={materialSource}
-            onChange={(e) => setMaterialSource(e.target.value as CostingMaterialSource)}
+            onChange={(e) => setMaterialSource(e.target.value as Exclude<CostingMaterialSource, "actual">)}
+          >
+            <option value="standard">Standardpris</option>
+            <option value="supplier">Aktiv leverantörs pris</option>
+          </Select>
+        </Field>
+        <FormHint attached>
+          {materialSource === "supplier" &&
+            "Huvudleverantörens pris i artikelns leverantörskatalog, i annan valuta omräknat med dagens kurs. Saknas det används artikelns standardkostnad, och kalkylen varnar om vilka rader som föll tillbaka."}
+          {materialSource === "standard" &&
+            "Artikelns standardkostnad på fliken Allmänt. Leverantörspriser påverkar inte kalkylen."}
+        </FormHint>
+
+        <Field label="Materialkostnad i efterkalkylen" htmlFor="costingPostMaterialSource">
+          <Select
+            id="costingPostMaterialSource"
+            value={postMaterialSource}
+            onChange={(e) => setPostMaterialSource(e.target.value as CostingMaterialSource)}
           >
             <option value="standard">Standardpris</option>
             <option value="supplier">Aktiv leverantörs pris</option>
@@ -128,12 +147,12 @@ export function CostingSettingsForm({ settings }: { settings: SystemSettings }) 
           </Select>
         </Field>
         <FormHint attached>
-          {materialSource === "supplier" &&
-            "Huvudleverantörens pris i artikelns leverantörskatalog. Saknas det används artikelns standardkostnad, och kalkylen varnar om vilka rader som föll tillbaka."}
-          {materialSource === "actual" &&
-            "Glidande medelpris vid förbrukningstillfället, härlett ur lagertransaktionerna. Gäller bara efterkalkylen — förkalkylen har inga förbrukningar att prissätta och använder standardpris med en varning. Material som förbrukats innan artikeln fått någon prissatt inleverans faller också tillbaka på standardpriset."}
-          {materialSource === "standard" &&
-            "Artikelns standardkostnad på fliken Allmänt. Leverantörspriser påverkar inte kalkylen."}
+          {postMaterialSource === "supplier" &&
+            "Huvudleverantörens pris och valutakursen som gällde när materialet togs ut på ordern (det senaste uttaget av komponenten). Saknas leverantörspris används standardkostnaden från samma dag, med varning."}
+          {postMaterialSource === "actual" &&
+            "Glidande medelpris vid förbrukningstillfället, härlett ur lagertransaktionerna — det materialet faktiskt kostade, med inköpsorderns valutakurs. Material som förbrukats innan artikeln fått någon prissatt inleverans faller tillbaka på standardpriset."}
+          {postMaterialSource === "standard" &&
+            "Artikelns standardkostnad som den var när materialet togs ut på ordern (det senaste uttaget av komponenten)."}
         </FormHint>
 
         <Field label="Leverantörspris vid staffel" htmlFor="costingSupplierPriceTier">

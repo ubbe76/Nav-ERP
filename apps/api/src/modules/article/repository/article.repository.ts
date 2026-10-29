@@ -15,6 +15,7 @@ import {
   articleCodes,
   articleGroups,
   articleRevisions,
+  articleSalesPriceHistory,
   articleStandardCostHistory,
   articles,
   articleUnits,
@@ -697,6 +698,24 @@ export function createArticleRepository(db: Db) {
     // At most one active per article (partial unique index); the switch runs
     // in a transaction like the customer contacts' primary flag. The first
     // revision created for an article becomes active automatically.
+
+    // Prishistorik on the article card: the standard cost (D1) and the
+    // försäljningspris (migration 0169), newest first.
+    async listPriceHistory(articleId: string) {
+      const [standardCost, salesPrice] = await Promise.all([
+        db
+          .select({ value: articleStandardCostHistory.cost, validFrom: articleStandardCostHistory.validFrom })
+          .from(articleStandardCostHistory)
+          .where(eq(articleStandardCostHistory.articleId, articleId))
+          .orderBy(desc(articleStandardCostHistory.validFrom), desc(articleStandardCostHistory.id)),
+        db
+          .select({ value: articleSalesPriceHistory.price, validFrom: articleSalesPriceHistory.validFrom })
+          .from(articleSalesPriceHistory)
+          .where(eq(articleSalesPriceHistory.articleId, articleId))
+          .orderBy(desc(articleSalesPriceHistory.validFrom)),
+      ]);
+      return { standardCost, salesPrice };
+    },
 
     async listRevisions(articleId: string) {
       return db
