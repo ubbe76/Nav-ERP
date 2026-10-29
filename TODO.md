@@ -1,35 +1,243 @@
 # TODO — Nav-ERP
 
-Aktuella punkter och beslut. Avslutade block är arkiverade utanför det publika repot.
+Öppna punkter i tre delar: **buggar** efter allvarlighetsgrad, **förbättringar** av det som finns och **nya funktioner** efter hur viktiga de är. Sist står besluten och det som är klart; avslutade block arkiveras utanför det publika repot.
 
-## Aktuellt
+**Så är listan rangordnad (förslag 2026-10-29).** Bland buggarna väger fel belopp, fel bokföring och fel lön tyngst, sedan fel resultat i ovanliga lägen och 500-fel, sist races med litet fönster, otydliga felmeddelanden och layout. Bland förbättringar och nya funktioner väger tyngst det som behövs för att ett nytt företag ska kunna börja använda Nav, lagkrav och det dagliga arbetet i verkstad och lager. Inom varje nivå står det viktigaste först.
+
+**Märkningar:** *(medvetet)* = ett val som gjordes med flit, *(parkerat)* = granskningen valde att vänta, *(hemsidan)* = står under **Det här saknas i dag** på hemsidans funktionssidor (`hemsida/content/areas.ts`, fältet `limits`) — ändra texten där när punkten byggs. Småfynden kommer från slutgranskningarna juli–oktober 2026; de är stickprovskontrollerade mot koden men kan ha lösts på vägen — stryk det som inte längre gäller. Nya fynd skrivs in under rätt rubrik.
+
+## Buggar
+
+### Overifierat mot externa tjänster
+
+Kan dölja allvarliga fel — och kan redan vara gjort.
+
+- [ ] Provuppladdning av momsdeklarationsfilen i Skatteverkets e-tjänst (elementordningen följer exempel 6; tabellens radordning skiljer sig).
+- [ ] Ladda upp en genererad pain.001 i bankens valideringstjänst (Swedbank Validex) och lägg in företagets IBAN.
+- [ ] Prova utlandsbetalningsfilen i bankens valideringstjänst.
+
+### Allvarliga — fel belopp, bokföring eller lön
+
+- [ ] **Kundorder:** radredigeringen jämför priset mot radens *ursprungliga* basantal (`editInitialBaseQuantityRef` i `SalesOrderDetail.tsx`): antal 10 → 100 → 10 lämnar 100-stegets pris kvar. Spegla inköpssidans `editPricedBaseQuantityRef` och vänta på enhetsfaktorn innan prisfrågan.
+- [ ] **Kreditfaktura:** `createCredit` med explicita rader kopierar inte `revenueAccount`, så krediteringen kan bokas på ett annat intäktskonto än fakturan (t.ex. räntefakturans 8313).
+- [ ] **Kalkyl:** leverantörspriser räknas inte om mellan valutor — med Aktiv leverantörs pris används katalogpriset som det står, även när det är i en annan valuta än kronor. *(hemsidan)*
+- [ ] **Närvaro:** instämpling av närvaro + arbete är inte atomär och det finns inget unikt index för öppen närvaro — dubbel närvaro är möjlig och ger fel timmar i löneunderlaget.
+- [ ] **Beställningsvara:** radredigeringen skickar alltid à-pris, så serverns 400 för ogiltig sparad konfiguration nås aldrig — evaluate-fel sväljs (`.catch`) och det gamla priset sparas. Visa felet.
+- [ ] **Beställningsvara:** antalsbytets omvärdering jämför inte ny konfigurationsnyckel mot sparad — ett förval som läggs till i mallen senare ger ett pris med tillägg som inte syns i valen.
+- [ ] **Konfigurerad tillverkning:** behovsberäkningens 60 s-cache kan ge en andra TO på en konfigurerad rad.
+- [ ] **Bankfiler:** `confirm()` tappar tyst `itemIds` som inte exporterats — användaren tror att raderna är bekräftade.
+
+### Medel — fel resultat i ovanliga lägen och 500-fel
+
+- [ ] **Kundfaktura:** `computeDueDate` i `invoice.service.ts` räknar i millisekunder och kan ge en dags fel förfallodag vid sommartidsskiftet — `setDate`-aritmetik vore exakt.
+- [ ] **Dröjsmålsränta:** `ensureReferenceRates` minns inte misslyckade hämtningar — varje sidladdning väntar 10 s när Riksbanken är nere.
+- [ ] **Konfigurator:** `updateRule` med bara ny effekt tolkar det sparade målet med den nya effektens icke-strikta schema — require → exclude kan tappa en operation tyst. Kräv mål när effekten ändras.
+- [ ] **Radordning:** latenta `createdAt`-ties (bulkinsert delar `now()`) i `salesOrderRows`, `costCalculationMaterialRows` och `supplierInvoiceRows` — raderna kan byta ordning.
+- [ ] **Inköp:** IO- och förfrågningsrader ger 500 på `InvalidUnitError`.
+- [ ] **Budget:** CSV-exporten skyddar inte kostnadsställekoder mot formelprefix (`=`, `+`, `-`, `@`) när filen öppnas i Excel.
+- [ ] **Budget:** `calendarMonthMap` ger dubbla MM i ett förlängt målår — beloppen kan hamna på fel månad.
+- [ ] **Konfigurerad tillverkning:** en icke-härledbar struktur accepteras på raden med cost null och syns först när TO:n skapas; datumförslaget ignorerar levererat antal; en inaktiv mall får fortfarande konfigurerade förslag i behovsberäkningen.
+- [ ] **Beställningsvara:** AddRowForm-omvärderingen kan skriva över ett pris som användaren skriver medan evaluate pågår (bryter "manuellt vinner"); `rowConfigurationLines` saknar `?.` på price.
+- [ ] **Bankfiler:** returdatum före betaldatum valideras inte; camt.054 tappar `RfrdDocInf` som inte är CINV/CREN (behåll som ADDTL) och `candidateOcrs` kräver 3–25 siffror mot specens 2–25.
+- [ ] **Bankfiler:** en lyckad bokning nollställer andra posters osparade utkast (misslyckade överlever).
+- [ ] **Kostnadsställen:** felet "välj kostnadsställe på raderna" visas när kolumnerna är dolda, så användaren ser inte fältet; P1-dialogen räknar offert som kundorder.
+- [ ] **Leverantörsfaktura:** webben visar "Ingen kurs" när servern faller tillbaka på inköpsorderns kurs.
+- [ ] **Årsbokslut:** `loadWarnings` läser sekventiellt och ett enda fel fäller sidan; saknad sista period ger en vanlig `Error` (500); `AccrualsCard`-utkastet i localStorage kan dölja rader som någon annan bokfört tills det rensas.
+- [ ] **Anläggningsregister:** ingen korskontroll av konton mellan grupper (A:s kostnadskonto = B:s ack nettas).
+- [ ] **TO från kundorderrad:** avbryts ordern i millisekundfönstret mellan validering och commit skapas TO:n länkad mot en avbruten order och raden blir permanent oborttagbar.
+
+### Låga — races med litet fönster
+
+- [ ] **Konfigurator:** `createTemplate` mot samtidigt typbyte på artikeln (kräver artikelradslås på båda sidor); `createFromSalesOrderRow` läser raden olåst och raden utvärderas utanför mallåset; `configuratorMode` läses före TO-transaktionen; härledningen läser mall/struktur/rutt utan transaktion (enstaka inkonsistent förhandsvisning); dubbel läsning i `getPublicTemplate`/`evaluatePublic`.
+- [ ] **Närvaro:** `updateAttendanceSession` läser raden utanför transaktionen.
+- [ ] **Ekonomi:** kontrollen att kontot är aktivt i bokföringstransaktionen tar inget radlås på `accounts` (sluttillståndet är lagligt ändå); budgetens kopplingsflytt mot samtidig Spara (teoretisk).
+- [ ] **Anläggningsregister:** `updateCategory` utan tx/radlås; `getPlan` läser utan delad snapshot (tillfällig falsk avvikelse).
+- [ ] **Anläggningsregister** *(parkerat)*: `createAsset` med ingående avskrivning tar inte advisory-låset och kan krocka med gruppens kontolås — bara en avstämningsdiff, inget bokas fel.
+- [ ] **Bankfiler:** PATCH av leverantörens betalningsuppgifter kan racea till en omappad 23514 (500; CHECK håller datan konsistent); bankinställningarna skrivs utan tx; betalreferensens audit skrivs utanför tx.
+
+### Låga — otydliga fel, texter och småbeteenden
+
+- [ ] **Anläggningsregister:** `seedBasCategories` saknar `isUniqueViolation`-fångst (dubbelklick ger 500) och seedade grupper skriver ingen audit; `undoRun` ignorerar antalet ersatta rader; modalernas tillstånd nollställs inte (DisposeModal, NewAssetModal) och EditAssetModal behåller osparade ändringar efter stängning; ett inaktivt förvalt mellankonto syns inte i den filtrerade listan; varningar visas med `FormError` i stället för `FormNotice`.
+- [ ] **Anläggningsregister** *(parkerat)*: en tillgång med bara ingående avskrivning kan byta grupp och ingående fält (manualen säger att fälten låses vid första bokförda avskrivningen).
+- [ ] **Årsbokslut** *(parkerat)*: en ångrad avskrivningskörning — eller vilken registerkörning som helst — daterad på bokslutsdagen låser datumet; med lagervärde 0 på tomt konto rapporteras inte felkonfigurationen Lager = Lagerförändring.
+- [ ] **Årsbokslut:** NV001-texten "Bokförd räkenskapsinformation kan inte ändras" missvisande för stängt år; inaktivt lagerkonto ger 409 här men 400 i steg 6; manuell bokföring i stängt år svarar `accounting-period-locked` (enligt spec), inte `fiscal-year-closed`; postern skickar ett datum som `what` i `FiscalYearClosedError`; `bookDepreciation` ger 400 month-in-future även utan något att boka.
+- [ ] **Årsbokslut:** utkastlistan kapas vid 20 utan besked; `reopen` skriver audit även när perioden redan är öppen och `updateClosingDate` loggar oförändrat datum; omföring av omföring i serie I markerar importen som omförd i meddelandet; `previewProfitDisposition` svarar på pågående bokslut; dubbla stängningsspärrar när bokslutsdag = årsslut.
+- [ ] **Dröjsmålsränta:** 409-texten already-charged när fakturan bara slutat vara kandidat; villkorstexten kommer även på valutafakturor; "3 valda" räknar ersättningsrutor; privatperson läses live i stället för från fakturan.
+- [ ] **Bankfiler:** BIC-texten; radresultat kan läcka råa meddelanden och `ItemResult` saknar verifikat; utkastvyns referens är tom; gamla utkastrader skickar `executionDate`; prefixmönstret `[A-Z0-9-]`; nedladdningen speglar klientens content type; webben skickar alltid `itemIds` (schemat tar max 500); "Fördelningen stämmer inte" när kund saknas; `absent`-id använder fel ordbokstext; `creditorTownRequired` styr även gäldenärens ort; leverantörsvalideringen vägrar inte 5-siffrig clearing som inte börjar på 8 eller fel 15-siffrig total (fångas vid filbygget); korsfil-#n kan para fel när en bank återanvänder en referens (varnas).
+- [ ] **Bankfiler:** uppladdning med överhoppade dubbletter visar inte filens egna varningar; fellistor ligger kvar till nästa bokning; bankbokförda kundbetalningar saknar audit `customer_payment created` och manuell Makulera av UTB-omgång skriver ingen audit.
+- [ ] **Frakt:** en övertagen bokning (`FreightBookingTakenOverError`) har redan skrivit audit `booked`, så Historiken visar en bokning raden aldrig fick — egen händelse `booking_taken_over`.
+- [ ] **Konfigurator:** `useVariantOf` behandlar alla fel som "ingen variant"; `saveReconfigure` stänger dialogen vid 409 (valen tappas); ett uttryckligen valt men regelexkluderat alternativ prissätts ändå på en ogiltig konfiguration; standardvärdet för tal kontrolleras inte mot stegrutnätet; `proposal.articleId` kontrolleras inte mot raden.
+- [ ] **Konfigurator, mallredigeringen:** en halvifylld rads fel rensas inte vid skrivning i ny rad; halvskriven tidig retur kastar pågående svar för det senaste kompletta värdet; `parseDecimal` vägrar `.5`; härledningen kan ge `-0`; baskopplad rad visar bara sekvensnumret när rutthämtningen fallerar.
+- [ ] **Konfigurator, orderrader:** "· Konfigurerbar" visas i alla artikelval, även register/struktur; `ConfigurationLineList` nycklar på text; `FormHint` ger `<p>` i `<span>`; gruppsorteringen vid lika sortOrder och `configuredRowsOfTemplate` saknar stabil ordning; `formatMeasure` kan visa e-notation; `show_configuration_prices` i e-postloggen är alltid boolean för offert/OB; delkredit med explicita rader kopierar konfigurationen från orderraden.
+- [ ] **Konfigurator, behovsberäkningen:** mallraden har en inaktiv kryssruta; artikeltabellen döljs när sidan bara har konfigurerade rader.
+- [ ] **Externt API:** `row-variant-exists`-texten är variantformulerad även för vanliga dubbletter; generisk webbtext för `configurator-not-published`; listrutten går förbi `run()`.
+- [ ] **Faktura:** fakturadialogens rader inom en order saknar stabil ordning (sorteras bara på ordernummer).
+- [ ] **Terminalen:** Sök/Bara redo behåller dolda markeringar; stationsbyte under pågående Starta valda; materialsorteringen använder numerisk collator mot API:ts `localeCompare`; identifieringen väntar på hela uppdateringen inkl. ordrar; Gå hem nu erbjuds även vid flerdygnsglömska; Sluttid skickas alltid (≤ 59 s avrundning); "Hej då"-notisen ligger kvar med hårdvarutangentbord.
+- [ ] **Reskontran:** knappen är inte inaktiverad vid felton i betalningsförhandsvisningen.
+- [ ] **Lagerloggen:** CSV:ns Saldo-kolumn styrs av rå `articleId`-sträng (tom sträng ger tom kolumn).
+- [ ] **Ekonomi:** konteringsregelsidans fallback märker oseedat konto "(inaktivt konto)"; ett ingående momskonto utan ruta visas negativt i varningen.
+
+### Låga — layout
+
+- [ ] **TO-kortet:** rubrik och cell överlappar i operationstabellens kolumn Planerad vecka; valraderna för konfigurerad TO ligger tätt mot Material-rubriken.
+- [ ] **Kundorderkortet:** tabellen scrollar ~144 px i sidled vid 1280 px; redigeringsläget i smala kolumner är inte kontrollerat.
+- [ ] **Personal & lön:** Attesteringstabellen spiller över 32 px vid 1500 px bredd; `SchedulesPageClient.tsx` (~325, `1fr 1fr 1fr auto`) och `EmployeeTabs.tsx` (`150px 1fr 160px`) har fasta grid som kan spilla över — lägg korta fält i `FormRow`.
+- [ ] **Kostnadsställen:** smala filter i resultaträkningen; projektvalet trunkerat i radcellen; fakturaradernas tabell skrollar i sidled på desktop.
+- [ ] **Anläggningsregister:** tomma Nr/Anskaffad-celler visar etiketter på mobil; Summa alla grupper saknar rubrik; tre fält i `FormRow` med columns=2; ingående avskrivningens fältpar hänger inte ihop i formuläret (servern vägrar).
+- [ ] **Årsbokslut:** periodiseringstabellens fasta px-kolumner är inte kontrollerade i mobilbredd.
+- [ ] **Konfigurator:** mallredigeringens åtgärdskolumn är 260 px — kontrollera i 375 px.
+- [ ] **Reskontran:** Makulerad visas som färgad text i stället för genomstruken.
+
+### Låga — fel i manualen
+
+- [ ] Manualens §Skriv ut TO och §Pallkort säger att en planerad TO saknar operationer — inte sant för beställningsvara; manualen säger "gul varning" (temaberoende).
+- [ ] Manualen beskriver leverantörsfakturans restrad som egen rad fast den slås ihop per konto, och nämner inte att Verifikat-länken står kvar efter Avbryt *(medvetet: spåret ska synas)*.
+- [ ] Manualens "Pågående" mot pillens "Pågår" (artikelöversikten och behovsberäkningen).
+- [ ] Anläggningsregistrets "använd andra koder än F, L, K, U och M" saknar kanske AV.
+- [ ] Reskontrans förhandsvisningslista saknar teckenmismatch-meddelandet; dubbelt "när" och vacklande kreditfakturaterm i `inkop.md`.
+
+## Förbättringar
+
+### Hög
+
+- [ ] **Förbättrad artikel- och strukturimport** — omfattning ej specad än (bygger vidare på import-export.md-paketen). Viktigt när ett nytt företag flyttar in sina data.
+- [ ] **Förbättrad kundimport** — omfattning ej specad än. Känt: Personnummer importeras inte.
+- [ ] **Förbättrad leverantörsimport** — omfattning ej specad än.
+- [ ] **Tidsfasade förslag i behovsberäkningen** — förslagen får datum först när ordrarna skapas. *(hemsidan)*
+- [ ] **Förbättrad lagerplatshantering** — omfattning ej specad än.
+
+### Medel
+
+- [ ] **Efterkalkylen:** automatisk uppdelning av avvikelsen på pris, mängd och tid, och skillnad på ställtid och stycktid. *(hemsidan)*
+- [ ] **Planeringen och Leveranstidskontrollen prövar alternativa resurser** — i dag planeras en operation alltid på den resurs den har på ordern. *(hemsidan)*
+- [ ] **Påslag per artikelgrupp, kund eller order** — i dag gäller påslagen hela företaget och bara TO-påslaget sätts per resurs. *(hemsidan)*
+- [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
+- [ ] **Händelseloggen:** ingen `created`-händelse för TO.
+- [ ] **Redigerbar Översikt** — användaren väljer vad startsidan visar. Omfattning ej specad än.
+- [ ] **Huvudboken:** kontoväljaren utesluter inaktiva konton med historik ("inkl. inaktiva"-val); IB/UB döljs när intervallet saknar rader (IB = UB ≠ 0 vore informativt); sorteringen ordnar över serier på nummer före serie (tie-breaken otestad).
+- [ ] **Prestanda vid tillväxt:** `openAmountSql` evalueras två gånger i SELECT + WHERE (fullscan); verifikatens `seriesId` och `inquiry_rows.routing_operation_id` saknar index; Översikten driver behovsberäkningen (60 s-cache) och `orderPlanSummaries`; bankfilernas namnmatchning är O(kunder × poster).
+
+### Låg
+
+- [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — förkalkylen räknar alltid med inställningarna under System → Kalkyler. *(hemsidan)*
+- [ ] **Momsrapporten:** visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
+- [ ] **Faktura:** icke-admin ser ingen bokföringsindikation på fakturakorten (verifikatnumret som ren text vore lika säkert som den admin-spärrade länken); fakturalistans sökning matchar kundens nuvarande namn men visar ögonblicksbilden; `?orderId=` utan rest droppas tyst när flera ordrar faktureras; Lägg till rad saknar enhetsväljare (antalet är basenheten).
+- [ ] **Konfigurator:** återanvänd inaktiv variant läggs in tyst — visa "Varianten X fanns redan (inaktiv)"; antalsbyte på rad vars mall lämnat Beställningsvara saknar tips om att ange pris; `createQuote` rapporterar bara första ogiltiga rad; ingen laddningstext medan mallens grupper hämtas i Konfigurera; ingen "välj alla" i behovsberäkningens konfigurerade sektion; "— Välj —" kan inte tömma ett förval *(enligt spec)*.
+- [ ] **Varianter:** dubblettnummer inom samma körning säger "finns redan"; standardvärdeshjälpen nämner inte tomt mått / Med-Utan; Skapa variant är inaktiv i stället för dold vid ogiltig konfiguration.
+- [ ] **Konfigurator, prestanda:** `evaluateRowConfiguration` laddar mallen två gånger + full förkalkyl per utvärdering; derive per tangenttryck utan debounce (gammalt TB syns tills svaret kommer); extra evaluate direkt efter Lägg in; `createVariants`-förkalkylen läser på vanliga `db` medan transaktionen håller mallåset (upp till 200 lån i följd); variantsteget i `resolvePrice` gör en extra PK-uppslagning per prissättning; kunden hämtas två gånger per utskrift/mejl.
+- [ ] **Stafflade leverantörspriser:** visa "Staffelpris från N" i IO-radformuläret (API:t returnerar redan `fromQuantity`/`source`); webben saknar klienttak på 50 staffelsteg (zod ger 400).
+- [ ] **Legoförfrågan:** artikelkolumnen i behovsberäkningen blir trång när en legorad har många förfrågningar.
+- [ ] **Kopiera från befintlig artikel:** ritningsrevisioner kopieras inte.
+- [ ] **Bankfiler:** kontovarningen kunde tipsa om att lägga in IBAN.
+- [ ] **Favoriter:** förvalda favoriter per behörighetsgrupp; åtgärdsgenvägar som **+ Ny kundorder** (kräver `?ny=1`-stöd på sidorna).
+- [ ] **Manualen, årsbokslutet:** nämn att värderingen faller tillbaka på standardpris (kommentaren "deterministisk" är för stark), att identisk periodisering med sedan inaktiverat konto ger 400 och att Omför-rådet för IB-spärren kan landa i år N+2 vid sent bokslut.
+
+### Kodkvalitet
+
+- [ ] `apps/api/test` typkontrolleras inte (CI typkontrollerar bara `src` via bygget).
+- [ ] **Kopiera från befintlig artikel** skriver tillverknings- och inköpstabeller direkt från artikelmodulen — borde vara Tx-löv i ägarmodulerna; `informationIsNew` dubblerad i `CopyFromModal`/`NewArticleForm`.
+- [ ] **Anläggningsregister:** `fixed-asset.service.ts` är ~1 300 rader — körningsblocket kan bli egen fil; `previewRows` återimplementerar ackumulatorns nettning; `stockholmToday` duplicerar `currentMonthStockholm`; `reverse()` anropar `findFixedAssetLink` två gånger; `assertOpeningDepreciation` körs vid varje PATCH; typputs på `OpeningDepreciationCheck`; kommentar om varför `disposeAsset` anropar `assertPostablePeriod`; aritmetiken i en kommentar i `depreciation-schedule.test.ts` (100000/36, månad 22) och `missingMonths`-dokumentationen om var resten hamnar.
+- [ ] **Årsbokslut:** `year-end-checks.ts` importerar `formatNumber` från `document-pdf` (drar in pdfkit); `inventoryStepView` räknas två gånger; `unlockPeriod` hämtar året två gånger; `getPlan` går på egen `db`; `closingPeriodStatus` förvalt `locked`; periodspärren täcker bara UPDATE; ingen CHECK `reversal_verification_id <> verification_id` på `profit_dispositions`.
+- [ ] **Dubbletter att extrahera:** toleransregeln och betalningsförhandsvisningen (kund/leverantör — vid tredje konsumenten); debetkontots regexar (`pain001-check` och bankinställningarna); 2-minutersfönstret (`assertShipmentsBillable` i `invoice.repository.ts` och `CANCEL_STALE_MS`, jämförs mot appklockan); `LegoInquiryResult` (fyra kopior) och leverantörshämtningen i webben (`useSuppliers`-kandidat); sub-radsloopen i plocklista/följesedel; paus/resume-SQL (en `Db | Tx`-hjälpare); "strip id + tidsstämplar" vid ruttkopiering; en delad `round4`-export i shared/units vid tredje konsumenten (i dag `toUnitQuantity(x, null)`).
+- [ ] **Konfigurator:** serviceblocket ligger under Behovsberäkning-kommentaren i `app.ts`; reorder-400 saknar `issues`; `ConfigureModal` portalar själv (låt `Modal` äga en opt-in-portal) och blur-hacket hör hemma i `SearchPicker`; `VariantOfPanel` och mallredigeringen har inline-stilar; Förval-radions onChange/onClick; död `toOrderBlocked`-logik i `KonfiguratorTab`; `ConfiguredManufacturingNotAvailableError` har oanvänt articleNumber och dubbel mappning; engelska "ConfiguredStructureReader not wired" kan nå en rad vid felkoppling; `selfCostPerUnit ?? 0`; exhaustiv `never` i `resolveVariant`s statusswitch; lägg `variantOf` på `GET /articles/:id` i stället för två hämtningar per kort.
+- [ ] **Faktura:** kommentaren i `invoice.repository.ts` (~519) listar `updateStatus` bland de villkorade fast den är ovillkorad (numera bara testsöm); latent dubbelräkning i `validateCommittedQuantities` om en repo-väg någonsin körs mot en redan utfärdad faktura med länkade rader; `create`/`createCredit` duplicerar tally-loopen.
+- [ ] **Ekonomi:** `PERIOD_STATUS_LABELS` i webben oanvänd; `vatRate 0 + vatAmount ≠ 0` når balansassert som 500 (onåbart via fakturan); catch-kommentaren i `supplier-invoice.service.ts` (~340) nämner bara racet; `payment.routes.ts` (~70) nämner bara betalkontoorsaken till `PaymentBankAccountConflictError`; kommentargrammatik i `payment.repository.ts`; lokal `formatMoney` i `SupplierInvoiceCard`; TRUNCATE-kommentaren om payment_terms-kaskaden; `DEFAULT_POSTING_SETTINGS` i testhjälparen speglar systemservicens fallbacks för hand.
+- [ ] **Övrigt:** `toBuffer` utanför try i bankfilsuppladdningen (413 via global hanterare); `?withOperations=` på orderlistan saknar anropare (behölls som publikt API); närvarons audit saknar pausantal; kontrollera regelfilens ordval för `bank_*`-inställningsnycklarna; typerna i `SalesOrderLinkReader`, `ManufacturingCoverageReader` och webbens `types.ts` hålls i synk för hand *(husets mönster)*.
+
+### Testluckor
+
+- [ ] **Postern och reskontran:** inaktivt regelkonto → `MissingPostingAccountError` är inte pinnat; omföringstestet täcker bara L-serien och asserterar inte räknaren; `reverse()`:s unik-race bara sekventiellt; `NoAccountingPeriodForPosting` på betalnings-/avgiftsvägarna; in-lock `fee_already_charged`; leverantörsbetalningens periodspärr end-to-end; toleranstesterna pinnar inte radantal; `makePaymentTerm`-fixturens namnkollisionsrisk.
+- [ ] **Moms:** momsomföringens advisory lock saknar deterministiskt racetest; backfilltestet för momsruta per konto mappar bara 3 av 7 konteringsnycklar.
+- [ ] **Anläggningsregister:** route-409 för inaktivt BAS-konto och för field-locked/life-too-short/has-depreciation; Review Focus-koderna på HTTP-nivå; att innevarande månad accepteras; avyttrad tillgångs redigeringsspärr; ångra med ingående avskrivning; `disposalError`-fallbacken; rader daterade efter årsslut; öppningsvalideringen med flera regelbrott; `seedBookedMonths` daterar på den 28:e; NOTICE-brus från TRUNCATE-kaskaden.
+- [ ] **Årsbokslut:** startClosing på stängt år; Omför över riktiga V/R-id; framtida stämmodatum; 201/preview-koercion; `PATCH /settings/posting` med de nya nycklarna; RF1-testets värde 0.
+- [ ] **Bankfiler:** låsordningstestet (C5) bygger på 300 ms sömn — polla `pg_stat_activity`; route-test för de nya 409:orna och leverantörsroutarnas 400; sanitizing-testet asserterar bara antalet varningar; returfixturen har bara Cdtr; PATCH med motstridig profil/`initiatingPartyId`; bokningstesterna kontrollerar inte serie/konto och samtidighetstestet tvingar inte överlapp.
+- [ ] **Frakt:** racetesterna i shipping-booking/invoice-freight bygger på fasta sömnar — polla om de flagnar; "ny försändelse 14:50 → första Hämta priser" bara testad på ren nivå; avbokning efter avbokning i Sendifys eget UI inte provad mot sandlådan.
+- [ ] **Försäljning och faktura:** två separata kreditutkast mot samma orderrad; prisupplösarens grupplösa artikel; `updateCustomerPriceSchema` med båda värdena; teoretisk dubbel-round4 i radredigeringens enhetsväxlingsvakt; dual-auth (session + klienttoken) end-to-end för konfigurator-scopet och `POST /quotes`.
+- [ ] **Konfigurator:** schematestet tunt på positiva vägar och DB-CHECK:arna; dubbel errors-import, `makeArticle` `as never` och oanvända variabler; evaluate-404 asserterar bara status; pin-tester för krockande op vars villkor inte gäller, formelfel som kopplar bort en rad utan varning och standardfallet i pass A; `variantRequestSchema`/`variantSetsSchema` (200-tak, 4 decimaler), orderable-tolkningen, surface_treatment-namnfallback, lego-leverantörsförval på villkorad op; `created_by` via rutten; låstestet i article-template-guard bevisar väntan bara via tid; too_long via `resolveVariant`; HTTP-test av `?configurable`; route-test för 400 details och 409 row-configuration-changed; SVK-testet borde ha allmänt påslag ≠ 0; DB-test för costing-only/fantom-egen-länk-material; testnamnet "invalid configured row has no cascade" överlovar; enhetstest för `selectionFromRaw`/`rawFromSelection` med null; inga komponenttester (mallredigeringen, modalens PATCH).
+- [ ] **Stafflade leverantörspriser:** route-test för 400 utan `quantity` på `GET /supplier-price-quote`; flernivåfall med `costingSupplierPriceTier: "tiered"`.
+- [ ] **Inventeringen:** INV-nummerstegning; positiv diff utan standardpris → null; spärrsläpp efter registrering.
+- [ ] **Terminalen och närvaron:** anställd-cascade och FK-race; lego-inleverans; Slutför order över flera op; admin-fall; 2 s-gränsen.
+- [ ] **Artikelöversikten:** `toBeCloseTo` i invarianttestet om bråktal någonsin används.
+
+### Att besluta
+
+- [ ] **0-kronorsfaktura** ger 409 `ZeroAmountPostingError` — om garanti-/ersättningsfakturor dyker upp: utfärda utan verifikat eller symboliskt belopp?
+- [ ] **Konfigurerad rad:** TB räknas om från *aktuell* mall vid antalsändring medan en befintlig TO behåller sin frysta struktur — TB kan glida från det som byggs.
+- [ ] **Konfigurerad TO:** kalkylutfallet jämför efterkalkylen mot mallens senaste förkalkyl, inte mot TO:ns egen `configuration.cost`.
+- [ ] **Konfigurerad rad:** ett kostnadsfel i förkalkylen stoppar försäljningen (`evaluateRowConfiguration` kastar).
+- [ ] **`paidAt`** är NULL för leverantörsfakturor betalda före leverantörsreskontran — beslut behövs om något ska sortera eller filtrera på det.
+
+### Medvetna val — ompröva bara vid behov
+
+- [ ] **Lön:** attest ogiltigförklaras inte av senare ändringar i öppen period; OB räknas även på övertidsintervall (lönesystemet avgör); `absentToday` i `GET /stamp-sessions` syns för arbetsledare via Pågående arbete utan Personal & lön.
+- [ ] **Närvaroavvikelser:** attesteringen visar ingen "(N min sent)" förrän sessionen stängts; anledningen påverkar aldrig lön eller frånvaro.
+- [ ] **Offertuppföljning:** Öppna igen efter manuell statusändring till Förlorad från t.ex. Levererad gör ordern till offert med leveranser kvar; radering av förlustorsak kan flytta till en inaktiv orsak; PDF-datumet är ISO.
+- [ ] **Aviseringar:** Leverantörsfakturor att betala härleder saknat förfallodatum ur leverantörens nuvarande villkor (reskontrans Förfallna-filter använder bara lagrat datum); alla typer avbockade ger tomma rader utan mejl.
+- [ ] **Leveransdagar:** en leverantör som tar emot lördagar får inte leverera lördagen före ett måndagsbehov (specen säger arbetsdagen före behovet); ett handskrivet datum på en ny IO-rad nollställs vid artikelbyte, som priset.
+- [ ] **Behörighet:** behovsberäkningens **Skapa ordrar** (Tillverkning) skapar IO-utkast även utan behörigheten Inköp; `/price-quote` visar priskedjan för godtycklig kund för en klienttoken (tokenet kan redan skapa ordrar för godtycklig kund).
+- [ ] **Övrigt:** inventeringens guard-TOCTOU under READ COMMITTED (accepterad husrisk); avbrutna inventeringar samlar störningsflaggor för evigt (bara visning); personalkortet släpper dolda inaktiva stationsförval vid sparning; varianter skapade före en offert som sedan faller ligger kvar; en egen CSV med Kund + Namn + Betalningsvillkor räknas som Lista-fil i kundimporten.
+
+## Nya funktioner
+
+### Hög
+
+- [ ] **Radera eller anonymisera en anställd** — i dag kan en anställd bara markeras som inaktiv. Krävs för GDPR. *(hemsidan)*
+- [ ] **Import av lagersaldon från fil** — ingående saldon läggs i dag in med inventering eller justering. Viktigt när ett nytt företag börjar. *(hemsidan)*
+- [ ] **Skanning i lagret** — pallkorten har streckkod/QR-kod men ingen rutin läser dem: inleverans, plock och inventering med handskanner eller mobilkamera. Omfattning ej specad än. *(hemsidan)*
+- [ ] **E-faktura (Peppol), etapp 2** — mottagning (inkommande e-faktura blir leverantörsfakturautkast med rader), webhooks, utländska mottagare och valutor (omvänd moms, export), automatisk sändning vid Utfärda och samlingsfakturering, ev. InExchange-adapter. Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
+- [ ] **Dokument på fler språk** — offert, orderbekräftelse, följesedel och faktura skrivs bara ut på svenska, fast försäljning i utländsk valuta finns. *(hemsidan)*
+
+### Medel
+
+- [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare. *(hemsidan, under både Tillverkning och Lager)*
+- [ ] **Koppling mellan en TO och dess halvfabrikats TO:er (pegging)** — medvetet utanför produktionsplaneringen 2026-10-17. *(hemsidan)*
+- [ ] **Prognos och ABC-klassning** — behovsberäkningen räknar bara på faktiska ordrar; en enkel prognos per artikel och omsättningsklassning som styr vilka artiklar som får beställningspunkt. Omfattning ej specad än.
+- [ ] **Planering och beställningspunkt per lager** — behovsberäkningen räknar på artikelns totala saldo över alla lager. *(hemsidan)*
+- [ ] **Semester- och kompsaldo** — semester och kompledighet registreras som frånvaro i timmar och kompsaldot förs i lönesystemet. *(hemsidan)*
+
+### Låg
+
+- [ ] **Detaljplanering per dag eller timme och köberäkning** — planeringen räknar ledig tid per resurs och vecka (avancerad kapacitetsplanering är medvetet utanför v1). *(hemsidan)*
+- [ ] **FIFO-värdering och bakdaterade lagerrörelser** in i en tidigare värdering. *(hemsidan)*
+- [ ] **Lämna in momsdeklarationen från Nav** — i dag laddar man själv upp filen från Momsrapporten i Skatteverkets e-tjänst. *(hemsidan)*
+- [ ] **Färdig koppling till en webbutik** — externa system kan redan lägga offerter via API:t. *(hemsidan)*
+- [ ] **Färdiga kollektivavtal att välja** — OB-fönster, övertidströskel och tidkoder läggs upp av företaget självt. *(hemsidan)*
+- [ ] **Passerkort eller RFID-brickor** i terminalen — personalen identifierar sig med anställningsnumret. *(hemsidan)*
+- [ ] **Mobilapp** — Nav|ERP och stämpelterminalen används i webbläsaren. *(hemsidan)*
+- [ ] **Aktivitetsbaserad kalkyl** — omkostnaderna fördelas med procentuella påslag. *(hemsidan)*
+- [ ] **Flera bolag och koncernredovisning** — en installation hanterar ett företag. *(hemsidan)*
+
+### Medvetet utanför
+
+- EDI för order och fakturor — bortvalt i v1 enligt CLAUDE.md. *(hemsidan)*
+- Lönesystem — Nav|ERP räknar inte ut lön, skatteavdrag eller arbetsgivaravgifter; PAXml-filen innehåller timmar per tidkod och dag, inte belopp (se Beslut). *(hemsidan)*
+
+## Beslut
+
+- Löneunderlag exporteras som **PAXml** (funkar mot Visma Lön, Hogia, Kontek, Agda, Fortnox Lön).
+- Ekonomi = **full redovisning inbyggd** (kontoplan, verifikat, huvudbok, momsrapport — inte bara SIE-export).
+
+## Klart
+
+Avslutade punkter, i den ordning de stod under Aktuellt. Flyttas till arkivet utanför det publika repot när de inte längre behövs som referens.
 
 - [x] **import-export.md, paket A–D** — **klar 2026-09-06**: Avrundning (`articles.rounding`), tidsenhet i beredningen och operationsimportens **Enhet** med **Uppdatera befintliga operationer**, importentiteterna enheter/inköpspriser/kundpriser plus planeringsfliken, och flerfilsimporten **Alla filer**. Detaljerna står i `.claude/rules/`.
-- [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare.
 - [x] **Orderradens 400 vid tom priskedja** (S) — **klar 2026-10-15**: raden behåller sitt pris och sin rabatt när kedjan är tom. — en rad-PATCH som ändrar antalet utan `unitPrice` prisar om raden (C3: en ny kvantitet kan ha passerat en staffelgräns) och kastar `PriceNotFoundError` → 400 om kedjan är **helt tom**, trots att raden redan har ett pris. Motivet "stale-pris vore värre vid staffel" bär inte i just det fallet: finns ingen prisregel alls finns ingen staffel att ha passerat. Kandidatfix: behåll radens befintliga pris och rabatt när kedjan inte ger något, och lämna kastet i `addRow`/`createQuote` orört — där är det både testat (`sales.service.test.ts` "throws PriceNotFoundError when omitted and the chain is empty") och manualdokumenterat ("Saknas pris i alla fyra stegen går det inte att lägga raden"). Webben är opåverkad (skickar alltid pris); det gäller främst konfiguratorn. Fällan syns i testfilen: två tester kringgår den genom att skicka `unitPrice`, och ett tredje förklarar den i en kommentar. Se C3-uppföljningarnas punkt 7.
 - [x] **Frivillig onboarding** — **klar 2026-10-15** (System → Kom igång + kortet på Översikten) — en guide för nya användare/installationer som går att hoppa över.
 - [x] **Förbättra produktionsplaneringen** — **klar 2026-10-17** (första omgången): planerade veckor per operation på ledig kapacitet (knappen Planera i Beläggning och direkt när en TO skapas), flytta en operation till en annan vecka (låses), markeringar och sammanfattning för överlast, sena och oplanerade ordrar, terminalens sortering Planerad vecka, och reservationen från Leveranstidskontrollen som skapar TO:erna för hela trädet. Detaljerna står i `.claude/rules/`. Medvetet utanför: kopplingen mellan en förälder-TO och komponentens TO (pegging).
 - [x] **Frivillig exempeldata** — **klar 2026-10-15** (System → Exempeldata) — en funktion som på begäran skapar exempelprodukter med operationer och strukturer, exempelkunder och exempelleverantörer.
-- [ ] **Förbättrad artikel- och strukturimport** — omfattning ej specad än (bygger vidare på import-export.md-paketen ovan).
-- [ ] **Förbättrad kundimport** — omfattning ej specad än.
-- [ ] **Förbättrad leverantörsimport** — omfattning ej specad än.
-- [ ] **Förbättrad lagerplatshantering** — omfattning ej specad än.
 - [x] **Förbättra scheman för när- och frånvaro** — **klar 2026-10-28** (0.6.1-alpha): ATF och inarbetning i veckoschemat — **Ordinarie arbetstid per vecka** och **ATF per vecka** på veckoschemat, räknat per arbetsdag med veckans sista arbetsdag som den korta, **Tjänar in ATF** på frånvarokoderna och inställningen **Tillåt ATF-uttag via schemat** (migration 0166). Spec `2026-10-28-atf-i-veckoschemat-design.md`. — bland annat ska ATF kunna läggas till. I dag finns dags- och veckoscheman, helgdagar och överstyrning per vecka/dag på personalkortets **Schema**-flik (Tillverkning → Planering → Scheman); ATF finns bara som intjäning per vecka med uttag och justeringar på personalkortets **ATF**-flik eller i terminalen, inte i schemat. Omfattning ej specad än (2026-10-28).
 - [x] **Excelmallar för importerna** — **klar 2026-10-22**: **Ladda ned mall** på varje importflik, förklaringarna i guidens mappningssteg och i manualkapitlet **Importmallar**, som också finns på hemsidan med mallarna. — en exempelfil (.xlsx) per import med en rubrik för varje importkolumn, och en cellkommentar på varje kolumnrubrik som förklarar tydligare vad kolumnen betyder (format, enhet, tillåtna värden, om den är obligatorisk). Omfattning ej specad än (2026-10-22).
-- [ ] **Redigerbar Översikt** — användaren ska kunna välja vad startsidan Översikt (dashboarden) visar. Omfattning ej specad än.
 - [x] **Anledning vid sen ankomst och tidig utstämpling** — **klar 2026-10-22**: inställningarna under Lön & PAXml, registret Avvikelseorsaker, terminalens frågor och attesteringens kolumn Avvikelser (migration 0136). — en systeminställning (av som förval) som tvingar den anställde att ange en anledning i terminalen när närvaron stämplas in för sent eller stämplas ut för tidigt jämfört med schemat. Stämplar den anställde ut efter schemats sluttid (övertid) ska hen dessutom välja **Övertid utbetald** eller **Övertid sparad** (komptid) — valet finns redan som den anställdes förval (`employees.overtime_compensation`) och per dag (`overtime_dispositions`), så terminalen kan skriva dagens val där. Spec `2026-10-22-narvaroavvikelser-design.md` (2026-10-22).
 - [x] **E-faktura (Peppol), etapp 1** — utgående kundfaktura och kreditfaktura som Peppol BIS Billing 3 via B2Brouter: kundens **Fakturaleverans** och **Peppol-id** med **Kontrollera**, **Skicka e-faktura** på fakturakortet med sändningslogg, statusjobb och inställningssidan System → E-faktura (migration 0133). Klar 2026-10-21.
-- [ ] **E-faktura (Peppol), etapp 2** — mottagning (inkommande e-faktura blir leverantörsfakturautkast med rader), webhooks, utländska mottagare och valutor (omvänd moms, export), automatisk sändning vid Utfärda och samlingsfakturering, ev. InExchange-adapter. Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7.
 - [x] **Aviseringar** — **klar 2026-10-21**: sidan **Aviseringar** och Översiktens **Att bevaka** visar tio typer (negativt saldo, försenade kund-/inköpsordrar, sena TO:er, behöver beställas/tillverkas, förfallna kundfakturor, leverantörsfakturor att betala, e-fakturor och utskick som misslyckades) efter behörighet, och varje användare kan slå på en **daglig sammanställning via e-post** (migration 0134). Offerter som passerat giltighetstiden kommer med *Uppföljning av offerter*. — systemet berättar inget självt: försenade ordrar, offerter som passerat giltighetsdatum, saldo under beställningspunkten och förfallna fakturor syns bara om man går och tittar. Förslag: en lista på Översikten och/eller en daglig sammanställning via e-post. Omfattning ej specad än (jämförelse 2026-10-21).
 - [x] **Uppföljning av offerter** — **klar 2026-10-21**: offerten får **Giltig t.o.m.** (förval i Systeminställningar) och markeras **Utgången** när datumet passerat, **Förlorad…** med orsak ur registret **Förlustorsaker** (och **Öppna igen**), aviseringen **Offerter att följa upp** och rapporten **Offertuppföljning** med hit rate per kund, månad och förlustorsak (migration 0135). — giltighetstid på offerten, orsak när en offert förloras och en hit rate (andel offerter som blir order). Enklaste formen av säljuppföljning; saknas helt i dag. Omfattning ej specad än (jämförelse 2026-10-21).
 - [x] **Reklamationer och avvikelser** — **klar 2026-10-26** (migration 0153–0154): huvudmenyn **Kvalitet** med **Avvikelser** (Kundreklamation, Leverantörsavvikelse, Intern avvikelse; AV-nummer; Registrerad → Utreds → Avslutad/Makulerad; orsak, ansvarig, åtgärd senast, orsaksanalys/åtgärd/förebyggande åtgärd, beslut, kostnadsrader med kreditering/ersättning från kopplade fakturor, bilder och filer, historik, Reklamationsrapport som PDF och e-post), genvägarna Skapa kreditfaktura/ersättningsorder/inköpsorder/tillverkningsorder och Koppla dokument, sektionen Avvikelser på order-, faktura-, kund- och leverantörskorten, registret **Kvalitetsorsaker** som även kassationen väljer ur, leveransprecisionen per motpart med avvikelser, andel felfria, reklamerat antal och avvikelsekostnad, aviseringen för passerad Åtgärd senast. — ett ärende för kundreklamation och avvikande leverantörsleverans med orsak, åtgärd, kostnad och koppling till order och artikel; kassationsorsaker finns bara per operation i dag, och leverantörsbedömningen (leveransprecisionen) saknar kvalitetsdelen. Omfattning ej specad än (jämförelse 2026-10-21).
-- [ ] **Skanning i lagret** — pallkorten har streckkod/QR-kod men ingen rutin läser dem: inleverans, plock och inventering med handskanner eller mobilkamera. Omfattning ej specad än (jämförelse 2026-10-21).
 - [x] **Återkommande verifikat och periodisering av fakturor** — **klar 2026-10-24** (bokföringsgranskningen etapp 3): **Återkommande verifikat** som mall per månad (utkast eller bokför) och **Fördela över perioder** (migration 0147). — månadsvisa bokningar (hyra, försäkring) som mall, och fördelning av en faktura över flera perioder; görs för hand i dag. Omfattning ej specad än (jämförelse 2026-10-21).
 - [x] **Budget** — resultatbudget per konto att ställa resultaträkningen mot (etapp 5 del B, migration 0150): budget per konto och räkenskapsårsperiod, valfritt per kostnadsställe (flikarna Totalt/Ej fördelat/per kostnadsställe), förvald budget per år, Fördela årsbelopp jämnt, Kopiera utfall från föregående år, Kopiera budget, CSV-export/-import, kolumnerna Budget/Avvikelse/Avvikelse % (period och ackumulerat) i resultaträkningen.
 - [x] **Bokföringsgranskningen 2026-10-24** — **klar 2026-10-26** — beslutat att bygga i denna ordning: (1) **momskoder** — register i stället för den fasta momssatslistan, alla momsdeklarationens rutor (20–24, 30–32, 37–41, 50, 60–62 m.fl.), kundens land och momsnummer styr momskod och intäktskonto, köparens momsnummer och undantagstext på fakturan, leveransdatum på fakturan, omvänd moms i byggsektorn, helårsmoms, periodisk sammanställning och momsdeklarationen som fil; (2) **valuta** — leverantörs- och kundfakturor i utländsk valuta med kursdifferens, utlandsbetalningar; (3) **snabbare manuell bokföring** — registrering direkt i tabellen, kontosök, automatisk motrad, momshjälp, mallar och återkommande verifikat, import av verifikat från SIE (lönejournal); (4) **bankavstämning** (camt.053); därefter kostnadsställen/projekt, budget, dröjsmålsränta och fakturaskanning. Mottagning av e-faktura skjuts upp. **Status 2026-10-26:** alla etapper klara. (1)–(4) klara (migrationer 0142–0148), kostnadsställen och projekt klara (etapp 5 del A, se nedan), budget klar (5B, 0150), dröjsmålsränta och förseningsersättning klara (5C, 0151: referensränta från Riksbanken, Räntefakturering, momskod UTM, förseningsersättning med avräkning mot påminnelseavgiften) och fakturaskanning klar (0152).
 - [x] **Kostnadsställen och projekt** — **klar 2026-10-25** (bokföringsgranskningen etapp 5 del A, migration 0149): registren **Kostnadsställen** och **Projekt** under Ekonomi med radering och flytt av kopplingarna, kolumnerna i verifikattabellen, mallar och återkommande verifikat, förval från kundorder, artikelgrupp, leverantör, inköpsorder, bankregel och anläggningsgrupp, objekten på intäkts-/kostnadsraden i automatkonteringen, **Kräver kostnadsställe** på kontot, resultaträkningen per kostnadsställe/projekt, filter i huvudboken och verifikationslistan, **Projektrapport** och SIE med `#DIM`/`#OBJEKT`.
 - [x] **Fakturaskanning** — **klar 2026-10-26** (migration 0152): **Inköp → Fakturainkorg** tar emot leverantörsfakturor genom uppladdning, **Fota faktura** på mobilen och en IMAP-låda som Nav läser (**System → Fakturaskanning**). Reglerna läser PDF:ens textlager lokalt (leverantör via orgnr/momsnr/bankgiro/plusgiro/IBAN, fakturanummer, datum, OCR, belopp, momssats, summakontroll) och lär sig leverantörens etiketter; **Tolka med AI** (Claude via företagets egen Anthropic-nyckel, automatiskt när reglerna inte räcker om läget är på) läser foton, skannade PDF:er och rader; **Matcha mot inköpsorder** föreslår IO och radkoppling. **Skapa leverantörsfaktura** gör ett utkast med filen som underlag — attesten som förut. — leverantörsfakturor som PDF eller foto (uppladdning eller en egen e-postlåda som Nav läser) tolkas till ett **utkast** till leverantörsfaktura: leverantör (via orgnr/bankgiro/VAT-nummer), fakturanummer, datum, förfallodag, OCR, valuta, netto/moms/brutto, momskod och helst raderna, matchade mot öppna inköpsorder. Originalet blir fakturans underlag och osäkra fält markeras — en människa granskar och attesterar som i dag. Tolkningen bakom en utbytbar söm (som frakten och e-fakturan), frivillig och med egen API-nyckel eftersom fakturorna skickas till en extern tjänst. Görs efter momskoderna och leverantörsfakturor i valuta (bokföringsgranskningen 2026-10-24), motorval tas med användaren då.
-- [ ] **Prognos och ABC-klassning** — behovsberäkningen räknar bara på faktiska ordrar; en enkel prognos per artikel och omsättningsklassning som styr vilka artiklar som får beställningspunkt. Omfattning ej specad än (jämförelse 2026-10-21).
 - [x] **Tillägg/Plugin-system** — **klar 2026-10-23**: externa tillägg installeras under System → Tillägg med egen API-nyckel och behörighetsgrupp, får händelser som signerade webhooks (16 typer, köade och omförsökta) och kan visa sidor i modulernas menyer och flikar på artikel-, kund- och leverantörskorten (migration 0141); exempeltillägg i `examples/nav-plugin-exempel/`. Dessutom **egna teman** under System → Teman (temafil och temaredigerare, migration 0140). — ett sätt att bygga ut Nav med tillägg (plugins).
 - [x] **Nummerserie för artikelnummer** — **klar 2026-10-19**: ett tomt Artikelnummer i Ny artikel får nästa lediga nummer ur standardserien **Artikelnummer** eller ur en egen artikelserie (System → Nummerserier → **Egna artikelserier**) som kopplas till artikelgrupper; nummer som redan finns hoppas över (migration 0127). Serier kopplade till kund är medvetet utelämnade. — en ny artikel ska kunna få sitt artikelnummer ur en nummerserie, som orderna får sina nummer i dag. Omfattningen är inte specad än.
 - [x] **Byta leverantör på leverantörsfaktura** — **klar 2026-10-18**: **Betalas till en annan leverantör** i Ny leverantörsfaktura och **Leverantör (betalas till)** på utkastets kort; raderna förblir matchade mot inköpsordern. — när man registrerar en leverantörsfaktura ska man kunna ändra leverantör, även när fakturan skapas från ett fakturaunderlag. Omfattningen är inte specad än.
@@ -57,205 +265,3 @@ Mindre uppföljningar från granskningarna — **alla sex avbetade i städsvepet
 - [x] Utleveransen fick listan **"Levererbara ordrar"** + artikelsökning + rikare träffrader (spegling av inleveransen).
 - [x] Operationsimporten läser kolumnen **Packinstruktion** (>1000 tecken = radfel).
 - [x] Fakturaunderlagslistan: ren lego-IO visar orderns uppdateringsdatum som mottagningsdatum (dokumenterad approximation).
-
-## Saknas enligt hemsidan — att gå igenom
-
-Punkterna under **Det här saknas i dag** på hemsidans funktionssidor (`hemsida/content/areas.ts`, fältet `limits`), samlade 2026-10-28 för att gå igenom och besluta vad som ska byggas. Texten är hemsidans egen. Fyra punkter visade sig redan vara lösta (valuta i försäljningen och i bokföringen, e-faktura och fakturaskanning, SIE-import av verifikat) och två delvis (momsfilen, budget) — de är strukna eller omskrivna på hemsidan 2026-10-28 och står inte med här. Samma sak som en befintlig punkt ovan står med en hänvisning.
-
-### Tillverkning
-
-- [ ] Planeringen räknar ledig tid per resurs och vecka. Det finns ingen detaljplanering per dag eller timme och ingen köberäkning.
-- [ ] Det finns ännu ingen spårbarhet med batch- eller serienummer. *(Samma som **D3 Spårbarhet batch/serienr** ovan; står även under Lager och artiklar.)*
-- [ ] Det finns ingen koppling mellan en tillverkningsorder och tillverkningsordrarna för dess halvfabrikat. *(Medvetet utanför produktionsplaneringen 2026-10-17: pegging.)*
-- [ ] Planeringen och Leveranstidskontrollen prövar inte alternativa resurser. En operation planeras alltid på den resurs den har på ordern.
-- [ ] Behovsberäkningens förslag är inte tidsfasade. Datumen sätts först när ordrarna skapas.
-
-### Lager och artiklar
-
-- [ ] Det finns ännu ingen spårbarhet på batch- eller serienummer. *(Se Tillverkning.)*
-- [ ] Det finns ännu inget stöd för streckkoder i lagret. Artikel och antal väljs och skrivs in för hand. *(Samma som **Skanning i lagret** ovan.)*
-- [ ] Lagersaldon går inte att importera från fil. Ingående saldon läggs in med inventering eller justering.
-- [ ] Behovsberäkningen räknar på artikelns totala saldo över alla lager. Det går inte att planera eller sätta beställningspunkt per lager.
-- [ ] Det finns ingen FIFO-värdering, och en lagerrörelse kan inte backdateras in i en tidigare värdering.
-
-### Inköp och försäljning
-
-- [ ] E-faktura via Peppol går bara till svenska företagskunder i kronor, och inkommande e-fakturor tas inte emot. Andra fakturor skickas som PDF med e-post. *(Samma som **E-faktura (Peppol), etapp 2** ovan.)*
-- [ ] Det finns ingen EDI för order eller fakturor. *(Medvetet bortvalt i v1 enligt CLAUDE.md.)*
-- [ ] Offert, orderbekräftelse, följesedel och faktura skrivs bara ut på svenska.
-- [ ] Det finns ingen färdig koppling till en webbutik. Externa system kan däremot lägga offerter via API:t.
-
-### Kalkyl
-
-- [ ] Påslagen gäller hela företaget. Bara TO-påslaget sätts per resurs, och det finns inga påslag per artikelgrupp, kund eller order.
-- [ ] Omkostnaderna fördelas med procentuella påslag. Det finns ingen aktivitetsbaserad kalkyl.
-- [ ] Det går inte att pröva andra påslag på en enskild artikel. Förkalkylen räknar alltid med inställningarna under System → Kalkyler.
-- [ ] Leverantörspriser räknas inte om mellan valutor. Med Aktiv leverantörs pris används katalogpriset som det står, även när det är i en annan valuta än kronor.
-- [ ] Det finns ännu ingen automatisk uppdelning av avvikelsen på pris, mängd och tid, och efterkalkylen skiljer inte på ställtid och stycktid.
-
-### Personal, tid och lön
-
-- [ ] Det finns ännu ingen funktion för att radera eller anonymisera en anställds uppgifter. En anställd kan bara markeras som inaktiv.
-- [ ] Nav|ERP är inte ett lönesystem. Det räknar inte ut lön, skatteavdrag eller arbetsgivaravgifter. PAXml-filen innehåller timmar per tidkod och dag, inte belopp. *(Ett val enligt Beslut nedan — snarare en avgränsning än något att bygga.)*
-- [ ] Nav|ERP för inget semestersaldo och inget kompsaldo. Semester och kompledighet registreras som frånvaro i timmar, och kompsaldot förs i lönesystemet.
-- [ ] Det finns inga färdiga kollektivavtal att välja. OB-fönster, övertidströskel och tidkoder lägger ni upp själva.
-- [ ] Det finns ingen koppling till passerkort eller RFID-brickor. Personalen identifierar sig med anställningsnumret.
-- [ ] Det finns ingen mobilapp. Nav|ERP och stämpelterminalen används i webbläsaren.
-
-### Ekonomi
-
-- [ ] Nav|ERP lämnar inte in momsdeklarationen. Ni laddar själva upp filen från Momsrapporten i Skatteverkets e-tjänst.
-- [ ] En installation hanterar ett företag. Flera bolag och koncernredovisning finns inte.
-
-## Småfynd från granskningarna
-
-Uppskjutna fynd från slutgranskningarna juli–oktober 2026, flyttade hit från arbetsminnet 2026-10-29 så att allt står på ett ställe. Alla bedömdes ofarliga vid merge. De äldre är stickprovskontrollerade mot koden och det som redan var löst är struket, men mer kan ha lösts på vägen — stryk det som inte längre gäller. *(medvetet)* betyder ett val som gjordes med flit; ta bara upp det om beteendet ska ändras. Nya småfynd skrivs hit.
-
-### Försäljning, offert och faktura
-
-- [ ] Kundorderkortets radredigering jämför priset mot radens *ursprungliga* basantal (`editInitialBaseQuantityRef` i `SalesOrderDetail.tsx`): antal 10 → 100 → 10 lämnar 100-stegets pris kvar. Spegla inköpssidans `editPricedBaseQuantityRef` och vänta på enhetsfaktorn innan prisfrågan.
-- [ ] `computeDueDate` i `invoice.service.ts` räknar i millisekunder och kan slå fel vid sommartidsskiftet — `setDate`-aritmetik vore exakt.
-- [ ] Fakturalistans sökning matchar kundens nuvarande namn men visar ögonblicksbilden; `?orderId=` utan rest droppas tyst när flera ordrar faktureras; fakturans Lägg till rad saknar enhetsväljare (antalet är basenheten).
-- [ ] `invoice.repository.ts`: kommentaren (~519) listar `updateStatus` bland de villkorade fast den är ovillkorad (numera bara testsöm); latent dubbelräkning i `validateCommittedQuantities` om en repo-väg någonsin körs mot en redan utfärdad faktura med länkade rader.
-- [ ] Testluckor: två separata kreditutkast mot samma orderrad; `create`/`createCredit` duplicerar tally-loopen; prisupplösarens grupplösa artikel; `updateCustomerPriceSchema` med båda värdena; teoretisk dubbel-round4 i radredigeringens enhetsväxlingsvakt; dual-auth (session + klienttoken) end-to-end för konfigurator-scopet och `POST /quotes`.
-- [ ] 0-kronorsfaktura ger 409 `ZeroAmountPostingError` *(medvetet)* — kräver ett produktbeslut om garanti-/ersättningsfakturor dyker upp (utfärda utan verifikat eller symboliskt belopp).
-- [ ] Icke-admin ser ingen bokföringsindikation på fakturakorten (Verifikat-länken är admin-spärrad; verifikatnumret som ren text vore lika säkert).
-- [ ] `/price-quote` visar priskedjan för godtycklig kund för en klienttoken *(medvetet — tokenet kan redan skapa ordrar för godtycklig kund)*.
-- [ ] TO från kundorderrad: avbryts ordern i millisekundfönstret mellan validering och commit skapas TO:n länkad mot en avbruten order och raden blir permanent oborttagbar.
-- [ ] Typerna i `SalesOrderLinkReader`, `ManufacturingCoverageReader` och webbens `types.ts` hålls i synk för hand *(husets mönster)*; en delad `round4`-export i shared/units när en tredje konsument dyker upp (i dag `toUnitQuantity(x, null)`).
-- [ ] Offertuppföljning *(medvetet)*: Öppna igen efter manuell statusändring till Förlorad från t.ex. Levererad gör ordern till offert med leveranser kvar; radering av förlustorsak kan flytta till en inaktiv orsak; PDF-datumet är ISO.
-- [ ] Kundimporten: Personnummer importeras inte; en egen CSV med Kund + Namn + Betalningsvillkor räknas som Lista-fil *(dokumenterad avvägning)*.
-
-### Konfigurator
-
-- [ ] Ett uttryckligen valt men regelexkluderat alternativ prissätts ändå på en ogiltig konfiguration (giltighetsflaggan avgör användningen).
-- [ ] Olåst race: `createTemplate` mot samtidigt typbyte på artikeln (kräver artikelradslås på båda sidor).
-- [ ] `updateRule` med bara ny effekt tolkar det sparade målet med den nya effektens icke-strikta schema (require → exclude kan tappa en operation tyst) — kräv mål när effekten ändras.
-- [ ] Standardvärdet för tal kontrolleras inte mot stegrutnätet (create + update).
-- [ ] Mallredigeringen: Förval-radions onChange/onClick, inline-marginaler, åtgärdskolumnen 260 px (kontrollera i 375 px), en halvifylld rads fel rensas inte vid skrivning i ny rad, halvskriven tidig retur kastar pågående svar, `parseDecimal` vägrar `.5`, "— Välj —" kan inte tömma ett förval *(enligt spec)*; inga komponenttester.
-- [ ] Konfiguratorns serviceblock ligger under Behovsberäkning-kommentaren i `app.ts`; reorder-400 saknar `issues`; testputs (dubbel errors-import, `makeArticle` `as never`, oanvända variabler, evaluate-404 asserterar bara status, tunt schematest för positiva vägar och DB-CHECK:arna).
-- [ ] Härledningen läser mall, struktur och rutt utan transaktion (en enstaka inkonsistent förhandsvisning möjlig); `-0` som resultat; pin-tester för krockande op vars villkor inte gäller, formelfel som kopplar bort en rad utan varning och standardfallet i pass A; inga komponenttester för modalens PATCH; baskopplad rad visar bara sekvensnumret när rutthämtningen fallerar.
-- [ ] `useVariantOf` behandlar alla fel som "ingen variant" och hämtas två gånger per kort — lägg `variantOf` på `GET /articles/:id`.
-- [ ] `createVariants`: förkalkylen läser på vanliga `db` medan transaktionen håller mallåset (upp till 200 lån i följd) — skicka in tx om det blir långsamt.
-- [ ] Varianter, puts: `VariantOfPanel` inline-style → CSS-modul; delad "strip id + tidsstämplar"-hjälpare för ruttkopiering; död `toOrderBlocked`-logik i `KonfiguratorTab` för köpta; dubblettnummer inom samma körning säger "finns redan"; standardvärdeshjälpen nämner inte tomt mått / Med-Utan; Skapa variant är inaktiv i stället för dold vid ogiltig konfiguration.
-- [ ] Testluckor varianter: `variantRequestSchema`/`variantSetsSchema` (200-tak, 4 decimaler), orderable-tolkningen, surface_treatment-namnfallback, lego-leverantörsförval på villkorad op, `created_by` via rutten, låstestet i article-template-guard bevisar väntan bara via tid.
-- [ ] Konfigurera på orderraden: återanvänd inaktiv variant läggs in tyst — visa "Varianten X fanns redan (inaktiv)"; `ConfigureModal` portalar själv (låt `Modal` äga en opt-in-portal); ingen laddningstext medan mallens grupper hämtas; "· Konfigurerbar" visas i alla artikelval, även register/struktur; variantsteget i `resolvePrice` gör en extra PK-uppslagning per prissättning.
-- [ ] Testluckor orderrad: too_long via `resolveVariant`, `created_by` via rutten, HTTP-test av `?configurable`, exhaustiv `never` i statusswitchen.
-- [ ] Beställningsvara: antalsbytets omvärdering jämför inte ny konfigurationsnyckel mot sparad (ett förval som läggs till senare ger pris med tillägg som inte syns i valen); `createFromSalesOrderRow` läser raden olåst (kan planera på gammal artikel vid samtidigt variantbyte); raden utvärderas utanför mallåset.
-- [ ] Beställningsvara, webb: radredigeringen skickar alltid à-pris, så serverns 400 för ogiltig sparad konfiguration nås aldrig och evaluate-fel sväljs — visa felet som hint; antalsbyte på rad vars mall lämnat Beställningsvara saknar tips om att ange pris; `saveReconfigure` stänger dialogen vid 409 (valen tappas); AddRowForm-omvärderingen kan skriva över ett pris som skrivs under pågående evaluate; extra evaluate efter Lägg in; `ConfigurationLineList` nycklar på text; blur-hacket i `ConfigureModal` hör hemma i `SearchPicker`; `FormHint` `<p>` i `<span>`.
-- [ ] Kundorderkortets tabell scrollar ~144 px i sidled vid 1280 px och redigeringsläget i smala kolumner är inte kontrollerat; fakturadialogens rader inom en order saknar stabil ordning.
-- [ ] Beställningsvara, server: `show_configuration_prices` alltid boolean för offert/OB i e-postloggen; kunden hämtas två gånger per utskrift/mejl; delkredit med explicita rader kopierar från orderraden; `rowConfigurationLines` saknar `?.` på price; sub-radsloopen duplicerad i plocklista/följesedel; `ConfiguredManufacturingNotAvailableError` har oanvänt articleNumber och dubbel mappning; `configuredRowsOfTemplate` saknar orderBy; `createQuote` rapporterar bara första ogiltiga rad; `formatMeasure` och e-notation.
-- [ ] Beslut: radens TB räknas om från *aktuell* mall vid antalsändring medan en befintlig TO behåller sin frysta struktur — TB kan glida från det som byggs.
-- [ ] Beslut: kalkylutfallet jämför en konfigurerad TO:s efterkalkyl mot mallens senaste förkalkyl, inte mot TO:ns egen `configuration.cost`.
-- [ ] Beslut: kostnadsfel i förkalkylen stoppar försäljning av en konfigurerad rad (`evaluateRowConfiguration` kastar).
-- [ ] Konfigurerad tillverkning, server: mallen laddas två gånger + full förkalkyl per utvärdering; icke-härledbar struktur accepteras på raden med cost null (syns först vid TO); `configuratorMode` läses före TO-transaktionen; 60 s-cachen kan ge en andra TO på en konfigurerad rad; inaktiv mall får konfigurerade förslag; datumförslaget ignorerar levererat antal; ingen `created`-händelse för TO i händelseloggen; `proposal.articleId` kontrolleras inte mot raden; engelska "ConfiguredStructureReader not wired" kan nå en rad; `selfCostPerUnit ?? 0`.
-- [ ] Konfigurerad tillverkning, test: route-test för 400 details och 409 row-configuration-changed; SVK-testet borde ha allmänt påslag ≠ 0; DB-test för costing-only/fantom-egen-länk-material; testnamnet "invalid configured row has no cascade" överlovar.
-- [ ] Konfigurerad tillverkning, webb/manual: mallraden i behovsberäkningen har en inaktiv kryssruta; artikeltabellen döljs när sidan bara har konfigurerade rader; ingen "välj alla" i konfigurerade sektionen; valraderna på TO-kortet ligger tätt mot Material; derive per tangenttryck utan debounce (gammalt TB syns tills svaret kommer); manualen säger "gul varning" (temaberoende); manualens §Skriv ut TO och §Pallkort säger att planerad TO saknar operationer — inte sant för beställningsvara.
-- [ ] Externt API: `row-variant-exists`-texten är variantformulerad även för vanliga dubbletter; IO-/förfrågningsrader ger 500 på `InvalidUnitError`; gruppsorteringen vid lika sortOrder; dubbel läsning i `getPublicTemplate`/`evaluatePublic`; listrutten går förbi `run()`; generisk webbtext för `configurator-not-published`; inget enhetstest för `selectionFromRaw`/`rawFromSelection` med null; varianter skapade före en offert som sedan faller ligger kvar *(medvetet)*.
-
-### Inköp
-
-- [ ] Stafflade leverantörspriser: route-test för 400 utan `quantity` på `GET /supplier-price-quote`; flernivåfall med `costingSupplierPriceTier: "tiered"`; webben saknar klienttak på 50 staffelsteg (zod ger 400).
-- [ ] Idé: visa "Staffelpris från N" i IO-radformuläret — API:t returnerar redan `fromQuantity`/`source`.
-- [ ] Legoförfrågan: inget index på `inquiry_rows.routing_operation_id`; leverantörshämtningen tredubblad i webben (`useSuppliers`-kandidat); `LegoInquiryResult` duplicerad fyra gånger; artikelkolumnen i behovsberäkningen blir trång när en legorad har många förfrågningar.
-- [ ] Leverantörsfakturans webb visar "Ingen kurs" när servern faller tillbaka på inköpsorderns kurs.
-- [ ] Leveransdagar *(medvetet)*: en leverantör som tar emot lördagar får inte leverera lördagen före ett måndagsbehov (specen säger arbetsdagen före behovet); ett handskrivet datum på en ny IO-rad nollställs vid artikelbyte, som priset.
-- [ ] Behovsberäkningens **Skapa ordrar** (Tillverkning) skapar IO-utkast även utan behörigheten Inköp *(medvetet)*.
-
-### Lager och artiklar
-
-- [ ] Inventeringen: guard-TOCTOU under READ COMMITTED *(accepterad husrisk)*; avbrutna sessioner samlar störningsflaggor för evigt (bara visning); testluckor (INV-nummerstegning, positiv diff utan standardpris → null, spärrsläpp efter registrering).
-- [ ] Lagerloggens CSV: Saldo-kolumnen styrs av rå `articleId`-sträng (tom sträng ger tom kolumn).
-- [ ] Kopiera från befintlig artikel skriver tillverknings- och inköpstabeller direkt från artikelmodulen (borde vara Tx-löv i ägarmodulerna); `informationIsNew` dubblerad i `CopyFromModal`/`NewArticleForm`; ritningsrevisioner kopieras inte.
-- [ ] Artikelöversikten: `toBeCloseTo` i invarianttestet om bråktal någonsin används; manualens "Pågående" mot pillens "Pågår" (även i behovsberäkningens avsnitt).
-
-### Tillverkning och terminal
-
-- [ ] TO-kortets operationstabell: rubrik och cell överlappar i kolumnen Planerad vecka.
-- [ ] Terminalens operationslista: `?withOperations=` på orderlistan saknar anropare (behölls som publikt API); personalkortet släpper dolda inaktiva förval vid sparning *(medvetet)*; Sök/Bara redo behåller dolda markeringar; stationsbyte under pågående Starta valda; materialsorteringen använder numerisk collator mot API:ts `localeCompare`; testluckor (anställd-cascade, FK-race).
-
-### Närvaro, tid och lön
-
-- [ ] Instämpling av närvaro + arbete är inte atomär — dubbel närvaro är möjlig och det finns inget unikt index för öppen närvaro.
-- [ ] `updateAttendanceSession` läser raden utanför transaktionen; paus/resume-SQL dubblerad i stället för en `Db | Tx`-hjälpare; audit saknar pausantal.
-- [ ] Terminalen: identifieringen väntar på hela uppdateringen inkl. ordrar; Gå hem nu erbjuds även vid flerdygnsglömska; Sluttid skickas alltid (≤ 59 s avrundning); "Hej då"-notisen ligger kvar med hårdvarutangentbord; testluckor (lego-inleverans, Slutför order över flera op, admin-fall, 2 s-gränsen).
-- [ ] Närvaroavvikelser *(medvetet)*: attesteringen visar ingen "(N min sent)" förrän sessionen stängts; anledningen påverkar aldrig lön eller frånvaro.
-- [ ] Attest ogiltigförklaras inte av senare ändringar i öppen period *(planbeslut)*.
-- [ ] Upplåsning av löneperiod nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
-- [ ] OB räknas även på övertidsintervall *(planbeslut — lönesystemet avgör)*.
-- [ ] `absentToday` i `GET /stamp-sessions` syns för arbetsledare via Pågående arbete utan Personal & lön *(medvetet)*.
-- [ ] Layout: Attesteringstabellen spiller över 32 px vid 1500 px bredd; `SchedulesPageClient.tsx` (~325, `1fr 1fr 1fr auto`) och `EmployeeTabs.tsx` (`150px 1fr 160px`) har fasta grid som kan spilla över — lägg korta fält i `FormRow`.
-
-### Ekonomi – bokföring, reskontra och moms
-
-- [ ] Kontrollen att kontot är aktivt i bokföringstransaktionen tar inget radlås på `accounts` (sluttillståndet är lagligt ändå); verifikatens `seriesId` saknar index.
-- [ ] Huvudboken: kontoväljaren utesluter inaktiva konton med historik ("inkl. inaktiva"-val); IB/UB döljs när intervallet saknar rader; sorteringen ordnar över serier på nummer före serie och tie-breaken är otestad.
-- [ ] Latenta `createdAt`-ties (bulkinsert delar `now()`) i `salesOrderRows`, `costCalculationMaterialRows` och `supplierInvoiceRows`.
-- [ ] Postern: inaktivt regelkonto → `MissingPostingAccountError` är inte pinnat av test; `vatRate 0 + vatAmount ≠ 0` når balansassert som 500 (onåbart via fakturan); catch-kommentaren i `supplier-invoice.service.ts` (~340) nämner bara racet; omföringstestet täcker bara L-serien och asserterar inte räknaren; `reverse()`:s unik-race bara sekventiellt testad; `DEFAULT_POSTING_SETTINGS` i testhjälparen speglar systemservicens fallbacks för hand.
-- [ ] Kosmetik: `PERIOD_STATUS_LABELS` i webben oanvänd; konteringsregelsidans fallback märker oseedat konto "(inaktivt konto)"; manualen beskriver AP-restraden som egen rad fast den slås ihop per konto, och nämner inte att Verifikat-länken står kvar efter Avbryt *(medvetet: spåret ska synas)*.
-- [ ] `apps/api/test` typkontrolleras inte (CI typkontrollerar bara `src` via bygget).
-- [ ] Reskontran: `openAmountSql` evalueras två gånger i SELECT + WHERE (fullscan — korrekt men oskalbart); toleransregeln och betalningsförhandsvisningen finns i två kopior (kund/leverantör) — extrahera vid tredje konsumenten; `paidAt` är NULL för leverantörsfakturor betalda före leverantörsreskontran (beslut behövs om något ska sortera/filtrera på det).
-- [ ] Reskontran, webb: knappen inte inaktiverad vid felton i betalningsförhandsvisningen; manualens förhandsvisningslista saknar teckenmismatch-meddelandet; Makulerad visas som färgad text i stället för genomstruken.
-- [ ] Reskontran, testluckor: `NoAccountingPeriodForPosting` på betalnings-/avgiftsvägarna; in-lock `fee_already_charged`; leverantörsbetalningens periodspärr end-to-end; toleranstesterna pinnar inte radantal.
-- [ ] Reskontran, småputs: `payment.routes.ts` (~70) nämner bara betalkontoorsaken till `PaymentBankAccountConflictError`; kommentargrammatik i `payment.repository.ts`; dubbelt "när" och vacklande kreditfakturaterm i `inkop.md`; `makePaymentTerm`-fixturens namnkollisionsrisk; TRUNCATE-kommentaren om payment_terms-kaskaden; lokal `formatMoney` i `SupplierInvoiceCard`.
-- [ ] Moms: momsomföringens advisory lock saknar deterministiskt racetest; Momsrapporten visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
-- [ ] Kostnadsställen och projekt, kosmetik: smala filter i resultaträkningen; projektvalet trunkerat i radcellen; felet "välj kostnadsställe på raderna" när kolumnerna är dolda; P1-dialogen räknar offert som kundorder; fakturaradernas tabell skrollar i sidled på desktop.
-- [ ] Budget: kopplingsflytt mot samtidig Spara (teoretisk); `calendarMonthMap` med dubbel MM i förlängt målår; CSV-formelprefix på kostnadsställekod.
-- [ ] Dröjsmålsränta: `createCredit` med explicita rader kopierar inte `revenueAccount`; `ensureReferenceRates` minns inte misslyckade hämtningar (10 s per laddning när Riksbanken är nere); 409-texten already-charged när fakturan bara slutat vara kandidat; villkorstexten även på valutafakturor; "3 valda" räknar ersättningsrutor; privatperson läses live.
-- [ ] Momsruta per konto: backfilltestet mappar bara 3 av 7 konteringsnycklar; ingående momskonto utan ruta visas negativt i varningen.
-
-### Anläggningsregister
-
-- [ ] *(parkerat)* `createAsset` med ingående avskrivning tar inte advisory-låset och kan krocka med gruppens kontolås — bara en avstämningsdiff, inget bokas fel.
-- [ ] *(parkerat)* En tillgång med bara ingående avskrivning kan byta grupp och ingående fält (manualen säger att fälten låses vid första bokförda avskrivningen).
-- [ ] `seedBasCategories` saknar `isUniqueViolation`-fångst (dubbelklick ger 500) och skriver ingen audit; `updateCategory` utan tx/radlås; ingen korskontroll av konton mellan grupper (A:s kostnadskonto = B:s ack).
-- [ ] `fixed-asset.service.ts` är ~1 300 rader — körningsblocket kan bli egen fil; `previewRows` återimplementerar ackumulatorns nettning; `stockholmToday` duplicerar `currentMonthStockholm`; `reverse()` anropar `findFixedAssetLink` två gånger; `undoRun` ignorerar antalet ersatta rader; `getPlan` läser utan delad snapshot (tillfällig falsk avvikelse möjlig); `assertOpeningDepreciation` körs vid varje PATCH; typputs på `OpeningDepreciationCheck`; kommentar om varför `disposeAsset` anropar `assertPostablePeriod`.
-- [ ] Kommentarer: aritmetiken i `depreciation-schedule.test.ts` (100000/36, månad 22) och `missingMonths`-dokumentationen om var resten hamnar.
-- [ ] Testluckor: route-409 för inaktivt BAS-konto och för field-locked/life-too-short/has-depreciation; Review Focus-koderna på HTTP-nivå; att innevarande månad accepteras; avyttrad tillgångs redigeringsspärr; ångra med ingående avskrivning; `disposalError`-fallbacken; rader daterade efter årsslut; öppningsvalideringen med flera regelbrott; `seedBookedMonths` daterar på den 28:e; NOTICE-brus från TRUNCATE-kaskaden.
-- [ ] Webb: ingående avskrivningens fältpar hänger inte ihop i formuläret; tre fält i `FormRow` med columns=2; varningar visas med `FormError` i stället för `FormNotice`; modalernas tillstånd nollställs inte (DisposeModal, NewAssetModal); inaktivt förvalt mellankonto osynligt i den filtrerade listan; EditAssetModal behåller osparade ändringar; Summa alla grupper saknar rubrik; tomma Nr/Anskaffad-celler visar etiketter på mobil; manualens "använd andra koder än F, L, K, U och M" saknar kanske AV.
-
-### Årsbokslut
-
-- [ ] *(parkerat)* En ångrad avskrivningskörning — eller vilken registerkörning som helst — daterad på bokslutsdagen låser datumet.
-- [ ] *(parkerat)* Med lagervärde 0 på tomt konto rapporteras inte felkonfigurationen Lager = Lagerförändring.
-- [ ] Databasen: NV001-texten "Bokförd räkenskapsinformation kan inte ändras" är missvisande för stängt år; periodspärren täcker bara UPDATE; ingen CHECK `reversal_verification_id <> verification_id` på `profit_dispositions`.
-- [ ] Manuell bokföring i stängt år svarar `accounting-period-locked` (enligt spec), inte `fiscal-year-closed`; postern skickar ett datum som `what` i `FiscalYearClosedError`.
-- [ ] Småsaker: `unlockPeriod` hämtar året två gånger; `updateClosingDate` loggar oförändrat datum; saknad sista period ger vanlig `Error` (500); `closingPeriodStatus` förvalt `locked`; `loadWarnings` är sekventiell (ett fel fäller sidan) och `getPlan` går på egen `db`; `year-end-checks.ts` importerar `formatNumber` från `document-pdf` (drar in pdfkit); `inventoryStepView` räknas två gånger; inaktivt lagerkonto ger 409 här men 400 i steg 6; `reopen` skriver audit även när perioden redan är öppen; omföring av omföring i serie I markerar importen som omförd i meddelandet; `previewProfitDisposition` svarar på pågående bokslut; dubbla stängningsspärrar när bokslutsdag = årsslut.
-- [ ] Att nämna i manualen: värderingens "deterministisk"-kommentar är för stark (standardprisfallback); `bookDepreciation` ger 400 month-in-future även utan något att boka; identisk periodisering med sedan inaktiverat konto ger 400; Omför-rådet för IB-spärren kan landa i år N+2 vid sent bokslut.
-- [ ] Testluckor: startClosing på stängt år; Omför över riktiga V/R-id; framtida stämmodatum; 201/preview-koercion; `PATCH /settings/posting` med de nya nycklarna; RF1-testets värde 0.
-- [ ] Webb: utkastlistan kapas vid 20 utan besked; `AccrualsCard`-utkastet i localStorage kan dölja rader som någon annan bokfört; periodiseringstabellens fasta px-kolumner ej kontrollerade i mobilbredd.
-
-### Bankfiler
-
-- [ ] Leverantörens betalningsuppgifter: PATCH-race ger omappad 23514/500 (CHECK håller datan konsistent); BIC-texten; leverantörsroutarnas 400 otestade; betalreferensens audit utanför tx.
-- [ ] Låsordningstestet (C5) bygger på 300 ms sömn — polla `pg_stat_activity`; route-test för de nya 409:orna; returdatum före betaldatum valideras inte.
-- [ ] pain.001-byggaren: sanitizing-testet asserterar bara antalet varningar; `creditorTownRequired` styr även gäldenärens ort; leverantörsvalideringen vägrar inte 5-siffrig clearing som inte börjar på 8 eller fel 15-siffrig total (fångas vid filbygget).
-- [ ] camt.054: `RfrdDocInf` som inte är CINV/CREN tappas (behåll som ADDTL); `candidateOcrs` `\d{3,25}` mot specens 2–25; returfixturen har bara Cdtr.
-- [ ] Bankinställningarna skrivs utan tx; test saknas för PATCH med motstridig profil/`initiatingPartyId`; debetkontots regexar dubblerade mellan `pain001-check` och bankinställningarna; kontrollera regelfilens ordval för `bank_*`-nycklarna.
-- [ ] Bokningen: assertions kontrollerar inte serie/konto; samtidighetstestet tvingar inte överlapp; `confirm()` tappar tyst icke-exporterade `itemIds`; radresultat kan läcka råa meddelanden; utkastvyns referens tom; `ItemResult` saknar verifikat; `toBuffer` utanför try (413 via global hanterare); bankbokförda kundbetalningar saknar audit `customer_payment created`; manuell Makulera av UTB-omgång skriver ingen audit; gamla utkastrader skickar `executionDate`; prefixmönstret `[A-Z0-9-]`; nedladdningen speglar klientens content type; namnmatchningen är O(kunder × poster).
-- [ ] Webb: uppladdning med överhoppade dubbletter visar inte filens egna varningar; fellistor ligger kvar till nästa bokning; en lyckad bokning nollställer andra posters osparade utkast; webben skickar alltid itemIds (max 500); "Fördelningen stämmer inte" när kund saknas; kontovarningen kunde tipsa om att lägga in IBAN; `absent`-id använder fel ordbokstext; korsfil-#n kan para fel när en bank återanvänder en referens (varnas).
-
-### Frakt
-
-- [ ] En övertagen bokning (`FreightBookingTakenOverError`) har redan skrivit audit `booked`, så Historiken visar en bokning raden aldrig fick — egen händelse `booking_taken_over`.
-- [ ] Racetesterna i shipping-booking/invoice-freight bygger på fasta sömnar — polla om de börjar flagna.
-- [ ] 2-minutersfönstret finns både som literal i `invoice.repository.ts` (`assertShipmentsBillable`) och som `CANCEL_STALE_MS` i shipping.service, och jämförs mot appklockan.
-- [ ] "Ny försändelse 14:50 → första Hämta priser" bara testad på ren nivå; avbokning efter avbokning i Sendifys eget UI är inte provad mot sandlådan.
-
-### Översikt, aviseringar och favoriter
-
-- [ ] Aviseringar *(medvetet)*: Leverantörsfakturor att betala härleder saknat förfallodatum ur leverantörens nuvarande villkor (reskontrans Förfallna-filter använder bara lagrat datum); alla typer avbockade ger tomma rader utan mejl. Översikten driver behovsberäkningen (60 s-cache) och `orderPlanSummaries` — håll koll på prestandan.
-- [ ] Favoriter, idéer som inte byggdes: förvalda favoriter per behörighetsgrupp; åtgärdsgenvägar som **+ Ny kundorder** (kräver `?ny=1`-stöd på sidorna).
-
-### Kontroller mot externa tjänster
-
-Kan redan vara gjorda — stryk dem i så fall.
-
-- [ ] Provuppladdning av momsdeklarationsfilen i Skatteverkets e-tjänst.
-- [ ] Ladda upp en genererad pain.001 i bankens valideringstjänst (Swedbank Validex) och lägg in företagets IBAN.
-- [ ] Prova utlandsbetalningsfilen i bankens valideringstjänst.
-
-## Beslut
-
-- Löneunderlag exporteras som **PAXml** (funkar mot Visma Lön, Hogia, Kontek, Agda, Fortnox Lön).
-- Ekonomi = **full redovisning inbyggd** (kontoplan, verifikat, huvudbok, momsrapport — inte bara SIE-export).
