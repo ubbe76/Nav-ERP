@@ -6,6 +6,8 @@
 
 **Märkningar:** *(medvetet)* = ett val som gjordes med flit, *(parkerat)* = granskningen valde att vänta, *(hemsidan)* = står under **Det här saknas i dag** på hemsidans funktionssidor (`hemsida/content/areas.ts`, fältet `limits`) — ändra texten där när punkten byggs. Småfynden kommer från slutgranskningarna juli–oktober 2026; de är stickprovskontrollerade mot koden men kan ha lösts på vägen — stryk det som inte längre gäller. Nya fynd skrivs in under rätt rubrik.
 
+**Ärenden på GitHub:** punkter med en länk (→ #n) är också [ärenden på GitHub](https://github.com/ubbe76/Nav-ERP/issues) — färdplanen som syns utåt. Beskrivningen finns i ärendet; här står bara raden. Stäng ärendet med `Fixes #n` i commiten och stryk raden här. Övriga punkter (låga buggar, kodkvalitet, testluckor, medvetna val) är interna och stannar här; säkerhetsfrågor går enligt SECURITY.md.
+
 ## Buggar
 
 ### Overifierat mot externa tjänster
@@ -20,7 +22,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 - [ ] **Kundorder:** radredigeringen jämför priset mot radens *ursprungliga* basantal (`editInitialBaseQuantityRef` i `SalesOrderDetail.tsx`): antal 10 → 100 → 10 lämnar 100-stegets pris kvar. Spegla inköpssidans `editPricedBaseQuantityRef` och vänta på enhetsfaktorn innan prisfrågan.
 - [ ] **Kreditfaktura:** `createCredit` med explicita rader kopierar inte `revenueAccount`, så krediteringen kan bokas på ett annat intäktskonto än fakturan (t.ex. räntefakturans 8313).
-- [ ] **Kalkyl:** leverantörspriser räknas inte om mellan valutor — med Aktiv leverantörs pris används katalogpriset som det står, även när det är i en annan valuta än kronor. *(hemsidan)*
+- [ ] **Kalkyl:** leverantörspriser i utländsk valuta räknas inte om till kronor → [#1](https://github.com/ubbe76/Nav-ERP/issues/1) *(hemsidan)*
 - [ ] **Närvaro:** instämpling av närvaro + arbete är inte atomär och det finns inget unikt index för öppen närvaro — dubbel närvaro är möjlig och ger fel timmar i löneunderlaget.
 - [ ] **Beställningsvara:** radredigeringen skickar alltid à-pris, så serverns 400 för ogiltig sparad konfiguration nås aldrig — evaluate-fel sväljs (`.catch`) och det gamla priset sparas. Visa felet.
 - [ ] **Beställningsvara:** antalsbytets omvärdering jämför inte ny konfigurationsnyckel mot sparad — ett förval som läggs till i mallen senare ger ett pris med tillägg som inte syns i valen.
@@ -103,23 +105,23 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Förbättrad artikel- och strukturimport** — omfattning ej specad än (bygger vidare på import-export.md-paketen). Viktigt när ett nytt företag flyttar in sina data.
 - [ ] **Förbättrad kundimport** — omfattning ej specad än. Känt: Personnummer importeras inte.
 - [ ] **Förbättrad leverantörsimport** — omfattning ej specad än.
-- [ ] **Tidsfasade förslag i behovsberäkningen** — förslagen får datum först när ordrarna skapas. *(hemsidan)*
+- [ ] **Tidsfasade förslag i behovsberäkningen** → [#13](https://github.com/ubbe76/Nav-ERP/issues/13) *(hemsidan)*
 - [ ] **Förbättrad lagerplatshantering** — omfattning ej specad än.
 
 ### Medel
 
-- [ ] **Efterkalkylen:** automatisk uppdelning av avvikelsen på pris, mängd och tid, och skillnad på ställtid och stycktid. *(hemsidan)*
-- [ ] **Planeringen och Leveranstidskontrollen prövar alternativa resurser** — i dag planeras en operation alltid på den resurs den har på ordern. *(hemsidan)*
-- [ ] **Påslag per artikelgrupp, kund eller order** — i dag gäller påslagen hela företaget och bara TO-påslaget sätts per resurs. *(hemsidan)*
+- [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
+- [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
+- [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
-- [ ] **Redigerbar Översikt** — användaren väljer vad startsidan visar. Omfattning ej specad än.
+- [ ] **Välj vad Översikten visar** → [#17](https://github.com/ubbe76/Nav-ERP/issues/17)
 - [ ] **Huvudboken:** kontoväljaren utesluter inaktiva konton med historik ("inkl. inaktiva"-val); IB/UB döljs när intervallet saknar rader (IB = UB ≠ 0 vore informativt); sorteringen ordnar över serier på nummer före serie (tie-breaken otestad).
 - [ ] **Prestanda vid tillväxt:** `openAmountSql` evalueras två gånger i SELECT + WHERE (fullscan); verifikatens `seriesId` och `inquiry_rows.routing_operation_id` saknar index; Översikten driver behovsberäkningen (60 s-cache) och `orderPlanSummaries`; bankfilernas namnmatchning är O(kunder × poster).
 
 ### Låg
 
-- [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — förkalkylen räknar alltid med inställningarna under System → Kalkyler. *(hemsidan)*
+- [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — ingår i [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Momsrapporten:** visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
 - [ ] **Faktura:** icke-admin ser ingen bokföringsindikation på fakturakorten (verifikatnumret som ren text vore lika säkert som den admin-spärrade länken); fakturalistans sökning matchar kundens nuvarande namn men visar ögonblicksbilden; `?orderId=` utan rest droppas tyst när flera ordrar faktureras; Lägg till rad saknar enhetsväljare (antalet är basenheten).
 - [ ] **Konfigurator:** återanvänd inaktiv variant läggs in tyst — visa "Varianten X fanns redan (inaktiv)"; antalsbyte på rad vars mall lämnat Beställningsvara saknar tips om att ange pris; `createQuote` rapporterar bara första ogiltiga rad; ingen laddningstext medan mallens grupper hämtas i Konfigurera; ingen "välj alla" i behovsberäkningens konfigurerade sektion; "— Välj —" kan inte tömma ett förval *(enligt spec)*.
@@ -181,28 +183,28 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Hög
 
-- [ ] **Radera eller anonymisera en anställd** — i dag kan en anställd bara markeras som inaktiv. Krävs för GDPR. *(hemsidan)*
-- [ ] **Import av lagersaldon från fil** — ingående saldon läggs i dag in med inventering eller justering. Viktigt när ett nytt företag börjar. *(hemsidan)*
-- [ ] **Skanning i lagret** — pallkorten har streckkod/QR-kod men ingen rutin läser dem: inleverans, plock och inventering med handskanner eller mobilkamera. Omfattning ej specad än. *(hemsidan)*
-- [ ] **E-faktura (Peppol), etapp 2** — mottagning (inkommande e-faktura blir leverantörsfakturautkast med rader), webhooks, utländska mottagare och valutor (omvänd moms, export), automatisk sändning vid Utfärda och samlingsfakturering, ev. InExchange-adapter. Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
-- [ ] **Dokument på fler språk** — offert, orderbekräftelse, följesedel och faktura skrivs bara ut på svenska, fast försäljning i utländsk valuta finns. *(hemsidan)*
+- [ ] **Radera eller anonymisera en anställd** (GDPR) → [#2](https://github.com/ubbe76/Nav-ERP/issues/2) *(hemsidan)*
+- [ ] **Import av lagersaldon från fil** → [#3](https://github.com/ubbe76/Nav-ERP/issues/3) *(hemsidan)*
+- [ ] **Skanning i lagret** med streckkod och QR-kod → [#4](https://github.com/ubbe76/Nav-ERP/issues/4) *(hemsidan)*
+- [ ] **E-faktura (Peppol), etapp 2** — mottagning → [#5](https://github.com/ubbe76/Nav-ERP/issues/5); utländska mottagare, valuta och automatisk sändning → [#6](https://github.com/ubbe76/Nav-ERP/issues/6). Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
+- [ ] **Dokument på engelska** → [#7](https://github.com/ubbe76/Nav-ERP/issues/7) *(hemsidan)*
 
 ### Medel
 
-- [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare. *(hemsidan, under både Tillverkning och Lager)*
-- [ ] **Koppling mellan en TO och dess halvfabrikats TO:er (pegging)** — medvetet utanför produktionsplaneringen 2026-10-17. *(hemsidan)*
-- [ ] **Prognos och ABC-klassning** — behovsberäkningen räknar bara på faktiska ordrar; en enkel prognos per artikel och omsättningsklassning som styr vilka artiklar som får beställningspunkt. Omfattning ej specad än.
-- [ ] **Planering och beställningspunkt per lager** — behovsberäkningen räknar på artikelns totala saldo över alla lager. *(hemsidan)*
-- [ ] **Semester- och kompsaldo** — semester och kompledighet registreras som frånvaro i timmar och kompsaldot förs i lönesystemet. *(hemsidan)*
+- [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare → [#8](https://github.com/ubbe76/Nav-ERP/issues/8) *(hemsidan, under både Tillverkning och Lager)*
+- [ ] **Koppling mellan en TO och dess halvfabrikats TO:er (pegging)** → [#9](https://github.com/ubbe76/Nav-ERP/issues/9) *(hemsidan)*
+- [ ] **Prognos och ABC-klassning** → [#10](https://github.com/ubbe76/Nav-ERP/issues/10)
+- [ ] **Planering och beställningspunkt per lager** → [#11](https://github.com/ubbe76/Nav-ERP/issues/11) *(hemsidan)*
+- [ ] **Semester- och kompsaldo** → [#12](https://github.com/ubbe76/Nav-ERP/issues/12) *(hemsidan)*
 
 ### Låg
 
-- [ ] **Detaljplanering per dag eller timme och köberäkning** — planeringen räknar ledig tid per resurs och vecka (avancerad kapacitetsplanering är medvetet utanför v1). *(hemsidan)*
-- [ ] **FIFO-värdering och bakdaterade lagerrörelser** in i en tidigare värdering. *(hemsidan)*
-- [ ] **Lämna in momsdeklarationen från Nav** — i dag laddar man själv upp filen från Momsrapporten i Skatteverkets e-tjänst. *(hemsidan)*
-- [ ] **Färdig koppling till en webbutik** — externa system kan redan lägga offerter via API:t. *(hemsidan)*
+- [ ] **Detaljplanering per dag eller timme och köberäkning** (medvetet utanför v1) → [#18](https://github.com/ubbe76/Nav-ERP/issues/18) *(hemsidan)*
+- [ ] **FIFO-värdering och bakdaterade lagerrörelser** → [#19](https://github.com/ubbe76/Nav-ERP/issues/19) *(hemsidan)*
+- [ ] **Lämna momsdeklarationen direkt till Skatteverket** → [#20](https://github.com/ubbe76/Nav-ERP/issues/20) *(hemsidan)*
+- [ ] **Färdig koppling till en webbutik** → [#21](https://github.com/ubbe76/Nav-ERP/issues/21) *(hemsidan)*
 - [ ] **Färdiga kollektivavtal att välja** — OB-fönster, övertidströskel och tidkoder läggs upp av företaget självt. *(hemsidan)*
-- [ ] **Passerkort eller RFID-brickor** i terminalen — personalen identifierar sig med anställningsnumret. *(hemsidan)*
+- [ ] **Passerkort eller RFID-brickor** i stämpelterminalen → [#22](https://github.com/ubbe76/Nav-ERP/issues/22) *(hemsidan)*
 - [ ] **Mobilapp** — Nav|ERP och stämpelterminalen används i webbläsaren. *(hemsidan)*
 - [ ] **Aktivitetsbaserad kalkyl** — omkostnaderna fördelas med procentuella påslag. *(hemsidan)*
 - [ ] **Flera bolag och koncernredovisning** — en installation hanterar ett företag. *(hemsidan)*
