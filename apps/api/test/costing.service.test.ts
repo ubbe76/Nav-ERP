@@ -23,6 +23,7 @@ import { createStockRepository } from "../src/modules/stock/repository/stock.rep
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createTimeReportRepository } from "../src/modules/timereport/repository/timereport.repository.js";
 import { createTimeReportService } from "../src/modules/timereport/service/timereport.service.js";
+import { ExchangeRateUnavailableError } from "../src/modules/system/service/exchange-rates.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
@@ -144,10 +145,11 @@ async function addServiceComponent(parentId: string, standardCost: number, quant
 async function setPrimarySupplierPrice(
   articleId: string,
   price: number | undefined,
-  priceBreaks?: { fromQuantity: number; price: number }[]
+  priceBreaks?: { fromQuantity: number; price: number }[],
+  currency = "SEK"
 ) {
   const supplier = await purchaseService.createSupplier({ name: `Lev-${crypto.randomUUID()}`, active: true });
-  await purchaseService.addArticleSupplier(articleId, { supplierId: supplier.id, price, isPrimary: true, priceBreaks });
+  await purchaseService.addArticleSupplier(articleId, { supplierId: supplier.id, price, currency, isPrimary: true, priceBreaks });
   return supplier;
 }
 
@@ -832,5 +834,151 @@ describe("costing service — borttagning", () => {
 
   it("throws for an unknown calculation id", async () => {
     await expect(costingService.deleteCostCalculation(crypto.randomUUID())).rejects.toThrow(CostCalculationNotFoundError);
+  });
+});
+
+// Leverantörspris i valuta (#1): a supplier price in another currency is costed
+// at today's rate, recorded on the specification row, and a currency without a
+// rate falls back to the standard cost with a warning — never read as kronor.
+describe("costing service — supplier price in another currency", () => {
+  const lookups: { currency: string; date: string }[] = [];
+  const knownRates: Record<string, number> = { EUR: 11.5, USD: 10 };
+  const ratedService = createCostingService(
+    createCostingRepository(db),
+    { getSettings: async () => costingSettings },
+    undefined,
+    {
+      getRate: async (currency, date) => {
+        lookups.push({ currency, date });
+        const rate = knownRates[currency];
+        if (rate === undefined) throw new ExchangeRateUnavailableError(currency, date);
+        return { currency, requestedDate: date, date, rate, source: "riksbank" };
+      },
+    },
+    () => "2026-10-29"
+  );
+
+  beforeEach(() => {
+    lookups.length = 0;
+    costingSettings.costingMaterialSource = "supplier";
+  });
+
+  async function materialRowsOf(calculationId: string) {
+    return db.select().from(costCalculationMaterialRows).where(eq(costCalculationMaterialRows.costCalculationId, calculationId));
+  }
+
+  it("converts the price at today's rate and records currency, price and rate on the row", async () => {
+    const { parent, component } = await makeParentWithBom(10, 2);
+    await setPrimarySupplierPrice(component.id, 2.5, undefined, "EUR");
+
+    const { calculation, warnings } = await ratedService.preCalculate(parent.id, 5, true);
+
+    // 2 × 5 × (2.5 EUR × 11.5) = 10 × 28.75
+    expect(calculation.materialCost).toBe("287.5000");
+    expect(warnings).toEqual([]);
+    expect(lookups).toEqual([{ currency: "EUR", date: "2026-10-29" }]);
+    const [row] = await materialRowsOf(calculation.id);
+    expect(row).toMatchObject({
+      unitCost: "28.7500",
+      priceSource: "supplier",
+      supplierCurrency: "EUR",
+      supplierUnitPrice: "2.5000",
+      exchangeRate: "11.500000",
+    });
+  });
+
+  it("looks a currency up once per calculation however many rows use it", async () => {
+    const { parent, component } = await makeParentWithBom(10, 2);
+    await setPrimarySupplierPrice(component.id, 2.5, undefined, "EUR");
+    const second = await articleService.createArticle({
+      articleNumber: `COMP-${crypto.randomUUID()}`,
+      name: "Second",
+      type: "purchased",
+      unit: "st",
+      active: true,
+    });
+    await articleService.addBomComponent(parent.id, { componentArticleId: second.id, quantity: 1 });
+    await setPrimarySupplierPrice(second.id, 4, undefined, "EUR");
+
+    const { calculation } = await ratedService.preCalculate(parent.id, 1, false);
+
+    // 2 × 28.75 + 1 × 46
+    expect(calculation.materialCost).toBe("103.5000");
+    expect(lookups).toHaveLength(1);
+  });
+
+  it("falls back to the standard cost and names the currency when there is no rate", async () => {
+    const { parent, component } = await makeParentWithBom(10, 2);
+    await setPrimarySupplierPrice(component.id, 2.5, undefined, "NOK");
+
+    const { calculation, warnings } = await ratedService.preCalculate(parent.id, 5, true);
+
+    expect(calculation.materialCost).toBe("100.0000");
+    expect(warnings).toEqual(["Component: ingen kurs för leverantörspriset i NOK, använder standardpris"]);
+    const [row] = await materialRowsOf(calculation.id);
+    expect(row).toMatchObject({ priceSource: "standard", supplierCurrency: null, supplierUnitPrice: null, exchangeRate: null });
+  });
+
+  it("never looks up a rate for a SEK price or for another material source", async () => {
+    const sek = await makeParentWithBom(10, 2);
+    await setPrimarySupplierPrice(sek.component.id, 25);
+    const sekResult = await ratedService.preCalculate(sek.parent.id, 5, true);
+    expect(sekResult.calculation.materialCost).toBe("250.0000");
+    const [sekRow] = await materialRowsOf(sekResult.calculation.id);
+    expect(sekRow).toMatchObject({ supplierCurrency: null, exchangeRate: null });
+
+    const eur = await makeParentWithBom(10, 2);
+    await setPrimarySupplierPrice(eur.component.id, 2.5, undefined, "EUR");
+    costingSettings.costingMaterialSource = "standard";
+    const standard = await ratedService.preCalculate(eur.parent.id, 5, false);
+    expect(standard.calculation.materialCost).toBe("100.0000");
+
+    expect(lookups).toEqual([]);
+  });
+
+  it("converts on a sub-level of a multi-level calculation", async () => {
+    const top = await articleService.createArticle({
+      articleNumber: `TOP-${crypto.randomUUID()}`,
+      name: "Top",
+      type: "manufactured",
+      unit: "st",
+      active: true,
+    });
+    const { parent: semi, component: leaf } = await makeParentWithBom(10, 3);
+    await articleService.addBomComponent(top.id, { componentArticleId: semi.id, quantity: 2 });
+    await setPrimarySupplierPrice(leaf.id, 1.5, undefined, "USD");
+
+    const { calculation, warnings } = await ratedService.preCalculate(top.id, 1, true, true);
+
+    // 2 × 3 leaves × (1.5 USD × 10) = 90, carried up as the halvfabrikat's TVK.
+    expect(calculation.semiFinishedCost).toBe("90.0000");
+    expect(warnings).toEqual([]);
+    expect(lookups).toEqual([{ currency: "USD", date: "2026-10-29" }]);
+  });
+
+  it("converts in the configurator's derived-structure preview", async () => {
+    const { parent, component } = await makeParentWithBom(10, 2);
+    await setPrimarySupplierPrice(component.id, 2.5, undefined, "EUR");
+
+    const preview = await ratedService.previewStructure(parent.id, 1, {
+      components: [{ componentArticleId: component.id, quantity: 2, unitId: null, unitFactor: null }],
+      operations: [],
+    });
+
+    expect(preview.materialCost).toBe(57.5);
+    expect(preview.warnings).toEqual([]);
+  });
+
+  it("converts the consumed material in a post-calculation", async () => {
+    const order = await makeOrderWithReportedWork();
+    const [consumption] = await mfgService.listMaterialConsumptions(order.id);
+    await setPrimarySupplierPrice(consumption!.componentArticleId, 2, undefined, "USD");
+
+    const { calculation } = await ratedService.postCalculate(order.id, true);
+
+    // 8 consumed × (2 USD × 10)
+    expect(calculation.materialCost).toBe("160.0000");
+    const [row] = await materialRowsOf(calculation.id);
+    expect(row).toMatchObject({ supplierCurrency: "USD", supplierUnitPrice: "2.0000", exchangeRate: "10.000000" });
   });
 });

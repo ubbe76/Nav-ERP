@@ -350,6 +350,12 @@ export interface CostCalculationMaterialRow {
   overheadAmount: string;
   // Materialpåslag lifted up the same way; "0.0000" otherwise.
   materialMarkupAmount: string;
+  // A supplier price in another currency: the catalog price, its currency
+  // and the rate unitCost was converted at. All null otherwise, and on rows
+  // saved before the conversion existed.
+  supplierCurrency: string | null;
+  supplierUnitPrice: string | null;
+  exchangeRate: string | null;
   articleNumber: string;
   articleName: string;
   unitCode: string;

@@ -9,6 +9,7 @@ import { Button } from "../ui/Button";
 import { FormActions, FormError, FormHint, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
+import { formatRate } from "../../lib/currency";
 import type {
   CostCalculationDetail,
   CostCalculationMaterialRow,
@@ -102,6 +103,7 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
   const hasRowOverhead = detail.materialRows.some((row) => Number(row.overheadAmount) !== 0);
   // Same rule for the materialpåslag a halvfabrikat lifted up.
   const hasRowMaterialMarkup = detail.materialRows.some((row) => Number(row.materialMarkupAmount) !== 0);
+  const hasForeignPrice = detail.materialRows.some((row) => row.supplierCurrency !== null);
 
   return (
     <div>
@@ -111,6 +113,8 @@ export function CostSpecification({ calculationId, onApplied }: { calculationId:
         {percent(detail.generalMarkupPercent)}, materialpåslag {percent(detail.materialMarkupPercent)}.
         {detail.multiLevel &&
           " Flernivåkalkyl: tillverkade halvfabrikat kostades ur sina egna strukturer och rutter, och bär därför inget MO-påslag här; deras TO-påslag och materialpåslag ingår i kedjans TO-påslag och materialpåslag."}
+        {hasForeignPrice &&
+          " Leverantörspriser i annan valuta är omräknade till kronor med dagens kurs när kalkylen gjordes."}
       </FormHint>
 
       {hasRows ? (
@@ -289,6 +293,18 @@ function PriceSourceCell({
   // (actual) reports its fallbacks without another edit here.
   if (configured !== "standard" && row.priceSource === "standard") {
     return <span className={styles.fallback}>standardpris (fallback)</span>;
+  }
+  // A supplier price in another currency: what the kronor à-pris came from.
+  if (row.supplierCurrency !== null && row.supplierUnitPrice !== null && row.exchangeRate !== null) {
+    const price = Number(row.supplierUnitPrice).toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    return (
+      <>
+        {PRICE_SOURCE_LABELS[row.priceSource]}
+        <span className={styles.foreign}>
+          {price} {row.supplierCurrency} · kurs {formatRate(row.exchangeRate)}
+        </span>
+      </>
+    );
   }
   return <>{PRICE_SOURCE_LABELS[row.priceSource]}</>;
 }

@@ -1,0 +1,4 @@
+ALTER TABLE "cost_calculation_material_rows" ADD COLUMN "supplier_currency" varchar(3);--> statement-breakpoint
+ALTER TABLE "cost_calculation_material_rows" ADD COLUMN "supplier_unit_price" numeric(14, 4);--> statement-breakpoint
+ALTER TABLE "cost_calculation_material_rows" ADD COLUMN "exchange_rate" numeric(14, 6);--> statement-breakpoint
+ALTER TABLE "cost_calculation_material_rows" ADD CONSTRAINT "cost_calculation_material_rows_foreign_price" CHECK (("cost_calculation_material_rows"."supplier_currency" is null) = ("cost_calculation_material_rows"."supplier_unit_price" is null) and ("cost_calculation_material_rows"."supplier_currency" is null) = ("cost_calculation_material_rows"."exchange_rate" is null));

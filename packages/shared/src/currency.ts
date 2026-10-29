@@ -68,6 +68,17 @@ export function toSek(amount: number, rate: number): number {
   return fromOre(divideRounded(ore(amount) * micro(rate), MICRO_PER_UNIT));
 }
 
+// The SEK value of a unit price at a rate, to four decimals — a supplier's
+// catalog price in its own currency, costed in kronor by the calculation.
+// Exact like toSek, but kept at the four decimals the price columns carry
+// (numeric(14,4)) instead of rounded to the öre: a screw at 0,0123 EUR would
+// otherwise lose several percent before it is multiplied by the quantity.
+export function toSekUnitPrice(price: number, rate: number): number {
+  const tenThousandths = BigInt(Math.round(price * 1e4));
+  const n = Number(divideRounded(tenThousandths * micro(rate), MICRO_PER_UNIT)) / 1e4;
+  return n === 0 ? 0 : n;
+}
+
 // The amount in a document currency that a SEK amount is worth at the
 // document's rate (SEK per 1 unit), to the öre — the other direction of
 // toSek: an article's försäljningspris (SEK, up to four decimals), the

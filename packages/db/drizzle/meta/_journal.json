@@ -1177,6 +1177,13 @@
       "when": 1793212684981,
       "tag": "0167_operation_time_unit_seconds",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1793269922773,
+      "tag": "0168_kalkyl_leverantorspris_valuta",
+      "breakpoints": true
     }
   ]
 }

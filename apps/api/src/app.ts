@@ -469,7 +469,13 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // articleService is the price writer for "Sätt standardpris"/"Sätt
   // försäljningspris" on a saved calculation — injected so the standard cost
   // travels the same path the article card uses and gets its history row.
-  const costingService = createCostingService(createCostingRepository(database), systemService, articleService);
+  // exchangeRateService converts a supplier price in another currency to SEK.
+  const costingService = createCostingService(
+    createCostingRepository(database),
+    systemService,
+    articleService,
+    exchangeRateService
+  );
   // stockService also feeds the pick list (where each article can be
   // picked); manufacturingService feeds listRows' per-row "I tillverkning"
   // coverage + linked TO list (E3); costingService feeds each row's self cost

@@ -1,4 +1,5 @@
-import { boolean, index, integer, numeric, pgEnum, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { boolean, check, index, integer, numeric, pgEnum, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { articles } from "./article";
 import { manufacturingOrders, workCenters } from "./manufacturing";
 import { units } from "./register";
@@ -127,11 +128,23 @@ export const costCalculationMaterialRows = pgTable(
     // material_markup = the markup on this level's dM + MO + this. 0 on
     // material/lego rows and on rows saved before the column existed.
     materialMarkupAmount: numeric("material_markup_amount", { precision: 14, scale: 4 }).notNull().default("0"),
+    // A supplier price in another currency (material source "supplier"):
+    // the catalog price as stated, its currency and the rate (SEK per 1 unit,
+    // the day's rate from getRate) unit_cost was converted at. All three or
+    // none — null on SEK prices, on every other source and on rows saved
+    // before the columns existed (those read foreign prices as kronor).
+    supplierCurrency: varchar("supplier_currency", { length: 3 }),
+    supplierUnitPrice: numeric("supplier_unit_price", { precision: 14, scale: 4 }),
+    exchangeRate: numeric("exchange_rate", { precision: 14, scale: 6 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_cost_calculation_material_rows_calculation").on(table.costCalculationId),
     index("idx_cost_calculation_material_rows_article").on(table.componentArticleId),
+    check(
+      "cost_calculation_material_rows_foreign_price",
+      sql`(${table.supplierCurrency} is null) = (${table.supplierUnitPrice} is null) and (${table.supplierCurrency} is null) = (${table.exchangeRate} is null)`
+    ),
   ]
 );
 

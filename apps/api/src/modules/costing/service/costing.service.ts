@@ -1,4 +1,4 @@
-import type { CostCalculationType, CostingMaterialSource, CostingSupplierPriceTier, DerivedCosting } from "@navet/shared";
+import { SEK, type CostCalculationType, type CostingMaterialSource, type CostingSupplierPriceTier, type DerivedCosting } from "@navet/shared";
 import type {
   CostCalculationWrite,
   CostingRepository,
@@ -17,6 +17,8 @@ import {
 import { costMultiLevel, type SubAssemblyPort } from "./sub-assembly.js";
 import { explodeDerivedMaterials } from "../../configurator/service/configurator-explode.js";
 import { manufacturingCost, perUnit, selfCost } from "./cost-figures.js";
+import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
+import { stockholmToday } from "../../system/service/delivery-days.js";
 
 export class ArticleNotFoundError extends Error {
   constructor(id: string) {
@@ -91,6 +93,43 @@ export interface CostingSettingsReader {
 // it tells the user nothing, so each distinct message is reported once.
 function distinct(warnings: string[]) {
   return [...new Set(warnings)];
+}
+
+// Leverantörspris i valuta: today's rate for every currency a calculation run
+// meets, looked up once per currency and BEFORE any arithmetic — getRate may
+// call Riksbanken, and resolveUnitCost stays pure. Only the "supplier" source
+// reads supplier prices, so the other sources never trigger a lookup. A
+// currency without a rate gets null and resolveUnitCost falls back with a
+// warning; any other error is a real failure and propagates.
+function createRateAttacher(rates: Pick<ExchangeRateReader, "getRate">, source: CostingMaterialSource, today: string) {
+  const byCurrency = new Map<string, Promise<number | null>>();
+  function rateFor(currency: string) {
+    let rate = byCurrency.get(currency);
+    if (!rate) {
+      rate = rates.getRate(currency, today).then(
+        (lookup) => lookup.rate,
+        (err: unknown) => {
+          if (err instanceof ExchangeRateUnavailableError) return null;
+          throw err;
+        }
+      );
+      byCurrency.set(currency, rate);
+    }
+    return rate;
+  }
+  return async function attachRates<T extends { supplierCurrency?: string | null }>(
+    bases: T[]
+  ): Promise<(T & { supplierExchangeRate: number | null })[]> {
+    return Promise.all(
+      bases.map(async (basis) => {
+        const currency = basis.supplierCurrency ?? SEK;
+        return {
+          ...basis,
+          supplierExchangeRate: source === "supplier" && currency !== SEK ? await rateFor(currency) : null,
+        };
+      })
+    );
+  };
 }
 
 // A calculation that was computed but not written. Same field names as the
@@ -261,8 +300,27 @@ export function createCostingService(
     updateSalesPrice: async () => {
       throw new Error("ArticlePriceWriter not wired");
     },
-  }
+  },
+  // Today's rate for a supplier price in another currency. Optional for the
+  // same reason as the writer, and just as loud: it is only asked when a
+  // calculation actually meets a foreign supplier price.
+  rates: Pick<ExchangeRateReader, "getRate"> = {
+    getRate: async () => {
+      throw new Error("ExchangeRateReader not wired");
+    },
+  },
+  today: () => string = stockholmToday
 ) {
+  // The repository's cost basis with today's rates attached — the one port
+  // every pre-calculation path costs through, multi-level sub-levels and the
+  // configurator's derived structure included.
+  function ratedPort(port: SubAssemblyPort, attachRates: ReturnType<typeof createRateAttacher>): SubAssemblyPort {
+    return {
+      ...port,
+      getComponentCostBasis: async (articleIds) => attachRates(await port.getComponentCostBasis(articleIds)),
+    };
+  }
+
   async function loadCostingConfig(): Promise<{
     source: CostingMaterialSource;
     supplierPriceTier: CostingSupplierPriceTier;
@@ -300,19 +358,20 @@ export function createCostingService(
     const warnings: string[] = [];
     const { source: configured, supplierPriceTier, markups } = await loadCostingConfig();
     const source = preCalculationSource(configured, warnings);
+    const port = ratedPort(repo, createRateAttacher(rates, source, today()));
 
     let materialRows: MaterialRowWrite[];
     let operationRows: OperationRowWrite[];
 
     if (multiLevel) {
-      const level = await costMultiLevel(repo, articleId, quantity, source, markups, supplierPriceTier);
+      const level = await costMultiLevel(port, articleId, quantity, source, markups, supplierPriceTier);
       materialRows = level.materialRows;
       operationRows = level.operationRows;
       warnings.push(...level.warnings);
     } else {
       const components = await repo.explodeBom(articleId, quantity);
       const basisById = new Map(
-        (await repo.getComponentCostBasis(components.map((c) => c.componentArticleId))).map((b) => [b.id, b])
+        (await port.getComponentCostBasis(components.map((c) => c.componentArticleId))).map((b) => [b.id, b])
       );
 
       materialRows = [];
@@ -351,7 +410,10 @@ export function createCostingService(
     const warnings: string[] = [];
     const { source, supplierPriceTier, markups } = await loadCostingConfig();
 
-    const consumptions = await repo.getMaterialConsumptionsWithCost(manufacturingOrderId);
+    // Supplier prices are today's catalog prices, so they take today's rate.
+    const consumptions = await createRateAttacher(rates, source, today())(
+      await repo.getMaterialConsumptionsWithCost(manufacturingOrderId)
+    );
     // Only asked for when the configured source needs it — deriving the moving
     // average costs two queries and a replay, and the other two sources have
     // no use for the answer.
@@ -466,7 +528,7 @@ export function createCostingService(
     );
 
     const port: SubAssemblyPort = {
-      ...repo,
+      ...ratedPort(repo, createRateAttacher(rates, source, today())),
       explodeBom: async (id, q) => {
         if (id !== articleId) return repo.explodeBom(id, q);
         // Phantoms dissolved, merged per (article, operation) — the configurator module's pure helper.
