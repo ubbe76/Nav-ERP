@@ -272,7 +272,7 @@ export interface ManufacturingOrderCreator {
   // structure, re-checking the row's key under the row lock).
   createFromSalesOrderRow(
     rowId: string,
-    input: { quantity?: number; dueDate?: string | null },
+    input: { quantity?: number; dueDate?: string | null; onlyUncovered?: boolean },
     createdBy: string | null
   ): Promise<{ id: string; orderNumber: string }>;
   // Reservationen: the same create inside the caller's transaction (the
@@ -1345,9 +1345,12 @@ export function createPlanningService(
           const suggestion = await this.suggestManufacturingDueDate(proposal.articleId, {
             salesOrderRowId: proposal.salesOrderRowId,
           });
+          // onlyUncovered: the proposal may come from a cached list (up to
+          // REQUIREMENTS_CACHE_MS old) or a second click — the row's TO is
+          // only created for what it still lacks, checked under its lock.
           const mo = await deps.manufacturing.createFromSalesOrderRow(
             proposal.salesOrderRowId!,
-            { quantity: proposal.quantity, ...(suggestion ? { dueDate: suggestion.dueDate } : {}) },
+            { quantity: proposal.quantity, onlyUncovered: true, ...(suggestion ? { dueDate: suggestion.dueDate } : {}) },
             createdBy
           );
           result.manufacturingOrders.push({

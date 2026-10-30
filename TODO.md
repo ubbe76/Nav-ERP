@@ -20,7 +20,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Allvarliga — fel belopp, bokföring eller lön
 
-- [ ] **Konfigurerad tillverkning:** behovsberäkningens 60 s-cache kan ge en andra TO på en konfigurerad rad.
 
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 

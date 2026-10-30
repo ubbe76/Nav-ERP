@@ -1148,14 +1148,25 @@ export function createSalesRepository(db: Db) {
     // konfiguration takes first (rowConfigurationGuards), so the two
     // serialise: either the TO sees the new key and refuses, or Ändra
     // konfiguration sees the TO and refuses. Row before order, as there.
-    async lockRowForManufacturing(tx: Tx, rowId: string): Promise<{ configurationKey: string | null } | null> {
+    async lockRowForManufacturing(
+      tx: Tx,
+      rowId: string
+    ): Promise<{ configurationKey: string | null; quantityOrdered: number; quantityDelivered: number } | null> {
       const [row] = await tx
-        .select({ configuration: salesOrderRows.configuration })
+        .select({
+          configuration: salesOrderRows.configuration,
+          quantityOrdered: salesOrderRows.quantityOrdered,
+          quantityDelivered: salesOrderRows.quantityDelivered,
+        })
         .from(salesOrderRows)
         .where(eq(salesOrderRows.id, rowId))
         .for("update");
       if (!row) return null;
-      return { configurationKey: (row.configuration as OrderRowConfiguration | null)?.key ?? null };
+      return {
+        configurationKey: (row.configuration as OrderRowConfiguration | null)?.key ?? null,
+        quantityOrdered: Number(row.quantityOrdered),
+        quantityDelivered: Number(row.quantityDelivered),
+      };
     },
 
     // Atomic like deliverGoods: locks the row so a concurrent delivery can't

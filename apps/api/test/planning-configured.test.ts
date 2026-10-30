@@ -111,6 +111,38 @@ describe("behovsberäkning — beställningsvara", () => {
     expect(rows.find((r) => r.articleId === s.article.id)).toMatchObject({ demandSales: 2, supplyMo: 2, projected: 0, proposalQuantity: 0 });
   });
 
+  // The list is cached up to a minute (REQUIREMENTS_CACHE_MS): a proposal
+  // already acted on — or a second click, or two users at once — must not
+  // give the row a second TO. Decided under the row lock.
+  it("Skapa ordrar never gives a configured row more TO than it still lacks, also twice at once", async () => {
+    const { s, row } = await confirmedRow(2);
+    const user = await makeUser();
+    const proposal = { kind: "configured", articleId: s.article.id, salesOrderRowId: row.id, quantity: 2 };
+    const linkedTos = async () =>
+      (await mfg.listManufacturingOrders({ limit: 50, offset: 0 } as never)).rows.filter(
+        (o: { salesOrderRowId: string | null; status: string }) => o.salesOrderRowId === row.id && o.status !== "cancelled"
+      );
+
+    const first = await planning.createOrdersFromProposals({ proposals: [proposal] } as never, user.id);
+    expect(first.manufacturingOrders).toHaveLength(1);
+    // The same, stale proposal again.
+    const again = await planning.createOrdersFromProposals({ proposals: [proposal] } as never, user.id);
+    expect(again.manufacturingOrders).toHaveLength(0);
+    expect(again.errors.map((e: { message: string }) => e.message)).toEqual([
+      "Raden har redan tillverkningsordrar för hela antalet — uppdatera behovsberäkningen",
+    ]);
+    expect(await linkedTos()).toHaveLength(1);
+
+    // Two at once on a fresh row: one wins.
+    const { s: s2, row: row2 } = await confirmedRow(1);
+    const both = { kind: "configured", articleId: s2.article.id, salesOrderRowId: row2.id, quantity: 1 };
+    const results = await Promise.all([
+      planning.createOrdersFromProposals({ proposals: [both] } as never, user.id),
+      planning.createOrdersFromProposals({ proposals: [both] } as never, user.id),
+    ]);
+    expect(results.reduce((n, r) => n + r.manufacturingOrders.length, 0)).toBe(1);
+  });
+
   it("delivery from a free unit covers the row; the template gets no proposal after delivery", async () => {
     const { s, order, row } = await confirmedRow(1);
     const loc = await makeLocation();
