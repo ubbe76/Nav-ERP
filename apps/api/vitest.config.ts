@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+import { TEST_WORKERS } from "./test/test-workers";
 
 // The private repo (../../private, absent in a plain clone) carries the
 // end-to-end tests against the real Monitor exports; run them when it is there.
@@ -20,15 +21,19 @@ export default defineConfig({
     // Aborts the run unless DATABASE_URL points at a test database — the
     // suite truncates every table it touches.
     setupFiles: ["./test/setup.ts"],
-    // The per-test TRUNCATE hooks take 2-4 s against a shared Postgres and
-    // occasionally spike well past that, which at 20 s produced failures that
-    // moved between files and looked like regressions — three in one session,
-    // every one green when the file was re-run alone. The hooks are not the
-    // thing under test; give them room rather than re-diagnosing flakes.
+    // The per-test TRUNCATE hooks used to take 2-4 s against a shared
+    // Postgres and occasionally spiked well past that, which at 20 s produced
+    // failures that moved between files and looked like regressions. They are
+    // milliseconds now (test/helpers/fast-truncate.ts), but files run side by
+    // side; the hooks are not the thing under test, so they keep the room.
     hookTimeout: 60000,
     testTimeout: 20000,
-    // Integration tests share one Postgres instance and truncate tables between
-    // cases, so test files must not run concurrently against it.
-    fileParallelism: false,
+    // Integration tests truncate tables between cases, so two files must never
+    // share a database: TEST_WORKERS files run at once, each worker against
+    // its own clone of the test database (test/test-workers.ts,
+    // global-setup.ts). One process per file, so each gets a fresh module
+    // graph and its own connection pool.
+    pool: "forks",
+    poolOptions: { forks: { maxForks: TEST_WORKERS, minForks: 1 } },
   },
 });
