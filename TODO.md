@@ -23,7 +23,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Beställningsvara:** radredigeringen skickar alltid à-pris, så serverns 400 för ogiltig sparad konfiguration nås aldrig — evaluate-fel sväljs (`.catch`) och det gamla priset sparas. Visa felet.
 - [ ] **Beställningsvara:** antalsbytets omvärdering jämför inte ny konfigurationsnyckel mot sparad — ett förval som läggs till i mallen senare ger ett pris med tillägg som inte syns i valen.
 - [ ] **Konfigurerad tillverkning:** behovsberäkningens 60 s-cache kan ge en andra TO på en konfigurerad rad.
-- [ ] **Bankfiler:** `confirm()` tappar tyst `itemIds` som inte exporterats — användaren tror att raderna är bekräftade.
 
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 
