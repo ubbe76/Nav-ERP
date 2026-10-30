@@ -86,6 +86,8 @@ const DATABASE_URL_FALLBACK = "postgresql://erp:erp_dev_password@localhost:5432/
 const ALLOW_MULTIPLE_STAMPS_KEY = "allow_multiple_stamps";
 const SHOW_REVISIONS_ON_DOCUMENTS_KEY = "show_revisions_on_documents";
 const SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY = "show_order_revision_on_documents";
+// Streckkod på inköpsorder (#23) — ON when unset, like the order revision.
+const PURCHASE_ORDER_BARCODE_KEY = "purchase_order_barcode";
 const EXTRA_DESCRIPTION_DOCUMENTS_KEY = "extra_description_documents";
 const ATF_MINUTES_PER_WEEK_KEY = "atf_minutes_per_week";
 // Tillåt ATF-uttag via schemat (utjämning på veckoschemat) — off when unset.
@@ -300,6 +302,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       showRevisionsOnDocuments: get(SHOW_REVISIONS_ON_DOCUMENTS_KEY) === "true",
       // Unlike the other toggles this one defaults ON when never set.
       showOrderRevisionOnDocuments: get(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY) !== "false",
+      purchaseOrderBarcode: get(PURCHASE_ORDER_BARCODE_KEY) !== "false",
       extraDescriptionDocuments: decodeExtraDescriptionDocuments(get(EXTRA_DESCRIPTION_DOCUMENTS_KEY)),
       atfMinutesPerWeek: get(ATF_MINUTES_PER_WEEK_KEY) === null ? 0 : Number(get(ATF_MINUTES_PER_WEEK_KEY)),
       scheduleBalancing: get(SCHEDULE_BALANCING_KEY) === "true",
@@ -600,6 +603,9 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.showOrderRevisionOnDocuments !== undefined) {
         await set(SHOW_ORDER_REVISION_ON_DOCUMENTS_KEY, String(input.showOrderRevisionOnDocuments));
+      }
+      if (input.purchaseOrderBarcode !== undefined) {
+        await set(PURCHASE_ORDER_BARCODE_KEY, String(input.purchaseOrderBarcode));
       }
       if (input.extraDescriptionDocuments !== undefined) {
         // Stored in the catalog's order, without duplicates.

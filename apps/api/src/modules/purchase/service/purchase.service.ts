@@ -439,6 +439,8 @@ export interface PurchaseSettingsReader extends DocumentSettingsReader {
   getSettings(): Promise<{
     showRevisionsOnDocuments: boolean;
     showOrderRevisionOnDocuments: boolean;
+    // Streckkod på inköpsorder (#23).
+    purchaseOrderBarcode: boolean;
     extraDescriptionDocuments?: ExtraDescriptionDocument[];
     purchaseOverReceiptPercent: number | null;
     // Inherited from DocumentSettingsReader (the pallet card is sales/
@@ -651,7 +653,7 @@ export function createPurchaseService(
     const content = await pdf.render({
       title: "Inköpsorder",
       documentNumber: order.orderNumber,
-      documentNumberBarcode: true,
+      documentNumberBarcode: documentSettings.purchaseOrderBarcode,
       date: order.createdAt,
       partnerLabel: "Leverantör",
       partner: supplier!,

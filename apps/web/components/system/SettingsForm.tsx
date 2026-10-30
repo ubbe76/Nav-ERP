@@ -28,6 +28,7 @@ export function SettingsForm({
   const [showOrderRevisionOnDocuments, setShowOrderRevisionOnDocuments] = useState(
     settings.showOrderRevisionOnDocuments
   );
+  const [purchaseOrderBarcode, setPurchaseOrderBarcode] = useState(settings.purchaseOrderBarcode);
   const [extraDescriptionDocuments, setExtraDescriptionDocuments] = useState<ExtraDescriptionDocument[]>(
     settings.extraDescriptionDocuments
   );
@@ -91,6 +92,11 @@ export function SettingsForm({
   async function toggleShowOrderRevision() {
     const updated = await save({ showOrderRevisionOnDocuments: !showOrderRevisionOnDocuments });
     if (updated) setShowOrderRevisionOnDocuments(updated.showOrderRevisionOnDocuments);
+  }
+
+  async function togglePurchaseOrderBarcode() {
+    const updated = await save({ purchaseOrderBarcode: !purchaseOrderBarcode });
+    if (updated) setPurchaseOrderBarcode(updated.purchaseOrderBarcode);
   }
 
   // Saves the whole list in canonical order; the checkbox follows the server's answer.
@@ -273,6 +279,27 @@ export function SettingsForm({
           data-on={showOrderRevisionOnDocuments}
           disabled={pending}
           onClick={toggleShowOrderRevision}
+        >
+          <span className={styles.knob} aria-hidden="true" />
+        </button>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Streckkod på inköpsorder</div>
+          <div className={styles.description}>
+            På: inköpsorderns PDF har ordernumret som streckkod uppe till höger, så en utskriven order kan skannas i
+            inleveransen. Gäller även den PDF som skickas till leverantören.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={purchaseOrderBarcode}
+          aria-label="Streckkod på inköpsorder"
+          className={styles.switch}
+          data-on={purchaseOrderBarcode}
+          disabled={pending}
+          onClick={togglePurchaseOrderBarcode}
         >
           <span className={styles.knob} aria-hidden="true" />
         </button>
