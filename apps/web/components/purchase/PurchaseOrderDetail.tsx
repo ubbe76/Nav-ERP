@@ -19,6 +19,7 @@ import { DocumentActionBar } from "../documents/DocumentActionBar";
 import { ManualStatusChange } from "../documents/ManualStatusChange";
 import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, type TermsValue } from "../documents/TermsFields";
 import { toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
+import { requoteFor } from "../../lib/rowRequote";
 import { formatMoney } from "../../lib/format";
 import { apiFetch } from "../../lib/api";
 import { useSupplierDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
@@ -120,15 +121,16 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   useEffect(() => {
     if (editingRowId === null || editPriceTouched) return;
     const row = rows.find((r) => r.id === editingRowId);
-    const qty = Number(editQuantity);
-    if (!row || !Number.isFinite(qty) || qty <= 0) return;
-    // Until the article's units have loaded the row's factor is unknown (the
-    // options list is empty) — quoting then would read a 500 kg row as 500
-    // base units and overwrite a stored price just by opening Ändra.
-    const factor = editUnitId === "" ? 1 : editUnitOptions.find((o) => o.value === editUnitId)?.factor;
-    if (factor === undefined) return;
-    const baseQuantity = toBaseQuantity(qty, factor);
-    if (baseQuantity === editPricedBaseQuantityRef.current) return;
+    if (!row) return;
+    // lib/rowRequote.ts — the same rule as the sales order card.
+    const requote = requoteFor({
+      quantity: editQuantity,
+      unitId: editUnitId,
+      unitOptions: editUnitOptions,
+      pricedBaseQuantity: editPricedBaseQuantityRef.current,
+    });
+    if (!requote) return;
+    const { base: baseQuantity, factor } = requote;
     // Claimed up front so a null/foreign-currency answer isn't re-asked on
     // every unrelated rerender; a later quantity change asks again.
     editPricedBaseQuantityRef.current = baseQuantity;
