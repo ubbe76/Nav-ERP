@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.6.1-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.7.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -554,7 +554,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   artikeln har även **extra benämning** (flerradig, utskrivbar på valda
   dokument), **säkerhetslager** för behovsberäkningen, **Pos.** på
   strukturraden och **cykeltid** och **transportkostnad** (lego) på
-  operationen
+  operationen; **Streckkod (EAN)** på artikeln, **etiketter** för artiklar
+  och lagerplatser (A4-ark eller etikettskrivare, Code 128 eller QR) och
+  **prishistorik** för standardkostnad, försäljningspris och
+  leverantörskatalog
 - **Inköp** — leverantörer med leverantörskort (flikar Allmänt /
   Villkor & frakt / Kontakter: adress med postnummer/postort,
   organisationsnummer, VAT-nummer, leverans-/betalningsvillkor, speditör
@@ -595,7 +598,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   **utleveransrutin** som rapporterar leverans av hela ordern på en
   gång (med **rest** per rad) och skapar följesedel, med utskrivbar **plocklista** (PDF med restantal och
   lagerplatssaldon per artikel), **pallkort** per följesedel (streck- eller
-  QR-kod, eget antal per kolli) och möjlighet att **ångra en utleverans**
+  QR-kod, eget antal per kolli), **tillåten överleverans** (systemets förval
+  eller per kund) och möjlighet att **ångra en utleverans**
   per leveransrad så länge den inte är fakturerad; ny offert eller kundorder (skapas
   direkt som bekräftad) från kundkortet eller listan; offerter med
   **giltighetstid** som kan markeras **Förlorad** med förlustorsak; kundpriser med
@@ -645,7 +649,8 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   inarbetning** i veckoschemat — veckans sista arbetsdag blir kortare och
   förlängs i veckor med helgdag eller sjuk-/VAB-dagar), **ATF**
   (arbetstidsförkortning med intjäning i minuter/vecka, tidbank eller
-  veckouttag per anställd),
+  veckouttag per anställd), **radering eller anonymisering** av en
+  anställd (GDPR),
   **produktionsgrupper** som kopplar personal och resurser samt, under
   **Personal & lön**, **löneunderlaget**: frånvarohantering
   (frånvarokoder mappade mot lönearter, registrering per anställd/dag),
@@ -657,7 +662,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
 - **Lager** — saldon över alla artiklar, redigerbara lager/lagerplatser
   med automatisk reservplats `***` (transaktioner utan vald plats bokförs
   på artikelns lagerplats eller `***`), transaktionslogg (inflödesrader
-  bär inköpskostnaden `unit_cost` i SEK), inventering samt
+  bär inköpskostnaden `unit_cost` i SEK), inventering, **skanning** med
+  handskanner eller mobilens kamera (Lager → Skanna, och räkning av
+  artiklarna i inleverans, plock/utleverans och inventering), **import av
+  lagersaldon** samt
   **lagervärdering** (`/lager/vardering`, administratörer): lagrets värde
   per valfritt datum med tre metoder — standardpris, senaste inköp eller
   vägt snitt — uppdelat per varugrupp eller artikelkod och nedladdningsbart som PDF
