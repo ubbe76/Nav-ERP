@@ -23,7 +23,9 @@ const service = createRegisterService(createRegisterRepository(db));
 const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
 const PASSWORD = "correcthorsebattery";
 
-const TRUNCATE = sql`TRUNCATE sales_order_rows, sales_orders, customers, quote_loss_reasons, user_settings, users, audit_log CASCADE`;
+// payment_terms too: a test below creates the term "30", which another file
+// in the same worker may have left behind.
+const TRUNCATE = sql`TRUNCATE sales_order_rows, sales_orders, customers, quote_loss_reasons, payment_terms, user_settings, users, audit_log CASCADE`;
 const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'QLR%'`;
 
 let app: ReturnType<typeof buildApp>;
