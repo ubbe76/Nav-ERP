@@ -683,6 +683,15 @@ const PAGE_HEIGHT = 841.89; // A4 portrait, points
 const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
 const TABLE_BOTTOM = 780;
 
+// Skanning (#4): the document number as a Code 128 at the right end of a
+// title line drawn at `titleY` (the inköpsorder, the plocklista) —
+// right-aligned below the logo, at most 170 pt wide so it never reaches the
+// title text. Nothing is drawn for a number Code 128 cannot hold.
+function drawTitleBarcode(doc: PDFKit.PDFDocument, text: string, titleY: number): void {
+  const width = code128Width(text, 170);
+  if (width !== null) drawCode128(doc, text, PAGE_MARGIN + CONTENT_WIDTH - width, titleY - 2, 170, 24);
+}
+
 // Manufacturing order column layouts.
 const MO_OP_COLS = {
   seq: { x: 0, w: 30 },
@@ -1139,12 +1148,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     let y = 130;
     const numberWithRevision = `${input.documentNumber}${input.revision != null ? ` / ${input.revision}` : ""}`;
     doc.font("Helvetica-Bold").fontSize(18).text(`${input.title} ${numberWithRevision}`, left, y);
-    if (input.documentNumberBarcode) {
-      // Right-aligned beside the title, below the logo; at most 170 pt wide
-      // so it never reaches the title text.
-      const width = code128Width(input.documentNumber, 170);
-      if (width !== null) drawCode128(doc, input.documentNumber, left + CONTENT_WIDTH - width, y - 2, 170, 24);
-    }
+    if (input.documentNumberBarcode) drawTitleBarcode(doc, input.documentNumber, y);
     y += 26;
     doc
       .font("Helvetica")
@@ -1651,6 +1655,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     let y = 130;
     doc.font("Helvetica-Bold").fontSize(18).text(`Plocklista ${input.documentNumber}`, left, y);
+    // Skanning (#4): the picker scans the order number in Utleverans.
+    drawTitleBarcode(doc, input.documentNumber, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
     doc.text(`Utskriven: ${input.printedAt.toISOString().slice(0, 10)}`, left, y);

@@ -695,6 +695,7 @@ export interface PurchaseOrderRow {
   articleId: string;
   articleNumber: string;
   articleName: string;
+  articleType: ArticleType;
   confirmedDeliveryDate: string | null;
   // Always stored in the article's base unit; unitCode/unitFactor say which
   // unit the row was entered in (factor null = base unit).

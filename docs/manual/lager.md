@@ -32,7 +32,7 @@ Det här känns igen:
 
 Koder läses med Code 128, EAN-8, EAN-13, UPC och QR.
 
-Skanningsfältet finns också i [Inleverans](/hjalp/inkop#skanna-i-inleveransen), där en skannad artikel räknas mot inköpsorderns rader.
+Skanningsfältet finns också i [Inleverans](/hjalp/inkop#skanna-i-inleveransen) och [Utleverans](/hjalp/forsaljning#skanna-vid-plock), där en skannad artikel räknas mot orderns rader.
 
 ## Etiketter
 

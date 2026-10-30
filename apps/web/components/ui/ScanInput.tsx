@@ -84,6 +84,32 @@ export function ScanInput({
   );
 }
 
+// A scanning routine's top block: the scan field and, under it, what the last
+// scan did (useScanFeedback) — kept to a phone's width on desktop so the
+// field reads as one control, not a page-wide bar.
+export function ScanPanel({
+  onScan,
+  feedback,
+  placeholder,
+  inputRef,
+}: {
+  onScan: (code: string) => void;
+  feedback: { tone: "ok" | "warn"; text: string } | null;
+  placeholder: string;
+  inputRef?: RefObject<HTMLInputElement | null>;
+}) {
+  return (
+    <div className={styles.panel}>
+      <ScanInput autoFocus inputRef={inputRef} placeholder={placeholder} onScan={onScan} />
+      {feedback && (
+        <p className={styles.feedback} data-tone={feedback.tone} role="status">
+          {feedback.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Mounted only while the dialog is open (Modal unmounts its children), so the
 // camera starts on open and the cleanup stops every track on close.
 function CameraScanner({ onDecoded }: { onDecoded: (code: string) => void }) {

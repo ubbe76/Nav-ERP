@@ -759,6 +759,18 @@ Fakturor skapas i **fakturamodulen** (se [Fakturor](#fakturor) ovan) i stället 
 
 Enstaka rader kan fortfarande levereras direkt på kundorderkortet med **Leverera** — även det skapar ett eget leveranstillfälle (en följesedel med en rad).
 
+### Skanna vid plock
+
+Överst i rutinen finns skanningsfältet (**Skanna kundorder, artikel eller lagerplats…**) — skanna med handskanner eller med knappen **Kamera**, precis som på [Lager → Skanna](/hjalp/lager#skanna). Rutinen fungerar i mobilen, så plocket kan göras med telefonen i handen. Under fältet visas vad den senaste skanningen gjorde; en varning visas i rött (och telefonen vibrerar, där det går).
+
+- **Kundordern** väljer ordern. [Plocklistan](#plocklista) har ordernumret som streckkod uppe till höger, så plocket kan börja med att skanna den. Bara ordrar i status **Under tillverkning** kan väljas ("KO-1003 kan inte levereras — Bekräftad"). Har du redan plockat något på en annan order frågar rutinen först — **Byt order** släpper det plockade.
+- **Lagerplatsens etikett** (LP-koden) väljer **Lagerplats** — platsen varorna tas från. En inaktiv plats har inget saldo, och rutinen varnar.
+- **Artikeln** — artikelnumret eller **Streckkod (EAN)** — räknar en plockad enhet på artikelns rad, i radens enhet. Den första artikelskanningen nollställer de förifyllda restantalen och raden **Räknar plockade artiklar — rader med 0 levereras inte.** visas, tillsammans med hur många rader som har **Kvar att plocka** (eller **Allt är plockat.**). Tabellen får kolumnen **Kvar att plocka** per rad. Antalen kan rättas för hand (Enter i fältet flyttar tillbaka markören till skanningsfältet), och **Fyll i restantal** går tillbaka till restantalen.
+- **Överplock räknas inte.** En kundorderrad kan aldrig levereras med mer än beställt, så en skanning när raden redan är fullt plockad varnar ("Överplock — … är redan plockad (3 av 3 st)") och lägger inte till något. En artikel som inte finns på ordern eller redan är levererad räknas inte heller.
+- **Tjänster och ställkostnader** plockas inte: de raderna behåller sitt restantal när skanningen börjar och följer med leveransen. Skannas en sådan artikel ändå svarar rutinen att antalet skrivs för hand.
+
+Skanna kundordern först — en artikel som skannas innan en order är vald räknas inte. Avsluta med **Rapportera utleverans** som vanligt.
+
 **Varning för beställningsvara.** Levererar du en konfigurerad rad (beställningsvara) mer än tillverkningsordrarna kopplade till raden har färdigrapporterat visas en gul varning under antalet, både här och i dialogen **Leverera** på orderkortet: *KO-raden har bara X av Y färdigrapporterade*. X är det färdigrapporterade antalet på de kopplade tillverkningsordrarna (Klar eller Avslutad), Y det antal som raden då skulle vara levererad till. Varningen stoppar inte leveransen — mallens lagersaldo är gemensamt och en enhet som byggts fritt får levereras — den påminner bara om att tillverkningen inte hunnit ikapp. Se [Tillverkningsorder för beställningsvara](/hjalp/tillverkning#tillverkningsorder-for-bestallningsvara).
 
 #### Pallkort vid utleverans
@@ -774,6 +786,7 @@ Behöver du skriva ut igen, eller ett annat antal, klickar du **Pallkort (PDF)**
 - Bara rader med kvarvarande antal tas med, och **Att plocka** är restantalet (beställt minus levererat) i radens enhet.
 - Kolumnen **Lagerplats (saldo)** visar var artikeln finns och aktuellt saldo per lagerplats — saldona anges i artikelns grundenhet.
 - Kolumnen **Plockat** och raden "Plockat av / Datum" fylls i för hand av den som plockar.
+- Ordernumret står också som streckkod uppe till höger, så att ordern kan skannas i [Utleverans](#skanna-vid-plock).
 - Konfigurerade rader visar valen (t.ex. *Lock: Lock B*, *Bredd: 1 200 mm*) under benämningen — aldrig priser.
 
 Plocklistan kan skrivas ut i alla statusar utom Avbruten och ändrar ingenting i systemet.

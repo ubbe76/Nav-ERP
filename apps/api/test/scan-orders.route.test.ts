@@ -5,11 +5,13 @@ import { buildApp } from "../src/app.js";
 import { createDocumentPdfService } from "../src/modules/mail/service/document-pdf.js";
 import { pdfRectCount, pdfText } from "./helpers/pdf.js";
 
-// Skanning, etapp 2 (#4) — what Inleverans needs from the API: the receivable
-// orders holding an open row of a scanned article (openArticleId), and the
-// order number as a Code 128 on the purchase order PDF.
+// Skanning, etapp 2 och 3 (#4) — what Inleverans and Utleverans need from
+// the API: the receivable orders holding an open row of a scanned article
+// (openArticleId), the article type on the IO rows (a tjänst is not counted),
+// and the order number as a Code 128 on the purchase order and the
+// plocklista.
 
-const TRUNCATE = sql`TRUNCATE purchase_orders, suppliers, stock_transactions, stock_locations, warehouses, articles, audit_log, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE sales_orders, customers, purchase_orders, suppliers, stock_transactions, stock_locations, warehouses, articles, audit_log, users CASCADE`;
 const PASSWORD = "ett-tillräckligt-långt-lösenord";
 
 let app: ReturnType<typeof buildApp>;
@@ -80,9 +82,26 @@ describe("Inleverans: receivable orders for a scanned article", () => {
 
     expect((await call("GET", `/purchase-orders?openArticleId=inte-ett-id`)).statusCode).toBe(400);
   });
+
+  it("tells a tjänst apart on the IO rows", async () => {
+    const supplier = (await call("POST", "/suppliers", { name: "Skruvgrossen AB", active: true })).json() as { id: string };
+    const screw = await makeArticle("SK-1");
+    const freight = (
+      await call("POST", "/articles", { articleNumber: "FRAKT", name: "Frakt", type: "service", unit: "st", active: true })
+    ).json() as { id: string };
+    const order = await makeOrder(supplier.id, [
+      { articleId: screw.id, quantity: 10 },
+      { articleId: freight.id, quantity: 1 },
+    ]);
+    const rows = (await call("GET", `/purchase-orders/${order.id}/rows`)).json() as { articleId: string; articleType: string }[];
+    expect(Object.fromEntries(rows.map((r) => [r.articleId, r.articleType]))).toEqual({
+      [screw.id]: "purchased",
+      [freight.id]: "service",
+    });
+  });
 });
 
-describe("Inköpsorderns PDF", () => {
+describe("Streckkoden på inköpsordern och plocklistan", () => {
   it("carries the order number as a barcode beside the title", async () => {
     const supplier = (await call("POST", "/suppliers", { name: "Skruvgrossen AB", active: true })).json() as { id: string };
     const screw = await makeArticle("SK-1");
@@ -94,6 +113,19 @@ describe("Inköpsorderns PDF", () => {
     // The bars of one Code 128 symbol: a layout without codes draws only a
     // handful of rectangles.
     expect(pdfRectCount(res.rawPayload)).toBeGreaterThan(30);
+  });
+
+  it("puts the order number as a barcode on the plocklista too", async () => {
+    const customer = (await call("POST", "/customers", { name: "Kök & Bad AB", active: true })).json() as { id: string };
+    const screw = await makeArticle("SK-1");
+    const res = await call("POST", "/quotes", { customerId: customer.id, confirm: true, rows: [{ articleId: screw.id, quantity: 4, unitPrice: 10 }] });
+    expect(res.statusCode).toBe(201);
+    const { order } = res.json() as { order: { id: string; orderNumber: string } };
+
+    const pickList = await call("GET", `/sales-orders/${order.id}/pick-list`);
+    expect(pickList.statusCode).toBe(200);
+    expect(pdfText(pickList.rawPayload)).toContain(`Plocklista ${order.orderNumber}`);
+    expect(pdfRectCount(pickList.rawPayload)).toBeGreaterThan(30);
   });
 
   it("draws the bars only when asked, and nothing for a number Code 128 cannot hold", async () => {

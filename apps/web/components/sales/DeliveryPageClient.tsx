@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
@@ -10,11 +10,31 @@ import { StatusPill } from "../ui/StatusPill";
 import { SectionHeading } from "../ui/SectionHeading";
 import { Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
+import { ScanPanel } from "../ui/ScanInput";
+import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
 import { apiFetch } from "../../lib/api";
+import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { configuredDeliveryWarning } from "../../lib/configuredDelivery";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
-import { SALES_ORDER_STATUS_PILL, type SalesOrder, type SalesOrderRow, type StockLocation } from "../../lib/types";
+import {
+  countScan,
+  enteredQuantity,
+  hasCounted,
+  isScannableRow,
+  leftToCount,
+  resolveOrderScan,
+  type OrderCountState,
+  type OrderScanRow,
+} from "../../lib/orderScan";
+import {
+  SALES_ORDER_STATUS_PILL,
+  type SalesOrder,
+  type SalesOrderRow,
+  type SalesOrderStatus,
+  type ScanMatch,
+  type StockLocation,
+} from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
 import { FormError, FormNotice } from "../ui/Form";
@@ -22,12 +42,28 @@ import { BookTransportButton } from "../shipping/BookTransportButton";
 import { PalletCardDialog } from "../documents/PalletCardDialog";
 import styles from "./DeliveryPageClient.module.css";
 
+const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
+
+type ArticleMatch = Extract<ScanMatch, { kind: "article" }>;
+type LocationOption = Pick<StockLocation, "id" | "name" | "warehouseName">;
+
+const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articleNumber} · ${a.name}`;
+
 // Utleverans routine — report a whole delivery in one go. Quantities are
 // prefilled with each row's remaining amount; rows set to 0 are skipped. All
 // filled-in rows are booked in ONE POST /sales-orders/:id/deliver call —
 // C2's batch endpoint — so the whole occasion becomes a single delivery
 // (följesedel), atomic across every row. Delivery requires status
 // "Under tillverkning".
+//
+// Skanning (#4, etapp 3): the scan field takes a KO number (picks the
+// order), a lagerplats label (picks where the goods are taken from) or an
+// article/EAN, which counts one picked per scan on the article's row — the
+// first article scan clears the prefilled amounts, so only what was picked is
+// delivered, and a scan beyond the remaining amount is refused (the server
+// never delivers more than ordered). Tjänster and ställkostnadsrader keep
+// their remaining amount. The rules are lib/orderScan.ts, shared with
+// Inleverans.
 export function DeliveryPageClient({
   locations,
   selected,
@@ -50,14 +86,38 @@ export function DeliveryPageClient({
     () => rows.filter((r) => Number(r.quantityDelivered) < Number(r.quantityOrdered)),
     [rows]
   );
+  // The open rows as the scan rules see them: remaining in the row's unit.
+  const scanRows = useMemo<OrderScanRow[]>(
+    () =>
+      openRows.map((r) => ({
+        id: r.id,
+        articleId: r.articleId,
+        remaining: toUnitQuantity(Number(r.quantityOrdered) - Number(r.quantityDelivered), r.unitFactor),
+        scannable: isScannableRow(r),
+      })),
+    [openRows]
+  );
+  const scanRowOf = (row: SalesOrderRow) => scanRows.find((r) => r.id === row.id)!;
 
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
-  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  // A scanned lagerplats that GET /stock/locations leaves out (inactive: it
+  // holds nothing), added to the select so the choice can be shown.
+  const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
+  const { count, countRef, setCount } = useCountState(NO_COUNT);
+  const { feedback, ok, warn, clear: clearFeedback } = useScanFeedback();
+  const [lastRowId, setLastRowId] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [palletCardDeliveryId, setPalletCardDeliveryId] = useState<string | null>(null);
   const [done, setDone] = useState<{ message: string; deliveryId: string; deliveryNumber: string } | null>(null);
+  const scanField = useRef<HTMLInputElement>(null);
+  // The props the queued scan handlers read — a handler may run after a
+  // navigation it did not see.
+  const latest = useRef({ order, openRows, scanRows, rows });
+  useEffect(() => {
+    latest.current = { order, openRows, scanRows, rows };
+  });
 
   // Frakt: "Boka transport" on the result block only when freight is
   // enabled under System → Frakt — fetched once; an error hides the button.
@@ -68,24 +128,112 @@ export function DeliveryPageClient({
       .catch(() => setFreightEnabled(false));
   }, []);
 
-  // Entered/displayed in the row's unit; converted to the base unit when the
-  // delivery is booked (stock is always base).
-  function enteredQuantity(row: SalesOrderRow): string {
-    return (
-      quantities[row.id] ??
-      String(toUnitQuantity(Number(row.quantityOrdered) - Number(row.quantityDelivered), row.unitFactor))
-    );
+  const locationOptions: LocationOption[] =
+    scannedLocation && !locations.some((l) => l.id === scannedLocation.id) ? [...locations, scannedLocation] : locations;
+
+  function goToOrder(id: string) {
+    setCount(NO_COUNT);
+    setLastRowId(null);
+    setRowErrors({});
+    setFormError(null);
+    setDone(null);
+    router.replace(`/forsaljning/utleverans?order=${id}`);
   }
 
   // The SearchPicker also fires onChange(null) while the user is typing (it
   // invalidates the previous pick) — only a definite pick should navigate.
   function selectOrder(next: SalesOrder | null) {
     if (!next) return;
-    setQuantities({});
-    setRowErrors({});
-    setFormError(null);
+    clearFeedback();
+    goToOrder(next.id);
+  }
+
+  function applyCount(article: ArticleMatch) {
+    const outcome = countScan(latest.current.scanRows, countRef.current, article.id, { capped: true });
+    if (!outcome.counted && !outcome.full) return;
+    setLastRowId(outcome.rowId);
+    const row = latest.current.openRows.find((r) => r.id === outcome.rowId);
+    const amount = `${outcome.quantity} av ${outcome.remaining} ${row?.unitCode ?? ""}`.trim();
+    if (!outcome.counted) {
+      warn(`Överplock — ${articleLabel(article)} är redan plockad (${amount})`);
+      return;
+    }
+    setCount(outcome.state);
     setDone(null);
-    router.replace(`/forsaljning/utleverans?order=${next.id}`);
+    ok(`${articleLabel(article)}: ${amount}`);
+  }
+
+  const onScan = useScanQueue(handleScan, warn);
+
+  async function handleScan(code: string, matches: ScanMatch[]) {
+    const { order: current, scanRows: currentRows, rows: allRows } = latest.current;
+    const intent = resolveOrderScan(
+      matches,
+      "salesOrder",
+      current ? { openRows: currentRows, articleIds: allRows.map((r) => r.articleId) } : null
+    );
+    switch (intent.kind) {
+      case "location": {
+        const m = intent.match;
+        if (!locations.some((l) => l.id === m.id)) {
+          setScannedLocation({ id: m.id, name: m.name, warehouseName: m.warehouseName });
+        }
+        setLocationId(m.id);
+        const text = `Lagerplats: ${m.warehouseName} — ${m.name}`;
+        if (m.active) ok(text);
+        else warn(`${text} — inaktiv, det finns inget saldo på den`);
+        return;
+      }
+      case "count":
+        applyCount(intent.match);
+        return;
+      case "order": {
+        const m = intent.match;
+        if (m.id === current?.id) {
+          ok(`${m.orderNumber} är redan vald`);
+          return;
+        }
+        if (m.status !== "in_production") {
+          warn(`${m.orderNumber} kan inte levereras — ${SALES_ORDER_STATUS_PILL[m.status as SalesOrderStatus]?.label ?? m.status}`);
+          return;
+        }
+        if (hasCounted(countRef.current) && !(await confirmDialog(`Byta till ${m.orderNumber}? Det du har plockat på ${current?.orderNumber} levereras inte.`, { confirmLabel: "Byt order" }))) {
+          return;
+        }
+        ok(`${m.orderNumber} — ${m.partyName}`);
+        goToOrder(m.id);
+        return;
+      }
+      case "articleManual":
+        warn(`${articleLabel(intent.match)} räknas inte vid plock — skriv antalet för hand`);
+        return;
+      case "articleDone":
+        warn(`${articleLabel(intent.match)} är redan levererad på ${current?.orderNumber}`);
+        return;
+      case "articleNotOnOrder":
+        warn(`${articleLabel(intent.match)} finns inte på ${current?.orderNumber}`);
+        return;
+      case "articleWithoutOrder":
+        warn(`Skanna eller välj kundordern först — ${articleLabel(intent.match)}`);
+        return;
+      case "wrongKind":
+        warn(
+          `${code} är en ${intent.match.kind === "purchaseOrder" ? "inköpsorder" : "tillverkningsorder"} — skanna en kundorder, en artikel eller en lagerplats`
+        );
+        return;
+      case "unknown":
+        warn(`Ingen träff för ${code}`);
+        return;
+    }
+  }
+
+  async function resetToRemaining() {
+    if (hasCounted(count) && !(await confirmDialog("Det du har plockat ersätts med restantalen.", { confirmLabel: "Fyll i restantal" }))) {
+      return;
+    }
+    setCount(NO_COUNT);
+    setLastRowId(null);
+    clearFeedback();
   }
 
   async function report() {
@@ -94,7 +242,7 @@ export function DeliveryPageClient({
     setDone(null);
 
     const toDeliver = openRows
-      .map((row) => ({ row, quantity: Number(enteredQuantity(row)) }))
+      .map((row) => ({ row, quantity: Number(enteredQuantity(scanRowOf(row), count)) }))
       .filter(({ quantity }) => quantity > 0);
     if (toDeliver.length === 0) return;
 
@@ -118,7 +266,9 @@ export function DeliveryPageClient({
         deliveryId: result.deliveryId,
         deliveryNumber: result.deliveryNumber,
       });
-      setQuantities({});
+      setCount(NO_COUNT);
+      setLastRowId(null);
+      clearFeedback();
       // Pallkort: auto-open the cards for the delivery (one page per row) —
       // best effort (a popup blocker may stop it); the Pallkort (PDF) link
       // in the result block is the always-there fallback.
@@ -142,6 +292,8 @@ export function DeliveryPageClient({
   }
 
   const pill = order ? SALES_ORDER_STATUS_PILL[order.status] : null;
+  // Kvar att plocka, shown once counting has started.
+  const rowsLeft = count.counting ? scanRows.filter((r) => (leftToCount(r, count) ?? 0) > 0).length : 0;
 
   return (
     <>
@@ -153,7 +305,14 @@ export function DeliveryPageClient({
         <HelpLink chapter="forsaljning" anchor="utleverans" label="Hjälp om utleverans" />
       </div>
 
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 20 }}>
+      <ScanPanel
+        inputRef={scanField}
+        placeholder="Skanna kundorder, artikel eller lagerplats…"
+        onScan={onScan}
+        feedback={feedback}
+      />
+
+      <div className={styles.controls}>
         <Field label="Kundorder" htmlFor="deliveryOrder">
           <SearchPicker
             id="deliveryOrder"
@@ -176,11 +335,11 @@ export function DeliveryPageClient({
             )}
           />
         </Field>
-        {locations.length > 0 && (
+        {locationOptions.length > 0 && (
           <Field label="Lagerplats" htmlFor="deliveryLocation">
             <Select id="deliveryLocation" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
               <option value="">Artikelns lagerplats</option>
-              {locations.map((l) => (
+              {locationOptions.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.warehouseName} — {l.name}
                 </option>
@@ -189,7 +348,7 @@ export function DeliveryPageClient({
           </Field>
         )}
         {order && pill && (
-          <div style={{ display: "flex", gap: 12, alignItems: "center", paddingBottom: 6 }}>
+          <div className={styles.orderStatus}>
             <StatusPill status={pill.status} label={pill.label} />
             <Link href={`/forsaljning/ordrar/${order.id}`} style={{ fontWeight: 600, color: "inherit" }}>
               Öppna {order.orderNumber}
@@ -206,7 +365,7 @@ export function DeliveryPageClient({
       </div>
 
       {done && (
-        <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+        <div className={styles.done}>
           <p style={{ fontWeight: 600, margin: 0 }}>{done.message}</p>
           <a
             href={`/api/v1/deliveries/${done.deliveryId}/pdf`}
@@ -276,17 +435,36 @@ export function DeliveryPageClient({
 
       {order && openRows.length > 0 && (
         <>
+          {count.counting && (
+            <div className={styles.countingNote}>
+              <span>
+                Räknar plockade artiklar — rader med 0 levereras inte.{" "}
+                <strong>
+                  {rowsLeft === 0 ? "Allt är plockat." : `Kvar att plocka på ${rowsLeft} rad${rowsLeft === 1 ? "" : "er"}.`}
+                </strong>
+              </span>
+              <Button type="button" variant="secondary" size="small" onClick={() => void resetToRemaining()}>
+                Fyll i restantal
+              </Button>
+            </div>
+          )}
           <Table<SalesOrderRow>
             columns={[
-              { key: "articleNumber", label: "Artikelnummer", width: "150px" },
+              // Narrower than Inleverans' columns: counting adds Kvar att
+              // plocka and the row must still fit beside the menu.
+              { key: "articleNumber", label: "Artikelnummer", width: "130px" },
               { key: "articleName", label: "Benämning", width: "1fr" },
-              { key: "quantityOrdered", label: "Beställt", width: "100px", align: "right" },
-              { key: "unitCode", label: "Enhet", width: "70px" },
-              { key: "quantityDelivered", label: "Levererat", width: "100px", align: "right" },
-              { key: "remaining", label: "Rest", width: "100px", align: "right" },
-              { key: "id", label: "Leverera nu", width: "220px", align: "right" },
+              { key: "quantityOrdered", label: "Beställt", width: "80px", align: "right" },
+              { key: "unitCode", label: "Enhet", width: "60px" },
+              { key: "quantityDelivered", label: "Levererat", width: "80px", align: "right" },
+              { key: "remaining", label: "Rest", width: "70px", align: "right" },
+              ...(count.counting
+                ? [{ key: "left", label: "Kvar att plocka", width: "110px", align: "right" as const }]
+                : []),
+              { key: "id", label: "Leverera nu", width: "180px", align: "right" },
             ]}
             rows={openRows}
+            highlightedRowId={lastRowId}
             renderCell={(row, key) => {
               switch (key) {
                 case "quantityOrdered":
@@ -298,6 +476,10 @@ export function DeliveryPageClient({
                       {toUnitQuantity(Number(row.quantityOrdered) - Number(row.quantityDelivered), row.unitFactor)}
                     </strong>
                   );
+                case "left": {
+                  const left = leftToCount(scanRowOf(row), count);
+                  return left === null ? "–" : left;
+                }
                 case "id":
                   return (
                     <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -307,13 +489,21 @@ export function DeliveryPageClient({
                         step="any"
                         size="sm"
                         aria-label={`Leverera nu — ${row.articleNumber}`}
-                        value={enteredQuantity(row)}
-                        onChange={(e) => setQuantities((q) => ({ ...q, [row.id]: e.target.value }))}
+                        value={enteredQuantity(scanRowOf(row), count)}
+                        onChange={(e) =>
+                          setCount({ ...countRef.current, quantities: { ...countRef.current.quantities, [row.id]: e.target.value } })
+                        }
+                        // Enter hands the next scan back to the scan field.
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          scanField.current?.focus();
+                        }}
                       />
                       {(() => {
                         const warning = configuredDeliveryWarning(
                           row,
-                          toBaseQuantity(Number(enteredQuantity(row)), row.unitFactor)
+                          toBaseQuantity(Number(enteredQuantity(scanRowOf(row), count)), row.unitFactor)
                         );
                         return warning ? <FormNotice>{warning}</FormNotice> : null;
                       })()}
