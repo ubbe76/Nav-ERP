@@ -13,6 +13,7 @@ import {
   time,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
   boolean,
@@ -272,7 +273,10 @@ export const attendanceSessions = pgTable(
     stopNote: text("stop_note"),
   },
   (table) => [
-    index("attendance_sessions_open_by_employee").on(table.employeeId).where(sql`${table.stoppedAt} is null`),
+    // At most one open attendance per employee (migration 0173): two
+    // simultaneous stamps (a double tap, two terminals) must not both clock
+    // the employee in — the payroll would count the hours twice.
+    uniqueIndex("attendance_sessions_one_open_per_employee").on(table.employeeId).where(sql`${table.stoppedAt} is null`),
     index("attendance_sessions_by_employee_started").on(table.employeeId, table.startedAt),
   ]
 );
@@ -320,5 +324,12 @@ export const stampSessions = pgTable(
     // The terminal's logged-in session user — not who did the work.
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   },
-  (table) => [index("stamp_sessions_open_by_employee").on(table.employeeId).where(sql`${table.stoppedAt} is null`)]
+  (table) => [
+    index("stamp_sessions_open_by_employee").on(table.employeeId).where(sql`${table.stoppedAt} is null`),
+    // One open work stamp per employee and operation (migration 0173) — the
+    // same race as attendance: two would both become time reports.
+    uniqueIndex("stamp_sessions_one_open_per_operation")
+      .on(table.employeeId, table.moOperationId)
+      .where(sql`${table.stoppedAt} is null`),
+  ]
 );

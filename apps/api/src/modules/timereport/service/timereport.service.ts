@@ -14,6 +14,7 @@ import type {
 } from "@navet/shared";
 import type { Tx } from "@navet/db";
 import type { StampReason, TimeReportRepository } from "../repository/timereport.repository.js";
+import { ONE_OPEN_ATTENDANCE, ONE_OPEN_STAMP } from "../repository/timereport.repository.js";
 import { localDateOf, stampedHours } from "../repository/stamp-close.js";
 import type { ManufacturingService } from "../../manufacturing/service/manufacturing.service.js";
 import {
@@ -325,9 +326,16 @@ export function createTimeReportService(
 
   // Regel 5 shares this with attendanceIn: resume work paused by the
   // previous Gå hem, then open the attendance (with its sen ankomst reason).
+  // A clock-in that lost the race to a simultaneous one (double tap, two
+  // terminals) fails on the one-open-attendance index: the employee IS
+  // present, opened by the other request.
   async function beginAttendance(employeeId: string, createdBy: string, at: Date, reason?: AttendanceReasonInput) {
-    await repo.resumeStampSessions(employeeId, at);
-    return repo.createAttendanceSession(employeeId, createdBy, toStampReason(reason), at);
+    try {
+      return await repo.beginAttendance(employeeId, createdBy, toStampReason(reason), at);
+    } catch (err) {
+      if (isUniqueViolation(err, ONE_OPEN_ATTENDANCE)) throw new AlreadyPresentError();
+      throw err;
+    }
   }
 
   // Stämpla ut: closes the session, materializes the time report and
@@ -517,15 +525,33 @@ export function createTimeReportService(
       if (startsAttendance) await assertArrivalReason(input.employeeId, at, input.attendanceReason);
 
       if (order.status === "released") {
-        await manufacturing.start(order.id);
+        try {
+          await manufacturing.start(order.id);
+        } catch (err) {
+          // Started by a simultaneous first stamp (another employee, a
+          // double tap) — the order is under way, which is all this needs.
+          if (!(err instanceof InvalidStatusTransitionError)) throw err;
+          if ((await manufacturing.getManufacturingOrder(order.id))?.status !== "in_progress") throw err;
+        }
       }
 
       let attendanceStarted = false;
       if (startsAttendance) {
-        await beginAttendance(input.employeeId, createdBy, at, input.attendanceReason);
-        attendanceStarted = true;
+        try {
+          await beginAttendance(input.employeeId, createdBy, at, input.attendanceReason);
+          attendanceStarted = true;
+        } catch (err) {
+          // Clocked in by a simultaneous stamp — present all the same.
+          if (!(err instanceof AlreadyPresentError)) throw err;
+        }
       }
-      const session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy);
+      let session;
+      try {
+        session = await repo.createStampSession(input.employeeId, input.moOperationId, createdBy);
+      } catch (err) {
+        if (isUniqueViolation(err, ONE_OPEN_STAMP)) throw new AlreadyStampedInError();
+        throw err;
+      }
       return { ...session, attendanceStarted };
     },
 
@@ -613,14 +639,15 @@ export function createTimeReportService(
       // The forgotten stop time is an estimate and asks for no reason;
       // today's new attendance is judged like any other.
       await assertArrivalReason(input.employeeId, now, input.reason, { id: open.id, startedAt: open.startedAt, stop });
-      const session = await repo.closeForgottenAndBegin(
-        input.employeeId,
-        open.id,
-        stop,
-        now,
-        createdBy,
-        toStampReason(input.reason)
-      );
+      let session;
+      try {
+        session = await repo.closeForgottenAndBegin(input.employeeId, open.id, stop, now, createdBy, toStampReason(input.reason));
+      } catch (err) {
+        // The forgotten one was closed and today's opened by a simultaneous
+        // request that won the one-open-attendance index.
+        if (isUniqueViolation(err, ONE_OPEN_ATTENDANCE)) throw new AlreadyPresentError();
+        throw err;
+      }
       // Someone else closed it in between (double tap, retry) — they also
       // opened today's attendance.
       if (!session) throw new AlreadyPresentError();

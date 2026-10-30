@@ -1212,6 +1212,13 @@
       "when": 1793350432377,
       "tag": "0172_overleverans_kund",
       "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "7",
+      "when": 1793356342473,
+      "tag": "0173_en_oppen_narvaro",
+      "breakpoints": true
     }
   ]
 }

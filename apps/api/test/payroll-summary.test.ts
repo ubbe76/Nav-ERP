@@ -325,8 +325,12 @@ describe("overtime disposition on period days", () => {
     // minutes after the unpaid lunch) vs the 480 min schedule → 90 min
     // overtime — the exact figure doesn't matter to this test (only that it's
     // > 0 and lands on this day), just that overtimeCompMinutes tracks it.
-    const session = await timeReportRepository.createAttendanceSession(employee.id, user.id);
-    await backdateAttendanceSession(session.id, localDate(2026, 5, 4, 7, 0), localDate(2026, 5, 4, 17, 0));
+    // Inserted already closed: seedScenario keeps Tuesday's attendance open,
+    // and an employee has at most one open attendance (migration 0173).
+    await db.execute(sql`
+      INSERT INTO attendance_sessions (employee_id, created_by, started_at, stopped_at)
+      VALUES (${employee.id}, ${user.id}, ${localDate(2026, 5, 4, 7, 0).toISOString()}::timestamptz, ${localDate(2026, 5, 4, 17, 0).toISOString()}::timestamptz)
+    `);
 
     let summary = await service.getPeriodSummary(2026, 5);
     let row = summary.employees.find((e) => e.employeeId === employee.id)!;

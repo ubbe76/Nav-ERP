@@ -1095,3 +1095,42 @@ describe("rättad och glömd närvaro", () => {
     );
   });
 });
+
+// Two stamps at the same moment — a double tap, or two terminals. Each used
+// to check "is there an open attendance?" and then insert, so both could
+// clock the employee in and the payroll counted the hours twice. The
+// one-open indexes (migration 0173) let exactly one win.
+describe("samtidiga stämplingar", () => {
+  const openAttendances = async (employeeId: string) =>
+    (await db.execute(sql`select count(*)::int as n from attendance_sessions where employee_id = ${employeeId} and stopped_at is null`))[0]!.n;
+
+  it("two simultaneous Kom open one attendance; the other is already present", async () => {
+    const user = await makeUser();
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-RACE", name: "Dubbel", active: true });
+    const results = await Promise.allSettled(
+      Array.from({ length: 4 }, () => timeReportService.attendanceIn({ employeeId: employee.id }, user.id))
+    );
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    for (const r of results.filter((r) => r.status === "rejected")) {
+      expect((r as PromiseRejectedResult).reason).toBeInstanceOf(AlreadyPresentError);
+    }
+    expect(await openAttendances(employee.id)).toBe(1);
+  });
+
+  it("two simultaneous stamps on the same operation open one work stamp and one attendance", async () => {
+    const { user, operation } = await makeReleasedMoWithOperation();
+    const employee = await timeReportService.createEmployee({ employeeNumber: "E-RACE2", name: "Dubbel", active: true });
+    const results = await Promise.allSettled(
+      Array.from({ length: 4 }, () => timeReportService.stampIn({ employeeId: employee.id, moOperationId: operation.id }, user.id))
+    );
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    for (const r of results.filter((r) => r.status === "rejected")) {
+      expect((r as PromiseRejectedResult).reason).toBeInstanceOf(AlreadyStampedInError);
+    }
+    const stamps = (
+      await db.execute(sql`select count(*)::int as n from stamp_sessions where employee_id = ${employee.id} and stopped_at is null`)
+    )[0]!.n;
+    expect(stamps).toBe(1);
+    expect(await openAttendances(employee.id)).toBe(1);
+  });
+});
