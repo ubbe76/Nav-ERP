@@ -92,6 +92,7 @@ export function createStockCountService(deps: {
         printedAt: new Date(),
         warehouseName: session.warehouseName,
         locationName: session.locationName,
+        locationLabelCode: session.locationLabelCode,
         blocksTransactions: session.blocksTransactions,
         note: session.note,
         showBalances,

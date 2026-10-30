@@ -4210,6 +4210,8 @@ export interface StockCountRow {
 
 export interface StockCountDetail extends StockCountSession {
   note: string | null;
+  // The place's etikettkod (LP0042) — the räknelista's barcode.
+  locationLabelCode: string;
   rows: StockCountRow[];
 }
 

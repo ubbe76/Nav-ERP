@@ -11,13 +11,16 @@ paths:
   - "apps/web/components/ui/useOrderScan.ts"
   - "apps/web/components/purchase/GoodsReceiptPageClient*"
   - "apps/web/components/sales/DeliveryPageClient*"
+  - "apps/web/lib/countScan.ts"
+  - "apps/web/components/stock/StockCount*"
   - "apps/api/test/scan*"
   - "apps/api/test/web-order-scan*"
+  - "apps/api/test/web-count-scan*"
 ---
 
 # Skanning och etiketter (#4)
 
-Spec `private/superpowers/specs/2026-10-29-skanning-design.md` — fyra etapper (grunden, inleverans, plock/utleverans, inventering), en i taget mergad; ärendet stängs med den sista.
+Spec `private/superpowers/specs/2026-10-29-skanning-design.md` — fyra etapper (grunden, inleverans, plock/utleverans, inventering), en i taget mergade; #4 stängdes med den sista (2026-10-30).
 
 - **Koderna** (användarbeslut): artikelnummer och ordernummer (som pallkorten), **EAN/GTIN** i `articles.barcode` (migration 0171; CHECK på formen, partiellt unikt index `articles_barcode_unique` ⇒ 409 `duplicate-article-barcode` via `throwIfBarcodeTaken` före artikelnummerkrocken; kontrollsiffran i rena `isValidGtin`, `articleBarcodeSchema` "" ⇒ null) och **lagerplatsens etikettkod** `LP` + `stock_locations.label_number` (identity, unik; `formatLocationLabelCode`/`parseLocationLabelCode`) — kort, ASCII och stabil vid namnbyte, eftersom platsnamn kan ha å/ä/ö som Code 128 inte kodar. Leverantörens artikelnummer är medvetet inte med. Kopiera från tar aldrig med EAN (tillåtelselistan i `article-copy.ts`).
 - **`GET /scan?code=`** (modulen `scan`, bara läsning, office): `normalizeScanCode` (tar bort Enter, tab, GS1-separatorn) och svarar med **alla** träffar i fast ordning — plats, artikel på EAN, artikel på nummer, IO/KO (även offertnumret)/TO — så varje rutin väljer den sort den väntar sig. Ingen träff ⇒ tom lista, aldrig 404.
@@ -28,3 +31,5 @@ Spec `private/superpowers/specs/2026-10-29-skanning-design.md` — fyra etapper 
   - Inleverans: överleverans varnar bara (`capped: false`, toleransen är serverns); artikel utan vald order ⇒ `GET /purchase-orders?openArticleId=` (ordrar med en *öppen* rad), en träff väljs direkt och skanningen räknas när raderna laddats (`pendingCount`), flera visas som lista. Utleverans: **överplock räknas aldrig** (`capped: true` — `deliverBatch` vägrar mer än beställt), kolumnen **Kvar att plocka** (`leftToCount`) när räkningen startat, artikel utan vald KO varnar bara (medvetet ingen `openArticleId` för kundorder — plocket utgår från ordern).
   - Skanningarna köas (`useScanQueue`) och räknas mot `countRef`, inte mot React-state — snabba handskannerskanningar får aldrig tappas. Uppslagen cachas per sida utom koder som träffar en order (statusen kan ändras).
   - **Användarbeslut:** IO-PDF:en har ordernumret som Code 128 bredvid rubriken (`DocumentPdfInput.documentNumberBarcode`; att göra den valfri är #23); plocklistan har det alltid (internt dokument). En implementation: `drawTitleBarcode` i `document-pdf.ts`. Test: `scan-orders.route.test.ts`.
+- **Etapp 4 — Inventering** (ingen migration, admin som rutinen): ren `apps/web/lib/countScan.ts` (`resolveCountScan`, `web-count-scan.test.ts`) — plats (egen/annan) före artikel, artikel med rad före artikel utan. Listan (`StockCountScanPanel`) och kortet (`StockCountDetailClient`) delar `locationCountHref`: `GET /stock-counts?locationId=&status=open` → öppna inventeringen, annars `/lager/inventering/ny?location=` (förvald; inaktiv plats ⇒ varning, `createSession` vägrar den ändå). **Artikel och antal** (specen): skanningen markerar raden och fokuserar **Räknat** med värdet markerat — **ingen +1 per skanning** här, eftersom en handskanner skriver i fältet som har fokus och de två sätten inte går att blanda; Enter i Räknat sparar raden (PATCH) och lämnar tillbaka fokus. Artikel utan rad ⇒ `POST …/rows` (som Lägg till) och fokus när raden kommit med refreshen (`focusWhenLoaded`). Räknelistan har platsens LP-kod som streckkod (`StockCountSheetPdfInput.locationLabelCode`, detaljsvarets `locationLabelCode`). Test: `scan-count.route.test.ts`.
+

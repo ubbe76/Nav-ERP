@@ -11,6 +11,7 @@ import {
   type Tx,
 } from "@navet/db";
 import {
+  formatLocationLabelCode,
   ilikePattern,
   type AddStockCountRowInput,
   type CreateStockCountInput,
@@ -139,6 +140,7 @@ export function createStockCountRepository(db: Db) {
       if (query.status && query.status.length > 0) {
         conditions.push(inArray(stockCountSessions.status, query.status));
       }
+      if (query.locationId) conditions.push(eq(stockCountSessions.locationId, query.locationId));
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       const base = () =>
@@ -206,6 +208,7 @@ export function createStockCountRepository(db: Db) {
           countNumber: stockCountSessions.countNumber,
           locationId: stockCountSessions.locationId,
           locationName: stockLocations.name,
+          locationLabelNumber: stockLocations.labelNumber,
           warehouseName: warehouses.name,
           status: stockCountSessions.status,
           blocksTransactions: stockCountSessions.blocksTransactions,
@@ -250,8 +253,12 @@ export function createStockCountRepository(db: Db) {
         .where(and(...disturbedConditions));
       const disturbed = new Set(disturbedRows.map((d) => d.articleId));
 
+      const { locationLabelNumber, ...header } = session;
       return {
-        ...session,
+        ...header,
+        // Skanning (#4): the place's label code, printed as the räknelista's
+        // barcode and shown on the count card.
+        locationLabelCode: formatLocationLabelCode(locationLabelNumber),
         rowCount: rows.length,
         countedCount: rows.filter((r) => r.countedQuantity !== null).length,
         rows: rows.map((r) => ({ ...r, disturbed: disturbed.has(r.articleId) })),

@@ -11,6 +11,7 @@ import { getListPageSize } from "../../../lib/listPageSize";
 import { STOCK_COUNT_STATUS_LABELS, type Paged, type StockCountSession } from "../../../lib/types";
 import shellStyles from "../../../components/AppShell.module.css";
 import { HelpLink } from "../../../components/ui/HelpLink";
+import { StockCountScanPanel } from "../../../components/stock/StockCountScanPanel";
 
 const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
 
@@ -48,6 +49,8 @@ export default async function StockCountListPage(props: { searchParams: Promise<
           <HelpLink chapter="lager" anchor="inventering" label="Hjälp om inventering" />
         </div>
       </div>
+
+      <StockCountScanPanel />
 
       <ListToolbar placeholder="Sök INV-nummer eller lagerplats…">
         <ListFilterSelect

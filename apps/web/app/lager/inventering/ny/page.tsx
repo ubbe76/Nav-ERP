@@ -6,7 +6,10 @@ import type { StockLocation } from "../../../../lib/types";
 import shellStyles from "../../../../components/AppShell.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
 
-export default async function NewStockCountPage() {
+// ?location=<id> preselects the place — a scanned lagerplats label without
+// an open count lands here (StockCountScanPanel).
+export default async function NewStockCountPage(props: { searchParams: Promise<{ location?: string }> }) {
+  const { location } = await props.searchParams;
   const cookieHeader = (await headers()).get("cookie") ?? undefined;
   const user = await getCurrentUser(cookieHeader);
 
@@ -29,7 +32,7 @@ export default async function NewStockCountPage() {
         <HelpLink chapter="lager" anchor="inventering" label="Hjälp om inventering" />
       </div>
 
-      <NewStockCountForm locations={locations} />
+      <NewStockCountForm locations={locations} initialLocationId={locations.some((l) => l.id === location) ? location : undefined} />
     </AppShell>
   );
 }
