@@ -220,11 +220,27 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         }),
       })
         .then((evaluation) => {
-          if (seq !== editRequestSeq.current || evaluation.price.unitPrice === null) return;
+          if (seq !== editRequestSeq.current) return;
+          // Said now rather than at Spara, where the server refuses the same
+          // quantity change: choices the template no longer accepts, or a
+          // template that resolves them to another configuration than the
+          // row shows (a förval added since — its price would include it).
+          if (!evaluation.valid) {
+            setRowError(`Konfigurationen är inte längre giltig: ${evaluation.errors.join("; ") || "okänt fel"} — använd Ändra konfiguration.`);
+            return;
+          }
+          if (evaluation.key !== editedRow.configuration?.key) {
+            setRowError(apiErrorMessage({ code: "row-configuration-outdated" }, ""));
+            return;
+          }
+          setRowError(null);
+          if (evaluation.price.unitPrice === null) return;
           setEditPrice(String(toUnitPrice(evaluation.price.unitPrice, factor)));
           setEditDiscountPercent(String(evaluation.price.discountPercent));
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (seq === editRequestSeq.current) setRowError(apiErrorMessage(err, "Konfigurationen kunde inte prissättas för det nya antalet"));
+        });
       return;
     }
     apiFetch<PriceQuote>(
@@ -360,7 +376,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       setEditingRowId(null);
       router.refresh();
     } catch (err) {
-      setRowError(err instanceof Error ? err.message : "Kunde inte spara raden");
+      setRowError(apiErrorMessage(err, "Kunde inte spara raden"));
     } finally {
       setRowPending(false);
     }

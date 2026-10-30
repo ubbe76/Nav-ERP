@@ -94,6 +94,7 @@ import type { RowConfigurationEvaluation } from "../../configurator/service/conf
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import {
   ConfigurationNotAllowedError,
+  RowConfigurationOutdatedError,
   ConfigurationRequiredError,
   CustomerPriceNotFoundError,
   CustomerArticleNumberNotFoundError,
@@ -1315,6 +1316,14 @@ export function createSalesService(
           ...chainCurrency(orderPricing(order)),
         });
         if (!evaluated.valid || !evaluated.configuration) throw new ConfiguratorInvalidConfigurationError(evaluated.errors);
+        // The stored choices resolve to another configuration than the row
+        // shows (a förval added to the template since): its price and cost
+        // would include choices the row doesn't list.
+        if (evaluated.configuration.key !== stored.key) {
+          throw new RowConfigurationOutdatedError(
+            (await articleFiles.getArticle(existing.articleId))?.articleNumber ?? existing.articleId
+          );
+        }
         configurationCostPatch = evaluated.cost;
       }
       if (input.unitPrice === undefined && quantity !== undefined) {

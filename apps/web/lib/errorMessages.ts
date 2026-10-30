@@ -510,6 +510,8 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Leveranstiden kan bara kontrolleras för en offert, en bekräftad order eller en order under tillverkning."
   ),
   "row-configuration-locked": serverMessage("Konfigurationen kan inte ändras — raden har gått vidare."),
+  "row-configuration-outdated":
+    "Mallen har ändrats sedan raden konfigurerades — öppna Ändra konfiguration och spara valen innan antalet ändras.",
   "row-configuration-changed":
     "Raden konfigurerades om medan tillverkningsordern skapades — kontrollera raden och försök igen, eller använd Ändra konfiguration.",
   "row-variant-exists": serverMessage("Varianten ligger redan som rad på ordern."),

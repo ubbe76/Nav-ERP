@@ -57,6 +57,7 @@ import {
 import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
+  RowConfigurationOutdatedError,
   CustomerPriceNotFoundError,
   CustomerArticleNumberNotFoundError,
   DuplicateCustomerArticleNumberError,
@@ -483,6 +484,9 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // / was removed since the row was created (Avvikelse 3).
       if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
       if (err instanceof ConfiguratorNotToOrderModeError) return reply.code(409).send(errorBody(err));
+      // The stored choices resolve to another configuration (a förval added
+      // to the template since): Ändra konfiguration, not a silent reprice.
+      if (err instanceof RowConfigurationOutdatedError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfiguratorTemplateNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
     }

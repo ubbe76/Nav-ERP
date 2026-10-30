@@ -232,6 +232,7 @@ import {
   PriceListInUseError,
   RowConfigurationLockedError,
   RowConfigurationChangedError,
+  RowConfigurationOutdatedError,
   RowVariantExistsError,
 } from "../src/modules/sales/service/sales.errors.js";
 import { ShipmentDeliveryUndoneError, ShipmentOnDraftInvoiceError } from "../src/modules/shipping/service/shipping.errors.js";
@@ -742,6 +743,7 @@ const cases: Array<[Error, string]> = [
   [new SalesOrderNotOpenError("cancelled"), ERROR_CODES.SALES_ORDER_NOT_OPEN],
   [new RowConfigurationLockedError("x"), ERROR_CODES.ROW_CONFIGURATION_LOCKED],
   [new RowConfigurationChangedError(), ERROR_CODES.ROW_CONFIGURATION_CHANGED],
+  [new RowConfigurationOutdatedError("x"), ERROR_CODES.ROW_CONFIGURATION_OUTDATED],
   [new RowVariantExistsError("63000-B"), ERROR_CODES.ROW_VARIANT_EXISTS],
   [new WorkCenterNotFoundError("x"), ERROR_CODES.WORK_CENTER_NOT_FOUND],
   [new MoReportNotFoundError("x"), ERROR_CODES.MO_REPORT_NOT_FOUND],
