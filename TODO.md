@@ -123,7 +123,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låg
 
-- [ ] **Inköpsorder:** streckkoden med ordernumret på PDF:en ska kunna stängas av med en inställning under System → Inställningar → [#23](https://github.com/ubbe76/Nav-ERP/issues/23)
 - [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — ingår i [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Momsrapporten:** visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
 - [ ] **Faktura:** icke-admin ser ingen bokföringsindikation på fakturakorten (verifikatnumret som ren text vore lika säkert som den admin-spärrade länken); fakturalistans sökning matchar kundens nuvarande namn men visar ögonblicksbilden; `?orderId=` utan rest droppas tyst när flera ordrar faktureras; Lägg till rad saknar enhetsväljare (antalet är basenheten).

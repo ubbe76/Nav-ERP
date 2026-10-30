@@ -2699,6 +2699,8 @@ export interface SystemSettings {
   // Print the order's own revision after the document number
   // ("Inköpsorder IO2500123 / 2") on offert/orderbekräftelse/inköpsorder.
   showOrderRevisionOnDocuments: boolean;
+  // Streckkod på inköpsorder: the order number as a barcode on the PO PDF.
+  purchaseOrderBarcode: boolean;
   // Company-wide ATF accrual in minutes per completed work week (0 = off);
   // individual employees can override it on the personalkort.
   atfMinutesPerWeek: number;

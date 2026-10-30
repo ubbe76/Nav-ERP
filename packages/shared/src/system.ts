@@ -69,6 +69,10 @@ const systemSettingsFieldsSchema = z.object({
     // ("Inköpsorder IO2500123 / 2") on offert/orderbekräftelse/inköpsorder.
     // Defaults ON when the key was never set.
     showOrderRevisionOnDocuments: z.boolean().optional(),
+    // Streckkod på inköpsorder: the order number as a Code 128 beside the
+    // title on the purchase order PDF, scanned in Inleverans (#4, #23).
+    // Defaults ON when the key was never set.
+    purchaseOrderBarcode: z.boolean().optional(),
     // The documents that print the article's Extra benämning under the name
     // (the whole list; [] = none).
     extraDescriptionDocuments: z.array(extraDescriptionDocumentSchema).max(EXTRA_DESCRIPTION_DOCUMENTS.length).optional(),

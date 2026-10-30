@@ -112,7 +112,19 @@ describe("Streckkoden på inköpsordern och plocklistan", () => {
     expect(pdfText(res.rawPayload)).toContain(order.orderNumber);
     // The bars of one Code 128 symbol: a layout without codes draws only a
     // handful of rectangles.
-    expect(pdfRectCount(res.rawPayload)).toBeGreaterThan(30);
+    const withCode = pdfRectCount(res.rawPayload);
+    expect(withCode).toBeGreaterThan(30);
+
+    // Streckkod på inköpsorder (#23): off, the same PDF has no bars.
+    expect((await call("GET", "/settings")).json().purchaseOrderBarcode).toBe(true);
+    try {
+      const off = await call("PATCH", "/settings", { purchaseOrderBarcode: false });
+      expect(off.json().purchaseOrderBarcode).toBe(false);
+      const without = pdfRectCount((await call("GET", `/purchase-orders/${order.id}/pdf`)).rawPayload);
+      expect(withCode - without).toBeGreaterThan(30);
+    } finally {
+      await db.execute(sql`DELETE FROM system_settings WHERE key = 'purchase_order_barcode'`);
+    }
   });
 
   it("puts the order number as a barcode on the plocklista too", async () => {
