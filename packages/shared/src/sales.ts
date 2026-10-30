@@ -510,8 +510,14 @@ export type UpdateInvoiceHeaderInput = z.infer<typeof updateInvoiceHeaderSchema>
 
 // Credit note: created as a draft prefilled from the source invoice; rows
 // may be overridden at create (partial credit) or edited afterwards.
+// A credit row may name the source invoice's row it mirrors — needed for a
+// free row (a räntefaktura's, no order row to match on): the credit copies
+// its momskod, leveransdatum, objekt and intäktskonto.
+export const creditInvoiceRowInputSchema = invoiceRowInputSchema.extend({
+  sourceRowId: z.string().uuid().optional(),
+});
 export const createCreditInvoiceSchema = z.object({
-  rows: z.array(invoiceRowInputSchema).optional(),
+  rows: z.array(creditInvoiceRowInputSchema).optional(),
   // Avvikelser: the deviation this document is created for (Skapa
   // kreditfaktura/ersättningsorder/inköpsorder/tillverkningsorder) — linked in
   // deviation_links in the document's own create transaction; needs Kvalitet.

@@ -548,6 +548,38 @@ describe("Skapa räntefakturor", () => {
     expect((await db.select().from(invoiceRows).where(eq(invoiceRows.invoiceId, draft.id)))[0]!.revenueAccount).toBe("8313");
   });
 
+  it("a credit of a räntefaktura nets the same accounts, also with rows given explicitly", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const invoice = await makeInvoice(customer.id, user.id, 36500);
+    const run = await lateInterestService.createInvoices(
+      { asOf: AS_OF, issue: true, items: [{ invoiceId: invoice.id, fromDate: `${Y}-09-02`, includeInterest: true, includeFee: false, fee: 0 }] },
+      user.id
+    );
+    const interest = (await invoiceService.getInvoice(run.created[0]!.invoiceId))!;
+    const source = interest.rows[0]!;
+    expect(source.revenueAccount).toBe("8313");
+
+    // The prefill copies it…
+    const prefilled = await invoiceService.createCredit(interest.id, {}, user.id);
+    expect(prefilled.rows.map((r) => r.revenueAccount)).toEqual(["8313"]);
+    await invoiceService.cancel(prefilled.id, user.id);
+
+    // …and so does a row given explicitly, naming its source row (a free
+    // row has no order row to match on).
+    const partial = await invoiceService.createCredit(
+      interest.id,
+      { rows: [{ sourceRowId: source.id, description: "Ränta, delkredit", quantity: 1, unitPrice: 100 }] },
+      user.id
+    );
+    expect(partial.rows.map((r) => r.revenueAccount)).toEqual(["8313"]);
+
+    // A source row that is not on the credited invoice is refused.
+    await expect(
+      invoiceService.createCredit(interest.id, { rows: [{ sourceRowId: crypto.randomUUID(), description: "x", quantity: 1, unitPrice: 1 }] }, user.id)
+    ).rejects.toMatchObject({ name: "InvoiceRowNotFoundError" });
+  });
+
   it("reports an Utfärda direkt failure in Swedish and leaves the räntefaktura as a draft", async () => {
     const user = await makeUser();
     const customer = await makeCustomer();

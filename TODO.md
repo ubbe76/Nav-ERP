@@ -21,7 +21,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Allvarliga — fel belopp, bokföring eller lön
 
 - [ ] **Kundorder:** radredigeringen jämför priset mot radens *ursprungliga* basantal (`editInitialBaseQuantityRef` i `SalesOrderDetail.tsx`): antal 10 → 100 → 10 lämnar 100-stegets pris kvar. Spegla inköpssidans `editPricedBaseQuantityRef` och vänta på enhetsfaktorn innan prisfrågan.
-- [ ] **Kreditfaktura:** `createCredit` med explicita rader kopierar inte `revenueAccount`, så krediteringen kan bokas på ett annat intäktskonto än fakturan (t.ex. räntefakturans 8313).
 - [ ] **Beställningsvara:** radredigeringen skickar alltid à-pris, så serverns 400 för ogiltig sparad konfiguration nås aldrig — evaluate-fel sväljs (`.catch`) och det gamla priset sparas. Visa felet.
 - [ ] **Beställningsvara:** antalsbytets omvärdering jämför inte ny konfigurationsnyckel mot sparad — ett förval som läggs till i mallen senare ger ett pris med tillägg som inte syns i valen.
 - [ ] **Konfigurerad tillverkning:** behovsberäkningens 60 s-cache kan ge en andra TO på en konfigurerad rad.
