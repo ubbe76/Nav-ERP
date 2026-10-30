@@ -151,6 +151,8 @@ export type CreateStockCountInput = z.infer<typeof createStockCountSchema>;
 
 export const listStockCountsQuerySchema = listQuerySchema.extend({
   status: statusListParam(stockCountStatusSchema.options),
+  // One place's counts — a scanned lagerplats label opens its open count.
+  locationId: z.string().uuid().optional(),
 });
 export type ListStockCountsQuery = z.infer<typeof listStockCountsQuerySchema>;
 

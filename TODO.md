@@ -186,7 +186,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Hög
 
-- [ ] **Skanning i lagret** med streckkod och QR-kod → [#4](https://github.com/ubbe76/Nav-ERP/issues/4) *(hemsidan)*
 - [ ] **E-faktura (Peppol), etapp 2** — mottagning → [#5](https://github.com/ubbe76/Nav-ERP/issues/5); utländska mottagare, valuta och automatisk sändning → [#6](https://github.com/ubbe76/Nav-ERP/issues/6). Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
 - [ ] **Dokument på engelska** → [#7](https://github.com/ubbe76/Nav-ERP/issues/7) *(hemsidan)*
 

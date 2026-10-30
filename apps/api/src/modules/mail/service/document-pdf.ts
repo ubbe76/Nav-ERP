@@ -547,6 +547,9 @@ export interface StockCountSheetPdfInput {
   printedAt: Date;
   warehouseName: string;
   locationName: string;
+  // The place's label code (LP0042), printed as a barcode beside the title
+  // so the counter can scan the place from the list (skanning, #4).
+  locationLabelCode: string;
   blocksTransactions: boolean;
   note: string | null;
   showBalances: boolean;
@@ -684,7 +687,8 @@ const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
 const TABLE_BOTTOM = 780;
 
 // Skanning (#4): the document number as a Code 128 at the right end of a
-// title line drawn at `titleY` (the inköpsorder, the plocklista) —
+// title line drawn at `titleY` (the inköpsorder, the plocklista; the
+// räknelista carries its lagerplats code instead) —
 // right-aligned below the logo, at most 170 pt wide so it never reaches the
 // title text. Nothing is drawn for a number Code 128 cannot hold.
 function drawTitleBarcode(doc: PDFKit.PDFDocument, text: string, titleY: number): void {
@@ -1765,6 +1769,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     let y = 130;
     doc.font("Helvetica-Bold").fontSize(18).text(`Räknelista ${input.documentNumber}`, left, y);
+    drawTitleBarcode(doc, input.locationLabelCode, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
     doc.text(`Utskriven: ${input.printedAt.toISOString().slice(0, 10)}`, left, y);

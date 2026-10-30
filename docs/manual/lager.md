@@ -32,7 +32,7 @@ Det här känns igen:
 
 Koder läses med Code 128, EAN-8, EAN-13, UPC och QR.
 
-Skanningsfältet finns också i [Inleverans](/hjalp/inkop#skanna-i-inleveransen) och [Utleverans](/hjalp/forsaljning#skanna-vid-plock), där en skannad artikel räknas mot orderns rader.
+Skanningsfältet finns också i [Inleverans](/hjalp/inkop#skanna-i-inleveransen) och [Utleverans](/hjalp/forsaljning#skanna-vid-plock), där en skannad artikel räknas mot orderns rader, och i [Inventering](#skanna-vid-inventering), där lagerplatsen öppnar platsens inventering och artikeln tar fram raden att skriva räknat antal på.
 
 ## Etiketter
 
@@ -132,6 +132,17 @@ Skriv ut **räknelistan** med **Skriv ut räknelista** — den är avsiktligt *b
 **Registrera** bokför differenserna: en transaktion av typen Inventeringsjustering per räknad rad där räknat ≠ bokfört, med anteckningen "Inventering INV-…". Rader utan räknat antal **hoppas över** — de justeras inte och tolkas aldrig som noll. Rader där räknat = bokfört bokför inget. Registreringen kan inte ångras (men saldot kan förstås justeras igen). Statusen blir **Registrerad**.
 
 **Avbryt inventering** stänger underlaget utan att boka något och släpper spärren. Statusen blir **Avbruten**.
+
+### Skanna vid inventering
+
+Både listan **Lager → Inventering** och inventeringskortet har ett skanningsfält — handskanner eller knappen **Kamera**, som på [Skanna](#skanna).
+
+- **Lagerplatsens etikett** (LP-koden) på listan öppnar platsens pågående inventering. Finns ingen öppnas **Ny inventering** med platsen förvald, så du väljer spärr och anteckning och klickar **Skapa inventeringsunderlag**. En inaktiv plats har inget saldo att inventera, och rutinen säger det. Räknelistan har platsens LP-kod som streckkod uppe till höger, så platsen kan också skannas från listan.
+- På inventeringskortet bekräftar platsens egen etikett att du står på rätt plats. En annan plats öppnar den platsens inventering — har du skrivit räknade antal som inte sparats frågar rutinen först (**Byt lagerplats**).
+- **Artikeln** — artikelnumret eller **Streckkod (EAN)** — markerar raden och ställer markören i **Räknat** med värdet markerat. Skriv det räknade antalet och tryck **Enter**: raden sparas direkt och markören går tillbaka till skanningsfältet, redo för nästa artikel. Vid inventering räknar varje skanning alltså inte upp antalet, som vid in- och utleverans — antalet på hyllan skrivs in.
+- En artikel som **inte finns på underlaget** läggs till, som med **Lägg till artikel**, och får markören direkt. Rutinen varnar, så en felskanning syns och kan tas bort med **Ta bort**.
+
+Enter i **Räknat** sparar raden även när du skriver utan att skanna. **Spara räknade antal** finns kvar för flera inskrivna rader på en gång.
 
 ## Justering
 

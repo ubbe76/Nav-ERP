@@ -1,7 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Table } from "../ui/Table";
@@ -10,7 +10,12 @@ import { Field, Input } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { StatusPill } from "../ui/StatusPill";
 import { HelpLink } from "../ui/HelpLink";
+import { ScanPanel } from "../ui/ScanInput";
+import { useScanFeedback, useScanQueue } from "../ui/useOrderScan";
+import { locationCountHref, ORDER_KIND_LABEL } from "./StockCountScanPanel";
 import { API_URL, apiFetch } from "../../lib/api";
+import { apiErrorMessage } from "../../lib/errorMessages";
+import { resolveCountScan } from "../../lib/countScan";
 import buttonStyles from "../ui/Button.module.css";
 import shellStyles from "../AppShell.module.css";
 import { FormError } from "../ui/Form";
@@ -18,6 +23,7 @@ import {
   STOCK_COUNT_STATUS_LABELS,
   type Article,
   type StockCountDetail,
+  type ScanMatch,
   type StockCountPostResult,
   type StockCountRow,
 } from "../../lib/types";
@@ -25,6 +31,15 @@ import { formatQuantity } from "../../lib/format";
 
 const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
 
+const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articleNumber} · ${a.name}`;
+
+// Skanning (#4, etapp 4): the scan field takes a lagerplats label (this
+// count's place, or another place whose count opens) or an article — its row
+// is marked and Räknat takes the cursor with the value selected: artikel och
+// antal, typed and saved with Enter, which hands the cursor back to the scan
+// field. An article the sheet lacks is added first, as Lägg till artikel
+// does. No +1 per scan here: a handheld scanner types into the focused field,
+// so counting by scans and typing the count cannot be mixed.
 export function StockCountDetailClient({ session }: { session: StockCountDetail }) {
   const router = useRouter();
   const [counted, setCounted] = useState<Record<string, string>>({});
@@ -34,6 +49,38 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   const [pending, setPending] = useState(false);
 
   const open = session.status === "open";
+  const { feedback, ok, warn } = useScanFeedback();
+  const [markedRowId, setMarkedRowId] = useState<string | null>(null);
+  const scanField = useRef<HTMLInputElement>(null);
+  const countFields = useRef(new Map<string, HTMLInputElement>());
+  // A row added by a scan arrives with the refresh; its field takes the
+  // cursor then.
+  const focusWhenLoaded = useRef<string | null>(null);
+  // The props the queued scan handler reads — it may run after a refresh.
+  const latest = useRef(session);
+  useEffect(() => {
+    latest.current = session;
+  });
+
+  function focusCount(rowId: string) {
+    setMarkedRowId(rowId);
+    const field = countFields.current.get(rowId);
+    if (!field) {
+      focusWhenLoaded.current = rowId;
+      return;
+    }
+    field.focus();
+    field.select();
+  }
+
+  useEffect(() => {
+    const rowId = focusWhenLoaded.current;
+    if (!rowId || !session.rows.some((r) => r.id === rowId)) return;
+    focusWhenLoaded.current = null;
+    focusCount(rowId);
+    // focusCount reads refs only; rerun when the refreshed rows arrive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.rows]);
 
   function serverValue(row: StockCountRow): string {
     return row.countedQuantity === null ? "" : String(Number(row.countedQuantity));
@@ -51,6 +98,8 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
     () => session.rows.filter((row) => counted[row.id] !== undefined && canonCount(counted[row.id]!) !== serverValue(row)),
     [counted, session.rows]
   );
+  const dirtyRowsRef = useRef(0);
+  dirtyRowsRef.current = dirtyRows.length;
 
   async function saveCounts() {
     setError(null);
@@ -83,6 +132,91 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
       setPending(false);
     }
   }
+
+  // Enter in Räknat: saves this one row (the scanned count) and hands the
+  // cursor back to the scan field.
+  async function saveRow(row: StockCountRow) {
+    const value = counted[row.id];
+    scanField.current?.focus();
+    if (value === undefined || canonCount(value) === serverValue(row)) return;
+    try {
+      await apiFetch(`/api/v1/stock-counts/${session.id}/rows/${row.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ countedQuantity: value === "" ? null : Number(value) }),
+      });
+      ok(`${row.articleNumber}: räknat ${value === "" ? "– (ej räknad)" : `${Number(value)} ${row.unit ?? ""}`.trim()} — sparat`);
+      // counted stays until the fresh props land, as in saveCounts.
+      router.refresh();
+    } catch (err) {
+      warn(apiErrorMessage(err, "Kunde inte spara raden"));
+    }
+  }
+
+  const onScan = useScanQueue(async (code: string, matches: ScanMatch[]) => {
+    const current = latest.current;
+    const intent = resolveCountScan(matches, {
+      locationId: current.locationId,
+      open: current.status === "open",
+      rows: current.rows,
+    });
+    switch (intent.kind) {
+      case "thisLocation":
+        ok(`${current.warehouseName} — ${current.locationName} är den här inventeringens plats`);
+        return;
+      case "otherLocation": {
+        const m = intent.match;
+        let href: string | null;
+        try {
+          href = await locationCountHref(m);
+        } catch (err) {
+          warn(apiErrorMessage(err, "Kunde inte hämta inventeringarna"));
+          return;
+        }
+        if (!href) {
+          warn(`${m.warehouseName} — ${m.name} är inaktiv och har inget saldo att inventera`);
+          return;
+        }
+        if (
+          dirtyRowsRef.current > 0 &&
+          !(await confirmDialog(`Gå till ${m.warehouseName} — ${m.name}? Räknade antal som inte sparats försvinner.`, {
+            confirmLabel: "Byt lagerplats",
+          }))
+        ) {
+          return;
+        }
+        router.push(href);
+        return;
+      }
+      case "row":
+        ok(`${articleLabel(intent.match)} — skriv räknat antal och tryck Enter`);
+        focusCount(intent.rowId);
+        return;
+      case "addArticle": {
+        const article = intent.match;
+        try {
+          const row = await apiFetch<{ id: string }>(`/api/v1/stock-counts/${current.id}/rows`, {
+            method: "POST",
+            body: JSON.stringify({ articleId: article.id }),
+          });
+          warn(`${articleLabel(article)} fanns inte på underlaget och lades till — skriv räknat antal`);
+          focusCount(row.id);
+          router.refresh();
+        } catch (err) {
+          warn(apiErrorMessage(err, "Kunde inte lägga till artikeln"));
+        }
+        return;
+      }
+      case "articleNotCounting":
+        warn(`Inventeringen är ${STOCK_COUNT_STATUS_LABELS[current.status].toLowerCase()} — räknade antal kan inte ändras`);
+        return;
+      case "order":
+        warn(`${code} är ${ORDER_KIND_LABEL[intent.match.kind]} — skanna en lagerplats eller en artikel`);
+        return;
+      case "unknown":
+        warn(`Ingen träff för ${code}`);
+        return;
+    }
+  }, warn);
 
   async function post() {
     const skipped = session.rowCount - session.countedCount;
@@ -176,7 +310,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         <div>
           <div className={shellStyles.title}>Inventering {session.countNumber}</div>
           <div className={shellStyles.meta}>
-            {session.warehouseName} — {session.locationName}
+            {session.warehouseName} — {session.locationName} ({session.locationLabelCode})
             {session.blocksTransactions ? " · Lagertransaktioner spärrade" : ""}
             {session.note ? ` · ${session.note}` : ""}
           </div>
@@ -204,6 +338,13 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
         </div>
       </div>
 
+      <ScanPanel
+        inputRef={scanField}
+        placeholder="Skanna lagerplats eller artikel…"
+        onScan={onScan}
+        feedback={feedback}
+      />
+
       <FormError>{error}</FormError>
       {message && <p>{message}</p>}
 
@@ -218,6 +359,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
           { key: "actions", label: "", width: "80px", align: "right" },
         ]}
         rows={session.rows}
+        highlightedRowId={markedRowId}
         emptyText="Inga rader — lagerplatsen har inget bokfört saldo. Lägg till artiklar som hittas fysiskt."
         renderCell={(row, key) => {
           switch (key) {
@@ -237,6 +379,15 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
                   size="sm"
                   value={enteredCount(row)}
                   onChange={(e) => setCounted((c) => ({ ...c, [row.id]: e.target.value }))}
+                  ref={(field) => {
+                    if (field) countFields.current.set(row.id, field);
+                    else countFields.current.delete(row.id);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    void saveRow(row);
+                  }}
                 />
               ) : row.countedQuantity === null ? (
                 "ej räknad"

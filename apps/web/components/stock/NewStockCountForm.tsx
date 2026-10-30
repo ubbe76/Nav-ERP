@@ -9,9 +9,9 @@ import type { StockLocation } from "../../lib/types";
 import { Card } from "../ui/Card";
 import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 
-export function NewStockCountForm({ locations }: { locations: StockLocation[] }) {
+export function NewStockCountForm({ locations, initialLocationId }: { locations: StockLocation[]; initialLocationId?: string }) {
   const router = useRouter();
-  const [locationId, setLocationId] = useState("");
+  const [locationId, setLocationId] = useState(initialLocationId ?? "");
   const [blocksTransactions, setBlocksTransactions] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
