@@ -179,6 +179,19 @@
   .row > .cell:empty {
     display: none;
   }
+
+  /* Stacked, the marked row is one block: the accent edge goes on the row,
+     not as a frame around every stacked cell. */
+  .row[data-highlighted] {
+    background: var(--color-divider);
+    box-shadow: inset 4px 0 0 var(--accent);
+  }
+  .row[data-highlighted] > .cell,
+  .row[data-highlighted] > .cell:first-child,
+  .row[data-highlighted] > .cell:last-child {
+    background: transparent;
+    box-shadow: none;
+  }
 }
 
 /* Stacked rows are blocks again, so the hover tint goes on the row itself. */

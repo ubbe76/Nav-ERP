@@ -944,6 +944,9 @@ export function createPurchaseRepository(db: Db) {
           ...getTableColumns(purchaseOrderRows),
           articleNumber: articles.articleNumber,
           articleName: articles.name,
+          // A tjänst has nothing to scan — Inleverans leaves it out of the
+          // counting (skanning, #4).
+          articleType: articles.type,
           // The unit the row displays in: the entered unit, falling back to
           // the article's base unit.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,

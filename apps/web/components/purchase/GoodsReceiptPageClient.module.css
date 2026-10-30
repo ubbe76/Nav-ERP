@@ -55,29 +55,6 @@
   white-space: nowrap;
 }
 
-/* Skanningsfältet and what the last scan did — kept to a phone's width on
-   desktop so the field reads as one control, not a page-wide bar. */
-.scan {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  max-width: 560px;
-  margin-bottom: 20px;
-}
-
-.feedback {
-  margin: 0;
-  font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--status-running-text);
-  overflow-wrap: anywhere;
-}
-
-.feedback[data-tone="warn"] {
-  color: var(--status-stopped-text);
-}
-
 .controls {
   display: flex;
   gap: 16px;

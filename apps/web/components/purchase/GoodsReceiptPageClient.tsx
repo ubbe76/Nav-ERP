@@ -9,7 +9,8 @@ import { StatusPill } from "../ui/StatusPill";
 import { SectionHeading } from "../ui/SectionHeading";
 import { Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
-import { ScanInput } from "../ui/ScanInput";
+import { ScanPanel } from "../ui/ScanInput";
+import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
 import { apiFetch } from "../../lib/api";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -19,10 +20,11 @@ import {
   countScan,
   enteredQuantity,
   hasCounted,
-  resolveReceiptScan,
-  type ReceiptCountState,
-  type ReceiptScanRow,
-} from "../../lib/goodsReceiptScan";
+  isScannableRow,
+  resolveOrderScan,
+  type OrderCountState,
+  type OrderScanRow,
+} from "../../lib/orderScan";
 import {
   PURCHASE_ORDER_STATUS_PILL,
   type Paged,
@@ -30,7 +32,6 @@ import {
   type PurchaseOrderRow,
   type PurchaseOrderStatus,
   type ScanMatch,
-  type ScanResult,
   type StockLocation,
 } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
@@ -39,9 +40,8 @@ import { FormError } from "../ui/Form";
 import styles from "./GoodsReceiptPageClient.module.css";
 
 const RECEIVABLE: PurchaseOrderStatus[] = ["confirmed", "partially_received"];
-const NO_COUNT: ReceiptCountState = { counting: false, quantities: {} };
+const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
 
-type Feedback = { tone: "ok" | "warn"; text: string };
 type ArticleMatch = Extract<ScanMatch, { kind: "article" }>;
 type LocationOption = Pick<StockLocation, "id" | "name" | "warehouseName">;
 
@@ -55,8 +55,8 @@ const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articl
 // Skanning (#4, etapp 2): the scan field takes an IO number (picks the
 // order), a lagerplats label (picks the location) or an article/EAN, which
 // counts one per scan on the article's row — the first article scan clears
-// the prefilled amounts, so only what was counted is received
-// (lib/goodsReceiptScan.ts holds the rules).
+// the prefilled amounts, so only what was counted is received (the rules are
+// lib/orderScan.ts, shared with Utleverans).
 export function GoodsReceiptPageClient({
   locations,
   selected,
@@ -79,12 +79,13 @@ export function GoodsReceiptPageClient({
     [rows]
   );
   // The open rows as the scan rules see them: remaining in the row's unit.
-  const scanRows = useMemo<ReceiptScanRow[]>(
+  const scanRows = useMemo<OrderScanRow[]>(
     () =>
       openRows.map((r) => ({
         id: r.id,
         articleId: r.articleId,
         remaining: toUnitQuantity(Number(r.quantityOrdered) - Number(r.quantityReceived), r.unitFactor),
+        scannable: isScannableRow(r),
       })),
     [openRows]
   );
@@ -93,19 +94,11 @@ export function GoodsReceiptPageClient({
   // A scanned lagerplats that GET /stock/locations leaves out (inactive — a
   // receipt into it reactivates it), added to the select so it can be shown.
   const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
-  // Mirrored in a ref: scans are handled one after the other off the queue
-  // below, faster than React re-renders, and each must count on top of the
-  // previous one.
-  const [count, setCountState] = useState<ReceiptCountState>(NO_COUNT);
-  const countRef = useRef(count);
-  function setCount(next: ReceiptCountState) {
-    countRef.current = next;
-    setCountState(next);
-  }
+  const { count, countRef, setCount } = useCountState(NO_COUNT);
+  const { feedback, ok, warn, clear: clearFeedback } = useScanFeedback();
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [lastRowId, setLastRowId] = useState<string | null>(null);
   // An article scanned before an order was chosen that is open on several
   // orders: the list narrows to them until one is picked.
@@ -113,8 +106,6 @@ export function GoodsReceiptPageClient({
   // The scan that chose the order: counted once the order's rows have loaded.
   const pendingCount = useRef<{ orderId: string; article: ArticleMatch } | null>(null);
   const scanField = useRef<HTMLInputElement>(null);
-  const scanQueue = useRef<Promise<void>>(Promise.resolve());
-  const lookups = useRef(new Map<string, ScanMatch[]>());
   // The props the queued scan handlers read — a handler may run after a
   // navigation it did not see.
   const latest = useRef({ order, openRows, scanRows, rows });
@@ -139,18 +130,12 @@ export function GoodsReceiptPageClient({
   function selectOrder(next: PurchaseOrder | null) {
     if (!next) return;
     pendingCount.current = null;
-    setFeedback(null);
+    clearFeedback();
     goToOrder(next.id);
   }
 
-  function warn(text: string) {
-    setFeedback({ tone: "warn", text });
-    // A short buzz on phones that have it — the warehouse is loud.
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(200);
-  }
-
   function applyCount(article: ArticleMatch) {
-    const outcome = countScan(latest.current.scanRows, countRef.current, article.id);
+    const outcome = countScan(latest.current.scanRows, countRef.current, article.id, { capped: false });
     if (!outcome.counted) return;
     setCount(outcome.state);
     setLastRowId(outcome.rowId);
@@ -158,7 +143,7 @@ export function GoodsReceiptPageClient({
     const row = latest.current.openRows.find((r) => r.id === outcome.rowId);
     const text = `${articleLabel(article)}: ${outcome.quantity} av ${outcome.remaining} ${row?.unitCode ?? ""}`.trim();
     if (outcome.over) warn(`${text} — mer än restantalet`);
-    else setFeedback({ tone: "ok", text });
+    else ok(text);
   }
 
   // The order's rows arrive with the navigation the scan started.
@@ -171,28 +156,13 @@ export function GoodsReceiptPageClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, scanRows]);
 
-  function onScan(code: string) {
-    // In arrival order, never dropped: three quick scans are three counted.
-    scanQueue.current = scanQueue.current.then(() => handleScan(code)).catch(() => undefined);
-  }
+  const onScan = useScanQueue(handleScan, warn);
 
-  async function handleScan(code: string) {
-    let matches = lookups.current.get(code);
-    if (!matches) {
-      try {
-        matches = (await apiFetch<ScanResult>(`/api/v1/scan?code=${encodeURIComponent(code)}`)).matches;
-        // Articles and locations are what gets scanned over and over; an
-        // order's status may change while the page is open, so it is asked
-        // for again.
-        if (!matches.some((m) => m.kind === "purchaseOrder")) lookups.current.set(code, matches);
-      } catch (err) {
-        warn(apiErrorMessage(err, "Kunde inte slå upp koden"));
-        return;
-      }
-    }
+  async function handleScan(code: string, matches: ScanMatch[]) {
     const { order: current, scanRows: currentRows, rows: allRows } = latest.current;
-    const intent = resolveReceiptScan(
+    const intent = resolveOrderScan(
       matches,
+      "purchaseOrder",
       current ? { openRows: currentRows, articleIds: allRows.map((r) => r.articleId) } : null
     );
     switch (intent.kind) {
@@ -202,10 +172,7 @@ export function GoodsReceiptPageClient({
           setScannedLocation({ id: m.id, name: m.name, warehouseName: m.warehouseName });
         }
         setLocationId(m.id);
-        setFeedback({
-          tone: "ok",
-          text: `Lagerplats: ${m.warehouseName} — ${m.name}${m.active ? "" : " (inaktiv, aktiveras vid inleveransen)"}`,
-        });
+        ok(`Lagerplats: ${m.warehouseName} — ${m.name}${m.active ? "" : " (inaktiv, aktiveras vid inleveransen)"}`);
         return;
       }
       case "count":
@@ -214,7 +181,7 @@ export function GoodsReceiptPageClient({
       case "order": {
         const m = intent.match;
         if (m.id === current?.id) {
-          setFeedback({ tone: "ok", text: `${m.orderNumber} är redan vald` });
+          ok(`${m.orderNumber} är redan vald`);
           return;
         }
         if (!RECEIVABLE.includes(m.status as PurchaseOrderStatus)) {
@@ -225,17 +192,20 @@ export function GoodsReceiptPageClient({
           return;
         }
         pendingCount.current = null;
-        setFeedback({ tone: "ok", text: `${m.orderNumber} — ${m.partyName}` });
+        ok(`${m.orderNumber} — ${m.partyName}`);
         goToOrder(m.id);
         return;
       }
-      case "articleReceived":
+      case "articleManual":
+        warn(`${articleLabel(intent.match)} är en tjänst — skriv antalet för hand`);
+        return;
+      case "articleDone":
         warn(`${articleLabel(intent.match)} är redan mottagen på ${current?.orderNumber}`);
         return;
       case "articleNotOnOrder":
         warn(`${articleLabel(intent.match)} finns inte på ${current?.orderNumber}`);
         return;
-      case "findOrders": {
+      case "articleWithoutOrder": {
         const article = intent.match;
         let found: PurchaseOrder[];
         try {
@@ -258,7 +228,7 @@ export function GoodsReceiptPageClient({
           return;
         }
         setArticleOrders({ article, orders: found });
-        setFeedback({ tone: "ok", text: `${articleLabel(article)} väntas på ${found.length} ordrar — välj en` });
+        ok(`${articleLabel(article)} väntas på ${found.length} ordrar — välj en`);
         return;
       }
       case "wrongKind":
@@ -276,7 +246,7 @@ export function GoodsReceiptPageClient({
   // counts on the chosen order.
   function pickArticleOrder(o: PurchaseOrder) {
     if (articleOrders) pendingCount.current = { orderId: o.id, article: articleOrders.article };
-    setFeedback(null);
+    clearFeedback();
     goToOrder(o.id);
   }
 
@@ -286,7 +256,7 @@ export function GoodsReceiptPageClient({
     }
     setCount(NO_COUNT);
     setLastRowId(null);
-    setFeedback(null);
+    clearFeedback();
   }
 
   async function report() {
@@ -345,7 +315,7 @@ export function GoodsReceiptPageClient({
       );
       setCount(NO_COUNT);
       setLastRowId(null);
-      setFeedback(null);
+      clearFeedback();
     }
     setPending(false);
     router.refresh();
@@ -364,19 +334,12 @@ export function GoodsReceiptPageClient({
         <HelpLink chapter="inkop" anchor="inleverans" label="Hjälp om inleverans" />
       </div>
 
-      <div className={styles.scan}>
-        <ScanInput
-          autoFocus
-          inputRef={scanField}
-          placeholder="Skanna inköpsorder, artikel eller lagerplats…"
-          onScan={onScan}
-        />
-        {feedback && (
-          <p className={styles.feedback} data-tone={feedback.tone} role="status">
-            {feedback.text}
-          </p>
-        )}
-      </div>
+      <ScanPanel
+        inputRef={scanField}
+        placeholder="Skanna inköpsorder, artikel eller lagerplats…"
+        onScan={onScan}
+        feedback={feedback}
+      />
 
       <div className={styles.controls}>
         <Field label="Inköpsorder" htmlFor="receiptOrder">
