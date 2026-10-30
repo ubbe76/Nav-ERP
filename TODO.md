@@ -110,7 +110,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Kundorder:** tillåten överleverans till kund — en procentsats under System → Inställningar och ett val per kund (följ inställningen, tillåt, tillåt inte) — [#24](https://github.com/ubbe76/Nav-ERP/issues/24)
+- [ ] **Kundorder:** tillåten överleverans till kund — en procentsats under System → Inställningar och ett val per kund (följ inställningen, tillåt, tillåt inte) → [#24](https://github.com/ubbe76/Nav-ERP/issues/24)
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
@@ -123,7 +123,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låg
 
-- [ ] **Inköpsorder:** streckkoden med ordernumret på PDF:en ska kunna stängas av med en inställning under System → Inställningar — [#23](https://github.com/ubbe76/Nav-ERP/issues/23)
+- [ ] **Inköpsorder:** streckkoden med ordernumret på PDF:en ska kunna stängas av med en inställning under System → Inställningar → [#23](https://github.com/ubbe76/Nav-ERP/issues/23)
 - [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — ingår i [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Momsrapporten:** visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
 - [ ] **Faktura:** icke-admin ser ingen bokföringsindikation på fakturakorten (verifikatnumret som ren text vore lika säkert som den admin-spärrade länken); fakturalistans sökning matchar kundens nuvarande namn men visar ögonblicksbilden; `?orderId=` utan rest droppas tyst när flera ordrar faktureras; Lägg till rad saknar enhetsväljare (antalet är basenheten).
