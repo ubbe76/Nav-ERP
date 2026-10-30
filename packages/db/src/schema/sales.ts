@@ -32,6 +32,12 @@ import { stockLocations, stockTransactions } from "./stock";
 // setting pallet_card_code holds the default; customers.pallet_card_code
 // overrides it for the customer-facing card (null = follow the system).
 export const palletCardCodeEnum = pgEnum("pallet_card_code", ["none", "barcode", "qr"]);
+
+// Överleverans till kund (#24): the customer's own choice, null = the system
+// setting sales_over_delivery_percent. "allow" uses
+// customers.over_delivery_percent (null there = no limit); "deny" = never
+// more than ordered.
+export const customerOverDeliveryEnum = pgEnum("customer_over_delivery", ["allow", "deny"]);
 import type { StoredRates } from "./shipping";
 import { freightProducts, shipments } from "./shipping";
 
@@ -127,6 +133,9 @@ export const customers = pgTable("customers", {
   // Kod på pallkort — the customer's own choice for the final (TILL KUND)
   // card; null = the system setting pallet_card_code (migration 0129).
   palletCardCode: palletCardCodeEnum("pallet_card_code"),
+  // Överleverans (#24, migration 0172): null = Systemets förval.
+  overDelivery: customerOverDeliveryEnum("over_delivery"),
+  overDeliveryPercent: numeric("over_delivery_percent", { precision: 7, scale: 2 }),
   // Webbsida — free text, may lack a scheme ("www.example.se").
   // Fasta leveransdagar (delivery-days.ts): ISO weekdays 1–7, sorted, no
   // duplicates (normalized by zod); empty = no fixed days. Mode and transit
@@ -159,6 +168,11 @@ export const customers = pgTable("customers", {
   check("customers_transit_days", sql`${table.transitDays} between 0 and 60`),
   check("customers_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
   check("customers_late_interest_rate", sql`${table.lateInterestRate} IS NULL OR ${table.lateInterestRate} >= 0`),
+  // A percentage only with Tillåt — Tillåt inte and Systemets förval have none.
+  check(
+    "customers_over_delivery_percent",
+    sql`${table.overDeliveryPercent} IS NULL OR (${table.overDelivery} = 'allow' AND ${table.overDeliveryPercent} >= 0)`
+  ),
 ]);
 
 // Multiple delivery addresses per customer; at most one is the default,

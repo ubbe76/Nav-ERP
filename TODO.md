@@ -110,7 +110,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Kundorder:** tillåten överleverans till kund — en procentsats under System → Inställningar och ett val per kund (följ inställningen, tillåt, tillåt inte) → [#24](https://github.com/ubbe76/Nav-ERP/issues/24)
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*

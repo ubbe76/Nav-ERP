@@ -139,7 +139,9 @@ export type DeliverBatchResult =
       rows: (typeof salesOrderRows.$inferSelect)[];
     }
   | { ok: false; reason: "order_not_found" | "invalid_status" }
-  | { ok: false; reason: "row_not_found" | "over_delivery"; rowId: string };
+  | { ok: false; reason: "row_not_found"; rowId: string }
+  // maxQuantity: the most the row may hold delivered, in the base unit.
+  | { ok: false; reason: "over_delivery"; rowId: string; maxQuantity: number };
 
 // Ångra utleverans — one delivery row reversed (see undoDeliveryRow below).
 // Every refusal is decided before anything is written, so returning it from
@@ -176,7 +178,10 @@ class BatchRowNotFoundError extends Error {
   }
 }
 class BatchOverDeliveryError extends Error {
-  constructor(public rowId: string) {
+  constructor(
+    public rowId: string,
+    public maxQuantity: number
+  ) {
     super();
   }
 }
@@ -335,6 +340,24 @@ async function rowConfigurationGuards(
   return { ok: true, row: found.row, orderStatus: found.orderStatus };
 }
 
+// Överleverans on a customer PATCH: the percentage belongs to Tillåt only
+// (CHECK customers_over_delivery_percent). Another choice clears it; a
+// percentage sent alone is kept only if the stored choice is Tillåt.
+function overDeliveryUpdate(
+  overDelivery: "allow" | "deny" | null | undefined,
+  overDeliveryPercent: number | null | undefined
+) {
+  const percent = overDeliveryPercent == null ? null : String(overDeliveryPercent);
+  if (overDelivery !== undefined) {
+    if (overDelivery !== "allow") return { overDelivery, overDeliveryPercent: null };
+    return overDeliveryPercent === undefined ? { overDelivery } : { overDelivery, overDeliveryPercent: percent };
+  }
+  if (overDeliveryPercent === undefined) return {};
+  return {
+    overDeliveryPercent: sql<string | null>`case when ${customers.overDelivery} = 'allow' then ${percent}::numeric end`,
+  };
+}
+
 export function createSalesRepository(db: Db) {
   return {
     // The customer number comes from the "customer" number series unless the
@@ -353,11 +376,15 @@ export function createSalesRepository(db: Db) {
       // guard updateCustomer already applies below.
       // Dröjsmålsränta: lateInterestRate is numeric(5,2) — the same
       // string/omit treatment as discountPercent (null clears).
-      const { discountPercent, lateInterestRate, ...rest } = input;
+      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, ...rest } = input;
       const values = {
         ...rest,
         ...(discountPercent === undefined ? {} : { discountPercent: String(discountPercent) }),
         ...(lateInterestRate === undefined ? {} : { lateInterestRate: lateInterestRate === null ? null : String(lateInterestRate) }),
+        // Överleverans: the percentage belongs to Tillåt only (CHECK
+        // customers_over_delivery_percent).
+        overDelivery: overDelivery ?? null,
+        overDeliveryPercent: overDelivery === "allow" && overDeliveryPercent != null ? String(overDeliveryPercent) : null,
       };
       // Tillägg: customer.created commits with the customer.
       const insert = (customerNumber: string) =>
@@ -375,11 +402,12 @@ export function createSalesRepository(db: Db) {
     },
 
     async updateCustomer(id: string, input: UpdateCustomerInput) {
-      const { discountPercent, lateInterestRate, ...rest } = input;
+      const { discountPercent, lateInterestRate, overDelivery, overDeliveryPercent, ...rest } = input;
       const set = {
         ...rest,
         ...(discountPercent === undefined ? {} : { discountPercent: String(discountPercent) }),
         ...(lateInterestRate === undefined ? {} : { lateInterestRate: lateInterestRate === null ? null : String(lateInterestRate) }),
+        ...overDeliveryUpdate(overDelivery, overDeliveryPercent),
       };
       return db.transaction(async (tx) => {
         const [row] = await tx.update(customers).set(set).where(eq(customers.id, id)).returning();
@@ -1152,7 +1180,14 @@ export function createSalesRepository(db: Db) {
           .where(and(eq(salesOrderRows.id, rowId), eq(salesOrderRows.salesOrderId, orderId)))
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
-        if (patch.quantity !== undefined && patch.quantity < Number(row.quantityDelivered)) {
+        // An over-delivered row (#24) holds more delivered than ordered: an
+        // edit that resends the same quantity (the card always sends it) is
+        // no reduction and must not be refused.
+        if (
+          patch.quantity !== undefined &&
+          patch.quantity !== Number(row.quantityOrdered) &&
+          patch.quantity < Number(row.quantityDelivered)
+        ) {
           return { ok: false, reason: "quantity_below_delivered" };
         }
 
@@ -1350,10 +1385,22 @@ export function createSalesRepository(db: Db) {
     // delivered row, then recomputes the order status once at the end. Any
     // row failing aborts the whole transaction — no delivery, no
     // delivery_rows, no stock_transactions, no quantity_delivered changes.
+    //
+    // overDeliveryPercent: Tillåten överleverans for the order's customer
+    // (effectiveOverDeliveryPercent, read by the service before the
+    // transaction — a settings change racing a delivery may go either way,
+    // as for purchase receipts). null = no limit; omitted = 0, never more
+    // than ordered.
     async deliverBatch(
       orderId: string,
-      input: { locationId?: string; rows: { rowId: string; quantity: number }[]; createdBy: string }
+      input: {
+        locationId?: string;
+        rows: { rowId: string; quantity: number }[];
+        createdBy: string;
+        overDeliveryPercent?: number | null;
+      }
     ): Promise<DeliverBatchResult> {
+      const overDeliveryPercent = input.overDeliveryPercent === undefined ? 0 : input.overDeliveryPercent;
       try {
         return await db.transaction(async (tx) => {
           const [order] = await tx.select().from(salesOrders).where(eq(salesOrders.id, orderId));
@@ -1375,8 +1422,9 @@ export function createSalesRepository(db: Db) {
             if (!row) throw new BatchRowNotFoundError(r.rowId);
 
             const newDelivered = Number(row.quantityDelivered) + r.quantity;
-            if (newDelivered > Number(row.quantityOrdered)) {
-              throw new BatchOverDeliveryError(r.rowId);
+            if (overDeliveryPercent !== null) {
+              const maxQuantity = round4(Number(row.quantityOrdered) * (1 + overDeliveryPercent / 100));
+              if (newDelivered > maxQuantity + 0.00005) throw new BatchOverDeliveryError(r.rowId, maxQuantity);
             }
 
             const [updatedRow] = await tx
@@ -1448,7 +1496,9 @@ export function createSalesRepository(db: Db) {
         if (err instanceof BatchOrderNotFoundError) return { ok: false, reason: "order_not_found" };
         if (err instanceof BatchInvalidStatusError) return { ok: false, reason: "invalid_status" };
         if (err instanceof BatchRowNotFoundError) return { ok: false, reason: "row_not_found", rowId: err.rowId };
-        if (err instanceof BatchOverDeliveryError) return { ok: false, reason: "over_delivery", rowId: err.rowId };
+        if (err instanceof BatchOverDeliveryError) {
+          return { ok: false, reason: "over_delivery", rowId: err.rowId, maxQuantity: err.maxQuantity };
+        }
         throw err;
       }
     },

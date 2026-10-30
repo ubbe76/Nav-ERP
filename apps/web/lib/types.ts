@@ -1207,6 +1207,10 @@ export interface Customer extends PartnerCardFields {
   showConfigurationPrices: boolean;
   // Kod på pallkort — null = följ systeminställningen.
   palletCardCode: PalletCardCode | null;
+  // Överleverans (#24): null = Systemets förval; the percentage only with
+  // "allow" (null there = no limit). numeric(7,2) arrives as a string.
+  overDelivery: "allow" | "deny" | null;
+  overDeliveryPercent: string | null;
   website: string | null;
   // E-faktura (Peppol): hur kunden vill ha sina fakturor, och kundens
   // Peppol-id ("0007:5560000000"; null = härleds ur organisationsnumret).
@@ -1340,6 +1344,9 @@ export interface SalesOrder extends DocumentTermsFields {
   customerId: string;
   customerName: string;
   status: SalesOrderStatus;
+  // GET /sales-orders/:id only: Tillåten överleverans for the order's
+  // customer (#24) — null = no limit, 0 = never more than ordered.
+  overDeliveryPercent?: number | null;
   // Valuta: the order's currency and its rate (SEK per 1 unit, a numeric
   // string with six decimals; "1" for SEK). Snapshotted at creation from the
   // customer and today's rate; prices on the order are in `currency`.
@@ -2765,6 +2772,8 @@ export interface SystemSettings {
   // quantity. null = no limit, 0 (the default) = never past the ordered
   // quantity.
   purchaseOverReceiptPercent: number | null;
+  // Tillåten överleverans på kundorder (#24): null = no limit, 0 = never.
+  salesOverDeliveryPercent: number | null;
   // Automatkontering (B2): standardkonton, always a 4-digit account number —
   // never null/empty on GET (posting-settings.ts's codeSetting falls back to
   // the BAS default when unset). PATCH accepts "" to reset a field back to

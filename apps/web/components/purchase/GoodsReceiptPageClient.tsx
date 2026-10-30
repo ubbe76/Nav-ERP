@@ -86,6 +86,8 @@ export function GoodsReceiptPageClient({
         articleId: r.articleId,
         remaining: toUnitQuantity(Number(r.quantityOrdered) - Number(r.quantityReceived), r.unitFactor),
         scannable: isScannableRow(r),
+        // The over-receipt tolerance is the server's to apply.
+        max: null,
       })),
     [openRows]
   );
@@ -135,7 +137,7 @@ export function GoodsReceiptPageClient({
   }
 
   function applyCount(article: ArticleMatch) {
-    const outcome = countScan(latest.current.scanRows, countRef.current, article.id, { capped: false });
+    const outcome = countScan(latest.current.scanRows, countRef.current, article.id);
     if (!outcome.counted) return;
     setCount(outcome.state);
     setLastRowId(outcome.rowId);

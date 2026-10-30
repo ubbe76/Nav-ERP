@@ -36,6 +36,8 @@ export function SettingsForm({
   const [atfSaved, setAtfSaved] = useState(false);
   // "" = ingen gräns (null on the API).
   const [overReceiptPercent, setOverReceiptPercent] = useState(formatPercent(settings.purchaseOverReceiptPercent));
+  const [overDeliveryPercent, setOverDeliveryPercent] = useState(formatPercent(settings.salesOverDeliveryPercent));
+  const [overDeliverySaved, setOverDeliverySaved] = useState(false);
   const [overReceiptSaved, setOverReceiptSaved] = useState(false);
   const [materialShortage, setMaterialShortage] = useState(settings.manufacturingMaterialShortage);
   const [palletMismatch, setPalletMismatch] = useState(settings.palletCardAllowQuantityMismatch);
@@ -136,6 +138,22 @@ export function SettingsForm({
     if (updated) {
       setOverReceiptPercent(formatPercent(updated.purchaseOverReceiptPercent));
       setOverReceiptSaved(true);
+    }
+  }
+
+  // Same rules as saveOverReceipt, for the sales side (#24).
+  async function saveOverDelivery(badInput: boolean) {
+    setOverDeliverySaved(false);
+    const trimmed = overDeliveryPercent.trim().replace(",", ".");
+    const percent = trimmed === "" ? null : Number(trimmed);
+    if (badInput || (percent !== null && (!Number.isFinite(percent) || percent < 0 || percent > 1000))) {
+      setError("Tillåten överleverans måste vara 0–1000 % eller tomt för ingen gräns");
+      return;
+    }
+    const updated = await save({ salesOverDeliveryPercent: percent });
+    if (updated) {
+      setOverDeliveryPercent(formatPercent(updated.salesOverDeliveryPercent));
+      setOverDeliverySaved(true);
     }
   }
 
@@ -399,6 +417,36 @@ export function SettingsForm({
             onBlur={(e) => saveOverReceipt(e.currentTarget.validity.badInput)}
           />
           {overReceiptSaved && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Tillåten överleverans på kundorder (%)</div>
+          <div className={styles.description}>
+            Hur mycket mer än beställt antal som får levereras på en kundorderrad, i procent av radens beställda
+            antal. 0 = aldrig mer än beställt. Tomt fält = ingen gräns. Gäller kunder med Systemets förval — kundkortet
+            kan tillåta eller spärra överleverans för en enskild kund.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="0"
+            max={1000}
+            step="any"
+            placeholder="Ingen gräns"
+            aria-label="Tillåten överleverans på kundorder (%)"
+            className={styles.numberInput}
+            style={{ width: 120 }}
+            value={overDeliveryPercent}
+            disabled={pending}
+            onChange={(e) => {
+              setOverDeliverySaved(false);
+              setOverDeliveryPercent(e.target.value);
+            }}
+            onBlur={(e) => saveOverDelivery(e.currentTarget.validity.badInput)}
+          />
+          {overDeliverySaved && <span className={styles.saved}>Sparat</span>}
         </div>
       </div>
       <div className={styles.row}>

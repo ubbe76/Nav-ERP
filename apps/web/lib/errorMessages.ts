@@ -323,7 +323,16 @@ const MESSAGES: Record<string, MessageEntry> = {
   "fixed-asset-plan-year-not-found": "Räkenskapsåret hittades inte",
   // sales / purchase
   "sales-order-row-not-found": "Orderraden hittades inte — den kan ha tagits bort.",
-  "over-delivery": "Levererat antal skulle överskrida beställt antal på raden.",
+  // A delivery carries the order's Tillåten överleverans it broke (#24,
+  // allowedPercent > 0 ⇒ name it); a row edit below the delivered quantity
+  // and a delivery at 0 % read the plain sentence.
+  "over-delivery": (err) => {
+    const body = err.body as { allowedPercent?: unknown } | undefined;
+    const percent = typeof body?.allowedPercent === "number" ? body.allowedPercent : 0;
+    return percent > 0
+      ? `Levererat antal skulle överskrida beställt antal med mer än tillåten överleverans (${percent.toLocaleString("sv-SE")} %) på raden.`
+      : "Levererat antal skulle överskrida beställt antal på raden.";
+  },
   "row-has-receipts": "Raden har redan inleveranser och kan inte tas bort.",
   // A goods receipt carries the system setting Tillåten överleverans it broke
   // (allowedPercent > 0 ⇒ name it); a row edit below the received quantity

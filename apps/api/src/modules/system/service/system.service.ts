@@ -138,6 +138,9 @@ const COSTING_MATERIAL_MARKUP_PERCENT_KEY = "costing_material_markup_percent";
 // absent ⇒ 0 % (receipts stop at the ordered quantity, exactly as before the
 // setting existed), "" ⇒ null = no limit, otherwise the percent.
 const PURCHASE_OVER_RECEIPT_PERCENT_KEY = "purchase_over_receipt_percent";
+// Tillåten överleverans på kundorder (#24) — same encoding: unset = 0,
+// "" = no limit.
+const SALES_OVER_DELIVERY_PERCENT_KEY = "sales_over_delivery_percent";
 function decodeOverReceiptPercent(raw: string | null): number | null {
   if (raw === null) return 0;
   if (raw === "") return null;
@@ -340,6 +343,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       costingGeneralMarkupPercent: percentSetting(get(COSTING_GENERAL_MARKUP_PERCENT_KEY)),
       costingMaterialMarkupPercent: percentSetting(get(COSTING_MATERIAL_MARKUP_PERCENT_KEY)),
       purchaseOverReceiptPercent: decodeOverReceiptPercent(get(PURCHASE_OVER_RECEIPT_PERCENT_KEY)),
+      salesOverDeliveryPercent: decodeOverReceiptPercent(get(SALES_OVER_DELIVERY_PERCENT_KEY)),
       manufacturingMaterialShortage: decodeMaterialShortage(get(MANUFACTURING_MATERIAL_SHORTAGE_KEY)),
       palletCardCode: decodePalletCardCode(get(PALLET_CARD_CODE_KEY)),
       // Missing ⇒ allowed: the dialog warns, printing is not blocked.
@@ -678,6 +682,12 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
         await set(
           PURCHASE_OVER_RECEIPT_PERCENT_KEY,
           input.purchaseOverReceiptPercent === null ? "" : String(input.purchaseOverReceiptPercent)
+        );
+      }
+      if (input.salesOverDeliveryPercent !== undefined) {
+        await set(
+          SALES_OVER_DELIVERY_PERCENT_KEY,
+          input.salesOverDeliveryPercent === null ? "" : String(input.salesOverDeliveryPercent)
         );
       }
       if (input.manufacturingMaterialShortage !== undefined) {

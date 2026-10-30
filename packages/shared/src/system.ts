@@ -132,6 +132,10 @@ const systemSettingsFieldsSchema = z.object({
     // quantity. null = no limit; 0 = never past the ordered quantity (the
     // behaviour before the setting existed, and the default when unset).
     purchaseOverReceiptPercent: z.number().min(0).max(1000).nullable().optional(),
+    // Tillåten överleverans på kundorder (#24): the same for a sales order
+    // row's delivery — the default for every customer whose card says
+    // Systemets förval. null = no limit; 0 (unset) = never more than ordered.
+    salesOverDeliveryPercent: z.number().min(0).max(1000).nullable().optional(),
     // Materialbrist vid rapportering: what a manufacturing report that draws
     // more component material than is in stock runs into — nothing ("none",
     // the behaviour before the setting existed and the default when unset),

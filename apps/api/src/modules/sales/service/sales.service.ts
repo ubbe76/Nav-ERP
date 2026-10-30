@@ -45,6 +45,7 @@ import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/
 import {
   customerVatNumberWarning,
   customerVatTreatment,
+  effectiveOverDeliveryPercent,
   type SalesVatCustomer,
   roundUpToMultiple,
   salesRowIsGoods,
@@ -210,6 +211,9 @@ export interface SalesSettingsReader extends DocumentSettingsReader {
       quoteValidityDays: number;
       // Ställkostnadsartikel — optional so settings fakes need not carry it.
       setupChargeArticleId?: string | null;
+      // Tillåten överleverans på kundorder (#24) — optional for the same
+      // reason; absent = 0, never more than ordered.
+      salesOverDeliveryPercent?: number | null;
     }
   >;
 }
@@ -265,9 +269,18 @@ export class InvalidStatusTransitionError extends Error {
   }
 }
 
+// limit: a delivery past the order's Tillåten överleverans (#24) — the
+// percentage for the order's customer and the most the row may hold
+// delivered, in the base unit; the route puts both on the error body so the
+// web can name the percentage. Without it: a row edit below the delivered
+// quantity.
 export class OverDeliveryError extends Error {
-  constructor() {
-    super("Delivered quantity would exceed the ordered quantity for this row");
+  constructor(readonly limit?: { allowedPercent: number; maxQuantity: number }) {
+    super(
+      limit && limit.allowedPercent > 0
+        ? `Delivered quantity would exceed the ordered quantity plus the allowed ${limit.allowedPercent} % over-delivery for this row`
+        : "Delivered quantity would exceed the ordered quantity for this row"
+    );
     this.name = "OverDeliveryError";
   }
 }
@@ -871,6 +884,27 @@ export function createSalesService(
     return { ...customer, vatTreatment: customerVatTreatment(customer), vatNumberWarning: customerVatNumberWarning(customer) };
   }
 
+  // Tillåten överleverans (#24) for a customer: the card's own choice, else
+  // the system setting. Read outside the delivery's transaction, like the
+  // purchase side's tolerance. null = no limit.
+  async function overDeliveryPercentFor(customerId: string): Promise<number | null> {
+    const [customer, { salesOverDeliveryPercent }] = await Promise.all([
+      repo.findCustomerById(customerId),
+      settings.getSettings(),
+    ]);
+    return effectiveOverDeliveryPercent(
+      { overDelivery: customer?.overDelivery ?? null, overDeliveryPercent: customer?.overDeliveryPercent ?? null },
+      // null is "no limit" — only a reader without the setting means 0.
+      salesOverDeliveryPercent === undefined ? 0 : salesOverDeliveryPercent
+    );
+  }
+
+  // An unknown order is left to the delivery's own transaction to report.
+  async function overDeliveryPercentForOrder(orderId: string): Promise<number | null> {
+    const order = await repo.findSalesOrderById(orderId);
+    return order ? overDeliveryPercentFor(order.customerId) : 0;
+  }
+
   return {
     async createCustomer(input: CreateCustomerInput) {
       await validateRegisterRefs(input);
@@ -1136,8 +1170,12 @@ export function createSalesService(
       return { ...result, order: confirmed ?? result.order };
     },
 
+    // overDeliveryPercent: Tillåten överleverans for the order's customer
+    // (#24) — Utleverans counts picked goods up to it.
     async getSalesOrder(id: string) {
-      return repo.findSalesOrderById(id);
+      const order = await repo.findSalesOrderById(id);
+      if (!order) return order;
+      return { ...order, overDeliveryPercent: await overDeliveryPercentFor(order.customerId) };
     },
 
     async listSalesOrders(query: ListSalesOrdersQuery) {
@@ -1809,10 +1847,12 @@ export function createSalesService(
     // deliveryNumber), while keeping the original row/orderStatus response
     // shape callers already depend on.
     async deliverGoods(orderId: string, rowId: string, input: DeliverGoodsInput, createdBy: string) {
+      const overDeliveryPercent = await overDeliveryPercentForOrder(orderId);
       const result = await repo.deliverBatch(orderId, {
         locationId: input.locationId,
         rows: [{ rowId, quantity: input.quantity }],
         createdBy,
+        overDeliveryPercent,
       });
       if (result.ok) {
         await logDelivery(orderId, result.deliveryNumber, [{ rowId, quantity: input.quantity }], createdBy);
@@ -1832,14 +1872,15 @@ export function createSalesService(
         case "invalid_status":
           throw new InvalidStatusTransitionError("Goods can only be delivered once the order is in production");
         case "over_delivery":
-          throw new OverDeliveryError();
+          throw new OverDeliveryError({ allowedPercent: overDeliveryPercent ?? 0, maxQuantity: result.maxQuantity });
       }
     },
 
     // Leveranstillfälle (delivery occasion) — C2: delivers several rows in
     // one go, creating a single delivery record for them.
     async deliverBatch(orderId: string, input: DeliverBatchInput, createdBy: string) {
-      const result = await repo.deliverBatch(orderId, { ...input, createdBy });
+      const overDeliveryPercent = await overDeliveryPercentForOrder(orderId);
+      const result = await repo.deliverBatch(orderId, { ...input, createdBy, overDeliveryPercent });
       if (result.ok) {
         await logDelivery(orderId, result.deliveryNumber, input.rows, createdBy);
         return { deliveryId: result.deliveryId, deliveryNumber: result.deliveryNumber, orderStatus: result.orderStatus };
@@ -1853,7 +1894,7 @@ export function createSalesService(
         case "row_not_found":
           throw new SalesOrderRowNotFoundError(result.rowId);
         case "over_delivery":
-          throw new OverDeliveryError();
+          throw new OverDeliveryError({ allowedPercent: overDeliveryPercent ?? 0, maxQuantity: result.maxQuantity });
       }
     },
 
