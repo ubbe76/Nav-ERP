@@ -698,7 +698,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof SalesOrderRowNotFoundError) return reply.code(404).send(errorBody(err));
         if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
-        if (err instanceof OverDeliveryError) return reply.code(409).send(errorBody(err));
+        if (err instanceof OverDeliveryError) return reply.code(409).send({ ...errorBody(err), ...err.limit });
         if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
         throw err;
       }
@@ -716,7 +716,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof SalesOrderNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof SalesOrderRowNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
-      if (err instanceof OverDeliveryError) return reply.code(409).send(errorBody(err));
+      if (err instanceof OverDeliveryError) return reply.code(409).send({ ...errorBody(err), ...err.limit });
       if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
       throw err;
     }

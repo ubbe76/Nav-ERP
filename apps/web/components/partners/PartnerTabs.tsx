@@ -236,6 +236,15 @@ function AllmantTab({
   const [palletCardCode, setPalletCardCode] = useState<string>(
     isCustomer ? ((partner as Customer).palletCardCode ?? "") : ""
   );
+  // Överleverans (#24): "" = Systemets förval; the percentage only with Tillåt.
+  const [overDelivery, setOverDelivery] = useState<string>(
+    isCustomer ? ((partner as Customer).overDelivery ?? "") : ""
+  );
+  const [overDeliveryPercent, setOverDeliveryPercent] = useState(
+    isCustomer && (partner as Customer).overDeliveryPercent !== null
+      ? String(Number((partner as Customer).overDeliveryPercent))
+      : ""
+  );
   const [address, setAddress] = useState(partner.address ?? "");
   const [postalCode, setPostalCode] = useState(partner.postalCode ?? "");
   const [city, setCity] = useState(partner.city ?? "");
@@ -263,6 +272,15 @@ function AllmantTab({
           ...(isCustomer ? { website: orNull(website) } : {}),
           ...(isCustomer ? { showConfigurationPrices } : {}),
           ...(isCustomer ? { palletCardCode: palletCardCode === "" ? null : palletCardCode } : {}),
+          ...(isCustomer
+            ? {
+                overDelivery: overDelivery === "" ? null : overDelivery,
+                overDeliveryPercent:
+                  overDelivery === "allow" && overDeliveryPercent.trim() !== ""
+                    ? Number(overDeliveryPercent.replace(",", "."))
+                    : null,
+              }
+            : {}),
           address: orNull(address),
           postalCode: orNull(postalCode),
           city: orNull(city),
@@ -415,6 +433,31 @@ function AllmantTab({
             <FormHint attached>
               Om kundens pallkort får en streckkod eller QR-kod för artikelnumret och vårt ordernummer. Systemets
               förval är inställningen under System.
+            </FormHint>
+            <Field label="Överleverans" htmlFor="overDelivery">
+              <Select id="overDelivery" value={overDelivery} onChange={(e) => setOverDelivery(e.target.value)}>
+                <option value="">Systemets förval</option>
+                <option value="allow">Tillåt</option>
+                <option value="deny">Tillåt inte</option>
+              </Select>
+            </Field>
+            {overDelivery === "allow" && (
+              <Field label="Tillåten överleverans (%)" htmlFor="overDeliveryPercent">
+                <Input
+                  id="overDeliveryPercent"
+                  type="number"
+                  min="0"
+                  step="any"
+                  size="xs"
+                  placeholder="Ingen gräns"
+                  value={overDeliveryPercent}
+                  onChange={(e) => setOverDeliveryPercent(e.target.value)}
+                />
+              </Field>
+            )}
+            <FormHint attached>
+              Om en kundorderrad får levereras med mer än beställt antal. Systemets förval är inställningen Tillåten
+              överleverans på kundorder under System; Tillåt med tomt fält betyder ingen gräns.
             </FormHint>
           </>
         )}

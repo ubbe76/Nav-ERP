@@ -1205,6 +1205,13 @@
       "when": 1793297324768,
       "tag": "0171_skanning_ean_etikettkod",
       "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1793350432377,
+      "tag": "0172_overleverans_kund",
+      "breakpoints": true
     }
   ]
 }

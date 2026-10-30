@@ -18,12 +18,16 @@ type OrderKind = "purchaseOrder" | "salesOrder";
 // A row the routine can book against: an open row of the chosen order, its
 // remaining amount in the row's own unit (what the field shows). A row that
 // is not `scannable` — a tjänst or a ställkostnad, nothing to pick up — is
-// left out of the counting and keeps its remaining amount.
+// left out of the counting and keeps its remaining amount. `max` is the most
+// this booking may hold, in the row's unit: Utleverans' remaining amount plus
+// the customer's Tillåten överleverans (#24); null = no cap here, the server
+// decides (Inleverans, or a customer without limit).
 export interface OrderScanRow {
   id: string;
   articleId: string;
   remaining: number;
   scannable: boolean;
+  max: number | null;
 }
 
 // Only tjänster have nothing to scan; a ställkostnadsrad follows the order
@@ -109,34 +113,29 @@ export function leftToCount(row: OrderScanRow, state: OrderCountState): number |
 
 export type CountOutcome =
   | { counted: false; full?: undefined }
-  // `capped` and every row of the article already holds its remaining
-  // amount: nothing was added (överplock).
+  // Every row of the article already holds its `max`: nothing was added
+  // (överplock).
   | { counted: false; full: true; rowId: string; quantity: number; remaining: number }
   | { counted: true; state: OrderCountState; rowId: string; quantity: number; remaining: number; over: boolean };
 
 // One article scan adds 1 (in the row's unit) to the article's row. With the
 // same article on several open rows, the first row still short of its
-// remaining amount takes it. When all are full: `capped` (Utleverans — the
-// server never delivers more than ordered) refuses the scan; otherwise the
-// first row takes it, flagged `over` — whether that much may be received is
-// the server's over-receipt tolerance (Inleverans).
-export function countScan(
-  rows: OrderScanRow[],
-  state: OrderCountState,
-  articleId: string,
-  options: { capped: boolean }
-): CountOutcome {
+// remaining amount takes it; when all are full, the first row with room
+// under its `max` takes it, flagged `over` (past the remaining amount). No
+// row with room: the scan is refused (överplock). A fractional step fills up
+// to `max` (2.5 tillåtet, 2 räknade ⇒ 2.5).
+export function countScan(rows: OrderScanRow[], state: OrderCountState, articleId: string): CountOutcome {
   const candidates = rows.filter((r) => r.articleId === articleId && r.scannable);
   if (candidates.length === 0) return { counted: false };
   const current = (row: OrderScanRow) => Number(state.quantities[row.id] ?? 0) || 0;
-  const open = candidates.find((r) => current(r) < r.remaining);
-  if (!open && options.capped) {
-    const row = candidates[0]!;
-    return { counted: false, full: true, rowId: row.id, quantity: current(row), remaining: row.remaining };
+  const row =
+    candidates.find((r) => current(r) < r.remaining && (r.max === null || current(r) < r.max)) ??
+    candidates.find((r) => r.max === null || current(r) < r.max);
+  if (!row) {
+    const first = candidates[0]!;
+    return { counted: false, full: true, rowId: first.id, quantity: current(first), remaining: first.remaining };
   }
-  const row = open ?? candidates[0]!;
-  // Capped, a fractional remainder (2.5 kvar, 2 räknade) fills up to it.
-  const next = options.capped ? Math.min(current(row) + 1, row.remaining) : current(row) + 1;
+  const next = row.max === null ? current(row) + 1 : Math.min(current(row) + 1, row.max);
   const quantity = Math.round(next * 10000) / 10000;
   return {
     counted: true,

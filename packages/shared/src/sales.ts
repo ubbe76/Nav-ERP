@@ -90,6 +90,27 @@ export const countryCodeSchema = z
 // with two decimals (numeric(5,2)); blank clears it in the forms.
 export const lateInterestRateSchema = blankSafe(z.coerce.number().min(0).max(100));
 
+// Tillåten överleverans till kund (#24). The system setting
+// salesOverDeliveryPercent is the default; a customer can follow it (null),
+// allow its own percentage ("allow" + overDeliveryPercent, null = no limit)
+// or deny it ("deny" = never more than ordered).
+export const customerOverDeliverySchema = z.enum(["allow", "deny"]);
+export type CustomerOverDelivery = z.infer<typeof customerOverDeliverySchema>;
+export const overDeliveryPercentSchema = blankSafe(z.coerce.number().min(0).max(1000));
+
+// The percentage past the ordered quantity a row may be delivered for this
+// customer: null = no limit, 0 = never more than ordered.
+export function effectiveOverDeliveryPercent(
+  customer: { overDelivery: CustomerOverDelivery | null; overDeliveryPercent: number | string | null },
+  systemPercent: number | null
+): number | null {
+  if (customer.overDelivery === "deny") return 0;
+  if (customer.overDelivery === "allow") {
+    return customer.overDeliveryPercent === null ? null : Number(customer.overDeliveryPercent);
+  }
+  return systemPercent;
+}
+
 export const createCustomerSchema = z.object({
   name: z.string().min(1).max(255),
   // Kundnummer — omitted = allocated from the "customer" number series.
@@ -135,6 +156,10 @@ export const createCustomerSchema = z.object({
   // Kod på pallkort — the customer's own code type on the customer-facing
   // pallet card; null/omitted = the system setting pallet_card_code.
   palletCardCode: palletCardCodeSchema.nullable().optional(),
+  // Överleverans (#24): null/omitted = Systemets förval; the percentage only
+  // with "allow" (null there = no limit).
+  overDelivery: customerOverDeliverySchema.nullable().optional(),
+  overDeliveryPercent: overDeliveryPercentSchema.nullable().optional(),
   website: z.string().max(255).optional(),
   defaultFreightProductId: z.string().uuid().optional(),
   // E-faktura (Peppol): Fakturaleverans and the customer's Peppol-id
@@ -190,6 +215,8 @@ export const updateCustomerSchema = z
     reverseChargeConstruction: z.boolean().optional(),
     showConfigurationPrices: z.boolean().optional(),
     palletCardCode: palletCardCodeSchema.nullable().optional(),
+    overDelivery: customerOverDeliverySchema.nullable().optional(),
+    overDeliveryPercent: overDeliveryPercentSchema.nullable().optional(),
     website: z.string().max(255).nullable().optional(),
     defaultFreightProductId: z.string().uuid().nullable().optional(),
     invoiceDelivery: invoiceDeliverySchema.optional(),

@@ -15,12 +15,15 @@ import {
 // Skanning mot en order (#4): what a scan means in Inleverans (etapp 2) and
 // Utleverans (etapp 3), and how an article scan counts.
 
+// No cap on the client (Inleverans: the server's tolerance decides).
 const rows: OrderScanRow[] = [
-  { id: "r1", articleId: "screw", remaining: 2, scannable: true },
-  { id: "r2", articleId: "nut", remaining: 10, scannable: true },
-  { id: "r3", articleId: "screw", remaining: 3, scannable: true },
-  { id: "r4", articleId: "setup", remaining: 1, scannable: false },
+  { id: "r1", articleId: "screw", remaining: 2, scannable: true, max: null },
+  { id: "r2", articleId: "nut", remaining: 10, scannable: true, max: null },
+  { id: "r3", articleId: "screw", remaining: 3, scannable: true, max: null },
+  { id: "r4", articleId: "setup", remaining: 1, scannable: false, max: null },
 ];
+// Capped at the remaining amount (Utleverans, no överleverans allowed).
+const capped = rows.map((r) => ({ ...r, max: r.remaining }));
 const fresh: OrderCountState = { counting: false, quantities: {} };
 const order = { openRows: rows, articleIds: ["screw", "nut", "setup", "washer"] };
 
@@ -70,7 +73,7 @@ describe("isScannableRow", () => {
 describe("countScan", () => {
   it("prefills the remaining amount until the first scan, then counts from zero — except rows it does not count", () => {
     expect(rows.map((r) => enteredQuantity(r, fresh))).toEqual(["2", "10", "3", "1"]);
-    const first = countScan(rows, fresh, "nut", { capped: false });
+    const first = countScan(rows, fresh, "nut");
     if (!first.counted) throw new Error("not counted");
     expect(first.rowId).toBe("r2");
     expect(rows.map((r) => enteredQuantity(r, first.state))).toEqual(["0", "1", "0", "1"]);
@@ -80,16 +83,16 @@ describe("countScan", () => {
   });
 
   it("keeps a typed quantity when counting starts", () => {
-    const next = countScan(rows, { counting: false, quantities: { r2: "4" } }, "screw", { capped: false });
+    const next = countScan(rows, { counting: false, quantities: { r2: "4" } }, "screw");
     if (!next.counted) throw new Error("not counted");
     expect(rows.map((r) => enteredQuantity(r, next.state))).toEqual(["1", "4", "0", "1"]);
   });
 
-  it("fills the article's rows in order; uncapped flags what goes over", () => {
+  it("fills the article's rows in order; without a cap it flags what goes over", () => {
     let state = fresh;
     const hits: string[] = [];
     for (let i = 0; i < 6; i++) {
-      const next = countScan(rows, state, "screw", { capped: false });
+      const next = countScan(rows, state, "screw");
       if (!next.counted) throw new Error("not counted");
       hits.push(`${next.rowId}:${next.quantity}${next.over ? "!" : ""}`);
       state = next.state;
@@ -99,7 +102,7 @@ describe("countScan", () => {
 
   it("capped refuses an överplock and fills a fractional remainder", () => {
     const full: OrderCountState = { counting: true, quantities: { r1: "2", r3: "3" } };
-    expect(countScan(rows, full, "screw", { capped: true })).toEqual({
+    expect(countScan(capped, full, "screw")).toEqual({
       counted: false,
       full: true,
       rowId: "r1",
@@ -107,13 +110,21 @@ describe("countScan", () => {
       remaining: 2,
     });
     expect(rows.map((r) => leftToCount(r, full))).toEqual([0, 10, 0, null]);
-    const fraction: OrderScanRow[] = [{ id: "k", articleId: "plate", remaining: 2.5, scannable: true }];
-    const next = countScan(fraction, { counting: true, quantities: { k: "2" } }, "plate", { capped: true });
+    const fraction: OrderScanRow[] = [{ id: "k", articleId: "plate", remaining: 2.5, scannable: true, max: 2.5 }];
+    const next = countScan(fraction, { counting: true, quantities: { k: "2" } }, "plate");
     expect(next.counted && [next.quantity, next.over]).toEqual([2.5, false]);
   });
 
+  it("counts past the remaining amount up to the allowed överleverans, then refuses", () => {
+    // 10 kvar, 10 % tillåtet ⇒ max 11.
+    const allowed: OrderScanRow[] = [{ id: "k", articleId: "plate", remaining: 10, scannable: true, max: 11 }];
+    const over = countScan(allowed, { counting: true, quantities: { k: "10" } }, "plate");
+    expect(over.counted && [over.quantity, over.over]).toEqual([11, true]);
+    expect(countScan(allowed, { counting: true, quantities: { k: "11" } }, "plate")).toMatchObject({ counted: false, full: true });
+  });
+
   it("does not count an article without a scannable row", () => {
-    expect(countScan(rows, fresh, "bolt", { capped: false })).toEqual({ counted: false });
-    expect(countScan(rows, fresh, "setup", { capped: true })).toEqual({ counted: false });
+    expect(countScan(rows, fresh, "bolt")).toEqual({ counted: false });
+    expect(countScan(capped, fresh, "setup")).toEqual({ counted: false });
   });
 });

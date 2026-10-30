@@ -60,8 +60,8 @@ const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articl
 // order), a lagerplats label (picks where the goods are taken from) or an
 // article/EAN, which counts one picked per scan on the article's row — the
 // first article scan clears the prefilled amounts, so only what was picked is
-// delivered, and a scan beyond the remaining amount is refused (the server
-// never delivers more than ordered). Tjänster and ställkostnadsrader keep
+// delivered, and a scan beyond the customer's Tillåten överleverans (#24; by
+// default none) is refused, as the server refuses it. Tjänster and ställkostnadsrader keep
 // their remaining amount. The rules are lib/orderScan.ts, shared with
 // Inleverans.
 export function DeliveryPageClient({
@@ -86,7 +86,11 @@ export function DeliveryPageClient({
     () => rows.filter((r) => Number(r.quantityDelivered) < Number(r.quantityOrdered)),
     [rows]
   );
-  // The open rows as the scan rules see them: remaining in the row's unit.
+  // Tillåten överleverans for the order's customer (#24): null = no limit.
+  const overDeliveryPercent = order?.overDeliveryPercent === undefined ? 0 : order.overDeliveryPercent;
+  // The open rows as the scan rules see them: remaining in the row's unit,
+  // and the most this delivery may take — the remaining amount plus the
+  // allowed överleverans (the server refuses beyond it).
   const scanRows = useMemo<OrderScanRow[]>(
     () =>
       openRows.map((r) => ({
@@ -94,8 +98,15 @@ export function DeliveryPageClient({
         articleId: r.articleId,
         remaining: toUnitQuantity(Number(r.quantityOrdered) - Number(r.quantityDelivered), r.unitFactor),
         scannable: isScannableRow(r),
+        max:
+          overDeliveryPercent === null
+            ? null
+            : toUnitQuantity(
+                Number(r.quantityOrdered) * (1 + overDeliveryPercent / 100) - Number(r.quantityDelivered),
+                r.unitFactor
+              ),
       })),
-    [openRows]
+    [openRows, overDeliveryPercent]
   );
   const scanRowOf = (row: SalesOrderRow) => scanRows.find((r) => r.id === row.id)!;
 
@@ -114,9 +125,9 @@ export function DeliveryPageClient({
   const scanField = useRef<HTMLInputElement>(null);
   // The props the queued scan handlers read — a handler may run after a
   // navigation it did not see.
-  const latest = useRef({ order, openRows, scanRows, rows });
+  const latest = useRef({ order, openRows, scanRows, rows, overDeliveryPercent });
   useEffect(() => {
-    latest.current = { order, openRows, scanRows, rows };
+    latest.current = { order, openRows, scanRows, rows, overDeliveryPercent };
   });
 
   // Frakt: "Boka transport" on the result block only when freight is
@@ -149,18 +160,24 @@ export function DeliveryPageClient({
   }
 
   function applyCount(article: ArticleMatch) {
-    const outcome = countScan(latest.current.scanRows, countRef.current, article.id, { capped: true });
+    const outcome = countScan(latest.current.scanRows, countRef.current, article.id);
     if (!outcome.counted && !outcome.full) return;
     setLastRowId(outcome.rowId);
     const row = latest.current.openRows.find((r) => r.id === outcome.rowId);
     const amount = `${outcome.quantity} av ${outcome.remaining} ${row?.unitCode ?? ""}`.trim();
+    const allowed = latest.current.overDeliveryPercent;
+    const allowance = allowed ? `tillåten överleverans ${allowed.toLocaleString("sv-SE")} %` : null;
     if (!outcome.counted) {
-      warn(`Överplock — ${articleLabel(article)} är redan plockad (${amount})`);
+      warn(`Överplock — ${articleLabel(article)} är redan plockad (${amount}${allowance ? `, ${allowance}` : ""})`);
       return;
     }
     setCount(outcome.state);
     setDone(null);
-    ok(`${articleLabel(article)}: ${amount}`);
+    if (outcome.over) {
+      warn(`${articleLabel(article)}: ${amount} — överleverans${allowance ? ` (${allowance})` : ""}`);
+    } else {
+      ok(`${articleLabel(article)}: ${amount}`);
+    }
   }
 
   const onScan = useScanQueue(handleScan, warn);
