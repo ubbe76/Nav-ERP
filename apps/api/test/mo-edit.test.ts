@@ -136,8 +136,14 @@ async function materialRows(moId: string) {
   return db.select().from(moMaterialConsumptions).where(eq(moMaterialConsumptions.manufacturingOrderId, moId));
 }
 
+// In the order they were written — never the table's physical order, which
+// a reused (DELETE-cleaned) table does not keep.
 async function auditRows(action: string) {
-  return db.select().from(auditLog).where(and(eq(auditLog.entityType, "manufacturing_order"), eq(auditLog.action, action)));
+  return db
+    .select()
+    .from(auditLog)
+    .where(and(eq(auditLog.entityType, "manufacturing_order"), eq(auditLog.action, action)))
+    .orderBy(auditLog.createdAt);
 }
 
 async function stockOf(articleId: string) {

@@ -1219,13 +1219,19 @@ export function createInvoiceService(
       // prefill entirely — undefined means "mirror every row on the source".
       // Momskoder: a credit row mirrors its source row's momskod and
       // leveransdatum (spec 4.2) — the prefill copies them, and an override
-      // row linked to an order row that the source billed takes them from
-      // that source row unless it says otherwise.
+      // row takes them from its source row unless it says otherwise: the one
+      // it names (sourceRowId — a free row has nothing else to match on),
+      // else the one that billed the same order row.
       const sourceRows = await repo.listRows(invoiceId);
       let rowInputs: RowInput[];
       if (input.rows !== undefined) {
-        rowInputs = input.rows.map((r) => {
-          const source = r.salesOrderRowId ? sourceRows.find((row) => row.salesOrderRowId === r.salesOrderRowId) : undefined;
+        rowInputs = input.rows.map(({ sourceRowId, ...r }) => {
+          const source = sourceRowId
+            ? sourceRows.find((row) => row.id === sourceRowId)
+            : r.salesOrderRowId
+              ? sourceRows.find((row) => row.salesOrderRowId === r.salesOrderRowId)
+              : undefined;
+          if (sourceRowId && !source) throw new InvoiceRowNotFoundError(sourceRowId);
           if (!source) return r;
           const explicitCode = r.vatCodeId !== undefined || (r.vatRate !== undefined && r.vatRate !== null);
           return {
@@ -1238,6 +1244,9 @@ export function createInvoiceService(
             ...(r.costCenterId !== undefined ? {} : { costCenterId: source.costCenterId }),
             ...(r.projectId !== undefined ? {} : { projectId: source.projectId }),
             sourceDimensions: { costCenterId: source.costCenterId, projectId: source.projectId },
+            // The credit nets the account the source row was booked on (a
+            // räntefaktura's 8313) — never client input, so always copied.
+            revenueAccount: source.revenueAccount,
           };
         });
       } else {

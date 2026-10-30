@@ -48,6 +48,8 @@ import { explodeBom } from "../../article/service/bom-explosion.js";
 import type { ManufacturingMaterial, ManufacturingOperation } from "../../configurator/service/manufacturing-structure.js";
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
+// The one rule for how much of a configured row still lacks a TO (pure).
+import { uncoveredConfiguredQuantity } from "../../planning/service/configured-coverage.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
@@ -356,7 +358,15 @@ export interface ConfiguredCreateInput {
   lockRow?: {
     rowId: string;
     expectedKey: string;
-    lock: (tx: Tx, rowId: string) => Promise<{ configurationKey: string | null } | null>;
+    lock: (
+      tx: Tx,
+      rowId: string
+    ) => Promise<{ configurationKey: string | null; quantityOrdered: number; quantityDelivered: number } | null>;
+    // Behovsberäkningens Skapa ordrar: never more than the row still lacks,
+    // decided under the row lock — a proposal from a cached list, or two
+    // clicks, must not give the row a second TO. The order card's Skapa TO
+    // leaves it off (a deliberate extra TO is the operator's call).
+    onlyUncovered?: boolean;
   };
 }
 
@@ -367,7 +377,8 @@ export type NewOrderPlanner = (tx: Tx, manufacturingOrderId: string) => Promise<
 
 export type CreateManufacturingOrderOutcome =
   | { ok: true; order: typeof manufacturingOrders.$inferSelect; warnings: string[] }
-  | { ok: false; reason: "configuration_changed" };
+  | { ok: false; reason: "configuration_changed" }
+  | { ok: false; reason: "already_covered"; uncovered: number };
 
 // Finished-goods receipt (inleverans) up to `targetReceived` in total — the
 // one implementation behind both the delinleverans from the last operation
@@ -1310,6 +1321,18 @@ export function createManufacturingRepository(db: Db) {
         const locked = await configured.lockRow.lock(tx, configured.lockRow.rowId);
         if (!locked || locked.configurationKey !== configured.lockRow.expectedKey) {
           return { ok: false, reason: "configuration_changed" };
+        }
+        if (configured.lockRow.onlyUncovered) {
+          const linkedOrders = await tx
+            .select({ status: manufacturingOrders.status, quantity: manufacturingOrders.quantity })
+            .from(manufacturingOrders)
+            .where(and(eq(manufacturingOrders.salesOrderRowId, configured.lockRow.rowId), ne(manufacturingOrders.status, "cancelled")));
+          const uncovered = uncoveredConfiguredQuantity({
+            quantityOrdered: locked.quantityOrdered,
+            quantityDelivered: locked.quantityDelivered,
+            linkedOrders: linkedOrders.map((o) => ({ status: o.status, quantity: Number(o.quantity) })),
+          });
+          if (input.quantity > uncovered + 0.00005) return { ok: false, reason: "already_covered", uncovered };
         }
       }
       const orderNumber = await getNextOrderNumber(tx, "manufacturing_order");

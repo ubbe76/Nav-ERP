@@ -31,6 +31,7 @@ import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, 
 import { formatStockholmDate, formatStockholmDateTime } from "../../lib/date";
 import { configuredDeliveryWarning } from "../../lib/configuredDelivery";
 import { toBaseQuantity, toBasePrice, toUnitPrice, toUnitQuantity } from "../../lib/units";
+import { requoteFor } from "../../lib/rowRequote";
 import { marginLabel, useArticleSelfCost, useConfiguredSelfCost } from "./useArticleMargin";
 import { computeLineMargin, sumMargins } from "../../lib/margin";
 import { formatMoney } from "../../lib/format";
@@ -144,17 +145,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   const editUnitOptions = useUnitOptions(editArticle);
   const editFactor = editUnitOptions.find((o) => o.value === editUnitId)?.factor ?? 1;
   const editRequestSeq = useRef(0);
-  // The BASE quantity (article's base unit) editing started at — editArticle
-  // resolves asynchronously (startEditRow fetches it after opening the row),
-  // so the prefill effect below would otherwise fire once that fetch lands
-  // even though nothing was actually edited yet, silently replacing the
-  // row's already-correct stored price with a freshly re-resolved one.
-  // Storing the BASE quantity (not the displayed unit string) keeps a pure
-  // unit switch — switchEditUnit re-expresses the string in the new unit
-  // without the underlying base quantity changing — from being mistaken for
-  // an actual quantity edit; comparing against this keeps both "open edit,
-  // change nothing, Spara" AND "open edit, switch unit only, Spara" no-ops.
-  const editInitialBaseQuantityRef = useRef(0);
+  // The base quantity the shown price belongs to — the row's own when Ändra
+  // opens, then each quoted quantity (lib/rowRequote.ts: 10 → 100 → 10 comes
+  // back to the 10-tier, a pure unit switch never reprices, and nothing is
+  // asked before the article's units have loaded).
+  const editPricedBaseQuantityRef = useRef(0);
 
   const deliverable = rows.filter((r) => Number(r.quantityDelivered) < Number(r.quantityOrdered));
   // Valuta: the order's prices are in its currency; the rate (SEK per 1 unit,
@@ -198,14 +193,17 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   // request-sequence race guard as AddRowForm/NewQuoteForm below.
   useEffect(() => {
     if (editingRowId === null || editPriceTouched || !editArticle) return;
-    const enteredQuantity = Number(editQuantity);
-    if (!Number.isFinite(enteredQuantity) || enteredQuantity <= 0) return;
-    const baseQuantity = toBaseQuantity(enteredQuantity, editFactor);
-    // Nothing has actually changed since edit mode opened — compare the base
-    // quantity (unit-invariant), not the displayed string, so a pure unit
-    // switch (switchEditUnit re-expresses the same base quantity in a new
-    // unit) never trips this and re-prices the row.
-    if (baseQuantity === editInitialBaseQuantityRef.current) return;
+    const requote = requoteFor({
+      quantity: editQuantity,
+      unitId: editUnitId,
+      unitOptions: editUnitOptions,
+      pricedBaseQuantity: editPricedBaseQuantityRef.current,
+    });
+    if (!requote) return;
+    const { base: baseQuantity, factor } = requote;
+    // Claimed up front so an answer without a price isn't re-asked on every
+    // unrelated rerender; a later quantity change asks again.
+    editPricedBaseQuantityRef.current = baseQuantity;
     const seq = ++editRequestSeq.current;
     const editedRow = rows.find((r) => r.id === editingRowId);
     if (editedRow?.configuration) {
@@ -222,11 +220,27 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         }),
       })
         .then((evaluation) => {
-          if (seq !== editRequestSeq.current || evaluation.price.unitPrice === null) return;
-          setEditPrice(String(toUnitPrice(evaluation.price.unitPrice, editFactor)));
+          if (seq !== editRequestSeq.current) return;
+          // Said now rather than at Spara, where the server refuses the same
+          // quantity change: choices the template no longer accepts, or a
+          // template that resolves them to another configuration than the
+          // row shows (a förval added since — its price would include it).
+          if (!evaluation.valid) {
+            setRowError(`Konfigurationen är inte längre giltig: ${evaluation.errors.join("; ") || "okänt fel"} — använd Ändra konfiguration.`);
+            return;
+          }
+          if (evaluation.key !== editedRow.configuration?.key) {
+            setRowError(apiErrorMessage({ code: "row-configuration-outdated" }, ""));
+            return;
+          }
+          setRowError(null);
+          if (evaluation.price.unitPrice === null) return;
+          setEditPrice(String(toUnitPrice(evaluation.price.unitPrice, factor)));
           setEditDiscountPercent(String(evaluation.price.discountPercent));
         })
-        .catch(() => {});
+        .catch((err) => {
+          if (seq === editRequestSeq.current) setRowError(apiErrorMessage(err, "Konfigurationen kunde inte prissättas för det nya antalet"));
+        });
       return;
     }
     apiFetch<PriceQuote>(
@@ -236,14 +250,14 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       .then((quote) => {
         if (seq !== editRequestSeq.current) return;
         if (!quote.price) return;
-        setEditPrice(String(toUnitPrice(quote.price.unitPrice, editFactor)));
+        setEditPrice(String(toUnitPrice(quote.price.unitPrice, factor)));
         setEditDiscountPercent(String(quote.price.discountPercent));
       })
       .catch(() => {
         // Best-effort prefill — silently leave the fields untouched on error.
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingRowId, editQuantity, editFactor, editPriceTouched, editArticle, order.customerId]);
+  }, [editingRowId, editQuantity, editUnitId, editUnitOptions, editPriceTouched, editArticle, order.customerId]);
 
   const deliveryText = order.deliveryAddress
     ? [
@@ -280,10 +294,9 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     const initialQuantity = String(toUnitQuantity(Number(row.quantityOrdered), row.unitFactor));
     setEditingRowId(row.id);
     setEditQuantity(initialQuantity);
-    // quantityOrdered is already stored in the article's base unit — no
-    // conversion needed here (contrast the prefill effect, which converts
-    // the displayed editQuantity back to base via editFactor).
-    editInitialBaseQuantityRef.current = Number(row.quantityOrdered);
+    // quantityOrdered is already stored in the article's base unit — the
+    // stored price belongs to it.
+    editPricedBaseQuantityRef.current = Number(row.quantityOrdered);
     setEditPrice(String(toUnitPrice(Number(row.unitPrice), row.unitFactor)));
     setEditDiscountPercent(String(Number(row.discountPercent)));
     setEditPriceTouched(false);
@@ -363,7 +376,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       setEditingRowId(null);
       router.refresh();
     } catch (err) {
-      setRowError(err instanceof Error ? err.message : "Kunde inte spara raden");
+      setRowError(apiErrorMessage(err, "Kunde inte spara raden"));
     } finally {
       setRowPending(false);
     }

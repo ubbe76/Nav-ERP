@@ -48,6 +48,11 @@ const timeReportListColumns = {
 export type StampReason = { reasonId: string | null; note: string | null };
 const NO_REASON: StampReason = { reasonId: null, note: null };
 
+// The partial unique indexes behind "one open at a time" (migration 0173):
+// a concurrent second stamp fails on them instead of opening a duplicate.
+export const ONE_OPEN_ATTENDANCE = "attendance_sessions_one_open_per_employee";
+export const ONE_OPEN_STAMP = "stamp_sessions_one_open_per_operation";
+
 export function createTimeReportRepository(db: Db) {
   // Conditional: only a still-open attendance is closed, so two Gå hem at
   // once (double tap, two terminals) close it once — null tells the caller.
@@ -67,6 +72,19 @@ export function createTimeReportRepository(db: Db) {
       .update(stampSessions)
       .set({ pausedAt: at })
       .where(and(eq(stampSessions.employeeId, employeeId), isNull(stampSessions.stoppedAt), isNull(stampSessions.pausedAt)))
+      .returning({ id: stampSessions.id });
+    return rows.length;
+  }
+
+  // Attendance-in resumes paused work: the pause folds into pausedSeconds.
+  async function resumeOpenStampSessions(employeeId: string, at: Date, dbc: Db | Tx = db) {
+    const rows = await dbc
+      .update(stampSessions)
+      .set({
+        pausedSeconds: sql`${stampSessions.pausedSeconds} + extract(epoch from (${at.toISOString()}::timestamptz - ${stampSessions.pausedAt}))`,
+        pausedAt: null,
+      })
+      .where(and(eq(stampSessions.employeeId, employeeId), isNull(stampSessions.stoppedAt), isNotNull(stampSessions.pausedAt)))
       .returning({ id: stampSessions.id });
     return rows.length;
   }
@@ -361,6 +379,23 @@ export function createTimeReportRepository(db: Db) {
       });
     },
 
+    // Kom (and a work stamp that clocks the employee in): resumes the work
+    // the previous Gå hem paused and opens the attendance in ONE
+    // transaction. A concurrent clock-in fails on ONE_OPEN_ATTENDANCE and
+    // rolls the resume back with it.
+    async beginAttendance(employeeId: string, createdBy: string, reason: StampReason, startedAt: Date) {
+      return db.transaction(async (tx) => {
+        await resumeOpenStampSessions(employeeId, startedAt, tx);
+        const [row] = await tx
+          .insert(attendanceSessions)
+          .values({ employeeId, createdBy, startReasonId: reason.reasonId, startNote: reason.note, startedAt })
+          .returning();
+        return row!;
+      });
+    },
+
+    // An attendance row as is — the test fixtures' primitive; the service
+    // clocks in through beginAttendance.
     async createAttendanceSession(employeeId: string, createdBy: string, reason: StampReason = NO_REASON, startedAt?: Date) {
       const [row] = await db
         .insert(attendanceSessions)
@@ -624,13 +659,7 @@ export function createTimeReportRepository(db: Db) {
               lt(stampSessions.startedAt, forgottenStoppedAt)
             )
           );
-        await tx
-          .update(stampSessions)
-          .set({
-            pausedSeconds: sql`${stampSessions.pausedSeconds} + extract(epoch from (${now.toISOString()}::timestamptz - ${stampSessions.pausedAt}))`,
-            pausedAt: null,
-          })
-          .where(and(eq(stampSessions.employeeId, employeeId), isNull(stampSessions.stoppedAt), isNotNull(stampSessions.pausedAt)));
+        await resumeOpenStampSessions(employeeId, now, tx);
         const [session] = await tx
           .insert(attendanceSessions)
           .values({ employeeId, createdBy, startReasonId: reason.reasonId, startNote: reason.note, startedAt: now })
@@ -655,25 +684,6 @@ export function createTimeReportRepository(db: Db) {
     },
 
     pauseOpenStampSessions,
-
-    // Attendance-in resumes paused work: the pause folds into pausedSeconds.
-    async resumeStampSessions(employeeId: string, at: Date) {
-      const rows = await db
-        .update(stampSessions)
-        .set({
-          pausedSeconds: sql`${stampSessions.pausedSeconds} + extract(epoch from (${at.toISOString()}::timestamptz - ${stampSessions.pausedAt}))`,
-          pausedAt: null,
-        })
-        .where(
-          and(
-            eq(stampSessions.employeeId, employeeId),
-            isNull(stampSessions.stoppedAt),
-            isNotNull(stampSessions.pausedAt)
-          )
-        )
-        .returning({ id: stampSessions.id });
-      return rows.length;
-    },
   };
 }
 

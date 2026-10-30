@@ -163,6 +163,17 @@ export class ConfigurationRequiredError extends Error {
 
 // Konfigurator 4b: a configuration on anything that is not a to_order
 // template is a malformed row (400), not a state conflict.
+// 409: a quantity change on a beställningsvara row whose stored choices the
+// template now resolves to another configuration — typically a group added
+// later with a förval, whose price addition the row's choices don't show.
+// The row is not repriced behind the choices' back: Ändra konfiguration.
+export class RowConfigurationOutdatedError extends Error {
+  constructor(public articleNumber: string) {
+    super(`${articleNumber}: mallen har ändrats sedan raden konfigurerades — använd Ändra konfiguration`);
+    this.name = "RowConfigurationOutdatedError";
+  }
+}
+
 export class ConfigurationNotAllowedError extends Error {
   constructor(public articleNumber: string) {
     super(`${articleNumber} är inte en beställningsvara — konfiguration kan inte anges`);

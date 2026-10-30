@@ -95,7 +95,10 @@ export interface SalesOrderLinkReader {
   // Konfigurator 4c: locks the row FOR UPDATE inside the TO's create-tx and
   // returns the key stored at that moment — compared against the key the
   // derivation ran on, so a row reconfigured in between is refused.
-  lockRowForManufacturing(tx: Tx, rowId: string): Promise<{ configurationKey: string | null } | null>;
+  lockRowForManufacturing(
+    tx: Tx,
+    rowId: string
+  ): Promise<{ configurationKey: string | null; quantityOrdered: number; quantityDelivered: number } | null>;
   markInProduction(tx: Tx, salesOrderId: string): Promise<void>;
 }
 
@@ -462,6 +465,20 @@ export class LinkedOrderStatusError extends Error {
 // default quantity (quantityOrdered − coverage) is ≤ 0 — nothing left of the
 // row to put into production. Only applies to the derived default; an
 // explicit quantity bypasses this check.
+// Behovsberäkningens Skapa ordrar on a configured row that already has its
+// TOs (a proposal from a list up to a minute old, or a second click) —
+// Swedish, since planning shows it as is in its result.
+export class ConfiguredRowAlreadyCoveredError extends Error {
+  constructor(readonly uncovered: number) {
+    super(
+      uncovered > 0
+        ? `Raden saknar bara ${uncovered} — uppdatera behovsberäkningen och skapa ordern igen`
+        : "Raden har redan tillverkningsordrar för hela antalet — uppdatera behovsberäkningen"
+    );
+    this.name = "ConfiguredRowAlreadyCoveredError";
+  }
+}
+
 export class NothingLeftToManufactureError extends Error {
   constructor(rowId: string) {
     super(`Nothing left to manufacture for sales order row ${rowId}`);
@@ -729,7 +746,7 @@ export function createManufacturingService(
   // "validate first" shape as every other guard in this file): the linked
   // KO row, the article's rounding/template mode and a beställningsvara's
   // derived structure. Shared by the Tx variant.
-  async function prepareCreate(input: CreateManufacturingOrderInput) {
+  async function prepareCreate(input: CreateManufacturingOrderInput, opts: { onlyUncovered?: boolean } = {}) {
     let articleId = input.articleId;
     let linkedSalesOrderId: string | undefined;
     let linkedRow: Awaited<ReturnType<SalesOrderLinkReader["findRowForManufacturing"]>> = null;
@@ -792,7 +809,14 @@ export function createManufacturingService(
         // never built on other choices than the row's; the user runs Ändra
         // konfiguration.
         ...(rowConfiguration && input.salesOrderRowId
-          ? { lockRow: { rowId: input.salesOrderRowId, expectedKey: structure.key, lock: salesOrders.lockRowForManufacturing } }
+          ? {
+              lockRow: {
+                rowId: input.salesOrderRowId,
+                expectedKey: structure.key,
+                lock: salesOrders.lockRowForManufacturing,
+                onlyUncovered: opts.onlyUncovered,
+              },
+            }
           : {}),
       };
     } else if (linkedRow?.configuration) {
@@ -1335,8 +1359,15 @@ export function createManufacturingService(
     // derived from the row; if both are given they must agree. On success,
     // the repo's create-tx stamps salesOrderRowId and flips the KO to
     // in_production as its last step, atomically with the MO insert.
-    async createManufacturingOrder(input: CreateManufacturingOrderInput, createdBy: string | null) {
-      const prepared = await prepareCreate(input);
+    // onlyUncovered (behovsberäkningens Skapa ordrar): a configured row's TO
+    // is refused when the row no longer lacks that much — see
+    // ConfiguredCreateInput.lockRow.
+    async createManufacturingOrder(
+      input: CreateManufacturingOrderInput,
+      createdBy: string | null,
+      opts: { onlyUncovered?: boolean } = {}
+    ) {
+      const prepared = await prepareCreate(input, opts);
       // Avvikelser (Skapa tillverkningsorder): the case link is written in
       // the TO's create transaction, after the plan — the TO and its link
       // commit together or not at all.
@@ -1356,7 +1387,10 @@ export function createManufacturingService(
         prepared.configured,
         planAndLink
       );
-      if (!result.ok) throw new RowConfigurationChangedError();
+      if (!result.ok) {
+        if (result.reason === "already_covered") throw new ConfiguredRowAlreadyCoveredError(result.uncovered);
+        throw new RowConfigurationChangedError();
+      }
       await audit.log({ entityType: "manufacturing_order", entityId: result.order.orderNumber, action: "released", userId: createdBy });
       // releaseWarnings: the same shortage warnings Släpp returns, plus the
       // plan's (horizon, Sen).
@@ -1385,7 +1419,10 @@ export function createManufacturingService(
         prepared.configured,
         planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks) : undefined
       );
-      if (!result.ok) throw new RowConfigurationChangedError();
+      if (!result.ok) {
+        if (result.reason === "already_covered") throw new ConfiguredRowAlreadyCoveredError(result.uncovered);
+        throw new RowConfigurationChangedError();
+      }
       return { ...result.order, releaseWarnings: result.warnings };
     },
 
@@ -1417,7 +1454,7 @@ export function createManufacturingService(
     // autoflip.
     async createFromSalesOrderRow(
       rowId: string,
-      input: { quantity?: number; dueDate?: string | null },
+      input: { quantity?: number; dueDate?: string | null; onlyUncovered?: boolean },
       createdBy: string | null
     ) {
       let quantity = input.quantity;
@@ -1435,7 +1472,11 @@ export function createManufacturingService(
         quantity = toUnitQuantity(row.quantityOrdered - covered, null);
         if (quantity <= 0) throw new NothingLeftToManufactureError(rowId);
       }
-      return this.createManufacturingOrder({ salesOrderRowId: rowId, quantity, dueDate: input.dueDate }, createdBy);
+      return this.createManufacturingOrder(
+        { salesOrderRowId: rowId, quantity, dueDate: input.dueDate },
+        createdBy,
+        { onlyUncovered: input.onlyUncovered }
+      );
     },
 
     // E3 (KO→TO-koppling, Task 6): the detail card's "Kundorder" field —

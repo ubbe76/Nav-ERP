@@ -20,6 +20,7 @@ import { TEST_WORKERS, workerDatabaseName } from "./test-workers.js";
 export default async function setup() {
   assertTestDatabase();
   await runMigrations();
+  await keepInsertionOrder();
 
   const url = new URL(process.env.DATABASE_URL!);
   const template = url.pathname.slice(1);
@@ -35,3 +36,25 @@ export default async function setup() {
     await server.end();
   }
 }
+
+// The suite empties tables with DELETE (helpers/fast-truncate.ts), so a
+// table keeps its pages between tests. Once autovacuum has recorded their
+// free space, new rows can land in the holes and a query without ORDER BY
+// stops returning them in the order they were written — which a TRUNCATEd,
+// fresh table always did and some tests quietly rely on. Without autovacuum
+// new rows go to the end of the table again. Set on the template, so every
+// worker's clone has it; tables a new migration adds get it on the next run.
+async function keepInsertionOrder() {
+  const client = postgres(process.env.DATABASE_URL!, { max: 1, onnotice: () => {} });
+  try {
+    await client.unsafe(`
+      DO $off$ DECLARE t text; BEGIN
+        FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+          EXECUTE format('ALTER TABLE %I SET (autovacuum_enabled = false)', t);
+        END LOOP;
+      END $off$`);
+  } finally {
+    await client.end();
+  }
+}
+

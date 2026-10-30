@@ -2,7 +2,13 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { customerPrices, customers, db, priceListRows, priceLists, salesOrderRows } from "@navet/db";
 import type { OrderRowConfiguration } from "@navet/shared";
-import { ConfigurationNotAllowedError, ConfigurationRequiredError, PriceNotFoundError, RowVariantExistsError } from "../src/modules/sales/service/sales.errors.js";
+import {
+  ConfigurationNotAllowedError,
+  ConfigurationRequiredError,
+  PriceNotFoundError,
+  RowConfigurationOutdatedError,
+  RowVariantExistsError,
+} from "../src/modules/sales/service/sales.errors.js";
 import { ConfiguratorInvalidConfigurationError, ConfiguratorNotToOrderModeError } from "../src/modules/configurator/service/configurator.errors.js";
 import { makeArticle } from "./helpers/configurator.js";
 import { buildToOrder, configurator, makeCustomer, resetConfiguredRows, salesService } from "./helpers/configured-rows.js";
@@ -128,6 +134,32 @@ describe("configured rows — create", () => {
     const [row] = await rowsOf(order.id);
     expect(cfgOf(row!).price).toMatchObject({ unitPrice: null, source: null });
     await expect(salesService.updateRow(order.id, row!.id, { quantity: 3 } as never)).rejects.toBeInstanceOf(PriceNotFoundError);
+  });
+
+  it("a quantity change is refused when the template has since given the choices a förval the row doesn't show", async () => {
+    const { article } = await buildToOrder();
+    const c = await makeCustomer();
+    const { order } = await salesService.createQuote(
+      { customerId: c.id, rows: [{ articleId: article.id, quantity: 1, configuration: { selection: SEL } }] } as never,
+      null
+    );
+    const [row] = await rowsOf(order.id);
+    expect(Number(row!.unitPrice)).toBe(1050);
+
+    // A group added later, with a förval that costs extra.
+    const montage = await configurator.createGroup(article.id, { code: "MONTAGE", name: "Montage", kind: "choice", required: false });
+    const ja = await configurator.createValue(article.id, montage.id, { code: "JA", name: "Med montage", priceAdd: 300, active: true });
+    await configurator.updateGroup(article.id, montage.id, { defaultValueId: ja.id });
+
+    // Repriced at the new quantity, the row would cost 1350 for choices
+    // that still list only Lås and Bredd.
+    await expect(salesService.updateRow(order.id, row!.id, { quantity: 3 } as never)).rejects.toBeInstanceOf(RowConfigurationOutdatedError);
+    await expect(salesService.updateRow(order.id, row!.id, { quantity: 3, unitPrice: 1050 } as never)).rejects.toBeInstanceOf(
+      RowConfigurationOutdatedError
+    );
+    // The same quantity evaluates nothing: a price edit still works.
+    const kept = await salesService.updateRow(order.id, row!.id, { quantity: 1, unitPrice: 990 } as never);
+    expect(Number(kept.row.unitPrice)).toBe(990);
   });
 
   it("refuses: template without configuration (409), configuration on a plain article (400), invalid configuration (400 with details)", async () => {

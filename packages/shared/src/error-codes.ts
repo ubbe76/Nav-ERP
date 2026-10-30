@@ -442,6 +442,9 @@ export const ERROR_CODES = {
   ROW_CONFIGURATION_LOCKED: "row-configuration-locked",
   // Konfigurator 4c: the row was reconfigured while its TO was being created.
   ROW_CONFIGURATION_CHANGED: "row-configuration-changed",
+  // A quantity change on a beställningsvara row whose stored choices the
+  // template now resolves differently (a förval added since).
+  ROW_CONFIGURATION_OUTDATED: "row-configuration-outdated",
   ROW_VARIANT_EXISTS: "row-variant-exists",
   WORK_CENTER_NOT_FOUND: "work-center-not-found",
   // Ångra rapportering / Makulera order (TO)
