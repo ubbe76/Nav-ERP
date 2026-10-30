@@ -9,9 +9,9 @@ import type { AuthRepository } from "../repository/auth.repository.js";
 // rewrites the email column, only deletedAt/active) and after a self-rename.
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import type { SetupCode } from "./setup-code.js";
+import { BCRYPT_ROUNDS } from "./bcrypt-rounds.js";
 
 const JWT_EXPIRES_IN = "8h";
-const SALT_ROUNDS = 12;
 
 export class DuplicateEmailError extends Error {
   constructor(email: string) {
@@ -212,7 +212,7 @@ export function createAuthService(
       if (await repo.findByEmail(input.email)) {
         throw new DuplicateEmailError(input.email);
       }
-      const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
+      const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
       const created = await repo.create({
         email: input.email,
         passwordHash,
@@ -243,7 +243,7 @@ export function createAuthService(
       }
       const readOnly = input.readOnly ?? false;
       if (readOnly && input.role === "admin") throw new ReadOnlyAdminError();
-      const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
+      const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
       const created = await repo.create({
         email: input.email,
         passwordHash,
@@ -313,7 +313,7 @@ export function createAuthService(
       if (input.active !== undefined) fields.active = input.active;
       if (input.permissionGroupId !== undefined) fields.permissionGroupId = input.permissionGroupId;
       if (input.readOnly !== undefined) fields.readOnly = input.readOnly;
-      if (input.password !== undefined) fields.passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
+      if (input.password !== undefined) fields.passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
 
       if (!(await repo.update(id, fields))) throw new UserNotFoundError(id);
       // update returns the bare row; re-read through the group join.

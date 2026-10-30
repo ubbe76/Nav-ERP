@@ -3,10 +3,10 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { API_CLIENT_SCOPES, type ApiClientScope, type CreateApiClientInput, type UpdateApiClientInput } from "@navet/shared";
 import type { OAuthRepository } from "../repository/oauth.repository.js";
+import { BCRYPT_ROUNDS } from "../../auth/service/bcrypt-rounds.js";
 
 const CLIENT_TOKEN_EXPIRES_IN = "1h";
 const CLIENT_TOKEN_EXPIRES_IN_SECONDS = 60 * 60;
-const SALT_ROUNDS = 12;
 
 export class ApiClientCustomerNotFoundError extends Error {
   constructor(id: string) {
@@ -80,7 +80,7 @@ export function createOAuthService(repo: OAuthRepository, jwtSecret: string) {
       const customer = customerId ? await repo.customerSummary(customerId) : null;
       if (customerId && !customer) throw new ApiClientCustomerNotFoundError(customerId);
       const clientSecret = crypto.randomBytes(32).toString("hex");
-      const clientSecretHash = await bcrypt.hash(clientSecret, SALT_ROUNDS);
+      const clientSecretHash = await bcrypt.hash(clientSecret, BCRYPT_ROUNDS);
       const row = await repo.createApiClient({ name: input.name, clientSecretHash, scopes: input.scopes, customerId }, createdBy);
       return { client: toPublicApiClient(row, customer), clientSecret };
     },
