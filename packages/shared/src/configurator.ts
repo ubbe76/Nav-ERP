@@ -37,6 +37,22 @@ const number4 = z.coerce
   // Exact: an absolute tolerance on v×10⁴ misjudges large numbers.
   .refine((v) => Number(v.toFixed(4)) === v, "Högst 4 decimaler");
 
+/**
+ * Whether a number-group value lies on the step grid counted from min — the
+ * ONE implementation shared by the engine (a chosen value), the group schema
+ * and the service (the default). Exact: values have at most 4 decimals, so
+ * the test is made in integer 1e-4 units.
+ */
+export function isOnNumberStep(value: number, min: number | null, step: number | null): boolean {
+  if (step === null) return true;
+  const s4 = Math.round(step * 1e4);
+  if (s4 <= 0) return true;
+  const q4 = Math.round((value - (min ?? 0)) * 1e4);
+  return ((q4 % s4) + s4) % s4 === 0;
+}
+
+export const NUMBER_DEFAULT_OFF_STEP = "Förvalet ska ligga på ett steg räknat från min";
+
 // Strict throughout: a target shaped for another effect must fail, never be
 // silently stripped into a valid shape (that would invert a rule's meaning).
 export const configuratorConditionSchema = z.union([
@@ -153,6 +169,8 @@ export const createConfiguratorGroupSchema = z
         path: ["defaultNumber"],
         message: "Förvalet ska ligga inom intervallet",
       });
+    else if (g.defaultNumber !== null && !isOnNumberStep(g.defaultNumber, g.minValue, g.step))
+      ctx.addIssue({ code: "custom", path: ["defaultNumber"], message: NUMBER_DEFAULT_OFF_STEP });
   });
 // Update: every field optional, kind never changes. Fields that do not belong
 // to the group's kind are rejected by the service (InvalidConfiguratorGroupError).

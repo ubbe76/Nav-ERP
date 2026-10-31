@@ -16,6 +16,7 @@ const GROUP_SEPARATORS = /[\u00a0\u202f]/g;
 
 /** sv-SE measure: "1 200", "12,5" — thousands separator is the ordinary space (WinAnsi-safe). */
 export function formatMeasure(n: number): string {
+  if (n === 0) n = 0; // −0 would print "-0"
   const decimals = Number.isInteger(n) ? 0 : Math.min(4, (String(Number(n.toFixed(4))).split(".")[1] ?? "").length);
   return formatNumber(n, decimals).replace(GROUP_SEPARATORS, " ");
 }

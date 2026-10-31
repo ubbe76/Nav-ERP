@@ -27,8 +27,10 @@ import { StatusPill, type Status } from "../ui/StatusPill";
 import { SegmentedToggle } from "../ui/SegmentedToggle";
 import {
   filterTerminalOperations,
+  forgottenStopNowAllowed,
   readinessLabel,
   sortTerminalOperations,
+  splitSelection,
   type TerminalSort,
 } from "../../lib/terminalOperations";
 import { plannedWeekLabel } from "../../lib/planning";
@@ -281,6 +283,8 @@ export function StampTerminal({
       if (/^[0-9]$/.test(e.key)) setEntry((v) => (v + e.key).slice(0, 10));
       else if (e.key === "Backspace") setEntry((v) => v.slice(0, -1));
       else if (e.key === "Enter") confirmEntry();
+      else return;
+      setNotice(null); // the previous person's "Hej då" goes away as on the on-screen keys
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -498,7 +502,9 @@ export function StampTerminal({
       }
       await refresh();
       if (failed.length === 0) {
-        setSelectedOperationIds(new Set());
+        // Only what was started: a row hidden by Sök/Bara redo was not.
+        const started = new Set(operations.map((op) => op.operationId));
+        setSelectedOperationIds((prev) => new Set([...prev].filter((id) => !started.has(id))));
         setError(null);
         if (attendanceStarted) setNotice("Närvaron stämplades in.");
         setStep({ name: "home", employee });
@@ -813,6 +819,8 @@ export function StampTerminal({
     step.name === "pickOperations"
       ? sortTerminalOperations(filterTerminalOperations(rows, { onlyReady, search }), sort)
       : [];
+  // Starta valda starts the checked rows the list shows; checked rows hidden by the filter wait.
+  const selection = splitSelection(visibleRows, selectedOperationIds);
 
   return (
     <div className={styles.terminal}>
@@ -952,14 +960,16 @@ export function StampTerminal({
             <button type="button" className={styles.bigAction} disabled={busy} onClick={() => saveForgotten(step.employee)}>
               Spara och stämpla in
             </button>
-            <button
-              type="button"
-              className={styles.attendanceButton}
-              disabled={busy}
-              onClick={() => goHome(step.employee, step.attendanceId)}
-            >
-              Gå hem nu
-            </button>
+            {forgottenStopNowAllowed(step.startedAt, now) && (
+              <button
+                type="button"
+                className={styles.attendanceButton}
+                disabled={busy}
+                onClick={() => goHome(step.employee, step.attendanceId)}
+              >
+                Gå hem nu
+              </button>
+            )}
             <BackRow label="Avbryt" onBack={resetToKeypad} />
           </section>
         )}
@@ -1009,15 +1019,12 @@ export function StampTerminal({
             onRetry={() => setReloadKey((k) => k + 1)}
             stampedOperationIds={new Set(openSessions.filter((s) => s.employeeId === step.employee.id).map((s) => s.moOperationId))}
             selected={selectedOperationIds}
+            startCount={selection.start.length}
+            hiddenSelectedCount={selection.hiddenCount}
             onToggle={toggleOperationSelected}
             busy={busy}
             error={error}
-            onStart={() =>
-              startSelectedOperations(
-                step.employee,
-                rows.filter((r) => selectedOperationIds.has(r.operationId))
-              )
-            }
+            onStart={() => startSelectedOperations(step.employee, selection.start)}
             onBack={() => setStep({ name: "home", employee: step.employee })}
           />
         )}
@@ -1411,11 +1418,13 @@ function StationPicker({
   stations,
   stationIds,
   defaultStationIds,
+  disabled = false,
   onApply,
 }: {
   stations: TerminalStation[];
   stationIds: string[];
   defaultStationIds: string[];
+  disabled?: boolean;
   onApply: (ids: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1462,6 +1471,7 @@ function StationPicker({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Station: ${stationSummary(stations, stationIds)}`}
+        disabled={disabled}
         onClick={openPanel}
       >
         <span className={styles.stationSummary}>{stationSummary(stations, stationIds)}</span>
@@ -1563,6 +1573,8 @@ function OperationListView({
   onRetry,
   stampedOperationIds,
   selected,
+  startCount,
+  hiddenSelectedCount,
   onToggle,
   busy,
   error,
@@ -1589,6 +1601,9 @@ function OperationListView({
   onRetry: () => void;
   stampedOperationIds: Set<string>;
   selected: Set<string>;
+  /** Checked rows the list shows (what Starta valda starts) and checked rows the filter hides. */
+  startCount: number;
+  hiddenSelectedCount: number;
   onToggle: (operationId: string) => void;
   busy: boolean;
   error: string | null;
@@ -1606,15 +1621,18 @@ function OperationListView({
       <div className={styles.prompt}>Välj operationer</div>
 
       <div className={styles.filterBar}>
+        {/* Station and material reload the list, which drops checked rows that
+            are no longer listed — not while Starta valda is running. */}
         <StationPicker
           stations={stations}
           stationIds={stationIds}
           defaultStationIds={employee.defaultWorkCenterIds ?? []}
+          disabled={busy}
           onApply={onStationIds}
         />
         <label className={styles.filterGroup}>
           <span className={styles.filterLabel}>Material</span>
-          <select className={styles.select} value={materialId} onChange={(e) => onMaterialId(e.target.value)}>
+          <select className={styles.select} value={materialId} disabled={busy} onChange={(e) => onMaterialId(e.target.value)}>
             <option value="">Alla material</option>
             {materials.map((m) => (
               <option key={m.articleId} value={m.articleId}>
@@ -1724,8 +1742,14 @@ function OperationListView({
             {error}
           </div>
         )}
-        <button type="button" className={styles.bigAction} disabled={busy || selected.size === 0} onClick={onStart}>
-          Starta valda{selected.size > 0 ? ` (${selected.size})` : ""}
+        {hiddenSelectedCount > 0 && (
+          <p className={styles.hint}>
+            {hiddenSelectedCount === 1 ? "1 markerad operation döljs" : `${hiddenSelectedCount} markerade operationer döljs`} av
+            filtret och startas inte.
+          </p>
+        )}
+        <button type="button" className={styles.bigAction} disabled={busy || startCount === 0} onClick={onStart}>
+          Starta valda{startCount > 0 ? ` (${startCount})` : ""}
         </button>
         <BackRow onBack={onBack} />
       </div>

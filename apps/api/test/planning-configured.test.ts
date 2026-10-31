@@ -113,6 +113,22 @@ describe("behovsberäkning — beställningsvara", () => {
     expect(rows.find((r) => r.articleId === s.article.id)).toMatchObject({ demandSales: 2, supplyMo: 2, projected: 0, proposalQuantity: 0 });
   });
 
+  it("Skapa ordrar refuses a configured proposal whose row is not that article's configured row", async () => {
+    const { s, row } = await confirmedRow(1);
+    const user = await makeUser();
+    const other = await makeArticle();
+    const created = await planning.createOrdersFromProposals(
+      { proposals: [{ kind: "configured", articleId: other.id, salesOrderRowId: row.id, quantity: 1 }] } as never,
+      user.id
+    );
+    expect(created.manufacturingOrders).toEqual([]);
+    expect(created.errors).toEqual([
+      { articleId: other.id, articleNumber: other.articleNumber, message: "Kundorderraden hör inte till artikeln eller är inte konfigurerad" },
+    ]);
+    // The row's own TO is still to be made.
+    expect((await list()).find((r) => r.articleId === s.article.id && r.proposalKind === "configured")).toBeDefined();
+  });
+
   // The list is cached up to a minute (REQUIREMENTS_CACHE_MS): a proposal
   // already acted on — or a second click, or two users at once — must not
   // give the row a second TO. Decided under the row lock.

@@ -8,7 +8,7 @@ import {
 import {
   createConfiguratorGroupSchema, configuratorConditionSchema, createConfiguratorBomLineSchema, updateConfiguratorBomLineSchema,
   createConfiguratorOperationSchema, updateConfiguratorOperationSchema, createConfiguratorValueSchema, updateConfiguratorValueSchema,
-  deriveConfigurationSchema, configuratorSelectionSchema, variantSetsSchema,
+  deriveConfigurationSchema, configuratorSelectionSchema, variantSetsSchema, isOnNumberStep,
 } from "@navet/shared";
 import { isUniqueViolation } from "../src/modules/system/service/db-errors.js";
 import { makeArticle, resetConfigurator } from "./helpers/configurator.js";
@@ -68,6 +68,19 @@ describe("configurator schema", () => {
     const cond = (value: number) => configuratorConditionSchema.safeParse({ groupId: crypto.randomUUID(), op: "gt", value }).success;
     expect([cond(1234567.1234), cond(1078213.6444), cond(9999999999.9999)]).toEqual([true, true, true]);
     expect(cond(1234567.12345)).toBe(false);
+  });
+
+  it("zod: a number group's default must lie on the step grid counted from min (the engine's own test)", () => {
+    const group = (defaultNumber: number, step: number | null = 50) =>
+      createConfiguratorGroupSchema.safeParse({ code: "BREDD", name: "Bredd", kind: "number", minValue: 800, maxValue: 3000, step, defaultNumber });
+    expect(group(1200).success).toBe(true);
+    expect(group(1225).success).toBe(false);
+    expect(group(1225, null).success).toBe(true);
+    expect(isOnNumberStep(1200, 800, 50)).toBe(true);
+    expect(isOnNumberStep(1225, 800, 50)).toBe(false);
+    // Exact in 1e-4 units: 0.3 from 0 in steps of 0.1 is on the grid despite float arithmetic.
+    expect(isOnNumberStep(0.3, 0, 0.1)).toBe(true);
+    expect(isOnNumberStep(5, null, 0.1)).toBe(true);
   });
 
   it("zod: a selection value may be null (deliberately empty, delprojekt 5); so may a choice/number set's value", () => {

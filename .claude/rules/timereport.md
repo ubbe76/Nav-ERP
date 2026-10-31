@@ -33,6 +33,7 @@ Behörigheterna för Personal & lön: `permissions.md`. TO-rapporteringen som st
 - `closeStampSession` är villkorad, så en egen utstämpling som förlorar kapplöpningen tar bort sin tidrapport (`deleteTimeReport`) och svarar 409. `stoppedAt` på `POST /stamp-sessions/:id/stop` är admin/arbetsledare (403 annars).
 - Attesteringens närvarorättning följer med till arbetena (`correctAttendanceWithWork`: stängd öppen närvaro pausar, flyttad sluttid flyttar pausen med 2 s tolerans). En öppen närvaro från en tidigare dag ger 409 `attendance-open-from-earlier-day` tills terminalen skickar `forgottenStoppedAt` (`closeForgottenAndBegin`, en transaktion som bara stänger en närvaro som fortfarande är öppen — en gammal andra inskickning ger 409 `already-present`).
 - `absentToday` i `GET /stamp-sessions` bara för admin/arbetsledare (frånvaro = hälsodata).
+- Terminalens glömd-utstämpling-vy visar **Gå hem nu** bara när närvaron började Stockholmsdagen före i dag (`forgottenStopNowAllowed` i `lib/terminalOperations.ts`); äldre kräver en tid. Arbetsledarens **Sluttid** på Pågående (`StampOutForm`) skickas bara när fältet rörts — orört skickas pausens exakta `pausedAt` eller inget alls (servern stämplar nu), aldrig förifyllnadens nedrundade minut.
 - **Dagarna är Stockholmsdagar** (`localDateOf`); `docker-compose.yml` sätter `TZ: Europe/Stockholm` eftersom lönemotorn (`clockToMs`/`dayBounds`) gör om schemaklockslag med serverns lokala tid.
 
 ## Radera eller anonymisera en anställd (GDPR, #2, migration 0170)

@@ -200,12 +200,14 @@ export class RowConfigurationChangedError extends Error {
   }
 }
 
-// Ändra konfiguration on a variant row: the resolved variant already sits on
-// this order as an ordinary row (the partial unique index
-// sales_order_rows_order_article_unique fired).
+// The partial unique index sales_order_rows_order_article_unique fired: the
+// article already sits on this order as an ordinary row. `variant` is the
+// Ändra konfiguration case (the resolved variant is the duplicate); an
+// ordinary duplicate row — or a configuration whose variant a plain row
+// already has — gets the neutral wording.
 export class RowVariantExistsError extends Error {
-  constructor(public articleNumber: string) {
-    super(`Varianten ${articleNumber} ligger redan som rad på ordern`);
+  constructor(public articleNumber: string, kind: "variant" | "article" = "article") {
+    super(`${kind === "variant" ? "Varianten" : "Artikeln"} ${articleNumber} ligger redan som rad på ordern`);
     this.name = "RowVariantExistsError";
   }
 }

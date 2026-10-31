@@ -153,7 +153,7 @@ Under **Valgrupper** lägger du till grupper med **Lägg till valgrupp** och vä
 
 - **Listval** — kunden väljer ett av flera alternativ. Fält: **Kod**, **Namn** och **Obligatorisk**. Spara gruppen och lägg sedan till **Alternativ** i samma dialog med **Kod**, **Namn** och **Tillägg** (pristillägg), och markera **Aktiv** och **Förval**. Ett inaktivt alternativ kan inte längre väljas men finns kvar i mallen och i reglerna.
 - **Ja/nej** — en kryssruta. Fält: **Kod**, **Namn** och **Pristillägg** som läggs på när rutan är ikryssad.
-- **Mått/tal** — ett tal inom ett intervall. Fält: **Kod**, **Namn**, **Obligatorisk**, **Enhet**, **Min**, **Max**, **Steg** (lämna tomt för fri inmatning), **Förval**, **Pris per enhet** och **Räknas över**. Högst fyra decimaler.
+- **Mått/tal** — ett tal inom ett intervall. Fält: **Kod**, **Namn**, **Obligatorisk**, **Enhet**, **Min**, **Max**, **Steg** (lämna tomt för fri inmatning), **Förval**, **Pris per enhet** och **Räknas över**. Högst fyra decimaler. Förvalet måste ligga inom intervallet och, med **Steg**, exakt på ett steg räknat från **Min** — annars vägrar dialogen med *Förvalet ska ligga på ett steg räknat från min*.
 
 **Kod** består av stora bokstäver A–Z och siffror 0–9, högst 20 tecken, och är unik per mall (alternativkoden unik per grupp). Ordningen ändras med **Upp** och **Ned**. En grupp eller ett alternativ som en regel använder kan inte tas bort förrän regeln har ändrats eller tagits bort.
 

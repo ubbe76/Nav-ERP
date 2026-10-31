@@ -1,5 +1,5 @@
 // apps/api/src/modules/configurator/service/configurator-engine.ts
-import { fromSek, round2 } from "@navet/shared";
+import { fromSek, isOnNumberStep, round2 } from "@navet/shared";
 import type {
   ConfiguratorCondition, ConfiguratorEvaluation, ConfiguratorEvaluationGroup, ConfiguratorRuleTarget, ConfiguratorSelection, PriceSource,
 } from "@navet/shared";
@@ -208,12 +208,7 @@ export function resolveConfiguration(
       const r = range.get(g.id)!;
       if (!hasAtMost4Decimals(v)) { addError(g.id, `${g.name} får ha högst 4 decimaler`); continue; }
       if (!emptyRange.has(g.id) && (v < r.min - STEP_TOLERANCE || v > r.max + STEP_TOLERANCE)) addError(g.id, `${g.name} ska vara mellan ${sv(r.min)} och ${sv(r.max)}${unit}`);
-      if (g.step !== null) {
-        // exact: values have at most 4 decimals, so compare in integer 1e-4 units
-        const s4 = Math.round(g.step * 1e4);
-        const q4 = Math.round((v - (g.minValue ?? 0)) * 1e4);
-        if (s4 > 0 && ((q4 % s4) + s4) % s4 !== 0) addError(g.id, `${g.name} ska anges i steg om ${sv(g.step)}${unit}`);
-      }
+      if (g.step !== null && !isOnNumberStep(v, g.minValue, g.step)) addError(g.id, `${g.name} ska anges i steg om ${sv(g.step)}${unit}`);
     }
   }
 

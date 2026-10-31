@@ -23,8 +23,8 @@ import {
 export async function publicConfiguratorRoutes(app: FastifyInstance, opts: { service: ConfiguratorService }) {
   const { service } = opts;
   // The static segment outranks `:articleId` in find-my-way.
-  app.get("/configurator/templates", { config: { access: ["office"], clientScope: "configurator:read" } }, async (req) =>
-    service.listPublicTemplates(listPublicTemplatesQuerySchema.parse(req.query)));
+  app.get("/configurator/templates", { config: { access: ["office"], clientScope: "configurator:read" } }, (req, reply) =>
+    run(reply, () => service.listPublicTemplates(listPublicTemplatesQuerySchema.parse(req.query))));
   app.get<{ Params: { articleId: string } }>("/configurator/:articleId", { config: { access: ["office"], clientScope: "configurator:read" } }, (req, reply) =>
     run(reply, () => service.getPublicTemplate(req.params.articleId, { client: Boolean(req.apiClient) })));
   // A customerId prices the choice through that customer's price chain — a

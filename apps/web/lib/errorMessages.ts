@@ -524,7 +524,7 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Kombinationen kan inte tillverkas — förhandsgranska varianterna på mallens artikelkort för att se vad i strukturen som saknas.",
   "configurator-not-to-order-mode": "Mallen är inte i läget Beställningsvara.",
   "configurator-mode-changed": "Artikelns konfiguratorläge ändrades medan tillverkningsordern skapades — försök igen.",
-  "configurator-not-published": "Mallen är inte publicerad för API:t.",
+  "configurator-not-published": serverMessage("Mallen är inte publicerad för API:t."),
   "configuration-required": serverMessage("Artikeln är en beställningsvara — konfigurera den."),
   "configuration-not-allowed": serverMessage("Artikeln är inte en beställningsvara."),
   // The derivation's own messages (structure lines, operations) ride along as
@@ -546,7 +546,8 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Mallen har ändrats sedan raden konfigurerades — öppna Ändra konfiguration och spara valen innan antalet ändras.",
   "row-configuration-changed":
     "Raden konfigurerades om medan tillverkningsordern skapades — kontrollera raden och försök igen, eller använd Ändra konfiguration.",
-  "row-variant-exists": serverMessage("Varianten ligger redan som rad på ordern."),
+  // The server says which: "Varianten …" from Ändra konfiguration, "Artikeln …" for an ordinary duplicate row.
+  "row-variant-exists": serverMessage("Artikeln ligger redan som rad på ordern."),
   "work-center-not-found": "Resursen finns inte.",
   // Ångra rapportering / Makulera order (TO)
   "mo-report-not-found": "Rapporteringen finns inte — ladda om sidan.",

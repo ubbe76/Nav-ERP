@@ -565,7 +565,10 @@ function ValueEditor({
               id="cfg-new-value-code"
               value={newCode}
               maxLength={20}
-              onChange={(e) => setNewCode(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                setError(null);
+                setNewCode(e.target.value.toUpperCase());
+              }}
             />
           </Field>
           <Field label="Namn" htmlFor="cfg-new-value-name">
@@ -573,7 +576,10 @@ function ValueEditor({
               id="cfg-new-value-name"
               value={newName}
               maxLength={100}
-              onChange={(e) => setNewName(e.target.value)}
+              onChange={(e) => {
+                setError(null);
+                setNewName(e.target.value);
+              }}
             />
           </Field>
           <Field label="Tillägg" htmlFor="cfg-new-value-price">

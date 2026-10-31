@@ -204,6 +204,17 @@ describe("invoice", () => {
     await salesService.updateCustomer(c.id, { showConfigurationPrices: false } as never);
     expect(pdfText((await invoiceService.renderPdf(issued!.id)).content)).toContain("(+ 50,00)");
 
+    // A delkredit with explicit rows copies it from the source row (never
+    // re-read from the order row); the draft's row is dropped again so the
+    // full credit below is not over-credit.
+    const partial = await invoiceService.createCredit(
+      issued!.id,
+      { rows: [{ articleId: article.id, salesOrderRowId: orderRow!.id, description: "Delkredit", quantity: 1, unitPrice: 1150 }] },
+      user.id
+    );
+    expect(partial!.rows[0]!.configuration).toEqual(issued!.rows[0]!.configuration);
+    await invoiceService.deleteRow(partial!.id, partial!.rows[0]!.id, user.id);
+
     const credit = await invoiceService.createCredit(issued!.id, {}, user.id);
     expect(credit!.rows[0]!.configuration).toEqual(orderRow!.configuration);
     const issuedCredit = await invoiceService.issue(credit!.id, user.id);

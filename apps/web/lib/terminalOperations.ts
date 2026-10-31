@@ -80,6 +80,28 @@ export function filterTerminalOperations(
   });
 }
 
+// "Starta valda" acts on the rows the list shows. A row checked and then
+// hidden by Sök/Bara redo stays checked (it comes back with the filter) but is
+// not started; the count tells the operator how many are hidden.
+export function splitSelection(
+  visible: TerminalOperation[],
+  selected: Set<string>
+): { start: TerminalOperation[]; hiddenCount: number } {
+  const start = visible.filter((row) => selected.has(row.operationId));
+  return { start, hiddenCount: Math.max(selected.size - start.length, 0) };
+}
+
+// Glömd utstämpling: "Gå hem nu" (stop the attendance open since an earlier
+// day right now) only makes sense for a shift that ran past midnight — the
+// attendance started on the Stockholm day before today. Older than that, the
+// operator must give the time they went home.
+export function forgottenStopNowAllowed(startedAt: string, now: number): boolean {
+  const day = (ms: number) => new Date(ms).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
+  const started = Date.parse(startedAt);
+  if (Number.isNaN(started)) return false;
+  return day(started) === day(now - 24 * 60 * 60 * 1000);
+}
+
 // sv-SE with at most 4 decimals — hides float noise from the API.
 function formatNumber(value: number): string {
   return value.toLocaleString("sv-SE", { maximumFractionDigits: 4 });

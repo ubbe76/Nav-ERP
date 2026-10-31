@@ -1,4 +1,4 @@
-import { parseRuleTarget } from "@navet/shared";
+import { isOnNumberStep, NUMBER_DEFAULT_OFF_STEP, parseRuleTarget } from "@navet/shared";
 import type {
   ConfiguratorBomLineDetail, ConfiguratorDerivation, DerivedCosting, DerivedStructure, ConfiguratorEvaluation, ConfiguratorGroupDetail, ConfiguratorMode, ConfiguratorOperationDetail,
   ConfiguratorRuleDetail, ConfiguratorSelection, ConfiguratorTemplateDetail, ConfiguratorTemplateView, ConfiguratorValueDetail, CreateConfiguratorBomLineInput,
@@ -1081,6 +1081,9 @@ export function createConfiguratorService(deps: {
             const def = input.defaultNumber !== undefined ? input.defaultNumber : toNumber(group.defaultNumber);
             if (min > max) throw new InvalidConfiguratorGroupError("Min får inte vara större än max");
             if (def !== null && (def < min || def > max)) throw new InvalidConfiguratorGroupError("Förvalet ska ligga inom intervallet");
+            // The same grid test the engine applies to a chosen value — a default off the step would make every evaluation that relies on it invalid.
+            const step = input.step !== undefined ? input.step : toNumber(group.step);
+            if (def !== null && !isOnNumberStep(def, min, step)) throw new InvalidConfiguratorGroupError(NUMBER_DEFAULT_OFF_STEP);
           }
           if (input.code !== undefined && input.code !== group.code) {
             // A variant's key spells the code, and so does a formula in a line's quantity or an operation's times.

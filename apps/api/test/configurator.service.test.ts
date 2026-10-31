@@ -204,6 +204,19 @@ describe("configurator service — further cases", () => {
     return { ...base, hjul, bredd };
   }
 
+  it("refuses a number default off the step grid, also when the step changes under it", async () => {
+    const { article, bredd } = await withBooleanAndNumber();
+    await service.updateGroup(article.id, bredd.id, { step: 50, defaultNumber: 350 });
+    const offGrid = await service.updateGroup(article.id, bredd.id, { defaultNumber: 375 }).catch((e: unknown) => e);
+    expect(offGrid).toBeInstanceOf(InvalidConfiguratorGroupError);
+    expect((offGrid as Error).message).toBe("Förvalet ska ligga på ett steg räknat från min");
+    // A new step the stored default does not fit is refused the same way …
+    await expect(service.updateGroup(article.id, bredd.id, { step: 20 })).rejects.toBeInstanceOf(InvalidConfiguratorGroupError);
+    // … while removing the step frees the default.
+    const freed = await service.updateGroup(article.id, bredd.id, { step: null, defaultNumber: 375 });
+    expect(Number(freed.defaultNumber)).toBe(375);
+  });
+
   it("rejects a condition or require target whose op does not match its group's kind", async () => {
     const { article, lock, a, c, farg, ep, hjul, bredd } = await withBooleanAndNumber();
     const rule = (conditions: unknown[], target: unknown, effect: "exclude" | "require" | "limit" = "exclude") =>

@@ -1136,7 +1136,10 @@ export function createManufacturingService(
           readiness.set(id, r);
         }
       }
-      const byArticleNumber = (a: TerminalMaterial, b: TerminalMaterial) => a.articleNumber.localeCompare(b.articleNumber, "sv");
+      // Natural number order, the same collation as the web's material sort
+      // (lib/terminalOperations.ts) — so a row's first material IS its
+      // sort key there, and the picker lists 2 before 10.
+      const byArticleNumber = (a: TerminalMaterial, b: TerminalMaterial) => a.articleNumber.localeCompare(b.articleNumber, "sv", { numeric: true });
       const materialsByOp = new Map<string, TerminalMaterial[]>();
       for (const m of materials) {
         if (!m.moOperationId) continue;

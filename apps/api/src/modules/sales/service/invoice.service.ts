@@ -1238,6 +1238,9 @@ export function createInvoiceService(
             // The credit nets the account the source row was booked on (a
             // räntefaktura's 8313) — never client input, so always copied.
             revenueAccount: source.revenueAccount,
+            // Konfigurator 4b: the SOURCE row's configuration copy, as the
+            // prefill takes it — never re-read from the order row.
+            configuration: (source.configuration as OrderRowConfiguration | null) ?? null,
           };
         });
       } else {

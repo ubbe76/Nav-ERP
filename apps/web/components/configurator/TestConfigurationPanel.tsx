@@ -77,7 +77,6 @@ export function TestConfigurationPanel({
       if (mine === seq.current) {
         setResult(res);
         setError(null);
-        setPendingInput(false);
         setPendingEvaluation(false);
       }
     } catch (err) {
@@ -85,7 +84,6 @@ export function TestConfigurationPanel({
         // A failed evaluation must not leave the previous Giltig/Ogiltig looking current.
         setResult(null);
         setError(apiErrorMessage(err, "Kunde inte utvärdera konfigurationen"));
-        setPendingInput(false);
         setPendingEvaluation(false);
       }
     }
@@ -94,20 +92,20 @@ export function TestConfigurationPanel({
   // Re-evaluates (debounced) on every change, including the template itself
   // changing while the panel is open.
   useEffect(() => {
-    const mine = ++seq.current;
     // Any input change makes a shown derivation (and one in flight) outdated.
     deriveSeq.current++;
     setDeriving(false);
     setStale(true);
     setDeriveError(null);
-    setPendingEvaluation(true);
     const { selection, pending } = selectionFromRaw(groups, raw);
+    setPendingInput(pending);
     // Half-typed ("12,"): evaluating without it would fall back to the
-    // default — keep the previous result instead.
-    if (pending) {
-      setPendingInput(true);
-      return;
-    }
+    // default — keep the previous result instead. `seq` is not bumped, so an
+    // answer still on its way for the last complete value is written (and
+    // pendingInput, set above, keeps Visa struktur och kalkyl waiting).
+    if (pending) return;
+    const mine = ++seq.current;
+    setPendingEvaluation(true);
     lastSelection.current = selection;
     const timer = setTimeout(() => void evaluate(mine, selection, customer?.id ?? null), 250);
     return () => clearTimeout(timer);
