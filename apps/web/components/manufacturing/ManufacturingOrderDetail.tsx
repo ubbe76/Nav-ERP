@@ -1,29 +1,26 @@
 "use client";
 
 import { RowDeviationLink } from "../quality/RowDeviationLink";
-import { ScrapReasonFields } from "../quality/ScrapReasonFields";
-import { useScrapReasons } from "../../lib/useScrapReasons";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Table } from "../ui/Table";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { StatusPill } from "../ui/StatusPill";
-import { Field, Input, Select } from "../ui/Field";
-import { minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toBaseQuantity, toUnitQuantity } from "../../lib/units";
+import { Input } from "../ui/Field";
+import { minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
-import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { takeReleaseWarnings } from "../../lib/releaseWarnings";
-import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { confirmDelete } from "../../lib/confirm";
 import { MoMaterialModal } from "./MoMaterialModal";
 import { OperationModal, type OperationPayload } from "../articles/OperationModal";
 import { ReportsSection } from "./ReportsSection";
+import { ReportPanel } from "./ReportPanel";
 import { PalletCardDialog, type PalletCardTarget } from "../documents/PalletCardDialog";
-import { suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
+import { moOperationLabel } from "../../lib/moReportRows";
 import { useCan, useCanOpen } from "../PermissionsProvider";
-import { stockholmToday } from "../../lib/date";
 import { ACTION_LABELS, actionsForStatus, confirmCancel, runOrderAction, type OrderAction } from "../../lib/manufacturingOrderActions";
 import {
   MANUFACTURING_ORDER_STATUS_PILL,
@@ -45,7 +42,7 @@ import { Card } from "../ui/Card";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
 import { configurationLines } from "../../lib/configurationLines";
 import { formatMoney, formatQuantity } from "../../lib/format";
-import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
+import { FormError, FormHint, FormNotice, FormStack } from "../ui/Form";
 import { CostCalculationList } from "../costing/CostCalculationList";
 import { CostChain } from "../ui/CostChain";
 import { chainLines } from "../../lib/costChain";
@@ -66,12 +63,6 @@ interface ManufacturingOrderDetailProps {
   reports: MOReport[];
   // Ångra rapportering — admin/arbetsledare with Tillverkning.
   canUndoReports: boolean;
-}
-
-// Every place an operation is named on this card. Beskrivning is what the
-// step IS; the resource name is the fallback so the label is never blank.
-function moOperationLabel(op: MOOperation) {
-  return `${op.sequenceNo} — ${op.description ?? op.workCenterName}`;
 }
 
 export function ManufacturingOrderDetail({
@@ -617,6 +608,26 @@ export function ManufacturingOrderDetail({
 
       <PalletCardDialog target={palletCard} onClose={() => setPalletCard(null)} />
 
+      {/* Efterrapportering: a done order still takes reports (time, scrap
+          and material, no finished goods) until Stäng order. */}
+      {!readOnly && (order.status === "released" || order.status === "in_progress" || order.status === "done") && (
+        <>
+          <SectionHeading spaced>Rapportera</SectionHeading>
+          <ReportPanel
+            orderId={order.id}
+            orderStatus={order.status}
+            orderQuantity={order.quantity}
+            quantityReceived={order.quantityReceived}
+            operations={operations}
+            materials={materials}
+            locations={locations}
+            employees={employees}
+            timeReports={timeReports}
+            onDone={() => router.refresh()}
+          />
+        </>
+      )}
+
       <ReportsSection
         orderId={order.id}
         reports={reports}
@@ -658,46 +669,13 @@ export function ManufacturingOrderDetail({
           />
         )}
 
-        {/* Efterrapportering: a done order still takes reports (time, scrap
-            and material, no finished goods) until Stäng order. */}
-        {(order.status === "released" || order.status === "in_progress" || order.status === "done") && (
-          <>
-            <ConsumeMaterialForm orderId={order.id} materials={materials} locations={locations} onDone={() => router.refresh()} />
-            <CompleteOperationsList
-              orderId={order.id}
-              orderQuantity={order.quantity}
-              orderDone={order.status === "done"}
-              operations={operations}
-              locations={locations}
-              onDone={() => router.refresh()}
-            />
-            <ReportTimeForm
-              employees={employees}
-              operations={operations}
-              orderQuantity={order.quantity}
-              timeReports={timeReports}
-              onDone={() => router.refresh()}
-            />
-          </>
-        )}
-
         {(order.status === "released" || order.status === "in_progress") && (
-          <>
-            {/* No Starta: Slutför order works straight on a released order. */}
-            <CompleteOrderForm
-              orderId={order.id}
-              orderQuantity={order.quantity}
-              quantityReceived={order.quantityReceived}
-              locations={locations}
-              onDone={() => router.refresh()}
-            />
-            <StatusActions
-              orderId={order.id}
-              orderNumber={order.orderNumber}
-              actions={actionsForStatus(order.status)}
-              onDone={() => router.refresh()}
-            />
-          </>
+          <StatusActions
+            orderId={order.id}
+            orderNumber={order.orderNumber}
+            actions={actionsForStatus(order.status)}
+            onDone={() => router.refresh()}
+          />
         )}
 
         {order.status === "done" && (
@@ -906,527 +884,6 @@ function PostCalculateAction({ orderId, onDone }: { orderId: string; onDone: (ca
           </>
         )}
       </FormStack>
-    </Card>
-  );
-}
-
-// --- Consume material (released / in_progress / done) ---
-
-function ConsumeMaterialForm({
-  orderId,
-  materials,
-  locations,
-  onDone,
-}: {
-  orderId: string;
-  materials: MOMaterialConsumption[];
-  locations: StockLocation[];
-  onDone: () => void;
-}) {
-  const consumable = materials.filter((m) => Number(m.quantityConsumed) < Number(m.quantityPlanned));
-  const [rowId, setRowId] = useState(consumable[0]?.id ?? "");
-  const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
-  // Antal is prefilled with what remains of the row's planned quantity; a
-  // typed value wins until another material is picked or the draw is booked.
-  const [typedQuantity, setTypedQuantity] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  // Entered in the material row's display unit, booked in the base unit. A
-  // row drawn in full drops out of the list, so fall back to the first one.
-  const selectedRow = consumable.find((m) => m.id === rowId) ?? consumable[0];
-  const quantity = typedQuantity ?? suggestedConsumeQuantity(selectedRow);
-
-  if (consumable.length === 0) return null;
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setPending(true);
-    try {
-      const consumed = await runWithShortageConfirm((allowMaterialShortage) =>
-        apiFetch(`/api/v1/manufacturing-orders/${orderId}/materials/${selectedRow!.id}/consume`, {
-          method: "POST",
-          body: JSON.stringify({
-            locationId: locationId || undefined,
-            quantity: toBaseQuantity(Number(quantity), selectedRow?.unitFactor ?? null),
-            allowMaterialShortage,
-          }),
-        })
-      );
-      if (consumed === null) return;
-      setTypedQuantity(null);
-      onDone();
-    } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte förbruka materialet"));
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <Card maxWidth={420}>
-      <Form onSubmit={handleSubmit}>
-        <strong>Förbruka material</strong>
-        <FormError>{error}</FormError>
-
-        <Field label="Material" htmlFor="rowId">
-          <Select
-            id="rowId"
-            value={selectedRow?.id ?? ""}
-            onChange={(e) => {
-              setRowId(e.target.value);
-              setTypedQuantity(null);
-            }}
-          >
-            {consumable.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.componentArticleNumber} — {m.componentName} ({toUnitQuantity(Number(m.quantityConsumed), m.unitFactor)}/
-                {toUnitQuantity(Number(m.quantityPlanned), m.unitFactor)} {m.unitCode})
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <FormRow>
-          {/* Stock locations are optional — the select only appears when some exist. */}
-          {locations.length > 0 && (
-            <Field label="Lagerplats" htmlFor="locationId">
-              <Select id="locationId" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-                <option value="">Artikelns lagerplats</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.warehouseName} — {l.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-          <Field label={selectedRow ? `Antal (${selectedRow.unitCode})` : "Antal"} htmlFor="consumeQuantity">
-            <Input
-              id="consumeQuantity"
-              type="number"
-              min="0"
-              step="any"
-              required
-              size="sm"
-              value={quantity}
-              onChange={(e) => setTypedQuantity(e.target.value)}
-            />
-          </Field>
-        </FormRow>
-
-        <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
-            {pending ? "Förbrukar…" : "Förbruka"}
-          </Button>
-        </FormActions>
-      </Form>
-    </Card>
-  );
-}
-
-// --- Complete operations (released / in_progress / done) ---
-
-function CompleteOperationsList({
-  orderId,
-  orderQuantity,
-  orderDone,
-  operations,
-  locations,
-  onDone,
-}: {
-  orderId: string;
-  orderQuantity: string;
-  // Efterrapportering: the server books no finished goods on a done order
-  // and the terminal no longer lists it.
-  orderDone: boolean;
-  operations: MOOperation[];
-  locations: StockLocation[];
-  onDone: () => void;
-}) {
-  const pendingOps = operations.filter((op) => op.status === "pending");
-  const [actualTimes, setActualTimes] = useState<Record<string, string>>({});
-  // Prefilled with what REMAINS of the order quantity (terminal partials
-  // already accumulated on the operation aren't double-counted).
-  const [quantities, setQuantities] = useState<Record<string, string>>({});
-  const [scrapped, setScrapped] = useState<Record<string, string>>({});
-  const [scrapReasons, setScrapReasons] = useState<Record<string, string>>({});
-  // Kassationsorsaker from Kvalitetsorsaker: Orsak is chosen, scrapReasons holds the Kommentar.
-  const scrapReasonOptions = useScrapReasons();
-  const [scrapReasonIds, setScrapReasonIds] = useState<Record<string, string>>({});
-  const reasonRegister = scrapReasonOptions !== null && scrapReasonOptions.length > 0;
-  const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  if (pendingOps.length === 0) return null;
-
-  function remainingFor(op: MOOperation): string {
-    return String(Math.max(Number(orderQuantity) - Number(op.quantityCompleted ?? 0), 0));
-  }
-
-  async function complete(op: MOOperation) {
-    const opId = op.id;
-    const scrapQty = Number(scrapped[opId]) || 0;
-    if (scrapQty > 0 && reasonRegister && (scrapReasonIds[opId] ?? "") === "") {
-      setError("Välj en orsak när kasserat antal är större än 0.");
-      return;
-    }
-    if (scrapQty > 0 && !reasonRegister && (scrapReasons[opId] ?? "").trim() === "") {
-      setError("Ange en kassationsorsak när kasserat antal är större än 0.");
-      return;
-    }
-    setError(null);
-    setPendingId(opId);
-    try {
-      const actualTime = actualTimes[opId];
-      const quantityCompleted = quantities[opId] ?? remainingFor(op);
-      const completed = await runWithShortageConfirm((allowMaterialShortage) =>
-        apiFetch(`/api/v1/manufacturing-orders/${orderId}/operations/${opId}/complete`, {
-          method: "POST",
-          body: JSON.stringify({
-            ...(actualTime ? { actualTime: Number(actualTime) } : {}),
-            quantityCompleted: Number(quantityCompleted) || 0,
-            quantityScrapped: scrapQty,
-            ...(scrapQty > 0 && reasonRegister ? { scrapReasonId: scrapReasonIds[opId] } : {}),
-            scrapReason: (scrapReasons[opId] ?? "").trim() || undefined,
-            locationId: locationId || undefined,
-            allowMaterialShortage,
-          }),
-        })
-      );
-      if (completed === null) {
-        setPendingId(null);
-        return;
-      }
-      // Auto-open the pallet card for the just-reported quantity — best
-      // effort (a popup blocker may stop a window.open after an async
-      // call); the Pallkort link on the operation row is the always-there
-      // fallback. Without a positive quantity the card falls back to the
-      // operation's accumulated quantity.
-      const reported = Number(quantityCompleted) || 0;
-      const reportId = (completed as { reportId?: string | null }).reportId ?? null;
-      window.open(
-        reportId
-          ? `/api/v1/manufacturing-orders/${orderId}/reports/${reportId}/pallet-card`
-          : `/api/v1/manufacturing-orders/${orderId}/operations/${opId}/pallet-card${reported > 0 ? `?quantity=${reported}` : ""}`,
-        "_blank",
-        "noopener"
-      );
-      onDone();
-    } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte slutföra operationen"));
-      setPendingId(null);
-    }
-  }
-
-  return (
-    <Card maxWidth={420}>
-      <FormStack>
-        <strong>Slutför operation</strong>
-        {orderDone ? (
-          <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
-            Ordern är klar. Det du rapporterar nu kommer med i efterkalkylen: antal, kassation och material som är
-            kopplat till operationen. Inga fler färdiga varor läggs in i lager.
-          </p>
-        ) : (
-          <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
-            Material som är kopplat till operationen dras automatiskt för antal OK + kasserat. Antal klart är
-            förifyllt med vad som återstår av orderns antal. Operationen markeras klar först när hela orderns antal är
-            rapporterat som OK — annars ligger den kvar och kan rapporteras vidare, även i stämpelterminalen.
-          </p>
-        )}
-        <FormError>{error}</FormError>
-        {/* Stock locations are optional — the select only appears when some exist. */}
-        {locations.length > 0 && (
-          <Field label="Lagerplats för materialuttag" htmlFor="completeOpLocation">
-            <Select id="completeOpLocation" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-              <option value="">Artikelns lagerplats</option>
-              {locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.warehouseName} — {l.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
-        {pendingOps.map((op) => (
-          <div key={op.id} style={{ display: "grid", gap: 10 }}>
-            <div style={{ fontFamily: "var(--font-body)", fontSize: 13, fontWeight: 600 }}>
-              {moOperationLabel(op)}
-            </div>
-            {/* Kvar = planned − OK; scrapped units must be made again. */}
-            <div className="num" style={{ fontSize: 13, opacity: 0.75 }}>
-              Planerat {Number(orderQuantity)} · Klart {Number(op.quantityCompleted ?? 0)}
-              {Number(op.quantityScrapped) > 0 ? ` · Kasserat ${Number(op.quantityScrapped)}` : ""} ·{" "}
-              <strong>Kvar {remainingFor(op)}</strong>
-            </div>
-            <FormRow columns={3}>
-              <Field label="Antal klart" htmlFor={`quantityCompleted-${op.id}`}>
-                <Input
-                  id={`quantityCompleted-${op.id}`}
-                  type="number"
-                  min="0"
-                  step="any"
-                  size="sm"
-                  value={quantities[op.id] ?? remainingFor(op)}
-                  onChange={(e) => setQuantities((prev) => ({ ...prev, [op.id]: e.target.value }))}
-                />
-              </Field>
-              <Field label="Kasserat" htmlFor={`quantityScrapped-${op.id}`}>
-                <Input
-                  id={`quantityScrapped-${op.id}`}
-                  type="number"
-                  min="0"
-                  step="any"
-                  size="sm"
-                  value={scrapped[op.id] ?? "0"}
-                  onChange={(e) => setScrapped((prev) => ({ ...prev, [op.id]: e.target.value }))}
-                />
-              </Field>
-              <Field label="Faktisk tid" htmlFor={`actualTime-${op.id}`}>
-                <Input
-                  id={`actualTime-${op.id}`}
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  size="sm"
-                  value={actualTimes[op.id] ?? ""}
-                  onChange={(e) => setActualTimes((prev) => ({ ...prev, [op.id]: e.target.value }))}
-                />
-              </Field>
-            </FormRow>
-            {Number(scrapped[op.id]) > 0 && (
-              <ScrapReasonFields
-                idPrefix={`scrap-${op.id}`}
-                reasons={scrapReasonOptions}
-                reasonId={scrapReasonIds[op.id] ?? ""}
-                text={scrapReasons[op.id] ?? ""}
-                onReasonId={(id) => setScrapReasonIds((prev) => ({ ...prev, [op.id]: id }))}
-                onText={(text) => setScrapReasons((prev) => ({ ...prev, [op.id]: text }))}
-              />
-            )}
-            <FormActions>
-              <Button type="button" variant="secondary" size="small" disabled={pendingId !== null} onClick={() => complete(op)}>
-                {pendingId === op.id ? "…" : "Slutför"}
-              </Button>
-            </FormActions>
-          </div>
-        ))}
-      </FormStack>
-    </Card>
-  );
-}
-
-// --- Report time (released / in_progress / done) ---
-
-function today() {
-  return stockholmToday();
-}
-
-function ReportTimeForm({
-  employees,
-  operations,
-  orderQuantity,
-  timeReports,
-  onDone,
-}: {
-  employees: EmployeeDirectoryEntry[];
-  operations: MOOperation[];
-  orderQuantity: string;
-  timeReports: TimeReport[];
-  onDone: () => void;
-}) {
-  const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
-  const [operationId, setOperationId] = useState(operations[0]?.id ?? "");
-  const [date, setDate] = useState(today());
-  // Timmar is prefilled with the operation's theoretical time less what is
-  // already reported on it; a typed value wins until another operation is
-  // picked or the report is saved.
-  const [typedHours, setTypedHours] = useState<string | null>(null);
-  const hours =
-    typedHours ?? suggestedReportHours(operations.find((op) => op.id === operationId), orderQuantity, timeReports);
-  const [note, setNote] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-
-  if (employees.length === 0 || operations.length === 0) return null;
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setPending(true);
-    try {
-      await apiFetch("/api/v1/time-reports", {
-        method: "POST",
-        body: JSON.stringify({ employeeId, moOperationId: operationId, date, hours: Number(hours), note: note || undefined }),
-      });
-      setNote("");
-      setTypedHours(null);
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Kunde inte rapportera tiden");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <Card maxWidth={420}>
-      <Form onSubmit={handleSubmit}>
-        <strong>Rapportera tid</strong>
-        <FormError>{error}</FormError>
-
-        <Field label="Anställd" htmlFor="reportEmployeeId">
-          <Select id="reportEmployeeId" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.employeeNumber} — {emp.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field label="Operation" htmlFor="reportOperationId">
-          <Select
-            id="reportOperationId"
-            value={operationId}
-            onChange={(e) => {
-              setOperationId(e.target.value);
-              setTypedHours(null);
-            }}
-          >
-            {operations.map((op) => (
-              <option key={op.id} value={op.id}>
-                {moOperationLabel(op)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <FormRow>
-          <Field label="Datum" htmlFor="reportDate">
-            <Input id="reportDate" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
-          </Field>
-          <Field label="Timmar" htmlFor="reportHours">
-            <Input id="reportHours" type="number" min="0.01" step="0.01" required size="sm" value={hours} onChange={(e) => setTypedHours(e.target.value)} />
-          </Field>
-        </FormRow>
-
-        <Field label="Anteckning (valfritt)" htmlFor="reportNote">
-          <Input id="reportNote" value={note} onChange={(e) => setNote(e.target.value)} />
-        </Field>
-
-        <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
-            {pending ? "Rapporterar…" : "Rapportera tid"}
-          </Button>
-        </FormActions>
-      </Form>
-    </Card>
-  );
-}
-
-// --- Complete order (in_progress only, receipt into stock) ---
-
-function CompleteOrderForm({
-  orderId,
-  orderQuantity,
-  quantityReceived,
-  locations,
-  onDone,
-}: {
-  orderId: string;
-  orderQuantity: string;
-  quantityReceived: string;
-  locations: StockLocation[];
-  onDone: () => void;
-}) {
-  const received = Number(quantityReceived);
-  const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
-  // Antal = what goes into stock NOW, on top of any delinleverans — so it
-  // defaults to what remains; 0 closes a short order without receiving more.
-  const [quantity, setQuantity] = useState(String(Math.max(Number(orderQuantity) - received, 0)));
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    // Slutför order closes the order — ask first when it would close short of
-    // the order quantity (0 closes it without receiving anything more).
-    const total = received + Number(quantity);
-    if (total < Number(orderQuantity)) {
-      const fmt = (n: number) => n.toLocaleString("sv-SE");
-      const ok = await confirmDialog(
-        `Ordern stängs med ${fmt(total)} av ${fmt(Number(orderQuantity))} st inlevererade — resten tillverkas inte på den här ordern. Stäng ordern ändå?`,
-        { confirmLabel: "Stäng ordern" }
-      );
-      if (!ok) return;
-    }
-    setError(null);
-    setPending(true);
-    try {
-      const closed = await runWithShortageConfirm((allowMaterialShortage) =>
-        apiFetch(`/api/v1/manufacturing-orders/${orderId}/complete`, {
-          method: "POST",
-          body: JSON.stringify({ locationId: locationId || undefined, quantity: Number(quantity), allowMaterialShortage }),
-        })
-      );
-      if (closed === null) return;
-      onDone();
-    } catch (err) {
-      setError(apiErrorMessage(err, "Kunde inte slutföra ordern"));
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <Card maxWidth={420}>
-      <Form onSubmit={handleSubmit}>
-        <strong>Slutför order (mottag i lager)</strong>
-        <FormHint>Stänger ordern. Antal är det som läggs i lager nu.</FormHint>
-        <FormError>{error}</FormError>
-        {received > 0 && (
-          <FormHint>
-            {received} st är redan inlevererade från sista operationen — 0 stänger ordern utan mer inleverans.
-          </FormHint>
-        )}
-
-        <FormRow>
-          {/* Stock locations are optional — the select only appears when some exist. */}
-          {locations.length > 0 && (
-            <Field label="Lagerplats" htmlFor="completeLocationId">
-              <Select id="completeLocationId" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-                <option value="">Artikelns lagerplats</option>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.warehouseName} — {l.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-          <Field label="Antal" htmlFor="completeQuantity">
-            <Input
-              id="completeQuantity"
-              type="number"
-              min="0"
-              step="any"
-              required
-              size="sm"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-            />
-          </Field>
-        </FormRow>
-
-        <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
-            {pending ? "Slutför…" : "Slutför order"}
-          </Button>
-        </FormActions>
-      </Form>
     </Card>
   );
 }

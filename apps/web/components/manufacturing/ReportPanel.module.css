@@ -1,0 +1,93 @@
+/* The Rapportera card: one wrapping line per operation, material row and
+   report row. Items wrap instead of sitting on fixed tracks, so a phone
+   stacks them and a desktop reads each row as one line where it fits. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px solid var(--color-divider);
+  padding-top: var(--space-3);
+}
+
+.groupTitle {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* Linked material sits indented under its operation. */
+.material {
+  padding-left: var(--space-4);
+}
+
+.title {
+  flex: 1 1 14rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.summary {
+  color: var(--color-text-muted);
+}
+
+.hint {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+.cell {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.wide {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+/* Right-aligned, also when it wraps onto a line of its own. */
+.action {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .material {
+    padding-left: var(--space-3);
+  }
+
+  .cell,
+  .wide {
+    flex: 1 1 40%;
+  }
+}
