@@ -54,7 +54,8 @@ import {
   type ExchangeRateReader,
   type ReferenceRateReader,
 } from "../../system/service/exchange-rates.js";
-import { stockholmToday } from "../../system/service/delivery-days.js";
+import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
+import { dueDateFromTerm } from "../../system/service/due-date.js";
 import {
   accruedInterestText,
   addDays as addCalendarDays,
@@ -348,19 +349,6 @@ export class ReminderFeeAlreadyChargedError extends Error {
     super(`Invoice ${id} has already been charged a reminder fee`);
     this.name = "ReminderFeeAlreadyChargedError";
   }
-}
-
-// dueDate: invoiceDate + parseInt(paymentTermCode) days when the code is a
-// finite number of days ("30" -> 30 dagar netto), else null (a code like
-// "KONTANT" just prints the term itself, no computed due date) — same parse
-// as renderInvoicePdf in sales.service.ts. Computed off the SAME `now`
-// instant the caller formats as invoiceDate (not a re-parse of that string)
-// so the day-count is exact regardless of server timezone, and formatted
-// with the same sv-SE local-date idiom used elsewhere in the codebase.
-function computeDueDate(now: Date, paymentTermCode: string | null): string | null {
-  const termDays = Number.parseInt(paymentTermCode ?? "", 10);
-  if (!Number.isFinite(termDays)) return null;
-  return new Date(now.getTime() + termDays * 24 * 60 * 60 * 1000).toLocaleDateString("sv-SE");
 }
 
 // A row as the client may send it (create or the merged result of a PATCH).
@@ -1709,7 +1697,8 @@ export function createInvoiceService(
       const buyerVatNumber = await issueVatNumber(invoice, customer);
 
       const now = new Date();
-      const invoiceDate = now.toLocaleDateString("sv-SE");
+      // A Stockholm day, whatever the container's zone.
+      const invoiceDate = stockholmDateOf(now);
       // Valuta: the rate the invoice is booked at, decided here — before the
       // transaction, since the lookup may call Riksbanken. SEK is 1; a rate
       // typed on the draft wins; a credit note keeps its source invoice's
@@ -1730,7 +1719,7 @@ export function createInvoiceService(
         exchangeRate,
         exchangeRateManual: invoice.exchangeRateManual,
         invoiceDate,
-        dueDate: computeDueDate(now, paymentTerm?.code ?? null),
+        dueDate: dueDateFromTerm(invoiceDate, paymentTerm?.code ?? null),
         // Fakturanamn (c/o, holding company) replaces the customer name on
         // the invoice when the customer has a separate invoice address.
         customerName: (useInvoiceAddress && customer.invoiceName) || customer.name,
@@ -1931,7 +1920,7 @@ export function createInvoiceService(
 
       const level = context.reminders.length + 1;
       const now = new Date();
-      const reminderDate = now.toLocaleDateString("sv-SE");
+      const reminderDate = stockholmDateOf(now);
       // ...and the rest of the posting's configuration preconditions, for
       // exactly the same reason. A FEE-FREE reminder books nothing, so it is
       // deliberately unaffected: sending one during a locked month, or with

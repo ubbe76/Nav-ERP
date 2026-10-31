@@ -297,6 +297,7 @@ export const ERROR_CODES = {
   INVALID_OPERATION_FILE_TYPE: "invalid-operation-file-type",
   MO_OPERATION_NOT_FOUND: "mo-operation-not-found",
   DUPLICATE_INQUIRY_ROW: "duplicate-inquiry-row",
+  DUPLICATE_PURCHASE_ORDER_ROW: "duplicate-purchase-order-row",
   // system
   SERIES_EXHAUSTED: "series-exhausted",
   DUPLICATE_NUMBER_SERIES_NAME: "duplicate-number-series-name",

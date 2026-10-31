@@ -60,8 +60,9 @@ import {
   NotLegoOperationError,
   InquiryRowPriceNotApplicableError,
   DuplicateInquiryRowError,
+  DuplicatePurchaseOrderRowError,
 } from "../service/purchase.service.js";
-import { ArticleIsTemplateError, ArticleNotFoundError } from "../../article/service/article.service.js";
+import { ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
 import { materialShortageBody } from "../../manufacturing/service/material-shortage.js";
@@ -245,7 +246,8 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
     ) {
       return reply.code(404).send(errorBody(err as Error));
     }
-    if (err instanceof LegoOperationArticleMismatchError || err instanceof NotLegoOperationError) {
+    // InvalidUnitError: a unit that is not one of the article's.
+    if (err instanceof LegoOperationArticleMismatchError || err instanceof NotLegoOperationError || err instanceof InvalidUnitError) {
       return reply.code(400).send(errorBody(err));
     }
     if (
@@ -466,9 +468,13 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
     } catch (err) {
       if (err instanceof PurchaseOrderNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof MoOperationNotFoundError) return reply.code(404).send(errorBody(err));
-      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+      if (err instanceof InvalidStatusTransitionError || err instanceof DuplicatePurchaseOrderRowError) {
+        return reply.code(409).send(errorBody(err));
+      }
       // Produktkonfigurator: a template in mode variants on a new row.
       if (err instanceof ArticleIsTemplateError) return reply.code(409).send(errorBody(err));
+      // A unit that is not one of the article's.
+      if (err instanceof InvalidUnitError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });
@@ -484,6 +490,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       if (err instanceof InvalidStatusTransitionError || err instanceof OverReceiptError) {
         return reply.code(409).send(errorBody(err));
       }
+      if (err instanceof InvalidUnitError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

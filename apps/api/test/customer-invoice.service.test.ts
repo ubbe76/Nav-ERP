@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
 import { auditLog, db, units, verifications } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -649,9 +649,33 @@ describe("customer invoice — issue", () => {
     );
     const issued = await invoiceService.issue(draft!.id, issuedBy);
 
-    expect(issued!.invoiceDate).toBe(new Date().toLocaleDateString("sv-SE"));
+    // Today as a Stockholm day, whatever the zone the suite runs in.
+    expect(issued!.invoiceDate).toBe(new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date()));
     expect(issued!.dueDate).not.toBeNull();
     expect(daysBetween(issued!.invoiceDate!, issued!.dueDate!)).toBe(30);
+  });
+
+  // Issued just after midnight Stockholm time on the nights the clocks
+  // change: the invoice date is the Stockholm day (the suite may run in UTC)
+  // and the due date is whole calendar days later, never a 24-hour multiple.
+  it.each([
+    ["2026-03-28T22:30:00Z", "2026-03-28", "2026-03-29"], // 23:30 CET, the night clocks go forward
+    ["2026-10-24T22:30:00Z", "2026-10-25", "2026-10-26"], // 00:30 CEST, the night clocks go back
+  ])("issued at %s: invoice date %s, due one day later on %s", async (instant, invoiceDate, dueDate) => {
+    const term = await registerService.paymentTerms.create({ code: "1", name: "1 dag netto" });
+    const customer = await makeCustomer();
+    const draft = await invoiceService.create(
+      { customerId: customer.id, paymentTermId: term.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
+      (await makeUser()).id
+    );
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(instant));
+    try {
+      const issued = await invoiceService.issue(draft!.id, issuedBy);
+      expect([issued!.invoiceDate, issued!.dueDate]).toEqual([invoiceDate, dueDate]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a non-numeric payment-term code (KONTANT) leaves the due date null", async () => {

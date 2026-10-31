@@ -109,7 +109,7 @@ export const DEMO_DATA: DemoData = {
     { code: "300", name: "Färdiga produkter" },
     { code: "400", name: "Köpkomponenter" },
   ],
-  // The code is the number of days — computeDueDate reads it that way.
+  // The code is the number of days — dueDateFromTerm reads it that way.
   paymentTerm: { code: "30", name: "30 dagar netto" },
   deviationReasons: [
     { code: "TRANSP", name: "Transportskada", customer: true, supplier: true, internal: false, scrap: false },
