@@ -3,6 +3,7 @@ import { and, count, eq, sql } from "drizzle-orm";
 import { auditLog, bankFileEntries, bankFiles, companyInfo, customerPayments, db, invoices, paymentBatches, paymentBatchItems, supplierInvoices, supplierPayments, verifications } from "@navet/db";
 import { createBankFileRepository } from "../src/modules/banking/repository/bank-file.repository.js";
 import { createBankFileService } from "../src/modules/banking/service/bank-file.service.js";
+import { UNEXPECTED_ERROR_TEXT } from "../src/modules/banking/service/reportable-error.js";
 import { computeOpenAmounts } from "../src/modules/purchase/repository/open-amounts.js";
 import { isUniqueViolation } from "../src/modules/system/service/db-errors.js";
 import { computeOcrNumber } from "../src/modules/system/service/ocr.js";
@@ -114,9 +115,22 @@ describe("uppladdning", () => {
   });
 
   it("a fresh file names no earlier file", async () => {
-    const { skippedFrom, file } = await upload(fixtureXml("camt054-swedbank-credit.xml"));
+    const { skippedFrom, file, warnings } = await upload(fixtureXml("camt054-swedbank-credit.xml"));
     expect(skippedFrom).toEqual([]);
     expect(file.warnings).toEqual(["Post med status PDNG hoppades över (bara bokförda poster läses)"]);
+    // The answer carries the parser's own warnings apart from the file's
+    // summary (which also lists skipped entries), so the upload page can
+    // show them when it does not navigate to the file.
+    expect(warnings).toEqual(file.warnings);
+    const again = await upload(fixtureXml("camt054-swedbank-credit.xml"), "igen.xml");
+    expect(again).toMatchObject({ created: false, warnings: [] });
+  });
+
+  it("the download's content type follows the message type, never what the client claimed", async () => {
+    const { file } = await files.upload({ filename: "avi.xml", contentType: "text/html", data: Buffer.from(fixtureXml("camt054-swedbank-credit.xml")) }, userId);
+    const download = await files.download(file.id);
+    expect(download.contentType).toBe("application/xml");
+    expect(download.data.toString("utf8")).toBe(fixtureXml("camt054-swedbank-credit.xml"));
   });
 
   it("the same bytes uploaded concurrently become one file", async () => {
@@ -226,6 +240,11 @@ describe("inbetalningar (camt.054 kredit)", () => {
     expect(detail!.bankFileEntry).toMatchObject({ bankFileId: file.id, filename: "camt054.xml", dedupeKey: "821491234567890|tx:202410098402000100000001" });
     const logged = await db.select().from(auditLog).where(and(eq(auditLog.entityType, "bank_file"), eq(auditLog.action, "entry_booked")));
     expect(logged).toHaveLength(3);
+    // Each payment also has its own `created` row, as a payment registered
+    // by hand has — written inside the entry's transaction.
+    const created = await db.select().from(auditLog).where(and(eq(auditLog.entityType, "customer_payment"), eq(auditLog.action, "created")));
+    expect(created.map((row) => row.entityId).sort()).toEqual(payments.map((p) => p.paymentNumber).sort());
+    expect(created.every((row) => (row.detail as { bankFile: string; bankAccountNumber: string }).bankFile === "camt054.xml")).toBe(true);
   });
 
   // Only the entry's own live-payment indexes mean "already booked"; any
@@ -233,6 +252,7 @@ describe("inbetalningar (camt.054 kredit)", () => {
   it("maps only the *_entry_live unique violations to bank-entry-already-booked", async () => {
     const violation = (constraint: string) => Object.assign(new Error(`duplicate key value violates unique constraint "${constraint}"`), { code: "23505", constraint_name: constraint });
     let constraint = "customer_payments_entry_live";
+    const logged: { msg: string; extra?: Record<string, unknown> }[] = [];
     const fake = createBankFileService({
       db,
       repo: createBankFileRepository(db),
@@ -243,6 +263,7 @@ describe("inbetalningar (camt.054 kredit)", () => {
         },
       },
       receivables: { openReceivables: async () => [], closedByOcrs: async () => [], customersWithOpenItems: async () => [] },
+      log: (msg, extra) => logged.push({ msg, extra }),
     });
     const { file } = await fake.upload({ filename: "k.xml", contentType: "application/xml", data: Buffer.from(fixtureXml("camt054-swedbank-credit.xml")) }, userId);
     const [entry] = await fake.incomingView(file.id);
@@ -250,9 +271,11 @@ describe("inbetalningar (camt.054 kredit)", () => {
     expect((await fake.bookIncoming(file.id, body, userId)).results[0]).toMatchObject({ ok: false, error: { code: "bank-entry-already-booked" } });
     constraint = "customer_payments_payment_number_unique";
     const other = (await fake.bookIncoming(file.id, body, userId)).results[0]!;
-    expect(other.ok).toBe(false);
-    expect(other.ok === false && other.error.code).not.toBe("bank-entry-already-booked");
-    expect(other.ok === false && other.error.error).toContain("customer_payments_payment_number_unique");
+    // A real driver error: logged with its message, answered with the
+    // generic text — never the raw message, never a code.
+    expect(other).toEqual({ entryId: entry!.id, ok: false, error: { error: UNEXPECTED_ERROR_TEXT } });
+    expect(logged).toHaveLength(1);
+    expect((logged[0]!.extra!.err as Error).message).toContain("customer_payments_payment_number_unique");
     // The real driver error carries the index name where the check reads it.
     const customer = await makeCustomer();
     const live = (n: string) => ({ paymentNumber: n, customerId: customer.id, paymentDate: "2024-10-09", bankAccountNumber: "1930", amount: "1", amountSek: "1", bankFileEntryId: entry!.id });

@@ -573,7 +573,13 @@ export function createShippingService(deps: {
           bookedAt: now(),
           bookedBy: userId,
         });
-        if (!marked) throw new FreightBookingTakenOverError();
+        if (!marked) {
+          // Another booker took the (stale) reservation over meanwhile: the
+          // transport Sendify booked for THIS attempt never became the
+          // row's — the history says so next to the `booked` row above.
+          await audit.log({ entityType: "shipment", entityId: id, action: "booking_taken_over", detail: trace, userId });
+          throw new FreightBookingTakenOverError();
+        }
       } catch (err) {
         console.error("Transport booked at the broker but the shipment could not be marked booked", {
           ...trace,

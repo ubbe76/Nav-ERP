@@ -274,16 +274,25 @@ export function supplierPaymentDetailsProblems(input: SupplierPaymentDetails, co
     problems.plusgiro = "Plusgironumret ska vara 2–8 siffror med giltig kontrollsiffra";
   }
   if (d.bankClearing !== null && !/^\d{4,5}$/.test(d.bankClearing)) problems.bankClearing = "Clearingnumret ska vara 4–5 siffror";
-  // Swedbank's 8-series carries a fifth (check) digit: "8CCCC". The same rule
-  // runs in the payment file's structural check (pain001-check.ts).
+  // Swedbank's 8-series carries a fifth (check) digit: "8CCCC" — and only
+  // that series does. The same rule (CLEARING) runs in the payment file's
+  // structural check (pain001-check.ts).
   else if (d.bankClearing !== null && d.bankClearing.startsWith("8") && d.bankClearing.length !== 5) {
     problems.bankClearing = "Clearingnummer i 8-serien (Swedbank) ska vara 5 siffror";
+  } else if (d.bankClearing !== null && !d.bankClearing.startsWith("8") && d.bankClearing.length !== 4) {
+    problems.bankClearing = "Clearingnumret ska vara 4 siffror (bara 8-serien, Swedbank, har 5)";
   }
   if (d.bankAccountNumber !== null && !/^\d{1,15}$/.test(d.bankAccountNumber)) {
     problems.bankAccountNumber = "Kontonumret ska vara högst 15 siffror";
   }
+  // Swedbank's 8-series BBAN is always 15 digits (clearing + account padded
+  // with zeros): an account too long to pad cannot be sent — the same check
+  // the payment file makes at export, here where it can be corrected.
+  else if (d.bankAccountNumber !== null && d.bankClearing !== null && !problems.bankClearing && d.bankClearing.startsWith("8") && d.bankClearing.length + d.bankAccountNumber.length > 15) {
+    problems.bankAccountNumber = "Clearingnummer och kontonummer i 8-serien (Swedbank) får tillsammans vara högst 15 siffror";
+  }
   if (d.iban !== null && !isValidIban(d.iban)) problems.iban = "IBAN är ogiltigt";
-  if (d.bic !== null && !BIC_PATTERN.test(d.bic)) problems.bic = "BIC ska vara 8 eller 11 tecken";
+  if (d.bic !== null && !BIC_PATTERN.test(d.bic)) problems.bic = "BIC ska vara 8 eller 11 tecken: bankkod (4 bokstäver), land (2 bokstäver), ort (2 tecken) och eventuellt kontor (3 tecken), t.ex. ESSESESS";
   // Othr/Id is Max34Text; letters and digits only after normalization.
   if (d.foreignAccountNumber !== null && !/^[A-Z0-9]{1,34}$/.test(d.foreignAccountNumber)) {
     problems.foreignAccountNumber = "Kontonumret får bara innehålla bokstäver och siffror, högst 34 tecken";

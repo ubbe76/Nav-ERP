@@ -345,8 +345,12 @@ describe("boka", () => {
     const [row] = await db.select().from(shipments).where(eq(shipments.id, shipment.id));
     expect(row!.status).toBe("draft");
     expect(row!.bookingStartedAt?.getTime()).toBe(takeover.getTime());
-    // The transport Sendify booked for the first attempt is traceable.
+    // The transport Sendify booked for the first attempt is traceable — in
+    // the server log and in the history, which says the booking was taken
+    // over right after the `booked` row it had already written.
     expect(JSON.stringify(error.mock.calls)).toContain("TRK-tok-dhl-1");
+    expect(auditEntries.filter((e) => e.action === "booked" || e.action === "booking_taken_over").map((e) => e.action)).toEqual(["booked", "booking_taken_over"]);
+    expect(auditEntries.find((e) => e.action === "booking_taken_over")!.detail).toMatchObject({ trackingNumber: "TRK-tok-dhl-1" });
   });
 
   it("a failed booking does not free a reservation another booker took over", async () => {

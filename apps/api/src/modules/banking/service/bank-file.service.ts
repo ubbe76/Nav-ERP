@@ -9,7 +9,6 @@ import {
   type ListBankFilesQuery,
 } from "@navet/shared";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
-import { errorBody } from "../../system/service/error-body.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
 import { findItemByEndToEndId } from "../repository/payment-batch.repository.js";
 import type { BankFileRepository } from "../repository/bank-file.repository.js";
@@ -35,6 +34,7 @@ import { parseCamt054 } from "./iso20022/camt054-parser.js";
 import { namesMatch } from "./name-match.js";
 import { notificationAccountWarning, type CompanyAccounts } from "./own-account.js";
 import type { PaymentBatchService } from "./payment-batch.service.js";
+import { consoleErrorLog, reportableError, type ErrorLog } from "./reportable-error.js";
 
 // The slices of the sales module this service books and reads through —
 // declared here, at the consumer (the CustomerPaymentPoster/StockBalanceReader
@@ -56,6 +56,8 @@ export interface BankFileServiceDeps {
   // The company's own accounts, read live (the bank settings repository).
   company: { readCompany(): Promise<CompanyAccounts> };
   now?: () => Date;
+  // Where unexpected per-entry errors (never shown to the user) are reported.
+  log?: ErrorLog;
 }
 
 // Where the entries an upload skipped were first read (spec §6.1).
@@ -167,6 +169,7 @@ function sameAmount(
 export function createBankFileService(deps: BankFileServiceDeps) {
   const { db, repo } = deps;
   const now = deps.now ?? (() => new Date());
+  const log = deps.log ?? consoleErrorLog;
 
   // Every bank file write logs inside its own transaction (spec §10).
   async function audit(tx: Tx, filename: string, action: string, detail: unknown, userId: string) {
@@ -191,9 +194,11 @@ export function createBankFileService(deps: BankFileServiceDeps) {
         results.push({ entryId, ok: true, paymentNumber });
       } catch (err) {
         // A concurrent booking of the same entry trips its partial unique
-        // index; any other unique violation is a real error and stays one.
-        const error = ENTRY_LIVE_INDEXES.some((name) => isUniqueViolation(err, name)) ? new BankEntryAlreadyBookedError() : (err as Error);
-        results.push({ entryId, ok: false, error: errorBody(error) });
+        // index; any other unique violation is a real error and stays one. A
+        // known refusal is answered as it is; anything else is logged and
+        // replaced by the generic text (a driver error never reaches the user).
+        const error = ENTRY_LIVE_INDEXES.some((name) => isUniqueViolation(err, name)) ? new BankEntryAlreadyBookedError() : err;
+        results.push({ entryId, ok: false, error: reportableError(error, log, `Bokför bankfilspost ${entryId}`) });
       }
     }
     return results;
@@ -211,7 +216,7 @@ export function createBankFileService(deps: BankFileServiceDeps) {
     async upload(input: { filename: string; contentType: string; data: Buffer }, userId: string) {
       const sha256 = createHash("sha256").update(input.data).digest("hex");
       const existing = await repo.findIncomingBySha(sha256);
-      if (existing) return { file: existing, created: false, skippedFrom: [] as SkippedFrom[] };
+      if (existing) return { file: existing, created: false, skippedFrom: [] as SkippedFrom[], warnings: [] as string[] };
       // Parse errors are thrown before anything is written.
       const parsed = parseCamt054(input.data.toString("utf8"));
       const bankCreatedAt = parsed.createdAt ? new Date(parsed.createdAt) : null;
@@ -277,13 +282,15 @@ export function createBankFileService(deps: BankFileServiceDeps) {
           await audit(tx, file.filename, "uploaded", { sha256, entries: fresh.length, skipped }, userId);
           return { file, skippedFrom };
         });
-        return { file, created: true, skippedFrom };
+        // `warnings` = the parser's own (file.warnings also lists the skipped
+        // entries, which the web renders from skippedFrom with links).
+        return { file, created: true, skippedFrom, warnings: parsed.warnings };
       } catch (err) {
         // The same bytes uploaded concurrently: the partial unique index on
         // sha256 decides; the loser answers with the winner's file.
         if (isUniqueViolation(err)) {
           const winner = await repo.findIncomingBySha(sha256);
-          if (winner) return { file: winner, created: false, skippedFrom: [] as SkippedFrom[] };
+          if (winner) return { file: winner, created: false, skippedFrom: [] as SkippedFrom[], warnings: [] as string[] };
         }
         throw err;
       }
@@ -301,10 +308,12 @@ export function createBankFileService(deps: BankFileServiceDeps) {
       return { ...file, accounts, accountWarning: notificationAccountWarning(accounts, company) };
     },
 
+    // The content type follows what the file IS (its message type), never
+    // what the uploading client claimed it was.
     async download(id: string) {
       const file = await repo.findFileData(id);
       if (!file) throw new BankFileNotFoundError(id);
-      return file;
+      return { filename: file.filename, data: file.data, contentType: file.messageType === "csv" ? "text/csv; charset=utf-8" : "application/xml" };
     },
 
     // Spec §5.1: computed live on every GET — nothing about the matching is
@@ -427,6 +436,20 @@ export function createBankFileService(deps: BankFileServiceDeps) {
             userId,
             { bankFileEntryId: entry.id }
           );
+          // The payment's own history row — what create() logs after commit
+          // for a payment registered by hand, here inside the entry's tx.
+          await tx.insert(auditLog).values({
+            entityType: "customer_payment",
+            entityId: done.paymentNumber,
+            action: "created",
+            detail: {
+              amount: payment.amount,
+              bankAccountNumber,
+              bankFile: file.filename,
+              ...(foreign ? { currency: payment.currency, amountSek: Number(entry.amount), bankFeeSek: entry.chargesAmount === null ? 0 : Number(entry.chargesAmount) } : {}),
+            },
+            userId,
+          });
           await audit(tx, file.filename, "entry_booked", { dedupeKey: entry.dedupeKey, payment: done.paymentNumber }, userId);
           return done.paymentNumber;
         }

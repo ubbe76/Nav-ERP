@@ -17,7 +17,7 @@ import { formatMoney } from "../../lib/format";
 import { paymentPreview, PREVIEW_TONE_COLOR, round2 } from "../../lib/paymentTolerance";
 import type { BankFileDetail, BankItemResult, Customer, IncomingEntryView, OpenInvoiceRow, Paged } from "../../lib/types";
 import { BankEntryIgnoreButton } from "./BankEntryIgnoreButton";
-import { BookingFailures } from "./BookingFailures";
+import { BookingFailures, liveFailures, stampResults, type StampedResults } from "./BookingFailures";
 
 // currency = what the rows settle in: the account's (the entry's own amount)
 // or, for an entry whose payer instructed another currency, that one.
@@ -58,21 +58,17 @@ function initialDraft(entry: IncomingEntryView): Draft {
 // changes: the user's edits are kept per entry (lib/stampedEdits.ts), so a
 // booking resets only the entries it booked.
 export function IncomingBankFileCard(props: { file: BankFileDetail; entries: IncomingEntryView[]; customers: Customer[]; tolerance: number }) {
-  const [results, setResults] = useState<BankItemResult[] | null>(null);
-  const failures = (results ?? [])
-    .filter((r) => !r.ok && r.error)
-    .map((r) => {
-      const entry = props.entries.find((e) => e.id === r.entryId);
-      return {
-        key: r.entryId ?? "",
-        label: entry ? `${formatMoney(entry.amount)} kr ${entry.counterpartyName ?? ""}`.trim() : "Post",
-        error: r.error!,
-      };
-    });
+  // Stamped with the entry's state: an entry booked or handled afterwards
+  // takes its stale error with it.
+  const [results, setResults] = useState<StampedResults | null>(null);
+  const failures = liveFailures(results, props.entries, (id) => {
+    const entry = props.entries.find((e) => e.id === id);
+    return entry ? `${formatMoney(entry.amount)} kr ${entry.counterpartyName ?? ""}`.trim() : "Post";
+  });
   return (
     <>
       <BookingFailures failures={failures} />
-      <IncomingBankFileBody key={props.file.id} {...props} onResults={setResults} />
+      <IncomingBankFileBody key={props.file.id} {...props} onResults={(r) => setResults(stampResults(r, props.entries))} />
     </>
   );
 }
@@ -105,10 +101,16 @@ function IncomingBankFileBody({
   const isChosen = (e: IncomingEntryView) => editOf(toggled, e) ?? e.state === "matched";
   const allocated = (e: IncomingEntryView) => round2(draftOf(e).rows.reduce((sum, r) => sum + (Number(r.applied) || 0), 0));
 
-  const bookable = (e: IncomingEntryView) => {
+  // Why a chosen entry is not booked yet (null = it is bookable).
+  const notBookableReason = (e: IncomingEntryView): string | null => {
     const draft = draftOf(e);
-    return EDITABLE.has(e.state) && draft.customerId !== "" && draft.rows.length > 0 && allocated(e) === round2(amountIn(e, draft.currency));
+    if (!EDITABLE.has(e.state)) return "Posten kan inte bokföras här.";
+    if (draft.customerId === "") return "Välj kund under Fördelning — posten bokförs inte förrän den har en kund och fakturor.";
+    if (draft.rows.length === 0) return "Välj fakturor under Fördelning — posten bokförs inte förrän den har fakturor.";
+    if (allocated(e) !== round2(amountIn(e, draft.currency))) return "Fördelningen stämmer inte med beloppet — posten bokförs inte förrän den gör det.";
+    return null;
   };
+  const bookable = (e: IncomingEntryView) => notBookableReason(e) === null;
   // A chosen entry whose allocation stops adding up (or that changes state)
   // is skipped, never a lock on the others: only chosen ∩ bookable is sent,
   // and its checkbox stays enabled so it can be unchecked.
@@ -215,9 +217,7 @@ function IncomingBankFileBody({
                 )}
                 {writable && e.state !== "booked" && <BankEntryIgnoreButton fileId={file.id} direction="incoming" entryId={e.id} ignored={e.state === "ignored"} />}
               </div>
-              {editable && chosen && !bookable(e) && (
-                <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>Fördelningen stämmer inte med beloppet — posten bokförs inte förrän den gör det.</div>
-              )}
+              {editable && chosen && !bookable(e) && <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>{notBookableReason(e)}</div>}
               {e.proposal?.reason && <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>{e.proposal.reason}</div>}
               {editable && isForeignPayment(e) && draft.currency !== e.currency && (
                 <div style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>

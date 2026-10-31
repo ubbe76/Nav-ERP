@@ -29,15 +29,11 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
-- [ ] **Bankfiler:** BIC-texten; radresultat kan läcka råa meddelanden och `ItemResult` saknar verifikat; utkastvyns referens är tom; gamla utkastrader skickar `executionDate`; prefixmönstret `[A-Z0-9-]`; nedladdningen speglar klientens content type; webben skickar alltid `itemIds` (schemat tar max 500); "Fördelningen stämmer inte" när kund saknas; `absent`-id använder fel ordbokstext; `creditorTownRequired` styr även gäldenärens ort; leverantörsvalideringen vägrar inte 5-siffrig clearing som inte börjar på 8 eller fel 15-siffrig total (fångas vid filbygget); korsfil-#n kan para fel när en bank återanvänder en referens (varnas).
-- [ ] **Bankfiler:** uppladdning med överhoppade dubbletter visar inte filens egna varningar; fellistor ligger kvar till nästa bokning; bankbokförda kundbetalningar saknar audit `customer_payment created` och manuell Makulera av UTB-omgång skriver ingen audit.
-- [ ] **Frakt:** en övertagen bokning (`FreightBookingTakenOverError`) har redan skrivit audit `booked`, så Historiken visar en bokning raden aldrig fick — egen händelse `booking_taken_over`.
 - [ ] **Konfigurator:** `useVariantOf` behandlar alla fel som "ingen variant"; `saveReconfigure` stänger dialogen vid 409 (valen tappas); ett uttryckligen valt men regelexkluderat alternativ prissätts ändå på en ogiltig konfiguration; standardvärdet för tal kontrolleras inte mot stegrutnätet; `proposal.articleId` kontrolleras inte mot raden.
 - [ ] **Konfigurator, mallredigeringen:** en halvifylld rads fel rensas inte vid skrivning i ny rad; halvskriven tidig retur kastar pågående svar för det senaste kompletta värdet; `parseDecimal` vägrar `.5`; härledningen kan ge `-0`; baskopplad rad visar bara sekvensnumret när rutthämtningen fallerar.
 - [ ] **Konfigurator, orderrader:** "· Konfigurerbar" visas i alla artikelval, även register/struktur; `ConfigurationLineList` nycklar på text; `FormHint` ger `<p>` i `<span>`; gruppsorteringen vid lika sortOrder och `configuredRowsOfTemplate` saknar stabil ordning; `formatMeasure` kan visa e-notation; `show_configuration_prices` i e-postloggen är alltid boolean för offert/OB; delkredit med explicita rader kopierar konfigurationen från orderraden.
 - [ ] **Konfigurator, behovsberäkningen:** mallraden har en inaktiv kryssruta; artikeltabellen döljs när sidan bara har konfigurerade rader.
 - [ ] **Externt API:** `row-variant-exists`-texten är variantformulerad även för vanliga dubbletter; generisk webbtext för `configurator-not-published`; listrutten går förbi `run()`.
-- [ ] **Faktura:** fakturadialogens rader inom en order saknar stabil ordning (sorteras bara på ordernummer).
 - [ ] **Terminalen:** Sök/Bara redo behåller dolda markeringar; stationsbyte under pågående Starta valda; materialsorteringen använder numerisk collator mot API:ts `localeCompare`; identifieringen väntar på hela uppdateringen inkl. ordrar; Gå hem nu erbjuds även vid flerdygnsglömska; Sluttid skickas alltid (≤ 59 s avrundning); "Hej då"-notisen ligger kvar med hårdvarutangentbord.
 
 ### Låga — layout
@@ -133,6 +129,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medvetna val — ompröva bara vid behov
 
+- [ ] **Bankfiler:** radresultatet (`ItemResult`) bär inget verifikat — webben visar bara misslyckade rader; `creditorTownRequired` i bankprofilen styr även gäldenärens ort (kontrollera mot bankens MIG om en bank vägrar, och lägg i så fall en egen profilflagga); korsfilsparningen #n kan para fel när en bank återanvänder en referens (posten varnas redan); prefixmönstret `[A-Z0-9-]` för omgångsnumret (bankernas teckenregler okända — meddelandet säger nu hur det rättas).
 - [ ] **Årsbokslut:** `bookDepreciation` ger 400 `month-in-future` före planen även när inget saknas (en indatakontroll; webben låter inte välja en kommande månad); en omföring av en omföring i serie I döljer importens nummer i IB-spärrens meddelande (spärren slår ändå till på IB-skillnaden).
 - [ ] **Lön:** attest ogiltigförklaras inte av senare ändringar i öppen period; OB räknas även på övertidsintervall (lönesystemet avgör); `absentToday` i `GET /stamp-sessions` syns för arbetsledare via Pågående arbete utan Personal & lön.
 - [ ] **Närvaroavvikelser:** attesteringen visar ingen "(N min sent)" förrän sessionen stängts; anledningen påverkar aldrig lön eller frånvaro.

@@ -633,6 +633,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     supplierPayments: supplierPaymentService,
     // KU81: today's rate for the 150 000 kr threshold of a payment abroad.
     exchangeRates: exchangeRateService,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   // Bankfiler (camt.054) — declared after the payment services (C3): incoming
   // payments book through the customer payment registration's Tx seam,
@@ -645,6 +646,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     customerPayments: paymentService,
     receivables: paymentRepository,
     company: bankSettingsRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   // Produktkonfigurator: templates, groups, rules, conditional structure lines
   // and operations, the shared evaluate/derive engine and stocked variants.
