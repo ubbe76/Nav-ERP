@@ -16,6 +16,7 @@ import { documentSekAmounts, SEK } from "../../lib/currency";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, round2 } from "../../lib/format";
 import { useInvoiceRate } from "../../lib/useExchangeRate";
+import { purchaseOrderFallbackRate } from "../../lib/purchaseOrderFallbackRate";
 import {
   chargedVatRate,
   supplierDefaultVatCode,
@@ -187,10 +188,6 @@ export function NewSupplierInvoiceForm({
   // lookup itself and records where the rate came from.
   const invoiceCurrency = invoiceSupplier?.currency.trim().toUpperCase() ?? SEK;
   const foreignCurrency = invoiceSupplier !== null && invoiceCurrency !== SEK;
-  const invoiceRate = useInvoiceRate({
-    currency: foreignCurrency ? invoiceCurrency : null,
-    date: invoiceDate,
-  });
   const [note, setNote] = useState("");
   // Underlag — the supplier's invoice as PDF/scan, uploaded right after the
   // invoice is created (the file needs the new LF's id).
@@ -200,6 +197,14 @@ export function NewSupplierInvoiceForm({
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [qtyBasis, setQtyBasis] = useState<"received" | "ordered">("received");
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
+  // Valuta, continued: with basis from a purchase order the API falls back on
+  // that order's rate when the date has none — the field shows it too.
+  const basisOrder = previewRows.length > 0 ? (orders.find((o) => o.id === selectedOrderId) ?? null) : null;
+  const invoiceRate = useInvoiceRate({
+    currency: foreignCurrency ? invoiceCurrency : null,
+    date: invoiceDate,
+    fallbackRate: purchaseOrderFallbackRate(basisOrder, foreignCurrency ? invoiceCurrency : null),
+  });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // An order id to auto-select + auto-fetch once its supplier's orders load

@@ -82,6 +82,8 @@ export function budgetedAmounts(lines: BudgetLineAmount[], periods: BudgetPeriod
 // calendar month (the MM of the period's start date). Keys are 1-based
 // target ordinals, values 1-based source ordinals. A source year with two
 // periods of the same MM (a long first year) contributes the LATER one; a
+// long TARGET year gets the same source month for both of its occurrences
+// (every amount stays in its calendar month, the whole year is budgeted); a
 // target month with no source counterpart is absent from the map.
 export function calendarMonthMap(source: BudgetPeriod[], target: BudgetPeriod[]): Map<number, number> {
   const sourceByMonth = new Map<string, number>();

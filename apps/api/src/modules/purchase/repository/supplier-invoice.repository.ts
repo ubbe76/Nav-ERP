@@ -403,6 +403,10 @@ export function createSupplierInvoiceRepository(db: Db | Tx) {
           supplierCountry: suppliers.country,
           supplierCurrency: suppliers.currency,
           purchaseOrderNumber: purchaseOrders.orderNumber,
+          // Valuta: the card shows the PO's rate when the invoice date has
+          // none — the fallback resolveRate takes on a save.
+          purchaseOrderCurrency: purchaseOrders.currency,
+          purchaseOrderExchangeRate: purchaseOrders.exchangeRate,
           verificationDisplayNumber: verificationDisplayNumberSql,
           // Momskoder: the header's code (NOT NULL).
           vatCodeCode: vatCodes.code,

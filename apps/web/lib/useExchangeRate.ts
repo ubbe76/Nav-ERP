@@ -97,6 +97,9 @@ type RateMode = "stored" | "typed" | "auto";
 export function useInvoiceRate(options: {
   currency: string | null;
   date: string;
+  // purchaseOrderFallbackRate of the linked purchase order: shown (källa
+  // inköpsorderns kurs) when the date has no rate, as the save will record.
+  fallbackRate?: number | null;
   stored?: {
     rate: string;
     source: DocumentRateSourceValue | null;
@@ -105,7 +108,7 @@ export function useInvoiceRate(options: {
     invoiceDate: string;
   };
 }): InvoiceRate {
-  const { currency, date, stored } = options;
+  const { currency, date, stored, fallbackRate = null } = options;
   const hasStored = stored !== undefined;
   const storedMissing = hasStored && stored.rate.trim() === "";
   const storedManual = hasStored && stored.source === "manual";
@@ -138,12 +141,18 @@ export function useInvoiceRate(options: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
+  // No rate for the date, but the API will take the purchase order's.
+  const usesFallback = lookupWanted && lookedUp === null && lookup.status === "error" && fallbackRate !== null;
+
   let rate: string;
   let sourceText: string | null;
   let fromRiksbank = false;
   if (mode === "typed") {
     rate = typed;
     sourceText = "manuell";
+  } else if (lookupWanted && usesFallback) {
+    rate = String(fallbackRate);
+    sourceText = documentRateSourceText("purchase_order", null);
   } else if (lookupWanted) {
     rate = lookedUp ? String(lookedUp.rate) : "";
     const source: DocumentRateSourceValue | null = lookedUp ? (lookedUp.source === "manual" ? "register" : "riksbank") : null;
@@ -164,7 +173,7 @@ export function useInvoiceRate(options: {
     sourceText,
     fromRiksbank,
     loading: lookupWanted && lookedUp === null && (lookup.status === "loading" || lookup.status === "ok"),
-    problem: lookupWanted && lookedUp === null && lookup.status === "error" ? lookup.message : null,
+    problem: lookupWanted && lookedUp === null && lookup.status === "error" && !usesFallback ? lookup.message : null,
     setRate: (value: string) => {
       setMode("typed");
       setTyped(value);

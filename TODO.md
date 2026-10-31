@@ -23,16 +23,12 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 
-- [ ] **Konfigurator:** `updateRule` med bara ny effekt tolkar det sparade målet med den nya effektens icke-strikta schema — require → exclude kan tappa en operation tyst. Kräv mål när effekten ändras.
 - [ ] **Radordning:** latenta `createdAt`-ties (bulkinsert delar `now()`) i `salesOrderRows`, `costCalculationMaterialRows` och `supplierInvoiceRows` — raderna kan byta ordning.
-- [ ] **Budget:** CSV-exporten skyddar inte kostnadsställekoder mot formelprefix (`=`, `+`, `-`, `@`) när filen öppnas i Excel.
-- [ ] **Budget:** `calendarMonthMap` ger dubbla MM i ett förlängt målår — beloppen kan hamna på fel månad.
 - [ ] **Konfigurerad tillverkning:** en icke-härledbar struktur accepteras på raden med cost null och syns först när TO:n skapas; datumförslaget ignorerar levererat antal; en inaktiv mall får fortfarande konfigurerade förslag i behovsberäkningen.
 - [ ] **Beställningsvara:** AddRowForm-omvärderingen kan skriva över ett pris som användaren skriver medan evaluate pågår (bryter "manuellt vinner"); `rowConfigurationLines` saknar `?.` på price.
 - [ ] **Bankfiler:** returdatum före betaldatum valideras inte; camt.054 tappar `RfrdDocInf` som inte är CINV/CREN (behåll som ADDTL) och `candidateOcrs` kräver 3–25 siffror mot specens 2–25.
 - [ ] **Bankfiler:** en lyckad bokning nollställer andra posters osparade utkast (misslyckade överlever).
 - [ ] **Kostnadsställen:** felet "välj kostnadsställe på raderna" visas när kolumnerna är dolda, så användaren ser inte fältet; P1-dialogen räknar offert som kundorder.
-- [ ] **Leverantörsfaktura:** webben visar "Ingen kurs" när servern faller tillbaka på inköpsorderns kurs.
 - [ ] **Årsbokslut:** `loadWarnings` läser sekventiellt och ett enda fel fäller sidan; saknad sista period ger en vanlig `Error` (500); `AccrualsCard`-utkastet i localStorage kan dölja rader som någon annan bokfört tills det rensas.
 - [ ] **Anläggningsregister:** ingen korskontroll av konton mellan grupper (A:s kostnadskonto = B:s ack nettas).
 - [ ] **TO från kundorderrad:** avbryts ordern i millisekundfönstret mellan validering och commit skapas TO:n länkad mot en avbruten order och raden blir permanent oborttagbar.

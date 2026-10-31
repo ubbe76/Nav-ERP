@@ -38,6 +38,7 @@ import {
 import { fetchPurchaseOrderBasis, basisRowsSum, type BasisQuantity } from "../../lib/supplierInvoiceBasis";
 import { useUnsavedGuard } from "../../lib/unsavedGuard";
 import { useInvoiceRate } from "../../lib/useExchangeRate";
+import { purchaseOrderFallbackRate } from "../../lib/purchaseOrderFallbackRate";
 import { useVatCodes } from "../../lib/useVatCodes";
 import {
   chargedVatRate,
@@ -630,7 +631,12 @@ function ReviewForm({
   // --- Valuta ---
   const invoiceCurrency = supplier?.currency.trim().toUpperCase() ?? SEK;
   const foreignCurrency = supplier !== null && invoiceCurrency !== SEK;
-  const invoiceRate = useInvoiceRate({ currency: foreignCurrency ? invoiceCurrency : null, date: invoiceDate });
+  // A chosen purchase order's rate is what the conversion falls back on.
+  const invoiceRate = useInvoiceRate({
+    currency: foreignCurrency ? invoiceCurrency : null,
+    date: invoiceDate,
+    fallbackRate: purchaseOrderFallbackRate(orders.find((o) => o.id === orderId) ?? null, foreignCurrency ? invoiceCurrency : null),
+  });
   const scanCurrency = result?.currency.value?.trim().toUpperCase() ?? null;
   const currencyMismatch = supplier !== null && scanCurrency !== null && scanCurrency !== invoiceCurrency;
 

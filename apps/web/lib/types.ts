@@ -903,6 +903,10 @@ export interface SupplierInvoice {
   supplierName: string;
   purchaseOrderId: string | null;
   purchaseOrderNumber?: string | null;
+  // The linked PO's currency and rate (detail only) — the rate a save falls
+  // back to when the invoice date has none (purchaseOrderFallbackRate).
+  purchaseOrderCurrency?: string | null;
+  purchaseOrderExchangeRate?: string | null;
   invoiceDate: string;
   dueDate: string | null;
   currency: string;
