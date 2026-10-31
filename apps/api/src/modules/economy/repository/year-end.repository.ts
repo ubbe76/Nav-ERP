@@ -379,7 +379,14 @@ export async function hasDepreciationRunOn(executor: Executor, date: string): Pr
     .select({ id: fixedAssetDepreciationRuns.id })
     .from(fixedAssetDepreciationRuns)
     .innerJoin(verifications, eq(verifications.id, fixedAssetDepreciationRuns.verificationId))
-    .where(and(isNull(fixedAssetDepreciationRuns.disposalAssetId), eq(verifications.date, date)))
+    // Undone runs (reversed in the register) are not booked steps any more.
+    .where(
+      and(
+        isNull(fixedAssetDepreciationRuns.disposalAssetId),
+        isNull(fixedAssetDepreciationRuns.reversalVerificationId),
+        eq(verifications.date, date)
+      )
+    )
     .limit(1);
   return row !== undefined;
 }

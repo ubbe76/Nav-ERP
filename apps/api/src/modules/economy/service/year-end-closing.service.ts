@@ -495,6 +495,10 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     if (value === 0 && !closing.inventoryVerificationId) {
       const settings = await deps.settings.read(executor);
       const account = await repo.findAccountByNumber(executor, settings.postingInventory);
+      // The same account in both roles is a misconfiguration whatever the
+      // value — reported here too, as soon as both numbers resolve.
+      const change = await repo.findAccountByNumber(executor, settings.postingInventoryChange);
+      if (account && change && account.id === change.id) throw new InventoryAccountConflictError(settings.postingInventory);
       const ledger = account ? await repo.accountBalance(executor, account.id, closing.closingDate) : 0;
       if (ledger === 0) {
         const unchanged = closing.inventoryBookedAt !== null && closing.inventoryMethod === method && Number(closing.inventoryValue) === 0;
@@ -989,6 +993,10 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     };
   }
 
+  // The drafts shown under the draft-verifications blocker; the count beside
+  // them says how many there are in all.
+  const DRAFT_LIST_LIMIT = 20;
+
   // Detail sections that grow with each step.
   async function views(executor: Db | Tx, closing: repo.ClosingRow, year: repo.FiscalYearRow) {
     const close = await loadCloseBlockers(executor, closing, year);
@@ -1008,7 +1016,9 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         stepBlockers: evaluateStepBlockers(close.gate),
         closeBlockers: close.blockers,
         warnings: await loadWarnings(executor, closing, year, { tolerant: true }),
-        draftVerifications: await repo.listDrafts(executor, year.id, 20),
+        draftVerifications: await repo.listDrafts(executor, year.id, DRAFT_LIST_LIMIT),
+        // The blocker's count: the list above is capped, this is not.
+        draftVerificationCount: close.gate.draftCount,
       },
       ibCheck: close.ib,
       profitDisposition: await dispositionView(executor, closing),
@@ -1085,6 +1095,8 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         const year = await requireYear(tx, closing.fiscalYearId);
         if (closing.status !== "in_progress") throw new YearEndClosingClosedError(year.label);
         if (await closingDateLocked(tx, closing)) throw new ClosingDateLockedError();
+        // Same date as before: nothing to write, nothing to log.
+        if (closingDate === closing.closingDate) return;
         await assertClosingDate(tx, year, closingDate);
         await repo.updateClosing(tx, id, { closingDate });
         await writeAudit(tx, year.label, "closing_date_changed", { from: closing.closingDate, to: closingDate }, userId);
@@ -1517,7 +1529,10 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         await repo.markFiscalYearOpen(tx, year.id);
         const period = await repo.findPeriodForDate(tx, closing.closingDate);
         if (!period) throw new Error(`No period covers ${closing.closingDate}`);
-        await repo.unlockPeriodById(tx, period.id);
+        // closeYear locks every period, so the month is locked here unless
+        // older data says otherwise — then there is no unlock to log.
+        const unlocked = period.status === "locked";
+        if (unlocked) await repo.unlockPeriodById(tx, period.id);
         const cancelled = closing.resultTransferVerificationId
           ? await cancelGuideVerification(tx, closing.id, closing.resultTransferVerificationId, "result_transfer", userId)
           : null;
@@ -1527,25 +1542,30 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
           tx,
           year.label,
           "reopened",
-          { reason, cancelledResultTransfer: cancelled?.displayNumber ?? null, unlockedPeriod: month },
+          { reason, cancelledResultTransfer: cancelled?.displayNumber ?? null, unlockedPeriod: unlocked ? month : null },
           userId
         );
         // The period's own history shows the unlock too (same entity id as
         // economyService.unlockPeriod).
-        await tx.insert(auditLog).values({
-          entityType: "accounting_period",
-          entityId: `${year.label}-${month}`,
-          action: "unlocked",
-          detail: { reason: `Bokslut öppnat igen: ${reason}` },
-          userId,
-        });
+        if (unlocked) {
+          await tx.insert(auditLog).values({
+            entityType: "accounting_period",
+            entityId: `${year.label}-${month}`,
+            action: "unlocked",
+            detail: { reason: `Bokslut öppnat igen: ${reason}` },
+            userId,
+          });
+        }
       });
       return service.getClosing(id);
     },
 
+    // Same gate as bookProfitDisposition (without its lock): on an open
+    // closing the result is not final, so there is nothing to preview.
     async previewProfitDisposition(id: string, input: ProfitDispositionInput) {
       const closing = await requireClosing(db, id);
       const year = await requireYear(db, closing.fiscalYearId);
+      if (closing.status !== "closed") throw new YearEndClosingNotClosedError(year.label);
       const plan = await dispositionPlan(db, year, input);
       return {
         resultAmount: plan.resultAmount,

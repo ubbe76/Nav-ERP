@@ -89,6 +89,14 @@ class NoPeriodAtBookingError extends Error {
     super();
   }
 }
+// Checked BEFORE the period: closeYear locks every period of the year, so
+// the lock alone would report "locked period" when the answer the user
+// needs is "the year is closed — reopen it under Bokslut".
+class ClosedYearAtBookingError extends Error {
+  constructor(public label: string) {
+    super();
+  }
+}
 // Fifth in-tx check (kostnadsställen och projekt): a row on an account with
 // Kräver kostnadsställe but no cost center. Read under the same lock as the
 // others — the flag can be set between the draft and Bokför.
@@ -107,6 +115,7 @@ export type BookFailure =
   | { ok: false; reason: "too_few_rows" }
   | { ok: false; reason: "unbalanced"; totalDebit: number; totalCredit: number }
   | { ok: false; reason: "inactive_account"; accountId: string }
+  | { ok: false; reason: "closed_year"; label: string }
   | { ok: false; reason: "locked_period"; date: string }
   | { ok: false; reason: "no_period"; date: string }
   | { ok: false; reason: "cost_center_required"; accountNumbers: string[] };
@@ -118,6 +127,7 @@ export function bookFailureReason(err: unknown): BookFailure | null {
     return { ok: false, reason: "unbalanced", totalDebit: err.totalDebit, totalCredit: err.totalCredit };
   }
   if (err instanceof InactiveAccountAtBookingError) return { ok: false, reason: "inactive_account", accountId: err.accountId };
+  if (err instanceof ClosedYearAtBookingError) return { ok: false, reason: "closed_year", label: err.label };
   if (err instanceof LockedPeriodAtBookingError) return { ok: false, reason: "locked_period", date: err.date };
   if (err instanceof NoPeriodAtBookingError) return { ok: false, reason: "no_period", date: err.date };
   if (err instanceof CostCenterRequiredAtBookingError) return { ok: false, reason: "cost_center_required", accountNumbers: err.accountNumbers };
@@ -265,11 +275,13 @@ export function createEconomyRepository(db: Db) {
     // period-checked at all until now. Same query shape as
     // getPeriodStatusForDate, but via `tx` so it sees the locked row.
     const [periodRow] = await tx
-      .select({ status: accountingPeriods.status })
+      .select({ status: accountingPeriods.status, yearStatus: fiscalYears.status, yearLabel: fiscalYears.label })
       .from(accountingPeriods)
+      .innerJoin(fiscalYears, eq(fiscalYears.id, accountingPeriods.fiscalYearId))
       .where(and(lte(accountingPeriods.startDate, existing.date), gte(accountingPeriods.endDate, existing.date)));
     const periodStatus = periodRow?.status ?? null;
     if (periodStatus === null) throw new NoPeriodAtBookingError(existing.date);
+    if (periodRow!.yearStatus === "closed") throw new ClosedYearAtBookingError(periodRow!.yearLabel);
     if (periodStatus === "locked") throw new LockedPeriodAtBookingError(existing.date);
 
     const verificationNumber = await allocateVerificationNumber(tx, existing.seriesId, existing.fiscalYearId);

@@ -151,6 +151,15 @@ describe("evaluateCloseBlockers", () => {
     expect(evaluateCloseBlockers({ ...early, today: "2025-01-01" })).toEqual([]);
   });
 
+  it("gives one blocker, not two, when the closing day is the year's last day and neither has passed", () => {
+    // closingDate = yearEndDate = 2024-12-31 in READY.
+    expect(evaluateCloseBlockers({ ...READY, today: "2024-12-31" }).map((c) => c.code)).toEqual(["fiscal-year-not-ended"]);
+    // An earlier closing day that has passed while the year has not: still one.
+    expect(evaluateCloseBlockers({ ...READY, closingDate: "2024-12-20", today: "2024-12-25" }).map((c) => c.code)).toEqual([
+      "fiscal-year-not-ended",
+    ]);
+  });
+
   it("does not gate the steps on the year's end (only the close)", () => {
     expect(evaluateStepBlockers({ ...GATE, closingDate: "2024-12-20", today: "2024-12-21" })).toEqual([]);
   });

@@ -11,8 +11,9 @@ import {
   FixedAssetCategoryInUseError,
   FixedAssetCategoryNotFoundError,
 } from "../src/modules/economy/service/fixed-asset.service.js";
-import { testEconomyRepository, testEconomyService } from "./helpers/services.js";
-import { PLAN_YEAR, accountId, resetFixedAssets, setupFixedAssets, testFixedAssetService } from "./helpers/fixed-assets.js";
+import { createFixedAssetService } from "../src/modules/economy/service/fixed-asset.service.js";
+import { testDocumentPdfService, testEconomyRepository, testEconomyService } from "./helpers/services.js";
+import { PLAN_YEAR, accountId, resetFixedAssets, setupFixedAssets, testFixedAssetService, testPoster } from "./helpers/fixed-assets.js";
 
 const service = testFixedAssetService;
 
@@ -207,6 +208,28 @@ describe("anläggningsgrupper", () => {
     const byggnader = (await service.listCategories()).find((category) => category.name === "Byggnader")!;
     expect(byggnader.accounts.expense.number).toBe("7820");
     expect(byggnader.defaultUsefulLifeMonths).toBe(600);
+  });
+
+  it("survives a double click: two concurrent seeds both succeed, one creates and one skips, and the created groups are logged", async () => {
+    await setupFixedAssets();
+    const logged: string[] = [];
+    const audited = createFixedAssetService({
+      db,
+      poster: testPoster,
+      audit: { log: async (entry) => void logged.push(`${entry.action}:${entry.entityId}`) },
+      pdf: testDocumentPdfService,
+    });
+    const results = await Promise.allSettled([audited.seedBasCategories(), audited.seedBasCategories()]);
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+    const values = results.map((r) => (r as PromiseFulfilledResult<{ created: string[]; skipped: string[] }>).value);
+    expect(values.map((v) => v.created.length).sort()).toEqual([0, 5]);
+    expect(values.map((v) => v.skipped.length).sort()).toEqual([0, 5]);
+    expect((await service.listCategories()).filter((category) => category.name === "Datorer")).toHaveLength(1);
+    expect(logged.sort()).toEqual(
+      ["Bilar och andra transportmedel", "Byggnader", "Datorer", "Inventarier och verktyg", "Maskiner och andra tekniska anläggningar"].map(
+        (name) => `created:${name}`
+      )
+    );
   });
 
   it("creates nothing when a BAS account is missing", async () => {

@@ -125,7 +125,8 @@ export function AnlaggningarPageClient({
       />
       <Pagination total={assets.total} pageSize={pageSize} />
 
-      <NewAssetModal open={createOpen} onClose={() => setCreateOpen(false)} categories={categories} supplierInvoices={supplierInvoices} />
+      {/* Mounted only while open so a cancelled form starts blank next time. */}
+      {createOpen && <NewAssetModal open onClose={() => setCreateOpen(false)} categories={categories} supplierInvoices={supplierInvoices} />}
     </>
   );
 }
@@ -251,18 +252,14 @@ function DepreciationSection({ runs }: { runs: Paged<DepreciationRun> }) {
       <Modal open={preview !== null} onClose={() => setPreview(null)} title={`Bokför avskrivningar t.o.m. ${preview ? monthLabel(preview.throughMonth) : ""}`} wide>
         {preview && (
           <>
-            {preview.warnings.map((warning) =>
-              warning === "inactive-account" ? (
-                <FormNotice key={warning} style={{ marginBottom: 12 }}>
-                  {DEPRECIATION_WARNINGS[warning]}{" "}
-                  {preview.inactiveAccounts.map((row) => `${row.accountNumber} ${row.accountName} (${row.categoryName})`).join(", ")}
-                </FormNotice>
-              ) : (
-                <FormError key={warning} margin="below">
-                  {DEPRECIATION_WARNINGS[warning]}
-                </FormError>
-              )
-            )}
+            {preview.warnings.map((warning) => (
+              <FormNotice key={warning} style={{ marginBottom: 12 }}>
+                {DEPRECIATION_WARNINGS[warning]}
+                {warning === "inactive-account" && (
+                  <> {preview.inactiveAccounts.map((row) => `${row.accountNumber} ${row.accountName} (${row.categoryName})`).join(", ")}</>
+                )}
+              </FormNotice>
+            ))}
             {preview.assets.length === 0 ? (
               <p>Inget att bokföra — alla månader t.o.m. {monthLabel(preview.throughMonth)} är redan avskrivna.</p>
             ) : (

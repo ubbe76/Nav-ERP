@@ -29,12 +29,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
-- [ ] **Anläggningsregister:** `seedBasCategories` saknar `isUniqueViolation`-fångst (dubbelklick ger 500) och seedade grupper skriver ingen audit; `undoRun` ignorerar antalet ersatta rader; modalernas tillstånd nollställs inte (DisposeModal, NewAssetModal) och EditAssetModal behåller osparade ändringar efter stängning; ett inaktivt förvalt mellankonto syns inte i den filtrerade listan; varningar visas med `FormError` i stället för `FormNotice`.
-- [ ] **Anläggningsregister** *(parkerat)*: en tillgång med bara ingående avskrivning kan byta grupp och ingående fält (manualen säger att fälten låses vid första bokförda avskrivningen).
-- [ ] **Årsbokslut** *(parkerat)*: en ångrad avskrivningskörning — eller vilken registerkörning som helst — daterad på bokslutsdagen låser datumet; med lagervärde 0 på tomt konto rapporteras inte felkonfigurationen Lager = Lagerförändring.
-- [ ] **Årsbokslut:** NV001-texten "Bokförd räkenskapsinformation kan inte ändras" missvisande för stängt år; inaktivt lagerkonto ger 409 här men 400 i steg 6; manuell bokföring i stängt år svarar `accounting-period-locked` (enligt spec), inte `fiscal-year-closed`; postern skickar ett datum som `what` i `FiscalYearClosedError`; `bookDepreciation` ger 400 month-in-future även utan något att boka.
-- [ ] **Årsbokslut:** utkastlistan kapas vid 20 utan besked; `reopen` skriver audit även när perioden redan är öppen och `updateClosingDate` loggar oförändrat datum; omföring av omföring i serie I markerar importen som omförd i meddelandet; `previewProfitDisposition` svarar på pågående bokslut; dubbla stängningsspärrar när bokslutsdag = årsslut.
-- [ ] **Dröjsmålsränta:** 409-texten already-charged när fakturan bara slutat vara kandidat; villkorstexten kommer även på valutafakturor; "3 valda" räknar ersättningsrutor; privatperson läses live i stället för från fakturan.
 - [ ] **Bankfiler:** BIC-texten; radresultat kan läcka råa meddelanden och `ItemResult` saknar verifikat; utkastvyns referens är tom; gamla utkastrader skickar `executionDate`; prefixmönstret `[A-Z0-9-]`; nedladdningen speglar klientens content type; webben skickar alltid `itemIds` (schemat tar max 500); "Fördelningen stämmer inte" när kund saknas; `absent`-id använder fel ordbokstext; `creditorTownRequired` styr även gäldenärens ort; leverantörsvalideringen vägrar inte 5-siffrig clearing som inte börjar på 8 eller fel 15-siffrig total (fångas vid filbygget); korsfil-#n kan para fel när en bank återanvänder en referens (varnas).
 - [ ] **Bankfiler:** uppladdning med överhoppade dubbletter visar inte filens egna varningar; fellistor ligger kvar till nästa bokning; bankbokförda kundbetalningar saknar audit `customer_payment created` och manuell Makulera av UTB-omgång skriver ingen audit.
 - [ ] **Frakt:** en övertagen bokning (`FreightBookingTakenOverError`) har redan skrivit audit `booked`, så Historiken visar en bokning raden aldrig fick — egen händelse `booking_taken_over`.
@@ -45,9 +39,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Externt API:** `row-variant-exists`-texten är variantformulerad även för vanliga dubbletter; generisk webbtext för `configurator-not-published`; listrutten går förbi `run()`.
 - [ ] **Faktura:** fakturadialogens rader inom en order saknar stabil ordning (sorteras bara på ordernummer).
 - [ ] **Terminalen:** Sök/Bara redo behåller dolda markeringar; stationsbyte under pågående Starta valda; materialsorteringen använder numerisk collator mot API:ts `localeCompare`; identifieringen väntar på hela uppdateringen inkl. ordrar; Gå hem nu erbjuds även vid flerdygnsglömska; Sluttid skickas alltid (≤ 59 s avrundning); "Hej då"-notisen ligger kvar med hårdvarutangentbord.
-- [ ] **Reskontran:** knappen är inte inaktiverad vid felton i betalningsförhandsvisningen.
-- [ ] **Lagerloggen:** CSV:ns Saldo-kolumn styrs av rå `articleId`-sträng (tom sträng ger tom kolumn).
-- [ ] **Ekonomi:** konteringsregelsidans fallback märker oseedat konto "(inaktivt konto)"; ett ingående momskonto utan ruta visas negativt i varningen.
 
 ### Låga — layout
 
@@ -142,6 +133,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medvetna val — ompröva bara vid behov
 
+- [ ] **Årsbokslut:** `bookDepreciation` ger 400 `month-in-future` före planen även när inget saknas (en indatakontroll; webben låter inte välja en kommande månad); en omföring av en omföring i serie I döljer importens nummer i IB-spärrens meddelande (spärren slår ändå till på IB-skillnaden).
 - [ ] **Lön:** attest ogiltigförklaras inte av senare ändringar i öppen period; OB räknas även på övertidsintervall (lönesystemet avgör); `absentToday` i `GET /stamp-sessions` syns för arbetsledare via Pågående arbete utan Personal & lön.
 - [ ] **Närvaroavvikelser:** attesteringen visar ingen "(N min sent)" förrän sessionen stängts; anledningen påverkar aldrig lön eller frånvaro.
 - [ ] **Offertuppföljning:** Öppna igen efter manuell statusändring till Förlorad från t.ex. Levererad gör ordern till offert med leveranser kvar; radering av förlustorsak kan flytta till en inaktiv orsak; PDF-datumet är ISO.

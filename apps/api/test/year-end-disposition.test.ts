@@ -44,6 +44,10 @@ describe("vinstdisposition", () => {
     await expect(service.bookProfitDisposition(closingId, { agmDate: AGM, dividendAmount: 0 }, user.id)).rejects.toBeInstanceOf(
       YearEndClosingNotClosedError
     );
+    // The preview too: the result is not final before the close.
+    await expect(service.previewProfitDisposition(closingId, { agmDate: AGM, dividendAmount: 0 })).rejects.toBeInstanceOf(
+      YearEndClosingNotClosedError
+    );
     await service.bookResultTransfer(closingId, user.id);
     await createCalendarYear(NEXT_YEAR);
     await service.closeYear(closingId, user.id);

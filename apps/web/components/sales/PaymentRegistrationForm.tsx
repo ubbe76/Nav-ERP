@@ -265,6 +265,17 @@ export function PaymentRegistrationForm({
     return { gain: difference === 0 ? 0 : -difference, bookedReceivable };
   })();
 
+  // The row preview's red texts (over the open amount, wrong sign): the API
+  // would refuse the whole payment, so the button waits for the correction.
+  const hasInvalidAmount = includedRows.some(
+    (row) =>
+      paymentPreview(
+        row.openAmount,
+        amounts[row.id] ?? String(row.openAmount),
+        toleranceInCurrency(tolerance, row.exchangeRate ?? 1, row.currency)
+      ).tone === "error"
+  );
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!customerId) {
@@ -541,7 +552,7 @@ export function PaymentRegistrationForm({
         </Field>
 
         <FormActions>
-          <Button type="submit" variant="primary" disabled={pending}>
+          <Button type="submit" variant="primary" disabled={pending || hasInvalidAmount}>
             {pending ? "Registrerar…" : "Registrera betalning"}
           </Button>
         </FormActions>

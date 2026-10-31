@@ -9,7 +9,7 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { Field, Input, Select, Textarea } from "../ui/Field";
-import { Form, FormActions, FormError, FormHint, FormRow, FormStack } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
 import { GatedLink } from "../ui/GatedLink";
 import { useCan } from "../PermissionsProvider";
 import { AuditTrailSection } from "../system/AuditTrailSection";
@@ -203,8 +203,11 @@ export function AnlaggningCard({ asset, categories, accounts }: { asset: FixedAs
       {/* The audit-log API is admin-only. */}
       {can(["admin"]) && <AuditTrailSection entityType="fixed_asset" entityId={asset.assetNumber} />}
 
-      <EditAssetModal key={asset.updatedAt} open={editOpen} onClose={() => setEditOpen(false)} asset={asset} categories={categories} locked={locked} disposed={disposed} />
-      <DisposeModal open={disposeOpen} onClose={() => setDisposeOpen(false)} asset={asset} accounts={accounts} />
+      {/* Mounted only while open: the form state lives in the modal
+          components, so an abandoned edit or a half-filled disposal
+          does not reappear the next time the dialog opens. */}
+      {editOpen && <EditAssetModal open onClose={() => setEditOpen(false)} asset={asset} categories={categories} locked={locked} disposed={disposed} />}
+      {disposeOpen && <DisposeModal open onClose={() => setDisposeOpen(false)} asset={asset} accounts={accounts} />}
     </div>
   );
 }
@@ -251,7 +254,7 @@ function EditAssetModal({
         Object.assign(payload, { name: form.name, residualValue: form.residualValue, usefulLifeMonths: form.usefulLifeMonths });
         if (!locked) {
           Object.assign(payload, {
-            categoryId: form.categoryId,
+            ...(groupLocked ? {} : { categoryId: form.categoryId }),
             acquisitionDate: form.acquisitionDate,
             acquisitionCost: form.acquisitionCost,
             depreciationStartMonth: form.depreciationStartMonth,
@@ -271,6 +274,10 @@ function EditAssetModal({
   }
 
   const lockedHint = "Låst — avskrivning är bokförd";
+  // The server refuses a group change once an opening amount is stored
+  // (it sits on the group's accounts in IB); the opening fields themselves
+  // stay open until the first run.
+  const groupLocked = locked || Number(asset.openingDepreciation) > 0;
 
   return (
     <Modal open={open} onClose={onClose} title={`Redigera ${asset.assetNumber}`}>
@@ -280,14 +287,14 @@ function EditAssetModal({
             <Input id="edit-name" value={form.name} disabled={disposed} onChange={(e) => set({ name: e.target.value })} required maxLength={200} />
           </Field>
           <Field label="Grupp" htmlFor="edit-category">
-            <Select id="edit-category" value={form.categoryId} disabled={locked || disposed} onChange={(e) => set({ categoryId: e.target.value })}>
+            <Select id="edit-category" value={form.categoryId} disabled={groupLocked || disposed} onChange={(e) => set({ categoryId: e.target.value })}>
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
                 </option>
               ))}
             </Select>
-            {locked && <FormHint attached>{lockedHint}</FormHint>}
+            {groupLocked && <FormHint attached>{locked ? lockedHint : "Låst — ingående avskrivning ligger på gruppens konton"}</FormHint>}
           </Field>
         </FormRow>
         <FormRow>
@@ -347,7 +354,12 @@ function DisposeModal({ open, onClose, asset, accounts }: { open: boolean; onClo
   const [disposalType, setDisposalType] = useState<"sale" | "scrap">("sale");
   const [disposalDate, setDisposalDate] = useState(stockholmToday());
   const [disposalPrice, setDisposalPrice] = useState("");
-  const [intermediateAccountId, setIntermediateAccountId] = useState(asset.category.disposalGainAccountId);
+  // Förval: the group's gain account — but only when it is still active,
+  // since the list below hides inactive accounts and a hidden selection
+  // would be posted blind. Otherwise the user picks one.
+  const [intermediateAccountId, setIntermediateAccountId] = useState(
+    accounts.some((account) => account.id === asset.category.disposalGainAccountId && account.active) ? asset.category.disposalGainAccountId : ""
+  );
   const [preview, setPreview] = useState<DisposalPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -417,6 +429,7 @@ function DisposeModal({ open, onClose, asset, accounts }: { open: boolean; onClo
             </Field>
             <Field label="Mellankonto" htmlFor="dispose-account">
               <Select id="dispose-account" value={intermediateAccountId} onChange={(e) => { setIntermediateAccountId(e.target.value); setPreview(null); }} required>
+                {intermediateAccountId === "" && <option value="">Välj konto</option>}
                 {accounts.filter((account) => account.active).map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.number} {account.name}
@@ -431,7 +444,7 @@ function DisposeModal({ open, onClose, asset, accounts }: { open: boolean; onClo
         {preview && (
           <>
             {preview.warnings.includes("intermediate-account-not-box-05") && (
-              <FormError margin="below">Mellankontot saknar momsruta 05 — försäljningen kommer inte med i ruta 05 i momsrapporten</FormError>
+              <FormNotice style={{ marginBottom: 12 }}>Mellankontot saknar momsruta 05 — försäljningen kommer inte med i ruta 05 i momsrapporten</FormNotice>
             )}
             <p>
               {preview.catchUpMonths.length > 0 ? `Avskrivning ${preview.catchUpMonths.map((row) => monthLabel(row.month)).join(", ")} bokförs först (${formatMoney(preview.catchUpMonths.reduce((sum, row) => sum + row.amount, 0))}). ` : ""}

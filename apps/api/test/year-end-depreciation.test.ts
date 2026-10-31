@@ -51,8 +51,12 @@ describe("steg 3 — avskrivningar", () => {
     await assetThroughNovember(user.id);
     const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
     const result = await service.bookDepreciation(closing.id, user.id);
+    expect((await service.getClosing(closing.id)).closingDateLocked).toBe(true);
     await testFixedAssetService.undoRun(result.run!.run.id, user.id);
-    expect((await service.getClosing(closing.id)).steps.depreciation.status).toBe("missing");
+    const detail = await service.getClosing(closing.id);
+    expect(detail.steps.depreciation.status).toBe("missing");
+    // The undone run no longer locks the closing date.
+    expect(detail.closingDateLocked).toBe(false);
   });
 
   // Review Focus 1 (avskrivning).

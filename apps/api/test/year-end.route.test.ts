@@ -361,8 +361,9 @@ describe("year-end-closings in the real app", () => {
   // Spec 3/§12: the closed-year trigger is the last line. A result transfer
   // whose app guard read the year as open, while another transaction is
   // closing it, waits on the trigger's FOR SHARE and is then refused with
-  // SQLSTATE NV001 — which the app's error handler turns into 409.
-  it("409s bookkeeping-record-locked when the closed-year trigger refuses a booking", async () => {
+  // SQLSTATE NV001 — which the app's error handler turns into 409
+  // fiscal-year-closed (the trigger's message says which NV001 it is).
+  it("409s fiscal-year-closed when the closed-year trigger refuses a booking", async () => {
     const app = buildApp();
     await app.ready();
     try {
@@ -389,7 +390,7 @@ describe("year-end-closings in the real app", () => {
       }
       const res = await request;
       expect(res.statusCode).toBe(409);
-      expect(res.json().code).toBe("bookkeeping-record-locked");
+      expect(res.json()).toMatchObject({ code: "fiscal-year-closed", error: "Räkenskapsåret är stängt — öppna det igen under Bokslut" });
       expect(await countVerifications("BS")).toBe(0);
     } finally {
       await app.close();

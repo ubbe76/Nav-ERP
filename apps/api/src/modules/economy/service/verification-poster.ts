@@ -750,12 +750,13 @@ async function ensureSeries(tx: Tx, series: { code: string; name: string }): Pro
 // it outside one, before something irreversible happens.
 export async function assertPostablePeriod(executor: Db | Tx, date: string): Promise<void> {
   const [period] = await executor
-    .select({ status: accountingPeriods.status, yearStatus: fiscalYears.status })
+    .select({ status: accountingPeriods.status, yearStatus: fiscalYears.status, yearLabel: fiscalYears.label })
     .from(accountingPeriods)
     .innerJoin(fiscalYears, eq(fiscalYears.id, accountingPeriods.fiscalYearId))
     .where(and(lte(accountingPeriods.startDate, date), gte(accountingPeriods.endDate, date)));
   if (!period) throw new NoAccountingPeriodForPostingError(date);
-  if (period.yearStatus === "closed") throw new FiscalYearClosedError(date);
+  // The year's label, as every other thrower of this error names it.
+  if (period.yearStatus === "closed") throw new FiscalYearClosedError(period.yearLabel);
   if (period.status === "locked") throw new AccountingPeriodLockedError(date);
 }
 

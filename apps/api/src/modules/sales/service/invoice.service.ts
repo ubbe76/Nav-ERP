@@ -634,6 +634,9 @@ export function createInvoiceService(
   // text: Debitera dröjsmålsränta is on, the customer has Dröjsmålsränta,
   // and the invoice is not itself a räntefaktura.
   async function lateInterestTermsText(invoice: RawInvoice): Promise<boolean> {
+    // The routine only charges SEK invoices (listLateInterestSources), so a
+    // foreign-currency invoice promises nothing it will not get.
+    if (invoice.currency !== SEK) return false;
     const settings = await repo.getLateInterestSettings();
     if (!settings.lateInterestEnabled) return false;
     const customer = await repo.findCustomerById(invoice.customerId);

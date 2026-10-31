@@ -77,8 +77,13 @@ export interface CloseGateInput extends StepGateInput {
 // Gate for steg 6 (spec 4.2/4.7). A locked closing month does not block:
 // closing locks every period anyway.
 export function evaluateCloseBlockers(input: CloseGateInput): YearEndCheck[] {
-  const blockers = evaluateStepBlockers(input).filter((check) => check.code !== "closing-period-locked");
-  if (input.yearEndDate >= input.today) {
+  const yearNotEnded = input.yearEndDate >= input.today;
+  // closing-date-not-passed is implied by fiscal-year-not-ended (the closing
+  // date never lies after the year's end) — one message, not two.
+  const blockers = evaluateStepBlockers(input).filter(
+    (check) => check.code !== "closing-period-locked" && !(yearNotEnded && check.code === "closing-date-not-passed")
+  );
+  if (yearNotEnded) {
     blockers.push({
       code: "fiscal-year-not-ended",
       message: `Räkenskapsåret slutar ${input.yearEndDate} — det kan stängas tidigast dagen efter`,

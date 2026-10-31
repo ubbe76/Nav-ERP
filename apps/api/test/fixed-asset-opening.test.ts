@@ -9,7 +9,7 @@ import {
   currentMonthStockholm,
 } from "../src/modules/economy/service/fixed-asset.service.js";
 import { testEconomyService } from "./helpers/services.js";
-import { PLAN_YEAR, resetFixedAssets, setupFixedAssets, testFixedAssetService } from "./helpers/fixed-assets.js";
+import { PLAN_YEAR, accountId, resetFixedAssets, setupFixedAssets, testFixedAssetService } from "./helpers/fixed-assets.js";
 import { waitForLockWaiter } from "./helpers/year-end.js";
 import { DEPRECIATION_LOCK_SQL } from "../src/modules/economy/service/fixed-asset.service.js";
 
@@ -166,6 +166,18 @@ describe("ingående avskrivning", () => {
     const { user, category } = await setupFixedAssets();
     const asset = await createAsset(user.id, category.id);
 
+    // The group is locked while an opening amount sits on its accounts.
+    const other = await testFixedAssetService.createCategory({
+      name: "Maskiner",
+      assetAccountId: await accountId("1210"),
+      accumulatedDepreciationAccountId: await accountId("1219"),
+      depreciationExpenseAccountId: await accountId("7830"),
+      disposalGainAccountId: await accountId("3973"),
+      disposalLossAccountId: await accountId("7970"),
+      defaultUsefulLifeMonths: 60,
+    });
+    await expect(service.updateAsset(asset.id, { categoryId: other.id }, user.id)).rejects.toBeInstanceOf(FixedAssetFieldLockedError);
+
     // Amount alone: the stored through-month is kept.
     const raised = await service.updateAsset(asset.id, { openingDepreciation: 50000 }, user.id);
     expect(raised).toMatchObject({ openingDepreciation: "50000.00", accumulatedDepreciation: 50000, bookValue: 70000 });
@@ -175,6 +187,9 @@ describe("ingående avskrivning", () => {
     const cleared = await service.updateAsset(asset.id, { openingDepreciation: 0, openingDepreciationThroughMonth: null }, user.id);
     expect(cleared).toMatchObject({ openingDepreciation: "0.00", openingDepreciationThroughMonth: null, accumulatedDepreciation: 0 });
     expect(cleared.plannedMonths[0]!.month).toBe(`${Y - 2}-03`);
+    // Without an opening amount the group can move (and back).
+    expect((await service.updateAsset(asset.id, { categoryId: other.id }, user.id)).categoryId).toBe(other.id);
+    await service.updateAsset(asset.id, { categoryId: category.id }, user.id);
 
     // The merged row is validated: an amount without a stored month, a month
     // before the start, a residual that eats the opening amount.

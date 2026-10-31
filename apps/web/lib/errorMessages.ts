@@ -220,8 +220,8 @@ const MESSAGES: Record<string, MessageEntry> = {
     const ids = (err.body as { invoiceIds?: unknown } | undefined)?.invoiceIds;
     const n = Array.isArray(ids) ? ids.length : 0;
     return n > 0
-      ? `Ränta eller förseningsersättning har redan debiterats på ${n} ${n === 1 ? "faktura" : "fakturor"} sedan listan hämtades — uppdatera listan och försök igen.`
-      : "Ränta eller förseningsersättning har redan debiterats sedan listan hämtades — uppdatera listan och försök igen.";
+      ? `Ränta eller förseningsersättning har redan debiterats eller ändrats på ${n} ${n === 1 ? "faktura" : "fakturor"} sedan listan hämtades — uppdatera listan och försök igen.`
+      : "Ränta eller förseningsersättning har redan debiterats eller ändrats sedan listan hämtades — uppdatera listan och försök igen.";
   },
   "late-interest-future-date": "T.o.m. datum kan inte ligga efter dagens datum — ränta debiteras bara för dagar som har passerat.",
   "reminder-fee-after-late-fee":
