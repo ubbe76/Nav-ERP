@@ -524,6 +524,11 @@ export function createSalesService(
   }
   // The first article that two ordinary rows (configuration null) share —
   // what the partial unique index sales_order_rows_order_article_unique refuses.
+  // A duplicate that a configuration resolved to (a variant row) is named a
+  // variant; any other is an ordinary article twice.
+  function duplicateKind(inputs: readonly { configuration?: unknown }[], rows: SalesRowWrite[], articleId: string): "variant" | "article" {
+    return rows.some((r, i) => r.articleId === articleId && inputs[i]?.configuration) ? "variant" : "article";
+  }
   function firstDuplicateArticleId(rows: SalesRowWrite[]): string | null {
     const seen = new Set<string>();
     for (const row of rows) {
@@ -1137,7 +1142,7 @@ export function createSalesService(
       // refuse with the domain error up front. Configured beställningsvara
       // rows (configuration set) may repeat.
       const duplicate = firstDuplicateArticleId(rows);
-      if (duplicate) throw new RowVariantExistsError(await articleNumberOf(duplicate));
+      if (duplicate) throw new RowVariantExistsError(await articleNumberOf(duplicate), duplicateKind(input.rows, rows, duplicate));
       const quoteValidUntil = await resolveQuoteValidUntil(input);
       // Kostnadsställen och projekt on the header: must exist and be pickable.
       const dimensions = await repo.resolveDimensions({ costCenterId: input.costCenterId, projectId: input.projectId });
@@ -1158,7 +1163,7 @@ export function createSalesService(
         // (which has already rolled back).
         if (isUniqueViolation(err, ROW_ARTICLE_UNIQUE)) {
           const id = firstDuplicateArticleId(rows);
-          throw new RowVariantExistsError(id ? await articleNumberOf(id) : "(okänd)");
+          throw new RowVariantExistsError(id ? await articleNumberOf(id) : "(okänd)", id ? duplicateKind(input.rows, rows, id) : "article");
         }
         throw err;
       }
@@ -1242,7 +1247,11 @@ export function createSalesService(
         // The article (e.g. the variant a configuration resolved to) already
         // sits on the order as an ordinary row — the partial unique index,
         // caught outside the repository's (rolled back) transaction.
-        if (isUniqueViolation(err, ROW_ARTICLE_UNIQUE)) throw new RowVariantExistsError(await articleNumberOf(write.articleId));
+        // A configured input that hits the index resolved to a variant (a
+        // beställningsvara row is exempt from it).
+        if (isUniqueViolation(err, ROW_ARTICLE_UNIQUE)) {
+          throw new RowVariantExistsError(await articleNumberOf(write.articleId), input.configuration ? "variant" : "article");
+        }
         throw err;
       }
       const article = await articleFiles.getArticle(row.articleId);
