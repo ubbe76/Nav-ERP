@@ -443,6 +443,9 @@ export const ERROR_CODES = {
   CONFIGURATOR_NOT_PUBLISHED: "configurator-not-published",
   CONFIGURATION_REQUIRED: "configuration-required",
   CONFIGURATION_NOT_ALLOWED: "configuration-not-allowed",
+  // A beställningsvara row whose structure cannot be derived for the choices
+  // — refused at the sale (details for sessions only).
+  CONFIGURATION_NOT_DERIVABLE: "configuration-not-derivable",
   // Leveranstidskontroll on an order that is no longer open.
   SALES_ORDER_NOT_OPEN: "sales-order-not-open",
   ROW_CONFIGURATION_LOCKED: "row-configuration-locked",

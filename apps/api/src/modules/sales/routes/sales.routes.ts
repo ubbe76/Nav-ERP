@@ -82,6 +82,7 @@ import { RegisterEntryNotFoundError } from "../../register/service/register.serv
 import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
 import { ArticleGroupNotFoundError, ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
 import {
+  ConfigurationNotDerivableError,
   ConfiguratorInvalidConfigurationError,
   ConfiguratorNotToOrderModeError,
   ConfiguratorNotVariantModeError,
@@ -91,6 +92,7 @@ import {
   ConfiguratorVariantNumberTakenError,
   ConfiguratorVariantTooLongError,
 } from "../../configurator/service/configurator.errors.js";
+import { notDerivableBody } from "../../configurator/routes/not-derivable-body.js";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
@@ -440,6 +442,9 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof ConfigurationRequiredError || err instanceof ConfiguratorNotToOrderModeError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
       if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
+      // A beställningsvara whose structure cannot be derived for the choices
+      // (details for a session only).
+      if (err instanceof ConfigurationNotDerivableError) return reply.code(409).send(notDerivableBody(err, req));
       if (err instanceof ConfiguratorTemplateNotFoundError) return reply.code(404).send(errorBody(err));
       // Delprojekt 5: a configuration on a variants template resolves the
       // variant here (4a's resolveVariant) — the same mapping as the PUT below.
@@ -483,6 +488,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // stored selection no longer validates, or the template left to_order
       // / was removed since the row was created (Avvikelse 3).
       if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
+      // …or the template's structure no longer derives for the stored choices.
+      if (err instanceof ConfigurationNotDerivableError) return reply.code(409).send(notDerivableBody(err, req));
       if (err instanceof ConfiguratorNotToOrderModeError) return reply.code(409).send(errorBody(err));
       // The stored choices resolve to another configuration (a förval added
       // to the template since): Ändra konfiguration, not a silent reprice.
@@ -513,6 +520,7 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       // / variant has no price.
       if (err instanceof ConfigurationNotAllowedError || err instanceof PriceNotFoundError) return reply.code(400).send(errorBody(err));
       if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
+      if (err instanceof ConfigurationNotDerivableError) return reply.code(409).send(notDerivableBody(err, req));
       // The variant path (4a's resolveVariant) creating the new variant.
       if (
         err instanceof ConfiguratorVariantNumberTakenError || err instanceof ConfiguratorVariantNumberRaceError ||

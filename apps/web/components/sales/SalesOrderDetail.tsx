@@ -191,6 +191,10 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
         .map((r) => formatStockholmDate(r.selfCostCalculatedAt))
     ),
   ].sort();
+  // A configured row whose structure carries no cost (or whose förkalkyl
+  // failed when the row was priced — never a reason to refuse the sale) is
+  // named as such rather than folded into the generic count.
+  const configuredWithoutCost = rows.filter((r) => r.configuration && r.selfCostPerUnit === null).length;
 
   // C3 price/discount prefill for the row being edited: when the quantity
   // changes and the operator hasn't touched price/discount themselves, ask
@@ -770,6 +774,10 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                 // förkalkyl of its own configuration, not the template's.
                 configuredCostDates.length > 0
                   ? ` Förkalkyl för konfigurationen, ${configuredCostDates.join(", ")}.`
+                  : ""
+              }${
+                configuredWithoutCost > 0
+                  ? ` Förkalkyl saknas för konfigurationen på ${configuredWithoutCost} ${configuredWithoutCost === 1 ? "rad" : "rader"}.`
                   : ""
               }`}
         </FormHint>

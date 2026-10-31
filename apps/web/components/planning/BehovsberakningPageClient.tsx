@@ -809,6 +809,13 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
                     <>
                       <GatedLink href={`/artiklar/${row.articleId}`} className={styles.rowLink}>
                         {row.articleNumber} — {row.articleName}
+                        {/* An inactive template proposes nothing, as an inactive article. */}
+                        {!row.active && (
+                          <>
+                            {" "}
+                            <StatusPill status="draft" label="Inaktiv" compact />
+                          </>
+                        )}
                       </GatedLink>
                       <ArticleOverviewButton articleId={row.articleId} articleNumber={row.articleNumber} />
                     </>

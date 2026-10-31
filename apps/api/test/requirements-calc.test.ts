@@ -802,7 +802,7 @@ describe("lego (subcontract) operation rows", () => {
 // demand before netting.
 const article = (id: string, overrides: Partial<RequirementsArticle> = {}) => art({ articleId: id, ...overrides });
 const configuredRow = (o: Partial<ConfiguredRowNeed>): ConfiguredRowNeed => ({
-  salesOrderRowId: "r", salesOrderId: "so", orderNumber: "KO-1", customerName: "Kund AB", templateArticleId: "T",
+  salesOrderRowId: "r", salesOrderId: "so", orderNumber: "KO-1", customerName: "Kund AB", templateArticleId: "T", templateActive: true,
   expectedDeliveryDate: null, summary: "", uncoveredQuantity: 1, error: null, ...o,
 });
 
@@ -876,6 +876,17 @@ describe("konfigurator 4c — beställningsvara", () => {
     );
     expect(rows.map((r) => r.proposalKind ?? "article")).toEqual(["article", "configured", "configured", "subcontract"]);
     expect(rows.filter((r) => r.proposalKind === "configured").map((r) => r.salesOrderNumber)).toEqual(["KO-1", "KO-2"]);
+  });
+
+  it("a configured row on an inactive template is listed (Inaktiv) but proposes nothing, like an inactive ordinary article", () => {
+    const rows = computeRequirements(
+      calcInput({
+        articles: [article("T", { type: "manufactured", configuratorMode: "to_order", active: false })],
+        configuredRows: [configuredRow({ salesOrderRowId: "r1", templateArticleId: "T", uncoveredQuantity: 2, templateActive: false })],
+      })
+    );
+    const cfg = rows.find((r) => r.proposalKind === "configured")!;
+    expect([cfg.salesOrderRowId, cfg.active, cfg.proposalQuantity, cfg.configurationError]).toEqual(["r1", false, 0, null]);
   });
 
   it("an invalid configured row keeps its error and has no cascade of its own", () => {

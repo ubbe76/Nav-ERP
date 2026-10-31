@@ -155,6 +155,10 @@ export interface ConfiguredRowNeed {
   orderNumber: string;
   customerName: string;
   templateArticleId: string;
+  // false = the template article is inactive: the row is listed but, like
+  // an inactive ordinary article, proposed nothing (the service cascades
+  // nothing for it either).
+  templateActive: boolean;
   expectedDeliveryDate: string | null;
   summary: string;
   uncoveredQuantity: number;
@@ -555,7 +559,7 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         safetyStock: null,
         orderQuantity: null,
         rounding: null,
-        proposalQuantity: c.uncoveredQuantity,
+        proposalQuantity: c.templateActive ? c.uncoveredQuantity : 0,
         proposalKind: "configured",
         primarySupplier: null,
         salesOrderRowId: c.salesOrderRowId,

@@ -440,12 +440,17 @@ export function createPlanningService(
     // The proposal row shows the date its TO is planned by.
     const configured = await toShipDates(loadedConfigured);
     const roundingOf = new Map(input.articles.map((a) => [a.articleId, a.rounding]));
+    // An inactive template is treated as an inactive ordinary article: its
+    // rows are shown (Inaktiv) but get no proposal (the calc) and cascade no
+    // material (here) — the TO cannot be made before the template is active.
+    const inactiveTemplates = new Set(input.articles.filter((a) => !a.active).map((a) => a.articleId));
     const needs: ConfiguredRowNeed[] = configured.map((r) => ({
       salesOrderRowId: r.rowId,
       salesOrderId: r.salesOrderId,
       orderNumber: r.orderNumber,
       customerName: r.customerName,
       templateArticleId: r.articleId,
+      templateActive: !inactiveTemplates.has(r.articleId),
       expectedDeliveryDate: r.expectedDeliveryDate,
       summary: configurationLines(r.configuration.selection).join(" · "),
       // Avrundning: the TO Skapa ordrar makes is rounded up to the template's
@@ -470,7 +475,7 @@ export function createPlanningService(
     >();
     configured.forEach((r, i) => {
       const need = needs[i]!;
-      if (need.uncoveredQuantity <= 0) return;
+      if (need.uncoveredQuantity <= 0 || !need.templateActive) return;
       const key = `${r.articleId}:${r.configuration.key}`;
       const g = groups.get(key) ?? {
         templateId: r.articleId,
@@ -507,12 +512,16 @@ export function createPlanningService(
   // and other rows' TOs are other configurations' units, so the pooled
   // coverage in findFirmDemand must not cover it (row B would otherwise be
   // dated from row A's TO, or left undated by a free unit in stock). No date
-  // on the row ⇒ nothing to plan by. Ordinary rows and calls without a row
-  // keep the pooled rule.
+  // on the row, or nothing left to deliver on it (ordered − delivered ≤ 0,
+  // the same delivered clamp as uncoveredConfiguredQuantity — the row's own
+  // TOs are deliberately NOT netted: an extra TO is the operator's decision)
+  // ⇒ nothing to plan by. Ordinary rows and calls without a row keep the
+  // pooled rule, whose overview demand is the remaining quantity already.
   async function firmDemandFor(articleId: string, today: string, salesOrderRowId: string | undefined) {
     if (salesOrderRowId) {
       const loaded = await repo.salesOrderRowForDueDate(salesOrderRowId);
       if (loaded?.configured && loaded.articleId === articleId) {
+        if (loaded.quantityOrdered - loaded.quantityDelivered <= 0) return null;
         const [row] = await toShipDates([loaded]);
         if (!DEMAND_SALES_STATUSES.has(row!.orderStatus) || !row!.expectedDeliveryDate) return null;
         const demand: FirmDemand = {

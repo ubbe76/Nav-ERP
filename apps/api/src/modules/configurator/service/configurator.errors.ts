@@ -267,6 +267,25 @@ export class ConfiguratorNotToOrderModeError extends Error {
   }
 }
 
+// 409 (code configuration-not-derivable): a beställningsvara row whose
+// selection the engine accepts but whose structure deriveStructure cannot
+// build (an alternative without article, a failing formula, a negative
+// quantity, an operation number clash). Refused at the sale — new row on
+// offert/kundorder (also POST /quotes), quantity change and Ändra
+// konfiguration — so the template is fixed before the row is promised; the
+// TO's creation would otherwise be the first to notice. `details` are the
+// derivation's own messages, which name structure lines and operations: the
+// routes send them to a session (the template is fixed in Nav) and never to
+// an API client (req.apiClient) — the same rule as
+// ConfiguratorVariantNotDerivableError. Rows stored before this check are
+// not touched.
+export class ConfigurationNotDerivableError extends Error {
+  constructor(public readonly details: string[]) {
+    super("Kombinationen kan inte tillverkas — åtgärda mallens struktur i Nav");
+    this.name = "ConfigurationNotDerivableError";
+  }
+}
+
 // --- externt API (delprojekt 5) ---
 
 // 409: an OAuth client's POST /quotes row carries a configuration on a

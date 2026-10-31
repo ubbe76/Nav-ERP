@@ -673,12 +673,14 @@ export function createPlanningRepository(db: Db) {
             transitDays: customers.transitDays,
           },
           configured: sql<boolean>`${salesOrderRows.configuration} is not null`,
+          quantityOrdered: salesOrderRows.quantityOrdered,
+          quantityDelivered: salesOrderRows.quantityDelivered,
         })
         .from(salesOrderRows)
         .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
         .where(eq(salesOrderRows.id, rowId));
-      return row ?? null;
+      return row ? { ...row, quantityOrdered: Number(row.quantityOrdered), quantityDelivered: Number(row.quantityDelivered) } : null;
     },
 
     // Server-side reload of the lego operations behind subcontract proposals

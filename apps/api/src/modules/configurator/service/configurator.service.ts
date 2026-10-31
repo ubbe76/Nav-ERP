@@ -29,7 +29,7 @@ import {
   validateRuleInput, TEMPLATE_IN_COMPONENT, TEMPLATE_IN_VALUE_ARTICLE, type LineFields, type OperationFields, type ReferenceTargets,
 } from "./configurator-rules.js";
 import {
-  ConfiguratorCodeLockedError, ConfiguratorCodeTakenError, ConfiguratorGroupNotFoundError, ConfiguratorInvalidConfigurationError,
+  ConfigurationNotDerivableError, ConfiguratorCodeLockedError, ConfiguratorCodeTakenError, ConfiguratorGroupNotFoundError, ConfiguratorInvalidConfigurationError,
   ConfiguratorLineNotFoundError, ConfiguratorNotToOrderModeError, ConfiguratorNotVariantModeError, ConfiguratorOperationNotFoundError, ConfiguratorReferenceInUseError,
   ConfiguratorReorderMismatchError, ConfiguratorRuleNotFoundError, ConfiguratorSequenceTakenError, ConfiguratorTemplateExistsError,
   ConfiguratorTemplateHasVariantsError, ConfiguratorTemplateNotFoundError, ConfiguratorTooManyCombinationsError, ConfiguratorValueNotFoundError,
@@ -55,13 +55,16 @@ import { stockholmToday } from "../../system/service/delivery-days.js";
 // refuses). Nothing stored can point outside the template.
 
 // Konfigurator 4b: what evaluateRowConfiguration answers — the configuration
-// is null exactly when the selection is invalid (errors say why).
+// is null exactly when the selection is invalid (errors say why). A valid
+// selection whose structure cannot be derived is not answered but thrown
+// (ConfigurationNotDerivableError) — refused at the sale.
 export type RowConfigurationEvaluation = {
   valid: boolean;
   errors: string[];
   configuration: OrderRowConfiguration | null;
   // Konfigurator 4c: the row's förkalkyl at the evaluated quantity — what the
-  // row margin is measured against. null when invalid or not derivable.
+  // row margin is measured against. null when invalid or when the structure
+  // carries no cost (including a costing failure, which never stops a sale).
   cost: OrderRowConfigurationCost | null;
 };
 
@@ -442,9 +445,12 @@ export function createConfiguratorService(deps: {
   // only price in SEK need not wire them.
   customerCurrency?: (id: string) => Promise<string | null>;
   rates?: ExchangeRateReader;
+  // Where a swallowed förkalkyl failure (deriveForManufacturing) is reported.
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
 }) {
   const { db } = deps;
   const repo = createConfiguratorRepository();
+  const log = deps.log ?? ((msg: string, extra?: Record<string, unknown>) => console.error(msg, extra));
 
   // Valuta: the rate to hand the engine (undefined for SEK, which leaves
   // every price exactly as before) and the chain's currency arguments.
@@ -728,12 +734,24 @@ export function createConfiguratorService(deps: {
 
     let cost: ConfiguredStructure["cost"] = null;
     if (opts.withCost !== false) {
-      // Same rule as a variant's standard cost: a figure only when something
-      // was costed and it is finite and > 0 — otherwise null, never 0.
-      const costing = await costStructure(templateArticleId, quantity, core);
-      const costed = costing.materialRows.length + costing.operationRows.length > 0;
-      const usable = (n: number) => (costed && Number.isFinite(n) && n > 0 ? round4(n) : null);
-      cost = { manufacturingCostPerUnit: usable(costing.manufacturingCostPerUnit), selfCostPerUnit: usable(costing.selfCostPerUnit) };
+      try {
+        // Same rule as a variant's standard cost: a figure only when something
+        // was costed and it is finite and > 0 — otherwise null, never 0.
+        const costing = await costStructure(templateArticleId, quantity, core);
+        const costed = costing.materialRows.length + costing.operationRows.length > 0;
+        const usable = (n: number) => (costed && Number.isFinite(n) && n > 0 ? round4(n) : null);
+        cost = { manufacturingCostPerUnit: usable(costing.manufacturingCostPerUnit), selfCostPerUnit: usable(costing.selfCostPerUnit) };
+      } catch (err) {
+        // A förkalkyl failure (a rate the costing cannot get, a structure it
+        // cannot walk) never stops a sale or a TO: the row/TO goes on without
+        // a cost, exactly as a configuration that carries none — the order
+        // card and the margin report say "saknar förkalkyl". Only the costing
+        // call is tolerated; the derivation's own errors above are not.
+        log("Configurator: förkalkyl of a configured structure failed — stored without cost", {
+          templateArticleId, key: evaluation.key, quantity, error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+        });
+        cost = null;
+      }
     }
     return {
       valid: true, errors: [], templateArticleId, key: evaluation.key,
@@ -1374,12 +1392,14 @@ export function createConfiguratorService(deps: {
         return { valid: false, errors: [...evaluation.errors, ...evaluation.groups.flatMap((g) => g.errors)], configuration: null, cost: null };
       }
       // Konfigurator 4c: the row's förkalkyl at the row quantity (TVK/SVK per
-      // unit) — null when the structure is not derivable or carries no cost.
+      // unit) — null when the structure carries no cost (or costing it failed).
+      // A structure the derivation cannot build is refused here, at the sale,
+      // rather than stored with cost null and discovered when the TO is made.
       const structure = await deriveForManufacturing(templateArticleId, selection, opts.quantity);
-      const cost: OrderRowConfigurationCost | null =
-        structure.valid && structure.cost
-          ? { ...structure.cost, quantity: opts.quantity, calculatedAt: new Date().toISOString() }
-          : null;
+      if (!structure.valid) throw new ConfigurationNotDerivableError(structure.errors);
+      const cost: OrderRowConfigurationCost | null = structure.cost
+        ? { ...structure.cost, quantity: opts.quantity, calculatedAt: new Date().toISOString() }
+        : null;
       return {
         valid: true, errors: [],
         configuration: {
