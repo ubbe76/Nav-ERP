@@ -26,12 +26,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — races med litet fönster
 
-- [ ] **Konfigurator:** `createTemplate` mot samtidigt typbyte på artikeln (kräver artikelradslås på båda sidor); `createFromSalesOrderRow` läser raden olåst och raden utvärderas utanför mallåset; `configuratorMode` läses före TO-transaktionen; härledningen läser mall/struktur/rutt utan transaktion (enstaka inkonsistent förhandsvisning); dubbel läsning i `getPublicTemplate`/`evaluatePublic`.
-- [ ] **Närvaro:** `updateAttendanceSession` läser raden utanför transaktionen.
-- [ ] **Ekonomi:** kontrollen att kontot är aktivt i bokföringstransaktionen tar inget radlås på `accounts` (sluttillståndet är lagligt ändå); budgetens kopplingsflytt mot samtidig Spara (teoretisk).
-- [ ] **Anläggningsregister:** `updateCategory` utan tx/radlås; `getPlan` läser utan delad snapshot (tillfällig falsk avvikelse).
-- [ ] **Anläggningsregister** *(parkerat)*: `createAsset` med ingående avskrivning tar inte advisory-låset och kan krocka med gruppens kontolås — bara en avstämningsdiff, inget bokas fel.
-- [ ] **Bankfiler:** PATCH av leverantörens betalningsuppgifter kan racea till en omappad 23514 (500; CHECK håller datan konsistent); bankinställningarna skrivs utan tx; betalreferensens audit skrivs utanför tx.
 
 ### Låga — otydliga fel, texter och småbeteenden
 
@@ -154,7 +148,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Aviseringar:** Leverantörsfakturor att betala härleder saknat förfallodatum ur leverantörens nuvarande villkor (reskontrans Förfallna-filter använder bara lagrat datum); alla typer avbockade ger tomma rader utan mejl.
 - [ ] **Leveransdagar:** en leverantör som tar emot lördagar får inte leverera lördagen före ett måndagsbehov (specen säger arbetsdagen före behovet); ett handskrivet datum på en ny IO-rad nollställs vid artikelbyte, som priset.
 - [ ] **Behörighet:** behovsberäkningens **Skapa ordrar** (Tillverkning) skapar IO-utkast även utan behörigheten Inköp; `/price-quote` visar priskedjan för godtycklig kund för en klienttoken (tokenet kan redan skapa ordrar för godtycklig kund).
-- [ ] **Övrigt:** inventeringens guard-TOCTOU under READ COMMITTED (accepterad husrisk); avbrutna inventeringar samlar störningsflaggor för evigt (bara visning); personalkortet släpper dolda inaktiva stationsförval vid sparning; varianter skapade före en offert som sedan faller ligger kvar; en egen CSV med Kund + Namn + Betalningsvillkor räknas som Lista-fil i kundimporten.
+- [ ] **Övrigt:** inventeringens guard-TOCTOU under READ COMMITTED (accepterad husrisk); avbrutna inventeringar samlar störningsflaggor för evigt (bara visning); personalkortet släpper dolda inaktiva stationsförval vid sparning; varianter skapade före en offert som sedan faller ligger kvar; en egen CSV med Kund + Namn + Betalningsvillkor räknas som Lista-fil i kundimporten. Kontrollen att kontot är aktivt i bokföringstransaktionen tar inget radlås på `accounts` (`updateAccount` har ingen invariant att skydda; sluttillståndet är lagligt); betalreferensens händelselogg skrivs efter commit som all annan händelselogg.
 
 ## Nya funktioner
 

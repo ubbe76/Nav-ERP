@@ -656,6 +656,38 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
       }));
   }
 
+  // Avskrivningsplanen's reads, on whatever executor getPlan hands in.
+  async function readPlan(ex: Db | Tx, query: { fiscalYearId: string }): Promise<FixedAssetPlan> {
+    const fiscalYear = await repo.findFiscalYear(ex, query.fiscalYearId);
+    if (!fiscalYear) throw new FixedAssetPlanYearNotFoundError(query.fiscalYearId);
+    const categories = (await repo.listCategories(ex)).map((category) => ({
+      id: category.id,
+      name: category.name,
+      assetAccount: category.accounts.asset,
+      accumulatedAccount: category.accounts.accumulated,
+    }));
+    const dates = await repo.listActiveDepreciationDates(ex);
+    const byAsset = new Map<string, PlanAssetInput["depreciations"]>();
+    for (const row of dates) {
+      const list = byAsset.get(row.assetId) ?? [];
+      list.push({ date: row.date, amount: Number(row.amount) });
+      byAsset.set(row.assetId, list);
+    }
+    const assets = (await repo.listPlanAssets(ex)).map((asset) => ({
+      ...asset,
+      acquisitionCost: Number(asset.acquisitionCost),
+      openingDepreciation: openingDepreciationOf(asset)?.amount ?? 0,
+      depreciations: byAsset.get(asset.id) ?? [],
+    }));
+    // Same reader as the balance sheet — the two can never disagree.
+    const ledgerBalances = (await readAccountBalances(ex, { from: null, to: fiscalYear.endDate })).map((row) => ({
+      accountId: row.accountId,
+      debit: row.periodDebit,
+      credit: row.periodCredit,
+    }));
+    return buildFixedAssetPlan({ fiscalYear, categories, assets, ledgerBalances });
+  }
+
   const service = {
     // --- Tillgångsgrupper ---
 
@@ -849,6 +881,11 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
         residualValue: input.residualValue ?? 0,
       });
       const asset = await db.transaction(async (tx) => {
+        // An opening amount locks the group's posting accounts (it is booked
+        // on them in IB): taken under the run lock, as updateCategory checks
+        // that flag under it — an account change can then never slip in
+        // between its check and this insert.
+        if (opening.openingDepreciation > 0) await tx.execute(DEPRECIATION_LOCK_SQL);
         // Document-series convention: the number is allocated inside the
         // insert transaction so a failed insert never burns one.
         const assetNumber = await getNextOrderNumber(tx, "fixed_asset");
@@ -1282,35 +1319,11 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
 
     // --- Avskrivningsplan ---
 
+    // Register and ledger are read from ONE snapshot (repeatable read, read
+    // only): a depreciation run committing between the two reads would
+    // otherwise show as a deviation that is gone on the next load.
     async getPlan(query: { fiscalYearId: string }): Promise<FixedAssetPlan> {
-      const fiscalYear = await repo.findFiscalYear(db, query.fiscalYearId);
-      if (!fiscalYear) throw new FixedAssetPlanYearNotFoundError(query.fiscalYearId);
-      const categories = (await repo.listCategories(db)).map((category) => ({
-        id: category.id,
-        name: category.name,
-        assetAccount: category.accounts.asset,
-        accumulatedAccount: category.accounts.accumulated,
-      }));
-      const dates = await repo.listActiveDepreciationDates(db);
-      const byAsset = new Map<string, PlanAssetInput["depreciations"]>();
-      for (const row of dates) {
-        const list = byAsset.get(row.assetId) ?? [];
-        list.push({ date: row.date, amount: Number(row.amount) });
-        byAsset.set(row.assetId, list);
-      }
-      const assets = (await repo.listPlanAssets(db)).map((asset) => ({
-        ...asset,
-        acquisitionCost: Number(asset.acquisitionCost),
-        openingDepreciation: openingDepreciationOf(asset)?.amount ?? 0,
-        depreciations: byAsset.get(asset.id) ?? [],
-      }));
-      // Same reader as the balance sheet — the two can never disagree.
-      const ledgerBalances = (await readAccountBalances(db, { from: null, to: fiscalYear.endDate })).map((row) => ({
-        accountId: row.accountId,
-        debit: row.periodDebit,
-        credit: row.periodCredit,
-      }));
-      return buildFixedAssetPlan({ fiscalYear, categories, assets, ledgerBalances });
+      return db.transaction((tx) => readPlan(tx, query), { isolationLevel: "repeatable read", accessMode: "read only" });
     },
 
     async getPlanPdf(query: { fiscalYearId: string }) {

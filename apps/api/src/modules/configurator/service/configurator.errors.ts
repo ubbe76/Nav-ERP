@@ -267,6 +267,15 @@ export class ConfiguratorNotToOrderModeError extends Error {
   }
 }
 
+// The template's mode changed between the TO's derivation and its create
+// transaction (manufacturing.repository re-reads it FOR SHARE under the row lock).
+export class ConfiguratorModeChangedError extends Error {
+  constructor() {
+    super("Artikelns konfiguratorläge ändrades medan tillverkningsordern skapades — försök igen");
+    this.name = "ConfiguratorModeChangedError";
+  }
+}
+
 // 409 (code configuration-not-derivable): a beställningsvara row whose
 // selection the engine accepts but whose structure deriveStructure cannot
 // build (an alternative without article, a failing formula, a negative

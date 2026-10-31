@@ -1,4 +1,4 @@
-import { eq, like } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { companyInfo, systemSettings, type Db, type Tx } from "@navet/db";
 
 // Bank settings are bank_* keys in system_settings (key–value, no migration
@@ -10,12 +10,21 @@ export function createBankSettingsRepository(db: Db) {
       const rows = await executor.select().from(systemSettings).where(like(systemSettings.key, "bank_%"));
       return new Map(rows.map((row) => [row.key, row.value]));
     },
-    async setSetting(key: string, value: string | null) {
+    async setSetting(key: string, value: string | null, executor: Db | Tx = db) {
       if (value === null) {
-        await db.delete(systemSettings).where(eq(systemSettings.key, key));
+        await executor.delete(systemSettings).where(eq(systemSettings.key, key));
         return;
       }
-      await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+      await executor.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+    },
+    // One transaction per settings write, serialised on an advisory lock so
+    // two PATCHes never interleave their read–merge–write (the kind derived
+    // from the profile must land with the profile it was derived from).
+    async inSettingsTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('bank_settings'))`);
+        return fn(tx);
+      });
     },
     async readCompany(executor: Db | Tx = db) {
       const [row] = await executor

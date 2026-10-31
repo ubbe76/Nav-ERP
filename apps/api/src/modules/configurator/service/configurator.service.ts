@@ -481,6 +481,16 @@ export function createConfiguratorService(deps: {
     });
   }
 
+  // Every multi-table read (evaluate, derive, the public reads) goes through
+  // here: a repeatable-read, read-only transaction, so the template, its
+  // groups, rules, lines and operations and the article's own structure and
+  // route come from ONE snapshot — a template edit committing mid-read can
+  // never hand out a preview mixing old and new rows. Nothing is locked;
+  // the callers' price/costing lookups run on their own connections.
+  function snapshot<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+    return db.transaction(fn, { isolationLevel: "repeatable read", accessMode: "read only" });
+  }
+
   async function mapCodeTaken<T>(code: string | undefined, constraint: string, run: () => Promise<T>): Promise<T> {
     try {
       return await run();
@@ -521,8 +531,8 @@ export function createConfiguratorService(deps: {
 
   // Delprojekt 5: the visibility rule for the external API's reads. A client
   // gets the same 404 for a hidden template as for an unknown one.
-  async function visibleTemplate(articleId: string, opts: { client: boolean }): Promise<{ articleNumber: string; name: string }> {
-    const head = await repo.templateVisibility(db, articleId);
+  async function visibleTemplate(ex: Db | Tx, articleId: string, opts: { client: boolean }): Promise<{ articleNumber: string; name: string }> {
+    const head = await repo.templateVisibility(ex, articleId);
     if (!head || (opts.client && (!head.published || !head.active))) throw new ConfiguratorTemplateNotFoundError();
     return { articleNumber: head.articleNumber, name: head.name };
   }
@@ -638,12 +648,19 @@ export function createConfiguratorService(deps: {
   // A plain read (no lock). A local function so evaluatePublic shares it.
   // Valuta: input.currency/exchangeRate as given (omitted = SEK) — the
   // routes resolve the defaults first (requestCurrency).
-  async function evaluate(
+  async function evaluateIn(
+    ex: Db | Tx,
     articleId: string,
     input: { selection: ConfiguratorSelection; customerId?: string; quantity: number } & ConfigurationCurrency
   ): Promise<ConfiguratorEvaluation> {
-    const template = await loadOrThrow(db, articleId);
+    const template = await loadOrThrow(ex, articleId);
     return resolveConfiguration(toEngineTemplate(template), input.selection, await customerPriceFor(articleId, input), rateOf(input)).evaluation;
+  }
+  function evaluate(
+    articleId: string,
+    input: { selection: ConfiguratorSelection; customerId?: string; quantity: number } & ConfigurationCurrency
+  ): Promise<ConfiguratorEvaluation> {
+    return snapshot((tx) => evaluateIn(tx, articleId, input));
   }
 
   // The customer price chain, as evaluate and derive both price a configuration
@@ -688,10 +705,23 @@ export function createConfiguratorService(deps: {
   // dropped, phantoms dissolved and rows merged per (article, operation).
   // Reads only — never inside another module's transaction. A local function
   // (not a method) so evaluateRowConfiguration can call it without `this`.
+  // The reads run in one snapshot; the förkalkyl runs AFTER it, on its own
+  // connections — it may fetch a rate from Riksbanken, and no transaction is
+  // held across HTTP (CLAUDE.md).
   async function deriveForManufacturing(
     templateArticleId: string, selection: ConfiguratorSelection, quantity: number, opts: { withCost?: boolean; allowVariants?: boolean } = {}
   ): Promise<ConfiguredStructure> {
-    const loaded = await loadDerivationInput(db, templateArticleId);
+    const { structure, core } = await snapshot((tx) => readConfiguredStructure(tx, templateArticleId, selection, quantity, opts));
+    if (!core || opts.withCost === false) return structure;
+    return { ...structure, cost: await costConfiguredStructure(templateArticleId, quantity, core, structure.key) };
+  }
+
+  // The structure without its cost (cost: null), and the derivation core the
+  // cost is computed from — null when the structure is not valid.
+  async function readConfiguredStructure(
+    ex: Db | Tx, templateArticleId: string, selection: ConfiguratorSelection, quantity: number, opts: { allowVariants?: boolean } = {}
+  ): Promise<{ structure: ConfiguredStructure; core: DerivedStructureCore | null }> {
+    const loaded = await loadDerivationInput(ex, templateArticleId);
     // allowVariants: Leveranstidskontrollen reads a not-yet-made variant's
     // structure the same way (it never creates the variant).
     if (loaded.detail.mode !== "to_order" && !(opts.allowVariants && loaded.detail.mode === "variants")) {
@@ -705,16 +735,19 @@ export function createConfiguratorService(deps: {
     });
     const empty = { templateArticleId, selection: [], operations: [], materials: [], cost: null };
     if (!evaluation.valid || evaluation.key === null) {
-      return { ...empty, valid: false, key: null, errors: [...evaluation.errors, ...evaluation.groups.flatMap((g) => g.errors)] };
+      return {
+        structure: { ...empty, valid: false, key: null, errors: [...evaluation.errors, ...evaluation.groups.flatMap((g) => g.errors)] },
+        core: null,
+      };
     }
-    if (!core.derivable) return { ...empty, valid: false, key: evaluation.key, errors: [...core.errors] };
+    if (!core.derivable) return { structure: { ...empty, valid: false, key: evaluation.key, errors: [...core.errors] }, core: null };
 
     const componentIds = [...new Set(core.materials.map((m) => m.componentArticleId))];
     const [templateRouting, workCenters, labels, phantoms] = await Promise.all([
-      repo.listTemplateRoutingRows(db, templateArticleId),
-      repo.workCentersForVariants(db, [...new Set(core.operations.map((o) => o.workCenterId))]),
-      repo.derivationLabels(db, { articleIds: componentIds, unitIds: [], workCenterIds: [] }),
-      repo.phantomIds(db, componentIds),
+      repo.listTemplateRoutingRows(ex, templateArticleId),
+      repo.workCentersForVariants(ex, [...new Set(core.operations.map((o) => o.workCenterId))]),
+      repo.derivationLabels(ex, { articleIds: componentIds, unitIds: [], workCenterIds: [] }),
+      repo.phantomIds(ex, componentIds),
     ]);
     const operations = manufacturingOperations(variantRoutingRows(core.operations, new Map(templateRouting.map((r) => [r.id, r])), workCenters));
     const exploded = await explodeDerivedMaterials(
@@ -726,37 +759,41 @@ export function createConfiguratorService(deps: {
         operationId: m.operation?.id ?? null,
         isPhantom: phantoms.has(m.componentArticleId),
       })),
-      (id, q) => repo.explodeBom(db, id, q)
+      (id, q) => repo.explodeBom(ex, id, q)
     );
     // Merged per (article, TO operation) and rounded to four decimals inside
     // linkMaterialsToOperations — one row per unique key, no float noise.
     const materials = linkMaterialsToOperations(exploded, core.operations, new Set(operations.map((o) => o.sequenceNo)));
-
-    let cost: ConfiguredStructure["cost"] = null;
-    if (opts.withCost !== false) {
-      try {
-        // Same rule as a variant's standard cost: a figure only when something
-        // was costed and it is finite and > 0 — otherwise null, never 0.
-        const costing = await costStructure(templateArticleId, quantity, core);
-        const costed = costing.materialRows.length + costing.operationRows.length > 0;
-        const usable = (n: number) => (costed && Number.isFinite(n) && n > 0 ? round4(n) : null);
-        cost = { manufacturingCostPerUnit: usable(costing.manufacturingCostPerUnit), selfCostPerUnit: usable(costing.selfCostPerUnit) };
-      } catch (err) {
-        // A förkalkyl failure (a rate the costing cannot get, a structure it
-        // cannot walk) never stops a sale or a TO: the row/TO goes on without
-        // a cost, exactly as a configuration that carries none — the order
-        // card and the margin report say "saknar förkalkyl". Only the costing
-        // call is tolerated; the derivation's own errors above are not.
-        log("Configurator: förkalkyl of a configured structure failed — stored without cost", {
-          templateArticleId, key: evaluation.key, quantity, error: err instanceof Error ? (err.stack ?? err.message) : String(err),
-        });
-        cost = null;
-      }
-    }
     return {
-      valid: true, errors: [], templateArticleId, key: evaluation.key,
-      selection: selectionEntries(template, effective), operations, materials, cost,
+      structure: {
+        valid: true, errors: [], templateArticleId, key: evaluation.key,
+        selection: selectionEntries(template, effective), operations, materials, cost: null,
+      },
+      core,
     };
+  }
+
+  async function costConfiguredStructure(
+    templateArticleId: string, quantity: number, core: DerivedStructureCore, key: string | null
+  ): Promise<ConfiguredStructure["cost"]> {
+    try {
+      // Same rule as a variant's standard cost: a figure only when something
+      // was costed and it is finite and > 0 — otherwise null, never 0.
+      const costing = await costStructure(templateArticleId, quantity, core);
+      const costed = costing.materialRows.length + costing.operationRows.length > 0;
+      const usable = (n: number) => (costed && Number.isFinite(n) && n > 0 ? round4(n) : null);
+      return { manufacturingCostPerUnit: usable(costing.manufacturingCostPerUnit), selfCostPerUnit: usable(costing.selfCostPerUnit) };
+    } catch (err) {
+      // A förkalkyl failure (a rate the costing cannot get, a structure it
+      // cannot walk) never stops a sale or a TO: the row/TO goes on without
+      // a cost, exactly as a configuration that carries none — the order
+      // card and the margin report say "saknar förkalkyl". Only the costing
+      // call is tolerated; the derivation's own errors are not.
+      log("Configurator: förkalkyl of a configured structure failed — stored without cost", {
+        templateArticleId, key, quantity, error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+      });
+      return null;
+    }
   }
 
   // --- stocked variants (lagerförda varianter) ---
@@ -968,21 +1005,31 @@ export function createConfiguratorService(deps: {
       return { rows: rows.map((r) => toPublicTemplateSummary(r, r)), total };
     },
 
+    // Visibility and the template come from one snapshot: a template
+    // unpublished between the two reads is never handed to a client.
     async getPublicTemplate(articleId: string, opts: { client: boolean }): Promise<PublicTemplate> {
-      const article = await visibleTemplate(articleId, opts);
-      return toPublicTemplate(await loadOrThrow(db, articleId), article);
+      return snapshot(async (tx) => {
+        const article = await visibleTemplate(tx, articleId, opts);
+        return toPublicTemplate(await loadOrThrow(tx, articleId), article);
+      });
     },
 
     // Valuta: in input.currency (default the customer's, else SEK) at
     // input.exchangeRate (default today's rate); the answer says which.
+    // The rate may be fetched (Riksbanken), so it is looked up before the
+    // snapshot — after a cheap visibility read, so a hidden template is still
+    // 404 without a rate call; the snapshot's own check is the one that counts.
     async evaluatePublic(
       articleId: string,
       input: { selection: ConfiguratorSelection; customerId?: string; quantity: number } & ConfigurationCurrency,
       opts: { client: boolean }
     ): Promise<ConfiguratorEvaluation> {
-      await visibleTemplate(articleId, opts);
+      await visibleTemplate(db, articleId, opts);
       const money = await requestCurrency(input);
-      return { ...(await evaluate(articleId, { ...input, ...money })), ...money };
+      return snapshot(async (tx) => {
+        await visibleTemplate(tx, articleId, opts);
+        return { ...(await evaluateIn(tx, articleId, { ...input, ...money })), ...money };
+      });
     },
 
     // Valuta: a customer's own currency (null = unknown customer, or no
@@ -1244,7 +1291,7 @@ export function createConfiguratorService(deps: {
       articleId: string,
       input: { selection: ConfiguratorSelection; customerId?: string; quantity: number } & ConfigurationCurrency
     ): Promise<ConfiguratorDerivation> {
-      const loaded = await loadDerivationInput(db, articleId);
+      const loaded = await snapshot((tx) => loadDerivationInput(tx, articleId));
       const money = await requestCurrency(input);
       const customerPrice = await customerPriceFor(articleId, { ...input, ...money });
       const resolved = resolveConfiguration(toEngineTemplate(loaded.detail), input.selection, customerPrice, rateOf(money));
@@ -1279,8 +1326,8 @@ export function createConfiguratorService(deps: {
       return { evaluation, structure, costing };
     },
 
-    // What the derivation reads (a plain read, like evaluate).
-    loadDerivationInput: (articleId: string) => loadDerivationInput(db, articleId),
+    // What the derivation reads (one snapshot, like evaluate).
+    loadDerivationInput: (articleId: string) => snapshot((tx) => loadDerivationInput(tx, articleId)),
 
     // --- stocked variants (lagerförda varianter) ---
 
@@ -1384,26 +1431,34 @@ export function createConfiguratorService(deps: {
     async evaluateRowConfiguration(
       templateArticleId: string, selection: ConfiguratorSelection, opts: { customerId: string; quantity: number } & ConfigurationCurrency
     ): Promise<RowConfigurationEvaluation> {
-      const detail = await loadOrThrow(db, templateArticleId);
-      if (detail.mode !== "to_order") throw new ConfiguratorNotToOrderModeError();
-      const template = toEngineTemplate(detail);
-      const { evaluation, effective } = resolveConfiguration(template, selection, await customerPriceFor(templateArticleId, opts), rateOf(opts));
-      if (!evaluation.valid || evaluation.key === null) {
-        return { valid: false, errors: [...evaluation.errors, ...evaluation.groups.flatMap((g) => g.errors)], configuration: null, cost: null };
-      }
+      // Price and structure are read from one snapshot so they agree; the
+      // förkalkyl runs after it (it may fetch a rate — no tx over HTTP).
+      const read = await snapshot(async (tx) => {
+        const detail = await loadOrThrow(tx, templateArticleId);
+        if (detail.mode !== "to_order") throw new ConfiguratorNotToOrderModeError();
+        const template = toEngineTemplate(detail);
+        const { evaluation, effective } = resolveConfiguration(template, selection, await customerPriceFor(templateArticleId, opts), rateOf(opts));
+        if (!evaluation.valid || evaluation.key === null) {
+          return { ok: false as const, errors: [...evaluation.errors, ...evaluation.groups.flatMap((g) => g.errors)] };
+        }
+        const derived = await readConfiguredStructure(tx, templateArticleId, selection, opts.quantity);
+        return { ok: true as const, template, evaluation, effective, key: evaluation.key, derived };
+      });
+      if (!read.ok) return { valid: false, errors: read.errors, configuration: null, cost: null };
+      const { template, evaluation, effective, key, derived } = read;
       // Konfigurator 4c: the row's förkalkyl at the row quantity (TVK/SVK per
       // unit) — null when the structure carries no cost (or costing it failed).
       // A structure the derivation cannot build is refused here, at the sale,
       // rather than stored with cost null and discovered when the TO is made.
-      const structure = await deriveForManufacturing(templateArticleId, selection, opts.quantity);
-      if (!structure.valid) throw new ConfigurationNotDerivableError(structure.errors);
-      const cost: OrderRowConfigurationCost | null = structure.cost
-        ? { ...structure.cost, quantity: opts.quantity, calculatedAt: new Date().toISOString() }
+      if (!derived.structure.valid || !derived.core) throw new ConfigurationNotDerivableError(derived.structure.errors);
+      const structureCost = await costConfiguredStructure(templateArticleId, opts.quantity, derived.core, key);
+      const cost: OrderRowConfigurationCost | null = structureCost
+        ? { ...structureCost, quantity: opts.quantity, calculatedAt: new Date().toISOString() }
         : null;
       return {
         valid: true, errors: [],
         configuration: {
-          templateArticleId, key: evaluation.key, selection: selectionEntries(template, effective),
+          templateArticleId, key, selection: selectionEntries(template, effective),
           price: {
             base: evaluation.price.base, additions: evaluation.price.additions, unitPrice: evaluation.price.unitPrice,
             discountPercent: evaluation.price.discountPercent, source: evaluation.price.source,

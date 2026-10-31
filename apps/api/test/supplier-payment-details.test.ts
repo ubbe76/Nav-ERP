@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
-import { db } from "@navet/db";
+import { eq, sql } from "drizzle-orm";
+import { db, suppliers } from "@navet/db";
 import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
 import { createPurchaseService, InvalidSupplierPaymentDetailsError } from "../src/modules/purchase/service/purchase.service.js";
 import { createSupplierInvoiceRepository } from "../src/modules/purchase/repository/supplier-invoice.repository.js";
@@ -14,7 +14,7 @@ import { createVerificationPoster } from "../src/modules/economy/service/verific
 import { readPostingSettings } from "../src/modules/system/service/posting-settings.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { testArticleService, testDocumentPdfService, testSystemService } from "./helpers/services.js";
-import { failure } from "./helpers/year-end.js";
+import { failure, waitForLockWaiter } from "./helpers/year-end.js";
 import { makeApprovedSupplierInvoice, makeSupplier, resetBanking, setupBanking } from "./helpers/banking.js";
 
 const purchaseService = createPurchaseService(
@@ -63,6 +63,26 @@ describe("leverantörens betalningsuppgifter", () => {
     // Clearing the field the method needs is refused too.
     const cleared = await failure(purchaseService.updateSupplier(supplier.id, { plusgiro: "" }));
     expect((cleared as InvalidSupplierPaymentDetailsError).problems).toEqual({ plusgiro: "Plusgiro saknas" });
+  });
+
+  // The merged pre-check runs on an unlocked read: when another PATCH
+  // switches the method meanwhile, the table's CHECK is the only guard and
+  // its 23514 is mapped to the same 400 the pre-check would have given.
+  it("maps the table's CHECK to the same 400 when a concurrent PATCH made the pre-check stale", async () => {
+    const supplier = await makeSupplier({ paymentMethod: "bankgiro", bankgiro: "50501055", iban: "SE4550000000058398257466" });
+    let patch: Promise<unknown> | undefined;
+    await db.transaction(async (holder) => {
+      await holder.update(suppliers).set({ paymentMethod: "iban" }).where(eq(suppliers.id, supplier.id));
+      // Clearing the IBAN is fine against the stored bankgiro method …
+      patch = failure(purchaseService.updateSupplier(supplier.id, { iban: "" }));
+      await waitForLockWaiter();
+    });
+    // … but lands on the switched row, where only the CHECK stands.
+    const error = await patch!;
+    expect(error).toBeInstanceOf(InvalidSupplierPaymentDetailsError);
+    expect(Object.keys((error as InvalidSupplierPaymentDetailsError).problems)).toEqual(["paymentMethod"]);
+    const [row] = await db.select().from(suppliers).where(eq(suppliers.id, supplier.id));
+    expect(row).toMatchObject({ paymentMethod: "iban", iban: "SE4550000000058398257466" });
   });
 
   it("rejects a bad check digit", async () => {

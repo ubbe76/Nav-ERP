@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
 import { companyInfo, db } from "@navet/db";
 import { createBankSettingsRepository } from "../src/modules/banking/repository/bank-settings.repository.js";
 import { bankSettingsRoutes } from "../src/modules/banking/routes/bank-settings.routes.js";
 import { BankSettingsIncompleteError, InvalidBankSettingError } from "../src/modules/banking/service/banking.errors.js";
 import { bankSettingsProblems, createBankSettingsService } from "../src/modules/banking/service/bank-settings.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { failure } from "./helpers/year-end.js";
+import { failure, waitForLockWaiter } from "./helpers/year-end.js";
 import { buildRouteApp, configureSwedbank, resetBanking, resetBankSettings, setupBanking, snapshotCompany } from "./helpers/banking.js";
 
 const service = createBankSettingsService({ repo: createBankSettingsRepository(db), audit: createAuditRepository(db) });
@@ -91,6 +92,23 @@ describe("bankinställningarna", () => {
     await configureSwedbank();
     expect(await failure(service.update({ debitAccountKind: "iban" }, userId))).toBeInstanceOf(InvalidBankSettingError);
     expect(await failure(service.update({ initiatingPartyId: "12345" }, userId))).toBeInstanceOf(InvalidBankSettingError);
+  });
+
+  // Read, merge and write happen in one transaction under the settings
+  // lock: a PATCH queues behind a holder and writes nothing until it has it.
+  it("writes the settings in one transaction under the settings lock", async () => {
+    await configureSwedbank();
+    let update: Promise<unknown> | undefined;
+    await db.transaction(async (holder) => {
+      await holder.execute(sql`SELECT pg_advisory_xact_lock(hashtext('bank_settings'))`);
+      update = service.update({ profile: "handelsbanken", initiatingPartyId: "556677-8899" }, userId);
+      await waitForLockWaiter();
+      expect((await service.read()).profile).toBe("swedbank");
+    });
+    await update!;
+    const view = await service.read();
+    expect(view.profile).toBe("handelsbanken");
+    expect(view.initiatingPartyId).toBe("5566778899");
   });
 
   it("normalizes hyphens/spaces in the agreement id and in the company's own giro numbers", async () => {

@@ -23,10 +23,12 @@ import {
   units,
   weekSchedules,
   workCenters,
+  configuratorTemplates,
   type Db,
 } from "@navet/db";
 import {
   ilikePattern,
+  type ConfiguratorMode,
   type CreateManufacturingOrderInput,
   type CreateMoOperationInput,
   type ManufacturingOrderConfiguration,
@@ -379,7 +381,12 @@ export type NewOrderPlanner = (tx: Tx, manufacturingOrderId: string) => Promise<
 export type CreateManufacturingOrderOutcome =
   | { ok: true; order: typeof manufacturingOrders.$inferSelect; warnings: string[] }
   | { ok: false; reason: "configuration_changed" }
+  | { ok: false; reason: "template_mode_changed" }
   | { ok: false; reason: "already_covered"; uncovered: number };
+
+// The configurator mode the service read before the transaction (null = no
+// template); `undefined` skips the re-check (callers outside prepareCreate).
+export type CreateManufacturingOrderRow = CreateManufacturingOrderInput & { articleId: string; templateMode?: ConfiguratorMode | null };
 
 // Finished-goods receipt (inleverans) up to `targetReceived` in total — the
 // one implementation behind both the delinleverans from the last operation
@@ -1296,7 +1303,7 @@ export function createManufacturingRepository(db: Db) {
     // markInProduction runs LAST, inside this same transaction, so the MO
     // insert and the KO's autoflip are one atomic unit.
     async createManufacturingOrder(
-      input: CreateManufacturingOrderInput & { articleId: string },
+      input: CreateManufacturingOrderRow,
       createdBy: string | null,
       linkedSalesOrder?: { salesOrderId: string; markInProduction: (tx: Tx, salesOrderId: string) => Promise<void> },
       configured?: ConfiguredCreateInput,
@@ -1315,7 +1322,7 @@ export function createManufacturingRepository(db: Db) {
     // the plan (`plan`, bound to the planning service) and the KO autoflip.
     async createManufacturingOrderInTx(
       tx: Tx,
-      input: CreateManufacturingOrderInput & { articleId: string },
+      input: CreateManufacturingOrderRow,
       createdBy: string | null,
       linkedSalesOrder?: { salesOrderId: string; markInProduction: (tx: Tx, salesOrderId: string) => Promise<void> },
       // Konfigurator 4c (ConfiguredCreateInput): the row lock is the first
@@ -1341,6 +1348,20 @@ export function createManufacturingRepository(db: Db) {
           });
           if (input.quantity > uncovered + 0.00005) return { ok: false, reason: "already_covered", uncovered };
         }
+      }
+      // Konfigurator: the mode the service read (and derived the structure
+      // for) is re-read FOR SHARE here — after the row lock, before anything
+      // is written; row → template is the order Ändra konfiguration locks
+      // in, and the template writers take this row FOR UPDATE. A mode change
+      // committed since the read would otherwise give a plain TO on a
+      // beställningsvara, or a configured TO on an article that is none.
+      if (input.templateMode !== undefined) {
+        const [template] = await tx
+          .select({ mode: configuratorTemplates.mode })
+          .from(configuratorTemplates)
+          .where(eq(configuratorTemplates.articleId, input.articleId))
+          .for("share");
+        if ((template?.mode ?? null) !== input.templateMode) return { ok: false, reason: "template_mode_changed" };
       }
       const orderNumber = await getNextOrderNumber(tx, "manufacturing_order");
       const [row] = await tx

@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
-import { db } from "@navet/db";
+import { eq, sql } from "drizzle-orm";
+import { attendanceSessions, db } from "@navet/db";
 import { stampOutSchema } from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -14,6 +14,7 @@ import {
   AlreadyStampedInError,
   AttendanceOpenFromEarlierDayError,
   AttendanceSessionAlreadyStoppedError,
+  AttendanceSessionChangedError,
   AttendanceSessionNotFoundError,
   DuplicateEmployeeNumberError,
   EmployeeNotFoundError,
@@ -27,6 +28,7 @@ import {
 import { InvalidStatusTransitionError } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { PayrollPeriodLockedError } from "../src/modules/payroll/service/period-lock.js";
 import { localDateOf } from "../src/modules/timereport/repository/stamp-close.js";
+import { failure, waitForLockWaiter } from "./helpers/year-end.js";
 
 const articleService = createArticleService(createArticleRepository(db));
 const mfgService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService);
@@ -627,6 +629,51 @@ describe("supervisor corrections — attendance sessions and time reports", () =
     await expect(
       timeReportService.updateAttendanceSession(first.id, { stoppedAt: null }, user.id)
     ).rejects.toBeInstanceOf(AlreadyPresentError);
+  });
+
+  // The service reads the session outside its transaction and validates the
+  // interval against that read; the write is conditional on BOTH times it
+  // read, so a start another correction moved meanwhile makes it a 409
+  // instead of an inverted interval.
+  it("refuses a correction whose start time another correction moved meanwhile", async () => {
+    const { user } = await makeReleasedMoWithOperation();
+    const employee = await makeEmployee();
+    const opened = await timeReportService.attendanceIn({ employeeId: employee.id }, user.id);
+    const { session: closed } = await timeReportService.attendanceOut(opened.id, user.id);
+    // A stop time valid against the stored start …
+    const newStoppedAt = new Date(closed.startedAt.getTime() + 30_000);
+    // … while another supervisor moves the start past it, holding the row
+    // until the correction has queued on it.
+    let correction: Promise<unknown> | undefined;
+    await db.transaction(async (holder) => {
+      await holder
+        .update(attendanceSessions)
+        .set({ startedAt: new Date(newStoppedAt.getTime() + 30_000) })
+        .where(eq(attendanceSessions.id, closed.id));
+      correction = failure(timeReportService.updateAttendanceSession(closed.id, { stoppedAt: newStoppedAt.toISOString() }, user.id));
+      await waitForLockWaiter();
+    });
+    expect(await correction!).toBeInstanceOf(AttendanceSessionChangedError);
+    const [row] = await db.select().from(attendanceSessions).where(eq(attendanceSessions.id, closed.id));
+    expect(row!.stoppedAt!.getTime()).toBe(closed.stoppedAt!.getTime());
+  });
+
+  it("re-opening that loses to a new Kom on the one-open index answers already-present", async () => {
+    const { user } = await makeReleasedMoWithOperation();
+    const employee = await makeEmployee();
+    const first = await timeReportService.attendanceIn({ employeeId: employee.id }, user.id);
+    await timeReportService.attendanceOut(first.id, user.id);
+    // A Kom at the terminal, not yet committed: the pre-check sees no open
+    // session, the UPDATE queues on the index entry and loses.
+    let reopen: Promise<unknown> | undefined;
+    await db.transaction(async (holder) => {
+      await holder.insert(attendanceSessions).values({ employeeId: employee.id, startedAt: new Date(), createdBy: user.id });
+      reopen = failure(timeReportService.updateAttendanceSession(first.id, { stoppedAt: null }, user.id));
+      await waitForLockWaiter();
+    });
+    expect(await reopen!).toBeInstanceOf(AlreadyPresentError);
+    const [row] = await db.select().from(attendanceSessions).where(eq(attendanceSessions.id, first.id));
+    expect(row!.stoppedAt).not.toBeNull();
   });
 
   it("deletes an attendance session", async () => {

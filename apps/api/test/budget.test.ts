@@ -23,6 +23,7 @@ import {
   BudgetRangeOutsideYearError,
   createFinancialReportsService,
 } from "../src/modules/economy/service/financial-reports.service.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
 
 // Budget (etapp 5 del B) against Postgres: CRUD and the per-year default,
 // replace-the-set per cost center, validation, Kopiera budget, Kopiera
@@ -371,6 +372,31 @@ describe("kostnadsställe — kopplingsflytt of budget lines", () => {
     ]);
     expect(await db.select().from(budgetLines)).toHaveLength(3);
     expect(await db.select().from(budgets)).toHaveLength(1);
+  });
+
+  // Spara (replaceLines) rewrites a cost center's lines under the budget's
+  // row lock; the reassignment takes the same lock first, so a save in
+  // flight commits before the move reads and its lines move too.
+  it("the reassignment waits for a Spara holding the budget's lock and moves what that save wrote", async () => {
+    const { user, year, workshop, assembly } = await setup();
+    const budget = await service.create({ fiscalYearId: year.id, name: "B" }, user.id);
+    await service.replaceLines(budget.id, { costCenterId: workshop.id, lines: [{ accountNumber: "3001", amounts: months(0, { 1: 100 }) }] }, user.id);
+    let removal: Promise<{ moved: { table: string; count: number }[] }> | undefined;
+    await db.transaction(async (holder) => {
+      await holder.select({ id: budgets.id }).from(budgets).where(eq(budgets.id, budget.id)).for("update");
+      removal = dimensions.costCenters.remove(workshop.id, assembly.id, user.id);
+      await waitForLockWaiter();
+      // The save's own write, still inside its lock.
+      await holder.insert(budgetLines).values({ budgetId: budget.id, accountNumber: "4010", month: 2, costCenterId: workshop.id, amount: "10" });
+      expect(await db.select().from(costCenters).where(eq(costCenters.id, workshop.id))).toHaveLength(1);
+    });
+    expect((await removal!).moved).toEqual([{ table: "budget_lines", count: 2 }]);
+    expect(await db.select().from(costCenters).where(eq(costCenters.id, workshop.id))).toHaveLength(0);
+    const detail = await service.get(budget.id);
+    expect(detail.lines).toEqual([
+      { accountNumber: "3001", accountName: expect.any(String), costCenterId: assembly.id, amounts: months(0, { 1: 100 }) },
+      { accountNumber: "4010", accountName: expect.any(String), costCenterId: assembly.id, amounts: months(0, { 2: 10 }) },
+    ]);
   });
 
   it("refuses to delete a cost center with budget lines and no replacement", async () => {

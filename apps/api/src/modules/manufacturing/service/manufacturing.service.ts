@@ -25,6 +25,7 @@ import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js
 import { roundUpToMultiple, splitLateFilter, toUnitQuantity } from "@navet/shared";
 import type { ManufacturingMaterialShortage, PalletCardCode } from "@navet/shared";
 import type {
+  CreateManufacturingOrderOutcome,
   ManufacturingRepository,
   ReportOperationQuantitiesInput,
   ReportSource,
@@ -56,7 +57,7 @@ import type { AuditWriter } from "../../system/repository/audit.repository.js";
 // module's row-configuration errors so the three TO paths and the order row
 // answer alike.
 import type { ConfiguredStructureReader } from "../../configurator/service/configurator.service.js";
-import { ConfiguratorInvalidConfigurationError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
+import { ConfiguratorInvalidConfigurationError, ConfiguratorModeChangedError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 import { configurationLines } from "../../configurator/service/configuration-lines.js";
 import { selectionFromEntries } from "../../configurator/service/variant-identity.js";
 import {
@@ -748,6 +749,13 @@ export function createManufacturingService(
   // "validate first" shape as every other guard in this file): the linked
   // KO row, the article's rounding/template mode and a beställningsvara's
   // derived structure. Shared by the Tx variant.
+  // The create transaction's refusals (CreateManufacturingOrderOutcome), as errors.
+  function createOutcomeError(result: Exclude<CreateManufacturingOrderOutcome, { ok: true }>): Error {
+    if (result.reason === "already_covered") return new ConfiguredRowAlreadyCoveredError(result.uncovered);
+    if (result.reason === "template_mode_changed") return new ConfiguratorModeChangedError();
+    return new RowConfigurationChangedError();
+  }
+
   async function prepareCreate(input: CreateManufacturingOrderInput, opts: { onlyUncovered?: boolean } = {}) {
     let articleId = input.articleId;
     let linkedSalesOrderId: string | undefined;
@@ -834,6 +842,8 @@ export function createManufacturingService(
     return {
       articleId: articleId!,
       quantity,
+      // Re-checked FOR SHARE in the create transaction (ConfiguratorModeChangedError).
+      templateMode: article?.configuratorMode ?? null,
       linkedSalesOrder: linkedSalesOrderId
         ? {
             salesOrderId: linkedSalesOrderId,
@@ -1393,16 +1403,13 @@ export function createManufacturingService(
           }
         : plan;
       const result = await repo.createManufacturingOrder(
-        { ...input, articleId: prepared.articleId, quantity: prepared.quantity },
+        { ...input, articleId: prepared.articleId, quantity: prepared.quantity, templateMode: prepared.templateMode },
         createdBy,
         prepared.linkedSalesOrder,
         prepared.configured,
         planAndLink
       );
-      if (!result.ok) {
-        if (result.reason === "already_covered") throw new ConfiguredRowAlreadyCoveredError(result.uncovered);
-        throw new RowConfigurationChangedError();
-      }
+      if (!result.ok) throw createOutcomeError(result);
       await audit.log({ entityType: "manufacturing_order", entityId: result.order.orderNumber, action: "released", userId: createdBy });
       // releaseWarnings: the same shortage warnings Släpp returns, plus the
       // plan's (horizon, Sen).
@@ -1425,16 +1432,13 @@ export function createManufacturingService(
       const prepared = await prepareCreate(input);
       const result = await repo.createManufacturingOrderInTx(
         tx,
-        { ...input, articleId: prepared.articleId, quantity: prepared.quantity },
+        { ...input, articleId: prepared.articleId, quantity: prepared.quantity, templateMode: prepared.templateMode },
         createdBy,
         prepared.linkedSalesOrder,
         prepared.configured,
         planning ? (t, moId) => planning.planNewOrderInTx(t, moId, opts.plannedWeeks) : undefined
       );
-      if (!result.ok) {
-        if (result.reason === "already_covered") throw new ConfiguredRowAlreadyCoveredError(result.uncovered);
-        throw new RowConfigurationChangedError();
-      }
+      if (!result.ok) throw createOutcomeError(result);
       return { ...result.order, releaseWarnings: result.warnings };
     },
 

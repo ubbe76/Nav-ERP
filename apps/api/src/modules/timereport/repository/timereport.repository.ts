@@ -555,13 +555,14 @@ export function createTimeReportRepository(db: Db) {
     // one. Work resumed since is never touched.
     //
     // The patch carries only the columns the supervisor changed, and the
-    // write is conditional on the stop time the service read
-    // (`expectedStoppedAt`, compared to the millisecond like the freight
-    // module's optimistic writes — JS dates have ms, Postgres µs): a Gå hem
-    // at the terminal in between would otherwise be undone by a correction
-    // that only meant to change a reason (it would write the stale
-    // "still open" back). A miss returns `session: null` with nothing
-    // written; the service answers 409.
+    // write is conditional on BOTH times the service read (`expected`,
+    // compared to the millisecond like the freight module's optimistic
+    // writes — JS dates have ms, Postgres µs): a Gå hem at the terminal in
+    // between would otherwise be undone by a correction that only meant to
+    // change a reason (it would write the stale "still open" back), and a
+    // second supervisor moving the start meanwhile would let a stop time
+    // validated against the old start land before the new one. A miss
+    // returns `session: null` with nothing written; the service answers 409.
     async correctAttendanceWithWork(
       id: string,
       patch: Partial<{
@@ -572,18 +573,19 @@ export function createTimeReportRepository(db: Db) {
         stopReasonId: string | null;
         stopNote: string | null;
       }>,
-      expectedStoppedAt: Date | null,
+      expected: { startedAt: Date; stoppedAt: Date | null },
       effect:
         | { kind: "pause"; employeeId: string; at: Date }
         | { kind: "move"; employeeId: string; from: Date; to: Date }
         | null
     ) {
       return db.transaction(async (tx) => {
+        const unchangedStart = sql`abs(extract(epoch from (${attendanceSessions.startedAt} - ${expected.startedAt.toISOString()}::timestamptz))) < 0.001`;
         const unchangedStop =
-          expectedStoppedAt === null
+          expected.stoppedAt === null
             ? isNull(attendanceSessions.stoppedAt)
-            : sql`abs(extract(epoch from (${attendanceSessions.stoppedAt} - ${expectedStoppedAt.toISOString()}::timestamptz))) < 0.001`;
-        const where = and(eq(attendanceSessions.id, id), unchangedStop);
+            : sql`abs(extract(epoch from (${attendanceSessions.stoppedAt} - ${expected.stoppedAt.toISOString()}::timestamptz))) < 0.001`;
+        const where = and(eq(attendanceSessions.id, id), unchangedStart, unchangedStop);
         const [session] =
           Object.keys(patch).length === 0
             ? await tx.select().from(attendanceSessions).where(where).for("update")
