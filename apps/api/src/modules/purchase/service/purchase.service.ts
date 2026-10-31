@@ -228,6 +228,16 @@ export class DuplicateInquiryRowError extends Error {
   }
 }
 
+// purchase_order_rows has unique(purchase_order_id, article_id) — the same
+// catch-the-insert pattern as DuplicateInquiryRowError. A second lego
+// operation on the same article needs its own order.
+export class DuplicatePurchaseOrderRowError extends Error {
+  constructor() {
+    super("Article already on the purchase order — change the quantity on its row, or put a lego operation on a separate order");
+    this.name = "DuplicatePurchaseOrderRowError";
+  }
+}
+
 // "Uppdatera beredningens legopris" refused: not a lego row, no answered
 // price yet, wrong status, or the routing operation is gone/no longer lego.
 export class InquiryRowPriceNotApplicableError extends Error {
@@ -1193,6 +1203,9 @@ export function createPurchaseService(
         // FK is the existence check.
         if (isForeignKeyViolation(err, "purchase_order_rows_mo_operation_id_mo_operations_id_fk")) {
           throw new MoOperationNotFoundError(input.moOperationId ?? "");
+        }
+        if (isUniqueViolation(err, "purchase_order_rows_purchase_order_id_article_id_unique")) {
+          throw new DuplicatePurchaseOrderRowError();
         }
         throw err;
       }

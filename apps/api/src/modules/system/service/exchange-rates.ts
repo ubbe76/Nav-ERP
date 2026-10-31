@@ -73,6 +73,11 @@ export const LOOKBACK_DAYS = 10;
 const FETCHED_TTL_PAST_MS = 6 * 60 * 60 * 1000;
 const FETCHED_TTL_TODAY_MS = 10 * 60 * 1000;
 const FETCHED_MEMO_MAX = 2000;
+// A failed referensränta fetch (Riksbanken down, a timeout, a refused key)
+// holds off ensureReferenceRates' automatic fetching for this long — every
+// invoice list and Räntefakturering load would otherwise wait out the
+// timeout again. Hämta från Riksbanken always tries, and clears it.
+const REFERENCE_RATE_FAILURE_BACKOFF_MS = 10 * 60 * 1000;
 
 export const RIKSBANK_MESSAGES = {
   unavailable: "Riksbanken svarar inte — försök igen eller ange kursen själv",
@@ -222,6 +227,8 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
     if (fetched.size >= FETCHED_MEMO_MAX) fetched.clear();
     fetched.set(fetchedKey(currency, day), clock() + (day >= today() ? FETCHED_TTL_TODAY_MS : FETCHED_TTL_PAST_MS));
   }
+  // See REFERENCE_RATE_FAILURE_BACKOFF_MS.
+  let referenceRateBackoffUntil = 0;
 
   async function readSettings(): Promise<{ source: ExchangeRateMode; apiKey: string | null }> {
     const raw = await readExchangeRateSettings(db);
@@ -479,6 +486,7 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
         await upsertRiksbankReferenceRate(db, validFrom, result.rate);
         fetchedCount += 1;
       }
+      referenceRateBackoffUntil = 0;
       return { fetched: fetchedCount, rows: await listReferenceRates(db) };
     },
 
@@ -487,17 +495,22 @@ export function createExchangeRateService(deps: ExchangeRateServiceDeps) {
     // unpublished half-year simply leaves it out — the caller reports
     // rateMissing). Never called inside a transaction. A half-year asked
     // for recently is not asked again (the fetch memo), so a list reload
-    // does not hammer Riksbanken for a rate that is not published.
+    // does not hammer Riksbanken for a rate that is not published — and
+    // after a failure nothing is asked for a while (the backoff), so a list
+    // reload does not wait out the timeout again either.
     async ensureReferenceRates(halfYearStarts: string[]): Promise<Map<string, number>> {
       const wanted = [...new Set(halfYearStarts)].sort();
       let stored = await referenceRatesFor(db, wanted);
       const todayDate = today();
       const missing = wanted.filter((start) => !stored.has(start) && start <= todayDate && !fetchedRecently(REFERENCE_RATE_SERIES, start));
-      if (missing.length > 0) {
+      if (missing.length > 0 && clock() >= referenceRateBackoffUntil) {
         const settings = await readSettings();
         for (const validFrom of missing) {
           const result = await fetchReferenceRate(validFrom, settings.apiKey);
-          if (!result.ok) break;
+          if (!result.ok) {
+            referenceRateBackoffUntil = clock() + REFERENCE_RATE_FAILURE_BACKOFF_MS;
+            break;
+          }
           markFetched(REFERENCE_RATE_SERIES, validFrom);
           if (result.rate !== null) await upsertRiksbankReferenceRate(db, validFrom, result.rate);
         }

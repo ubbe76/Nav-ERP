@@ -712,7 +712,7 @@ export async function planCustomerImport(
 // lists created by the import) ---
 
 // Betalningsvillkor whose name starts with a day count ("30 dagar netto")
-// get that number AS the code — it is what computeDueDate
+// get that number AS the code — it is what dueDateFromTerm
 // (purchase/service/supplier-invoice.service.ts) parses back out to compute
 // a due date. Anything else (including day-less terms like "Förskott") falls
 // through to the generic slug.

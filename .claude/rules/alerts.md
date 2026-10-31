@@ -22,7 +22,7 @@ Spec `docs/superpowers/specs/2026-10-21-aviseringar-design.md`.
   - **Orderlistornas statusfilter Sen** delar reglerna: `status=late` (`orderStatusListParam`/`splitLateFilter` i shared `list.ts`, härlett — aldrig lagrat; med en riktig status gäller båda). KO/IO använder lövet `planning/repository/late-orders.ts` (`salesOrderLate`/`purchaseOrderLate` = statusmängden + `EXISTS` på `salesRowLate`/`purchaseRowLate`, samma radvillkor som aviseringens join), TO-servicen tar `orderPlanSummaries` över alla öppna TO:er (`listOpenManufacturingOrderIds`) och listar de sena id:na så sidning och total stannar i SQL. De tre typernas `listHref` går till listan med `?status=late`. Test: `alerts.integration.test.ts` (listan = gruppen).
   - `purchase_needed`/`manufacture_needed` (behovsberäkningens förslag via `planningService.requirementProposals()`, genom 60 s-cachen, aldrig refresh)
   - `customer_invoice_overdue` (`openAmountSql`)
-  - `supplier_invoice_due` (attesterad, öppen, förfallodatum — lagrat annars `computeDueDate` — ≤ i dag + `alert_supplier_invoice_days`; röd när förfallen; fakturor i en levande betalningsomgång utesluts)
+  - `supplier_invoice_due` (attesterad, öppen, förfallodatum — lagrat annars `dueDateFromTerm` — ≤ i dag + `alert_supplier_invoice_days`; röd när förfallen; fakturor i en levande betalningsomgång utesluts)
   - `einvoice_failed` (senaste **produktions**sändning failed/rejected utan levande sändning)
   - `email_failed` (admin, 14 dagar, utan senare lyckat utskick av samma dokument; för `document_id` null samma mottagare)
   - `quote_followup` (**Offerter att följa upp**: quote med giltighetsdatum ≤ i dag + `alert_quote_followup_days`, röd när utgången), `recurring_verification_failed`, `bank_unreconciled`

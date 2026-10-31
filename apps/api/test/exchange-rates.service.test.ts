@@ -326,6 +326,32 @@ describe("referensränta", () => {
     expect(calls).toHaveLength(2);
     // A transport failure is not an error here: the caller shows rateMissing.
     const { svc: down } = service(["throw"]);
-    expect(await down.ensureReferenceRates(["2027-01-01"])).toEqual(new Map());
+    expect(await down.ensureReferenceRates(["2025-01-01"])).toEqual(new Map());
+  });
+
+  it("after a failure ensureReferenceRates asks Riksbanken nothing for ten minutes; Hämta från Riksbanken still tries and clears it", async () => {
+    const { svc, calls } = service(["hang", { status: 200, body: REF(2, "2026-01-02") }, { status: 200, body: REF(2.5, "2026-07-01") }]);
+    expect(await svc.ensureReferenceRates(["2026-01-01", "2026-07-01"])).toEqual(new Map());
+    expect(calls).toHaveLength(1); // the timeout stopped the run
+    // Every reload within the backoff answers at once, without a request.
+    now += 9 * 60 * 1000;
+    expect(await svc.ensureReferenceRates(["2026-01-01", "2026-07-01"])).toEqual(new Map());
+    expect(calls).toHaveLength(1);
+    // The explicit fetch is never held off, and a success lifts the backoff.
+    await svc.fetchReferenceRates({ from: "2026-01-01", to: "2026-01-01" });
+    expect(calls).toHaveLength(2);
+    expect([...(await svc.ensureReferenceRates(["2026-01-01", "2026-07-01"]))]).toEqual([
+      ["2026-01-01", 2],
+      ["2026-07-01", 2.5],
+    ]);
+    expect(calls).toHaveLength(3);
+  });
+
+  it("asks again once the backoff has passed", async () => {
+    const { svc, calls } = service(["throw", { status: 200, body: REF(2, "2026-01-02") }]);
+    expect(await svc.ensureReferenceRates(["2026-01-01"])).toEqual(new Map());
+    now += 10 * 60 * 1000;
+    expect(await svc.ensureReferenceRates(["2026-01-01"])).toEqual(new Map([["2026-01-01", 2]]));
+    expect(calls).toHaveLength(2);
   });
 });

@@ -358,7 +358,11 @@ import {
   MoOperationSequenceTakenError,
   MoOperationStampedError,
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
-import { DuplicateInquiryRowError, MoOperationNotFoundError } from "../src/modules/purchase/service/purchase.service.js";
+import {
+  DuplicateInquiryRowError,
+  DuplicatePurchaseOrderRowError,
+  MoOperationNotFoundError,
+} from "../src/modules/purchase/service/purchase.service.js";
 import {
   BaseUnitLockedError,
   CostingOnlyOperationLinkError,
@@ -634,6 +638,7 @@ const cases: Array<[Error, string]> = [
   [new InvalidOperationFileTypeError("text/plain"), ERROR_CODES.INVALID_OPERATION_FILE_TYPE],
   [new MoOperationNotFoundError("x"), ERROR_CODES.MO_OPERATION_NOT_FOUND],
   [new DuplicateInquiryRowError(), ERROR_CODES.DUPLICATE_INQUIRY_ROW],
+  [new DuplicatePurchaseOrderRowError(), ERROR_CODES.DUPLICATE_PURCHASE_ORDER_ROW],
   [new CostingOnlyOperationLinkError(), ERROR_CODES.COSTING_ONLY_OPERATION_LINK],
   [new DuplicateBomComponentError(), ERROR_CODES.DUPLICATE_BOM_COMPONENT],
   [new SeriesExhaustedError("customer"), ERROR_CODES.SERIES_EXHAUSTED],

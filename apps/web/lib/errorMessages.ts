@@ -376,6 +376,8 @@ const MESSAGES: Record<string, MessageEntry> = {
   "duplicate-bom-component":
     "Komponenten ligger redan i artikelns struktur — ändra den befintliga raden i stället.",
   "duplicate-inquiry-row": "Artikeln finns redan på förfrågan — lägg operationen på en egen förfrågan.",
+  "duplicate-purchase-order-row":
+    "Artikeln finns redan på inköpsordern — ändra antalet på den raden, eller lägg en legooperation på en egen inköpsorder.",
   // system
   "series-exhausted": "Nummerserien är full — kontrollera nummerserien under System.",
   "duplicate-number-series-name": "Det finns redan en nummerserie med det namnet.",

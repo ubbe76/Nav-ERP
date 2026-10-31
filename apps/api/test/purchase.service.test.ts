@@ -8,6 +8,7 @@ import { createPurchaseRepository } from "../src/modules/purchase/repository/pur
 import {
   createPurchaseService,
   DeliveryAddressNotFoundError,
+  DuplicatePurchaseOrderRowError,
   DuplicateSupplierNumberError,
   InquiryNotFoundError,
   InvalidStatusTransitionError,
@@ -164,6 +165,14 @@ describe("purchase service — order lifecycle", () => {
     await expect(
       purchaseService.addRow(order.id, { articleId: articleD.id, quantity: 1, unitPrice: 1 })
     ).rejects.toThrow(InvalidStatusTransitionError);
+  });
+
+  it("refuses the same article twice on an order with a domain error, not the raw unique violation", async () => {
+    const { order, article } = await makeOrderWithRow(10);
+    await expect(purchaseService.addRow(order.id, { articleId: article.id, quantity: 1, unitPrice: 1 })).rejects.toThrow(
+      DuplicatePurchaseOrderRowError
+    );
+    expect(await purchaseService.listRows(order.id)).toHaveLength(1);
   });
 
   it("allows cancel from draft and from confirmed", async () => {

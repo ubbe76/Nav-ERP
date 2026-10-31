@@ -100,7 +100,7 @@ export interface OpenSupplierInvoiceRow {
   supplierName: string;
   invoiceDate: string;
   dueDate: string | null;
-  // The supplier's payment term code ("30") for computeDueDate when the
+  // The supplier's payment term code ("30") for dueDateFromTerm when the
   // invoice was saved without a due date.
   paymentTermCode: string | null;
   // In the invoice's own currency (Valuta) — the alert names it.
@@ -361,7 +361,7 @@ export function createAlertsRepository(db: Db) {
     // NOT reserved in a live payment batch (the pending/exported rows the
     // partial unique index payment_batch_items_invoice_live guards) — those
     // are already on their way to the bank. The due-date window is applied
-    // by the service, which derives a missing due date with computeDueDate.
+    // by the service, which derives a missing due date with dueDateFromTerm.
     async openSupplierInvoices(): Promise<OpenSupplierInvoiceRow[]> {
       const rows = await db
         .select({

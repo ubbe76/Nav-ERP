@@ -1,7 +1,7 @@
 import { ALERT_ITEMS_LIMIT, BANK_UNRECONCILED_DAYS, type AlertGroup, type AlertItem, type AlertKind, type AlertSeverity, type AlertsResponse } from "@navet/shared";
 import { addDays, stockholmToday } from "../../system/service/delivery-days.js";
 import { stockholmNow } from "../../shipping/service/pickup.js";
-import { computeDueDate } from "../../purchase/service/supplier-invoice.service.js";
+import { dueDateFromTerm } from "../../system/service/due-date.js";
 import type { AlertsRepository } from "../repository/alerts.repository.js";
 import { alertKindDef, quoteFollowupSeverity, sortKinds, supplierInvoiceSeverity, visibleKinds, type AlertUser } from "./alert-kinds.js";
 
@@ -209,14 +209,14 @@ export function createAlertsService(deps: {
     },
 
     // Due within N days (the system setting), the stored due date first and
-    // computeDueDate's derivation for an invoice saved without one; an
+    // dueDateFromTerm's derivation for an invoice saved without one; an
     // invoice with neither has no due date and is left out.
     async supplier_invoice_due(today) {
       const [rows, days] = await Promise.all([repo.openSupplierInvoices(), deps.settings.supplierInvoiceDays()]);
       const horizon = addDays(today, days);
       const items: AlertItem[] = [];
       for (const r of rows) {
-        const dueDate = r.dueDate ?? computeDueDate(r.invoiceDate, r.paymentTermCode);
+        const dueDate = r.dueDate ?? dueDateFromTerm(r.invoiceDate, r.paymentTermCode);
         if (dueDate === null || dueDate > horizon) continue;
         const severity = supplierInvoiceSeverity(dueDate, today);
         items.push({

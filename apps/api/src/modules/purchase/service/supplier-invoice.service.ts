@@ -23,6 +23,7 @@ import {
 } from "../repository/supplier-invoice.repository.js";
 import { InvalidStatusTransitionError, SupplierNotFoundError } from "./purchase.service.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
+import { dueDateFromTerm } from "../../system/service/due-date.js";
 import type { PostingVatCode } from "../../economy/service/verification-poster.js";
 import {
   documentVatCode,
@@ -218,26 +219,6 @@ export class SupplierInvoiceFileFromScanError extends Error {
     super(`Underlaget kom från fakturainkorgen (${scanNumber}) och kan inte tas bort — det är den mottagna fakturan`);
     this.name = "SupplierInvoiceFileFromScanError";
   }
-}
-
-// dueDate: invoiceDate + parseInt(paymentTermCode) days when the code is a
-// finite number of days ("30" -> 30 dagar netto), else null (a code like
-// "KONTANT" carries no computed due date) — the same parse as sales'
-// computeDueDate (invoice.service.ts:170-174). The two differ in what they
-// count FROM, on purpose: AR derives the due date from the issuing INSTANT it
-// already holds (a Date), while AP has no such instant — the paper invoice's
-// own date is typed in, so this variant starts from that string. It is split
-// into local components and fed to the Date(y, m, d) constructor rather than
-// parsed with new Date("2026-07-01"), which ISO-parses to UTC midnight and
-// can land on the previous day once toLocaleDateString renders it in a
-// negative-offset timezone.
-// Exported for the alerts module (Leverantörsfakturor att betala), which
-// derives the due date the same way for an invoice saved without one.
-export function computeDueDate(invoiceDate: string, paymentTermCode: string | null): string | null {
-  const termDays = Number.parseInt(paymentTermCode ?? "", 10);
-  if (!Number.isFinite(termDays)) return null;
-  const [y, m, d] = invoiceDate.split("-").map(Number);
-  return new Date(y!, m! - 1, d! + termDays).toLocaleDateString("sv-SE");
 }
 
 // A row as the client may send it (create or the merged result of a PATCH).
@@ -510,7 +491,7 @@ export function createSupplierInvoiceService(
         const paymentTermCode = supplier.paymentTermId
           ? await r.findPaymentTermCode(supplier.paymentTermId)
           : null;
-        dueDate = computeDueDate(input.invoiceDate, paymentTermCode);
+        dueDate = dueDateFromTerm(input.invoiceDate, paymentTermCode);
       }
       const book = await r.vatCodeBook();
       const vatCodeId = headerVatCodeId(book, supplier, input.vatCodeId);
