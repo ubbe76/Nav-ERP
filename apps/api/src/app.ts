@@ -661,6 +661,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     customerCurrency: async (id) =>
       (await database.select({ currency: customers.currency }).from(customers).where(eq(customers.id, id)))[0]?.currency ?? null,
     rates: exchangeRateService,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   variantPriceRef.current = (q) => configuratorService.variantPrice(q);
   configuredStructureRef.current = (t, s, q, o) => configuratorService.deriveForManufacturing(t, s, q, o);

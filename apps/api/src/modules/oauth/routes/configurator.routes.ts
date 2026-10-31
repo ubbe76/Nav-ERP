@@ -18,6 +18,7 @@ import {
 import { ArticleIsTemplateError, InvalidUnitError } from "../../article/service/article.service.js";
 import type { ConfiguratorService } from "../../configurator/service/configurator.service.js";
 import {
+  ConfigurationNotDerivableError,
   ConfiguratorInvalidConfigurationError,
   ConfiguratorNotPublishedError,
   ConfiguratorNotToOrderModeError,
@@ -28,6 +29,7 @@ import {
   ConfiguratorVariantNumberTakenError,
   ConfiguratorVariantTooLongError,
 } from "../../configurator/service/configurator.errors.js";
+import { notDerivableBody } from "../../configurator/routes/not-derivable-body.js";
 import { CostCenterInactiveError, CostCenterNotFoundError, ProjectClosedError, ProjectNotFoundError } from "../../economy/service/dimension-check.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
@@ -124,6 +126,9 @@ export async function configuratorRoutes(
       if (err instanceof ConfigurationRequiredError || err instanceof ConfiguratorNotToOrderModeError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
       if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
+      // A beställningsvara whose structure cannot be derived for the choices:
+      // the structure's own messages only reach a session (Ny kundorder).
+      if (err instanceof ConfigurationNotDerivableError) return reply.code(409).send(notDerivableBody(err, req));
       if (err instanceof ConfiguratorTemplateNotFoundError) return reply.code(404).send(errorBody(err));
       // Delprojekt 5: a configuration on a variants template resolves the
       // variant (4a's resolveVariant) — the same mapping as the sales routes.

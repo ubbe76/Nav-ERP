@@ -526,6 +526,15 @@ const MESSAGES: Record<string, MessageEntry> = {
   "configurator-not-published": "Mallen är inte publicerad för API:t.",
   "configuration-required": serverMessage("Artikeln är en beställningsvara — konfigurera den."),
   "configuration-not-allowed": serverMessage("Artikeln är inte en beställningsvara."),
+  // The derivation's own messages (structure lines, operations) ride along as
+  // details for a session — they say what to fix in the template.
+  "configuration-not-derivable": (err) => {
+    const details = (err.body as { details?: unknown } | undefined)?.details;
+    const list = Array.isArray(details) ? details.filter((d): d is string => typeof d === "string") : [];
+    return `Kombinationen kan inte tillverkas — åtgärda mallens struktur på artikelkortet.${
+      list.length > 0 ? ` ${list.join("; ")}` : ""
+    }`;
+  },
   // The server's message says which: a check needs an open order, a
   // reservation (Skapa tillverkningsordrar) a confirmed one.
   "sales-order-not-open": serverMessage(

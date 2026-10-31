@@ -4,7 +4,7 @@ import { db } from "@navet/db";
 import { insertArticle } from "../../src/modules/article/repository/article.repository.js";
 import { insertBomRows } from "../../src/modules/article/repository/bom-write.js";
 import {
-  createConfiguratorService, type PriceReader, type VariantStockReader, type VariantWriters,
+  createConfiguratorService, type CostingPreview, type PriceReader, type VariantStockReader, type VariantWriters,
 } from "../../src/modules/configurator/service/configurator.service.js";
 import { createCostingRepository } from "../../src/modules/costing/repository/costing.repository.js";
 import { createCostingService } from "../../src/modules/costing/service/costing.service.js";
@@ -40,6 +40,9 @@ export function makeVariantService(
     // Valuta: evaluate/derive's currency defaults.
     customerCurrency?: (id: string) => Promise<string | null>;
     rates?: ExchangeRateReader;
+    // A failing förkalkyl (configured-cost-failure.test.ts) and where it is logged.
+    costing?: CostingPreview;
+    log?: (msg: string, extra?: Record<string, unknown>) => void;
   } = {}
 ) {
   return createConfiguratorService({
@@ -47,13 +50,14 @@ export function makeVariantService(
     prices: overrides.prices ?? (async () => ({ articleNumber: "X", price: null })),
     ...(overrides.customerCurrency ? { customerCurrency: overrides.customerCurrency } : {}),
     ...(overrides.rates ? { rates: overrides.rates } : {}),
+    ...(overrides.log ? { log: overrides.log } : {}),
     customerExists: async () => true,
     articles: {
       exists: async (id) => (await testArticleService.getArticle(id)) != null,
       isDescendant: (articleId, ancestorId) => testArticleService.isDescendant(articleId, ancestorId),
       find: (id) => testArticleService.getArticle(id),
     },
-    costing: testCostingService,
+    costing: overrides.costing ?? testCostingService,
     writers: overrides.writers ?? variantWriters,
     stock: overrides.stock ?? emptyStockReader,
   });

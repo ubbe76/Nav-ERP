@@ -5,6 +5,7 @@ import { createPlanningRepository } from "../src/modules/planning/repository/pla
 import { ConfigurationRequiredError, createPlanningService } from "../src/modules/planning/service/planning.service.js";
 import { previousWorkingDay } from "../src/modules/planning/service/due-date-suggestion.js";
 import { CONFIGURED_MFG_TRUNCATE, confirmedRow, FULL, mfg, resetCostingSettings } from "./helpers/configured-manufacturing.js";
+import { makeArticle } from "./helpers/configurator.js";
 import {
   buildVariants,
   configurator,
@@ -14,6 +15,7 @@ import {
   purchaseService,
   resetConfiguredRows,
   salesService,
+  seedStock,
 } from "./helpers/configured-rows.js";
 
 // Konfigurator 4c — behovsberäkningen with beställningsvaror, against the
@@ -297,6 +299,52 @@ describe("behovsberäkning — beställningsvara", () => {
     expect(created.errors).toEqual([]);
     const mo = await mfg.getManufacturingOrder(created.manufacturingOrders[0]!.id);
     expect(mo.dueDate).toBe(previousWorkingDay(date, new Set()));
+  });
+
+  it("the date suggestion for a configured row counts only what is left to deliver — a delivered row gives nothing to plan by", async () => {
+    const { s, order, row } = await confirmedRow(2);
+    const date = futureWeekday(20);
+    await db.execute(sql`update sales_orders set expected_delivery_date = ${date} where id = ${order.id}`);
+    // A plain row keeps the order in production after the configured row is
+    // fully delivered (an order that is Levererad is no demand at all).
+    const plain = await makeArticle({ salesPrice: 10 });
+    await salesService.addRow(order.id, { articleId: plain.id, quantity: 1 } as never);
+    const loc = await makeLocation();
+    const user = await makeUser();
+    await seedStock(s.article.id, loc.id, 2);
+    await salesService.startProduction(order.id, user.id);
+
+    // Partly delivered: the rest is still planned by the row's date.
+    await salesService.deliverGoods(order.id, row.id, { quantity: 1, locationId: loc.id }, user.id);
+    expect(await planning.suggestManufacturingDueDate(s.article.id, { salesOrderRowId: row.id })).toMatchObject({
+      demandDate: date,
+      source: "sales_order_row",
+      documentNumber: order.orderNumber,
+    });
+    // Fully delivered (the order stays Under tillverkning for the plain row): nothing left to make.
+    const delivered = await salesService.deliverGoods(order.id, row.id, { quantity: 1, locationId: loc.id }, user.id);
+    expect(delivered.orderStatus).toBe("in_production");
+    expect(await planning.suggestManufacturingDueDate(s.article.id, { salesOrderRowId: row.id })).toBeNull();
+  });
+
+  it("a configured row on an inactive template is listed (Inaktiv) but gets no proposal and cascades nothing, like an inactive article", async () => {
+    const { s, row } = await confirmedRow(1);
+    await db.execute(sql`update articles set active = false where id = ${s.article.id}`);
+    const rows = await list();
+    expect(rows.find((r) => r.proposalKind === "configured")).toMatchObject({
+      salesOrderRowId: row.id,
+      active: false,
+      proposalQuantity: 0,
+      configurationError: null,
+    });
+    expect(rows.find((r) => r.articleId === s.parts.skruv.id)?.demandDerived ?? 0).toBe(0);
+    expect(rows.find((r) => r.articleId === s.article.id)).toMatchObject({ demandSales: 1, active: false, proposalQuantity: 0, configuredTemplate: true });
+
+    // Active again: proposal and cascade are back.
+    await db.execute(sql`update articles set active = true where id = ${s.article.id}`);
+    const again = await list();
+    expect(again.find((r) => r.proposalKind === "configured")?.proposalQuantity).toBe(1);
+    expect(again.find((r) => r.articleId === s.parts.skruv.id)?.demandDerived).toBe(8);
   });
 
   it("searches configured rows by KO number and by their choices", async () => {

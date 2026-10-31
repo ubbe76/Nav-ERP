@@ -77,6 +77,7 @@ import { PermissionGroupOwnedByPluginError, PluginUserManagedError } from "../sr
 import { OrderRegisterTooLargeError } from "../src/modules/reports/service/order-register.service.js";
 import { QuoteFollowupTooLargeError } from "../src/modules/reports/service/quote-followup.service.js";
 import {
+  ConfigurationNotDerivableError,
   ConfiguratorCodeLockedError,
   ConfiguratorCodeTakenError,
   ConfiguratorInvalidConfigurationError,
@@ -746,6 +747,7 @@ const cases: Array<[Error, string]> = [
   [new ConfiguratorVariantTooLongError("x"), ERROR_CODES.CONFIGURATOR_VARIANT_TOO_LONG],
   [new ConfiguratorVariantNotDerivableError(), ERROR_CODES.CONFIGURATOR_VARIANT_NOT_DERIVABLE],
   [new ConfiguratorNotToOrderModeError(), ERROR_CODES.CONFIGURATOR_NOT_TO_ORDER_MODE],
+  [new ConfigurationNotDerivableError(["x"]), ERROR_CODES.CONFIGURATION_NOT_DERIVABLE],
   [new ConfiguratorNotPublishedError("63000"), ERROR_CODES.CONFIGURATOR_NOT_PUBLISHED],
   [new ConfigurationRequiredError("63000"), ERROR_CODES.CONFIGURATION_REQUIRED],
   [new ConfigurationNotAllowedError("63000"), ERROR_CODES.CONFIGURATION_NOT_ALLOWED],
