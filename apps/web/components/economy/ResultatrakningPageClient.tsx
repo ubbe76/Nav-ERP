@@ -219,13 +219,16 @@ export function ResultatrakningPageClient({
           )}
         </FormRow>
         {showDimensionControls && (
-          <FormRow columns={3}>
+          <>
+          <FormRow columns={2}>
             <Field label="Kostnadsställe" htmlFor="incomeCostCenter">
               <CostCenterSelect id="incomeCostCenter" all={dims.allCostCenters} value={costCenterId} onChange={setCostCenterId} emptyLabel="Alla kostnadsställen" />
             </Field>
             <Field label="Projekt" htmlFor="incomeProject">
               <ProjectSelect id="incomeProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Alla projekt" />
             </Field>
+          </FormRow>
+          <FormRow columns={2} style={{ marginTop: "var(--space-4)" }}>
             <Field label="Visa" htmlFor="incomeGroupBy">
               <Select id="incomeGroupBy" value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)}>
                 <option value="">Totalt</option>
@@ -234,6 +237,7 @@ export function ResultatrakningPageClient({
               </Select>
             </Field>
           </FormRow>
+          </>
         )}
         {budgets.length > 0 && (
           <FormRow>

@@ -241,7 +241,9 @@ export function ManufacturingOrderDetail({
         </a>
       </div>
       {order.configuration && (
-        <ConfigurationLineList lines={configurationLines(order.configuration.selection)} />
+        <div style={{ marginBottom: "var(--space-6)" }}>
+          <ConfigurationLineList lines={configurationLines(order.configuration.selection)} />
+        </div>
       )}
       {order.note && <p>{order.note}</p>}
 
@@ -343,16 +345,16 @@ export function ManufacturingOrderDetail({
       {operations.length > 0 ? (
         <Table<MOOperation>
           columns={[
-            { key: "sequenceNo", label: "Sekvensnr", width: "100px", align: "right" },
-            { key: "workCenterName", label: "Operation", width: "minmax(0, 1fr)" },
-            { key: "plannedWeek", label: "Planerad vecka", width: "130px" },
-            { key: "setupTime", label: "Ställtid (min)", width: "100px", align: "right" },
-            { key: "runTimePerUnit", label: "Tid/enhet", width: "100px", align: "right" },
-            { key: "status", label: "Status", width: "100px" },
-            { key: "quantityCompleted", label: "Antal OK", width: "100px", align: "right" },
-            { key: "quantityScrapped", label: "Kasserat", width: "90px", align: "right" },
-            { key: "actualTime", label: "Faktisk tid", width: "100px", align: "right" },
-            { key: "id", label: "", width: canEditLines ? "230px" : "80px", align: "right" },
+            { key: "sequenceNo", label: "Sekvensnr", width: "76px", align: "right" },
+            { key: "workCenterName", label: "Operation", width: "minmax(110px, 1fr)" },
+            { key: "plannedWeek", label: "Planerad vecka", width: "100px" },
+            { key: "setupTime", label: "Ställtid (min)", width: "70px", align: "right" },
+            { key: "runTimePerUnit", label: "Tid/enhet", width: "76px", align: "right" },
+            { key: "status", label: "Status", width: "80px" },
+            { key: "quantityCompleted", label: "Antal OK", width: "60px", align: "right" },
+            { key: "quantityScrapped", label: "Kasserat", width: "70px", align: "right" },
+            { key: "actualTime", label: "Faktisk tid", width: "64px", align: "right" },
+            { key: "id", label: "", width: canEditLines ? "120px" : "70px", align: "right" },
           ]}
           rows={operations}
           renderCell={(row, key) => {
@@ -742,7 +744,7 @@ function DueDateField({
   }
 
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+    <span style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
       <label htmlFor="dueDate" style={{ whiteSpace: "nowrap" }}>
         Planerat färdigdatum:
       </label>

@@ -45,6 +45,10 @@ import { PaymentReferenceSection } from "../banking/PaymentReferenceSection";
 import { UnderlagSection } from "../documents/UnderlagSection";
 import { InvoiceRateField, SekAmountsLine } from "./InvoiceRateField";
 
+// A cancelled (makulerad) payment reads as struck through, like an undone
+// receipt or report elsewhere — the Makulerad pill alone is just another colour.
+const CANCELLED_TEXT = { color: "var(--color-text-muted)", textDecoration: "line-through" } as const;
+
 export function SupplierInvoiceCard({
   invoice,
   canOpenVerifications,
@@ -241,15 +245,15 @@ export function SupplierInvoiceCard({
       {invoice.rows.length > 0 ? (
         <Table<SupplierInvoiceRow>
           columns={[
-            { key: "description", label: "Beskrivning", width: "1.4fr" },
-            { key: "articleNumber", label: "Artikel", width: "1fr" },
-            { key: "quantity", label: "Antal", width: "90px", align: "right" },
-            { key: "unitPrice", label: foreign ? `À-pris (${invoice.currency})` : "À-pris", width: "110px", align: "right" },
-            { key: "lineAmount", label: foreign ? `Belopp (${invoice.currency})` : "Belopp", width: "120px", align: "right" },
-            { key: "vatCode", label: "Momskod", width: "minmax(170px, 1fr)" },
-            ...(showObjects ? [{ key: "objects", label: "Kostnadsställe / projekt", width: "minmax(170px, 1fr)" }] : []),
-            { key: "poOrderNumber", label: "IO-matchning", width: "1fr" },
-            { key: "id", label: "", width: "110px", align: "right" },
+            { key: "description", label: "Beskrivning", width: "minmax(100px, 1.4fr)" },
+            { key: "articleNumber", label: "Artikel", width: "minmax(80px, 1fr)" },
+            { key: "quantity", label: "Antal", width: "60px", align: "right" },
+            { key: "unitPrice", label: foreign ? `À-pris (${invoice.currency})` : "À-pris", width: "84px", align: "right" },
+            { key: "lineAmount", label: foreign ? `Belopp (${invoice.currency})` : "Belopp", width: "84px", align: "right" },
+            { key: "vatCode", label: "Momskod", width: "minmax(100px, 1fr)" },
+            ...(showObjects ? [{ key: "objects", label: "Kostnadsställe / projekt", width: "minmax(140px, 1.2fr)" }] : []),
+            { key: "poOrderNumber", label: "IO-matchning", width: "minmax(70px, 1fr)" },
+            { key: "id", label: "", width: "84px", align: "right" },
           ]}
           rows={invoice.rows}
           renderCell={(row, key) => {
@@ -315,7 +319,7 @@ export function SupplierInvoiceCard({
                   return row.paymentDate;
                 case "paymentNumber":
                   return (
-                    <Link href={`/inkop/betalningar/${row.paymentId}`}>
+                    <Link style={row.cancelledAt !== null ? CANCELLED_TEXT : undefined} href={`/inkop/betalningar/${row.paymentId}`}>
                       {row.paymentNumber}
                       {row.cancelledAt !== null && (
                         <>
@@ -326,7 +330,7 @@ export function SupplierInvoiceCard({
                     </Link>
                   );
                 case "appliedAmount":
-                  return `${formatMoney(row.appliedAmount)} ${row.currency}`;
+                  return <span style={row.cancelledAt !== null ? CANCELLED_TEXT : undefined}>{`${formatMoney(row.appliedAmount)} ${row.currency}`}</span>;
                 case "writeOffAmount":
                   return Number(row.writeOffAmount) !== 0 ? `${formatMoney(row.writeOffAmount)} ${row.currency}` : "–";
                 case "settledSek":
@@ -750,7 +754,7 @@ function AddRowForm({
         </Field>
 
         {(dims.allCostCenters.length > 0 || dims.allProjects.length > 0) && (
-          <FormRow>
+          <>
             <Field label="Kostnadsställe" htmlFor="rowCostCenter">
               <CostCenterSelect
                 id="rowCostCenter"
@@ -765,7 +769,7 @@ function AddRowForm({
             <Field label="Projekt" htmlFor="rowProject">
               <ProjectSelect id="rowProject" all={dims.allProjects} value={projectId} onChange={setProjectId} emptyLabel="Följer fakturan" />
             </Field>
-          </FormRow>
+          </>
         )}
 
         {article && matchOptions.length > 0 && (

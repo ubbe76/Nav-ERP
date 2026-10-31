@@ -47,6 +47,10 @@ import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack 
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
 
+// A cancelled (makulerad) payment reads as struck through, like an undone
+// receipt or report elsewhere — the Makulerad pill alone is just another colour.
+const CANCELLED_TEXT = { color: "var(--color-text-muted)", textDecoration: "line-through" } as const;
+
 export function InvoiceCard({
   invoice,
   paymentTerms,
@@ -572,7 +576,7 @@ export function InvoiceCard({
                   return row.paymentDate;
                 case "paymentNumber":
                   return (
-                    <Link href={`/forsaljning/betalningar/${row.paymentId}`}>
+                    <Link style={row.cancelledAt !== null ? CANCELLED_TEXT : undefined} href={`/forsaljning/betalningar/${row.paymentId}`}>
                       {row.paymentNumber}
                       {row.cancelledAt !== null && (
                         <>
@@ -583,7 +587,7 @@ export function InvoiceCard({
                     </Link>
                   );
                 case "appliedAmount":
-                  return `${formatMoney(row.appliedAmount)} ${invoice.currency}`;
+                  return <span style={row.cancelledAt !== null ? CANCELLED_TEXT : undefined}>{`${formatMoney(row.appliedAmount)} ${invoice.currency}`}</span>;
                 case "writeOffAmount":
                   return Number(row.writeOffAmount) !== 0 ? `${formatMoney(row.writeOffAmount)} ${invoice.currency}` : "–";
                 case "settledSek":

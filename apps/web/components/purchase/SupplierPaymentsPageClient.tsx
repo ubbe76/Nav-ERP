@@ -16,6 +16,10 @@ import type { AccountOption, Paged, Supplier, SupplierPaymentDetail, SupplierPay
 import shellStyles from "../../components/AppShell.module.css";
 import listStyles from "../../app/inkop/ordrar/page.module.css";
 
+// A cancelled (makulerad) payment reads as struck through, like an undone
+// receipt or report elsewhere — the Makulerad pill alone is just another colour.
+const CANCELLED_TEXT = { color: "var(--color-text-muted)", textDecoration: "line-through" } as const;
+
 export function SupplierPaymentsPageClient({
   payments,
   suppliers,
@@ -112,7 +116,7 @@ export function SupplierPaymentsPageClient({
           switch (key) {
             case "paymentNumber":
               return (
-                <Link href={`/inkop/betalningar/${payment.id}`} className={listStyles.rowLink}>
+                <Link style={payment.cancelledAt !== null ? CANCELLED_TEXT : undefined} href={`/inkop/betalningar/${payment.id}`} className={listStyles.rowLink}>
                   {payment.paymentNumber}
                 </Link>
               );
@@ -121,7 +125,7 @@ export function SupplierPaymentsPageClient({
             case "supplierName":
               return payment.supplierName;
             case "amount":
-              return `${formatMoney(payment.amount)} ${currencyLabel(payment.currency)}`;
+              return <span style={payment.cancelledAt !== null ? CANCELLED_TEXT : undefined}>{`${formatMoney(payment.amount)} ${currencyLabel(payment.currency)}`}</span>;
             case "amountSek":
               // Only a payment in another currency has a SEK figure of its own.
               return payment.currency === SEK ? "–" : `${formatMoney(payment.amountSek)} kr`;

@@ -322,7 +322,7 @@ function DayScheduleForm({ schedule, onDone }: { schedule?: DaySchedule; onDone:
         </FormHint>
         <div id="dayBreaks" style={{ display: "grid", gap: 8 }}>
           {breaks.map((b, index) => (
-            <div key={index} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 8 }}>
+            <div key={index} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto", gap: 8 }}>
               <Select
                 aria-label="Typ av avbrott"
                 value={b.type}
