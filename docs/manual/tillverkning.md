@@ -114,7 +114,7 @@ Leverantörens namn-/kontaktkolumner ("Namn (2)"/"Namn (3)") samt "Skapa inte fa
 
 ## Tillverkningsorder
 
-**Tillverkning → Ordrar** listar alla TO med sök och statusfilter.
+**Tillverkning → Ordrar** listar alla TO med sök och statusfilter. Statusfiltret har också **Sen**: frisläppta och pågående ordrar som produktionsplaneringen markerar **Sen** — samma urval som aviseringen [Sena tillverkningsordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas.
 
 ### Läsläge
 

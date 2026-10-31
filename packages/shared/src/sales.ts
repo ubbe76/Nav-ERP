@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { dimensionFields } from "./dimensions.js";
 import { vatRateSchema } from "./vat.js";
-import { listQuerySchema, statusListParam } from "./list.js";
+import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
 import { configuratorSelectionSchema, orderRowConfigurationInputSchema } from "./configurator.js";
 
 import { blankSafe } from "./coerce.js";
@@ -46,7 +46,8 @@ export function salesDocumentKind(order: {
 }
 
 export const listSalesOrdersQuerySchema = listQuerySchema.extend({
-  status: statusListParam(salesOrderStatusSchema.options),
+  // Also "late" (Sen) — see orderStatusListParam in list.ts.
+  status: orderStatusListParam(salesOrderStatusSchema.options),
   // Offerter vs Kundorder — filters on the derived document kind; the
   // status filter still applies on top.
   kind: salesDocumentKindSchema.optional(),

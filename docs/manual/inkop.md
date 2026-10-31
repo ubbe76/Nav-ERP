@@ -186,7 +186,7 @@ När en legorad har fått ett pris visas knappen **Uppdatera beredningens legopr
 
 ## Inköpsorder
 
-**Inköp → Inköpsorder** listar alla ordrar med sök och statusfilter. Filtret **Alla ordertyper** kan ställas på **Legoinköp** — ordrar med minst en [lego-rad](#rader-och-statusflode), alltså en rad som köper en operation på en tillverkningsorder — eller **Övriga inköp** (ordrar utan lego-rad). En order som blandar lego-rader och vanliga rader räknas som legoinköp. Exporten till CSV följer filtret.
+**Inköp → Inköpsorder** listar alla ordrar med sök och statusfilter. Statusfiltret har också **Sen**: ordrar som är utkast, bekräftade eller delvis mottagna där en rad med rest har ett ankomstdatum som har passerat (bekräftat leveransdatum före önskat) — samma urval som aviseringen [Försenade inköpsordrar](/hjalp/aviseringar). **Sen** är ingen egen status utan räknas fram när listan visas. Filtret **Alla ordertyper** kan ställas på **Legoinköp** — ordrar med minst en [lego-rad](#rader-och-statusflode), alltså en rad som köper en operation på en tillverkningsorder — eller **Övriga inköp** (ordrar utan lego-rad). En order som blandar lego-rader och vanliga rader räknas som legoinköp. Exporten till CSV följer filtret.
 
 ### Skapa
 

@@ -51,3 +51,19 @@ export function statusListParam<T extends readonly [string, ...string[]]>(values
       return parts as T[number][];
     });
 }
+
+// The order lists' (kund-, inköps- and tillverkningsorder) status filter also
+// takes "late" — Sen, derived when the list is read by the same rule as
+// Aviseringarna, never a stored status. splitLateFilter separates it from the
+// real statuses; given together, both apply.
+export const LATE_FILTER = "late";
+export function orderStatusListParam<T extends readonly [string, ...string[]]>(values: T) {
+  return statusListParam([...values, LATE_FILTER] as unknown as readonly [T[number] | typeof LATE_FILTER, ...(T[number] | typeof LATE_FILTER)[]]);
+}
+export function splitLateFilter<S extends string>(
+  status: readonly (S | typeof LATE_FILTER)[] | undefined
+): { statuses: S[] | undefined; late: boolean } {
+  if (!status) return { statuses: undefined, late: false };
+  const statuses = status.filter((s): s is S => s !== LATE_FILTER);
+  return { statuses: statuses.length > 0 ? statuses : undefined, late: statuses.length !== status.length };
+}

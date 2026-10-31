@@ -40,7 +40,12 @@ export function PurchaseOrdersPageClient({ orders, pageSize }: { orders: Paged<P
           param="status"
           allLabel="Alla statusar"
           ariaLabel="Filtrera på status"
-          options={Object.entries(PURCHASE_ORDER_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label }))}
+          // Sen (late) is derived from the rows, not a stored status — the
+          // API takes it in the same param.
+          options={[
+            ...Object.entries(PURCHASE_ORDER_STATUS_PILL).map(([value, pill]) => ({ value, label: pill.label })),
+            { value: "late", label: "Sen" },
+          ]}
         />
         <ListFilterSelect
           param="kind"

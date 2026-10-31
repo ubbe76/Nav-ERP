@@ -1179,8 +1179,8 @@ export function createSalesService(
       return { ...order, overDeliveryPercent: await overDeliveryPercentFor(order.customerId) };
     },
 
-    async listSalesOrders(query: ListSalesOrdersQuery) {
-      return repo.listSalesOrders(query);
+    async listSalesOrders(query: ListSalesOrdersQuery, today: string = stockholmToday()) {
+      return repo.listSalesOrders(query, today);
     },
 
     // E3: enriches each row with its derived "I tillverkning" coverage —

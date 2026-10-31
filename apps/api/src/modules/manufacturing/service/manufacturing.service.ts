@@ -22,7 +22,7 @@ import type {
   UpdateWorkCenterInput,
 } from "@navet/shared";
 import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
-import { roundUpToMultiple, toUnitQuantity } from "@navet/shared";
+import { roundUpToMultiple, splitLateFilter, toUnitQuantity } from "@navet/shared";
 import type { ManufacturingMaterialShortage, PalletCardCode } from "@navet/shared";
 import type {
   ManufacturingRepository,
@@ -1530,9 +1530,20 @@ export function createManufacturingService(
     // Produktionsplanering: each row carries plannedStartWeek/plannedEndWeek
     // (min/max over its pending operations' planned weeks) and late (Sen)
     // from the plan — nulls/false without a plan reader or a plan.
+    // The status filter Sen is the plan's verdict, not a stored status: it
+    // asks for the summaries of every open order first and lists the late
+    // ones (so paging and total stay in SQL), reusing those summaries for
+    // the page. Without a plan reader nothing is Sen.
     async listManufacturingOrders(query: ListManufacturingOrdersQuery) {
-      const result = await repo.listManufacturingOrders(query);
-      const summaries = planning ? await planning.orderPlanSummaries(result.rows.map((row) => row.id)) : new Map();
+      let summaries: Awaited<ReturnType<ManufacturingPlanReader["orderPlanSummaries"]>> | null = null;
+      let lateIds: string[] | undefined;
+      if (splitLateFilter(query.status).late) {
+        const openIds = await repo.listOpenManufacturingOrderIds();
+        summaries = planning ? await planning.orderPlanSummaries(openIds) : new Map();
+        lateIds = openIds.filter((id) => summaries!.get(id)?.late === true);
+      }
+      const result = await repo.listManufacturingOrders(query, lateIds);
+      summaries ??= planning ? await planning.orderPlanSummaries(result.rows.map((row) => row.id)) : new Map();
       return {
         ...result,
         rows: result.rows.map((row) => {

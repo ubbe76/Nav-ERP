@@ -1168,8 +1168,8 @@ export function createPurchaseService(
       return repo.findPurchaseOrderById(id);
     },
 
-    async listPurchaseOrders(query: ListPurchaseOrdersQuery) {
-      return repo.listPurchaseOrders(query);
+    async listPurchaseOrders(query: ListPurchaseOrdersQuery, today: string = stockholmToday()) {
+      return repo.listPurchaseOrders(query, today);
     },
 
     async listRows(purchaseOrderId: string) {

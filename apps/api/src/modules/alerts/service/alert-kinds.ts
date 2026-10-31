@@ -84,15 +84,22 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     label: "Försenade kundordrar",
     severity: "yellow",
     rule: ["forsaljning"],
-    listHref: "/forsaljning/ordrar",
+    // Straight to the list filtered on Sen — the same rule (late-orders.ts).
+    listHref: "/forsaljning/ordrar?status=late",
   },
-  { kind: "purchase_order_late", label: "Försenade inköpsordrar", severity: "yellow", rule: ["inkop"], listHref: "/inkop/ordrar" },
+  {
+    kind: "purchase_order_late",
+    label: "Försenade inköpsordrar",
+    severity: "yellow",
+    rule: ["inkop"],
+    listHref: "/inkop/ordrar?status=late",
+  },
   {
     kind: "manufacturing_order_late",
     label: "Sena tillverkningsordrar",
     severity: "yellow",
     rule: ["tillverkning"],
-    listHref: "/tillverkning/ordrar",
+    listHref: "/tillverkning/ordrar?status=late",
   },
   {
     kind: "purchase_needed",

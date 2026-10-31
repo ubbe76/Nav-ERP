@@ -47,6 +47,7 @@ import {
   type ListPriceHistoryQuery,
   type ListPurchaseInvoiceBasisQuery,
   type ListPurchaseOrdersQuery,
+  splitLateFilter,
   type ListQuery,
   type PurchaseOrderStatus,
   type UpdateArticleSupplierInput,
@@ -58,6 +59,7 @@ import {
   type UpdatePurchaseOrderRowInput,
   type UpdateSupplierInput,
 } from "@navet/shared";
+import { purchaseOrderLate } from "../../planning/repository/late-orders.js";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
@@ -748,7 +750,8 @@ export function createPurchaseRepository(db: Db) {
       return row ?? null;
     },
 
-    async listPurchaseOrders(query: ListPurchaseOrdersQuery) {
+    // `today` (Stockholm) dates the status filter Sen (late-orders.ts).
+    async listPurchaseOrders(query: ListPurchaseOrdersQuery, today: string) {
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
@@ -774,7 +777,9 @@ export function createPurchaseRepository(db: Db) {
           )
         );
       }
-      if (query.status) conditions.push(inArray(purchaseOrders.status, query.status));
+      const { statuses, late } = splitLateFilter(query.status);
+      if (statuses) conditions.push(inArray(purchaseOrders.status, statuses));
+      if (late) conditions.push(purchaseOrderLate(today));
       if (query.supplierId) conditions.push(eq(purchaseOrders.supplierId, query.supplierId));
       if (query.kind) {
         const hasLegoRow = exists(
