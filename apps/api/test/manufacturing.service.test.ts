@@ -1615,11 +1615,56 @@ describe("manufacturing service — receipt from the last operation", () => {
     expect(completeManufacturingOrderSchema.parse({ quantity: 0 })).toEqual({ quantity: 0 });
   });
 
-  it("refuses a further report once the order completed itself", async () => {
-    const { last } = await makeTwoOpMo(10);
+  // Efterrapportering: the last operation completing the order must not
+  // strand the operations nobody reported.
+  it("takes a report on an operation left unreported once the order completed itself — no goods, still done", async () => {
+    const { order, parent, linked, first, last, user } = await makeTwoOpMo(10);
+    await report(last.id, 10);
+    expect((await mfgService.getManufacturingOrder(order.id))!.status).toBe("done");
+
+    const result = await report(first.id, 9, 1, user.id);
+
+    expect([result.received, result.orderCompleted]).toEqual([0, false]);
+    const op = (await mfgService.getOperation(first.id))!;
+    expect([op.quantityCompleted, op.quantityScrapped]).toEqual(["9.0000", "1.0000"]);
+    expect(await consumed(order.id, linked.id)).toBe(20); // (9 OK + 1 kasserat) × 2
+    expect(await onHand(parent.id)).toBe(10);
+    expect(await receipts(order.id)).toHaveLength(1);
+    const after = (await mfgService.getManufacturingOrder(order.id))!;
+    expect([after.status, after.quantityReceived]).toEqual(["done", "10.0000"]);
+  });
+
+  it("receives no further goods from the last operation of a done order", async () => {
+    const { order, parent, last } = await makeTwoOpMo(10);
     await report(last.id, 10);
 
-    await expect(report(last.id, 1)).rejects.toThrow(InvalidStatusTransitionError);
+    await report(last.id, 1);
+
+    expect(Number((await mfgService.getOperation(last.id))!.quantityCompleted)).toBe(11);
+    expect(await onHand(parent.id)).toBe(10);
+    const after = (await mfgService.getManufacturingOrder(order.id))!;
+    expect([after.status, after.quantityReceived]).toEqual(["done", "10.0000"]);
+  });
+
+  it("lets Förbruka draw on a done order", async () => {
+    const { order, unlinked, user } = await makeTwoOpMo(10);
+    await mfgService.complete(order.id, { quantity: 0 }, user.id);
+    const row = (await mfgService.listMaterialConsumptions(order.id)).find((r) => r.componentArticleId === unlinked.id)!;
+
+    await mfgService.consumeMaterial(order.id, row.id, { quantity: 3 }, user.id);
+
+    expect(await consumed(order.id, unlinked.id)).toBe(3);
+    expect((await mfgService.getManufacturingOrder(order.id))!.status).toBe("done");
+  });
+
+  it("refuses reports and draws once the order is closed", async () => {
+    const { order, first, last, user } = await makeTwoOpMo(10);
+    await report(last.id, 10);
+    await mfgService.close(order.id, user.id);
+    const [row] = await mfgService.listMaterialConsumptions(order.id);
+
+    await expect(report(first.id, 1)).rejects.toThrow(InvalidStatusTransitionError);
+    await expect(mfgService.consumeMaterial(order.id, row!.id, { quantity: 1 }, user.id)).rejects.toThrow(InvalidStatusTransitionError);
   });
 });
 

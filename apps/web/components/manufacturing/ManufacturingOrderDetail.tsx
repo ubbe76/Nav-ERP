@@ -658,12 +658,15 @@ export function ManufacturingOrderDetail({
           />
         )}
 
-        {(order.status === "released" || order.status === "in_progress") && (
+        {/* Efterrapportering: a done order still takes reports (time, scrap
+            and material, no finished goods) until Stäng order. */}
+        {(order.status === "released" || order.status === "in_progress" || order.status === "done") && (
           <>
             <ConsumeMaterialForm orderId={order.id} materials={materials} locations={locations} onDone={() => router.refresh()} />
             <CompleteOperationsList
               orderId={order.id}
               orderQuantity={order.quantity}
+              orderDone={order.status === "done"}
               operations={operations}
               locations={locations}
               onDone={() => router.refresh()}
@@ -675,6 +678,11 @@ export function ManufacturingOrderDetail({
               timeReports={timeReports}
               onDone={() => router.refresh()}
             />
+          </>
+        )}
+
+        {(order.status === "released" || order.status === "in_progress") && (
+          <>
             {/* No Starta: Slutför order works straight on a released order. */}
             <CompleteOrderForm
               orderId={order.id}
@@ -902,7 +910,7 @@ function PostCalculateAction({ orderId, onDone }: { orderId: string; onDone: (ca
   );
 }
 
-// --- Consume material (released / in_progress) ---
+// --- Consume material (released / in_progress / done) ---
 
 function ConsumeMaterialForm({
   orderId,
@@ -1017,17 +1025,21 @@ function ConsumeMaterialForm({
   );
 }
 
-// --- Complete operations (released / in_progress) ---
+// --- Complete operations (released / in_progress / done) ---
 
 function CompleteOperationsList({
   orderId,
   orderQuantity,
+  orderDone,
   operations,
   locations,
   onDone,
 }: {
   orderId: string;
   orderQuantity: string;
+  // Efterrapportering: the server books no finished goods on a done order
+  // and the terminal no longer lists it.
+  orderDone: boolean;
   operations: MOOperation[];
   locations: StockLocation[];
   onDone: () => void;
@@ -1112,11 +1124,18 @@ function CompleteOperationsList({
     <Card maxWidth={420}>
       <FormStack>
         <strong>Slutför operation</strong>
-        <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
-          Material som är kopplat till operationen dras automatiskt för antal OK + kasserat. Antal klart är
-          förifyllt med vad som återstår av orderns antal. Operationen markeras klar först när hela orderns antal är
-          rapporterat som OK — annars ligger den kvar och kan rapporteras vidare, även i stämpelterminalen.
-        </p>
+        {orderDone ? (
+          <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
+            Ordern är klar. Det du rapporterar nu kommer med i efterkalkylen: antal, kassation och material som är
+            kopplat till operationen. Inga fler färdiga varor läggs in i lager.
+          </p>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>
+            Material som är kopplat till operationen dras automatiskt för antal OK + kasserat. Antal klart är
+            förifyllt med vad som återstår av orderns antal. Operationen markeras klar först när hela orderns antal är
+            rapporterat som OK — annars ligger den kvar och kan rapporteras vidare, även i stämpelterminalen.
+          </p>
+        )}
         <FormError>{error}</FormError>
         {/* Stock locations are optional — the select only appears when some exist. */}
         {locations.length > 0 && (
@@ -1199,7 +1218,7 @@ function CompleteOperationsList({
   );
 }
 
-// --- Report time (released / in_progress) ---
+// --- Report time (released / in_progress / done) ---
 
 function today() {
   return stockholmToday();

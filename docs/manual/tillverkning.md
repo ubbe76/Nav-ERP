@@ -229,7 +229,7 @@ Antal OK som rapporteras på orderns **sista operation** (den med högst sekvens
 - Material som **inte** är kopplat till någon operation dras i samma takt: med 4 av 10 inlevererade är 4/10 av det materialet draget.
 - Kasserade enheter ger inget saldo.
 - En **Frisläppt** order blir **Pågår** vid första inleveransen.
-- När inlevererat antal når orderns antal blir ordern **Klar** av sig själv — historiken får raden **Slutförd** som vid **Slutför order**. Rapporteras fler än orderns antal läggs även de in.
+- När inlevererat antal når orderns antal blir ordern **Klar** av sig själv — historiken får raden **Slutförd** som vid **Slutför order**. Rapporteras fler än orderns antal läggs även de in. Operationer som inte hunnit rapporteras kan [efterrapporteras](#efterrapportera-pa-en-klar-order).
 - Orderhuvudet visar **Inlevererat: 4 av 10** så snart något lagts in.
 
 Rapporter på tidigare operationer lägger inte in något i lager.
@@ -239,7 +239,17 @@ I **Lagerplats för materialuttag** är standardvalet **"Artikelns lagerplats"**
 ### Avsluta
 
 - **Slutför order** stänger ordern: ange antal och lagerplats (standard: artikelns) — **Antal** är det som läggs i lager **nu**, utöver det som redan inlevererats från sista operationen, och förifylls med det som återstår av orderns antal. Material som **inte** är kopplat till någon operation dras upp till det totalt inlevererade antalet, och ordern blir **Klar**. Rutan finns så snart ordern är **Frisläppt**. Skulle ordern stängas innan hela antalet är inlevererat frågar Nav först ("Ordern stängs med 0 av 5 st inlevererade … Stäng ordern ändå?"). Har kassationer gjort att sista operationen aldrig nådde orderns antal anger du **0** för att stänga ordern utan mer inleverans. En order vars sista operation nått orderns antal är redan **Klar** och behöver inte slutföras. En order som stängts av misstag öppnas igen med **Ångra** på raden **Slutför order** under [Rapporteringar](#rapporteringar-och-angra).
-- **Stäng order** avslutar en Klar order; därefter går ingenting att ångra.
+- **Stäng order** avslutar en Klar order; därefter går ingenting att ångra eller [efterrapportera](#efterrapportera-pa-en-klar-order).
+
+### Efterrapportera på en klar order
+
+En order blir **Klar** så snart hela antalet är inlevererat — även om tidigare operationer aldrig rapporterades. Fram till **Stäng order** går det att efterrapportera på den, så att efterkalkylen får med operationernas antal, tid och material:
+
+- **Slutför operation** finns kvar för de operationer som fortfarande **Väntar**. Rutan säger att ordern är klar: antal OK, kasserat och materialet som är kopplat till operationen bokförs som vanligt, men inga fler färdiga varor läggs in i lager — inte heller från sista operationen. Ska fler varor in ångrar du först den rapportering som gjorde ordern klar (se [Rapporteringar och Ångra](#rapporteringar-och-angra)).
+- **Förbruka** och **Rapportera tid** fungerar som på en order som pågår.
+- En lego-operation som inlevereras på inköpsordern efter att tillverkningsordern blivit klar avrapporteras på samma sätt.
+- Ordern förblir **Klar**, och efterrapporteringen syns under [Rapporteringar](#rapporteringar-och-angra) och kan ångras som vilken rad som helst.
+- [Stämpelterminalen](/hjalp/terminal) visar inte en klar order — efterrapporteringen görs på TO-kortet.
 
 ### Rapporteringar och Ångra
 
@@ -264,8 +274,8 @@ En ångrad rad ligger kvar i listan, överstruken och märkt **Ångrad** med tid
 | Planerad | Skapad men inte frisläppt; material/operationer ännu inte snapshotade. Nya ordrar frisläpps när de skapas, så statusen gäller bara äldre ordrar |
 | Frisläppt | Materiallista och operationer fastställda |
 | Pågår | Arbete pågår |
-| Klar | Färdigrapporterad — inlevererad till lager |
-| Stängd | Avslutad |
+| Klar | Färdigrapporterad — inlevererad till lager; operationer, material och tid kan [efterrapporteras](#efterrapportera-pa-en-klar-order) |
+| Stängd | Avslutad — inget mer kan rapporteras |
 | Makulerad | Makulerad — inget tillverkas på ordern |
 
 ### Efterkalkyl

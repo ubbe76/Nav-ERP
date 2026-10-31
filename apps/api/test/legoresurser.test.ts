@@ -294,14 +294,28 @@ describe("goods receipt auto-reports the lego operation", () => {
     expect((await mfgService.listMaterialConsumptions(fixture.order.id))[0]?.quantityConsumed).toBe("8.0000");
   });
 
+  it("reports a receipt on a done TO as an efterrapport — the operation, no finished goods", async () => {
+    const fixture = await releasedMo(4);
+    const { ioOrder, row } = await makeLegoOrder(fixture, 4);
+    await mfgService.complete(fixture.order.id, { quantity: 4 }, fixture.user.id);
+
+    const result = await purchaseService.receiveGoods(ioOrder.id, row.id, { quantity: 4 }, fixture.user.id);
+    expect(result.operationReport).toEqual({ ok: true });
+    const operation = await mfgService.getOperation(fixture.legoOp.id);
+    expect([operation?.status, operation?.quantityCompleted]).toEqual(["done", "4.0000"]);
+    // The lego operation is the last one, but Slutför already received the goods.
+    const order = (await mfgService.getManufacturingOrder(fixture.order.id))!;
+    expect([order.status, order.quantityReceived]).toEqual(["done", "4.0000"]);
+  });
+
   it("keeps the receipt when the TO is in a status that cannot be reported", async () => {
     const fixture = await releasedMo(4);
     const { ioOrder, row } = await makeLegoOrder(fixture, 4);
 
-    // Drive the TO to done: the ordinary operation is irrelevant, complete()
-    // needs in_progress.
+    // Drive the TO to closed: a done one still takes efterrapporter.
     await mfgService.start(fixture.order.id);
     await mfgService.complete(fixture.order.id, { quantity: 4 }, fixture.user.id);
+    await mfgService.close(fixture.order.id, fixture.user.id);
 
     const result = await purchaseService.receiveGoods(ioOrder.id, row.id, { quantity: 4 }, fixture.user.id);
     expect(result.operationReport?.ok).toBe(false);

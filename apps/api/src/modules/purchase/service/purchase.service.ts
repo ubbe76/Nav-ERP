@@ -1483,8 +1483,9 @@ export function createPurchaseService(
         // accumulated quantity_completed covers the MO's order quantity (see
         // markDoneWhenCovered below), so a manually shorted row leaves it
         // pending. Runs AFTER the receipt's own committed transaction: a TO
-        // in the wrong status (done/closed, or already manually reported)
-        // must never undo the goods receipt, so failures come back as a
+        // in the wrong status (closed — a done one takes it as an
+        // efterrapport without finished goods) must never undo the goods
+        // receipt, so failures come back as a
         // warning instead of an error. Linked material tops up via the
         // ordinary consumeLinkedMaterial path.
         let operationReport: OperationReportOutcome | undefined;

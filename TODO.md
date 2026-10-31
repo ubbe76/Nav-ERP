@@ -23,7 +23,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 
-- [ ] **Tillverkning:** operationer som inte rapporterats går inte att rapportera när den sista operationen är rapporterad — hela antalet på sista operationen gör ordern **Klar**, och rapportering kräver Frisläppt eller Pågår. Efterkalkylen saknar då operationernas tid och material; enda vägen i dag är **Ångra rapportering** på den sista operationen.
 - [ ] **Kundfaktura:** `computeDueDate` i `invoice.service.ts` räknar i millisekunder och kan ge en dags fel förfallodag vid sommartidsskiftet — `setDate`-aritmetik vore exakt.
 - [ ] **Dröjsmålsränta:** `ensureReferenceRates` minns inte misslyckade hämtningar — varje sidladdning väntar 10 s när Riksbanken är nere.
 - [ ] **Konfigurator:** `updateRule` med bara ny effekt tolkar det sparade målet med den nya effektens icke-strikta schema — require → exclude kan tappa en operation tyst. Kräv mål när effekten ändras.

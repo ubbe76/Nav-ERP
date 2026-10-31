@@ -477,7 +477,12 @@ async function reportOperationQuantitiesInTx(
     .where(eq(manufacturingOrders.id, operation.manufacturingOrderId))
     .for("update");
   if (!order) return { ok: false, reason: "order_not_found" };
-  if (order.status !== "released" && order.status !== "in_progress") {
+  // Efterrapportering: a done order still takes reports — operations left
+  // unreported when the last one completed the order get their quantities,
+  // scrap and material — but receives no finished goods and keeps its
+  // status. Stäng order (closed) is what locks it.
+  const lateReport = order.status === "done";
+  if (order.status !== "released" && order.status !== "in_progress" && !lateReport) {
     return { ok: false, reason: "invalid_status" };
   }
 
@@ -523,7 +528,8 @@ async function reportOperationQuantitiesInTx(
 
   // Delinleverans: OK on the order's LAST operation is finished goods —
   // received at once (scrapped units never are), and the order is done
-  // once the received quantity reaches the order quantity.
+  // once the received quantity reaches the order quantity. Never on a done
+  // order: its goods are already in (more takes undoing what closed it).
   const [last] = await tx
     .select({ sequenceNo: moOperations.sequenceNo })
     .from(moOperations)
@@ -531,7 +537,7 @@ async function reportOperationQuantitiesInTx(
     .orderBy(desc(moOperations.sequenceNo))
     .limit(1);
   const goods =
-    last?.sequenceNo === operation.sequenceNo
+    !lateReport && last?.sequenceNo === operation.sequenceNo
       ? await receiveFinishedGoods(tx, order, { targetReceived: totalOk, createdBy: input.createdBy })
       : null;
   const completed = goods !== null && goods.delta > 0 && goods.received >= Number(order.quantity);
@@ -1564,7 +1570,9 @@ export function createManufacturingRepository(db: Db) {
       return db.transaction(async (tx) => {
         const [order] = await tx.select().from(manufacturingOrders).where(eq(manufacturingOrders.id, moId));
         if (!order) return { ok: false, reason: "order_not_found" };
-        if (order.status !== "released" && order.status !== "in_progress") {
+        // Efterrapportering: a done order may still draw (see
+        // reportOperationQuantitiesInTx); only a closed one is locked.
+        if (order.status !== "released" && order.status !== "in_progress" && order.status !== "done") {
           return { ok: false, reason: "invalid_status" };
         }
 

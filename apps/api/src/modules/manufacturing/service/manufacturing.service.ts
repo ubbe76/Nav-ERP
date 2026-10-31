@@ -1670,7 +1670,7 @@ export function createManufacturingService(
         case "row_not_found":
           throw new MOMaterialConsumptionNotFoundError(rowId);
         case "invalid_status":
-          throw new InvalidStatusTransitionError("Material can only be consumed once the order is released or in progress");
+          throw new InvalidStatusTransitionError("Material can only be consumed while the order is released, in progress or done");
         case "over_consumption":
           throw new OverConsumptionError();
       }
@@ -1760,7 +1760,7 @@ export function createManufacturingService(
           throw new ManufacturingOrderNotFoundError(operation.manufacturingOrderId);
         case "invalid_status":
           throw new InvalidStatusTransitionError(
-            "Operations can only be completed while the order is released or in progress"
+            "Operations can only be reported while the order is released, in progress or done"
           );
       }
     },
