@@ -131,6 +131,21 @@ describe("listTerminalOperations", () => {
     expect(filtered.materials.map((m) => m.articleNumber)).toEqual(["PLÅT-2", "RÖR-30"]);
   });
 
+  it("sorts a row's materials and the picker in natural number order (2 before 10), as the web does", async () => {
+    const f = await setup();
+    const parent = await makeArticle(`BORD-${crypto.randomUUID().slice(0, 8)}`, "Bord", "manufactured");
+    const m10 = await makeArticle("BEN-10", "Ben 10", "purchased");
+    const m2 = await makeArticle("BEN-2", "Ben 2", "purchased");
+    const r10 = await mfgService.createRoutingOperation(parent.id, { sequenceNo: 10, workCenterId: f.kap.id, setupTime: 0, runTimePerUnit: 1 });
+    await articleService.addBomComponent(parent.id, { componentArticleId: m10.id, quantity: 1, routingOperationId: r10.id });
+    await articleService.addBomComponent(parent.id, { componentArticleId: m2.id, quantity: 1, routingOperationId: r10.id });
+    await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 1 }, f.user.id);
+    const all = await mfgService.listTerminalOperations({});
+    const row = all.rows.find((r) => r.articleNumber === parent.articleNumber)!;
+    expect(row.materials.map((m) => m.articleNumber)).toEqual(["BEN-2", "BEN-10"]);
+    expect(all.materials.map((m) => m.articleNumber)).toEqual(["BEN-2", "BEN-10", "PLÅT-2", "RÖR-30"]);
+  });
+
   it("leaves out planned and done orders and done operations", async () => {
     const f = await setup();
     const planned = await mfgService.createManufacturingOrder({ articleId: f.parent.id, quantity: 3 }, f.user.id);

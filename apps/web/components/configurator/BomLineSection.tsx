@@ -60,8 +60,9 @@ export function BomLineSection({ articleId, groups, lines, operations, routing, 
     const op = line.routingOperationId
       ? routing.find((r) => r.id === line.routingOperationId)
       : operations.find((o) => o.id === line.configuratorOperationId);
-    const label = op ? (op.description ?? op.workCenterName) : "";
-    return `${line.operationSequenceNo} ${label}`.trim();
+    // Routing not loaded (the fetch failed) or the operation gone: still say what the number is.
+    if (!op) return `Operation ${line.operationSequenceNo}`;
+    return `${line.operationSequenceNo} ${op.description ?? op.workCenterName}`.trim();
   }
 
   return (

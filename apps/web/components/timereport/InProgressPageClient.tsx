@@ -206,6 +206,10 @@ function StampOutForm({
   const [stopAt, setStopAt] = useState(() =>
     toDateTimeLocalValue(session.pausedAt ?? new Date().toISOString())
   );
+  // Sluttid is prefilled to the minute. Untouched, the exact instant is sent
+  // instead: the pause start for a paused session, otherwise nothing (the
+  // server stamps "now") — never the prefill's rounded-down minute.
+  const [stopTouched, setStopTouched] = useState(false);
   const stopMs = Date.parse(stopAt);
   const [quantityOk, setQuantityOk] = useState("");
   const [quantityScrapped, setQuantityScrapped] = useState("");
@@ -242,7 +246,11 @@ function StampOutForm({
         apiFetch(`/api/v1/stamp-sessions/${session.id}/stop`, {
           method: "POST",
           body: JSON.stringify({
-            stoppedAt: new Date(stopAt).toISOString(),
+            ...(stopTouched
+              ? { stoppedAt: new Date(stopAt).toISOString() }
+              : session.pausedAt
+                ? { stoppedAt: session.pausedAt }
+                : {}),
             quantityOk: Number(quantityOk) || 0,
             quantityScrapped: scrapped,
             ...(scrapped > 0 && reasonRegister ? { scrapReasonId } : {}),
@@ -276,7 +284,10 @@ function StampOutForm({
           type="datetime-local"
           value={stopAt}
           min={toDateTimeLocalValue(session.startedAt)}
-          onChange={(e) => setStopAt(e.target.value)}
+          onChange={(e) => {
+            setStopTouched(true);
+            setStopAt(e.target.value);
+          }}
         />
       </Field>
       <FormHint>

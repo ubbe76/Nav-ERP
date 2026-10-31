@@ -1351,6 +1351,15 @@ export function createPlanningService(
       // choices and refuses a row whose configuration is no longer valid.
       for (const proposal of configuredProposals) {
         try {
+          // The TO is made from the row, so the row must be the configured
+          // row OF this proposal's article — the article id is otherwise
+          // only used for the result's labels, and a stale or mismatched
+          // pair would silently make another article's TO.
+          const linked = await repo.salesOrderRowForDueDate(proposal.salesOrderRowId!);
+          if (!linked || !linked.configured || linked.articleId !== proposal.articleId) {
+            pushError(proposal.articleId, "Kundorderraden hör inte till artikeln eller är inte konfigurerad");
+            continue;
+          }
           const suggestion = await this.suggestManufacturingDueDate(proposal.articleId, {
             salesOrderRowId: proposal.salesOrderRowId,
           });

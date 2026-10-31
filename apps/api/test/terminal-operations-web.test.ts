@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   filterTerminalOperations,
+  forgottenStopNowAllowed,
   readinessLabel,
   sortTerminalOperations,
+  splitSelection,
 } from "../../web/lib/terminalOperations";
 import type { TerminalOperation } from "../../web/lib/types";
 
@@ -97,5 +99,32 @@ describe("readinessLabel", () => {
     expect(readinessLabel(op({ readiness: "partial", available: "8", orderQuantity: "20", quantityCompleted: "5" }))).toBe("8 av 15 redo");
     expect(readinessLabel(op({ readiness: "partial", available: "0.30000000000000004", orderQuantity: "1000.5", quantityCompleted: "0" }))).toBe("0,3 av 1 000,5 redo");
     expect(readinessLabel(op({ readiness: "ready", available: "0", orderQuantity: "5", quantityCompleted: "9" }))).toBe("Redo");
+  });
+});
+
+describe("splitSelection", () => {
+  it("starts only the checked rows the list shows and counts the checked rows the filter hides", () => {
+    const a = op();
+    const b = op();
+    const c = op();
+    const selected = new Set([a.operationId, c.operationId]);
+    expect(splitSelection([a, b], selected)).toEqual({ start: [a], hiddenCount: 1 });
+    expect(splitSelection([a, b, c], selected)).toEqual({ start: [a, c], hiddenCount: 0 });
+    expect(splitSelection([], selected)).toEqual({ start: [], hiddenCount: 2 });
+  });
+});
+
+describe("forgottenStopNowAllowed", () => {
+  // Stockholm days: 2026-10-30 22:00 local = 2026-10-30T20:00:00Z (CET from 25 Oct).
+  const now = Date.parse("2026-10-31T06:00:00Z"); // 07:00 on the 31st
+  it("offers Gå hem nu for an attendance that started the day before (a shift past midnight)", () => {
+    expect(forgottenStopNowAllowed("2026-10-30T20:00:00Z", now)).toBe(true);
+    // 00:30 Stockholm on the 30th is still the day before.
+    expect(forgottenStopNowAllowed("2026-10-29T23:30:00Z", now)).toBe(true);
+  });
+  it("hides it for an attendance open since two or more days back, and for an unparsable start", () => {
+    expect(forgottenStopNowAllowed("2026-10-29T20:00:00Z", now)).toBe(false);
+    expect(forgottenStopNowAllowed("2026-10-01T06:00:00Z", now)).toBe(false);
+    expect(forgottenStopNowAllowed("not a date", now)).toBe(false);
   });
 });

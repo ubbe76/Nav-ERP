@@ -348,20 +348,17 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     }
   }
 
+  // A failure is thrown back to ConfigureModal, which shows it and keeps the
+  // dialog open with the choices (a 409 must not throw them away).
   async function saveReconfigure(draft: RowConfigurationDraft) {
     if (!reconfigure) return;
     const bumpRevision = await askBumpRevision(order.revision);
-    try {
-      await apiFetch(`/api/v1/sales-orders/${order.id}/rows/${reconfigure.row.id}/configuration`, {
-        method: "PUT",
-        body: JSON.stringify({ selection: draft.selection, bumpRevision }),
-      });
-      setReconfigure(null);
-      router.refresh();
-    } catch (err) {
-      setReconfigure(null);
-      setActionError(apiErrorMessage(err, "Kunde inte ändra konfigurationen"));
-    }
+    await apiFetch(`/api/v1/sales-orders/${order.id}/rows/${reconfigure.row.id}/configuration`, {
+      method: "PUT",
+      body: JSON.stringify({ selection: draft.selection, bumpRevision }),
+    });
+    setReconfigure(null);
+    router.refresh();
   }
 
   async function saveRow(row: SalesOrderRow) {

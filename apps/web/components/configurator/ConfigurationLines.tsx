@@ -9,8 +9,9 @@ export function ConfigurationLineList({ lines }: { lines: string[] }) {
   if (lines.length === 0) return null;
   return (
     <ul className={styles.configurationLines}>
-      {lines.map((l) => (
-        <li key={l}>{l}</li>
+      {lines.map((l, i) => (
+        // Position, not text: two groups can print the same line.
+        <li key={i}>{l}</li>
       ))}
     </ul>
   );

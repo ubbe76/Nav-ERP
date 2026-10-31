@@ -11,6 +11,7 @@ const fmt = (n: number, decimals: number) =>
     .replace(/[  ]/g, " ");
 
 export function formatMeasure(n: number): string {
+  if (n === 0) n = 0; // −0 would print "-0"
   const decimals = Number.isInteger(n) ? 0 : Math.min(4, (String(Number(n.toFixed(4))).split(".")[1] ?? "").length);
   return fmt(n, decimals);
 }

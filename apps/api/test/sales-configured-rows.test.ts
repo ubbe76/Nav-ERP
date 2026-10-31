@@ -83,6 +83,8 @@ describe("configured rows — create", () => {
     const dup = await salesService.addRow(order.id, { articleId: plain.id, quantity: 1 } as never).catch((e: unknown) => e);
     // The partial unique index, surfaced as the domain error (409 over HTTP).
     expect(dup).toBeInstanceOf(RowVariantExistsError);
+    // An ordinary duplicate row is not a variant: neutral wording (Ändra konfiguration says "Varianten …").
+    expect((dup as Error).message).toBe(`Artikeln ${plain.articleNumber} ligger redan som rad på ordern`);
     const added = await salesService.setFreightRow(order.id, { articleId: frakt.id, unitPrice: 250 });
     const repriced = await salesService.setFreightRow(order.id, { articleId: frakt.id, unitPrice: 300 });
     expect(repriced.id).toBe(added.id);

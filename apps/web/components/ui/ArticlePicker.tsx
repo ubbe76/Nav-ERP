@@ -61,7 +61,7 @@ export function ArticlePicker({
           <span className={styles.optionName}>
             {article.name}
             {article.isPhantom ? " · Fantom" : ""}
-            {article.configuratorMode === "variants" || article.configuratorMode === "to_order" ? " · Konfigurerbar" : ""}
+            {configurable && (article.configuratorMode === "variants" || article.configuratorMode === "to_order") ? " · Konfigurerbar" : ""}
           </span>
         </>
       )}

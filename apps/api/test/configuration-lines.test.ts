@@ -41,6 +41,7 @@ describe("configurationLines", () => {
     expect(formatMeasure(1200)).toBe("1 200");
     expect(formatMeasure(1234567.5)).toBe("1 234 567,5");
     expect(formatMeasure(0.25)).toBe("0,25");
+    expect(formatMeasure(-0)).toBe("0");
   });
 });
 
@@ -63,6 +64,6 @@ describe("web mirror", () => {
   });
 
   it("formats measures identically", () => {
-    for (const n of [0, 12, 1200, 1234567.5, 0.25, 12.3456, 1999.99]) expect(webMeasure(n)).toBe(formatMeasure(n));
+    for (const n of [0, -0, 12, 1200, 1234567.5, 0.25, 12.3456, 1999.99]) expect(webMeasure(n)).toBe(formatMeasure(n));
   });
 });

@@ -405,7 +405,7 @@ function throwRowConfigurationFailure(
     case "invoice_row":
       throw new RowConfigurationLockedError("raden är fakturerad");
     case "variant_exists":
-      throw new RowVariantExistsError(articleNumber);
+      throw new RowVariantExistsError(articleNumber, "variant");
   }
 }
 

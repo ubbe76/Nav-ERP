@@ -48,8 +48,11 @@ interface Props {
   title?: string;
   /** Extra line under the heading, e.g. "Ett handskrivet à-pris ersätts av konfigurationens pris." */
   notice?: string;
-  /** Given ⇒ Lägg in hands the selection + evaluation back WITHOUT calling /variant (to_order rows and Ändra konfiguration). */
-  onConfigured?: (draft: RowConfigurationDraft) => void;
+  /**
+   * Given ⇒ Lägg in hands the selection + evaluation back WITHOUT calling /variant (to_order rows and
+   * Ändra konfiguration). A rejected promise is shown in the dialog, which stays open with the choices.
+   */
+  onConfigured?: (draft: RowConfigurationDraft) => void | Promise<void>;
   /** Otherwise (variants mode on a new row) Lägg in resolves the variant. */
   onResolved?: (result: ResolveVariantResult) => void;
   /** Avbryt / Esc / ✕ — the form clears its article field. */
@@ -98,6 +101,8 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
   // A measure is half-typed ("12,"): what the dialog shows is not what was last evaluated.
   const [halfTyped, setHalfTyped] = useState(false);
   const seq = useRef(0);
+  // The request on its way, by its seq (0 = none): a half-typed measure must not drop it.
+  const inFlight = useRef(0);
   const lastSelection = useRef<ConfiguratorSelection>({});
 
   // The template's groups: GET /articles/:id/configurator (office read).
@@ -113,17 +118,20 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
   // Debounced evaluate on every change (same race guard as TestConfigurationPanel).
   useEffect(() => {
     if (!groups) return;
-    const mine = ++seq.current;
     const { selection, pending: incomplete } = selectionFromRaw(groups, raw);
     setHalfTyped(incomplete);
     if (incomplete) {
-      // Bumping seq above already discards any in-flight answer; nothing is pending any more.
-      setEvaluating(false);
+      // `seq` is not bumped: an answer on its way for the last complete value is still written
+      // (halfTyped keeps Lägg in disabled). A debounce that had not fired was cancelled by the
+      // cleanup, so without a request in flight nothing is evaluating any more.
+      if (inFlight.current !== seq.current) setEvaluating(false);
       return;
     }
+    const mine = ++seq.current;
     lastSelection.current = selection;
     setEvaluating(true);
     const timer = setTimeout(() => {
+      inFlight.current = mine;
       apiFetch<ConfiguratorEvaluation>(`/api/v1/configurator/${template.id}/evaluate`, {
         method: "POST",
         body: JSON.stringify({
@@ -147,6 +155,9 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
             setError(apiErrorMessage(err, "Kunde inte utvärdera konfigurationen"));
             setEvaluating(false);
           }
+        })
+        .finally(() => {
+          if (inFlight.current === mine) inFlight.current = 0;
         });
     }, 250);
     return () => clearTimeout(timer);
@@ -155,12 +166,19 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
 
   async function insert() {
     if (!result) return;
-    if (onConfigured) {
-      onConfigured({ selection: lastSelection.current, evaluation: result, lines: draftLines(groups ?? [], result) });
-      return;
-    }
     setPending(true);
     setError(null);
+    if (onConfigured) {
+      // A save that fails (409 row-configuration-locked, row-variant-exists …) keeps the dialog
+      // and its choices; the caller closes it on success.
+      try {
+        await onConfigured({ selection: lastSelection.current, evaluation: result, lines: draftLines(groups ?? [], result) });
+      } catch (err) {
+        setError(apiErrorMessage(err, "Kunde inte lägga in konfigurationen"));
+        setPending(false);
+      }
+      return;
+    }
     try {
       const res = await apiFetch<ResolveVariantResult>(`/api/v1/configurator/${template.id}/variant`, {
         method: "POST",

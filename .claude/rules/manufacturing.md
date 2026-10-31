@@ -60,7 +60,8 @@ Spec `private/superpowers/specs/2026-10-18-andra-tillverkningsorder-design.md`.
 ## Terminalens operationslista
 
 - `GET /terminal/operations` (+ `/terminal/stations`, `TERMINAL_READ`): en rad per stämplingsbar operation (frisläppt/pågående TO, pending, ej lego) med beredskap ur rena `terminal-readiness.ts` — första operationen alltid redo, annars föregående operations OK (även på annan station eller lego); spärrar aldrig. Bara **kopplat** material; `materials` i svaret är listan före materialfiltret.
-- Förvalda stationer per anställd i `employee_work_centers`, bärs av `GET /employees/directory`. Webbens sortering/sök i `lib/terminalOperations.ts`.
+- Förvalda stationer per anställd i `employee_work_centers`, bärs av `GET /employees/directory`. Webbens sortering/sök i `lib/terminalOperations.ts`; API:ts materialsortering är `localeCompare(…, "sv", { numeric: true })` = webbens collator, så radens första material är dess sorteringsnyckel.
+- **Starta valda** startar bara markerade rader som listan visar (`splitSelection`); markeringar som Sök/Bara redo döljer ligger kvar, räknas i en hinttext och tas inte bort vid lyckad start. Station/material är avstängda medan satsen pågår (omladdningen rensar annars markeringar mitt i). Test: `terminal-operations-web.test.ts`.
 
 ## Transportkostnad på legooperationer (migration 0164)
 
