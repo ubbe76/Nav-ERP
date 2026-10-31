@@ -38,7 +38,7 @@ import {
   ConfigurationRequiredError as SalesConfigurationRequiredError,
   RowConfigurationChangedError,
 } from "../../sales/service/sales.errors.js";
-import { ConfiguratorInvalidConfigurationError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
+import { ConfiguratorInvalidConfigurationError, ConfiguratorModeChangedError, ConfiguratorNotToOrderModeError } from "../../configurator/service/configurator.errors.js";
 import { InvalidStatusTransitionError as SalesStatusError } from "../../sales/service/sales.service.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { DELIVERY_CHECK, OVERVIEW_READ } from "../../auth/middleware/access-rules.js";
@@ -137,6 +137,7 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
         // mode) — mapped exactly as POST /manufacturing-orders maps them —
         // and the sales header's status guard.
         err instanceof RowConfigurationChangedError ||
+        err instanceof ConfiguratorModeChangedError ||
         err instanceof LinkedOrderStatusError ||
         err instanceof ArticleIsTemplateError ||
         err instanceof SalesConfigurationRequiredError ||

@@ -4,6 +4,7 @@ import {
   articleGroups,
   bankRules,
   budgetLines,
+  budgets,
   costCenters,
   customers,
   fixedAssetCategories,
@@ -58,7 +59,7 @@ interface DimensionReference {
   condition?: (id: string) => SQL;
   // A reference whose rows cannot simply be re-pointed (a unique key would
   // collide): the move is this statement instead of the generic UPDATE.
-  move?: (tx: Tx, id: string, replacementId: string) => Promise<void>;
+  move?: (tx: Tx, id: string, replacementId: string) => Promise<number>;
 }
 
 function ref(table: PgTable, tableName: string, labels: string, column: PgColumn): DimensionReference {
@@ -99,7 +100,18 @@ const salesOrderClosed = sql`${salesOrders.status} in ('delivered', 'invoiced', 
 // line the replacement already has for the same key is SUMMED into it (a
 // sum of zero removes the line — zero is never stored) before the rest are
 // re-pointed. Decision 10 of the budget contract.
-async function moveBudgetLines(tx: Tx, id: string, replacementId: string) {
+async function moveBudgetLines(tx: Tx, id: string, replacementId: string): Promise<number> {
+  // The budgets whose lines move are locked first (sorted, FOR UPDATE) — the
+  // lock Spara (replaceLines) takes before it rewrites a cost center's lines
+  // — so a save in flight commits before the move reads, or waits for it.
+  // The count is taken after the lock, so it includes what that save wrote.
+  await tx.execute(sql`
+    SELECT id FROM ${budgets}
+    WHERE id IN (SELECT DISTINCT budget_id FROM ${budgetLines} WHERE cost_center_id IN (${id}, ${replacementId}))
+    ORDER BY id FOR UPDATE
+  `);
+  const [counted] = await tx.select({ n: count() }).from(budgetLines).where(eq(budgetLines.costCenterId, id));
+  const moved = Number(counted?.n ?? 0);
   const paired = sql`source.cost_center_id = ${id} AND target.cost_center_id = ${replacementId}
       AND target.budget_id = source.budget_id AND target.account_number = source.account_number AND target.month = source.month`;
   // Pairs that cancel out go first — both rows — since the CHECK refuses an
@@ -122,6 +134,7 @@ async function moveBudgetLines(tx: Tx, id: string, replacementId: string) {
     WHERE ${paired}
   `);
   await tx.execute(sql`UPDATE ${budgetLines} SET cost_center_id = ${replacementId} WHERE cost_center_id = ${id}`);
+  return moved;
 }
 const purchaseOrderClosed = sql`${purchaseOrders.status} in ('received', 'closed', 'cancelled')`;
 
@@ -252,9 +265,11 @@ export function createDimensionRepository(db: Db) {
             const [before] = await tx.select({ n: count() }).from(r.table).where(whereFor(r, entry.id));
             const n = Number(before?.n ?? 0);
             if (n === 0) continue;
-            if (r.move) await r.move(tx, entry.id, replacementId);
-            else await tx.execute(sql`UPDATE ${r.table} SET ${sql.identifier(r.column.name)} = ${replacementId} WHERE ${whereFor(r, entry.id)}`);
-            moved.push({ table: r.tableName, count: n });
+            // A mover that locks first reports what it moved under the lock.
+            const movedCount = r.move
+              ? await r.move(tx, entry.id, replacementId)
+              : (await tx.execute(sql`UPDATE ${r.table} SET ${sql.identifier(r.column.name)} = ${replacementId} WHERE ${whereFor(r, entry.id)}`), n);
+            moved.push({ table: r.tableName, count: movedCount });
           }
         }
         await tx.delete(table).where(eq(table.id, entry.id));

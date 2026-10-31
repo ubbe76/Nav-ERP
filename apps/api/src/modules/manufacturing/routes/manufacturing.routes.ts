@@ -87,6 +87,7 @@ import {
 } from "../../sales/service/sales.errors.js";
 import {
   ConfiguratorInvalidConfigurationError,
+  ConfiguratorModeChangedError,
   ConfiguratorNotToOrderModeError,
 } from "../../configurator/service/configurator.errors.js";
 import { registerListCsvRoute } from "../../system/routes/csv-export.js";
@@ -369,7 +370,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
       if (err instanceof ConfigurationRequiredError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
       if (err instanceof RowConfigurationChangedError) return reply.code(409).send(errorBody(err));
-      if (err instanceof ConfiguratorNotToOrderModeError) return reply.code(409).send(errorBody(err));
+      if (err instanceof ConfiguratorNotToOrderModeError || err instanceof ConfiguratorModeChangedError) return reply.code(409).send(errorBody(err));
       if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
       // Avvikelser: the case cannot take the link (closed, wrong type).
       if (err instanceof DeviationLinkNotAllowedError) return reply.code(409).send(errorBody(err));
@@ -407,7 +408,7 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof ConfigurationRequiredError) return reply.code(409).send(errorBody(err));
         if (err instanceof ConfigurationNotAllowedError) return reply.code(400).send(errorBody(err));
         if (err instanceof RowConfigurationChangedError) return reply.code(409).send(errorBody(err));
-        if (err instanceof ConfiguratorNotToOrderModeError) return reply.code(409).send(errorBody(err));
+        if (err instanceof ConfiguratorNotToOrderModeError || err instanceof ConfiguratorModeChangedError) return reply.code(409).send(errorBody(err));
         if (err instanceof ConfiguratorInvalidConfigurationError) return reply.code(400).send({ ...errorBody(err), details: err.details });
         throw err;
       }

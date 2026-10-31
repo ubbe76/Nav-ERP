@@ -10,6 +10,8 @@ import {
 } from "../src/modules/economy/service/fixed-asset.service.js";
 import { testEconomyService } from "./helpers/services.js";
 import { PLAN_YEAR, resetFixedAssets, setupFixedAssets, testFixedAssetService } from "./helpers/fixed-assets.js";
+import { waitForLockWaiter } from "./helpers/year-end.js";
+import { DEPRECIATION_LOCK_SQL } from "../src/modules/economy/service/fixed-asset.service.js";
 
 // Ingående avskrivning: an asset acquired before the company started
 // bookkeeping in Nav already carries accumulated depreciation in the opening
@@ -99,6 +101,27 @@ describe("ingående avskrivning", () => {
 
     const list = await service.listAssets({ limit: 50, offset: 0 });
     expect(list.rows[0]).toMatchObject({ accumulatedDepreciation: OPENING, bookValue: 75000 });
+  });
+
+  // The opening amount locks the group's posting accounts, which
+  // updateCategory checks under the run lock: the insert takes that lock too,
+  // so it waits for an account change in flight instead of slipping past it.
+  it("takes the run lock when the asset carries an opening amount", async () => {
+    const { user, category } = await setupFixedAssets();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const holder = db.transaction(async (tx) => {
+      await tx.execute(DEPRECIATION_LOCK_SQL);
+      await held;
+    });
+    let settled = false;
+    const creating = createAsset(user.id, category.id).finally(() => (settled = true));
+    await waitForLockWaiter();
+    expect(settled).toBe(false);
+    release();
+    await holder;
+    const asset = await creating;
+    expect(asset.openingDepreciation).toBe("45000.00");
   });
 
   it("refuses an opening depreciation that contradicts the plan", async () => {

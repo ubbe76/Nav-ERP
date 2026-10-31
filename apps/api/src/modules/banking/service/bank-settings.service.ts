@@ -188,34 +188,40 @@ export function createBankSettingsService(deps: { repo: BankSettingsRepository; 
       };
     },
 
+    // Read, merge and write in one transaction (repo.inSettingsTransaction):
+    // a validation throw rolls back nothing written, and a concurrent PATCH
+    // waits for this one's commit before it reads.
     async update(input: UpdateBankSettingsInput, userId: string): Promise<BankSettingsView> {
-      const current = await readSettings();
-      const next: BankSettings = {
-        profile: input.profile !== undefined ? input.profile : current.profile,
-        initiatingPartyId: input.initiatingPartyId !== undefined ? normalizeId(input.initiatingPartyId) : current.initiatingPartyId,
-        debtorAgreementId: input.debtorAgreementId !== undefined ? normalizeId(input.debtorAgreementId) : current.debtorAgreementId,
-        debitAccountKind: input.debitAccountKind ?? current.debitAccountKind,
-      };
-      if (next.profile) {
-        const profile = bankProfile(next.profile);
-        if (input.debitAccountKind !== undefined && !profile.debitAccountKinds.includes(input.debitAccountKind)) {
-          throw new InvalidBankSettingError(`${profile.name} tar inte ${KIND_LABEL[input.debitAccountKind]} som debiteringskonto`);
+      const changed = await repo.inSettingsTransaction(async (tx) => {
+        const current = await readSettings(tx);
+        const next: BankSettings = {
+          profile: input.profile !== undefined ? input.profile : current.profile,
+          initiatingPartyId: input.initiatingPartyId !== undefined ? normalizeId(input.initiatingPartyId) : current.initiatingPartyId,
+          debtorAgreementId: input.debtorAgreementId !== undefined ? normalizeId(input.debtorAgreementId) : current.debtorAgreementId,
+          debitAccountKind: input.debitAccountKind ?? current.debitAccountKind,
+        };
+        if (next.profile) {
+          const profile = bankProfile(next.profile);
+          if (input.debitAccountKind !== undefined && !profile.debitAccountKinds.includes(input.debitAccountKind)) {
+            throw new InvalidBankSettingError(`${profile.name} tar inte ${KIND_LABEL[input.debitAccountKind]} som debiteringskonto`);
+          }
+          // A new bank that does not take the stored kind: its first kind.
+          if (next.debitAccountKind === null || !profile.debitAccountKinds.includes(next.debitAccountKind)) {
+            next.debitAccountKind = profile.debitAccountKinds[0]!;
+          }
+          if (next.initiatingPartyId && profile.initiatingParty.pattern && !profile.initiatingParty.pattern.test(next.initiatingPartyId)) {
+            throw new InvalidBankSettingError(`${profile.initiatingParty.label} har fel format`);
+          }
         }
-        // A new bank that does not take the stored kind: its first kind.
-        if (next.debitAccountKind === null || !profile.debitAccountKinds.includes(next.debitAccountKind)) {
-          next.debitAccountKind = profile.debitAccountKinds[0]!;
+        const changed: string[] = [];
+        for (const key of Object.keys(KEYS) as (keyof typeof KEYS)[]) {
+          if (next[key] !== current[key]) {
+            await repo.setSetting(KEYS[key], next[key], tx);
+            changed.push(KEYS[key]);
+          }
         }
-        if (next.initiatingPartyId && profile.initiatingParty.pattern && !profile.initiatingParty.pattern.test(next.initiatingPartyId)) {
-          throw new InvalidBankSettingError(`${profile.initiatingParty.label} har fel format`);
-        }
-      }
-      const changed: string[] = [];
-      for (const key of Object.keys(KEYS) as (keyof typeof KEYS)[]) {
-        if (next[key] !== current[key]) {
-          await repo.setSetting(KEYS[key], next[key]);
-          changed.push(KEYS[key]);
-        }
-      }
+        return changed;
+      });
       if (changed.length > 0) {
         // Key names only, never values — the freight settings' rule.
         await audit.log({ entityType: "bank_settings", entityId: "bank", action: "updated", detail: { changed }, userId });

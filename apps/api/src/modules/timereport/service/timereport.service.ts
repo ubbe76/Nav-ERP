@@ -837,8 +837,10 @@ export function createTimeReportService(
           : existing.stoppedAt !== null && newStoppedAt !== null && newStoppedAt.getTime() !== existing.stoppedAt.getTime()
             ? { kind: "move" as const, employeeId: existing.employeeId, from: existing.stoppedAt, to: newStoppedAt }
             : null;
-      // Only what the supervisor changed is written, and only while the stop
-      // time is still the one read above (a Gå hem in between ⇒ 409).
+      // Only what the supervisor changed is written, and only while both
+      // times are still the ones read above (a Gå hem or another correction
+      // in between ⇒ 409). Re-opening races a new Kom on the one-open index:
+      // the loser gets the same 409 as attendanceIn's.
       const patch = {
         ...(input.startedAt !== undefined ? { startedAt: newStartedAt } : {}),
         ...(input.stoppedAt !== undefined ? { stoppedAt: newStoppedAt } : {}),
@@ -847,12 +849,14 @@ export function createTimeReportService(
         ...(input.stopReasonId !== undefined ? { stopReasonId: reasons.stopReasonId } : {}),
         ...(input.stopNote !== undefined ? { stopNote: reasons.stopNote } : {}),
       };
-      const { session: updated, pausedWorkSessions, movedPauses } = await repo.correctAttendanceWithWork(
-        id,
-        patch,
-        existing.stoppedAt,
-        effect
-      );
+      let corrected: Awaited<ReturnType<typeof repo.correctAttendanceWithWork>>;
+      try {
+        corrected = await repo.correctAttendanceWithWork(id, patch, { startedAt: existing.startedAt, stoppedAt: existing.stoppedAt }, effect);
+      } catch (err) {
+        if (isUniqueViolation(err, ONE_OPEN_ATTENDANCE)) throw new AlreadyPresentError();
+        throw err;
+      }
+      const { session: updated, pausedWorkSessions, movedPauses } = corrected;
       if (!updated) throw new AttendanceSessionChangedError(id);
 
       await audit.log({

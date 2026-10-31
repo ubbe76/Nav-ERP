@@ -56,7 +56,7 @@ import {
   formatRevisionInfo,
   type DocumentSettingsReader,
 } from "../../mail/service/document-pdf.js";
-import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
+import { isForeignKeyViolation, isUniqueViolation, isCheckViolation } from "../../system/service/db-errors.js";
 import type {
   SupplierDeliveryDateQuery,
   SupplierDeliveryDateSuggestion,
@@ -370,6 +370,11 @@ const SUPPLIER_PAYMENT_DETAIL_KEYS = [
 // A payee abroad needs street, town and country (valuta steg 2), so a PATCH
 // of those is checked against the payment details too.
 const SUPPLIER_PAYMENT_CONTEXT_KEYS = ["country", "address", "city"] as const;
+// The suppliers table's own guards behind the pre-check (schema purchase.ts).
+const SUPPLIER_PAYMENT_METHOD_CHECK = "suppliers_payment_method_details";
+const SUPPLIER_CLEARING_PAIR_CHECK = "suppliers_clearing_pair";
+const PAYMENT_DETAILS_CHANGED_CONCURRENTLY =
+  "Betalningsuppgifterna ändrades samtidigt av någon annan — ladda om leverantören och försök igen";
 
 function paymentDetailsOf(row: Partial<SupplierPaymentDetails>): SupplierPaymentDetails {
   return {
@@ -815,6 +820,12 @@ export function createPurchaseService(
         row = await repo.updateSupplier(id, normalized);
       } catch (err) {
         if (isUniqueViolation(err)) throw new DuplicateSupplierNumberError(input.supplierNumber ?? "");
+        // The merged pre-check above ran on an unlocked read: a concurrent
+        // PATCH of the other half (the method here, the number there) can
+        // leave the CHECK as the only guard — the same 400 as the pre-check.
+        if (isCheckViolation(err, SUPPLIER_PAYMENT_METHOD_CHECK) || isCheckViolation(err, SUPPLIER_CLEARING_PAIR_CHECK)) {
+          throw new InvalidSupplierPaymentDetailsError({ paymentMethod: PAYMENT_DETAILS_CHANGED_CONCURRENTLY });
+        }
         throw err;
       }
       if (!row) throw new SupplierNotFoundError(id);

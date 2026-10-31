@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { db, manufacturingOrders, moMaterialConsumptions, moOperations, stockTransactions } from "@navet/db";
+import { configuratorTemplates, db, manufacturingOrders, moMaterialConsumptions, moOperations, stockTransactions } from "@navet/db";
 import type { ManufacturingOrderConfiguration } from "@navet/shared";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
@@ -9,7 +9,11 @@ import {
   ConfigurationRequiredError,
   RowConfigurationChangedError,
 } from "../src/modules/sales/service/sales.errors.js";
-import { ConfiguratorInvalidConfigurationError, ConfiguratorNotToOrderModeError } from "../src/modules/configurator/service/configurator.errors.js";
+import {
+  ConfiguratorInvalidConfigurationError,
+  ConfiguratorModeChangedError,
+  ConfiguratorNotToOrderModeError,
+} from "../src/modules/configurator/service/configurator.errors.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import {
   buildToOrderWithStructure,
@@ -22,6 +26,7 @@ import {
 import { configurator, makeLocation, makeUser, resetConfiguredRows, salesRepository, salesService } from "./helpers/configured-rows.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { pdfText } from "./helpers/pdf.js";
+import { failure, waitForLockWaiter } from "./helpers/year-end.js";
 
 // Konfigurator 4c: a beställningsvara's TO carries its derived structure from
 // creation — all three paths (the KO row's Skapa TO, Ny tillverkningsorder,
@@ -141,6 +146,22 @@ describe("configured TO — creation", () => {
       reader as never
     );
     await expect(racing.createFromSalesOrderRow(row.id, {}, null)).rejects.toBeInstanceOf(RowConfigurationChangedError);
+    expect(await db.select().from(manufacturingOrders)).toHaveLength(0);
+  });
+
+  // The mode is read (and the structure derived) before the transaction; the
+  // transaction re-reads it FOR SHARE after the row lock and refuses a change.
+  it("a template whose mode changes between derivation and insert ⇒ 409, nothing written", async () => {
+    const s = await buildToOrderWithStructure();
+    let create: Promise<unknown> | undefined;
+    await db.transaction(async (holder) => {
+      // The flip is uncommitted: the service still reads to_order and
+      // derives, then queues on the template row in its own transaction.
+      await holder.update(configuratorTemplates).set({ mode: "variants" }).where(eq(configuratorTemplates.articleId, s.article.id));
+      create = failure(mfg.createManufacturingOrder({ articleId: s.article.id, quantity: 1, configuration: { selection: FULL } }, null));
+      await waitForLockWaiter();
+    });
+    expect(await create!).toBeInstanceOf(ConfiguratorModeChangedError);
     expect(await db.select().from(manufacturingOrders)).toHaveLength(0);
   });
 

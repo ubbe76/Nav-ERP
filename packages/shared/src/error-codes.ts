@@ -439,6 +439,8 @@ export const ERROR_CODES = {
   CONFIGURATOR_VARIANT_NOT_DERIVABLE: "configurator-variant-not-derivable",
   // Beställningsvara på orderraden (konfigurator 4b).
   CONFIGURATOR_NOT_TO_ORDER_MODE: "configurator-not-to-order-mode",
+  // The template's mode changed while a TO was being created on it.
+  CONFIGURATOR_MODE_CHANGED: "configurator-mode-changed",
   // Externt API (konfigurator 5): a client used a template without Visa i API.
   CONFIGURATOR_NOT_PUBLISHED: "configurator-not-published",
   CONFIGURATION_REQUIRED: "configuration-required",

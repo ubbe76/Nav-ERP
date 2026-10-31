@@ -523,6 +523,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "configurator-variant-not-derivable":
     "Kombinationen kan inte tillverkas — förhandsgranska varianterna på mallens artikelkort för att se vad i strukturen som saknas.",
   "configurator-not-to-order-mode": "Mallen är inte i läget Beställningsvara.",
+  "configurator-mode-changed": "Artikelns konfiguratorläge ändrades medan tillverkningsordern skapades — försök igen.",
   "configurator-not-published": "Mallen är inte publicerad för API:t.",
   "configuration-required": serverMessage("Artikeln är en beställningsvara — konfigurera den."),
   "configuration-not-allowed": serverMessage("Artikeln är inte en beställningsvara."),
