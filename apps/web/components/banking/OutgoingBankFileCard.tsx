@@ -11,6 +11,7 @@ import { Table } from "../ui/Table";
 import { useCan } from "../PermissionsProvider";
 import { API_URL, apiFetch } from "../../lib/api";
 import { OUTGOING_STATE } from "../../lib/banking";
+import { editOf, withEdit, type StampedEdits } from "../../lib/stampedEdits";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatRate } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
@@ -49,9 +50,10 @@ function hintFor(e: OutgoingEntryView): string | undefined {
   return HINT[e.state];
 }
 
-// Owns the per-row booking results OUTSIDE the keyed body: book() refreshes the
-// page, the page's key (the entries' states) then remounts the body, and
-// results held there would vanish together with the failures the user must read.
+// Owns the per-row booking results OUTSIDE the body, which shows the result
+// of the latest refresh. The body is no longer remounted when an entry's state
+// changes: a checkbox the user changed is kept per entry (lib/stampedEdits.ts),
+// so an entry left out of one booking is not chosen again behind their back.
 export function OutgoingBankFileCard({ file, entries }: { file: BankFileDetail; entries: OutgoingEntryView[] }) {
   const [results, setResults] = useState<BankItemResult[] | null>(null);
   const failures = (results ?? [])
@@ -60,7 +62,7 @@ export function OutgoingBankFileCard({ file, entries }: { file: BankFileDetail; 
   return (
     <>
       <BookingFailures failures={failures} />
-      <OutgoingBankFileBody key={entries.map((e) => e.state).join()} file={file} entries={entries} onResults={setResults} />
+      <OutgoingBankFileBody key={file.id} file={file} entries={entries} onResults={setResults} />
     </>
   );
 }
@@ -77,7 +79,10 @@ function OutgoingBankFileBody({
   const router = useRouter();
   const can = useCan();
   const writable = can(["inkop"]);
-  const [chosen, setChosen] = useState<Set<string>>(new Set(entries.filter((e) => BOOKABLE.has(e.state)).map((e) => e.id)));
+  const [toggled, setToggled] = useState<StampedEdits<boolean>>({});
+  // A booked entry's state has changed, so its old tick no longer counts.
+  const isChosen = (e: OutgoingEntryView) => BOOKABLE.has(e.state) && (editOf(toggled, e) ?? true);
+  const chosenEntries = entries.filter(isChosen);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -88,7 +93,7 @@ function OutgoingBankFileBody({
     try {
       const body = await apiFetch<{ results: BankItemResult[] }>(`/api/v1/bank-files/${file.id}/outgoing/book`, {
         method: "POST",
-        body: JSON.stringify({ entryIds: entries.filter((e) => chosen.has(e.id)).map((e) => e.id) }),
+        body: JSON.stringify({ entryIds: chosenEntries.map((e) => e.id) }),
       });
       onResults(body.results);
       router.refresh();
@@ -128,16 +133,9 @@ function OutgoingBankFileBody({
               return (
                 <Checkbox
                   aria-label={`Välj ${e.endToEndId ?? "post"}`}
-                  checked={chosen.has(e.id)}
+                  checked={isChosen(e)}
                   disabled={!writable || !BOOKABLE.has(e.state)}
-                  onChange={() =>
-                    setChosen((c) => {
-                      const next = new Set(c);
-                      if (next.has(e.id)) next.delete(e.id);
-                      else next.add(e.id);
-                      return next;
-                    })
-                  }
+                  onChange={() => setToggled((t) => withEdit(t, e, !isChosen(e)))}
                 />
               );
             case "endToEndId":
@@ -207,7 +205,7 @@ function OutgoingBankFileBody({
       />
       {writable && (
         <div style={{ marginTop: 16 }}>
-          <Button onClick={book} disabled={pending || chosen.size === 0}>
+          <Button onClick={book} disabled={pending || chosenEntries.length === 0}>
             Bokför valda
           </Button>
         </div>

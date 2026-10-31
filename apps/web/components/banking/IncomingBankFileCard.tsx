@@ -10,6 +10,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { useCan } from "../PermissionsProvider";
 import { API_URL, apiFetch } from "../../lib/api";
 import { INCOMING_STATE } from "../../lib/banking";
+import { editOf, withEdit, type StampedEdits } from "../../lib/stampedEdits";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { currencyLabel, formatRate, SEK, toleranceInCurrency } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
@@ -52,9 +53,10 @@ function initialDraft(entry: IncomingEntryView): Draft {
   };
 }
 
-// Owns the per-row booking results OUTSIDE the keyed body: booking refreshes
-// the page, the entries' states then change the key and remount the body, and
-// results held there would vanish together with the failures the user must read.
+// Owns the per-row booking results OUTSIDE the body, which shows the result
+// of the latest refresh. The body is no longer remounted when an entry's state
+// changes: the user's edits are kept per entry (lib/stampedEdits.ts), so a
+// booking resets only the entries it booked.
 export function IncomingBankFileCard(props: { file: BankFileDetail; entries: IncomingEntryView[]; customers: Customer[]; tolerance: number }) {
   const [results, setResults] = useState<BankItemResult[] | null>(null);
   const failures = (results ?? [])
@@ -70,7 +72,7 @@ export function IncomingBankFileCard(props: { file: BankFileDetail; entries: Inc
   return (
     <>
       <BookingFailures failures={failures} />
-      <IncomingBankFileBody key={props.entries.map((e) => e.state).join()} {...props} onResults={setResults} />
+      <IncomingBankFileBody key={props.file.id} {...props} onResults={setResults} />
     </>
   );
 }
@@ -91,27 +93,26 @@ function IncomingBankFileBody({
   const router = useRouter();
   const can = useCan();
   const writable = can(["forsaljning"]);
-  const [drafts, setDrafts] = useState<Record<string, Draft>>(() => Object.fromEntries(entries.map((e) => [e.id, initialDraft(e)])));
-  const [chosen, setChosen] = useState<Set<string>>(new Set(entries.filter((e) => e.state === "matched").map((e) => e.id)));
+  // Only what the user changed is held here; an untouched entry follows the
+  // server's current proposal, and a booked/ignored one starts over.
+  const [editedDrafts, setEditedDrafts] = useState<StampedEdits<Draft>>({});
+  const [toggled, setToggled] = useState<StampedEdits<boolean>>({});
   const [openEditor, setOpenEditor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  const allocated = (id: string) => round2((drafts[id]?.rows ?? []).reduce((sum, r) => sum + (Number(r.applied) || 0), 0));
+  const draftOf = (e: IncomingEntryView) => editOf(editedDrafts, e) ?? initialDraft(e);
+  const isChosen = (e: IncomingEntryView) => editOf(toggled, e) ?? e.state === "matched";
+  const allocated = (e: IncomingEntryView) => round2(draftOf(e).rows.reduce((sum, r) => sum + (Number(r.applied) || 0), 0));
 
-  function setDraft(id: string, draft: Draft) {
-    setDrafts((d) => ({ ...d, [id]: draft }));
-  }
-
-  const bookable = (e: IncomingEntryView) =>
-    EDITABLE.has(e.state) &&
-    drafts[e.id]!.customerId !== "" &&
-    drafts[e.id]!.rows.length > 0 &&
-    allocated(e.id) === round2(amountIn(e, drafts[e.id]!.currency));
+  const bookable = (e: IncomingEntryView) => {
+    const draft = draftOf(e);
+    return EDITABLE.has(e.state) && draft.customerId !== "" && draft.rows.length > 0 && allocated(e) === round2(amountIn(e, draft.currency));
+  };
   // A chosen entry whose allocation stops adding up (or that changes state)
   // is skipped, never a lock on the others: only chosen ∩ bookable is sent,
   // and its checkbox stays enabled so it can be unchecked.
-  const toBook = entries.filter((e) => chosen.has(e.id) && bookable(e));
+  const toBook = entries.filter((e) => isChosen(e) && bookable(e));
 
   async function book() {
     if (pending) return;
@@ -122,11 +123,14 @@ function IncomingBankFileBody({
       const body = await apiFetch<{ results: BankItemResult[] }>(`/api/v1/bank-files/${file.id}/incoming/book`, {
         method: "POST",
         body: JSON.stringify({
-          entries: toBook.map((e) => ({
-            entryId: e.id,
-            customerId: drafts[e.id]!.customerId,
-            rows: drafts[e.id]!.rows.filter((r) => Number(r.applied) !== 0).map((r) => ({ invoiceId: r.invoiceId, appliedAmount: Number(r.applied) })),
-          })),
+          entries: toBook.map((e) => {
+            const draft = draftOf(e);
+            return {
+              entryId: e.id,
+              customerId: draft.customerId,
+              rows: draft.rows.filter((r) => Number(r.applied) !== 0).map((r) => ({ invoiceId: r.invoiceId, appliedAmount: Number(r.applied) })),
+            };
+          }),
         }),
       });
       onResults(body.results);
@@ -154,7 +158,8 @@ function IncomingBankFileBody({
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {entries.map((e) => {
           const s = INCOMING_STATE[e.state]!;
-          const draft = drafts[e.id]!;
+          const draft = draftOf(e);
+          const chosen = isChosen(e);
           const editable = writable && EDITABLE.has(e.state);
           return (
             <div key={e.id} style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-card)", padding: 12 }}>
@@ -162,16 +167,9 @@ function IncomingBankFileBody({
                 {editable && (
                   <Checkbox
                     aria-label="Bokför posten"
-                    checked={chosen.has(e.id)}
-                    disabled={!chosen.has(e.id) && !bookable(e)}
-                    onChange={() =>
-                      setChosen((c) => {
-                        const next = new Set(c);
-                        if (next.has(e.id)) next.delete(e.id);
-                        else next.add(e.id);
-                        return next;
-                      })
-                    }
+                    checked={chosen}
+                    disabled={!chosen && !bookable(e)}
+                    onChange={() => setToggled((t) => withEdit(t, e, !chosen))}
                   />
                 )}
                 {isForeignPayment(e) ? (
@@ -217,7 +215,7 @@ function IncomingBankFileBody({
                 )}
                 {writable && e.state !== "booked" && <BankEntryIgnoreButton fileId={file.id} direction="incoming" entryId={e.id} ignored={e.state === "ignored"} />}
               </div>
-              {editable && chosen.has(e.id) && !bookable(e) && (
+              {editable && chosen && !bookable(e) && (
                 <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>Fördelningen stämmer inte med beloppet — posten bokförs inte förrän den gör det.</div>
               )}
               {e.proposal?.reason && <div style={{ fontSize: 13, color: "var(--status-delayed-text)" }}>{e.proposal.reason}</div>}
@@ -245,8 +243,8 @@ function IncomingBankFileBody({
                   draft={draft}
                   customers={customers}
                   tolerance={tolerance}
-                  allocated={allocated(e.id)}
-                  onChange={(d) => setDraft(e.id, d)}
+                  allocated={allocated(e)}
+                  onChange={(d) => setEditedDrafts((edits) => withEdit(edits, e, d))}
                 />
               )}
             </div>

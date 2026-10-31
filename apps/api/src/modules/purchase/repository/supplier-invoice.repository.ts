@@ -459,7 +459,7 @@ export function createSupplierInvoiceRepository(db: Db | Tx) {
         .leftJoin(purchaseOrderRows, eq(purchaseOrderRows.id, supplierInvoiceRows.purchaseOrderRowId))
         .leftJoin(purchaseOrders, eq(purchaseOrders.id, purchaseOrderRows.purchaseOrderId))
         .where(eq(supplierInvoiceRows.supplierInvoiceId, invoiceId))
-        .orderBy(asc(supplierInvoiceRows.createdAt));
+        .orderBy(asc(supplierInvoiceRows.createdAt), asc(supplierInvoiceRows.id));
     },
 
     // Only a draft is changed: the status guard sits in the UPDATE itself, so
@@ -552,7 +552,7 @@ export function createSupplierInvoiceRepository(db: Db | Tx) {
             .from(supplierInvoiceRows)
             .leftJoin(articles, eq(articles.id, supplierInvoiceRows.articleId))
             .where(eq(supplierInvoiceRows.supplierInvoiceId, id))
-            .orderBy(asc(supplierInvoiceRows.createdAt));
+            .orderBy(asc(supplierInvoiceRows.createdAt), asc(supplierInvoiceRows.id));
           // The header's and the rows' momskoder, through this transaction.
           const vatCodesById = await loadPostingVatCodes(tx, [
             invoice.vatCodeId,

@@ -79,6 +79,9 @@ const byDue = (a: OpenReceivable, b: OpenReceivable) =>
 // looked up — a CINV that is somebody's invoice number is not an OCR.
 export function candidateOcrs(remittance: BankEntryReference[]): string[] {
   const structured = remittance.filter((r) => r.type === "SCOR" || r.type === "CINV" || r.type === "CREN").map((r) => r.value.replace(/\s/g, ""));
+  // The spec's free-text runs are 2–25 digits, but 3 is the shortest
+  // reference validateOcrNumber accepts (base + length + check digit), so a
+  // 2-digit run could never be looked up.
   const pool = structured.length > 0 ? structured : remittance.flatMap((r) => r.value.match(/\d{3,25}/g) ?? []);
   return [...new Set(pool.filter((v) => validateOcrNumber(v)))];
 }

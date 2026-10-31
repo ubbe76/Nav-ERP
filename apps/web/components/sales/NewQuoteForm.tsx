@@ -513,6 +513,11 @@ function QuoteRowFields({
   const currentFactor = unitOptions.find((o) => o.value === row.unitId)?.factor ?? 1;
   const unitCode = unitOptions.find((o) => o.value === row.unitId)?.code;
   const requestSeq = useRef(0);
+  // The touched flag as it is when a prefill response LANDS — the effect's
+  // closure holds it as it was when the request left, so a price typed while
+  // the request was in flight would otherwise be overwritten ("manuellt vinner").
+  const priceTouchedNow = useRef(row.priceTouched);
+  priceTouchedNow.current = row.priceTouched;
 
   // Report the unit factor up so the form can send base-unit quantities to the check.
   useEffect(() => {
@@ -593,7 +598,7 @@ function QuoteRowFields({
     apiFetch<PriceQuote>(priceQuotePath({ customerId, articleId, quantity: baseQuantity, currency, exchangeRate }))
       .then((quote) => {
         if (seq !== requestSeq.current) return; // superseded by a newer article/quantity edit
-        if (!quote.price) return; // no chain match — leave the fields as they are, no error shown
+        if (priceTouchedNow.current || !quote.price) return; // no chain match — leave the fields as they are, no error shown
         onChange({
           unitPrice: String(toUnitPrice(quote.price.unitPrice, currentFactor)),
           discountPercent: String(quote.price.discountPercent),
@@ -628,7 +633,7 @@ function QuoteRowFields({
     })
       .then((evaluation) => {
         if (seq !== requestSeq.current) return;
-        if (row.priceTouched || evaluation.price.unitPrice === null) return;
+        if (priceTouchedNow.current || evaluation.price.unitPrice === null) return;
         onChange({
           unitPrice: String(toUnitPrice(evaluation.price.unitPrice, currentFactor)),
           discountPercent: String(evaluation.price.discountPercent),

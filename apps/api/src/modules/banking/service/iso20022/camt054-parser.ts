@@ -83,11 +83,19 @@ function accountOf(acct: XmlNode | null): string {
   return textAt(acct, "Id", "IBAN") ?? textAt(acct, "Id", "Othr", "Id") ?? "okänt-konto";
 }
 
-function remittanceOf(rmtInf: XmlNode | null): BankEntryReference[] {
+// `legacy` is the list as the parser read it before other document types
+// were kept: the content hash is taken over it, so a file read before and
+// read again after gives the same dedupe keys (as legacyAmount below).
+function remittanceOf(rmtInf: XmlNode | null): { refs: BankEntryReference[]; legacy: BankEntryReference[] } {
   const refs: BankEntryReference[] = [];
+  const legacy: BankEntryReference[] = [];
+  const push = (ref: BankEntryReference) => {
+    refs.push(ref);
+    legacy.push(ref);
+  };
   for (const ustrd of children(rmtInf, "Ustrd")) {
     const value = ustrd.text.trim();
-    if (value) refs.push({ type: "USTRD", value, amount: null });
+    if (value) push({ type: "USTRD", value, amount: null });
   }
   for (const strd of children(rmtInf, "Strd")) {
     const strdAmount = amountOf(path(strd, "RfrdDocAmt", "RmtdAmt")) ?? amountOf(path(strd, "RfrdDocAmt", "CdtNoteAmt"));
@@ -96,17 +104,23 @@ function remittanceOf(rmtInf: XmlNode | null): BankEntryReference[] {
       const type = textAt(doc, "Tp", "CdOrPrtry", "Cd");
       const value = textAt(doc, "Nb");
       if ((type === "CINV" || type === "CREN") && value) {
-        refs.push({ type, value, amount: docs.length === 1 && strdAmount ? strdAmount.amount : null });
+        push({ type, value, amount: docs.length === 1 && strdAmount ? strdAmount.amount : null });
+      } else if (value) {
+        // Another document type (DISP, SOAC, a proprietary code, none): not
+        // an invoice to match on, but still the payer's own reference — kept
+        // as additional text so it shows on the entry and its digits count
+        // as free text when nothing structured is there.
+        refs.push({ type: "ADDTL", value, amount: null });
       }
     }
     const creditorRef = textAt(strd, "CdtrRefInf", "Ref");
-    if (creditorRef) refs.push({ type: "SCOR", value: creditorRef, amount: docs.length === 0 && strdAmount ? strdAmount.amount : null });
+    if (creditorRef) push({ type: "SCOR", value: creditorRef, amount: docs.length === 0 && strdAmount ? strdAmount.amount : null });
     for (const addtl of children(strd, "AddtlRmtInf")) {
       const value = addtl.text.trim();
-      if (value) refs.push({ type: "ADDTL", value, amount: null });
+      if (value) push({ type: "ADDTL", value, amount: null });
     }
   }
-  return refs;
+  return { refs, legacy };
 }
 
 // TxAmt/CcyXchg (or InstdAmt/CcyXchg) as the bank wrote it — display only,
@@ -249,7 +263,7 @@ export function parseCamt054(xml: string): ParsedCamt054 {
         const refs = tx ? child(tx, "Refs") : null;
         const rawEndToEnd = textAt(refs, "EndToEndId");
         const endToEndId = rawEndToEnd && rawEndToEnd.toUpperCase() !== "NOTPROVIDED" ? rawEndToEnd : null;
-        const remittance = tx ? remittanceOf(child(tx, "RmtInf")) : [];
+        const { refs: remittance, legacy: legacyRemittance } = tx ? remittanceOf(child(tx, "RmtInf")) : { refs: [], legacy: [] };
         // The other party: the payer on money in, the payee on money out. A
         // return (credit + reversal) is our own payment coming back, so its
         // party is the original Cdtr. Banks are not consistent here, so the
@@ -265,7 +279,7 @@ export function parseCamt054(xml: string): ParsedCamt054 {
         else if (ntryRef) [dedupeKey, dedupeSource] = [`${account}|ntry:${ntryRef}#${txIndex}`, "entry_ref"];
         else {
           const base = createHash("sha256")
-            .update(JSON.stringify([account, bookingDate, direction, reversal, legacyAmount.amount.toFixed(2), endToEndId, counterpartyName, remittance]))
+            .update(JSON.stringify([account, bookingDate, direction, reversal, legacyAmount.amount.toFixed(2), endToEndId, counterpartyName, legacyRemittance]))
             .digest("hex");
           const n = (hashCounts.get(base) ?? 0) + 1;
           hashCounts.set(base, n);

@@ -109,6 +109,11 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   const [editPriceTouched, setEditPriceTouched] = useState(false);
   const editPricedBaseQuantityRef = useRef(0);
   const editRequestSeq = useRef(0);
+  // The touched flag as it is when a prefill response LANDS — the effect's
+  // closure holds it as it was when the request left, so a price typed while
+  // the request was in flight would otherwise be overwritten ("manuellt vinner").
+  const editPriceTouchedNow = useRef(editPriceTouched);
+  editPriceTouchedNow.current = editPriceTouched;
   // Fasta leveransdagar: only the warning for the row's date while editing —
   // an existing row's date is never prefilled.
   const editDateHint = useSupplierDeliveryDateSuggestion({
@@ -139,7 +144,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
       `/api/v1/supplier-price-quote?supplierId=${order.supplierId}&articleId=${row.articleId}&quantity=${baseQuantity}`
     )
       .then((quote) => {
-        if (seq !== editRequestSeq.current) return;
+        if (seq !== editRequestSeq.current || editPriceTouchedNow.current) return;
         // No catalog price, or a catalog currency other than the order's:
         // leave the field as it is rather than guess.
         if (!quote.price || quote.price.currency !== order.currency) return;
@@ -728,6 +733,11 @@ function AddRowForm({
   // /price-quote prefill (touched flag + request sequence).
   const [priceTouched, setPriceTouched] = useState(false);
   const requestSeq = useRef(0);
+  // The touched flag as it is when a prefill response LANDS — the effect's
+  // closure holds it as it was when the request left, so a price typed while
+  // the request was in flight would otherwise be overwritten ("manuellt vinner").
+  const priceTouchedNow = useRef(priceTouched);
+  priceTouchedNow.current = priceTouched;
   const articleId = article?.id ?? null;
   const parsedQuantity = Number(quantity);
   const baseQuantity =
@@ -742,7 +752,7 @@ function AddRowForm({
       `/api/v1/supplier-price-quote?supplierId=${supplierId}&articleId=${articleId}&quantity=${baseQuantity}`
     )
       .then((quote) => {
-        if (seq !== requestSeq.current) return;
+        if (seq !== requestSeq.current || priceTouchedNow.current) return;
         // No catalog price, or a catalog currency other than the order's:
         // leave the field alone rather than guess.
         if (!quote.price || quote.price.currency !== currency) return;
