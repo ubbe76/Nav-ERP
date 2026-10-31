@@ -63,7 +63,12 @@ export function SalesOrdersPageClient({
           param="status"
           allLabel="Alla statusar"
           ariaLabel="Filtrera på status"
-          options={statuses.map((value) => ({ value, label: SALES_ORDER_STATUS_PILL[value].label }))}
+          // Sen (late) is derived from the rows, not a stored status — the
+          // API takes it in the same param. Never on quotes.
+          options={[
+            ...statuses.map((value) => ({ value, label: SALES_ORDER_STATUS_PILL[value].label })),
+            ...(isQuote ? [] : [{ value: "late", label: "Sen" }]),
+          ]}
         />
         <ListExportLink endpoint={`/api/v1/sales-orders/csv?kind=${kind}`} />
       </ListToolbar>

@@ -106,7 +106,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
-- [ ] **Filtrera på Sen i orderlistorna:** listorna över inköps-, tillverknings- och kundorder får statusfiltret **Sen**. Använd samma härledning som aviseringarna, så att filtret och **Att bevaka** visar samma ordrar: för kund- och inköpsorder en rad med rest vars effektiva datum passerats, för tillverkningsorder `orderPlanSummaries().late`, som redan ger TO-listans markering **Sen**.
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
 - [ ] **Välj vad Översikten visar** → [#17](https://github.com/ubbe76/Nav-ERP/issues/17)

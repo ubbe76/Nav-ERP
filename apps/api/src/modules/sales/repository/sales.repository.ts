@@ -46,6 +46,7 @@ import {
   type ListPriceListsQuery,
   type ListQuery,
   type ListSalesOrdersQuery,
+  splitLateFilter,
   type NewDeliveryAddressInput,
   type OrderRowConfiguration,
   type PalletCardCode,
@@ -62,6 +63,7 @@ import {
   type UpdateSalesOrderHeaderInput,
   type UpdateSalesOrderRowInput,
 } from "@navet/shared";
+import { salesOrderLate } from "../../planning/repository/late-orders.js";
 import { documentKindSql } from "./document-kind.js";
 import { getNextOrderNumber, insertWithSeriesNumber } from "../../system/service/number-series.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
@@ -849,7 +851,8 @@ export function createSalesRepository(db: Db) {
       return row ?? null;
     },
 
-    async listSalesOrders(query: ListSalesOrdersQuery) {
+    // `today` (Stockholm) dates the status filter Sen (late-orders.ts).
+    async listSalesOrders(query: ListSalesOrdersQuery, today: string) {
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
@@ -877,7 +880,9 @@ export function createSalesRepository(db: Db) {
           )
         );
       }
-      if (query.status) conditions.push(inArray(salesOrders.status, query.status));
+      const { statuses, late } = splitLateFilter(query.status);
+      if (statuses) conditions.push(inArray(salesOrders.status, statuses));
+      if (late) conditions.push(salesOrderLate(today));
       if (query.kind) conditions.push(sql`${documentKindSql} = ${query.kind}`);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 

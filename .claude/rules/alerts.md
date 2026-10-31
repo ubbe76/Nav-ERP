@@ -19,6 +19,7 @@ Spec `docs/superpowers/specs/2026-10-21-aviseringar-design.md`.
   - `stock_negative` (totalsaldo < 0)
   - `sales_order_late`/`purchase_order_late` (rad med rest vars `salesRowDeliveryDate`/`purchaseRowArrivalDate` < i dag; offerter och levererade ordrar räknas aldrig)
   - `manufacturing_order_late` (`orderPlanSummaries().late` = TO-listans **Sen**)
+  - **Orderlistornas statusfilter Sen** delar reglerna: `status=late` (`orderStatusListParam`/`splitLateFilter` i shared `list.ts`, härlett — aldrig lagrat; med en riktig status gäller båda). KO/IO använder lövet `planning/repository/late-orders.ts` (`salesOrderLate`/`purchaseOrderLate` = statusmängden + `EXISTS` på `salesRowLate`/`purchaseRowLate`, samma radvillkor som aviseringens join), TO-servicen tar `orderPlanSummaries` över alla öppna TO:er (`listOpenManufacturingOrderIds`) och listar de sena id:na så sidning och total stannar i SQL. De tre typernas `listHref` går till listan med `?status=late`. Test: `alerts.integration.test.ts` (listan = gruppen).
   - `purchase_needed`/`manufacture_needed` (behovsberäkningens förslag via `planningService.requirementProposals()`, genom 60 s-cachen, aldrig refresh)
   - `customer_invoice_overdue` (`openAmountSql`)
   - `supplier_invoice_due` (attesterad, öppen, förfallodatum — lagrat annars `computeDueDate` — ≤ i dag + `alert_supplier_invoice_days`; röd när förfallen; fakturor i en levande betalningsomgång utesluts)

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   accounts,
   articles,
@@ -33,6 +33,12 @@ import {
 } from "@navet/db";
 import { PLUGIN_TEST_EVENT_TYPE } from "@navet/shared";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "../../planning/repository/effective-dates.js";
+import {
+  LATE_PURCHASE_ORDER_STATUSES,
+  LATE_SALES_ORDER_STATUSES,
+  purchaseRowLate,
+  salesRowLate,
+} from "../../planning/repository/late-orders.js";
 import { openAmountSql as invoiceOpenAmountSql } from "../../sales/repository/open-amounts.js";
 import { openAmountSql as supplierInvoiceOpenAmountSql } from "../../purchase/repository/open-amounts.js";
 import { PLUGIN_REFUSAL_ERRORS } from "../../system/service/plugin-webhook.js";
@@ -244,8 +250,8 @@ export function createAlertsRepository(db: Db) {
 
     // Försenade kundordrar: confirmed/in production with a row that still
     // has quantity to deliver and whose effective delivery date (the row's,
-    // else the order's) is before today. Quotes and delivered orders never
-    // count — a delivered order falls out because no row has rest.
+    // else the order's) is before today — the rule in late-orders.ts, shared
+    // with the order list's status filter Sen.
     async lateSalesOrders(today: string): Promise<LateOrderRow[]> {
       const earliest = sql<string>`min(${salesRowDeliveryDate})`;
       return db
@@ -260,9 +266,8 @@ export function createAlertsRepository(db: Db) {
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
         .where(
           and(
-            inArray(salesOrders.status, ["confirmed", "in_production"]),
-            gt(salesOrderRows.quantityOrdered, salesOrderRows.quantityDelivered),
-            sql`${salesRowDeliveryDate} < ${today}::date`
+            inArray(salesOrders.status, [...LATE_SALES_ORDER_STATUSES]),
+            salesRowLate(today)
           )
         )
         .groupBy(salesOrders.id, salesOrders.orderNumber, customers.name)
@@ -290,7 +295,8 @@ export function createAlertsRepository(db: Db) {
 
     // Försenade inköpsordrar: draft/confirmed/partially received with a row
     // that still has quantity to receive and whose effective arrival date
-    // (confirmed before requested, row before order) is before today.
+    // (confirmed before requested, row before order) is before today — the
+    // rule in late-orders.ts, shared with the order list's status filter Sen.
     async latePurchaseOrders(today: string): Promise<LateOrderRow[]> {
       const earliest = sql<string>`min(${purchaseRowArrivalDate})`;
       return db
@@ -305,9 +311,8 @@ export function createAlertsRepository(db: Db) {
         .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
         .where(
           and(
-            inArray(purchaseOrders.status, ["draft", "confirmed", "partially_received"]),
-            gt(purchaseOrderRows.quantityOrdered, purchaseOrderRows.quantityReceived),
-            sql`${purchaseRowArrivalDate} < ${today}::date`
+            inArray(purchaseOrders.status, [...LATE_PURCHASE_ORDER_STATUSES]),
+            purchaseRowLate(today)
           )
         )
         .groupBy(purchaseOrders.id, purchaseOrders.orderNumber, suppliers.name)

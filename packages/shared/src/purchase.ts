@@ -2,7 +2,7 @@ import { z } from "zod";
 import { dimensionFields } from "./dimensions.js";
 import { businessDateSchema } from "./business-date.js";
 import { materialShortageOverrideSchema } from "./manufacturing.js";
-import { listQuerySchema, statusListParam } from "./list.js";
+import { listQuerySchema, orderStatusListParam, statusListParam } from "./list.js";
 import { blankSafe } from "./coerce.js";
 import { vatRateSchema } from "./vat.js";
 import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.js";
@@ -21,7 +21,8 @@ export const purchaseOrderStatusSchema = z.enum([
 export type PurchaseOrderStatus = z.infer<typeof purchaseOrderStatusSchema>;
 
 export const listPurchaseOrdersQuerySchema = listQuerySchema.extend({
-  status: statusListParam(purchaseOrderStatusSchema.options),
+  // Also "late" (Sen) — see orderStatusListParam in list.ts.
+  status: orderStatusListParam(purchaseOrderStatusSchema.options),
   // Restricts the list to one supplier's orders (e.g. picking a received
   // order as invoice basis on a supplier invoice).
   supplierId: z.string().uuid().optional(),

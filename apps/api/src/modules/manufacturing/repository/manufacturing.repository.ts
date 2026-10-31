@@ -34,6 +34,7 @@ import {
   type CreateRoutingOperationInput,
   type CreateWorkCenterInput,
   type ListManufacturingOrdersQuery,
+  splitLateFilter,
   type ListWorkCentersQuery,
   type UpdateMoOperationInput,
   type UpdateProductionGroupInput,
@@ -1462,7 +1463,19 @@ export function createManufacturingRepository(db: Db) {
       return row ?? null;
     },
 
-    async listManufacturingOrders(query: ListManufacturingOrdersQuery) {
+    // The orders the plan can call Sen: released/in progress, the same set
+    // orderPlanSummaries loads (and Aviseringarna's sena TO:er).
+    async listOpenManufacturingOrderIds(): Promise<string[]> {
+      const rows = await db
+        .select({ id: manufacturingOrders.id })
+        .from(manufacturingOrders)
+        .where(inArray(manufacturingOrders.status, ["released", "in_progress"]));
+      return rows.map((r) => r.id);
+    },
+
+    // `onlyIds`: the status filter Sen, resolved by the service from the
+    // plan (orderPlanSummaries) — an empty list matches nothing.
+    async listManufacturingOrders(query: ListManufacturingOrdersQuery, onlyIds?: string[]) {
       const conditions = [];
       if (query.search) {
         const pattern = ilikePattern(query.search);
@@ -1474,7 +1487,9 @@ export function createManufacturingRepository(db: Db) {
           )
         );
       }
-      if (query.status) conditions.push(inArray(manufacturingOrders.status, query.status));
+      const { statuses } = splitLateFilter(query.status);
+      if (statuses) conditions.push(inArray(manufacturingOrders.status, statuses));
+      if (onlyIds) conditions.push(onlyIds.length > 0 ? inArray(manufacturingOrders.id, onlyIds) : sql`false`);
       const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       const [rows, totalRows] = await Promise.all([

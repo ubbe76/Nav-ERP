@@ -21,7 +21,13 @@ import {
   supplierInvoices,
   suppliers,
 } from "@navet/db";
-import type { AlertKind, AlertsResponse } from "@navet/shared";
+import {
+  listManufacturingOrdersQuerySchema,
+  listPurchaseOrdersQuerySchema,
+  listSalesOrdersQuerySchema,
+  type AlertKind,
+  type AlertsResponse,
+} from "@navet/shared";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
@@ -31,6 +37,8 @@ import { createPlanningService } from "../src/modules/planning/service/planning.
 import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
 import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { createAlertsRepository } from "../src/modules/alerts/repository/alerts.repository.js";
+import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
+import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
 import { createAlertsService, EMAIL_FAILED_DAYS } from "../src/modules/alerts/service/alerts.service.js";
 import { vatCodeId } from "./helpers/vat-codes.js";
 
@@ -396,6 +404,85 @@ describe("manufacturing_order_late", () => {
     expect(g.items.map((i) => [i.key, i.date, i.href])).toEqual([[late.id, YESTERDAY, `/tillverkning/ordrar/${late.id}`]]);
     expect(g.items[0]!.primary).toBe(`${late.orderNumber} ${article.articleNumber} ${article.name}`);
     expect(g.items[0]!.secondary).toBe(`Sen enligt planeringen · färdigdatum ${YESTERDAY}`);
+  });
+});
+
+// The order lists' status filter Sen (late-orders.ts, orderPlanSummaries):
+// exactly the orders Aviseringarna call late, so the list a group links to
+// and the group never disagree.
+describe("the order lists' status filter Sen", () => {
+  const salesRepo = createSalesRepository(db);
+  const purchaseRepo = createPurchaseRepository(db);
+  // Lists through the plan, like app.ts; the TOs are created by the
+  // unplanned mfgService above.
+  const listingMfgService = createManufacturingService(
+    createManufacturingRepository(db),
+    testDocumentPdfService,
+    testArticleService,
+    undefined as never,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    planningService
+  );
+  const ids = (rows: { id: string }[]) => rows.map((r) => r.id).sort();
+  const keys = (items: { key: string }[]) => items.map((i) => i.key).sort();
+
+  it("lists exactly the late kund- and inköpsorder, and combines with a real status", async () => {
+    const late = await salesOrder("confirmed", "2030-03-01", [{ quantity: 5, delivered: 2 }]);
+    const inProduction = await salesOrder("in_production", YESTERDAY, [{ quantity: 1 }]);
+    await salesOrder("confirmed", TODAY, [{ quantity: 5 }]);
+    await salesOrder("confirmed", "2030-02-01", [{ quantity: 5, delivered: 5 }]);
+    await salesOrder("delivered", "2030-02-01", [{ quantity: 5, delivered: 5 }]);
+    await salesOrder("quote", "2030-02-01", [{ quantity: 5 }]);
+    await salesOrder("confirmed", "2030-04-01", [{ quantity: 1, date: "2030-04-02" }]);
+
+    const sales = await salesRepo.listSalesOrders(listSalesOrdersQuerySchema.parse({ status: "late" }), TODAY);
+    expect(ids(sales.rows)).toEqual([late.id, inProduction.id].sort());
+    expect(sales.total).toBe(2);
+    expect(ids(sales.rows)).toEqual(keys((await group("sales_order_late")).items));
+    const both = await salesRepo.listSalesOrders(listSalesOrdersQuerySchema.parse({ status: "late,in_production" }), TODAY);
+    expect(ids(both.rows)).toEqual([inProduction.id]);
+
+    const draft = await purchaseOrder("draft", { expected: "2030-03-01" }, [{ quantity: 10 }]);
+    const partial = await purchaseOrder("partially_received", { expected: YESTERDAY }, [{ quantity: 10, received: 4 }]);
+    await purchaseOrder("confirmed", { expected: "2030-02-01", confirmed: "2030-03-20" }, [{ quantity: 10 }]);
+    await purchaseOrder("received", { expected: "2030-02-01" }, [{ quantity: 10, received: 10 }]);
+    await purchaseOrder("cancelled", { expected: "2030-02-01" }, [{ quantity: 10 }]);
+
+    const purchases = await purchaseRepo.listPurchaseOrders(listPurchaseOrdersQuerySchema.parse({ status: "late" }), TODAY);
+    expect(ids(purchases.rows)).toEqual([draft.id, partial.id].sort());
+    expect(ids(purchases.rows)).toEqual(keys((await group("purchase_order_late")).items));
+  });
+
+  it("lists the TOs the plan calls Sen, with paging and the total in SQL", async () => {
+    const user = await makeUser();
+    const wc = await mfgService.createWorkCenter({ code: "310", name: "Kap", active: true });
+    const article = await makeArticle("manufactured");
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 10, workCenterId: wc.id, setupTime: 0, runTimePerUnit: 30 });
+    const first = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 2, dueDate: YESTERDAY }, user.id);
+    const second = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 2, dueDate: "2030-02-20" }, user.id);
+    await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 2, dueDate: "2030-03-29" }, user.id);
+    const done = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 1, dueDate: "2030-02-01" }, user.id);
+    await db.execute(sql`UPDATE manufacturing_orders SET status = 'done' WHERE id = ${done.id}`);
+
+    const all = await listingMfgService.listManufacturingOrders(listManufacturingOrdersQuerySchema.parse({ status: "late" }));
+    expect(ids(all.rows)).toEqual([first.id, second.id].sort());
+    expect(all.rows.every((r) => r.late)).toBe(true);
+    expect(ids(all.rows)).toEqual(keys((await group("manufacturing_order_late")).items));
+
+    const page = await listingMfgService.listManufacturingOrders(listManufacturingOrdersQuerySchema.parse({ status: "late", limit: "1" }));
+    expect([page.rows.length, page.total]).toEqual([1, 2]);
+    // A real status narrows it further; done is never Sen.
+    const narrowed = await listingMfgService.listManufacturingOrders(listManufacturingOrdersQuerySchema.parse({ status: "late,done" }));
+    expect(narrowed.total).toBe(0);
+  });
+
+  it("the status param takes late beside the real statuses and still refuses anything else", () => {
+    expect(listSalesOrdersQuerySchema.parse({ status: "late,confirmed" }).status).toEqual(["late", "confirmed"]);
+    expect(() => listPurchaseOrdersQuerySchema.parse({ status: "sen" })).toThrow();
+    expect(() => listManufacturingOrdersQuerySchema.parse({ status: "late,overdue" })).toThrow();
   });
 });
 
