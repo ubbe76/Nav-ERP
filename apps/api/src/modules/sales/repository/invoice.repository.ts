@@ -744,7 +744,9 @@ export function createInvoiceRepository(db: Db) {
             sql`${salesOrderRows.quantityDelivered} > 0`
           )
         )
-        .orderBy(asc(salesOrders.orderNumber));
+        // The order's rows in their own order (created_at, id — the same
+        // tiebreak as sales.repository's listRowsByOrder), order by order.
+        .orderBy(asc(salesOrders.orderNumber), asc(salesOrderRows.createdAt), asc(salesOrderRows.id));
 
       const invoiced = await getInvoicedQuantities(
         rows.map((r) => r.salesOrderRowId),

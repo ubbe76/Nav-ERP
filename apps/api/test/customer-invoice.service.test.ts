@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
-import { auditLog, db, units, verifications } from "@navet/db";
+import { auditLog, db, salesOrderRows, units, verifications } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -299,6 +299,29 @@ describe("customer invoice — listInvoiceableOrders (prefill)", () => {
       biller.id
     );
     expect(await invoiceService.listInvoiceableOrders(customer.id)).toHaveLength(0);
+  });
+
+  // The dialog's rows within an order come in the order's own row order
+  // (created_at, id — listRowsByOrder's), not in whatever order the heap
+  // happens to return them.
+  it("lists an order's rows in the order's own row order", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const location = await makeLocation();
+    const articles = [await makeArticle(), await makeArticle(), await makeArticle()];
+    for (const article of articles) await seedStock(article.id, location.id, 5);
+    const { order, rows } = await salesService.createQuote(
+      { customerId: customer.id, rows: articles.map((article) => ({ articleId: article.id, quantity: 5, unitPrice: 10 })), confirm: true },
+      user.id
+    );
+    await salesService.startProduction(order.id);
+    for (const row of rows) await salesService.deliverGoods(order.id, row.id, { locationId: location.id, quantity: 5 }, user.id);
+    // Move the first row last in the order's own ordering.
+    await db.update(salesOrderRows).set({ createdAt: new Date(Date.now() + 3_600_000) }).where(eq(salesOrderRows.id, rows[0]!.id));
+    const expected = (await salesService.listRows(order.id)).map((r) => r.id);
+    expect(expected).toEqual([rows[1]!.id, rows[2]!.id, rows[0]!.id]);
+    const [listed] = await invoiceService.listInvoiceableOrders(customer.id);
+    expect(listed!.rows.map((r) => r.salesOrderRowId)).toEqual(expected);
   });
 
   it("carries the order row's discountPercent for the client to prefill", async () => {

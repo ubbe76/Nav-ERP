@@ -111,8 +111,7 @@ export class PaymentBatchItemNotConfirmableError extends Error {
     public endToEndId: string,
     public status: string
   ) {
-    // "absent": a chosen id that is no row of this batch at all.
-    super(status === "absent" ? `Payment row ${endToEndId} is not part of this batch` : `Payment ${endToEndId} is ${status}, not exported`);
+    super(`Payment ${endToEndId} is ${status}, not exported`);
     this.name = "PaymentBatchItemNotConfirmableError";
   }
 }

@@ -6,6 +6,9 @@ import {
   PaymentFileInvalidError,
   SupplierInvoicesNotPayableError,
 } from "../src/modules/banking/service/banking.errors.js";
+import { createPaymentBatchRepository } from "../src/modules/banking/repository/payment-batch.repository.js";
+import { createPaymentBatchService } from "../src/modules/banking/service/payment-batch.service.js";
+import { UNEXPECTED_ERROR_TEXT } from "../src/modules/banking/service/reportable-error.js";
 import { createSupplierInvoiceRepository } from "../src/modules/purchase/repository/supplier-invoice.repository.js";
 import { createSupplierInvoiceService } from "../src/modules/purchase/service/supplier-invoice.service.js";
 import { InvalidStatusTransitionError } from "../src/modules/purchase/service/purchase.service.js";
@@ -24,6 +27,7 @@ import {
   setupBanking,
   snapshotCompany,
   swedbankSupplier,
+  testBankSettingsService,
   testPoster,
   testSupplierPaymentService,
 } from "./helpers/banking.js";
@@ -229,7 +233,8 @@ describe("bekräfta, avvisa, retur och makulera", () => {
     expect(results.map((r) => [r.itemId, r.ok, r.error?.code])).toEqual([
       [batch.items[0]!.id, true, undefined],
       [batch.items[1]!.id, false, "payment-batch-item-not-confirmable"],
-      [foreign, false, "payment-batch-item-not-confirmable"],
+      // An id that is no row of this batch: "not found", not "no longer waiting".
+      [foreign, false, "payment-batch-item-not-found"],
     ]);
     // The third row was not chosen: it still waits for the bank.
     expect(after.items.map((i) => i.status)).toEqual(["confirmed", "rejected", "exported"]);
@@ -419,5 +424,67 @@ describe("öppna poster och betalningskortet", () => {
     expect(detail!.paymentBatchItem).toEqual({ id: batch.items[0]!.id, batchId: batch.id, batchNumber: batch.batchNumber, endToEndId: batch.items[0]!.endToEndId });
     // A paid invoice is no open item; a rejected row no longer shows.
     expect((await testSupplierPaymentService.listOpenInvoices({ limit: 50, offset: 0 })).rows.map((r) => r.id)).not.toContain(a.id);
+  });
+});
+
+// Småbuggar (låga): the draft's reference, per-row error texts, the UTB's
+// own history row and the batch's history on a manual Makulera.
+describe("småbuggar: utkastets referens, radfel och händelselogg", () => {
+  it("the draft shows the reference the file will carry — the invoice's own, else the generated message", async () => {
+    const { a, b, c } = await threeInvoices();
+    const batch = await service.create({ invoiceIds: [a.id, b.id, c.id] }, userId);
+    const draft = batch.items.map((i) => [i.creditor!.referenceKind, i.creditor!.reference]);
+    // OCR, a typed message, and the generated message for the invoice without one.
+    expect(draft).toEqual([
+      ["ocr", "4605127"],
+      ["message", "Faktura 2026-118"],
+      ["message", "88213"],
+    ]);
+    const exported = await service.export(batch.id, userId);
+    expect(exported.items.map((i) => [i.creditor!.referenceKind, i.creditor!.reference])).toEqual(draft);
+  });
+
+  it("an unexpected error on a row is logged and answered with the generic text, never its own message", async () => {
+    const { a } = await threeInvoices();
+    const logged: { msg: string; extra?: Record<string, unknown> }[] = [];
+    const broken = createPaymentBatchService({
+      db,
+      repo: createPaymentBatchRepository(db),
+      bankSettings: testBankSettingsService,
+      supplierPayments: {
+        createInTx: async () => {
+          throw new TypeError("Cannot read properties of undefined (reading 'x')");
+        },
+        cancelInTx: testSupplierPaymentService.cancelInTx,
+      },
+      now: () => new Date("2024-10-15T10:00:00Z"),
+      log: (msg, extra) => logged.push({ msg, extra }),
+    });
+    const batch = await broken.create({ invoiceIds: [a.id] }, userId);
+    await broken.export(batch.id, userId);
+    const { results } = await broken.confirm(batch.id, { paymentDate: "2024-10-15" }, userId);
+    expect(results).toEqual([{ itemId: batch.items[0]!.id, ok: false, error: { error: UNEXPECTED_ERROR_TEXT } }]);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]!.msg).toContain(batch.items[0]!.endToEndId);
+    expect((logged[0]!.extra!.err as Error).message).toContain("Cannot read properties");
+  });
+
+  it("a confirmed row writes the UTB's own `created` row, and a manual Makulera of it writes the batch's item_returned", async () => {
+    const { a } = await threeInvoices();
+    const batch = await service.create({ invoiceIds: [a.id] }, userId);
+    await service.export(batch.id, userId);
+    const { results } = await service.confirm(batch.id, { paymentDate: "2024-10-09" }, userId);
+    const paymentNumber = results[0]!.ok ? results[0]!.paymentNumber : "";
+    const created = await db.select().from(auditLog).where(and(eq(auditLog.entityType, "supplier_payment"), eq(auditLog.action, "created")));
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ entityId: paymentNumber, detail: { amount: 12500, bankAccountNumber: "1930", paymentBatch: batch.batchNumber } });
+
+    const [payment] = await db.select({ id: supplierPayments.id }).from(supplierPayments);
+    // Dated in the test's fiscal year (the omföring defaults to today).
+    await testSupplierPaymentService.cancel(payment!.id, userId, { date: "2024-10-10" });
+    expect((await service.get(batch.id)).items[0]!.status).toBe("returned");
+    const returned = await db.select().from(auditLog).where(and(eq(auditLog.entityType, "payment_batch"), eq(auditLog.action, "item_returned")));
+    expect(returned).toHaveLength(1);
+    expect(returned[0]).toMatchObject({ entityId: batch.batchNumber, detail: { endToEndId: batch.items[0]!.endToEndId, via: "manual", payment: paymentNumber } });
   });
 });

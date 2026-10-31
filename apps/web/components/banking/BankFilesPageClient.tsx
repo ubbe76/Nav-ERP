@@ -37,7 +37,7 @@ export function BankFilesPageClient({ direction, files, pageSize }: { direction:
   const [error, setError] = useState<string | null>(null);
   // Shown INSTEAD of navigating on. A duplicate upload or one that skipped
   // entries would otherwise lose its explanation on the very next page.
-  const [notice, setNotice] = useState<{ text: string; fileId: string; skippedFrom: BankFileSkippedFrom[] } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; fileId: string; skippedFrom: BankFileSkippedFrom[]; warnings: string[] } | null>(null);
   const [pending, setPending] = useState(false);
 
   async function upload(file: File) {
@@ -53,12 +53,20 @@ export function BankFilesPageClient({ direction, files, pageSize }: { direction:
         setError(apiErrorMessage(new ApiError(body.error ?? "", res.status, body.code, body), "Filen kunde inte läsas in."));
         return;
       }
-      const { file: meta, created, skippedFrom = [] } = body as { file: BankFileMeta; created: boolean; skippedFrom?: BankFileSkippedFrom[] };
+      const {
+        file: meta,
+        created,
+        skippedFrom = [],
+        warnings = [],
+      } = body as { file: BankFileMeta; created: boolean; skippedFrom?: BankFileSkippedFrom[]; warnings?: string[] };
       if (!created) {
-        setNotice({ text: "Filen är redan inläst.", fileId: meta.id, skippedFrom: [] });
+        setNotice({ text: "Filen är redan inläst.", fileId: meta.id, skippedFrom: [], warnings: [] });
         router.refresh();
       } else if (meta.skippedDuplicates > 0) {
-        setNotice({ text: `${meta.skippedDuplicates} poster var redan inlästa och hoppades över.`, fileId: meta.id, skippedFrom });
+        // The file's own warnings (a PDNG entry skipped, a repeated bank
+        // reference …) are shown here too — the user does not land on the
+        // file's page, where they would otherwise have been read.
+        setNotice({ text: `${meta.skippedDuplicates} poster var redan inlästa och hoppades över.`, fileId: meta.id, skippedFrom, warnings });
         router.refresh();
       } else {
         router.push(`${copy.base}/${meta.id}`);
@@ -105,6 +113,9 @@ export function BankFilesPageClient({ direction, files, pageSize }: { direction:
             <div key={s.bankFileId}>
               {s.count} {s.count === 1 ? "post" : "poster"} från <GatedLink href={`${copy.base}/${s.bankFileId}`}>{s.filename}</GatedLink>
             </div>
+          ))}
+          {notice.warnings.map((w) => (
+            <div key={w}>{w}</div>
           ))}
         </FormNotice>
       )}

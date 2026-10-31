@@ -63,7 +63,14 @@ export function checkPain001(input: Pain001Input, profile: BankProfile, today: s
   const header = (field: string, message: string) => violations.push({ endToEndId: null, field, message });
   const anyForeign = input.items.some((item) => itemKind(item) !== "domestic");
 
-  if (!(anyForeign ? MESSAGE_ID_FOREIGN : MESSAGE_ID).test(input.messageId)) header("messageId", "Omgångens nummer kan inte användas som MsgId");
+  // The batch number is the file's MsgId, so the number series' prefix must
+  // fit the pattern — the text says what to change.
+  if (!(anyForeign ? MESSAGE_ID_FOREIGN : MESSAGE_ID).test(input.messageId)) {
+    header(
+      "messageId",
+      `Omgångens nummer ${input.messageId} kan inte användas som MsgId i filen — nummerseriens prefix får bara innehålla A–Z, 0–9 och bindestreck och numret högst ${anyForeign ? 25 : 26} tecken (System → Nummerserier)`
+    );
+  }
   if (input.items.length === 0) header("items", "Omgången har inga poster");
   const initiatingId = initiatingPartyIdFor(input, profile);
   if (initiatingId === null) {

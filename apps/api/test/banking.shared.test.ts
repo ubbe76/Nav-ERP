@@ -62,7 +62,20 @@ describe("leverantörens betalningsuppgifter", () => {
     });
     expect(supplierPaymentDetailsProblems({ ...NONE, bankClearing: "83279" })).toEqual({});
     expect(supplierPaymentDetailsProblems({ ...NONE, bankClearing: "6001" })).toEqual({});
-    expect(supplierPaymentDetailsProblems({ ...NONE, bic: "SWED" })).toEqual({ bic: "BIC ska vara 8 eller 11 tecken" });
+    // Only the 8-series has five digits (the payment file's CLEARING rule,
+    // caught here instead of at export).
+    expect(supplierPaymentDetailsProblems({ ...NONE, bankClearing: "60011" })).toEqual({
+      bankClearing: "Clearingnumret ska vara 4 siffror (bara 8-serien, Swedbank, har 5)",
+    });
+    // An 8-series BBAN is always 15 digits: clearing + account must fit.
+    expect(supplierPaymentDetailsProblems({ ...NONE, bankClearing: "83279", bankAccountNumber: "9941234123" })).toEqual({});
+    expect(supplierPaymentDetailsProblems({ ...NONE, bankClearing: "83279", bankAccountNumber: "99412341234" })).toEqual({
+      bankAccountNumber: "Clearingnummer och kontonummer i 8-serien (Swedbank) får tillsammans vara högst 15 siffror",
+    });
+    expect(supplierPaymentDetailsProblems({ ...NONE, bankClearing: "6001", bankAccountNumber: "99412341234" })).toEqual({});
+    expect(supplierPaymentDetailsProblems({ ...NONE, bic: "SWED" })).toEqual({ bic: expect.stringContaining("BIC ska vara 8 eller 11 tecken") });
+    // 12345678 is 8 characters but no BIC: the text says what the shape is.
+    expect(supplierPaymentDetailsProblems({ ...NONE, bic: "12345678" })).toEqual({ bic: expect.stringContaining("bankkod (4 bokstäver)") });
     expect(supplierPaymentDetailsProblems({ ...NONE, iban: "SE4550000000058398257467" })).toEqual({ iban: "IBAN är ogiltigt" });
   });
 });

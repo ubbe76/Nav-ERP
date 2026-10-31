@@ -37,6 +37,7 @@ describe("händelseloggens etiketter", () => {
     ["action", "converted"],
     ["action", "rejected"],
     ["action", "restored"],
+    ["action", "booking_taken_over"],
   ])("labels the %s %s on both sides", (kind, key) => {
     const api = kind === "entity" ? AUDIT_ENTITY_TYPE_LABELS : AUDIT_ACTION_LABELS;
     expect(api[key]).toMatch(/\S/);

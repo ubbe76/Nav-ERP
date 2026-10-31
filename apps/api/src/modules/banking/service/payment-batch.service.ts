@@ -21,6 +21,7 @@ import { SupplierInvoiceInPaymentBatchError } from "../../purchase/service/suppl
 import { computeOpenAmounts } from "../../purchase/repository/open-amounts.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { errorBody } from "../../system/service/error-body.js";
+import { consoleErrorLog, reportableError, type ErrorLog } from "./reportable-error.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { readPostingSettings } from "../../system/service/posting-settings.js";
 import type { PaymentBatchRepository, BatchItemRow } from "../repository/payment-batch.repository.js";
@@ -66,6 +67,8 @@ export interface PaymentBatchServiceDeps {
   // such payment is reported (the safe side).
   exchangeRates?: Pick<ExchangeRateReader, "getRate">;
   now?: () => Date;
+  // Where unexpected per-row errors (never shown to the user) are reported.
+  log?: ErrorLog;
 }
 
 export type ItemResult = { itemId: string; ok: true; paymentNumber: string } | { itemId: string; ok: false; error: { error: string; code?: string } };
@@ -121,6 +124,15 @@ function referenceOf(row: BatchItemRow, profile: BankProfile): Pain001Item["refe
   return { kind: "message", value: defaultPaymentMessage(row.invoiceNumber, max, kind), generated: true };
 }
 
+// The reference the draft shows for a row the file has not been built for
+// yet: the invoice's own reference, else the message the export would
+// generate (cut to the profile's limit when the bank is set up).
+function liveReference(row: BatchItemRow, profile: BankProfile | null): Pain001Item["reference"] {
+  if (profile) return referenceOf(row, profile);
+  if (row.paymentReferenceKind && row.paymentReference) return { kind: row.paymentReferenceKind, value: row.paymentReference };
+  return { kind: "message", value: defaultPaymentMessage(row.invoiceNumber, 140, kindOf(row) ?? "domestic"), generated: true };
+}
+
 function draftWarnings(row: BatchItemRow, profile: BankProfile | null, decision: RegulatoryReportingDecision | null): string[] {
   const kind = kindOf(row);
   if (!profile || !kind) return [];
@@ -170,6 +182,7 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
   const { db, repo } = deps;
   const now = deps.now ?? (() => new Date());
   const today = () => stockholmDate(now());
+  const log = deps.log ?? consoleErrorLog;
 
   // Every write in this service logs inside its own transaction.
   async function audit(tx: Tx, batchNumber: string, action: string, detail: unknown, userId: string) {
@@ -337,6 +350,7 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
         const live = row.supplier.paymentMethod ? creditorOf(row) : null;
         const snapshot = row.item.creditorSnapshot;
         const decision = draft ? decisionOf(row, rates) : snapshot?.regulatoryReporting ?? null;
+        const reference = liveReference(row, profile);
         return {
           id: row.item.id,
           seq: row.item.seq,
@@ -372,8 +386,8 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
             name: live.name,
             postalCode: live.postalCode,
             city: live.city,
-            referenceKind: row.paymentReferenceKind ?? "message",
-            reference: row.paymentReference ?? "",
+            referenceKind: reference.kind,
+            reference: reference.value,
             kind: kindOf(row) ?? undefined,
             currency: row.item.currency,
             street: live.street ?? null,
@@ -600,6 +614,21 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
         { paymentBatchItemId: item.id, bankFileEntryId: opts.bankFileEntryId }
       );
       await tx.update(paymentBatchItems).set({ status: "confirmed", updatedAt: now() }).where(eq(paymentBatchItems.id, item.id));
+      // The UTB's own history row — what create() logs after commit for a
+      // payment registered by hand, here inside the row's transaction.
+      await tx.insert(auditLog).values({
+        entityType: "supplier_payment",
+        entityId: result.paymentNumber,
+        action: "created",
+        detail: {
+          amount,
+          bankAccountNumber: batch.bankAccountNumber,
+          paymentBatch: batch.batchNumber,
+          endToEndId: item.endToEndId,
+          ...(item.currency !== SEK ? { currency: item.currency, amountSek: opts.amountSek ?? null, bankFeeSek: opts.bankFeeSek ?? 0 } : {}),
+        },
+        userId,
+      });
       await audit(
         tx,
         batch.batchNumber,
@@ -651,11 +680,15 @@ export function createPaymentBatchService(deps: PaymentBatchServiceDeps) {
           );
           results.push({ itemId: row.item.id, ok: true, paymentNumber: done.paymentNumber });
         } catch (err) {
-          results.push({ itemId: row.item.id, ok: false, error: errorBody(err as Error) });
+          // A known refusal as it is; anything else is logged and answered
+          // with the generic text (a driver error never reaches the user).
+          results.push({ itemId: row.item.id, ok: false, error: reportableError(err, log, `Bekräfta utförd ${row.item.endToEndId}`) });
         }
       }
+      // A chosen id that is no row of this batch at all: "not found", never
+      // "no longer waiting" (the web's text for not-confirmable).
       for (const itemId of chosen ?? []) {
-        if (!rows.some((r) => r.item.id === itemId)) refuse(itemId, itemId, "absent");
+        if (!rows.some((r) => r.item.id === itemId)) results.push({ itemId, ok: false, error: errorBody(new PaymentBatchItemNotFoundError(itemId)) });
       }
       return { results, batch: await service.get(id) };
     },

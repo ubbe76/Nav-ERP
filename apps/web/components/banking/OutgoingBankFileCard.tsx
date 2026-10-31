@@ -17,7 +17,7 @@ import { formatRate } from "../../lib/currency";
 import { formatMoney } from "../../lib/format";
 import type { BankFileDetail, BankItemResult, OutgoingEntryView } from "../../lib/types";
 import { BankEntryIgnoreButton } from "./BankEntryIgnoreButton";
-import { BookingFailures } from "./BookingFailures";
+import { BookingFailures, liveFailures, stampResults, type StampedResults } from "./BookingFailures";
 
 const BOOKABLE = new Set(["matched", "return"]);
 const HINT: Partial<Record<OutgoingEntryView["state"], string>> = {
@@ -55,14 +55,14 @@ function hintFor(e: OutgoingEntryView): string | undefined {
 // changes: a checkbox the user changed is kept per entry (lib/stampedEdits.ts),
 // so an entry left out of one booking is not chosen again behind their back.
 export function OutgoingBankFileCard({ file, entries }: { file: BankFileDetail; entries: OutgoingEntryView[] }) {
-  const [results, setResults] = useState<BankItemResult[] | null>(null);
-  const failures = (results ?? [])
-    .filter((r) => !r.ok && r.error)
-    .map((r) => ({ key: r.entryId ?? "", label: entries.find((e) => e.id === r.entryId)?.endToEndId ?? "Post", error: r.error! }));
+  // Stamped with the entry's state: an entry booked or handled afterwards
+  // takes its stale error with it.
+  const [results, setResults] = useState<StampedResults | null>(null);
+  const failures = liveFailures(results, entries, (id) => entries.find((e) => e.id === id)?.endToEndId ?? "Post");
   return (
     <>
       <BookingFailures failures={failures} />
-      <OutgoingBankFileBody key={file.id} file={file} entries={entries} onResults={setResults} />
+      <OutgoingBankFileBody key={file.id} file={file} entries={entries} onResults={(r) => setResults(stampResults(r, entries))} />
     </>
   );
 }

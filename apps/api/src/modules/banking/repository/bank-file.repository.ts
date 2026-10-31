@@ -75,7 +75,7 @@ export function createBankFileRepository(db: Db) {
 
     async findFileData(id: string) {
       const [row] = await db
-        .select({ filename: bankFiles.filename, contentType: bankFiles.contentType, data: bankFiles.data })
+        .select({ filename: bankFiles.filename, messageType: bankFiles.messageType, data: bankFiles.data })
         .from(bankFiles)
         .where(and(eq(bankFiles.id, id), eq(bankFiles.direction, "incoming")));
       return row ?? null;

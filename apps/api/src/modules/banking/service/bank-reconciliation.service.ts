@@ -56,7 +56,7 @@ import {
   type LedgerRowView,
   type StatementEntryView,
 } from "../repository/bank-reconciliation.repository.js";
-import * as bankingErrors from "./banking.errors.js";
+import { reportableError as reportError } from "./reportable-error.js";
 import {
   BankAccountIdentifierLockedError,
   BankAccountIdentifierTakenError,
@@ -90,33 +90,9 @@ import { parseCamt053, type ParsedStatement } from "./iso20022/camt053-parser.js
 import { proposeMatches, type MatchProposal } from "./match-proposals.js";
 import { reconciliationSummary, type ReconciliationSummary } from "./reconciliation-summary.js";
 
-// The errors whose message may be shown to the user as is (the import's
-// warnings, Bokför enligt regel's per-entry failures): every banking domain
-// error plus economy's known refusals. Anything else is logged and replaced
-// by a generic Swedish text — a driver or programming error never leaks.
-type ErrorClass = abstract new (...args: never[]) => Error;
-const KNOWN_ERROR_CLASSES: ErrorClass[] = [
-  ...(Object.values(bankingErrors) as unknown[]).filter((v): v is ErrorClass => typeof v === "function"),
-  AccountingPeriodLockedError,
-  AccountNotFoundError,
-  InactiveAccountError,
-  NoAccountingPeriodError,
-  NoFiscalYearForDateError,
-  TooFewVerificationRowsError,
-  UnbalancedVerificationError,
-  VerificationSeriesNotFoundError,
-  // Kostnadsställen och projekt: Kräver kostnadsställe and the object rule
-  // on a rule's objects — Swedish messages meant for the user.
-  CostCenterRequiredError,
-  CostCenterInactiveError,
-  CostCenterNotFoundError,
-  ProjectClosedError,
-  ProjectNotFoundError,
-];
-export const UNEXPECTED_ERROR_TEXT = "Ett oväntat fel inträffade — se serverns logg.";
-export function isKnownBankError(err: unknown): err is Error {
-  return err instanceof Error && KNOWN_ERROR_CLASSES.some((cls) => err instanceof cls);
-}
+// The known-error whitelist and the generic text live in reportable-error.ts
+// (shared with the bank files' per-entry results); re-exported for the tests.
+export { UNEXPECTED_ERROR_TEXT, isKnownBankError } from "./reportable-error.js";
 
 // Bankavstämning (etapp 4) — spec §1–§5. The statement side of a bank
 // account is imported from camt.053 or CSV, matched against the verification
@@ -333,9 +309,7 @@ export function createBankReconciliationService(deps: BankReconciliationServiceD
   // warnings, book-by-rule failures): known domain errors as they are,
   // anything else logged and replaced by the generic text.
   function reportableError(err: unknown, context: string): { error: string; code?: string } {
-    if (isKnownBankError(err)) return errorBody(err);
-    log(`Bankavstämning: ${context} failed unexpectedly`, { err });
-    return { error: UNEXPECTED_ERROR_TEXT };
+    return reportError(err, log, `Bankavstämning: ${context}`);
   }
 
   async function audit(executor: Db | Tx, entityType: string, entityId: string, action: string, detail: unknown, userId: string | null) {

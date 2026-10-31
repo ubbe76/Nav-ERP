@@ -11,7 +11,7 @@ import { Modal } from "../ui/Modal";
 import { SectionHeading } from "../ui/SectionHeading";
 import { StatusPill } from "../ui/StatusPill";
 import { Table } from "../ui/Table";
-import { BookingFailures } from "./BookingFailures";
+import { BookingFailures, liveFailures, stampResults, type StampedResults } from "./BookingFailures";
 import { AuditTrailSection } from "../system/AuditTrailSection";
 import { useCan } from "../PermissionsProvider";
 import { API_URL, apiFetch } from "../../lib/api";
@@ -42,16 +42,23 @@ import type { BankItemResult, OpenSupplierInvoiceRow, Paged, PaymentBatchDetail,
 
 // Owns the per-row booking results OUTSIDE the keyed body: act() refreshes the
 // page, the key (batch.updatedAt) then remounts the body, and results held in
-// the body would vanish with the very failures the user needs to read.
+// the body would vanish with the very failures the user needs to read. Each
+// failure is stamped with its row's status and shown only while that holds
+// (a row confirmed or rejected afterwards takes its stale error with it).
 export function PaymentBatchCard({ batch, unverifiedBank, tolerance }: { batch: PaymentBatchDetail; unverifiedBank: boolean; tolerance: number }) {
-  const [results, setResults] = useState<BankItemResult[] | null>(null);
-  const failures = (results ?? [])
-    .filter((r) => !r.ok && r.error)
-    .map((r) => ({ key: r.itemId ?? "", label: batch.items.find((i) => i.id === r.itemId)?.endToEndId ?? "Post", error: r.error! }));
+  const [results, setResults] = useState<StampedResults | null>(null);
+  const rows = batch.items.map((i) => ({ id: i.id, state: i.status }));
+  const failures = liveFailures(results, rows, (id) => batch.items.find((i) => i.id === id)?.endToEndId ?? "Post");
   return (
     <>
       <BookingFailures failures={failures} />
-      <PaymentBatchCardBody key={batch.updatedAt} batch={batch} unverifiedBank={unverifiedBank} tolerance={tolerance} onResults={setResults} />
+      <PaymentBatchCardBody
+        key={batch.updatedAt}
+        batch={batch}
+        unverifiedBank={unverifiedBank}
+        tolerance={tolerance}
+        onResults={(r) => setResults(stampResults(r, rows))}
+      />
     </>
   );
 }
@@ -326,7 +333,9 @@ function PaymentBatchCardBody({
             onResults(null);
             // Closed first: a refusal is shown on the card, not behind the dialog.
             setConfirmOpen(false);
-            act("/confirm", { method: "POST", body: JSON.stringify({ paymentDate, itemIds, ...(amounts.length > 0 ? { amounts } : {}) }) }, (body) => {
+            // itemIds only when a subset is chosen: without them the server
+            // takes every waiting row (and the list is capped at 500).
+            act("/confirm", { method: "POST", body: JSON.stringify({ paymentDate, ...(itemIds ? { itemIds } : {}), ...(amounts.length > 0 ? { amounts } : {}) }) }, (body) => {
               onResults((body as { results: BankItemResult[] }).results);
             });
           }}
@@ -339,23 +348,34 @@ function PaymentBatchCardBody({
   );
 }
 
-function ItemEditModal({ item, onClose, onSave }: { item: PaymentBatchItem; onClose: () => void; onSave: (body: { amount: number; executionDate: string }) => void }) {
+// Only what changed is sent: an old draft row whose payment day has passed
+// (the export moves it to today) could otherwise not have its amount
+// changed — the server refuses a payment day before today.
+function ItemEditModal({ item, onClose, onSave }: { item: PaymentBatchItem; onClose: () => void; onSave: (body: { amount?: number; executionDate?: string }) => void }) {
   const [amount, setAmount] = useState(String(item.amount));
   const [date, setDate] = useState(item.executionDate);
+  const changed = { ...(Number(amount) !== item.amount ? { amount: Number(amount) } : {}), ...(date !== item.executionDate ? { executionDate: date } : {}) };
   return (
     <Modal open onClose={onClose} title={`Ändra ${item.endToEndId}`}>
       <Form
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
-          onSave({ amount: Number(amount), executionDate: date });
+          if (Object.keys(changed).length === 0) onClose();
+          else onSave(changed);
         }}
       >
         <Field label={item.currency === SEK ? "Belopp" : `Belopp (${item.currency})`} htmlFor="itemAmount">
           <Input id="itemAmount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
         </Field>
         <Field label="Betalningsdag" htmlFor="itemDate">
-          <Input id="itemDate" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          {/* min only for a NEW date: an unchanged past date is never sent
+              (only changed fields are), and the browser's validation of min
+              would otherwise block saving just the amount on such a row. */}
+          <Input id="itemDate" type="date" value={date} min={date === item.executionDate ? undefined : stockholmToday()} onChange={(e) => setDate(e.target.value)} />
         </Field>
+        {item.executionDate < stockholmToday() && date === item.executionDate && (
+          <FormHint>Betalningsdagen har passerat och flyttas till idag när filen exporteras.</FormHint>
+        )}
         <FormActions>
           <Button type="submit">Spara</Button>
         </FormActions>
@@ -536,7 +556,8 @@ function ConfirmModal({
   batch: PaymentBatchDetail;
   tolerance: number;
   onClose: () => void;
-  onConfirm: (paymentDate: string, itemIds: string[], amounts: { itemId: string; amountSek: number; bankFeeSek: number }[]) => void;
+  // itemIds null = every waiting row.
+  onConfirm: (paymentDate: string, itemIds: string[] | null, amounts: { itemId: string; amountSek: number; bankFeeSek: number }[]) => void;
 }) {
   const today = stockholmToday();
   const [date, setDate] = useState(today);
@@ -638,7 +659,7 @@ function ConfirmModal({
           onClick={() =>
             onConfirm(
               date,
-              chosenItems.map((i) => i.id),
+              chosenItems.length === waiting.length ? null : chosenItems.map((i) => i.id),
               chosenForeign.map((i) => ({
                 itemId: i.id,
                 amountSek: round2(parseAmount(sek[i.id]?.amountSek) ?? 0),

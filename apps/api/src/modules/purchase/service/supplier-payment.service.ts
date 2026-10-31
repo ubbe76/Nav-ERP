@@ -375,6 +375,18 @@ export function createSupplierPaymentService(
         action: "cancelled",
         userId,
       });
+      // A batch payment cancelled by hand leaves its row "returned" (the
+      // repository's write) — the batch's own history says so too, as the
+      // bank's return does (returnItemInTx's item_returned).
+      if (payment.paymentBatchItem) {
+        await audit.log({
+          entityType: "payment_batch",
+          entityId: payment.paymentBatchItem.batchNumber,
+          action: "item_returned",
+          detail: { endToEndId: payment.paymentBatchItem.endToEndId, via: "manual", payment: payment.paymentNumber },
+          userId,
+        });
+      }
       return (await service.getPayment(id))!;
     },
   };
