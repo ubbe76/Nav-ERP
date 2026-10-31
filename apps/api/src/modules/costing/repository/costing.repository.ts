@@ -439,8 +439,12 @@ export function createCostingRepository(db: Db) {
           .returning();
 
         if (materialRows.length > 0) {
+          // One statement ⇒ one now() for every created_at, and
+          // listMaterialRows sorts on it — stamp the rows a millisecond apart
+          // in input order (same idiom as sales' invoice.repository create).
+          const now = Date.now();
           await tx.insert(costCalculationMaterialRows).values(
-            materialRows.map((r) => ({
+            materialRows.map((r, i) => ({
               costCalculationId: row!.id,
               componentArticleId: r.componentArticleId,
               kind: r.kind,
@@ -456,6 +460,7 @@ export function createCostingRepository(db: Db) {
               supplierUnitPrice: r.supplierUnitPrice === null ? null : String(r.supplierUnitPrice),
               exchangeRate: r.exchangeRate === null ? null : String(r.exchangeRate),
               priceDate: r.priceDate,
+              createdAt: new Date(now + i),
             }))
           );
         }
@@ -498,7 +503,7 @@ export function createCostingRepository(db: Db) {
         .innerJoin(units, eq(units.id, articles.unitId))
         .leftJoin(rowUnits, eq(rowUnits.id, costCalculationMaterialRows.unitId))
         .where(eq(costCalculationMaterialRows.costCalculationId, costCalculationId))
-        .orderBy(asc(costCalculationMaterialRows.createdAt));
+        .orderBy(asc(costCalculationMaterialRows.createdAt), asc(costCalculationMaterialRows.id));
     },
 
     async listOperationRows(costCalculationId: string) {

@@ -51,5 +51,5 @@ export function configurationLines(
 export function rowConfigurationLines(configuration: unknown, withPrices: boolean): string[] | undefined {
   const cfg = configuration as OrderRowConfiguration | null;
   if (!cfg) return undefined;
-  return configurationLines(cfg.selection, withPrices ? cfg.price.additions : undefined);
+  return configurationLines(cfg.selection, withPrices ? cfg.price?.additions : undefined);
 }

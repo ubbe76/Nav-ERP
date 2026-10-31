@@ -19,7 +19,7 @@ import {
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
 import { manufacturingRoutes } from "../src/modules/manufacturing/routes/manufacturing.routes.js";
 import { createSalesRepository } from "../src/modules/sales/repository/sales.repository.js";
-import { createSalesService } from "../src/modules/sales/service/sales.service.js";
+import { createSalesService, InvalidStatusTransitionError } from "../src/modules/sales/service/sales.service.js";
 import { markSalesOrderInProduction } from "../src/modules/sales/service/production-transition.js";
 import { createRegisterRepository } from "../src/modules/register/repository/register.repository.js";
 import { createRegisterService } from "../src/modules/register/service/register.service.js";
@@ -200,6 +200,57 @@ describe("manufacturing service — creating a TO linked to a KO row", () => {
     await expect(
       mfgService.createManufacturingOrder({ quantity: 5, salesOrderRowId: rows[0]!.id }, null)
     ).rejects.toBeInstanceOf(LinkedOrderStatusError);
+  });
+
+  // The validation read happens before the TO's transaction. An order
+  // cancelled in that window is caught again under the header's lock at the
+  // transaction's end — before, the TO committed linked to a cancelled order
+  // and its row could never be removed.
+  it("refuses the TO when the order is cancelled between the validation and the transaction", async () => {
+    const { order, row } = await makeConfirmedOrderRow(4);
+    const racingService = createManufacturingService(createManufacturingRepository(db), testDocumentPdfService, testArticleService, {
+      findRowForManufacturing: async (rowId) => {
+        const found = await salesRepository.findRowForManufacturing(rowId);
+        await salesService.cancel(order.id);
+        return found;
+      },
+      lockRowForManufacturing: salesRepository.lockRowForManufacturing,
+      markInProduction: markSalesOrderInProduction,
+    });
+
+    await expect(racingService.createManufacturingOrder({ quantity: 4, salesOrderRowId: row.id }, null)).rejects.toBeInstanceOf(
+      LinkedOrderStatusError
+    );
+    const linked = await db.execute(sql`SELECT id FROM manufacturing_orders WHERE sales_order_row_id = ${row.id}`);
+    expect(linked).toHaveLength(0);
+    expect((await salesService.getSalesOrder(order.id)).status).toBe("cancelled");
+  });
+
+  // The other way round: Makulera read "confirmed", a TO moved the order to
+  // in_production before its UPDATE — the cancellation is refused instead of
+  // overwriting in_production.
+  it("refuses Makulera when a TO moved the order to in_production after the status check", async () => {
+    const { order } = await makeConfirmedOrderRow(4);
+    const racingSales = createSalesService(
+      {
+        ...salesRepository,
+        findSalesOrderById: async (id: string) => {
+          const found = await salesRepository.findSalesOrderById(id);
+          await db.transaction((tx) => markSalesOrderInProduction(tx, id));
+          return found;
+        },
+      },
+      registerService,
+      mailService,
+      documentPdfService,
+      stockService,
+      articleService,
+      systemService,
+      (query) => resolvePrice(db, query)
+    );
+
+    await expect(racingSales.cancel(order.id)).rejects.toBeInstanceOf(InvalidStatusTransitionError);
+    expect((await salesService.getSalesOrder(order.id)).status).toBe("in_production");
   });
 
   it("allows creating a TO without a link, unaffected by the new validation", async () => {

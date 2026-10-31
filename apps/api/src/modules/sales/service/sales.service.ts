@@ -1734,7 +1734,12 @@ export function createSalesService(
           `Cannot cancel an order in status "${order.status}" — production has already started`
         );
       }
-      const updated = await repo.updateStatus(orderId, "cancelled");
+      // Conditional on the status just checked: a TO created against the
+      // order in between has moved it to in_production (under the same
+      // header lock), a quote may have been confirmed or lost — either way
+      // the cancellation no longer applies.
+      const updated = await repo.updateStatus(orderId, "cancelled", null, order.status);
+      if (!updated) throw new InvalidStatusTransitionError(`Cannot cancel an order whose status changed meanwhile`);
       await audit.log({
         entityType: "sales_order",
         entityId: order.orderNumber,

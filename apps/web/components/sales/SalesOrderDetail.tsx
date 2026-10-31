@@ -145,6 +145,11 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
   const editUnitOptions = useUnitOptions(editArticle);
   const editFactor = editUnitOptions.find((o) => o.value === editUnitId)?.factor ?? 1;
   const editRequestSeq = useRef(0);
+  // The touched flag as it is when a prefill response LANDS — the effect's
+  // closure holds it as it was when the request left, so a price typed while
+  // the request was in flight would otherwise be overwritten ("manuellt vinner").
+  const editPriceTouchedNow = useRef(editPriceTouched);
+  editPriceTouchedNow.current = editPriceTouched;
   // The base quantity the shown price belongs to — the row's own when Ändra
   // opens, then each quoted quantity (lib/rowRequote.ts: 10 → 100 → 10 comes
   // back to the 10-tier, a pure unit switch never reprices, and nothing is
@@ -234,7 +239,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             return;
           }
           setRowError(null);
-          if (evaluation.price.unitPrice === null) return;
+          if (evaluation.price.unitPrice === null || editPriceTouchedNow.current) return;
           setEditPrice(String(toUnitPrice(evaluation.price.unitPrice, factor)));
           setEditDiscountPercent(String(evaluation.price.discountPercent));
         })
@@ -248,7 +253,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       priceQuotePath({ customerId: order.customerId, articleId: editArticle.id, quantity: baseQuantity, salesOrderId: order.id })
     )
       .then((quote) => {
-        if (seq !== editRequestSeq.current) return;
+        if (seq !== editRequestSeq.current || editPriceTouchedNow.current) return;
         if (!quote.price) return;
         setEditPrice(String(toUnitPrice(quote.price.unitPrice, factor)));
         setEditDiscountPercent(String(quote.price.discountPercent));
@@ -1315,6 +1320,11 @@ function AddRowForm({
   const currentFactor = unitOptions.find((o) => o.value === unitId)?.factor ?? 1;
   const unitCode = unitOptions.find((o) => o.value === unitId)?.code;
   const requestSeq = useRef(0);
+  // The touched flag as it is when a prefill response LANDS — the effect's
+  // closure holds it as it was when the request left, so a price typed while
+  // the request was in flight would otherwise be overwritten ("manuellt vinner").
+  const priceTouchedNow = useRef(priceTouched);
+  priceTouchedNow.current = priceTouched;
 
   // Picking an article pre-selects its sales unit; switching unit
   // re-expresses the entered quantity and price (500 kg ⇄ 100 st).
@@ -1387,7 +1397,7 @@ function AddRowForm({
       priceQuotePath({ customerId, articleId, quantity: baseQuantity, salesOrderId: orderId })
     )
       .then((quote) => {
-        if (seq !== requestSeq.current) return;
+        if (seq !== requestSeq.current || priceTouchedNow.current) return;
         if (!quote.price) return;
         setUnitPrice(String(toUnitPrice(quote.price.unitPrice, currentFactor)));
         setDiscountPercent(String(quote.price.discountPercent));
@@ -1421,7 +1431,7 @@ function AddRowForm({
       .then((evaluation) => {
         if (seq !== requestSeq.current) return;
         setRowConfiguration((c) => (c ? { ...c, evaluation } : c));
-        if (!priceTouched && evaluation.price.unitPrice !== null) {
+        if (!priceTouchedNow.current && evaluation.price.unitPrice !== null) {
           setUnitPrice(String(toUnitPrice(evaluation.price.unitPrice, currentFactor)));
           setDiscountPercent(String(evaluation.price.discountPercent));
         }

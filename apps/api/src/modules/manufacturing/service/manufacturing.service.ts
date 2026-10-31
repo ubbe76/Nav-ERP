@@ -99,7 +99,9 @@ export interface SalesOrderLinkReader {
     tx: Tx,
     rowId: string
   ): Promise<{ configurationKey: string | null; quantityOrdered: number; quantityDelivered: number } | null>;
-  markInProduction(tx: Tx, salesOrderId: string): Promise<void>;
+  // Locks the order header, flips confirmed → in_production and returns the
+  // status it found (null = gone) — prepareCreate's wrapper refuses the rest.
+  markInProduction(tx: Tx, salesOrderId: string): Promise<string | null>;
 }
 
 // Legoförfrågan: one entry in the inquiry row form's Legooperation select —
@@ -833,7 +835,17 @@ export function createManufacturingService(
       articleId: articleId!,
       quantity,
       linkedSalesOrder: linkedSalesOrderId
-        ? { salesOrderId: linkedSalesOrderId, markInProduction: salesOrders.markInProduction }
+        ? {
+            salesOrderId: linkedSalesOrderId,
+            // The status check above was a committed read before the
+            // transaction; the order may have been cancelled since. Checked
+            // again under the header's lock, the TO's last step — the throw
+            // rolls the TO back instead of linking it to a dead order.
+            markInProduction: async (tx: Tx, salesOrderId: string) => {
+              const status = await salesOrders.markInProduction(tx, salesOrderId);
+              if (status !== "confirmed" && status !== "in_production") throw new LinkedOrderStatusError(status ?? "deleted");
+            },
+          }
         : undefined,
       configured,
     };

@@ -300,6 +300,41 @@ describe("utlandsbetalningar (debet med växling)", () => {
     expect(b!.dedupeKey).toBe(legacyKey(b!, "500.00"));
   });
 
+  // RfrdDocInf of another type than CINV/CREN used to be dropped. It is kept
+  // as ADDTL now — but the content hash is still taken over the list without
+  // it, so a hash-keyed entry read before keeps its key.
+  it("keeps other referenced documents as ADDTL without changing the content hash", async () => {
+    const doc = (tp: string, nb: string) => `<RfrdDocInf><Tp><CdOrPrtry>${tp}</CdOrPrtry></Tp><Nb>${nb}</Nb></RfrdDocInf>`;
+    const xml =
+      `<?xml version="1.0" encoding="UTF-8"?><Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.054.001.02"><BkToCstmrDbtCdtNtfctn>` +
+      `<GrpHdr><MsgId>DOCS-1</MsgId><CreDtTm>2024-10-09T18:00:00</CreDtTm></GrpHdr>` +
+      `<Ntfctn><Id>DOCS-1-1</Id><CreDtTm>2024-10-09T18:00:00</CreDtTm>` +
+      `<Acct><Id><Othr><Id>5512348</Id><SchmeNm><Prtry>BGNR</Prtry></SchmeNm></Othr></Id><Ccy>SEK</Ccy></Acct>` +
+      `<Ntry><Amt Ccy="SEK">800.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2024-10-09</Dt></BookgDt>` +
+      `<BkTxCd><Domn><Cd>PMNT</Cd><Fmly><Cd>RCDT</Cd><SubFmlyCd>DMCT</SubFmlyCd></Fmly></Domn></BkTxCd>` +
+      `<NtryDtls><TxDtls><AmtDtls><TxAmt><Amt Ccy="SEK">800.00</Amt></TxAmt></AmtDtls><RltdPties><Dbtr><Nm>KUND AB</Nm></Dbtr></RltdPties>` +
+      `<RmtInf><Strd>${doc("<Cd>DISP</Cd>", "FS-1001")}${doc("<Cd>CINV</Cd>", "7001")}${doc("<Prtry>ORDER</Prtry>", "KO-55")}</Strd>` +
+      `<Strd><AddtlRmtInf>Tack</AddtlRmtInf></Strd></RmtInf></TxDtls></NtryDtls></Ntry></Ntfctn></BkToCstmrDbtCdtNtfctn></Document>`;
+    expect(await validateAgainstXsd(xml, "camt.054.001.02")).toEqual([]);
+
+    const [e] = parseCamt054(xml).entries;
+    expect(e!.remittance).toEqual([
+      { type: "ADDTL", value: "FS-1001", amount: null },
+      { type: "CINV", value: "7001", amount: null },
+      { type: "ADDTL", value: "KO-55", amount: null },
+      { type: "ADDTL", value: "Tack", amount: null },
+    ]);
+    const legacy = [
+      { type: "CINV", value: "7001", amount: null },
+      { type: "ADDTL", value: "Tack", amount: null },
+    ];
+    const hash = createHash("sha256")
+      .update(JSON.stringify([e!.account, e!.bookingDate, e!.direction, e!.reversal, "800.00", e!.endToEndId, e!.counterpartyName, legacy]))
+      .digest("hex");
+    expect(e!.dedupeSource).toBe("content_hash");
+    expect(e!.dedupeKey).toBe(`${e!.account}|hash:${hash}#1`);
+  });
+
   it("the test builder's exchange case is valid against the XSD", async () => {
     const xml = camtFile({
       messageId: "F-1",
