@@ -23,7 +23,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 
-- [ ] **Tillverkning:** operationer som inte rapporterats går inte att rapportera när den sista operationen är rapporterad — hela antalet på sista operationen gör ordern **Klar**, och rapportering kräver Frisläppt eller Pågår. Efterkalkylen saknar då operationernas tid och material; enda vägen i dag är **Ångra rapportering** på den sista operationen.
 - [ ] **Kundfaktura:** `computeDueDate` i `invoice.service.ts` räknar i millisekunder och kan ge en dags fel förfallodag vid sommartidsskiftet — `setDate`-aritmetik vore exakt.
 - [ ] **Dröjsmålsränta:** `ensureReferenceRates` minns inte misslyckade hämtningar — varje sidladdning väntar 10 s när Riksbanken är nere.
 - [ ] **Konfigurator:** `updateRule` med bara ny effekt tolkar det sparade målet med den nya effektens icke-strikta schema — require → exclude kan tappa en operation tyst. Kräv mål när effekten ändras.
@@ -107,6 +106,8 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
+- [ ] **TO-kortets manuella avrapportering:** **Förbruka material**, **Slutför operation**, **Rapportera tid** och **Slutför order** är var sitt stort kort bredvid varandra och upplevs klumpiga. Gör rader i stället för block, och rapportera material och operation tillsammans — t.ex. en rad per operation med antal OK, kasserat, tid och operationens kopplade material i samma rad.
+- [ ] **Filtrera på Sen i orderlistorna:** listorna över inköps-, tillverknings- och kundorder får statusfiltret **Sen**. Använd samma härledning som aviseringarna, så att filtret och **Att bevaka** visar samma ordrar: för kund- och inköpsorder en rad med rest vars effektiva datum passerats, för tillverkningsorder `orderPlanSummaries().late`, som redan ger TO-listans markering **Sen**.
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
 - [ ] **Välj vad Översikten visar** → [#17](https://github.com/ubbe76/Nav-ERP/issues/17)

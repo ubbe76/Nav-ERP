@@ -198,6 +198,23 @@ describe("Ångra rapportering", () => {
     expect([last.status, Number(last.quantityCompleted)]).toEqual(["pending", 0]);
   });
 
+  it("undoes an efterrapport on a done order and leaves the order done", async () => {
+    const ctx = await setup();
+    await mfgService.completeOperation(ctx.last.id, {}, ctx.user.id);
+    await mfgService.completeOperation(ctx.first.id, {}, ctx.user.id);
+    expect(await balance(ctx.component.id, ctx.location.id)).toBe(90);
+
+    const late = (await mfgService.listReports(ctx.order.id)).find((r) => r.sequenceNo === 10)!;
+    expect(Number(late.quantityReceived)).toBe(0);
+    await mfgService.undoReport(ctx.order.id, late.id, ctx.user.id);
+
+    expect(await balance(ctx.component.id, ctx.location.id)).toBe(100);
+    const first = (await mfgService.listOperations(ctx.order.id)).find((o) => o.sequenceNo === 10)!;
+    expect([first.status, Number(first.quantityCompleted)]).toEqual(["pending", 0]);
+    const order = await orderNow(ctx.order.id);
+    expect([order.status, Number(order.quantityReceived)]).toEqual(["done", 5]);
+  });
+
   it("refuses when the received goods are no longer on the location", async () => {
     const ctx = await setup();
     await mfgService.completeOperation(ctx.last.id, { quantityCompleted: 3 }, ctx.user.id);
