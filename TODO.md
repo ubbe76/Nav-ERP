@@ -32,22 +32,10 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — layout
 
-- [ ] **TO-kortet:** rubrik och cell överlappar i operationstabellens kolumn Planerad vecka; valraderna för konfigurerad TO ligger tätt mot Material-rubriken.
-- [ ] **Kundorderkortet:** tabellen scrollar ~144 px i sidled vid 1280 px; redigeringsläget i smala kolumner är inte kontrollerat.
-- [ ] **Personal & lön:** Attesteringstabellen spiller över 32 px vid 1500 px bredd; `SchedulesPageClient.tsx` (~325, `1fr 1fr 1fr auto`) och `EmployeeTabs.tsx` (`150px 1fr 160px`) har fasta grid som kan spilla över — lägg korta fält i `FormRow`.
-- [ ] **Kostnadsställen:** smala filter i resultaträkningen; projektvalet trunkerat i radcellen; fakturaradernas tabell skrollar i sidled på desktop.
-- [ ] **Anläggningsregister:** tomma Nr/Anskaffad-celler visar etiketter på mobil; Summa alla grupper saknar rubrik; tre fält i `FormRow` med columns=2; ingående avskrivningens fältpar hänger inte ihop i formuläret (servern vägrar).
-- [ ] **Årsbokslut:** periodiseringstabellens fasta px-kolumner är inte kontrollerade i mobilbredd.
-- [ ] **Konfigurator:** mallredigeringens åtgärdskolumn är 260 px — kontrollera i 375 px.
-- [ ] **Reskontran:** Makulerad visas som färgad text i stället för genomstruken.
+- [ ] **Layout, rester efter genomgången 2026-10-31:** avskrivningsplanen (13 kolumner) scrollar 80–94 px i sidled vid 1280 px; Attesteringstabellen scrollar fortfarande ~150 px vid 1280 px (ren vid 1500); artikelkortets rubrik är trång vid 375 px (Skriv ut etikett trycker ihop numret och namnet bryts per tecken); periodiseringstabellens val trunkeras i staplade celler på mobil; en inskriven 0 i Ingående avskrivning med en månad passerar formuläret och vägras först av servern.
 
 ### Låga — fel i manualen
 
-- [ ] Manualens §Skriv ut TO och §Pallkort säger att en planerad TO saknar operationer — inte sant för beställningsvara; manualen säger "gul varning" (temaberoende).
-- [ ] Manualen beskriver leverantörsfakturans restrad som egen rad fast den slås ihop per konto, och nämner inte att Verifikat-länken står kvar efter Avbryt *(medvetet: spåret ska synas)*.
-- [ ] Manualens "Pågående" mot pillens "Pågår" (artikelöversikten och behovsberäkningen).
-- [ ] Anläggningsregistrets "använd andra koder än F, L, K, U och M" saknar kanske AV.
-- [ ] Reskontrans förhandsvisningslista saknar teckenmismatch-meddelandet; dubbelt "när" och vacklande kreditfakturaterm i `inkop.md`.
 
 ## Förbättringar
 

@@ -175,17 +175,17 @@ export function AttestationPageClient({
 
       <Table<EmployeeRow>
         columns={[
-          { key: "name", label: "Anställd", width: "1fr" },
-          { key: "scheduledMinutes", label: "Schema", width: "90px", align: "right" },
-          { key: "workedMinutes", label: "Arbetat", width: "90px", align: "right" },
-          { key: "absence", label: "Frånvaro", width: "90px", align: "right" },
-          { key: "overtime", label: "Övertid", width: "90px", align: "right" },
-          { key: "ob", label: "OB", width: "80px", align: "right" },
-          { key: "atfMinutes", label: "ATF", width: "80px", align: "right" },
-          { key: "unaccountedMinutes", label: "Ofördelat", width: "110px", align: "right" },
-          { key: "deviations", label: "Avvikelser", width: "130px" },
-          { key: "status", label: "Status", width: "160px" },
-          { key: "actions", label: "", width: "230px", align: "right" },
+          { key: "name", label: "Anställd", width: "minmax(120px, 1fr)" },
+          { key: "scheduledMinutes", label: "Schema", width: "72px", align: "right" },
+          { key: "workedMinutes", label: "Arbetat", width: "72px", align: "right" },
+          { key: "absence", label: "Frånvaro", width: "72px", align: "right" },
+          { key: "overtime", label: "Övertid", width: "72px", align: "right" },
+          { key: "ob", label: "OB", width: "56px", align: "right" },
+          { key: "atfMinutes", label: "ATF", width: "56px", align: "right" },
+          { key: "unaccountedMinutes", label: "Ofördelat", width: "84px", align: "right" },
+          { key: "deviations", label: "Avvikelser", width: "110px" },
+          { key: "status", label: "Status", width: "120px" },
+          { key: "actions", label: "", width: "150px", align: "right" },
         ]}
         rows={rows}
         emptyText="Inga medarbetare med underlag i perioden"
@@ -246,7 +246,7 @@ export function AttestationPageClient({
               return statusCell(employee);
             case "actions":
               return (
-                <span style={{ display: "inline-flex", gap: 8, justifyContent: "flex-end" }}>
+                <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                   <Button type="button" variant="ghost" size="small" onClick={() => setDetails(employee)}>
                     Detaljer
                   </Button>

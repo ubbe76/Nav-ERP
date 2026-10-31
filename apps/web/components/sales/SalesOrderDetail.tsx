@@ -533,21 +533,23 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
             // its track would push the table straight back out. The name has
             // only a small floor (minmax(120px, 1fr)) and wraps its choice
             // lines inside the track; the action buttons wrap in their cell.
+            // While a row is being edited the tracks that hold inputs widen
+            // (the table then scrolls inside its card) so no input is clipped.
             { key: "articleNumber", label: "Artikelnummer", width: "110px" },
-            { key: "articleName", label: "Benämning", width: "minmax(120px, 1fr)" },
-            { key: "quantityOrdered", label: "Beställt", width: "70px", align: "right" },
-            { key: "unitCode", label: "Enhet", width: "60px" },
-            { key: "quantityDelivered", label: "Levererat", width: "70px", align: "right" },
+            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(170px, 1fr)" : "minmax(90px, 1fr)" },
+            { key: "quantityOrdered", label: "Beställt", width: editingRowId ? "90px" : "66px", align: "right" },
+            { key: "unitCode", label: "Enhet", width: editingRowId ? "84px" : "52px" },
+            { key: "quantityDelivered", label: "Levererat", width: "66px", align: "right" },
             // E3: quantity already in production (non-cancelled linked TOs)
             // plus one line per TO — order number linking to the TO card and
             // its status — so a row that has its TO is obvious at a glance.
             // The pill sits under the number: a wider track pushes the table
             // past the content column.
-            { key: "quantityInProduction", label: "I tillverkning", width: "90px" },
-            { key: "unitPrice", label: "Á-pris", width: "90px", align: "right" },
-            { key: "discountPercent", label: "Rabatt", width: "60px", align: "right" },
-            { key: "lineAmount", label: "Belopp", width: "90px", align: "right" },
-            ...(rowsEditable || canReclaim ? ([{ key: "id", label: "", width: "220px", align: "right" }] as const) : []),
+            { key: "quantityInProduction", label: "I tillverkning", width: "84px" },
+            { key: "unitPrice", label: "Á-pris", width: editingRowId ? "100px" : "84px", align: "right" },
+            { key: "discountPercent", label: "Rabatt", width: editingRowId ? "70px" : "52px", align: "right" },
+            { key: "lineAmount", label: "Belopp", width: "76px", align: "right" },
+            ...(rowsEditable || canReclaim ? ([{ key: "id", label: "", width: "140px", align: "right" }] as const) : []),
           ]}
           rows={rows}
           footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(total)} ${order.currency}` }}

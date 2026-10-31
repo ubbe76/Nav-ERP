@@ -307,7 +307,7 @@ function EditAssetModal({
             {locked && <FormHint attached>{lockedHint}</FormHint>}
           </Field>
         </FormRow>
-        <FormRow>
+        <FormRow columns={3}>
           <Field label="Anskaffningsvärde" htmlFor="edit-cost">
             <Input id="edit-cost" type="number" step="0.01" min="0" value={form.acquisitionCost} disabled={locked || disposed} onChange={(e) => set({ acquisitionCost: e.target.value })} />
             {locked && <FormHint attached>{lockedHint}</FormHint>}
@@ -321,14 +321,15 @@ function EditAssetModal({
         </FormRow>
         <FormRow>
           <Field label="Ingående avskrivning" htmlFor="edit-opening">
-            <Input id="edit-opening" type="number" step="0.01" min="0" value={form.openingDepreciation} disabled={locked || disposed} onChange={(e) => set({ openingDepreciation: e.target.value })} />
+            <Input id="edit-opening" type="number" step="0.01" min="0" value={form.openingDepreciation} required={form.openingDepreciationThroughMonth !== "" && !locked && !disposed} disabled={locked || disposed} onChange={(e) => set({ openingDepreciation: e.target.value })} />
             {locked && <FormHint attached>{lockedHint}</FormHint>}
           </Field>
           <Field label="Avskriven t.o.m. månad" htmlFor="edit-opening-month">
-            <Input id="edit-opening-month" type="month" value={form.openingDepreciationThroughMonth} disabled={locked || disposed} onChange={(e) => set({ openingDepreciationThroughMonth: e.target.value })} />
+            <Input id="edit-opening-month" type="month" required={form.openingDepreciation.trim() !== "" && Number(form.openingDepreciation) !== 0 && !locked && !disposed} value={form.openingDepreciationThroughMonth} disabled={locked || disposed} onChange={(e) => set({ openingDepreciationThroughMonth: e.target.value })} />
             {locked && <FormHint attached>{lockedHint}</FormHint>}
           </Field>
         </FormRow>
+        {!locked && !disposed && <FormHint>Ingående avskrivning och Avskriven t.o.m. månad hör ihop: fyll i båda eller ingen av dem.</FormHint>}
         {locked && !disposed && <FormHint>Ändras nyttjandetid eller restvärde fördelas det återstående underlaget jämnt på de återstående månaderna. Bokförda avskrivningar ändras aldrig.</FormHint>}
         <FormRow>
           <Field label="Anteckning" htmlFor="edit-note">

@@ -421,7 +421,7 @@ function NewAssetModal({
             <Input id="asset-start" type="month" value={form.depreciationStartMonth} min={form.acquisitionDate.slice(0, 7)} onChange={(e) => set({ depreciationStartMonth: e.target.value })} />
           </Field>
         </FormRow>
-        <FormRow>
+        <FormRow columns={3}>
           <Field label="Anskaffningsvärde" htmlFor="asset-cost">
             <Input id="asset-cost" type="number" step="0.01" min="0" value={form.acquisitionCost} onChange={(e) => set({ acquisitionCost: e.target.value })} required />
           </Field>
@@ -434,18 +434,19 @@ function NewAssetModal({
         </FormRow>
         <FormRow>
           <Field label="Ingående avskrivning" htmlFor="asset-opening">
-            <Input id="asset-opening" type="number" step="0.01" min="0" value={form.openingDepreciation} onChange={(e) => set({ openingDepreciation: e.target.value })} />
+            <Input id="asset-opening" type="number" step="0.01" min="0" value={form.openingDepreciation} required={form.openingDepreciationThroughMonth !== ""} onChange={(e) => set({ openingDepreciation: e.target.value })} />
           </Field>
           <Field label="Avskriven t.o.m. månad" htmlFor="asset-opening-month">
             <Input
               id="asset-opening-month"
               type="month"
+              required={form.openingDepreciation.trim() !== "" && Number(form.openingDepreciation) !== 0}
               value={form.openingDepreciationThroughMonth}
               onChange={(e) => set({ openingDepreciationThroughMonth: e.target.value })}
             />
           </Field>
         </FormRow>
-        <FormHint>Fylls i för tillgångar som anskaffats före Nav: den ackumulerade avskrivning som redan ligger i ingående balansen. Första körningen fortsätter månaden efter.</FormHint>
+        <FormHint>Fylls i för tillgångar som anskaffats före Nav: den ackumulerade avskrivning som redan ligger i ingående balansen. Första körningen fortsätter månaden efter. Ingående avskrivning och Avskriven t.o.m. månad hör ihop: fyll i båda eller ingen av dem.</FormHint>
         <FormRow>
           <Field label="Leverantörsfaktura" htmlFor="asset-invoice">
             <Select id="asset-invoice" value={form.supplierInvoiceId} onChange={(e) => set({ supplierInvoiceId: e.target.value })}>

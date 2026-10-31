@@ -2,7 +2,6 @@
 
 import type { SelectHTMLAttributes } from "react";
 import { Field, Select } from "../ui/Field";
-import { FormRow } from "../ui/Form";
 import type { CostCenter, Project } from "../../lib/types";
 
 // Pickers for the two accounting dimensions. A selected value that is no
@@ -101,8 +100,10 @@ export function DimensionFields({
     lists.allProjects.length > 0 ||
     projectId !== "";
   if (!visible) return null;
+  // Stacked, not a FormRow: "100 · Verkstaden" style options are long and a
+  // half-width select truncates them.
   return (
-    <FormRow>
+    <>
       {withCostCenter && (
         <Field label={costCenterLabel} htmlFor={`${idPrefix}CostCenter`}>
           <CostCenterSelect id={`${idPrefix}CostCenter`} all={lists.allCostCenters} value={costCenterId} onChange={onCostCenterChange} />
@@ -111,6 +112,6 @@ export function DimensionFields({
       <Field label={projectLabel} htmlFor={`${idPrefix}Project`}>
         <ProjectSelect id={`${idPrefix}Project`} all={lists.allProjects} value={projectId} onChange={onProjectChange} />
       </Field>
-    </FormRow>
+    </>
   );
 }

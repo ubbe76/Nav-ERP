@@ -41,7 +41,10 @@ type PlanTableRow = FixedAssetPlanRow & { id: string };
 
 function renderPlanCell(row: PlanTableRow, key: string) {
   if ((MONEY_KEYS as string[]).includes(key)) return formatMoney(row[key as keyof FixedAssetPlanTotals]);
-  return String(row[key as keyof FixedAssetPlanRow] ?? "");
+  // null, not "": a cell without content is hidden in the stacked phone layout
+  // instead of printing its label next to nothing (the total row has no Nr/Anskaffad).
+  const value = row[key as keyof FixedAssetPlanRow];
+  return value === null || value === undefined || value === "" ? null : String(value);
 }
 
 function totalsFooter(totals: FixedAssetPlanTotals, label: string) {
@@ -158,6 +161,7 @@ export function AvskrivningsplanPageClient({
 
       {grandTotal && plan && plan.categories.some((category) => category.assets.length > 0) && (
         <Card maxWidth="none">
+          <h2 style={{ marginTop: 0 }}>Alla grupper</h2>
           <Table columns={COLUMNS} rows={[grandTotal]} renderCell={renderPlanCell} />
         </Card>
       )}
