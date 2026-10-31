@@ -605,7 +605,7 @@ Avstämningen är ingen spärr — du kan fortfarande bokföra — men [årsboks
 
 ### Anläggningsgrupper
 
-**Ekonomi → Anläggningsgrupper** är grunddata: varje grupp bär fem konton — **Tillgångskonto** (t.ex. 1220), **Ack. avskrivningar** (1229), **Avskrivningskostnad** (7830), **Vinst vid avyttring** (3973) och **Förlust vid avyttring** (7970) — samt **Förvald nyttjandetid (månader)**, som förifylls på nya anläggningar i gruppen. Tillgångskonto, ack-konto och kostnadskonto måste vara tre olika konton. När någon anläggning i gruppen har bokförd avskrivning eller en **Ingående avskrivning** är de tre kontona låsta i gruppens dialog (*"Tillgångskonto, ack-konto och kostnadskonto är låsta — gruppen har bokförd eller ingående avskrivning"*) — de bär redan bokförda belopp; vinst- och förlustkonto, namn och nyttjandetid kan fortfarande ändras.
+**Ekonomi → Anläggningsgrupper** är grunddata: varje grupp bär fem konton — **Tillgångskonto** (t.ex. 1220), **Ack. avskrivningar** (1229), **Avskrivningskostnad** (7830), **Vinst vid avyttring** (3973) och **Förlust vid avyttring** (7970) — samt **Förvald nyttjandetid (månader)**, som förifylls på nya anläggningar i gruppen. Tillgångskonto, ack-konto och kostnadskonto måste vara tre olika konton. Ett tillgångs- eller ack-konto får dessutom bara ha den rollen i hela registret — samma konto kan inte vara ack-konto i en grupp och kostnadskonto, vinst- eller förlustkonto (eller tillgångskonto) i en annan, eftersom [avstämningen](#avskrivningsplan) görs per konto och de två gruppernas bokningar då skulle ta ut varandra. Samma konto i samma roll i flera grupper går bra (t.ex. 7830 som kostnadskonto överallt). När någon anläggning i gruppen har bokförd avskrivning eller en **Ingående avskrivning** är de tre kontona låsta i gruppens dialog (*"Tillgångskonto, ack-konto och kostnadskonto är låsta — gruppen har bokförd eller ingående avskrivning"*) — de bär redan bokförda belopp; vinst- och förlustkonto, namn och nyttjandetid kan fortfarande ändras.
 
 En grupp kan också få ett **Kostnadsställe (förval)**, som sätts på avskrivningsraden (kostnadskontot) när gruppens anläggningar skrivs av.
 
@@ -669,6 +669,8 @@ Steg 1 visar spärrar och varningar. **Spärrar** hindrar stegen 2–5: verifika
 - Lagerkontots saldo stämmer inte med den bokförda lagervärderingen.
 - De öppna valutaposterna har ändrats sedan valutaomvärderingen bokfördes — gör om steget [Valutaomvärdering](#valutaomvardering).
 
+Kan en av kontrollerna inte göras (t.ex. **"Anläggningsregistret kunde inte kontrolleras — försök igen, eller se serverloggen om felet består"**) visas det som en egen varning och övriga kontroller visas ändå. Ladda om sidan; består felet finns orsaken i serverloggen.
+
 ### Lagerförändring
 
 Steg 2 värderar lagret per bokslutsdatumet med vald **Värderingsmetod** (**Standardpris**, **Senaste inköp** eller **Vägt snitt**; förvalt är metoden från förra årets bokslut, annars **Vägt snitt**). **Visa lagervärdering** visar lagervärdet, saldot på lagerkontot, skillnaden och exakt den kontering som bokförs. **Bokför lagerförändring** bokför skillnaden mellan lagervärdet och kontot **Lager** mot **Lagerförändring** (se [Standardkonton](#standardkonton)). Artiklar utan pris räknas som 0 och visas som en varning. Har företaget inget lager — lagervärdet och saldot på **Lager** är båda 0 — blir steget **Klar** utan verifikat, även om kontona **Lager** och **Lagerförändring** saknas i kontoplanen.
@@ -684,6 +686,8 @@ Steg 3 kör anläggningsregistrets avskrivningar t.o.m. bokslutsmånaden, datera
 ### Periodiseringar
 
 Steg 4 bokför upplupna och förutbetalda kostnader och intäkter. Lägg till en rad per post med **Lägg till rad**: **Typ** (**Förutbetald kostnad**, **Upplupen intäkt**, **Upplupen kostnad** eller **Förutbetald intäkt**), **Balanskonto** (förval 1790 respektive 2990), **Resultatkonto**, **Belopp** och **Text**. Konteringen visas under raderna. **Bokför periodiseringar** bokför alla rader i ett verifikat på bokslutsdatumet och **återför dem automatiskt** med ett spegelvänt verifikat på nästa räkenskapsårs första dag. Finns inget nästa räkenskapsår skapas det. Är första perioden i nästa räkenskapsår låst visar steget en varning — återföringen kan inte bokföras förrän perioden låsts upp under [Räkenskapsår och perioder](#rakenskapsar-och-perioder). Har året inga periodiseringar klickar du **Inga periodiseringar**. Ändrar du raderna och bokför igen omförs både periodiseringen och återföringen innan de nya bokförs. Periodiseringar påverkar inte momsrapporten. En identisk omkörning vägras om ett av kontona i de bokförda raderna har inaktiverats sedan dess — aktivera kontot igen, eller ändra raderna.
+
+Rader du ändrat men inte bokfört sparas i webbläsaren och finns kvar om du laddar om sidan. Har någon annan bokfört periodiseringarna under tiden tas ditt utkast bort, och kortet visar **"Ett osparat utkast i den här webbläsaren gällde en tidigare bokföring av periodiseringarna och har tagits bort — raderna nedan är de som är bokförda nu."**
 
 ### Valutaomvärdering
 

@@ -71,6 +71,23 @@ export class FixedAssetCategoryAccountsNotDistinctError extends Error {
   }
 }
 
+export type CategoryAccountRole = "asset" | "accumulated" | "expense" | "gain" | "loss";
+
+// An account that is the asset or ack account of a group (this one or
+// another) used in a different role — the per-account reconciliation would
+// net the two groups' bookings (assertAccountRolesAcrossCategories).
+export class FixedAssetCategoryAccountRoleConflictError extends Error {
+  constructor(
+    readonly accountNumber: string,
+    readonly role: CategoryAccountRole,
+    readonly categoryName: string,
+    readonly otherRole: CategoryAccountRole
+  ) {
+    super(`Account ${accountNumber} is the ${otherRole} account of group ${categoryName} and cannot be the ${role} account here`);
+    this.name = "FixedAssetCategoryAccountRoleConflictError";
+  }
+}
+
 // The asset, accumulated-depreciation and expense accounts are what the
 // group's depreciation (and its opening amounts) sit on in the ledger;
 // pointing the group elsewhere after the fact would make the register's
@@ -224,6 +241,45 @@ type CategoryAccountFields = Pick<
   | "disposalGainAccountId"
   | "disposalLossAccountId"
 >;
+
+const ROLE_KEYS: [CategoryAccountRole, keyof CategoryAccountFields][] = [
+  ["asset", "assetAccountId"],
+  ["accumulated", "accumulatedDepreciationAccountId"],
+  ["expense", "depreciationExpenseAccountId"],
+  ["gain", "disposalGainAccountId"],
+  ["loss", "disposalLossAccountId"],
+];
+const BALANCE_ROLES = new Set<CategoryAccountRole>(["asset", "accumulated"]);
+
+// The asset and ack accounts are reconciled per account against the ledger
+// (Avskrivningsplan, the year-end warning). An account in either role — in
+// any group — may have no other role in any group: group A's expense account
+// as group B's ack account nets A's depreciation against B's accumulated
+// depreciation. The same role in several groups is fine. Run under the
+// depreciation lock with the write, so two saves cannot cross.
+async function assertAccountRolesAcrossCategories(
+  executor: Db | Tx,
+  fields: CategoryAccountFields,
+  self: { id: string | null; name: string }
+): Promise<void> {
+  const groups = [
+    { name: self.name, fields },
+    ...(await repo.listCategoryAccounts(executor)).filter((c) => c.id !== self.id).map((c) => ({ name: c.name, fields: c })),
+  ];
+  for (const [role, key] of ROLE_KEYS) {
+    for (const group of groups) {
+      for (const [otherRole, otherKey] of ROLE_KEYS) {
+        if (otherRole === role || group.fields[otherKey] !== fields[key]) continue;
+        if (!BALANCE_ROLES.has(role) && !BALANCE_ROLES.has(otherRole)) continue;
+        const account = await repo.findAccountRef(executor, fields[key]);
+        // Within the group itself the balance role is the one the account
+        // "already has" — the message then names the other as the mistake.
+        const [mine, theirs] = group.fields === fields && BALANCE_ROLES.has(role) ? [otherRole, role] : [role, otherRole];
+        throw new FixedAssetCategoryAccountRoleConflictError(account?.number ?? "", mine, group.name, theirs);
+      }
+    }
+  }
+}
 
 function assertDistinctCategoryAccounts(fields: CategoryAccountFields): void {
   const { assetAccountId, accumulatedDepreciationAccountId, depreciationExpenseAccountId } = fields;
@@ -620,13 +676,16 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
       ]) {
         await requireActiveAccount(id);
       }
-      let row;
-      try {
-        row = await repo.insertCategory(db, input);
-      } catch (err) {
-        if (isUniqueViolation(err)) throw new DuplicateFixedAssetCategoryNameError(input.name);
-        throw err;
-      }
+      const row = await db.transaction(async (tx) => {
+        await tx.execute(DEPRECIATION_LOCK_SQL);
+        await assertAccountRolesAcrossCategories(tx, input, { id: null, name: input.name });
+        try {
+          return await repo.insertCategory(tx, input);
+        } catch (err) {
+          if (isUniqueViolation(err)) throw new DuplicateFixedAssetCategoryNameError(input.name);
+          throw err;
+        }
+      });
       await audit.log({ entityType: "fixed_asset_category", entityId: row.name, action: "created", detail: input });
       return (await repo.findCategoryById(db, row.id))!;
     },
@@ -659,6 +718,11 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
           if (!account) throw new AccountNotFoundError(input[key]!);
           if (!account.active) throw new InactiveAccountError(input[key]!);
         }
+        // Only when an account changes: a name, life or cost-center change
+        // must not be refused over a combination saved before the check
+        // existed. An account change validates the whole set, so such a
+        // group gets its old conflict named before it can change accounts.
+        if (changedAccountKeys.length > 0) await assertAccountRolesAcrossCategories(tx, merged, { id, name: merged.name });
         // Kostnadsställe (förval): a new choice must be active; the kept one may stay.
         if (input.defaultCostCenterId !== undefined) {
           await resolveDimensions(tx, { costCenterId: input.defaultCostCenterId }, { existing: { costCenterId: existing.defaultCostCenterId, projectId: null } });

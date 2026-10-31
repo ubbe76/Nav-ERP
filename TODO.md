@@ -24,9 +24,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Medel — fel resultat i ovanliga lägen och 500-fel
 
 - [ ] **Konfigurerad tillverkning:** en icke-härledbar struktur accepteras på raden med cost null och syns först när TO:n skapas; datumförslaget ignorerar levererat antal; en inaktiv mall får fortfarande konfigurerade förslag i behovsberäkningen.
-- [ ] **Kostnadsställen:** felet "välj kostnadsställe på raderna" visas när kolumnerna är dolda, så användaren ser inte fältet; P1-dialogen räknar offert som kundorder.
-- [ ] **Årsbokslut:** `loadWarnings` läser sekventiellt och ett enda fel fäller sidan; saknad sista period ger en vanlig `Error` (500); `AccrualsCard`-utkastet i localStorage kan dölja rader som någon annan bokfört tills det rensas.
-- [ ] **Anläggningsregister:** ingen korskontroll av konton mellan grupper (A:s kostnadskonto = B:s ack nettas).
 
 ### Låga — races med litet fönster
 

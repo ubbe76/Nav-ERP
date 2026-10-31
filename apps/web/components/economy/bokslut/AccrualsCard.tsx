@@ -52,25 +52,42 @@ export function AccrualsCard({ closing, accounts }: { closing: YearEndClosingDet
       description: row.description,
     }));
   const [rows, setRows] = useState<Draft[]>(fromServer);
+  // The booking a draft was made on (null = none yet). A draft made before
+  // someone else booked the step would otherwise hide the rows they booked.
+  const basis = step.bookedAt;
+  const [discarded, setDiscarded] = useState(false);
 
-  // An unsent draft survives a reload (per-viewer convenience only).
+  // An unsent draft survives a reload (per-viewer convenience only) — but
+  // only on the booking it was made on; a stale one is dropped with a notice.
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(storageKey);
-      if (raw) {
-        const restored = JSON.parse(raw) as Draft[];
-        newRowSeq = Math.max(newRowSeq, highestNewRowSeq(restored.map((row) => row.id)));
-        setRows(restored);
+      if (!raw) return;
+      const stored = JSON.parse(raw) as { basis: string | null; rows: Draft[] } | Draft[] | null;
+      if (stored === null || typeof stored !== "object") {
+        window.localStorage.removeItem(storageKey);
+        return;
       }
+      // An array is a draft saved before the basis was stored: it can only
+      // be trusted while nothing has been booked.
+      const draft = Array.isArray(stored) ? (basis === null ? { basis, rows: stored } : null) : stored;
+      if (!draft || draft.basis !== basis) {
+        window.localStorage.removeItem(storageKey);
+        setDiscarded(true);
+        return;
+      }
+      newRowSeq = Math.max(newRowSeq, highestNewRowSeq(draft.rows.map((row) => row.id)));
+      setRows(draft.rows);
     } catch {
       // storage blocked or corrupt — start from the server's rows
     }
-  }, [storageKey]);
+  }, [storageKey, basis]);
 
   function update(next: Draft[]) {
     setRows(next);
+    setDiscarded(false);
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(next));
+      window.localStorage.setItem(storageKey, JSON.stringify({ basis, rows: next }));
     } catch {
       // ignore
     }
@@ -142,6 +159,12 @@ export function AccrualsCard({ closing, accounts }: { closing: YearEndClosingDet
             "Inga periodiseringar."
           )}
         </p>
+      )}
+      {discarded && (
+        <FormNotice>
+          Ett osparat utkast i den här webbläsaren gällde en tidigare bokföring av periodiseringarna och har tagits bort — raderna nedan är de
+          som är bokförda nu.
+        </FormNotice>
       )}
       <Table<Draft>
         columns={[

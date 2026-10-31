@@ -24,6 +24,7 @@ import {
 import type { ListCostCentersQuery, ListProjectsQuery, ProjectStatus } from "@navet/shared";
 import { ilikePattern } from "@navet/shared";
 import { isForeignKeyViolation } from "../../system/service/db-errors.js";
+import { documentKindSql } from "../../sales/repository/document-kind.js";
 import { RegisterEntryInUseError, type RegisterUsage } from "../../register/service/register.errors.js";
 
 // Kostnadsställen och projekt (etapp 5 del A): the two registers with the
@@ -67,20 +68,22 @@ function ref(table: PgTable, tableName: string, labels: string, column: PgColumn
 
 // A table whose rows are movable while the document is open and locked once
 // it is not: two references, `movableLabels` for the first, `lockedLabels`
-// for the second, split on `lockedWhen`.
+// for the second, split on `lockedWhen`. `scope` narrows both to part of the
+// table (offert vs kundorder in sales_orders).
 function split(
   table: PgTable,
   tableName: string,
   column: PgColumn,
   movableLabels: string,
   lockedLabels: string,
-  lockedWhen: SQL
+  lockedWhen: SQL,
+  scope?: SQL
 ): DimensionReference[] {
   const movable = ref(table, tableName, movableLabels, column);
   const locked = ref(table, tableName, lockedLabels, column);
   return [
-    { ...movable, condition: (id) => and(eq(column, id), sql`not (${lockedWhen})`)! },
-    { ...locked, locked: true, condition: (id) => and(eq(column, id), lockedWhen)! },
+    { ...movable, condition: (id) => and(eq(column, id), scope, sql`not (${lockedWhen})`)! },
+    { ...locked, locked: true, condition: (id) => and(eq(column, id), scope, lockedWhen)! },
   ];
 }
 
@@ -152,7 +155,26 @@ function references(dimension: "costCenter" | "project"): DimensionReference[] {
       "leverantörsfakturarad (attesterad)|leverantörsfakturarader (attesterade)",
       supplierInvoiceRowNotDraft
     ),
-    ...split(salesOrders, "sales_orders", column(salesOrders), "kundorder|kundorder", "avslutad kundorder|avslutade kundorder", salesOrderClosed),
+    // Offert and kundorder share sales_orders; the usage names them apart
+    // by the same document-kind rule the sales lists use.
+    ...split(
+      salesOrders,
+      "sales_orders",
+      column(salesOrders),
+      "offert|offerter",
+      "avslutad offert|avslutade offerter",
+      salesOrderClosed,
+      sql`${documentKindSql} = 'quote'`
+    ),
+    ...split(
+      salesOrders,
+      "sales_orders",
+      column(salesOrders),
+      "kundorder|kundorder",
+      "avslutad kundorder|avslutade kundorder",
+      salesOrderClosed,
+      sql`${documentKindSql} = 'order'`
+    ),
     ...(dimension === "project"
       ? split(purchaseOrders, "purchase_orders", column(purchaseOrders), "inköpsorder|inköpsorder", "avslutad inköpsorder|avslutade inköpsorder", purchaseOrderClosed)
       : []),

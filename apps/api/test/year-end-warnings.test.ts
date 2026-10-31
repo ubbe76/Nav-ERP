@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
-import { bankAccounts, bankReconciliations, db, supplierInvoices, suppliers, vatSettlements } from "@navet/db";
+import { and, eq } from "drizzle-orm";
+import { accountingPeriods, bankAccounts, bankReconciliations, db, supplierInvoices, suppliers, vatSettlements } from "@navet/db";
+import { FiscalYearLastPeriodMissingError } from "../src/modules/economy/service/year-end-closing.service.js";
 import { formatNumber } from "../src/modules/mail/service/document-pdf.js";
 import { testEconomyService } from "./helpers/services.js";
 import { testFixedAssetService } from "./helpers/fixed-assets.js";
@@ -54,6 +55,41 @@ describe("steg 1 — step blockers", () => {
     expect(detail.checks.draftVerifications).toEqual([
       expect.objectContaining({ id: expect.any(String), date: `${YEAR}-03-01`, description: "Utkast" }),
     ]);
+  });
+});
+
+// The warning checks read independently on the Bokslut page: one that
+// throws is named in a check-failed warning instead of failing the page.
+describe("steg 1 — a warning check that fails", () => {
+  it("shows the page with a check-failed warning and the other checks intact", async () => {
+    const log = vi.fn();
+    const failing = buildYearEndService({
+      fixedAssets: {
+        ...testFixedAssetService,
+        getPlan: async () => {
+          throw new Error("plan exploded");
+        },
+      },
+      log,
+    });
+    const { user, yearId } = await setupYearEnd();
+    const closing = await failing.startClosing({ fiscalYearId: yearId }, user.id);
+
+    const warnings = (await failing.getClosing(closing.id)).checks.warnings;
+    expect(warnings.filter((w) => w.code === "check-failed").map((w) => w.message)).toEqual([
+      "Anläggningsregistret kunde inte kontrolleras — försök igen, eller se serverloggen om felet består",
+    ]);
+    // The rest still ran: no VAT month is settled in this year.
+    expect(warnings.some((w) => w.code === "vat-unsettled")).toBe(true);
+    expect(log).toHaveBeenCalledWith("Årsbokslut: warning check failed (Anläggningsregistret)", { err: expect.any(Error) });
+  });
+
+  // lastPeriod used to throw a plain Error (500).
+  it("refuses a year without a period for its last day with fiscal-year-last-period-missing", async () => {
+    const { user, yearId } = await setupYearEnd();
+    const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
+    await db.delete(accountingPeriods).where(and(eq(accountingPeriods.fiscalYearId, yearId), eq(accountingPeriods.startDate, `${YEAR}-12-01`)));
+    await expect(service.getClosing(closing.id)).rejects.toBeInstanceOf(FiscalYearLastPeriodMissingError);
   });
 });
 

@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
-import { accounts, db, fiscalYears, permissionGroups, yearEndClosings } from "@navet/db";
+import { and, eq, sql } from "drizzle-orm";
+import { accountingPeriods, accounts, db, fiscalYears, permissionGroups, yearEndClosings } from "@navet/db";
 import { buildApp } from "../src/app.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -59,6 +59,17 @@ describe("year-end-closings routes", () => {
 
     const list = await app.inject({ url: `/year-end-closings?fiscalYearId=${yearId}` });
     expect(list.json()).toMatchObject({ total: 1, rows: [{ fiscalYearLabel: String(YEAR), status: "in_progress" }] });
+    await app.close();
+  });
+
+  it("409s fiscal-year-last-period-missing for a year without a period for its last day", async () => {
+    const { user, yearId } = await setupYearEnd();
+    const app = buildYearEndApp(user.id);
+    const created = await app.inject({ method: "POST", url: "/year-end-closings", payload: { fiscalYearId: yearId } });
+    await db.delete(accountingPeriods).where(and(eq(accountingPeriods.fiscalYearId, yearId), eq(accountingPeriods.startDate, `${YEAR}-12-01`)));
+    const response = await app.inject({ url: `/year-end-closings/${created.json().id}` });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("fiscal-year-last-period-missing");
     await app.close();
   });
 

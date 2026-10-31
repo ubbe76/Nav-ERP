@@ -65,6 +65,12 @@ describe("evaluateWarnings", () => {
     });
   });
 
+  // A reskontra the Bokslut page could not read is null — its check-failed
+  // warning says so; no mismatch is made up.
+  it("says nothing about a reskontra that could not be checked", () => {
+    expect(evaluateWarnings({ ...CLEAN, receivables: null, payables: null })).toEqual([]);
+  });
+
   it("prefixes a positive payables difference with +", () => {
     const [warning] = evaluateWarnings({ ...CLEAN, payables: { accountNumber: "2440", ledger: 7000, register: 6500 } });
     expect(warning!.message).toContain(`(skillnad +${formatNumber(500)})`);

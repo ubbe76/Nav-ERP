@@ -208,6 +208,8 @@ export const ERROR_CODES = {
   INVENTORY_ACCOUNT_CONFLICT: "inventory-account-conflict",
   INVALID_ACCRUAL_ACCOUNT: "invalid-accrual-account",
   NEXT_FISCAL_YEAR_MISSING: "next-fiscal-year-missing",
+  // the year has no accounting period covering its last day (409)
+  FISCAL_YEAR_LAST_PERIOD_MISSING: "fiscal-year-last-period-missing",
   YEAR_END_STEP_ORDER: "year-end-step-order",
   YEAR_END_CLOSING_NOT_CLOSED: "year-end-closing-not-closed",
   NEXT_FISCAL_YEAR_CLOSED: "next-fiscal-year-closed",
@@ -227,6 +229,9 @@ export const ERROR_CODES = {
   DUPLICATE_FIXED_ASSET_CATEGORY_NAME: "duplicate-fixed-asset-category-name",
   FIXED_ASSET_CATEGORY_IN_USE: "fixed-asset-category-in-use",
   FIXED_ASSET_CATEGORY_ACCOUNTS_NOT_DISTINCT: "fixed-asset-category-accounts-not-distinct",
+  // an asset/ack account given another role in some group (409, body
+  // accountNumber/role/categoryName/otherRole)
+  FIXED_ASSET_CATEGORY_ACCOUNT_ROLE_CONFLICT: "fixed-asset-category-account-role-conflict",
   FIXED_ASSET_CATEGORY_ACCOUNTS_LOCKED: "fixed-asset-category-accounts-locked",
   FIXED_ASSET_BAS_ACCOUNT_MISSING: "fixed-asset-bas-account-missing",
   FIXED_ASSET_FIELD_LOCKED: "fixed-asset-field-locked",

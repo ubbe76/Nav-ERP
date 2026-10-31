@@ -23,6 +23,16 @@ export function demoBlockersText(blockers: string[]): string {
   return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} och ${words.at(-1)}`;
 }
 
+// The anläggningsgrupp's account roles, in prose (the form's labels are
+// Tillgångskonto, Ack. avskrivningar, Avskrivningskostnad, Vinst/Förlust vid avyttring).
+const FIXED_ASSET_ROLE_LABELS: Record<string, string> = {
+  asset: "tillgångskonto",
+  accumulated: "konto för ack. avskrivningar",
+  expense: "konto för avskrivningskostnad",
+  gain: "konto för vinst vid avyttring",
+  loss: "konto för förlust vid avyttring",
+};
+
 type MessageEntry = string | ((err: ApiError) => string);
 
 // For codes whose API message is already Swedish AND names the specific rule
@@ -278,6 +288,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "inventory-account-conflict": "Lager och Lagerförändring kan inte vara samma konto — ändra under Konteringsregler",
   "invalid-accrual-account": "Kontot passar inte för den typen av periodisering — balanskontot ska ligga på rätt sida och resultatkontot i klass 3–8",
   "next-fiscal-year-missing": "Nästa räkenskapsår kunde inte skapas automatiskt — lägg upp det under Räkenskapsår",
+  "fiscal-year-last-period-missing": "Räkenskapsåret saknar en period för sin sista dag — lägg upp perioderna under Räkenskapsår",
   "year-end-step-order":
     "Gör stegen Lagerförändring, Avskrivningar och Periodiseringar — och Valutaomvärdering när det finns öppna fakturor i annan valuta — före resultatöverföringen",
   // The server names the currencies and the day: body.currencies (ISO codes),
@@ -305,6 +316,15 @@ const MESSAGES: Record<string, MessageEntry> = {
   "duplicate-fixed-asset-category-name": "En grupp med det namnet finns redan",
   "fixed-asset-category-in-use": "Gruppen har anläggningar och kan inte tas bort",
   "fixed-asset-category-accounts-not-distinct": "Tillgångskonto, ack-konto och kostnadskonto måste vara tre olika konton",
+  "fixed-asset-category-account-role-conflict": (err) => {
+    const body = err.body as { accountNumber?: unknown; role?: unknown; categoryName?: unknown; otherRole?: unknown } | undefined;
+    const label = (role: unknown) => (typeof role === "string" ? FIXED_ASSET_ROLE_LABELS[role] : undefined);
+    const own = label(body?.role);
+    const other = label(body?.otherRole);
+    return typeof body?.accountNumber === "string" && typeof body.categoryName === "string" && own && other
+      ? `Konto ${body.accountNumber} är redan ${other} i gruppen ${body.categoryName} och kan inte vara ${own} — ett tillgångs- eller ack-konto får bara ha en roll i anläggningsregistret, annars stämmer avstämningen per konto inte.`
+      : "Ett tillgångs- eller ack-konto används redan i en annan roll i en grupp — välj ett annat konto.";
+  },
   "fixed-asset-category-accounts-locked": "Tillgångskonto, ack-konto och kostnadskonto är låsta — gruppen har bokförd eller ingående avskrivning",
   "fixed-asset-bas-account-missing": "Ett BAS-konto saknas — kör Förifyll BAS-urval i kontoplanen först",
   "fixed-asset-field-locked": "Fältet är låst — avskrivning är bokförd på anläggningen",

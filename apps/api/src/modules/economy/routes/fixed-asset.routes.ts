@@ -30,6 +30,7 @@ import {
   FixedAssetBasAccountMissingError,
   FixedAssetCategoryAccountsLockedError,
   FixedAssetCategoryAccountsNotDistinctError,
+  FixedAssetCategoryAccountRoleConflictError,
   FixedAssetCategoryInUseError,
   FixedAssetCategoryNotFoundError,
   FixedAssetFieldLockedError,
@@ -58,6 +59,12 @@ export async function fixedAssetRoutes(app: FastifyInstance, opts: { service: Fi
   const ekonomi = { preHandler: requirePermission("ekonomi") };
 
   function categoryError(err: unknown, reply: Reply) {
+    // Which group already has the account, in which role (the web names both).
+    if (err instanceof FixedAssetCategoryAccountRoleConflictError) {
+      return reply
+        .code(409)
+        .send({ ...errorBody(err), accountNumber: err.accountNumber, role: err.role, categoryName: err.categoryName, otherRole: err.otherRole });
+    }
     if (err instanceof FixedAssetCategoryNotFoundError || err instanceof AccountNotFoundError || err instanceof CostCenterNotFoundError) {
       return reply.code(404).send(errorBody(err));
     }

@@ -58,6 +58,21 @@ describe("fixed-asset-categories routes", () => {
     const empty = await app.inject({ method: "POST", url: "/fixed-asset-categories", payload: {} });
     expect(empty.statusCode).toBe(400);
     expect(empty.json().code).toBe("validation-failed");
+
+    // Inventarier's ack account (1229) as another group's expense account.
+    const crossed = await app.inject({
+      method: "POST",
+      url: "/fixed-asset-categories",
+      payload: { ...payload, name: "Korsad", depreciationExpenseAccountId: await accountId("1229") },
+    });
+    expect(crossed.statusCode).toBe(409);
+    expect(crossed.json()).toMatchObject({
+      code: "fixed-asset-category-account-role-conflict",
+      accountNumber: "1229",
+      role: "expense",
+      categoryName: "Inventarier",
+      otherRole: "accumulated",
+    });
     await app.close();
   });
 
