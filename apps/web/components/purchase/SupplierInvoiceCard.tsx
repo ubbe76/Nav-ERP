@@ -18,6 +18,7 @@ import { documentRateSourceText, documentSekAmounts, formatRate, SEK } from "../
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, formatQuantity } from "../../lib/format";
 import { useInvoiceRate } from "../../lib/useExchangeRate";
+import { purchaseOrderFallbackRate } from "../../lib/purchaseOrderFallbackRate";
 import {
   isVatCode,
   supplierVatCodeNote,
@@ -453,6 +454,11 @@ function HeaderForm({
   const invoiceRate = useInvoiceRate({
     currency: foreign ? invoice.currency : null,
     date: invoiceDate,
+    // A linked purchase order's rate is what a save falls back on.
+    fallbackRate: purchaseOrderFallbackRate(
+      invoice.purchaseOrderId ? { currency: invoice.purchaseOrderCurrency, exchangeRate: invoice.purchaseOrderExchangeRate } : null,
+      foreign ? invoice.currency : null
+    ),
     stored: foreign
       ? {
           rate: invoice.exchangeRateMissing ? "" : String(Number(invoice.exchangeRate)),

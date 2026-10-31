@@ -118,6 +118,19 @@ describe("calendarMonthMap", () => {
     expect(map.get(1)).toBe(7); // January 2027
   });
 
+  // Omläggning av räkenskapsår: an 18-month target year has January–June
+  // twice, and both get the source's January–June — every amount lands in
+  // its own calendar month, and the long year is budgeted in full.
+  it("gives both occurrences of a calendar month in an extended target year the same source month", () => {
+    const source = generateMonthlyPeriods("2025-01-01", "2025-12-31");
+    const extended = generateMonthlyPeriods("2026-01-01", "2027-06-30"); // 18 periods
+    const map = calendarMonthMap(source, extended);
+    expect(map.size).toBe(18);
+    expect([map.get(1), map.get(13)]).toEqual([1, 1]); // January 2026 and January 2027
+    expect([map.get(6), map.get(18)]).toEqual([6, 6]); // June 2026 and June 2027
+    expect(map.get(12)).toBe(12); // December 2026
+  });
+
   it("leaves a target month without counterpart out of the map", () => {
     const short = generateMonthlyPeriods("2026-07-01", "2026-12-31");
     const target = generateMonthlyPeriods("2027-01-01", "2027-12-31");
@@ -247,6 +260,29 @@ describe("budget CSV", () => {
     expect(lines[0]).toBe("Konto;Kontonamn;Kostnadsställe;2027-01;2027-02;2027-03;Summa");
     expect(lines[1]).toBe("3001;Försäljning;;1000,00;1000,50;0,00;2000,50");
     expect(lines[2]).toBe("4010;Inköp material;100;400,00;0,00;0,00;400,00");
+  });
+
+  it("guards a cost center code that looks like a formula in Excel, and reads it back", () => {
+    const codes = { "cc-minus": "-10", "cc-eq": "=SUM(A1)" } as const;
+    const formulaResolvers = {
+      ...resolvers,
+      costCenterId: (code: string) => Object.entries(codes).find(([, c]) => c === code)?.[0] ?? null,
+      costCenterCode: (id: string) => codes[id as keyof typeof codes] ?? null,
+    };
+    const csv = buildBudgetCsv(["2027-01"], [
+      { accountNumber: "4010", accountName: "Inköp material", costCenterId: "cc-minus", costCenterCode: "-10", amounts: [400] },
+      { accountNumber: "4010", accountName: "Inköp material", costCenterId: "cc-eq", costCenterCode: "=SUM(A1)", amounts: [-50] },
+    ]);
+    const lines = csv.replace(/^\uFEFF/, "").split("\r\n");
+    expect(lines[1]).toBe("4010;Inköp material;'-10;400,00;400,00");
+    expect(lines[2]).toBe("4010;Inköp material;'=SUM(A1);-50,00;-50,00");
+    const { headers, rows } = parseCsvBuffer(Buffer.from(csv, "utf8"));
+    const result = parseBudgetCsv([headers, ...rows], 1, formulaResolvers);
+    expect(result.errors).toEqual([]);
+    expect(result.lines.map((line) => [line.costCenterId, line.amounts])).toEqual([
+      ["cc-minus", [400]],
+      ["cc-eq", [-50]],
+    ]);
   });
 
   it("parses the same form back, by column position, with decimal comma and spaces", () => {

@@ -51,6 +51,13 @@ export function guardFormulaInjection(value: string): string {
   return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
+// The way back for an import that reads our own export: drops the guard's
+// apostrophe again (only in front of a trigger character, so a value that
+// really starts with an apostrophe is left alone).
+export function unguardFormulaInjection(value: string): string {
+  return /^'[=+\-@\t\r]/.test(value) ? value.slice(1) : value;
+}
+
 function formatValue(raw: string | number | null | undefined, format: CsvColumn<never>["format"]): string {
   if (raw === null || raw === undefined || raw === "") return "";
   switch (format) {

@@ -278,6 +278,8 @@ export function createSupplierInvoiceService(
         unavailable = err;
       }
     }
+    // Mirrored in the web's purchaseOrderFallbackRate (lib/purchaseOrderFallbackRate.ts),
+    // so the form shows this rate instead of "Ingen kurs".
     if (purchaseOrderId) {
       const order = await repo.findPurchaseOrderRate(purchaseOrderId);
       if (order && order.currency === currency && order.exchangeRate > 0 && order.exchangeRate !== 1) {

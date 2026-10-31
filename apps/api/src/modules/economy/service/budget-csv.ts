@@ -4,7 +4,7 @@
 // straight into another. Pure: the export is buildCsv over grid lines, the
 // parser turns parsed records into grid lines + per-row errors and saves
 // nothing (the web fills the grid, the user presses Spara).
-import { buildCsv, round2, type CsvColumn } from "@navet/shared";
+import { buildCsv, round2, unguardFormulaInjection, type CsvColumn } from "@navet/shared";
 import { normalizeDecimal } from "../../import/service/csv.js";
 import { compareGridLines, isBudgetableAccount, type BudgetGridLine } from "./budget-calc.js";
 
@@ -63,7 +63,8 @@ export function parseBudgetCsv(records: string[][], monthCount: number, resolve:
       errors.push({ row, message: `Okänt eller ej budgeterbart konto ${accountNumber}` });
       return;
     }
-    const code = (record[2] ?? "").trim();
+    // A code like "-10" left the export as "'-10" (the formula guard).
+    const code = unguardFormulaInjection((record[2] ?? "").trim());
     let costCenterId: string | null = null;
     if (code !== "") {
       costCenterId = resolve.costCenterId(code);

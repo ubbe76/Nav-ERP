@@ -145,6 +145,8 @@ describe("leverantörsfaktura i valuta — kursen", () => {
       .returning();
     const fromOrder = await invoices.create({ supplierId: eur.id, invoiceNumber: "T-2", invoiceDate: TODAY, purchaseOrderId: order!.id, rows: [] }, user.id);
     expect(fromOrder).toMatchObject({ exchangeRate: "11.400000", exchangeRateSource: "purchase_order" });
+    // The card shows the order's rate as the fallback for a new invoice date.
+    expect(await invoices.getInvoice(fromOrder.id)).toMatchObject({ purchaseOrderCurrency: "EUR", purchaseOrderExchangeRate: "11.400000" });
 
     // No lookup, no order: 409 exchange-rate-unavailable, nothing created.
     await expect(invoices.create({ supplierId: eur.id, invoiceNumber: "T-3", invoiceDate: TODAY, rows: [] }, user.id)).rejects.toBeInstanceOf(
