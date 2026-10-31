@@ -259,6 +259,15 @@ describe("Räntefakturering — kandidaterna", () => {
     expect((await candidates({ customerId: company.id })).rows[0]!.fee).toBe(0);
   });
 
+  it("judges privatperson by the invoice, not by the customer card of today", async () => {
+    const user = await makeUser();
+    const company = await makeCustomer("Blev privat AB");
+    await makeInvoice(company.id, user.id, 36500);
+    await db.update(customers).set({ privatePerson: true }).where(eq(customers.id, company.id));
+    const [row] = (await candidates({ customerId: company.id })).rows;
+    expect([row!.privatePerson, row!.fee]).toEqual([false, 450]);
+  });
+
   it("reduces the förseningsersättning by a charged påminnelseavgift and uses the Avtalad räntesats", async () => {
     const user = await makeUser();
     const customer = await makeCustomer("Avtal AB", { lateInterestRate: "15" });
@@ -522,6 +531,11 @@ describe("Skapa räntefakturor", () => {
     const quiet = await makeCustomer("Tyst AB", { lateInterest: false });
     const quietInvoice = await makeInvoice(quiet.id, user.id, 1000);
     expect(await pdfText((await invoiceService.renderPdf(quietInvoice.id)).content)).not.toContain(TERMS);
+
+    // A foreign-currency invoice is never a candidate, so it promises nothing.
+    const eur = await makeCustomer("Euro AB", { currency: "EUR" });
+    const eurInvoice = await makeInvoice(eur.id, user.id, 1000, DUE, "EUR");
+    expect(await pdfText((await invoiceService.renderPdf(eurInvoice.id)).content)).not.toContain(TERMS);
 
     await testSystemService.updateSettings({ lateInterestEnabled: false });
     const off = await makeInvoice(customer.id, user.id, 1000);

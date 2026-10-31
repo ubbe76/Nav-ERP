@@ -8,7 +8,9 @@ import type { FinancialReportsService } from "../src/modules/economy/service/fin
 import type { SieService } from "../src/modules/economy/service/sie.service.js";
 import type { VatReportService } from "../src/modules/economy/service/vat-report.service.js";
 import { createVerificationPoster } from "../src/modules/economy/service/verification-poster.js";
-import { DEFAULT_POSTING_SETTINGS, testEconomyService } from "./helpers/services.js";
+import { isBookkeepingLockViolation, isClosedFiscalYearViolation } from "../src/modules/system/service/db-errors.js";
+import { bookFailureError } from "../src/modules/economy/service/economy.service.js";
+import { DEFAULT_POSTING_SETTINGS, testEconomyRepository, testEconomyService } from "./helpers/services.js";
 import { NEXT_YEAR, YEAR, accountId, createCalendarYear, failure, resetYearEnd, setupYearEnd } from "./helpers/year-end.js";
 
 beforeEach(resetYearEnd);
@@ -57,6 +59,29 @@ async function manualDraftInYear(userId: string) {
 }
 
 describe("closed fiscal year — application guards", () => {
+  it("names the year, not the date, in the poster's FiscalYearClosedError", async () => {
+    const { user, yearId } = await setupYearEnd();
+    await closeBySql(yearId);
+    const balances = [
+      { accountId: await accountId("1930"), amount: 100 },
+      { accountId: await accountId("2091"), amount: -100 },
+    ];
+    const err = await failure(db.transaction((tx) => poster.postOpeningBalances(tx, { date: `${YEAR}-06-30`, balances }, user.id)));
+    expect(err).toBeInstanceOf(FiscalYearClosedError);
+    expect((err as Error).message).toBe(`The fiscal year (${YEAR}) is closed — reopen it under Bokslut`);
+  });
+
+  it("tells the closed-year triggers' NV001 apart from the bookkeeping lock's", async () => {
+    const { yearId } = await setupYearEnd();
+    await closeBySql(yearId);
+    // The period guard (migration 0106): locked → open in a closed year.
+    const err = await failure(db.update(accountingPeriods).set({ status: "open" }).where(eq(accountingPeriods.fiscalYearId, yearId)));
+    expect(isBookkeepingLockViolation(err)).toBe(true);
+    expect(isClosedFiscalYearViolation(err)).toBe(true);
+    // The 0095 triggers' messages are about booked records.
+    expect(isClosedFiscalYearViolation({ code: "NV001", message: "Bokfört verifikat kan inte ändras — rätta med en omföring (id x)" })).toBe(false);
+  });
+
   it("the poster refuses with FiscalYearClosedError, which is also an AccountingPeriodLockedError", async () => {
     const { user, yearId } = await setupYearEnd();
     await closeBySql(yearId);
@@ -138,15 +163,28 @@ describe("closed fiscal year — application guards", () => {
     expect((await testEconomyService.findVerificationById(draft.id)).reversedBy).toBeNull();
   });
 
-  it("POST /verifications/:id/book answers 409 for a draft in a closed year", async () => {
+  it("POST /verifications/:id/book answers 409 fiscal-year-closed for a draft in a closed year", async () => {
     const { user, yearId } = await setupYearEnd();
     const draft = await manualDraftInYear(user.id);
     await closeBySql(yearId);
     const app = buildEconomyApp(user.id);
     const res = await app.inject({ method: "POST", url: `/verifications/${draft.id}/book` });
     expect(res.statusCode).toBe(409);
-    expect(res.json().code).toBe("accounting-period-locked");
+    // The year before the period: every period of a closed year is locked,
+    // but the answer the user needs is "reopen the year".
+    expect(res.json().code).toBe("fiscal-year-closed");
     await app.close();
+  });
+
+  it("the in-tx re-check reports a closed year as FiscalYearClosedError (before the locked period)", async () => {
+    const { user, yearId } = await setupYearEnd();
+    const draft = await manualDraftInYear(user.id);
+    await closeBySql(yearId);
+    const failure = await testEconomyRepository.bookVerification(draft.id, user.id);
+    expect(failure).toEqual({ ok: false, reason: "closed_year", label: String(YEAR) });
+    const err = bookFailureError(draft.id, failure as Extract<typeof failure, { ok: false }>);
+    expect(err).toBeInstanceOf(FiscalYearClosedError);
+    expect(err).toBeInstanceOf(AccountingPeriodLockedError);
   });
 
   it("POST /verifications answers 409 fiscal-year-closed for a draft dated in a closed year", async () => {

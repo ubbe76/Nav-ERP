@@ -214,6 +214,17 @@ describe("steg 2 — lagerförändring", () => {
     await expect(service.bookInventory(closing.id, { method: "standard" }, user.id)).rejects.toBeInstanceOf(MissingPostingAccountError);
   });
 
+  it("409s when lager and lagerförändring are the same account even with nothing to value", async () => {
+    const { user, yearId } = await setupYearEnd();
+    const service = buildYearEndService({
+      inventory: fakeValuation(0).reader,
+      settings: { read: async () => ({ ...DEFAULT_POSTING_SETTINGS, postingInventoryChange: "1460" }) },
+    });
+    const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
+    await expect(service.previewInventory(closing.id, "standard")).rejects.toBeInstanceOf(InventoryAccountConflictError);
+    await expect(service.bookInventory(closing.id, { method: "standard" }, user.id)).rejects.toBeInstanceOf(InventoryAccountConflictError);
+  });
+
   it("409s when lager and lagerförändring are the same account", async () => {
     const { user, yearId } = await setupYearEnd();
     const service = buildYearEndService({

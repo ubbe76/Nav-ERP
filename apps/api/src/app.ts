@@ -194,7 +194,7 @@ import { createAlertsService } from "./modules/alerts/service/alerts.service.js"
 import { createAlertDigestRepository } from "./modules/alerts/repository/alert-digest.repository.js";
 import { createAlertDigestService } from "./modules/alerts/service/alert-digest.service.js";
 import { alertsRoutes } from "./modules/alerts/routes/alerts.routes.js";
-import { isBookkeepingLockViolation, isEmployeeAnonymizedViolation } from "./modules/system/service/db-errors.js";
+import { isBookkeepingLockViolation, isClosedFiscalYearViolation, isEmployeeAnonymizedViolation } from "./modules/system/service/db-errors.js";
 import { createQualityRepository } from "./modules/quality/repository/quality.repository.js";
 import { createQualityService } from "./modules/quality/service/quality.service.js";
 import { qualityRoutes } from "./modules/quality/routes/quality.routes.js";
@@ -259,6 +259,14 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // räkenskapsinformation that slipped past the services' own guards.
     if (isBookkeepingLockViolation(err)) {
       app.log.error(err);
+      // The closed-year triggers (migration 0105): the fix is Öppna igen
+      // under Bokslut, not an omföring.
+      if (isClosedFiscalYearViolation(err)) {
+        return reply.code(409).send({
+          error: "Räkenskapsåret är stängt — öppna det igen under Bokslut",
+          code: "fiscal-year-closed",
+        });
+      }
       return reply.code(409).send({
         error: "Bokförd räkenskapsinformation kan inte ändras eller raderas",
         code: "bookkeeping-record-locked",

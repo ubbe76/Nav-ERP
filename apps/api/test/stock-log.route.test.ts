@@ -64,9 +64,11 @@ describe("lagerlogg — kostnadsdöljning", () => {
     expect(without.body).not.toContain("50,00");
   });
 
-  it("400s an invalid filter on the CSV route", async () => {
+  it("400s an invalid filter on the CSV route — an empty articleId included, never an empty Saldo column", async () => {
     const res = await buildApp({ role: "admin", permissions: [] }).inject({ method: "GET", url: "/stock/transactions/csv?direction=sideways" });
     expect(res.statusCode).toBe(400);
+    const blank = await buildApp({ role: "admin", permissions: [] }).inject({ method: "GET", url: "/stock/transactions/csv?articleId=" });
+    expect(blank.statusCode).toBe(400);
   });
 
   it("CSV drops Saldo without an article filter and labels transfer legs Flytt till/från", async () => {

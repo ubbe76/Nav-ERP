@@ -4964,8 +4964,10 @@ export interface YearEndClosingDetail {
     stepBlockers: YearEndCheck[];
     closeBlockers: YearEndCheck[];
     warnings: YearEndCheck[];
-    // The drafts behind the "draft-verifications" blocker, at most 20.
+    // The drafts behind the "draft-verifications" blocker, at most 20 —
+    // draftVerificationCount is how many there are in all.
     draftVerifications: { id: string; date: string; description: string }[];
+    draftVerificationCount: number;
   };
   ibCheck: {
     nextFiscalYearLabel: string;

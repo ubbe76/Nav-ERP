@@ -510,7 +510,7 @@ export function MomsrapportPageClient({
                         <GatedLink href={{ pathname: "/ekonomi/kontoplan", query: { search: account.accountNumber } }}>
                           {account.accountNumber} · {account.accountName}
                         </GatedLink>{" "}
-                        — {formatMoney(account.net)}
+                        — {formatMoney(Math.abs(account.net))}
                       </li>
                     ))}
                   </ul>

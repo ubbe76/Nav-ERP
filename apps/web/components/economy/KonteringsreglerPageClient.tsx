@@ -175,17 +175,23 @@ export function KonteringsreglerPageClient({
 }
 
 // Options for an account select keyed by account NUMBER (the Standardkonton
-// fields): the fetched (active) accounts, plus — only when the current value
-// isn't among them — an extra option for it, so an account that was later
+// fields): the active accounts, plus — only when the current value isn't
+// among them — an extra option for it, so an account that was later
 // deactivated doesn't silently jump the select to a different one, which
 // would then quietly overwrite the setting with that different account on
-// the next save.
+// the next save. `accounts` holds the whole chart (inactive included), so a
+// number that is not in it at all is missing, not inactive.
 function accountNumberOptions(accounts: Account[], currentValue: string): ReactNode {
-  const hasCurrent = currentValue === "" || accounts.some((a) => a.number === currentValue);
+  const current = accounts.find((a) => a.number === currentValue);
+  const hasCurrent = currentValue === "" || current?.active === true;
   return (
     <>
-      {!hasCurrent && <option value={currentValue}>{currentValue} (inaktivt konto)</option>}
-      {accounts.map((a) => (
+      {!hasCurrent && (
+        <option value={currentValue}>
+          {current ? `${current.number} ${current.name} (inaktivt konto)` : `${currentValue} (saknas i kontoplanen)`}
+        </option>
+      )}
+      {accounts.filter((a) => a.active).map((a) => (
         <option key={a.id} value={a.number}>
           {a.number} {a.name}
         </option>
@@ -198,13 +204,13 @@ function accountNumberOptions(accounts: Account[], currentValue: string): ReactN
 // comes from the rule row's own joined number/name (economy.repository.ts's
 // listPostingRules), since an inactive account isn't in `accounts` to look up.
 function accountIdOptions(accounts: Account[], currentId: string, currentLabel: string | null): ReactNode {
-  const hasCurrent = currentId === "" || accounts.some((a) => a.id === currentId);
+  const hasCurrent = currentId === "" || accounts.some((a) => a.id === currentId && a.active);
   return (
     <>
       {!hasCurrent && currentLabel && (
         <option value={currentId}>{currentLabel} (inaktivt konto)</option>
       )}
-      {accounts.map((a) => (
+      {accounts.filter((a) => a.active).map((a) => (
         <option key={a.id} value={a.id}>
           {a.number} {a.name}
         </option>

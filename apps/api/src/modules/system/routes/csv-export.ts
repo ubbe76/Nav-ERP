@@ -17,8 +17,9 @@ export interface ListCsvRouteOptions<Q, T> {
   // the filter (Offerter vs Kundorder share one list endpoint).
   filenameBase: string | ((query: Q) => string);
   // A function when the columns/rows depend on who asks (e.g. cost columns
-  // only for the ekonomi audience) — receives the request.
-  columns: CsvColumn<T>[] | ((req: FastifyRequest) => CsvColumn<T>[]);
+  // only for the ekonomi audience) or on the filter (a balance column only
+  // with an article filter) — receives the request and the PARSED query.
+  columns: CsvColumn<T>[] | ((req: FastifyRequest, query: Q) => CsvColumn<T>[]);
   fetch: (
     query: Q & { limit: number; offset: number },
     req: FastifyRequest
@@ -51,7 +52,7 @@ export function registerListCsvRoute<Q, T>(app: FastifyInstance, opts: ListCsvRo
       const filename = `${base}-${stockholmDate.format(new Date())}.csv`;
       reply.header("Content-Type", "text/csv; charset=utf-8");
       reply.header("Content-Disposition", contentDisposition(filename));
-      return reply.send(buildCsv(typeof opts.columns === "function" ? opts.columns(req) : opts.columns, result.rows));
+      return reply.send(buildCsv(typeof opts.columns === "function" ? opts.columns(req, parsed.data) : opts.columns, result.rows));
     }
   );
 }

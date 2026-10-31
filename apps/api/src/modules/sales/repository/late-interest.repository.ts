@@ -71,7 +71,9 @@ export async function listLateInterestSources(
       customerId: invoices.customerId,
       customerName: customers.name,
       customerPaymentTermId: customers.paymentTermId,
-      privatePerson: customers.privatePerson,
+      // Stamped on the invoice at issue — a later change on the customer
+      // card does not turn a business invoice into a consumer one.
+      privatePerson: invoices.privatePerson,
       customerLateFee: customers.lateFee,
       agreedRate: customers.lateInterestRate,
       dueDate: invoices.dueDate,

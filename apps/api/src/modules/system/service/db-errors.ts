@@ -79,6 +79,16 @@ export function isBookkeepingLockViolation(err: unknown): boolean {
   );
 }
 
+// Årsbokslut (migration 0105): the two closed-year triggers raise the same
+// NV001 but mean "reopen the year", not "booked records are immutable" —
+// told apart on their message, which both start with the closed year.
+export function isClosedFiscalYearViolation(err: unknown): boolean {
+  if (!isBookkeepingLockViolation(err)) return false;
+  const { message, cause } = err as { message?: unknown; cause?: unknown };
+  const causeMessage = typeof cause === "object" && cause !== null ? (cause as { message?: unknown }).message : undefined;
+  return [message, causeMessage].some((text) => typeof text === "string" && /Räkenskapsåret är stängt|stängt räkenskapsår/.test(text));
+}
+
 // GDPR (#2, migration 0170): the guard triggers refuse any change to an
 // anonymized employee and any new time, absence, ATF or schedule row for one
 // with SQLSTATE NV002. The services check first where a user can get there;

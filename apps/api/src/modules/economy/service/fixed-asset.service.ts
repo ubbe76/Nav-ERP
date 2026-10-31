@@ -784,8 +784,12 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
     },
 
     // Förifyll BAS-grupper: idempotent on name, all-or-nothing on accounts.
+    // Under the run lock like every other category writer: a double click
+    // runs the second seed after the first has committed, so it skips the
+    // names instead of hitting the unique index (500) mid-transaction.
     async seedBasCategories(): Promise<{ created: string[]; skipped: string[] }> {
-      return db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
+        await tx.execute(DEPRECIATION_LOCK_SQL);
         const numbers = [
           ...new Set(
             BAS_FIXED_ASSET_CATEGORIES.flatMap((category) => [
@@ -823,6 +827,10 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
         }
         return { created, skipped };
       });
+      for (const name of result.created) {
+        await audit.log({ entityType: "fixed_asset_category", entityId: name, action: "created", detail: { source: "bas" } });
+      }
+      return result;
     },
 
     // --- Anläggningar ---
@@ -943,6 +951,11 @@ export function createFixedAssetService(deps: FixedAssetServiceDeps) {
           const locked = changed.find((key) => (LOCKED_AFTER_DEPRECIATION as readonly string[]).includes(key));
           if (locked) throw new FixedAssetFieldLockedError(locked);
         }
+        // An opening amount already sits in IB on THIS group's accounts
+        // (postingAccountsLocked counts it): moving the asset would shift it
+        // between groups in the reconciliation. The opening fields themselves
+        // stay editable until the first run (above).
+        if (Number(existing.openingDepreciation) > 0 && changed.includes("categoryId")) throw new FixedAssetFieldLockedError("categoryId");
 
         const merged = {
           acquisitionDate: input.acquisitionDate ?? existing.acquisitionDate,

@@ -73,6 +73,13 @@ describe("startClosing / updateClosingDate", () => {
     const { user, yearId } = await setupYearEnd();
     const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
     expect((await service.updateClosingDate(closing.id, `${YEAR}-12-15`, user.id)).closingDate).toBe(`${YEAR}-12-15`);
+    // The same date again changes nothing and logs nothing.
+    expect((await service.updateClosingDate(closing.id, `${YEAR}-12-15`, user.id)).closingDate).toBe(`${YEAR}-12-15`);
+    const changes = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityType, "year_end_closing"), eq(auditLog.action, "closing_date_changed")));
+    expect(changes).toHaveLength(1);
     await expect(service.updateClosingDate(closing.id, `${YEAR}-10-01`, user.id)).rejects.toBeInstanceOf(InvalidClosingDateError);
     // A booked inventory step (value 0, nothing to book) locks the date.
     await db

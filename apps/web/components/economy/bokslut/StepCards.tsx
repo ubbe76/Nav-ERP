@@ -77,7 +77,8 @@ function stepState(closing: YearEndClosingDetail, status: PillKey): PillKey {
 export function ChecksCard({ closing }: { closing: YearEndClosingDetail }) {
   const router = useRouter();
   const [unlocking, setUnlocking] = useState(false);
-  const { stepBlockers, warnings, draftVerifications } = closing.checks;
+  const { stepBlockers, warnings, draftVerifications, draftVerificationCount } = closing.checks;
+  const draftsNotListed = draftVerificationCount - draftVerifications.length;
   const status: PillKey = stepBlockers.length > 0 ? "blocked" : warnings.length > 0 ? "warnings" : "done";
   return (
     <Card maxWidth="none">
@@ -97,6 +98,13 @@ export function ChecksCard({ closing }: { closing: YearEndClosingDetail }) {
               </Link>
             </li>
           ))}
+          {draftsNotListed > 0 && (
+            <li>
+              <Link href={{ pathname: "/ekonomi/verifikat", query: { fiscalYearId: closing.fiscalYearId, status: "draft" } }}>
+                … och {draftsNotListed} till
+              </Link>
+            </li>
+          )}
         </ul>
       )}
       {stepBlockers.some((check) => check.code === "closing-period-locked") && (

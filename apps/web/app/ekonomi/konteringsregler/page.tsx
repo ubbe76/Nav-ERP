@@ -28,7 +28,9 @@ export default async function KonteringsreglerPage() {
   const [settings, postingRules, accounts, articleGroups, vatCodes] = await Promise.all([
     apiGet<SystemSettings>("/api/v1/settings", cookieHeader),
     apiGet<PostingRule[]>("/api/v1/posting-rules", cookieHeader),
-    apiGet<Paged<Account>>("/api/v1/accounts?limit=1000", cookieHeader),
+    // Inactive accounts included: the selects list the active ones, the rest
+    // only tell a deactivated setting apart from one missing in the chart.
+    apiGet<Paged<Account>>("/api/v1/accounts?includeInactive=true&limit=1000", cookieHeader),
     apiGet<ArticleGroup[]>("/api/v1/article-groups", cookieHeader),
     apiGet<VatCodeView[]>("/api/v1/vat-codes", cookieHeader),
   ]);

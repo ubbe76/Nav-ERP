@@ -160,12 +160,9 @@ export async function stockRoutes(
     path: "/stock/transactions/csv",
     querySchema: listStockTransactionsQuerySchema,
     filenameBase: "lagertransaktioner",
-    columns: (req) =>
-      stockTransactionColumns(
-        canSeeStockCost(req.user!),
-        // Saldo only exists with an article filter (the CSV route strips unknown keys' validity, not presence).
-        typeof (req.query as Record<string, unknown>).articleId === "string"
-      ),
+    // Saldo only exists with an article filter — judged on the parsed query,
+    // the same one the rows were fetched with.
+    columns: (req, query) => stockTransactionColumns(canSeeStockCost(req.user!), query.articleId !== undefined),
     fetch: async (query) => service.listTransactions(query),
   });
 

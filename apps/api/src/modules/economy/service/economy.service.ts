@@ -413,6 +413,8 @@ export function bookFailureError(id: string, failure: BookFailure): Error {
       return new UnbalancedVerificationError(failure.totalDebit, failure.totalCredit);
     case "inactive_account":
       return new InactiveAccountError(failure.accountId);
+    case "closed_year":
+      return new FiscalYearClosedError(failure.label);
     case "locked_period":
       return new AccountingPeriodLockedError(failure.date);
     case "no_period":
@@ -1002,6 +1004,10 @@ export function createEconomyService(repo: EconomyRepository, audit: AuditWriter
         if (!account || !account.active) throw new InactiveAccountError(accountId);
       }
 
+      // The year before the period: a closed year has every period locked,
+      // and the fix is Öppna igen under Bokslut, not an unlock.
+      const year = await repo.findFiscalYearById(verification.fiscalYearId);
+      if (year?.status === "closed") throw new FiscalYearClosedError(year.label);
       const periodStatus = await repo.getPeriodStatusForDate(verification.date);
       if (periodStatus === null) throw new NoAccountingPeriodError(verification.date);
       if (periodStatus === "locked") throw new AccountingPeriodLockedError(verification.date);
