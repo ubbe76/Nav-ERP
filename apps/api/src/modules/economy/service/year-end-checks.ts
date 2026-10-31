@@ -22,7 +22,9 @@ export type YearEndCheckCode =
   | "fx-revaluation-stale"
   | "result-not-transferred"
   | "next-year-opening-balance-import"
-  | "bank-not-reconciled";
+  | "bank-not-reconciled"
+  // A warning check that threw on the Bokslut page — the rest still show.
+  | "check-failed";
 
 export interface YearEndCheck {
   code: YearEndCheckCode;
@@ -129,8 +131,9 @@ export interface LedgerComparison {
 
 export interface WarningInput {
   unsettledVatMonths: string[];
-  receivables: LedgerComparison;
-  payables: LedgerComparison;
+  // null = could not be checked (a check-failed warning says so).
+  receivables: LedgerComparison | null;
+  payables: LedgerComparison | null;
   fixedAssetMismatches: string[];
   revenueWithoutVatBox: { accountNumber: string; accountName: string; net: number }[];
   // Steg 2 done but the inventory account no longer equals the booked value.
@@ -153,7 +156,8 @@ function signed(value: number): string {
   return value > 0 ? `+${formatNumber(value)}` : formatNumber(value);
 }
 
-function ledgerMismatch(code: YearEndCheckCode, label: string, comparison: LedgerComparison): YearEndCheck | null {
+function ledgerMismatch(code: YearEndCheckCode, label: string, comparison: LedgerComparison | null): YearEndCheck | null {
+  if (!comparison) return null;
   const revaluation = round2(comparison.revaluation ?? 0);
   const difference = round2(comparison.ledger - comparison.register - revaluation);
   if (difference === 0) return null;

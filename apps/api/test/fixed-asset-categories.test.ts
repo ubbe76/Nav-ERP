@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { db, fixedAssetCategories } from "@navet/db";
 import { BAS_STANDARD_ACCOUNTS } from "../src/modules/economy/service/bas-accounts.js";
 import { AccountNotFoundError, InactiveAccountError } from "../src/modules/economy/service/economy.service.js";
 import {
@@ -6,6 +7,7 @@ import {
   FixedAssetBasAccountMissingError,
   FixedAssetCategoryAccountsLockedError,
   FixedAssetCategoryAccountsNotDistinctError,
+  FixedAssetCategoryAccountRoleConflictError,
   FixedAssetCategoryInUseError,
   FixedAssetCategoryNotFoundError,
 } from "../src/modules/economy/service/fixed-asset.service.js";
@@ -58,6 +60,46 @@ describe("anläggningsgrupper", () => {
     await expect(
       service.createCategory(await categoryInput({ depreciationExpenseAccountId: await accountId("1210") }))
     ).rejects.toBeInstanceOf(FixedAssetCategoryAccountsNotDistinctError);
+  });
+
+  // The asset and ack accounts are reconciled per account, so neither may
+  // have another role in any group; the same role in several groups is fine
+  // (Maskiner above shares Inventarier's expense, gain and loss accounts).
+  it("refuses an asset or ack account in another role, in another group or its own", async () => {
+    await setupFixedAssets();
+    const conflict = (accountNumber: string, role: string, categoryName: string, otherRole: string) =>
+      expect.objectContaining({ name: "FixedAssetCategoryAccountRoleConflictError", accountNumber, role, categoryName, otherRole });
+
+    // Inventarier: asset 1220, ack 1229.
+    await expect(service.createCategory(await categoryInput({ depreciationExpenseAccountId: await accountId("1229") }))).rejects.toEqual(
+      conflict("1229", "expense", "Inventarier", "accumulated")
+    );
+    await expect(service.createCategory(await categoryInput({ assetAccountId: await accountId("1229") }))).rejects.toEqual(
+      conflict("1229", "asset", "Inventarier", "accumulated")
+    );
+    await expect(service.createCategory(await categoryInput({ accumulatedDepreciationAccountId: await accountId("1220") }))).rejects.toEqual(
+      conflict("1220", "accumulated", "Inventarier", "asset")
+    );
+    // Its own asset account as its gain account.
+    await expect(service.createCategory(await categoryInput({ disposalGainAccountId: await accountId("1210") }))).rejects.toEqual(
+      conflict("1210", "gain", "Maskiner", "asset")
+    );
+
+    // An update that moves an account into a crossing role is refused too.
+    const maskiner = await service.createCategory(await categoryInput());
+    await expect(service.updateCategory(maskiner.id, { disposalLossAccountId: await accountId("1220") })).rejects.toBeInstanceOf(
+      FixedAssetCategoryAccountRoleConflictError
+    );
+  });
+
+  it("lets a name change through on a combination saved before the role check", async () => {
+    await setupFixedAssets();
+    const [legacy] = await db
+      .insert(fixedAssetCategories)
+      .values({ ...(await categoryInput({ name: "Gammal", depreciationExpenseAccountId: await accountId("1229") })) })
+      .returning();
+    const renamed = await service.updateCategory(legacy!.id, { name: "Gammal grupp" });
+    expect(renamed.name).toBe("Gammal grupp");
   });
 
   it("updates, refuses to update a missing one, and deletes an unused one", async () => {

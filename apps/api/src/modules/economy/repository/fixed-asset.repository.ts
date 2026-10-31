@@ -145,6 +145,22 @@ export async function findCategoryByName(executor: Db | Tx, name: string) {
   return row ?? null;
 }
 
+// Every group's five accounts, for the role check across groups.
+export async function listCategoryAccounts(executor: Db | Tx) {
+  return executor
+    .select({
+      id: fixedAssetCategories.id,
+      name: fixedAssetCategories.name,
+      assetAccountId: fixedAssetCategories.assetAccountId,
+      accumulatedDepreciationAccountId: fixedAssetCategories.accumulatedDepreciationAccountId,
+      depreciationExpenseAccountId: fixedAssetCategories.depreciationExpenseAccountId,
+      disposalGainAccountId: fixedAssetCategories.disposalGainAccountId,
+      disposalLossAccountId: fixedAssetCategories.disposalLossAccountId,
+    })
+    .from(fixedAssetCategories)
+    .orderBy(asc(fixedAssetCategories.name));
+}
+
 export async function insertCategory(executor: Db | Tx, values: CategoryWrite) {
   const [row] = await executor.insert(fixedAssetCategories).values(values).returning();
   return row!;

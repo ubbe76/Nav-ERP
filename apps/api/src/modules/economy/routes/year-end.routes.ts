@@ -32,6 +32,7 @@ import {
   ProfitDispositionNotFoundError,
   YearEndBlockedError,
   YearEndClosingClosedError,
+  FiscalYearLastPeriodMissingError,
   YearEndClosingExistsError,
   YearEndClosingNotClosedError,
   YearEndClosingNotFoundError,
@@ -68,6 +69,7 @@ const CONFLICT: ErrorClass[] = [
   ProfitDispositionActiveError,
   ProfitDispositionExistsError,
   NothingToDisposeError,
+  FiscalYearLastPeriodMissingError,
 ];
 
 function closingError(err: unknown, reply: Reply) {

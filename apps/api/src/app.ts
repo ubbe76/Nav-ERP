@@ -887,6 +887,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     fixedAssets: fixedAssetService,
     inventory: valuationService,
     fiscalYears: economyService,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
 
   app.register(

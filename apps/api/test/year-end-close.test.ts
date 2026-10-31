@@ -193,6 +193,26 @@ describe("steg 6 — stäng året", () => {
     await expect(service.bookResultTransfer(closingId, user.id)).rejects.toBeInstanceOf(YearEndClosingClosedError);
   });
 
+  // The warning checks run strictly and one at a time inside the close's
+  // transaction: the first that throws fails the close with its own error
+  // and the year stays open (the Bokslut page itself shows check-failed).
+  it("fails the close with the original error when a warning check throws, and rolls back", async () => {
+    const { user } = await setupUserAndAccounts();
+    const failing = buildYearEndService({
+      fixedAssets: {
+        ...testFixedAssetService,
+        getPlan: async () => {
+          throw new Error("plan exploded");
+        },
+      },
+      log: () => {},
+    });
+    const { closingId, yearId } = await prepareClosableYear(failing, user.id, { revenue: 1000, cost: 400 });
+    await failing.bookResultTransfer(closingId, user.id);
+    await expect(failing.closeYear(closingId, user.id)).rejects.toThrow("plan exploded");
+    expect((await yearRow(yearId)).status).toBe("open");
+  });
+
   it("keeps the lock stamp of a period locked before the close", async () => {
     const { user } = await setupUserAndAccounts();
     const { closingId, yearId } = await prepareClosableYear(service, user.id, { revenue: 100000, cost: 40000 });

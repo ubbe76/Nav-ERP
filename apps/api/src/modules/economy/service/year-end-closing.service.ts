@@ -65,7 +65,14 @@ import {
   type SignedAmount,
 } from "./year-end-calc.js";
 import { DIVIDEND_PAYABLE_ACCOUNT, RETAINED_EARNINGS_ACCOUNT, YEAR_RESULT_ACCOUNT, YEAR_RESULT_EQUITY_ACCOUNT } from "./year-end-accounts.js";
-import { evaluateCloseBlockers, evaluateStepBlockers, evaluateWarnings, type StepGateInput, type YearEndCheck } from "./year-end-checks.js";
+import {
+  evaluateCloseBlockers,
+  evaluateStepBlockers,
+  evaluateWarnings,
+  type LedgerComparison,
+  type StepGateInput,
+  type YearEndCheck,
+} from "./year-end-checks.js";
 import { unreconciledBankAccountsAsOf } from "../../banking/repository/bank-reconciliation.repository.js";
 
 export class YearEndClosingNotFoundError extends Error {
@@ -128,6 +135,15 @@ export class NextFiscalYearMissingError extends Error {
   constructor(label: string) {
     super(`The fiscal year after ${label} could not be created automatically — create it under Räkenskapsår`);
     this.name = "NextFiscalYearMissingError";
+  }
+}
+
+// The year has no accounting period covering its last day (periods deleted
+// or a year set up by hand) — the closing date must lie in that period.
+export class FiscalYearLastPeriodMissingError extends Error {
+  constructor(label: string, endDate: string) {
+    super(`Fiscal year ${label} has no accounting period covering ${endDate}`);
+    this.name = "FiscalYearLastPeriodMissingError";
   }
 }
 
@@ -264,6 +280,9 @@ export interface YearEndClosingServiceDeps {
   // economyService satisfies this (app.ts passes it): steg 4 creates the
   // next fiscal year through the ordinary path, before its transaction.
   fiscalYears: { createFiscalYear(input: CreateFiscalYearInput): Promise<{ id: string }> };
+  // A warning check that failed on the Bokslut page (loadWarnings' tolerant
+  // mode); omitted ⇒ console.error.
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
 
 export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
@@ -285,7 +304,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
   // may lie in.
   async function lastPeriod(executor: Db | Tx, year: repo.FiscalYearRow): Promise<repo.PeriodRow> {
     const period = await repo.findPeriodForDate(executor, year.endDate);
-    if (!period) throw new Error(`Fiscal year ${year.label} has no period covering ${year.endDate}`);
+    if (!period) throw new FiscalYearLastPeriodMissingError(year.label, year.endDate);
     return period;
   }
 
@@ -331,50 +350,119 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     return { closing, year };
   }
 
-  async function loadWarnings(executor: Db | Tx, closing: repo.ClosingRow, year: repo.FiscalYearRow): Promise<YearEndCheck[]> {
+  // `tolerant` (the Bokslut page's GET, on the service's own pool): the
+  // checks read independently and in parallel, and one that throws becomes
+  // a `check-failed` warning naming it (the error itself goes to the server
+  // log) instead of failing the whole page. Closing the year runs them
+  // strictly and ONE AT A TIME inside its transaction — the first failure
+  // fails the close with the original error and no later check starts (in
+  // parallel, the others would go on issuing statements through the tx
+  // handle after the rollback, on a connection back in the pool).
+  async function loadWarnings(
+    executor: Db | Tx,
+    closing: repo.ClosingRow,
+    year: repo.FiscalYearRow,
+    opts: { tolerant?: boolean } = {}
+  ): Promise<YearEndCheck[]> {
+    const failed: YearEndCheck[] = [];
+    let serial: Promise<unknown> = Promise.resolve();
+    const attempt = async <T>(what: string, read: () => Promise<T>, fallback: T): Promise<T> => {
+      if (!opts.tolerant) {
+        // Chained on the previous check: a rejection skips every later read.
+        const next = serial.then(read);
+        serial = next;
+        return next;
+      }
+      try {
+        return await read();
+      } catch (err) {
+        (deps.log ?? ((msg: string, extra?: unknown) => console.error(msg, extra)))(`Årsbokslut: warning check failed (${what})`, { err });
+        failed.push({ code: "check-failed", message: `${what} kunde inte kontrolleras — försök igen, eller se serverloggen om felet består` });
+        return fallback;
+      }
+    };
     const settings = await deps.settings.read(executor);
     // The reskontror are measured at the YEAR'S END, the same date the
     // fixed-asset reconciliation (getPlan) uses — activity dated between an
     // earlier closing date and year end cannot slip past the check.
-    const balances = await readAccountBalances(executor, { from: null, to: year.endDate });
-    const debitBalance = (number: string) => {
-      const row = balances.find((balance) => balance.accountNumber === number);
-      return row ? round2(row.periodDebit - row.periodCredit) : 0;
+    // Read once for both reskontror.
+    let balances: ReturnType<typeof readAccountBalances> | null = null;
+    const ledgerCheck = async (accountNumber: string, sign: 1 | -1, register: () => Promise<number>) => {
+      const row = (await (balances ??= readAccountBalances(executor, { from: null, to: year.endDate }))).find((balance) => balance.accountNumber === accountNumber);
+      return {
+        accountNumber,
+        ledger: row ? round2(sign * (row.periodDebit - row.periodCredit)) : 0,
+        register: await register(),
+        // The live valutaomvärdering sits on both accounts (dated on the
+        // closing date, its reversal after year end): the ledger is expected
+        // to be the reskontra plus what it booked there.
+        revaluation: await fxBookedOnAccount(executor, closing, accountNumber, sign),
+      };
     };
-    const periods = await repo.listPeriods(executor, year.id);
-    const settlements = (await findSettlementsOverlapping(executor, year.startDate, year.endDate)).filter((s) => !s.reversed);
-    const plan = await deps.fixedAssets.getPlan({ fiscalYearId: year.id });
-    const movements = await readVatAccountMovements(executor, year.startDate, year.endDate);
-    const inventoryStep = await inventoryStepView(executor, closing);
-    const fx = await fxStepState(executor, closing);
-    return evaluateWarnings({
-      unsettledVatMonths: periods
-        .filter((period) => !settlements.some((s) => s.fromDate <= period.startDate && s.toDate >= period.endDate))
-        .map((period) => period.startDate.slice(0, 7)),
-      // The live valutaomvärdering sits on both accounts (dated on the
-      // closing date, its reversal after year end): the ledger is expected
-      // to be the reskontra plus what it booked there.
-      receivables: {
-        accountNumber: settings.postingAccountsReceivable,
-        ledger: debitBalance(settings.postingAccountsReceivable),
-        register: await deps.receivables.totalAsOf(executor, year.endDate),
-        revaluation: await fxBookedOnAccount(executor, closing, settings.postingAccountsReceivable, 1),
-      },
-      payables: {
-        accountNumber: settings.postingAccountsPayable,
-        ledger: round2(-debitBalance(settings.postingAccountsPayable)),
-        register: await deps.payables.totalAsOf(executor, year.endDate),
-        revaluation: await fxBookedOnAccount(executor, closing, settings.postingAccountsPayable, -1),
-      },
-      fixedAssetMismatches: plan.reconciliation.filter((row) => row.mismatch).map(reconciliationLine),
-      revenueWithoutVatBox: findUnassignedAccounts(movements).filter((account) => account.accountNumber.startsWith("3")),
-      inventoryStale:
-        inventoryStep.status === "stale" ? { ledger: inventoryStep.ledger ?? 0, value: inventoryStep.value ?? 0 } : null,
-      fxRevaluationStale: fx.status === "stale",
-      // Bankavstämning: a bank account not reconciled through the closing
-      // date is a warning, never a blocker (spec etapp 4 §4).
-      unreconciledBankAccounts: await unreconciledBankAccountsAsOf(executor, closing.closingDate),
-    });
+    const [unsettledVatMonths, receivables, payables, fixedAssetMismatches, revenueWithoutVatBox, inventoryStale, fxRevaluationStale, unreconciledBankAccounts] =
+      await Promise.all([
+        attempt(
+          "Momsomföringen",
+          async () => {
+            const periods = await repo.listPeriods(executor, year.id);
+            const settlements = (await findSettlementsOverlapping(executor, year.startDate, year.endDate)).filter((s) => !s.reversed);
+            return periods
+              .filter((period) => !settlements.some((s) => s.fromDate <= period.startDate && s.toDate >= period.endDate))
+              .map((period) => period.startDate.slice(0, 7));
+          },
+          [] as string[]
+        ),
+        attempt(
+          "Kundreskontran",
+          (): Promise<LedgerComparison | null> =>
+            ledgerCheck(settings.postingAccountsReceivable, 1, () => deps.receivables.totalAsOf(executor, year.endDate)),
+          null
+        ),
+        attempt(
+          "Leverantörsreskontran",
+          (): Promise<LedgerComparison | null> =>
+            ledgerCheck(settings.postingAccountsPayable, -1, () => deps.payables.totalAsOf(executor, year.endDate)),
+          null
+        ),
+        attempt(
+          "Anläggningsregistret",
+          async () => (await deps.fixedAssets.getPlan({ fiscalYearId: year.id })).reconciliation.filter((row) => row.mismatch).map(reconciliationLine),
+          [] as string[]
+        ),
+        attempt(
+          "Momsrutorna på intäktskontona",
+          async () =>
+            findUnassignedAccounts(await readVatAccountMovements(executor, year.startDate, year.endDate)).filter((account) =>
+              account.accountNumber.startsWith("3")
+            ),
+          [] as ReturnType<typeof findUnassignedAccounts>
+        ),
+        attempt(
+          "Lagervärderingen",
+          async (): Promise<{ ledger: number; value: number } | null> => {
+            const inventoryStep = await inventoryStepView(executor, closing);
+            return inventoryStep.status === "stale" ? { ledger: inventoryStep.ledger ?? 0, value: inventoryStep.value ?? 0 } : null;
+          },
+          null
+        ),
+        attempt("Valutaomvärderingen", async () => (await fxStepState(executor, closing)).status === "stale", false),
+        // Bankavstämning: a bank account not reconciled through the closing
+        // date is a warning, never a blocker (spec etapp 4 §4).
+        attempt("Bankavstämningen", () => unreconciledBankAccountsAsOf(executor, closing.closingDate), []),
+      ]);
+    return [
+      ...evaluateWarnings({
+        unsettledVatMonths,
+        receivables,
+        payables,
+        fixedAssetMismatches,
+        revenueWithoutVatBox,
+        inventoryStale,
+        fxRevaluationStale,
+        unreconciledBankAccounts,
+      }),
+      ...failed,
+    ];
   }
 
   async function requireAccountByNumber(executor: Db | Tx, number: string, role: string): Promise<repo.AccountRow> {
@@ -919,7 +1007,7 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
       checks: {
         stepBlockers: evaluateStepBlockers(close.gate),
         closeBlockers: close.blockers,
-        warnings: await loadWarnings(executor, closing, year),
+        warnings: await loadWarnings(executor, closing, year, { tolerant: true }),
         draftVerifications: await repo.listDrafts(executor, year.id, 20),
       },
       ibCheck: close.ib,

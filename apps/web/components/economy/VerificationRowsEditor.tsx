@@ -21,6 +21,8 @@ import styles from "./VerificationRowsEditor.module.css";
 export interface EditorAccount {
   number: string;
   name: string;
+  // Kräver kostnadsställe — a row on such an account shows the columns.
+  costCenterRequired?: boolean;
 }
 
 type ColKey = "account" | "description" | "vatCode" | "costCenter" | "project" | "debit" | "credit";
@@ -132,17 +134,23 @@ export function VerificationRowsEditor({
   const withVat = vatCodes !== undefined;
 
   // Hidden unless the user chose to show them — or a row already carries one,
-  // which must never be invisible. Read after mount (the server render has no
-  // localStorage), so the first paint is the hidden state.
+  // which must never be invisible, or a row's account requires a cost center
+  // (the booking would be refused with "välj kostnadsställe på raderna", and
+  // the field must be there to choose it). Read after mount (the server render
+  // has no localStorage), so the first paint is the hidden state.
   const dims = useDimensions();
   const hasObjects = dims.allCostCenters.length > 0 || dims.allProjects.length > 0;
   const rowsHaveDimensions = rows.some((r) => r.costCenterId !== "" || r.projectId !== "");
+  const rowsNeedCostCenter = rows.some(
+    (r) => r.accountNumber !== "" && accounts.some((a) => a.number === r.accountNumber && a.costCenterRequired === true)
+  );
+  const dimensionsForced = rowsHaveDimensions || rowsNeedCostCenter;
   const [dimensionsChoice, setDimensionsChoice] = useState<boolean | null>(null);
   useEffect(() => {
     setDimensionsChoice(readDimensionsPreference());
   }, []);
   const dimensionsAvailable = dimensions && (hasObjects || rowsHaveDimensions);
-  const withDims = dimensionsAvailable && (rowsHaveDimensions || dimensionsChoice === true);
+  const withDims = dimensionsAvailable && (dimensionsForced || dimensionsChoice === true);
 
   const cols: ColKey[] = [
     "account",
@@ -480,7 +488,7 @@ export function VerificationRowsEditor({
             <label className={styles.dimensionsToggle}>
               <Checkbox
                 checked={withDims}
-                disabled={rowsHaveDimensions}
+                disabled={dimensionsForced}
                 onChange={(e) => {
                   setDimensionsChoice(e.target.checked);
                   writeDimensionsPreference(e.target.checked);

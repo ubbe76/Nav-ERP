@@ -223,6 +223,44 @@ describe("locked documents", () => {
     expect(await repo.costCenters.findById(next.id)).not.toBeNull();
   });
 
+  // Offert and kundorder are both sales_orders rows; the usage named every
+  // one "kundorder". It now follows the document kind, as the sales lists do.
+  it("names offerter and kundorder apart in the usage, and moves both", async () => {
+    const { user: u } = await setupEconomy();
+    const old = await service.projects.create({ code: "P1", name: "Ett", active: true, status: "open" }, u.id);
+    const next = await service.projects.create({ code: "P2", name: "Två", active: true, status: "open" }, u.id);
+    const [customer] = await db.insert(customers).values({ customerNumber: "K-1", name: "Kund AB" }).returning();
+    const [quote] = await db
+      .insert(salesOrders)
+      .values({ orderNumber: "OF-1", quoteNumber: "OF-1", customerId: customer!.id, status: "quote", projectId: old.id })
+      .returning();
+    const [order] = await db.insert(salesOrders).values({ orderNumber: "KO-1", customerId: customer!.id, status: "confirmed", projectId: old.id }).returning();
+    await db.insert(salesOrders).values({ orderNumber: "OF-2", quoteNumber: "OF-2", customerId: customer!.id, status: "lost", projectId: next.id });
+    // A quote cancelled as a quote keeps its OF- number; an order converted
+    // from a quote and then cancelled is a kundorder.
+    await db.insert(salesOrders).values({ orderNumber: "OF-3", quoteNumber: "OF-3", customerId: customer!.id, status: "cancelled", projectId: next.id });
+    await db.insert(salesOrders).values({ orderNumber: "KO-2", quoteNumber: "OF-4", customerId: customer!.id, status: "cancelled", projectId: next.id });
+
+    const usage = await service.projects.usage(old.id);
+    expect(usage.references.map((r) => [r.table, r.labelOne, r.count, r.blocksReplacement])).toEqual([
+      ["sales_orders", "offert", 1, false],
+      ["sales_orders", "kundorder", 1, false],
+    ]);
+    await service.projects.remove(old.id, next.id, u.id);
+    const moved = await db.select({ id: salesOrders.id, projectId: salesOrders.projectId }).from(salesOrders);
+    expect(moved.find((r) => r.id === quote!.id)!.projectId).toBe(next.id);
+    expect(moved.find((r) => r.id === order!.id)!.projectId).toBe(next.id);
+
+    // A lost or cancelled offert is closed like a cancelled order.
+    const locked = await service.projects.usage(next.id);
+    expect(locked.references.map((r) => [r.labelOne, r.count, r.blocksReplacement])).toEqual([
+      ["offert", 1, false],
+      ["avslutad offert", 2, true],
+      ["kundorder", 1, false],
+      ["avslutad kundorder", 1, true],
+    ]);
+  });
+
   it("a project on an attested supplier invoice or a closed purchase order is locked too", async () => {
     const { user: u } = await setupEconomy();
     const old = await service.projects.create({ code: "P1", name: "Ett", active: true, status: "open" }, u.id);
