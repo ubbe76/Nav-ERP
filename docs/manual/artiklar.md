@@ -294,7 +294,7 @@ Struktur och operationer kan också läsas in från fil i stället för att mata
 Beskrivningen visas **i stället för resursnamnet** överallt där operationen presenteras för en människa, med resursens tresiffriga kod kvar bredvid:
 
 - artikelkortets operationslista och strukturradens **Operation**-lista,
-- tillverkningsorderns operationstabell, dess **Slutför operation** och **Rapportera tid**,
+- tillverkningsorderns operationstabell, dess kort **Rapportera** (**Slutför**, **Förbruka** och **Rapportera tid**),
 - stämpelterminalens val av operation (resursen står kvar på raden under),
 - utskriften **Skriv ut TO (PDF)**, där kolumnen heter **Operation**.
 
