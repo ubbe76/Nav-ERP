@@ -93,6 +93,9 @@ const listColumns = {
   articleNumber: articles.articleNumber,
   articleName: articles.name,
   unitCode: units.code,
+  // Dokument på engelska (#7): for the reklamationsbesked in English.
+  articleNameEn: articles.nameEn,
+  unitCodeEn: units.codeEn,
   quantity: deviations.quantity,
   reasonId: deviations.reasonId,
   reasonCode: deviationReasons.code,
@@ -775,6 +778,8 @@ export interface ListRow {
   articleNumber: string | null;
   articleName: string | null;
   unitCode: string | null;
+  articleNameEn: string | null;
+  unitCodeEn: string | null;
   quantity: string | null;
   reasonId: string | null;
   reasonCode: string | null;

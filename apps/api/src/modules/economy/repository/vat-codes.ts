@@ -36,7 +36,16 @@ export async function listVatCodeRows(executor: Db | Tx) {
 // Every code of the company as the documents need it (document-vat-code.ts).
 export async function loadVatCodeBook(executor: Db | Tx): Promise<VatCodeBook> {
   const rows = await executor
-    .select({ id: vatCodes.id, code: vatCodes.code, name: vatCodes.name, invoiceText: vatCodes.invoiceText, active: vatCodes.active })
+    .select({
+      id: vatCodes.id,
+      code: vatCodes.code,
+      name: vatCodes.name,
+      invoiceText: vatCodes.invoiceText,
+      // Dokument på engelska (#7): the English name/text for English documents.
+      nameEn: vatCodes.nameEn,
+      invoiceTextEn: vatCodes.invoiceTextEn,
+      active: vatCodes.active,
+    })
     .from(vatCodes);
   return vatCodeBook(rows);
 }

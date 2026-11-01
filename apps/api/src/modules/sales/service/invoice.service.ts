@@ -22,6 +22,7 @@ import {
   domesticVatCodeForRate,
   isVatCode,
   isVatRate,
+  localized,
   round2,
   salesRowIsGoods,
   salesVatCode,
@@ -29,10 +30,12 @@ import {
   toUnitQuantity,
   VAT_CODE_CATALOG,
   vatCodeEntry,
+  type DocumentLanguage,
   type OrderRowConfiguration,
   type SalesVatCustomer,
 } from "@navet/shared";
 import { rowConfigurationLines } from "../../configurator/service/configuration-lines.js";
+import { documentTexts } from "../../mail/service/document-texts.js";
 import type { InvoiceableShipment, InvoiceRepository, InvoiceRowWrite, IssueStamp } from "../repository/invoice.repository.js";
 import type { DocumentPdfInput, DocumentSettingsReader, PaymentReminderPdfInput } from "../../mail/service/document-pdf.js";
 import { extraDescriptionFor } from "../../mail/service/document-pdf.js";
@@ -57,13 +60,7 @@ import {
 } from "../../system/service/exchange-rates.js";
 import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
 import { dueDateFromTerm } from "../../system/service/due-date.js";
-import {
-  accruedInterestText,
-  addDays as addCalendarDays,
-  halfYearStartsBetween,
-  LATE_INTEREST_TERMS_TEXT,
-  lateInterest,
-} from "./late-interest.js";
+import { accruedInterestText, addDays as addCalendarDays, halfYearStartsBetween, lateInterest } from "./late-interest.js";
 
 // Narrow slices of mail/pdf services — same cross-module pattern as
 // StockBalanceReader in sales.service.ts. No CompanyInfoReader here: the
@@ -249,10 +246,14 @@ export class ShipmentAlreadyInvoicedError extends Error {
 
 // The freight row's default text: "Frakt DHL Paket (FR-2026-12)", truncated
 // to the column's 255 chars. Used by the dialog's prefill and the collective
-// invoicing routine; a user may overwrite it ("manuellt vinner").
-export function freightRowDescription(s: { carrierName: string | null; productName: string | null; shipmentNumber: string }) {
+// invoicing routine; a user may overwrite it ("manuellt vinner"). Written in
+// the customer's language (Dokument på engelska #7) — the text is stored.
+export function freightRowDescription(
+  s: { carrierName: string | null; productName: string | null; shipmentNumber: string },
+  language: DocumentLanguage = "sv"
+) {
   const name = [s.carrierName, s.productName].filter(Boolean).join(" ");
-  return `Frakt ${name ? `${name} ` : ""}(${s.shipmentNumber})`.slice(0, 255);
+  return documentTexts(language).freightRow(name || null, s.shipmentNumber).slice(0, 255);
 }
 
 // The partial unique index on invoice_rows.shipment_id fired — mirrors the
@@ -397,7 +398,9 @@ type RowInput = {
 // (goods for the derivation).
 type RowContext = {
   customerId: string;
-  customer: SalesVatCustomer;
+  // The customer's VAT facts plus its document language (#7: the generated
+  // freight row text is stored in it).
+  customer: SalesVatCustomer & { language: string };
   book: VatCodeBook;
   freightArticleId: string | null;
   // Valuta: the invoice's currency — a linked order row (or shipment order)
@@ -491,6 +494,14 @@ export function createInvoiceService(
   // Shared by renderPdf and sendEmail so both guard/load the invoice
   // identically (same pattern as sales.service's getInvoicePdf/
   // sendInvoiceEmail pair) while building the PDF exactly once per call.
+  // Dokument på engelska (#7): a draft follows the customer's CURRENT
+  // language (the preview); anything issued uses the language stamped at
+  // Utfärda (invoices.language) — the archived PDF, reprints and the
+  // reminders never change with the customer.
+  function invoiceLanguage(invoice: RawInvoice, customer: { language: string } | null): DocumentLanguage {
+    return invoice.status === "draft" ? documentLanguageOf(customer?.language) : documentLanguageOf(invoice.language);
+  }
+
   async function buildPdf(invoice: RawInvoice) {
     const rows = await repo.listRows(invoice.id);
     const extraDescription = extraDescriptionFor(
@@ -507,12 +518,11 @@ export function createInvoiceService(
     const sign = isCredit ? -1 : 1;
 
     // Credit notes reference their source invoice's OWN FA number in the
-    // header, using the same field the sales-order documents use for
-    // "Ordernummer" (orderReference).
-    let creditReference: string | null = null;
+    // header (the dictionary's meta.creditsInvoice line).
+    let creditedInvoiceNumber: string | null = null;
     if (isCredit && invoice.creditedInvoiceId) {
       const source = await repo.findRawById(invoice.creditedInvoiceId);
-      creditReference = source?.invoiceNumber ? `Krediterar faktura ${source.invoiceNumber}` : null;
+      creditedInvoiceNumber = source?.invoiceNumber ?? null;
     }
 
     const dueDate = invoice.dueDate ? new Date(invoice.dueDate) : null;
@@ -521,10 +531,15 @@ export function createInvoiceService(
     // suppliers.our_customer_number): the customer's number for us is theirs
     // to change, and a reprint should carry the current one.
     const customer = await repo.findCustomerById(invoice.customerId);
+    const language = invoiceLanguage(invoice, customer);
+    const texts = documentTexts(language);
 
     // Momskoder (spec 4.3): the invoice texts of the codes on the invoice,
-    // once each, in catalog order — the company's own text per code.
-    const textByCode = new Map(rows.map((r) => [r.vatCode.code, r.vatCode.invoiceText] as const));
+    // once each, in catalog order — the company's own text per code, in the
+    // document's language (English only when an English text is filled in).
+    const textByCode = new Map(
+      rows.map((r) => [r.vatCode.code, localized(r.vatCode.invoiceText ?? "", r.vatCode.invoiceTextEn, language)] as const)
+    );
     const vatTexts = VAT_CODE_CATALOG.flatMap((entry) => {
       const text = textByCode.get(entry.code)?.trim();
       return text ? [text] : [];
@@ -542,13 +557,14 @@ export function createInvoiceService(
     // Dröjsmålsränta (kontrakt, beslut 15): the terms text under the
     // payment terms when the routine is on and the customer has
     // Dröjsmålsränta — on an invoice, never a credit note or a räntefaktura.
-    const lateInterestText = !isCredit && (await lateInterestTermsText(invoice)) ? LATE_INTEREST_TERMS_TEXT : null;
+    const lateInterestText = !isCredit && (await lateInterestTermsText(invoice)) ? texts.lateInterest.terms : null;
 
     const content = await pdf.render({
-      title: isCredit ? "Kreditfaktura" : "Faktura",
+      language,
+      title: isCredit ? texts.titles.creditNote : texts.titles.invoice,
       documentNumber: invoice.invoiceNumber!,
       date: invoice.invoiceDate ? new Date(invoice.invoiceDate) : new Date(),
-      partnerLabel: "Fakturaadress",
+      partnerLabel: texts.partnerLabels.invoiceAddress,
       // Snapshot columns only — never the live customer, so a reprint after
       // the customer is renamed/moved still shows what was true at issue.
       partner: {
@@ -566,15 +582,17 @@ export function createInvoiceService(
       // sales.service.ts's renderInvoicePdf/renderSalesOrderPdf.
       rows: rows.map((r) => ({
         articleNumber: r.articleNumber ?? "",
-        articleName: r.articleName ?? r.description,
+        // The article's name live (English when filled in on an English
+        // document); a free row prints its stored description.
+        articleName: r.articleName ? localized(r.articleName, r.articleNameEn, language) : r.description,
         quantity: String(toUnitQuantity(Number(r.quantity), r.unitFactor)),
-        unit: r.unitCode,
+        unit: r.unitCode ? localized(r.unitCode, r.unitCodeEn, language) : r.unitCode,
         unitPrice: String(toUnitPrice(Number(r.unitPrice), r.unitFactor) * sign),
         discountPercent: r.discountPercent,
         vatRate: Number(r.vatRate),
         // Momskoder: the VAT summary groups per code (two 0 % codes are two
         // lines with their own names).
-        vatCode: { code: r.vatCode.code, name: r.vatCode.name },
+        vatCode: { code: r.vatCode.code, name: localized(r.vatCode.name, r.vatCode.nameEn, language) },
         // Stored amounts (invoice_rows.lineAmount/vatAmount) are the PDF's
         // monetary authority — the same round2:ed figures the B2 ledger
         // posting and the API list/card already sum, so all three agree on
@@ -587,9 +605,7 @@ export function createInvoiceService(
         // Which order (and the customer's own order number) the row settles
         // — per row rather than in the header, since a samlingsfaktura mixes
         // several orders. Free rows print nothing.
-        orderReference: r.salesOrderRowId
-          ? `Order ${r.salesOrderNumber}${r.customerOrderNumber ? ` · Ert ordernr ${r.customerOrderNumber}` : ""}`
-          : null,
+        orderReference: r.salesOrderRowId ? texts.rowInfo.orderReference(r.salesOrderNumber ?? "", r.customerOrderNumber) : null,
         // Leveransdatum (ML 17 kap. 24 § p. 7): printed next to the order
         // reference only when it differs from the invoice date.
         deliveredDate: r.deliveryDate && r.deliveryDate !== invoice.invoiceDate ? r.deliveryDate : null,
@@ -597,8 +613,10 @@ export function createInvoiceService(
         // additions per the customer's Visa tilläggspriser as it is when the
         // PDF is built — i.e. at issue, since the PDF is archived right then
         // and every later print serves the archived bytes.
-        configurationLines: rowConfigurationLines(r.configuration, customer?.showConfigurationPrices ?? false),
-        extraDescription: extraDescription(r.articleExtraDescription),
+        configurationLines: rowConfigurationLines(r.configuration, customer?.showConfigurationPrices ?? false, language),
+        extraDescription: extraDescription(
+          r.articleExtraDescription ? localized(r.articleExtraDescription, r.articleExtraDescriptionEn, language) : null
+        ),
         customerArticleNumber: r.articleId ? (customerArticleNumbers.get(r.articleId) ?? null) : null,
         setupForArticleNumber: r.setupForArticleNumber,
       })),
@@ -611,7 +629,7 @@ export function createInvoiceService(
       // Snapshot: what the customer was at issue, not what they are now.
       pricesIncludeVat: invoice.privatePerson,
       dueDate,
-      orderReference: creditReference,
+      creditedInvoiceNumber,
       ourSupplierNumberAtCustomer: customer?.ourSupplierNumber ?? null,
       lateInterestText,
       // Snapshot column only — never the live customer (same rule as the
@@ -627,8 +645,8 @@ export function createInvoiceService(
       payment: isCredit ? undefined : { ocrNumber: invoice.ocrNumber, dueDate },
     });
 
-    const prefix = isCredit ? "Kreditfaktura" : "Faktura";
-    return { filename: `${prefix}-${invoice.invoiceNumber}.pdf`, content };
+    const filename = isCredit ? texts.filenames.creditNote(invoice.invoiceNumber!) : texts.filenames.invoice(invoice.invoiceNumber!);
+    return { filename, content };
   }
 
   // Whether the invoice's PDF/reminder carries the dröjsmålsränta terms
@@ -682,7 +700,7 @@ export function createInvoiceService(
       agreedRate,
     });
     if (result.amount === null || result.amount <= 0) return null;
-    return accruedInterestText(today, result.amount);
+    return accruedInterestText(today, result.amount, documentLanguageOf(invoice.language));
   }
 
   // Dröjsmålsränta: an active förseningsersättning on the invoice.
@@ -723,11 +741,16 @@ export function createInvoiceService(
     printedAt: Date
   ) {
     const dueDate = invoice.dueDate ? new Date(invoice.dueDate) : null;
+    // Dokument på engelska (#7): the reminder is written in the invoice's
+    // stamped language (a reminder is only ever sent for an issued invoice).
+    const language = documentLanguageOf(invoice.language);
+    const texts = documentTexts(language);
     // Dröjsmålsränta: the terms text and the accrued interest (information,
     // never charged by the reminder).
-    const lateInterestText = (await lateInterestTermsText(invoice)) ? LATE_INTEREST_TERMS_TEXT : null;
+    const lateInterestText = (await lateInterestTermsText(invoice)) ? texts.lateInterest.terms : null;
     const accruedInterest = lateInterestText ? await accruedInterestLine(invoice) : null;
     const content = await pdf.renderPaymentReminder({
+      language,
       level,
       documentNumber: invoice.invoiceNumber!,
       printedAt,
@@ -752,7 +775,7 @@ export function createInvoiceService(
       lateInterestText,
       accruedInterestText: accruedInterest,
     });
-    return { filename: `Betalningspåminnelse-${invoice.invoiceNumber}.pdf`, content };
+    return { filename: texts.filenames.paymentReminder(invoice.invoiceNumber!), content };
   }
 
   // currency: the invoice's (undefined = the customer's — the readers that
@@ -1563,7 +1586,7 @@ export function createInvoiceService(
           vatRate: String(vatRate ?? DEFAULT_VAT_RATE),
           vatCodeId: vatCode?.id ?? null,
           vatCode: vatCode ? vatCodeRef(vatCode) : null,
-          description: freightRowDescription(r),
+          description: freightRowDescription(r, documentLanguageOf(ctx.customer.language)),
         });
       }
       return out;
@@ -1643,7 +1666,7 @@ export function createInvoiceService(
               add(priced.currency, {
                 articleId: freightArticleId,
                 shipmentId: s.shipmentId,
-                description: freightRowDescription(s),
+                description: freightRowDescription(s, documentLanguageOf(customer.language)),
                 quantity: 1,
                 unitPrice: priced.unitPrice,
                 discountPercent: 0,

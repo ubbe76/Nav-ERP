@@ -1047,6 +1047,10 @@ export function createInvoiceRepository(db: Db) {
           articleName: articles.name,
           // Extra benämning — live, printed when the setting lists the invoice.
           articleExtraDescription: articles.extraDescription,
+          // Dokument på engelska (#7): the English texts, printed through
+          // localized() on an English document.
+          articleNameEn: articles.nameEn,
+          articleExtraDescriptionEn: articles.extraDescriptionEn,
           salesOrderNumber: salesOrders.orderNumber,
           // Printed with the order number under the row on the invoice PDF —
           // a samlingsfaktura mixes orders, so "Ert ordernummer" is per row.
@@ -1058,6 +1062,10 @@ export function createInvoiceRepository(db: Db) {
           // (no article to derive a base unit from). Mirrors
           // sales.repository's listRowsByOrder.
           unitCode: sql<string | null>`coalesce(${rowUnits.code}, ${units.code})`,
+          // Dokument på engelska (#7): the display unit's English code — the
+          // row's own unit when it has one (NOT a coalesce across the two
+          // units: a row unit without code_en must not borrow the base unit's).
+          unitCodeEn: sql<string | null>`case when ${rowUnits.id} is null then ${units.codeEn} else ${rowUnits.codeEn} end`,
           // Frakt etapp 2: the billed shipment's number, so the card can link
           // to the försändelse (null on every non-freight row).
           shipmentNumber: shipments.shipmentNumber,
@@ -1068,6 +1076,8 @@ export function createInvoiceRepository(db: Db) {
             code: vatCodes.code,
             name: vatCodes.name,
             invoiceText: vatCodes.invoiceText,
+            nameEn: vatCodes.nameEn,
+            invoiceTextEn: vatCodes.invoiceTextEn,
           },
           // Kostnadsställen och projekt on the revenue row.
           ...rowDimensionColumns,

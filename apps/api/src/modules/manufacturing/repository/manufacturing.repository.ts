@@ -1465,6 +1465,9 @@ export function createManufacturingRepository(db: Db) {
           // The article's base unit — MO quantities are always base-unit.
           // Printed on the pallet card (Etapp F).
           articleUnitCode: units.code,
+          // Dokument på engelska (#7): for the customer's pallet card.
+          articleNameEn: articles.nameEn,
+          articleUnitCodeEn: units.codeEn,
         })
         .from(manufacturingOrders)
         .innerJoin(articles, eq(articles.id, manufacturingOrders.articleId))

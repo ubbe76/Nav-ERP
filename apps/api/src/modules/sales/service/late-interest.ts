@@ -1,4 +1,5 @@
-import { LATE_FEE_AMOUNT, round2 } from "@navet/shared";
+import { LATE_FEE_AMOUNT, round2, type DocumentLanguage } from "@navet/shared";
+import { documentTexts } from "../../mail/service/document-texts.js";
 import { halfYearStart, halfYearStartsBetween, nextHalfYearStart } from "../../system/service/half-years.js";
 
 // Dröjsmålsränta och förseningsersättning — the pure rules (no DB imports),
@@ -152,25 +153,38 @@ export function fullyPaidDate(principal: number, payments: readonly LateInterest
   return null;
 }
 
+// Dokument på engelska (#7): the texts below are written in the CUSTOMER's
+// language when the row is created (they are stored in invoice_rows.
+// description) or in the invoice's stamped language on the reminder — the
+// wording itself lives in the mail module's dictionary (document-texts.ts).
+
 // "12,00 %" / "10,00/12,00 %" — the distinct rates in order of appearance.
-export function formatRates(rates: readonly number[]): string {
-  const distinct = [...new Set(rates)];
-  return `${distinct.map((rate) => rate.toFixed(2).replace(".", ",")).join("/")} %`;
+export function formatRates(rates: readonly number[], language: DocumentLanguage = "sv"): string {
+  return documentTexts(language).lateInterest.rates(rates);
 }
 
 // Row texts on the räntefaktura — the ONE place they are written.
-export function lateInterestRowText(input: { invoiceNumber: string; from: string; to: string; days: number; rates: readonly number[] }) {
-  return `Dröjsmålsränta ${input.invoiceNumber}, ${input.from}–${input.to} (${input.days} ${input.days === 1 ? "dag" : "dagar"}, ${formatRates(input.rates)})`;
+export function lateInterestRowText(
+  input: { invoiceNumber: string; from: string; to: string; days: number; rates: readonly number[] },
+  language: DocumentLanguage = "sv"
+) {
+  return documentTexts(language).lateInterest.interestRow({ ...input, rates: formatRates(input.rates, language) });
 }
 
-export function lateFeeRowText(invoiceNumber: string): string {
-  return `Förseningsersättning ${invoiceNumber}`;
+export function lateFeeRowText(invoiceNumber: string, language: DocumentLanguage = "sv"): string {
+  return documentTexts(language).lateInterest.feeRow(invoiceNumber);
 }
 
-// The payment-reminder PDF's information line (never a charge).
-export function accruedInterestText(through: string, amount: number): string {
-  const formatted = amount.toLocaleString("sv-SE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/ /g, " ");
-  return `Upplupen dröjsmålsränta t.o.m. ${through}: ${formatted} kr`;
+// The payment-reminder PDF's information line (never a charge). The locale's
+// no-break group separator becomes an ordinary space (WinAnsi-safe).
+export function accruedInterestText(through: string, amount: number, language: DocumentLanguage = "sv"): string {
+  const formatted = amount
+    .toLocaleString(documentTexts(language).locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    .replace(/ /g, " ");
+  return documentTexts(language).lateInterest.accrued(through, formatted);
 }
 
-export const LATE_INTEREST_TERMS_TEXT = "Vid betalning efter förfallodagen debiteras dröjsmålsränta enligt räntelagen.";
+// The Swedish terms sentence — the invoice/reminder pick theirs from the
+// dictionary by language; this constant is the Swedish side for the tests
+// and the readers that only ever print Swedish.
+export const LATE_INTEREST_TERMS_TEXT = documentTexts("sv").lateInterest.terms;

@@ -12,6 +12,10 @@ export type DocumentVatCodeRow = {
   code: VatCode;
   name: string;
   invoiceText: string | null;
+  // Dokument på engelska (#7): the English name/invoice text, printed through
+  // localized(sv, en, language) on an English document; null ⇒ the Swedish.
+  nameEn: string | null;
+  invoiceTextEn: string | null;
   active: boolean;
 };
 
@@ -22,7 +26,17 @@ export type VatCodeBook = {
   byCode: Map<VatCode, DocumentVatCodeRow>;
 };
 
-export function vatCodeBook(rows: { id: string; code: string; name: string; invoiceText: string | null; active: boolean }[]): VatCodeBook {
+export function vatCodeBook(
+  rows: {
+    id: string;
+    code: string;
+    name: string;
+    invoiceText: string | null;
+    nameEn?: string | null;
+    invoiceTextEn?: string | null;
+    active: boolean;
+  }[]
+): VatCodeBook {
   const byId = new Map<string, DocumentVatCodeRow>();
   const byCode = new Map<VatCode, DocumentVatCodeRow>();
   for (const row of rows) {
@@ -30,7 +44,15 @@ export function vatCodeBook(rows: { id: string; code: string; name: string; invo
     // create route exists). There is no CHECK on the column, so a row outside
     // the catalog — only a manual DB edit could make one — is ignored here.
     if (!isVatCode(row.code)) continue;
-    const entry: DocumentVatCodeRow = { id: row.id, code: row.code, name: row.name, invoiceText: row.invoiceText, active: row.active };
+    const entry: DocumentVatCodeRow = {
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      invoiceText: row.invoiceText,
+      nameEn: row.nameEn ?? null,
+      invoiceTextEn: row.invoiceTextEn ?? null,
+      active: row.active,
+    };
     byId.set(row.id, entry);
     byCode.set(row.code, entry);
   }

@@ -440,8 +440,10 @@ export function createPurchaseRepository(db: Db) {
           purchaseOrderNumber: purchaseOrders.orderNumber,
           deliveryTermCode: deliveryTerms.code,
           deliveryTermName: deliveryTerms.name,
+          deliveryTermNameEn: deliveryTerms.nameEn,
           paymentTermCode: paymentTerms.code,
           paymentTermName: paymentTerms.name,
+          paymentTermNameEn: paymentTerms.nameEn,
           carrierCode: carriers.code,
           carrierName: carriers.name,
         })
@@ -474,11 +476,17 @@ export function createPurchaseRepository(db: Db) {
           // The unit the row displays in: the entered unit, falling back to
           // the article's base unit.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
+          // Dokument på engelska (#7): the display unit's English code — the
+          // row's own unit when it has one (NOT a coalesce across the two
+          // units: a row unit without code_en must not borrow the base unit's).
+          unitCodeEn: sql<string | null>`case when ${rowUnits.id} is null then ${units.codeEn} else ${rowUnits.codeEn} end`,
           // Printed under the row on the RFQ (lego rows only).
           articleWeight: articles.weight,
           articleSurfaceTreatment: articles.surfaceTreatment,
           articleColour: articles.colour,
           articleExtraDescription: articles.extraDescription,
+          articleNameEn: articles.nameEn,
+          articleExtraDescriptionEn: articles.extraDescriptionEn,
           // Lego row context — the operation heading comes from the MO
           // snapshot when the row was raised for a TO, else live from the
           // article's routing (TO-less price inquiry).
@@ -714,8 +722,10 @@ export function createPurchaseRepository(db: Db) {
           supplierLanguage: suppliers.language,
           deliveryTermCode: deliveryTerms.code,
           deliveryTermName: deliveryTerms.name,
+          deliveryTermNameEn: deliveryTerms.nameEn,
           paymentTermCode: paymentTerms.code,
           paymentTermName: paymentTerms.name,
+          paymentTermNameEn: paymentTerms.nameEn,
           carrierCode: carriers.code,
           carrierName: carriers.name,
           // Projekt (kostnadsställen och projekt) for the card.
@@ -959,6 +969,10 @@ export function createPurchaseRepository(db: Db) {
           // The unit the row displays in: the entered unit, falling back to
           // the article's base unit.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
+          // Dokument på engelska (#7): the display unit's English code — the
+          // row's own unit when it has one (NOT a coalesce across the two
+          // units: a row unit without code_en must not borrow the base unit's).
+          unitCodeEn: sql<string | null>`case when ${rowUnits.id} is null then ${units.codeEn} else ${rowUnits.codeEn} end`,
           // Lego row context: the TO the operation belongs to (printed as
           // the row's reference), the operation's own heading, whether the
           // PDF shows net weight (weight × qty) and where the drawing comes
@@ -967,6 +981,8 @@ export function createPurchaseRepository(db: Db) {
           articleSurfaceTreatment: articles.surfaceTreatment,
           articleColour: articles.colour,
           articleExtraDescription: articles.extraDescription,
+          articleNameEn: articles.nameEn,
+          articleExtraDescriptionEn: articles.extraDescriptionEn,
           moOrderNumber: manufacturingOrders.orderNumber,
           moOperationDescription: moOperations.description,
           moOperationSequenceNo: moOperations.sequenceNo,

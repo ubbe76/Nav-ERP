@@ -1,5 +1,5 @@
 import type { Db, Tx } from "@navet/db";
-import { round2, SEK, type CreateLateInterestInvoicesInput, type LateInterestCandidatesQuery } from "@navet/shared";
+import { documentLanguageOf, round2, SEK, type CreateLateInterestInvoicesInput, type LateInterestCandidatesQuery } from "@navet/shared";
 import { AccountingPeriodLockedError, FiscalYearClosedError } from "../../economy/service/accounting-period-lock.js";
 import { documentVatCode, InvalidVatCodeError } from "../../economy/service/document-vat-code.js";
 import {
@@ -331,6 +331,9 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
           const customerName = picks[0]!.candidate.customerName;
           const customerId = picks[0]!.candidate.customerId;
           const customer = await invoiceRepo.findCustomerById(customerId);
+          // Dokument på engelska (#7): the stored row texts are written in the
+          // customer's language when the räntefaktura is created.
+          const rowLanguage = documentLanguageOf(customer?.language);
           const interestPicks = picks.filter((pick) => pick.interest);
           const interestTotal = round2(interestPicks.reduce((sum, pick) => sum + (pick.candidate.interest ?? 0), 0));
           // Minsta räntebelopp applies to the ränta per räntefaktura: under
@@ -357,7 +360,10 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
             if (pick.interest && withInterest) {
               rows.push({
                 ...baseRow,
-                description: lateInterestRowText({ invoiceNumber: c.invoiceNumber, from: c.fromDate, to: c.toDate, days: c.days, rates: c.rates }),
+                description: lateInterestRowText(
+                  { invoiceNumber: c.invoiceNumber, from: c.fromDate, to: c.toDate, days: c.days, rates: c.rates },
+                  rowLanguage
+                ),
                 unitPrice: c.interest!,
                 lineAmount: c.interest!,
                 revenueAccount: settings.postingLateInterest,
@@ -367,7 +373,7 @@ export function createLateInterestService(deps: LateInterestServiceDeps) {
             if (pick.fee) {
               rows.push({
                 ...baseRow,
-                description: lateFeeRowText(c.invoiceNumber),
+                description: lateFeeRowText(c.invoiceNumber, rowLanguage),
                 unitPrice: c.fee,
                 lineAmount: c.fee,
                 revenueAccount: settings.postingLateFee,
