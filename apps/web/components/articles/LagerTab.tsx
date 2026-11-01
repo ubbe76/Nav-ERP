@@ -26,6 +26,7 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
   const [stockControlled, setStockControlled] = useState(article.stockControlled ? "stock" : "order");
   const [orderQuantity, setOrderQuantity] = useState(article.orderQuantity ?? "");
   const [rounding, setRounding] = useState(article.rounding ?? "");
+  const [leadTime, setLeadTime] = useState(article.manufacturingLeadTimeDays != null ? String(article.manufacturingLeadTimeDays) : "");
   const [pending, setPending] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +45,10 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
           stockControlled: stockControlled === "stock",
           orderQuantity: orderQuantity.trim() === "" ? null : Number(orderQuantity),
           rounding: rounding.trim() === "" ? null : Number(rounding),
+          // Only manufactured articles carry a lead time; others leave it untouched.
+          ...(article.type === "manufactured"
+            ? { manufacturingLeadTimeDays: leadTime.trim() === "" ? null : Number(leadTime) }
+            : {}),
         }),
       });
       setSaved(true);
@@ -123,7 +128,25 @@ export function LagerTab({ article, balances }: { article: Article; balances: St
                 onChange={(e) => setRounding(e.target.value)}
               />
             </Field>
+            {article.type === "manufactured" && (
+              <Field label="Ledtid (dagar)" htmlFor="manufacturingLeadTimeDays">
+                <Input
+                  id="manufacturingLeadTimeDays"
+                  type="number"
+                  size="sm"
+                  min="0"
+                  step="1"
+                  value={leadTime}
+                  onChange={(e) => setLeadTime(e.target.value)}
+                />
+              </Field>
+            )}
           </FormRow>
+          {article.type === "manufactured" && (
+            <FormHint attached>
+              Ledtid (dagar): tomt fält räknar ledtiden ur operationerna i rutten.
+            </FormHint>
+          )}
           <FormHint attached>
             Används av behovsberäkningen. Beställningspunkt och Säkerhetslager jämförs mot projicerat saldo — det större av dem är golvet, och
             förslaget fyller upp till det. Styrning (Orderstyrd/Lagerstyrd) är bara information. Förslag avrundas upp till

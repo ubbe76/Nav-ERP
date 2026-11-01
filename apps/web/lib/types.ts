@@ -102,6 +102,8 @@ export interface Article {
   // Avrundning: the step proposals AND order-row quantities are rounded up
   // to (server-side, in the base unit, after orderQuantity). Null = none.
   rounding: string | null;
+  // Manufactured articles only: lead time in days; null = derived from the routing.
+  manufacturingLeadTimeDays: number | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -2545,7 +2547,8 @@ export interface DueDateSuggestion {
   documentType: "sales_order" | "purchase_order" | "manufacturing_order" | null;
   documentId: string | null;
   documentNumber: string | null; // null = negative stock, no document
-  clampedToToday: boolean;
+  // True when the date is floored at today + lead time and still misses the demand.
+  late: boolean;
 }
 
 export interface ResolvedCalendarDay {
@@ -4241,6 +4244,18 @@ export interface StockCountPostResult {
 // Behovsberäkning (MRP light, E1). GET /planning/requirements — one row per
 // article with any demand/supply/stock/reorder point (or, by default, only
 // those with a proposalQuantity > 0). Never stored — fully derived server-side.
+export interface RequirementProposal {
+  // Stable: "<purchase|manufacture>:<articleId>:<needWeek|undated|rop>",
+  // "configured:<salesOrderRowId>" or "subcontract:<moOperationId>".
+  key: string;
+  needDate: string | null;
+  needWeek: string | null;
+  latestDate: string | null;
+  late: boolean;
+  quantity: number;
+  reason: "demand" | "reorder_point" | "undated";
+}
+
 export interface RequirementRow {
   articleId: string;
   articleNumber: string;
@@ -4263,8 +4278,16 @@ export interface RequirementRow {
   safetyStock: number | null;
   orderQuantity: number | null;
   rounding: number | null;
+  // Sum of proposals[].quantity.
   proposalQuantity: number;
   proposalKind: "purchase" | "manufacture" | "subcontract" | "configured" | null;
+  // Tidsfasade förslag (#13): one proposal per behovsvecka (configured and lego
+  // rows always have at most one).
+  proposals: RequirementProposal[];
+  // Manufactured articles only: lead time in days for the proposed quantity.
+  leadDays: number | null;
+  earliestLatestDate: string | null;
+  anyLate: boolean;
   primarySupplier: {
     supplierId: string;
     supplierName: string;
@@ -4361,6 +4384,8 @@ export interface PlanningOrderProposal {
   moOperationId?: string;
   // Required for kind "configured": configured rows share articleId with the template's own row.
   salesOrderRowId?: string;
+  // The proposal's behovsdatum; omitted when it has none.
+  needDate?: string;
 }
 
 export interface PlanningOrdersResult {
@@ -4369,7 +4394,8 @@ export interface PlanningOrdersResult {
   purchaseOrders: { id: string; orderNumber: string; supplierId: string; supplierName: string; rowCount: number }[];
   manufacturingOrders: { id: string; orderNumber: string; articleNumber: string }[];
   errors: { articleId: string; articleNumber: string; message: string }[];
-  // Fasta leveransdagar: IO rows whose earliest arrival comes after the demand.
+  // Fasta leveransdagar: IO rows whose earliest arrival comes after the demand,
+  // and TOs whose färdigdatum cannot make the demand (#13).
   warnings: { orderNumber: string; articleNumber: string; demandDate: string; deliveryDate: string; message: string }[];
 }
 
