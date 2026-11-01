@@ -242,6 +242,9 @@ describe("manufacturing orders", () => {
             orderNumber: "TO-1",
             orderStatus: "released",
             dueDate: "2026-09-15",
+            // The TO starts on its due date here (no lead time in these fixtures).
+            needDate: "2026-09-15",
+            parentArticleId: "p",
             parentArticleNumber: "P",
             parentArticleName: "Produkt",
             quantityPlanned: 4,
@@ -253,6 +256,9 @@ describe("manufacturing orders", () => {
             orderNumber: "TO-2",
             orderStatus: "in_progress",
             dueDate: null,
+            // The TO starts on its due date here (no lead time in these fixtures).
+            needDate: null,
+            parentArticleId: "p",
             parentArticleNumber: "P",
             parentArticleName: "Produkt",
             quantityPlanned: 2,
@@ -264,6 +270,9 @@ describe("manufacturing orders", () => {
             orderNumber: "TO-3",
             orderStatus: "done",
             dueDate: null,
+            // The TO starts on its due date here (no lead time in these fixtures).
+            needDate: null,
+            parentArticleId: "p",
             parentArticleNumber: "P",
             parentArticleName: "Produkt",
             quantityPlanned: 7,
@@ -299,6 +308,7 @@ describe("manufacturing orders", () => {
             moId: "m1",
             orderNumber: "TO-1",
             dueDate: "2026-09-25",
+            needDate: "2026-09-25",
             parentArticleId: "p",
             parentArticleNumber: "P",
             parentArticleName: "Produkt",
@@ -308,6 +318,7 @@ describe("manufacturing orders", () => {
             moId: "m2",
             orderNumber: "TO-2",
             dueDate: "2026-09-26",
+            needDate: "2026-09-26",
             parentArticleId: "other",
             parentArticleNumber: "O",
             parentArticleName: "Annan",
@@ -343,6 +354,9 @@ describe("manufacturing orders", () => {
             orderNumber: "TO-1",
             orderStatus: "released",
             dueDate: null,
+            // The TO starts on its due date here (no lead time in these fixtures).
+            needDate: null,
+            parentArticleId: "p",
             parentArticleNumber: "P",
             parentArticleName: "Produkt",
             quantityPlanned: 4,
@@ -413,6 +427,9 @@ describe("agreement with behovsberäkningen", () => {
             orderNumber: "TO-2",
             orderStatus: "released",
             dueDate: "2026-09-15",
+            // The TO starts on its due date here (no lead time in these fixtures).
+            needDate: "2026-09-15",
+            parentArticleId: "p",
             parentArticleNumber: "P",
             parentArticleName: "p",
             quantityPlanned: 4,
@@ -420,7 +437,7 @@ describe("agreement with behovsberäkningen", () => {
           },
         ],
         plannedMos: [
-          { moId: "m1", orderNumber: "TO-1", dueDate: "2026-09-25", parentArticleId: "p", parentArticleNumber: "P", parentArticleName: "p", quantity: 3 },
+          { moId: "m1", orderNumber: "TO-1", dueDate: "2026-09-25", needDate: "2026-09-25", parentArticleId: "p", parentArticleNumber: "P", parentArticleName: "p", quantity: 3 },
         ],
         bomEdges,
       })

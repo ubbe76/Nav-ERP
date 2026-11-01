@@ -102,6 +102,8 @@ describe("findFirmDemand", () => {
           orderNumber: "TO-9",
           orderStatus: "released",
           dueDate: "2026-11-03",
+          needDate: "2026-11-03",
+          parentArticleId: "p",
           parentArticleNumber: "P",
           parentArticleName: "Förälder",
           quantityPlanned: 4,

@@ -3,8 +3,14 @@
 // set is specified directly rather than mirrored off a single web Table
 // column list (behovsberäkningen's page shows a richer, more interactive
 // breakdown than a flat CSV can carry).
+//
+// Tidsfasade förslag (#13): one line per PROPOSAL (RequirementExportRow —
+// the article row repeated with `proposal`), so Förslag, Behovsdatum,
+// Senaste datum and Passerat are the proposal's; a row without proposals
+// (showAll) is one line with those columns empty.
 import { type CsvColumn } from "@navet/shared";
 import type { RequirementRow } from "./requirements-calc.js";
+import type { RequirementExportRow } from "./planning.service.js";
 
 const TYPE_LABELS: Record<RequirementRow["type"], string> = {
   purchased: "Inköp",
@@ -26,7 +32,7 @@ function reference(r: RequirementRow): string | null {
   return null;
 }
 
-export const requirementsExportColumns: CsvColumn<RequirementRow>[] = [
+export const requirementsExportColumns: CsvColumn<RequirementExportRow>[] = [
   { label: "Artikelnummer", value: (r) => r.articleNumber },
   // A configured row carries its choices after the template's name.
   {
@@ -40,7 +46,12 @@ export const requirementsExportColumns: CsvColumn<RequirementRow>[] = [
   { label: "Inkommande", value: (r) => r.supplyPo + r.supplyPoDraft + r.supplyMo, format: "number" },
   { label: "Netto", value: (r) => r.projected, format: "number" },
   { label: "Beställningspunkt", value: (r) => r.reorderPoint, format: "number" },
-  { label: "Förslag", value: (r) => r.proposalQuantity, format: "number" },
-  { label: "Ledtid (dagar)", value: (r) => r.primarySupplier?.leadTimeDays ?? null, format: "number" },
+  { label: "Förslag", value: (r) => r.proposal?.quantity ?? null, format: "number" },
+  { label: "Behovsdatum", value: (r) => r.proposal?.needDate ?? null, format: "date" },
+  { label: "Senaste datum", value: (r) => r.proposal?.latestDate ?? null, format: "date" },
+  { label: "Passerat", value: (r) => (r.proposal?.late ? "Ja" : r.proposal ? "Nej" : null) },
+  // The supplier's lead time for a purchase; the manufacturing lead time
+  // (field or routing) for a manufactured article.
+  { label: "Ledtid (dagar)", value: (r) => r.primarySupplier?.leadTimeDays ?? r.leadDays ?? null, format: "number" },
   { label: "Huvudleverantör", value: (r) => r.primarySupplier?.supplierName ?? null },
 ];

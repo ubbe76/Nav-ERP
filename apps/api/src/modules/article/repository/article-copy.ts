@@ -35,6 +35,7 @@ export const COPIED_INFORMATION_FIELDS = [
   "stockControlled",
   "orderQuantity",
   "rounding",
+  "manufacturingLeadTimeDays",
 ] as const satisfies readonly (keyof CreateArticleInput & keyof typeof articles.$inferSelect)[];
 
 // Default purchase/sales units and the alternative units only make sense

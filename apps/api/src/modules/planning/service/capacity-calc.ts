@@ -170,7 +170,14 @@ export interface CapacityResult {
 // consumed as soon as ANY quantity has been reported — OK or scrapped (a
 // scrap-only report leaves quantityCompleted at "0" but the machine is
 // already set up). Untouched operations keep the full setup.
-export function remainingOperationMinutes(op: CapacityOperationRow): number {
+// Narrowed to the fields it reads so the lead-time dating (requirements-
+// dating.ts) can hand in a TO operation without the capacity row's labels.
+export type RemainingMinutesOperation = Pick<
+  CapacityOperationRow,
+  "operationStatus" | "orderQuantity" | "quantityCompleted" | "quantityScrapped" | "runTimePerUnit" | "setupTime"
+>;
+
+export function remainingOperationMinutes(op: RemainingMinutesOperation): number {
   if (op.operationStatus === "done") return 0;
   const remainingQty = Math.max(op.orderQuantity - (op.quantityCompleted ?? 0), 0);
   const workStarted = (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0;

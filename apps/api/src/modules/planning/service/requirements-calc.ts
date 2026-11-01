@@ -483,8 +483,9 @@ function needWeekOf(date: string, thisMonday: string): string {
 }
 
 // The latest start for a manufactured need: the working day before the need
-// (the färdigdatum rule) minus the lead time in working days.
-function latestStartFor(needDate: string, leadDays: number, offDays: ReadonlySet<string>): string {
+// (the färdigdatum rule) minus the lead time in working days. Exported for
+// the service, which dates a configured row's derived material with it.
+export function latestStartFor(needDate: string, leadDays: number, offDays: ReadonlySet<string>): string {
   return subtractWorkingDays(previousWorkingDay(needDate, offDays), Math.max(0, leadDays), offDays);
 }
 
@@ -912,8 +913,9 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
   return [...rows, ...configuredRows, ...legoRows];
 }
 
-// The row-level sort/filter fields derived from the proposals.
-function proposalSummary(proposals: RequirementProposal[]): Pick<RequirementRow, "earliestLatestDate" | "anyLate"> {
+// The row-level sort/filter fields derived from the proposals. Exported for
+// the service's horizon filter, which recomputes them on the trimmed list.
+export function proposalSummary(proposals: RequirementProposal[]): Pick<RequirementRow, "earliestLatestDate" | "anyLate"> {
   let earliest: string | null = null;
   for (const p of proposals) {
     if (p.latestDate !== null && (earliest === null || p.latestDate < earliest)) earliest = p.latestDate;

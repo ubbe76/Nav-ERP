@@ -109,10 +109,25 @@ describe("manufacturingLeadDays", () => {
 });
 
 describe("moStartDate", () => {
-  it("the Monday of the earliest planned week wins over the due date", () => {
+  it("the due date minus the lead time wins over an EARLIER planned week (Planera fills capacity from today)", () => {
+    // Base: Fri 2026-12-18 minus 3 working days = Tue 12-15; the plan says
+    // week 11-09 — earlier, not binding ⇒ the base.
     expect(
       moStartDate({
         plannedStartWeeks: ["2026-11-16", null, "2026-11-09", undefined],
+        planFixed: false,
+        dueDate: "2026-12-18",
+        leadDays: 3,
+        offDays: NO_HOLIDAYS,
+      })
+    ).toBe("2026-12-15");
+  });
+
+  it("a binding plan (locked or reported on) wins with the Monday of its earliest week", () => {
+    expect(
+      moStartDate({
+        plannedStartWeeks: ["2026-11-16", null, "2026-11-09"],
+        planFixed: true,
         dueDate: "2026-12-18",
         leadDays: 3,
         offDays: NO_HOLIDAYS,
@@ -120,18 +135,36 @@ describe("moStartDate", () => {
     ).toBe("2026-11-09");
   });
 
-  it("otherwise the due date minus the lead time in working days", () => {
-    // Mon 2026-11-16 minus 3 working days = Wed 11-11.
-    expect(moStartDate({ plannedStartWeeks: [], dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS })).toBe("2026-11-11");
-    // Lead time 0: the due date itself.
-    expect(moStartDate({ plannedStartWeeks: [null], dueDate: "2026-11-16", leadDays: 0, offDays: NO_HOLIDAYS })).toBe("2026-11-16");
-    // A full-day holiday is skipped.
-    expect(moStartDate({ plannedStartWeeks: [], dueDate: "2026-11-16", leadDays: 1, offDays: new Set(["2026-11-13"]) })).toBe(
-      "2026-11-12"
-    );
+  it("a planned week LATER than the base wins (overload pushed the work back)", () => {
+    // Base Wed 2026-11-11; planned week 11-16 is later ⇒ 11-16. A planned
+    // Monday in the base's own week (11-09) is earlier ⇒ the base.
+    expect(
+      moStartDate({ plannedStartWeeks: ["2026-11-16"], planFixed: false, dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS })
+    ).toBe("2026-11-16");
+    expect(
+      moStartDate({ plannedStartWeeks: ["2026-11-09"], planFixed: false, dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS })
+    ).toBe("2026-11-11");
   });
 
-  it("an undated TO without a plan stays undated", () => {
-    expect(moStartDate({ plannedStartWeeks: [null], dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })).toBeNull();
+  it("without a plan: the due date minus the lead time in working days", () => {
+    // Mon 2026-11-16 minus 3 working days = Wed 11-11.
+    expect(moStartDate({ plannedStartWeeks: [], planFixed: false, dueDate: "2026-11-16", leadDays: 3, offDays: NO_HOLIDAYS })).toBe(
+      "2026-11-11"
+    );
+    // Lead time 0: the due date itself.
+    expect(
+      moStartDate({ plannedStartWeeks: [null], planFixed: false, dueDate: "2026-11-16", leadDays: 0, offDays: NO_HOLIDAYS })
+    ).toBe("2026-11-16");
+    // A full-day holiday is skipped.
+    expect(
+      moStartDate({ plannedStartWeeks: [], planFixed: false, dueDate: "2026-11-16", leadDays: 1, offDays: new Set(["2026-11-13"]) })
+    ).toBe("2026-11-12");
+  });
+
+  it("without a due date the planned week is all there is; without either it stays undated", () => {
+    expect(
+      moStartDate({ plannedStartWeeks: ["2026-11-23"], planFixed: false, dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })
+    ).toBe("2026-11-23");
+    expect(moStartDate({ plannedStartWeeks: [null], planFixed: false, dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })).toBeNull();
   });
 });

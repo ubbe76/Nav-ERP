@@ -24,6 +24,13 @@ export const listRequirementsQuerySchema = listQuerySchema.extend({
     .enum(["true", "false"])
     .optional()
     .transform((value) => value === "true"),
+  // Tidsfasade förslag (#13): sort by article number (as before) or by the
+  // earliest latest order/start date (undated last); `latest` keeps only the
+  // proposals whose latest date falls inside the horizon — late = already
+  // passed, the others up to and including the Sunday of this / next / the
+  // fourth week (a passed date is inside every horizon).
+  sort: z.enum(["article", "latest"]).default("article"),
+  latest: z.enum(["late", "this_week", "next_week", "four_weeks"]).optional(),
 });
 export type ListRequirementsQuery = z.infer<typeof listRequirementsQuerySchema>;
 
@@ -50,6 +57,11 @@ export const createPlanningOrdersSchema = z.object({
           kind: z.enum(["purchase", "manufacture", "subcontract", "configured"]),
           moOperationId: z.string().uuid().optional(),
           salesOrderRowId: z.string().uuid().optional(),
+          // Tidsfasade förslag (#13): the proposal's own need date — the TO's
+          // färdigdatum and the IO row's önskade leveransdatum are counted
+          // from it. Omitted (integrations) ⇒ the first firm demand decides,
+          // as before.
+          needDate: businessDateSchema.optional(),
         })
         .refine((p) => p.kind !== "subcontract" || p.moOperationId !== undefined, {
           message: "moOperationId is required for subcontract proposals",
@@ -67,8 +79,12 @@ export type CreatePlanningOrdersInput = z.infer<typeof createPlanningOrdersSchem
 // GET /articles/:id/due-date-suggestion — färdigdatumsförslag for a new TO.
 // salesOrderRowId: the KO row the TO is made for (its own delivery date is
 // then the firm demand).
+// quantity: the TO quantity the lead time is counted for (the routing's
+// setup + run × quantity when the article has no Ledtid (dagar) field);
+// omitted ⇒ 1.
 export const dueDateSuggestionQuerySchema = z.object({
   salesOrderRowId: z.string().uuid().optional(),
+  quantity: z.coerce.number().positive().optional(),
 });
 export type DueDateSuggestionQuery = z.infer<typeof dueDateSuggestionQuerySchema>;
 

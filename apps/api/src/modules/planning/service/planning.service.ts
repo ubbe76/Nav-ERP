@@ -15,10 +15,20 @@ import {
   DEMAND_SALES_STATUSES,
   computeLowLevelCodes,
   computeRequirements,
+  latestStartFor,
+  proposalSummary,
   type ConfiguredRowNeed,
+  type DerivedDemand,
+  type RequirementProposal,
   type RequirementRow,
   type RequirementsInput,
 } from "./requirements-calc.js";
+import {
+  buildLeadTimeContext,
+  computeMoStartDates,
+  configuredLeadDays,
+  type LeadTimeContext,
+} from "./requirements-dating.js";
 import {
   buildScheduleLookups,
   mondayOf,
@@ -31,7 +41,7 @@ import {
   type CapacityResult,
   type PlannedWeek,
 } from "./capacity-calc.js";
-import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput } from "./article-overview.js";
+import { buildArticleOverview, type ArticleOverview, type ArticleOverviewInput, type ArticleOverviewLoad } from "./article-overview.js";
 import { MIN_PLAN_MINUTES, PLAN_HORIZON_WEEKS, type PlanWorkCenter } from "./capacity-book.js";
 import { longOperationWarnings, planProduction, type OperationPlan, type PlanOperation, type PlanOrder, type PlanWarning } from "./production-plan.js";
 import { lockProductionPlan } from "../repository/plan-lock.js";
@@ -60,6 +70,7 @@ import {
   // Anchored in Europe/Stockholm — a UTC date would be yesterday's for the
   // first hours after midnight (summer time).
   stockholmToday,
+  type DeliveryDefaults,
   type PartnerDeliveryFields,
 } from "../../system/service/delivery-days.js";
 import { resolveSupplierPrice } from "../../purchase/service/supplier-price.js";
@@ -325,9 +336,68 @@ export interface CreatedOrdersResult {
   manufacturingOrders: { id: string; orderNumber: string; articleNumber: string }[];
   errors: { articleId: string; articleNumber: string; message: string }[];
   // Fasta leveransdagar: an IO row whose earliest possible arrival (lead
-  // time, the supplier's days, transit) comes after the demand. Never stops
+  // time, the supplier's days, transit) comes after the demand — and, since
+  // tidsfasade förslag (#13), a TO whose earliest possible finish (today plus
+  // the lead time) comes after the working day before the need. Never stops
   // the order — always present, empty when nothing is late.
   warnings: { orderNumber: string; articleNumber: string; demandDate: string; deliveryDate: string; message: string }[];
+}
+
+// Tidsfasade förslag: the CSV export has one line per proposal — the article
+// row repeated with each of its proposals (`proposal` null for a row without
+// any, shown with showAll).
+export type RequirementExportRow = RequirementRow & { proposal: RequirementProposal | null };
+
+// The horizon filter's last day: the Sunday of the current week, of the next,
+// or of the fourth week counted from the current one. "late" has no end —
+// it is strictly before today.
+function latestHorizonEnd(latest: NonNullable<ListRequirementsQuery["latest"]>, today: string): string | null {
+  const thisMonday = mondayOf(today);
+  switch (latest) {
+    case "late":
+      return null;
+    case "this_week":
+      return addDays(thisMonday, 6);
+    case "next_week":
+      return addDays(thisMonday, 13);
+    case "four_weeks":
+      return addDays(thisMonday, 27);
+  }
+}
+
+// Same scale as the calc (numeric(14,4)).
+const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
+
+// The rows with only the proposals inside the horizon (a passed latest date
+// is inside every horizon); a row left without proposals is dropped. The
+// cached rows are never mutated — copies all the way.
+function filterByLatest(rows: RequirementRow[], latest: NonNullable<ListRequirementsQuery["latest"]>, today: string): RequirementRow[] {
+  const end = latestHorizonEnd(latest, today);
+  const inside = (p: RequirementProposal) =>
+    p.latestDate !== null && (end === null ? p.latestDate < today : p.latestDate <= end);
+  const out: RequirementRow[] = [];
+  for (const row of rows) {
+    const proposals = row.proposals.filter(inside);
+    if (proposals.length === 0) continue;
+    out.push({
+      ...row,
+      proposals,
+      proposalQuantity: round4(proposals.reduce((sum, p) => sum + p.quantity, 0)),
+      ...proposalSummary(proposals),
+    });
+  }
+  return out;
+}
+
+// Sortering Senaste datum: the earliest latest date first, undated last,
+// article number as the tie-break so two loads render identically.
+function compareByLatest(a: RequirementRow, b: RequirementRow): number {
+  if (a.earliestLatestDate !== b.earliestLatestDate) {
+    if (a.earliestLatestDate === null) return 1;
+    if (b.earliestLatestDate === null) return -1;
+    return a.earliestLatestDate < b.earliestLatestDate ? -1 : 1;
+  }
+  return a.articleNumber < b.articleNumber ? -1 : a.articleNumber > b.articleNumber ? 1 : 0;
 }
 
 // Domain errors carry user-readable messages and pass through; anything that
@@ -384,6 +454,24 @@ export function createPlanningService(
   // through here, so the pure builders keep reading expectedDeliveryDate.
   // A row without customer fields (test fakes) follows the system defaults.
   const NO_PARTNER_SETTINGS: PartnerDeliveryFields = { deliveryWeekdays: [], deliveryDayMode: null, transitDays: null };
+  type DeliveryContext = { defaults: DeliveryDefaults; offDays: ReadonlySet<string> };
+  function shiftToShipDates<T extends { expectedDeliveryDate: string | null; customerDelivery?: PartnerDeliveryFields }>(
+    rows: T[],
+    ctx: DeliveryContext
+  ): T[] {
+    return rows.map((r) =>
+      r.expectedDeliveryDate
+        ? {
+            ...r,
+            expectedDeliveryDate: shipDateFor(
+              r.expectedDeliveryDate,
+              effectiveDeliverySettings(r.customerDelivery ?? NO_PARTNER_SETTINGS, "customer", ctx.defaults),
+              ctx.offDays
+            ),
+          }
+        : r
+    );
+  }
   async function toShipDates<T extends { expectedDeliveryDate: string | null; customerDelivery?: PartnerDeliveryFields }>(
     rows: T[],
     dbc?: Tx
@@ -391,59 +479,141 @@ export function createPlanningService(
     const dates = rows.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : []));
     if (dates.length === 0) return rows;
     // Transit days are at most 60 working days.
-    const { defaults, offDays } = await repo.deliveryContext(deliveryHolidayWindow(dates, 60), dbc);
-    return rows.map((r) =>
-      r.expectedDeliveryDate
-        ? {
-            ...r,
-            expectedDeliveryDate: shipDateFor(
-              r.expectedDeliveryDate,
-              effectiveDeliverySettings(r.customerDelivery ?? NO_PARTNER_SETTINGS, "customer", defaults),
-              offDays
-            ),
-          }
-        : r
-    );
+    return shiftToShipDates(rows, await repo.deliveryContext(deliveryHolidayWindow(dates, 60), dbc));
   }
 
-  async function loadOverviewInput(articleId: string) {
+  // The lead-time rules for a set of articles (field, routing, resources).
+  // Optional on the repo for the unit tests' fakes ⇒ lead time 0 everywhere.
+  async function leadTimeInputsFor(filter: { orderIds: string[]; articleIds: string[] }, dbc?: Tx) {
+    const inputs = (await repo.loadMoDatingInputs?.(filter, dbc)) ?? {
+      operations: [],
+      routings: [],
+      workCenters: [],
+      articleLeadTimes: new Map<string, number | null>(),
+    };
+    return { ...inputs, context: buildLeadTimeContext(inputs) };
+  }
+
+  // The holiday window the dating needs: the dates themselves, the transit
+  // search (60 working days) and the longest Ledtid (dagar) field — a
+  // routing-derived lead time beyond 60 working days is not realistic, and
+  // beyond the window the holidays simply are not subtracted.
+  function datingWindow(dates: string[], articleLeadTimes: ReadonlyMap<string, number | null>) {
+    const maxField = Math.max(0, ...[...articleLeadTimes.values()].map((d) => d ?? 0));
+    return deliveryHolidayWindow(dates, 60 + maxField);
+  }
+
+  // Tidsfasade förslag (#13): the artikelöversikt's material rows and planned
+  // TOs are dated with the TO's START (moStartDate), not its due date — the
+  // material must be there when the work begins. One dating load and ONE
+  // delivery context for the whole set (KO ship dates and TO starts share
+  // the holiday register); nothing is loaded for a set without dates or TOs.
+  async function dateOverviewLoads(loads: ArticleOverviewLoad[], dbc?: Tx): Promise<ArticleOverviewInput[]> {
+    const dates: string[] = [];
+    const moIds = new Set<string>();
+    const parentIds = new Set<string>();
+    for (const l of loads) {
+      for (const r of l.salesRows) if (r.expectedDeliveryDate) dates.push(r.expectedDeliveryDate);
+      for (const m of [...l.materialRows, ...l.plannedMos]) {
+        moIds.add(m.moId);
+        parentIds.add(m.parentArticleId);
+        if (m.dueDate) dates.push(m.dueDate);
+      }
+    }
+    const dating = moIds.size > 0 ? await leadTimeInputsFor({ orderIds: [...moIds], articleIds: [...parentIds] }, dbc) : null;
+    const ctx: DeliveryContext | null =
+      dates.length > 0 ? await repo.deliveryContext(datingWindow(dates, dating?.articleLeadTimes ?? new Map()), dbc) : null;
+    const starts = dating
+      ? computeMoStartDates({
+          orders: [
+            ...new Map(
+              loads
+                .flatMap((l) => [
+                  ...l.materialRows.map((m) => ({ manufacturingOrderId: m.moId, articleId: m.parentArticleId, quantity: 0, dueDate: m.dueDate })),
+                  ...l.plannedMos.map((m) => ({ manufacturingOrderId: m.moId, articleId: m.parentArticleId, quantity: m.quantity, dueDate: m.dueDate })),
+                ])
+                .map((o) => [o.manufacturingOrderId, o] as const)
+            ).values(),
+          ],
+          operations: dating.operations,
+          articleLeadTimes: dating.articleLeadTimes,
+          context: dating.context,
+          offDays: ctx?.offDays ?? new Set<string>(),
+        })
+      : new Map<string, string | null>();
+    return loads.map((l) => ({
+      ...l,
+      salesRows: ctx ? shiftToShipDates(l.salesRows, ctx) : l.salesRows,
+      materialRows: l.materialRows.map((m) => ({ ...m, needDate: starts.get(m.moId) ?? null })),
+      plannedMos: l.plannedMos.map((m) => ({ ...m, needDate: starts.get(m.moId) ?? null })),
+    }));
+  }
+
+  async function loadOverviewInput(articleId: string): Promise<ArticleOverviewInput> {
     const input = await repo.loadArticleOverviewInput(articleId);
     if (!input) throw new ArticleNotFoundError(articleId);
-    return { ...input, salesRows: await toShipDates(input.salesRows) };
+    return (await dateOverviewLoads([input]))[0]!;
   }
 
   // The same for a set of articles (Leveranstidskontroll's whole tree): one
-  // batch load and ONE delivery context for every KO row across the set —
-  // toShipDates preserves order and length, so the rows are flattened and
-  // sliced back per article. Unknown ids are absent, never an error.
-  // `dbc`: the reservation reads inside its own transaction (undefined =
-  // the plain db, as every other read).
+  // batch load and ONE delivery context for every KO row and TO across the
+  // set. Unknown ids are absent, never an error. `dbc`: the reservation
+  // reads inside its own transaction (undefined = the plain db, as every
+  // other read).
   async function loadOverviewInputs(articleIds: string[], dbc?: Tx) {
     const inputs = await repo.loadArticleOverviewInputs(articleIds, dbc);
-    const entries = [...inputs.values()];
-    const shifted = await toShipDates(entries.flatMap((i) => i.salesRows), dbc);
-    const result = new Map<string, ArticleOverviewInput>();
-    let offset = 0;
-    for (const input of entries) {
-      result.set(input.article.articleId, { ...input, salesRows: shifted.slice(offset, offset + input.salesRows.length) });
-      offset += input.salesRows.length;
-    }
-    return result;
+    const dated = await dateOverviewLoads([...inputs.values()], dbc);
+    return new Map<string, ArticleOverviewInput>(dated.map((input) => [input.article.articleId, input]));
   }
 
-  // Konfigurator 4c: the configured rows and their cascade are derived here,
-  // once per distinct (template, configuration) per run, so the pure calc
-  // never calls the configurator. An invalid configuration keeps its row
-  // (with the engine's message) but cascades nothing.
-  async function loadInputWithConfigured(): Promise<RequirementsInput> {
-    const [input, loadedConfigured] = await Promise.all([repo.loadRequirementsInput(), repo.loadConfiguredSalesRows()]);
-    // The proposal row shows the date its TO is planned by.
-    const configured = await toShipDates(loadedConfigured);
-    const roundingOf = new Map(input.articles.map((a) => [a.articleId, a.rounding]));
+  // The behovsberäkning's input, dated (tidsfasade förslag #13): the KO rows
+  // on their ship dates, every open TO's start date (its material's need
+  // date), the lego operations' planned week and the lead-time rules — ONE
+  // delivery context and ONE dating load for the whole run, never per
+  // article. Konfigurator 4c: the configured rows and their cascade are
+  // derived here too, once per distinct (template, configuration) per run,
+  // so the pure calc never calls the configurator. An invalid configuration
+  // keeps its row (with the engine's message) but cascades nothing.
+  async function loadDatedInput(): Promise<RequirementsInput> {
+    const [load, loadedConfigured] = await Promise.all([repo.loadRequirementsInput(), repo.loadConfiguredSalesRows()]);
+    const today = todayFn();
+    const dating = load.dating;
+    const leadTime = buildLeadTimeContext(dating);
+    const dates = [
+      today,
+      ...load.salesRows.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : [])),
+      ...loadedConfigured.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : [])),
+      ...load.manufacturingOrders.flatMap((o) => (o.dueDate ? [o.dueDate] : [])),
+      ...load.legoOperationRows.flatMap((o) => (o.plannedStartWeek ? [o.plannedStartWeek] : [])),
+    ];
+    const delivery = await repo.deliveryContext(datingWindow(dates, dating.articleLeadTimes));
+    const offDays: ReadonlySet<string> = delivery.offDays;
+
+    const starts = computeMoStartDates({
+      orders: load.manufacturingOrders,
+      operations: dating.operations,
+      articleLeadTimes: dating.articleLeadTimes,
+      context: leadTime,
+      offDays,
+    });
+    const salesRows = shiftToShipDates(load.salesRows, delivery);
+    const manufacturingOrders = load.manufacturingOrders.map((o) => ({ ...o, startDate: starts.get(o.manufacturingOrderId) ?? null }));
+    const moMaterialRows = load.moMaterialRows.map((r) => ({ ...r, needDate: starts.get(r.manufacturingOrderId) ?? null }));
+    // A lego operation is needed at the supplier when its own planned week
+    // starts, else when the TO starts; Ledtid beställning is the resource's.
+    const legoOperationRows = load.legoOperationRows.map((op) => ({
+      ...op,
+      needDate: op.plannedStartWeek ?? starts.get(op.manufacturingOrderId) ?? null,
+      orderLeadTimeDays: leadTime.orderLeadTimeDaysOf(op.workCenterId),
+    }));
+
+    // The proposal row shows the date its TO is planned by (the ship date).
+    const configured = shiftToShipDates(loadedConfigured, delivery);
+    const roundingOf = new Map(load.articles.map((a) => [a.articleId, a.rounding]));
     // An inactive template is treated as an inactive ordinary article: its
     // rows are shown (Inaktiv) but get no proposal (the calc) and cascade no
     // material (here) — the TO cannot be made before the template is active.
-    const inactiveTemplates = new Set(input.articles.filter((a) => !a.active).map((a) => a.articleId));
+    const inactiveTemplates = new Set(load.articles.filter((a) => !a.active).map((a) => a.articleId));
     const needs: ConfiguredRowNeed[] = configured.map((r) => ({
       salesOrderRowId: r.rowId,
       salesOrderId: r.salesOrderId,
@@ -465,10 +635,14 @@ export function createPlanningService(
         roundingOf.get(r.articleId) ?? null
       ),
       error: null,
+      // Set below once the structure is derived: the template's field, else
+      // the derived operations for the row's quantity.
+      leadDays: dating.articleLeadTimes.get(r.articleId) ?? 0,
     }));
     // Group the uncovered rows per (template, key): the derivation is linear
     // in quantity, so one call at the summed quantity equals the sum of the
-    // per-row calls.
+    // per-row calls — each row then gets its share, dated with its own TO's
+    // latest start (the component must be there when that TO begins).
     const groups = new Map<
       string,
       { templateId: string; selection: ConfiguratorSelection; quantity: number; needs: ConfiguredRowNeed[] }
@@ -487,7 +661,7 @@ export function createPlanningService(
       g.needs.push(need);
       groups.set(key, g);
     });
-    const cascade = new Map<string, number>();
+    const derivedDemands: DerivedDemand[] = [];
     for (const g of groups.values()) {
       try {
         if (!deps.configuredStructure) throw new Error("ConfiguredStructureReader not wired");
@@ -497,14 +671,37 @@ export function createPlanningService(
           for (const n of g.needs) n.error = s.errors[0] ?? "Konfigurationen är inte giltig";
           continue;
         }
-        for (const m of s.materials) {
-          cascade.set(m.componentArticleId, (cascade.get(m.componentArticleId) ?? 0) + m.totalQuantity);
+        const operations = s.operations.map((o) => ({
+          workCenterId: o.workCenterId,
+          setupTime: Number(o.setupTime),
+          runTimePerUnit: Number(o.runTimePerUnit),
+        }));
+        for (const n of g.needs) {
+          n.leadDays = configuredLeadDays(dating.articleLeadTimes.get(g.templateId), operations, n.uncoveredQuantity, leadTime);
+          const needDate = n.expectedDeliveryDate === null ? null : latestStartFor(n.expectedDeliveryDate, n.leadDays, offDays);
+          const share = n.uncoveredQuantity / g.quantity;
+          for (const m of s.materials) {
+            derivedDemands.push({ articleId: m.componentArticleId, quantity: m.totalQuantity * share, needDate });
+          }
         }
       } catch (err) {
         for (const n of g.needs) n.error = errorMessage(err);
       }
     }
-    return { ...input, configuredRows: needs, configuredCascade: cascade };
+    return {
+      ...load,
+      salesRows,
+      manufacturingOrders,
+      moMaterialRows,
+      legoOperationRows,
+      configuredRows: needs,
+      configuredCascade: new Map(),
+      derivedDemands,
+      today,
+      offDays,
+      deliveryDefaults: delivery.defaults,
+      leadDaysFor: leadTime.leadDaysFor,
+    };
   }
 
   // The firm demand a new TO is dated from. Konfigurator 4c: a CONFIGURED
@@ -517,13 +714,21 @@ export function createPlanningService(
   // TOs are deliberately NOT netted: an extra TO is the operator's decision)
   // ⇒ nothing to plan by. Ordinary rows and calls without a row keep the
   // pooled rule, whose overview demand is the remaining quantity already.
-  async function firmDemandFor(articleId: string, today: string, salesOrderRowId: string | undefined) {
+  type ConfiguredRowRef = { configuration: ConfiguratorSelection };
+  async function firmDemandFor(
+    articleId: string,
+    today: string,
+    salesOrderRowId: string | undefined
+  ): Promise<{ demand: FirmDemand | null; configuredRow: ConfiguredRowRef | null }> {
     if (salesOrderRowId) {
       const loaded = await repo.salesOrderRowForDueDate(salesOrderRowId);
       if (loaded?.configured && loaded.articleId === articleId) {
-        if (loaded.quantityOrdered - loaded.quantityDelivered <= 0) return null;
+        const configuredRow: ConfiguredRowRef | null = loaded.configuration
+          ? { configuration: selectionFromEntries(loaded.configuration.selection) }
+          : null;
+        if (loaded.quantityOrdered - loaded.quantityDelivered <= 0) return { demand: null, configuredRow };
         const [row] = await toShipDates([loaded]);
-        if (!DEMAND_SALES_STATUSES.has(row!.orderStatus) || !row!.expectedDeliveryDate) return null;
+        if (!DEMAND_SALES_STATUSES.has(row!.orderStatus) || !row!.expectedDeliveryDate) return { demand: null, configuredRow };
         const demand: FirmDemand = {
           date: row!.expectedDeliveryDate,
           source: "sales_order_row",
@@ -531,16 +736,67 @@ export function createPlanningService(
           documentId: row!.salesOrderId,
           documentNumber: row!.orderNumber,
         };
-        return demand;
+        return { demand, configuredRow };
       }
     }
-    return findFirmDemand(buildArticleOverview(await loadOverviewInput(articleId)), { today, salesOrderRowId });
+    const demand = findFirmDemand(buildArticleOverview(await loadOverviewInput(articleId)), { today, salesOrderRowId });
+    return { demand, configuredRow: null };
+  }
+
+  // The lead time a new TO is dated with: the article's field, else its
+  // routing for the quantity — or, for a configured (beställningsvara) row,
+  // the template's field, else the derived structure's operations. A failed
+  // derivation falls back to the template's routing: the date is a
+  // suggestion, the create itself refuses an invalid configuration.
+  async function leadDaysForNewOrder(articleId: string, quantity: number, configuredRow: ConfiguredRowRef | null): Promise<number> {
+    const { context, articleLeadTimes } = await leadTimeInputsFor({ orderIds: [], articleIds: [articleId] });
+    if (configuredRow && deps.configuredStructure) {
+      try {
+        const s = await deps.configuredStructure(articleId, configuredRow.configuration, quantity, { withCost: false });
+        if (s.valid) {
+          return configuredLeadDays(
+            articleLeadTimes.get(articleId),
+            s.operations.map((o) => ({ workCenterId: o.workCenterId, setupTime: Number(o.setupTime), runTimePerUnit: Number(o.runTimePerUnit) })),
+            quantity,
+            context
+          );
+        }
+      } catch {
+        // Fall through to the template's own routing.
+      }
+    }
+    return context.leadDaysFor(articleId, quantity);
+  }
+
+  // The holidays suggestDueDate can reach: back from the demand (the working
+  // day before) and forward from today over the lead time (the floor).
+  async function dueDateOffDays(demandDate: string, today: string, leadDays: number): Promise<Set<string>> {
+    const from = holidayLookbackStart(demandDate) < today ? holidayLookbackStart(demandDate) : today;
+    const floorEnd = addDays(today, 2 * leadDays + 14);
+    const to = demandDate > floorEnd ? demandDate : floorEnd;
+    return new Set(await repo.fullDayHolidaysBetween(from, to));
+  }
+
+  // The färdigdatum for a TO of `quantity` dated from a KNOWN need (a
+  // proposal's needDate): the working day before it, floored at today plus
+  // the lead time (late ⇒ the floor). The source is "shortage" — Skapa
+  // ordrar reads only dueDate/demandDate/late from it.
+  async function dueDateForNeed(
+    articleId: string,
+    needDate: string,
+    quantity: number,
+    configuredRow: ConfiguredRowRef | null
+  ): Promise<DueDateSuggestion> {
+    const today = todayFn();
+    const leadDays = await leadDaysForNewOrder(articleId, quantity, configuredRow);
+    const demand: FirmDemand = { date: needDate, source: "shortage", documentType: null, documentId: null, documentNumber: null };
+    return suggestDueDate(demand, { today, offDays: await dueDateOffDays(needDate, today, leadDays), leadDays });
   }
 
   function computedRequirements(refresh: boolean): { at: number; rows: Promise<RequirementRow[]> } {
     const t = now();
     if (refresh || !cache || t - cache.at >= cacheMs) {
-      const rows = loadInputWithConfigured().then(computeRequirements);
+      const rows = loadDatedInput().then(computeRequirements);
       const entry = { at: t, rows };
       cache = entry;
       rows.catch(() => {
@@ -1008,12 +1264,28 @@ export function createPlanningService(
             (r.configurationSummary?.toLowerCase().includes(term) ?? false)
         );
       }
+      // Tidsfasade förslag: the horizon filter trims the proposals (and
+      // drops rows left without any) BEFORE paging, so total counts what is
+      // shown; the sort by latest date is a copy — the cache stays as is.
+      if (query.latest) rows = filterByLatest(rows, query.latest, todayFn());
+      if (query.sort === "latest") rows = [...rows].sort(compareByLatest);
 
       return {
         rows: rows.slice(query.offset, query.offset + query.limit),
         total: rows.length,
         computedAt: new Date(entry.at).toISOString(),
       };
+    },
+
+    // The CSV export's rows: the same filters, then one line per proposal (a
+    // row without proposals — showAll — is one line with `proposal` null).
+    // Paging applies to the flattened lines, so the export cap counts them.
+    async listRequirementsForExport(query: ListRequirementsQuery): Promise<Paged<RequirementExportRow>> {
+      const { rows } = await this.listRequirements({ ...query, offset: 0, limit: Number.MAX_SAFE_INTEGER });
+      const lines: RequirementExportRow[] = rows.flatMap((row): RequirementExportRow[] =>
+        row.proposals.length === 0 ? [{ ...row, proposal: null }] : row.proposals.map((proposal) => ({ ...row, proposal }))
+      );
+      return { rows: lines.slice(query.offset, query.offset + query.limit), total: lines.length };
     },
 
     // Aviseringar (Behöver beställas / Behöver tillverkas): the rows with a
@@ -1042,18 +1314,19 @@ export function createPlanningService(
     // before its first firm demand not already covered by stock or open
     // IO/TO (or before the linked KO row's delivery date, if that row is
     // uncovered), today at the earliest. null = no uncovered dated demand.
+    // Never before the earliest possible finish: today plus the article's
+    // lead time (the field Ledtid (dagar), else the routing for `quantity`,
+    // 1 when not given) — below that floor the floor is suggested with
+    // `late`.
     async suggestManufacturingDueDate(
       articleId: string,
-      opts: { salesOrderRowId?: string } = {}
+      opts: { salesOrderRowId?: string; quantity?: number } = {}
     ): Promise<DueDateSuggestion | null> {
       const today = todayFn();
-      const demand = await firmDemandFor(articleId, today, opts.salesOrderRowId);
+      const { demand, configuredRow } = await firmDemandFor(articleId, today, opts.salesOrderRowId);
       if (!demand) return null;
-      const offDays = new Set(await repo.fullDayHolidaysBetween(holidayLookbackStart(demand.date), demand.date));
-      // Lead time 0 until the article's lead time (field or routing,
-      // manufacturing-lead-time.ts) is loaded here — then the holiday window
-      // must also cover [today, today + leadDays] for the floor.
-      return suggestDueDate(demand, { today, offDays, leadDays: 0 });
+      const leadDays = await leadDaysForNewOrder(articleId, opts.quantity ?? 1, configuredRow);
+      return suggestDueDate(demand, { today, offDays: await dueDateOffDays(demand.date, today, leadDays), leadDays });
     },
 
     // Leveranstidskontroll — reads only (nothing is booked).
@@ -1348,6 +1621,24 @@ export function createPlanningService(
       const subcontractProposals = input.proposals.filter((p) => p.kind === "subcontract");
       const configuredProposals = input.proposals.filter((p) => p.kind === "configured");
 
+      // Tidsfasade förslag (#13): a proposal that carries its needDate is
+      // dated from it (the TO's färdigdatum, the IO row's önskade
+      // leveransdatum); one without (integrations) from the article's first
+      // firm demand, as before. A TO whose earliest possible finish comes
+      // after the need is created anyway and reported in `warnings`, exactly
+      // like a late IO row.
+      const today = todayFn();
+      const pushLateManufacturing = (orderNumber: string, articleId: string, s: DueDateSuggestion | null) => {
+        if (!s?.late) return;
+        result.warnings.push({
+          orderNumber,
+          articleNumber: numberFor(articleId),
+          demandDate: s.demandDate,
+          deliveryDate: s.dueDate,
+          message: `Färdigdatumet (${s.dueDate}) hinner inte före behovet (${s.demandDate})`,
+        });
+      };
+
       // Konfigurator 4c: configured rows first — they are parents (their TO's
       // material is what the component proposals below were netted against).
       // The manufacturing service derives the structure from the row's own
@@ -1363,9 +1654,17 @@ export function createPlanningService(
             pushError(proposal.articleId, "Kundorderraden hör inte till artikeln eller är inte konfigurerad");
             continue;
           }
-          const suggestion = await this.suggestManufacturingDueDate(proposal.articleId, {
-            salesOrderRowId: proposal.salesOrderRowId,
-          });
+          const suggestion = proposal.needDate
+            ? await dueDateForNeed(
+                proposal.articleId,
+                proposal.needDate,
+                proposal.quantity,
+                linked.configuration ? { configuration: selectionFromEntries(linked.configuration.selection) } : null
+              )
+            : await this.suggestManufacturingDueDate(proposal.articleId, {
+                salesOrderRowId: proposal.salesOrderRowId,
+                quantity: proposal.quantity,
+              });
           // onlyUncovered: the proposal may come from a cached list (up to
           // REQUIREMENTS_CACHE_MS old) or a second click — the row's TO is
           // only created for what it still lacks, checked under its lock.
@@ -1379,6 +1678,7 @@ export function createPlanningService(
             orderNumber: mo.orderNumber,
             articleNumber: numberFor(proposal.articleId),
           });
+          pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion);
         } catch (err) {
           pushError(proposal.articleId, errorMessage(err));
         }
@@ -1388,6 +1688,8 @@ export function createPlanningService(
       // MRP's own netting): a new planned TO is material demand in its
       // components' overview, so both a component TO's färdigdatum and a
       // purchased component's önskade leveransdatum (below) land before it.
+      // Within a level the proposals keep their order (stable sort) — two
+      // week proposals of one article become two TOs.
       if (manufactureProposals.length > 1) {
         const levels = computeLowLevelCodes(await repo.loadBomEdges());
         manufactureProposals.sort((a, b) => (levels.get(a.articleId) ?? 0) - (levels.get(b.articleId) ?? 0));
@@ -1395,7 +1697,9 @@ export function createPlanningService(
 
       for (const proposal of manufactureProposals) {
         try {
-          const suggestion = await this.suggestManufacturingDueDate(proposal.articleId);
+          const suggestion = proposal.needDate
+            ? await dueDateForNeed(proposal.articleId, proposal.needDate, proposal.quantity, null)
+            : await this.suggestManufacturingDueDate(proposal.articleId, { quantity: proposal.quantity });
           const mo = await deps.manufacturing.createManufacturingOrder(
             {
               articleId: proposal.articleId,
@@ -1410,6 +1714,7 @@ export function createPlanningService(
             orderNumber: mo.orderNumber,
             articleNumber: numberFor(proposal.articleId),
           });
+          pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion);
         } catch (err) {
           pushError(proposal.articleId, errorMessage(err));
         }
@@ -1422,15 +1727,53 @@ export function createPlanningService(
         ])
       );
 
-      const bySupplier = new Map<
-        string,
-        { supplierName: string; rows: { articleId: string; quantity: number; unitPrice: number }[] }
-      >();
+      // The raw demand date per purchase proposal: its own needDate, else the
+      // article's first firm demand (the TO färdigdatum rule's demand — a
+      // KO's ship date or a TO's start), looked up once per article. A failed
+      // suggestion is just no date — it must not stop the order (a real
+      // problem fails addRow).
+      const firstDemandByArticle = new Map<string, Promise<DueDateSuggestion | null>>();
+      const firstDemandFor = (articleId: string) => {
+        let pending = firstDemandByArticle.get(articleId);
+        if (!pending) {
+          pending = this.suggestManufacturingDueDate(articleId).catch(() => null);
+          firstDemandByArticle.set(articleId, pending);
+        }
+        return pending;
+      };
+
+      type PurchaseRow = {
+        articleId: string;
+        quantity: number;
+        unitPrice: number;
+        demandDate: string | null;
+        // The fallback date when the delivery context cannot be loaded (the
+        // working day before the demand, today at the earliest — the TO
+        // färdigdatum rule, exactly as before fasta leveransdagar).
+        fallbackDate: string | null;
+      };
+      const bySupplier = new Map<string, { supplierName: string; rows: PurchaseRow[] }>();
       for (const proposal of purchaseProposals) {
         const supplier = supplierByArticle.get(proposal.articleId);
         if (!supplier) {
           pushError(proposal.articleId, "Artikeln saknar huvudleverantör");
           continue;
+        }
+        let demandDate: string | null;
+        let fallbackDate: string | null;
+        if (proposal.needDate) {
+          demandDate = proposal.needDate;
+          fallbackDate = suggestPurchaseDeliveryDate({
+            demandDate,
+            today,
+            leadTimeDays: 0,
+            settings: effectiveDeliverySettings(NO_PARTNER_SETTINGS, "supplier", { supplier: { mode: "arrival", transitDays: 0 }, customer: { mode: "dispatch", transitDays: 0 } }),
+            offDays: new Set<string>(),
+          }).date;
+        } else {
+          const first = await firstDemandFor(proposal.articleId);
+          demandDate = first?.demandDate ?? null;
+          fallbackDate = first?.dueDate ?? null;
         }
         const group = bySupplier.get(supplier.supplierId) ?? { supplierName: supplier.supplierName, rows: [] };
         group.rows.push({
@@ -1438,27 +1781,18 @@ export function createPlanningService(
           quantity: proposal.quantity,
           // Stafflat: the break for the proposal quantity, else grundpriset.
           unitPrice: resolveSupplierPrice(supplier, proposal.quantity).price ?? 0,
+          demandDate,
+          fallbackDate,
         });
         bySupplier.set(supplier.supplierId, group);
       }
 
-      // Önskat leveransdatum: the raw demand date per article (the TO
-      // färdigdatum rule's demand — a KO's ship date or a TO's due date),
-      // then the latest arrival before it that the supplier's days allow,
-      // never earlier than the earliest possible arrival with lead time and
-      // transit (late ⇒ a warning). Without settings: the working day before
-      // the demand, exactly as before. A failed suggestion is just no date —
-      // it must not stop the order (a real problem fails addRow).
-      const suggestions = new Map<string, { demandDate: string; dueDate: string } | null>();
-      for (const group of bySupplier.values()) {
-        for (const row of group.rows) {
-          const suggestion = await this.suggestManufacturingDueDate(row.articleId).catch(() => null);
-          suggestions.set(row.articleId, suggestion ? { demandDate: suggestion.demandDate, dueDate: suggestion.dueDate } : null);
-        }
-      }
-      const demandDates = new Map([...suggestions].map(([articleId, s]) => [articleId, s?.demandDate ?? null]));
-      const today = todayFn();
-      const knownDemands = [...demandDates.values()].filter((d): d is string => d !== null);
+      // Önskat leveransdatum: the raw demand date per row, then the latest
+      // arrival before it that the supplier's days allow, never earlier than
+      // the earliest possible arrival with lead time and transit (late ⇒ a
+      // warning). Without settings: the working day before the demand,
+      // exactly as before.
+      const knownDemands = [...bySupplier.values()].flatMap((g) => g.rows.flatMap((r) => (r.demandDate ? [r.demandDate] : [])));
       const maxLead = Math.max(0, ...[...supplierByArticle.values()].map((s) => s.leadTimeDays ?? 0));
       // The delivery context (defaults + holidays) is a convenience for the
       // dates, never a reason to fail — the TOs above already exist. Without
@@ -1470,81 +1804,99 @@ export function createPlanningService(
           : null;
 
       for (const [supplierId, group] of bySupplier) {
-        // The order gets the earliest date; a row whose own date is later
-        // keeps it on the row (null = follows the order).
-        const dates = new Map<string, { date: string | null; late: boolean }>();
-        for (const row of group.rows) {
-          const supplier = supplierByArticle.get(row.articleId)!;
-          dates.set(
-            row.articleId,
-            delivery
+        // Tidsfasade förslag: the supplier's rows in need-date order (undated
+        // last), and an article's n:th proposal on the supplier's n:th IO —
+        // purchase_order_rows_purchase_order_id_article_id_unique allows one
+        // row per article and order, so a second week of the same article
+        // opens a second draft IO. Most runs still give one IO per supplier.
+        // TODO: merge the buckets into one IO per supplier when "Samma
+        // artikel flera gånger på en order" (TODO.md, Förbättringar → Medel)
+        // lifts the unique index.
+        const sorted = [...group.rows].sort((a, b) =>
+          a.demandDate === b.demandDate ? 0 : a.demandDate === null ? 1 : b.demandDate === null ? -1 : a.demandDate < b.demandDate ? -1 : 1
+        );
+        const buckets: PurchaseRow[][] = [];
+        const seen = new Map<string, number>();
+        for (const row of sorted) {
+          const n = seen.get(row.articleId) ?? 0;
+          seen.set(row.articleId, n + 1);
+          (buckets[n] ??= []).push(row);
+        }
+
+        for (const bucket of buckets) {
+          // The order gets the earliest date; a row whose own date is later
+          // keeps it on the row (null = follows the order).
+          const dates = bucket.map((row) => {
+            const supplier = supplierByArticle.get(row.articleId)!;
+            return delivery
               ? suggestPurchaseDeliveryDate({
-                  demandDate: demandDates.get(row.articleId) ?? null,
+                  demandDate: row.demandDate,
                   today,
                   leadTimeDays: supplier.leadTimeDays,
                   settings: effectiveDeliverySettings(supplier.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
                   offDays: delivery.offDays,
                 })
-              : { date: suggestions.get(row.articleId)?.dueDate ?? null, late: false }
-          );
-        }
-        const orderDate = [...dates.values()]
-          .map((d) => d.date)
-          .filter((d): d is string => d !== null)
-          .sort()[0];
+              : { date: row.fallbackDate, late: false };
+          });
+          const orderDate = dates
+            .map((d) => d.date)
+            .filter((d): d is string => d !== null)
+            .sort()[0];
 
-        let order: { id: string; orderNumber: string };
-        try {
-          order = await deps.purchase.createPurchaseOrder(
-            { supplierId, exchangeRate: 1, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
-            createdBy
-          );
-        } catch (err) {
-          for (const row of group.rows) pushError(row.articleId, errorMessage(err));
-          continue;
-        }
-        let rowCount = 0;
-        for (const row of group.rows) {
-          const { date: rowDate, late } = dates.get(row.articleId) ?? { date: null, late: false };
+          let order: { id: string; orderNumber: string };
           try {
-            await deps.purchase.addRow(order.id, {
-              ...row,
-              ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
-            });
-            rowCount += 1;
-            const demandDate = demandDates.get(row.articleId) ?? null;
-            if (late && rowDate && demandDate) {
-              result.warnings.push({
-                orderNumber: order.orderNumber,
-                articleNumber: numberFor(row.articleId),
-                demandDate,
-                deliveryDate: rowDate,
-                message: `Leveransen (${rowDate}) kommer efter behovet (${demandDate})`,
-              });
-            }
+            order = await deps.purchase.createPurchaseOrder(
+              { supplierId, exchangeRate: 1, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
+              createdBy
+            );
           } catch (err) {
-            pushError(row.articleId, errorMessage(err));
+            for (const row of bucket) pushError(row.articleId, errorMessage(err));
+            continue;
           }
-        }
-        if (rowCount === 0) {
-          // Every row failed — don't leave a rowless draft IO in the register
-          // and don't report it as created. Best-effort cancel; the row
-          // failures above are already reported per article.
-          try {
-            await deps.purchase.cancel(order.id);
-          } catch {
-            // The empty draft survives as junk, but the user already gets one
-            // error per row; a cancel failure has nothing actionable to add.
+          let rowCount = 0;
+          for (const [i, row] of bucket.entries()) {
+            const { date: rowDate, late } = dates[i]!;
+            try {
+              await deps.purchase.addRow(order.id, {
+                articleId: row.articleId,
+                quantity: row.quantity,
+                unitPrice: row.unitPrice,
+                ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
+              });
+              rowCount += 1;
+              if (late && rowDate && row.demandDate) {
+                result.warnings.push({
+                  orderNumber: order.orderNumber,
+                  articleNumber: numberFor(row.articleId),
+                  demandDate: row.demandDate,
+                  deliveryDate: rowDate,
+                  message: `Leveransen (${rowDate}) kommer efter behovet (${row.demandDate})`,
+                });
+              }
+            } catch (err) {
+              pushError(row.articleId, errorMessage(err));
+            }
           }
-          continue;
+          if (rowCount === 0) {
+            // Every row failed — don't leave a rowless draft IO in the register
+            // and don't report it as created. Best-effort cancel; the row
+            // failures above are already reported per article.
+            try {
+              await deps.purchase.cancel(order.id);
+            } catch {
+              // The empty draft survives as junk, but the user already gets one
+              // error per row; a cancel failure has nothing actionable to add.
+            }
+            continue;
+          }
+          result.purchaseOrders.push({
+            id: order.id,
+            orderNumber: order.orderNumber,
+            supplierId,
+            supplierName: group.supplierName,
+            rowCount,
+          });
         }
-        result.purchaseOrders.push({
-          id: order.id,
-          orderNumber: order.orderNumber,
-          supplierId,
-          supplierName: group.supplierName,
-          rowCount,
-        });
       }
 
       // --- Subcontract (lego) proposals: grouped per supplier into draft

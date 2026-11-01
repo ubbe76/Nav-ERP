@@ -76,14 +76,26 @@ export function routingLeadWork(
   }));
 }
 
-// When an existing TO starts (its material need date): the Monday of the
-// EARLIEST planned week of its operations when any is planned, otherwise
-// the due date minus the lead time in working days, otherwise null (an
-// undated TO — as before). Shared by the article overview, the
+// When an existing TO starts (its material need date). The base is the due
+// date minus the lead time in working days — the latest start that still
+// finishes in time, the same rule the proposals use. The production plan's
+// weeks only win when the plan is binding or later:
+// - `planFixed` (an operation is locked by a move, or already reported on):
+//   the Monday of the earliest planned week — the work is under way or was
+//   placed by hand, so that is when the material is used;
+// - a planned week LATER than the base (overload pushed the work back): the
+//   material is not needed before the work can start.
+// An earlier planned week is ignored on purpose (user decision 2026-11-01):
+// Planera fills free capacity forward from today, so almost every new TO is
+// planned for the current week however far off its due date is, and
+// following that would make nearly every purchased component urgent.
+// Without a due date the planned week is all there is; without either, null
+// (an undated TO — as before). Shared by the article overview, the
 // behovsberäkning and the färdigdatumsförslag, so a component's need never
 // sits on a different day in one of them.
 export function moStartDate(i: {
   plannedStartWeeks: readonly (string | null | undefined)[]; // mo_operations.planned_start_week (Mondays)
+  planFixed: boolean;
   dueDate: string | null;
   leadDays: number;
   offDays: ReadonlySet<string>;
@@ -92,7 +104,8 @@ export function moStartDate(i: {
   for (const week of i.plannedStartWeeks) {
     if (week && (earliest === null || week < earliest)) earliest = week;
   }
-  if (earliest !== null) return earliest;
-  if (i.dueDate === null) return null;
-  return subtractWorkingDays(i.dueDate, Math.max(0, i.leadDays), i.offDays);
+  const base = i.dueDate === null ? null : subtractWorkingDays(i.dueDate, Math.max(0, i.leadDays), i.offDays);
+  if (earliest === null) return base;
+  if (base === null || i.planFixed || earliest > base) return earliest;
+  return base;
 }
