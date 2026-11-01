@@ -10,10 +10,12 @@ import { formatMoney } from "../../lib/format";
 import type { FiscalYear, FixedAssetPlan, FixedAssetPlanRow, FixedAssetPlanTotals } from "../../lib/types";
 import buttonStyles from "../ui/Button.module.css";
 
+// Nr and Anskaffad ride in the Benämning cell (number first, date on a second
+// line) and the two disposal columns only show when the year has a disposal:
+// nine money columns plus three identity columns scrolled sideways at 1280 px
+// as soon as the amounts reached millions. The PDF and CSV keep every column.
 const COLUMNS = [
-  { key: "assetNumber", label: "Nr", width: "80px" },
-  { key: "name", label: "Benämning", width: "2fr" },
-  { key: "acquisitionDate", label: "Anskaffad", width: "100px" },
+  { key: "name", label: "Anläggning", width: "minmax(160px, 2fr)" },
   { key: "acquisitionOpening", label: "IB ansk.", width: "1fr", align: "right" as const },
   { key: "acquisitions", label: "Anskaffningar", width: "1fr", align: "right" as const },
   { key: "disposals", label: "Avyttringar", width: "1fr", align: "right" as const },
@@ -24,6 +26,7 @@ const COLUMNS = [
   { key: "depreciationClosing", label: "UB ack.", width: "1fr", align: "right" as const },
   { key: "bookValueClosing", label: "Bokfört värde", width: "1fr", align: "right" as const },
 ];
+const DISPOSAL_KEYS = new Set(["disposals", "depreciationDisposed"]);
 
 const MONEY_KEYS: (keyof FixedAssetPlanTotals)[] = [
   "acquisitionOpening",
@@ -41,10 +44,19 @@ type PlanTableRow = FixedAssetPlanRow & { id: string };
 
 function renderPlanCell(row: PlanTableRow, key: string) {
   if ((MONEY_KEYS as string[]).includes(key)) return formatMoney(row[key as keyof FixedAssetPlanTotals]);
-  // null, not "": a cell without content is hidden in the stacked phone layout
-  // instead of printing its label next to nothing (the total row has no Nr/Anskaffad).
-  const value = row[key as keyof FixedAssetPlanRow];
-  return value === null || value === undefined || value === "" ? null : String(value);
+  if (key !== "name") return null;
+  // The total row has no number or date — just its label.
+  if (!row.assetNumber) return row.name;
+  return (
+    <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <span>
+        <span className="num">{row.assetNumber}</span> {row.name}
+      </span>
+      <span className="num" style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>
+        Anskaffad {row.acquisitionDate}
+      </span>
+    </span>
+  );
 }
 
 function totalsFooter(totals: FixedAssetPlanTotals, label: string) {
@@ -62,6 +74,8 @@ export function AvskrivningsplanPageClient({
 }) {
   const router = useRouter();
   const mismatches = plan?.reconciliation.filter((row) => row.mismatch) ?? [];
+  const hasDisposals = plan?.categories.some((category) => category.assets.some((row) => row.disposals !== 0 || row.depreciationDisposed !== 0)) ?? false;
+  const columns = hasDisposals ? COLUMNS : COLUMNS.filter((column) => !DISPOSAL_KEYS.has(column.key));
   const grandTotal: PlanTableRow | null = plan
     ? {
         ...plan.totals,
@@ -149,7 +163,7 @@ export function AvskrivningsplanPageClient({
               {category.categoryName} ({category.assetAccountNumber} / {category.accumulatedAccountNumber})
             </h2>
             <Table
-              columns={COLUMNS}
+              columns={columns}
               rows={category.assets.map((row) => ({ ...row, id: row.assetId }))}
               renderCell={renderPlanCell}
               footer={totalsFooter(category.totals, `Summa ${category.categoryName.toLowerCase()}`)}
@@ -162,7 +176,7 @@ export function AvskrivningsplanPageClient({
       {grandTotal && plan && plan.categories.some((category) => category.assets.length > 0) && (
         <Card maxWidth="none">
           <h2 style={{ marginTop: 0 }}>Alla grupper</h2>
-          <Table columns={COLUMNS} rows={[grandTotal]} renderCell={renderPlanCell} />
+          <Table columns={columns} rows={[grandTotal]} renderCell={renderPlanCell} />
         </Card>
       )}
     </>

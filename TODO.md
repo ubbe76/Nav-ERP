@@ -32,7 +32,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låga — layout
 
-- [ ] **Layout, rester efter genomgången 2026-10-31:** avskrivningsplanen (13 kolumner) scrollar 80–94 px i sidled vid 1280 px; Attesteringstabellen scrollar fortfarande ~150 px vid 1280 px (ren vid 1500); artikelkortets rubrik är trång vid 375 px (Skriv ut etikett trycker ihop numret och namnet bryts per tecken); periodiseringstabellens val trunkeras i staplade celler på mobil; en inskriven 0 i Ingående avskrivning med en månad passerar formuläret och vägras först av servern.
 
 ### Låga — fel i manualen
 

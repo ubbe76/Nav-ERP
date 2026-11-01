@@ -175,17 +175,21 @@ export function AttestationPageClient({
 
       <Table<EmployeeRow>
         columns={[
+          // The hour columns are sized to their headings (FRÅNVARO, OFÖRDELAT
+          // are the widest) and the buttons sit under the status pill: with
+          // a column of their own the table scrolled ~150 px sideways at
+          // 1280 px with the name squeezed to its floor. Status is Detaljer +
+          // Attestera side by side; Ångra attest wraps under Detaljer.
           { key: "name", label: "Anställd", width: "minmax(120px, 1fr)" },
-          { key: "scheduledMinutes", label: "Schema", width: "72px", align: "right" },
-          { key: "workedMinutes", label: "Arbetat", width: "72px", align: "right" },
-          { key: "absence", label: "Frånvaro", width: "72px", align: "right" },
-          { key: "overtime", label: "Övertid", width: "72px", align: "right" },
-          { key: "ob", label: "OB", width: "56px", align: "right" },
-          { key: "atfMinutes", label: "ATF", width: "56px", align: "right" },
-          { key: "unaccountedMinutes", label: "Ofördelat", width: "84px", align: "right" },
-          { key: "deviations", label: "Avvikelser", width: "110px" },
-          { key: "status", label: "Status", width: "120px" },
-          { key: "actions", label: "", width: "150px", align: "right" },
+          { key: "scheduledMinutes", label: "Schema", width: "56px", align: "right" },
+          { key: "workedMinutes", label: "Arbetat", width: "58px", align: "right" },
+          { key: "absence", label: "Frånvaro", width: "68px", align: "right" },
+          { key: "overtime", label: "Övertid", width: "56px", align: "right" },
+          { key: "ob", label: "OB", width: "52px", align: "right" },
+          { key: "atfMinutes", label: "ATF", width: "52px", align: "right" },
+          { key: "unaccountedMinutes", label: "Ofördelat", width: "76px", align: "right" },
+          { key: "deviations", label: "Avvikelser", width: "84px" },
+          { key: "status", label: "Status", width: "170px" },
         ]}
         rows={rows}
         emptyText="Inga medarbetare med underlag i perioden"
@@ -243,35 +247,36 @@ export function AttestationPageClient({
               );
             }
             case "status":
-              return statusCell(employee);
-            case "actions":
               return (
-                <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  <Button type="button" variant="ghost" size="small" onClick={() => setDetails(employee)}>
-                    Detaljer
-                  </Button>
-                  {!locked &&
-                    (employee.attested ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="small"
-                        disabled={pendingId === employee.employeeId}
-                        onClick={() => unattest(employee.employeeId)}
-                      >
-                        Ångra attest
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="small"
-                        disabled={pendingId === employee.employeeId}
-                        onClick={() => attest(employee.employeeId)}
-                      >
-                        Attestera
-                      </Button>
-                    ))}
+                <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8 }}>
+                  {statusCell(employee)}
+                  <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+                    <Button type="button" variant="ghost" size="small" onClick={() => setDetails(employee)}>
+                      Detaljer
+                    </Button>
+                    {!locked &&
+                      (employee.attested ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="small"
+                          disabled={pendingId === employee.employeeId}
+                          onClick={() => unattest(employee.employeeId)}
+                        >
+                          Ångra attest
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="small"
+                          disabled={pendingId === employee.employeeId}
+                          onClick={() => attest(employee.employeeId)}
+                        >
+                          Attestera
+                        </Button>
+                      ))}
+                  </span>
                 </span>
               );
             default:

@@ -55,6 +55,15 @@
     padding: 26px 20px 32px;
     padding-top: 20px; /* the theme row inside .main clears the hamburger */
   }
+  /* The hamburger is fixed at left 20px, 38px wide. Since Favorit joined the
+     row (Favorit + Logga ut + the theme switch ≈ 345px) a phone no longer has
+     room for it beside the button, and the right-aligned row slid under it.
+     Keep the row clear of the button and let the theme switch wrap to its own
+     line instead. */
+  .themeRow {
+    padding-left: 48px;
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 640px) {
