@@ -52,6 +52,12 @@ export const requirementsExportColumns: CsvColumn<RequirementExportRow>[] = [
   { label: "Passerat", value: (r) => (r.proposal?.late ? "Ja" : r.proposal ? "Nej" : null) },
   // The supplier's lead time for a purchase; the manufacturing lead time
   // (field or routing) for a manufactured article.
-  { label: "Ledtid (dagar)", value: (r) => r.primarySupplier?.leadTimeDays ?? r.leadDays ?? null, format: "number" },
+  // Manufactured: the lead time the proposals were dated with (field or
+  // routing); purchased: the main supplier's catalogue lead time.
+  {
+    label: "Ledtid (dagar)",
+    value: (r) => (r.type === "manufactured" ? r.leadDays : r.primarySupplier?.leadTimeDays) ?? null,
+    format: "number",
+  },
   { label: "Huvudleverantör", value: (r) => r.primarySupplier?.supplierName ?? null },
 ];

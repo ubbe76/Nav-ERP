@@ -9,7 +9,13 @@ import type { PartnerDeliveryFields } from "../src/modules/system/service/delive
 
 // Tidsfasade förslag: a requirements load without TOs, routings or resources
 // — every lead time is 0 and nothing is dated beyond the rows themselves.
-const emptyDating = { operations: [], routings: [], workCenters: [], articleLeadTimes: new Map<string, number | null>() };
+const emptyDating = {
+  operations: [],
+  routings: [],
+  workCenters: [],
+  articleLeadTimes: new Map<string, number | null>(),
+  orderQuantities: new Map<string, number>(),
+};
 
 function makeRepo(overrides: Partial<PlanningRepository> = {}): PlanningRepository {
   return {

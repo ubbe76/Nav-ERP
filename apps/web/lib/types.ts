@@ -4386,6 +4386,8 @@ export interface PlanningOrderProposal {
   salesOrderRowId?: string;
   // The proposal's behovsdatum; omitted when it has none.
   needDate?: string;
+  // reorder_point: dated today for no deadline — never reported late.
+  reason?: RequirementProposal["reason"];
 }
 
 export interface PlanningOrdersResult {

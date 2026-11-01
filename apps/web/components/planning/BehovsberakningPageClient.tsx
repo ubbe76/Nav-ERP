@@ -129,8 +129,10 @@ interface RowState {
   moOrderNumber: string | null;
   moOperationLabel: string | null;
   unitCode: string | null;
-  // The proposal's behovsdatum, sent on Skapa ordrar (null = omitted).
+  // The proposal's behovsdatum and reason, sent on Skapa ordrar (null =
+  // omitted; a reorder-point proposal is never reported late).
   needDate: string | null;
+  reason: RequirementProposal["reason"] | null;
   // Set once the user changes the selection or the quantity — a touched row
   // keeps its state across refetches, an untouched one follows the server.
   touched: boolean;
@@ -168,6 +170,7 @@ function makeRowState(row: DisplayRow): RowState {
     moOperationLabel: row.moOperationLabel ?? null,
     unitCode: row.unitCode,
     needDate: row.proposal?.needDate ?? null,
+    reason: row.proposal?.reason ?? null,
     touched: false,
   };
 }
@@ -195,6 +198,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // Uppdatera, or after creating orders/inquiries — must bypass it, so it
   // sets this before bumping reloadKey and the next fetch sends refresh=true.
   const forceRefresh = useRef(false);
+  const lastFilterKey = useRef<string | null>(null);
   const [computedAt, setComputedAt] = useState<string | null>(null);
   const reload = () => {
     forceRefresh.current = true;
@@ -276,8 +280,18 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         })()
       : listApiQuery(sp, ["type", "groupId", "showAll", "latest", "sort"], pageSize);
 
-    const refresh = forceRefresh.current ? "&refresh=true" : "";
+    const refreshing = forceRefresh.current;
+    const refresh = refreshing ? "&refresh=true" : "";
     forceRefresh.current = false;
+    // A new filter, sort or search starts the selection over (only the
+    // page number keeps it): otherwise proposals preselected in the full
+    // list stay selected out of sight under Senast: Passerat and Skapa
+    // ordrar would create them too.
+    const filterParams = new URLSearchParams(queryKey);
+    filterParams.delete("page");
+    const filterKey = filterParams.toString();
+    const filterChanged = lastFilterKey.current !== filterKey;
+    lastFilterKey.current = filterKey;
 
     apiFetch<Paged<RequirementRow> & { computedAt: string }>(`/api/v1/planning/requirements${query}${refresh}`)
       .then((res) => {
@@ -298,14 +312,22 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         // so Uppdatera shows recomputed quantities. Entries for rows on other
         // pages stay as they are. confirmCreate clears rowStates first, so
         // that path is a full rebuild.
-        setRowStates((prev) =>
-          mergeUntouched(
-            prev,
-            paged.rows.flatMap(toLines).filter((l) => !l.header),
-            (l) => l.id,
-            makeRowState
-          )
-        );
+        const lines = paged.rows.flatMap(toLines).filter((l) => !l.header);
+        setRowStates((prev) => {
+          let base = filterChanged ? {} : prev;
+          if (refreshing && !filterChanged) {
+            // After Uppdatera a proposal can move to another week (its key
+            // carries the week): drop states for keys of articles shown on
+            // this page that no longer exist, so a stale touched one is never
+            // sent with its old behovsdatum. Other pages are left alone.
+            const shownArticles = new Set(lines.map((l) => l.articleId));
+            const shownKeys = new Set(lines.map((l) => l.id));
+            base = Object.fromEntries(
+              Object.entries(prev).filter(([key, state]) => shownKeys.has(key) || !shownArticles.has(state.articleId))
+            );
+          }
+          return mergeUntouched(base, lines, (l) => l.id, makeRowState);
+        });
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -422,6 +444,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         quantity,
         kind: state.kind,
         ...(state.needDate ? { needDate: state.needDate } : {}),
+        ...(state.reason ? { reason: state.reason } : {}),
         ...(state.kind === "configured" && state.salesOrderRowId ? { salesOrderRowId: state.salesOrderRowId } : {}),
         // Subcontract proposals are keyed by the MO operation they buy.
         ...(state.kind === "subcontract" && state.moOperationId ? { moOperationId: state.moOperationId } : {}),
@@ -841,8 +864,10 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               // Purchased: the main supplier's catalogue lead time; manufactured:
               // Ledtid (dagar) or the routing's time (leadDays, the proposals'
               // dating).
-              if (row.primarySupplier?.leadTimeDays != null) return `${row.primarySupplier.leadTimeDays} dgr`;
-              return row.leadDays != null ? `${row.leadDays} dgr` : "—";
+              {
+                const days = row.type === "manufactured" ? row.leadDays : row.primarySupplier?.leadTimeDays;
+                return days != null ? `${days} dgr` : "—";
+              }
             case "source":
               if (row.proposalKind === "manufacture") return "Ny TO";
               if (row.primarySupplier) return row.primarySupplier.supplierName;

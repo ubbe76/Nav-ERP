@@ -446,6 +446,10 @@ function addTo(map: Map<string, number>, articleId: string, quantity: number) {
 interface Demand {
   date: string | null;
   quantity: number;
+  // Material for a reorder-point proposal (or for material of one): needed
+  // "now" but for no deadline — it must never make a proposal Passerat, the
+  // same promise the reorder-point proposal itself keeps.
+  asap?: boolean;
 }
 
 function pushDemand(map: Map<string, Demand[]>, articleId: string, demand: Demand) {
@@ -617,6 +621,9 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
 
       // Walk the demands drawing on the pool; what is not covered is
       // grouped per need week (undated in its own group, last).
+      // A group's need date is its first uncovered REAL demand; a group of
+      // only reorder-point material (asap) is dated today like the
+      // reorder-point proposal and never late.
       const groups = new Map<string | null, { needDate: string | null; uncovered: number }>();
       for (const demand of own) {
         const covered = Math.min(pool, demand.quantity);
@@ -624,9 +631,12 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         const uncovered = round4(demand.quantity - covered);
         if (uncovered <= 0) continue;
         const week = demand.date === null ? null : needWeekOf(demand.date, thisMonday);
+        const realDate = demand.asap ? null : demand.date;
         const group = groups.get(week);
-        if (group) group.uncovered = round4(group.uncovered + uncovered);
-        else groups.set(week, { needDate: demand.date, uncovered });
+        if (group) {
+          group.uncovered = round4(group.uncovered + uncovered);
+          if (group.needDate === null) group.needDate = realDate;
+        } else groups.set(week, { needDate: realDate, uncovered });
       }
 
       // One proposal per group in week order: the uncovered quantity less
@@ -642,6 +652,19 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
         }
         const quantity = orderQuantityFor(net, article);
         carry = round4(quantity - net);
+        if (week !== null && group.needDate === null) {
+          // Only reorder-point material in this week: "now", never late.
+          proposals.push({
+            key: `${kind}:${id}:${week}`,
+            needDate: today,
+            needWeek: week,
+            latestDate: today,
+            late: false,
+            quantity,
+            reason: "reorder_point",
+          });
+          continue;
+        }
         const needDate = group.needDate;
         let latestDate: string | null = null;
         if (needDate !== null) {
@@ -666,7 +689,9 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
           needDate,
           needWeek: week,
           latestDate,
-          late: latestDate !== null && latestDate < today,
+          // A dated purchase with no possible arrival at all (latestDate null)
+          // is as late as it gets.
+          late: needDate !== null && (latestDate === null || latestDate < today),
           quantity,
           reason: needDate === null ? "undated" : "demand",
         });
@@ -706,7 +731,11 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
           proposal.quantity
         )) {
           addTo(demandDerived, componentId, componentQuantity);
-          pushDemand(demands, componentId, { date: proposal.latestDate, quantity: componentQuantity });
+          pushDemand(demands, componentId, {
+            date: proposal.latestDate,
+            quantity: componentQuantity,
+            asap: proposal.reason === "reorder_point",
+          });
         }
       }
     }

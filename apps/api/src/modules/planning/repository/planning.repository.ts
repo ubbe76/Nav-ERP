@@ -70,6 +70,10 @@ export interface MoDatingInputs {
   routings: DatingRoutingOperation[];
   workCenters: DatingWorkCenter[];
   articleLeadTimes: Map<string, number | null>;
+  // The filtered TOs' remaining quantity (moRemainingQuantity, the same
+  // figure the behovsberäkning dates with) — a TO without operations is
+  // timed on the article's routing for it. Empty without an order filter.
+  orderQuantities: Map<string, number>;
 }
 
 // loadRequirementsInput's result: the pure calc's input plus what the
@@ -267,7 +271,7 @@ export function createPlanningRepository(db: Db) {
     if (filter.articleIds) articleConditions.push(inArray(articles.id, filter.articleIds));
     const noOrders = filter.orderIds !== undefined && filter.orderIds.length === 0;
     const noArticles = filter.articleIds !== undefined && filter.articleIds.length === 0;
-    const [operationRows, routingRows, workCenterRows, articleRows] = await Promise.all([
+    const [operationRows, routingRows, workCenterRows, articleRows, orderRows] = await Promise.all([
       noOrders
         ? Promise.resolve([])
         : dbc
@@ -313,6 +317,12 @@ export function createPlanningRepository(db: Db) {
             .select({ articleId: articles.id, manufacturingLeadTimeDays: articles.manufacturingLeadTimeDays })
             .from(articles)
             .where(and(...articleConditions)),
+      filter.orderIds === undefined || noOrders
+        ? Promise.resolve([])
+        : dbc
+            .select({ manufacturingOrderId: manufacturingOrders.id, quantity: moRemainingQuantity })
+            .from(manufacturingOrders)
+            .where(inArray(manufacturingOrders.id, filter.orderIds)),
     ]);
     const num = (v: string | null) => (v === null ? null : Number(v));
     return {
@@ -334,6 +344,7 @@ export function createPlanningRepository(db: Db) {
         orderLeadTimeDays: num(r.orderLeadTimeDays),
       })),
       articleLeadTimes: new Map(articleRows.map((r) => [r.articleId, r.manufacturingLeadTimeDays])),
+      orderQuantities: new Map(orderRows.map((r) => [r.manufacturingOrderId, Number(r.quantity)])),
     };
   }
 

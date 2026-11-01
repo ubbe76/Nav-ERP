@@ -235,6 +235,16 @@ describe("Skapa ordrar — one order per proposal, dated from its needDate", () 
         message: "Färdigdatumet (2030-03-18) hinner inte före behovet (2030-03-11)",
       },
     ]);
+
+    // A reorder-point proposal is dated today for no deadline: the same
+    // floor, but never reported as late.
+    const rop = await planningService.createOrdersFromProposals(
+      { proposals: [{ articleId: slow.id, quantity: 1, kind: "manufacture", needDate: "2030-03-04", reason: "reorder_point" }] },
+      user.id
+    );
+    expect(rop.errors).toEqual([]);
+    expect((await mfgService.getManufacturingOrder(rop.manufacturingOrders[0]!.id))!.dueDate).toBe("2030-03-18");
+    expect(rop.warnings).toEqual([]);
   });
 
   it("two week proposals of one purchased article become two draft IOs at the supplier; another article's single proposal joins the first", async () => {

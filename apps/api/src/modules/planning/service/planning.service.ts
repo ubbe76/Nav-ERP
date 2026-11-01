@@ -76,7 +76,7 @@ import {
 import { resolveSupplierPrice } from "../../purchase/service/supplier-price.js";
 import { configurationLines } from "../../configurator/service/configuration-lines.js";
 import { selectionFromEntries } from "../../configurator/service/variant-identity.js";
-import { addDays } from "../../system/service/delivery-days.js";
+import { addDays, previousWorkingDay } from "../../system/service/delivery-days.js";
 import type { ConfiguredStructureReader } from "../../configurator/service/configurator.service.js";
 
 // Own copy rather than importing the article module's class — planning
@@ -373,8 +373,9 @@ const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 // cached rows are never mutated — copies all the way.
 function filterByLatest(rows: RequirementRow[], latest: NonNullable<ListRequirementsQuery["latest"]>, today: string): RequirementRow[] {
   const end = latestHorizonEnd(latest, today);
-  const inside = (p: RequirementProposal) =>
-    p.latestDate !== null && (end === null ? p.latestDate < today : p.latestDate <= end);
+  // Passerat is part of every horizon — including a dated purchase with no
+  // possible arrival at all (late, latestDate null).
+  const inside = (p: RequirementProposal) => p.late || (end !== null && p.latestDate !== null && p.latestDate <= end);
   const out: RequirementRow[] = [];
   for (const row of rows) {
     const proposals = row.proposals.filter(inside);
@@ -490,6 +491,7 @@ export function createPlanningService(
       routings: [],
       workCenters: [],
       articleLeadTimes: new Map<string, number | null>(),
+      orderQuantities: new Map<string, number>(),
     };
     return { ...inputs, context: buildLeadTimeContext(inputs) };
   }
@@ -529,7 +531,15 @@ export function createPlanningService(
             ...new Map(
               loads
                 .flatMap((l) => [
-                  ...l.materialRows.map((m) => ({ manufacturingOrderId: m.moId, articleId: m.parentArticleId, quantity: 0, dueDate: m.dueDate })),
+                  // The TO's remaining quantity, as the behovsberäkning dates
+                  // it — matters only for a TO without operations (timed on
+                  // the article's routing for that quantity).
+                  ...l.materialRows.map((m) => ({
+                    manufacturingOrderId: m.moId,
+                    articleId: m.parentArticleId,
+                    quantity: dating.orderQuantities.get(m.moId) ?? 0,
+                    dueDate: m.dueDate,
+                  })),
                   ...l.plannedMos.map((m) => ({ manufacturingOrderId: m.moId, articleId: m.parentArticleId, quantity: m.quantity, dueDate: m.dueDate })),
                 ])
                 .map((o) => [o.manufacturingOrderId, o] as const)
@@ -1626,10 +1636,17 @@ export function createPlanningService(
       // leveransdatum); one without (integrations) from the article's first
       // firm demand, as before. A TO whose earliest possible finish comes
       // after the need is created anyway and reported in `warnings`, exactly
-      // like a late IO row.
+      // like a late IO row — except a reorder-point proposal: it is dated
+      // today for no deadline (the list never marks it Passerat), so its
+      // floor date is simply "as soon as possible".
       const today = todayFn();
-      const pushLateManufacturing = (orderNumber: string, articleId: string, s: DueDateSuggestion | null) => {
-        if (!s?.late) return;
+      const pushLateManufacturing = (
+        orderNumber: string,
+        articleId: string,
+        s: DueDateSuggestion | null,
+        reason: CreatePlanningOrdersInput["proposals"][number]["reason"]
+      ) => {
+        if (!s?.late || reason === "reorder_point") return;
         result.warnings.push({
           orderNumber,
           articleNumber: numberFor(articleId),
@@ -1678,7 +1695,7 @@ export function createPlanningService(
             orderNumber: mo.orderNumber,
             articleNumber: numberFor(proposal.articleId),
           });
-          pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion);
+          pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion, proposal.reason);
         } catch (err) {
           pushError(proposal.articleId, errorMessage(err));
         }
@@ -1714,7 +1731,7 @@ export function createPlanningService(
             orderNumber: mo.orderNumber,
             articleNumber: numberFor(proposal.articleId),
           });
-          pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion);
+          pushLateManufacturing(mo.orderNumber, proposal.articleId, suggestion, proposal.reason);
         } catch (err) {
           pushError(proposal.articleId, errorMessage(err));
         }
@@ -1747,6 +1764,8 @@ export function createPlanningService(
         quantity: number;
         unitPrice: number;
         demandDate: string | null;
+        // A reorder-point proposal: dated, but never reported late.
+        reorderPoint: boolean;
         // The fallback date when the delivery context cannot be loaded (the
         // working day before the demand, today at the earliest — the TO
         // färdigdatum rule, exactly as before fasta leveransdagar).
@@ -1763,13 +1782,10 @@ export function createPlanningService(
         let fallbackDate: string | null;
         if (proposal.needDate) {
           demandDate = proposal.needDate;
-          fallbackDate = suggestPurchaseDeliveryDate({
-            demandDate,
-            today,
-            leadTimeDays: 0,
-            settings: effectiveDeliverySettings(NO_PARTNER_SETTINGS, "supplier", { supplier: { mode: "arrival", transitDays: 0 }, customer: { mode: "dispatch", transitDays: 0 } }),
-            offDays: new Set<string>(),
-          }).date;
+          // The working day before the need, today at the earliest (no
+          // holidays without the context).
+          const before = previousWorkingDay(demandDate, new Set<string>());
+          fallbackDate = before < today ? today : before;
         } else {
           const first = await firstDemandFor(proposal.articleId);
           demandDate = first?.demandDate ?? null;
@@ -1782,6 +1798,7 @@ export function createPlanningService(
           // Stafflat: the break for the proposal quantity, else grundpriset.
           unitPrice: resolveSupplierPrice(supplier, proposal.quantity).price ?? 0,
           demandDate,
+          reorderPoint: proposal.reason === "reorder_point",
           fallbackDate,
         });
         bySupplier.set(supplier.supplierId, group);
@@ -1864,7 +1881,7 @@ export function createPlanningService(
                 ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
               });
               rowCount += 1;
-              if (late && rowDate && row.demandDate) {
+              if (late && rowDate && row.demandDate && !row.reorderPoint) {
                 result.warnings.push({
                   orderNumber: order.orderNumber,
                   articleNumber: numberFor(row.articleId),

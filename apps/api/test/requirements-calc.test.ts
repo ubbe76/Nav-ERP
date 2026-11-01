@@ -1167,7 +1167,7 @@ describe("time-phased proposals — safety stock floor and reorder point", () =>
     expect(rowFor(rows, "a").proposals.map((p) => p.reason)).toEqual(["demand"]);
   });
 
-  it("the reorder-point proposal cascades to the components dated today", () => {
+  it("the reorder-point proposal's material is a reorder-point proposal at the component too — today, never late", () => {
     const rows = computeRequirements(
       timed({
         articles: [art({ articleId: "p", type: "manufactured", reorderPoint: 2 }), art({ articleId: "c" })],
@@ -1175,7 +1175,22 @@ describe("time-phased proposals — safety stock floor and reorder point", () =>
       })
     );
     expect(rowFor(rows, "c").proposals).toEqual([
-      expect.objectContaining({ needDate: TODAY, quantity: 6, reason: "demand" }),
+      { key: `purchase:c:${TODAY}`, needDate: TODAY, needWeek: TODAY, latestDate: TODAY, late: false, quantity: 6, reason: "reorder_point" },
+    ]);
+  });
+
+  it("reorder-point material in the same week as a real demand: the real demand dates the proposal", () => {
+    // TODAY is a Monday; the KO row on Thursday the same week.
+    const thursday = "2026-11-05";
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "p", type: "manufactured", reorderPoint: 2 }), art({ articleId: "c" })],
+        bomEdges: [{ parentArticleId: "p", componentArticleId: "c", quantity: 3 }],
+        salesRows: [sale("c", thursday, 4)],
+      })
+    );
+    expect(rowFor(rows, "c").proposals).toEqual([
+      expect.objectContaining({ needDate: thursday, needWeek: TODAY, quantity: 10, reason: "demand" }),
     ]);
   });
 });
