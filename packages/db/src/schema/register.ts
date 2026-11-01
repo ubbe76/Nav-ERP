@@ -13,11 +13,14 @@ import { boolean, check, numeric, pgEnum, pgTable, text, timestamp, uuid, varcha
 // because both suppliers (purchase.ts) and customers (sales.ts) use it.
 export const deliveryDayModeEnum = pgEnum("delivery_day_mode", ["arrival", "dispatch"]);
 
-// Leveransvillkor (e.g. DAP / "Delivered at Place")
+// Leveransvillkor (e.g. DAP / "Delivered at Place"). name_en (Dokument på
+// engelska #7, migration 0175) is the Benämning (engelska) printed on English
+// documents — not unique, null = the Swedish name is printed.
 export const deliveryTerms = pgTable("delivery_terms", {
   id: uuid("id").primaryKey().defaultRandom(),
   code: varchar("code", { length: 20 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull().unique(),
+  nameEn: varchar("name_en", { length: 100 }),
   description: text("description"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -33,11 +36,12 @@ export const articleCodes = pgTable("article_codes", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Betalningsvillkor (e.g. 30 / "30 dagar netto")
+// Betalningsvillkor (e.g. 30 / "30 dagar netto"); name_en as on delivery_terms.
 export const paymentTerms = pgTable("payment_terms", {
   id: uuid("id").primaryKey().defaultRandom(),
   code: varchar("code", { length: 20 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull().unique(),
+  nameEn: varchar("name_en", { length: 100 }),
   description: text("description"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -54,10 +58,13 @@ export const carriers = pgTable("carriers", {
 // Enheter (e.g. st / "Styck", kg / "Kilogram") — referenced by articles
 // (base/purchase/sales unit) and per-article alternative units with
 // conversion factors (article_units in article.ts).
+// code_en (Dokument på engelska #7, migration 0175) is the Kod (engelska)
+// written on English documents (st → pcs); null = the code itself (kg, m …).
 export const units = pgTable("units", {
   id: uuid("id").primaryKey().defaultRandom(),
   code: varchar("code", { length: 20 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull().unique(),
+  codeEn: varchar("code_en", { length: 20 }),
   description: text("description"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

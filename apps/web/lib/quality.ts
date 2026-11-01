@@ -267,6 +267,8 @@ export interface DeviationEvent {
 }
 
 export interface Deviation extends DeviationListRow {
+  // Counterparty's document language; null for internal deviations (GET :id).
+  counterpartyLanguage?: "sv" | "en" | null;
   description: string | null;
   salesOrderRowId: string | null;
   purchaseOrderRowId: string | null;

@@ -42,6 +42,8 @@ import type { RegisterReferenceReader } from "../../register/service/register.se
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
+import { documentLanguageOf, localized, type DocumentLanguage } from "@navet/shared";
+import { documentTexts } from "../../mail/service/document-texts.js";
 import {
   customerVatNumberWarning,
   customerVatTreatment,
@@ -414,6 +416,12 @@ function termLabel(code: string | null, name: string | null) {
   return [code, name].filter(Boolean).join(" \u00b7 ");
 }
 
+// Dokument på engelska (#7): the term's name in the document's language
+// (the English name only when filled in — localized()).
+function localizedTermLabel(code: string | null, name: string | null, nameEn: string | null | undefined, language: DocumentLanguage) {
+  return termLabel(code, name === null ? null : localized(name, nameEn, language));
+}
+
 export function createSalesService(
   repo: SalesRepository,
   registers: RegisterReferenceReader,
@@ -685,6 +693,10 @@ export function createSalesService(
     ]);
     const { showOrderRevisionOnDocuments } = documentSettings;
     const extraDescription = extraDescriptionFor(documentSettings, variant === "quote" ? "quote" : "orderConfirmation");
+    // Dokument på engelska (#7): the customer's language, live — the quote
+    // and the confirmation are re-rendered on every print.
+    const language = documentLanguageOf(customer!.language);
+    const texts = documentTexts(language);
     const customerArticleNumbers = await repo.customerArticleNumberMap(order.customerId, rows.map((r) => r.articleId));
     const articleNumberByRowId = new Map(rows.map((r) => [r.id, r.articleNumber]));
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
@@ -700,7 +712,8 @@ export function createSalesService(
     );
     const usedCodes = new Set<VatCode>(rowCodes);
     const vatTexts = VAT_CODE_CATALOG.flatMap((entry) => {
-      const text = usedCodes.has(entry.code) ? vatCodeTexts.get(entry.code)?.trim() : undefined;
+      const code = usedCodes.has(entry.code) ? vatCodeTexts.get(entry.code) : undefined;
+      const text = code ? localized(code.invoiceText ?? "", code.invoiceTextEn, language).trim() : undefined;
       return text ? [text] : [];
     });
     // Offerter (0138): the quote prints its OF- number even after the order
@@ -710,34 +723,40 @@ export function createSalesService(
     const quoteReference =
       variant === "confirmation" && order.quoteNumber && order.quoteNumber !== order.orderNumber ? order.quoteNumber : null;
     const content = await pdf.render({
-      title: variant === "quote" ? "Offert" : "Orderbekräftelse",
+      language,
+      title: variant === "quote" ? texts.titles.quote : texts.titles.orderConfirmation,
       documentNumber,
       quoteReference,
       date: order.createdAt,
-      partnerLabel: "Kund",
+      partnerLabel: texts.partnerLabels.customer,
       partner: customer!,
       // Valuta: the order's own currency (its prices are in it).
       currency: order.currency,
       // Printed in the row's unit (the values are stored in the base unit).
       rows: rows.map((r, i) => ({
         articleNumber: r.articleNumber,
-        articleName: r.articleName,
+        articleName: localized(r.articleName, r.articleNameEn, language),
         quantity: String(toUnitQuantity(Number(r.quantityOrdered), r.unitFactor)),
-        unit: r.unitCode,
+        unit: localized(r.unitCode, r.unitCodeEn, language),
         unitPrice: String(toUnitPrice(Number(r.unitPrice), r.unitFactor)),
         discountPercent: r.discountPercent,
         // The row's momskod rate — only used when pricesIncludeVat
         // (privatperson) grosses up the cells.
         vatRate: vatCodeEntry(rowCodes[i]!).rate,
-        revisionInfo: formatRevisionInfo(revisions?.get(r.articleId)),
-        articleInfo: formatArticleAttributes({
-          surfaceTreatment: r.articleSurfaceTreatment,
-          colour: r.articleColour,
-        }),
-        extraDescription: extraDescription(r.articleExtraDescription),
+        revisionInfo: formatRevisionInfo(revisions?.get(r.articleId), language),
+        articleInfo: formatArticleAttributes(
+          {
+            surfaceTreatment: r.articleSurfaceTreatment,
+            colour: r.articleColour,
+          },
+          language
+        ),
+        extraDescription: extraDescription(
+          r.articleExtraDescription ? localized(r.articleExtraDescription, r.articleExtraDescriptionEn, language) : null
+        ),
         customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
         setupForArticleNumber: r.setupForRowId ? (articleNumberByRowId.get(r.setupForRowId) ?? null) : null,
-        configurationLines: rowConfigurationLines(r.configuration, showConfigurationPrices),
+        configurationLines: rowConfigurationLines(r.configuration, showConfigurationPrices, language),
         deliveryDate: ownDeliveryDate(r.expectedDeliveryDate, order.expectedDeliveryDate),
       })),
       showTotal: true,
@@ -766,12 +785,13 @@ export function createSalesService(
             country: order.deliveryCountry,
           }
         : null,
-      deliveryTerm: termLabel(order.deliveryTermCode, order.deliveryTermName),
-      paymentTerm: termLabel(order.paymentTermCode, order.paymentTermName),
+      deliveryTerm: localizedTermLabel(order.deliveryTermCode, order.deliveryTermName, order.deliveryTermNameEn, language),
+      paymentTerm: localizedTermLabel(order.paymentTermCode, order.paymentTermName, order.paymentTermNameEn, language),
+      // A carrier's name is a company name — never translated.
       carrier: termLabel(order.carrierCode, order.carrierName),
     });
-    const prefix = variant === "quote" ? "Offert" : "Orderbekraftelse";
-    return { filename: `${prefix}-${documentNumber}.pdf`, content };
+    const filename = variant === "quote" ? texts.filenames.quote(documentNumber) : texts.filenames.orderConfirmation(documentNumber);
+    return { filename, content };
   }
 
   // The invoice: same document skeleton as the quote/confirmation but
@@ -801,19 +821,24 @@ export function createSalesService(
       ? new Date(invoicedAt.getTime() + termDays * 24 * 60 * 60 * 1000)
       : null;
 
+    // Dokument på engelska (#7): this legacy reprint has no stamped language
+    // (it predates invoices.language) — the customer's live language.
+    const language = documentLanguageOf(customer!.language);
+    const texts = documentTexts(language);
     const content = await pdf.render({
-      title: "Faktura",
+      language,
+      title: texts.titles.invoice,
       documentNumber: order.invoiceNumber!,
       date: invoicedAt,
-      partnerLabel: useInvoiceAddress ? "Fakturaadress" : "Kund",
+      partnerLabel: useInvoiceAddress ? texts.partnerLabels.invoiceAddress : texts.partnerLabels.customer,
       partner: partner!,
       currency: "SEK",
       // Printed in the row's unit (the values are stored in the base unit).
       rows: rows.map((r) => ({
         articleNumber: r.articleNumber,
-        articleName: r.articleName,
+        articleName: localized(r.articleName, r.articleNameEn, language),
         quantity: String(toUnitQuantity(Number(r.quantityOrdered), r.unitFactor)),
-        unit: r.unitCode,
+        unit: localized(r.unitCode, r.unitCodeEn, language),
         unitPrice: String(toUnitPrice(Number(r.unitPrice), r.unitFactor)),
       })),
       showTotal: true,
@@ -834,11 +859,11 @@ export function createSalesService(
             country: order.deliveryCountry,
           }
         : null,
-      deliveryTerm: termLabel(order.deliveryTermCode, order.deliveryTermName),
-      paymentTerm: termLabel(order.paymentTermCode, order.paymentTermName),
+      deliveryTerm: localizedTermLabel(order.deliveryTermCode, order.deliveryTermName, order.deliveryTermNameEn, language),
+      paymentTerm: localizedTermLabel(order.paymentTermCode, order.paymentTermName, order.paymentTermNameEn, language),
       carrier: termLabel(order.carrierCode, order.carrierName),
     });
-    return { filename: `Faktura-${order.invoiceNumber}.pdf`, content };
+    return { filename: texts.filenames.invoice(order.invoiceNumber!), content };
   }
   // Referenced base-data entries must exist — validated here so the API
   // answers 404 instead of surfacing an FK violation.
@@ -2003,7 +2028,10 @@ export function createSalesService(
           ? { carrierName: shipment.carrierName, trackingNumber: shipment.trackingNumber }
           : null;
 
+      // Dokument på engelska (#7): the customer's language, live.
+      const language = documentLanguageOf(delivery.customerLanguage);
       const content = await pdf.renderDeliveryNote({
+        language,
         documentNumber: delivery.deliveryNumber,
         orderNumber: delivery.orderNumber,
         deliveredAt: delivery.deliveredAt,
@@ -2024,18 +2052,24 @@ export function createSalesService(
           : null,
         rows: delivery.rows.map((r) => ({
           articleNumber: r.articleNumber,
-          articleName: r.articleName,
+          articleName: localized(r.articleName, r.articleNameEn, language),
           quantity: toUnitQuantity(Number(r.quantity), r.unitFactor),
-          unit: r.unitCode,
+          unit: localized(r.unitCode, r.unitCodeEn, language),
           priorDelivered: toUnitQuantity(r.priorDelivered, r.unitFactor),
           undoneAt: r.undoneAt,
           // The delivery note carries no prices at all — choices only.
-          configurationLines: rowConfigurationLines(r.configuration, false),
-          extraDescription: extraDescription(r.articleExtraDescription),
+          configurationLines: rowConfigurationLines(r.configuration, false, language),
+          extraDescription: extraDescription(
+            r.articleExtraDescription ? localized(r.articleExtraDescription, r.articleExtraDescriptionEn, language) : null
+          ),
           customerArticleNumber: customerArticleNumbers.get(r.articleId) ?? null,
         })),
       });
-      return { pdf: content, filename: `foljesedel-${delivery.deliveryNumber}.pdf`, deliveryNumber: delivery.deliveryNumber };
+      return {
+        pdf: content,
+        filename: documentTexts(language).filenames.deliveryNote(delivery.deliveryNumber),
+        deliveryNumber: delivery.deliveryNumber,
+      };
     },
 
     // Pallkort (Etapp F) — one card PAGE per kolli, all in the "final"
@@ -2067,19 +2101,23 @@ export function createSalesService(
 
       // Kod på pallkort: the customer's own choice, else the system setting.
       const code = delivery.customerPalletCardCode ?? (await settings.getSettings()).palletCardCode;
+      // Dokument på engelska (#7): the card travels with the goods — the
+      // customer's language, live.
+      const language = documentLanguageOf(delivery.customerLanguage);
       const cards: PalletCardPdfInput[] = [];
       for (const pick of picks) {
         pick.quantities.forEach((quantity, i) => {
           cards.push({
             kind: "final",
+            language,
             code,
             articleNumber: pick.row.articleNumber,
-            articleName: pick.row.articleName,
+            articleName: localized(pick.row.articleName, pick.row.articleNameEn, language),
             customerName: delivery.customerName,
             customerOrderNumber: delivery.customerOrderNumber,
             orderNumber: delivery.orderNumber,
             quantity,
-            unit: pick.row.unitCode,
+            unit: localized(pick.row.unitCode, pick.row.unitCodeEn, language),
             parcel: { index: i + 1, count: pick.quantities.length },
             printedAt: delivery.deliveredAt,
             // The delivery card deliberately names no reporter (user's
@@ -2097,7 +2135,7 @@ export function createSalesService(
         });
       }
       const content = await pdf.renderPalletCard(cards);
-      return { pdf: content, filename: `pallkort-${delivery.deliveryNumber}.pdf` };
+      return { pdf: content, filename: documentTexts(language).filenames.palletCard(delivery.deliveryNumber) };
     },
 
     // The delivery's rows for the pallet card dialog (GET /deliveries/:id/

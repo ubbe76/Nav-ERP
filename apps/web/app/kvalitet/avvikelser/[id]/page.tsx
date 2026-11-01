@@ -7,6 +7,8 @@ import { MailSection } from "../../../../components/mail/MailSection";
 import buttonStyles from "../../../../components/ui/Button.module.css";
 import { HelpLink } from "../../../../components/ui/HelpLink";
 import { apiGet } from "../../../../lib/api";
+import { documentMailTexts } from "../../../../lib/documentMailTexts";
+import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
 import { DEVIATION_TYPE_LABELS, getResponsibleCandidates, type Deviation, type DeviationReason } from "../../../../lib/quality";
 import shellStyles from "../../../../components/AppShell.module.css";
@@ -37,8 +39,12 @@ export default async function DeviationPage(props: { params: Promise<{ id: strin
 
   const title = REPORT_TITLE[deviation.type];
   const lower = title.toLowerCase();
-  const subject = `${title} ${deviation.deviationNumber}`;
-  const message = `Hej!\n\nSe bifogat ${lower} ${deviation.deviationNumber}.\n\nMed vänliga hälsningar`;
+  // Dokument på engelska (#7): a customer/supplier deviation follows the
+  // counterparty's language; internal ones stay Swedish.
+  const { subject, body: message } = documentMailTexts(
+    { kind: "deviation", number: deviation.deviationNumber, deviationType: deviation.type },
+    documentLanguageOf(deviation.counterpartyLanguage)
+  );
   const endpoint = `/api/v1/deviations/${deviation.id}/email`;
 
   return (

@@ -47,6 +47,8 @@ import type { RegisterReferenceReader } from "../../register/service/register.se
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
 import type { DocumentPdfService } from "../../mail/service/document-pdf.js";
+import { documentLanguageOf, localized, type DocumentLanguage } from "@navet/shared";
+import { documentTexts } from "../../mail/service/document-texts.js";
 import { mergePdfs } from "../../mail/service/pdf-merge.js";
 import type { ArticleFileReader, ArticleRevisionReader, ArticleUnitReader } from "../../article/service/article.service.js";
 import { ArticleNotFoundError, assertPurchasableArticle } from "../../article/service/article.service.js";
@@ -441,9 +443,14 @@ export interface RoutingPriceWriter {
 
 // "Lego för TO-1024 · Op 20 · Ytbehandling" under a lego row on IO/RFQ, or
 // "Lego · Op 20 · Ytbehandling" for a TO-less price inquiry.
-function legoReference(orderNumber: string | null, sequenceNo: number, description: string | null) {
-  const operation = description ? `Op ${sequenceNo} · ${description}` : `Op ${sequenceNo}`;
-  return orderNumber ? `Lego för ${orderNumber} · ${operation}` : `Lego · ${operation}`;
+function legoReference(orderNumber: string | null, sequenceNo: number, description: string | null, language: DocumentLanguage) {
+  return documentTexts(language).rowInfo.legoReference(orderNumber, sequenceNo, description);
+}
+
+// Dokument på engelska (#7): a term's name in the supplier's language
+// (English only when filled in — localized()).
+function localizedTermLabel(code: string | null, name: string | null, nameEn: string | null | undefined, language: DocumentLanguage) {
+  return termLabel(code, name === null ? null : localized(name, nameEn, language));
 }
 
 // The system settings the purchase module reads: the document toggles, the
@@ -597,16 +604,20 @@ export function createPurchaseService(
     ]);
     const extraDescription = extraDescriptionFor(documentSettings, "inquiry");
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
+    // Dokument på engelska (#7): the supplier's language, live.
+    const language = documentLanguageOf(supplier!.language);
+    const texts = documentTexts(language);
     // Our own carrier customer number, printed only when we pay the freight.
     const carrierCustomerNumber =
       inquiry.freightPaidByUs && inquiry.carrierId
         ? await settings.getCompanyCarrierNumber(inquiry.carrierId)
         : null;
     const content = await pdf.render({
-      title: "Förfrågan",
+      language,
+      title: texts.titles.inquiry,
       documentNumber: inquiry.inquiryNumber,
       date: inquiry.createdAt,
-      partnerLabel: "Leverantör",
+      partnerLabel: texts.partnerLabels.supplier,
       partner: supplier!,
       currency: supplier!.currency,
       // Printed in the row's unit (the values are stored in the base unit).
@@ -614,22 +625,24 @@ export function createPurchaseService(
         const isLego = r.moOperationId !== null || r.routingOperationId !== null;
         return {
           articleNumber: r.articleNumber,
-          articleName: r.articleName,
+          articleName: localized(r.articleName, r.articleNameEn, language),
           quantity: String(toUnitQuantity(Number(r.quantity), r.unitFactor)),
-          unit: r.unitCode,
+          unit: localized(r.unitCode, r.unitCodeEn, language),
           unitPrice: r.unitPrice === null ? null : String(toUnitPrice(Number(r.unitPrice), r.unitFactor)),
-          revisionInfo: formatRevisionInfo(revisions?.get(r.articleId)),
+          revisionInfo: formatRevisionInfo(revisions?.get(r.articleId), language),
           // Lego rows print like the IO's: Ytbehandling/Färg, the operation
           // reference (with the TO when there is one), the ställpris and —
           // when the operation asks for it — the net weight. A lego row
           // whose operation was deleted keeps its ställpris but no heading.
           articleInfo: isLego
-            ? formatArticleAttributes({ surfaceTreatment: r.articleSurfaceTreatment, colour: r.articleColour })
+            ? formatArticleAttributes({ surfaceTreatment: r.articleSurfaceTreatment, colour: r.articleColour }, language)
             : null,
-          extraDescription: extraDescription(r.articleExtraDescription),
+          extraDescription: extraDescription(
+            r.articleExtraDescription ? localized(r.articleExtraDescription, r.articleExtraDescriptionEn, language) : null
+          ),
           moReference:
             isLego && r.legoSequenceNo !== null
-              ? legoReference(r.moOrderNumber, r.legoSequenceNo, r.legoDescription)
+              ? legoReference(r.moOrderNumber, r.legoSequenceNo, r.legoDescription, language)
               : null,
           setupPrice: r.setupPrice,
           netWeightKg:
@@ -641,14 +654,14 @@ export function createPurchaseService(
       // An inquiry asks for prices — no total line.
       showTotal: false,
       requestedDeliveryDate: inquiry.expectedDeliveryDate,
-      deliveryTerm: termLabel(inquiry.deliveryTermCode, inquiry.deliveryTermName),
-      paymentTerm: termLabel(inquiry.paymentTermCode, inquiry.paymentTermName),
+      deliveryTerm: localizedTermLabel(inquiry.deliveryTermCode, inquiry.deliveryTermName, inquiry.deliveryTermNameEn, language),
+      paymentTerm: localizedTermLabel(inquiry.paymentTermCode, inquiry.paymentTermName, inquiry.paymentTermNameEn, language),
       carrier: termLabel(inquiry.carrierCode, inquiry.carrierName),
       carrierCustomerNumber,
       // Live value — no snapshot, same rule as the supplier address block.
       ourCustomerNumberAtSupplier: supplier!.ourCustomerNumber,
     });
-    return { filename: `${inquiry.inquiryNumber}.pdf`, content };
+    return { filename: texts.filenames.inquiry(inquiry.inquiryNumber), content };
   }
 
   async function renderPurchaseOrderPdf(
@@ -662,15 +675,19 @@ export function createPurchaseService(
     const { showOrderRevisionOnDocuments } = documentSettings;
     const extraDescription = extraDescriptionFor(documentSettings, "purchaseOrder");
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
+    // Dokument på engelska (#7): the supplier's language, live.
+    const language = documentLanguageOf(supplier!.language);
+    const texts = documentTexts(language);
     // Our own carrier customer number, printed only when we pay the freight.
     const carrierCustomerNumber =
       order.freightPaidByUs && order.carrierId ? await settings.getCompanyCarrierNumber(order.carrierId) : null;
     const content = await pdf.render({
-      title: "Inköpsorder",
+      language,
+      title: texts.titles.purchaseOrder,
       documentNumber: order.orderNumber,
       documentNumberBarcode: documentSettings.purchaseOrderBarcode,
       date: order.createdAt,
-      partnerLabel: "Leverantör",
+      partnerLabel: texts.partnerLabels.supplier,
       partner: supplier!,
       currency: order.currency,
       // Printed in the row's unit (the values are stored in the base unit).
@@ -678,22 +695,24 @@ export function createPurchaseService(
         const isLego = r.moOperationId !== null && r.moOrderNumber !== null && r.moOperationSequenceNo !== null;
         return {
           articleNumber: r.articleNumber,
-          articleName: r.articleName,
+          articleName: localized(r.articleName, r.articleNameEn, language),
           quantity: String(toUnitQuantity(Number(r.quantityOrdered), r.unitFactor)),
-          unit: r.unitCode,
+          unit: localized(r.unitCode, r.unitCodeEn, language),
           unitPrice: String(toUnitPrice(Number(r.unitPrice), r.unitFactor)),
-          revisionInfo: formatRevisionInfo(revisions?.get(r.articleId)),
+          revisionInfo: formatRevisionInfo(revisions?.get(r.articleId), language),
           // Lego: Ytbehandling/Färg from the article, the TO reference under
           // the row, the one-off ställpris (its own sub-line, added once to
           // the row amount) and — when the operation asks for it — the net
           // weight (article weight × base quantity; no line at all when the
           // article has no weight).
           articleInfo: isLego
-            ? formatArticleAttributes({ surfaceTreatment: r.articleSurfaceTreatment, colour: r.articleColour })
+            ? formatArticleAttributes({ surfaceTreatment: r.articleSurfaceTreatment, colour: r.articleColour }, language)
             : null,
-          extraDescription: extraDescription(r.articleExtraDescription),
+          extraDescription: extraDescription(
+            r.articleExtraDescription ? localized(r.articleExtraDescription, r.articleExtraDescriptionEn, language) : null
+          ),
           moReference: isLego
-            ? legoReference(r.moOrderNumber, r.moOperationSequenceNo!, r.moOperationDescription)
+            ? legoReference(r.moOrderNumber, r.moOperationSequenceNo!, r.moOperationDescription, language)
             : null,
           setupPrice: r.setupPrice,
           netWeightKg:
@@ -712,14 +731,14 @@ export function createPurchaseService(
       revision: showOrderRevisionOnDocuments ? order.revision : null,
       yourReference: order.yourReference,
       ourReference: order.ourReference,
-      deliveryTerm: termLabel(order.deliveryTermCode, order.deliveryTermName),
-      paymentTerm: termLabel(order.paymentTermCode, order.paymentTermName),
+      deliveryTerm: localizedTermLabel(order.deliveryTermCode, order.deliveryTermName, order.deliveryTermNameEn, language),
+      paymentTerm: localizedTermLabel(order.paymentTermCode, order.paymentTermName, order.paymentTermNameEn, language),
       carrier: termLabel(order.carrierCode, order.carrierName),
       carrierCustomerNumber,
       // Live value — no snapshot, same rule as the supplier address block.
       ourCustomerNumberAtSupplier: supplier!.ourCustomerNumber,
     });
-    return { filename: `${order.orderNumber}.pdf`, content };
+    return { filename: texts.filenames.purchaseOrder(order.orderNumber), content };
   }
   // Referenced base-data entries must exist — validated here so the API
   // answers 404 instead of surfacing an FK violation.

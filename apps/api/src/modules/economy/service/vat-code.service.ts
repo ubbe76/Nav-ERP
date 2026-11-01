@@ -142,13 +142,17 @@ export function buildVatCodeView(row: VatCodeRow, chart: Map<string, AccountInfo
     code: row.code,
     name: row.name,
     invoiceText: row.invoiceText,
+    nameEn: row.nameEn,
+    invoiceTextEn: row.invoiceTextEn,
     active: row.active,
     label: entry.label,
+    labelEn: entry.labelEn,
     direction: entry.direction,
     kind: entry.kind,
     rate: entry.rate,
     requiresBuyerVatNumber: entry.requiresBuyerVatNumber,
     defaultInvoiceText: entry.invoiceText,
+    defaultInvoiceTextEn: entry.invoiceTextEn,
     accounts: VAT_CODE_SLOTS.filter((slot) => entry.slots[slot] !== undefined).map((slot) =>
       accountView(row.code as VatCode, slot, row, chart)
     ),
@@ -219,6 +223,8 @@ export function createVatCodeService(deps: { db: Db; poster: VerificationPoster;
       const patch: Partial<VatCodeRow> = {};
       if (input.name !== undefined) patch.name = input.name;
       if (input.invoiceText !== undefined) patch.invoiceText = input.invoiceText;
+      if (input.nameEn !== undefined) patch.nameEn = input.nameEn;
+      if (input.invoiceTextEn !== undefined) patch.invoiceTextEn = input.invoiceTextEn;
       if (input.active !== undefined) patch.active = input.active;
 
       for (const slot of VAT_CODE_SLOTS) {

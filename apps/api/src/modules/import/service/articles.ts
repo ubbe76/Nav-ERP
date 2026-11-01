@@ -32,6 +32,9 @@ export const ARTICLE_IMPORT_FIELDS = [
   "colour",
   // Monitor's "Extra benämning" (Artikellista, Extra fält) — multi-line.
   "extraDescription",
+  // Benämning engelska / Extra benämning engelska (Dokument på engelska #7).
+  "nameEn",
+  "extraDescriptionEn",
   // Streckkod (EAN/GTIN, #4).
   "barcode",
   "active",
@@ -102,6 +105,9 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   farg: "colour",
   kulor: "colour",
   extrabenamning: "extraDescription",
+  benamningengelska: "nameEn",
+  engelskbenamning: "nameEn",
+  extrabenamningengelska: "extraDescriptionEn",
   ean: "barcode",
   eankod: "barcode",
   ean13: "barcode",
@@ -209,6 +215,9 @@ export interface ArticleCreatePlan {
   colour: string | null;
   // Optional: the bom import's article creates carry none.
   extraDescription?: string | null;
+  // The English texts (#7) — optional for the same reason.
+  nameEn?: string | null;
+  extraDescriptionEn?: string | null;
   barcode?: string | null;
   active: boolean;
   reorderPoint: number | null;
@@ -236,6 +245,8 @@ export interface ArticleUpdatePlan {
     surfaceTreatment?: string | null;
     colour?: string | null;
     extraDescription?: string;
+    nameEn?: string;
+    extraDescriptionEn?: string;
     barcode?: string;
     active?: boolean;
     reorderPoint?: number | null;
@@ -509,6 +520,29 @@ export async function planArticleImport(
       }
     }
 
+    // Benämning engelska / Extra benämning engelska (#7): same ceilings as
+    // the article card (255 / 2000); a longer text is a row error. Empty
+    // cell: left untouched (the Swedish text is printed on English documents).
+    const nameEnCell = record["nameEn"] ?? "";
+    let nameEn: string | null = null;
+    if (nameEnCell !== "") {
+      if (nameEnCell.length > 255) errors.push(`Benämning engelska är för lång (${nameEnCell.length} tecken, max 255)`);
+      else {
+        nameEn = nameEnCell;
+        values["nameEn"] = nameEnCell;
+      }
+    }
+    const extraDescriptionEnCell = record["extraDescriptionEn"] ?? "";
+    let extraDescriptionEn: string | null = null;
+    if (extraDescriptionEnCell !== "") {
+      if (extraDescriptionEnCell.length > 2000) {
+        errors.push(`Extra benämning engelska är för lång (${extraDescriptionEnCell.length} tecken, max 2000)`);
+      } else {
+        extraDescriptionEn = extraDescriptionEnCell;
+        values["extraDescriptionEn"] = extraDescriptionEnCell;
+      }
+    }
+
     // Streckkod (EAN/GTIN): a valid GTIN, unique across the register and the
     // file. Empty leaves the stored code alone, like the other text fields.
     const barcodeCell = normalizeScanCode(record["barcode"] ?? "");
@@ -703,6 +737,8 @@ export async function planArticleImport(
         surfaceTreatment,
         colour,
         ...(extraDescription !== null ? { extraDescription } : {}),
+        ...(nameEn !== null ? { nameEn } : {}),
+        ...(extraDescriptionEn !== null ? { extraDescriptionEn } : {}),
         ...(barcode !== null ? { barcode } : {}),
         active: active ?? true,
         reorderPoint: planning.reorderPoint ?? null,
@@ -741,6 +777,8 @@ export async function planArticleImport(
       }
       if (colour !== null && colour !== existing.colour) patch.colour = colour;
       if (extraDescription !== null) patch.extraDescription = extraDescription;
+      if (nameEn !== null) patch.nameEn = nameEn;
+      if (extraDescriptionEn !== null) patch.extraDescriptionEn = extraDescriptionEn;
       if (barcode !== null && barcode !== existing.barcode) patch.barcode = barcode;
       if (active !== null) patch.active = active;
       if (planning.reorderPoint !== undefined) patch.reorderPoint = planning.reorderPoint;

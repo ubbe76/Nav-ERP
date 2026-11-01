@@ -44,6 +44,8 @@ import {
 import { Card } from "../ui/Card";
 import { GatedLink } from "../ui/GatedLink";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormStack } from "../ui/Form";
+import { documentMailTexts } from "../../lib/documentMailTexts";
+import { documentLanguageOf } from "../../lib/documentLanguage";
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
 
@@ -788,10 +790,13 @@ function ReminderDialog({
   onSent: () => void;
 }) {
   const [to, setTo] = useState(defaultTo);
-  const [subject, setSubject] = useState(`Betalningspåminnelse faktura ${invoice.invoiceNumber}`);
-  const [message, setMessage] = useState(
-    `Hej!\n\nVi har tyvärr ännu inte mottagit betalning för faktura ${invoice.invoiceNumber}. Se bifogad påminnelse.\n\nMed vänliga hälsningar`
+  // Dokument på engelska (#7): the reminder follows the invoice's stamped language.
+  const reminderMail = documentMailTexts(
+    { kind: "paymentReminder", number: invoice.invoiceNumber ?? "" },
+    documentLanguageOf(invoice.language)
   );
+  const [subject, setSubject] = useState(reminderMail.subject);
+  const [message, setMessage] = useState(reminderMail.body);
   // Never pre-checked — the fee is an explicit choice every time (mirrors
   // sendReminderSchema's own withFee default(false) in packages/shared),
   // and impossible to check at all once the statutory one-time fee is spent.

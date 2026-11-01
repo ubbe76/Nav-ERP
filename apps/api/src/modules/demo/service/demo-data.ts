@@ -14,6 +14,7 @@ export type DemoLocation = "raw" | "components";
 export interface DemoCode {
   code: string;
   name: string;
+  nameEn?: string;
 }
 
 export interface DemoWorkCenter {
@@ -110,7 +111,8 @@ export const DEMO_DATA: DemoData = {
     { code: "400", name: "Köpkomponenter" },
   ],
   // The code is the number of days — dueDateFromTerm reads it that way.
-  paymentTerm: { code: "30", name: "30 dagar netto" },
+  // nameEn: Benämning (engelska) on English documents (Dokument på engelska #7).
+  paymentTerm: { code: "30", name: "30 dagar netto", nameEn: "30 days net" },
   deviationReasons: [
     { code: "TRANSP", name: "Transportskada", customer: true, supplier: true, internal: false, scrap: false },
     { code: "FELART", name: "Fel artikel", customer: true, supplier: true, internal: false, scrap: false },

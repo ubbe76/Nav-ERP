@@ -896,3 +896,54 @@ describe("import service — suppliers entity", () => {
     expect(rows).toHaveLength(0); // nothing written
   });
 });
+
+// Dokument på engelska (#7): the Språk column.
+describe("planSupplierImport — Språk (language)", () => {
+  const mapping = { Leverantörsnummer: "supplierNumber", Namn: "name", Språk: "language" };
+
+  it("reads Svenska/Engelska/sv/en in any case, makes anything else a row error and leaves an empty cell out", async () => {
+    const plan = await planSupplierImport(
+      {
+        mapping,
+        rows: [
+          ["700", "Lev Ett", "english"],
+          ["701", "Lev Två", "Svenska"],
+          ["702", "Lev Tre", "no"],
+          ["703", "Lev Fyra", ""],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.rows.map((r) => r.errors)).toEqual([[], [], ["Ogiltigt språk 'no' — ange Svenska eller Engelska"], []]);
+    expect(plan.creates).toEqual([
+      { supplierNumber: "700", name: "Lev Ett", language: "en" },
+      { supplierNumber: "701", name: "Lev Två", language: "sv" },
+      { supplierNumber: "703", name: "Lev Fyra" },
+    ]);
+    expect(plan.summary).toEqual({ create: 3, update: 0, skip: 0, error: 1, warning: 0 });
+  });
+
+  it("an empty cell leaves an existing supplier's language untouched", async () => {
+    const plan = await planSupplierImport(
+      { mapping, rows: [["700", "", ""], ["701", "", "EN"]] },
+      fakeDeps({ "700": "11111111-1111-1111-1111-111111111111", "701": "22222222-2222-2222-2222-222222222222" })
+    );
+    expect(plan.updates).toEqual([
+      { id: "11111111-1111-1111-1111-111111111111", patch: {} },
+      { id: "22222222-2222-2222-2222-222222222222", patch: { language: "en" } },
+    ]);
+  });
+
+  it("the template heading Språk maps itself and the commit stores the language", async () => {
+    expect(suggestSupplierMapping(["Leverantörsnummer", "Namn", "Språk"])["Språk"]).toBe("language");
+    await importService.commit("suppliers", {
+      mapping,
+      rows: [
+        ["800", "Supplier GmbH", "Engelska"],
+        ["801", "Lev AB", ""],
+      ],
+    });
+    const rows = await db.select({ number: suppliers.supplierNumber, language: suppliers.language }).from(suppliers);
+    expect(Object.fromEntries(rows.map((r) => [r.number, r.language]))).toEqual({ "800": "en", "801": "sv" });
+  });
+});

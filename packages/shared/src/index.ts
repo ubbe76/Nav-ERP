@@ -22,6 +22,7 @@ export * from "./contact.js";
 export * from "./costing.js";
 export * from "./csv.js";
 export * from "./delivery.js";
+export * from "./document-language.js";
 export * from "./manufacturing.js";
 export * from "./oauth.js";
 export * from "./payroll.js";

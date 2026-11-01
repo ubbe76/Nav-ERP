@@ -21,6 +21,8 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "surfaceTreatment", label: "Ytbehandling" },
   { field: "colour", label: "Färg" },
   { field: "extraDescription", label: "Extra benämning" },
+  { field: "nameEn", label: "Benämning engelska" },
+  { field: "extraDescriptionEn", label: "Extra benämning engelska" },
   { field: "barcode", label: "Streckkod (EAN)" },
   { field: "active", label: "Aktiv" },
   // Monitor's Planering export (Beställningspunkt, Orderkvantitet,
@@ -129,6 +131,7 @@ export const CUSTOMER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "privatePerson", label: "Privatperson" },
   { field: "website", label: "Webbsida" },
   { field: "currency", label: "Valuta" },
+  { field: "language", label: "Språk" },
 ];
 
 // Mirrors SUPPLIER_IMPORT_FIELDS in
@@ -154,6 +157,7 @@ export const SUPPLIER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "city", label: "Postort" },
   { field: "country", label: "Land" },
   { field: "currency", label: "Valuta" },
+  { field: "language", label: "Språk" },
   { field: "ourCustomerNumber", label: "Vårt kundnummer" },
   { field: "paymentTerm", label: "Betalningsvillkor" },
   { field: "deliveryTerm", label: "Leveransvillkor" },

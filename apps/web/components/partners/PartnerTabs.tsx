@@ -9,6 +9,7 @@ import { Modal } from "../ui/Modal";
 import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Select, Textarea, Toggle } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
+import { DOCUMENT_LANGUAGES, DOCUMENT_LANGUAGE_LABELS, type DocumentLanguage } from "../../lib/documentLanguage";
 import type {
   ArticleGroup,
   Customer,
@@ -252,6 +253,7 @@ function AllmantTab({
   // förvalda momskoden on its invoices).
   const [country, setCountry] = useState(isCustomer ? (partner as Customer).country : (partner as Supplier).country);
   const [currency, setCurrency] = useState("currency" in partner ? partner.currency : "SEK");
+  const [language, setLanguage] = useState<DocumentLanguage>(partner.language);
   const [active, setActive] = useState(partner.active);
   const { error, setError, saved, setSaved, pending, setPending } = useSaveState();
 
@@ -286,6 +288,7 @@ function AllmantTab({
           city: orNull(city),
           country: country.trim().toUpperCase() || "SE",
           ...(showCurrency ? { currency } : {}),
+          language,
           active,
         }),
       });
@@ -409,6 +412,20 @@ function AllmantTab({
             </FormHint>
           </>
         )}
+        <Field label="Språk" htmlFor="language">
+          <Select id="language" value={language} onChange={(e) => setLanguage(e.target.value as DocumentLanguage)}>
+            {DOCUMENT_LANGUAGES.map((code) => (
+              <option key={code} value={code}>
+                {DOCUMENT_LANGUAGE_LABELS[code]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <FormHint attached>
+          {isCustomer
+            ? "Språket på kundens dokument: offert, orderbekräftelse, följesedel, pallkort och fakturan skrivs på engelska när du väljer Engelska. Fakturan låser språket när den utfärdas."
+            : "Språket på förfrågan och inköpsorder till leverantören."}
+        </FormHint>
         {isCustomer && (
           <>
             <Field label="Visa tilläggspriser" htmlFor="showConfigurationPrices">

@@ -73,6 +73,10 @@ export const suppliers = pgTable("suppliers", {
   // value (same rule as the supplier address block).
   ourCustomerNumber: varchar("our_customer_number", { length: 50 }),
   currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+  // Språk (Dokument på engelska #7, migration 0175): the language the
+  // inquiry and purchase order to this supplier are written in (live, never
+  // archived). DOCUMENT_LANGUAGES in @navet/shared; extend the CHECK too.
+  language: varchar("language", { length: 2 }).notNull().default("sv"),
   // Momskoder: the supplier's country (ISO 3166-1 alpha-2) and its default
   // momskod for new supplier invoices — null = derived from the country
   // (SE ⇒ MP25, EU ⇒ IEUV25, otherwise IUTV).
@@ -128,6 +132,7 @@ export const suppliers = pgTable("suppliers", {
   // The bank id is a pair: the clearing system and the member id together.
   check("suppliers_clearing_pair", sql`(${table.clearingSystem} is null) = (${table.clearingMemberId} is null)`),
   check("suppliers_charge_bearer_valid", sql`${table.chargeBearer} in ('SHAR', 'DEBT')`),
+  check("suppliers_language_valid", sql`${table.language} IN ('sv', 'en')`),
   check("suppliers_payment_reporting_code_format", sql`${table.paymentReportingCode} ~ '^[0-9]{3}$'`),
   check("suppliers_delivery_weekdays", sql`${table.deliveryWeekdays} <@ '{1,2,3,4,5,6,7}'::smallint[]`),
   check("suppliers_transit_days", sql`${table.transitDays} between 0 and 60`),

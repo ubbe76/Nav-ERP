@@ -30,6 +30,8 @@ export const COPIED_INFORMATION_FIELDS = [
   "surfaceTreatment",
   "colour",
   "extraDescription",
+  "nameEn",
+  "extraDescriptionEn",
   "reorderPoint",
   "safetyStock",
   "stockControlled",

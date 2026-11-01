@@ -110,6 +110,11 @@ export const createArticleSchema = z.object({
   // "Extra benämning" — multi-line free text, printed on the documents the
   // setting extraDescriptionDocuments lists; blank = none.
   extraDescription: optionalText(2000).optional(),
+  // Benämning (engelska) / Extra benämning (engelska) (#7): used on English
+  // documents when filled in, else the Swedish text (localized); blank =
+  // none. Never printed on Swedish documents.
+  nameEn: optionalText(255).optional(),
+  extraDescriptionEn: optionalText(2000).optional(),
   // Streckkod (EAN/GTIN, #4); blank = none.
   barcode: articleBarcodeSchema.optional(),
   groupId: z.string().uuid().optional(),
@@ -182,6 +187,9 @@ export const updateArticleSchema = z
     colour: optionalText(200).optional(),
     // "Extra benämning"; "" clears.
     extraDescription: optionalText(2000).optional(),
+    // The English texts (#7); "" clears.
+    nameEn: optionalText(255).optional(),
+    extraDescriptionEn: optionalText(2000).optional(),
     // Streckkod (EAN/GTIN, #4); "" or null clears.
     barcode: articleBarcodeSchema.nullable().optional(),
   })

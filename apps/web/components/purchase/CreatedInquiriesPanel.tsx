@@ -9,7 +9,9 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { FormError, FormHint } from "../ui/Form";
 import { PdfActions } from "../documents/PdfActions";
 import { SendEmailModal } from "../mail/MailSection";
-import { fetchDefaultRecipient } from "../../lib/mail";
+import { fetchDefaultRecipientAndLanguage } from "../../lib/mail";
+import { documentMailTexts } from "../../lib/documentMailTexts";
+import type { DocumentLanguage } from "../../lib/documentLanguage";
 import type { CreatedInquiry } from "../../lib/types";
 import styles from "../../app/tillverkning/behovsberakning/page.module.css";
 
@@ -26,14 +28,19 @@ export function CreatedInquiriesPanel({
 }) {
   const [mailTarget, setMailTarget] = useState<CreatedInquiry | null>(null);
   const [mailTo, setMailTo] = useState<string | null>(null);
+  // Dokument på engelska (#7): the supplier's language steers the mail defaults.
+  const [mailLanguage, setMailLanguage] = useState<DocumentLanguage>("sv");
   const [sentIds, setSentIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!mailTarget) return;
     let cancelled = false;
     setMailTo(null);
-    fetchDefaultRecipient("suppliers", mailTarget.supplierId).then((to) => {
-      if (!cancelled) setMailTo(to);
+    fetchDefaultRecipientAndLanguage("suppliers", mailTarget.supplierId).then(({ to, language }) => {
+      if (!cancelled) {
+        setMailTo(to);
+        setMailLanguage(language);
+      }
     });
     return () => {
       cancelled = true;
@@ -92,8 +99,8 @@ export function CreatedInquiriesPanel({
             label: "Maila",
             modalTitle: `Skicka ${mailTarget.inquiryNumber} via e-post`,
             endpoint: `/api/v1/inquiries/${mailTarget.id}/send-email`,
-            subject: `Förfrågan ${mailTarget.inquiryNumber}`,
-            message: `Hej!\n\nSe bifogad förfrågan ${mailTarget.inquiryNumber}.\n\nMed vänliga hälsningar`,
+            subject: documentMailTexts({ kind: "inquiry", number: mailTarget.inquiryNumber }, mailLanguage).subject,
+            message: documentMailTexts({ kind: "inquiry", number: mailTarget.inquiryNumber }, mailLanguage).body,
           }}
           defaultTo={mailTo}
           drawingCount={0}

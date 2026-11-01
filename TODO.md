@@ -60,6 +60,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låg
 
+- [ ] **Dokument på engelska:** avvikelseorsakens namn skrivs på svenska även på ett engelskt reklamationsbesked (`deviation_reasons` saknar `name_en`); en kreditfaktura kopierar källfakturans frakt-/ränterader med deras text, så en kredit till en kund som bytt språk efter fakturan får raderna på fakturans språk.
 - [ ] **Behovsberäkningen, tidsfasade förslag:** sorteringen **Sortering: Senaste datum** lägger ett inköpsförslag utan möjlig ankomst (senaste datum saknas, markerat **Passerat**) sist i stället för först; efter **Uppdatera** rensas val för förslag som flyttat vecka bara på den visade sidan (andra sidors val kan ha kvar ett gammalt behovsdatum); **Skapa ordrar** utan behovsdatum (integrationer) laddar ledtidsunderlaget även för inköpsartiklar.
 - [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — ingår i [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Momsrapporten:** visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
@@ -126,7 +127,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Hög
 
 - [ ] **E-faktura (Peppol), etapp 2** — mottagning → [#5](https://github.com/ubbe76/Nav-ERP/issues/5); utländska mottagare, valuta och automatisk sändning → [#6](https://github.com/ubbe76/Nav-ERP/issues/6). Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
-- [ ] **Dokument på engelska** → [#7](https://github.com/ubbe76/Nav-ERP/issues/7) *(hemsidan)*
 
 ### Medel
 

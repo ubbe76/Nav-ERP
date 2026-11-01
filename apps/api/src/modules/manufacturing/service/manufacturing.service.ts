@@ -40,6 +40,8 @@ import type { PlannedWeek } from "../../planning/service/capacity-calc.js";
 export { MaterialShortageError, type MaterialShortage } from "./material-shortage.js";
 import type { PeriodLockChecker } from "../../payroll/service/period-lock.js";
 import type { DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
+import { documentLanguageOf, localized } from "@navet/shared";
+import { documentTexts } from "../../mail/service/document-texts.js";
 import { extraDescriptionFor } from "../../mail/service/document-pdf.js";
 import { appendFilesToPdf, mergePdfs } from "../../mail/service/pdf-merge.js";
 import { ArticleNotFoundError, assertOrderableArticle, type ArticleFileReader, type ArticleUnitReader } from "../../article/service/article.service.js";
@@ -80,6 +82,9 @@ export interface SalesOrderLinkReader {
     orderNumber: string;
     orderStatus: string;
     customerName: string;
+    // Dokument på engelska (#7): the customer's language — the final pallet
+    // card is printed in it.
+    customerLanguage: string;
     // Kundens ordernummer — printed on the pallet card (Etapp F).
     customerOrderNumber: string | null;
     articleId: string;
@@ -1059,13 +1064,17 @@ export function createManufacturingService(
     // Kod på pallkort: the customer's choice on the final card, else the
     // system setting; an omitted settings reader means none (the plain card).
     const systemCode: PalletCardCode = settings ? (await settings.getSettings()).palletCardCode : "none";
+    // Dokument på engelska (#7): the final card follows the customer's
+    // language (it travels with the goods); the internal card is Swedish.
+    const language = salesOrderRow ? documentLanguageOf(salesOrderRow.customerLanguage) : "sv";
     // One card per kolli, numbered Kolli n av m.
     const cards: PalletCardPdfInput[] = quantities.map((quantity, i) => {
       const common = {
+        language,
         articleNumber: order.articleNumber,
-        articleName: order.articleName,
+        articleName: localized(order.articleName, order.articleNameEn, language),
         quantity,
-        unit: order.articleUnitCode,
+        unit: localized(order.articleUnitCode, order.articleUnitCodeEn, language),
         parcel: { index: i + 1, count: quantities.length },
         printedAt: extras.printedAt,
         reportedBy: extras.reportedBy,
@@ -1091,7 +1100,7 @@ export function createManufacturingService(
             nextOperation: next ? `${next.sequenceNo} · ${next.description?.trim() || next.workCenterName}` : null,
           };
     });
-    return { order, operation, cards };
+    return { order, operation, cards, language };
   }
 
   return {
@@ -2155,13 +2164,13 @@ export function createManufacturingService(
     // time; no Rapporterad av (the accumulated quantity has no single
     // reporter).
     async getOperationPalletCardPdf(moId: string, operationId: string, quantities?: number[]) {
-      const { order, operation, cards } = await buildOperationPalletCards(moId, operationId, {
+      const { order, operation, cards, language } = await buildOperationPalletCards(moId, operationId, {
         quantities,
         printedAt: new Date(),
         reportedBy: null,
       });
       const content = await pdf.renderPalletCard(cards);
-      return { filename: `pallkort-${order.orderNumber}-op${operation.sequenceNo}.pdf`, content };
+      return { filename: documentTexts(language).filenames.palletCard(`${order.orderNumber}-op${operation.sequenceNo}`), content };
     },
 
     // Pallkort per rapport (omutskrift from the TO card's Rapporteringar):
@@ -2175,13 +2184,13 @@ export function createManufacturingService(
       if (!report || report.manufacturingOrderId !== moId) throw new MoReportNotFoundError(reportId);
       if (report.kind !== "operation" || !report.moOperationId || report.undoneAt) throw new MoReportNoPalletCardError();
 
-      const { order, operation, cards } = await buildOperationPalletCards(moId, report.moOperationId, {
+      const { order, operation, cards, language } = await buildOperationPalletCards(moId, report.moOperationId, {
         quantities: quantities ?? (Number(report.quantityOk) > 0 ? [Number(report.quantityOk)] : undefined),
         printedAt: report.createdAt,
         reportedBy: report.employeeName ?? report.userName ?? null,
       });
       const content = await pdf.renderPalletCard(cards);
-      return { filename: `pallkort-${order.orderNumber}-op${operation.sequenceNo}.pdf`, content };
+      return { filename: documentTexts(language).filenames.palletCard(`${order.orderNumber}-op${operation.sequenceNo}`), content };
     },
   };
 }

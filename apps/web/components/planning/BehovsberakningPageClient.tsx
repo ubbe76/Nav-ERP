@@ -15,7 +15,9 @@ import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { ListExportLink, ListFilterSelect, ListToggleFilter, ListToolbar, Pagination } from "../ui/ListControls";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
-import { fetchDefaultRecipient } from "../../lib/mail";
+import { fetchDefaultRecipientAndLanguage } from "../../lib/mail";
+import { documentMailTexts } from "../../lib/documentMailTexts";
+import type { DocumentLanguage } from "../../lib/documentLanguage";
 import { createLegoInquiries } from "../../lib/legoInquiries";
 import { SendEmailModal } from "../mail/MailSection";
 import { useCan } from "../PermissionsProvider";
@@ -214,6 +216,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // dialog opens with the address already filled in rather than blank).
   const [mailTarget, setMailTarget] = useState<PlanningOrdersResult["purchaseOrders"][number] | null>(null);
   const [mailTo, setMailTo] = useState<string | null>(null);
+  // Dokument på engelska (#7): the supplier's language steers the mail defaults.
+  const [mailLanguage, setMailLanguage] = useState<DocumentLanguage>("sv");
   const [sentOrderIds, setSentOrderIds] = useState<string[]>([]);
 
   // "Skapa förfrågan": a legoförfrågan requests quotes from one or more
@@ -233,8 +237,11 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     if (!mailTarget) return;
     let cancelled = false;
     setMailTo(null);
-    fetchDefaultRecipient("suppliers", mailTarget.supplierId).then((to) => {
-      if (!cancelled) setMailTo(to);
+    fetchDefaultRecipientAndLanguage("suppliers", mailTarget.supplierId).then(({ to, language }) => {
+      if (!cancelled) {
+        setMailTo(to);
+        setMailLanguage(language);
+      }
     });
     return () => {
       cancelled = true;
@@ -1044,8 +1051,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
             label: "Maila",
             modalTitle: `Skicka ${mailTarget.orderNumber} via e-post`,
             endpoint: `/api/v1/purchase-orders/${mailTarget.id}/send-email`,
-            subject: `Inköpsorder ${mailTarget.orderNumber}`,
-            message: `Hej!\n\nSe bifogad inköpsorder ${mailTarget.orderNumber}.\n\nMed vänliga hälsningar`,
+            subject: documentMailTexts({ kind: "purchaseOrder", number: mailTarget.orderNumber }, mailLanguage).subject,
+            message: documentMailTexts({ kind: "purchaseOrder", number: mailTarget.orderNumber }, mailLanguage).body,
           }}
           defaultTo={mailTo}
           drawingCount={0}

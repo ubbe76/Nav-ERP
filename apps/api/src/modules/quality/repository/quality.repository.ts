@@ -93,6 +93,9 @@ const listColumns = {
   articleNumber: articles.articleNumber,
   articleName: articles.name,
   unitCode: units.code,
+  // Dokument på engelska (#7): for the reklamationsbesked in English.
+  articleNameEn: articles.nameEn,
+  unitCodeEn: units.codeEn,
   quantity: deviations.quantity,
   reasonId: deviations.reasonId,
   reasonCode: deviationReasons.code,
@@ -242,6 +245,9 @@ export function createQualityRepository(db: Db) {
             customerNumber: customers.customerNumber,
             supplierNumber: suppliers.supplierNumber,
             counterpartyEmail: sql<string | null>`coalesce(${customers.email}, ${suppliers.email})`,
+            // Språk (#7): the language the reklamationsbesked to the
+            // counterparty is printed in (live); null for an internal case.
+            counterpartyLanguage: sql<string | null>`coalesce(${customers.language}, ${suppliers.language})`,
             counterpartyAddress: sql<string | null>`coalesce(${customers.address}, ${suppliers.address})`,
             counterpartyPostalCode: sql<string | null>`coalesce(${customers.postalCode}, ${suppliers.postalCode})`,
             counterpartyCity: sql<string | null>`coalesce(${customers.city}, ${suppliers.city})`,
@@ -772,6 +778,8 @@ export interface ListRow {
   articleNumber: string | null;
   articleName: string | null;
   unitCode: string | null;
+  articleNameEn: string | null;
+  unitCodeEn: string | null;
   quantity: string | null;
   reasonId: string | null;
   reasonCode: string | null;
@@ -810,6 +818,7 @@ export interface DetailRow extends ListRow {
   customerNumber: string | null;
   supplierNumber: string | null;
   counterpartyEmail: string | null;
+  counterpartyLanguage: string | null;
   counterpartyAddress: string | null;
   counterpartyPostalCode: string | null;
   counterpartyCity: string | null;

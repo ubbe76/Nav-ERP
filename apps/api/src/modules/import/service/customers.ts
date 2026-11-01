@@ -4,7 +4,7 @@
 // summarize/ImportRowResult); all database work lives in
 // import.repository.ts.
 import { z } from "zod";
-import type { ImportCommitInput } from "@navet/shared";
+import { parseDocumentLanguageCell, type DocumentLanguage, type ImportCommitInput } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
 import {
   normalizeHeader,
@@ -51,6 +51,7 @@ export const CUSTOMER_IMPORT_FIELDS = [
   "privatePerson",
   "website",
   "currency",
+  "language",
 ] as const;
 export type CustomerImportField = (typeof CUSTOMER_IMPORT_FIELDS)[number];
 
@@ -117,6 +118,7 @@ const FIELD_LABELS: Record<CustomerImportField, string> = {
   privatePerson: "Privatperson",
   website: "Webbsida",
   currency: "Valuta",
+  language: "Språk",
 };
 
 // E-mail policy: an invalid address never blocks the row — the value is
@@ -148,6 +150,7 @@ const SPECIAL_FIELDS: ReadonlySet<CustomerImportField> = new Set<CustomerImportF
   "invoiceOnHold",
   "privatePerson",
   "currency",
+  "language",
 ]);
 
 // Valuta: same rule as the supplier import's currency (ISO 4217, three
@@ -243,6 +246,8 @@ export const CUSTOMER_HEADER_ALIASES: Record<string, string> = {
   webbplats: "website",
   valuta: "currency",
   valutakod: "currency",
+  sprak: "language",
+  dokumentsprak: "language",
 };
 
 // Applied in a first pass, before the general alias contest — a specific
@@ -351,6 +356,8 @@ export interface CustomerCreatePlan {
   privatePerson?: boolean;
   website?: string;
   currency?: string;
+  // Språk: the customer's document language (Dokument på engelska #7).
+  language?: DocumentLanguage;
 }
 
 export interface CustomerUpdatePlan {
@@ -575,6 +582,17 @@ export async function planCustomerImport(
       const upper = currencyCell.toUpperCase();
       if (!CURRENCY_PATTERN.test(upper)) errors.push(`Ogiltig valutakod '${currencyCell}' — ange 3 bokstäver, t.ex. SEK`);
       else patch.currency = upper;
+    }
+
+    // Språk (Dokument på engelska #7) — Svenska/Engelska/sv/en, case-
+    // insensitively; anything else is a row ERROR. Empty cell: sv on create
+    // (the column default), untouched on update.
+    const languageCell = record["language"] ?? "";
+    if (languageCell !== "") {
+      values["language"] = languageCell;
+      const parsed = parseDocumentLanguageCell(languageCell);
+      if (parsed === null) errors.push(`Ogiltigt språk '${languageCell}' — ange Svenska eller Engelska`);
+      else patch.language = parsed;
     }
 
     // discountPercent — normalizeDecimal handles Swedish "15,5"; 0–100.

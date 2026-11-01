@@ -14,6 +14,8 @@ import {
   type UpdateDeviationInput,
 } from "@navet/shared";
 import { formatNumber, type DocumentPdfService } from "../../mail/service/document-pdf.js";
+import { documentLanguageOf, localized, type DocumentLanguage } from "@navet/shared";
+import { documentTexts } from "../../mail/service/document-texts.js";
 import type { MailService } from "../../mail/service/mail.service.js";
 import { hasSignature } from "../../purchase/service/invoice-scan/file-signature.js";
 import { stockholmToday } from "../../system/service/delivery-days.js";
@@ -49,11 +51,9 @@ import { allowedActions, closeRequirementsMissing, isEditable } from "./deviatio
 export const DEVIATION_FILE_TYPES = ["application/pdf", "image/jpeg", "image/png"] as const;
 export const MAX_DEVIATION_FILE_BYTES = 20 * 1024 * 1024;
 
-const PDF_TITLES: Record<DeviationType, string> = {
-  supplier: "Reklamation",
-  customer: "Reklamationsbesked",
-  internal: "Avvikelserapport",
-};
+// The report's titles live in the mail module's dictionary
+// (document-texts.ts, deviation.titles — Reklamation / Reklamationsbesked /
+// Avvikelserapport), one per language.
 
 // The fields PATCH may change (the type never changes).
 const EDITABLE_FIELDS = [
@@ -83,10 +83,10 @@ const EDITABLE_FIELDS = [
 type EditableField = (typeof EDITABLE_FIELDS)[number];
 
 // The PDF's quantity: formatNumber (never sv-SE's U+2212 minus, mail.md)
-// with up to four decimals and no trailing zeros.
-function formatQuantity(value: number): string {
+// with up to four decimals and no trailing zeros, in the document's language.
+function formatQuantity(value: number, language: DocumentLanguage): string {
   const decimals = Number.isInteger(value) ? 0 : Math.min(4, String(value).split(".")[1]?.length ?? 4);
-  return formatNumber(value, decimals);
+  return formatNumber(value, decimals, language);
 }
 
 // Comparable form of a stored or incoming value (numeric columns come back
@@ -432,37 +432,48 @@ export function createQualityService(deps: {
     async renderPdf(id: string, opts: { details: boolean }) {
       const row = await repo.findDetail(id);
       if (!row) throw new DeviationNotFoundError(id);
-      const title = PDF_TITLES[row.type];
+      // Dokument på engelska (#7): the outgoing letters follow the
+      // counterparty's language, live; the internal report is Swedish. The
+      // free texts (title, description, analysis…) and the reason print as
+      // written; only the labels, the article name and the unit follow.
+      const language = row.type === "internal" ? "sv" : documentLanguageOf(row.counterpartyLanguage);
+      const t = documentTexts(language).deviation;
+      const title = t.titles[row.type];
       const references: { label: string; value: string }[] = [];
-      if (row.counterpartyReference) references.push({ label: "Er referens", value: row.counterpartyReference });
-      if (row.salesOrderNumber) references.push({ label: "Kundorder", value: row.salesOrderNumber });
-      if (row.customerOrderNumber) references.push({ label: "Ert ordernr", value: row.customerOrderNumber });
-      if (row.invoiceNumber) references.push({ label: "Faktura", value: row.invoiceNumber });
-      if (row.purchaseOrderNumber) references.push({ label: "Inköpsorder", value: row.purchaseOrderNumber });
+      if (row.counterpartyReference) references.push({ label: t.references.yourReference, value: row.counterpartyReference });
+      if (row.salesOrderNumber) references.push({ label: t.references.salesOrder, value: row.salesOrderNumber });
+      if (row.customerOrderNumber) references.push({ label: t.references.customerOrderNumber, value: row.customerOrderNumber });
+      if (row.invoiceNumber) references.push({ label: t.references.invoice, value: row.invoiceNumber });
+      if (row.purchaseOrderNumber) references.push({ label: t.references.purchaseOrder, value: row.purchaseOrderNumber });
       // The TO number is internal — only the internal report prints it.
       if (row.type === "internal" && row.manufacturingOrderNumber) {
-        references.push({ label: "Tillverkningsorder", value: row.manufacturingOrderNumber });
+        references.push({ label: t.references.manufacturingOrder, value: row.manufacturingOrderNumber });
       }
-      const sections: { label: string; text: string }[] = [{ label: "Ärende", text: row.title }];
-      if (row.articleNumber) sections.push({ label: "Artikel", text: `${row.articleNumber} ${row.articleName ?? ""}`.trim() });
+      const sections: { label: string; text: string }[] = [{ label: t.sections.subject, text: row.title }];
+      if (row.articleNumber) {
+        const articleName = row.articleName ? localized(row.articleName, row.articleNameEn, language) : "";
+        sections.push({ label: t.sections.article, text: `${row.articleNumber} ${articleName}`.trim() });
+      }
       if (row.quantity !== null) {
-        sections.push({ label: "Antal", text: `${formatQuantity(Number(row.quantity))}${row.unitCode ? ` ${row.unitCode}` : ""}` });
+        const unit = row.unitCode ? ` ${localized(row.unitCode, row.unitCodeEn, language)}` : "";
+        sections.push({ label: t.sections.quantity, text: `${formatQuantity(Number(row.quantity), language)}${unit}` });
       }
-      if (row.reasonName) sections.push({ label: "Orsak", text: row.reasonName });
-      if (row.description) sections.push({ label: "Beskrivning", text: row.description });
+      if (row.reasonName) sections.push({ label: t.sections.reason, text: row.reasonName });
+      if (row.description) sections.push({ label: t.sections.description, text: row.description });
       if (opts.details) {
-        if (row.causeAnalysis) sections.push({ label: "Orsaksanalys", text: row.causeAnalysis });
-        if (row.correctiveAction) sections.push({ label: "Åtgärd", text: row.correctiveAction });
-        if (row.preventiveAction) sections.push({ label: "Förebyggande åtgärd", text: row.preventiveAction });
-        if (row.decision) sections.push({ label: "Beslut", text: DEVIATION_DECISION_LABELS[row.decision] });
+        if (row.causeAnalysis) sections.push({ label: t.sections.causeAnalysis, text: row.causeAnalysis });
+        if (row.correctiveAction) sections.push({ label: t.sections.correctiveAction, text: row.correctiveAction });
+        if (row.preventiveAction) sections.push({ label: t.sections.preventiveAction, text: row.preventiveAction });
+        if (row.decision) sections.push({ label: t.sections.decision, text: t.decisions[row.decision] });
       }
       const partnerName = row.customerName ?? row.supplierName;
       const content = await deps.pdf.renderDeviationReport({
+        language,
         title,
         outgoing: row.type !== "internal",
         documentNumber: row.deviationNumber,
         date: row.reportedDate,
-        partnerLabel: row.type === "customer" ? "KUND" : row.type === "supplier" ? "LEVERANTÖR" : null,
+        partnerLabel: row.type === "customer" ? t.partnerLabels.customer : row.type === "supplier" ? t.partnerLabels.supplier : null,
         partner: partnerName
           ? {
               name: partnerName,
@@ -475,7 +486,7 @@ export function createQualityService(deps: {
         references,
         sections,
       });
-      return { filename: `${title}-${row.deviationNumber}.pdf`, content };
+      return { filename: documentTexts(language).filenames.deviation(title, row.deviationNumber), content };
     },
 
     // Skicka: the PDF as attachment through the mail module (email_log with
@@ -536,6 +547,7 @@ function detailFields(row: DetailRow) {
     customerNumber: row.customerNumber,
     supplierNumber: row.supplierNumber,
     counterpartyEmail: row.counterpartyEmail,
+    counterpartyLanguage: row.counterpartyLanguage,
   };
 }
 

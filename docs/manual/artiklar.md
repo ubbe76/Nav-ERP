@@ -114,6 +114,8 @@ Blir lagerplatsen tom inaktiveras den automatiskt, och då nollställs fältet t
 
 **Ytbehandling** och **Färg** skrivs ut som en rad under artikelnamnet ("Ytbehandling: … · Färg: …", bara ifyllda fält tas med) på förfrågan och inköpsorder (bara på lego-rader) samt på offert och orderbekräftelse (alla rader). De skrivs aldrig ut på fakturan.
 
+**Benämning (engelska)** och **Extra benämning (engelska)** ligger direkt under sina svenska motsvarigheter på fliken **Allmänt** och används på dokument som skrivs på engelska (när kundens eller leverantörens **Språk** är **Engelska**, se [Dokument på engelska](/hjalp/forsaljning#dokument-pa-engelska)). Är fältet tomt skrivs den svenska texten även på engelska dokument; svenska dokument visar aldrig de engelska fälten. Fälten finns inte i dialogen **Ny artikel**, men kan fyllas i via artikelimportens kolumner (se [Importera artiklar](#importera-artiklar)) och kopieras med **Kopiera från**.
+
 **Extra benämning** är en flerradig fritext (radbrytningar behålls) som skrivs ut under artikelnamnet, direkt efter raden med ytbehandling och färg, på de dokument som är valda under **System → Inställningar**, avsnittet **Extra benämning på dokument** (se [Inställningar](/hjalp/system#installningar)): Förfrågan, Inköpsorder, Offert, Orderbekräftelse, Plocklista, Följesedel, Faktura och Tillverkningsorder. Inget dokument är valt från början. Texten läses från artikeln när dokumentet skrivs ut, så en ändring slår igenom på nästa utskrift; en utfärdad faktura behåller dock den text den hade när den utfärdades. Fältet finns bara på artikelkortet, inte i dialogen **Ny artikel**, men **Kopiera från** med **Information** kopierar det till den nya artikeln.
 
 #### Enheter

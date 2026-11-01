@@ -10,6 +10,7 @@ import { partnerDeliveryFields } from "./delivery.js";
 import { palletCardCodeSchema } from "./system.js";
 import { invoiceDeliverySchema, peppolIdFieldSchema } from "./einvoice.js";
 import { currencyCodeSchema, exchangeRateValueSchema } from "./currency.js";
+import { documentLanguageSchema } from "./document-language.js";
 
 // "lost" (Förlorad): a quote the customer did not take — closed like
 // cancelled (no edits, no documents), reopenable to quote.
@@ -170,6 +171,10 @@ export const createCustomerSchema = z.object({
   // Valuta: the customer's currency (ISO 4217, "eur" → "EUR"). New orders
   // take it with today's rate; the customer's särpriser are in it.
   currency: currencyCodeSchema.default("SEK"),
+  // Språk (#7): the language of the customer's documents — quote, order
+  // confirmation, delivery note and pallet card follow it live, the invoice
+  // stamps it at Utfärda (invoices.language).
+  language: documentLanguageSchema.default("sv"),
   // Dröjsmålsränta: charged on overdue invoices (förval ja), the Avtalad
   // räntesats (total %, null = referensränta + marginal enligt räntelagen)
   // and förseningsersättning (förval ja, ignored for a privatperson).
@@ -225,6 +230,9 @@ export const updateCustomerSchema = z
     // Valuta: not nullable — a customer always has a currency. Existing
     // orders keep theirs.
     currency: currencyCodeSchema.optional(),
+    // Språk: not nullable — a customer always has a document language.
+    // Issued invoices keep the language they were stamped with.
+    language: documentLanguageSchema.optional(),
     lateInterest: z.boolean().optional(),
     lateInterestRate: lateInterestRateSchema.nullable().optional(),
     lateFee: z.boolean().optional(),

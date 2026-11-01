@@ -1,12 +1,33 @@
 import PDFDocument from "pdfkit";
-import { minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, VAT_CODES, type ExtraDescriptionDocument } from "@navet/shared";
+import {
+  documentLanguageOf,
+  minutesPerUnitToSecondsPerUnit,
+  minutesPerUnitToUnitsPerHour,
+  VAT_CODES,
+  type DocumentLanguage,
+  type ExtraDescriptionDocument,
+} from "@navet/shared";
 import { code128Width, drawCode128, drawQrCode } from "./pdf-codes.js";
+import { DOCUMENT_TEXTS, documentTexts, type DocumentTexts } from "./document-texts.js";
 import type { SystemService } from "../../system/service/system.service.js";
 
 // One shared A4 layout for all outgoing business documents (förfrågan,
 // inköpsorder, offert, orderbekräftelse): company header with logo, document
 // title/number/date, partner address block, row table, optional total.
 // Built with pdfkit — the built-in Helvetica fonts cover åäö (WinAnsi).
+//
+// Dokument på engelska (#7): every customer-/supplier-facing renderer takes
+// `language` in its input (required, so no caller is forgotten) and prints
+// its fixed texts from document-texts.ts; the callers hand over the
+// translatable DATA (article names, terms, unit codes, VAT texts) already
+// localized. Internal documents (pick list, TO printout, count sheet,
+// reports, payroll, the internal pallet card) stay Swedish with their own
+// literals. The inputs resolve through documentLanguageOf so a fixture from
+// before #7 (no language) still prints Swedish.
+
+// The texts of the outgoing documents' SWEDISH side — the internal
+// renderers' page numbers and the pre-#7 fallback.
+const SV_TEXTS = DOCUMENT_TEXTS.sv;
 
 export interface DocumentPdfRow {
   articleNumber: string;
@@ -111,14 +132,19 @@ export function extraDescriptionFor(
 }
 
 // "Ytbehandling: Pulverlack RAL 9010 · Färg: Vit" — an empty half is left
-// out, both empty → null so the row prints no extra line.
-export function formatArticleAttributes(article: {
-  surfaceTreatment: string | null;
-  colour: string | null;
-}): string | null {
+// out, both empty → null so the row prints no extra line. The values print
+// as entered (only the labels follow the document's language).
+export function formatArticleAttributes(
+  article: {
+    surfaceTreatment: string | null;
+    colour: string | null;
+  },
+  language: DocumentLanguage = "sv"
+): string | null {
+  const t = documentTexts(language).rowInfo;
   const parts = [
-    article.surfaceTreatment ? `Ytbehandling: ${article.surfaceTreatment}` : null,
-    article.colour ? `Färg: ${article.colour}` : null,
+    article.surfaceTreatment ? `${t.surfaceTreatment}: ${article.surfaceTreatment}` : null,
+    article.colour ? `${t.colour}: ${article.colour}` : null,
   ].filter((part): part is string => part !== null);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -126,14 +152,14 @@ export function formatArticleAttributes(article: {
 // Shared formatter for the per-row revision line: the article's active
 // revision plus each drawing number with its active drawing revision.
 export function formatRevisionInfo(
-  info: { revision: string | null; drawings: { drawingNumber: string; revision: string | null }[] } | undefined
+  info: { revision: string | null; drawings: { drawingNumber: string; revision: string | null }[] } | undefined,
+  language: DocumentLanguage = "sv"
 ): string | null {
   if (!info) return null;
+  const t = documentTexts(language).rowInfo;
   const parts: string[] = [];
-  if (info.revision) parts.push(`Rev ${info.revision}`);
-  for (const d of info.drawings) {
-    parts.push(d.revision ? `Ritn ${d.drawingNumber} rev ${d.revision}` : `Ritn ${d.drawingNumber}`);
-  }
+  if (info.revision) parts.push(t.revision(info.revision));
+  for (const d of info.drawings) parts.push(t.drawing(d.drawingNumber, d.revision));
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
@@ -156,38 +182,24 @@ export interface PartnerBlock {
   country?: string | null;
 }
 
-// Swedish names for the countries that actually occur in the customer
-// register; anything else prints as its ISO code, which is still readable.
-const COUNTRY_NAMES: Record<string, string> = {
-  DK: "Danmark",
-  NO: "Norge",
-  FI: "Finland",
-  DE: "Tyskland",
-  PL: "Polen",
-  IT: "Italien",
-  EE: "Estland",
-  LV: "Lettland",
-  LT: "Litauen",
-  NL: "Nederländerna",
-  BE: "Belgien",
-  FR: "Frankrike",
-  ES: "Spanien",
-  GB: "Storbritannien",
-  US: "USA",
-};
-
 // Address lines below the name: street, "postnr ort", and the country when
 // it is not Sweden — a Swedish sender never prints "Sverige" on domestic
-// mail. A multi-row street (Monitor's Adressrad 1–3 are stored joined with
-// newlines) is split into one entry per row: the partner block advances y
-// by a fixed line height per entry, so an embedded newline would draw the
-// second row on top of "postnr ort".
-export function addressLines(a: {
-  address: string | null;
-  postalCode: string | null;
-  city: string | null;
-  country?: string | null;
-}): string[] {
+// mail. The country's name follows the document's language (the
+// dictionary's countryNames; an unlisted country prints as its ISO code,
+// which is still readable). A multi-row street (Monitor's Adressrad 1–3 are
+// stored joined with newlines) is split into one entry per row: the partner
+// block advances y by a fixed line height per entry, so an embedded newline
+// would draw the second row on top of "postnr ort".
+export function addressLines(
+  a: {
+    address: string | null;
+    postalCode: string | null;
+    city: string | null;
+    country?: string | null;
+  },
+  language: DocumentLanguage = "sv"
+): string[] {
+  const countryNames = documentTexts(language).countryNames;
   const country = a.country?.trim().toUpperCase();
   const streetRows = (a.address ?? "")
     .split(/\r\n|\r|\n/)
@@ -196,15 +208,23 @@ export function addressLines(a: {
   return [
     ...streetRows,
     [a.postalCode, a.city].filter(Boolean).join(" "),
-    country && country !== "SE" ? (COUNTRY_NAMES[country] ?? country) : null,
+    country && country !== "SE" ? (countryNames[country] ?? country) : null,
   ].filter((line): line is string => Boolean(line));
 }
 
 export interface DocumentPdfInput {
-  title: string; // "Förfrågan" | "Inköpsorder" | "Offert" | "Orderbekräftelse" | "Faktura"
+  // Dokument på engelska (#7): the language the fixed texts are printed in
+  // (DOCUMENT_TEXTS). The caller resolves it — the customer's/supplier's
+  // live language, or the invoice's stamped one — and hands over the
+  // translatable data (names, terms, units, VAT texts) already localized.
+  language: DocumentLanguage;
+  // The printed title — the dictionary's titles.* of the same language
+  // ("Förfrågan" | "Inköpsorder" | "Offert" | "Orderbekräftelse" | "Faktura").
+  title: string;
   documentNumber: string;
   date: Date;
-  partnerLabel: string; // "Leverantör" | "Kund" | "Fakturaadress"
+  // The dictionary's partnerLabels.* ("Leverantör" | "Kund" | "Fakturaadress").
+  partnerLabel: string;
   partner: PartnerBlock;
   currency: string;
   rows: DocumentPdfRow[];
@@ -245,6 +265,10 @@ export interface DocumentPdfInput {
   // Invoice-only meta lines under the date.
   dueDate?: Date | null;
   orderReference?: string | null;
+  // Credit note: the FA number of the invoice it credits — printed as the
+  // dictionary's meta.creditsInvoice line (Swedish keeps the "Ordernummer:
+  // Krediterar faktura X" wording the credit note always had).
+  creditedInvoiceNumber?: string | null;
   // Offerter (0138): the OF- number an order confirmation came from —
   // "Vår offert: OF-1001" under the date. The callsite passes it only when
   // the order's number differs from its quote number.
@@ -356,6 +380,8 @@ export interface DeliveryNoteRow {
 }
 
 export interface DeliveryNotePdfInput {
+  // The customer's language, live (Dokument på engelska #7).
+  language: DocumentLanguage;
   documentNumber: string; // the delivery's FS- number
   orderNumber: string; // the sales order this delivery belongs to
   deliveredAt: Date;
@@ -379,6 +405,9 @@ export interface DeliveryNotePdfInput {
 // renderer never recomputes money, exactly like the invoice's own totals
 // prefer stored amounts over quantity × unitPrice (see DocumentPdfRow).
 export interface PaymentReminderPdfInput {
+  // The invoice's STAMPED language (invoices.language), never the live
+  // customer — the reminder is written like the invoice it reminds about.
+  language: DocumentLanguage;
   // 1, 2, 3 ... — printed in the title ("Betalningspåminnelse 2").
   level: number;
   documentNumber: string; // the invoice's FA number
@@ -409,6 +438,9 @@ export interface PaymentReminderPdfInput {
 // prices ever reach this renderer. `details` (the dialog's choice) adds the
 // investigation and the decision.
 export interface DeviationReportPdfInput {
+  // The counterparty's language (live) on the outgoing letters; the internal
+  // report is Swedish. Labels and section texts arrive already in it.
+  language: DocumentLanguage;
   title: string;
   // Outgoing letters get the company footer; the internal report page numbers.
   outgoing: boolean;
@@ -640,6 +672,9 @@ export interface ManufacturingOrderPdfInput {
 export type PalletCardCodeType = "none" | "barcode" | "qr";
 
 interface PalletCardCommon {
+  // Dokument på engelska (#7): the customer's language on a "final" card
+  // (it travels with the goods); an "internal" card is always "sv".
+  language: DocumentLanguage;
   articleNumber: string;
   articleName?: string | null;
   quantity: number;
@@ -838,15 +873,18 @@ function colsFor(hasDiscount: boolean) {
 // Exported for the B6a economy reports, which format their own amounts
 // (economy owns the content, mail owns the paper) and therefore need this
 // function's WinAnsi handling — a balance sheet is full of negative numbers.
-export function formatNumber(value: number, decimals = 2): string {
+// `language` picks the locale (sv-SE "1 234,50", en-GB "1,234.50" — #7);
+// the default keeps every internal caller Swedish.
+export function formatNumber(value: number, decimals = 2, language: DocumentLanguage = "sv"): string {
   // sv-SE renders a negative sign as U+2212 (MINUS SIGN), which the
   // Helvetica standard font's WinAnsiEncoding has no glyph for — pdfkit
   // silently substitutes the wrong character. Credit notes are the first
   // caller to ever feed a negative amount through here, so normalize to the
   // plain ASCII hyphen-minus WinAnsi does support; positive output (every
-  // other document) is unaffected.
+  // other document) is unaffected. Kept for every locale — ICU data differs
+  // between builds.
   return value
-    .toLocaleString("sv-SE", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+    .toLocaleString(documentTexts(language).locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
     .replace("−", "-");
 }
 
@@ -874,17 +912,18 @@ function formatTime(value: number): string {
   return value.toLocaleString("sv-SE", options).replace("−", "-");
 }
 
-function formatQuantity(raw: string): string {
+function formatQuantity(raw: string, language: DocumentLanguage = "sv"): string {
   const n = Number(raw);
-  return Number.isInteger(n) ? n.toLocaleString("sv-SE") : formatNumber(n);
+  return Number.isInteger(n) ? n.toLocaleString(documentTexts(language).locale).replace("−", "-") : formatNumber(n, 2, language);
 }
 
 // C3: the Rabatt column's cell text — "<n> %" in formatQuantity's style
-// (whole percentages print without decimals), or "" for null/undefined/0 so
-// a document with no discounted rows renders with a visibly empty column.
-function formatDiscount(raw: string | null | undefined): string {
+// (whole percentages print without decimals; "<n>%" in English), or "" for
+// null/undefined/0 so a document with no discounted rows renders with a
+// visibly empty column.
+function formatDiscount(raw: string | null | undefined, language: DocumentLanguage): string {
   if (raw == null || Number(raw) === 0) return "";
-  return `${formatQuantity(raw)} %`;
+  return documentTexts(language).discount(formatQuantity(raw, language));
 }
 
 // C3: a row's own discount as a 0-1 fraction (0 for null/undefined) — shared
@@ -944,8 +983,9 @@ function vatGroupPrints(group: PerRowVatGroup): boolean {
   return group.rate !== 0 || group.code !== null;
 }
 
-function vatGroupLabel(group: PerRowVatGroup): string {
-  return group.rate !== 0 ? `Moms (${group.rate} %)` : (group.name ?? "Moms (0 %)");
+// The group's name is the VAT code's name, localized by the caller.
+function vatGroupLabel(group: PerRowVatGroup, texts: DocumentTexts): string {
+  return group.rate !== 0 ? texts.totals.vat(group.rate) : (group.name ?? texts.totals.vat(0));
 }
 
 // 8pt grey info lines under a row's name. A line may hold "\n" (Extra
@@ -1036,19 +1076,24 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   // Payment/registration footer stamped on every page of OUTGOING documents
   // (inquiry, purchase order, quote, order confirmation). Internal documents
   // (pick list, TO printout) stay clean. Empty fields are skipped entirely.
-  function drawFooter(doc: typeof PDFDocument.prototype, company: Awaited<ReturnType<SystemService["getCompanyInfo"]>>) {
+  function drawFooter(
+    doc: typeof PDFDocument.prototype,
+    company: Awaited<ReturnType<SystemService["getCompanyInfo"]>>,
+    texts: DocumentTexts
+  ) {
+    const t = texts.footer;
     const registrationLine = [
-      company?.orgNumber ? `Org.nr: ${company.orgNumber}` : null,
-      company?.vatNumber ? `VAT-nr: ${company.vatNumber}` : null,
-      company?.companySeat ? `Säte: ${company.companySeat}` : null,
-      company?.fSkatt ? "Godkänd för F-skatt" : null,
+      company?.orgNumber ? `${t.orgNumber}: ${company.orgNumber}` : null,
+      company?.vatNumber ? `${t.vatNumber}: ${company.vatNumber}` : null,
+      company?.companySeat ? `${t.companySeat}: ${company.companySeat}` : null,
+      company?.fSkatt ? t.fSkatt : null,
     ].filter(Boolean);
     const paymentLine = [
-      company?.bankgiro ? `Bankgiro: ${company.bankgiro}` : null,
-      company?.plusgiro ? `Plusgiro: ${company.plusgiro}` : null,
-      company?.bankName ? `Bank: ${company.bankName}` : null,
-      company?.iban ? `IBAN: ${company.iban}` : null,
-      company?.bic ? `BIC: ${company.bic}` : null,
+      company?.bankgiro ? `${t.bankgiro}: ${company.bankgiro}` : null,
+      company?.plusgiro ? `${t.plusgiro}: ${company.plusgiro}` : null,
+      company?.bankName ? `${t.bank}: ${company.bankName}` : null,
+      company?.iban ? `${t.iban}: ${company.iban}` : null,
+      company?.bic ? `${t.bic}: ${company.bic}` : null,
     ].filter(Boolean);
     const contactLine = [company?.phone, company?.email, company?.website].filter(Boolean);
 
@@ -1084,7 +1129,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   // is laid out — bufferPages keeps them addressable, same mechanism as
   // drawFooter. Single-page documents stay unnumbered. Outgoing documents
   // keep their payment footer instead; the two would share the same strip.
-  function drawPageNumbers(doc: typeof PDFDocument.prototype) {
+  function drawPageNumbers(doc: typeof PDFDocument.prototype, texts: DocumentTexts = SV_TEXTS) {
     const range = doc.bufferedPageRange();
     if (range.count <= 1) return;
     for (let i = range.start; i < range.start + range.count; i++) {
@@ -1093,7 +1138,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const previousBottom = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
       doc.font("Helvetica").fontSize(7.5).fillColor("#666666");
-      doc.text(`Sida ${i - range.start + 1} av ${range.count}`, PAGE_MARGIN, doc.page.height - 30, {
+      doc.text(texts.pageOf(i - range.start + 1, range.count), PAGE_MARGIN, doc.page.height - 30, {
         width: doc.page.width - PAGE_MARGIN * 2,
         align: "right",
         lineBreak: false,
@@ -1114,13 +1159,15 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     doc: typeof PDFDocument.prototype,
     company: Awaited<ReturnType<SystemService["getCompanyInfo"]>>,
     startY: number,
-    payment: { ocrNumber: string | null; dueDate: Date | null }
+    payment: { ocrNumber: string | null; dueDate: Date | null },
+    texts: DocumentTexts
   ): number {
+    const t = texts.payment;
     const boxLines = [
-      payment.ocrNumber ? `OCR-nummer: ${payment.ocrNumber}` : null,
-      company?.bankgiro ? `Bankgiro: ${company.bankgiro}` : null,
-      company?.plusgiro ? `Plusgiro: ${company.plusgiro}` : null,
-      payment.dueDate ? `Förfallodatum: ${payment.dueDate.toISOString().slice(0, 10)}` : null,
+      payment.ocrNumber ? `${t.ocrNumber}: ${payment.ocrNumber}` : null,
+      company?.bankgiro ? `${t.bankgiro}: ${company.bankgiro}` : null,
+      company?.plusgiro ? `${t.plusgiro}: ${company.plusgiro}` : null,
+      payment.dueDate ? `${t.dueDate}: ${payment.dueDate.toISOString().slice(0, 10)}` : null,
     ].filter((line): line is string => Boolean(line));
     if (boxLines.length === 0) return startY;
 
@@ -1134,7 +1181,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     }
     doc.rect(PAGE_MARGIN, y, CONTENT_WIDTH, boxHeight).strokeColor("#cccccc").lineWidth(0.5).stroke();
     let by = y + 10;
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text("BETALNING", PAGE_MARGIN + 12, by);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(t.heading, PAGE_MARGIN + 12, by);
     by += 14;
     doc.font("Helvetica").fontSize(10).fillColor("#000000");
     for (const line of boxLines) {
@@ -1147,6 +1194,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   async function render(input: DocumentPdfInput): Promise<Buffer> {
     const { doc, finished, company } = await startDocument();
     const left = PAGE_MARGIN;
+    const language = documentLanguageOf(input.language);
+    const t = documentTexts(language);
+    const num = (value: number, decimals = 2) => formatNumber(value, decimals, language);
+    const meta = (label: string, value: string) => `${label}: ${value}`;
 
     // --- Document title ---
     let y = 130;
@@ -1158,62 +1209,66 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       .font("Helvetica")
       .fontSize(10)
       .fillColor("#444444")
-      .text(`Datum: ${input.date.toISOString().slice(0, 10)}`, left, y);
+      .text(meta(t.meta.date, input.date.toISOString().slice(0, 10)), left, y);
     y += 14;
     if (input.dueDate) {
-      doc.text(`Förfallodatum: ${input.dueDate.toISOString().slice(0, 10)}`, left, y);
+      doc.text(meta(t.meta.dueDate, input.dueDate.toISOString().slice(0, 10)), left, y);
       y += 14;
     }
     if (input.orderReference) {
-      doc.text(`Ordernummer: ${input.orderReference}`, left, y);
+      doc.text(meta(t.meta.orderNumber, input.orderReference), left, y);
+      y += 14;
+    }
+    if (input.creditedInvoiceNumber) {
+      doc.text(t.meta.creditsInvoice(input.creditedInvoiceNumber), left, y);
       y += 14;
     }
     if (input.quoteReference) {
-      doc.text(`Vår offert: ${input.quoteReference}`, left, y);
+      doc.text(meta(t.meta.ourQuote, input.quoteReference), left, y);
       y += 14;
     }
     if (input.partnerNumber) {
-      doc.text(`Kundnr: ${input.partnerNumber}`, left, y);
+      doc.text(meta(t.meta.customerNumber, input.partnerNumber), left, y);
       y += 14;
     }
     if (input.buyerVatNumber && input.buyerVatNumber.trim() !== "") {
-      doc.text(`Ert momsreg.nr: ${input.buyerVatNumber.trim()}`, left, y);
+      doc.text(meta(t.meta.buyerVatNumber, input.buyerVatNumber.trim()), left, y);
       y += 14;
     }
     if (input.customerOrderNumber) {
-      doc.text(`Ert ordernummer: ${input.customerOrderNumber}`, left, y);
+      doc.text(meta(t.meta.customerOrderNumber, input.customerOrderNumber), left, y);
       y += 14;
     }
     if (input.customerInquiryNumber) {
-      doc.text(`Er förfrågan: ${input.customerInquiryNumber}`, left, y);
+      doc.text(meta(t.meta.customerInquiryNumber, input.customerInquiryNumber), left, y);
       y += 14;
     }
     if (input.yourReference) {
-      doc.text(`Er referens: ${input.yourReference}`, left, y);
+      doc.text(meta(t.meta.yourReference, input.yourReference), left, y);
       y += 14;
     }
     if (input.ourReference) {
-      doc.text(`Vår referens: ${input.ourReference}`, left, y);
+      doc.text(meta(t.meta.ourReference, input.ourReference), left, y);
       y += 14;
     }
     if (input.requestedDeliveryDate) {
-      doc.text(`Önskat leveransdatum: ${input.requestedDeliveryDate}`, left, y);
+      doc.text(meta(t.meta.requestedDeliveryDate, input.requestedDeliveryDate), left, y);
       y += 14;
     }
     if (input.deliveryDate) {
-      doc.text(`Leveransdatum: ${input.deliveryDate}`, left, y);
+      doc.text(meta(t.meta.deliveryDate, input.deliveryDate), left, y);
       y += 14;
     }
     if (input.validUntil) {
-      doc.text(`Offerten gäller till och med ${input.validUntil}.`, left, y);
+      doc.text(t.meta.quoteValidUntil(input.validUntil), left, y);
       y += 14;
     }
     if (input.ourCustomerNumberAtSupplier) {
-      doc.text(`Vårt kundnummer hos er: ${input.ourCustomerNumberAtSupplier}`, left, y);
+      doc.text(meta(t.meta.ourCustomerNumberAtSupplier, input.ourCustomerNumberAtSupplier), left, y);
       y += 14;
     }
     if (input.ourSupplierNumberAtCustomer) {
-      doc.text(`Vårt leverantörsnr hos er: ${input.ourSupplierNumberAtCustomer}`, left, y);
+      doc.text(meta(t.meta.ourSupplierNumberAtCustomer, input.ourSupplierNumberAtCustomer), left, y);
       y += 14;
     }
     doc.fillColor("#000000");
@@ -1226,7 +1281,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.partner.name, left, y);
     y += 15;
     doc.font("Helvetica").fontSize(10);
-    const partnerLines = addressLines(input.partner);
+    const partnerLines = addressLines(input.partner, language);
     for (const line of partnerLines) {
       doc.text(line, left, y);
       y += 14;
@@ -1235,12 +1290,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     if (input.deliveryAddress) {
       const deliveryX = left + 260;
       let dy = blockTop;
-      doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text("LEVERANSADRESS", deliveryX, dy);
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(t.deliveryAddressLabel, deliveryX, dy);
       dy += 13;
       doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.deliveryAddress.label, deliveryX, dy);
       dy += 15;
       doc.font("Helvetica").fontSize(10);
-      const deliveryLines = addressLines(input.deliveryAddress);
+      const deliveryLines = addressLines(input.deliveryAddress, language);
       for (const line of deliveryLines) {
         doc.text(line, deliveryX, dy, { width: CONTENT_WIDTH - 260 });
         dy += doc.heightOfString(line, { width: CONTENT_WIDTH - 260 });
@@ -1251,10 +1306,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     // --- Terms (leverans-/betalningsvillkor, speditör) ---
     const termLines = [
-      input.deliveryTerm ? `Leveransvillkor: ${input.deliveryTerm}` : null,
-      input.paymentTerm ? `Betalningsvillkor: ${input.paymentTerm}` : null,
+      input.deliveryTerm ? meta(t.terms.deliveryTerm, input.deliveryTerm) : null,
+      input.paymentTerm ? meta(t.terms.paymentTerm, input.paymentTerm) : null,
       input.carrier
-        ? `Speditör: ${input.carrier}${input.carrierCustomerNumber ? ` · Vårt kundnr: ${input.carrierCustomerNumber}` : ""}`
+        ? `${meta(t.terms.carrier, input.carrier)}${input.carrierCustomerNumber ? ` · ${meta(t.terms.ourCarrierCustomerNumber, input.carrierCustomerNumber)}` : ""}`
         : null,
       input.lateInterestText ?? null,
     ].filter((line): line is string => Boolean(line));
@@ -1269,7 +1324,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     }
 
     if (input.pricesIncludeVat) {
-      doc.font("Helvetica").fontSize(10).fillColor("#444444").text("Priser inklusive moms", left, y);
+      doc.font("Helvetica").fontSize(10).fillColor("#444444").text(t.pricesIncludeVat, left, y);
       doc.fillColor("#000000");
       y += 18;
     }
@@ -1280,13 +1335,13 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const COLS = colsFor(input.rows.some((row) => Number(row.discountPercent ?? 0) !== 0));
     const drawTableHeader = () => {
       doc.font("Helvetica-Bold").fontSize(9).fillColor("#555555");
-      doc.text("Artikelnummer", left + COLS.articleNumber.x, y, { width: COLS.articleNumber.w });
-      doc.text("Benämning", left + COLS.articleName.x, y, { width: COLS.articleName.w });
-      doc.text("Antal", left + COLS.quantity.x, y, { width: COLS.quantity.w, align: "right" });
-      doc.text("Enhet", left + COLS.unit.x, y, { width: COLS.unit.w });
-      doc.text("À-pris", left + COLS.unitPrice.x, y, { width: COLS.unitPrice.w, align: "right" });
-      if (COLS.discount) doc.text("Rabatt", left + COLS.discount.x, y, { width: COLS.discount.w, align: "right" });
-      doc.text("Summa", left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(t.columns.articleNumber, left + COLS.articleNumber.x, y, { width: COLS.articleNumber.w });
+      doc.text(t.columns.articleName, left + COLS.articleName.x, y, { width: COLS.articleName.w });
+      doc.text(t.columns.quantity, left + COLS.quantity.x, y, { width: COLS.quantity.w, align: "right" });
+      doc.text(t.columns.unit, left + COLS.unit.x, y, { width: COLS.unit.w });
+      doc.text(t.columns.unitPrice, left + COLS.unitPrice.x, y, { width: COLS.unitPrice.w, align: "right" });
+      if (COLS.discount) doc.text(t.columns.discount, left + COLS.discount.x, y, { width: COLS.discount.w, align: "right" });
+      doc.text(t.columns.amount, left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 14;
       doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
       y += 8;
@@ -1303,8 +1358,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // reference / ställpris / nettovikt (each on its own line), and the
       // configured row's choices (konfigurator 4b).
       const infoLines = [
-        row.customerArticleNumber ? `Ert art.nr: ${row.customerArticleNumber}` : null,
-        row.setupForArticleNumber ? `Ställkostnad för ${row.setupForArticleNumber}` : null,
+        row.customerArticleNumber ? meta(t.rowInfo.customerArticleNumber, row.customerArticleNumber) : null,
+        row.setupForArticleNumber ? t.rowInfo.setupChargeFor(row.setupForArticleNumber) : null,
         row.revisionInfo ?? null,
         row.articleInfo ?? null,
         row.extraDescription ?? null,
@@ -1312,13 +1367,13 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         row.moReference ?? null,
         // The order reference and the invoice row's Leveransdatum share one
         // sub-line ("Order KO… · Ert ordernr … · Levererad 2026-10-01").
-        [row.orderReference ?? null, row.deliveredDate ? `Levererad ${row.deliveredDate}` : null]
+        [row.orderReference ?? null, row.deliveredDate ? t.rowInfo.delivered(row.deliveredDate) : null]
           .filter((part): part is string => part !== null)
           .join(" · ") || null,
-        row.setupPrice != null ? `Ställpris: ${formatNumber(Number(row.setupPrice))} ${input.currency}` : null,
-        row.netWeightKg != null ? `Nettovikt: ${formatNumber(row.netWeightKg, 1)} kg` : null,
-        row.requestedDeliveryDate ? `Önskat leveransdatum: ${row.requestedDeliveryDate}` : null,
-        row.deliveryDate ? `Leveransdatum: ${row.deliveryDate}` : null,
+        row.setupPrice != null ? t.rowInfo.setupPrice(num(Number(row.setupPrice)), input.currency) : null,
+        row.netWeightKg != null ? t.rowInfo.netWeight(num(row.netWeightKg, 1)) : null,
+        row.requestedDeliveryDate ? meta(t.rowInfo.requestedDeliveryDate, row.requestedDeliveryDate) : null,
+        row.deliveryDate ? meta(t.rowInfo.deliveryDate, row.deliveryDate) : null,
       ].filter((line): line is string => line !== null);
       // An info line that wraps in the name column (a long order reference
       // with its Levererad date) takes 11pt per printed line, not one slot.
@@ -1363,18 +1418,18 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
       doc.text(row.articleNumber, left + COLS.articleNumber.x, y, { width: COLS.articleNumber.w });
       doc.text(row.articleName, left + COLS.articleName.x, y, { width: COLS.articleName.w });
-      doc.text(formatQuantity(row.quantity), left + COLS.quantity.x, y, { width: COLS.quantity.w, align: "right" });
+      doc.text(formatQuantity(row.quantity, language), left + COLS.quantity.x, y, { width: COLS.quantity.w, align: "right" });
       doc.text(row.unit ?? "", left + COLS.unit.x, y, { width: COLS.unit.w });
-      doc.text(shownUnitPrice === null ? "–" : formatNumber(shownUnitPrice), left + COLS.unitPrice.x, y, {
+      doc.text(shownUnitPrice === null ? "–" : num(shownUnitPrice), left + COLS.unitPrice.x, y, {
         width: COLS.unitPrice.w,
         align: "right",
       });
       if (COLS.discount)
-        doc.text(formatDiscount(row.discountPercent), left + COLS.discount.x, y, {
+        doc.text(formatDiscount(row.discountPercent, language), left + COLS.discount.x, y, {
           width: COLS.discount.w,
         align: "right",
       });
-      doc.text(unitPrice === null ? "–" : formatNumber(shownAmount), left + COLS.amount.x, y, {
+      doc.text(unitPrice === null ? "–" : num(shownAmount), left + COLS.amount.x, y, {
         width: COLS.amount.w,
         align: "right",
       });
@@ -1423,28 +1478,28 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const labelX = left + COLS.quantity.x - 60;
       const labelW = COLS.unitPrice.x - COLS.quantity.x + 110;
       doc.font("Helvetica-Bold").fontSize(10);
-      const grossLabel = input.vat ? `Att betala ${input.currency}` : `Summa inkl. moms ${input.currency}`;
+      const grossLabel = input.vat ? t.totals.amountDue(input.currency) : t.totals.totalInclVat(input.currency);
       doc.text(grossLabel, labelX, y, { width: labelW, align: "right" });
-      doc.text(formatNumber(total + vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(num(total + vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
       doc.font("Helvetica").fontSize(10);
-      doc.text("Varav moms", labelX, y, { width: labelW, align: "right" });
-      doc.text(formatNumber(vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(t.totals.ofWhichVat, labelX, y, { width: labelW, align: "right" });
+      doc.text(num(vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     } else if (input.showTotal && input.vat && "rate" in input.vat) {
       // Invoice totals: net, VAT and the amount to pay.
       const vatAmount = total * (input.vat.rate / 100);
       const labelX = left + COLS.quantity.x - 60;
       const labelW = COLS.unitPrice.x - COLS.quantity.x + 110;
       doc.font("Helvetica").fontSize(10);
-      doc.text(`Summa exkl. moms ${input.currency}`, labelX, y, { width: labelW, align: "right" });
-      doc.text(formatNumber(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(t.totals.totalExclVat(input.currency), labelX, y, { width: labelW, align: "right" });
+      doc.text(num(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
-      doc.text(`Moms (${input.vat.rate} %)`, labelX, y, { width: labelW, align: "right" });
-      doc.text(formatNumber(vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(t.totals.vat(input.vat.rate), labelX, y, { width: labelW, align: "right" });
+      doc.text(num(vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
       doc.font("Helvetica-Bold").fontSize(10);
-      doc.text(`Att betala ${input.currency}`, labelX, y, { width: labelW, align: "right" });
-      doc.text(formatNumber(total + vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(t.totals.amountDue(input.currency), labelX, y, { width: labelW, align: "right" });
+      doc.text(num(total + vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     } else if (input.showTotal && perRowVatGroups) {
       // Per-sats momssummering: one "Moms (X %)" line per distinct rate
       // present on the invoice, highest rate first. 0 %-rader contribute no
@@ -1453,32 +1508,32 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const labelX = left + COLS.quantity.x - 60;
       const labelW = COLS.unitPrice.x - COLS.quantity.x + 110;
       doc.font("Helvetica").fontSize(10);
-      doc.text(`Summa exkl. moms ${input.currency}`, labelX, y, { width: labelW, align: "right" });
-      doc.text(formatNumber(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(t.totals.totalExclVat(input.currency), labelX, y, { width: labelW, align: "right" });
+      doc.text(num(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
       let vatTotal = 0;
       for (const group of perRowVatGroups) {
         vatTotal += group.vatAmount;
         if (!vatGroupPrints(group)) continue;
-        doc.text(vatGroupLabel(group), labelX, y, { width: labelW, align: "right" });
-        doc.text(formatNumber(group.vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+        doc.text(vatGroupLabel(group, t), labelX, y, { width: labelW, align: "right" });
+        doc.text(num(group.vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
         y += 15;
       }
       doc.font("Helvetica-Bold").fontSize(10);
-      doc.text(`Att betala ${input.currency}`, labelX, y, { width: labelW, align: "right" });
-      doc.text(formatNumber(total + vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(t.totals.amountDue(input.currency), labelX, y, { width: labelW, align: "right" });
+      doc.text(num(total + vatTotal), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     } else if (input.showTotal) {
       doc.font("Helvetica-Bold").fontSize(10);
-      const label = hasUnpricedRows ? `Summa (exkl. rader utan pris) ${input.currency}` : `Summa ${input.currency}`;
+      const label = hasUnpricedRows ? t.totals.totalExclUnpriced(input.currency) : t.totals.total(input.currency);
       doc.text(label, left + COLS.quantity.x - 60, y, { width: COLS.unitPrice.x - COLS.quantity.x + 110, align: "right" });
-      doc.text(formatNumber(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
+      doc.text(num(total), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     }
 
     // Valuta: the VAT in SEK under the totals (ML 17 kap. 29 §).
     if (vatInSekLine) {
       y += 15;
       doc.font("Helvetica").fontSize(9).fillColor("#444444");
-      doc.text(`Moms i SEK: ${formatNumber(vatInSekLine.amount)} (kurs ${formatNumber(vatInSekLine.rate, 6)})`, left, y, {
+      doc.text(t.totals.vatInSek(num(vatInSekLine.amount), num(vatInSekLine.rate, 6)), left, y, {
         width: CONTENT_WIDTH,
         align: "right",
       });
@@ -1504,9 +1559,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     }
 
     // Payment box (OCR/giro/förfallodatum), shared with the payment reminder.
-    if (input.payment) y = drawPaymentBox(doc, company, y, input.payment);
+    if (input.payment) y = drawPaymentBox(doc, company, y, input.payment, t);
 
-    drawFooter(doc, company);
+    drawFooter(doc, company, t);
     doc.end();
     return finished;
   }
@@ -1519,41 +1574,43 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   async function renderPaymentReminder(input: PaymentReminderPdfInput): Promise<Buffer> {
     const { doc, finished, company } = await startDocument();
     const left = PAGE_MARGIN;
+    const language = documentLanguageOf(input.language);
+    const t = documentTexts(language);
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(`Betalningspåminnelse ${input.level}`, left, y);
+    doc.font("Helvetica-Bold").fontSize(18).text(t.titles.paymentReminder(input.level), left, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
-    doc.text(`Datum: ${input.printedAt.toISOString().slice(0, 10)}`, left, y);
+    doc.text(`${t.meta.date}: ${input.printedAt.toISOString().slice(0, 10)}`, left, y);
     y += 14;
     // The reference block — which invoice this is about.
-    doc.text(`Faktura ${input.documentNumber}`, left, y);
+    doc.text(t.reminder.invoice(input.documentNumber), left, y);
     y += 14;
     if (input.invoiceDate) {
-      doc.text(`Fakturadatum: ${input.invoiceDate.toISOString().slice(0, 10)}`, left, y);
+      doc.text(`${t.reminder.invoiceDate}: ${input.invoiceDate.toISOString().slice(0, 10)}`, left, y);
       y += 14;
     }
     if (input.dueDate) {
-      doc.text(`Förfallodatum: ${input.dueDate.toISOString().slice(0, 10)}`, left, y);
+      doc.text(`${t.reminder.dueDate}: ${input.dueDate.toISOString().slice(0, 10)}`, left, y);
       y += 14;
     }
     doc.fillColor("#000000");
     y += 10;
 
     // Address block — the invoice's frozen snapshot, same layout as render().
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text("FAKTURAADRESS", left, y);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#888888").text(t.partnerLabels.invoiceAddress.toUpperCase(), left, y);
     y += 13;
     doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.partner.name, left, y);
     y += 15;
     doc.font("Helvetica").fontSize(10);
-    const partnerLines = addressLines(input.partner);
+    const partnerLines = addressLines(input.partner, language);
     for (const line of partnerLines) {
       doc.text(line, left, y);
       y += 14;
     }
     y += 20;
 
-    const body = "Vi kan inte se att nedanstående faktura har betalats. Vänligen betala snarast.";
+    const body = t.reminder.body;
     doc.text(body, left, y, { width: CONTENT_WIDTH });
     y += doc.heightOfString(body, { width: CONTENT_WIDTH }) + 4;
     // Dröjsmålsränta: the terms and the accrued interest, as information.
@@ -1574,28 +1631,28 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
     const amountLine = (label: string, value: number, bold = false) => {
       doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(10);
       doc.text(label, labelX, y, { width: labelW, align: "right" });
-      doc.text(formatNumber(value), amountX, y, { width: amountW, align: "right" });
+      doc.text(formatNumber(value, 2, language), amountX, y, { width: amountW, align: "right" });
       y += 15;
     };
 
     doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
     y += 10;
-    amountLine(`Fakturabelopp inkl. moms ${input.currency}`, input.grossAmount);
+    amountLine(t.reminder.grossAmount(input.currency), input.grossAmount);
     // Printed as the deduction it is — a payment reduces what is left. An
     // untouched invoice (the most common reminder of all) prints no line at
     // all, same convention as the fee line below: sv-SE renders -0 as
     // "-0,00", which reads as a mistake on a document that goes to a customer.
-    if (input.settledAmount !== 0) amountLine("Betalt/krediterat", -input.settledAmount);
+    if (input.settledAmount !== 0) amountLine(t.reminder.settled, -input.settledAmount);
     // A fee-free reminder prints no fee line at all (0,00 kr would only
     // invite the question whether one was charged).
-    if (input.feeAmount !== 0) amountLine("Påminnelseavgift", input.feeAmount);
+    if (input.feeAmount !== 0) amountLine(t.reminder.fee, input.feeAmount);
     doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
     y += 8;
-    amountLine(`Att betala ${input.currency}`, input.amountDue, true);
+    amountLine(t.totals.amountDue(input.currency), input.amountDue, true);
 
-    if (input.payment) y = drawPaymentBox(doc, company, y, input.payment);
+    if (input.payment) y = drawPaymentBox(doc, company, y, input.payment, t);
 
-    drawFooter(doc, company);
+    drawFooter(doc, company, t);
     doc.end();
     return finished;
   }
@@ -1603,14 +1660,16 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   async function renderDeviationReport(input: DeviationReportPdfInput): Promise<Buffer> {
     const { doc, finished, company } = await startDocument();
     const left = PAGE_MARGIN;
+    const language = documentLanguageOf(input.language);
+    const t = documentTexts(language);
 
     let y = 130;
     doc.font("Helvetica-Bold").fontSize(18).text(input.title, left, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
-    doc.text(`Nummer: ${input.documentNumber}`, left, y);
+    doc.text(`${t.deviation.number}: ${input.documentNumber}`, left, y);
     y += 14;
-    doc.text(`Datum: ${input.date}`, left, y);
+    doc.text(`${t.deviation.date}: ${input.date}`, left, y);
     y += 14;
     for (const ref of input.references) {
       doc.text(`${ref.label}: ${ref.value}`, left, y, { width: CONTENT_WIDTH });
@@ -1625,7 +1684,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.fillColor("#000000").font("Helvetica-Bold").fontSize(11).text(input.partner.name, left, y);
       y += 15;
       doc.font("Helvetica").fontSize(10);
-      for (const line of addressLines(input.partner)) {
+      for (const line of addressLines(input.partner, language)) {
         doc.text(line, left, y);
         y += 14;
       }
@@ -1647,7 +1706,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       y = doc.y + 12;
     }
 
-    if (input.outgoing) drawFooter(doc, company);
+    if (input.outgoing) drawFooter(doc, company, t);
     else drawPageNumbers(doc);
     doc.end();
     return finished;
@@ -1849,40 +1908,43 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
   async function renderDeliveryNote(input: DeliveryNotePdfInput): Promise<Buffer> {
     const { doc, finished, company } = await startDocument();
     const left = PAGE_MARGIN;
+    const language = documentLanguageOf(input.language);
+    const t = documentTexts(language);
+    const dn = t.deliveryNote;
 
     let y = 130;
-    doc.font("Helvetica-Bold").fontSize(18).text(`Följesedel ${input.documentNumber}`, left, y);
+    doc.font("Helvetica-Bold").fontSize(18).text(`${t.titles.deliveryNote} ${input.documentNumber}`, left, y);
     y += 26;
     doc.font("Helvetica").fontSize(10).fillColor("#444444");
-    doc.text(`Leveransdatum: ${input.deliveredAt.toISOString().slice(0, 10)}`, left, y);
+    doc.text(`${dn.deliveryDate}: ${input.deliveredAt.toISOString().slice(0, 10)}`, left, y);
     y += 14;
     if (input.undoneAt) {
-      doc.font("Helvetica-Bold").text(`Ångrad ${formatStockholmDateTime(input.undoneAt)}`, left, y).font("Helvetica");
+      doc.font("Helvetica-Bold").text(dn.undone(formatStockholmDateTime(input.undoneAt)), left, y).font("Helvetica");
       y += 14;
     }
-    doc.text(`Ordernummer: ${input.orderNumber}`, left, y);
+    doc.text(`${dn.orderNumber}: ${input.orderNumber}`, left, y);
     y += 14;
-    doc.text(`Kund: ${input.customerName}`, left, y);
+    doc.text(`${dn.customer}: ${input.customerName}`, left, y);
     y += 14;
     if (input.customerOrderNumber) {
-      doc.text(`Ert ordernummer: ${input.customerOrderNumber}`, left, y);
+      doc.text(`${dn.customerOrderNumber}: ${input.customerOrderNumber}`, left, y);
       y += 14;
     }
     if (input.customerReference) {
-      doc.text(`Er referens: ${input.customerReference}`, left, y);
+      doc.text(`${dn.customerReference}: ${input.customerReference}`, left, y);
       y += 14;
     }
     if (input.carrier?.carrierName) {
-      doc.text(`Transportör: ${input.carrier.carrierName}`, left, y);
+      doc.text(`${dn.carrier}: ${input.carrier.carrierName}`, left, y);
       y += 14;
     }
     if (input.carrier?.trackingNumber) {
-      doc.text(`Fraktsedelsnr: ${input.carrier.trackingNumber}`, left, y);
+      doc.text(`${dn.trackingNumber}: ${input.carrier.trackingNumber}`, left, y);
       y += 14;
     }
     if (input.deliveryAddress) {
-      const addressParts = [input.deliveryAddress.label, ...addressLines(input.deliveryAddress)];
-      const line = `Leveransadress: ${addressParts.join(", ")}`;
+      const addressParts = [input.deliveryAddress.label, ...addressLines(input.deliveryAddress, language)];
+      const line = `${dn.deliveryAddress}: ${addressParts.join(", ")}`;
       doc.text(line, left, y, { width: CONTENT_WIDTH });
       y += doc.heightOfString(line, { width: CONTENT_WIDTH });
     }
@@ -1891,14 +1953,14 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     const drawTableHeader = () => {
       doc.font("Helvetica-Bold").fontSize(9).fillColor("#555555");
-      doc.text("Artikel", left + DELIVERY_NOTE_COLS.articleNumber.x, y, { width: DELIVERY_NOTE_COLS.articleNumber.w });
-      doc.text("Benämning", left + DELIVERY_NOTE_COLS.articleName.x, y, { width: DELIVERY_NOTE_COLS.articleName.w });
-      doc.text("Levererat", left + DELIVERY_NOTE_COLS.quantity.x, y, {
+      doc.text(dn.columns.article, left + DELIVERY_NOTE_COLS.articleNumber.x, y, { width: DELIVERY_NOTE_COLS.articleNumber.w });
+      doc.text(dn.columns.articleName, left + DELIVERY_NOTE_COLS.articleName.x, y, { width: DELIVERY_NOTE_COLS.articleName.w });
+      doc.text(dn.columns.delivered, left + DELIVERY_NOTE_COLS.quantity.x, y, {
         width: DELIVERY_NOTE_COLS.quantity.w,
         align: "right",
       });
-      doc.text("Enhet", left + DELIVERY_NOTE_COLS.unit.x, y, { width: DELIVERY_NOTE_COLS.unit.w });
-      doc.text("Tidigare levererat", left + DELIVERY_NOTE_COLS.priorDelivered.x, y, {
+      doc.text(dn.columns.unit, left + DELIVERY_NOTE_COLS.unit.x, y, { width: DELIVERY_NOTE_COLS.unit.w });
+      doc.text(dn.columns.priorDelivered, left + DELIVERY_NOTE_COLS.priorDelivered.x, y, {
         width: DELIVERY_NOTE_COLS.priorDelivered.w,
         align: "right",
       });
@@ -1916,10 +1978,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // row height (a plain row has none, so it is laid out exactly as before).
       // An undone row gets one more 8pt line of the same kind.
       const infoLines = [
-        ...(row.customerArticleNumber ? [`Ert art.nr: ${row.customerArticleNumber}`] : []),
+        ...(row.customerArticleNumber ? [`${t.rowInfo.customerArticleNumber}: ${row.customerArticleNumber}`] : []),
         ...(row.extraDescription ? [row.extraDescription] : []),
         ...(row.configurationLines ?? []),
-        ...(row.undoneAt ? [`Ångrad ${formatStockholmDateTime(row.undoneAt)}`] : []),
+        ...(row.undoneAt ? [dn.undone(formatStockholmDateTime(row.undoneAt))] : []),
       ];
       const measured = measureInfoLines(doc, infoLines, DELIVERY_NOTE_COLS.articleName.w);
       const rowHeight = Math.max(nameHeight + measured.height, 11) + 8;
@@ -1934,13 +1996,13 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(row.articleName, left + DELIVERY_NOTE_COLS.articleName.x, y, { width: DELIVERY_NOTE_COLS.articleName.w });
       doc
         .font("Helvetica-Bold")
-        .text(formatQuantity(String(row.quantity)), left + DELIVERY_NOTE_COLS.quantity.x, y, {
+        .text(formatQuantity(String(row.quantity), language), left + DELIVERY_NOTE_COLS.quantity.x, y, {
           width: DELIVERY_NOTE_COLS.quantity.w,
           align: "right",
         })
         .font("Helvetica");
       doc.text(row.unit ?? "", left + DELIVERY_NOTE_COLS.unit.x, y, { width: DELIVERY_NOTE_COLS.unit.w });
-      doc.text(formatQuantity(String(row.priorDelivered)), left + DELIVERY_NOTE_COLS.priorDelivered.x, y, {
+      doc.text(formatQuantity(String(row.priorDelivered), language), left + DELIVERY_NOTE_COLS.priorDelivered.x, y, {
         width: DELIVERY_NOTE_COLS.priorDelivered.w,
         align: "right",
       });
@@ -1957,7 +2019,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
 
     doc.moveTo(left, y).lineTo(left + CONTENT_WIDTH, y).strokeColor("#cccccc").lineWidth(0.5).stroke();
 
-    drawFooter(doc, company);
+    drawFooter(doc, company, t);
     doc.end();
     return finished;
   }
@@ -2258,12 +2320,15 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         drawHeader();
       }
       const code: PalletCardCodeType = card.code ?? "none";
+      // The customer's language on a final card; the internal card is Swedish.
+      const language = documentLanguageOf(card.language);
+      const pc = documentTexts(language).palletCard;
 
       // 1. Title band.
       doc.rect(left, cardTop, CONTENT_WIDTH, 20).fill("#000000");
       doc.font("Helvetica-Bold").fontSize(10).fillColor("#ffffff");
-      doc.text("PALLKORT", left + pad, cardTop + 5.5, { lineBreak: false });
-      doc.text(card.kind === "final" ? "TILL KUND" : "INTERNT", left, cardTop + 5.5, {
+      doc.text(pc.title, left + pad, cardTop + 5.5, { lineBreak: false });
+      doc.text(card.kind === "final" ? pc.toCustomer : pc.internal, left, cardTop + 5.5, {
         width: CONTENT_WIDTH - pad,
         align: "right",
         lineBreak: false,
@@ -2276,7 +2341,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const qtyColX = left + articleColWidth;
       const qtyColWidth = CONTENT_WIDTH - articleColWidth;
       const yA = y + 6;
-      label("ARTIKELNUMMER", left + pad, yA);
+      label(pc.articleNumber, left + pad, yA);
       const numberWidth = code === "qr" ? articleColWidth - 2 * pad - QR_SIZE - 6 : articleColWidth - 2 * pad;
       value(card.articleNumber, left + pad, yA + 10, 30, numberWidth);
       let yName = yA + 48;
@@ -2287,7 +2352,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         drawQr(card.articleNumber, left + articleColWidth - pad - QR_SIZE, yA, QR_SIZE);
         yName = yA + QR_SIZE + 6;
       }
-      label("BENÄMNING", left + pad, yName);
+      label(pc.articleName, left + pad, yName);
       // Two-line budget before ellipsizing — same bold-black treatment as
       // value(), which is single-line only, so a direct doc.text call with a
       // taller fixed box (up to 2 lines at 13 pt).
@@ -2295,9 +2360,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(card.articleName || "—", left + pad, yName + 10, { width: articleColWidth - 2 * pad, height: 32, ellipsis: true });
       const rowABottom = yName + 10 + 30 + 6;
 
-      label("ANTAL", qtyColX + pad, yA);
+      label(pc.quantity, qtyColX + pad, yA);
       fitValue(
-        `${formatQuantity(String(card.quantity))}${card.unit ? ` ${card.unit}` : ""}`,
+        `${formatQuantity(String(card.quantity), language)}${card.unit ? ` ${card.unit}` : ""}`,
         qtyColX + pad,
         yA + 12,
         40,
@@ -2307,7 +2372,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // with the quantity when the pallets are counted.
       const parcel = card.parcel ?? { index: 1, count: 1 };
       thinLine(qtyColX, yA + 66, right, yA + 66);
-      value(`Kolli ${parcel.index} av ${parcel.count}`, qtyColX + pad, yA + 74, 18, qtyColWidth - 2 * pad);
+      value(pc.parcel(parcel.index, parcel.count), qtyColX + pad, yA + 74, 18, qtyColWidth - 2 * pad);
       thinLine(qtyColX, y, qtyColX, rowABottom);
       y = rowABottom;
       thinLine(left, y, right, y);
@@ -2324,7 +2389,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
                 .map((row) => row.trim())
                 .filter((row) => row !== "")
                 .join(", "),
-              ...addressLines({ ...card.deliveryAddress, address: null }),
+              ...addressLines({ ...card.deliveryAddress, address: null }, language),
             ].filter((line) => line !== "")
           : [];
         // Beside an address the customer gets half the width: a name that
@@ -2337,7 +2402,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
         const nameHeight = nameSize === 13 ? 2 * 13 * 1.25 : 21;
         const rowBHeight = 6 + 9 + Math.max(nameHeight, address.length * 11) + 6;
         if (address.length > 0) {
-          label("KUND", left + pad, y + 6);
+          label(pc.customer, left + pad, y + 6);
           doc.font("Helvetica-Bold").fontSize(nameSize).fillColor("#000000");
           doc.text(card.customerName, left + pad, y + 15 + (nameSize === 13 ? 0 : 18 - nameSize), {
             width: nameWidth,
@@ -2345,29 +2410,29 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
             ellipsis: true,
           });
           thinLine(left + half, y, left + half, y + rowBHeight);
-          label("LEVERANSADRESS", left + half + pad, y + 6);
+          label(pc.deliveryAddress, left + half + pad, y + 6);
           doc.font("Helvetica-Bold").fontSize(10).fillColor("#000000");
           address.forEach((line, i) => {
             doc.text(line, left + half + pad, y + 16 + i * 11, { width: half - 2 * pad, height: 11, ellipsis: true });
           });
         } else {
-          plainCell(card.customerName, "KUND", left, y, CONTENT_WIDTH);
+          plainCell(card.customerName, pc.customer, left, y, CONTENT_WIDTH);
         }
         y += rowBHeight;
         thinLine(left, y, right, y);
 
         const rowCHeight = codedCellHeight(code);
-        plainCell(card.customerOrderNumber || "—", "KUNDENS ORDERNUMMER", left, y, half);
+        plainCell(card.customerOrderNumber || "—", pc.customerOrderNumber, left, y, half);
         thinLine(left + half, y, left + half, y + rowCHeight);
-        codedCell(card.orderNumber, "VÅRT KUNDORDERNUMMER", left + half, y, half, code);
+        codedCell(card.orderNumber, pc.ourOrderNumber, left + half, y, half, code);
         y += rowCHeight;
       } else {
         const rowBHeight = codedCellHeight(code);
-        codedCell(card.orderNumber, "TILLVERKNINGSORDER", left, y, half, code);
+        codedCell(card.orderNumber, pc.manufacturingOrder, left, y, half, code);
         thinLine(left + half, y, left + half, y + rowBHeight);
         // "—" rather than no cell, so the grid keeps its shape on the last
         // operation of an unlinked order.
-        plainCell(card.nextOperation || "—", "NÄSTA OPERATION", left + half, y, half);
+        plainCell(card.nextOperation || "—", pc.nextOperation, left + half, y, half);
         y += rowBHeight;
       }
       thinLine(left, y, right, y);
@@ -2377,9 +2442,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // (the delivery card never names one, a TO card only when known) ⇒
       // two cells instead of three.
       const bottomCells: [string, string][] = [
-        ["DATUM", formatStockholmDateTime(card.printedAt ?? new Date())],
-        ...(card.reportedBy ? [["RAPPORTERAD AV", card.reportedBy] as [string, string]] : []),
-        ["REFERENS", card.reference || "—"],
+        [pc.date, formatStockholmDateTime(card.printedAt ?? new Date())],
+        ...(card.reportedBy ? [[pc.reportedBy, card.reportedBy] as [string, string]] : []),
+        [pc.reference, card.reference || "—"],
       ];
       const cellWidth = CONTENT_WIDTH / bottomCells.length;
       bottomCells.forEach(([labelText, text], i) => {
@@ -2405,7 +2470,8 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.undash();
     });
 
-    drawPageNumbers(doc);
+    // One document = one delivery/operation, so every card shares a language.
+    drawPageNumbers(doc, documentTexts(documentLanguageOf(cards[0]?.language)));
     doc.end();
     return finished;
   }

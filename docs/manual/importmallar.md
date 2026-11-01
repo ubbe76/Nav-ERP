@@ -35,6 +35,8 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Ytbehandling** | Nej | Fritext, max 200 tecken. Tom cell lämnar fältet orört på en befintlig post. | Borstad |
 | **Färg** | Nej | Fritext, max 200 tecken. Tom cell lämnar fältet orört på en befintlig post. | Rostfri |
 | **Extra benämning** | Nej | Fritext bredvid benämningen, max 2 000 tecken — radbrytningar i cellen behålls (Alt+Enter i Excel). Skrivs ut på de dokument som valts under System → Inställningar. Tom cell lämnar fältet orört på en befintlig post. | Rostfritt slipat, levereras i delar |
+| **Benämning engelska** | Nej | Artikelns namn på engelska, max 255 tecken — skrivs ut i stället för benämningen på dokument till kunder och leverantörer med språket Engelska; saknas den används den svenska. Tom cell lämnar fältet orört på en befintlig post. | Sink unit 1200 mm, stainless |
+| **Extra benämning engelska** | Nej | Extra benämning på engelska, max 2 000 tecken, radbrytningar behålls — skrivs ut på engelska dokument i stället för den svenska; saknas den används den svenska. Tom cell lämnar fältet orört på en befintlig post. | Brushed stainless steel, delivered in parts |
 | **EAN** | Nej | Tillverkarens streckkod på förpackningen (EAN/GTIN): 8, 12, 13 eller 14 siffror med rätt kontrollsiffra. Unik — samma kod får inte finnas på en annan artikel. Används när varan skannas. Tom cell lämnar fältet orört på en befintlig post. | 7350000000016 |
 | **Aktiv** | Nej | Ja/Nej, 1/0 eller true/false. Tom cell betyder aktiv för nya artiklar och lämnar befintliga orörda. | Ja |
 | **Beställningspunkt** | Nej | Nivån i grundenhet som behovsberäkningen fyller upp till: den jämför med det beräknade saldot (lager + inkommande − behov) och föreslår skillnaden när saldot ligger under. Decimalkomma eller punkt, aldrig negativ. 0 betyder ingen beställningspunkt och tömmer fältet; tom cell lämnar det orört. | 10 |
@@ -178,6 +180,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Privatperson** | Nej | Ja/Nej, 1/0, X eller true/false — Ja visar priser inklusive moms på kundens offerter, orderbekräftelser och fakturor. Tom cell lämnar fältet orört på en befintlig post. | Nej |
 | **Webbsida** | Nej | Max 255 tecken. Tom cell lämnar fältet orört på en befintlig post. | https://www.example.com |
 | **Valuta** | Nej | Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya offerter och kundordrar får kundens valuta och dagens kurs, och kundens kundpriser gäller i den valutan; befintliga ordrar behåller sin. Tom cell ger SEK för nya kunder och lämnar befintliga orörda. | SEK |
+| **Språk** | Nej | Svenska eller Engelska (även sv/en, stora och små bokstäver går bra); annat ger ett fel. Styr språket på kundens offerter, orderbekräftelser, följesedlar och fakturor. Tom cell ger Svenska för nya kunder och lämnar befintliga orörda. | Svenska |
 
 ## Kundkontakter
 
@@ -230,6 +233,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Postort** | Nej | Max 100 tecken. Tom cell lämnar fältet orört på en befintlig post. | Exempelby |
 | **Land** | Nej | Landskod med två bokstäver (t.ex. SE); små bokstäver godtas. Styr leverantörsfakturans förvalda momskod när leverantören saknar egen: SE ger svensk moms, ett annat EU-land omvänd moms på varor och övriga länder varor utanför EU. Tom cell ger SE på en ny leverantör. Tom cell lämnar fältet orört på en befintlig post. | SE |
 | **Valuta** | Nej | Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya inköpsorder och nya katalograder (även de som Inköpspriser-importen skapar) får leverantörens valuta; befintliga behåller sin. Tom cell ger SEK för nya leverantörer och lämnar befintliga orörda. | SEK |
+| **Språk** | Nej | Svenska eller Engelska (även sv/en, stora och små bokstäver går bra); annat ger ett fel. Styr språket på förfrågningar och inköpsorder till leverantören. Tom cell ger Svenska för nya leverantörer och lämnar befintliga orörda. | Svenska |
 | **Vårt kundnummer** | Nej | Det kundnummer leverantören har på oss, max 50 tecken — skrivs ut på förfrågan och inköpsorder. Tom cell lämnar fältet orört på en befintlig post. | K-1234 |
 | **Betalningsvillkor** | Nej | Betalningsvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor; börjar namnet med ett antal dagar (30 dagar netto) blir dagarna villkorets kod och styr förfallodatum på leverantörsfakturor. | 30 dagar netto |
 | **Leveransvillkor** | Nej | Leveransvillkorets kod eller namn i registret (skiftlägesokänsligt), max 100 tecken. Ett okänt värde skapas som nytt villkor. | Fritt vårt lager |

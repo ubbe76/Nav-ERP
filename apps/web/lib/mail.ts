@@ -1,4 +1,5 @@
 import { apiFetch, apiGet } from "./api";
+import { documentLanguageOf, type DocumentLanguage } from "./documentLanguage";
 import type { ArticleFile, Customer, EmailLogEntry, Paged, PartnerContact, Supplier } from "./types";
 
 // How many drawings the order's articles carry — the send dialog offers to
@@ -48,10 +49,19 @@ export async function fetchDefaultRecipient(
   partnerBase: "suppliers" | "customers",
   partnerId: string
 ): Promise<string> {
+  return (await fetchDefaultRecipientAndLanguage(partnerBase, partnerId)).to;
+}
+
+// Same lookup, plus the partner's document language (Språk) for the default
+// subject and text of the mail (documentMailTexts).
+export async function fetchDefaultRecipientAndLanguage(
+  partnerBase: "suppliers" | "customers",
+  partnerId: string
+): Promise<{ to: string; language: DocumentLanguage }> {
   const [contacts, partner] = await Promise.all([
     apiFetch<PartnerContact[]>(`/api/v1/${partnerBase}/${partnerId}/contacts`).catch(() => []),
     apiFetch<Supplier | Customer>(`/api/v1/${partnerBase}/${partnerId}`).catch(() => null),
   ]);
   const primary = contacts.find((c) => c.isPrimary && c.email);
-  return primary?.email ?? partner?.email ?? "";
+  return { to: primary?.email ?? partner?.email ?? "", language: documentLanguageOf(partner?.language) };
 }

@@ -9,6 +9,7 @@ import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.
 import { partnerDeliveryFields } from "./delivery.js";
 import { countryCodeSchema } from "./sales.js";
 import { exchangeRateValueSchema } from "./currency.js";
+import { documentLanguageSchema } from "./document-language.js";
 
 export const purchaseOrderStatusSchema = z.enum([
   "draft",
@@ -142,6 +143,9 @@ export const createSupplierSchema = z.object({
   // Our customer number at this supplier — printed on inquiry/PO.
   ourCustomerNumber: z.string().max(50).optional(),
   currency: z.string().regex(/^[A-Z]{3}$/, "3 stora bokstäver, t.ex. SEK").default("SEK"),
+  // Språk (#7): the language of the inquiry and purchase order sent to the
+  // supplier (printed live — a supplier document is never archived).
+  language: documentLanguageSchema.default("sv"),
   // Momskoder: the supplier's country and its Momskod (förval) for new
   // supplier invoices — a code with direction both/purchase; omitted/null =
   // derived from the country (supplierDefaultVatCode).
@@ -174,6 +178,8 @@ export const updateSupplierSchema = z
     carrierCustomerNumber: z.string().max(50).nullable().optional(),
     ourCustomerNumber: z.string().max(50).nullable().optional(),
     currency: z.string().regex(/^[A-Z]{3}$/, "3 stora bokst\u00e4ver, t.ex. SEK").optional(),
+    // Språk: not nullable — a supplier always has a document language.
+    language: documentLanguageSchema.optional(),
     // Not nullable — a supplier always has a country.
     country: countryCodeSchema.optional(),
     defaultVatCodeId: z.string().uuid().nullable().optional(),

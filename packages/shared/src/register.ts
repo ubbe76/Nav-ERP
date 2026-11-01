@@ -14,6 +14,28 @@ export type CreateRegisterEntryInput = z.infer<typeof createRegisterEntrySchema>
 export const updateRegisterEntrySchema = createRegisterEntrySchema;
 export type UpdateRegisterEntryInput = z.infer<typeof updateRegisterEntrySchema>;
 
+// Dokument på engelska (#7): a blank English text is stored as null and the
+// document falls back to the Swedish one (localized in document-language.ts).
+const optionalEnglishText = (max: number) =>
+  z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? null : value),
+    z.string().trim().max(max).nullable()
+  );
+
+// Leveransvillkor and betalningsvillkor: Benämning (engelska) — printed on
+// English documents instead of `name`. Not unique (the Swedish name is).
+export const termRegisterEntrySchema = createRegisterEntrySchema.extend({
+  nameEn: optionalEnglishText(100).optional(),
+});
+export type TermRegisterEntryInput = z.infer<typeof termRegisterEntrySchema>;
+
+// Enheter: Kod (engelska) — the unit as written on English documents (the
+// unit is printed as its code); null = the code is used (kg, m, l …).
+export const unitRegisterEntrySchema = createRegisterEntrySchema.extend({
+  codeEn: optionalEnglishText(20).optional(),
+});
+export type UnitRegisterEntryInput = z.infer<typeof unitRegisterEntrySchema>;
+
 // DELETE /<register>/:id — the replacement (another entry of the same
 // register) that every referencing row is moved to first. Optional: an
 // entry nothing points at is deleted outright; a referenced one without a

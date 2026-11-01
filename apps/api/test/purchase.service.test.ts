@@ -1610,3 +1610,29 @@ describe("purchase service — önskat leveransdatum", () => {
     expect(text).toContain("Önskat leveransdatum: 2030-04-01");
   });
 });
+
+// Dokument på engelska (#7): the supplier's language round-trips through the
+// service and the inquiry/purchase order details carry it (live).
+describe("purchase service — supplier language (Språk, #7)", () => {
+  it("defaults to sv, round-trips en and is carried as supplierLanguage on the inquiry and purchase order details", async () => {
+    const user = await makeUser();
+    const swedish = await makeSupplier();
+    expect(swedish.language).toBe("sv");
+    const english = await purchaseService.createSupplier({ name: "Supplier GmbH", active: true, country: "DE", language: "en" });
+    expect(english.language).toBe("en");
+    expect((await purchaseService.getSupplier(english.id))!.language).toBe("en");
+
+    const article = await makeArticle(`ART-LANG-${crypto.randomUUID()}`);
+    const order = await purchaseService.createPurchaseOrder({ supplierId: english.id }, user.id);
+    const { inquiry } = await purchaseService.createInquiry(
+      { supplierId: english.id, rows: [{ articleId: article.id, quantity: 5 }] },
+      user.id
+    );
+    expect((await purchaseService.getPurchaseOrder(order.id))!.supplierLanguage).toBe("en");
+    expect((await purchaseService.getInquiry(inquiry.id))!.supplierLanguage).toBe("en");
+
+    await purchaseService.updateSupplier(english.id, { language: "sv" });
+    expect((await purchaseService.getPurchaseOrder(order.id))!.supplierLanguage).toBe("sv");
+    expect((await purchaseService.getInquiry(inquiry.id))!.supplierLanguage).toBe("sv");
+  });
+});

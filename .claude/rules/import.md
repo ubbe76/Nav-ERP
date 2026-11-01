@@ -62,6 +62,10 @@ Spec `private/superpowers/specs/2026-10-29-lagersaldoimport-design.md`.
 
 - **Cykeltid** (0159) är eget fält `cycleTimePerUnit` — aliaset `cykeltid` pekade tidigare på stycktiden. Omräknas med filens tidsenhet (`convertCycleTime`, ren), 0 ⇒ null, ignoreras på legoresurs, i `updateExisting` bara från ifylld cell.
 
+## Språk på kund- och leverantörsimporten (0175, #7)
+
+- Kolumnen **Språk** (`language`, alias `sprak`/`dokumentsprak`) i kund- och leverantörsimporten läses med rena `parseDocumentLanguageCell` i shared (Svenska/Engelska/sv/en/Swedish/English, skiftlägesokänsligt): okänt värde ⇒ radfel "Ogiltigt språk '…' — ange Svenska eller Engelska", tom cell ⇒ ingen nyckel (kolumnens default `sv` vid ny, orörd vid uppdatering). `language` står i `CUSTOMER_PASSTHROUGH_FIELDS`/`SUPPLIER_PASSTHROUGH_FIELDS`. Artikelimporten: **Benämning engelska** (`nameEn`, > 255 ⇒ radfel) och **Extra benämning engelska** (`extraDescriptionEn`, flerradig, > 2000 ⇒ radfel), tom cell orörd. Webbspegeln `apps/web/lib/importFields.ts` måste bära fälten (`import-field-help.test.ts`). Inga real-files-tester finns för kund-/leverantörsexporterna; artikelexporterna saknar kolumnerna.
+
 ## Kundens leveransadresser
 
 - Läser både Leveransadress-filen och **Alternativa leveransadresser** (där två kolumner heter "Namn": den första är kundens och lämnas, upprepningen mappas till `label` via sekundäraliaset). Kolumnen **Förvald** (`isDefault`) avgör per rad när den är mappad, annars gäller `setAsDefault`; en kund med förvald adress får aldrig en till (varning).

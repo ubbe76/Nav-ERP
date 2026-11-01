@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, count, eq, sql } from "drizzle-orm";
-import { auditLog, db, salesOrderRows, units, verifications } from "@navet/db";
+import { auditLog, db, invoices, salesOrderRows, units, verifications } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -1840,5 +1840,65 @@ describe("customer invoice — audit trail", () => {
     expect(reminders).toHaveLength(1);
     expect(reminders[0]!.entityId).toBe(issued!.invoiceNumber);
     expect(reminders[0]!.detail).toMatchObject({ level: 1, fee: 0 });
+  });
+});
+
+// Dokument på engelska (#7): the customer's language is stamped on the
+// invoice at Utfärda and never follows the customer afterwards; a draft
+// follows the customer (its preview and mail defaults use the live value).
+describe("invoice language (Språk, #7)", () => {
+  it("stamps the customer's language at issue; a later change on the customer does not reach the invoice", async () => {
+    const customer = await salesService.createCustomer({ name: "Customer Ltd", active: true, country: "GB", language: "en" });
+    const biller = await makeUser();
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
+      biller.id
+    );
+    // The draft row carries the column default 'sv'; every read answers
+    // with the customer's current language instead.
+    const [raw] = await db.select({ language: invoices.language }).from(invoices).where(eq(invoices.id, draft!.id));
+    expect(raw!.language).toBe("sv");
+    expect(draft!.language).toBe("en");
+    expect((await invoiceService.getInvoice(draft!.id))!.language).toBe("en");
+
+    const issued = await invoiceService.issue(draft!.id, issuedBy);
+    expect(issued!.language).toBe("en");
+
+    await salesService.updateCustomer(customer.id, { language: "sv" });
+    const after = await invoiceService.getInvoice(issued!.id);
+    expect(after!.language).toBe("en");
+    expect(after!.status).toBe("issued");
+  });
+
+  it("a draft follows the customer's current language", async () => {
+    const customer = await makeCustomer();
+    const biller = await makeUser();
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
+      biller.id
+    );
+    expect((await invoiceService.getInvoice(draft!.id))!.language).toBe("sv");
+    await salesService.updateCustomer(customer.id, { language: "en" });
+    expect((await invoiceService.getInvoice(draft!.id))!.language).toBe("en");
+    await salesService.updateCustomer(customer.id, { language: "sv" });
+    expect((await invoiceService.getInvoice(draft!.id))!.language).toBe("sv");
+  });
+
+  it("a credit note takes the customer's language at the credit's own issue, not the source invoice's", async () => {
+    const customer = await makeCustomer();
+    const biller = await makeUser();
+    const draft = await invoiceService.create(
+      { customerId: customer.id, rows: [{ description: "x", quantity: 1, unitPrice: 10 }] },
+      biller.id
+    );
+    const issued = await invoiceService.issue(draft!.id, issuedBy);
+    expect(issued!.language).toBe("sv");
+
+    await salesService.updateCustomer(customer.id, { language: "en" });
+    const credit = await invoiceService.createCredit(issued!.id, {}, biller.id);
+    const issuedCredit = await invoiceService.issue(credit!.id, issuedBy);
+    expect(issuedCredit!.language).toBe("en");
+    // The source invoice keeps its stamp.
+    expect((await invoiceService.getInvoice(issued!.id))!.language).toBe("sv");
   });
 });

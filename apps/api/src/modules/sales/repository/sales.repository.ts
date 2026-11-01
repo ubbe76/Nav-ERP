@@ -116,6 +116,9 @@ export interface SalesOrderRowForManufacturing {
   orderNumber: string;
   orderStatus: SalesOrderStatus;
   customerName: string;
+  // Dokument på engelska (#7): the customer's language — the final pallet
+  // card of the last operation is printed in it.
+  customerLanguage: string;
   // Kundens ordernummer — printed on the pallet card (Etapp F); null when
   // the order carries none.
   customerOrderNumber: string | null;
@@ -446,11 +449,13 @@ export function createSalesRepository(db: Db) {
       return row ?? null;
     },
 
-    // Momskoder: the company's invoice text per code, for the quote/order
-    // confirmation (renderSalesOrderPdf).
+    // Momskoder: the company's invoice text per code (Swedish and English —
+    // #7), for the quote/order confirmation (renderSalesOrderPdf).
     async vatCodeInvoiceTexts() {
       const book = await loadVatCodeBook(db);
-      return new Map([...book.byCode.values()].map((row) => [row.code, row.invoiceText] as const));
+      return new Map(
+        [...book.byCode.values()].map((row) => [row.code, { invoiceText: row.invoiceText, invoiceTextEn: row.invoiceTextEn }] as const)
+      );
     },
 
     async freightProductExists(id: string) {
@@ -815,6 +820,9 @@ export function createSalesRepository(db: Db) {
           // The order card's "Fakturera" points at the samlingsfakturering
           // routine instead of the invoice dialog for flagged customers.
           customerCollectiveInvoicing: customers.collectiveInvoicing,
+          // Språk (#7): the language the quote/order confirmation/delivery
+          // note are printed in (live) — the card's mail defaults follow it.
+          customerLanguage: customers.language,
           deliveryAddressLabel: customerDeliveryAddresses.label,
           deliveryAddress: customerDeliveryAddresses.address,
           deliveryPostalCode: customerDeliveryAddresses.postalCode,
@@ -827,6 +835,9 @@ export function createSalesRepository(db: Db) {
           deliveryTermName: deliveryTerms.name,
           paymentTermCode: paymentTerms.code,
           paymentTermName: paymentTerms.name,
+          // Dokument på engelska (#7): the terms' English names for the PDFs.
+          deliveryTermNameEn: deliveryTerms.nameEn,
+          paymentTermNameEn: paymentTerms.nameEn,
           carrierCode: carriers.code,
           carrierName: carriers.name,
           // Förlorad: the reason's code/name and who marked it (null unless lost).
@@ -1119,6 +1130,7 @@ export function createSalesRepository(db: Db) {
           orderNumber: salesOrders.orderNumber,
           orderStatus: salesOrders.status,
           customerName: customers.name,
+          customerLanguage: customers.language,
           customerOrderNumber: salesOrders.customerOrderNumber,
           articleId: salesOrderRows.articleId,
           articleType: articles.type,
@@ -1369,11 +1381,19 @@ export function createSalesRepository(db: Db) {
           articleColour: articles.colour,
           // Extra benämning — printed on the documents the setting lists.
           articleExtraDescription: articles.extraDescription,
+          // Dokument på engelska (#7): the English texts for English documents.
+          articleNameEn: articles.nameEn,
+          articleExtraDescriptionEn: articles.extraDescriptionEn,
           // Privatperson documents gross the printed prices up by this rate.
           articleVatRate: articleVatRateSql,
           // The unit the row displays in: the entered unit, falling back to
           // the article's base unit.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
+          // Dokument på engelska (#7): the display unit's English code — the
+          // row's own unit when it has one (NOT a coalesce across the two
+          // units: a row unit without code_en must not borrow the base unit's).
+          unitCodeEn: sql<string | null>`case when ${rowUnits.id} is null then ${units.codeEn} else ${rowUnits.codeEn} end`,
+
           // Konfigurator 4b (Avvikelse 7): the row's article is a stocked
           // variant of this template — the card offers Ändra konfiguration
           // on it without a second call. null = plain article (or a
@@ -1665,6 +1685,9 @@ export function createSalesRepository(db: Db) {
           orderNumber: salesOrders.orderNumber,
           customerId: salesOrders.customerId,
           customerName: customers.name,
+          // Dokument på engelska (#7): the delivery note and the pallet card
+          // follow the customer's language, live.
+          customerLanguage: customers.language,
           customerOrderNumber: salesOrders.customerOrderNumber,
           customerReference: salesOrders.customerReference,
           // Pallkort: the customer's Kod på pallkort.
@@ -1700,7 +1723,10 @@ export function createSalesRepository(db: Db) {
             articleId: salesOrderRows.articleId,
             articleName: articles.name,
             articleExtraDescription: articles.extraDescription,
+            articleNameEn: articles.nameEn,
+            articleExtraDescriptionEn: articles.extraDescriptionEn,
             unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
+            unitCodeEn: sql<string | null>`case when ${rowUnits.id} is null then ${units.codeEn} else ${rowUnits.codeEn} end`,
             unitFactor: salesOrderRows.unitFactor,
             quantityDelivered: salesOrderRows.quantityDelivered,
             // Konfigurator 4b: the configured row's choices print on the note.
@@ -1753,8 +1779,11 @@ export function createSalesRepository(db: Db) {
           articleId: r.articleId,
           articleName: r.articleName,
           articleExtraDescription: r.articleExtraDescription,
+          articleNameEn: r.articleNameEn,
+          articleExtraDescriptionEn: r.articleExtraDescriptionEn,
           quantity: r.quantity,
           unitCode: r.unitCode,
+          unitCodeEn: r.unitCodeEn,
           unitFactor: r.unitFactor,
           priorDelivered: Math.max(0, Number(r.quantityDelivered) - (laterMap.get(r.salesOrderRowId) ?? 0)),
           configuration: r.configuration,
