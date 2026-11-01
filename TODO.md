@@ -47,6 +47,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
+- [ ] **Standardledtid och standardkötid för tillverkning** (Systeminställningar): en **standardledtid** (arbetsdagar) som gäller när **Ledtid (dagar)** är tomt **och artikeln saknar rutt** (finns en rutt räknas ledtiden ur den som i dag), och en **standardkötid** som läggs till **mellan** operationerna (inte före första eller efter sista) när ledtiden räknas ur rutten. Ordningen blir alltså: fältet → rutten med kötid → standardledtiden → 0. Påverkar senaste startdatum i behovsberäkningen, TO:ns startdatum (komponenternas behovsdatum) och färdigdatumsförslaget — regeln bor i `manufacturing-lead-time.ts` (`manufacturingLeadDays`/`leadDaysFromWork`). Beslut 2026-11-01.
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
