@@ -218,6 +218,9 @@ function VatCodeForm({ code, accounts, onClose }: { code: VatCodeView; accounts:
 
   const [name, setName] = useState(code.name);
   const [invoiceText, setInvoiceText] = useState(code.invoiceText ?? "");
+  // Dokument på engelska (#7): blank = the Swedish text is printed.
+  const [nameEn, setNameEn] = useState(code.nameEn ?? "");
+  const [invoiceTextEn, setInvoiceTextEn] = useState(code.invoiceTextEn ?? "");
   const [active, setActive] = useState(code.active);
   const [accountValues, setAccountValues] = useState<SlotValues>(initialAccounts);
   const [error, setError] = useState<string | null>(null);
@@ -227,9 +230,11 @@ function VatCodeForm({ code, accounts, onClose }: { code: VatCodeView; accounts:
   const [warnings, setWarnings] = useState<string[] | null>(null);
 
   const body = useMemo(() => {
-    const patch: Partial<Record<"name" | "invoiceText" | "active" | VatCodeAccountField, string | boolean>> = {};
+    const patch: Partial<Record<"name" | "invoiceText" | "nameEn" | "invoiceTextEn" | "active" | VatCodeAccountField, string | boolean>> = {};
     if (name.trim() !== code.name) patch.name = name.trim();
     if (invoiceText.trim() !== (code.invoiceText ?? "")) patch.invoiceText = invoiceText.trim();
+    if (nameEn.trim() !== (code.nameEn ?? "")) patch.nameEn = nameEn.trim();
+    if (invoiceTextEn.trim() !== (code.invoiceTextEn ?? "")) patch.invoiceTextEn = invoiceTextEn.trim();
     if (active !== code.active) patch.active = active;
     for (const account of slots) {
       const chosen = accountValues[account.slot];
@@ -238,7 +243,7 @@ function VatCodeForm({ code, accounts, onClose }: { code: VatCodeView; accounts:
       if (effective !== account.accountNumber) patch[VAT_CODE_ACCOUNT_FIELDS[account.slot]] = chosen;
     }
     return patch;
-  }, [name, invoiceText, active, accountValues, slots, code]);
+  }, [name, invoiceText, nameEn, invoiceTextEn, active, accountValues, slots, code]);
   const changed = Object.keys(body).length > 0;
 
   async function submit(event: FormEvent) {
@@ -289,6 +294,7 @@ function VatCodeForm({ code, accounts, onClose }: { code: VatCodeView; accounts:
   }
 
   const hasDefaultText = code.defaultInvoiceText !== null;
+  const hasDefaultTextEn = code.defaultInvoiceTextEn !== null;
   // Moms 25/12/6 % and Momsfri are what Nav falls back on whenever it picks a
   // code itself, so an active one cannot be deactivated (400 vat-code-required).
   const domesticInUse = code.active && isDomesticVatCode(code.code);
@@ -321,6 +327,48 @@ function VatCodeForm({ code, accounts, onClose }: { code: VatCodeView; accounts:
           <>
             {" "}
             <Button type="button" size="small" variant="ghost" onClick={() => setInvoiceText(code.defaultInvoiceText ?? "")}>
+              Återställ till förvald text
+            </Button>
+          </>
+        )}
+      </FormHint>
+
+      <Field label="Namn (engelska)" htmlFor="vatCodeNameEn">
+        <Input
+          id="vatCodeNameEn"
+          maxLength={100}
+          value={nameEn}
+          placeholder={code.labelEn}
+          onChange={(e) => setNameEn(e.target.value)}
+        />
+      </Field>
+      <FormHint attached>
+        Skrivs på engelska fakturor. Tomt fält = den svenska benämningen.
+        {code.labelEn !== "" && nameEn.trim() !== code.labelEn && (
+          <>
+            {" "}
+            <Button type="button" size="small" variant="ghost" onClick={() => setNameEn(code.labelEn)}>
+              Återställ till förvalt namn
+            </Button>
+          </>
+        )}
+      </FormHint>
+
+      <Field label="Fakturatext (engelska)" htmlFor="vatCodeInvoiceTextEn">
+        <Input
+          id="vatCodeInvoiceTextEn"
+          maxLength={255}
+          value={invoiceTextEn}
+          placeholder="Ingen text"
+          onChange={(e) => setInvoiceTextEn(e.target.value)}
+        />
+      </Field>
+      <FormHint attached>
+        Skrivs på engelska fakturor under momssammanställningen. Tomt fält = den svenska fakturatexten.
+        {hasDefaultTextEn && invoiceTextEn.trim() !== code.defaultInvoiceTextEn && (
+          <>
+            {" "}
+            <Button type="button" size="small" variant="ghost" onClick={() => setInvoiceTextEn(code.defaultInvoiceTextEn ?? "")}>
               Återställ till förvald text
             </Button>
           </>

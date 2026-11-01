@@ -58,6 +58,9 @@ const TAB_CONFIG: Record<
     writeRule?: AccessRule;
     deleteRule?: AccessRule;
     moveHint?: string;
+    // Dokument på engelska (#7): the English text of the entry — the
+    // delivery/payment terms' name ("nameEn") or the unit's code ("codeEn").
+    english?: { field: "nameEn" | "codeEn"; label: string; maxLength: number; hint: string };
   }
 > = {
   Leveransvillkor: {
@@ -67,13 +70,34 @@ const TAB_CONFIG: Record<
     // The description column exists on every register in the API; it is only
     // surfaced where it carries meaning — the Combiterms explanations here.
     showDescription: true,
+    english: {
+      field: "nameEn",
+      label: "Benämning (engelska)",
+      maxLength: 100,
+      hint: "Skrivs på engelska dokument. Tomt = den svenska benämningen.",
+    },
   },
-  Betalningsvillkor: { basePath: "/api/v1/payment-terms", singular: "betalningsvillkor" },
+  Betalningsvillkor: {
+    basePath: "/api/v1/payment-terms",
+    singular: "betalningsvillkor",
+    english: {
+      field: "nameEn",
+      label: "Benämning (engelska)",
+      maxLength: 100,
+      hint: "Skrivs på engelska dokument. Tomt = den svenska benämningen.",
+    },
+  },
   Speditörer: { basePath: "/api/v1/carriers", singular: "speditör" },
   Enheter: {
     basePath: "/api/v1/units",
     singular: "enhet",
     seed: { label: "Lägg till standardenheter", path: "/api/v1/units/generate-standard" },
+    english: {
+      field: "codeEn",
+      label: "Kod (engelska)",
+      maxLength: 20,
+      hint: "Enheten som den skrivs på engelska dokument, t.ex. pcs för st. Tomt = koden används.",
+    },
   },
   Kollityper: {
     basePath: "/api/v1/package-types",
@@ -177,7 +201,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
   const [freightEditing, setFreightEditing] = useState<RegisterEntry | null>(null);
   const [seedNotice, setSeedNotice] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
-  const { basePath, singular, seed, showDescription, descriptionLabel, showActive, activeHint, showReasonFlags, writeRule, deleteRule, moveHint } =
+  const { basePath, singular, seed, showDescription, descriptionLabel, showActive, activeHint, showReasonFlags, writeRule, deleteRule, moveHint, english } =
     TAB_CONFIG[tab];
   const canWrite = writeRule ? can(writeRule) : true;
   const canDelete = deleteRule ? can(deleteRule) : true;
@@ -225,6 +249,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
         columns={[
           { key: "code", label: "Kod", width: "0.4fr" },
           { key: "name", label: "Benämning", width: "2fr" },
+          ...(english ? [{ key: "english", label: english.label, width: "1.5fr" }] : []),
           ...(showDescription ? [{ key: "description", label: descriptionLabel ?? "Förklaring", width: "3fr" }] : []),
           ...(tab === "Kollityper" ? [{ key: "freight", label: "Frakt", width: "2fr" }] : []),
           ...(showReasonFlags ? REASON_FLAGS.map((f) => ({ key: f.key, label: f.label, width: "0.5fr" })) : []),
@@ -247,6 +272,8 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
                   <strong>{entry.name}</strong>
                 </button>
               );
+            case "english":
+              return english ? (entry[english.field] ?? "—") : null;
             case "description":
               return entry.description ?? "—";
             case "active":
@@ -273,6 +300,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={`Ny ${singular}`}>
         <RegisterEntryForm
           basePath={basePath}
+          english={english}
           showDescription={showDescription}
           descriptionLabel={descriptionLabel}
           showActive={showActive}
@@ -290,6 +318,7 @@ export function RegisterTab({ tab, entries }: { tab: Tab; entries: RegisterEntry
           <RegisterEntryForm
             basePath={basePath}
             entry={editing}
+            english={english}
             entries={entries}
             singular={singular}
             showDescription={showDescription}
@@ -417,6 +446,7 @@ function RegisterEntryForm({
   showActive,
   activeHint,
   showReasonFlags,
+  english,
   canDelete = true,
   moveHint,
   onSuccess,
@@ -430,6 +460,7 @@ function RegisterEntryForm({
   showActive?: boolean;
   activeHint?: string;
   showReasonFlags?: boolean;
+  english?: { field: "nameEn" | "codeEn"; label: string; maxLength: number; hint: string };
   canDelete?: boolean;
   moveHint?: string;
   onSuccess: () => void;
@@ -437,6 +468,7 @@ function RegisterEntryForm({
   const [code, setCode] = useState(entry?.code ?? "");
   const [name, setName] = useState(entry?.name ?? "");
   const [description, setDescription] = useState(entry?.description ?? "");
+  const [englishText, setEnglishText] = useState((english ? entry?.[english.field] : null) ?? "");
   const [active, setActive] = useState(entry?.active ?? true);
   const [flags, setFlags] = useState<Record<ReasonFlagKey, boolean>>({
     appliesCustomer: entry?.appliesCustomer ?? false,
@@ -462,15 +494,17 @@ function RegisterEntryForm({
     try {
       // Tabs without the description concept keep their wire format unchanged;
       // an emptied field is stored as null so the table's "—" stays honest.
-      const body = JSON.stringify(
-        showDescription
+      const body = JSON.stringify({
+        ...(showDescription
           ? { code, name, description: description.trim() || null }
           : showReasonFlags
             ? { code: code.trim().toUpperCase(), name, active, ...flags }
             : showActive
               ? { code: code.trim().toUpperCase(), name, active }
-              : { code, name }
-      );
+              : { code, name }),
+        // "" clears the English text (the API stores it as null).
+        ...(english ? { [english.field]: englishText.trim() } : {}),
+      });
       if (entry) {
         await apiFetch(`${basePath}/${entry.id}`, { method: "PATCH", body });
       } else {
@@ -605,6 +639,20 @@ function RegisterEntryForm({
       <Field label="Benämning" htmlFor="registerName">
         <Input id="registerName" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
       </Field>
+
+      {english && (
+        <>
+          <Field label={english.label} htmlFor="registerEnglish">
+            <Input
+              id="registerEnglish"
+              maxLength={english.maxLength}
+              value={englishText}
+              onChange={(e) => setEnglishText(e.target.value)}
+            />
+          </Field>
+          <FormHint attached>{english.hint}</FormHint>
+        </>
+      )}
 
       {showActive && (
         <label style={{ display: "flex", gap: 8, alignItems: "center" }}>

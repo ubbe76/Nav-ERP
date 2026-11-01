@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
 import { Field, Input, Select, Textarea } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
+import { DOCUMENT_LANGUAGES, DOCUMENT_LANGUAGE_LABELS, type DocumentLanguage } from "../../lib/documentLanguage";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import type { SupplierPrefill } from "../../lib/invoiceScan";
 
@@ -37,6 +38,7 @@ export function NewSupplierForm({
   const [city, setCity] = useState(initial.city ?? "");
   const [country, setCountry] = useState((initial.country ?? "SE").trim().toUpperCase().slice(0, 2) || "SE");
   const [currency, setCurrency] = useState("SEK");
+  const [language, setLanguage] = useState<DocumentLanguage>("sv");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -56,6 +58,7 @@ export function NewSupplierForm({
           city: city || undefined,
           country: country.trim() || undefined,
           currency,
+          language,
           orgNumber: orgNumber.trim() || undefined,
           vatNumber: vatNumber.trim() || undefined,
           ...(paymentMethod === "bankgiro" && bankgiro.trim()
@@ -118,6 +121,16 @@ export function NewSupplierForm({
           />
         </Field>
       </FormRow>
+
+      <Field label="Språk" htmlFor="language">
+        <Select id="language" value={language} onChange={(e) => setLanguage(e.target.value as DocumentLanguage)}>
+          {DOCUMENT_LANGUAGES.map((code) => (
+            <option key={code} value={code}>
+              {DOCUMENT_LANGUAGE_LABELS[code]}
+            </option>
+          ))}
+        </Select>
+      </Field>
 
       <Field label="Adress" htmlFor="address">
         <Textarea id="address" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} />

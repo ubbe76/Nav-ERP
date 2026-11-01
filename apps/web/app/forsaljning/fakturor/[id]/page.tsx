@@ -8,6 +8,8 @@ import { DeviationsSection } from "../../../../components/quality/DeviationsSect
 import { AuditTrailSection } from "../../../../components/system/AuditTrailSection";
 import { apiGet, getCurrentUser } from "../../../../lib/api";
 import { canOpen } from "../../../../lib/pageAccess";
+import { documentMailTexts } from "../../../../lib/documentMailTexts";
+import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { getDocumentEmails } from "../../../../lib/mail";
 import type { VatCodeView } from "../../../../lib/vatCodes";
 import {
@@ -63,14 +65,18 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
   // dedicated fakturamejl — a reminder should still reach someone.
   const reminderDefaultTo = customer?.invoiceEmail ?? customer?.email ?? "";
 
+  const invoiceMail = documentMailTexts(
+    { kind: invoice.type === "credit" ? "creditNote" : "invoice", number: invoice.invoiceNumber ?? "" },
+    documentLanguageOf(invoice.language)
+  );
   const sendButtons: SendButtonConfig[] = canMail
     ? [
         {
           label: `Skicka ${documentLabel.toLowerCase()}`,
           modalTitle: `Skicka ${documentLabel.toLowerCase()} ${invoice.invoiceNumber} via e-post`,
           endpoint: `/api/v1/invoices/${invoice.id}/send-email`,
-          subject: `${documentLabel} ${invoice.invoiceNumber}`,
-          message: `Hej!\n\nSe bifogad ${documentLabel.toLowerCase()} ${invoice.invoiceNumber}.\n\nMed vänliga hälsningar`,
+          subject: invoiceMail.subject,
+          message: invoiceMail.body,
           to: customer?.invoiceEmail ?? undefined,
           hint: customer?.invoiceDelivery === "peppol" ? "Kunden vill ha e-faktura" : undefined,
         },
@@ -127,6 +133,7 @@ export default async function InvoiceDetailPage(props: { params: Promise<{ id: s
           emails={emails}
           defaultTo={invoiceEmail}
           sendButtons={sendButtons}
+          documentLanguage={documentLanguageOf(invoice.language)}
           pdfLinks={[{ label: `${documentLabel} (PDF)`, href: `/api/v1/invoices/${invoice.id}/pdf` }]}
         />
       )}

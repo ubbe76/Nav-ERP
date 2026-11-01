@@ -6,6 +6,8 @@ import { ReceiptsSection } from "../../../../components/purchase/ReceiptsSection
 import { MailSection } from "../../../../components/mail/MailSection";
 import { DeviationsSection } from "../../../../components/quality/DeviationsSection";
 import { AuditTrailSection } from "../../../../components/system/AuditTrailSection";
+import { documentMailTexts } from "../../../../lib/documentMailTexts";
+import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { apiGet } from "../../../../lib/api";
 import { countDrawings, getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
 import type {
@@ -38,6 +40,10 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
   ]);
   const defaultTo = await getDefaultRecipient("suppliers", order.supplierId, supplier?.email ?? null, cookieHeader);
   const drawingCount = await countDrawings(rows.map((r) => r.articleId), cookieHeader);
+  const poMail = documentMailTexts(
+    { kind: "purchaseOrder", number: order.orderNumber },
+    documentLanguageOf(order.supplierLanguage)
+  );
   const mailable = order.status !== "cancelled" && order.status !== "closed";
 
   return (
@@ -66,6 +72,7 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
       />
 
       <MailSection
+        documentLanguage={documentLanguageOf(order.supplierLanguage)}
         emails={emails}
         defaultTo={defaultTo}
         sendButtons={
@@ -75,8 +82,8 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
                   label: "Skicka via e-post",
                   modalTitle: `Skicka ${order.orderNumber} via e-post`,
                   endpoint: `/api/v1/purchase-orders/${order.id}/send-email`,
-                  subject: `Inköpsorder ${order.orderNumber}`,
-                  message: `Hej!\n\nSe bifogad inköpsorder ${order.orderNumber}.\n\nMed vänliga hälsningar`,
+                  subject: poMail.subject,
+                  message: poMail.body,
                 },
               ]
             : []

@@ -2,8 +2,9 @@
 
 import { useState, type FormEvent } from "react";
 import { Button } from "../ui/Button";
-import { Field, Input, Textarea } from "../ui/Field";
+import { Field, Input, Select, Textarea } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
+import { DOCUMENT_LANGUAGES, DOCUMENT_LANGUAGE_LABELS, type DocumentLanguage } from "../../lib/documentLanguage";
 import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
 import { CurrencyInput } from "../ui/CurrencyInput";
 
@@ -17,6 +18,7 @@ export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
   const [country, setCountry] = useState("SE");
   // Valuta: new quotes and orders for the customer are made in it.
   const [currency, setCurrency] = useState("SEK");
+  const [language, setLanguage] = useState<DocumentLanguage>("sv");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -35,6 +37,7 @@ export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
           city: city || undefined,
           country: country.trim() || undefined,
           currency: currency.trim() || undefined,
+          language,
         }),
       });
       onSuccess();
@@ -71,6 +74,16 @@ export function NewCustomerForm({ onSuccess }: { onSuccess: () => void }) {
       <FormHint attached>
         Kundens valuta. Nya offerter och kundorder tas i den, och kundens särpriser anges i den.
       </FormHint>
+
+      <Field label="Språk" htmlFor="language">
+        <Select id="language" value={language} onChange={(e) => setLanguage(e.target.value as DocumentLanguage)}>
+          {DOCUMENT_LANGUAGES.map((code) => (
+            <option key={code} value={code}>
+              {DOCUMENT_LANGUAGE_LABELS[code]}
+            </option>
+          ))}
+        </Select>
+      </Field>
 
       <Field label="Adress" htmlFor="address">
         <Textarea id="address" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} />

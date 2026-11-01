@@ -1,5 +1,6 @@
 import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./configurator";
 import type { DocumentRateSourceValue } from "./currency";
+import type { DocumentLanguage } from "./documentLanguage";
 import type { Permission } from "./permissions";
 import type { VatBoxSetting, VatDeclarationBoxes, VatReportingPeriod } from "./vatBoxes";
 import type {
@@ -38,6 +39,9 @@ export interface Article {
   id: string;
   articleNumber: string;
   name: string;
+  // Benämning (engelska) — null = the Swedish name is used on English documents.
+  nameEn?: string | null;
+  extraDescriptionEn?: string | null;
   type: ArticleType;
   // Streckkod (EAN/GTIN) — 8, 12, 13 or 14 digits; unique when set.
   barcode: string | null;
@@ -449,6 +453,9 @@ export interface RegisterEntry {
   id: string;
   code: string;
   name: string;
+  // Leveransvillkor/betalningsvillkor: Benämning (engelska); Enheter: Kod (engelska).
+  nameEn?: string | null;
+  codeEn?: string | null;
   // Optional free-text explanation — surfaced only on registers whose tab
   // enables it (delivery terms' Combiterms explanations today).
   description?: string | null;
@@ -537,6 +544,8 @@ export interface PartnerCardFields {
 
 export interface Supplier extends PartnerCardFields, SupplierPaymentFields {
   id: string;
+  // Språk: the language of the inquiry and purchase order.
+  language: DocumentLanguage;
   supplierNumber: string;
   name: string;
   contactName: string | null;
@@ -591,6 +600,8 @@ export const PURCHASE_ORDER_STATUS_PILL: Record<PurchaseOrderStatus, { status: "
 
 export interface PurchaseOrder extends DocumentTermsFields {
   id: string;
+  // Supplier's document language (GET :id only).
+  supplierLanguage?: DocumentLanguage;
   orderNumber: string;
   supplierId: string;
   supplierName: string;
@@ -633,6 +644,7 @@ export const INQUIRY_STATUS_PILL: Record<InquiryStatus, { status: "running" | "d
 
 export interface Inquiry extends DocumentTermsFields {
   id: string;
+  supplierLanguage?: DocumentLanguage;
   inquiryNumber: string;
   supplierId: string;
   supplierName: string;
@@ -1160,6 +1172,8 @@ export interface SupplierInvoicePaymentEntry {
 
 export interface Customer extends PartnerCardFields {
   id: string;
+  // Språk: the language of the customer's documents.
+  language: DocumentLanguage;
   customerNumber: string;
   name: string;
   contactName: string | null;
@@ -1342,6 +1356,8 @@ export const SALES_ORDER_STATUS_PILL: Record<SalesOrderStatus, { status: "runnin
 
 export interface SalesOrder extends DocumentTermsFields {
   id: string;
+  // Customer's document language (GET :id only).
+  customerLanguage?: DocumentLanguage;
   orderNumber: string;
   // Offerter: OF-… number kept after the quote becomes an order (null for
   // direct orders and older quotes); documentKind is derived by the API.
@@ -1720,6 +1736,8 @@ export interface InvoiceReminderEntry {
 // OpenInvoiceRow's own openAmount) — meaningless for draft/cancelled, see
 // invoice.service.ts's getInvoice comment.
 export interface InvoiceDetail extends InvoiceHeader {
+  // Document language: stamped at Utfärda, else the customer's current.
+  language?: DocumentLanguage;
   rows: InvoiceRow[];
   // Köparens momsregistreringsnummer as the invoice shows it — on a draft the
   // number Utfärda would stamp (the customer's current one; a credit note's

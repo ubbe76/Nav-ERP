@@ -24,6 +24,8 @@ import shellStyles from "../AppShell.module.css";
 import Link from "next/link";
 import buttonStyles from "../ui/Button.module.css";
 import { HelpLink } from "../ui/HelpLink";
+import { documentMailTexts } from "../../lib/documentMailTexts";
+import { documentLanguageOf } from "../../lib/documentLanguage";
 import { SectionHeading } from "../ui/SectionHeading";
 import { DeviationsSection } from "../quality/DeviationsSection";
 
@@ -75,27 +77,32 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
   // An OF-numbered quote gets its KO number when the confirmation is sent, so
   // the default texts name the quote rather than a number it doesn't have yet.
   const confirmsQuote = order.status === "quote" && !!quoteNumber && quoteNumber === order.orderNumber;
+  // Dokument på engelska (#7): the mail defaults follow the customer's language.
+  const documentLanguage = documentLanguageOf(order.customerLanguage);
   if (order.status === "quote") {
+    const quoteMail = documentMailTexts({ kind: "quote", number: quoteNumber ?? order.orderNumber }, documentLanguage);
     sendButtons.push({
       label: "Skicka offert",
       modalTitle: `Skicka offert ${quoteNumber ?? order.orderNumber} via e-post`,
       endpoint: `/api/v1/sales-orders/${order.id}/send-email`,
-      subject: `Offert ${quoteNumber ?? order.orderNumber}`,
-      message: `Hej!\n\nSe bifogad offert ${quoteNumber ?? order.orderNumber}.\n\nMed vänliga hälsningar`,
+      subject: quoteMail.subject,
+      message: quoteMail.body,
       extraBody: { variant: "quote" },
     });
   }
   if (order.status !== "cancelled" && order.status !== "lost") {
+    const confirmationMail = documentMailTexts(
+      { kind: "orderConfirmation", number: order.orderNumber, quoteNumber: confirmsQuote ? quoteNumber : null },
+      documentLanguage
+    );
     sendButtons.push({
       label: "Skicka orderbekräftelse",
       modalTitle: confirmsQuote
         ? `Skicka orderbekräftelse för offert ${quoteNumber} via e-post`
         : `Skicka orderbekräftelse ${order.orderNumber} via e-post`,
       endpoint: `/api/v1/sales-orders/${order.id}/send-email`,
-      subject: confirmsQuote ? `Orderbekräftelse för offert ${quoteNumber}` : `Orderbekräftelse ${order.orderNumber}`,
-      message: confirmsQuote
-        ? `Hej!\n\nTack för er order. Se bifogad orderbekräftelse för vår offert ${quoteNumber}.\n\nMed vänliga hälsningar`
-        : `Hej!\n\nTack för er order. Se bifogad orderbekräftelse ${order.orderNumber}.\n\nMed vänliga hälsningar`,
+      subject: confirmationMail.subject,
+      message: confirmationMail.body,
       extraBody: { variant: "confirmation" },
       // Confirming a quote gives it a KO number — land on the order card.
       ...(order.status === "quote" ? { redirectTo: `/forsaljning/ordrar/${order.id}` } : {}),
@@ -104,12 +111,13 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
   // The invoice exists once the order is invoiced. Its email goes to the
   // customer's invoice email when one is set.
   if (order.status === "invoiced" && order.invoiceNumber) {
+    const invoiceMail = documentMailTexts({ kind: "legacyInvoice", number: order.invoiceNumber }, documentLanguage);
     sendButtons.push({
       label: "Skicka faktura",
       modalTitle: `Skicka faktura ${order.invoiceNumber} via e-post`,
       endpoint: `/api/v1/sales-orders/${order.id}/send-invoice-email`,
-      subject: `Faktura ${order.invoiceNumber}`,
-      message: `Hej!\n\nSe bifogad faktura ${order.invoiceNumber}.\n\nMed vänliga hälsningar`,
+      subject: invoiceMail.subject,
+      message: invoiceMail.body,
       to: customer?.invoiceEmail ?? undefined,
     });
   }
@@ -210,6 +218,7 @@ export async function SalesOrderCardPage({ id, route }: { id: string; route: Sal
         emails={emails}
         defaultTo={defaultTo}
         sendButtons={sendButtons}
+        documentLanguage={documentLanguage}
         configurationPrices={
           rows.some((r) => r.configuration !== null)
             ? { defaultChecked: customer?.showConfigurationPrices ?? false }

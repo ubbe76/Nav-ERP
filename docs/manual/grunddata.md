@@ -8,12 +8,14 @@ Villkor för hur gods levereras, t.ex. `DAP · Levererat angiven plats`.
 
 Utöver kod och benämning har leveransvillkoren kolumnen **Förklaring** — en enkel beskrivning av vad villkoret innebär i praktiken (vem som betalar frakten och var risken går över). Texten redigeras i fältet **Förklaring (valfritt)** när du öppnar en post; ett tomt fält visas som `—` i listan. Förklaringen visas bara här i registret, inte på ordrar eller utskrifter.
 
-- **Förifyll Combiterms** lägger in de elva standardvillkoren ur Combiterms 2020 (EXW, FCA, FAS, FOB, CFR, CIF, CPT, CIP, DAP, DPU, DDP) med svenska benämningar och färdiga förklaringar. Knappen är säker att trycka flera gånger — befintliga poster rörs aldrig, och egna ändringar av kod/benämning/förklaring bevaras.
+Leveransvillkor har också **Benämning (engelska)** (kolumn och fält), som skrivs på dokument på engelska; är den tom används den svenska benämningen.
+
+- **Förifyll Combiterms** lägger in de elva standardvillkoren ur Combiterms 2020 (EXW, FCA, FAS, FOB, CFR, CIF, CPT, CIP, DAP, DPU, DDP) med svenska benämningar och färdiga förklaringar samt engelska benämningar (t.ex. *Delivered at Place* för DAP). Knappen är säker att trycka flera gånger — befintliga poster rörs aldrig, och egna ändringar av kod/benämning/förklaring bevaras.
 - **+ Ny leveransvillkor** för egna villkor.
 
 ## Betalningsvillkor
 
-T.ex. `30 · 30 dagar netto`. Skapa med **+ Ny betalningsvillkor**.
+T.ex. `30 · 30 dagar netto`. Skapa med **+ Ny betalningsvillkor**. Fältet **Benämning (engelska)** är texten på dokument som skrivs på engelska (t.ex. *30 days net*); tomt = den svenska benämningen.
 
 ## Speditörer
 
@@ -22,6 +24,8 @@ Fraktbolag, t.ex. `DHL · DHL Freight`. Skapa med **+ Ny speditör**.
 ## Enheter
 
 Måttenheter, t.ex. `st · Styck` och `kg · Kilogram`. Enheterna används som artiklarnas **grundenhet** och som **alternativa enheter** med omräkningsfaktor på artikelkortet (se kapitlet Artiklar).
+
+Enheter har också **Kod (engelska)** (kolumn och fält) — enheten som den skrivs på dokument på engelska; tomt = koden används som den är. Standardenheterna får sina engelska koder automatiskt: st blir pcs, tim blir h och förp blir pkg (kg, g, m, m2, m3 och l behåller sin kod).
 
 - **Lägg till standardenheter** lägger in de vanligaste enheterna (st, kg, g, m, m2, m3, l, tim, förp). Knappen är säker att trycka flera gånger — befintliga poster rörs aldrig.
 - Borttagning med **Flytta och ta bort** är till för att slå ihop dubbletter, t.ex. `ST` och `st`. Omräkningsfaktorn på varje rad rörs inte — bara enhetsreferensen byts — så flytten förutsätter att posterna faktiskt är samma enhet; att slå ihop olika enheter (t.ex. kg → g) gör att antal på befintliga rader läses fel.

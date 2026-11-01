@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
 import { InquiryDetail } from "../../../../components/purchase/InquiryDetail";
 import { MailSection } from "../../../../components/mail/MailSection";
+import { documentMailTexts } from "../../../../lib/documentMailTexts";
+import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { apiGet } from "../../../../lib/api";
 import { countDrawings, getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
 import type { Inquiry, InquiryRow, RegisterEntry, Supplier } from "../../../../lib/types";
@@ -26,6 +28,10 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
   ]);
   const defaultTo = await getDefaultRecipient("suppliers", inquiry.supplierId, supplier?.email ?? null, cookieHeader);
   const drawingCount = await countDrawings(rows.map((r) => r.articleId), cookieHeader);
+  const inquiryMail = documentMailTexts(
+    { kind: "inquiry", number: inquiry.inquiryNumber },
+    documentLanguageOf(inquiry.supplierLanguage)
+  );
   const mailable = inquiry.status !== "ordered" && inquiry.status !== "cancelled";
 
   return (
@@ -41,6 +47,7 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
       <InquiryDetail inquiry={inquiry} rows={rows} registers={{ deliveryTerms, paymentTerms, carriers }} />
 
       <MailSection
+        documentLanguage={documentLanguageOf(inquiry.supplierLanguage)}
         emails={emails}
         defaultTo={defaultTo}
         sendButtons={
@@ -50,8 +57,8 @@ export default async function InquiryDetailPage(props: { params: Promise<{ id: s
                   label: "Skicka via e-post",
                   modalTitle: `Skicka ${inquiry.inquiryNumber} via e-post`,
                   endpoint: `/api/v1/inquiries/${inquiry.id}/send-email`,
-                  subject: `Förfrågan ${inquiry.inquiryNumber}`,
-                  message: `Hej!\n\nSe bifogad förfrågan ${inquiry.inquiryNumber}.\n\nMed vänliga hälsningar`,
+                  subject: inquiryMail.subject,
+                  message: inquiryMail.body,
                 },
               ]
             : []

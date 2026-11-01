@@ -8,6 +8,7 @@ import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
+import type { DocumentLanguage } from "../../lib/documentLanguage";
 import { EMAIL_DOCUMENT_TYPE_LABELS, EMAIL_STATUS_PILL, type EmailLogEntry } from "../../lib/types";
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
@@ -48,6 +49,7 @@ export function MailSection({
   showDocumentColumn = false,
   drawingCount = 0,
   configurationPrices,
+  documentLanguage,
 }: {
   emails: EmailLogEntry[];
   defaultTo: string;
@@ -60,6 +62,9 @@ export function MailSection({
   // Set when the order has configured rows: shows Visa tilläggspriser (prefilled
   // from the customer's setting), which steers the PDF links and the send dialog.
   configurationPrices?: { defaultChecked: boolean };
+  // Dokument på engelska (#7): "en" shows a note that the PDFs and mail
+  // defaults are English; Swedish shows nothing.
+  documentLanguage?: DocumentLanguage;
 }) {
   const router = useRouter();
   const [active, setActive] = useState<SendButtonConfig | null>(null);
@@ -77,6 +82,11 @@ export function MailSection({
             {btn.hint && <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{btn.hint}</span>}
           </span>
         ))}
+        {documentLanguage === "en" && (
+          <span style={{ alignSelf: "center", fontSize: 13, color: "var(--color-text-secondary)" }}>
+            Dokument på engelska
+          </span>
+        )}
         {pdfLinks.map((link) => {
           const href = link.configurationPrices
             ? `${link.href}${link.href.includes("?") ? "&" : "?"}showConfigurationPrices=${showPrices}`
