@@ -1,7 +1,7 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { inArray, sql } from "drizzle-orm";
 import { buildCsv, createArticleSchema, updateArticleSchema } from "@navet/shared";
-import { articles, db } from "@navet/db";
+import { articles, db, systemSettings } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -396,5 +396,80 @@ describe("articles.manufacturing_lead_time_days", () => {
     // The field wins: 2 days regardless of quantity.
     await articleService.updateArticle(m.id, { manufacturingLeadTimeDays: 2 });
     expect(await planningService.suggestManufacturingDueDate(m.id, { quantity: 6 })).toMatchObject({ dueDate: "2030-03-08", late: false });
+  });
+});
+
+describe("Standardledtid and Standardkötid (system settings)", () => {
+  const KEYS = ["planning_default_lead_time_days", "planning_queue_time_days"];
+  // system_settings is not truncated with the rest — remove the pair so the
+  // other describes keep measuring with 0/0.
+  afterEach(async () => {
+    await db.delete(systemSettings).where(inArray(systemSettings.key, KEYS));
+  });
+
+  // Two operations on one resource, each `minutesPerUnit` per unit.
+  async function twoOperationRoutingOf(articleId: string, minutesPerUnit: number) {
+    const wc = await mfgService.createWorkCenter({ code: String(workCenterNo++), name: "Svets", hoursPerDay: 8, active: true });
+    await mfgService.createRoutingOperation(articleId, { sequenceNo: 10, workCenterId: wc.id, setupTime: 0, runTimePerUnit: minutesPerUnit });
+    await mfgService.createRoutingOperation(articleId, { sequenceNo: 20, workCenterId: wc.id, setupTime: 0, runTimePerUnit: minutesPerUnit });
+  }
+
+  it("the Standardkötid between a TO's operations moves its start, the material's need date and the component's proposal earlier", async () => {
+    const user = await makeUser();
+    const parent = await makeArticle({ articleNumber: "TP-Q", type: "manufactured" });
+    const part = await makeArticle({ articleNumber: "TP-QC" });
+    await articleService.addBomComponent(parent.id, { componentArticleId: part.id, quantity: 1 });
+    await twoOperationRoutingOf(parent.id, 240); // 2 units ⇒ 1 day per operation
+    await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 2, dueDate: "2030-03-08" }, user.id);
+
+    // 0 queue time: 2 days before Fri 03-08 ⇒ Wed 03-06.
+    expect((await planningService.getArticleOverview(part.id)).rows.map((r) => [r.kind, r.date])).toEqual([["mo_material", "2030-03-06"]]);
+    let row = (await list({ search: "TP-QC" })).find((r) => r.articleId === part.id)!;
+    expect(row.proposals.map((p) => [p.needDate, p.latestDate])).toEqual([["2030-03-06", "2030-03-05"]]);
+
+    // 1.5 days between the two operations: 2 + 1.5 = 3.5 ⇒ 4 days ⇒ Mon 03-04.
+    await systemService.updateSettings({ planningQueueTimeDays: 1.5 });
+    expect((await planningService.getArticleOverview(part.id)).rows.map((r) => [r.kind, r.date])).toEqual([["mo_material", "2030-03-04"]]);
+    row = (await list({ search: "TP-QC" })).find((r) => r.articleId === part.id)!;
+    expect(row.proposals.map((p) => [p.needDate, p.latestDate, p.late])).toEqual([["2030-03-04", "2030-03-01", true]]);
+  });
+
+  it("the Standardledtid applies to a manufactured article without a routing: the proposal's latest start, a TO's start and the färdigdatum floor", async () => {
+    const user = await makeUser();
+    const unrouted = await makeArticle({ articleNumber: "TP-U", type: "manufactured" });
+    const part = await makeArticle({ articleNumber: "TP-UC" });
+    await articleService.addBomComponent(unrouted.id, { componentArticleId: part.id, quantity: 1 });
+    const routed = await makeArticle({ articleNumber: "TP-R", type: "manufactured" });
+    await routingOf(routed.id, 480); // one day per unit — a routing is never replaced by the default
+    // 3 ordered, 1 on an open TO ⇒ a proposal for 2.
+    await koFor(unrouted.id, 3, user.id, "2030-03-18"); // Monday
+    await koFor(routed.id, 1, user.id, "2030-03-18");
+    await mfgService.createManufacturingOrder({ articleId: unrouted.id, quantity: 1, dueDate: "2030-03-08" }, user.id);
+
+    // Without the setting: lead time 0 — latest start is the working day before the need.
+    let rows = await list({ search: "TP-" });
+    expect(rows.find((r) => r.articleId === unrouted.id)).toMatchObject({ leadDays: 0 });
+    expect(rows.find((r) => r.articleId === unrouted.id)!.proposals.map((p) => p.latestDate)).toEqual(["2030-03-15"]);
+    expect((await planningService.getArticleOverview(part.id)).rows.map((r) => r.date)).toEqual(["2030-03-08"]);
+
+    await systemService.updateSettings({ planningDefaultLeadTimeDays: 3 });
+    rows = await list({ search: "TP-" });
+    // Unrouted: 3 days ⇒ Fri 03-15 − 3 working days = Tue 03-12.
+    expect(rows.find((r) => r.articleId === unrouted.id)).toMatchObject({ leadDays: 3 });
+    expect(rows.find((r) => r.articleId === unrouted.id)!.proposals.map((p) => p.latestDate)).toEqual(["2030-03-12"]);
+    // Routed: still the routing (1 unit ⇒ 1 day ⇒ Thu 03-14).
+    expect(rows.find((r) => r.articleId === routed.id)).toMatchObject({ leadDays: 1 });
+    expect(rows.find((r) => r.articleId === routed.id)!.proposals.map((p) => p.latestDate)).toEqual(["2030-03-14"]);
+    // The released TO has no operations (no routing) ⇒ the default: Fri 03-08 − 3 = Tue 03-05.
+    expect((await planningService.getArticleOverview(part.id)).rows.map((r) => r.date)).toEqual(["2030-03-05"]);
+    // The färdigdatum floor is today + 3 working days (Thu 03-07): a need on
+    // 03-06 cannot be met.
+    await koFor(unrouted.id, 5, user.id, "2030-03-06");
+    expect(await planningService.suggestManufacturingDueDate(unrouted.id, { quantity: 5 })).toMatchObject({ dueDate: "2030-03-07", late: true });
+
+    // The field still wins over the default.
+    await articleService.updateArticle(unrouted.id, { manufacturingLeadTimeDays: 1 });
+    rows = await list({ search: "TP-U" });
+    expect(rows.find((r) => r.articleId === unrouted.id)).toMatchObject({ leadDays: 1 });
   });
 });

@@ -4,6 +4,7 @@ import { auditLog, companyInfo, db, numberSeries, systemSettings } from "@navet/
 import { updateSystemSettingsSchema } from "@navet/shared";
 import { createSystemRepository } from "../src/modules/system/repository/system.repository.js";
 import { createSystemService, NumberSeriesNotFoundError } from "../src/modules/system/service/system.service.js";
+import { decodeLeadTimeDefaults, decodeLeadTimeSettingDays } from "../src/modules/system/service/plan-settings.js";
 import { getNextOrderNumber } from "../src/modules/system/service/number-series.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -221,6 +222,43 @@ describe("system service — settings", () => {
     }
     expect(updateSystemSettingsSchema.safeParse({ planningLongOperationWeeks: -1 }).success).toBe(false);
     expect(updateSystemSettingsSchema.safeParse({ planningLongOperationWeeks: 105 }).success).toBe(false);
+  });
+
+  it("defaults Standardledtid and Standardkötid to 0, round-trips one decimal, and junk or out-of-range decodes to the default", async () => {
+    const keys = ["planning_default_lead_time_days", "planning_queue_time_days"];
+    await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    try {
+      expect(await systemService.getSettings()).toMatchObject({ planningDefaultLeadTimeDays: 0, planningQueueTimeDays: 0 });
+      expect(await systemService.updateSettings({ planningDefaultLeadTimeDays: 2.5, planningQueueTimeDays: 0.5 })).toMatchObject({
+        planningDefaultLeadTimeDays: 2.5,
+        planningQueueTimeDays: 0.5,
+      });
+      expect(await systemService.updateSettings({ planningDefaultLeadTimeDays: 0 })).toMatchObject({
+        planningDefaultLeadTimeDays: 0,
+        planningQueueTimeDays: 0.5,
+      });
+      for (const [key, value] of [
+        ["planning_default_lead_time_days", "garbage"],
+        ["planning_queue_time_days", "61"],
+      ] as const) {
+        await db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+      }
+      expect(await systemService.getSettings()).toMatchObject({ planningDefaultLeadTimeDays: 0, planningQueueTimeDays: 0 });
+    } finally {
+      await db.delete(systemSettings).where(inArray(systemSettings.key, keys));
+    }
+    // The pure decode: blank ⇒ default, negative ⇒ default, more than one
+    // decimal is trimmed to one.
+    expect(decodeLeadTimeSettingDays("", 0)).toBe(0);
+    expect(decodeLeadTimeSettingDays("-1", 0)).toBe(0);
+    expect(decodeLeadTimeSettingDays(" 1.5 ", 0)).toBe(1.5);
+    expect(decodeLeadTimeSettingDays("1.25", 0)).toBe(1.3);
+    expect(decodeLeadTimeDefaults(() => null)).toEqual({ defaultLeadDays: 0, queueDays: 0 });
+    // The API's 400: 0–60 with at most one decimal.
+    expect(updateSystemSettingsSchema.safeParse({ planningDefaultLeadTimeDays: -0.1 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ planningQueueTimeDays: 60.5 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ planningQueueTimeDays: 1.25 }).success).toBe(false);
+    expect(updateSystemSettingsSchema.safeParse({ planningDefaultLeadTimeDays: 60, planningQueueTimeDays: 0.3 }).success).toBe(true);
   });
 
   it("defaults the delivery-day settings and round-trips them; junk decodes to the defaults", async () => {

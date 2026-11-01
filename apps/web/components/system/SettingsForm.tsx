@@ -44,6 +44,11 @@ export function SettingsForm({
   const [palletCardCode, setPalletCardCode] = useState(settings.palletCardCode);
   const [longOperationWeeks, setLongOperationWeeks] = useState(String(settings.planningLongOperationWeeks));
   const [longOperationSaved, setLongOperationSaved] = useState(false);
+  // Standardledtid/Standardkötid för tillverkning (working days, one decimal).
+  const [defaultLeadTimeDays, setDefaultLeadTimeDays] = useState(String(settings.planningDefaultLeadTimeDays));
+  const [defaultLeadTimeSaved, setDefaultLeadTimeSaved] = useState(false);
+  const [queueTimeDays, setQueueTimeDays] = useState(String(settings.planningQueueTimeDays));
+  const [queueTimeSaved, setQueueTimeSaved] = useState(false);
   const [quoteValidityDays, setQuoteValidityDays] = useState(String(settings.quoteValidityDays));
   const [quoteValiditySaved, setQuoteValiditySaved] = useState(false);
   const [setupArticle, setSetupArticle] = useState<ArticlePickerValue | null>(setupChargeArticle);
@@ -184,6 +189,44 @@ export function SettingsForm({
     if (updated) {
       setLongOperationWeeks(String(updated.planningLongOperationWeeks));
       setLongOperationSaved(true);
+    }
+  }
+
+  // Both lead-time settings share the server's rule: 0–60 working days with
+  // at most one decimal (the resources' Kötid (dagar) has the same precision).
+  function parseLeadTimeDays(raw: string, badInput: boolean): number | null {
+    const trimmed = raw.trim().replace(",", ".");
+    const days = trimmed === "" ? NaN : Number(trimmed);
+    if (badInput || !Number.isFinite(days) || days < 0 || days > 60) return null;
+    if (Math.round(days * 10) !== days * 10) return null;
+    return days;
+  }
+
+  async function saveDefaultLeadTimeDays(badInput: boolean) {
+    setDefaultLeadTimeSaved(false);
+    const days = parseLeadTimeDays(defaultLeadTimeDays, badInput);
+    if (days === null) {
+      setError("Standardledtid måste vara 0–60 dagar med högst en decimal (0 = ingen standardledtid)");
+      return;
+    }
+    const updated = await save({ planningDefaultLeadTimeDays: days });
+    if (updated) {
+      setDefaultLeadTimeDays(String(updated.planningDefaultLeadTimeDays));
+      setDefaultLeadTimeSaved(true);
+    }
+  }
+
+  async function saveQueueTimeDays(badInput: boolean) {
+    setQueueTimeSaved(false);
+    const days = parseLeadTimeDays(queueTimeDays, badInput);
+    if (days === null) {
+      setError("Kötid mellan operationer måste vara 0–60 dagar med högst en decimal (0 = ingen kötid)");
+      return;
+    }
+    const updated = await save({ planningQueueTimeDays: days });
+    if (updated) {
+      setQueueTimeDays(String(updated.planningQueueTimeDays));
+      setQueueTimeSaved(true);
     }
   }
 
@@ -542,6 +585,62 @@ export function SettingsForm({
             onBlur={(e) => saveLongOperationWeeks(e.currentTarget.validity.badInput)}
           />
           {longOperationSaved && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Standardledtid (dagar)</div>
+          <div className={styles.description}>
+            Tillverkningens ledtid i arbetsdagar för en tillverkad artikel som varken har <strong>Ledtid (dagar)</strong>{" "}
+            ifyllt eller någon rutt. Har artikeln en rutt räknas ledtiden ur operationerna. Styr senaste startdatum i
+            behovsberäkningen, tillverkningsorderns startdatum och det föreslagna färdigdatumet. 0 = ingen standardledtid.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="0"
+            max={60}
+            step="any"
+            aria-label="Standardledtid (dagar)"
+            className={styles.numberInput}
+            value={defaultLeadTimeDays}
+            disabled={pending}
+            onChange={(e) => {
+              setDefaultLeadTimeSaved(false);
+              setDefaultLeadTimeDays(e.target.value);
+            }}
+            onBlur={(e) => saveDefaultLeadTimeDays(e.currentTarget.validity.badInput)}
+          />
+          {defaultLeadTimeSaved && <span className={styles.saved}>Sparat</span>}
+        </div>
+      </div>
+      <div className={styles.row}>
+        <div className={styles.texts}>
+          <div className={styles.label}>Kötid mellan operationer (dagar)</div>
+          <div className={styles.description}>
+            Arbetsdagar som läggs till mellan operationerna — inte före den första eller efter den sista — när ledtiden
+            räknas ur rutten. Påverkar bara ledtiden och startdatumet, inte Planera eller Leveranstidskontrollen. 0 =
+            ingen kötid.
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="number"
+            min="0"
+            max={60}
+            step="any"
+            aria-label="Kötid mellan operationer (dagar)"
+            className={styles.numberInput}
+            value={queueTimeDays}
+            disabled={pending}
+            onChange={(e) => {
+              setQueueTimeSaved(false);
+              setQueueTimeDays(e.target.value);
+            }}
+            onBlur={(e) => saveQueueTimeDays(e.currentTarget.validity.badInput)}
+          />
+          {queueTimeSaved && <span className={styles.saved}>Sparat</span>}
         </div>
       </div>
       <div className={styles.row}>

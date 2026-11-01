@@ -153,6 +153,13 @@ const systemSettingsFieldsSchema = z.object({
     // remaining time alone fills its resource for more than this many normal
     // weeks. Decimals allowed; 0 = no warning; default 4 when unset.
     planningLongOperationWeeks: z.number().min(0).max(104).optional(),
+    // Standardledtid/Standardkötid för tillverkning (working days): the lead
+    // time of a manufactured article with neither Ledtid (dagar) nor a
+    // routing, and the waiting time between consecutive operations when the
+    // lead time comes from them. At most one decimal like a resource's Kötid
+    // (dagar); 0 = off (the default when unset).
+    planningDefaultLeadTimeDays: z.number().min(0).max(60).multipleOf(0.1).optional(),
+    planningQueueTimeDays: z.number().min(0).max(60).multipleOf(0.1).optional(),
     // Fasta leveransdagar: the default mode and transit days for suppliers
     // and customers without their own (delivery-days.ts decodes the keys).
     supplierDeliveryDayMode: deliveryDayModeSchema.optional(),

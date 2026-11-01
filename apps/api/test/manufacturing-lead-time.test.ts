@@ -65,6 +65,66 @@ describe("manufacturingLeadDays", () => {
     expect(manufacturingLeadDays(null, [])).toBe(0);
   });
 
+  describe("Standardledtid and Standardkötid (system settings)", () => {
+    const defaults = { defaultLeadDays: 3, queueDays: 1.5 };
+
+    it("the field still wins over both", () => {
+      expect(manufacturingLeadDays(2, [], defaults)).toBe(2);
+      expect(manufacturingLeadDays(0, [{ minutes: 480, resource: own(8) }], defaults)).toBe(0);
+    });
+
+    it("the queue time is waited BETWEEN operations, and the sum is rounded up once", () => {
+      // Two operations of 1 day each + ONE queue of 1.5 ⇒ 3.5 ⇒ 4 (not 2 + 2 queues).
+      const two = [{ minutes: 480, resource: own(8) }, { minutes: 480, resource: own(8) }];
+      expect(manufacturingLeadDays(null, two, defaults)).toBe(4);
+      // Three half-day operations + two queues: 1.5 + 3 = 4.5 ⇒ 5 — per-operation
+      // rounding would give 2 + 2 + 2 = 6.
+      const three = [{ minutes: 240, resource: own(8) }, { minutes: 240, resource: own(8) }, { minutes: 240, resource: own(8) }];
+      expect(leadDaysFromWork(three, 1.5)).toBe(5);
+      // A lego operation in the chain queues like any other.
+      expect(manufacturingLeadDays(null, [{ minutes: 480, resource: own(8) }, { minutes: 0, resource: lego(2, 0) }], defaults)).toBe(5);
+    });
+
+    it("a single operation gets no queue time", () => {
+      expect(manufacturingLeadDays(null, [{ minutes: 480, resource: own(8) }], defaults)).toBe(1);
+      expect(leadDaysFromWork([{ minutes: 481, resource: own(8) }], 10)).toBe(2);
+    });
+
+    it("no operations at all ⇒ the Standardledtid, rounded up to whole days like the field", () => {
+      expect(manufacturingLeadDays(null, [], defaults)).toBe(3);
+      expect(manufacturingLeadDays(undefined, [], { defaultLeadDays: 2.5, queueDays: 0 })).toBe(3);
+      expect(manufacturingLeadDays(null, [], { defaultLeadDays: 0, queueDays: 5 })).toBe(0);
+    });
+
+    it("an existing TO whose operations are all done needs 0 — not the Standardledtid", () => {
+      const allDone = [
+        { minutes: 0, resource: own(8), done: true },
+        { minutes: 0, resource: own(8), done: true },
+      ];
+      expect(manufacturingLeadDays(null, allDone, defaults)).toBe(0);
+      // A done lego operation no longer counts the supplier's lead time either.
+      expect(manufacturingLeadDays(null, [{ minutes: 0, resource: lego(5, 2), done: true }], defaults)).toBe(0);
+    });
+
+    it("a partly done TO queues only between the REMAINING operations", () => {
+      // Done, remaining, remaining: one queue (not two) ⇒ 1 + 1 + 1.5 = 3.5 ⇒ 4.
+      const work = [
+        { minutes: 0, resource: own(8), done: true },
+        { minutes: 480, resource: own(8) },
+        { minutes: 480, resource: own(8) },
+      ];
+      expect(manufacturingLeadDays(null, work, defaults)).toBe(4);
+      // One remaining ⇒ no queue at all.
+      expect(manufacturingLeadDays(null, [work[0]!, work[1]!], defaults)).toBe(1);
+    });
+
+    it("the defaults are optional and 0 by default — today's behaviour", () => {
+      const two = [{ minutes: 480, resource: own(8) }, { minutes: 480, resource: own(8) }];
+      expect(manufacturingLeadDays(null, two)).toBe(2);
+      expect(manufacturingLeadDays(null, two, { defaultLeadDays: 9, queueDays: 0 })).toBe(2);
+    });
+  });
+
   it("routingLeadWork uses setup + run × quantity for a proposal or new TO", () => {
     const resources = new Map([["wc-1", own(8)], ["wc-lego", lego(4, 1)]]);
     const work = routingLeadWork(

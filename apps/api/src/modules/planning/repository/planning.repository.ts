@@ -46,6 +46,7 @@ import type {
   DatingRoutingOperation,
   DatingWorkCenter,
 } from "../service/requirements-dating.js";
+import type { LeadTimeDefaults } from "../service/manufacturing-lead-time.js";
 import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { CapacityInput, PlannedWeek } from "../service/capacity-calc.js";
@@ -53,7 +54,7 @@ import type { OperationPlan } from "../service/production-plan.js";
 import { roundPlanWeeks } from "../service/capacity-book.js";
 import type { ArticleOverviewLoad } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
-import { loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
+import { loadLeadTimeDefaults, loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "./effective-dates.js";
 
 export interface PlanningArticleInfo {
@@ -74,6 +75,9 @@ export interface MoDatingInputs {
   // figure the behovsberäkning dates with) — a TO without operations is
   // timed on the article's routing for it. Empty without an order filter.
   orderQuantities: Map<string, number>;
+  // Standardledtid/Standardkötid (system settings), loaded with the rest so
+  // every reader of one run applies the same pair.
+  defaults: LeadTimeDefaults;
 }
 
 // loadRequirementsInput's result: the pure calc's input plus what the
@@ -271,7 +275,7 @@ export function createPlanningRepository(db: Db) {
     if (filter.articleIds) articleConditions.push(inArray(articles.id, filter.articleIds));
     const noOrders = filter.orderIds !== undefined && filter.orderIds.length === 0;
     const noArticles = filter.articleIds !== undefined && filter.articleIds.length === 0;
-    const [operationRows, routingRows, workCenterRows, articleRows, orderRows] = await Promise.all([
+    const [operationRows, routingRows, workCenterRows, articleRows, orderRows, defaults] = await Promise.all([
       noOrders
         ? Promise.resolve([])
         : dbc
@@ -323,6 +327,7 @@ export function createPlanningRepository(db: Db) {
             .select({ manufacturingOrderId: manufacturingOrders.id, quantity: moRemainingQuantity })
             .from(manufacturingOrders)
             .where(inArray(manufacturingOrders.id, filter.orderIds)),
+      loadLeadTimeDefaults(dbc),
     ]);
     const num = (v: string | null) => (v === null ? null : Number(v));
     return {
@@ -345,6 +350,7 @@ export function createPlanningRepository(db: Db) {
       })),
       articleLeadTimes: new Map(articleRows.map((r) => [r.articleId, r.manufacturingLeadTimeDays])),
       orderQuantities: new Map(orderRows.map((r) => [r.manufacturingOrderId, Number(r.quantity)])),
+      defaults,
     };
   }
 

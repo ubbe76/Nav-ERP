@@ -59,6 +59,34 @@ describe("buildLeadTimeContext", () => {
   });
 });
 
+describe("buildLeadTimeContext with Standardledtid and Standardkötid", () => {
+  const ctx = buildLeadTimeContext({
+    articleLeadTimes: new Map([["field", 2]]),
+    routings: [
+      { articleId: "two", workCenterId: "w1", setupTime: 0, runTimePerUnit: 480 },
+      { articleId: "two", workCenterId: "w1", setupTime: 0, runTimePerUnit: 480 },
+      { articleId: "one", workCenterId: "w1", setupTime: 0, runTimePerUnit: 480 },
+    ],
+    workCenters: [own],
+    defaults: { defaultLeadDays: 4, queueDays: 1 },
+  });
+
+  it("the field wins; a routing gets the queue time between its operations; one operation none; no routing ⇒ Standardledtid", () => {
+    expect(ctx.leadDaysFor("field", 50)).toBe(2);
+    // 1 + 1 days + one queue ⇒ 3.
+    expect(ctx.leadDaysFor("two", 1)).toBe(3);
+    expect(ctx.leadDaysFor("one", 1)).toBe(1);
+    expect(ctx.leadDaysFor("unrouted", 1)).toBe(4);
+    expect(ctx.defaults).toEqual({ defaultLeadDays: 4, queueDays: 1 });
+  });
+
+  it("without the pair the context behaves as before (0/0)", () => {
+    const plain = buildLeadTimeContext({ articleLeadTimes: new Map(), routings: [], workCenters: [own] });
+    expect(plain.defaults).toEqual({ defaultLeadDays: 0, queueDays: 0 });
+    expect(plain.leadDaysFor("unrouted", 1)).toBe(0);
+  });
+});
+
 describe("computeMoStartDates", () => {
   const ctx = buildLeadTimeContext({
     articleLeadTimes: new Map([["f", 3]]),
@@ -142,6 +170,54 @@ describe("computeMoStartDates", () => {
   });
 });
 
+describe("computeMoStartDates with Standardledtid and Standardkötid", () => {
+  const ctx = buildLeadTimeContext({
+    articleLeadTimes: new Map([["f", 1]]),
+    routings: [{ articleId: "r", workCenterId: "w1", setupTime: 0, runTimePerUnit: 480 }],
+    workCenters: [own],
+    defaults: { defaultLeadDays: 3, queueDays: 1 },
+  });
+  const due = "2030-03-15"; // Friday
+
+  it("a TO with operations: remaining time + queue between the REMAINING operations; all done ⇒ 0; no operations ⇒ routing or Standardledtid", () => {
+    const starts = computeMoStartDates({
+      orders: [
+        { manufacturingOrderId: "two", articleId: "r", quantity: 1, dueDate: due },
+        { manufacturingOrderId: "partly", articleId: "r", quantity: 1, dueDate: due },
+        { manufacturingOrderId: "alldone", articleId: "r", quantity: 1, dueDate: due },
+        { manufacturingOrderId: "routed", articleId: "r", quantity: 2, dueDate: due },
+        { manufacturingOrderId: "unrouted", articleId: "x", quantity: 2, dueDate: due },
+        { manufacturingOrderId: "field", articleId: "f", quantity: 2, dueDate: due },
+      ],
+      operations: [
+        // Two pending operations of 1 day each + one queue ⇒ 3 days ⇒ Tue 03-12.
+        op({ manufacturingOrderId: "two", orderQuantity: 1 }),
+        op({ manufacturingOrderId: "two", orderQuantity: 1 }),
+        // One done, two pending ⇒ 2 days + ONE queue ⇒ 3 ⇒ Tue 03-12 (two
+        // queues would give Mon 03-11).
+        op({ manufacturingOrderId: "partly", orderQuantity: 1, operationStatus: "done" }),
+        op({ manufacturingOrderId: "partly", orderQuantity: 1 }),
+        op({ manufacturingOrderId: "partly", orderQuantity: 1 }),
+        // Every operation done ⇒ 0 days: the due date itself, never the Standardledtid.
+        op({ manufacturingOrderId: "alldone", orderQuantity: 1, operationStatus: "done" }),
+        op({ manufacturingOrderId: "alldone", orderQuantity: 1, operationStatus: "done" }),
+      ],
+      articleLeadTimes: new Map([["f", 1]]),
+      context: ctx,
+      offDays: noHolidays,
+    });
+    expect(starts.get("two")).toBe("2030-03-12");
+    expect(starts.get("partly")).toBe("2030-03-12");
+    expect(starts.get("alldone")).toBe(due);
+    // No operations, article routed: 2 units × 1 day, one operation ⇒ no queue ⇒ Wed 03-13.
+    expect(starts.get("routed")).toBe("2030-03-13");
+    // No operations, no routing ⇒ Standardledtid 3 ⇒ Tue 03-12.
+    expect(starts.get("unrouted")).toBe("2030-03-12");
+    // The field wins over the Standardledtid ⇒ Thu 03-14.
+    expect(starts.get("field")).toBe("2030-03-14");
+  });
+});
+
 describe("configuredLeadDays", () => {
   const ctx = buildLeadTimeContext({ articleLeadTimes: new Map(), routings: [], workCenters: [own, lego] });
 
@@ -154,5 +230,23 @@ describe("configuredLeadDays", () => {
     // 30 + 90 × 10 = 930 / 480 = 1.9375 + 4 ⇒ 5.9375 ⇒ 6.
     expect(configuredLeadDays(null, ops, 10, ctx)).toBe(6);
     expect(configuredLeadDays(undefined, [], 10, ctx)).toBe(0);
+  });
+
+  it("applies the Standardkötid between the derived operations and the Standardledtid without any", () => {
+    const withDefaults = buildLeadTimeContext({
+      articleLeadTimes: new Map(),
+      routings: [],
+      workCenters: [own, lego],
+      defaults: { defaultLeadDays: 2, queueDays: 1 },
+    });
+    const ops = [
+      { workCenterId: "w1", setupTime: 0, runTimePerUnit: 48 },
+      { workCenterId: "w1", setupTime: 0, runTimePerUnit: 48 },
+    ];
+    // 1 + 1 days + one queue ⇒ 3; the template's field still wins; no
+    // operations ⇒ the Standardledtid.
+    expect(configuredLeadDays(null, ops, 10, withDefaults)).toBe(3);
+    expect(configuredLeadDays(1, ops, 10, withDefaults)).toBe(1);
+    expect(configuredLeadDays(null, [], 10, withDefaults)).toBe(2);
   });
 });

@@ -15,6 +15,7 @@ const emptyDating = {
   workCenters: [],
   articleLeadTimes: new Map<string, number | null>(),
   orderQuantities: new Map<string, number>(),
+  defaults: { defaultLeadDays: 0, queueDays: 0 },
 };
 
 function makeRepo(overrides: Partial<PlanningRepository> = {}): PlanningRepository {

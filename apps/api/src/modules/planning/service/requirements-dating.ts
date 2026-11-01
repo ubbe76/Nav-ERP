@@ -8,7 +8,9 @@
 import {
   manufacturingLeadDays,
   moStartDate,
+  NO_LEAD_TIME_DEFAULTS,
   routingLeadWork,
+  type LeadTimeDefaults,
   type LeadTimeResource,
   type LeadTimeWork,
 } from "./manufacturing-lead-time.js";
@@ -58,16 +60,23 @@ export type ArticleLeadTimeFields = ReadonlyMap<string, number | null>;
 export interface LeadTimeContext {
   resourceOf: (workCenterId: string) => LeadTimeResource | null;
   // The lead time of an unstarted routing for a quantity (a proposal, a new
-  // TO): the field when set, else the routing's work.
+  // TO): the field when set, else the routing's work plus the queue time
+  // between the operations, else (no routing) the Standardledtid.
   leadDaysFor: (articleId: string, quantity: number) => number;
   orderLeadTimeDaysOf: (workCenterId: string) => number | null;
+  // Standardledtid/Standardkötid as loaded for this run — every reader that
+  // measures work through this context applies the same pair.
+  defaults: LeadTimeDefaults;
 }
 
 export function buildLeadTimeContext(input: {
   articleLeadTimes: ArticleLeadTimeFields;
   routings: readonly DatingRoutingOperation[];
   workCenters: readonly DatingWorkCenter[];
+  // Optional for the unit tests' fakes ⇒ no default lead time, no queue time.
+  defaults?: LeadTimeDefaults;
 }): LeadTimeContext {
+  const defaults = input.defaults ?? NO_LEAD_TIME_DEFAULTS;
   const resources = new Map(input.workCenters.map((w) => [w.workCenterId, w]));
   const routingOf = new Map<string, DatingRoutingOperation[]>();
   for (const op of input.routings) {
@@ -81,9 +90,11 @@ export function buildLeadTimeContext(input: {
     leadDaysFor: (articleId, quantity) =>
       manufacturingLeadDays(
         input.articleLeadTimes.get(articleId),
-        routingLeadWork(routingOf.get(articleId) ?? [], quantity, resourceOf)
+        routingLeadWork(routingOf.get(articleId) ?? [], quantity, resourceOf),
+        defaults
       ),
     orderLeadTimeDaysOf: (workCenterId) => resources.get(workCenterId)?.orderLeadTimeDays ?? null,
+    defaults,
   };
 }
 
@@ -91,10 +102,13 @@ export function buildLeadTimeContext(input: {
 // time, or the plan's earliest week when it is binding (locked or reported
 // on) or later. A TO WITH operations
 // (released/in progress — or planned with a snapshot) is measured on its own
-// operations' remaining minutes, a partly reported TO needs less time; a TO
-// without any (an ordinary planned TO has none before release) on the
-// article's routing for its quantity. The field Ledtid (dagar) wins in both
-// cases, as everywhere.
+// operations' remaining minutes plus the Standardkötid between the ones not
+// yet done — a partly reported TO needs less time, one with every operation
+// done needs 0 (its done operations are passed as `done` work so the
+// Standardledtid never applies to it); a TO without any (an ordinary planned
+// TO has none before release) on the article's routing for its quantity,
+// and without a routing on the Standardledtid. The field Ledtid (dagar)
+// wins in both cases, as everywhere.
 export function computeMoStartDates(input: {
   orders: readonly DatingManufacturingOrder[];
   operations: readonly DatingMoOperation[];
@@ -116,8 +130,9 @@ export function computeMoStartDates(input: {
       const work: LeadTimeWork[] = ops.map((op) => ({
         minutes: remainingOperationMinutes(op),
         resource: input.context.resourceOf(op.workCenterId),
+        done: op.operationStatus === "done",
       }));
-      leadDays = manufacturingLeadDays(input.articleLeadTimes.get(order.articleId), work);
+      leadDays = manufacturingLeadDays(input.articleLeadTimes.get(order.articleId), work, input.context.defaults);
     } else {
       leadDays = input.context.leadDaysFor(order.articleId, order.quantity);
     }
@@ -142,12 +157,12 @@ export function computeMoStartDates(input: {
 // The lead time of a configured (beställningsvara) row's TO: the template's
 // field, else the derived structure's operations for the row quantity (the
 // same minute formula as a routing — the derived operations ARE the TO's
-// routing).
+// routing) with the queue time between them, else the Standardledtid.
 export function configuredLeadDays(
   templateLeadTimeDays: number | null | undefined,
   operations: readonly { workCenterId: string; setupTime: number; runTimePerUnit: number }[],
   quantity: number,
   context: LeadTimeContext
 ): number {
-  return manufacturingLeadDays(templateLeadTimeDays, routingLeadWork(operations, quantity, context.resourceOf));
+  return manufacturingLeadDays(templateLeadTimeDays, routingLeadWork(operations, quantity, context.resourceOf), context.defaults);
 }
