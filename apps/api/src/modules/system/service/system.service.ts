@@ -44,7 +44,13 @@ import {
   POSTING_LATE_FEE_KEY,
 } from "./posting-settings.js";
 import { isUniqueViolation } from "./db-errors.js";
-import { decodeLongOperationWeeks, PLANNING_LONG_OPERATION_WEEKS_KEY } from "./plan-settings.js";
+import {
+  decodeLeadTimeDefaults,
+  decodeLongOperationWeeks,
+  PLANNING_DEFAULT_LEAD_TIME_DAYS_KEY,
+  PLANNING_LONG_OPERATION_WEEKS_KEY,
+  PLANNING_QUEUE_TIME_DAYS_KEY,
+} from "./plan-settings.js";
 import {
   ALERT_DIGEST_TIME_KEY,
   ALERT_QUOTE_FOLLOWUP_DAYS_KEY,
@@ -299,6 +305,7 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
     const rows = await repo.getAllSettings();
     const byKey = new Map(rows.map((row) => [row.key, row.value] as const));
     const get = (key: string) => byKey.get(key) ?? null;
+    const leadTimeDefaults = decodeLeadTimeDefaults(get);
 
     return {
       allowMultipleStamps: get(ALLOW_MULTIPLE_STAMPS_KEY) === "true",
@@ -350,6 +357,10 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       palletCardAllowQuantityMismatch: get(PALLET_CARD_ALLOW_QUANTITY_MISMATCH_KEY) !== "false",
       // Orimligt mycket tid (Planera, ny TO) — plan-settings.ts owns the default.
       planningLongOperationWeeks: decodeLongOperationWeeks(get(PLANNING_LONG_OPERATION_WEEKS_KEY)),
+      // Standardledtid/Standardkötid för tillverkning — plan-settings.ts owns
+      // the keys, the defaults (0) and the decode.
+      planningDefaultLeadTimeDays: leadTimeDefaults.defaultLeadDays,
+      planningQueueTimeDays: leadTimeDefaults.queueDays,
       // Fasta leveransdagar — the default mode/transit days for partners
       // without their own; junk decodes to the default (delivery-days.ts).
       ...flattenDeliveryDefaults(decodeDeliveryDefaults(get)),
@@ -699,6 +710,12 @@ export function createSystemService(repo: SystemRepository, audit: AuditWriter =
       }
       if (input.planningLongOperationWeeks !== undefined) {
         await set(PLANNING_LONG_OPERATION_WEEKS_KEY, String(input.planningLongOperationWeeks));
+      }
+      if (input.planningDefaultLeadTimeDays !== undefined) {
+        await set(PLANNING_DEFAULT_LEAD_TIME_DAYS_KEY, String(input.planningDefaultLeadTimeDays));
+      }
+      if (input.planningQueueTimeDays !== undefined) {
+        await set(PLANNING_QUEUE_TIME_DAYS_KEY, String(input.planningQueueTimeDays));
       }
       if (input.supplierDeliveryDayMode !== undefined) {
         await set(DELIVERY_SETTING_KEYS.supplierMode, input.supplierDeliveryDayMode);

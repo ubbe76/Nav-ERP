@@ -29,6 +29,7 @@ import {
   configuredLeadDays,
   type LeadTimeContext,
 } from "./requirements-dating.js";
+import { NO_LEAD_TIME_DEFAULTS } from "./manufacturing-lead-time.js";
 import {
   buildScheduleLookups,
   mondayOf,
@@ -492,6 +493,7 @@ export function createPlanningService(
       workCenters: [],
       articleLeadTimes: new Map<string, number | null>(),
       orderQuantities: new Map<string, number>(),
+      defaults: NO_LEAD_TIME_DEFAULTS,
     };
     return { ...inputs, context: buildLeadTimeContext(inputs) };
   }

@@ -2766,6 +2766,12 @@ export interface SystemSettings {
   // Orimligt mycket tid (Planera, ny TO): weeks of a resource's capacity one
   // operation may fill before the planner warns; 0 = no warning.
   planningLongOperationWeeks: number;
+  // Standardledtid för tillverkning: working days for a manufactured article
+  // with neither Ledtid (dagar) nor a routing; 0 = none.
+  planningDefaultLeadTimeDays: number;
+  // Standardkötid: working days waited between consecutive operations when
+  // the lead time comes from the routing; 0 = none.
+  planningQueueTimeDays: number;
   supplierDeliveryDayMode: DeliveryDayMode;
   supplierTransitDays: number;
   customerDeliveryDayMode: DeliveryDayMode;
