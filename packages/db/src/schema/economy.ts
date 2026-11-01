@@ -214,6 +214,11 @@ export const vatCodes = pgTable("vat_codes", {
   code: varchar("code", { length: 10 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull(),
   invoiceText: varchar("invoice_text", { length: 255 }),
+  // Dokument på engelska (#7, migration 0175): Namn (engelska) and
+  // Fakturatext (engelska), seeded from the catalog's labelEn/invoiceTextEn;
+  // null = the Swedish text is printed on English documents too.
+  nameEn: varchar("name_en", { length: 100 }),
+  invoiceTextEn: varchar("invoice_text_en", { length: 255 }),
   active: boolean("active").notNull().default(true),
   revenueAccount: varchar("revenue_account", { length: 4 }),
   outputVatAccount: varchar("output_vat_account", { length: 4 }),

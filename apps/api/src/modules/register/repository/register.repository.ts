@@ -41,12 +41,16 @@ import type {
 import { isForeignKeyViolation } from "../../system/service/db-errors.js";
 import { InvalidReplacementError, RegisterEntryInUseError, type RegisterUsage } from "../service/register.errors.js";
 
-// The five terms-style registers share the exact same column shape, so one
-// table-parameterized accessor serves all of them. The casts below are safe
-// for the same reason — identical columns. quote_loss_reasons differs
-// (active, no description): it reuses the id/code/name machinery and gets
-// its own create/update below.
+// The five terms-style registers share the same code/name/description
+// shape, so one table-parameterized accessor serves all of them. The casts
+// below are safe for that reason. Two registers carry one English column
+// more (delivery/payment terms name_en, units code_en — Dokument på engelska
+// #7): the routes' schemas decide which register accepts which, and drizzle
+// drops a key the table has no column for, so the accessor stays shared.
+// quote_loss_reasons differs (active, no description): it reuses the
+// id/code/name machinery and gets its own create/update below.
 type RegisterTable = typeof deliveryTerms;
+type RegisterWriteInput = CreateRegisterEntryInput & { nameEn?: string | null; codeEn?: string | null };
 
 // One column somewhere in the schema that points at a register table — the
 // reference map below is the single place that knows who uses a register
@@ -186,12 +190,12 @@ export function createRegisterRepository(db: Db) {
         return row ?? null;
       },
 
-      async create(input: CreateRegisterEntryInput) {
+      async create(input: RegisterWriteInput) {
         const [row] = await db.insert(table).values(input).returning();
         return row!;
       },
 
-      async update(id: string, input: UpdateRegisterEntryInput) {
+      async update(id: string, input: RegisterWriteInput & UpdateRegisterEntryInput) {
         const [row] = await db.update(table).set(input).where(eq(table.id, id)).returning();
         return row ?? null;
       },
@@ -199,7 +203,7 @@ export function createRegisterRepository(db: Db) {
       // Seed helper: inserts the entry unless its code or name already
       // exists (any conflict skips — existing entries are never touched).
       // Returns true when a row was actually created.
-      async createIfMissing(input: CreateRegisterEntryInput) {
+      async createIfMissing(input: RegisterWriteInput) {
         const rows = await db.insert(table).values(input).onConflictDoNothing().returning();
         return rows.length > 0;
       },

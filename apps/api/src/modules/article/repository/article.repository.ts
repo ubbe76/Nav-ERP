@@ -127,6 +127,8 @@ export async function insertArticle(tx: Tx, input: InsertArticleInput): Promise<
     surfaceTreatment: input.surfaceTreatment ?? null,
     colour: input.colour ?? null,
     extraDescription: input.extraDescription ?? null,
+    nameEn: input.nameEn ?? null,
+    extraDescriptionEn: input.extraDescriptionEn ?? null,
     barcode: input.barcode ?? null,
   };
   const copyUnits = source !== null && source.unitId === input.unitId;

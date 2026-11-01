@@ -536,6 +536,7 @@ function detailFields(row: DetailRow) {
     customerNumber: row.customerNumber,
     supplierNumber: row.supplierNumber,
     counterpartyEmail: row.counterpartyEmail,
+    counterpartyLanguage: row.counterpartyLanguage,
   };
 }
 

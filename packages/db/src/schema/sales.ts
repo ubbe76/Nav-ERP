@@ -153,6 +153,12 @@ export const customers = pgTable("customers", {
   // takes it (and today's rate); the customer's särpriser (customer_prices)
   // are in it.
   currency: varchar("currency", { length: 3 }).notNull().default("SEK"),
+  // Språk (Dokument på engelska #7, migration 0175): the language of the
+  // customer's documents — quote/order confirmation/delivery note/pallet
+  // card follow it when printed; the invoice stamps it at Utfärda
+  // (invoices.language). DOCUMENT_LANGUAGES in @navet/shared; extend the
+  // CHECK when a language is added.
+  language: varchar("language", { length: 2 }).notNull().default("sv"),
   // Dröjsmålsränta (migration 0151): whether the customer's overdue SEK
   // invoices are offered in Räntefakturering (förval ja), the Avtalad
   // räntesats (the TOTAL rate in %, replacing referensränta + marginal; null
@@ -167,6 +173,7 @@ export const customers = pgTable("customers", {
   check("customers_delivery_weekdays", sql`${table.deliveryWeekdays} <@ '{1,2,3,4,5,6,7}'::smallint[]`),
   check("customers_transit_days", sql`${table.transitDays} between 0 and 60`),
   check("customers_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+  check("customers_language_valid", sql`${table.language} IN ('sv', 'en')`),
   check("customers_late_interest_rate", sql`${table.lateInterestRate} IS NULL OR ${table.lateInterestRate} >= 0`),
   // A percentage only with Tillåt — Tillåt inte and Systemets förval have none.
   check(
@@ -568,6 +575,11 @@ export const invoices = pgTable(
     // Privatperson snapshot: the PDF prints prices including VAT. Frozen at
     // issue like the fields above (false while draft — drafts never print).
     privatePerson: boolean("private_person").notNull().default(false),
+    // Språk (#7): the customer's document language stamped at issue — the
+    // archived PDF, the reprints and the reminders are written in it. A
+    // draft follows the customer's current language instead ('sv' here
+    // until issued; invoices issued before 0175 were written in Swedish).
+    language: varchar("language", { length: 2 }).notNull().default("sv"),
     paymentTermCode: varchar("payment_term_code", { length: 50 }),
     paymentTermName: varchar("payment_term_name", { length: 100 }),
     note: text("note"),
@@ -601,6 +613,7 @@ export const invoices = pgTable(
     ),
     check("invoices_rate_positive", sql`${table.exchangeRate} IS NULL OR ${table.exchangeRate} > 0`),
     check("invoices_manual_rate_set", sql`NOT ${table.exchangeRateManual} OR ${table.exchangeRate} IS NOT NULL`),
+    check("invoices_language_valid", sql`${table.language} IN ('sv', 'en')`),
   ]
 );
 

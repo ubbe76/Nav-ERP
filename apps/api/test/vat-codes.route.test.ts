@@ -443,3 +443,34 @@ describe("vat_codes seed ↔ catalog", () => {
     expect(VAT_CODE_CATALOG.map((entry) => entry.code)).toEqual([...VAT_CODES]);
   });
 });
+
+// Dokument på engelska (#7): Namn (engelska) / Fakturatext (engelska) on the
+// code, seeded from the catalog by migration 0175 and edited through PATCH.
+describe("GET/PATCH /vat-codes — English texts (#7)", () => {
+  it("lists the seeded English texts and the catalog defaults, PATCH edits and clears them", async () => {
+    const { user } = await setupEconomy();
+    const app = buildApp(user.id);
+    const list = await app.inject({ method: "GET", url: "/vat-codes" });
+    expect(list.statusCode).toBe(200);
+    const euv = list.json().find((row: { code: string }) => row.code === "EUV");
+    expect(euv).toMatchObject({
+      nameEn: "Goods to another EU country",
+      invoiceTextEn: "Intra-Community supply (Article 138 of the VAT Directive)",
+      labelEn: "Goods to another EU country",
+      defaultInvoiceTextEn: "Intra-Community supply (Article 138 of the VAT Directive)",
+    });
+    const mp25 = list.json().find((row: { code: string }) => row.code === "MP25");
+    expect(mp25).toMatchObject({ nameEn: "VAT 25%", invoiceTextEn: null, defaultInvoiceTextEn: null });
+
+    const id = await vatCodeId("EUV");
+    const edited = await app.inject({ method: "PATCH", url: `/vat-codes/${id}`, payload: { nameEn: "EU goods", invoiceTextEn: "Intra-EU supply" } });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().vatCode).toMatchObject({ code: "EUV", nameEn: "EU goods", invoiceTextEn: "Intra-EU supply", name: "Varor till annat EU-land" });
+
+    // "" clears both — the Swedish texts are then printed on English documents too.
+    const cleared = await app.inject({ method: "PATCH", url: `/vat-codes/${id}`, payload: { nameEn: "", invoiceTextEn: "" } });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json().vatCode).toMatchObject({ nameEn: null, invoiceTextEn: null });
+    await app.close();
+  });
+});

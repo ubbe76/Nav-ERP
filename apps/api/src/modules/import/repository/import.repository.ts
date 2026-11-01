@@ -205,6 +205,7 @@ const CUSTOMER_PASSTHROUGH_FIELDS = [
   "privatePerson",
   "website",
   "currency",
+  "language",
 ] as const satisfies readonly (keyof CustomerCreatePlan)[];
 
 type CustomerRegisterIds = {
@@ -274,6 +275,7 @@ const SUPPLIER_PASSTHROUGH_FIELDS = [
   "city",
   "country",
   "currency",
+  "language",
   "ourCustomerNumber",
   "carrierCustomerNumber",
 ] as const satisfies readonly (keyof SupplierCreatePlan)[];
@@ -545,6 +547,8 @@ export function createImportRepository(db: Db) {
                 surfaceTreatment: create.surfaceTreatment,
                 colour: create.colour,
                 extraDescription: create.extraDescription ?? null,
+                nameEn: create.nameEn ?? null,
+                extraDescriptionEn: create.extraDescriptionEn ?? null,
                 barcode: create.barcode ?? null,
                 defaultLocationId: plan.fallbackLocationId,
                 active: create.active,
@@ -604,6 +608,8 @@ export function createImportRepository(db: Db) {
                 : {}),
               ...(update.patch.colour !== undefined ? { colour: update.patch.colour } : {}),
               ...(update.patch.extraDescription !== undefined ? { extraDescription: update.patch.extraDescription } : {}),
+              ...(update.patch.nameEn !== undefined ? { nameEn: update.patch.nameEn } : {}),
+              ...(update.patch.extraDescriptionEn !== undefined ? { extraDescriptionEn: update.patch.extraDescriptionEn } : {}),
               ...(update.patch.barcode !== undefined ? { barcode: update.patch.barcode } : {}),
               ...(update.patch.active !== undefined ? { active: update.patch.active } : {}),
               ...(update.patch.reorderPoint !== undefined

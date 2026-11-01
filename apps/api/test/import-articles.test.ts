@@ -1206,3 +1206,88 @@ describe("article import — Säkerhetslager and Styrning", () => {
   });
 });
 
+// Dokument på engelska (#7): Benämning engelska / Extra benämning engelska.
+describe("planArticleImport — the English texts (#7)", () => {
+  const mapping = {
+    Artikelnummer: "articleNumber",
+    Benämning: "name",
+    "Benämning engelska": "nameEn",
+    "Extra benämning engelska": "extraDescriptionEn",
+  };
+
+  it("maps the template headings, carries the texts on create and leaves an empty cell out", async () => {
+    expect(suggestArticleMapping(["Artikelnummer", "Benämning", "Benämning engelska", "Extra benämning engelska"])).toEqual(mapping);
+    const plan = await planArticleImport(
+      {
+        mapping,
+        rows: [
+          ["E-1", "Diskbänk", "Sink unit", "Brushed stainless\nDelivered in parts"],
+          ["E-2", "Plåt", "", ""],
+        ],
+        defaults: { articleType: "purchased" },
+      },
+      fakeDeps()
+    );
+    expect(plan.rows.every((r) => r.errors.length === 0)).toBe(true);
+    expect(plan.creates[0]).toMatchObject({ articleNumber: "E-1", nameEn: "Sink unit", extraDescriptionEn: "Brushed stainless\nDelivered in parts" });
+    expect(plan.creates[1]).not.toHaveProperty("nameEn");
+    expect(plan.creates[1]).not.toHaveProperty("extraDescriptionEn");
+  });
+
+  it("too long texts are row errors (255 / 2000); an empty cell leaves an existing article's text untouched", async () => {
+    const existing: ExistingArticle = {
+      id: "id-1",
+      articleNumber: "E-1",
+      name: "Diskbänk",
+      type: "manufactured",
+      unitCode: "st",
+      unitId: "unit-st",
+      isPhantom: false,
+      groupCode: null,
+      standardCost: null,
+      weight: null,
+      surfaceTreatment: null,
+      colour: null,
+      active: true,
+    };
+    const plan = await planArticleImport(
+      {
+        mapping,
+        rows: [
+          ["E-1", "", "", "Delivered in parts"],
+          ["E-3", "Ny", "x".repeat(256), ""],
+          ["E-4", "Ny", "", "y".repeat(2001)],
+        ],
+        defaults: { articleType: "purchased" },
+      },
+      fakeDeps([existing])
+    );
+    expect(plan.updates).toEqual([{ id: "id-1", patch: { extraDescriptionEn: "Delivered in parts" } }]);
+    expect(plan.rows[1]!.errors).toEqual(["Benämning engelska är för lång (256 tecken, max 255)"]);
+    expect(plan.rows[2]!.errors).toEqual(["Extra benämning engelska är för lång (2001 tecken, max 2000)"]);
+  });
+
+  it("the commit stores and updates the English texts", async () => {
+    await importService.commit("articles", {
+      mapping,
+      rows: [["E-10", "Diskbänk", "Sink unit", "Brushed"]],
+      defaults: { articleType: "purchased" },
+    });
+    const [created] = await db
+      .select({ nameEn: articles.nameEn, extraDescriptionEn: articles.extraDescriptionEn })
+      .from(articles)
+      .where(eq(articles.articleNumber, "E-10"));
+    expect(created).toEqual({ nameEn: "Sink unit", extraDescriptionEn: "Brushed" });
+
+    await importService.commit("articles", {
+      mapping,
+      rows: [["E-10", "", "Sink unit 1200", ""]],
+      defaults: { articleType: "purchased" },
+    });
+    const [updated] = await db
+      .select({ nameEn: articles.nameEn, extraDescriptionEn: articles.extraDescriptionEn })
+      .from(articles)
+      .where(eq(articles.articleNumber, "E-10"));
+    expect(updated).toEqual({ nameEn: "Sink unit 1200", extraDescriptionEn: "Brushed" });
+  });
+});

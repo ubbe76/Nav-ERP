@@ -815,6 +815,9 @@ export function createSalesRepository(db: Db) {
           // The order card's "Fakturera" points at the samlingsfakturering
           // routine instead of the invoice dialog for flagged customers.
           customerCollectiveInvoicing: customers.collectiveInvoicing,
+          // Språk (#7): the language the quote/order confirmation/delivery
+          // note are printed in (live) — the card's mail defaults follow it.
+          customerLanguage: customers.language,
           deliveryAddressLabel: customerDeliveryAddresses.label,
           deliveryAddress: customerDeliveryAddresses.address,
           deliveryPostalCode: customerDeliveryAddresses.postalCode,

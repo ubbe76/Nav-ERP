@@ -15,6 +15,7 @@ import {
   buyerVatNumberProblem,
   buyerVatNumberWarning,
   DEFAULT_VAT_RATE,
+  documentLanguageOf,
   fromSek,
   invoiceSekAmounts,
   SEK,
@@ -1073,9 +1074,14 @@ export function createInvoiceService(
       let buyerVatNumber = header.vatNumber;
       let vatNumberProblem: ReturnType<typeof buyerVatNumberProblem> = null;
       let vatNumberWarning: ReturnType<typeof buyerVatNumberWarning> = null;
+      // Språk (#7): an issued invoice carries the language it was stamped
+      // with; a draft follows the customer's current language (the preview
+      // and the mail defaults use it).
+      let language = documentLanguageOf(header.language);
       if (header.status === "draft") {
         const customer = await repo.findCustomerById(header.customerId);
         if (customer) {
+          language = documentLanguageOf(customer.language);
           buyerVatNumber = await issueVatNumber(header, customer);
           const check = {
             codes: rows.flatMap((row) => (isVatCode(row.vatCode.code) ? [row.vatCode.code] : [])),
@@ -1090,6 +1096,7 @@ export function createInvoiceService(
       }
       return {
         ...header,
+        language,
         buyerVatNumber,
         vatNumberProblem,
         vatNumberWarning,
@@ -1737,6 +1744,7 @@ export function createInvoiceService(
         orgNumber: customer.orgNumber,
         vatNumber: buyerVatNumber,
         privatePerson: customer.privatePerson,
+        language: documentLanguageOf(customer.language),
         paymentTermCode: paymentTerm?.code ?? null,
         paymentTermName: paymentTerm?.name ?? null,
       };

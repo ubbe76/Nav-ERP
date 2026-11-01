@@ -40,6 +40,7 @@ import {
   isVatCode,
   isVatRate,
   round2,
+  type DocumentLanguage,
   type EinvoiceStatus,
   type InvoiceStatus,
   type InvoiceType,
@@ -78,6 +79,10 @@ export type IssueStamp = {
   vatNumber: string | null;
   // Privatperson at issue — the PDF prints prices including VAT.
   privatePerson: boolean;
+  // Språk at issue (Dokument på engelska #7): the customer's document
+  // language, frozen with the rest — the archived PDF, reprints and the
+  // reminders are written in it whatever the customer is switched to later.
+  language: DocumentLanguage;
   paymentTermCode: string | null;
   paymentTermName: string | null;
   // Valuta: the rate the invoice is booked at (1 for SEK) — decided by the

@@ -131,6 +131,22 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Rostfritt slipat, levereras i delar",
     },
     {
+      field: "nameEn",
+      label: "Benämning engelska",
+      required: false,
+      header: "Benämning engelska",
+      description: `Artikelns namn på engelska, max 255 tecken — skrivs ut i stället för benämningen på dokument till kunder och leverantörer med språket Engelska; saknas den används den svenska. ${UNTOUCHED}`,
+      example: "Sink unit 1200 mm, stainless",
+    },
+    {
+      field: "extraDescriptionEn",
+      label: "Extra benämning engelska",
+      required: false,
+      header: "Extra benämning engelska",
+      description: `Extra benämning på engelska, max 2 000 tecken, radbrytningar behålls — skrivs ut på engelska dokument i stället för den svenska; saknas den används den svenska. ${UNTOUCHED}`,
+      example: "Brushed stainless steel, delivered in parts",
+    },
+    {
       field: "barcode",
       label: "Streckkod (EAN)",
       required: false,
@@ -936,6 +952,15 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
         "Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya offerter och kundordrar får kundens valuta och dagens kurs, och kundens kundpriser gäller i den valutan; befintliga ordrar behåller sin. Tom cell ger SEK för nya kunder och lämnar befintliga orörda.",
       example: "SEK",
     },
+    {
+      field: "language",
+      label: "Språk",
+      required: false,
+      header: "Språk",
+      description:
+        "Svenska eller Engelska (även sv/en, stora och små bokstäver går bra); annat ger ett fel. Styr språket på kundens offerter, orderbekräftelser, följesedlar och fakturor. Tom cell ger Svenska för nya kunder och lämnar befintliga orörda.",
+      example: "Svenska",
+    },
   ],
 
   customerContacts: [
@@ -1215,6 +1240,15 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description:
         "Valutakod med tre bokstäver (SEK, EUR, NOK …); små bokstäver godtas, annat ger ett fel. Nya inköpsorder och nya katalograder (även de som Inköpspriser-importen skapar) får leverantörens valuta; befintliga behåller sin. Tom cell ger SEK för nya leverantörer och lämnar befintliga orörda.",
       example: "SEK",
+    },
+    {
+      field: "language",
+      label: "Språk",
+      required: false,
+      header: "Språk",
+      description:
+        "Svenska eller Engelska (även sv/en, stora och små bokstäver går bra); annat ger ett fel. Styr språket på förfrågningar och inköpsorder till leverantören. Tom cell ger Svenska för nya leverantörer och lämnar befintliga orörda.",
+      example: "Svenska",
     },
     {
       field: "ourCustomerNumber",

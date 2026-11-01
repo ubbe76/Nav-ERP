@@ -1799,3 +1799,27 @@ describe("sales service — audit trail", () => {
     expect(priceDeleted).toHaveLength(1);
   });
 });
+
+// Dokument på engelska (#7): the customer's language round-trips through the
+// service and the order detail carries it for the card's mail defaults.
+describe("sales service — customer language (Språk, #7)", () => {
+  it("defaults to sv, round-trips en and is carried as customerLanguage on the sales order detail", async () => {
+    const user = await makeUser();
+    const swedish = await makeCustomer();
+    expect(swedish.language).toBe("sv");
+    const english = await salesService.createCustomer({ name: "Customer Ltd", active: true, country: "GB", language: "en" });
+    expect(english.language).toBe("en");
+    expect((await salesService.getCustomer(english.id))!.language).toBe("en");
+
+    const article = await makeArticle();
+    const { order } = await salesService.createQuote(
+      { customerId: english.id, rows: [{ articleId: article.id, quantity: 1, unitPrice: 99 }] },
+      user.id
+    );
+    expect((await salesService.getSalesOrder(order.id))!.customerLanguage).toBe("en");
+
+    // The order follows the customer live — no snapshot on the order.
+    await salesService.updateCustomer(english.id, { language: "sv" });
+    expect((await salesService.getSalesOrder(order.id))!.customerLanguage).toBe("sv");
+  });
+});

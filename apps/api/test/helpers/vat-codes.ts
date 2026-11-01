@@ -40,6 +40,8 @@ export async function resetVatCodes(): Promise<void> {
       .set({
         name: entry.label,
         invoiceText: entry.invoiceText,
+        nameEn: entry.labelEn,
+        invoiceTextEn: entry.invoiceTextEn,
         active: true,
         revenueAccount: entry.slots.revenue?.account ?? null,
         outputVatAccount: entry.slots.outputVat?.account ?? null,

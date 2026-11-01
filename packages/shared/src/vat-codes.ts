@@ -87,11 +87,17 @@ export type VatCodeSlotDefault = { account: string; box: VatBoxSetting };
 export type VatCodeCatalogEntry = {
   code: VatCode;
   label: string;
+  // Dokument på engelska (#7): the English name and invoice text the
+  // migration seeds into vat_codes.name_en/invoice_text_en (the company's
+  // own copy is edited on the Momskoder page; a blank one falls back to the
+  // Swedish text at print time).
+  labelEn: string;
   direction: VatCodeDirection;
   kind: VatCodeKind;
   rate: VatRate;
   slots: Partial<Record<VatCodeSlot, VatCodeSlotDefault>>;
   invoiceText: string | null;
+  invoiceTextEn: string | null;
   // EU sales and omvänd betalningsskyldighet: the buyer's momsregistrerings-
   // nummer must be on the invoice (ML 17 kap. 24 §).
   requiresBuyerVatNumber: boolean;
@@ -108,91 +114,109 @@ export const VAT_CODE_CATALOG: readonly VatCodeCatalogEntry[] = [
   {
     code: "MP25",
     label: "Moms 25 %",
+    labelEn: "VAT 25%",
     direction: "both",
     kind: "domestic",
     rate: 25,
     slots: { revenue: slot("3001", "05"), outputVat: slot("2610", "10"), inputVat: slot("2640", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "MP12",
     label: "Moms 12 %",
+    labelEn: "VAT 12%",
     direction: "both",
     kind: "domestic",
     rate: 12,
     slots: { revenue: slot("3002", "05"), outputVat: slot("2620", "11"), inputVat: slot("2640", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "MP6",
     label: "Moms 6 %",
+    labelEn: "VAT 6%",
     direction: "both",
     kind: "domestic",
     rate: 6,
     slots: { revenue: slot("3003", "05"), outputVat: slot("2630", "12"), inputVat: slot("2640", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "MF",
     label: "Momsfri",
+    labelEn: "VAT exempt",
     direction: "both",
     kind: "domestic",
     rate: 0,
     slots: { revenue: slot("3004", "42") },
     invoiceText: "Momsfri omsättning",
+    invoiceTextEn: "VAT-exempt supply",
     requiresBuyerVatNumber: false,
   },
   {
     code: "EUV",
     label: "Varor till annat EU-land",
+    labelEn: "Goods to another EU country",
     direction: "sales",
     kind: "eu_sale",
     rate: 0,
     slots: { revenue: slot("3108", "35") },
     invoiceText: "Unionsintern leverans (artikel 138 i mervärdesskattedirektivet)",
+    invoiceTextEn: "Intra-Community supply (Article 138 of the VAT Directive)",
     requiresBuyerVatNumber: true,
   },
   {
     code: "EUT",
     label: "Tjänster till annat EU-land",
+    labelEn: "Services to another EU country",
     direction: "sales",
     kind: "eu_sale",
     rate: 0,
     slots: { revenue: slot("3308", "39") },
     invoiceText: "Omvänd betalningsskyldighet (artikel 196 i mervärdesskattedirektivet)",
+    invoiceTextEn: "Reverse charge (Article 196 of the VAT Directive)",
     requiresBuyerVatNumber: true,
   },
   {
     code: "EXV",
     label: "Export av varor",
+    labelEn: "Export of goods",
     direction: "sales",
     kind: "export",
     rate: 0,
     slots: { revenue: slot("3105", "36") },
     invoiceText: "Export av varor, undantagen från moms (artikel 146 i mervärdesskattedirektivet)",
+    invoiceTextEn: "Export of goods, exempt from VAT (Article 146 of the VAT Directive)",
     requiresBuyerVatNumber: false,
   },
   {
     code: "EXT",
     label: "Tjänster till land utanför EU",
+    labelEn: "Services outside the EU",
     direction: "sales",
     kind: "export",
     rate: 0,
     slots: { revenue: slot("3305", "40") },
     invoiceText: "Tjänsten är omsatt utanför Sverige",
+    invoiceTextEn: "Service supplied outside Sweden",
     requiresBuyerVatNumber: false,
   },
   {
     code: "OB",
     label: "Omvänd betalningsskyldighet, Sverige",
+    labelEn: "Reverse charge, Sweden",
     direction: "sales",
     kind: "reverse_sale",
     rate: 0,
     slots: { revenue: slot("3231", "41") },
     invoiceText: "Omvänd betalningsskyldighet",
+    invoiceTextEn: "Reverse charge",
     requiresBuyerVatNumber: true,
   },
   {
@@ -200,96 +224,115 @@ export const VAT_CODE_CATALOG: readonly VatCodeCatalogEntry[] = [
     // Never derived by salesVatCode — set explicitly by Räntefakturering.
     code: "UTM",
     label: "Utanför momsens tillämpningsområde",
+    labelEn: "Outside the scope of VAT",
     direction: "sales",
     kind: "out_of_scope",
     rate: 0,
     slots: { revenue: slot("3990", "none") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IEUV25",
     label: "Inköp varor från EU 25 %",
+    labelEn: "Purchase of goods from the EU 25%",
     direction: "purchase",
     kind: "reverse_purchase",
     rate: 25,
     slots: { cost: slot("4515", "20"), outputVat: slot("2614", "30"), inputVat: slot("2645", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IEUV12",
     label: "Inköp varor från EU 12 %",
+    labelEn: "Purchase of goods from the EU 12%",
     direction: "purchase",
     kind: "reverse_purchase",
     rate: 12,
     slots: { cost: slot("4516", "20"), outputVat: slot("2624", "31"), inputVat: slot("2645", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IEUV6",
     label: "Inköp varor från EU 6 %",
+    labelEn: "Purchase of goods from the EU 6%",
     direction: "purchase",
     kind: "reverse_purchase",
     rate: 6,
     slots: { cost: slot("4517", "20"), outputVat: slot("2634", "32"), inputVat: slot("2645", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IEUT",
     label: "Inköp tjänster från EU 25 %",
+    labelEn: "Purchase of services from the EU 25%",
     direction: "purchase",
     kind: "reverse_purchase",
     rate: 25,
     slots: { cost: slot("4535", "21"), outputVat: slot("2614", "30"), inputVat: slot("2645", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IUTT",
     label: "Inköp tjänster utanför EU 25 %",
+    labelEn: "Purchase of services outside the EU 25%",
     direction: "purchase",
     kind: "reverse_purchase",
     rate: 25,
     slots: { cost: slot("4531", "22"), outputVat: slot("2614", "30"), inputVat: slot("2645", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IOBV",
     label: "Inköp varor i Sverige, omvänd betalningsskyldighet",
+    labelEn: "Purchase of goods in Sweden, reverse charge",
     direction: "purchase",
     kind: "reverse_purchase",
     rate: 25,
     slots: { cost: slot("4415", "23"), outputVat: slot("2614", "30"), inputVat: slot("2647", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IOBT",
     label: "Inköp tjänster i Sverige, omvänd betalningsskyldighet",
+    labelEn: "Purchase of services in Sweden, reverse charge",
     direction: "purchase",
     kind: "reverse_purchase",
     rate: 25,
     slots: { cost: slot("4425", "24"), outputVat: slot("2614", "30"), inputVat: slot("2647", "48") },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IUTV",
     label: "Inköp varor utanför EU (importmoms separat)",
+    labelEn: "Purchase of goods outside the EU (import VAT separate)",
     direction: "purchase",
     kind: "non_eu_goods",
     rate: 0,
     slots: {},
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IMP25",
     label: "Importmoms 25 %",
+    labelEn: "Import VAT 25%",
     direction: "import",
     kind: "import",
     rate: 25,
@@ -300,11 +343,13 @@ export const VAT_CODE_CATALOG: readonly VatCodeCatalogEntry[] = [
       inputVat: slot("2645", "48"),
     },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IMP12",
     label: "Importmoms 12 %",
+    labelEn: "Import VAT 12%",
     direction: "import",
     kind: "import",
     rate: 12,
@@ -315,11 +360,13 @@ export const VAT_CODE_CATALOG: readonly VatCodeCatalogEntry[] = [
       inputVat: slot("2645", "48"),
     },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
   {
     code: "IMP6",
     label: "Importmoms 6 %",
+    labelEn: "Import VAT 6%",
     direction: "import",
     kind: "import",
     rate: 6,
@@ -330,6 +377,7 @@ export const VAT_CODE_CATALOG: readonly VatCodeCatalogEntry[] = [
       inputVat: slot("2645", "48"),
     },
     invoiceText: null,
+    invoiceTextEn: null,
     requiresBuyerVatNumber: false,
   },
 ];
@@ -688,6 +736,22 @@ export const updateVatCodeSchema = z
       .nullable()
       .optional()
       .transform((value) => (value === "" ? null : value)),
+    // Dokument på engelska (#7): Namn (engelska) / Fakturatext (engelska);
+    // "" and null clear ⇒ the Swedish text is printed on English documents.
+    nameEn: z
+      .string()
+      .trim()
+      .max(100)
+      .nullable()
+      .optional()
+      .transform((value) => (value === "" ? null : value)),
+    invoiceTextEn: z
+      .string()
+      .trim()
+      .max(255)
+      .nullable()
+      .optional()
+      .transform((value) => (value === "" ? null : value)),
     active: z.boolean().optional(),
     revenueAccount: vatCodeAccountField.optional(),
     outputVatAccount: vatCodeAccountField.optional(),
@@ -729,13 +793,19 @@ export type VatCodeView = {
   code: VatCode;
   name: string;
   invoiceText: string | null;
+  // Dokument på engelska (#7): the company's own English name/invoice text
+  // (null = the Swedish one is printed on English documents too).
+  nameEn: string | null;
+  invoiceTextEn: string | null;
   active: boolean;
   label: string;
+  labelEn: string;
   direction: VatCodeDirection;
   kind: VatCodeKind;
   rate: number;
   requiresBuyerVatNumber: boolean;
   defaultInvoiceText: string | null;
+  defaultInvoiceTextEn: string | null;
   accounts: VatCodeAccountView[];
   // Konteringsregler pointing at the code exactly.
   ruleCount: number;

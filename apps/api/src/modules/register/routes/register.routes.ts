@@ -5,6 +5,8 @@ import {
   deviationReasonInputSchema,
   packageTypeFreightSchema,
   quoteLossReasonInputSchema,
+  termRegisterEntrySchema,
+  unitRegisterEntrySchema,
   updateRegisterEntrySchema,
   type AccessRule,
 } from "@navet/shared";
@@ -121,10 +123,13 @@ export async function registerRoutes(app: FastifyInstance, opts: { service: Regi
   }
 
   const termSchemas = { create: createRegisterEntrySchema, update: updateRegisterEntrySchema };
-  register("/delivery-terms", service.deliveryTerms, termSchemas);
-  register("/payment-terms", service.paymentTerms, termSchemas);
+  // Dokument på engelska (#7): the terms take Benämning (engelska), the
+  // units Kod (engelska).
+  const englishTermSchemas = { create: termRegisterEntrySchema, update: termRegisterEntrySchema };
+  register("/delivery-terms", service.deliveryTerms, englishTermSchemas);
+  register("/payment-terms", service.paymentTerms, englishTermSchemas);
   register("/carriers", service.carriers, termSchemas);
-  register("/units", service.units, termSchemas);
+  register("/units", service.units, { create: unitRegisterEntrySchema, update: unitRegisterEntrySchema });
   register("/package-types", service.packageTypes, termSchemas);
   // Artikelkoder (selection/grouping in the lists) belong to Artiklar.
   register("/article-codes", service.articleCodes, termSchemas, { config: { access: ["artiklar"] } });

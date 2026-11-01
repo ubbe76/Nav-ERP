@@ -242,6 +242,9 @@ export function createQualityRepository(db: Db) {
             customerNumber: customers.customerNumber,
             supplierNumber: suppliers.supplierNumber,
             counterpartyEmail: sql<string | null>`coalesce(${customers.email}, ${suppliers.email})`,
+            // Språk (#7): the language the reklamationsbesked to the
+            // counterparty is printed in (live); null for an internal case.
+            counterpartyLanguage: sql<string | null>`coalesce(${customers.language}, ${suppliers.language})`,
             counterpartyAddress: sql<string | null>`coalesce(${customers.address}, ${suppliers.address})`,
             counterpartyPostalCode: sql<string | null>`coalesce(${customers.postalCode}, ${suppliers.postalCode})`,
             counterpartyCity: sql<string | null>`coalesce(${customers.city}, ${suppliers.city})`,
@@ -810,6 +813,7 @@ export interface DetailRow extends ListRow {
   customerNumber: string | null;
   supplierNumber: string | null;
   counterpartyEmail: string | null;
+  counterpartyLanguage: string | null;
   counterpartyAddress: string | null;
   counterpartyPostalCode: string | null;
   counterpartyCity: string | null;

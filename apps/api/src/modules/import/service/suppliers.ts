@@ -11,7 +11,7 @@
 // are their own entities (supplier-contacts.ts/
 // supplier-delivery-addresses.ts); this planner handles the supplier row.
 import { z } from "zod";
-import type { ImportCommitInput } from "@navet/shared";
+import { parseDocumentLanguageCell, type DocumentLanguage, type ImportCommitInput } from "@navet/shared";
 import {
   normalizeHeader,
   resolveColumns,
@@ -38,6 +38,7 @@ export const SUPPLIER_IMPORT_FIELDS = [
   "city",
   "country",
   "currency",
+  "language",
   "ourCustomerNumber",
   "paymentTerm",
   "deliveryTerm",
@@ -85,6 +86,7 @@ const FIELD_LABELS: Record<SupplierImportField, string> = {
   city: "Postort",
   country: "Land",
   currency: "Valuta",
+  language: "Språk",
   ourCustomerNumber: "Vårt kundnummer",
   paymentTerm: "Betalningsvillkor",
   deliveryTerm: "Leveransvillkor",
@@ -107,6 +109,7 @@ const SPECIAL_FIELDS: ReadonlySet<SupplierImportField> = new Set<SupplierImportF
   "address3",
   "country",
   "currency",
+  "language",
   "paymentTerm",
   "deliveryTerm",
   "carrier",
@@ -158,6 +161,8 @@ export const SUPPLIER_HEADER_ALIASES: Record<string, string> = {
   postort: "city",
   stad: "city",
   valuta: "currency",
+  sprak: "language",
+  dokumentsprak: "language",
   vartkundnummer: "ourCustomerNumber",
   vartkundnr: "ourCustomerNumber",
   betalningsvillkor: "paymentTerm",
@@ -236,6 +241,9 @@ export interface SupplierCreatePlan {
   country?: string;
   // Uppercased; omitted = the column's DB default 'SEK'.
   currency?: string;
+  // Språk: the language of the inquiry/PO to the supplier (#7); omitted =
+  // the column's DB default 'sv'.
+  language?: DocumentLanguage;
   ourCustomerNumber?: string;
   // Resolved id (register hit) XOR the raw name (register miss — the
   // repository creates the row and swaps this for the id). Never both.
@@ -446,6 +454,17 @@ export async function planSupplierImport(
       } else {
         patch.currency = upper;
       }
+    }
+
+    // Språk (Dokument på engelska #7) — Svenska/Engelska/sv/en, case-
+    // insensitively; anything else is a row ERROR. Empty cell: sv on create
+    // (the column default), untouched on update.
+    const languageCell = record["language"] ?? "";
+    if (languageCell !== "") {
+      values["language"] = languageCell;
+      const parsed = parseDocumentLanguageCell(languageCell);
+      if (parsed === null) errors.push(`Ogiltigt språk '${languageCell}' — ange Svenska eller Engelska`);
+      else patch.language = parsed;
     }
 
     // The three register lookups: id on a hit, name (queued for creation)

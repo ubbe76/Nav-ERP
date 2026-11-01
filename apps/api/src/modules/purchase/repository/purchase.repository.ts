@@ -435,6 +435,8 @@ export function createPurchaseRepository(db: Db) {
         .select({
           ...getTableColumns(inquiries),
           supplierName: suppliers.name,
+          // Språk (#7): the language the inquiry PDF is printed in (live).
+          supplierLanguage: suppliers.language,
           purchaseOrderNumber: purchaseOrders.orderNumber,
           deliveryTermCode: deliveryTerms.code,
           deliveryTermName: deliveryTerms.name,
@@ -708,6 +710,8 @@ export function createPurchaseRepository(db: Db) {
         .select({
           ...getTableColumns(purchaseOrders),
           supplierName: suppliers.name,
+          // Språk (#7): the language the purchase order PDF is printed in (live).
+          supplierLanguage: suppliers.language,
           deliveryTermCode: deliveryTerms.code,
           deliveryTermName: deliveryTerms.name,
           paymentTermCode: paymentTerms.code,

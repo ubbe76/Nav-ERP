@@ -1,4 +1,10 @@
-import type { CreateRegisterEntryInput, PackageTypeFreightInput, UpdateRegisterEntryInput } from "@navet/shared";
+import type {
+  CreateRegisterEntryInput,
+  PackageTypeFreightInput,
+  TermRegisterEntryInput,
+  UnitRegisterEntryInput,
+  UpdateRegisterEntryInput,
+} from "@navet/shared";
 import type { RegisterRepository } from "../repository/register.repository.js";
 import type { RegisterUsage } from "./register.errors.js";
 import {
@@ -22,34 +28,39 @@ export type { RegisterUsage } from "./register.errors.js";
 // Swedish delivery-term register content. Used to pre-fill delivery_terms;
 // existing entries are never overwritten.
 // The descriptions are duplicated in migration 0067's backfill UPDATEs (the
-// STANDARD_UNITS/0033 precedent) — keep the two in sync if the wording moves.
-export const COMBITERMS: { code: string; name: string; description: string }[] = [
-  { code: "EXW", name: "Från fabrik", description: "Köparen hämtar godset hos säljaren och står för hela transporten, exportklareringen och alla kostnader och risker." },
-  { code: "FCA", name: "Fritt fraktföraren", description: "Säljaren lämnar godset exportklarerat till köparens fraktförare på angiven plats; därefter tar köparen över risk och kostnad." },
-  { code: "FAS", name: "Fritt fartygets sida", description: "Säljaren levererar godset vid fartygets sida i avskeppningshamnen; köparen står för lastning, sjöfrakt och risk därifrån." },
-  { code: "FOB", name: "Fritt ombord", description: "Säljaren lastar godset ombord på fartyget i avskeppningshamnen; köparen står för sjöfrakt och risk från ombordlastningen." },
-  { code: "CFR", name: "Kostnad och frakt", description: "Säljaren betalar frakten till ankomsthamnen, men risken går över till köparen redan vid ombordlastningen." },
-  { code: "CIF", name: "Kostnad, försäkring och frakt", description: "Som CFR, men säljaren tecknar även transportförsäkring för godset till ankomsthamnen." },
-  { code: "CPT", name: "Fraktfritt", description: "Säljaren betalar frakten till angiven destination, men risken går över när godset lämnas till den förste fraktföraren." },
-  { code: "CIP", name: "Fraktfritt inklusive försäkring", description: "Som CPT, men säljaren tecknar även transportförsäkring för godset till destinationen." },
-  { code: "DAP", name: "Levererat angiven plats", description: "Säljaren står för transporten till angiven plats; köparen sköter lossning och importklarering." },
-  { code: "DPU", name: "Levererat angiven plats, urlastat", description: "Säljaren står för transporten och lossningen på angiven plats; köparen sköter importklareringen." },
-  { code: "DDP", name: "Levererat förtullat", description: "Säljaren står för hela transporten inklusive importklarering och tull; köparen tar bara emot på angiven plats." },
+// STANDARD_UNITS/0033 precedent) and the English names (nameEn, the
+// Incoterms 2020 names printed on English documents — Dokument på engelska
+// #7) in migration 0175's — keep the two in sync if the wording moves.
+export const COMBITERMS: { code: string; name: string; nameEn: string; description: string }[] = [
+  { code: "EXW", name: "Från fabrik", nameEn: "Ex Works", description: "Köparen hämtar godset hos säljaren och står för hela transporten, exportklareringen och alla kostnader och risker." },
+  { code: "FCA", name: "Fritt fraktföraren", nameEn: "Free Carrier", description: "Säljaren lämnar godset exportklarerat till köparens fraktförare på angiven plats; därefter tar köparen över risk och kostnad." },
+  { code: "FAS", name: "Fritt fartygets sida", nameEn: "Free Alongside Ship", description: "Säljaren levererar godset vid fartygets sida i avskeppningshamnen; köparen står för lastning, sjöfrakt och risk därifrån." },
+  { code: "FOB", name: "Fritt ombord", nameEn: "Free On Board", description: "Säljaren lastar godset ombord på fartyget i avskeppningshamnen; köparen står för sjöfrakt och risk från ombordlastningen." },
+  { code: "CFR", name: "Kostnad och frakt", nameEn: "Cost and Freight", description: "Säljaren betalar frakten till ankomsthamnen, men risken går över till köparen redan vid ombordlastningen." },
+  { code: "CIF", name: "Kostnad, försäkring och frakt", nameEn: "Cost, Insurance and Freight", description: "Som CFR, men säljaren tecknar även transportförsäkring för godset till ankomsthamnen." },
+  { code: "CPT", name: "Fraktfritt", nameEn: "Carriage Paid To", description: "Säljaren betalar frakten till angiven destination, men risken går över när godset lämnas till den förste fraktföraren." },
+  { code: "CIP", name: "Fraktfritt inklusive försäkring", nameEn: "Carriage and Insurance Paid To", description: "Som CPT, men säljaren tecknar även transportförsäkring för godset till destinationen." },
+  { code: "DAP", name: "Levererat angiven plats", nameEn: "Delivered at Place", description: "Säljaren står för transporten till angiven plats; köparen sköter lossning och importklarering." },
+  { code: "DPU", name: "Levererat angiven plats, urlastat", nameEn: "Delivered at Place Unloaded", description: "Säljaren står för transporten och lossningen på angiven plats; köparen sköter importklareringen." },
+  { code: "DDP", name: "Levererat förtullat", nameEn: "Delivered Duty Paid", description: "Säljaren står för hela transporten inklusive importklarering och tull; köparen tar bara emot på angiven plats." },
 ];
 
 // Standard units (enheter) — pre-fill for the units register; existing
 // entries are never overwritten. The migration seeds the same list, so a
 // fresh database always has "st" (the default base unit for new articles).
-export const STANDARD_UNITS: { code: string; name: string }[] = [
-  { code: "st", name: "Styck" },
+// codeEn (Dokument på engelska #7) is the abbreviation written on English
+// documents where it differs from the code; migration 0175 backfills the
+// same three — keep them in sync.
+export const STANDARD_UNITS: { code: string; name: string; codeEn?: string }[] = [
+  { code: "st", name: "Styck", codeEn: "pcs" },
   { code: "kg", name: "Kilogram" },
   { code: "g", name: "Gram" },
   { code: "m", name: "Meter" },
   { code: "m2", name: "Kvadratmeter" },
   { code: "m3", name: "Kubikmeter" },
   { code: "l", name: "Liter" },
-  { code: "tim", name: "Timme" },
-  { code: "förp", name: "Förpackning" },
+  { code: "tim", name: "Timme", codeEn: "h" },
+  { code: "förp", name: "Förpackning", codeEn: "pkg" },
 ];
 
 // Standard kollityper (package types) — idempotent pre-fill for the register.
@@ -149,10 +160,12 @@ export function createRegisterService(repo: RegisterRepository) {
   }
 
   return {
-    deliveryTerms: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["deliveryTerms"]["create"]>>>(repo.deliveryTerms),
-    paymentTerms: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["paymentTerms"]["create"]>>>(repo.paymentTerms),
+    // The terms carry Benämning (engelska), the units Kod (engelska) — the
+    // other registers keep the plain code/name/description shape.
+    deliveryTerms: forRegister<TermRegisterEntryInput, Awaited<ReturnType<RegisterRepository["deliveryTerms"]["create"]>>>(repo.deliveryTerms),
+    paymentTerms: forRegister<TermRegisterEntryInput, Awaited<ReturnType<RegisterRepository["paymentTerms"]["create"]>>>(repo.paymentTerms),
     carriers: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["carriers"]["create"]>>>(repo.carriers),
-    units: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["units"]["create"]>>>(repo.units),
+    units: forRegister<UnitRegisterEntryInput, Awaited<ReturnType<RegisterRepository["units"]["create"]>>>(repo.units),
     packageTypes: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["packageTypes"]["create"]>>>(repo.packageTypes),
     articleCodes: forRegister<CreateRegisterEntryInput, Awaited<ReturnType<RegisterRepository["articleCodes"]["create"]>>>(repo.articleCodes),
     // Förlustorsaker (uppföljning av offerter): same CRUD/usage/delete flow,
@@ -161,8 +174,9 @@ export function createRegisterService(repo: RegisterRepository) {
     // Avvikelseorsaker (Kvalitet): the deviations' and the scrap's reasons.
     deviationReasons: forRegister(repo.deviationReasons),
 
-    // Idempotent: creates the Combiterms entries that are missing and skips
-    // the rest, so customized codes/names survive re-runs.
+    // Idempotent: creates the Combiterms entries that are missing (with their
+    // English names) and skips the rest, so customized codes/names survive
+    // re-runs — an existing row never gets its name_en filled here.
     async seedCombiterms() {
       let created = 0;
       for (const term of COMBITERMS) {

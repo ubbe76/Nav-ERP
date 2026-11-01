@@ -1290,3 +1290,75 @@ describe("import service — customers entity", () => {
     expect(privat!.invoiceName).toBeNull(); // "Avviker från postadress" = false drops the invoice block
   });
 });
+
+// Dokument på engelska (#7): the Språk column.
+describe("planCustomerImport — Språk (language)", () => {
+  const mapping = { Kundnummer: "customerNumber", Namn: "name", Språk: "language" };
+
+  it("reads Svenska/Engelska/sv/en in any case, makes anything else a row error and leaves an empty cell out", async () => {
+    const plan = await planCustomerImport(
+      {
+        mapping,
+        rows: [
+          ["100", "Kund Ett", "Engelska"],
+          ["101", "Kund Två", "sv"],
+          ["102", "Kund Tre", "EN"],
+          ["103", "Kund Fyra", "Tyska"],
+          ["104", "Kund Fem", ""],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.rows.map((r) => r.errors)).toEqual([[], [], [], ["Ogiltigt språk 'Tyska' — ange Svenska eller Engelska"], []]);
+    expect(plan.creates).toEqual([
+      { customerNumber: "100", name: "Kund Ett", language: "en" },
+      { customerNumber: "101", name: "Kund Två", language: "sv" },
+      { customerNumber: "102", name: "Kund Tre", language: "en" },
+      // Empty cell: no key — the column default sv applies on create.
+      { customerNumber: "104", name: "Kund Fem" },
+    ]);
+    expect(plan.summary).toEqual({ create: 4, update: 0, skip: 0, error: 1, warning: 0 });
+  });
+
+  it("an empty cell leaves an existing customer's language untouched; a filled one changes it", async () => {
+    const plan = await planCustomerImport(
+      {
+        mapping,
+        rows: [
+          ["100", "", ""],
+          ["101", "", "engelska"],
+        ],
+      },
+      fakeDeps({ "100": "11111111-1111-1111-1111-111111111111", "101": "22222222-2222-2222-2222-222222222222" })
+    );
+    expect(plan.updates).toEqual([
+      { id: "11111111-1111-1111-1111-111111111111", patch: {} },
+      { id: "22222222-2222-2222-2222-222222222222", patch: { language: "en" } },
+    ]);
+  });
+
+  it("the template heading Språk maps itself and the commit stores the language", async () => {
+    expect(suggestCustomerMapping(["Kundnummer", "Namn", "Språk"])["Språk"]).toBe("language");
+    await setCustomerSeries(1);
+    await importService.commit("customers", {
+      mapping,
+      rows: [
+        ["200", "Customer Ltd", "Engelska"],
+        ["201", "Kund AB", ""],
+      ],
+    });
+    const rows = await db.select({ number: customers.customerNumber, language: customers.language }).from(customers);
+    expect(Object.fromEntries(rows.map((r) => [r.number, r.language]))).toEqual({ "200": "en", "201": "sv" });
+
+    // Update: an empty cell keeps en, a filled one switches.
+    await importService.commit("customers", {
+      mapping,
+      rows: [
+        ["200", "", ""],
+        ["201", "", "en"],
+      ],
+    });
+    const after = await db.select({ number: customers.customerNumber, language: customers.language }).from(customers);
+    expect(Object.fromEntries(after.map((r) => [r.number, r.language]))).toEqual({ "200": "en", "201": "en" });
+  });
+});

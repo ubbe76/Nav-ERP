@@ -113,6 +113,11 @@ export const articles = pgTable("articles", {
   // Artikellista, Extra fält). Printed under the name on the documents the
   // system setting extra_description_documents lists. Null = none.
   extraDescription: text("extra_description"),
+  // Benämning (engelska) / Extra benämning (engelska) (Dokument på engelska
+  // #7, migration 0175): printed on English documents when filled in, else
+  // the Swedish text (localized in @navet/shared). Never on Swedish ones.
+  nameEn: varchar("name_en", { length: 255 }),
+  extraDescriptionEn: text("extra_description_en"),
   // Streckkod (EAN/GTIN, #4): the manufacturer's code on the package, so a
   // scan finds the article. Digits only, 8/12/13/14 long with a valid check
   // digit (packages/shared/src/gtin.ts); unique when set.
