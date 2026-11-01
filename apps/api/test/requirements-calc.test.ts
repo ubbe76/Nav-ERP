@@ -927,3 +927,492 @@ describe("säkerhetslager", () => {
     expect(rowFor(rows, "d").proposalQuantity).toBe(0);
   });
 });
+
+// --- #13: time-phased proposals (tidsfasade förslag) ---
+//
+// 2026-11-02 is a Monday (v.45): v.46 starts 11-09, v.47 11-16, v.48 11-23.
+// Dates are ship/start dates already (the service shifts them); no holidays
+// unless a test sets them.
+
+const TODAY = "2026-11-02";
+const timed = (partial: Partial<RequirementsInput>) => calcInput({ today: TODAY, ...partial });
+const sale = (articleId: string, date: string | null, quantity: number) => ({
+  articleId,
+  orderStatus: "confirmed" as const,
+  quantityOrdered: quantity,
+  quantityDelivered: 0,
+  expectedDeliveryDate: date,
+});
+
+describe("time-phased proposals — grouping per need week", () => {
+  it("groups the uncovered demand per ISO week with the week's first uncovered day as need date", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a" })],
+        stock: [{ articleId: "a", quantity: 5 }],
+        salesRows: [sale("a", "2026-11-25", 7), sale("a", "2026-11-10", 10), sale("a", "2026-11-12", 4)],
+      })
+    );
+    const row = rowFor(rows, "a");
+    expect(row.proposals).toEqual([
+      // Stock covers 5 of the 10 on 11-10; the 4 on 11-12 join the same week.
+      {
+        key: "purchase:a:2026-11-09",
+        needDate: "2026-11-10",
+        needWeek: "2026-11-09",
+        latestDate: "2026-11-09",
+        late: false,
+        quantity: 9,
+        reason: "demand",
+      },
+      {
+        key: "purchase:a:2026-11-23",
+        needDate: "2026-11-25",
+        needWeek: "2026-11-23",
+        latestDate: "2026-11-24",
+        late: false,
+        quantity: 7,
+        reason: "demand",
+      },
+    ]);
+    expect(row).toMatchObject({ proposalQuantity: 16, proposalKind: "purchase", earliestLatestDate: "2026-11-09", anyLate: false });
+  });
+
+  it("a fully covered week makes no proposal; later demand draws on what is left of the pool", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a" })],
+        stock: [{ articleId: "a", quantity: 12 }],
+        purchaseRows: [{ articleId: "a", orderStatus: "confirmed", quantityOrdered: 3, quantityReceived: 0 }],
+        salesRows: [sale("a", "2026-11-10", 10), sale("a", "2026-11-25", 7)],
+      })
+    );
+    expect(rowFor(rows, "a").proposals.map((p) => [p.needWeek, p.quantity])).toEqual([["2026-11-23", 2]]);
+  });
+
+  it("a need before the current week is planned in the current week and is late", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a" })],
+        salesRows: [sale("a", "2026-10-20", 3), sale("a", "2026-11-04", 2)],
+      })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      {
+        key: "purchase:a:2026-11-02",
+        needDate: "2026-10-20",
+        needWeek: "2026-11-02",
+        latestDate: "2026-10-19",
+        late: true,
+        quantity: 5,
+        reason: "demand",
+      },
+    ]);
+    expect(rowFor(rows, "a").anyLate).toBe(true);
+  });
+
+  it("undated demand becomes its own undated proposal, sorted last", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a" })],
+        salesRows: [sale("a", null, 4), sale("a", "2026-11-25", 7)],
+      })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      expect.objectContaining({ needWeek: "2026-11-23", quantity: 7, reason: "demand" }),
+      { key: "purchase:a:undated", needDate: null, needWeek: null, latestDate: null, late: false, quantity: 4, reason: "undated" },
+    ]);
+    expect(rowFor(rows, "a").earliestLatestDate).toBe("2026-11-24");
+  });
+
+  it("negative stock is a need today", () => {
+    const rows = computeRequirements(
+      timed({ articles: [art({ articleId: "a" })], stock: [{ articleId: "a", quantity: -3 }] })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      expect.objectContaining({ needDate: TODAY, needWeek: TODAY, quantity: 3, reason: "demand", latestDate: "2026-10-30", late: true }),
+    ]);
+  });
+
+  it("dates TO material with the TO's start date and a planned TO's explosion with its start date", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "p", type: "manufactured" }), art({ articleId: "c" })],
+        bomEdges: [{ parentArticleId: "p", componentArticleId: "c", quantity: 2 }],
+        manufacturingOrders: [
+          { articleId: "p", status: "planned", quantity: 3, configured: false, startDate: "2026-11-18" },
+          { articleId: "p", status: "released", quantity: 1, configured: false },
+        ],
+        moMaterialRows: [
+          { componentArticleId: "c", orderStatus: "released", quantityPlanned: 5, quantityConsumed: 1, needDate: "2026-11-10" },
+        ],
+      })
+    );
+    expect(rowFor(rows, "c").proposals.map((p) => [p.needDate, p.quantity])).toEqual([
+      ["2026-11-10", 4],
+      ["2026-11-18", 6],
+    ]);
+    expect(rowFor(rows, "c").demandMo).toBe(10);
+  });
+});
+
+describe("time-phased proposals — order quantity, rounding and the carried surplus", () => {
+  it("applies the order quantity per proposal and carries the surplus to the next week", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", orderQuantity: 10 })],
+        salesRows: [sale("a", "2026-11-10", 9), sale("a", "2026-11-25", 6)],
+      })
+    );
+    // 9 → 10 (surplus 1); 6 − 1 = 5 → 10. Sum 20 = ⌈15 / 10⌉ × 10.
+    expect(rowFor(rows, "a").proposals.map((p) => p.quantity)).toEqual([10, 10]);
+    expect(rowFor(rows, "a").proposalQuantity).toBe(20);
+  });
+
+  it("a surplus large enough to cover a later week makes no proposal for it", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", orderQuantity: 20 })],
+        salesRows: [sale("a", "2026-11-10", 9), sale("a", "2026-11-25", 6), sale("a", "2026-12-09", 8)],
+      })
+    );
+    // 9 → 20 (surplus 11) covers the 6 (surplus 5); 8 − 5 = 3 → 20.
+    expect(rowFor(rows, "a").proposals.map((p) => [p.needWeek, p.quantity])).toEqual([
+      ["2026-11-09", 20],
+      ["2026-12-07", 20],
+    ]);
+  });
+
+  it("rounding is applied last, per proposal, and its surplus is carried too", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", rounding: 7.38 })],
+        salesRows: [sale("a", "2026-11-10", 100), sale("a", "2026-11-25", 3)],
+      })
+    );
+    // 100 → 103.32 (14 bars, surplus 3.32) covers the 3 kg two weeks later.
+    expect(rowFor(rows, "a").proposals.map((p) => p.quantity)).toEqual([103.32]);
+  });
+
+  it("the lead time is resolved for the ROUNDED proposal quantity", () => {
+    const asked: [string, number][] = [];
+    computeRequirements(
+      timed({
+        articles: [art({ articleId: "m", type: "manufactured", orderQuantity: 50 })],
+        salesRows: [sale("m", "2026-11-20", 7)],
+        leadDaysFor: (id, quantity) => {
+          asked.push([id, quantity]);
+          return 1;
+        },
+      })
+    );
+    expect(asked).toContainEqual(["m", 50]);
+  });
+});
+
+describe("time-phased proposals — safety stock floor and reorder point", () => {
+  it("safety stock is the floor of the pool: demand below it is uncovered", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", safetyStock: 10 })],
+        stock: [{ articleId: "a", quantity: 12 }],
+        salesRows: [sale("a", "2026-11-10", 5)],
+      })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      expect.objectContaining({ needDate: "2026-11-10", quantity: 3, reason: "demand" }),
+    ]);
+  });
+
+  it("a pool already below the safety stock is a need today", () => {
+    const rows = computeRequirements(
+      timed({ articles: [art({ articleId: "a", safetyStock: 10 })], stock: [{ articleId: "a", quantity: 4 }] })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      expect.objectContaining({ needDate: TODAY, needWeek: TODAY, quantity: 6, reason: "demand" }),
+    ]);
+  });
+
+  it("the reorder point tops up the position after all demands and proposals, dated today and never late", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", reorderPoint: 20 })],
+        stock: [{ articleId: "a", quantity: 2 }],
+        salesRows: [sale("a", "2026-11-25", 5)],
+      })
+    );
+    expect(rowFor(rows, "a").proposals).toEqual([
+      expect.objectContaining({ needWeek: "2026-11-23", quantity: 3, reason: "demand" }),
+      {
+        key: "purchase:a:rop",
+        needDate: TODAY,
+        needWeek: TODAY,
+        latestDate: TODAY,
+        late: false,
+        quantity: 20,
+        reason: "reorder_point",
+      },
+    ]);
+    expect(rowFor(rows, "a").proposalQuantity).toBe(23);
+  });
+
+  it("no reorder-point proposal when the surplus already lifts the position to the reorder point", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", reorderPoint: 4, orderQuantity: 10 })],
+        salesRows: [sale("a", "2026-11-25", 5)],
+      })
+    );
+    // 5 → 10, position 5 ≥ 4.
+    expect(rowFor(rows, "a").proposals.map((p) => p.reason)).toEqual(["demand"]);
+  });
+
+  it("the reorder-point proposal's material is a reorder-point proposal at the component too — today, never late", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "p", type: "manufactured", reorderPoint: 2 }), art({ articleId: "c" })],
+        bomEdges: [{ parentArticleId: "p", componentArticleId: "c", quantity: 3 }],
+      })
+    );
+    expect(rowFor(rows, "c").proposals).toEqual([
+      { key: `purchase:c:${TODAY}`, needDate: TODAY, needWeek: TODAY, latestDate: TODAY, late: false, quantity: 6, reason: "reorder_point" },
+    ]);
+  });
+
+  it("reorder-point material in the same week as a real demand: the real demand dates the proposal", () => {
+    // TODAY is a Monday; the KO row on Thursday the same week.
+    const thursday = "2026-11-05";
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "p", type: "manufactured", reorderPoint: 2 }), art({ articleId: "c" })],
+        bomEdges: [{ parentArticleId: "p", componentArticleId: "c", quantity: 3 }],
+        salesRows: [sale("c", thursday, 4)],
+      })
+    );
+    expect(rowFor(rows, "c").proposals).toEqual([
+      expect.objectContaining({ needDate: thursday, needWeek: TODAY, quantity: 10, reason: "demand" }),
+    ]);
+  });
+});
+
+describe("time-phased proposals — the sum invariant", () => {
+  // Without order quantity and rounding, the proposals of an article sum to
+  // the old aggregated proposal max(reorder point, safety stock) − projected;
+  // with an order quantity the sum is the same whole multiple (the carried
+  // surplus keeps the total minimal). Rounding on top of an order quantity
+  // may exceed it (each proposal is rounded separately) — documented, not
+  // asserted.
+  const cases: { stock: number; safety: number | null; rop: number | null; oq: number | null; demands: (string | null)[]; qty: number[]; supply: number }[] = [
+    { stock: 5, safety: null, rop: null, oq: null, demands: ["2026-11-10", "2026-11-25", null], qty: [10, 4, 7], supply: 0 },
+    { stock: -3, safety: 10, rop: null, oq: null, demands: ["2026-10-20", "2026-11-04"], qty: [3, 2], supply: 4 },
+    { stock: 2, safety: 5, rop: 20, oq: null, demands: ["2026-11-25", "2026-12-09"], qty: [5, 1], supply: 0 },
+    { stock: 0, safety: null, rop: 7, oq: 5, demands: ["2026-11-10", "2026-11-25"], qty: [3, 4], supply: 0 },
+    { stock: 50, safety: 10, rop: 60, oq: 25, demands: ["2026-11-10"], qty: [3], supply: 0 },
+    { stock: 1.5, safety: 2.25, rop: null, oq: 0.5, demands: ["2026-11-10", "2026-11-11", "2026-11-18"], qty: [0.3, 0.3, 0.4], supply: 0.1 },
+    { stock: 0, safety: null, rop: null, oq: 10, demands: ["2026-11-10", "2026-11-25", "2026-12-09"], qty: [9, 6, 8], supply: 0 },
+    { stock: 100, safety: 0, rop: 0, oq: null, demands: ["2026-11-10"], qty: [3], supply: 0 },
+  ];
+
+  it.each(cases)("sum of proposals = aggregated proposal (%j)", (c) => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", safetyStock: c.safety, reorderPoint: c.rop, orderQuantity: c.oq })],
+        stock: [{ articleId: "a", quantity: c.stock }],
+        purchaseRows: c.supply ? [{ articleId: "a", orderStatus: "confirmed", quantityOrdered: c.supply, quantityReceived: 0 }] : [],
+        salesRows: c.demands.map((d, i) => sale("a", d, c.qty[i]!)),
+      })
+    );
+    const row = rowFor(rows, "a");
+    const raw = Math.max(0, Math.max(c.rop ?? 0, c.safety ?? 0) - row.projected);
+    const expected = c.oq ? Math.ceil(Number((raw / c.oq).toFixed(6))) * c.oq : raw;
+    expect(row.proposalQuantity).toBeCloseTo(expected, 4);
+    expect(row.proposals.reduce((sum, p) => sum + p.quantity, 0)).toBeCloseTo(row.proposalQuantity, 4);
+  });
+});
+
+describe("time-phased proposals — latest dates", () => {
+  it("manufacture: the working day before the need minus the lead time; purchase: latestPurchaseOrderDate", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "m", type: "manufactured" }), art({ articleId: "k" })],
+        salesRows: [sale("m", "2026-11-20", 1), sale("k", "2026-11-20", 1)],
+        leadDaysFor: (id) => (id === "m" ? 3 : 0),
+        primarySuppliers: [
+          {
+            articleId: "k",
+            supplierId: "s1",
+            supplierName: "Leverantör",
+            price: 10,
+            currency: "SEK",
+            leadTimeDays: 5,
+            // Delivers to us Tuesdays and Thursdays.
+            supplierDelivery: { deliveryWeekdays: [2, 4], deliveryDayMode: "arrival", transitDays: null },
+          },
+        ],
+      })
+    );
+    // Fri 11-20: the working day before is Thu 11-19, minus 3 working days = Mon 11-16.
+    expect(rowFor(rows, "m").proposals[0]).toMatchObject({ latestDate: "2026-11-16", late: false });
+    expect(rowFor(rows, "m").leadDays).toBe(3);
+    // Arrival Thu 11-19 (listed), 5 working days before: Thu 11-12.
+    expect(rowFor(rows, "k").proposals[0]).toMatchObject({ latestDate: "2026-11-12", late: false });
+    expect(rowFor(rows, "k").leadDays).toBeNull();
+  });
+
+  it("purchase without a supplier: the working day before the need, holidays skipped", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "k" })],
+        salesRows: [sale("k", "2026-11-16", 1)],
+        offDays: new Set(["2026-11-13"]),
+      })
+    );
+    // Mon 11-16, Fri 11-13 is a holiday: the working day before is Thu 11-12.
+    expect(rowFor(rows, "k").proposals[0]!.latestDate).toBe("2026-11-12");
+  });
+
+  it("the system's supplier delivery defaults apply when the supplier has no own settings", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "t" })],
+        salesRows: [sale("t", "2026-11-16", 1)],
+        deliveryDefaults: { supplier: { mode: "arrival", transitDays: 2 }, customer: { mode: "dispatch", transitDays: 0 } },
+        primarySuppliers: [
+          { articleId: "t", supplierId: "s", supplierName: "S", price: null, currency: "SEK", leadTimeDays: 0 },
+        ],
+      })
+    );
+    // Arrival Fri 11-13 with 2 transit working days: ordered Wed 11-11.
+    expect(rowFor(rows, "t").proposals[0]!.latestDate).toBe("2026-11-11");
+  });
+
+  it("late when the latest date has passed, also for a need still ahead", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "m", type: "manufactured" })],
+        salesRows: [sale("m", "2026-11-04", 1)],
+        leadDaysFor: () => 5,
+      })
+    );
+    // Wed 11-04: working day before Tue 11-03, minus 5 working days = Tue 10-27 < today.
+    expect(rowFor(rows, "m").proposals[0]).toMatchObject({ needDate: "2026-11-04", latestDate: "2026-10-27", late: true });
+  });
+});
+
+describe("time-phased proposals — the cascade over two levels", () => {
+  it("dates the component's derived demand with the parent proposal's latest start", () => {
+    const leadDays: Record<string, number> = { a: 2, b: 1 };
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", type: "manufactured" }), art({ articleId: "b", type: "manufactured" }), art({ articleId: "c" })],
+        bomEdges: [
+          { parentArticleId: "a", componentArticleId: "b", quantity: 2 },
+          { parentArticleId: "b", componentArticleId: "c", quantity: 3 },
+        ],
+        salesRows: [sale("a", "2026-11-20", 1)],
+        leadDaysFor: (id) => leadDays[id] ?? 0,
+        primarySuppliers: [{ articleId: "c", supplierId: "s", supplierName: "S", price: null, currency: "SEK", leadTimeDays: 3 }],
+      })
+    );
+    // a: need Fri 11-20 → latest start Thu 11-19 − 2 = Tue 11-17.
+    expect(rowFor(rows, "a").proposals[0]).toMatchObject({ needDate: "2026-11-20", latestDate: "2026-11-17", quantity: 1 });
+    // b: need = a's start 11-17 → Mon 11-16 − 1 = Fri 11-13.
+    expect(rowFor(rows, "b").proposals[0]).toMatchObject({ needDate: "2026-11-17", latestDate: "2026-11-13", quantity: 2 });
+    // c: need = b's start 11-13 → arrival Thu 11-12, 3 working days lead: Mon 11-09.
+    expect(rowFor(rows, "c").proposals[0]).toMatchObject({ needDate: "2026-11-13", latestDate: "2026-11-09", quantity: 6 });
+    expect(rowFor(rows, "c").demandDerived).toBe(6);
+  });
+
+  it("two parent proposals in different weeks give the component two dated proposals", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", type: "manufactured" }), art({ articleId: "c" })],
+        bomEdges: [{ parentArticleId: "a", componentArticleId: "c", quantity: 1 }],
+        salesRows: [sale("a", "2026-11-11", 4), sale("a", "2026-12-02", 6)],
+      })
+    );
+    // a's latest starts (lead 0): Tue 11-10 and Tue 12-01 — c's need dates.
+    expect(rowFor(rows, "c").proposals.map((p) => [p.needDate, p.quantity])).toEqual([
+      ["2026-11-10", 4],
+      ["2026-12-01", 6],
+    ]);
+  });
+
+  it("an undated parent proposal gives undated component demand", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "a", type: "manufactured" }), art({ articleId: "c" })],
+        bomEdges: [{ parentArticleId: "a", componentArticleId: "c", quantity: 1 }],
+        salesRows: [sale("a", null, 4)],
+      })
+    );
+    expect(rowFor(rows, "c").proposals).toEqual([expect.objectContaining({ needDate: null, quantity: 4, reason: "undated" })]);
+  });
+
+  it("dated derived demand from outside (configured rows) is netted on its date; the undated map stays undated", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [art({ articleId: "c" })],
+        derivedDemands: [{ articleId: "c", quantity: 2, needDate: "2026-11-18" }],
+        configuredCascade: new Map([["c", 3]]),
+      })
+    );
+    expect(rowFor(rows, "c").demandDerived).toBe(5);
+    expect(rowFor(rows, "c").proposals.map((p) => [p.needDate, p.quantity, p.reason])).toEqual([
+      ["2026-11-18", 2, "demand"],
+      [null, 3, "undated"],
+    ]);
+  });
+});
+
+describe("time-phased proposals — configured and lego rows get their dates", () => {
+  it("a configured row: need = the row's ship date, latest start = the working day before minus its lead time", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [article("T", { type: "manufactured", configuratorMode: "to_order" })],
+        configuredRows: [
+          configuredRow({ salesOrderRowId: "r1", templateArticleId: "T", uncoveredQuantity: 2, expectedDeliveryDate: "2026-11-20", leadDays: 3 }),
+          configuredRow({ salesOrderRowId: "r2", templateArticleId: "T", uncoveredQuantity: 1, expectedDeliveryDate: null }),
+        ],
+      })
+    );
+    const [r1, r2] = rows.filter((r) => r.proposalKind === "configured");
+    expect(r1!.proposals).toEqual([
+      { key: "configured:r1", needDate: "2026-11-20", needWeek: "2026-11-16", latestDate: "2026-11-16", late: false, quantity: 2, reason: "demand" },
+    ]);
+    expect(r1).toMatchObject({ proposalQuantity: 2, earliestLatestDate: "2026-11-16", leadDays: null });
+    expect(r2!.proposals).toEqual([
+      { key: "configured:r2", needDate: null, needWeek: null, latestDate: null, late: false, quantity: 1, reason: "undated" },
+    ]);
+  });
+
+  it("a configured row on an inactive template has no proposals", () => {
+    const rows = computeRequirements(
+      timed({
+        articles: [article("T", { type: "manufactured", configuratorMode: "to_order", active: false })],
+        configuredRows: [configuredRow({ templateArticleId: "T", templateActive: false, uncoveredQuantity: 2, expectedDeliveryDate: "2026-11-20" })],
+      })
+    );
+    expect(rows.find((r) => r.proposalKind === "configured")).toMatchObject({ proposalQuantity: 0, proposals: [] });
+  });
+
+  it("a lego row: need = the operation's date, latest order = need minus Ledtid beställning", () => {
+    const rows = computeRequirements(
+      timed({
+        legoOperationRows: [
+          legoRow({ moOperationId: "op-1", needDate: "2026-11-16", orderLeadTimeDays: 2 }),
+          legoRow({ moOperationId: "op-2", sequenceNo: 30, needDate: "2026-11-02", orderLeadTimeDays: 1 }),
+          legoRow({ moOperationId: "op-3", sequenceNo: 40 }),
+        ],
+      })
+    );
+    const byOp = new Map(rows.map((r) => [r.moOperationId, r]));
+    expect(byOp.get("op-1")!.proposals).toEqual([
+      { key: "subcontract:op-1", needDate: "2026-11-16", needWeek: "2026-11-16", latestDate: "2026-11-12", late: false, quantity: 10, reason: "demand" },
+    ]);
+    // Needed today with a day's order lead time: should have been ordered Friday.
+    expect(byOp.get("op-2")!.proposals[0]).toMatchObject({ latestDate: "2026-10-30", late: true });
+    expect(byOp.get("op-2")!.anyLate).toBe(true);
+    expect(byOp.get("op-3")!.proposals[0]).toMatchObject({ needDate: null, latestDate: null, late: false, reason: "undated" });
+  });
+});

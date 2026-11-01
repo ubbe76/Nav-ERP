@@ -100,6 +100,9 @@ export const createArticleSchema = z.object({
   // Säkerhetslager (base unit) and Styrning Lagerstyrd (true) / Orderstyrd.
   safetyStock: z.coerce.number().nonnegative().optional(),
   stockControlled: z.boolean().optional(),
+  // Ledtid (dagar) — tillverkningsledtid in whole working days (#13); omitted
+  // = the routing's time decides.
+  manufacturingLeadTimeDays: z.coerce.number().int().min(0).optional(),
   // "Ytbehandling" / "Färg" — free text printed on documents (see the
   // articles schema); blank = not filled in.
   surfaceTreatment: optionalText(200).optional(),
@@ -172,6 +175,8 @@ export const updateArticleSchema = z
     // Säkerhetslager; null clears. Styrning: true = Lagerstyrd.
     safetyStock: z.coerce.number().nonnegative().nullable().optional(),
     stockControlled: z.boolean().optional(),
+    // Ledtid (dagar); null clears (the routing's time decides again).
+    manufacturingLeadTimeDays: z.coerce.number().int().min(0).nullable().optional(),
     // "Ytbehandling" / "Färg" — free text printed on documents; "" clears.
     surfaceTreatment: optionalText(200).optional(),
     colour: optionalText(200).optional(),

@@ -1693,6 +1693,7 @@ function CreateMoForm({
         id="moDueDate"
         articleId={row.articleId}
         salesOrderRowId={row.id}
+        quantity={Number(quantity)}
         value={dueDate}
         onChange={setDueDate}
       />

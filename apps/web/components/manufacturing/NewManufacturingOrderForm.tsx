@@ -151,7 +151,7 @@ export function NewManufacturingOrderForm({ deviation }: { deviation?: NewMoDevi
         <Input id="quantity" type="number" min="0" step="any" required size="sm" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
       </Field>
 
-      <SuggestedDueDateField id="dueDate" articleId={article?.id ?? null} value={dueDate} onChange={setDueDate} />
+      <SuggestedDueDateField id="dueDate" articleId={article?.id ?? null} quantity={Number(quantity)} value={dueDate} onChange={setDueDate} />
 
       <Field label="Anteckning (valfritt)" htmlFor="note">
         <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />

@@ -102,6 +102,8 @@ describe("findFirmDemand", () => {
           orderNumber: "TO-9",
           orderStatus: "released",
           dueDate: "2026-11-03",
+          needDate: "2026-11-03",
+          parentArticleId: "p",
           parentArticleNumber: "P",
           parentArticleName: "Förälder",
           quantityPlanned: 4,
@@ -206,27 +208,53 @@ describe("findFirmDemand", () => {
 
 describe("suggestDueDate", () => {
   const demand = { date: "2026-11-16", source: "shortage" as const, documentType: "sales_order" as const, documentId: "x", documentNumber: "KO-1" };
+  const opts = { today: "2026-10-06", offDays: NO_HOLIDAYS, leadDays: 0 };
 
   it("suggests the working day before the demand", () => {
-    expect(suggestDueDate(demand, { today: "2026-10-06", offDays: NO_HOLIDAYS })).toMatchObject({
+    expect(suggestDueDate(demand, opts)).toMatchObject({
       dueDate: "2026-11-13",
       demandDate: "2026-11-16",
-      clampedToToday: false,
+      late: false,
     });
   });
 
-  it("suggests today when the day before the demand has already passed", () => {
-    expect(suggestDueDate({ ...demand, date: "2026-10-06" }, { today: "2026-10-06", offDays: NO_HOLIDAYS })).toMatchObject({
+  it("suggests today when the day before the demand has already passed (lead time 0)", () => {
+    expect(suggestDueDate({ ...demand, date: "2026-10-06" }, opts)).toMatchObject({
       dueDate: "2026-10-06",
       demandDate: "2026-10-06",
-      clampedToToday: true,
+      late: true,
     });
   });
 
   it("keeps a working day before the demand that is exactly today", () => {
-    expect(suggestDueDate({ ...demand, date: "2026-10-07" }, { today: "2026-10-06", offDays: NO_HOLIDAYS })).toMatchObject({
+    expect(suggestDueDate({ ...demand, date: "2026-10-07" }, opts)).toMatchObject({
       dueDate: "2026-10-06",
-      clampedToToday: false,
+      late: false,
+    });
+  });
+
+  // The floor is today + leadDays WORKING days — the earliest the TO can be
+  // finished. 2026-10-06 is a Tuesday: 3 working days later is Friday 10-09,
+  // 4 is Monday 10-12.
+  it("never suggests earlier than today plus the lead time in working days, and says late", () => {
+    const withLead = { ...opts, leadDays: 4 };
+    expect(suggestDueDate({ ...demand, date: "2026-10-09" }, withLead)).toMatchObject({
+      dueDate: "2026-10-12",
+      demandDate: "2026-10-09",
+      late: true,
+    });
+    // A demand far enough ahead is unaffected by the lead time.
+    expect(suggestDueDate(demand, withLead)).toMatchObject({ dueDate: "2026-11-13", late: false });
+    // Exactly on the floor is not late.
+    expect(suggestDueDate({ ...demand, date: "2026-10-13" }, withLead)).toMatchObject({ dueDate: "2026-10-12", late: false });
+  });
+
+  it("the floor skips full-day holidays", () => {
+    const offDays = new Set(["2026-10-07"]);
+    // Tue 10-06 + 2 working days, skipping Wed 10-07: Thu 10-08 → Fri 10-09.
+    expect(suggestDueDate({ ...demand, date: "2026-10-08" }, { today: "2026-10-06", offDays, leadDays: 2 })).toMatchObject({
+      dueDate: "2026-10-09",
+      late: true,
     });
   });
 });

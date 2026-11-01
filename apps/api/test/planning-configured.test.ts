@@ -273,7 +273,7 @@ describe("behovsberäkning — beställningsvara", () => {
       demandDate: dateB,
       source: "sales_order_row",
       documentNumber: orderB.orderNumber,
-      clampedToToday: false,
+      late: false,
     });
     // Row A's own suggestion is still from A's date (its TO does not cover
     // it in the configured rule either — the TO is dated from the row).

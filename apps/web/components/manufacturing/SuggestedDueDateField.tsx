@@ -10,8 +10,8 @@ import type { DueDateSuggestion } from "../../lib/types";
 // GET /articles/:id/due-date-suggestion: one working day before the
 // article's first firm demand that stock and open IO/TO don't already cover
 // (with salesOrderRowId: before that KO row's delivery date, if the row is
-// uncovered), today at the earliest. Manual wins — the field is
-// only (re)filled while it still holds the last suggestion or is empty, so a
+// uncovered), today plus the lead time at the earliest (late = true then).
+// Manual wins — the field is only (re)filled while it still holds the last suggestion or is empty, so a
 // typed date survives a later article change. A request sequence drops
 // answers for an article that is no longer selected.
 export function SuggestedDueDateField({
@@ -19,6 +19,7 @@ export function SuggestedDueDateField({
   label = "Planerat färdigdatum (valfritt)",
   articleId,
   salesOrderRowId,
+  quantity,
   value,
   onChange,
 }: {
@@ -26,6 +27,8 @@ export function SuggestedDueDateField({
   label?: string;
   articleId: string | null;
   salesOrderRowId?: string;
+  // Order quantity when the caller knows it; the lead time can depend on it.
+  quantity?: number;
   value: string;
   onChange: (value: string) => void;
 }) {
@@ -51,12 +54,20 @@ export function SuggestedDueDateField({
       apply(null);
       return;
     }
-    const query = salesOrderRowId ? `?salesOrderRowId=${salesOrderRowId}` : "";
-    apiFetch<{ suggestion: DueDateSuggestion | null }>(`/api/v1/articles/${articleId}/due-date-suggestion${query}`)
-      .then((res) => apply(res.suggestion))
-      // A failed suggestion just leaves the field as it is — it's optional.
-      .catch(() => apply(null));
-  }, [articleId, salesOrderRowId]);
+    const params = new URLSearchParams();
+    if (salesOrderRowId) params.set("salesOrderRowId", salesOrderRowId);
+    if (quantity !== undefined && Number.isFinite(quantity) && quantity > 0) params.set("quantity", String(quantity));
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    // A short pause so typing a quantity asks once, not per keystroke (the
+    // sequence above already drops stale answers).
+    const timer = setTimeout(() => {
+      apiFetch<{ suggestion: DueDateSuggestion | null }>(`/api/v1/articles/${articleId}/due-date-suggestion${query}`)
+        .then((res) => apply(res.suggestion))
+        // A failed suggestion just leaves the field as it is — it's optional.
+        .catch(() => apply(null));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [articleId, salesOrderRowId, quantity]);
 
   return (
     <Field label={label} htmlFor={id}>
@@ -72,7 +83,7 @@ export function suggestionText(s: DueDateSuggestion): string {
     s.source === "sales_order_row"
       ? `kundorderns leveransdatum ${s.demandDate} (${s.documentNumber})`
       : `första bristen ${s.demandDate} (${s.documentNumber})`;
-  return s.clampedToToday
-    ? `Arbetsdagen före ${what} har redan passerat — idag föreslås.`
+  return s.late
+    ? `Färdigdatumet hinner inte före behovet (${s.demandDate}) — tidigast möjliga med ledtiden.`
     : `Föreslaget: arbetsdagen före ${what}.`;
 }

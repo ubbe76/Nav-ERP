@@ -1219,6 +1219,13 @@
       "when": 1793356342473,
       "tag": "0173_en_oppen_narvaro",
       "breakpoints": true
+    },
+    {
+      "idx": 174,
+      "version": "7",
+      "when": 1793531758046,
+      "tag": "0174_tillverkningsledtid",
+      "breakpoints": true
     }
   ]
 }

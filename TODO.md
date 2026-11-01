@@ -43,7 +43,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Förbättrad artikel- och strukturimport** — omfattning ej specad än (bygger vidare på import-export.md-paketen). Viktigt när ett nytt företag flyttar in sina data.
 - [ ] **Förbättrad kundimport** — omfattning ej specad än. Känt: Personnummer importeras inte.
 - [ ] **Förbättrad leverantörsimport** — omfattning ej specad än.
-- [ ] **Tidsfasade förslag i behovsberäkningen** → [#13](https://github.com/ubbe76/Nav-ERP/issues/13) *(hemsidan)*
 - [ ] **Förbättrad lagerplatshantering** — omfattning ej specad än.
 
 ### Medel
@@ -51,7 +50,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
-- [ ] **Samma artikel flera gånger på en order:** kundorder/offert och inköpsorder/förfrågan ska kunna ha samma artikel på flera rader — t.ex. när leverantören inte har fullt antal och resten levereras ett annat datum (raderna har redan egna leveransdatum). I dag stoppar de unika indexen `sales_order_rows_order_article_unique` (delvis: inte konfigurerade rader och ställkostnadsrader), `purchase_order_rows_purchase_order_id_article_id_unique` och `inquiry_rows_inquiry_id_article_id_unique` det, vilket också hindrar två legooperationer på samma artikel på en IO. Gå igenom allt som slår upp en rad via artikeln: skanningen i inleverans/utleverans (vilken rad räknas först — tidigaste datum?), behovsberäkningen, Skapa ordrar, förfrågan → IO, import och det externa API:t. Ersätter 409-felen `duplicate-purchase-order-row`/`duplicate-inquiry-row` och kundorderns motsvarighet.
+- [ ] **Samma artikel flera gånger på en order:** kundorder/offert och inköpsorder/förfrågan ska kunna ha samma artikel på flera rader — t.ex. när leverantören inte har fullt antal och resten levereras ett annat datum (raderna har redan egna leveransdatum). I dag stoppar de unika indexen `sales_order_rows_order_article_unique` (delvis: inte konfigurerade rader och ställkostnadsrader), `purchase_order_rows_purchase_order_id_article_id_unique` och `inquiry_rows_inquiry_id_article_id_unique` det, vilket också hindrar två legooperationer på samma artikel på en IO — och gör att behovsberäkningens **Skapa ordrar** i dag lägger två veckors förslag för samma artikel på två IO:er hos leverantören (slå ihop grupperingen i `createOrdersFromProposals` när indexet tas bort). Gå igenom allt som slår upp en rad via artikeln: skanningen i inleverans/utleverans (vilken rad räknas först — tidigaste datum?), behovsberäkningen, Skapa ordrar, förfrågan → IO, import och det externa API:t. Ersätter 409-felen `duplicate-purchase-order-row`/`duplicate-inquiry-row` och kundorderns motsvarighet.
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
 - [ ] **Händelseloggen:** ingen `created`-händelse för TO.
 - [ ] **Välj vad Översikten visar** → [#17](https://github.com/ubbe76/Nav-ERP/issues/17)
@@ -61,6 +60,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låg
 
+- [ ] **Behovsberäkningen, tidsfasade förslag:** sorteringen **Sortering: Senaste datum** lägger ett inköpsförslag utan möjlig ankomst (senaste datum saknas, markerat **Passerat**) sist i stället för först; efter **Uppdatera** rensas val för förslag som flyttat vecka bara på den visade sidan (andra sidors val kan ha kvar ett gammalt behovsdatum); **Skapa ordrar** utan behovsdatum (integrationer) laddar ledtidsunderlaget även för inköpsartiklar.
 - [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — ingår i [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Momsrapporten:** visar Deklarerad även när ett kvartal bara delvis överlappar en deklarerad månad — en hint "överlappar en deklarerad månad".
 - [ ] **Faktura:** icke-admin ser ingen bokföringsindikation på fakturakorten (verifikatnumret som ren text vore lika säkert som den admin-spärrade länken); fakturalistans sökning matchar kundens nuvarande namn men visar ögonblicksbilden; `?orderId=` utan rest droppas tyst när flera ordrar faktureras; Lägg till rad saknar enhetsväljare (antalet är basenheten).

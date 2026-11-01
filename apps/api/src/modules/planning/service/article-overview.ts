@@ -73,13 +73,19 @@ export interface OverviewManufacturingOrder {
   quantity: number;
 }
 
-// Material snapshot rows where the article is the component.
+// Material snapshot rows where the article is the component. The row is
+// DATED by needDate — the parent TO's start (moStartDate: its earliest
+// planned week, else due date minus lead time; tidsfasade förslag #13) —
+// which the planning service computes from the repository's dueDate and
+// parentArticleId. The TO's own due date is kept for the readers that show it.
 export interface OverviewMaterialRow {
   rowId: string;
   moId: string;
   orderNumber: string;
   orderStatus: ManufacturingOrderStatus;
   dueDate: string | null;
+  needDate: string | null;
+  parentArticleId: string;
   parentArticleNumber: string;
   parentArticleName: string;
   quantityPlanned: number;
@@ -89,10 +95,12 @@ export interface OverviewMaterialRow {
 // Every status = planned MO, regardless of article — a planned MO has no
 // snapshot yet, so which ones need this article is decided by exploding
 // the parent's BOM (one level, phantoms dissolved), exactly as the MRP does.
+// Dated by needDate like the material rows.
 export interface OverviewPlannedMo {
   moId: string;
   orderNumber: string;
   dueDate: string | null;
+  needDate: string | null;
   parentArticleId: string;
   parentArticleNumber: string;
   parentArticleName: string;
@@ -110,6 +118,14 @@ export interface ArticleOverviewInput {
   bomEdges: BomEdge[];
   phantomIds: string[];
   primarySupplier: { supplierId: string; supplierName: string; leadTimeDays: number | null } | null;
+}
+
+// What the repository loads: the input without the TO start dates, which the
+// planning service adds (it needs the holiday register and the TOs'
+// operations — requirements-dating.ts) before the builder runs.
+export interface ArticleOverviewLoad extends Omit<ArticleOverviewInput, "materialRows" | "plannedMos"> {
+  materialRows: Omit<OverviewMaterialRow, "needDate">[];
+  plannedMos: Omit<OverviewPlannedMo, "needDate">[];
 }
 
 export type OverviewRowKind =
@@ -249,7 +265,7 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
       id: `mat:${row.rowId}`,
       kind: "mo_material",
       direction: "demand",
-      date: row.dueDate,
+      date: row.needDate,
       documentType: "manufacturing_order",
       documentId: row.moId,
       documentNumber: row.orderNumber,
@@ -273,7 +289,7 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
       id: `pmat:${mo.moId}`,
       kind: "mo_planned_material",
       direction: "demand",
-      date: mo.dueDate,
+      date: mo.needDate,
       documentType: "manufacturing_order",
       documentId: mo.moId,
       documentNumber: mo.orderNumber,

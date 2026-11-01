@@ -7,6 +7,16 @@ import type { PartnerDeliveryFields } from "../src/modules/system/service/delive
 // Pure unit tests with faked deps — no database. Covers the order-creation
 // failure branches that are impractical to provoke through the real services.
 
+// Tidsfasade förslag: a requirements load without TOs, routings or resources
+// — every lead time is 0 and nothing is dated beyond the rows themselves.
+const emptyDating = {
+  operations: [],
+  routings: [],
+  workCenters: [],
+  articleLeadTimes: new Map<string, number | null>(),
+  orderQuantities: new Map<string, number>(),
+};
+
 function makeRepo(overrides: Partial<PlanningRepository> = {}): PlanningRepository {
   return {
     async loadRequirementsInput() {
@@ -458,6 +468,7 @@ describe("planning service — behovsberäkning result cache", () => {
           legoOperationRows: [],
           configuredRows: [],
           configuredCascade: new Map(),
+          dating: emptyDating,
         };
       },
     });
@@ -547,6 +558,7 @@ describe("planning service — behovsberäkning result cache", () => {
       bomEdges: [],
       primarySuppliers: [],
       legoOperationRows: [],
+      dating: emptyDating,
     };
   }
 });
@@ -586,7 +598,7 @@ describe("planning service — configured rows: one derivation per configuration
         return {
           articles: [art("t", { type: "manufactured", configuratorMode: "to_order", ...template }), art("c", {})],
           salesRows: [], purchaseRows: [], manufacturingOrders: [], moMaterialRows: [], stock: [], bomEdges: [],
-          primarySuppliers: [], legoOperationRows: [], configuredRows: [], configuredCascade: new Map(),
+          primarySuppliers: [], legoOperationRows: [], configuredRows: [], configuredCascade: new Map(), dating: emptyDating,
         } as never;
       },
       async loadConfiguredSalesRows() {

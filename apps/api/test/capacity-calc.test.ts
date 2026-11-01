@@ -8,6 +8,7 @@ import {
   remainingOperationMinutes,
   resourceDayMinutes,
   resolveResourceWeekHours,
+  routingOperationMinutes,
   type CapacityInput,
   type CapacityOperationRow,
   type CapacityResult,
@@ -717,5 +718,16 @@ describe("computeCapacity — planned operations", () => {
       lateOrders: [],
       unplannedOrders: [{ manufacturingOrderId: "mo-1", orderNumber: "PO-1" }],
     });
+  });
+});
+
+describe("routingOperationMinutes", () => {
+  it("is setup once plus run time per unit — the formula Leveranstidskontrollen and the lead time share", () => {
+    expect(routingOperationMinutes({ setupTime: 30, runTimePerUnit: 2.5 }, 10)).toBe(55);
+    expect(routingOperationMinutes({ setupTime: 30, runTimePerUnit: 2.5 }, 0)).toBe(30);
+    // An untouched TO's remaining minutes equal the routing formula.
+    expect(remainingOperationMinutes(op({ setupTime: 30, runTimePerUnit: 2.5, orderQuantity: 10 }))).toBe(
+      routingOperationMinutes({ setupTime: 30, runTimePerUnit: 2.5 }, 10)
+    );
   });
 });

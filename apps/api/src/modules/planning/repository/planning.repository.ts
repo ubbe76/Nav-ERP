@@ -40,11 +40,18 @@ import type {
   RequirementsInput,
   SalesOrderStatus,
 } from "../service/requirements-calc.js";
+import type {
+  DatingManufacturingOrder,
+  DatingMoOperation,
+  DatingRoutingOperation,
+  DatingWorkCenter,
+} from "../service/requirements-dating.js";
+import type { PartnerDeliveryFields } from "../../system/service/delivery-days.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { CapacityInput, PlannedWeek } from "../service/capacity-calc.js";
 import type { OperationPlan } from "../service/production-plan.js";
 import { roundPlanWeeks } from "../service/capacity-book.js";
-import type { ArticleOverviewInput } from "../service/article-overview.js";
+import type { ArticleOverviewLoad } from "../service/article-overview.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import { loadLongOperationWeeks } from "../../system/repository/plan-settings.js";
 import { purchaseRowArrivalDate, salesRowDeliveryDate } from "./effective-dates.js";
@@ -52,6 +59,35 @@ import { purchaseRowArrivalDate, salesRowDeliveryDate } from "./effective-dates.
 export interface PlanningArticleInfo {
   articleId: string;
   articleNumber: string;
+}
+
+// Tidsfasade förslag (#13): what the planning service needs to date every
+// open TO's material (requirements-dating.ts) — the TOs' operations with
+// their planned weeks, the resources, the routings and the articles' Ledtid
+// (dagar). Loaded once per run, never per article.
+export interface MoDatingInputs {
+  operations: DatingMoOperation[];
+  routings: DatingRoutingOperation[];
+  workCenters: DatingWorkCenter[];
+  articleLeadTimes: Map<string, number | null>;
+  // The filtered TOs' remaining quantity (moRemainingQuantity, the same
+  // figure the behovsberäkning dates with) — a TO without operations is
+  // timed on the article's routing for it. Empty without an order filter.
+  orderQuantities: Map<string, number>;
+}
+
+// loadRequirementsInput's result: the pure calc's input plus what the
+// service dates it with before computeRequirements runs — the KO rows' raw
+// delivery dates (moved to ship dates by toShipDates), the TOs' ids and due
+// dates (moStartDate), the material rows' TO and the lego operations'
+// planned week. The calc ignores the extra fields.
+export interface RequirementsLoad extends RequirementsInput {
+  articles: (RequirementsInput["articles"][number] & { manufacturingLeadTimeDays: number | null })[];
+  salesRows: (RequirementsInput["salesRows"][number] & { expectedDeliveryDate: string | null; customerDelivery: PartnerDeliveryFields })[];
+  manufacturingOrders: (RequirementsInput["manufacturingOrders"][number] & DatingManufacturingOrder)[];
+  moMaterialRows: (RequirementsInput["moMaterialRows"][number] & { manufacturingOrderId: string })[];
+  legoOperationRows: (LegoOperationRow & { workCenterId: string; plannedStartWeek: string | null })[];
+  dating: MoDatingInputs;
 }
 
 // Statuses worth loading at all — the pure calc owns the semantics, these
@@ -104,7 +140,11 @@ export function createPlanningRepository(db: Db) {
         groupId: articles.groupId,
         sequenceNo: moOperations.sequenceNo,
         operationDescription: moOperations.description,
+        workCenterId: moOperations.workCenterId,
         workCenterName: workCenters.name,
+        // Tidsfasade förslag: the operation's planned week (Monday) is the
+        // need date when planned; the service falls back to the TO's start.
+        plannedStartWeek: moOperations.plannedStartWeek,
         orderQuantity: manufacturingOrders.quantity,
         // Correlation must be table-qualified explicitly — see the
         // workCenterCount subquery note in manufacturing.repository.ts.
@@ -157,7 +197,7 @@ export function createPlanningRepository(db: Db) {
     }
 
     return rows.map(
-      (r): LegoOperationRow => ({
+      (r): LegoOperationRow & { workCenterId: string; plannedStartWeek: string | null } => ({
         moOperationId: r.moOperationId,
         manufacturingOrderId: r.manufacturingOrderId,
         orderNumber: r.orderNumber,
@@ -171,7 +211,9 @@ export function createPlanningRepository(db: Db) {
         groupId: r.groupId,
         sequenceNo: r.sequenceNo,
         operationDescription: r.operationDescription,
+        workCenterId: r.workCenterId,
         workCenterName: r.workCenterName,
+        plannedStartWeek: r.plannedStartWeek,
         orderQuantity: Number(r.orderQuantity),
         orderedQuantity: Number(r.orderedQuantity),
         supplierId: r.supplierId,
@@ -212,10 +254,104 @@ export function createPlanningRepository(db: Db) {
     }));
   }
 
+  // The dating inputs (requirements-dating.ts). `orderIds`/`articleIds`
+  // undefined = every open TO / every routing (the behovsberäkning's whole
+  // run); a list = only those (the artikelöversikt's TOs and parents, the
+  // färdigdatumsförslag's one article). The resources are always all of
+  // them — a handful of rows.
+  async function datingInputs(
+    dbc: Db | Tx,
+    filter: { orderIds?: string[]; articleIds?: string[] } = {}
+  ): Promise<MoDatingInputs> {
+    const orderConditions = [inArray(manufacturingOrders.status, OPEN_MO)];
+    if (filter.orderIds) orderConditions.push(inArray(manufacturingOrders.id, filter.orderIds));
+    const routingConditions = [eq(routingOperations.costingOnly, false)];
+    if (filter.articleIds) routingConditions.push(inArray(routingOperations.articleId, filter.articleIds));
+    const articleConditions = [eq(articles.type, "manufactured")];
+    if (filter.articleIds) articleConditions.push(inArray(articles.id, filter.articleIds));
+    const noOrders = filter.orderIds !== undefined && filter.orderIds.length === 0;
+    const noArticles = filter.articleIds !== undefined && filter.articleIds.length === 0;
+    const [operationRows, routingRows, workCenterRows, articleRows, orderRows] = await Promise.all([
+      noOrders
+        ? Promise.resolve([])
+        : dbc
+            .select({
+              manufacturingOrderId: moOperations.manufacturingOrderId,
+              workCenterId: moOperations.workCenterId,
+              setupTime: moOperations.setupTime,
+              runTimePerUnit: moOperations.runTimePerUnit,
+              operationStatus: moOperations.status,
+              orderQuantity: manufacturingOrders.quantity,
+              quantityCompleted: moOperations.quantityCompleted,
+              quantityScrapped: moOperations.quantityScrapped,
+              plannedStartWeek: moOperations.plannedStartWeek,
+              planLocked: moOperations.planLocked,
+            })
+            .from(moOperations)
+            .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+            .where(and(...orderConditions)),
+      noArticles
+        ? Promise.resolve([])
+        : dbc
+            .select({
+              articleId: routingOperations.articleId,
+              workCenterId: routingOperations.workCenterId,
+              setupTime: routingOperations.setupTime,
+              runTimePerUnit: routingOperations.runTimePerUnit,
+            })
+            .from(routingOperations)
+            .where(and(...routingConditions)),
+      dbc
+        .select({
+          workCenterId: workCenters.id,
+          type: workCenters.type,
+          hoursPerDay: workCenters.hoursPerDay,
+          leadTimeDays: workCenters.leadTimeDays,
+          queueTimeDays: workCenters.queueTimeDays,
+          orderLeadTimeDays: workCenters.orderLeadTimeDays,
+        })
+        .from(workCenters),
+      noArticles
+        ? Promise.resolve([])
+        : dbc
+            .select({ articleId: articles.id, manufacturingLeadTimeDays: articles.manufacturingLeadTimeDays })
+            .from(articles)
+            .where(and(...articleConditions)),
+      filter.orderIds === undefined || noOrders
+        ? Promise.resolve([])
+        : dbc
+            .select({ manufacturingOrderId: manufacturingOrders.id, quantity: moRemainingQuantity })
+            .from(manufacturingOrders)
+            .where(inArray(manufacturingOrders.id, filter.orderIds)),
+    ]);
+    const num = (v: string | null) => (v === null ? null : Number(v));
+    return {
+      operations: operationRows.map((r) => ({
+        ...r,
+        setupTime: Number(r.setupTime),
+        runTimePerUnit: Number(r.runTimePerUnit),
+        orderQuantity: Number(r.orderQuantity),
+        quantityCompleted: num(r.quantityCompleted),
+        quantityScrapped: Number(r.quantityScrapped),
+      })),
+      routings: routingRows.map((r) => ({ ...r, setupTime: Number(r.setupTime), runTimePerUnit: Number(r.runTimePerUnit) })),
+      workCenters: workCenterRows.map((r) => ({
+        workCenterId: r.workCenterId,
+        type: r.type,
+        hoursPerDay: num(r.hoursPerDay),
+        leadTimeDays: num(r.leadTimeDays),
+        queueTimeDays: num(r.queueTimeDays),
+        orderLeadTimeDays: num(r.orderLeadTimeDays),
+      })),
+      articleLeadTimes: new Map(articleRows.map((r) => [r.articleId, r.manufacturingLeadTimeDays])),
+      orderQuantities: new Map(orderRows.map((r) => [r.manufacturingOrderId, Number(r.quantity)])),
+    };
+  }
+
   return {
     // One set-based query per source; all business rules (which statuses are
     // demand/supply, netting, cascade) live in the pure calc.
-    async loadRequirementsInput(): Promise<RequirementsInput> {
+    async loadRequirementsInput(): Promise<RequirementsLoad> {
       const [articleRows, salesRows, purchaseRows, moRows, materialRows, stockRows, bomEdges, primary, legoRows] =
         await Promise.all([
           db
@@ -232,6 +368,7 @@ export function createPlanningRepository(db: Db) {
               safetyStock: articles.safetyStock,
               orderQuantity: articles.orderQuantity,
               rounding: articles.rounding,
+              manufacturingLeadTimeDays: articles.manufacturingLeadTimeDays,
               // Konfigurator: same left join as the article list's configuratorMode.
               configuratorMode: configuratorTemplates.mode,
             })
@@ -245,9 +382,19 @@ export function createPlanningRepository(db: Db) {
               orderStatus: salesOrders.status,
               quantityOrdered: salesOrderRows.quantityOrdered,
               quantityDelivered: salesOrderRows.quantityDelivered,
+              // Tidsfasade förslag: the row's effective delivery date and the
+              // customer's delivery fields — the service moves it to the ship
+              // date (toShipDates), exactly as the artikelöversikt's rows.
+              expectedDeliveryDate: salesRowDeliveryDate,
+              customerDelivery: {
+                deliveryWeekdays: customers.deliveryWeekdays,
+                deliveryDayMode: customers.deliveryDayMode,
+                transitDays: customers.transitDays,
+              },
             })
             .from(salesOrderRows)
             .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
+            .innerJoin(customers, eq(customers.id, salesOrders.customerId))
             // Konfigurator 4c: configured rows count as demand on the template
             // like any row (the TO made for the row is the template's supply);
             // the template itself is never proposed (configuratorMode).
@@ -269,11 +416,13 @@ export function createPlanningRepository(db: Db) {
             .where(and(inArray(purchaseOrders.status, OPEN_PO), isNull(purchaseOrderRows.moOperationId))),
           db
             .select({
+              manufacturingOrderId: manufacturingOrders.id,
               articleId: manufacturingOrders.articleId,
               status: manufacturingOrders.status,
               // Supply is what is still to come: units already received
               // (delinleverans) are on hand and must not count twice.
               quantity: moRemainingQuantity,
+              dueDate: manufacturingOrders.dueDate,
               // Konfigurator 4c: a configured TO has its own material rows.
               configured: sql<boolean>`${manufacturingOrders.configuration} is not null`,
             })
@@ -282,6 +431,7 @@ export function createPlanningRepository(db: Db) {
           db
             .select({
               componentArticleId: moMaterialConsumptions.componentArticleId,
+              manufacturingOrderId: moMaterialConsumptions.manufacturingOrderId,
               orderStatus: manufacturingOrders.status,
               quantityPlanned: moMaterialConsumptions.quantityPlanned,
               quantityConsumed: moMaterialConsumptions.quantityConsumed,
@@ -309,8 +459,10 @@ export function createPlanningRepository(db: Db) {
           primarySuppliersFor(),
           legoOperations(),
         ]);
+      const dating = await datingInputs(db);
 
       return {
+        dating,
         articles: articleRows.map((r) => ({
           articleId: r.articleId,
           articleNumber: r.articleNumber,
@@ -324,6 +476,7 @@ export function createPlanningRepository(db: Db) {
           safetyStock: r.safetyStock === null ? null : Number(r.safetyStock),
           orderQuantity: r.orderQuantity === null ? null : Number(r.orderQuantity),
           rounding: r.rounding === null ? null : Number(r.rounding),
+          manufacturingLeadTimeDays: r.manufacturingLeadTimeDays,
           configuratorMode: r.configuratorMode,
         })),
         salesRows: salesRows.map((r) => ({
@@ -331,6 +484,8 @@ export function createPlanningRepository(db: Db) {
           orderStatus: r.orderStatus,
           quantityOrdered: Number(r.quantityOrdered),
           quantityDelivered: Number(r.quantityDelivered),
+          expectedDeliveryDate: r.expectedDeliveryDate,
+          customerDelivery: r.customerDelivery,
         })),
         purchaseRows: purchaseRows.map((r) => ({
           articleId: r.articleId,
@@ -339,13 +494,16 @@ export function createPlanningRepository(db: Db) {
           quantityReceived: Number(r.quantityReceived),
         })),
         manufacturingOrders: moRows.map((r) => ({
+          manufacturingOrderId: r.manufacturingOrderId,
           articleId: r.articleId,
           status: r.status,
           quantity: Number(r.quantity),
+          dueDate: r.dueDate,
           configured: r.configured,
         })),
         moMaterialRows: materialRows.map((r) => ({
           componentArticleId: r.componentArticleId,
+          manufacturingOrderId: r.manufacturingOrderId,
           orderStatus: r.orderStatus,
           quantityPlanned: Number(r.quantityPlanned),
           quantityConsumed: Number(r.quantityConsumed),
@@ -426,7 +584,7 @@ export function createPlanningRepository(db: Db) {
     // Artikelöversikt — ONE article's open rows WITH dates, for the pure
     // builder in article-overview.ts. Delegates to the batch loader below
     // (one implementation); null when the article does not exist.
-    async loadArticleOverviewInput(articleId: string, dbc: Db | Tx = db): Promise<ArticleOverviewInput | null> {
+    async loadArticleOverviewInput(articleId: string, dbc: Db | Tx = db): Promise<ArticleOverviewLoad | null> {
       return (await this.loadArticleOverviewInputs([articleId], dbc)).get(articleId) ?? null;
     },
 
@@ -441,8 +599,11 @@ export function createPlanningRepository(db: Db) {
     // parent's BOM), as the MRP does per run. Unknown ids are simply absent.
     // `dbc`: the reservation runs the check inside its own transaction
     // (same Db | Tx widening as loadCapacityInput / loadDeliveryContext).
-    async loadArticleOverviewInputs(articleIds: string[], dbc: Db | Tx = db): Promise<Map<string, ArticleOverviewInput>> {
-      const result = new Map<string, ArticleOverviewInput>();
+    // The material rows and planned TOs carry the TO's due date and parent
+    // article; the service dates them with the TO's START (moStartDate,
+    // loadMoDatingInputs) before the builder runs.
+    async loadArticleOverviewInputs(articleIds: string[], dbc: Db | Tx = db): Promise<Map<string, ArticleOverviewLoad>> {
+      const result = new Map<string, ArticleOverviewLoad>();
       const ids = [...new Set(articleIds)];
       if (ids.length === 0) return result;
 
@@ -541,6 +702,7 @@ export function createPlanningRepository(db: Db) {
               orderNumber: manufacturingOrders.orderNumber,
               orderStatus: manufacturingOrders.status,
               dueDate: manufacturingOrders.dueDate,
+              parentArticleId: manufacturingOrders.articleId,
               parentArticleNumber: articles.articleNumber,
               parentArticleName: articles.name,
               quantityPlanned: moMaterialConsumptions.quantityPlanned,
@@ -654,6 +816,13 @@ export function createPlanningRepository(db: Db) {
       return result;
     },
 
+    // Tidsfasade förslag: the dating inputs for a set of TOs and the articles
+    // whose routing/field decide the lead time (the artikelöversikt's TOs
+    // and their parents; the färdigdatumsförslag's article with no TOs).
+    async loadMoDatingInputs(filter: { orderIds: string[]; articleIds: string[] }, dbc: Db | Tx = db): Promise<MoDatingInputs> {
+      return datingInputs(dbc, filter);
+    },
+
     // Konfigurator 4c: ONE sales order row for the färdigdatumsförslag — the
     // service dates a configured row's TO from the row itself (its supply is
     // not interchangeable with other configurations' units, so the pooled
@@ -673,6 +842,9 @@ export function createPlanningRepository(db: Db) {
             transitDays: customers.transitDays,
           },
           configured: sql<boolean>`${salesOrderRows.configuration} is not null`,
+          // Skapa ordrar derives the configured TO's lead time from the row's
+          // own configuration (requirements-dating.ts configuredLeadDays).
+          configuration: salesOrderRows.configuration,
           quantityOrdered: salesOrderRows.quantityOrdered,
           quantityDelivered: salesOrderRows.quantityDelivered,
         })
@@ -680,7 +852,14 @@ export function createPlanningRepository(db: Db) {
         .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
         .innerJoin(customers, eq(customers.id, salesOrders.customerId))
         .where(eq(salesOrderRows.id, rowId));
-      return row ? { ...row, quantityOrdered: Number(row.quantityOrdered), quantityDelivered: Number(row.quantityDelivered) } : null;
+      return row
+        ? {
+            ...row,
+            configuration: row.configuration as OrderRowConfiguration | null,
+            quantityOrdered: Number(row.quantityOrdered),
+            quantityDelivered: Number(row.quantityDelivered),
+          }
+        : null;
     },
 
     // Server-side reload of the lego operations behind subcontract proposals

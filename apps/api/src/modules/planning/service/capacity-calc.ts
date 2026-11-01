@@ -170,11 +170,26 @@ export interface CapacityResult {
 // consumed as soon as ANY quantity has been reported — OK or scrapped (a
 // scrap-only report leaves quantityCompleted at "0" but the machine is
 // already set up). Untouched operations keep the full setup.
-export function remainingOperationMinutes(op: CapacityOperationRow): number {
+// Narrowed to the fields it reads so the lead-time dating (requirements-
+// dating.ts) can hand in a TO operation without the capacity row's labels.
+export type RemainingMinutesOperation = Pick<
+  CapacityOperationRow,
+  "operationStatus" | "orderQuantity" | "quantityCompleted" | "quantityScrapped" | "runTimePerUnit" | "setupTime"
+>;
+
+export function remainingOperationMinutes(op: RemainingMinutesOperation): number {
   if (op.operationStatus === "done") return 0;
   const remainingQty = Math.max(op.orderQuantity - (op.quantityCompleted ?? 0), 0);
   const workStarted = (op.quantityCompleted ?? 0) > 0 || op.quantityScrapped > 0;
   return op.runTimePerUnit * remainingQty + (workStarted ? 0 : op.setupTime);
+}
+
+// The work in MINUTES a routing operation takes for a quantity that has not
+// been started yet (setup once, run time per unit). Leveranstidskontrollen
+// and the manufacturing lead time share this one formula so a proposal's
+// lead time and the check's capacity need never disagree.
+export function routingOperationMinutes(op: { setupTime: number; runTimePerUnit: number }, quantity: number): number {
+  return op.setupTime + op.runTimePerUnit * quantity;
 }
 
 const addDays = (date: string, days: number) => {

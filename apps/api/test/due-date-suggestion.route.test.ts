@@ -36,7 +36,7 @@ describe("GET /articles/:id/due-date-suggestion", () => {
         documentType: "sales_order",
         documentId: "so-1",
         documentNumber: "KO-1",
-        clampedToToday: false,
+        late: false,
       };
     });
 

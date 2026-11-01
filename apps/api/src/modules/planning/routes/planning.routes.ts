@@ -57,7 +57,8 @@ export async function planningRoutes(app: FastifyInstance, opts: { service: Plan
     querySchema: listRequirementsQuerySchema,
     filenameBase: "behovsberakning",
     columns: requirementsExportColumns,
-    fetch: (query) => service.listRequirements(query),
+    // One line per proposal (tidsfasade förslag).
+    fetch: (query) => service.listRequirementsForExport(query),
   });
 
   // Artikelöversikt — per-article subresource served from the module that

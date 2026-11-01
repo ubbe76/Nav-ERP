@@ -2,7 +2,8 @@
 // first firm (skarpt) demand — a KO row or TO material need that stock and
 // the open purchase/manufacturing orders do NOT already cover — or, for a TO
 // made from a KO row, before that row's own delivery date if the row itself
-// is uncovered. Never in the past: a passed date is moved up to today.
+// is uncovered. Never before the earliest possible finish (today plus the
+// lead time): a date below that floor is moved up to it and flagged late.
 //
 // Coverage is by QUANTITY, not time-phased: stock plus every open IO/TO
 // (dated, late or undated) is allocated to the demands in date order, the
@@ -13,7 +14,7 @@
 // Pure, like article-overview.ts: the service loads the overview and the
 // holiday register, this module owns the rules. Split in two because the
 // demand date decides which holidays the service has to load.
-import { addDays, isWorkingDay, previousWorkingDay } from "../../system/service/delivery-days.js";
+import { addDays, addWorkingDays, isWorkingDay, previousWorkingDay } from "../../system/service/delivery-days.js";
 import type { ArticleOverview, ArticleOverviewRow } from "./article-overview.js";
 
 export interface FirmDemand {
@@ -30,8 +31,11 @@ export interface FirmDemand {
 export interface DueDateSuggestion extends Omit<FirmDemand, "date"> {
   dueDate: string;
   demandDate: string;
-  // The working day before the demand had already passed — today instead.
-  clampedToToday: boolean;
+  // The working day before the demand comes before the earliest possible
+  // finish (today + the lead time in working days) — that floor is
+  // suggested instead and the TO will be late for the demand. The same
+  // pattern as suggestPurchaseDeliveryDate's floor.
+  late: boolean;
 }
 
 function fromRow(row: ArticleOverviewRow & { date: string }, source: FirmDemand["source"]): FirmDemand {
@@ -88,12 +92,18 @@ export { addDays, isWorkingDay, previousWorkingDay };
 export const HOLIDAY_LOOKBACK_DAYS = 31;
 export const holidayLookbackStart = (demandDate: string) => addDays(demandDate, -HOLIDAY_LOOKBACK_DAYS);
 
+// The färdigdatum: the working day before the demand, but never before the
+// earliest possible finish — today plus `leadDays` working days
+// (manufacturing-lead-time.ts; 0 = today, so a TO without lead time is
+// still suggested today at the earliest). Below the floor the floor is
+// suggested and `late` says the demand will not be met in time.
 export function suggestDueDate(
   demand: FirmDemand,
-  opts: { today: string; offDays: ReadonlySet<string> }
+  opts: { today: string; offDays: ReadonlySet<string>; leadDays: number }
 ): DueDateSuggestion {
   const { date, ...rest } = demand;
   const workingDayBefore = previousWorkingDay(date, opts.offDays);
-  const clampedToToday = workingDayBefore < opts.today;
-  return { ...rest, demandDate: date, dueDate: clampedToToday ? opts.today : workingDayBefore, clampedToToday };
+  const floor = addWorkingDays(opts.today, Math.max(0, opts.leadDays), opts.offDays);
+  const late = workingDayBefore < floor;
+  return { ...rest, demandDate: date, dueDate: late ? floor : workingDayBefore, late };
 }

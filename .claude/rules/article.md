@@ -24,6 +24,10 @@ Artikelregistret är grunden för allt annat och ska kännas igen av någon som 
 - Alla fält är redigerbara i efterhand, även artikelnummer/typ/fantomflagga (dubblett ⇒ 409).
 - Beredningslistans tidsenhet (`routing_operations.time_unit`: min/st, sek/st sedan 0167, st/h) växlas per rad i `BeredningView` (delade `ui/SegmentedToggle`, samma kontroll som operationsdialogen, `PATCH /articles/:id/routing/:opId { timeUnit }` utan konvertering; st/h avstängd vid stycktid 0, dold på legorader). Lagringen är alltid minuter; omräkningen går genom `runTimeInUnit`/`runTimeToMinutes` i `packages/shared/src/units.ts` (spegel `apps/web/lib/units.ts`, där även enhetsetiketterna bor) — sekunder visas med 2 decimaler, så ett inskrivet sekundvärde läses tillbaka oförändrat.
 
+## Ledtid (dagar) (#13, migration 0174)
+
+- `articles.manufacturing_lead_time_days` (integer, null = ej angiven, CHECK ≥ 0; `manufacturingLeadTimeDays` i `createArticleSchema`/`updateArticleSchema` som `z.coerce.number().int().min(0)`, null rensar) är tillverkningsledtiden i **arbetsdagar**, oberoende av antal. Satt vinner den över ruttens tid i varje ledtidsläsare (`manufacturingLeadDays` i `planning/service/manufacturing-lead-time.ts` — enda implementationen); tom ⇒ operationernas tid ur rutten utan kapacitetshänsyn. Fältet bara för tillverkade artiklar i UI:t, men servern vägrar det inte på köpta (det läses aldrig där). Kopieras av **Kopiera från → Information** (`COPIED_INFORMATION_FIELDS`). Importen tar det inte ännu (tas med importerna). Ändring nollar inte behovsberäkningens cache (60 s räcker).
+
 ## Streckkod (EAN, #4, migration 0171)
 
 - `articles.barcode` — se `scan.md` (format, unikhet, 409 före artikelnummerkrocken, aldrig kopierad).

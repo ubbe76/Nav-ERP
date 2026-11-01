@@ -4,6 +4,7 @@ import {
   createManufacturingOrderSchema,
   createPlanningOrdersSchema,
   createWorkCenterSchema,
+  dueDateSuggestionQuerySchema,
   listRequirementsQuerySchema,
   updateManufacturingOrderSchema,
   updateWorkCenterSchema,
@@ -48,6 +49,38 @@ describe("listRequirementsQuerySchema", () => {
 
   it("defaults showAll to false when absent", () => {
     expect(listRequirementsQuerySchema.parse({}).showAll).toBe(false);
+  });
+
+  // Tidsfasade förslag (#13): sort and the latest-date horizon.
+  it("sorts by article by default and accepts latest; unknown values are refused", () => {
+    expect(listRequirementsQuerySchema.parse({}).sort).toBe("article");
+    expect(listRequirementsQuerySchema.parse({ sort: "latest" }).sort).toBe("latest");
+    expect(listRequirementsQuerySchema.parse({}).latest).toBeUndefined();
+    for (const latest of ["late", "this_week", "next_week", "four_weeks"]) {
+      expect(listRequirementsQuerySchema.parse({ latest }).latest).toBe(latest);
+    }
+    expect(listRequirementsQuerySchema.safeParse({ latest: "soon" }).success).toBe(false);
+    expect(listRequirementsQuerySchema.safeParse({ sort: "name" }).success).toBe(false);
+  });
+});
+
+describe("createPlanningOrdersSchema — needDate", () => {
+  it("accepts an optional business date and refuses junk", () => {
+    const parsed = createPlanningOrdersSchema.parse({
+      proposals: [{ articleId: ARTICLE_ID, quantity: 2, kind: "purchase", needDate: "2030-03-11" }],
+    });
+    expect(parsed.proposals[0]!.needDate).toBe("2030-03-11");
+    expect(createPlanningOrdersSchema.parse({ proposals: [{ articleId: ARTICLE_ID, quantity: 2, kind: "purchase" }] }).proposals[0]!.needDate).toBeUndefined();
+    expect(createPlanningOrdersSchema.safeParse({ proposals: [{ articleId: ARTICLE_ID, quantity: 2, kind: "purchase", needDate: "nyss" }] }).success).toBe(false);
+    expect(createPlanningOrdersSchema.safeParse({ proposals: [{ articleId: ARTICLE_ID, quantity: 2, kind: "purchase", needDate: "9999-12-31" }] }).success).toBe(false);
+  });
+});
+
+describe("dueDateSuggestionQuerySchema — quantity", () => {
+  it("coerces a positive quantity and refuses zero", () => {
+    expect(dueDateSuggestionQuerySchema.parse({}).quantity).toBeUndefined();
+    expect(dueDateSuggestionQuerySchema.parse({ quantity: "6" }).quantity).toBe(6);
+    expect(dueDateSuggestionQuerySchema.safeParse({ quantity: "0" }).success).toBe(false);
   });
 });
 

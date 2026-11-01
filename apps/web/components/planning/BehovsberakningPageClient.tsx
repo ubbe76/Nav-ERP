@@ -23,6 +23,7 @@ import { PdfActions } from "../documents/PdfActions";
 import { SupplierCheckboxList } from "../purchase/SupplierCheckboxList";
 import { CreatedInquiriesPanel } from "../purchase/CreatedInquiriesPanel";
 import { listApiQuery, pageFromSearchParams } from "../../lib/listQuery";
+import { isoWeekNumber } from "../../lib/deliveryTimeCheck";
 import {
   INQUIRY_STATUS_PILL,
   type ArticleGroup,
@@ -31,6 +32,7 @@ import {
   type Paged,
   type PlanningOrderProposal,
   type PlanningOrdersResult,
+  type RequirementProposal,
   type RequirementRow,
   type Supplier,
 } from "../../lib/types";
@@ -48,21 +50,61 @@ const TYPE_OPTIONS = [
 // motsvarighet i API:ets querySchema — lego-rader sorteras redan sist i
 // listan, så ett rent sidvist filter skulle bara dölja dem på sidor
 // användaren aldrig når. Se fetch-effekten nedan för hur filtret hanteras.
+// Senast-filtret and the sort order are server-side (?latest=&sort=): the
+// filter trims each article's proposals to those whose senaste datum falls
+// within the horizon (passerat is included in all of them).
+const LATEST_OPTIONS = [
+  { value: "late", label: "Senast: Passerat" },
+  { value: "this_week", label: "Senast: Denna vecka" },
+  { value: "next_week", label: "Senast: Nästa vecka" },
+  { value: "four_weeks", label: "Senast: Fyra veckor" },
+];
+const SORT_OPTIONS = [{ value: "latest", label: "Sortering: Senaste datum" }];
+
 const KIND_OPTIONS = [
   { value: "article", label: "Artiklar" },
   { value: "lego", label: "Lego" },
 ];
 
+// One table line. An article with several proposals (one per behovsvecka)
+// becomes a header line (the article's own saldo/behov/tillgång, no proposal)
+// followed by one line per proposal; everything else is a single line.
+// Selection and edited quantities are keyed on the proposal key (`id`).
 interface DisplayRow extends RequirementRow {
   id: string;
+  proposal: RequirementProposal | null;
+  // Shows the article cells (false on the per-proposal lines under a header).
+  head: boolean;
+  // A header line of a multi-proposal article: carries no proposal of its own.
+  header: boolean;
 }
 
-// Subcontract (lego) rows are keyed per MO OPERATION — the same article can
-// appear on several lego rows — so the row key is the operation id there and
-// the article id everywhere else.
+// Fallback key for a row without proposals (Visa alla artiklar). Lego rows are
+// keyed per MO OPERATION and configured rows per sales-order row.
 function rowKey(row: RequirementRow): string {
-  // Configured sales-order rows share articleId with the template's own row — keyed per sales-order row.
   return row.moOperationId ?? row.salesOrderRowId ?? row.articleId;
+}
+
+function toLines(r: RequirementRow): DisplayRow[] {
+  if (r.proposals.length > 1) {
+    return [
+      { ...r, id: `${rowKey(r)}:head`, proposal: null, head: true, header: true },
+      ...r.proposals.map((p) => ({ ...r, id: p.key, proposal: p, head: false, header: false })),
+    ];
+  }
+  const p = r.proposals[0] ?? null;
+  return [{ ...r, id: p?.key ?? rowKey(r), proposal: p, head: true, header: false }];
+}
+
+// "beställ" for purchase/lego, "starta" for manufacture/configured.
+function latestVerb(kind: RequirementRow["proposalKind"]): string {
+  return kind === "purchase" || kind === "subcontract" ? "beställ" : "starta";
+}
+
+function needDateText(p: RequirementProposal): string {
+  if (p.reason === "reorder_point") return "Beställningspunkt";
+  if (p.reason === "undated") return "Saknar datum";
+  return p.needDate ?? "—";
 }
 
 // Selection/quantity state lives per row key, independent of which page is
@@ -87,6 +129,10 @@ interface RowState {
   moOrderNumber: string | null;
   moOperationLabel: string | null;
   unitCode: string | null;
+  // The proposal's behovsdatum and reason, sent on Skapa ordrar (null =
+  // omitted; a reorder-point proposal is never reported late).
+  needDate: string | null;
+  reason: RequirementProposal["reason"] | null;
   // Set once the user changes the selection or the quantity — a touched row
   // keeps its state across refetches, an untouched one follows the server.
   touched: boolean;
@@ -96,19 +142,20 @@ interface RowState {
 // a row without a proposed quantity. Shared by makeRowState, the per-row
 // checkbox and the select-all header so all three agree on what "selectable"
 // means.
-function isSelectable(row: RequirementRow): boolean {
+function isSelectable(row: DisplayRow): boolean {
+  const quantity = row.proposal?.quantity ?? 0;
   // An invalid configuration can't be manufactured (the server refuses it anyway).
-  if (row.proposalKind === "configured") return row.proposalQuantity > 0 && !row.configurationError;
+  if (row.proposalKind === "configured") return quantity > 0 && !row.configurationError;
   const needsSupplier = row.proposalKind === "purchase" || row.proposalKind === "subcontract";
-  return row.proposalQuantity > 0 && !(needsSupplier && !row.primarySupplier);
+  return quantity > 0 && !(needsSupplier && !row.primarySupplier);
 }
 
 // Preselected when there's actually a proposal; an unselectable row starts
 // unchecked and disabled.
-function makeRowState(row: RequirementRow): RowState {
+function makeRowState(row: DisplayRow): RowState {
   return {
     selected: isSelectable(row),
-    quantity: String(row.proposalQuantity),
+    quantity: String(row.proposal?.quantity ?? 0),
     // Only meaningful when selected (selected requires proposalQuantity > 0,
     // which the API only sets alongside a non-null proposalKind) — the
     // fallback here just keeps the type non-nullable for disabled rows.
@@ -122,6 +169,8 @@ function makeRowState(row: RequirementRow): RowState {
     moOrderNumber: row.moOrderNumber ?? null,
     moOperationLabel: row.moOperationLabel ?? null,
     unitCode: row.unitCode,
+    needDate: row.proposal?.needDate ?? null,
+    reason: row.proposal?.reason ?? null,
     touched: false,
   };
 }
@@ -149,6 +198,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // Uppdatera, or after creating orders/inquiries — must bypass it, so it
   // sets this before bumping reloadKey and the next fetch sends refresh=true.
   const forceRefresh = useRef(false);
+  const lastFilterKey = useRef<string | null>(null);
   const [computedAt, setComputedAt] = useState<string | null>(null);
   const reload = () => {
     forceRefresh.current = true;
@@ -222,14 +272,26 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           if (sp.type) params.set("type", sp.type);
           if (sp.groupId) params.set("groupId", sp.groupId);
           if (sp.showAll) params.set("showAll", sp.showAll);
+          if (sp.latest) params.set("latest", sp.latest);
+          if (sp.sort) params.set("sort", sp.sort);
           params.set("limit", "1000");
           params.set("offset", "0");
           return `?${params.toString()}`;
         })()
-      : listApiQuery(sp, ["type", "groupId", "showAll"], pageSize);
+      : listApiQuery(sp, ["type", "groupId", "showAll", "latest", "sort"], pageSize);
 
-    const refresh = forceRefresh.current ? "&refresh=true" : "";
+    const refreshing = forceRefresh.current;
+    const refresh = refreshing ? "&refresh=true" : "";
     forceRefresh.current = false;
+    // A new filter, sort or search starts the selection over (only the
+    // page number keeps it): otherwise proposals preselected in the full
+    // list stay selected out of sight under Senast: Passerat and Skapa
+    // ordrar would create them too.
+    const filterParams = new URLSearchParams(queryKey);
+    filterParams.delete("page");
+    const filterKey = filterParams.toString();
+    const filterChanged = lastFilterKey.current !== filterKey;
+    lastFilterKey.current = filterKey;
 
     apiFetch<Paged<RequirementRow> & { computedAt: string }>(`/api/v1/planning/requirements${query}${refresh}`)
       .then((res) => {
@@ -250,7 +312,22 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         // so Uppdatera shows recomputed quantities. Entries for rows on other
         // pages stay as they are. confirmCreate clears rowStates first, so
         // that path is a full rebuild.
-        setRowStates((prev) => mergeUntouched(prev, paged.rows, rowKey, makeRowState));
+        const lines = paged.rows.flatMap(toLines).filter((l) => !l.header);
+        setRowStates((prev) => {
+          let base = filterChanged ? {} : prev;
+          if (refreshing && !filterChanged) {
+            // After Uppdatera a proposal can move to another week (its key
+            // carries the week): drop states for keys of articles shown on
+            // this page that no longer exist, so a stale touched one is never
+            // sent with its old behovsdatum. Other pages are left alone.
+            const shownArticles = new Set(lines.map((l) => l.articleId));
+            const shownKeys = new Set(lines.map((l) => l.id));
+            base = Object.fromEntries(
+              Object.entries(prev).filter(([key, state]) => shownKeys.has(key) || !shownArticles.has(state.articleId))
+            );
+          }
+          return mergeUntouched(base, lines, (l) => l.id, makeRowState);
+        });
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -266,7 +343,9 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- queryKey mirrors searchParams
   }, [queryKey, reloadKey, pageSize]);
 
-  const rows: DisplayRow[] = (data?.rows ?? []).map((r) => ({ ...r, id: rowKey(r) }));
+  const rows: DisplayRow[] = (data?.rows ?? []).flatMap(toLines);
+  // Lines that carry selection state (everything but multi-proposal headers).
+  const stateLines = rows.filter((r) => !r.header);
 
   const configuredRows = rows.filter((r) => r.proposalKind === "configured");
   const articleRows = rows.filter((r) => r.proposalKind !== "configured");
@@ -278,7 +357,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
     [rowStates]
   );
   const selectedCount = selectedEntries.length;
-  const currentPageIds = useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
+  const currentPageIds = useMemo(() => new Set(rows.filter((r) => !r.header).map((r) => r.id)), [rows]);
   const otherPageCount = selectedEntries.filter(([key]) => !currentPageIds.has(key)).length;
 
   // The lego rows among the current selection — "Skapa förfrågan" only acts
@@ -324,19 +403,25 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // draft purchase order per primary supplier) happens server-side. Dedupe
   // by supplierId, not name — names aren't guaranteed unique.
   const summary = useMemo(() => {
-    const suppliers = new Map<string, string>();
+    // The server puts an article's n:th purchase proposal on the supplier's
+    // n:th IO (one row per article and order), so a supplier gets as many
+    // IOs as its most-proposed article has selected weeks.
+    const suppliers = new Map<string, { name: string; perArticle: Map<string, number> }>();
     let manufactureCount = 0;
     for (const [, state] of selectedEntries) {
       if ((state.kind === "purchase" || state.kind === "subcontract") && state.supplierId) {
-        suppliers.set(state.supplierId, state.supplierName ?? state.supplierId);
+        const entry = suppliers.get(state.supplierId) ?? { name: state.supplierName ?? state.supplierId, perArticle: new Map() };
+        if (state.kind === "purchase") entry.perArticle.set(state.articleId, (entry.perArticle.get(state.articleId) ?? 0) + 1);
+        suppliers.set(state.supplierId, entry);
       } else if (state.kind === "manufacture" || state.kind === "configured") {
         manufactureCount += 1;
       }
     }
     const parts: string[] = [];
     if (suppliers.size > 0) {
-      const names = Array.from(suppliers.values()).join(", ");
-      parts.push(`${suppliers.size} ${suppliers.size === 1 ? "inköpsorder" : "inköpsordrar"} (${names})`);
+      const orderCount = Array.from(suppliers.values()).reduce((sum, s) => sum + Math.max(1, ...s.perArticle.values()), 0);
+      const names = Array.from(suppliers.values(), (s) => s.name).join(", ");
+      parts.push(`${orderCount} ${orderCount === 1 ? "inköpsorder" : "inköpsordrar"} (${names})`);
     }
     if (manufactureCount > 0) {
       parts.push(`${manufactureCount} ${manufactureCount === 1 ? "tillverkningsorder" : "tillverkningsordrar"}`);
@@ -358,6 +443,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         articleId: state.articleId,
         quantity,
         kind: state.kind,
+        ...(state.needDate ? { needDate: state.needDate } : {}),
+        ...(state.reason ? { reason: state.reason } : {}),
         ...(state.kind === "configured" && state.salesOrderRowId ? { salesOrderRowId: state.salesOrderRowId } : {}),
         // Subcontract proposals are keyed by the MO operation they buy.
         ...(state.kind === "subcontract" && state.moOperationId ? { moOperationId: state.moOperationId } : {}),
@@ -437,7 +524,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   const selectedSummary =
     otherPageCount > 0
       ? `${selectedCount} rader valda (varav ${otherPageCount} på annan sida)`
-      : `${selectedCount} av ${rows.length} rader valda`;
+      : `${selectedCount} av ${stateLines.length} rader valda`;
   const actionButtons = (
     <span className={styles.selectionActions}>
       {canInkop && (
@@ -473,6 +560,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
       <ListToolbar placeholder="Sök artikelnummer eller benämning…">
         <ListFilterSelect param="type" allLabel="Alla typer" ariaLabel="Filtrera på typ" options={TYPE_OPTIONS} />
         <ListFilterSelect param="kind" allLabel="Alla" ariaLabel="Filtrera på artikel/lego" options={KIND_OPTIONS} />
+        <ListFilterSelect param="latest" allLabel="Senast: Alla" ariaLabel="Filtrera på senaste datum" options={LATEST_OPTIONS} />
+        <ListFilterSelect param="sort" allLabel="Sortering: Artikelnummer" ariaLabel="Sortera" options={SORT_OPTIONS} />
         <ListFilterSelect
           param="groupId"
           allLabel="Alla varugrupper"
@@ -628,19 +717,22 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               />
             ),
           },
-          // Eleven columns have to share ~1100px next to the sidebar, so the
+          // Thirteen columns have to share ~1100px next to the sidebar, so the
           // numeric columns are kept tight and Artikel takes the slack (with
           // a floor so a long name wraps to two lines, not five). Källa is
           // fixed at the width of its widest pill ("Saknar huvudleverantör"
           // wraps to two lines) instead of competing with Artikel for `fr`.
           { key: "article", label: "Artikel", width: "minmax(180px, 2fr)" },
-          { key: "type", label: "Typ", width: "70px" },
           { key: "onHand", label: "Saldo", width: "70px", align: "right" },
           { key: "demand", label: "Behov", width: "70px", align: "right" },
           { key: "incoming", label: "Inkommande", width: "80px", align: "right" },
           { key: "projected", label: "Netto", width: "70px", align: "right" },
           { key: "reorderPoint", label: "BP / SL", width: "60px", align: "right" },
-          { key: "proposal", label: "Förslag", width: "120px", align: "right" },
+          // Behovsdatum and senaste datum share one column (two lines) and the
+          // type rides in the article cell: with a column each the table no
+          // longer fitted 1500 px once #13 added the dates.
+          { key: "dates", label: "Behov / senast", width: "150px" },
+          { key: "proposal", label: "Förslag", width: "96px", align: "right" },
           { key: "leadTime", label: "Ledtid", width: "60px", align: "right" },
           { key: "source", label: "Källa", width: "140px" },
         ]}
@@ -652,18 +744,31 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           const incoming = row.supplyPo + row.supplyPoDraft + row.supplyMo;
           const isLego = row.proposalKind === "subcontract";
           const rowDisabled = !isSelectable(row);
+          const p = row.proposal;
+          // Under a multi-proposal header only the proposal's own cells show.
+          if (!row.head && key !== "select" && key !== "article" && key !== "dates" && key !== "proposal") {
+            return null;
+          }
 
           switch (key) {
             case "select":
+              if (row.header) return null;
               return (
                 <Checkbox
                   checked={state.selected}
                   disabled={rowDisabled}
                   onChange={(e) => toggleRow(row, e.target.checked)}
-                  aria-label={`Välj ${row.articleNumber}`}
+                  aria-label={`Välj ${row.articleNumber}${p?.needDate ? ` ${p.needDate}` : ""}`}
                 />
               );
             case "article":
+              if (!row.head) {
+                return (
+                  <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+                    Förslag{p?.reason === "demand" && p.needWeek ? ` vecka ${isoWeekNumber(p.needWeek)}` : ""}
+                  </span>
+                );
+              }
               return (
                 <>
                   <GatedLink href={`/artiklar/${row.articleId}`} className={styles.rowLink}>
@@ -676,6 +781,9 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
                     )}
                   </GatedLink>
                   <ArticleOverviewButton articleId={row.articleId} articleNumber={row.articleNumber} />
+                  <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                    {isLego ? <StatusPill status="running" label="Lego" compact /> : row.type === "manufactured" ? "Tillverkad" : "Inköp"}
+                  </div>
                   {isLego && (
                     // Which TO operation this lego proposal buys.
                     <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
@@ -694,9 +802,6 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
                     ))}
                 </>
               );
-            case "type":
-              if (isLego) return <StatusPill status="running" label="Lego" compact />;
-              return row.type === "manufactured" ? "Tillverkad" : "Inköp";
             case "onHand":
               return row.onHand.toLocaleString("sv-SE");
             case "demand":
@@ -729,7 +834,15 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
                   )}
                 </span>
               );
+            case "dates":
+              return p ? (
+                <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span>{needDateText(p)}</span>
+                  <LatestCell row={row} proposal={p} />
+                </span>
+              ) : null;
             case "proposal":
+              if (row.header) return null;
               if (row.configuredTemplate) {
                 // A beställningsvara template never gets a proposal of its own — its
                 // configured sales-order rows below do.
@@ -744,11 +857,17 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
                   value={state.quantity}
                   disabled={rowDisabled}
                   onChange={(e) => setQuantity(row, e.target.value)}
-                  aria-label={`Förslagskvantitet för ${row.articleNumber}`}
+                  aria-label={`Förslagskvantitet för ${row.articleNumber}${p?.needDate ? ` ${p.needDate}` : ""}`}
                 />
               );
             case "leadTime":
-              return row.primarySupplier?.leadTimeDays != null ? `${row.primarySupplier.leadTimeDays} dgr` : "—";
+              // Purchased: the main supplier's catalogue lead time; manufactured:
+              // Ledtid (dagar) or the routing's time (leadDays, the proposals'
+              // dating).
+              {
+                const days = row.type === "manufactured" ? row.leadDays : row.primarySupplier?.leadTimeDays;
+                return days != null ? `${days} dgr` : "—";
+              }
             case "source":
               if (row.proposalKind === "manufacture") return "Ny TO";
               if (row.primarySupplier) return row.primarySupplier.supplierName;
@@ -778,6 +897,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
               { key: "article", label: "Artikel", width: "minmax(160px, 1.5fr)" },
               { key: "selection", label: "Val", width: "minmax(200px, 2fr)" },
               { key: "delivery", label: "Leveransdatum", width: "110px" },
+              { key: "latest", label: "Senast", width: "130px" },
               { key: "proposal", label: "Antal", width: "110px", align: "right" },
             ]}
             rows={configuredRows}
@@ -833,6 +953,8 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
                   );
                 case "delivery":
                   return row.expectedDeliveryDate ?? "—";
+                case "latest":
+                  return row.proposal ? <LatestCell row={row} proposal={row.proposal} /> : null;
                 case "proposal":
                   return (
                     <Input
@@ -934,6 +1056,22 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
         />
       )}
     </>
+  );
+}
+
+// Senaste datum with its verb (beställ/starta) and the Passerat marker.
+function LatestCell({ row, proposal }: { row: RequirementRow; proposal: RequirementProposal }) {
+  return (
+    <span>
+      <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>{latestVerb(row.proposalKind)} </span>
+      {proposal.latestDate ?? "—"}
+      {proposal.late && (
+        <>
+          {" "}
+          <StatusPill status="stopped" label="Passerat" compact />
+        </>
+      )}
+    </span>
   );
 }
 

@@ -1,0 +1,2 @@
+ALTER TABLE "articles" ADD COLUMN "manufacturing_lead_time_days" integer;--> statement-breakpoint
+ALTER TABLE "articles" ADD CONSTRAINT "articles_manufacturing_lead_time_days_nonnegative" CHECK ("articles"."manufacturing_lead_time_days" >= 0);

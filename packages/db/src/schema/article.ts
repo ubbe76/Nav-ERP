@@ -133,6 +133,12 @@ export const articles = pgTable("articles", {
   // falls below it and fills up to it (the threshold is the larger of this
   // and the reorder point). Base unit; null = none.
   safetyStock: numeric("safety_stock", { precision: 14, scale: 4 }),
+  // Ledtid (dagar) — tillverkningsledtid for a manufactured article in WORKING
+  // days, a total throughput time independent of quantity (#13). It wins over
+  // the routing's time when set; null = not given, the behovsberäkning and
+  // the färdigdatumsförslag then sum the routing's operations instead
+  // (planning/service/manufacturing-lead-time.ts). Non-negative by CHECK.
+  manufacturingLeadTimeDays: integer("manufacturing_lead_time_days"),
   // Styrning (Monitor's Lagerstyrd/Orderstyrd) — information only; the
   // behovsberäkning reads the reorder point and safety stock, not this flag.
   stockControlled: boolean("stock_controlled").notNull().default(false),
@@ -160,6 +166,7 @@ export const articles = pgTable("articles", {
   },
   (table) => [
     check("articles_rounding_positive", sql`${table.rounding} > 0`),
+    check("articles_manufacturing_lead_time_days_nonnegative", sql`${table.manufacturingLeadTimeDays} >= 0`),
     uniqueIndex("articles_barcode_unique").on(table.barcode).where(sql`${table.barcode} is not null`),
     // The check digit is the application's (gtin.ts); the database pins the shape.
     check("articles_barcode_format", sql`${table.barcode} ~ '^([0-9]{8}|[0-9]{12,14})$'`),
