@@ -8,11 +8,13 @@ import {
   deliveryHolidayWindow,
   deliverySummary,
   earliestCustomerDelivery,
+  earliestPurchaseArrival,
   effectiveDeliverySettings,
   isListedDay,
   isValidCustomerDelivery,
   isValidPurchaseArrival,
   lastListedOnOrBefore,
+  latestPurchaseOrderDate,
   nextListedOnOrAfter,
   nextWorkingDayOnOrAfter,
   shipDateFor,
@@ -274,6 +276,120 @@ describe("delivery-days — long transit (43–60 working days)", () => {
           expect(shipDateFor(date, settings, holidays), `${date} transit ${transit} [${weekdays}]`).toBe(
             reference(date, settings)
           );
+        }
+      }
+    }
+  });
+});
+
+describe("delivery-days — latestPurchaseOrderDate (senaste beställningsdag)", () => {
+  // 2026-11-16 is a Monday. Without settings and lead time the order must be
+  // placed the working day before the demand (it arrives the same day).
+  it("without settings: the working day before the demand", () => {
+    expect(latestPurchaseOrderDate({ demandDate: "2026-11-16", leadTimeDays: 0, settings: none, offDays: off })).toBe(
+      "2026-11-13"
+    );
+    expect(latestPurchaseOrderDate({ demandDate: "2026-11-16", leadTimeDays: null, settings: none, offDays: off })).toBe(
+      "2026-11-13"
+    );
+  });
+
+  it("lead time alone: that many working days before the arrival", () => {
+    // Arrival Fri 11-13; 5 working days back is Fri 11-06.
+    expect(latestPurchaseOrderDate({ demandDate: "2026-11-16", leadTimeDays: 5, settings: none, offDays: off })).toBe(
+      "2026-11-06"
+    );
+  });
+
+  it("arrival mode with fixed days: the order for the last listed arrival before the demand", () => {
+    // Supplier delivers Tuesdays and Thursdays, 3 working days lead. Demand
+    // Mon 11-16 → arrival Thu 11-12 → order placed Mon 11-09.
+    expect(
+      latestPurchaseOrderDate({ demandDate: "2026-11-16", leadTimeDays: 3, settings: s([2, 4], "arrival"), offDays: off })
+    ).toBe("2026-11-09");
+  });
+
+  it("dispatch mode with transit: counts the dispatch day and transit", () => {
+    // Ships Mondays, 2 transit days, 1 day lead. Demand Fri 11-20 → arrival
+    // on/before Thu 11-19 → dispatch Mon 11-16 arrives Wed 11-18 → the order
+    // must be placed so that lead time ends by Mon 11-16: Fri 11-13.
+    expect(
+      latestPurchaseOrderDate({ demandDate: "2026-11-20", leadTimeDays: 1, settings: s([1], "dispatch", 2), offDays: off })
+    ).toBe("2026-11-13");
+  });
+
+  it("skips a full-day holiday in the lead time", () => {
+    const holidays = new Set(["2026-11-11"]);
+    // Arrival Fri 11-13; 3 working days back skipping Wed 11-11: Thu 11-12, Tue 11-10, Mon 11-09.
+    expect(latestPurchaseOrderDate({ demandDate: "2026-11-16", leadTimeDays: 3, settings: none, offDays: holidays })).toBe(
+      "2026-11-09"
+    );
+  });
+
+  it("returns null when no arrival day exists within the search window", () => {
+    // Deliveries only on Saturdays, and every Saturday for three months
+    // before the demand is a holiday: no listed arrival day within 60 days.
+    const saturdaysOff = new Set<string>();
+    for (let d = "2026-09-05"; d <= "2026-12-01"; d = addDays(d, 7)) saturdaysOff.add(d);
+    expect(
+      latestPurchaseOrderDate({ demandDate: "2026-12-01", leadTimeDays: 0, settings: s([6], "arrival"), offDays: saturdaysOff })
+    ).toBeNull();
+  });
+
+  it("the result's earliest arrival makes it, the day after's does not", () => {
+    const holidays = new Set(["2026-11-03", "2026-12-24", "2026-12-25"]);
+    for (const settings of [s([], "arrival", 2), s([2, 4], "arrival"), s([1], "dispatch", 3), s([6], "dispatch", 1)]) {
+      for (const lead of [0, 3, 12]) {
+        const demand = "2026-12-14";
+        const target = suggestPurchaseDeliveryDate({
+          demandDate: demand,
+          today: "2000-01-03",
+          leadTimeDays: lead,
+          settings,
+          offDays: holidays,
+        }).date!;
+        const latest = latestPurchaseOrderDate({ demandDate: demand, leadTimeDays: lead, settings, offDays: holidays })!;
+        expect(earliestPurchaseArrival(latest, lead, settings, holidays) <= target).toBe(true);
+        expect(earliestPurchaseArrival(addDays(latest, 1), lead, settings, holidays) > target).toBe(true);
+      }
+    }
+  });
+
+  // Pinned against a brute force: the latest day D over a wide window whose
+  // earliest arrival is on or before the arrival aimed at (the latest listed
+  // arrival before the working day before the demand). Every date over
+  // three months, lead 0–12, transit 0–8, many weekday sets, holidays.
+  it("agrees with a brute-force search over every order day", () => {
+    const holidays = new Set(["2026-11-03", "2026-12-24", "2026-12-25", "2026-12-31", "2027-01-01", "2027-01-06"]);
+    const reference = (demand: string, lead: number, settings: DeliverySettings): string | null => {
+      // The arrival aimed at, via the public suggestion with a today far back
+      // (so the floor never interferes).
+      const target = suggestPurchaseDeliveryDate({
+        demandDate: demand,
+        today: "2000-01-03",
+        leadTimeDays: lead,
+        settings,
+        offDays: holidays,
+      });
+      if (target.late || target.date === null) return null;
+      for (let i = 0, day = target.date; i <= 200; i++, day = addDays(day, -1)) {
+        if (earliestPurchaseArrival(day, lead, settings, holidays) <= target.date) return day;
+      }
+      return null;
+    };
+    const weekdaySets = [[], [1], [6], [7], [2, 4], [5], [1, 2, 3, 4, 5, 6, 7]];
+    for (let demand = "2026-11-01"; demand <= "2027-01-31"; demand = addDays(demand, 5)) {
+      for (const lead of [0, 1, 4, 12]) {
+        for (const transit of [0, 1, 3, 8]) {
+          for (const weekdays of weekdaySets) {
+            for (const mode of ["arrival", "dispatch"] as const) {
+              const settings = s(weekdays, mode, transit);
+              expect(
+                latestPurchaseOrderDate({ demandDate: demand, leadTimeDays: lead, settings, offDays: holidays }),
+                `${demand} lead ${lead} transit ${transit} [${weekdays}] ${mode}`
+              ).toBe(reference(demand, lead, settings));
+            }
+          }
         }
       }
     }

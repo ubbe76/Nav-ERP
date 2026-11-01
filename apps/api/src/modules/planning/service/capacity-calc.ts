@@ -177,6 +177,14 @@ export function remainingOperationMinutes(op: CapacityOperationRow): number {
   return op.runTimePerUnit * remainingQty + (workStarted ? 0 : op.setupTime);
 }
 
+// The work in MINUTES a routing operation takes for a quantity that has not
+// been started yet (setup once, run time per unit). Leveranstidskontrollen
+// and the manufacturing lead time share this one formula so a proposal's
+// lead time and the check's capacity need never disagree.
+export function routingOperationMinutes(op: { setupTime: number; runTimePerUnit: number }, quantity: number): number {
+  return op.setupTime + op.runTimePerUnit * quantity;
+}
+
 const addDays = (date: string, days: number) => {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);

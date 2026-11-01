@@ -201,8 +201,10 @@ function latestArrivalOnOrBefore(date: string, s: DeliverySettings, offDays: Rea
 const startDay = (today: string, offDays: ReadonlySet<string>) => nextWorkingDayOnOrAfter(today, offDays);
 
 // The earliest possible arrival at us: lead time = working days until the
-// supplier can ship, transit = working days on the way.
-function earliestPurchaseArrival(
+// supplier can ship, transit = working days on the way. Monotone in `today`
+// (a later order never arrives earlier) — latestPurchaseOrderDate relies on
+// that to step backwards.
+export function earliestPurchaseArrival(
   today: string,
   leadTimeDays: number,
   s: DeliverySettings,
@@ -238,6 +240,34 @@ export function suggestPurchaseDeliveryDate(i: {
   if (i.demandDate === null) return { date: floor, late: false };
   const candidate = latestArrivalOnOrBefore(previousWorkingDay(i.demandDate, i.offDays), i.settings, i.offDays);
   return candidate !== null && candidate >= floor ? { date: candidate, late: false } : { date: floor, late: true };
+}
+
+// Senaste beställningsdag: the last day D an order can be placed and still
+// arrive before the demand — the arrival aimed at is the latest listed
+// arrival on or before the working day before the demand (the same margin
+// as suggestPurchaseDeliveryDate), and D is the latest day whose earliest
+// possible arrival (earliestPurchaseArrival, ordering on D) is on or before
+// it. Built on the forward function rather than a mirrored backward one so
+// the two can never disagree; the brute-force comparison in
+// delivery-days.test.ts pins it. Stepping backwards from the arrival day
+// is bounded: lead time and transit are working days (at most 7/5 calendar
+// days each) plus the 60-day listed-day search and a margin — no answer
+// inside that ⇒ null (as when no arrival day is found at all). The result
+// may lie in the past; the caller decides what "late" means.
+export function latestPurchaseOrderDate(i: {
+  demandDate: string;
+  leadTimeDays: number | null;
+  settings: DeliverySettings;
+  offDays: ReadonlySet<string>;
+}): string | null {
+  const lead = Math.max(0, i.leadTimeDays ?? 0);
+  const arrival = latestArrivalOnOrBefore(previousWorkingDay(i.demandDate, i.offDays), i.settings, i.offDays);
+  if (arrival === null) return null;
+  const maxSteps = 2 * (lead + i.settings.transitDays) + SEARCH_DAYS + 14;
+  for (let n = 0, day = arrival; n <= maxSteps; n++, day = addDays(day, -1)) {
+    if (earliestPurchaseArrival(day, lead, i.settings, i.offDays) <= arrival) return day;
+  }
+  return null;
 }
 
 export function isValidPurchaseArrival(date: string, s: DeliverySettings, offDays: ReadonlySet<string>): boolean {

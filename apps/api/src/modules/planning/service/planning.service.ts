@@ -1050,7 +1050,10 @@ export function createPlanningService(
       const demand = await firmDemandFor(articleId, today, opts.salesOrderRowId);
       if (!demand) return null;
       const offDays = new Set(await repo.fullDayHolidaysBetween(holidayLookbackStart(demand.date), demand.date));
-      return suggestDueDate(demand, { today, offDays });
+      // Lead time 0 until the article's lead time (field or routing,
+      // manufacturing-lead-time.ts) is loaded here — then the holiday window
+      // must also cover [today, today + leadDays] for the floor.
+      return suggestDueDate(demand, { today, offDays, leadDays: 0 });
     },
 
     // Leveranstidskontroll — reads only (nothing is booked).

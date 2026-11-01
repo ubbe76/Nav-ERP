@@ -502,7 +502,7 @@ describe("planning service — färdigdatumsförslag", () => {
       demandDate: "2030-03-04",
       source: "shortage",
       documentNumber: ko.order.orderNumber,
-      clampedToToday: false,
+      late: false,
     });
   });
 

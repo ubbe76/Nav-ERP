@@ -16,6 +16,7 @@ import { explodeOneLevel, type BomEdge } from "./requirements-calc.js";
 import type { ArticleOverviewRow } from "./article-overview.js";
 import {
   mondayOf,
+  routingOperationMinutes,
   type CapacityOperationRow,
   type DayScheduleNetRow,
   type HolidayRow,
@@ -493,7 +494,7 @@ export function checkDeliveryTime(input: DeliveryTimeCheckInput): DeliveryTimeCh
         allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [] });
         continue;
       }
-      const minutes = op.setupTime + op.runTimePerUnit * quantity;
+      const minutes = routingOperationMinutes(op, quantity);
       if (minutes <= EPS) {
         steps.push({ kind: "operation", ...base, fromWeek: mondayOf(floor), toWeek: mondayOf(floor), weeks: [], date: ready });
         allocations.push({ sequenceNo: op.sequenceNo, workCenterId: op.workCenterId, weeks: [] });
