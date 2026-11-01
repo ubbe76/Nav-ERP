@@ -338,7 +338,7 @@ function VatCodeForm({ code, accounts, onClose }: { code: VatCodeView; accounts:
           id="vatCodeNameEn"
           maxLength={100}
           value={nameEn}
-          placeholder={code.labelEn}
+          placeholder={code.name}
           onChange={(e) => setNameEn(e.target.value)}
         />
       </Field>
