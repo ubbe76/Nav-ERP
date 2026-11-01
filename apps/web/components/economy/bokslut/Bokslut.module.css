@@ -7,6 +7,19 @@
   min-width: 0;
 }
 
+/* The accrual rows have five controls, three of them account selects. Beside
+   headings like RESULTATKONTO the selects were left ~125 px and cut their
+   option to "3001 · Förs"; stacked, each heading goes above its control so
+   the control gets the row's full width. */
+@media (max-width: 640px) {
+  .accrualRows [data-label] {
+    flex-wrap: wrap;
+  }
+  .accrualRows .control {
+    flex-basis: 100%;
+  }
+}
+
 /* The step cards' button rows: two or three long Swedish labels ("Bokför
    periodiseringar", "Inga periodiseringar") do not fit side by side on a
    phone, and an unwrapped flex row overflows the card and the page. */

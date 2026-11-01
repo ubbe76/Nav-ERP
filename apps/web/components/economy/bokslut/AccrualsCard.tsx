@@ -166,84 +166,86 @@ export function AccrualsCard({ closing, accounts }: { closing: YearEndClosingDet
           som är bokförda nu.
         </FormNotice>
       )}
-      <Table<Draft>
-        columns={[
-          { key: "kind", label: "Typ", width: "1.2fr" },
-          { key: "balance", label: "Balanskonto", width: "1.4fr" },
-          { key: "result", label: "Resultatkonto", width: "1.4fr" },
-          { key: "amount", label: "Belopp", width: "120px", align: "right" },
-          { key: "description", label: "Text", width: "1.6fr" },
-          { key: "actions", label: "", width: "90px", align: "right" },
-        ]}
-        rows={rows}
-        emptyText="Inga periodiseringsrader."
-        renderCell={(row, key) => {
-          switch (key) {
-            case "kind":
-              return (
-                <Select
-                  className={styles.control}
-                  aria-label="Typ"
-                  value={row.kind}
-                  onChange={(e) => {
-                    const kind = e.target.value as YearEndAccrualKind;
-                    setRow(row.id, { kind, balanceAccountId: idForNumber(DEFAULT_BALANCE_ACCOUNT[kind]) });
-                  }}
-                >
-                  {(Object.keys(YEAR_END_ACCRUAL_KIND_LABELS) as YearEndAccrualKind[]).map((kind) => (
-                    <option key={kind} value={kind}>
-                      {YEAR_END_ACCRUAL_KIND_LABELS[kind]}
-                    </option>
-                  ))}
-                </Select>
-              );
-            case "balance":
-              return (
-                <Select className={styles.control} aria-label="Balanskonto" value={row.balanceAccountId} onChange={(e) => setRow(row.id, { balanceAccountId: e.target.value })}>
-                  <option value="">Välj konto</option>
-                  {balanceAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.number} · {a.name}
-                    </option>
-                  ))}
-                </Select>
-              );
-            case "result":
-              return (
-                <Select className={styles.control} aria-label="Resultatkonto" value={row.resultAccountId} onChange={(e) => setRow(row.id, { resultAccountId: e.target.value })}>
-                  <option value="">Välj konto</option>
-                  {resultAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.number} · {a.name}
-                    </option>
-                  ))}
-                </Select>
-              );
-            case "amount":
-              return (
-                <Input
-                  className={styles.control}
-                  aria-label="Belopp"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={row.amount}
-                  onChange={(e) => setRow(row.id, { amount: e.target.value })}
-                />
-              );
-            case "description":
-              return <Input className={styles.control} aria-label="Text" maxLength={255} value={row.description} onChange={(e) => setRow(row.id, { description: e.target.value })} />;
-            case "actions":
-              return (
-                <Button type="button" variant="ghost" size="small" onClick={() => update(rows.filter((r) => r.id !== row.id))}>
-                  Ta bort
-                </Button>
-              );
-            default:
-              return null;
-          }
-        }}
-      />
+      <div className={styles.accrualRows}>
+        <Table<Draft>
+          columns={[
+            { key: "kind", label: "Typ", width: "1.2fr" },
+            { key: "balance", label: "Balanskonto", width: "1.4fr" },
+            { key: "result", label: "Resultatkonto", width: "1.4fr" },
+            { key: "amount", label: "Belopp", width: "120px", align: "right" },
+            { key: "description", label: "Text", width: "1.6fr" },
+            { key: "actions", label: "", width: "90px", align: "right" },
+          ]}
+          rows={rows}
+          emptyText="Inga periodiseringsrader."
+          renderCell={(row, key) => {
+            switch (key) {
+              case "kind":
+                return (
+                  <Select
+                    className={styles.control}
+                    aria-label="Typ"
+                    value={row.kind}
+                    onChange={(e) => {
+                      const kind = e.target.value as YearEndAccrualKind;
+                      setRow(row.id, { kind, balanceAccountId: idForNumber(DEFAULT_BALANCE_ACCOUNT[kind]) });
+                    }}
+                  >
+                    {(Object.keys(YEAR_END_ACCRUAL_KIND_LABELS) as YearEndAccrualKind[]).map((kind) => (
+                      <option key={kind} value={kind}>
+                        {YEAR_END_ACCRUAL_KIND_LABELS[kind]}
+                      </option>
+                    ))}
+                  </Select>
+                );
+              case "balance":
+                return (
+                  <Select className={styles.control} aria-label="Balanskonto" value={row.balanceAccountId} onChange={(e) => setRow(row.id, { balanceAccountId: e.target.value })}>
+                    <option value="">Välj konto</option>
+                    {balanceAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.number} · {a.name}
+                      </option>
+                    ))}
+                  </Select>
+                );
+              case "result":
+                return (
+                  <Select className={styles.control} aria-label="Resultatkonto" value={row.resultAccountId} onChange={(e) => setRow(row.id, { resultAccountId: e.target.value })}>
+                    <option value="">Välj konto</option>
+                    {resultAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.number} · {a.name}
+                      </option>
+                    ))}
+                  </Select>
+                );
+              case "amount":
+                return (
+                  <Input
+                    className={styles.control}
+                    aria-label="Belopp"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={row.amount}
+                    onChange={(e) => setRow(row.id, { amount: e.target.value })}
+                  />
+                );
+              case "description":
+                return <Input className={styles.control} aria-label="Text" maxLength={255} value={row.description} onChange={(e) => setRow(row.id, { description: e.target.value })} />;
+              case "actions":
+                return (
+                  <Button type="button" variant="ghost" size="small" onClick={() => update(rows.filter((r) => r.id !== row.id))}>
+                    Ta bort
+                  </Button>
+                );
+              default:
+                return null;
+            }
+          }}
+        />
+      </div>
       <FormHint>{reversalText}</FormHint>
       {closing.nextFiscalYear?.firstPeriodStatus === "locked" && (
         <FormNotice>

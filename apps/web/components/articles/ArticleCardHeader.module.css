@@ -102,6 +102,12 @@
   .card {
     flex-wrap: wrap;
   }
+  /* The buttons get their own line under the fields. With flex: 1 alone the
+     fields' basis is 0, so they stayed on the buttons' line and the benämning
+     was squeezed to ~60 px — broken one character at a time at 375 px. */
+  .main {
+    flex-basis: 100%;
+  }
   .grid {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);

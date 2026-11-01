@@ -18,6 +18,7 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
 import { stockholmToday } from "../../lib/date";
 import { FIXED_ASSET_DISPOSAL_TYPE_LABELS, monthLabel } from "../../lib/fixedAssets";
+import { openingDepreciationPairError } from "../../lib/openingDepreciation";
 import type { Account, DisposalPreview, DisposalResult, FixedAssetCategory, FixedAssetDetail } from "../../lib/types";
 
 export function AnlaggningCard({ asset, categories, accounts }: { asset: FixedAssetDetail; categories: FixedAssetCategory[]; accounts: Account[] }) {
@@ -246,6 +247,11 @@ function EditAssetModal({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const pairError = locked || disposed ? null : openingDepreciationPairError(form.openingDepreciation, form.openingDepreciationThroughMonth);
+    if (pairError) {
+      setError(pairError);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {

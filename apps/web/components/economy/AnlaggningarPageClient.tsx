@@ -17,6 +17,7 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
 import { FIXED_ASSET_STATUS_LABELS, currentMonthKey, monthLabel } from "../../lib/fixedAssets";
+import { openingDepreciationPairError } from "../../lib/openingDepreciation";
 import type { DepreciationPreview, DepreciationRun, DepreciationRunResult, FixedAsset, FixedAssetCategory, Paged, SupplierInvoice } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 
@@ -354,6 +355,11 @@ function NewAssetModal({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const pairError = openingDepreciationPairError(form.openingDepreciation, form.openingDepreciationThroughMonth);
+    if (pairError) {
+      setError(pairError);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
