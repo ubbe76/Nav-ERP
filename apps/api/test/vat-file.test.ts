@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { VAT_BOXES, type VatDeclarationBoxes } from "@navet/shared";
 import {
@@ -78,6 +79,20 @@ const EXAMPLE_BOXES: VatDeclarationBoxes = {
   "49": 225500,
 };
 
+// Skatteverket's DTD for the file, checked in unchanged (ISO-8859-1):
+//   eSKDUpload_6p0.dtd  sha256 e3077aff22a08f6bc141974e2ea979557abd197fb4a7cdb83f7316c7f0039123
+//     https://www.skatteverket.se/download/18.3f4496fd14864cc5ac99cb1/1700221496186/eSKDUpload_6p0.dtd
+//     (fetched 2026-11-01)
+// xmllint-wasm validates XSD and RelaxNG only, so the Moms content model — a
+// plain sequence of optional elements after Period — is read from the DTD.
+const ESKD_DTD = readFileSync(new URL("./fixtures/skatteverket/eSKDUpload_6p0.dtd", import.meta.url), "latin1");
+
+function dtdSequence(element: string): string[] {
+  const match = new RegExp(`<!ELEMENT ${element} \\(([^()]*)\\)>`).exec(ESKD_DTD);
+  if (!match) throw new Error(`No sequence for ${element} in the DTD`);
+  return match[1].split(",").map((part) => part.trim().replace(/\?$/, ""));
+}
+
 const zeroBoxes = (): VatDeclarationBoxes =>
   Object.fromEntries([...VAT_BOXES, "49"].map((box) => [box, 0])) as VatDeclarationBoxes;
 
@@ -85,6 +100,21 @@ describe("momsdeklaration som fil (eSKDUpload 6.0)", () => {
   it("reproduces Skatteverket's example 6 byte for byte", () => {
     const file = buildVatDeclarationFile({ orgNumber: "556000-0175", period: "202401", boxes: EXAMPLE_BOXES });
     expect(file.equals(Buffer.from(EXAMPLE_6, "latin1"))).toBe(true);
+  });
+
+  it("writes the elements in the order of Skatteverket's DTD", () => {
+    const moms = dtdSequence("Moms");
+    expect(moms[0]).toBe("Period");
+    // TextUpplysningMoms (a free-text note) is the only element Nav never writes.
+    const expected = moms.filter((element) => element !== "TextUpplysningMoms");
+    expect(["Period", ...VAT_FILE_ELEMENTS.map(([, element]) => element)]).toEqual(expected);
+
+    // Every box filled: the file lists the whole sequence, in that order.
+    const text = buildVatDeclarationFile({ orgNumber: "556000-0175", period: "202401", boxes: EXAMPLE_BOXES }).toString("latin1");
+    const body = text.slice(text.indexOf("<Moms>\n") + "<Moms>\n".length, text.indexOf("</Moms>"));
+    expect([...body.matchAll(/^<(\w+)>/gm)].map((match) => match[1])).toEqual(expected);
+    expect(ESKD_DTD).toContain('<!ATTLIST eSKDUpload Version CDATA #FIXED "6.0">');
+    expect(text).toContain('<eSKDUpload Version="6.0">');
   });
 
   it("names every box of the declaration exactly once", () => {

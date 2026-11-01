@@ -14,7 +14,7 @@
 
 Kan dölja allvarliga fel — och kan redan vara gjort.
 
-- [ ] Provuppladdning av momsdeklarationsfilen i Skatteverkets e-tjänst (elementordningen följer exempel 6; tabellens radordning skiljer sig).
+- [ ] Provuppladdning av momsdeklarationsfilen i Skatteverkets e-tjänst. Elementordningen är kontrollerad mot Skatteverkets DTD (`eSKDUpload_6p0.dtd`, låst i `vat-file.test.ts` 2026-11-01); kvar är e-tjänstens egna kontroller (organisationsnummer, period).
 - [ ] Ladda upp en genererad pain.001 i bankens valideringstjänst (Swedbank Validex) och lägg in företagets IBAN.
 - [ ] Prova utlandsbetalningsfilen i bankens valideringstjänst.
 

@@ -8,7 +8,9 @@ import type { VatDeclarationBox, VatDeclarationBoxes } from "@navet/shared";
 // Rules from the page: whole kronor without decimals, only a leading minus
 // is allowed, ruta 07 negative is written as 0, ruta 49 (MomsBetala) is
 // always present, boxes with nothing to report may be left out, no extra
-// spaces or tabs. The elements come in the page's order — not numeric.
+// spaces or tabs. The elements come in the page's order — not numeric —
+// which is the Moms sequence in Skatteverket's eSKDUpload_6p0.dtd (checked in
+// under test/fixtures/skatteverket and pinned by vat-file.test.ts).
 
 export const VAT_FILE_ELEMENTS: readonly (readonly [VatDeclarationBox, string])[] = [
   ["05", "ForsMomsEjAnnan"],
