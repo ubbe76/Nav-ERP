@@ -351,7 +351,8 @@ describe("planBomImport", () => {
     expect(plan.creates).toHaveLength(0);
   });
 
-  it("still errors on an in-file duplicate that is not yet in the structure", async () => {
+  it("imports an in-file duplicate that is not yet in the structure, with a warning", async () => {
+    // Migration 0176: the same component may sit on several rows.
     const plan = await planBomImport(
       {
         mapping: MAPPING,
@@ -364,15 +365,18 @@ describe("planBomImport", () => {
       fakeDeps(parentAndTwoComponents)
     );
 
-    expect(plan.rows[1]!.errors).toContain("Komponenten K-1 för artikel A-1 förekommer flera gånger i filen");
-    expect(plan.hasErrors).toBe(true);
+    expect(plan.rows.map((row) => row.errors)).toEqual([[], []]);
+    expect(plan.rows.map((row) => row.warnings)).toEqual([
+      ["Komponenten K-1 ingår 2 gånger i strukturen för A-1"],
+      ["Komponenten K-1 ingår 2 gånger i strukturen för A-1"],
+    ]);
+    expect(plan.hasErrors).toBe(false);
+    expect(plan.creates).toHaveLength(2);
   });
 
-  it("rejects the same component twice in the file, even at different operations", async () => {
-    // bom_components is unique on (parent, component) — the operation is not
-    // part of the key, so two rows for one component can never both land.
+  it("imports the same component at two operations as two rows", async () => {
     const plan = await planBomImport(
-      { mapping: MAPPING, rows: [["A-1", "K-1", "1", "", "10"], ["A-1", "K-1", "1", "", "20"]] },
+      { mapping: MAPPING, rows: [["A-1", "K-1", "1", "", "10"], ["A-1", "K-1", "2", "", "20"], ["A-1", "K-2", "1", "", ""]] },
       fakeDeps({
         ...parentAndTwoComponents,
         operations: [
@@ -382,9 +386,106 @@ describe("planBomImport", () => {
       })
     );
 
-    expect(plan.rows[0]!.errors).toEqual([]);
-    expect(plan.rows[1]!.errors).toContain("Komponenten K-1 för artikel A-1 förekommer flera gånger i filen");
-    expect(plan.creates).toHaveLength(1);
+    expect(plan.hasErrors).toBe(false);
+    expect(plan.creates.map((c) => [c.componentNumber, c.quantity, c.routingOperationId])).toEqual([
+      ["K-1", 1, "op-id-a-10"],
+      ["K-1", 2, "op-id-a-20"],
+      ["K-2", 1, null],
+    ]);
+    // Only the repeated component warns.
+    expect(plan.rows[2]!.warnings).toEqual([]);
+    expect(plan.summary).toMatchObject({ create: 3, error: 0, warning: 2 });
+  });
+
+  it("matches a repeated component to the stored rows — Pos. first, then in order", async () => {
+    const deps = fakeDeps({
+      ...parentAndTwoComponents,
+      edges: [
+        { id: "row-p3", parentId: "id-a", componentId: "id-k1", position: "3" },
+        { id: "row-p7", parentId: "id-a", componentId: "id-k1", position: "7" },
+      ],
+    });
+    const POS = { ...MAPPING, "Pos.": "position" };
+    // File order 7, 3, then a third row: the first two find their own Pos.,
+    // the third is a new row of the same component.
+    const rows = [
+      ["A-1", "K-1", "5", "", "", "7"],
+      ["A-1", "K-1", "4", "", "", "3"],
+      ["A-1", "K-1", "1", "", "", "9"],
+    ];
+
+    const update = await planBomImport({ mapping: POS, rows, updateExisting: true }, deps);
+    expect(update.rows.map((row) => row.action)).toEqual(["update", "update", "create"]);
+    expect(update.updates!.map((u) => [u.id, u.patch.quantity])).toEqual([
+      ["row-p7", 5],
+      ["row-p3", 4],
+    ]);
+    expect(update.creates.map((c) => c.position)).toEqual(["9"]);
+    expect(update.rows[0]!.warnings).toEqual(["Komponenten K-1 ingår 3 gånger i strukturen för A-1"]);
+
+    const skip = await planBomImport({ mapping: POS, rows, skipExisting: true }, deps);
+    expect(skip.rows.map((row) => row.action)).toEqual(["skip", "skip", "create"]);
+    expect(skip.creates).toHaveLength(1);
+
+    // Create-only: the matched rows are errors, the new one is not.
+    const plain = await planBomImport({ mapping: POS, rows }, deps);
+    expect(plain.rows.map((row) => row.errors.length)).toEqual([1, 1, 0]);
+  });
+
+  it("falls back to file order when Pos. does not match — one stored row, two in the file", async () => {
+    const deps = fakeDeps({
+      ...parentAndTwoComponents,
+      edges: [{ id: "row-1", parentId: "id-a", componentId: "id-k1", position: null }],
+    });
+    const plan = await planBomImport(
+      {
+        mapping: { ...MAPPING, "Pos.": "position" },
+        rows: [
+          ["A-1", "K-1", "2", "", "", "3"],
+          ["A-1", "K-1", "1", "", "", "7"],
+        ],
+        skipExisting: true,
+      },
+      deps
+    );
+    expect(plan.rows.map((row) => row.action)).toEqual(["skip", "create"]);
+    expect(plan.creates).toMatchObject([{ componentArticleId: "id-k1", quantity: 1, position: "7" }]);
+    expect(plan.rows[1]!.warnings).toEqual(["Komponenten K-1 ingår 2 gånger i strukturen för A-1"]);
+    expect(plan.hasErrors).toBe(false);
+  });
+
+  it("warns on a single file row when the stored structure already has the component", async () => {
+    // updateExisting rewrites one of two stored rows — the structure keeps both.
+    const plan = await planBomImport(
+      { mapping: MAPPING, rows: [["A-1", "K-1", "2", "", ""]], updateExisting: true },
+      fakeDeps({
+        ...parentAndTwoComponents,
+        edges: [
+          { id: "row-1", parentId: "id-a", componentId: "id-k1" },
+          { id: "row-2", parentId: "id-a", componentId: "id-k1" },
+        ],
+      })
+    );
+    expect(plan.updates!.map((u) => u.id)).toEqual(["row-1"]);
+    expect(plan.rows[0]!.warnings).toEqual(["Komponenten K-1 ingår 2 gånger i strukturen för A-1"]);
+  });
+
+  it("does not mistake repeated stored rows for a cycle, and still finds a real one", async () => {
+    const edges = [
+      { id: "row-1", parentId: "id-a", componentId: "id-k1" },
+      { id: "row-2", parentId: "id-a", componentId: "id-k1" },
+    ];
+    const fine = await planBomImport(
+      { mapping: MAPPING, rows: [["K-1", "K-2", "1", "", ""]] },
+      fakeDeps({ ...parentAndTwoComponents, edges })
+    );
+    expect(fine.hasErrors).toBe(false);
+
+    const cyclic = await planBomImport(
+      { mapping: MAPPING, rows: [["K-1", "A-1", "1", "", ""]] },
+      fakeDeps({ ...parentAndTwoComponents, edges })
+    );
+    expect(cyclic.rows[0]!.errors).toEqual(["Raden skapar en cirkulär struktur — A-1 innehåller redan K-1"]);
   });
 
   it("rejects a missing, malformed or non-positive quantity", async () => {
@@ -804,9 +905,8 @@ describe("planBomImport", () => {
     expect(plan.creates).toEqual([]);
   });
 
-  it("errors when the same new component sits on the same parent twice", async () => {
-    // Without a synthetic key this would slip past the planner and hit the
-    // (parent, component) unique index as a 409 at commit.
+  it("creates a new component once even when it sits on the same parent twice", async () => {
+    // Two structure rows, one new article — keyed "new:K-NY" for the warning.
     const plan = await planBomImport(
       {
         mapping: FULL_MAPPING,
@@ -819,10 +919,13 @@ describe("planBomImport", () => {
       fakeDeps({ ...onlyParent, units: [{ id: "unit-st", code: "st" }] })
     );
 
-    expect(plan.rows[0]!.errors).toEqual([]);
-    expect(plan.rows[1]!.errors).toContain(
-      "Komponenten K-NY för artikel A-1 förekommer flera gånger i filen"
-    );
+    expect(plan.rows.map((row) => row.errors)).toEqual([[], []]);
+    expect(plan.rows[1]!.warnings).toContain("Komponenten K-NY ingår 2 gånger i strukturen för A-1");
+    expect(plan.articleCreates.map((a) => a.articleNumber)).toEqual(["K-NY"]);
+    expect(plan.creates.map((c) => [c.componentNumber, c.quantity])).toEqual([
+      ["K-NY", 1],
+      ["K-NY", 2],
+    ]);
   });
 
   it("keeps two different new components apart in the cycle graph", async () => {
@@ -904,7 +1007,7 @@ describe("bom import — repository", () => {
     const componentId = await seedArticle("K-1", "purchased");
     await db.insert(bomComponents).values({ parentArticleId: parentId, componentArticleId: componentId, quantity: "2" });
 
-    expect(await repo.allBomEdges()).toEqual([{ id: expect.any(String), parentId, componentId }]);
+    expect(await repo.allBomEdges()).toEqual([{ id: expect.any(String), parentId, componentId, position: null }]);
   });
 
   it("maps a component's alternative unit factors", async () => {
@@ -1030,11 +1133,11 @@ describe("bom import — repository", () => {
       fallbackUnitId: fallback.unitId,
       fallbackLocationId: fallback.locationId,
       hasErrors: false,
-      // The same pair twice violates the (parent, component) unique index —
-      // the planner would have caught it, so this forces the failure past it.
+      // A self-reference violates the no_self_reference check — the planner
+      // would have caught it, so this forces the failure past it.
       creates: [
         { parentArticleId: parentId, componentArticleId: null, componentNumber: "K-ROLL", quantity: 1, unitId: null, unitFactor: null, routingOperationId: null },
-        { parentArticleId: parentId, componentArticleId: null, componentNumber: "K-ROLL", quantity: 1, unitId: null, unitFactor: null, routingOperationId: null },
+        { parentArticleId: parentId, componentArticleId: parentId, componentNumber: "A-1", quantity: 1, unitId: null, unitFactor: null, routingOperationId: null },
       ],
     };
 
@@ -1271,6 +1374,39 @@ describe("bom import — Pos. and updateExisting", () => {
     await expect(
       planBomImport({ mapping: POS_MAPPING, rows: [], updateExisting: true, skipExisting: true }, deps)
     ).rejects.toBeInstanceOf(ImportMappingError);
+  });
+
+  it("imports a repeated component and re-runs the file without doubling it", async () => {
+    await seedArticle("A-1");
+    const componentId = await seedArticle("K-1", "purchased");
+    const POS = { ...MAPPING, "Pos.": "position" };
+    const rows = [
+      ["A-1", "K-1", "2", "", "", "3"],
+      ["A-1", "K-1", "1", "", "", "7"],
+    ];
+    expect(await importService.commit("bom", { mapping: POS, rows })).toMatchObject({ created: 2 });
+
+    // Hoppa över: both rows are already there.
+    expect(await importService.commit("bom", { mapping: POS, rows, skipExisting: true })).toMatchObject({
+      created: 0,
+      skipped: 2,
+    });
+
+    // Uppdatera: each row lands on its own Pos.
+    const changed = [
+      ["A-1", "K-1", "6", "", "", "7"],
+      ["A-1", "K-1", "5", "", "", "3"],
+    ];
+    expect(await importService.commit("bom", { mapping: POS, rows: changed, updateExisting: true })).toMatchObject({
+      created: 0,
+      updated: 2,
+    });
+    const stored = await db.select().from(bomComponents);
+    expect(stored.every((row) => row.componentArticleId === componentId)).toBe(true);
+    expect(stored.map((row) => [row.position, row.quantity]).sort()).toEqual([
+      ["3", "5.0000"],
+      ["7", "6.0000"],
+    ]);
   });
 
   it("commits the update end-to-end", async () => {

@@ -462,7 +462,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "Komponentnummer",
       text: true,
       description:
-        "Den ingående artikeln. Måste finnas i artikelregistret om inte Skapa saknade artiklar är ikryssat — då skapas den ur radens egna kolumner. Samma komponent kan bara ligga en gång per artikel: finns den redan i strukturen blir raden ett fel (eller hoppas över med Hoppa över rader som redan finns). En artikel kan inte ingå i sin egen struktur, inte heller via flera led.",
+        "Den ingående artikeln. Måste finnas i artikelregistret om inte Skapa saknade artiklar är ikryssat — då skapas den ur radens egna kolumner. Samma komponent får förekomma på flera rader för en artikel (t.ex. olika Pos. eller operationer) och ger då en varning. Finns komponenten redan i strukturen blir raden ett fel, eller hoppas över med Hoppa över rader som redan finns — filens rader paras ihop med de befintliga på Pos. först, sedan i tur och ordning. En artikel kan inte ingå i sin egen struktur, inte heller via flera led.",
       example: "PL-2-1500",
     },
     {

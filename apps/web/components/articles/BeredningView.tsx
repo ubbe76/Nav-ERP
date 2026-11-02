@@ -6,7 +6,7 @@ import { Button } from "../ui/Button";
 import { SectionHeading } from "../ui/SectionHeading";
 import { SegmentedToggle } from "../ui/SegmentedToggle";
 import { Modal } from "../ui/Modal";
-import { FormError } from "../ui/Form";
+import { FormError, FormNotice } from "../ui/Form";
 import { NewArticleForm } from "./NewArticleForm";
 import { OperationModal } from "./OperationModal";
 import { BomComponentModal } from "./BomComponentModal";
@@ -15,6 +15,7 @@ import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { OPERATION_TIME_UNIT_LABELS, minutesPerUnitToSecondsPerUnit, minutesPerUnitToUnitsPerHour, toUnitQuantity } from "../../lib/units";
 import { operationLabel } from "./operation-label";
+import { bomDuplicateText, bomDuplicates } from "../../lib/bomDuplicates";
 import type { ArticleGroup, BomComponent, RoutingOperation, WorkCenter } from "../../lib/types";
 import styles from "./Beredning.module.css";
 
@@ -64,6 +65,11 @@ export function BeredningView({
   // A component whose operation link points outside the current routing
   // (should not happen) falls back to the unlinked group rather than vanishing.
   const unlinked = bom.filter((row) => row.routingOperationId === null || !opIds.has(row.routingOperationId));
+
+  // The same material on several rows is allowed (0176) but flagged — a
+  // notice over the list and a badge on each such row.
+  const duplicates = bomDuplicates(bom);
+  const duplicateCount = new Map(duplicates.map((d) => [d.componentArticleId, d.count]));
 
   const lastOp = sortedOps[sortedOps.length - 1];
   const defaultSequenceNo = lastOp ? lastOp.sequenceNo + 10 : 10;
@@ -147,7 +153,18 @@ export function BeredningView({
             </span>
           </span>
         </span>
-        <span className={styles.prepCell} data-align="right" />
+        {/* The Ställtid column is unused on a component row — the badge sits
+            there so it never squeezes the benämning out of the name cell. */}
+        <span className={styles.prepCell} data-align="right">
+          {duplicateCount.has(row.componentArticleId) && (
+            <span
+              className={styles.duplicateBadge}
+              title={`${row.componentArticleNumber} ingår ${duplicateCount.get(row.componentArticleId)} gånger i strukturen`}
+            >
+              Flera rader
+            </span>
+          )}
+        </span>
         <span className={styles.prepCell} data-align="right" />
         <span className={`${styles.prepCell} num`} data-align="right" data-label="Antal">
           {toUnitQuantity(Number(row.quantity), row.unitFactor)} {row.unitCode}
@@ -194,6 +211,13 @@ export function BeredningView({
       </SectionHeading>
 
       <FormError>{error}</FormError>
+
+      {duplicates.length > 0 && (
+        <FormNotice className={styles.duplicateNotice}>
+          Samma artikel finns på flera rader i strukturen: {duplicates.map(bomDuplicateText).join("; ")}. Kontrollera
+          att det är meningen — vid frisläpp läggs raderna ihop till en materialrad per operation.
+        </FormNotice>
+      )}
 
       <div className={styles.prep}>
         {empty ? (
@@ -387,6 +411,7 @@ export function BeredningView({
         onClose={() => setCompModal({ open: false, editing: null, presetOperationId: "" })}
         articleId={articleId}
         routing={routing}
+        bom={bom}
         editing={compModal.editing}
         presetOperationId={compModal.presetOperationId}
         onSaved={() => {

@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { articleCodes, db, units } from "@navet/db";
 import { createArticleSchema, updateArticleSchema, createArticleGroupSchema, updateArticleGroupSchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
+import { explodeBom } from "../src/modules/article/service/bom-explosion.js";
 import {
   createArticleService,
   BomCycleError,
@@ -10,7 +11,6 @@ import {
   BomComponentNotFoundError,
   DuplicateArticleGroupError,
   DuplicateArticleNumberError,
-  DuplicateBomComponentError,
   InvalidReferenceError,
 } from "../src/modules/article/service/article.service.js";
 
@@ -92,23 +92,27 @@ describe("article service — BOM structure", () => {
     expect(await service.getBom(parentTwo.id)).toHaveLength(1);
   });
 
-  it("rejects the same component twice on one article", async () => {
-    // bom_components is unique on (parent, component) — the operation link is
-    // chosen per component, not per routing row. Without the service catching
-    // the violation this surfaced to the client as a raw 500.
+  it("allows the same component twice on one article — two rows, summed when exploded", async () => {
+    // Migration 0176 dropped the unique (parent, component): the same material
+    // may sit at two drawing positions. The card warns; the server only stores.
     const parent = await makeArticle("DUP-PARENT");
     const child = await makeArticle("DUP-CHILD");
 
-    await service.addBomComponent(parent.id, { componentArticleId: child.id, quantity: 1 });
+    await service.addBomComponent(parent.id, { componentArticleId: child.id, quantity: 1, position: "3" });
+    await service.addBomComponent(parent.id, { componentArticleId: child.id, quantity: 5, position: "7" });
 
-    await expect(
-      service.addBomComponent(parent.id, { componentArticleId: child.id, quantity: 5 })
-    ).rejects.toBeInstanceOf(DuplicateBomComponentError);
-
-    // The first row is untouched — a refused duplicate must not have rewritten it.
     const bom = await service.getBom(parent.id);
-    expect(bom).toHaveLength(1);
-    expect(bom[0]?.quantity).toBe("1.0000");
+    expect(bom.map((row) => [row.position, row.quantity]).sort()).toEqual([
+      ["3", "1.0000"],
+      ["7", "5.0000"],
+    ]);
+    // The tree keeps both rows as authored.
+    const tree = await service.getBomTree(parent.id);
+    expect(tree?.children.map((c) => c.quantity).sort()).toEqual(["1.0000", "5.0000"]);
+    // Release/costing read explodeBom: one material line per (component, operation).
+    const exploded = await explodeBom(db, parent.id, 2);
+    expect(exploded).toHaveLength(1);
+    expect(exploded[0]?.totalQuantity).toBe(12);
   });
 
   it("throws ArticleNotFoundError when the parent or component does not exist", async () => {

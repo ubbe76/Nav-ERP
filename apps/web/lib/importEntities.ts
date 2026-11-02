@@ -116,7 +116,7 @@ export const IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
       },
     ],
     notice:
-      "Importera operationerna först om strukturraderna ska kopplas till en operation — kolumnen Operation slår upp sekvensnumret på artikelns befintliga rutt. Saknas operationen importeras raden ändå, utan koppling, och materialet dras vid slutrapporteringen.",
+      "Importera operationerna först om strukturraderna ska kopplas till en operation — kolumnen Operation slår upp sekvensnumret på artikelns befintliga rutt. Saknas operationen importeras raden ändå, utan koppling, och materialet dras vid slutrapporteringen. Samma komponent får förekomma flera gånger på en artikel (t.ex. olika Pos.) — raderna importeras var för sig och förhandsgranskningen varnar.",
   },
   supplierPrices: {
     entity: "supplierPrices",

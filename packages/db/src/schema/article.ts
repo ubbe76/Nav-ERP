@@ -350,9 +350,12 @@ export const bomComponents = pgTable(
     position: varchar("position", { length: 20 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
+  // No unique (parent, component) since migration 0176: the same material may
+  // sit on several rows of one structure (other Pos., other operation) — the
+  // card and the import warn instead. explodeBom sums such rows per
+  // (component, operation), so the MO still gets one material line each.
   (table) => [
     check("no_self_reference", sql`${table.parentArticleId} <> ${table.componentArticleId}`),
-    unique().on(table.parentArticleId, table.componentArticleId),
     index("idx_bom_parent").on(table.parentArticleId),
     index("idx_bom_component").on(table.componentArticleId),
   ]

@@ -2,11 +2,17 @@
 // entity-specific planner lives here and builds on the shared machinery in
 // import.service.ts; all database work lives in import.repository.ts.
 //
-// CREATE-ONLY by default, like the routing import: a component that is
-// already in the structure is a row error, not an update — or a SKIP, with
-// input.skipExisting. With input.updateExisting (opt-in, mutually exclusive
-// with skipExisting) the existing row is rewritten: antal and enhet always,
-// the operation link when the column is mapped, Pos. when the cell is filled.
+// CREATE-ONLY by default, like the routing import: a file row that MATCHES a
+// row already in the structure is a row error, not an update — or a SKIP,
+// with input.skipExisting. With input.updateExisting (opt-in, mutually
+// exclusive with skipExisting) the matched row is rewritten: antal and enhet
+// always, the operation link when the column is mapped, Pos. when the cell is
+// filled.
+//
+// Since migration 0176 the same component may sit on several rows of one
+// structure (another Pos., another operation): such rows import with a
+// WARNING, never an error. Matching is therefore per row, not per (parent,
+// component) pair — see matchExistingRows.
 import type { ArticleType, ImportCommitInput } from "@navet/shared";
 import { toBaseQuantity } from "@navet/shared";
 import { normalizeDecimal } from "./csv.js";
@@ -232,6 +238,51 @@ export interface BomImportPlan {
   hasErrors: boolean;
 }
 
+type ExistingBomRow = { id: string; position: string | null };
+
+// File row index -> the stored structure row it stands for. Per (parent,
+// component): first a file row whose Pos. equals a stored row's Pos., then the
+// remaining file rows in file order against the remaining stored rows in the
+// structure's order. A file row left over is a NEW row of the same component;
+// a stored row left over is untouched. With one row on each side — the only
+// case before 0176 — this is exactly the old pair match, so re-running a file
+// never doubles a structure.
+function matchExistingRows(
+  records: Record<string, string>[],
+  articlesByNumber: Map<string, ExistingArticle>,
+  existingByPair: Map<string, ExistingBomRow[]>
+): Map<number, string> {
+  const fileRowsByPair = new Map<string, number[]>();
+  records.forEach((record, index) => {
+    const parent = articlesByNumber.get(record["articleNumber"] ?? "");
+    const component = articlesByNumber.get(record["componentNumber"] ?? "");
+    if (!parent || !component || parent.id === component.id) return;
+    const key = `${parent.id}#${component.id}`;
+    if (!existingByPair.has(key)) return;
+    const list = fileRowsByPair.get(key);
+    if (list) list.push(index);
+    else fileRowsByPair.set(key, [index]);
+  });
+
+  const matched = new Map<number, string>();
+  for (const [key, indexes] of fileRowsByPair) {
+    const free = [...existingByPair.get(key)!];
+    const unmatched: number[] = [];
+    for (const index of indexes) {
+      const position = records[index]!["position"] ?? "";
+      const at = position === "" ? -1 : free.findIndex((row) => row.position === position);
+      if (at >= 0) matched.set(index, free.splice(at, 1)[0]!.id);
+      else unmatched.push(index);
+    }
+    for (const index of unmatched) {
+      const next = free.shift();
+      if (!next) break;
+      matched.set(index, next.id);
+    }
+  }
+  return matched;
+}
+
 export async function planBomImport(input: ImportCommitInput, deps: BomImportDeps): Promise<BomImportPlan> {
   // Not a per-row error: the two options contradict each other for EVERY
   // existing row (same rule as the routing import).
@@ -269,9 +320,18 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
   const unitsByCode = await deps.unitsByCode();
   const existingEdges = await deps.allBomEdges();
 
-  // The same query answers both questions: which (parent, component) pairs
-  // already exist, and what the graph looks like for the cycle check.
-  const existingPairs = new Map<string, string>(existingEdges.map((e) => [`${e.parentId}#${e.componentId}`, e.id ?? ""]));
+  // The same query answers both questions: which structure rows already
+  // exist (several per pair since 0176, in the structure's order — the
+  // repository sorts), and what the graph looks like for the cycle check.
+  const existingByPair = new Map<string, ExistingBomRow[]>();
+  for (const edge of existingEdges) {
+    const key = `${edge.parentId}#${edge.componentId}`;
+    const row = { id: edge.id ?? "", position: edge.position ?? null };
+    const list = existingByPair.get(key);
+    if (list) list.push(row);
+    else existingByPair.set(key, [row]);
+  }
+  const matchedRows = matchExistingRows(records, articlesByNumber, existingByPair);
 
   // resolveDefaults() creates the "st" unit and the "***" location on first
   // use, so it is called only when the flag is actually on.
@@ -283,7 +343,10 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
   // the cycle pass, which may still invalidate a row.
   const staged: (BomCreatePlan | null)[] = [];
   const updates: BomUpdatePlan[] = [];
-  const seen = new Set<string>();
+  // Row index -> its (parent, component) key, for the "ingår flera gånger"
+  // warning after the loop. A component this import creates has no id yet, so
+  // it is keyed "new:<number>" — the same synthetic key as the cycle pass.
+  const pairKeys = new Map<number, string>();
   // articleNumber -> the article staged for creation. The FIRST row that names
   // a missing component defines it; later rows may only warn about a
   // divergence. Rows with errors contribute too: the import is all-or-nothing,
@@ -329,21 +392,16 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
     }
 
     if (parent && component && component.id !== parent.id) {
-      // The uniqueness is (parent, component) — NOT (parent, component,
-      // operation). The same component cannot sit on a parent twice even at
-      // different operations.
-      const key = `${parent.id}#${component.id}`;
-      if (existingPairs.has(key)) {
+      pairKeys.set(index, `${parent.id}#${component.id}`);
+      const matchedRowId = matchedRows.get(index);
+      if (matchedRowId !== undefined) {
         if (input.skipExisting) {
           // Short-circuit: nothing is written for this row, so the remaining
           // cells (antal, enhet, operation) are not validated — a bad cell on
-          // a row we are not importing must not block the file. `seen` is
-          // still recorded, but the in-file duplicate stays silent here: with
-          // the pair already in the structure BOTH rows are skipped and no
-          // conflict is possible. staged gets its null so the two arrays stay
-          // parallel for the cycle pass below; the edge is already in
-          // existingEdges, so the graph is unchanged either way.
-          seen.add(key);
+          // a row we are not importing must not block the file. staged gets
+          // its null so the two arrays stay parallel for the cycle pass below;
+          // the edge is already in existingEdges, so the graph is unchanged.
+          pairKeys.delete(index);
           rows.push(
             skippedRow(
               rowNumber,
@@ -355,17 +413,13 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
           return;
         }
         if (input.updateExisting) {
-          existingRowId = existingPairs.get(key) || null;
+          existingRowId = matchedRowId || null;
         } else {
           errors.push(
             `Komponenten ${componentNumber} finns redan i strukturen för ${articleNumber} — ta bort raden ur filen`
           );
         }
       }
-      if (seen.has(key)) {
-        errors.push(`Komponenten ${componentNumber} för artikel ${articleNumber} förekommer flera gånger i filen`);
-      }
-      seen.add(key);
     }
 
     // Echoed for every row, mapped or not, so the preview payload has the same
@@ -463,18 +517,7 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
       }
     }
 
-    // The in-file duplicate check above only covers components that already
-    // exist — it keys on their ids. A component this import creates has no id
-    // yet, so the same (parent, new component) twice would slip through to the
-    // (parent_article_id, component_article_id) unique index and surface as a
-    // 409 instead of a row error. Same synthetic key as the cycle pass.
-    if (parent && pending) {
-      const pendingKey = `${parent.id}#new:${componentNumber}`;
-      if (seen.has(pendingKey)) {
-        errors.push(`Komponenten ${componentNumber} för artikel ${articleNumber} förekommer flera gånger i filen`);
-      }
-      seen.add(pendingKey);
-    }
+    if (parent && pending) pairKeys.set(index, `${parent.id}#new:${componentNumber}`);
 
     const rawQuantity = record["quantity"] ?? "";
     values["quantity"] = rawQuantity;
@@ -631,6 +674,25 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
       `Raden skapar en cirkulär struktur — ${componentNumber} innehåller redan ${parentNumber}`
     );
     staged[index] = null;
+  }
+
+  // The same component on several rows of one structure is allowed (0176)
+  // but worth a look: every row of such a pair warns, with the count the
+  // structure WILL have — its stored rows plus the file's unmatched ones (a
+  // matched row is one of the stored, whether it updates or errors). Skipped
+  // rows carry no key.
+  const newRowsByPair = new Map<string, number>();
+  for (const [index, key] of pairKeys) {
+    if (!matchedRows.has(index)) newRowsByPair.set(key, (newRowsByPair.get(key) ?? 0) + 1);
+  }
+  for (const [index, key] of pairKeys) {
+    const total = (existingByPair.get(key)?.length ?? 0) + (newRowsByPair.get(key) ?? 0);
+    if (total > 1) {
+      const record = records[index]!;
+      rows[index]!.warnings.push(
+        `Komponenten ${record["componentNumber"]} ingår ${total} gånger i strukturen för ${record["articleNumber"]}`
+      );
+    }
   }
 
   return {

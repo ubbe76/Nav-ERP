@@ -73,7 +73,8 @@ Spec `private/superpowers/specs/2026-10-29-lagersaldoimport-design.md`.
 
 ## Strukturimporten
 
-- **Pos.** (`position`, 0158, varchar 20) och **`updateExisting`** (*Uppdatera befintliga strukturrader*, utesluter `skipExisting` ⇒ 400): befintlig (förälder, komponent) skrivs om med antal + enhet alltid, operationslänken bara när kolumnen är mappad (tom ⇒ avlänkad), Pos. bara från ifylld cell. `allBomEdges` bär radens `id`; uppdaterade rader lägger inga kanter i cykelkontrollen.
+- **Pos.** (`position`, 0158, varchar 20) och **`updateExisting`** (*Uppdatera befintliga strukturrader*, utesluter `skipExisting` ⇒ 400): en matchad befintlig rad skrivs om med antal + enhet alltid, operationslänken bara när kolumnen är mappad (tom ⇒ avlänkad), Pos. bara från ifylld cell. `allBomEdges` bär radens `id` och `position`; uppdaterade rader lägger inga kanter i cykelkontrollen.
+- **Samma komponent flera gånger** (2026-11-02, migration 0176 tog bort unique (förälder, komponent)): aldrig ett fel, i stället varningen *Komponenten K ingår N gånger i strukturen för A* på varje rad i paret (N = lagrade rader + filens omatchade; överhoppade rader räknas inte). Matchningen mot lagrade rader är **per rad**, inte per par (`matchExistingRows` i `bom.ts`): först samma Pos., sedan resten i filordning mot resten i strukturens ordning (`allBomEdges` sorterar `created_at, id` — matchningen beror på det). Matchad rad = "finns redan" (fel / Hoppa över / Uppdatera som förut), omatchad = ny rad. Med en rad på var sida är det exakt den gamla parmatchningen, så en omkörning dubblar aldrig. Nya komponenter (`createMissingArticles`) på samma förälder två gånger skapas en gång och får två rader. `isAcyclic` i `bom-cycle.ts` räknar in-graden per **distinkt** förälder — annars ger dubbla kanter en falsk cykel i snabbvägen. Tester: `import-bom.test.ts` (matchning, varning, omkörning e2e, cykel med dubbla kanter).
 
 ## Resursimporten
 

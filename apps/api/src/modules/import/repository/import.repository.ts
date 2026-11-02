@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   articleCodes,
   articleGroups,
@@ -1366,10 +1366,18 @@ export function createImportRepository(db: Db) {
     // be substantially more code for the same answer. Two uuids per row, so
     // ~10 MB at 200 000 structure rows, once per (rare, admin-only) import.
     // A recursive CTE is the right upgrade if that table ever grows large.
+    // Ordered like the card lists a structure — the import matches a file's
+    // repeated component against the stored rows in this order (0176).
     async allBomEdges(): Promise<BomEdge[]> {
       return db
-        .select({ id: bomComponents.id, parentId: bomComponents.parentArticleId, componentId: bomComponents.componentArticleId })
-        .from(bomComponents);
+        .select({
+          id: bomComponents.id,
+          parentId: bomComponents.parentArticleId,
+          componentId: bomComponents.componentArticleId,
+          position: bomComponents.position,
+        })
+        .from(bomComponents)
+        .orderBy(asc(bomComponents.createdAt), asc(bomComponents.id));
     },
 
     // No register step; creates plus the opt-in updates (updateExisting) in
