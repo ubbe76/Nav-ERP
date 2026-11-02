@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { articles, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db } from "@navet/db";
+import { articles, stockCountSessions, stockLocations, stockTransactions, warehouses, type Db, type Tx } from "@navet/db";
 import { FALLBACK_LOCATION_NAME, resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
@@ -15,7 +15,7 @@ import { STOCK_IMPORT_NOTE, type StockBalanceImportPlan } from "../service/stock
 const CHUNK = 500;
 const chunks = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / CHUNK) }, (_, i) => items.slice(i * CHUNK, (i + 1) * CHUNK));
 
-export function createStockBalanceImportRepository(db: Db) {
+export function createStockBalanceImportRepository(db: Db | Tx) {
   return {
     async stockPlaces() {
       const [warehouseRows, locationRows] = await Promise.all([

@@ -10,6 +10,9 @@ import {
   ARTICLE_IMPORT_FIELDS,
   ARTICLE_UNIT_IMPORT_FIELDS,
   BOM_IMPORT_FIELDS,
+  CUSTOMER_CONTACT_IMPORT_FIELDS,
+  CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS,
+  CUSTOMER_IMPORT_FIELDS,
   CUSTOMER_PRICE_IMPORT_FIELDS,
   ROUTING_IMPORT_FIELDS,
   STOCK_BALANCE_IMPORT_FIELDS,
@@ -29,7 +32,13 @@ export interface ImportEntityConfig {
   anchor: string;
   fields: ImportFieldConfig[];
   defaults?: Record<string, string>;
+  // Shown above the wizard on the entity's own tab AND on its card in the
+  // multi-file wizard ("Alla filer").
   notice?: string;
+  // Shown instead of `notice` on the entity's own single-file tab only — for
+  // advice that is about running the tabs in order, which Alla filer does by
+  // itself (the customer page).
+  tabNotice?: string;
   skipExistingHint: string;
   extraOptions?: ImportOptionConfig[];
 }
@@ -156,6 +165,64 @@ export const IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
       "Antal är saldot på lagerplatsen efter importen, som vid en inventering: skillnaden mot dagens saldo bokas som en lagerjustering. Samma fil två gånger ändrar alltså inget. Lager och lagerplatser som saknas skapas. En ökning värderas till À-pris, annars artikelns standardkostnad.",
     skipExistingHint:
       "Lagerplatser där artikeln redan har ett saldo lämnas orörda och listas som överhoppade. Utan kryss sätts saldot till filens antal.",
+  },
+};
+
+// Customer import page: the three entities, mirroring
+// CUSTOMER_IMPORT_ENTITY_ORDER in packages/shared/src/import.ts (the web app
+// cannot import @navet/shared). Customers first — contacts and delivery
+// addresses attach to them by customer number.
+export const CUSTOMER_IMPORT_ENTITY_ORDER = ["customers", "customerContacts", "customerDeliveryAddresses"];
+
+export const CUSTOMER_IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
+  customers: {
+    entity: "customers",
+    label: "Kunder",
+    title: "Importera kunder",
+    meta: "CSV eller Excel (.xlsx)",
+    chapter: "forsaljning",
+    anchor: "importera-kunder",
+    fields: CUSTOMER_IMPORT_FIELDS,
+    tabNotice:
+      "Består kundexporten av flera filer, kör den här fliken en gång per fil, i ordningen Lista → Övrigt → Postadress → Fakturaadress: Lista-körningen skapar kunderna (matchning på kundnummer) med namn, organisationsnummer och VAT-nummer — och villkor, speditör, prislista och rabatt om de kolumnerna finns med i filen. Övrigt-körningen kompletterar kunderna och måste köras före Postadress, eftersom den liksom Lista mappar det korta namnet. Postadress-körningen ersätter sedan kortnamnet med det juridiska namnet och fyller i adressen, och Fakturaadress-körningen fakturaadressen. Kontakter och leveransadresser importeras efteråt på sina egna flikar. Fliken Alla filer gör allt detta av sig själv.",
+    skipExistingHint:
+      "Kunder som redan finns i registret uppdateras inte — de lämnas precis som de är och listas som överhoppade i resultatet. Utan kryss uppdateras de med filens värden. Lämna rutan avmarkerad för Övrigt-, Postadress- och Fakturaadress-filerna — de uppdaterar kunderna som Lista-filen skapar, och deras fält skrivs annars aldrig in.",
+  },
+  customerContacts: {
+    entity: "customerContacts",
+    label: "Kontakter",
+    title: "Importera kontakter",
+    meta: "CSV eller Excel (.xlsx) — en rad per kontakt",
+    chapter: "forsaljning",
+    anchor: "importera-kunder",
+    fields: CUSTOMER_CONTACT_IMPORT_FIELDS,
+    tabNotice:
+      "Importera kundfliken först — en kontakt kopplas till en befintlig kund via kundnumret och raden blir ett fel om kunden inte finns än.",
+    skipExistingHint:
+      "Kontakter som redan finns hos kunden (samma namn) hoppas över i stället för att stoppa hela importen. Befintliga kontakter ändras aldrig — det finns ingen uppdatering, bara skapande.",
+  },
+  customerDeliveryAddresses: {
+    entity: "customerDeliveryAddresses",
+    label: "Leveransadresser",
+    title: "Importera leveransadresser",
+    meta: "CSV eller Excel (.xlsx) — en rad per leveransadress",
+    chapter: "forsaljning",
+    anchor: "importera-kunder",
+    fields: CUSTOMER_DELIVERY_ADDRESS_IMPORT_FIELDS,
+    tabNotice:
+      "Importera kundfliken först — en leveransadress kopplas till en befintlig kund via kundnumret. En adress som är identisk med kundens egen adress hoppas alltid över.",
+    notice: "En adress som är identisk med kundens egen adress hoppas alltid över.",
+    skipExistingHint:
+      "Leveransadresser som redan finns på kunden (samma adress, postnummer, ort och land) hoppas över i stället för att stoppa hela importen. Befintliga leveransadresser ändras aldrig.",
+    extraOptions: [
+      {
+        key: "setAsDefault",
+        label: "Sätt som förvald leveransadress",
+        hint:
+          "En kund som ännu inte har någon förvald leveransadress får sin första importerade adress som förvald. En kund som redan har en förvald behåller den — importen sätter aldrig en ny förvald adress åt en kund som redan har en. Är kolumnen Förvald mappad avgör den per rad i stället.",
+        defaultChecked: true,
+      },
+    ],
   },
 };
 

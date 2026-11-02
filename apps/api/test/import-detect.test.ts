@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { IMPORT_ENTITY_ORDER, importEntitySchema } from "@navet/shared";
-import { detectImportEntity } from "../src/modules/import/service/detect.js";
+import { CUSTOMER_IMPORT_ENTITY_ORDER, IMPORT_ENTITY_ORDER, importEntitySchema } from "@navet/shared";
+import { detectImportEntity, importFileRank } from "../src/modules/import/service/detect.js";
+import { IMPORT_FIELD_HELP } from "../src/modules/import/service/field-help.js";
 
 // The header rows of Monitor G5's article exports, copied as literals so this
 // runs without the files.
@@ -59,5 +60,64 @@ describe("detectImportEntity", () => {
     expect(IMPORT_ENTITY_ORDER[0]).toBe("articles");
     expect(IMPORT_ENTITY_ORDER.indexOf("routing")).toBeLessThan(IMPORT_ENTITY_ORDER.indexOf("bom"));
     expect(IMPORT_ENTITY_ORDER.indexOf("articles")).toBeLessThan(IMPORT_ENTITY_ORDER.indexOf("supplierPrices"));
+  });
+});
+
+// The header rows of Monitor G5's customer exports (Kundlista, 2026-10).
+const CUSTOMER_HEADERS = {
+  lista: ["Kund", "Namn", "Betalningsvillkor", "Leveransvillkor", "Leveranssätt", "Giltighetstid", "Faktureringsplan", "Prislista", "Rabatt", "Rabattkategori", "Legeringstillägg"],
+  ovrigt: ["Kund", "Namn", "Prioritet", "Kundgrupp", "Momsreg.nr", "Moderbolag (kund)", "Välj leveransadress", "Personnummer", "Organisationsnr", "Kundkategori", "Vårt leverantörsnummer", "Kundnummer faktura", "Kreditlimit", "Försäkringsavgift", "Bankgiro", "PlusGiro", "Faktureringsavgift", "Betalningspåminnelse", "Samlingsfaktura", "Påminnelseavgift", "Öresavrundning", "Faktura i vänteläge", "Factoring", "Distributionsmetod", "Terminskurs", "Strökund", "Privatperson", "Webbsida", "Order som XML", "Faktura som XML", "Ärende som XML", "EORI-nr", "Flera order i e-postmeddelande", "Flera fakturor i e-post"],
+  postadress: ["Kund", "Namn", "Postadress – Adressformat", "Postadress – Namn", "Postadress – Adressrad 1", "Postadress – Adressrad 2", "Postadress – Adressrad 3", "Postadress – Adressrad 4", "Postadress – Postnummer", "Postadress – Stad", "Postadress – Region", "Postadress – Land"],
+  fakturaadress: ["Kund", "Namn", "Avviker från postadress", "Fakturaadress – Namn", "Fakturaadress – Adressrad 1", "Fakturaadress – Adressrad 2", "Fakturaadress – Adressrad 3", "Fakturaadress – Adressrad 4", "Fakturaadress – Postnummer", "Fakturaadress – Stad", "Fakturaadress – Land"],
+  besoksadress: ["Kund", "Namn", "Avviker från leveransadress", "Besöksadress – Namn", "Besöksadress adressrad 1", "Besöksadress adressrad 2", "Besöksadress adressrad 3", "Besöksadress adressrad 4", "Besöksadress – Postnummer", "Besöksadress – Stad", "Besöksadress – Land"],
+  leveransadress: ["Kund", "Namn", "Leveransadress – Namn", "Leveransadress – Adressrad 1", "Leveransadress – Adressrad 2", "Leveransadress – Adressrad 3", "Leveransadress – Adressrad 4", "Leveransadress – Postnummer", "Leveransadress – Stad", "Leveransadress – Land"],
+  alternativa: ["Kund", "Namn", "Förvald", "Aktiv", "Namn (2)", "Adressrad 1", "Adressrad 2", "Adressrad 3", "Adressrad 4", "Postnummer", "Stad", "Leveransvillkor", "Leveranssätt", "Transporttid", "Bestämmelseort", "Ort för leveransvillkor", "Kundgrupp", "Undantag momsreg.nr", "Momsreg.nr"],
+  referenser: ["Kund", "Förvald", "Aktiv", "Referens – Namn", "Telefon", "Mobiltelefon", "E-post", "Faxnummer", "Anmärkning", "Kommentar", "F", "Referenskategori"],
+};
+
+describe("detectImportEntity — customer exports", () => {
+  it("recognises every Monitor G5 customer export that has something to import", () => {
+    expect(detectImportEntity(CUSTOMER_HEADERS.lista)).toBe("customers");
+    expect(detectImportEntity(CUSTOMER_HEADERS.ovrigt)).toBe("customers");
+    expect(detectImportEntity(CUSTOMER_HEADERS.postadress)).toBe("customers");
+    expect(detectImportEntity(CUSTOMER_HEADERS.fakturaadress)).toBe("customers");
+    expect(detectImportEntity(CUSTOMER_HEADERS.leveransadress)).toBe("customerDeliveryAddresses");
+    expect(detectImportEntity(CUSTOMER_HEADERS.alternativa)).toBe("customerDeliveryAddresses");
+    expect(detectImportEntity(CUSTOMER_HEADERS.referenser)).toBe("customerContacts");
+  });
+
+  it("leaves Besöksadress unrecognised — nothing but the customer number maps", () => {
+    expect(detectImportEntity(CUSTOMER_HEADERS.besoksadress)).toBeNull();
+  });
+
+  it("recognises the three customer templates by their own headings", () => {
+    const headings = (entity: "customers" | "customerContacts" | "customerDeliveryAddresses") =>
+      IMPORT_FIELD_HELP[entity].map((f) => f.header);
+    expect(detectImportEntity(headings("customers"))).toBe("customers");
+    expect(detectImportEntity(headings("customerContacts"))).toBe("customerContacts");
+    expect(detectImportEntity(headings("customerDeliveryAddresses"))).toBe("customerDeliveryAddresses");
+  });
+
+  it("keeps the price list (customer + article) a customer price file", () => {
+    expect(detectImportEntity(HEADERS.prislistaForsaljning)).toBe("customerPrices");
+    expect(detectImportEntity(["Kund", "Artikelnummer", "Namn"])).toBeNull();
+  });
+
+  it("ranks the Lista-like files before the address files, and named article files before the rest", () => {
+    expect(importFileRank("customers", CUSTOMER_HEADERS.lista)).toBe(0);
+    expect(importFileRank("customers", CUSTOMER_HEADERS.ovrigt)).toBe(0);
+    expect(importFileRank("customers", CUSTOMER_HEADERS.postadress)).toBe(1);
+    expect(importFileRank("customers", CUSTOMER_HEADERS.fakturaadress)).toBe(1);
+    expect(importFileRank("customerContacts", CUSTOMER_HEADERS.referenser)).toBe(0);
+    expect(importFileRank("articles", HEADERS.artikellista)).toBe(0);
+    expect(importFileRank("articles", HEADERS.planering)).toBe(0);
+    // Extra benämning has no Benämning column: it cannot create an article,
+    // so it runs after the files that can.
+    expect(importFileRank("articles", HEADERS.extraBenamning)).toBe(1);
+  });
+
+  it("orders the customers before what hangs on them", () => {
+    for (const entity of CUSTOMER_IMPORT_ENTITY_ORDER) expect(importEntitySchema.options).toContain(entity);
+    expect(CUSTOMER_IMPORT_ENTITY_ORDER[0]).toBe("customers");
   });
 });

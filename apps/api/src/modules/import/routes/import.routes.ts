@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { importCommitSchema, importEntitySchema, type ImportEntity } from "@navet/shared";
+import { importBatchPreviewSchema, importCommitSchema, importEntitySchema, type ImportEntity } from "@navet/shared";
 import { requireRole } from "../../auth/middleware/auth.middleware.js";
 import { ImportFileError } from "../service/csv.js";
 import { importFieldHelp } from "../service/field-help.js";
@@ -17,6 +17,8 @@ import {
 // Operationslista are ~2.3 MB, the widest exports (Kundlista, Övrigt: 35
 // columns) about three times that. The limit leaves room for those.
 const IMPORT_ROWS_BODY_LIMIT = 16 * 1024 * 1024;
+// The batch preview carries every file of a multi-file import at once.
+const IMPORT_BATCH_BODY_LIMIT = 64 * 1024 * 1024;
 
 // CSV import (Monitor G5). All three endpoints are admin-only — imports can
 // create register rows and overwrite article data in bulk.
@@ -107,6 +109,19 @@ export async function importRoutes(app: FastifyInstance, opts: { service: Import
         if (err instanceof ImportMappingError) return reply.code(400).send(errorBody(err));
         throw err;
       }
+    }
+  );
+
+  // The multi-file wizard's preview ("Alla filer"): all files in commit
+  // order, previewed one after the other in a rolled-back transaction — see
+  // ImportService.previewBatch. Always 200: each file carries its own
+  // status (previewed / failed / blocked).
+  app.post(
+    "/imports/batch-preview",
+    { preHandler: requireRole("admin"), bodyLimit: IMPORT_BATCH_BODY_LIMIT },
+    async (req) => {
+      const input = importBatchPreviewSchema.parse(req.body);
+      return service.previewBatch(input.files);
     }
   );
 

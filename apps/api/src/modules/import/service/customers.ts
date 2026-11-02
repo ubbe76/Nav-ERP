@@ -21,6 +21,7 @@ export const CUSTOMER_IMPORT_FIELDS = [
   "customerNumber",
   "name",
   "orgNumber",
+  "personalNumber",
   "vatNumber",
   "contactName",
   "email",
@@ -64,6 +65,7 @@ export type CustomerImportField = (typeof CUSTOMER_IMPORT_FIELDS)[number];
 const MAX_LENGTHS: Partial<Record<CustomerImportField, number>> = {
   name: 255,
   orgNumber: 20,
+  personalNumber: 20,
   vatNumber: 30,
   contactName: 255,
   email: 255,
@@ -88,6 +90,7 @@ const FIELD_LABELS: Record<CustomerImportField, string> = {
   customerNumber: "Kundnummer",
   name: "Namn",
   orgNumber: "Organisationsnummer",
+  personalNumber: "Personnummer",
   vatNumber: "VAT-nummer",
   contactName: "Kontaktperson",
   email: "E-post",
@@ -134,6 +137,7 @@ const emailSchema = z.string().email();
 // validation, the discount/differs parsers and the four register lookups) —
 // skipped by the generic pass-through loop.
 const SPECIAL_FIELDS: ReadonlySet<CustomerImportField> = new Set<CustomerImportField>([
+  "personalNumber",
   "address2",
   "address3",
   "invoiceAddress2",
@@ -177,6 +181,10 @@ export const CUSTOMER_HEADER_ALIASES: Record<string, string> = {
   // Monitor's Lista export abbreviates the heading to "Organisationsnr".
   organisationsnr: "orgNumber",
   orgnr: "orgNumber",
+  // Personnummer lands in the same column as the organisation number — the
+  // customer card labels it Personnummer for a Privatperson (see the
+  // planner: it only fills an empty Organisationsnummer).
+  personnummer: "personalNumber",
   momsregnr: "vatNumber",
   vatnummer: "vatNumber",
   kontaktperson: "contactName",
@@ -281,10 +289,30 @@ const INVOICE_CONTEXT_OVERRIDES: Record<string, string> = {
 // the one Monitor file whose short "Namn" column maps to name.
 export const CUSTOMER_LISTA_MARKERS = ["kundgrupp", "organisationsnr", "kreditlimit", "betalningsvillkor", "prislista"];
 
+function normalizedCustomerHeaders(headers: string[]): string[] {
+  return headers.map((header) => normalizeHeader(header.replace(/ \(\d+\)$/, "")));
+}
+
+function hasInvoiceAddressMarker(normalizedHeaders: string[]): boolean {
+  return normalizedHeaders.includes("fakturaadressnamn") || normalizedHeaders.includes("avvikerfranpostadress");
+}
+
+// Monitor's Lista export (and its Övrigt variant, which carries the 2026-09
+// Lista's Kundgrupp/Organisationsnr/Kreditlimit) — the one file kind whose
+// short "Namn" column is auto-mapped to the name. The multi-file import
+// runs these files before the address files (importFileRank in detect.ts),
+// so Postadress' legal name is the one that stays.
+export function isCustomerListaFile(headers: string[]): boolean {
+  const normalizedHeaders = normalizedCustomerHeaders(headers);
+  return (
+    !hasInvoiceAddressMarker(normalizedHeaders) &&
+    CUSTOMER_LISTA_MARKERS.some((marker) => normalizedHeaders.includes(marker))
+  );
+}
+
 export function suggestCustomerMapping(headers: string[]): Record<string, string | null> {
-  const normalizedHeaders = headers.map((header) => normalizeHeader(header.replace(/ \(\d+\)$/, "")));
-  const isInvoiceAddressFile =
-    normalizedHeaders.includes("fakturaadressnamn") || normalizedHeaders.includes("avvikerfranpostadress");
+  const normalizedHeaders = normalizedCustomerHeaders(headers);
+  const isInvoiceAddressFile = hasInvoiceAddressMarker(normalizedHeaders);
   let aliases = isInvoiceAddressFile
     ? { ...CUSTOMER_HEADER_ALIASES, ...INVOICE_CONTEXT_OVERRIDES }
     : CUSTOMER_HEADER_ALIASES;
@@ -299,9 +327,7 @@ export function suggestCustomerMapping(headers: string[]): Record<string, string
   // Lista marker and an invoice-address marker is treated as an address
   // file — the safe default is to never touch the name. Generic CSVs
   // ("Kundnummer"/"Kundnr" + "Namn") keep the old suggestion.
-  const isListaFile =
-    !isInvoiceAddressFile && CUSTOMER_LISTA_MARKERS.some((marker) => normalizedHeaders.includes(marker));
-  if (normalizedHeaders.includes("kund") && !isListaFile) {
+  if (normalizedHeaders.includes("kund") && !isCustomerListaFile(headers)) {
     const { namn: _namn, ...rest } = aliases;
     aliases = rest;
   }
@@ -540,6 +566,25 @@ export async function planCustomerImport(
       // discountPercent, ...) — TS can't narrow that at the type level, so
       // the assignment goes through an untyped index.
       (patch as Record<string, string>)[field] = raw;
+    }
+
+    // Personnummer (Monitor's Övrigt export) is stored as the organisation
+    // number — the customer card labels that field Personnummer for a
+    // Privatperson. It only fills an EMPTY Organisationsnummer cell of the
+    // same row: a row with both keeps the organisation number.
+    const personalNumber = record["personalNumber"] ?? "";
+    if (personalNumber !== "") {
+      values["personalNumber"] = personalNumber;
+      const orgNumberCell = record["orgNumber"] ?? "";
+      if (orgNumberCell !== "") {
+        if (orgNumberCell !== personalNumber) {
+          warnings.push(`Personnumret importerades inte — raden har redan organisationsnummer ${orgNumberCell}`);
+        }
+      } else if (personalNumber.length > MAX_LENGTHS.personalNumber!) {
+        errors.push(`Fältet '${FIELD_LABELS.personalNumber}' är för långt (max ${MAX_LENGTHS.personalNumber} tecken)`);
+      } else {
+        patch.orgNumber = personalNumber;
+      }
     }
 
     // Address merging — overrides whatever the generic loop above set for

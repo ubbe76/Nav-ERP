@@ -3,11 +3,11 @@
 // entity-specific planners (articles.ts; customers.ts/suppliers.ts in later
 // blocks) build on these; createImportService (the routes' dependency) sits
 // at the bottom of this file.
-import type { ImportCommitInput, ImportEntity } from "@navet/shared";
+import type { ImportBatchPreviewInput, ImportCommitInput, ImportEntity } from "@navet/shared";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import type { ImportRepository } from "../repository/import.repository.js";
 import { parseImportFile } from "./parse-file.js";
-import { detectImportEntity } from "./detect.js";
+import { detectImportEntity, importFileRank } from "./detect.js";
 import { planArticleImport, suggestArticleMapping, type ArticleImportPlan } from "./articles.js";
 import { planCustomerImport, suggestCustomerMapping, type CustomerImportPlan } from "./customers.js";
 import { planSupplierImport, suggestSupplierMapping, type SupplierImportPlan } from "./suppliers.js";
@@ -289,7 +289,23 @@ export class ImportRegisterConflictError extends Error {
   }
 }
 
-export function createImportService(repo: ImportRepository) {
+export interface ImportServiceOptions {
+  // Runs fn against a repository bound to a transaction that is ALWAYS
+  // rolled back — the multi-file preview executes every file for real so
+  // the next one sees its result, and nothing is kept. Wired in app.ts.
+  dryRun?: <T>(fn: (repo: ImportRepository) => Promise<T>) => Promise<T>;
+}
+
+// One file's outcome in the batch preview, in request order. `blocked` =
+// not previewed, because an earlier file has errors: its rows were never
+// executed, so every later file would show follow-on errors ("Kunden …
+// finns inte") instead of its own.
+export type ImportBatchPreviewFile =
+  | { status: "previewed"; rows: ImportRowResult[]; summary: ImportSummary; willCreate: Record<string, string[]> }
+  | { status: "failed"; error: string; rows?: ImportRowResult[]; summary?: ImportSummary; willCreate?: Record<string, string[]> }
+  | { status: "blocked" };
+
+export function createImportService(repo: ImportRepository, options: ImportServiceOptions = {}) {
   // Per-entity dispatch: the customer/supplier importers add cases to these
   // switches and widen importEntitySchema — the routes file stays untouched.
   function suggest(entity: ImportEntity, headers: string[]): Record<string, string | null> {
@@ -330,6 +346,7 @@ export function createImportService(repo: ImportRepository) {
   }
 
   async function buildPlan(
+    r: ImportRepository,
     entity: ImportEntity,
     input: ImportCommitInput
   ): Promise<
@@ -353,52 +370,53 @@ export function createImportService(repo: ImportRepository) {
     switch (entity) {
       case "articles":
         // The repository implements ArticleImportDeps structurally.
-        return planArticleImport(input, repo);
+        return planArticleImport(input, r);
       case "customers":
         // The repository implements CustomerImportDeps structurally.
-        return planCustomerImport(input, repo);
+        return planCustomerImport(input, r);
       case "suppliers":
         // The repository implements SupplierImportDeps structurally.
-        return planSupplierImport(input, repo);
+        return planSupplierImport(input, r);
       case "bom":
         // The repository implements BomImportDeps structurally.
-        return planBomImport(input, repo);
+        return planBomImport(input, r);
       case "routing":
         // The repository implements RoutingImportDeps structurally.
-        return planRoutingImport(input, repo);
+        return planRoutingImport(input, r);
       case "customerContacts":
         // The repository implements CustomerContactImportDeps structurally.
-        return planCustomerContactImport(input, repo);
+        return planCustomerContactImport(input, r);
       case "customerDeliveryAddresses":
         // The repository implements CustomerDeliveryAddressImportDeps structurally.
-        return planCustomerDeliveryAddressImport(input, repo);
+        return planCustomerDeliveryAddressImport(input, r);
       case "supplierContacts":
         // The repository implements SupplierContactImportDeps structurally.
-        return planSupplierContactImport(input, repo);
+        return planSupplierContactImport(input, r);
       case "supplierDeliveryAddresses":
         // The repository implements SupplierDeliveryAddressImportDeps structurally.
-        return planSupplierDeliveryAddressImport(input, repo);
+        return planSupplierDeliveryAddressImport(input, r);
       case "workCenters":
         // The repository implements WorkCenterImportDeps structurally.
-        return planWorkCenterImport(input, repo);
+        return planWorkCenterImport(input, r);
       case "legoWorkCenters":
-        return planLegoWorkCenterImport(input, repo);
+        return planLegoWorkCenterImport(input, r);
       case "productionGroups":
-        return planProductionGroupImport(input, repo);
+        return planProductionGroupImport(input, r);
       case "articleUnits":
-        return planArticleUnitImport(input, repo);
+        return planArticleUnitImport(input, r);
       case "supplierPrices":
-        return planSupplierPriceImport(input, repo);
+        return planSupplierPriceImport(input, r);
       case "customerPrices":
-        return planCustomerPriceImport(input, repo);
+        return planCustomerPriceImport(input, r);
       case "stockBalances":
-        return planStockBalanceImport(input, repo);
+        return planStockBalanceImport(input, r);
     }
   }
 
   // The casts are safe — buildPlan's switch correlates entity to plan type,
   // which TypeScript cannot track across the function boundary.
   function executePlan(
+    r: ImportRepository,
     entity: ImportEntity,
     plan: Awaited<ReturnType<typeof buildPlan>>
   ): Promise<{
@@ -429,37 +447,37 @@ export function createImportService(repo: ImportRepository) {
   }> {
     switch (entity) {
       case "articles":
-        return repo.executeArticlePlan(plan as ArticleImportPlan);
+        return r.executeArticlePlan(plan as ArticleImportPlan);
       case "customers":
-        return repo.executeCustomerPlan(plan as CustomerImportPlan);
+        return r.executeCustomerPlan(plan as CustomerImportPlan);
       case "suppliers":
-        return repo.executeSupplierPlan(plan as SupplierImportPlan);
+        return r.executeSupplierPlan(plan as SupplierImportPlan);
       case "bom":
-        return repo.executeBomPlan(plan as BomImportPlan);
+        return r.executeBomPlan(plan as BomImportPlan);
       case "routing":
-        return repo.executeRoutingPlan(plan as RoutingImportPlan);
+        return r.executeRoutingPlan(plan as RoutingImportPlan);
       case "customerContacts":
-        return repo.executeCustomerContactPlan(plan as CustomerContactImportPlan);
+        return r.executeCustomerContactPlan(plan as CustomerContactImportPlan);
       case "customerDeliveryAddresses":
-        return repo.executeCustomerDeliveryAddressPlan(plan as CustomerDeliveryAddressImportPlan);
+        return r.executeCustomerDeliveryAddressPlan(plan as CustomerDeliveryAddressImportPlan);
       case "supplierContacts":
-        return repo.executeSupplierContactPlan(plan as SupplierContactImportPlan);
+        return r.executeSupplierContactPlan(plan as SupplierContactImportPlan);
       case "supplierDeliveryAddresses":
-        return repo.executeSupplierDeliveryAddressPlan(plan as SupplierDeliveryAddressImportPlan);
+        return r.executeSupplierDeliveryAddressPlan(plan as SupplierDeliveryAddressImportPlan);
       case "workCenters":
-        return repo.executeWorkCenterPlan(plan as WorkCenterImportPlan);
+        return r.executeWorkCenterPlan(plan as WorkCenterImportPlan);
       case "legoWorkCenters":
-        return repo.executeLegoWorkCenterPlan(plan as LegoWorkCenterImportPlan);
+        return r.executeLegoWorkCenterPlan(plan as LegoWorkCenterImportPlan);
       case "productionGroups":
-        return repo.executeProductionGroupPlan(plan as ProductionGroupImportPlan);
+        return r.executeProductionGroupPlan(plan as ProductionGroupImportPlan);
       case "articleUnits":
-        return repo.executeArticleUnitPlan(plan as ArticleUnitImportPlan);
+        return r.executeArticleUnitPlan(plan as ArticleUnitImportPlan);
       case "supplierPrices":
-        return repo.executeSupplierPricePlan(plan as SupplierPriceImportPlan);
+        return r.executeSupplierPricePlan(plan as SupplierPriceImportPlan);
       case "customerPrices":
-        return repo.executeCustomerPricePlan(plan as CustomerPriceImportPlan);
+        return r.executeCustomerPricePlan(plan as CustomerPriceImportPlan);
       case "stockBalances":
-        return repo.executeStockBalancePlan(plan as StockBalanceImportPlan);
+        return r.executeStockBalancePlan(plan as StockBalanceImportPlan);
     }
   }
 
@@ -491,7 +509,14 @@ export function createImportService(repo: ImportRepository) {
   return {
     async parse(entity: ImportEntity, file: Buffer) {
       const parsed = await parseWithUniqueHeaders(file);
-      return { ...parsed, suggestedMapping: suggest(entity, parsed.headers) };
+      // orderRank too: the multi-file wizard re-parses a file whose type the
+      // user changes by hand, and an address file must keep running after
+      // Lista/Övrigt (importFileRank).
+      return {
+        ...parsed,
+        orderRank: importFileRank(entity, parsed.headers),
+        suggestedMapping: suggest(entity, parsed.headers),
+      };
     },
 
     // The multi-file import's first step: parse without knowing the entity,
@@ -502,23 +527,74 @@ export function createImportService(repo: ImportRepository) {
     async detect(file: Buffer) {
       const parsed = await parseWithUniqueHeaders(file);
       const detectedEntity = detectImportEntity(parsed.headers);
+      const orderRank = detectedEntity ? importFileRank(detectedEntity, parsed.headers) : 0;
       return {
         ...parsed,
         detectedEntity,
+        orderRank,
         suggestedMapping: detectedEntity ? suggest(detectedEntity, parsed.headers) : {},
       };
     },
 
     async preview(entity: ImportEntity, input: ImportCommitInput) {
-      const plan = await buildPlan(entity, input);
+      const plan = await buildPlan(repo, entity, input);
       return { rows: plan.rows, summary: plan.summary, willCreate: plan.willCreate };
+    },
+
+    // The multi-file wizard's preview: plan AND execute every file in the
+    // order given, inside one transaction that is always rolled back, so
+    // each file is previewed against what the earlier ones leave behind —
+    // exactly what the per-file commits will then meet. A file with errors
+    // is not executed and blocks the rest (see ImportBatchPreviewFile).
+    async previewBatch(files: ImportBatchPreviewInput["files"]): Promise<{ files: ImportBatchPreviewFile[] }> {
+      const dryRun = options.dryRun;
+      if (!dryRun) throw new Error("previewBatch needs the dryRun option");
+      const results = await dryRun(async (txRepo) => {
+        const out: ImportBatchPreviewFile[] = [];
+        let blocked = false;
+        for (const { entity, ...input } of files) {
+          if (blocked) {
+            out.push({ status: "blocked" });
+            continue;
+          }
+          try {
+            const plan = await buildPlan(txRepo, entity, input);
+            const preview = { rows: plan.rows, summary: plan.summary, willCreate: plan.willCreate };
+            if (plan.hasErrors) {
+              const n = plan.summary.error;
+              const error = `Filen har fel på ${n} ${n === 1 ? "rad" : "rader"} — rätta filen eller hoppa över den`;
+              out.push({ status: "failed", error, ...preview });
+              blocked = true;
+              continue;
+            }
+            await executePlan(txRepo, entity, plan);
+            out.push({ status: "previewed", ...preview });
+          } catch (err) {
+            // Only the errors commit() turns into a 4xx — anything else is a
+            // bug and fails the request. The execute ran in its own savepoint
+            // (a nested transaction), but the later files are blocked all the
+            // same: they would be previewed without this file's rows.
+            const message =
+              err instanceof ImportMappingError || err instanceof ImportRegisterConflictError
+                ? err.message
+                : isUniqueViolation(err)
+                  ? new ImportConflictError().message
+                  : null;
+            if (message === null) throw err;
+            out.push({ status: "failed", error: message });
+            blocked = true;
+          }
+        }
+        return out;
+      });
+      return { files: results };
     },
 
     // Re-plans from scratch — the preview round-trip is never trusted — and
     // executes atomically: ANY row error aborts with the preview payload,
     // warnings never block.
     async commit(entity: ImportEntity, input: ImportCommitInput) {
-      const plan = await buildPlan(entity, input);
+      const plan = await buildPlan(repo, entity, input);
       if (plan.hasErrors) {
         throw new ImportValidationError({
           rows: plan.rows,
@@ -527,7 +603,7 @@ export function createImportService(repo: ImportRepository) {
         });
       }
       try {
-        const result = await executePlan(entity, plan);
+        const result = await executePlan(repo, entity, plan);
         // The skipped rows are the plan's, not the repository's — nothing was
         // written for them, so the repository never sees them. The WHOLE list
         // rides along uncapped: saving or printing it is the point of the

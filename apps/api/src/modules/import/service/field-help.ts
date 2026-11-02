@@ -707,6 +707,17 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "556123-4567",
     },
     {
+      field: "personalNumber",
+      label: "Personnummer",
+      required: false,
+      header: "Personnummer",
+      text: true,
+      description:
+        "För en privatperson, max 20 tecken. Sparas i fältet Organisationsnummer, som kundkortet visar som Personnummer när Privatperson är ikryssat — men bara när raden saknar organisationsnummer; har raden båda behålls organisationsnumret med en varning. " +
+        UNTOUCHED,
+      example: "121212-1212",
+    },
+    {
       field: "vatNumber",
       label: "VAT-nummer",
       required: false,

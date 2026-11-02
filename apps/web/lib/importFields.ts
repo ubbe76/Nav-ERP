@@ -104,6 +104,7 @@ export const CUSTOMER_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "customerNumber", label: "Kundnummer", required: true },
   { field: "name", label: "Namn" },
   { field: "orgNumber", label: "Organisationsnummer" },
+  { field: "personalNumber", label: "Personnummer" },
   { field: "vatNumber", label: "VAT-nummer" },
   { field: "contactName", label: "Kontaktperson" },
   { field: "email", label: "E-post" },
