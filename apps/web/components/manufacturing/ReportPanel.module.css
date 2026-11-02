@@ -1,26 +1,47 @@
-/* The Rapportera card: one wrapping line per operation, material row and
-   report row. Items wrap instead of sitting on fixed tracks, so a phone
-   stacks them and a desktop reads each row as one line where it fits. */
+/* The Rapportera card: one grid row per operation and material row sharing
+   the same columns, with the column labels drawn once in .head. On a phone
+   the head row is hidden and every row stacks with its own labels. */
 .panel {
+  --report-cols: minmax(0, 1fr) 7.5rem 6rem 6rem 6rem 6.5rem;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .header {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
+}
+
+.inlineField {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.inlineField > label {
+  white-space: nowrap;
+}
+
+.head {
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding-top: var(--space-1);
 }
 
 .section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
   border-top: 1px solid var(--color-divider);
-  padding-top: var(--space-3);
+  padding-top: var(--space-2);
 }
 
 .groupTitle {
@@ -30,10 +51,10 @@
 }
 
 .line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--space-2) var(--space-3);
+  display: grid;
+  grid-template-columns: var(--report-cols);
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
 }
 
 /* Linked material sits indented under its operation. */
@@ -42,7 +63,6 @@
 }
 
 .title {
-  flex: 1 1 14rem;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -56,6 +76,8 @@
 }
 
 .summary {
+  font-family: var(--font-body);
+  font-size: 13px;
   color: var(--color-text-muted);
 }
 
@@ -66,28 +88,144 @@
 }
 
 .cell {
-  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.cell > :global(*:not(span)) {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
-.wide {
-  flex: 1 1 12rem;
-  min-width: 0;
+.mobileLabel {
+  display: none;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  color: var(--color-text-muted);
 }
 
-/* Right-aligned, also when it wraps onto a line of its own. */
+/* Antal + unit in the column of Antal klart and the one after it. */
+.qty {
+  grid-column: 3 / span 2;
+}
+
+.unit {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
 .action {
-  flex: 0 0 auto;
+  grid-column: 6;
+  justify-self: end;
+}
+
+/* Rapportera tid / Slutför order: one compact row with a small row label. */
+.formRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.rowLabel {
+  flex: 0 0 8rem;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.grow {
+  flex: 1 1 10rem;
+}
+
+.date {
+  flex: 0 0 10rem;
+}
+
+.hours {
+  flex: 0 0 5.5rem;
+}
+
+.rowAction {
   margin-left: auto;
+  flex: 0 0 auto;
 }
 
 @media (max-width: 640px) {
+  .inlineField {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .inlineField > :global(div) {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  .head {
+    display: none;
+  }
+
+  .line {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .material {
     padding-left: var(--space-3);
   }
 
-  .cell,
-  .wide {
+  .title,
+  .summary,
+  .action {
+    grid-column: 1 / -1;
+  }
+
+  .action {
+    justify-self: start;
+  }
+
+  .qty {
+    grid-column: span 2;
+  }
+
+  .cell {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .qty {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .qty .mobileLabel {
+    flex-basis: 100%;
+  }
+
+  .mobileLabel {
+    display: block;
+  }
+
+  .rowLabel,
+  .grow,
+  .date {
+    flex: 1 1 100%;
+  }
+
+  .hours {
     flex: 1 1 40%;
   }
+
+  .rowAction {
+    margin-left: 0;
+  }
+}
+
+/* Antal in a material row is as narrow as the operation inputs above it. */
+.qty > :global(*:not(span)) {
+  flex: 0 1 6rem;
 }
