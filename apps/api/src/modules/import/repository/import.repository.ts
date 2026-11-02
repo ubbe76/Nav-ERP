@@ -1221,13 +1221,21 @@ export function createImportRepository(db: Db) {
     },
 
     // --- Customer price import (customerPrices) ---
-    // "<customerId>#<articleId>" -> the existing article rule at antal 1.
-    async customerArticlePrices(customerIds: string[]): Promise<Map<string, { id: string }>> {
-      const map = new Map<string, { id: string }>();
+    // "<customerId>#<articleId>" -> the existing article rule at antal 1,
+    // with its ställpris (the staffelsteg inherit it).
+    async customerArticlePrices(
+      customerIds: string[]
+    ): Promise<Map<string, { id: string; setupPrice: number | null }>> {
+      const map = new Map<string, { id: string; setupPrice: number | null }>();
       for (const part of chunk([...new Set(customerIds)])) {
         if (part.length === 0) continue;
         const rows = await db
-          .select({ id: customerPrices.id, customerId: customerPrices.customerId, articleId: customerPrices.articleId })
+          .select({
+            id: customerPrices.id,
+            customerId: customerPrices.customerId,
+            articleId: customerPrices.articleId,
+            setupPrice: customerPrices.setupPrice,
+          })
           .from(customerPrices)
           .where(
             and(
@@ -1236,7 +1244,43 @@ export function createImportRepository(db: Db) {
               eq(customerPrices.fromQuantity, "1")
             )
           );
-        for (const row of rows) map.set(`${row.customerId}#${row.articleId}`, { id: row.id });
+        for (const row of rows) {
+          map.set(`${row.customerId}#${row.articleId}`, {
+            id: row.id,
+            setupPrice: row.setupPrice === null ? null : Number(row.setupPrice),
+          });
+        }
+      }
+      return map;
+    },
+
+    // "<customerId>#<articleId>" -> from_quantity -> the article rules above
+    // antal 1 (the staffelsteg the import replaces as a set).
+    async customerArticlePriceBreaks(customerIds: string[]): Promise<Map<string, Map<number, { id: string }>>> {
+      const map = new Map<string, Map<number, { id: string }>>();
+      for (const part of chunk([...new Set(customerIds)])) {
+        if (part.length === 0) continue;
+        const rows = await db
+          .select({
+            id: customerPrices.id,
+            customerId: customerPrices.customerId,
+            articleId: customerPrices.articleId,
+            fromQuantity: customerPrices.fromQuantity,
+          })
+          .from(customerPrices)
+          .where(
+            and(
+              inArray(customerPrices.customerId, part),
+              isNotNull(customerPrices.articleId),
+              sql`${customerPrices.fromQuantity} > 1`
+            )
+          );
+        for (const row of rows) {
+          const key = `${row.customerId}#${row.articleId}`;
+          let steps = map.get(key);
+          if (!steps) map.set(key, (steps = new Map()));
+          steps.set(Number(row.fromQuantity), { id: row.id });
+        }
       }
       return map;
     },
@@ -1259,18 +1303,24 @@ export function createImportRepository(db: Db) {
       return map;
     },
 
-    // Creates + updates in ONE transaction. An update clears discount_percent
-    // so customer_prices_value_check (price XOR discount) holds whatever form
-    // the stored rule had.
+    // Deletes + creates + updates in ONE transaction. Deletes first (steps no
+    // longer in the file, the antal-1 rule a Pris 0 removes) — they never
+    // collide with a create, which only targets a free from_quantity. An
+    // update clears discount_percent so customer_prices_value_check (price
+    // XOR discount) holds whatever form the stored rule had.
     async executeCustomerPricePlan(plan: CustomerPriceImportPlan) {
       return db.transaction(async (tx) => {
+        for (const part of chunk(plan.deletes ?? [])) {
+          if (part.length === 0) continue;
+          await tx.delete(customerPrices).where(inArray(customerPrices.id, part));
+        }
         for (const part of chunk(plan.creates)) {
           if (part.length === 0) continue;
           await tx.insert(customerPrices).values(
             part.map((create) => ({
               customerId: create.customerId,
               articleId: create.articleId,
-              fromQuantity: "1",
+              fromQuantity: String(create.fromQuantity ?? 1),
               unitPrice: String(create.unitPrice),
               discountPercent: null,
               setupPrice: create.setupPrice != null ? String(create.setupPrice) : null,

@@ -239,9 +239,9 @@ För att en order i EUR ska få egna priser i stället för omräknade SEK-prise
 
 ## Importera kundpriser
 
-Fliken **Kundpriser** på **Artiklar → Importera** läser in kundernas artikelpriser (kundkortets flik **Priser**, se [Kundpriser](#kundpriser)) och kundernas egna artikelnummer (flik **Kundens artikelnummer**, se [Kundens artikelnummer](#kundens-artikelnummer)). Två exporter från det tidigare affärssystemet känns igen automatiskt: **Prislista Försäljning** — en rad per kund och artikel med rubrikerna **Kund** (kundnumret), **Pris** och **Rabatt** — och **Artikellista, Kundkopplingar**, som kopplar artiklar till kunder med kundens eget artikelnummer.
+Fliken **Kundpriser** på **Artiklar → Importera** läser in kundernas artikelpriser (kundkortets flik **Priser**, se [Kundpriser](#kundpriser)) och kundernas egna artikelnummer (flik **Kundens artikelnummer**, se [Kundens artikelnummer](#kundens-artikelnummer)). Tre exporter från det tidigare affärssystemet känns igen automatiskt: **Prislista Försäljning** — en rad per kund och artikel med rubrikerna **Kund** (kundnumret), **Pris** och **Rabatt** — den **stafflade** prislistan med samma kolumner plus **Gränsvärde antal** och **Pris (staffling)**, och **Artikellista, Kundkopplingar**, som kopplar artiklar till kunder med kundens eget artikelnummer.
 
-Kolumner: **Artikelnummer** och **Kundnummer** är obligatoriska; **Pris**, **Rabatt (%)**, **Ställpris** och **Kundens artikelnummer** är valfria. Rubrikerna **Kundens art.nr** och **Kundens art.nummer** pekar på **Kundens artikelnummer**. En rad måste ha minst ett pris eller ett kundens artikelnummer — en rad kan alltså bära enbart kundens artikelnummer. **Ställpris** kräver att raden har ett **Pris**, och anges i kundens valuta; **0** betyder inget ställpris och en tom cell lämnar ett befintligt ställpris orört. Ställpriset läggs på ordern som en egen rad om en **Ställkostnadsartikel** är vald, se [Ställpris och ställkostnad](#stallpris-och-stallkostnad).
+Kolumner: **Artikelnummer** och **Kundnummer** är obligatoriska; **Pris**, **Rabatt (%)**, **Ställpris**, **Kundens artikelnummer**, **Staffel: från antal** och **Staffel: pris** är valfria. Rubrikerna **Kundens art.nr** och **Kundens art.nummer** pekar på **Kundens artikelnummer**. En rad måste ha minst ett pris eller ett kundens artikelnummer — en rad kan alltså bära enbart kundens artikelnummer. **Ställpris** kräver att raden har ett **Pris** eller ett staffelsteg, och anges i kundens valuta; **0** betyder inget ställpris och en tom cell lämnar ett befintligt ställpris orört. Ställpriset läggs på ordern som en egen rad om en **Ställkostnadsartikel** är vald, se [Ställpris och ställkostnad](#stallpris-och-stallkostnad).
 
 Från **Artikellista, Kundkopplingar** importeras **Artikelnummer**, **Kundnummer** (från kolumnen Kund), **Pris**, **Rabatt**, **Ställpris** och **Kundens art.nr**. Kundnamn, Valuta, Enh. och Ledtid importeras inte.
 
@@ -249,10 +249,21 @@ Mallen laddas ned med **Ladda ned mall** i fliken; kolumnerna förklaras i [Impo
 
 - Kunden (matchad på **kundnummer**) och artikeln måste redan finnas.
 - Rader utan kund (i exporten står **Kundkoppling saknas**) och rader med varken pris eller kundens artikelnummer hoppas över och listas som överhoppade.
-- Priset sparas som en **artikelregel med Specialpris (kr)** från antal 1 — exportfilen bär ingen staffel. En rad utan **Pris** skapar ingen prisregel, och därmed inget ställpris heller.
+- Priset sparas som en **artikelregel med Specialpris (kr)** från antal 1. En rad utan **Pris** (och utan staffel) skapar ingen prisregel, och därmed inget ställpris heller.
 - **Rabatten räknas in i priset.** En prisregel är antingen ett pris eller en rabatt, så importen sparar nettopriset Pris × (1 − Rabatt/100) och varnar på raden att rabatten bakats in.
 - **Kundens artikelnummer** sparas på kundkortets flik **Kundens artikelnummer**. Läses samma kund och artikel in igen ersätts det befintliga numret med filens.
-- Har kunden redan en regel för artikeln (från antal 1) uppdateras den till det nya priset — även en regel som var en rabatt blir då ett specialpris. Med **Hoppa över rader som redan finns** lämnas ett befintligt pris eller artikelnummer orört. Samma kund och artikel två gånger i filen är ett fel.
+- Har kunden redan en regel för artikeln (från antal 1) uppdateras den till det nya priset — även en regel som var en rabatt blir då ett specialpris. Med **Hoppa över rader som redan finns** lämnas ett befintligt pris eller artikelnummer orört, staffel inräknad. Samma kund och artikel två gånger i filen är ett fel — utom i en stafflad fil, där varje steg är en egen rad.
+
+### Stafflade kundpriser
+
+I den stafflade prislistan har varje staffelsteg en egen rad: kund och artikel upprepas, **Gränsvärde antal** är antalet där steget börjar och **Pris (staffling)** stegets pris. Varje steg blir en egen prisregel på kundkortets flik **Priser** med **Från antal** = gränsvärdet. På offert- och orderraden gäller steget med det högsta **Från antal** som inte överstiger radens antal — se [Kundpriser](#kundpriser).
+
+- **Pris** blir regeln från antal 1. Finns ett steg med gränsvärde **1** gäller dess pris från antal 1 i stället, med en varning om det skiljer sig från **Pris**.
+- **Pris 0** på en artikel med staffel betyder *inget eget pris under första steget*: ingen regel från antal 1 skapas och en befintlig tas bort (varning på raden). Under första steget gäller då kundens prislista eller artikelns försäljningspris. Utan staffel är Pris 0 ett pris på 0 kr, som i den vanliga listan. Ett tomt **Pris** lämnar en befintlig regel från antal 1 orörd.
+- Filens steg **ersätter** kundens tidigare staffel på artikeln: steg som inte finns i filen tas bort, och en rad utan gränsvärde betyder att artikeln inte har någon staffel. Den vanliga prislistan (utan kolumnen **Gränsvärde antal**) rör aldrig staffeln.
+- **Rabatt** räknas in i stegens priser på samma sätt som i **Pris**.
+- **Ställpris** hör till kundens avtal på artikeln och sparas på varje steg, så att det följer med oavsett vilket steg ordern hamnar på. En tom cell ger nya steg samma ställpris som regeln från antal 1.
+- Samma gränsvärde två gånger för samma kund och artikel, eller ett gränsvärde utan staffelpris, är ett fel.
 
 ## Offerter
 

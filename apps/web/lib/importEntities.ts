@@ -135,14 +135,14 @@ export const IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
     entity: "customerPrices",
     label: "Kundpriser",
     title: "Importera kundpriser",
-    meta: "CSV eller Excel (.xlsx) — en rad per kund och artikel",
+    meta: "CSV eller Excel (.xlsx) — vanlig prislista eller stafflad",
     chapter: "forsaljning",
     anchor: "importera-kundpriser",
     fields: CUSTOMER_PRICE_IMPORT_FIELDS,
     notice:
-      "Priset sparas som kundens artikelpris (från antal 1). Rabatt räknas in i priset. Kundens artikelnummer sparas på kundkortet. Rader utan kund (Kundkoppling saknas) och rader med varken pris eller kundens artikelnummer hoppas över. Ställpris sparas på kundpriset (kräver pris på raden). Prisdatum importeras inte.",
+      "Priset sparas som kundens artikelpris (från antal 1). Den stafflade listan (Gränsvärde antal + Pris (staffling)) ger ett kundpris per steg och ersätter kundens tidigare staffel på artikeln; Pris 0 med staffel betyder inget eget pris under första steget. Rabatt räknas in i priset. Kundens artikelnummer sparas på kundkortet. Rader utan kund (Kundkoppling saknas) och rader med varken pris eller kundens artikelnummer hoppas över. Ställpris sparas på kundpriset och varje steg (kräver pris eller staffel på raden). Prisdatum importeras inte.",
     skipExistingHint:
-      "Kunder som redan har ett pris eller ett artikelnummer på artikeln behåller det. Utan kryss uppdateras de med filens värden.",
+      "Kunder som redan har ett pris (staffel inräknad) eller ett artikelnummer på artikeln behåller det. Utan kryss uppdateras de med filens värden.",
   },
   stockBalances: {
     entity: "stockBalances",
