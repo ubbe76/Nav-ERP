@@ -597,15 +597,24 @@ function CompleteOrderRow({
           </Cell>
         )}
         <div className={styles.rowAction}>
-          <Button type="submit" variant="primary" size="small" disabled={pending}>
+          <Button
+            type="submit"
+            variant="primary"
+            size="small"
+            disabled={pending}
+            title="Stänger ordern. Antal är det som läggs i lager nu."
+          >
             {pending ? "Slutför…" : "Slutför order"}
           </Button>
         </div>
       </div>
-      <span className={styles.hint}>
-        Stänger ordern. Antal är det som läggs i lager nu.
-        {received > 0 ? ` ${received} st är redan inlevererade från sista operationen — 0 stänger ordern utan mer inleverans.` : ""}
-      </span>
+      {/* The general explanation is the button's tooltip; this one stays
+          visible because it tells the user to enter 0. */}
+      {received > 0 && (
+        <span className={styles.hint}>
+          {received} st är redan inlevererade från sista operationen — 0 stänger ordern utan mer inleverans.
+        </span>
+      )}
       <FormError>{error}</FormError>
     </form>
   );
