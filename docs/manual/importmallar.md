@@ -152,6 +152,7 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | **Kundnummer** | Ja | Kundens unika nummer, max 50 tecken. Finns numret redan uppdateras kunden, annars skapas en ny. Nummerserien för kunder flyttas fram förbi filens högsta rent numeriska nummer. | 1001 |
 | **Namn** | Nej | Kundens namn, max 255 tecken. Krävs för nya kunder. Tom cell lämnar fältet orört på en befintlig post. | Restaurang Exempelkrogen AB |
 | **Organisationsnummer** | Nej | Max 20 tecken. Tom cell lämnar fältet orört på en befintlig post. | 556123-4567 |
+| **Personnummer** | Nej | För en privatperson, max 20 tecken. Sparas i fältet Organisationsnummer, som kundkortet visar som Personnummer när Privatperson är ikryssat — men bara när raden saknar organisationsnummer; har raden båda behålls organisationsnumret med en varning. Tom cell lämnar fältet orört på en befintlig post. | 121212-1212 |
 | **VAT-nummer** | Nej | Momsregistreringsnummer, max 30 tecken. Tom cell lämnar fältet orört på en befintlig post. | SE556123456701 |
 | **Kontaktperson** | Nej | Kontaktpersonens namn på kundkortets Allmänt-flik, max 255 tecken — kontaktregistret importeras separat som kundkontakter. | Anna Andersson |
 | **E-post** | Nej | Kundens e-postadress, max 255 tecken. En ogiltig adress stoppar inte raden — fältet lämnas tomt på en ny post och orört på en befintlig, med en varning. | info@example.com |

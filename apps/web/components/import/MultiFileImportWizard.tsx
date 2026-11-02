@@ -1,12 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Field";
 import { FormActions, FormError, FormHint, FormNotice } from "../ui/Form";
 import { API_URL, ApiError, apiFetch } from "../../lib/api";
-import { IMPORT_ENTITIES, IMPORT_ENTITY_ORDER, type ImportEntityConfig } from "../../lib/importEntities";
+import { type ImportEntityConfig } from "../../lib/importEntities";
 import buttonStyles from "../ui/Button.module.css";
 import wizardStyles from "./ImportWizard.module.css";
 import styles from "./MultiFileImportWizard.module.css";
@@ -37,22 +37,28 @@ interface FileState {
   file: File;
   // null = unrecognised (or deselected) — the file is left out entirely.
   entity: string | null;
+  // Commit order within the entity (from /imports/detect, or /parse after a
+  // manual entity change — both answer the server's importFileRank).
+  orderRank: number;
   parsed: ParseResponse;
   mapping: Record<string, string | null>;
   options: ImportOptionsState;
   preview: PreviewResponse | null;
   result: CommitResponse | null;
   error: string | null;
+  // The batch preview did not reach this file: an earlier file has errors.
+  previewBlocked: boolean;
   status: FileStatus;
 }
 
 interface MultiFileImportWizardProps {
   title: string;
   backHref: string;
-}
-
-function configFor(entity: string | null): ImportEntityConfig | null {
-  return entity ? (IMPORT_ENTITIES[entity] ?? null) : null;
+  // The entities this page accepts, and the order they commit in.
+  entities: Record<string, ImportEntityConfig>;
+  order: string[];
+  // The Filer step's explanatory paragraph.
+  intro: ReactNode;
 }
 
 function freshOptions(config: ImportEntityConfig | null): ImportOptionsState {
@@ -63,13 +69,16 @@ function freshOptions(config: ImportEntityConfig | null): ImportOptionsState {
   };
 }
 
-// Dependency order (IMPORT_ENTITY_ORDER), unknown files last, ties by name.
-function sortFiles(files: FileState[]): FileState[] {
+// Dependency order (the page's entity order), then the server's orderRank
+// within an entity, unknown files last, ties by name.
+function sortFiles(files: FileState[], order: string[]): FileState[] {
   const rank = (entity: string | null) => {
-    const index = entity ? IMPORT_ENTITY_ORDER.indexOf(entity) : -1;
-    return index === -1 ? IMPORT_ENTITY_ORDER.length : index;
+    const index = entity ? order.indexOf(entity) : -1;
+    return index === -1 ? order.length : index;
   };
-  return [...files].sort((a, b) => rank(a.entity) - rank(b.entity) || a.name.localeCompare(b.name, "sv"));
+  return [...files].sort(
+    (a, b) => rank(a.entity) - rank(b.entity) || a.orderRank - b.orderRank || a.name.localeCompare(b.name, "sv")
+  );
 }
 
 async function uploadFile(url: string, file: File): Promise<Response> {
@@ -80,13 +89,22 @@ async function uploadFile(url: string, file: File): Promise<Response> {
   return fetch(url, { method: "POST", credentials: "include", body });
 }
 
-// Every Monitor article export at once: drop the files, the server
-// recognises each one from its header row (POST /imports/detect), the user
-// checks the mappings per file, previews everything and imports in
-// dependency order — each file through the same /preview and /commit
-// endpoints the single-file wizard uses, one transaction per file. A failing
-// file stops the run; the files after it are reported as not imported.
-export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizardProps) {
+// Every Monitor export of one page (articles, customers) at once: drop the
+// files, the server recognises each one from its header row (POST
+// /imports/detect), the user checks the mappings per file, previews
+// everything in ONE call (POST /imports/batch-preview — each file is
+// previewed against the state the earlier files leave behind, and a file with
+// errors blocks the ones after it) and imports in dependency order — each file
+// through the same /commit endpoint the single-file wizard uses, one
+// transaction per file. A failing file stops the run; the files after it are
+// reported as not imported. The page decides which entities it accepts
+// (`entities`) and their commit order (`order`); a file detected as anything
+// else counts as unknown.
+export function MultiFileImportWizard({ title, backHref, entities, order, intro }: MultiFileImportWizardProps) {
+  function configFor(entity: string | null): ImportEntityConfig | null {
+    return entity ? (entities[entity] ?? null) : null;
+  }
+
   const [step, setStep] = useState<Step>("Filer");
   const [files, setFiles] = useState<FileState[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -119,16 +137,18 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
           name: file.name,
           file,
           entity: config ? data.detectedEntity : null,
+          orderRank: config ? (data.orderRank ?? 0) : 0,
           parsed: data,
           mapping: buildInitialMapping(data.headers, data.suggestedMapping),
           options: freshOptions(config),
           preview: null,
           result: null,
           error: null,
+          previewBlocked: false,
           status: "pending",
         });
       }
-      setFiles((current) => sortFiles([...current, ...added]));
+      setFiles((current) => sortFiles([...current, ...added], order));
       if (problems.length > 0) setError(problems.join(" · "));
     } finally {
       setPending(null);
@@ -140,8 +160,8 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
   // is that entity's suggestion (rows and headers are the same file).
   async function changeEntity(fileState: FileState, entity: string) {
     if (entity === "") {
-      patchFile(fileState.id, { entity: null, mapping: {}, options: freshOptions(null), preview: null, error: null });
-      setFiles((current) => sortFiles(current));
+      patchFile(fileState.id, { entity: null, orderRank: 0, mapping: {}, options: freshOptions(null), preview: null, error: null });
+      setFiles((current) => sortFiles(current, order));
       return;
     }
     setError(null);
@@ -156,13 +176,14 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
       const config = configFor(entity);
       patchFile(fileState.id, {
         entity,
+        orderRank: data.orderRank ?? 0,
         parsed: data,
         mapping: buildInitialMapping(data.headers, data.suggestedMapping),
         options: freshOptions(config),
         preview: null,
         error: null,
       });
-      setFiles((current) => sortFiles(current));
+      setFiles((current) => sortFiles(current, order));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Filen kunde inte läsas");
     } finally {
@@ -180,6 +201,14 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
 
   const activeFiles = files.filter((file) => file.entity !== null);
 
+  interface BatchPreviewResult {
+    status: "previewed" | "failed" | "blocked";
+    error?: string;
+    rows?: PreviewResponse["rows"];
+    summary?: PreviewResponse["summary"];
+    willCreate?: PreviewResponse["willCreate"];
+  }
+
   async function runPreviews() {
     setError(null);
     // Mapping problems are reported per file, before anything is sent.
@@ -187,28 +216,55 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
     for (const fileState of activeFiles) {
       const config = configFor(fileState.entity)!;
       const mappingError = validateMapping(fileState.mapping, config.fields);
-      patchFile(fileState.id, { error: mappingError, preview: null });
+      patchFile(fileState.id, { error: mappingError, preview: null, previewBlocked: false });
       if (mappingError) blocked = true;
     }
     if (blocked) {
       setError("Mappningen är inte komplett för alla filer — se felen per fil nedan.");
       return;
     }
-    for (const fileState of activeFiles) {
-      const config = configFor(fileState.entity)!;
-      setPending(`Granskar ${fileState.name}…`);
-      try {
-        const preview = await apiFetch<PreviewResponse>(`/api/v1/imports/${fileState.entity}/preview`, {
-          method: "POST",
-          body: requestBody(fileState, config),
-        });
-        patchFile(fileState.id, { preview, error: null });
-      } catch (err) {
-        patchFile(fileState.id, { preview: null, error: err instanceof Error ? err.message : "Förhandsgranskningen misslyckades" });
-      }
+    setPending("Förhandsgranskar alla filer…");
+    try {
+      // One call: the server previews each file against the state the
+      // earlier ones leave behind, in this (commit) order.
+      const body = JSON.stringify({
+        files: activeFiles.map((fileState) => ({
+          entity: fileState.entity,
+          mapping: fileState.mapping,
+          rows: fileState.parsed.rows,
+          ...optionsRequestFields(fileState.options, configFor(fileState.entity)!.extraOptions),
+        })),
+      });
+      const res = await apiFetch<{ files: BatchPreviewResult[] }>("/api/v1/imports/batch-preview", {
+        method: "POST",
+        body,
+      });
+      activeFiles.forEach((fileState, index) => {
+        const result = res.files[index];
+        if (!result || result.status === "blocked") {
+          patchFile(fileState.id, { preview: null, error: null, previewBlocked: true });
+          return;
+        }
+        const preview =
+          result.rows && result.summary
+            ? { rows: result.rows, summary: result.summary, willCreate: result.willCreate ?? {} }
+            : null;
+        if (result.status === "failed") {
+          patchFile(fileState.id, {
+            preview,
+            error: result.error ?? "Förhandsgranskningen misslyckades",
+            previewBlocked: false,
+          });
+        } else {
+          patchFile(fileState.id, { preview, error: null, previewBlocked: false });
+        }
+      });
+      setStep("Förhandsgranska");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Förhandsgranskningen misslyckades");
+    } finally {
+      setPending(null);
     }
-    setPending(null);
-    setStep("Förhandsgranska");
   }
 
   async function runCommits() {
@@ -245,7 +301,9 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
 
   const previewsBlocked =
     activeFiles.length === 0 ||
-    activeFiles.some((file) => file.error !== null || file.preview === null || file.preview.summary.error > 0);
+    activeFiles.some(
+      (file) => file.error !== null || file.previewBlocked || file.preview === null || file.preview.summary.error > 0
+    );
 
   function entityLabel(entity: string | null): string {
     return configFor(entity)?.label ?? "Okänd fil";
@@ -265,13 +323,7 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
 
       {step === "Filer" && (
         <div className={wizardStyles.stepBody}>
-          <p>
-            Välj alla exportfiler på en gång — artikellistan och dess delexporter (planering, extra
-            benämning, enheter), operationslistan, materiallistan och prislistorna. Varje fil känns igen
-            på sina kolumnrubriker; en fil som inte känns igen hoppas över (eller ges en typ för hand i
-            nästa steg). Filerna importeras i beroendeordning: artiklar → enheter → operationer →
-            struktur → inköpspriser → kundpriser.
-          </p>
+          {intro}
           <input
             ref={inputRef}
             type="file"
@@ -344,9 +396,9 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
                     onChange={(e) => void changeEntity(file, e.target.value)}
                   >
                     <option value="">Hoppa över filen</option>
-                    {IMPORT_ENTITY_ORDER.map((entity) => (
+                    {order.map((entity) => (
                       <option key={entity} value={entity}>
-                        {IMPORT_ENTITIES[entity]!.label}
+                        {entities[entity]?.label ?? entity}
                       </option>
                     ))}
                   </Select>
@@ -415,6 +467,7 @@ export function MultiFileImportWizard({ title, backHref }: MultiFileImportWizard
                   <span className={styles.fileMeta}>{config.label}</span>
                 </div>
                 {file.error && <FormError margin="below">{file.error}</FormError>}
+                {file.previewBlocked && <FormHint>Förhandsgranskas när felen i filen ovan är rättade.</FormHint>}
                 {file.preview && (
                   <details className={styles.previewDetails} open={hasErrors}>
                     <summary>

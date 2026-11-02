@@ -1,4 +1,4 @@
-// Recognises WHICH Monitor G5 article export a file is from its header row,
+// Recognises WHICH Monitor G5 article or customer export a file is from its header row,
 // for the multi-file import ("Alla filer"): the user drops every export at
 // once and the wizard sorts them into entities and dependency order. Pure —
 // headers in, entity out — so the whole signature table is unit-tested
@@ -10,6 +10,8 @@
 // specific signatures must be tried before the plain article list.
 import type { ImportEntity } from "@navet/shared";
 import { normalizeHeader } from "./import.service.js";
+import { isCustomerListaFile, suggestCustomerMapping } from "./customers.js";
+import { suggestArticleMapping } from "./articles.js";
 
 interface Signature {
   entity: ImportEntity;
@@ -85,10 +87,44 @@ export const IMPORT_ENTITY_SIGNATURES: Signature[] = [
 const ROUTING_TIME_HEADINGS = ["stalltid", "stycktid", "tidenhet"];
 const STOCK_QUANTITY_HEADINGS = ["antal", "saldo", "lagersaldo"];
 
-export function detectImportEntity(headers: string[]): ImportEntity | null {
+// Monitor G5's customer exports (Kundlista: Lista, Övrigt, Postadress,
+// Fakturaadress, Besöksadress, Leveransadress, Alternativa leveransadresser,
+// Referenser) and the three customer templates. They all key on the customer
+// number and never carry an article number — the price lists, which have
+// both, are matched by the article signatures above.
+const CUSTOMER_KEY_HEADINGS = ["kund", "kundnummer", "kundnr"];
+// Referenser ("Referens – Namn") and the contact template (Mobiltelefon,
+// Faxnummer — the customer template has neither).
+const CUSTOMER_CONTACT_HEADINGS = ["referensnamn", "mobiltelefon", "faxnummer"];
+// Leveransadress ("Leveransadress – Namn") and the template (Adressnamn).
+// Alternativa leveransadresser has neither; it is the only customer file
+// with both Förvald and a bare Adressrad 1.
+const CUSTOMER_DELIVERY_ADDRESS_HEADINGS = ["leveransadressnamn", "adressnamn"];
+
+function detectCustomerFile(present: Set<string>, headers: string[]): ImportEntity | null {
+  if (!CUSTOMER_KEY_HEADINGS.some((heading) => present.has(heading)) || present.has("artikelnummer")) return null;
+  if (CUSTOMER_CONTACT_HEADINGS.some((heading) => present.has(heading))) return "customerContacts";
+  if (
+    CUSTOMER_DELIVERY_ADDRESS_HEADINGS.some((heading) => present.has(heading)) ||
+    (present.has("forvald") && present.has("adressrad1"))
+  ) {
+    return "customerDeliveryAddresses";
+  }
+  // A customer file is only worth importing when something besides the
+  // number maps — Besöksadress (Nav has no visiting address) maps nothing
+  // and stays unrecognised instead of updating every customer with nothing.
+  const mapped = Object.values(suggestCustomerMapping(headers));
+  return mapped.some((field) => field !== null && field !== "customerNumber") ? "customers" : null;
+}
+
+function presentHeadings(headers: string[]): Set<string> {
   // parse() suffixes repeated headings ("Pris (2)") — strip that before
   // normalizing, as suggestMapping does.
-  const present = new Set(headers.map((header) => normalizeHeader(header.replace(/ \(\d+\)$/, ""))));
+  return new Set(headers.map((header) => normalizeHeader(header.replace(/ \(\d+\)$/, ""))));
+}
+
+export function detectImportEntity(headers: string[]): ImportEntity | null {
+  const present = presentHeadings(headers);
   for (const signature of IMPORT_ENTITY_SIGNATURES) {
     if (!signature.all.every((heading) => present.has(heading))) continue;
     if (signature.any && !signature.any.some((heading) => present.has(heading))) continue;
@@ -96,5 +132,20 @@ export function detectImportEntity(headers: string[]): ImportEntity | null {
     if (signature.needsQuantity && !STOCK_QUANTITY_HEADINGS.some((heading) => present.has(heading))) continue;
     return signature.entity;
   }
-  return null;
+  return detectCustomerFile(present, headers);
+}
+
+// Order WITHIN one entity in the multi-file import (lower first; the wizard
+// sorts by entity order, then rank, then file name).
+// - customers: the Lista-like files (Lista, Övrigt) map their short "Namn" to
+//   the name and must run before Postadress, whose legal name is the one to
+//   keep.
+// - articles: only a file with a Benämning column can create articles (a new
+//   article needs a name), so it runs before the sub-exports that only add
+//   fields (Extra-fält …) — otherwise those preview every new article as
+//   "Benämning saknas".
+export function importFileRank(entity: ImportEntity, headers: string[]): number {
+  if (entity === "customers") return isCustomerListaFile(headers) ? 0 : 1;
+  if (entity === "articles") return Object.values(suggestArticleMapping(headers)).includes("name") ? 0 : 1;
+  return 0;
 }

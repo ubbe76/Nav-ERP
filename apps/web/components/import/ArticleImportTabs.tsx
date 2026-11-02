@@ -22,6 +22,15 @@ const ALL_FILES_TAB = {
 
 const ENTITY_TABS: ImportEntityConfig[] = IMPORT_ENTITY_ORDER.map((entity) => IMPORT_ENTITIES[entity]!);
 
+const ALL_FILES_INTRO = (
+  <p>
+    Välj alla exportfiler på en gång — artikellistan och dess delexporter (planering, extra benämning,
+    enheter), operationslistan, materiallistan och prislistorna. Varje fil känns igen på sina kolumnrubriker;
+    en fil som inte känns igen hoppas över (eller ges en typ för hand i nästa steg). Filerna importeras i
+    beroendeordning: artiklar → enheter → operationer → struktur → inköpspriser → kundpriser.
+  </p>
+);
+
 export function ArticleImportTabs() {
   const [activeTab, setActiveTab] = useState(ALL_FILES_TAB.tab);
   const activeEntity = ENTITY_TABS.find((t) => t.label === activeTab) ?? null;
@@ -69,7 +78,14 @@ export function ArticleImportTabs() {
           extraOptions={activeEntity.extraOptions}
         />
       ) : (
-        <MultiFileImportWizard key="all" title={ALL_FILES_TAB.title} backHref="/artiklar/register" />
+        <MultiFileImportWizard
+          key="all"
+          title={ALL_FILES_TAB.title}
+          backHref="/artiklar/register"
+          entities={IMPORT_ENTITIES}
+          order={IMPORT_ENTITY_ORDER}
+          intro={ALL_FILES_INTRO}
+        />
       )}
     </>
   );

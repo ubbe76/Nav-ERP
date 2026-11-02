@@ -41,7 +41,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Hög
 
 - [ ] **Förbättrad artikel- och strukturimport** — omfattning ej specad än (bygger vidare på import-export.md-paketen). Viktigt när ett nytt företag flyttar in sina data.
-- [ ] **Förbättrad kundimport** — omfattning ej specad än. Känt: Personnummer importeras inte.
 - [ ] **Förbättrad leverantörsimport** — omfattning ej specad än.
 - [ ] **Förbättrad lagerplatshantering** — omfattning ej specad än.
 
@@ -119,6 +118,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 - [ ] **Aviseringar:** Leverantörsfakturor att betala härleder saknat förfallodatum ur leverantörens nuvarande villkor (reskontrans Förfallna-filter använder bara lagrat datum); alla typer avbockade ger tomma rader utan mejl.
 - [ ] **Leveransdagar:** en leverantör som tar emot lördagar får inte leverera lördagen före ett måndagsbehov (specen säger arbetsdagen före behovet); ett handskrivet datum på en ny IO-rad nollställs vid artikelbyte, som priset.
 - [ ] **Behörighet:** behovsberäkningens **Skapa ordrar** (Tillverkning) skapar IO-utkast även utan behörigheten Inköp; `/price-quote` visar priskedjan för godtycklig kund för en klienttoken (tokenet kan redan skapa ordrar för godtycklig kund).
+- [ ] **Kundimporten:** Kreditlimit och Giltighetstid per kund importeras inte — Nav har inga sådana fält (tre kunder vardera i exporten 2026-10); Distributionsmetod (Brev/E-post), Faktura/Order som XML, Kundgrupp, Besöksadress och leveransvillkor/leveranssätt per alternativ adress saknar motsvarighet.
 - [ ] **Samma artikel på flera rader:** staffelpriset räknas på radens eget antal, inte på summan av artikelns rader på ordern (en delad leverans 60 + 40 får staffeln för 60 och 40); plocklistan visar artikelns hela platssaldo på varje rad; fraktraden är den enda "en rad per artikel" — **Lägg till frakt** prissätter om artikelns äldsta vanliga rad.
 - [ ] **Övrigt:** inventeringens guard-TOCTOU under READ COMMITTED (accepterad husrisk); avbrutna inventeringar samlar störningsflaggor för evigt (bara visning); personalkortet släpper dolda inaktiva stationsförval vid sparning; varianter skapade före en offert som sedan faller ligger kvar; en egen CSV med Kund + Namn + Betalningsvillkor räknas som Lista-fil i kundimporten. Kontrollen att kontot är aktivt i bokföringstransaktionen tar inget radlås på `accounts` (`updateAccount` har ingen invariant att skydda; sluttillståndet är lagligt); betalreferensens händelselogg skrivs efter commit som all annan händelselogg.
 

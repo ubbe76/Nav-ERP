@@ -383,7 +383,34 @@ function buildLegoWorkCenterPatchValues(
   return set;
 }
 
-export function createImportRepository(db: Db) {
+// Thrown at the end of the batch preview's dry run so the transaction rolls
+// back — never leaves runImportDryRun.
+class ImportDryRunRollback extends Error {
+  constructor() {
+    super("import dry run");
+    this.name = "ImportDryRunRollback";
+  }
+}
+
+// The multi-file preview (ImportService.previewBatch): fn gets a repository
+// bound to a transaction that is ALWAYS rolled back. The repository's own
+// execute* transactions become savepoints inside it, so the files really run
+// one after the other and nothing is kept.
+export async function runImportDryRun<T>(db: Db, fn: (repo: ImportRepository) => Promise<T>): Promise<T> {
+  let result: { value: T } | null = null;
+  try {
+    await db.transaction(async (tx) => {
+      result = { value: await fn(createImportRepository(tx)) };
+      throw new ImportDryRunRollback();
+    });
+  } catch (err) {
+    if (!(err instanceof ImportDryRunRollback)) throw err;
+  }
+  if (result === null) throw new Error("import dry run produced no result");
+  return (result as { value: T }).value;
+}
+
+export function createImportRepository(db: Db | Tx) {
   return {
     // Lagersaldon (#3): the planner's lookups and executeStockBalancePlan.
     ...createStockBalanceImportRepository(db),

@@ -30,7 +30,7 @@ import {
 import { createCostingRepository } from "./modules/costing/repository/costing.repository.js";
 import { createCostingService } from "./modules/costing/service/costing.service.js";
 import { costingRoutes } from "./modules/costing/routes/costing.routes.js";
-import { createImportRepository } from "./modules/import/repository/import.repository.js";
+import { createImportRepository, runImportDryRun } from "./modules/import/repository/import.repository.js";
 import { createImportService } from "./modules/import/service/import.service.js";
 import { importRoutes } from "./modules/import/routes/import.routes.js";
 import { createEconomyRepository } from "./modules/economy/repository/economy.repository.js";
@@ -299,7 +299,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   const articleService = createArticleService(createArticleRepository(database));
   // CSV import (Monitor G5): articles now; customers/suppliers reuse the
   // same module later. Admin-only routes.
-  const importService = createImportService(createImportRepository(database));
+  const importService = createImportService(createImportRepository(database), {
+    dryRun: (fn) => runImportDryRun(database, fn),
+  });
   const stockService = createStockService(createStockRepository(database));
   // Shared base data (leveransvillkor/betalningsvillkor/speditörer) —
   // referenced from both customers and suppliers.

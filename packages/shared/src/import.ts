@@ -56,6 +56,12 @@ export const IMPORT_ENTITY_ORDER: ImportEntity[] = [
   "stockBalances",
 ];
 
+// The customer page's multi-file import ("Alla filer"): the customers first
+// (Lista before the address files — see importFileRank in detect.ts), then
+// the contacts and delivery addresses, which need the customers to exist.
+// Mirrored in apps/web/lib/importEntities.ts.
+export const CUSTOMER_IMPORT_ENTITY_ORDER: ImportEntity[] = ["customers", "customerContacts", "customerDeliveryAddresses"];
+
 // CSV-header -> target-field name, or null = "importera inte". The KEY ORDER
 // is the column order: key i of the mapping addresses column i of every row
 // array (JSON objects preserve key order; the wizard builds the mapping from
@@ -110,6 +116,21 @@ export const importCommitSchema = z.object({
   setAsDefault: z.boolean().optional(),
 });
 export type ImportCommitInput = z.infer<typeof importCommitSchema>;
+
+// POST /imports/batch-preview — the multi-file wizard's preview: every file
+// with its entity, in the order the wizard will commit them. The server
+// plans and executes the files one after the other inside ONE transaction
+// that is always rolled back, so each file is previewed against the state
+// the earlier files leave behind (the contacts see the customers the Lista
+// file creates) — and nothing is written.
+export const MAX_IMPORT_BATCH_FILES = 30;
+export const importBatchPreviewSchema = z.object({
+  files: z
+    .array(importCommitSchema.extend({ entity: importEntitySchema }))
+    .min(1)
+    .max(MAX_IMPORT_BATCH_FILES),
+});
+export type ImportBatchPreviewInput = z.infer<typeof importBatchPreviewSchema>;
 
 // GET /imports/:entity/fields — one entry per mappable field, in the
 // wizard's field order. `header` is the column heading the Excel template

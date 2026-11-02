@@ -223,11 +223,10 @@ describe("suggestCustomerMapping", () => {
 
   // The exact 34 headings of Kundlista-Lista-2026-09-03.xlsx. Only Kund,
   // Namn, Momsreg.nr, Organisationsnr, Vårt leverantörsnummer,
-  // Samlingsfaktura, Privatperson and Webbsida have a counterpart in
-  // `customers`; everything else stays unmapped — Personnummer deliberately
-  // (org_number is the only column, and merging is a v2 question), Kundgrupp
-  // deliberately (Sverige/EU/Export is not a country code — Postadress –
-  // Land is).
+  // Samlingsfaktura, Privatperson, Webbsida and Personnummer (stored as the
+  // organisation number when that is empty) have a counterpart in
+  // `customers`; everything else stays unmapped — Kundgrupp deliberately
+  // (Sverige/EU/Export is not a country code — Postadress – Land is).
   it("guesses the exact headings of Monitor's Lista export (2026-09-03)", () => {
     const headers = [
       "Kund", "Namn", "Prioritet", "Kundgrupp", "Momsreg.nr", "Moderbolag (kund)",
@@ -245,6 +244,7 @@ describe("suggestCustomerMapping", () => {
     expected["Namn"] = "name";
     expected["Momsreg.nr"] = "vatNumber";
     expected["Organisationsnr"] = "orgNumber";
+    expected["Personnummer"] = "personalNumber";
     expected["Vårt leverantörsnummer"] = "ourSupplierNumber";
     expected["Samlingsfaktura"] = "collectiveInvoicing";
     expected["Faktura i vänteläge"] = "invoiceOnHold";
@@ -377,6 +377,63 @@ describe("suggestCustomerMapping", () => {
       Prislista: "priceList",
       Rabatt: "discountPercent",
     });
+  });
+});
+
+describe("planCustomerImport — Personnummer", () => {
+  const MAPPING = { Kund: "customerNumber", Namn: "name", Organisationsnr: "orgNumber", Personnummer: "personalNumber" };
+
+  it("stores the personnummer as the organisation number when the row has none", async () => {
+    const plan = await planCustomerImport(
+      { mapping: MAPPING, rows: [["300", "Privat Person", "", "121212-1212"]] },
+      fakeDeps()
+    );
+    expect(plan.hasErrors).toBe(false);
+    expect(plan.rows[0]!.warnings).toEqual([]);
+    expect(plan.creates).toEqual([{ customerNumber: "300", name: "Privat Person", orgNumber: "121212-1212" }]);
+  });
+
+  it("keeps the organisation number with a warning when the row has both", async () => {
+    const plan = await planCustomerImport(
+      { mapping: MAPPING, rows: [["301", "Bolaget AB", "556123-4567", "121212-1212"]] },
+      fakeDeps()
+    );
+    expect(plan.hasErrors).toBe(false);
+    expect(plan.rows[0]!.warnings).toEqual([
+      "Personnumret importerades inte — raden har redan organisationsnummer 556123-4567",
+    ]);
+    expect(plan.creates[0]!.orgNumber).toBe("556123-4567");
+  });
+
+  it("does not warn when both cells hold the same number", async () => {
+    const plan = await planCustomerImport(
+      { mapping: MAPPING, rows: [["302", "Privat Person", "121212-1212", "121212-1212"]] },
+      fakeDeps()
+    );
+    expect(plan.rows[0]!.warnings).toEqual([]);
+    expect(plan.creates[0]!.orgNumber).toBe("121212-1212");
+  });
+
+  it("updates an existing customer's organisation number from a personnummer-only file, and an empty cell leaves it alone", async () => {
+    const plan = await planCustomerImport(
+      {
+        mapping: { Kund: "customerNumber", Personnummer: "personalNumber" },
+        rows: [["100", "121212-1212"], ["200", ""]],
+      },
+      fakeDeps({ "100": "11111111-1111-1111-1111-111111111111", "200": "22222222-2222-2222-2222-222222222222" })
+    );
+    expect(plan.updates).toEqual([
+      { id: "11111111-1111-1111-1111-111111111111", patch: { orgNumber: "121212-1212" } },
+      { id: "22222222-2222-2222-2222-222222222222", patch: {} },
+    ]);
+  });
+
+  it("errors on a personnummer longer than the column", async () => {
+    const plan = await planCustomerImport(
+      { mapping: MAPPING, rows: [["303", "Privat Person", "", "1".repeat(21)]] },
+      fakeDeps()
+    );
+    expect(plan.rows[0]!.errors).toEqual(["Fältet 'Personnummer' är för långt (max 20 tecken)"]);
   });
 });
 
@@ -1232,7 +1289,10 @@ describe("import service — customers entity", () => {
     expect(parsedLista.suggestedMapping["Namn"]).toBe("name");
     expect(parsedLista.suggestedMapping["Organisationsnr"]).toBe("orgNumber");
     expect(parsedLista.suggestedMapping["Momsreg.nr"]).toBe("vatNumber");
-    expect(parsedLista.suggestedMapping["Personnummer"]).toBeNull();
+    expect(parsedLista.suggestedMapping["Personnummer"]).toBe("personalNumber");
+    // The multi-file wizard re-parses on a manual type change and must keep
+    // the address files after Lista/Övrigt.
+    expect(parsedLista.orderRank).toBe(0);
     const listaResult = await importService.commit("customers", {
       mapping: parsedLista.suggestedMapping,
       rows: parsedLista.rows,
@@ -1254,6 +1314,7 @@ describe("import service — customers entity", () => {
     const parsedPost = await importService.parse("customers", postadress);
     expect(parsedPost.suggestedMapping["Namn"]).toBeNull();
     expect(parsedPost.suggestedMapping["Postadress – Namn"]).toBe("name");
+    expect(parsedPost.orderRank).toBe(1);
     const postResult = await importService.commit("customers", {
       mapping: parsedPost.suggestedMapping,
       rows: parsedPost.rows,
@@ -1286,7 +1347,7 @@ describe("import service — customers entity", () => {
 
     const [privat] = await db.select().from(customers).where(eq(customers.customerNumber, "1002"));
     expect(privat!.name).toBe("Anna Andersson");
-    expect(privat!.orgNumber).toBeNull(); // Personnummer is not mapped in v1
+    expect(privat!.orgNumber).toBe("121212-1212"); // Personnummer fills the empty organisation number
     expect(privat!.invoiceName).toBeNull(); // "Avviker från postadress" = false drops the invoice block
   });
 });

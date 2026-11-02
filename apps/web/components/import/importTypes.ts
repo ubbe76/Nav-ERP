@@ -7,6 +7,9 @@ export interface ParseResponse {
   headers: string[];
   rows: string[][];
   suggestedMapping: Record<string, string | null>;
+  // Commit order within the entity in the multi-file wizard (0 default;
+  // customers: the address files 1, after Lista/Övrigt).
+  orderRank: number;
   meta: {
     format: "csv" | "xlsx";
     // Both null for xlsx — a workbook has neither.
