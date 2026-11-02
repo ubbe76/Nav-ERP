@@ -620,7 +620,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "Kundnummer",
       text: true,
       description:
-        "Numret på en kund som redan finns i kundregistret. Samma kund och artikel får bara förekomma en gång i filen.",
+        "Numret på en kund som redan finns i kundregistret. Samma kund och artikel får bara förekomma en gång i filen — utom med staffel, där varje steg är en egen rad.",
       example: "1001",
     },
     {
@@ -628,7 +628,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       label: "Pris",
       required: false,
       header: "Pris",
-      description: `Kundens pris per grundenhet i SEK, ${DECIMAL}, aldrig negativt. Sparas med fyra decimaler som kundens artikelpris från antal 1 och ersätter ett tidigare pris på samma artikel. Tom cell lämnar priset orört — en rad med varken pris eller kundens artikelnummer hoppas över.`,
+      description: `Kundens pris per grundenhet i SEK, ${DECIMAL}, aldrig negativt. Sparas med fyra decimaler som kundens artikelpris från antal 1 och ersätter ett tidigare pris på samma artikel. Tom cell lämnar priset orört — en rad med varken pris, staffel eller kundens artikelnummer hoppas över. Med staffel betyder 0 inget eget pris under första steget (ett pris från antal 1 tas bort), och ett steg med gränsvärde 1 gäller före Pris.`,
       example: "1890,00",
     },
     {
@@ -656,8 +656,25 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       label: "Ställpris",
       required: false,
       header: "Ställpris",
-      description: `Engångskostnad per orderrad i SEK, ${DECIMAL}, aldrig negativ — sparas på kundpriset och läggs som en egen Ställkostnad-rad på nya offert- och orderrader när en ställkostnadsartikel är vald under System → Inställningar. Kräver Pris på raden. 0 betyder inget ställpris; tom cell lämnar det orört.`,
+      description: `Engångskostnad per orderrad i SEK, ${DECIMAL}, aldrig negativ — sparas på kundpriset och läggs som en egen Ställkostnad-rad på nya offert- och orderrader när en ställkostnadsartikel är vald under System → Inställningar. Kräver Pris eller staffel på raden och gäller även varje staffelsteg. 0 betyder inget ställpris; tom cell lämnar det orört.`,
       example: "400",
+    },
+    {
+      field: "breakQuantity",
+      label: "Staffel: från antal (Gränsvärde)",
+      required: false,
+      header: "Staffel: från antal",
+      description:
+        "Antalet i grundenhet där staffelpriset börjar gälla — en rad per steg, med kund och artikel upprepade. Ett gränsvärde på 1 (eller lägre) är priset från antal 1 och gäller före Pris. Finns kolumnen ersätts kundens staffel på artikeln helt av filens steg — en rad utan gränsvärde betyder att staffeln tas bort; ta bort kolumnen för att lämna staffeln orörd.",
+      example: "25",
+    },
+    {
+      field: "breakPrice",
+      label: "Staffel: pris",
+      required: false,
+      header: "Staffel: pris",
+      description: `Kundens pris per grundenhet från och med gränsvärdet, ${DECIMAL}, aldrig negativt. Krävs på varje rad som har ett gränsvärde; Rabatt räknas in som i Pris. Utan Staffel: från antal läses kolumnen inte.`,
+      example: "245,00",
     },
   ],
 

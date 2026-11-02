@@ -123,11 +123,13 @@ Förklaringarna nedan visas också i importguidens steg **Kolumner**, under det 
 | Kolumn | Obligatorisk | Förklaring | Exempel |
 | --- | --- | --- | --- |
 | **Artikelnummer** | Ja | Numret på en artikel som redan finns i artikelregistret. | SB-1200 |
-| **Kundnummer** | Ja | Numret på en kund som redan finns i kundregistret. Samma kund och artikel får bara förekomma en gång i filen. | 1001 |
-| **Pris** | Nej | Kundens pris per grundenhet i SEK, decimalkomma eller punkt, aldrig negativt. Sparas med fyra decimaler som kundens artikelpris från antal 1 och ersätter ett tidigare pris på samma artikel. Tom cell lämnar priset orört — en rad med varken pris eller kundens artikelnummer hoppas över. | 1890,00 |
+| **Kundnummer** | Ja | Numret på en kund som redan finns i kundregistret. Samma kund och artikel får bara förekomma en gång i filen — utom med staffel, där varje steg är en egen rad. | 1001 |
+| **Pris** | Nej | Kundens pris per grundenhet i SEK, decimalkomma eller punkt, aldrig negativt. Sparas med fyra decimaler som kundens artikelpris från antal 1 och ersätter ett tidigare pris på samma artikel. Tom cell lämnar priset orört — en rad med varken pris, staffel eller kundens artikelnummer hoppas över. Med staffel betyder 0 inget eget pris under första steget (ett pris från antal 1 tas bort), och ett steg med gränsvärde 1 gäller före Pris. | 1890,00 |
 | **Rabatt (%)** | Nej | Procentavdrag från 0 upp till (men inte med) 100 som bakas in i priset — Pris × (1 − Rabatt/100) — med en varning, eftersom kundpriset lagras som nettopris. Skriv bara talet — 10 betyder 10 %; skriv inte procenttecken. Tom cell betyder ingen rabatt. | 5 |
 | **Kundens artikelnummer** | Nej | Vad kunden kallar artikeln, max 50 tecken. Sparas på kundkortet och skrivs ut som "Ert art.nr" på offert, orderbekräftelse, plocklista, följesedel och faktura. Ersätter ett tidigare nummer för samma kund och artikel; tom cell lämnar det orört. | KND-4711 |
-| **Ställpris** | Nej | Engångskostnad per orderrad i SEK, decimalkomma eller punkt, aldrig negativ — sparas på kundpriset och läggs som en egen Ställkostnad-rad på nya offert- och orderrader när en ställkostnadsartikel är vald under System → Inställningar. Kräver Pris på raden. 0 betyder inget ställpris; tom cell lämnar det orört. | 400 |
+| **Ställpris** | Nej | Engångskostnad per orderrad i SEK, decimalkomma eller punkt, aldrig negativ — sparas på kundpriset och läggs som en egen Ställkostnad-rad på nya offert- och orderrader när en ställkostnadsartikel är vald under System → Inställningar. Kräver Pris eller staffel på raden och gäller även varje staffelsteg. 0 betyder inget ställpris; tom cell lämnar det orört. | 400 |
+| **Staffel: från antal** | Nej | Antalet i grundenhet där staffelpriset börjar gälla — en rad per steg, med kund och artikel upprepade. Ett gränsvärde på 1 (eller lägre) är priset från antal 1 och gäller före Pris. Finns kolumnen ersätts kundens staffel på artikeln helt av filens steg — en rad utan gränsvärde betyder att staffeln tas bort; ta bort kolumnen för att lämna staffeln orörd. | 25 |
+| **Staffel: pris** | Nej | Kundens pris per grundenhet från och med gränsvärdet, decimalkomma eller punkt, aldrig negativt. Krävs på varje rad som har ett gränsvärde; Rabatt räknas in som i Pris. Utan Staffel: från antal läses kolumnen inte. | 245,00 |
 
 ## Lagersaldon
 

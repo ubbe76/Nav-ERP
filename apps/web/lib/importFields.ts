@@ -80,8 +80,9 @@ export const SUPPLIER_PRICE_IMPORT_FIELDS: ImportFieldConfig[] = [
 
 // Mirrors CUSTOMER_PRICE_IMPORT_FIELDS in
 // apps/api/src/modules/import/service/customer-prices.ts (Monitor's
-// "Prislista Försäljning" and "Artikellista, Kundkopplingar"). Pris is not
-// required: a row may carry only Kundens artikelnummer.
+// "Prislista Försäljning" plain and stafflad, and "Artikellista,
+// Kundkopplingar"). Pris is not required: a row may carry only Kundens
+// artikelnummer.
 export const CUSTOMER_PRICE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "articleNumber", label: "Artikelnummer", required: true },
   { field: "customerNumber", label: "Kundnummer", required: true },
@@ -89,6 +90,8 @@ export const CUSTOMER_PRICE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "discountPercent", label: "Rabatt (%)" },
   { field: "customerArticleNumber", label: "Kundens artikelnummer" },
   { field: "setupPrice", label: "Ställpris" },
+  { field: "breakQuantity", label: "Staffel: från antal (Gränsvärde)" },
+  { field: "breakPrice", label: "Staffel: pris" },
 ];
 
 // Mirrors CUSTOMER_IMPORT_FIELDS in
