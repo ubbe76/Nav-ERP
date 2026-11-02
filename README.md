@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.7.1-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.7.2-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -594,7 +594,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   på offert/orderbekräftelse och plocklista; en ny leveransadress kan
   skrivas in direkt på ordern, som engångsadress eller sparad på kunden); orderrader redigerbara
   tills ordern är levererad (antal spärras mot redan levererat) och med
-  eget **leveransdatum** per rad;
+  eget **leveransdatum** per rad, där samma artikel får ligga på flera
+  rader; kund- och leverantörsdokumenten skrivs på **svenska eller
+  engelska** efter motpartens **Språk**;
   **utleveransrutin** som rapporterar leverans av hela ordern på en
   gång (med **rest** per rad) och skapar följesedel, med utskrivbar **plocklista** (PDF med restantal och
   lagerplatssaldon per artikel), **pallkort** per följesedel (streck- eller
@@ -625,7 +627,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   ritningar inbakade), material och operationer som kan **ändras på en
   skapad order** utan att artikelns beredning rörs, efterkalkyl; **föreslaget färdigdatum** på ny
   tillverkningsorder (arbetsdagen före artikelns första otäckta behov);
-  **behovsberäkning** med orderförslag och **Skapa ordrar** (resultatet
+  **behovsberäkning** med **tidsfasade** orderförslag (ett förslag per
+  behovsvecka med senaste dag att beställa eller starta utifrån
+  **ledtiden**) och **Skapa ordrar** (resultatet
   återanvänds en minut, **Uppdatera** räknar om), **artikelöversikt**
   med lagersaldo och löpande disponibelt antal, beläggning per
   resurs och vecka och **produktionsplanering** (operationerna planeras
