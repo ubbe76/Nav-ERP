@@ -115,6 +115,22 @@
   flex-shrink: 0;
 }
 
+/* Samma artikel på flera strukturrader (0176) — amber like FormNotice. */
+.duplicateBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--status-delayed-bg);
+  color: var(--status-delayed-text);
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
+}
+.duplicateNotice {
+  margin-bottom: 12px;
+}
+
 .kalkylBadge {
   font-size: 11px;
   font-weight: 600;

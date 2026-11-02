@@ -48,7 +48,6 @@ import {
   CostingOnlyOperationLinkError,
   DuplicateArticleBarcodeError,
   DuplicateArticleNumberError,
-  DuplicateBomComponentError,
   InvalidFileTypeError,
   InvalidReferenceError,
   InvalidUnitError,
@@ -261,9 +260,6 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
         return reply.code(404).send(errorBody(err));
       }
       if (err instanceof BomCycleError) {
-        return reply.code(409).send(errorBody(err));
-      }
-      if (err instanceof DuplicateBomComponentError) {
         return reply.code(409).send(errorBody(err));
       }
       if (err instanceof RoutingOperationMismatchError) {

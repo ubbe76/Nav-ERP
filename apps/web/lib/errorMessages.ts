@@ -393,8 +393,6 @@ const MESSAGES: Record<string, MessageEntry> = {
   "operation-has-linked-material":
     "Operationen har material kopplat till sig och kan inte märkas Kalkyl — ta bort operationskopplingen på strukturraden först.",
   "costing-only-operation-link": "Operationen är en kalkyloperation och kan inte dra material.",
-  "duplicate-bom-component":
-    "Komponenten ligger redan i artikelns struktur — ändra den befintliga raden i stället.",
   "duplicate-inquiry-row": "Artikeln finns redan på förfrågan — lägg operationen på en egen förfrågan.",
   "duplicate-purchase-order-row":
     "Artikeln finns redan på inköpsordern — ändra antalet på den raden, eller lägg en legooperation på en egen inköpsorder.",

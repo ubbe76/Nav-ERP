@@ -642,7 +642,10 @@ export function createArticleRepository(db: Db) {
         .innerJoin(units, eq(units.id, articles.unitId))
         .leftJoin(rowUnits, eq(rowUnits.id, bomComponents.unitId))
         .leftJoin(routingOperations, eq(routingOperations.id, bomComponents.routingOperationId))
-        .where(eq(bomComponents.parentArticleId, parentArticleId));
+        .where(eq(bomComponents.parentArticleId, parentArticleId))
+        // Entry order, deterministic — the same component may be on several
+        // rows (0176), and the import matches those rows in this order too.
+        .orderBy(asc(bomComponents.createdAt), asc(bomComponents.id));
     },
 
     // --- Attached files (ritningar) ---

@@ -47,18 +47,6 @@ export class BomCycleError extends Error {
   }
 }
 
-// The same component twice on one article. bom_components is unique on
-// (parent, component) — the operation link is chosen PER COMPONENT, not per
-// routing row — so the second insert violates the constraint. Caught and
-// named here for the same reason DuplicateArticleNumberError is: the raw
-// violation reached the client as a 500.
-export class DuplicateBomComponentError extends Error {
-  constructor() {
-    super("This component is already part of the article's structure");
-    this.name = "DuplicateBomComponentError";
-  }
-}
-
 export class ArticleNotFoundError extends Error {
   constructor(id: string) {
     super(`Article ${id} not found`);
@@ -868,22 +856,15 @@ export function createArticleService(repo: ArticleRepository) {
       // units) — stored in the component's base unit with the factor
       // snapshotted for display.
       const selection = await this.resolveUnitSelection(input.componentArticleId, input.unitId);
-      try {
-        return await repo.addBomComponent(parentArticleId, {
-          ...input,
-          quantity: toBaseQuantity(input.quantity, selection.unitFactor),
-          unitId: selection.unitId,
-          unitFactor: selection.unitFactor,
-        });
-      } catch (err) {
-        // bom_components has exactly one unique constraint — (parent,
-        // component) — so the unnamed check is unambiguous here, unlike
-        // isForeignKeyViolation's constraint-name variant. updateBomComponent
-        // needs no such guard: it only ever changes unit, quantity and the
-        // operation link, never componentArticleId.
-        if (isUniqueViolation(err)) throw new DuplicateBomComponentError();
-        throw err;
-      }
+      // The same component may already sit on another row (migration 0176
+      // dropped the unique (parent, component)) — allowed; the card warns
+      // about it from the row list, nothing is refused here.
+      return repo.addBomComponent(parentArticleId, {
+        ...input,
+        quantity: toBaseQuantity(input.quantity, selection.unitFactor),
+        unitId: selection.unitId,
+        unitFactor: selection.unitFactor,
+      });
     },
 
     // Is `candidateAncestorId` reachable by walking down from `articleId`'s BOM tree?

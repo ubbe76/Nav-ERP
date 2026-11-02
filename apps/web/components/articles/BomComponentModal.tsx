@@ -11,7 +11,8 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { operationLabel } from "./operation-label";
 import type { Article, BomComponent, RoutingOperation } from "../../lib/types";
-import { Form, FormActions, FormError, FormRow } from "../ui/Form";
+import { Form, FormActions, FormError, FormNotice, FormRow } from "../ui/Form";
+import { alreadyInStructureText } from "../../lib/bomDuplicates";
 
 interface BomComponentModalProps {
   open: boolean;
@@ -20,6 +21,9 @@ interface BomComponentModalProps {
   // The article's own routing — a component may be tied to one of these, and
   // is then drawn from stock when that operation is reported complete.
   routing: RoutingOperation[];
+  // The structure's current rows — picking a component that is already on
+  // one shows a warning (allowed since 0176, never refused).
+  bom: BomComponent[];
   // null = the modal adds a new component; a row = it edits that row
   // (quantity/unit/operation — the component article itself is fixed).
   editing: BomComponent | null;
@@ -35,6 +39,7 @@ export function BomComponentModal({
   onClose,
   articleId,
   routing,
+  bom,
   editing,
   presetOperationId,
   onSaved,
@@ -51,6 +56,7 @@ export function BomComponentModal({
       <ComponentForm
         articleId={articleId}
         routing={routing}
+        bom={bom}
         editing={editing}
         presetOperationId={presetOperationId}
         onSaved={onSaved}
@@ -63,6 +69,7 @@ export function BomComponentModal({
 function ComponentForm({
   articleId,
   routing,
+  bom,
   editing,
   presetOperationId,
   onSaved,
@@ -99,6 +106,7 @@ function ComponentForm({
   }, [editing]);
 
   const unitOptions = useUnitOptions(component);
+  const alreadyInStructure = !editing && component ? alreadyInStructureText(bom, component.id) : null;
   const currentFactor = unitOptions.find((o) => o.value === unitId)?.factor ?? 1;
 
   async function handleSubmit(e: FormEvent) {
@@ -166,6 +174,7 @@ function ComponentForm({
           />
         </Field>
       )}
+      {alreadyInStructure && <FormNotice>{alreadyInStructure}</FormNotice>}
 
       <FormRow>
         <Field label="Antal" htmlFor="quantity">

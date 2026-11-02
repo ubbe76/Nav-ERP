@@ -12,6 +12,8 @@ export interface BomEdge {
   componentId: string;
   /** The bom_components row — set on the stored edges (the import's update path). */
   id?: string;
+  /** Its Pos. — set on the stored edges; the import matches file rows on it. */
+  position?: string | null;
 }
 
 function addEdge(graph: Map<string, Set<string>>, edge: BomEdge): void {
@@ -21,12 +23,16 @@ function addEdge(graph: Map<string, Set<string>>, edge: BomEdge): void {
 }
 
 // Kahn's algorithm, used only as a yes/no oracle: does the whole graph sort?
+// The in-degree counts DISTINCT parents: since 0176 the same (parent,
+// component) may be several rows, and `children` is a Set — counting every
+// row would leave the component's degree above zero and report a cycle.
 function isAcyclic(edges: BomEdge[]): boolean {
   const children = new Map<string, Set<string>>();
   const inDegree = new Map<string, number>();
   for (const edge of edges) {
-    addEdge(children, edge);
     if (!inDegree.has(edge.parentId)) inDegree.set(edge.parentId, 0);
+    if (children.get(edge.parentId)?.has(edge.componentId)) continue;
+    addEdge(children, edge);
     inDegree.set(edge.componentId, (inDegree.get(edge.componentId) ?? 0) + 1);
   }
 

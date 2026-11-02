@@ -292,7 +292,6 @@ export const ERROR_CODES = {
   VERIFICATION_ALREADY_REVERSED: "verification-already-reversed",
   SUPPLIER_PAYMENT_ALREADY_CANCELLED: "supplier-payment-already-cancelled",
   // article / manufacturing
-  DUPLICATE_BOM_COMPONENT: "duplicate-bom-component",
   OPERATION_HAS_LINKED_MATERIAL: "operation-has-linked-material",
   COSTING_ONLY_OPERATION_LINK: "costing-only-operation-link",
   // lego (Etapp G)
