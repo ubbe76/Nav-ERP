@@ -292,7 +292,7 @@ export function ManufacturingOrderDetail({
             { key: "quantityPlanned", label: "Planerat", width: "100px", align: "right" },
             { key: "unitCode", label: "Enhet", width: "70px" },
             { key: "quantityConsumed", label: "Förbrukat", width: "100px", align: "right" },
-            ...(canEditLines ? [{ key: "id", label: "", width: "170px", align: "right" as const }] : []),
+            ...(canEditLines ? [{ key: "id", label: "", width: "150px", align: "right" as const }] : []),
           ]}
           rows={materials}
           renderCell={(row, key) => {
@@ -304,12 +304,12 @@ export function ManufacturingOrderDetail({
                 return toUnitQuantity(Number(row[key]), row.unitFactor);
               case "id":
                 return (
-                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
-                    <Button type="button" variant="ghost" size="small" onClick={() => setMaterialDialog({ editing: row })}>
+                  <span style={{ display: "inline-flex", gap: 2, flexWrap: "nowrap", whiteSpace: "nowrap", justifyContent: "flex-end", alignItems: "center" }}>
+                    <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={() => setMaterialDialog({ editing: row })}>
                       Ändra
                     </Button>
                     {Number(row.quantityConsumed) === 0 && (
-                      <Button type="button" variant="ghost" size="small" onClick={() => removeMaterial(row)}>
+                      <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={() => removeMaterial(row)}>
                         Ta bort
                       </Button>
                     )}
@@ -345,16 +345,16 @@ export function ManufacturingOrderDetail({
       {operations.length > 0 ? (
         <Table<MOOperation>
           columns={[
-            { key: "sequenceNo", label: "Sekvensnr", width: "76px", align: "right" },
-            { key: "workCenterName", label: "Operation", width: "minmax(110px, 1fr)" },
-            { key: "plannedWeek", label: "Planerad vecka", width: "100px" },
-            { key: "setupTime", label: "Ställtid (min)", width: "70px", align: "right" },
-            { key: "runTimePerUnit", label: "Tid/enhet", width: "76px", align: "right" },
-            { key: "status", label: "Status", width: "80px" },
-            { key: "quantityCompleted", label: "Antal OK", width: "60px", align: "right" },
-            { key: "quantityScrapped", label: "Kasserat", width: "70px", align: "right" },
-            { key: "actualTime", label: "Faktisk tid", width: "64px", align: "right" },
-            { key: "id", label: "", width: canEditLines ? "120px" : "70px", align: "right" },
+            { key: "sequenceNo", label: "Sekvensnr", width: "64px", align: "right" },
+            { key: "workCenterName", label: "Operation", width: "minmax(100px, 1fr)" },
+            { key: "plannedWeek", label: "Planerad vecka", width: "80px" },
+            { key: "setupTime", label: "Ställtid (min)", width: "62px", align: "right" },
+            { key: "runTimePerUnit", label: "Tid/enhet", width: "62px", align: "right" },
+            { key: "status", label: "Status", width: "76px" },
+            { key: "quantityCompleted", label: "Antal OK", width: "50px", align: "right" },
+            { key: "quantityScrapped", label: "Kasserat", width: "60px", align: "right" },
+            { key: "actualTime", label: "Faktisk tid", width: "54px", align: "right" },
+            { key: "id", label: "", width: canEditLines ? "185px" : "80px", align: "right" },
           ]}
           rows={operations}
           renderCell={(row, key) => {
@@ -365,11 +365,12 @@ export function ManufacturingOrderDetail({
               // param, so it shows the accumulated reported quantity.
               case "id":
                 return (
-                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
+                  <span style={{ display: "inline-flex", gap: 2, flexWrap: "nowrap", whiteSpace: "nowrap", justifyContent: "flex-end", alignItems: "center" }}>
                     <Button
                       type="button"
                       variant="ghost"
                       size="small"
+                      style={{ padding: "4px 8px" }}
                       onClick={() =>
                         setPalletCard({
                           kind: "single",
@@ -383,12 +384,12 @@ export function ManufacturingOrderDetail({
                       Pallkort
                     </Button>
                     {canEditLines && row.status === "pending" && (
-                      <Button type="button" variant="ghost" size="small" onClick={() => openOperationDialog(row)}>
+                      <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={() => openOperationDialog(row)}>
                         Ändra
                       </Button>
                     )}
                     {canEditLines && operationUntouched(row) && (
-                      <Button type="button" variant="ghost" size="small" onClick={() => removeOperation(row)}>
+                      <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={() => removeOperation(row)}>
                         Ta bort
                       </Button>
                     )}
@@ -658,7 +659,7 @@ export function ManufacturingOrderDetail({
       )}
 
       {!readOnly && (
-      <div style={{ marginTop: 20, display: "flex", gap: 16, flexWrap: "wrap" }}>
+      <div style={{ marginTop: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
         {order.status === "planned" && (
           <StatusActions
             orderId={order.id}
@@ -788,10 +789,9 @@ function StatusActions({
   }
 
   return (
-    <Card maxWidth={260}>
-      <FormStack>
-        <FormError>{error}</FormError>
-        {actions.map((action) => (
+    <>
+      {error && <FormError>{error}</FormError>}
+      {actions.map((action) => (
           <Button
             key={action}
             type="button"
@@ -801,9 +801,8 @@ function StatusActions({
           >
             {pending === action ? "Arbetar…" : ACTION_LABELS[action].label}
           </Button>
-        ))}
-      </FormStack>
-    </Card>
+      ))}
+    </>
   );
 }
 
@@ -856,15 +855,15 @@ function PostCalculateAction({ orderId, onDone }: { orderId: string; onDone: (ca
   }
 
   return (
-    <Card maxWidth={360}>
-      <FormStack>
-        <FormError>{error}</FormError>
-        <Button type="button" variant="secondary" disabled={pending} onClick={run}>
-          {pending ? "Beräknar…" : "Efterkalkylera"}
-        </Button>
+    <>
+      {error && <FormError>{error}</FormError>}
+      <Button type="button" variant="secondary" disabled={pending} onClick={run}>
+        {pending ? "Beräknar…" : "Efterkalkylera"}
+      </Button>
 
-        {preview && (
-          <>
+      {preview && (
+        <Card maxWidth={360} style={{ flexBasis: "100%" }}>
+          <FormStack>
             <FormHint>Beräkningen sparas först när du klickar Spara kalkyl.</FormHint>
             {preview.warnings.length > 0 && (
               <FormError>
@@ -883,9 +882,9 @@ function PostCalculateAction({ orderId, onDone }: { orderId: string; onDone: (ca
             <Button type="button" variant="primary" disabled={saving} onClick={save}>
               {saving ? "Sparar…" : "Spara kalkyl"}
             </Button>
-          </>
-        )}
-      </FormStack>
-    </Card>
+          </FormStack>
+        </Card>
+      )}
+    </>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
-import { Field, Input, Select } from "../ui/Field";
+import { Input, Label, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
@@ -40,6 +40,19 @@ interface ReportPanelProps {
   employees: EmployeeDirectoryEntry[];
   timeReports: TimeReport[];
   onDone: () => void;
+}
+
+// A grid cell: the label is only drawn on a phone (the column header row
+// carries it on a desktop); the input itself has an aria-label either way.
+function Cell({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+  return (
+    <div className={[styles.cell, className].filter(Boolean).join(" ")}>
+      <span className={styles.mobileLabel} aria-hidden="true">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
 }
 
 function LocationOptions({ locations }: { locations: StockLocation[] }) {
@@ -83,12 +96,23 @@ export function ReportPanel({
           </FormHint>
           {/* Stock locations are optional — the select only appears when some exist. */}
           {locations.length > 0 && (
-            <Field label="Lagerplats för materialuttag" htmlFor="reportMaterialLocation">
-              <Select id="reportMaterialLocation" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+            <div className={styles.inlineField}>
+              <Label htmlFor="reportMaterialLocation">Lagerplats för materialuttag</Label>
+              <Select id="reportMaterialLocation" size="md" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
                 <LocationOptions locations={locations} />
               </Select>
-            </Field>
+            </div>
           )}
+        </div>
+
+        {/* Column labels once; on a phone each row stacks and its own labels show. */}
+        <div className={`${styles.line} ${styles.head}`} aria-hidden="true">
+          <span>Operation</span>
+          <span>Klart/Kvar</span>
+          <span>Antal klart</span>
+          <span>Kasserat</span>
+          <span>Faktisk tid</span>
+          <span />
         </div>
 
         {groups.map(({ operation, materials: linked }) => (
@@ -230,64 +254,60 @@ function OperationRow({
       <div className={styles.line}>
         <div className={styles.title}>
           <span className={styles.name}>{moOperationLabel(op)}</span>
-          {/* Kvar = planned − OK; scrapped units must be made again. */}
-          <span className={`num ${styles.summary}`}>
-            {isPending ? `Planerat ${Number(orderQuantity)} · Klart ${Number(op.quantityCompleted ?? 0)}` : `Klart ${Number(op.quantityCompleted ?? 0)} av ${Number(orderQuantity)}`}
-            {Number(op.quantityScrapped) > 0 ? ` · Kasserat ${Number(op.quantityScrapped)}` : ""}
-            {isPending ? (
-              <>
-                {" "}
-                · <strong>Kvar {remaining}</strong>
-              </>
-            ) : (
-              " · Klar"
-            )}
-          </span>
           {isPending && op.workCenterType === "subcontract" && (
             <span className={styles.hint}>Lego — avrapporteras vid inleverans</span>
           )}
         </div>
+        {/* Kvar = planned − OK; scrapped units must be made again. */}
+        <div className={`num ${styles.summary}`}>
+          {isPending ? (
+            <span title={`Planerat ${Number(orderQuantity)}`}>
+              {Number(op.quantityCompleted ?? 0)} / <strong>{remaining}</strong>
+              <span className={styles.mobileLabel}> (Klart / Kvar)</span>
+            </span>
+          ) : (
+            <span>Klart {Number(op.quantityCompleted ?? 0)} av {Number(orderQuantity)} · Klar</span>
+          )}
+          {Number(op.quantityScrapped) > 0 && <div>Kasserat {Number(op.quantityScrapped)}</div>}
+        </div>
         {isPending && (
           <>
-            <div className={styles.cell}>
-              <Field label="Antal klart" htmlFor={`quantityCompleted-${op.id}`}>
-                <Input
-                  id={`quantityCompleted-${op.id}`}
-                  type="number"
-                  min="0"
-                  step="any"
-                  size="sm"
-                  value={quantity ?? remaining}
-                  onChange={(e) => setQuantity(e.target.value)}
-                />
-              </Field>
-            </div>
-            <div className={styles.cell}>
-              <Field label="Kasserat" htmlFor={`quantityScrapped-${op.id}`}>
-                <Input
-                  id={`quantityScrapped-${op.id}`}
-                  type="number"
-                  min="0"
-                  step="any"
-                  size="sm"
-                  value={scrapped}
-                  onChange={(e) => setScrapped(e.target.value)}
-                />
-              </Field>
-            </div>
-            <div className={styles.cell}>
-              <Field label="Faktisk tid" htmlFor={`actualTime-${op.id}`}>
-                <Input
-                  id={`actualTime-${op.id}`}
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  size="sm"
-                  value={actualTime}
-                  onChange={(e) => setActualTime(e.target.value)}
-                />
-              </Field>
-            </div>
+            <Cell label="Antal klart">
+              <Input
+                id={`quantityCompleted-${op.id}`}
+                aria-label={`Antal klart för ${moOperationLabel(op)}`}
+                type="number"
+                min="0"
+                step="any"
+                size="sm"
+                value={quantity ?? remaining}
+                onChange={(e) => setQuantity(e.target.value)}
+              />
+            </Cell>
+            <Cell label="Kasserat">
+              <Input
+                id={`quantityScrapped-${op.id}`}
+                aria-label={`Kasserat för ${moOperationLabel(op)}`}
+                type="number"
+                min="0"
+                step="any"
+                size="sm"
+                value={scrapped}
+                onChange={(e) => setScrapped(e.target.value)}
+              />
+            </Cell>
+            <Cell label="Faktisk tid">
+              <Input
+                id={`actualTime-${op.id}`}
+                aria-label={`Faktisk tid för ${moOperationLabel(op)}`}
+                type="number"
+                min="0"
+                step="0.01"
+                size="sm"
+                value={actualTime}
+                onChange={(e) => setActualTime(e.target.value)}
+              />
+            </Cell>
             <div className={styles.action}>
               <Button type="button" variant="secondary" size="small" disabled={pending} onClick={complete}>
                 {pending ? "…" : "Slutför"}
@@ -365,26 +385,26 @@ function MaterialRow({
           <span>
             <span className={styles.name}>{m.componentArticleNumber}</span> {m.componentName}
           </span>
-          <span className={`num ${styles.summary}`}>
-            {toUnitQuantity(Number(m.quantityConsumed), m.unitFactor)}/{toUnitQuantity(Number(m.quantityPlanned), m.unitFactor)} {m.unitCode}
-          </span>
+        </div>
+        <div className={`num ${styles.summary}`}>
+          {toUnitQuantity(Number(m.quantityConsumed), m.unitFactor)}/{toUnitQuantity(Number(m.quantityPlanned), m.unitFactor)} {m.unitCode}
         </div>
         {open && (
           <>
-            <div className={styles.cell}>
-              <Field label={`Antal (${m.unitCode})`} htmlFor={`consumeQuantity-${m.id}`}>
-                <Input
-                  id={`consumeQuantity-${m.id}`}
-                  type="number"
-                  min="0"
-                  step="any"
-                  required
-                  size="sm"
-                  value={quantity}
-                  onChange={(e) => setTypedQuantity(e.target.value)}
-                />
-              </Field>
-            </div>
+            <Cell label={`Antal (${m.unitCode})`} className={styles.qty}>
+              <Input
+                id={`consumeQuantity-${m.id}`}
+                aria-label={`Antal (${m.unitCode}) för ${m.componentArticleNumber} ${m.componentName}`}
+                type="number"
+                min="0"
+                step="any"
+                required
+                size="sm"
+                value={quantity}
+                onChange={(e) => setTypedQuantity(e.target.value)}
+              />
+              <span className={styles.unit}>{m.unitCode}</span>
+            </Cell>
             <div className={styles.action}>
               <Button type="submit" variant="secondary" size="small" disabled={pending}>
                 {pending ? "Förbrukar…" : "Förbruka"}
@@ -449,55 +469,45 @@ function ReportTimeRow({
 
   return (
     <form className={styles.section} onSubmit={handleSubmit}>
-      {/* Five fields never fit beside a title — the title gets its own line. */}
-      <div className={styles.groupTitle}>Rapportera tid</div>
-      <div className={styles.line}>
-        <div className={styles.wide}>
-          <Field label="Anställd" htmlFor="reportEmployeeId">
-            <Select id="reportEmployeeId" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.employeeNumber} — {emp.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-        <div className={styles.wide}>
-          <Field label="Operation" htmlFor="reportOperationId">
-            <Select
-              id="reportOperationId"
-              value={operationId}
-              onChange={(e) => {
-                setOperationId(e.target.value);
-                setTypedHours(null);
-              }}
-            >
-              {operations.map((op) => (
-                <option key={op.id} value={op.id}>
-                  {moOperationLabel(op)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-        <div className={styles.cell}>
-          <Field label="Datum" htmlFor="reportDate">
-            <Input id="reportDate" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
-          </Field>
-        </div>
-        <div className={styles.cell}>
-          <Field label="Timmar" htmlFor="reportHours">
-            <Input id="reportHours" type="number" min="0" step="any" required size="sm" value={hours} onChange={(e) => setTypedHours(e.target.value)} />
-          </Field>
-        </div>
-        <div className={styles.wide}>
-          <Field label="Anteckning (valfritt)" htmlFor="reportNote">
-            <Input id="reportNote" value={note} onChange={(e) => setNote(e.target.value)} />
-          </Field>
-        </div>
-        <div className={styles.action}>
-          <Button type="submit" variant="primary" disabled={pending}>
+      <div className={styles.formRow}>
+        <div className={styles.rowLabel}>Rapportera tid</div>
+        <Cell label="Anställd" className={styles.grow}>
+          <Select id="reportEmployeeId" aria-label="Anställd" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+            {employees.map((emp) => (
+              <option key={emp.id} value={emp.id}>
+                {emp.employeeNumber} — {emp.name}
+              </option>
+            ))}
+          </Select>
+        </Cell>
+        <Cell label="Operation" className={styles.grow}>
+          <Select
+            id="reportOperationId"
+            aria-label="Operation"
+            value={operationId}
+            onChange={(e) => {
+              setOperationId(e.target.value);
+              setTypedHours(null);
+            }}
+          >
+            {operations.map((op) => (
+              <option key={op.id} value={op.id}>
+                {moOperationLabel(op)}
+              </option>
+            ))}
+          </Select>
+        </Cell>
+        <Cell label="Datum" className={styles.date}>
+          <Input id="reportDate" aria-label="Datum" type="date" required size="sm" value={date} onChange={(e) => setDate(e.target.value)} />
+        </Cell>
+        <Cell label="Timmar" className={styles.hours}>
+          <Input id="reportHours" aria-label="Timmar" type="number" min="0" step="any" required size="sm" value={hours} onChange={(e) => setTypedHours(e.target.value)} />
+        </Cell>
+        <Cell label="Anteckning (valfritt)" className={styles.grow}>
+          <Input id="reportNote" aria-label="Anteckning (valfritt)" placeholder="Anteckning" value={note} onChange={(e) => setNote(e.target.value)} />
+        </Cell>
+        <div className={styles.rowAction}>
+          <Button type="submit" variant="primary" size="small" disabled={pending}>
             {pending ? "Rapporterar…" : "Rapportera tid"}
           </Button>
         </div>
@@ -563,44 +573,39 @@ function CompleteOrderRow({
 
   return (
     <form className={styles.section} onSubmit={handleSubmit}>
-      <div className={styles.line}>
-        <div className={styles.title}>
-          <span className={styles.name}>Slutför order</span>
-          <span className={styles.hint}>
-            Stänger ordern. Antal är det som läggs i lager nu.
-            {received > 0 ? ` ${received} st är redan inlevererade från sista operationen — 0 stänger ordern utan mer inleverans.` : ""}
-          </span>
-        </div>
-        <div className={styles.cell}>
-          <Field label="Antal" htmlFor="completeQuantity">
-            <Input
-              id="completeQuantity"
-              type="number"
-              min="0"
-              step="any"
-              required
-              size="sm"
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-            />
-          </Field>
-        </div>
+      <div className={styles.formRow}>
+        <div className={styles.rowLabel}>Slutför order</div>
+        <Cell label="Antal" className={styles.hours}>
+          <Input
+            id="completeQuantity"
+            aria-label="Antal"
+            type="number"
+            min="0"
+            step="any"
+            required
+            size="sm"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+          />
+        </Cell>
         {/* Stock locations are optional — the select only appears when some exist. */}
         {locations.length > 0 && (
-          <div className={styles.wide}>
-            <Field label="Lagerplats" htmlFor="completeLocationId">
-              <Select id="completeLocationId" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-                <LocationOptions locations={locations} />
-              </Select>
-            </Field>
-          </div>
+          <Cell label="Lagerplats" className={styles.grow}>
+            <Select id="completeLocationId" aria-label="Lagerplats" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+              <LocationOptions locations={locations} />
+            </Select>
+          </Cell>
         )}
-        <div className={styles.action}>
-          <Button type="submit" variant="primary" disabled={pending}>
+        <div className={styles.rowAction}>
+          <Button type="submit" variant="primary" size="small" disabled={pending}>
             {pending ? "Slutför…" : "Slutför order"}
           </Button>
         </div>
       </div>
+      <span className={styles.hint}>
+        Stänger ordern. Antal är det som läggs i lager nu.
+        {received > 0 ? ` ${received} st är redan inlevererade från sista operationen — 0 stänger ordern utan mer inleverans.` : ""}
+      </span>
       <FormError>{error}</FormError>
     </form>
   );
