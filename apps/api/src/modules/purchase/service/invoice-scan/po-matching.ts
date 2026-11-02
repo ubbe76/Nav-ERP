@@ -98,21 +98,34 @@ export interface PurchaseOrderRowCandidate {
 
 // Each invoice row against the order's rows, in the order (1) the supplier's
 // article number, (2) our article number in the row text, (3) the one row
-// with the same quantity and unit price (±1 %). A hit gives articleId +
-// purchaseOrderRowId, high when the quantity fits within what is received
-// and not yet invoiced. Each order row is matched at most once.
+// with the same quantity and unit price (±1 %). The same article may sit on
+// several rows of the order, so among the free rows (1) or (2) match, the
+// one whose open quantity equals the invoice row's wins, then one that has
+// room for it, then the first. A hit gives articleId + purchaseOrderRowId,
+// high when the quantity fits within what is received and not yet invoiced.
+// Each order row is matched at most once.
 export function matchInvoiceRows(rows: InvoiceScanRow[], orderRows: PurchaseOrderRowCandidate[]): InvoiceScanRow[] {
   const used = new Set<string>();
   const free = () => orderRows.filter((r) => !used.has(r.id));
+  const pick = (candidates: PurchaseOrderRowCandidate[], quantity: number | null) =>
+    (quantity === null ? undefined : candidates.find((r) => Math.abs(r.openQuantity - quantity) < 1e-9)) ??
+    (quantity === null ? undefined : candidates.find((r) => r.openQuantity >= quantity - 1e-9)) ??
+    candidates[0];
   return rows.map((row) => {
     let hit: PurchaseOrderRowCandidate | undefined;
     if (row.supplierArticleNumber) {
       const wanted = canon(row.supplierArticleNumber);
-      hit = free().find((r) => r.supplierArticleNumber !== null && canon(r.supplierArticleNumber) === wanted);
+      hit = pick(
+        free().filter((r) => r.supplierArticleNumber !== null && canon(r.supplierArticleNumber) === wanted),
+        row.quantity
+      );
     }
     if (!hit) {
-      hit = free().find((r) =>
-        new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(r.articleNumber)}(?![A-Za-z0-9])`, "i").test(row.description)
+      hit = pick(
+        free().filter((r) =>
+          new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(r.articleNumber)}(?![A-Za-z0-9])`, "i").test(row.description)
+        ),
+        row.quantity
       );
     }
     if (!hit && row.quantity !== null && row.unitPrice !== null) {

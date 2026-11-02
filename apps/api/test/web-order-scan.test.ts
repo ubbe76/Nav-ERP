@@ -6,6 +6,8 @@ import {
   hasCounted,
   isScannableRow,
   leftToCount,
+  purchaseScanDate,
+  salesScanDate,
   resolveOrderScan,
   type OrderCountState,
   type OrderScanMatch,
@@ -126,5 +128,48 @@ describe("countScan", () => {
   it("does not count an article without a scannable row", () => {
     expect(countScan(rows, fresh, "bolt")).toEqual({ counted: false });
     expect(countScan(capped, fresh, "setup")).toEqual({ counted: false });
+  });
+
+  it("with the same article on several rows counts the earliest effective date first, undated last, then the row order", () => {
+    // Listed later but due earlier: r3 takes the first scans; the undated
+    // r5 comes after both dated rows; the stable sort keeps r1 before r6.
+    const dated: OrderScanRow[] = [
+      { id: "r1", articleId: "screw", remaining: 1, scannable: true, max: null, date: "2030-03-20" },
+      { id: "r5", articleId: "screw", remaining: 1, scannable: true, max: null, date: null },
+      { id: "r3", articleId: "screw", remaining: 2, scannable: true, max: null, date: "2030-03-10" },
+      { id: "r6", articleId: "screw", remaining: 1, scannable: true, max: null, date: "2030-03-20" },
+    ];
+    let state = fresh;
+    const hits: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const next = countScan(dated, state, "screw");
+      if (!next.counted) throw new Error("not counted");
+      hits.push(`${next.rowId}:${next.quantity}${next.over ? "!" : ""}`);
+      state = next.state;
+    }
+    expect(hits).toEqual(["r3:1", "r3:2", "r1:1", "r6:1", "r5:1", "r3:3!"]);
+    // The input order is untouched.
+    expect(dated.map((r) => r.id)).toEqual(["r1", "r5", "r3", "r6"]);
+    // Without dates the old rule stands (the row order).
+    const plain = countScan(rows, fresh, "screw");
+    expect(plain.counted && plain.rowId).toBe("r1");
+  });
+});
+
+describe("scan dates", () => {
+  it("purchase: confirmed beats requested, the row's own beats the order's", () => {
+    const order = { confirmedDeliveryDate: "2030-05-02", expectedDeliveryDate: "2030-05-01" };
+    expect(purchaseScanDate({ confirmedDeliveryDate: "2030-06-01", expectedDeliveryDate: "2030-04-01" }, order)).toBe("2030-06-01");
+    expect(purchaseScanDate({ confirmedDeliveryDate: null, expectedDeliveryDate: "2030-04-01" }, order)).toBe("2030-05-02");
+    expect(purchaseScanDate({ confirmedDeliveryDate: null, expectedDeliveryDate: "2030-04-01" }, { confirmedDeliveryDate: null, expectedDeliveryDate: "2030-05-01" })).toBe("2030-04-01");
+    expect(purchaseScanDate({ confirmedDeliveryDate: null, expectedDeliveryDate: null }, { confirmedDeliveryDate: null, expectedDeliveryDate: "2030-05-01" })).toBe("2030-05-01");
+    expect(purchaseScanDate({ confirmedDeliveryDate: null, expectedDeliveryDate: null }, null)).toBeNull();
+  });
+
+  it("sales: the row's date, else the order's, else none", () => {
+    expect(salesScanDate({ expectedDeliveryDate: "2030-03-01" }, { expectedDeliveryDate: "2030-04-01" })).toBe("2030-03-01");
+    expect(salesScanDate({ expectedDeliveryDate: null }, { expectedDeliveryDate: "2030-04-01" })).toBe("2030-04-01");
+    expect(salesScanDate({ expectedDeliveryDate: null }, { expectedDeliveryDate: null })).toBeNull();
+    expect(salesScanDate({ expectedDeliveryDate: null }, null)).toBeNull();
   });
 });

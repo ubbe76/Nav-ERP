@@ -13,7 +13,6 @@ import { createManufacturingService } from "../src/modules/manufacturing/service
 import { createPurchaseRepository } from "../src/modules/purchase/repository/purchase.repository.js";
 import {
   createPurchaseService,
-  DuplicateInquiryRowError,
   InquiryRowPriceNotApplicableError,
   LegoOperationArticleMismatchError,
   LegoOperationClosedError,
@@ -252,31 +251,56 @@ describe("lego inquiry rows — creation", () => {
     ).rejects.toBeInstanceOf(NotLegoOperationError);
   });
 
-  it("addInquiryRow refuses an article already on the inquiry (409, not a 500)", async () => {
+  // Samma artikel flera gånger (0177): the same article may sit on several
+  // rows of an inquiry — added one by one or in the same batch.
+  it("addInquiryRow adds an article already on the inquiry as a second row", async () => {
     const f = await makeLegoRouting();
     const { inquiry } = await purchaseService.createInquiry(
       { supplierId: f.supplier.id, rows: [{ articleId: f.parent.id, quantity: 1 }] },
       f.user.id
     );
-    await expect(
-      purchaseService.addInquiryRow(inquiry.id, { articleId: f.parent.id, quantity: 1 })
-    ).rejects.toBeInstanceOf(DuplicateInquiryRowError);
+    const second = await purchaseService.addInquiryRow(inquiry.id, { articleId: f.parent.id, quantity: 3 });
+    expect(second.articleId).toBe(f.parent.id);
+    const rows = await purchaseService.listInquiryRows(inquiry.id);
+    expect(rows.map((r) => [r.articleId, Number(r.quantity)])).toEqual([
+      [f.parent.id, 1],
+      [f.parent.id, 3],
+    ]);
   });
 
-  it("createInquiry refuses the same article twice in its own rows", async () => {
-    const f = await makeLegoRouting();
-    await expect(
-      purchaseService.createInquiry(
-        {
-          supplierId: f.supplier.id,
-          rows: [
-            { articleId: f.parent.id, quantity: 1 },
-            { articleId: f.parent.id, quantity: 2 },
-          ],
-        },
-        f.user.id
-      )
-    ).rejects.toBeInstanceOf(DuplicateInquiryRowError);
+  it("createInquiry takes the same article twice in its own rows, and two lego operations on one article", async () => {
+    const f = await releasedMo(4);
+    // A second TO of the same article: its own lego operation.
+    const secondMo = await mfgService.createManufacturingOrder({ articleId: f.parent.id, quantity: 2 }, f.user.id);
+    const secondLegoOp = (await mfgService.listOperations(secondMo.id)).find((op) => op.sequenceNo === 20)!;
+    const { inquiry, rows } = await purchaseService.createInquiry(
+      {
+        supplierId: f.supplier.id,
+        rows: [
+          { articleId: f.parent.id, quantity: 1 },
+          { articleId: f.parent.id, quantity: 2 },
+          { articleId: f.parent.id, quantity: 4, moOperationId: f.moLegoOp.id },
+          { articleId: f.parent.id, quantity: 2, moOperationId: secondLegoOp.id },
+        ],
+      },
+      f.user.id
+    );
+    expect(rows.map((r) => [Number(r.quantity), r.moOperationId])).toEqual([
+      [1, null],
+      [2, null],
+      [4, f.moLegoOp.id],
+      [2, secondLegoOp.id],
+    ]);
+    // Converting keeps every row — the IO carries the article four times.
+    await purchaseService.sendInquiry(inquiry.id, f.user.id);
+    const order = await purchaseService.convertInquiryToOrder(inquiry.id, f.user.id);
+    const orderRows = await purchaseRepository.listRowsByOrder(order.id);
+    expect(orderRows.map((r) => [r.articleId, Number(r.quantityOrdered), r.moOperationId])).toEqual([
+      [f.parent.id, 1, null],
+      [f.parent.id, 2, null],
+      [f.parent.id, 4, f.moLegoOp.id],
+      [f.parent.id, 2, secondLegoOp.id],
+    ]);
   });
 
   it("refuses linking a done MO operation", async () => {
@@ -578,19 +602,9 @@ describe("lego inquiry rows — prisåterföring to the routing operation", () =
       "Raden saknar pris"
     );
 
-    const plain = await purchaseService.addInquiryRow(f.inquiry.id, { articleId: f.parent.id, quantity: 1 }).catch(
-      () => null
-    );
-    // Same article twice is blocked by the unique index — use a fresh one.
-    expect(plain).toBeNull();
-    const other = await articleService.createArticle({
-      articleNumber: `PLAIN-${crypto.randomUUID()}`,
-      name: "Vanlig",
-      type: "purchased",
-      unit: "st",
-      active: true,
-    });
-    const plainRow = await purchaseService.addInquiryRow(f.inquiry.id, { articleId: other.id, quantity: 1, unitPrice: 5 });
+    // The same article again as an ORDINARY row (no operation) is fine —
+    // and not a lego row.
+    const plainRow = await purchaseService.addInquiryRow(f.inquiry.id, { articleId: f.parent.id, quantity: 1, unitPrice: 5 });
     await expect(purchaseService.applyInquiryRowPriceToRouting(f.inquiry.id, plainRow.id)).rejects.toThrow(
       "Raden är ingen legorad"
     );

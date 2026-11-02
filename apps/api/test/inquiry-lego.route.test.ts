@@ -124,7 +124,7 @@ async function buildApp() {
 }
 
 describe("POST /inquiries/:id/rows", () => {
-  it("409s duplicate-inquiry-row when the article is already on the inquiry", async () => {
+  it("201s an article already on the inquiry as a second row", async () => {
     const f = await makeLegoRouting();
     const { app } = await buildApp();
     const { inquiry } = await purchaseService.createInquiry(
@@ -138,8 +138,9 @@ describe("POST /inquiries/:id/rows", () => {
       payload: { articleId: f.parent.id, quantity: 2 },
     });
 
-    expect(res.statusCode).toBe(409);
-    expect(res.json().code).toBe("duplicate-inquiry-row");
+    expect(res.statusCode).toBe(201);
+    expect(res.json().articleId).toBe(f.parent.id);
+    expect(await purchaseService.listInquiryRows(inquiry.id)).toHaveLength(2);
     await app.close();
   });
 

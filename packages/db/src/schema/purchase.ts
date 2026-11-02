@@ -296,11 +296,15 @@ export const inquiryRows = pgTable(
     setupPrice: numeric("setup_price", { precision: 12, scale: 2 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique().on(table.inquiryId, table.articleId)]
+  // The same article may sit on several rows (e.g. a split delivery with
+  // two dates), so the index is plain — it serves the row lookups by inquiry.
+  (table) => [index("idx_inquiry_rows_inquiry_article").on(table.inquiryId, table.articleId)]
 );
 
-// One row per article per PO (simplifies stock_transactions.reference_id ->
-// purchase_orders.id being unambiguous per article on receipt).
+// The same article may appear on several rows of a PO (split deliveries,
+// each row with its own dates). Everything that follows a receipt back to
+// its row goes through purchase_receipts.purchase_order_row_id, never
+// through (order, article).
 export const purchaseOrderRows = pgTable(
   "purchase_order_rows",
   {
@@ -337,7 +341,7 @@ export const purchaseOrderRows = pgTable(
     confirmedDeliveryDate: date("confirmed_delivery_date"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique().on(table.purchaseOrderId, table.articleId)]
+  (table) => [index("idx_purchase_order_rows_order_article").on(table.purchaseOrderId, table.articleId)]
 );
 
 // Inleveranslogg per inköpsorder: one row per receipt (Ta emot leverans /

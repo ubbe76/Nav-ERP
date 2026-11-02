@@ -329,7 +329,7 @@ describe("planning service — subcontract (lego) proposals", () => {
     expect(result.errors).toEqual([]);
   });
 
-  it("splits two lego operations on the SAME article into separate orders (one row per article per PO)", async () => {
+  it("puts two lego operations on the SAME article on one order as two rows", async () => {
     const orders: { id: string; rows: string[] }[] = [];
     const service = createPlanningService(
       makeRepo({
@@ -375,8 +375,10 @@ describe("planning service — subcontract (lego) proposals", () => {
       "user-1"
     );
 
-    expect(orders.map((o) => o.rows)).toEqual([["op-1"], ["op-2"]]);
-    expect(result.purchaseOrders).toHaveLength(2);
+    expect(orders.map((o) => o.rows)).toEqual([["op-1", "op-2"]]);
+    expect(result.purchaseOrders).toEqual([
+      { id: "po-1", orderNumber: "IO-1", supplierId: "sup-lego", supplierName: "Lego AB", rowCount: 2 },
+    ]);
   });
 
   it("reports an error for an operation without supplier and one that no longer exists", async () => {

@@ -36,7 +36,6 @@ import type {
 import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js";
 import type { Tx } from "@navet/db";
 import type { RowConfigurationMutationResult, SalesRepository, SalesRowWrite } from "../repository/sales.repository.js";
-import { ROW_ARTICLE_UNIQUE } from "../repository/sales.repository.js";
 import type { PriceResolution } from "./price-resolver.js";
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
@@ -112,7 +111,6 @@ import {
   PriceNotFoundError,
   PriceListCurrencyLockedError,
   RowConfigurationLockedError,
-  RowVariantExistsError,
   SalesOrderCurrencyLockedError,
   SalesOrderExchangeRateError,
 } from "./sales.errors.js";
@@ -390,11 +388,7 @@ function withoutConfigurationCost<T extends { configurationCost?: unknown }>(row
 // Ändra konfiguration (4b): one mapping from the repository's refusal
 // reasons to errors, shared by the variant branch's unlocked pre-read and
 // the locked re-check so both raise the identical RowConfigurationLockedError.
-function throwRowConfigurationFailure(
-  result: Extract<RowConfigurationMutationResult, { ok: false }>,
-  rowId: string,
-  articleNumber: string
-): never {
+function throwRowConfigurationFailure(result: Extract<RowConfigurationMutationResult, { ok: false }>, rowId: string): never {
   switch (result.reason) {
     case "row_not_found":
       throw new SalesOrderRowNotFoundError(rowId);
@@ -406,8 +400,6 @@ function throwRowConfigurationFailure(
       throw new RowConfigurationLockedError("raden har en tillverkningsorder");
     case "invoice_row":
       throw new RowConfigurationLockedError("raden är fakturerad");
-    case "variant_exists":
-      throw new RowVariantExistsError(articleNumber, "variant");
   }
 }
 
@@ -527,24 +519,25 @@ export function createSalesService(
     const article = await articleFiles.getArticle(articleId);
     return roundUpToMultiple(baseQuantity, article?.rounding);
   }
-  async function articleNumberOf(articleId: string) {
-    return (await articleFiles.getArticle(articleId))?.articleNumber ?? articleId;
-  }
-  // The first article that two ordinary rows (configuration null) share —
-  // what the partial unique index sales_order_rows_order_article_unique refuses.
-  // A duplicate that a configuration resolved to (a variant row) is named a
-  // variant; any other is an ordinary article twice.
-  function duplicateKind(inputs: readonly { configuration?: unknown }[], rows: SalesRowWrite[], articleId: string): "variant" | "article" {
-    return rows.some((r, i) => r.articleId === articleId && inputs[i]?.configuration) ? "variant" : "article";
-  }
-  function firstDuplicateArticleId(rows: SalesRowWrite[]): string | null {
-    const seen = new Set<string>();
-    for (const row of rows) {
-      if (row.configuration) continue;
-      if (seen.has(row.articleId)) return row.articleId;
-      seen.add(row.articleId);
-    }
-    return null;
+  // The row_added audit entry shared by addRow and setFreightRow.
+  async function logRowAdded(
+    orderNumber: string,
+    row: { articleId: string; quantityOrdered: string; unitPrice: string; discountPercent: string },
+    userId?: string | null
+  ) {
+    const article = await articleFiles.getArticle(row.articleId);
+    await audit.log({
+      entityType: "sales_order_row",
+      entityId: orderNumber,
+      action: "row_added",
+      detail: {
+        articleNumber: article?.articleNumber ?? null,
+        quantity: row.quantityOrdered,
+        unitPrice: row.unitPrice,
+        discountPercent: row.discountPercent,
+      },
+      userId: userId ?? null,
+    });
   }
   async function resolveRowInput<
     T extends {
@@ -1161,37 +1154,22 @@ export function createSalesService(
       // lock BEFORE the order's transaction, so they outlive a quote that
       // fails afterwards — by design (spec): a variant is an ordinary,
       // reusable article, and the next order for the same choices reuses it.
+      // The same article may appear on several rows (two configurations
+      // resolving to one variant included) — each stays its own row.
       const rows = await Promise.all(input.rows.map((r) => resolveRowInput(pricing, r, createdBy)));
-      // Two ordinary rows (incl. resolved variant rows) on the same article
-      // would hit the partial unique index sales_order_rows_order_article_unique;
-      // refuse with the domain error up front. Configured beställningsvara
-      // rows (configuration set) may repeat.
-      const duplicate = firstDuplicateArticleId(rows);
-      if (duplicate) throw new RowVariantExistsError(await articleNumberOf(duplicate), duplicateKind(input.rows, rows, duplicate));
       const quoteValidUntil = await resolveQuoteValidUntil(input);
       // Kostnadsställen och projekt on the header: must exist and be pickable.
       const dimensions = await repo.resolveDimensions({ costCenterId: input.costCenterId, projectId: input.projectId });
-      let created;
-      try {
-        // Avvikelser (Skapa ersättningsorder): the case link in the order's
-        // own transaction.
-        const deviationId = input.deviationId;
-        created = await repo.createQuote(
-          { ...input, ...dimensions, rows, quoteValidUntil, currency, exchangeRate },
-          createdBy,
-          deviationId
-            ? (tx, orderId) => linkDeviationInTx(tx, { deviationId, documentType: "sales_order", documentId: orderId, userId: createdBy })
-            : undefined
-        );
-      } catch (err) {
-        // Backstop for the index, caught outside the repository's transaction
-        // (which has already rolled back).
-        if (isUniqueViolation(err, ROW_ARTICLE_UNIQUE)) {
-          const id = firstDuplicateArticleId(rows);
-          throw new RowVariantExistsError(id ? await articleNumberOf(id) : "(okänd)", id ? duplicateKind(input.rows, rows, id) : "article");
-        }
-        throw err;
-      }
+      // Avvikelser (Skapa ersättningsorder): the case link in the order's
+      // own transaction.
+      const deviationId = input.deviationId;
+      const created = await repo.createQuote(
+        { ...input, ...dimensions, rows, quoteValidUntil, currency, exchangeRate },
+        createdBy,
+        deviationId
+          ? (tx, orderId) => linkDeviationInTx(tx, { deviationId, documentType: "sales_order", documentId: orderId, userId: createdBy })
+          : undefined
+      );
       const result = { order: created.order, rows: created.rows.map(withoutConfigurationCost) };
       if (!input.confirm) return result;
       // "Ny kundorder": run the normal quote → confirmed transition right
@@ -1263,35 +1241,11 @@ export function createSalesService(
       }
       const pricing = orderPricing(order);
       const write = await resolveRowInput(pricing, input, userId ?? null);
-      let row;
-      try {
-        // Valuta: the repository re-reads the currency under the order's key
-        // lock and refuses a row priced in a currency the order no longer has.
-        row = await repo.addRow(salesOrderId, write, pricing.currency);
-      } catch (err) {
-        // The article (e.g. the variant a configuration resolved to) already
-        // sits on the order as an ordinary row — the partial unique index,
-        // caught outside the repository's (rolled back) transaction.
-        // A configured input that hits the index resolved to a variant (a
-        // beställningsvara row is exempt from it).
-        if (isUniqueViolation(err, ROW_ARTICLE_UNIQUE)) {
-          throw new RowVariantExistsError(await articleNumberOf(write.articleId), input.configuration ? "variant" : "article");
-        }
-        throw err;
-      }
-      const article = await articleFiles.getArticle(row.articleId);
-      await audit.log({
-        entityType: "sales_order_row",
-        entityId: order.orderNumber,
-        action: "row_added",
-        detail: {
-          articleNumber: article?.articleNumber ?? null,
-          quantity: row.quantityOrdered,
-          unitPrice: row.unitPrice,
-          discountPercent: row.discountPercent,
-        },
-        userId: userId ?? null,
-      });
+      // Valuta: the repository re-reads the currency under the order's key
+      // lock and refuses a row priced in a currency the order no longer has.
+      // An article already on the order simply gets a second row.
+      const row = await repo.addRow(salesOrderId, write, pricing.currency);
+      await logRowAdded(order.orderNumber, row, userId);
       return withoutConfigurationCost(row);
     },
 
@@ -1497,7 +1451,7 @@ export function createSalesService(
         // live TO, order status) is refused here first, before any variant
         // exists. Advisory: the locked re-check below remains the authority.
         const preRead = await repo.readRowConfigurationLock(salesOrderId, rowId);
-        if (!preRead.ok) throwRowConfigurationFailure(preRead, rowId, beforeNumber);
+        if (!preRead.ok) throwRowConfigurationFailure(preRead, rowId);
         const { article: variant } = await rowConfiguration.resolveVariant(variantOf.templateArticleId, input.selection, userId ?? null);
         const resolution = await resolvePrice({
           customerId: order.customerId,
@@ -1521,7 +1475,7 @@ export function createSalesService(
       }
 
       const result = await repo.replaceRowConfiguration(salesOrderId, rowId, next, input.bumpRevision !== false);
-      if (!result.ok) throwRowConfigurationFailure(result, rowId, next.articleNumber);
+      if (!result.ok) throwRowConfigurationFailure(result, rowId);
       await audit.log({
         entityType: "sales_order_row",
         entityId: order.orderNumber,
@@ -1548,23 +1502,32 @@ export function createSalesService(
 
     // Frakt på offert: the order's freight row (the configured freight
     // article) gets this price — added with quantity 1, or repriced when the
-    // order already has one (one row per article per order). Goes through
-    // addRow/updateRow so status guards, revision and audit stay identical.
-    // Valuta: input.unitPrice is the kundpris in SEK (Sendify's price plus
-    // the markup); an order in another currency gets it converted with the
-    // order's rate (fromSek).
+    // order already has one. The same article may sit on several rows, so
+    // the single freight row is found-or-added under the order's row lock
+    // (repo.findOrAddArticleRow — ordinary rows only, never a
+    // ställkostnadsrad); two concurrent "Lägg till frakt" thus give one row,
+    // which the loser reprices. Status guard, revision and audit are those
+    // of addRow/updateRow. Valuta: input.unitPrice is the kundpris in SEK
+    // (Sendify's price plus the markup); an order in another currency gets
+    // it converted with the order's rate (fromSek).
     async setFreightRow(salesOrderId: string, input: { articleId: string; unitPrice: number }, userId?: string | null) {
       const order = await repo.findSalesOrderById(salesOrderId);
       if (!order) throw new SalesOrderNotFoundError(salesOrderId);
+      if (order.status !== "quote" && order.status !== "confirmed" && order.status !== "in_production") {
+        throw new InvalidStatusTransitionError(`Cannot add rows to an order in status "${order.status}"`);
+      }
       const unitPrice = order.currency === SEK ? input.unitPrice : fromSek(input.unitPrice, Number(order.exchangeRate));
       // Frakt etapp 2: the freight of this order's följesedel is already on
       // an invoice as a shipment row — neither a new order freight row nor a
       // repriced one may bill the same transport again.
       const invoiced = await repo.invoicedShipmentForOrder(salesOrderId);
       if (invoiced) throw new FreightAlreadyInvoicedError(invoiced.shipmentNumber);
-      const existing = (await repo.listRowsByOrder(salesOrderId)).find((r) => r.articleId === input.articleId);
-      if (!existing) {
-        return this.addRow(salesOrderId, { articleId: input.articleId, quantity: 1, unitPrice, discountPercent: 0 }, userId);
+      const pricing = orderPricing(order);
+      const write = await resolveRowInput(pricing, { articleId: input.articleId, quantity: 1, unitPrice, discountPercent: 0 }, userId ?? null);
+      const { row: existing, created } = await repo.findOrAddArticleRow(salesOrderId, write, pricing.currency);
+      if (created) {
+        await logRowAdded(order.orderNumber, existing, userId);
+        return withoutConfigurationCost(existing);
       }
       if (Number(existing.quantityDelivered) > 0) throw new FreightRowDeliveredError();
       const { row } = await this.updateRow(salesOrderId, existing.id, { unitPrice, discountPercent: 0 }, userId);

@@ -94,9 +94,8 @@ async function seedStock(articleId: string, locationId: string, quantity: number
   });
 }
 
-// Two rows on one order (the unique (order, article) index forces two
-// distinct articles), stocked and pushed to in_production so deliverBatch's
-// status guard passes.
+// Two rows (two articles) on one order, stocked and pushed to in_production
+// so deliverBatch's status guard passes.
 async function makeOrderWithTwoRows(quantityA = 10, quantityB = 5) {
   const user = await makeUser();
   const customer = await makeCustomer();
@@ -126,6 +125,40 @@ async function makeOrderWithTwoRows(quantityA = 10, quantityB = 5) {
 }
 
 describe("delivery occasions — batch delivery", () => {
+  // Samma artikel flera gånger (0177): addRow of an article already on the
+  // order gives a second row, and deliverBatch — keyed by row id — delivers
+  // the two rows independently.
+  it("the same article on two rows: a second row, delivered row by row", async () => {
+    const user = await makeUser();
+    const customer = await makeCustomer();
+    const article = await makeArticle();
+    const location = await makeLocation();
+    await seedStock(article.id, location.id, 15);
+    const { order, rows } = await salesService.createQuote(
+      { customerId: customer.id, rows: [{ articleId: article.id, quantity: 10, unitPrice: 10 }] },
+      user.id
+    );
+    const second = await salesService.addRow(order.id, { articleId: article.id, quantity: 5, unitPrice: 10, expectedDeliveryDate: "2030-04-01" }, user.id);
+    expect(second.id).not.toBe(rows[0]!.id);
+    expect((await salesService.listRows(order.id)).map((r) => [r.articleId, Number(r.quantityOrdered)])).toEqual([
+      [article.id, 10],
+      [article.id, 5],
+    ]);
+    await salesService.confirm(order.id);
+    await salesService.startProduction(order.id);
+
+    const first = await salesService.deliverBatch(order.id, { locationId: location.id, rows: [{ rowId: second.id, quantity: 5 }] }, user.id);
+    expect(first.orderStatus).toBe("in_production");
+    let after = await salesService.listRows(order.id);
+    expect(after.map((r) => r.quantityDelivered)).toEqual(["0.0000", "5.0000"]);
+
+    const last = await salesService.deliverBatch(order.id, { locationId: location.id, rows: [{ rowId: rows[0]!.id, quantity: 10 }] }, user.id);
+    expect(last.orderStatus).toBe("delivered");
+    after = await salesService.listRows(order.id);
+    expect(after.map((r) => r.quantityDelivered)).toEqual(["10.0000", "5.0000"]);
+    expect(await db.select().from(stockTransactions).where(eq(stockTransactions.referenceId, order.id))).toHaveLength(2);
+  });
+
   it("delivers two rows in one batch: one delivery with an FS-number, two delivery_rows, two stock rows, both rows updated", async () => {
     const { order, rowA, rowB, location, user } = await makeOrderWithTwoRows(10, 5);
 

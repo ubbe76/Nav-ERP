@@ -21,6 +21,7 @@ import {
   enteredQuantity,
   hasCounted,
   isScannableRow,
+  purchaseScanDate,
   resolveOrderScan,
   type OrderCountState,
   type OrderScanRow,
@@ -88,8 +89,9 @@ export function GoodsReceiptPageClient({
         scannable: isScannableRow(r),
         // The over-receipt tolerance is the server's to apply.
         max: null,
+        date: purchaseScanDate(r, order),
       })),
-    [openRows]
+    [openRows, order]
   );
 
   const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats

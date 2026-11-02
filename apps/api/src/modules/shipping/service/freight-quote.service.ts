@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import type { StoredRates } from "@navet/db";
 import type { ParcelInput } from "@navet/shared";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
-import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { productKey, type ShippingRepository } from "../repository/shipping.repository.js";
 import type { FreightSettingsService } from "./freight-settings.service.js";
 import { suggestParcels } from "./parcels.js";
@@ -146,16 +145,10 @@ export function createFreightQuoteService<S extends SalesFreightWriter>(deps: {
       // product link.
       if (!productId) throw new Error(`upsertFreightProducts returned no id for ${productKey(rate)}`);
       const customerPrice = customerPriceFor(rate.price, freight.markupPercent, freight.markupAmount);
-      const row = { articleId: freight.freightArticleId, unitPrice: customerPrice };
-      try {
-        await sales.setFreightRow(order.id, row, userId);
-      } catch (err) {
-        // Two "Lägg till frakt" at once: the other one inserted the freight
-        // row between our read and our insert. A second call finds that row
-        // and reprices it instead.
-        if (!isUniqueViolation(err)) throw err;
-        await sales.setFreightRow(order.id, row, userId);
-      }
+      // Two "Lägg till frakt" at once: setFreightRow finds-or-adds the
+      // freight row under the order's lock, so the second call reprices the
+      // first one's row instead of adding another.
+      await sales.setFreightRow(order.id, { articleId: freight.freightArticleId, unitPrice: customerPrice }, userId);
       await repo.setOrderFreightProduct(order.id, productId, rate.price);
       await audit.log({
         entityType: "sales_order",

@@ -778,7 +778,8 @@ function AddRowForm({
               <option value="">— Ingen matchning —</option>
               {matchOptions.map((o) => (
                 <option key={o.id} value={o.id}>
-                  {o.orderNumber} · {formatMoney(o.unitPrice)} {o.currency}
+                  {o.orderNumber} · {formatQuantity(o.quantity)} à {formatMoney(o.unitPrice)} {o.currency}
+                  {o.deliveryDate ? ` · leverans ${o.deliveryDate}` : ""}
                 </option>
               ))}
             </Select>

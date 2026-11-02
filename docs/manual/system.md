@@ -279,7 +279,7 @@ POST /api/v1/quotes
                                   "configuration": { "selection": { "FARG": "BL", "BREDD": 1200 } } } ] }
 ```
 
-- Mall i läget **Variantartiklar**: systemet hämtar variantartikeln för valet eller skapar den (med mallens grundenhet och alternativa enheter, så `unitId` kan vara en av mallens enheter) och raden blir en vanlig rad på varianten, med variantens pris. Samma val igen återanvänder samma artikel. Två rader med samma variant på en order ger 409 `row-variant-exists`.
+- Mall i läget **Variantartiklar**: systemet hämtar variantartikeln för valet eller skapar den (med mallens grundenhet och alternativa enheter, så `unitId` kan vara en av mallens enheter) och raden blir en vanlig rad på varianten, med variantens pris. Samma val igen återanvänder samma artikel. Samma variant får ligga på flera rader på en order.
 - Mall i läget **Beställningsvara**: raden ligger kvar på mallen och sparar valen, etiketterna och prisuppdelningen. Samma mall kan ligga flera gånger med olika val.
 - Pris och rabatt kommer ur utvärderingen (kundens priser och staffel räknas in) om raden inte anger eget `unitPrice`. Ett val som lämnade en valfri grupp tom behåller den tom även om mallen senare får ett förval; blir gruppen obligatorisk måste raden ändras med **Ändra konfiguration**.
 
@@ -302,7 +302,6 @@ Offertens huvud kan även bära kundens egna referenser: `customerInquiryNumber`
 | `price-not-found` | 400 | Raden saknar `unitPrice` och inget pris hittades (mallen saknar grundpris och kunden har inget eget pris) |
 | `invalid-unit` | 400 | `unitId` är varken artikelns grundenhet eller en av dess alternativa enheter |
 | `delivery-address-not-found` | 400 | `deliveryAddressId` hör inte till kunden |
-| `row-variant-exists` | 409 | Samma variant ligger redan på ordern |
 | `configurator-variant-number-taken` / `configurator-variant-number-race` | 409 | Variantens artikelnummer är upptaget (nu eller av ett samtidigt anrop) — försök igen |
 | `customer-not-found` | 404 | `customerId` finns inte |
 | `client-scope-missing` | 403 | Klienten saknar rättigheten för anropet (se [Rättigheter och kund](#rattigheter-och-kund)) |

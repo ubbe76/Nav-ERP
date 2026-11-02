@@ -7,7 +7,6 @@ import {
   ConfigurationRequiredError,
   PriceNotFoundError,
   RowConfigurationOutdatedError,
-  RowVariantExistsError,
 } from "../src/modules/sales/service/sales.errors.js";
 import { ConfiguratorInvalidConfigurationError, ConfiguratorNotToOrderModeError } from "../src/modules/configurator/service/configurator.errors.js";
 import { makeArticle } from "./helpers/configurator.js";
@@ -68,7 +67,7 @@ describe("configured rows — create", () => {
     expect(await rowsOf(order.id)).toHaveLength(3);
   });
 
-  it("ordinary rows keep the duplicate guard, and the freight row is still found by article", async () => {
+  it("an ordinary article may repeat as a second row, and the freight row is still found by article", async () => {
     const { article } = await buildToOrder();
     const plain = await makeArticle({ salesPrice: 100 });
     const frakt = await makeArticle({ salesPrice: 0 });
@@ -80,16 +79,15 @@ describe("configured rows — create", () => {
       } as never,
       null
     );
-    const dup = await salesService.addRow(order.id, { articleId: plain.id, quantity: 1 } as never).catch((e: unknown) => e);
-    // The partial unique index, surfaced as the domain error (409 over HTTP).
-    expect(dup).toBeInstanceOf(RowVariantExistsError);
-    // An ordinary duplicate row is not a variant: neutral wording (Ändra konfiguration says "Varianten …").
-    expect((dup as Error).message).toBe(`Artikeln ${plain.articleNumber} ligger redan som rad på ordern`);
+    // Samma artikel flera gånger: a second row, never a merge.
+    const dup = await salesService.addRow(order.id, { articleId: plain.id, quantity: 2 } as never);
+    expect(dup.articleId).toBe(plain.id);
+    expect((await rowsOf(order.id)).filter((r) => r.articleId === plain.id).map((r) => Number(r.quantityOrdered))).toEqual([1, 2]);
     const added = await salesService.setFreightRow(order.id, { articleId: frakt.id, unitPrice: 250 });
     const repriced = await salesService.setFreightRow(order.id, { articleId: frakt.id, unitPrice: 300 });
     expect(repriced.id).toBe(added.id);
     expect(Number(repriced.unitPrice)).toBe(300);
-    expect(await rowsOf(order.id)).toHaveLength(3);
+    expect(await rowsOf(order.id)).toHaveLength(4);
   });
 
   it("the customer's chain on the template and the discount flow into the row; two customers differ", async () => {

@@ -832,6 +832,9 @@ export interface PriceHistoryEntry {
   unitPrice: string;
   currency: string;
   quantity: string;
+  // The row's effective arrival date (bekräftat before önskat, row before
+  // order) — null when neither the row nor the order has one.
+  deliveryDate: string | null;
 }
 
 // Fakturaunderlag: one received purchase order awaiting a supplier invoice.

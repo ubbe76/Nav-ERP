@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { articles, auditLog, configuratorVariants, db, invoiceRows, invoices, manufacturingOrders, salesOrders } from "@navet/db";
 import type { OrderRowConfiguration } from "@navet/shared";
-import { ConfigurationNotAllowedError, RowConfigurationLockedError, RowVariantExistsError } from "../src/modules/sales/service/sales.errors.js";
+import { ConfigurationNotAllowedError, RowConfigurationLockedError } from "../src/modules/sales/service/sales.errors.js";
 import { ConfiguratorNotToOrderModeError, ConfiguratorTemplateNotFoundError } from "../src/modules/configurator/service/configurator.errors.js";
 import { makeArticle } from "./helpers/configurator.js";
 import {
@@ -205,7 +205,7 @@ describe("Ändra konfiguration — variantrad", () => {
     expect(await db.select().from(configuratorVariants)).toHaveLength(2);
   });
 
-  it("the new variant already on the order as a plain row ⇒ RowVariantExistsError", async () => {
+  it("the new variant already on the order as a plain row ⇒ two rows on the variant", async () => {
     const s = await buildVariants();
     const c = await makeCustomer();
     const { article: a } = await configurator.resolveVariant(s.template.id, { LOCK: "A", BREDD: 1200 }, null);
@@ -217,13 +217,13 @@ describe("Ändra konfiguration — variantrad", () => {
     // Picked by article, never by position.
     const rowA = (await salesService.listRows(order.id)).find((r) => r.articleId === a.id)!;
     expect(rowA).toBeDefined();
-    const err = await salesService.setRowConfiguration(order.id, rowA.id, { selection: { LOCK: "B", BREDD: 1200 } }, null).catch((e) => e);
-    expect(err).toBeInstanceOf(RowVariantExistsError);
-    expect((err as Error).message).toBe(`Varianten ${b.articleNumber} ligger redan som rad på ordern`);
+    const res = await salesService.setRowConfiguration(order.id, rowA.id, { selection: { LOCK: "B", BREDD: 1200 } }, null);
+    expect(res.row.articleId).toBe(b.id);
+    // Samma artikel flera gånger: the order now carries variant B twice.
     const after = await salesService.listRows(order.id);
-    expect(after.find((r) => r.id === rowA.id)!.articleId).toBe(a.id);
-    expect(after.map((r) => r.articleId).sort()).toEqual([a.id, b.id].sort());
-    expect(await auditRows("row_configuration_changed")).toHaveLength(0);
+    expect(after.find((r) => r.id === rowA.id)!.articleId).toBe(b.id);
+    expect(after.map((r) => r.articleId)).toEqual([b.id, b.id]);
+    expect(await auditRows("row_configuration_changed")).toHaveLength(1);
   });
 
   it("a locked variant row (invoice row) is refused BEFORE a new variant is created", async () => {

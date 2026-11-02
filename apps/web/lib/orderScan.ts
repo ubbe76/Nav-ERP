@@ -21,19 +21,48 @@ type OrderKind = "purchaseOrder" | "salesOrder";
 // left out of the counting and keeps its remaining amount. `max` is the most
 // this booking may hold, in the row's unit: Utleverans' remaining amount plus
 // the customer's Tillåten överleverans (#24); null = no cap here, the server
-// decides (Inleverans, or a customer without limit).
+// decides (Inleverans, or a customer without limit). `date` is the row's
+// effective delivery date (YYYY-MM-DD; purchase: coalesce(row confirmed,
+// order confirmed, row requested, order requested), sales: coalesce(row,
+// order)) — with the same article on several rows, the earliest date is
+// counted first; null/omitted = undated, counted last.
 export interface OrderScanRow {
   id: string;
   articleId: string;
   remaining: number;
   scannable: boolean;
   max: number | null;
+  date?: string | null;
 }
 
 // Only tjänster have nothing to scan; a ställkostnadsrad follows the order
 // whatever article the setting points at.
 export function isScannableRow(row: { articleType?: string; setupForRowId?: string | null }): boolean {
   return row.articleType !== "service" && !row.setupForRowId;
+}
+
+// The row's effective delivery date for the scan order (see OrderScanRow.date).
+// Purchase: the confirmed date wins over the requested one, the row's own over
+// the order's.
+export function purchaseScanDate(
+  row: { confirmedDeliveryDate?: string | null; expectedDeliveryDate?: string | null },
+  order: { confirmedDeliveryDate?: string | null; expectedDeliveryDate?: string | null } | null
+): string | null {
+  return (
+    row.confirmedDeliveryDate ??
+    order?.confirmedDeliveryDate ??
+    row.expectedDeliveryDate ??
+    order?.expectedDeliveryDate ??
+    null
+  );
+}
+
+// Sales: the row's own Önskat leveransdatum, else the order's.
+export function salesScanDate(
+  row: { expectedDeliveryDate?: string | null },
+  order: { expectedDeliveryDate?: string | null } | null
+): string | null {
+  return row.expectedDeliveryDate ?? order?.expectedDeliveryDate ?? null;
 }
 
 export type OrderScanIntent<M extends OrderScanMatch, K extends OrderKind> =
@@ -119,13 +148,24 @@ export type CountOutcome =
   | { counted: true; state: OrderCountState; rowId: string; quantity: number; remaining: number; over: boolean };
 
 // One article scan adds 1 (in the row's unit) to the article's row. With the
-// same article on several open rows, the first row still short of its
-// remaining amount takes it; when all are full, the first row with room
-// under its `max` takes it, flagged `over` (past the remaining amount). No
-// row with room: the scan is refused (överplock). A fractional step fills up
-// to `max` (2.5 tillåtet, 2 räknade ⇒ 2.5).
+// same article on several open rows, the rows are taken by effective date
+// (earliest first, undated last, then the row order): the first such row
+// still short of its remaining amount takes it; when all are full, the first
+// row with room under its `max` takes it, flagged `over` (past the remaining
+// amount). No row with room: the scan is refused (överplock). A fractional
+// step fills up to `max` (2.5 tillåtet, 2 räknade ⇒ 2.5).
 export function countScan(rows: OrderScanRow[], state: OrderCountState, articleId: string): CountOutcome {
-  const candidates = rows.filter((r) => r.articleId === articleId && r.scannable);
+  // Array.prototype.sort is stable, so equal dates keep the row order.
+  const candidates = rows
+    .filter((r) => r.articleId === articleId && r.scannable)
+    .sort((a, b) => {
+      const da = a.date ?? null;
+      const db = b.date ?? null;
+      if (da === db) return 0;
+      if (da === null) return 1;
+      if (db === null) return -1;
+      return da < db ? -1 : 1;
+    });
   if (candidates.length === 0) return { counted: false };
   const current = (row: OrderScanRow) => Number(state.quantities[row.id] ?? 0) || 0;
   const row =

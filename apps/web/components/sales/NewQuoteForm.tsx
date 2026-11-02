@@ -8,6 +8,7 @@ import { ArticlePicker } from "../ui/ArticlePicker";
 import { ConfigureModal } from "../configurator/ConfigureModal";
 import { ConfigurationLineList } from "../configurator/ConfigurationLines";
 import type { ConfiguratorEvaluation, ResolveVariantResult, RowConfigurationDraft } from "../../lib/configurator";
+import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { SearchPicker } from "../ui/SearchPicker";
 import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
 import { apiFetch } from "../../lib/api";
@@ -33,7 +34,7 @@ import {
   emptyDeliveryAddressDraft,
   type DeliveryAddressDraft,
 } from "./DeliveryAddressChoice";
-import { Form, FormActions, FormError, FormHint, FormLineRow, FormLineRowTop, FormRow } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormLineRow, FormLineRowTop, FormNotice, FormRow } from "../ui/Form";
 
 interface CreateQuoteResponse {
   order: SalesOrder;
@@ -430,6 +431,8 @@ export function NewQuoteForm({
               currency={orderCurrency}
               exchangeRate={exchangeRate}
               pricingKnown={pricingKnown}
+              otherRows={rows.filter((_, i) => i !== index).map((r) => ({ articleId: r.article?.id ?? "", configuration: r.configuration }))}
+              documentWord={mode === "quote" ? "offerten" : "ordern"}
               canRemove={rows.length > 1}
               perRowDate={perRowDates}
               onChange={(patch) => updateRow(index, patch)}
@@ -490,6 +493,8 @@ function QuoteRowFields({
   currency,
   exchangeRate,
   pricingKnown,
+  otherRows,
+  documentWord,
   canRemove,
   perRowDate,
   onChange,
@@ -497,6 +502,9 @@ function QuoteRowFields({
 }: {
   index: number;
   row: QuoteRow;
+  // The article ids of the form's other rows, for the "already on" notice.
+  otherRows: { articleId: string; configuration: RowConfigurationDraft | null }[];
+  documentWord: "offerten" | "ordern";
   customerId: string | null;
   // Valuta: the order's currency and rate (1 for SEK; null = a foreign rate
   // that is not typed in yet, so nothing can be priced). pricingKnown is false
@@ -528,6 +536,8 @@ function QuoteRowFields({
   const [configureTemplate, setConfigureTemplate] = useState<Article | null>(null);
   const [configureKey, setConfigureKey] = useState(0);
   const [configureMode, setConfigureMode] = useState<"variants" | "to_order">("variants");
+
+  const alreadyOnDocument = alreadyOnDocumentText(otherRows, row.article?.id, documentWord);
 
   function handleArticleChange(article: Article | null) {
     if (article?.configuratorMode === "variants" || article?.configuratorMode === "to_order") {
@@ -662,6 +672,7 @@ function QuoteRowFields({
           ✕
         </Button>
       </FormLineRowTop>
+      {alreadyOnDocument && <FormNotice>{alreadyOnDocument}</FormNotice>}
       {row.variantInfo && (
         <FormHint>
           Varianten <strong>{row.variantInfo.articleNumber}</strong> {row.variantInfo.created ? "skapades" : "fanns redan"}

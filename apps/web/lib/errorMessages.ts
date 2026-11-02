@@ -393,9 +393,6 @@ const MESSAGES: Record<string, MessageEntry> = {
   "operation-has-linked-material":
     "Operationen har material kopplat till sig och kan inte märkas Kalkyl — ta bort operationskopplingen på strukturraden först.",
   "costing-only-operation-link": "Operationen är en kalkyloperation och kan inte dra material.",
-  "duplicate-inquiry-row": "Artikeln finns redan på förfrågan — lägg operationen på en egen förfrågan.",
-  "duplicate-purchase-order-row":
-    "Artikeln finns redan på inköpsordern — ändra antalet på den raden, eller lägg en legooperation på en egen inköpsorder.",
   // system
   "series-exhausted": "Nummerserien är full — kontrollera nummerserien under System.",
   "duplicate-number-series-name": "Det finns redan en nummerserie med det namnet.",
@@ -544,8 +541,6 @@ const MESSAGES: Record<string, MessageEntry> = {
     "Mallen har ändrats sedan raden konfigurerades — öppna Ändra konfiguration och spara valen innan antalet ändras.",
   "row-configuration-changed":
     "Raden konfigurerades om medan tillverkningsordern skapades — kontrollera raden och försök igen, eller använd Ändra konfiguration.",
-  // The server says which: "Varianten …" from Ändra konfiguration, "Artikeln …" for an ordinary duplicate row.
-  "row-variant-exists": serverMessage("Artikeln ligger redan som rad på ordern."),
   "work-center-not-found": "Resursen finns inte.",
   // Ångra rapportering / Makulera order (TO)
   "mo-report-not-found": "Rapporteringen finns inte — ladda om sidan.",

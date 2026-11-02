@@ -9,7 +9,6 @@ import { ConfiguratorInvalidConfigurationError } from "../src/modules/configurat
 import { createOAuthRepository } from "../src/modules/oauth/repository/oauth.repository.js";
 import { createOAuthService } from "../src/modules/oauth/service/oauth.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
-import { RowVariantExistsError } from "../src/modules/sales/service/sales.errors.js";
 import { makeArticle } from "./helpers/configurator.js";
 import { testArticleService } from "./helpers/services.js";
 import { buildVariants, configurator, makeCustomer, makeUser, resetConfiguredRows, salesService } from "./helpers/configured-rows.js";
@@ -92,29 +91,30 @@ describe("variant mode in the row path (service)", () => {
     expect(await salesService.listRows(order.id)).toHaveLength(2);
   });
 
-  // Review Focus 3: the variant is created once (under the template lock);
-  // the second row is the same ordinary row as the first — refused with the
-  // domain error the unique index stands for, and no quote is left.
-  it("two rows with the same new combination in one createQuote: one variant, no order, RowVariantExistsError", async () => {
+  // The variant is created once (under the template lock); the second row
+  // resolves to the same variant and becomes a second row on it — the same
+  // article may sit on several rows.
+  it("two rows with the same new combination in one createQuote: one variant, one order with two rows on it", async () => {
     const { template } = await buildVariants();
     const c = await makeCustomer();
-    const err = await salesService
-      .createQuote(
-        {
-          customerId: c.id,
-          rows: [
-            { articleId: template.id, quantity: 1, configuration: { selection: SEL } },
-            { articleId: template.id, quantity: 3, configuration: { selection: SEL } },
-          ],
-        } as never,
-        null
-      )
-      .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(RowVariantExistsError);
+    const { order, rows } = await salesService.createQuote(
+      {
+        customerId: c.id,
+        rows: [
+          { articleId: template.id, quantity: 1, configuration: { selection: SEL } },
+          { articleId: template.id, quantity: 3, configuration: { selection: SEL } },
+        ],
+      } as never,
+      null
+    );
     const [variant] = await db.select().from(articles).where(eq(articles.articleNumber, `${template.articleNumber}-B-1200`));
-    expect((err as Error).message).toBe(`Varianten ${variant!.articleNumber} ligger redan som rad på ordern`);
+    expect(rows.map((r) => [r.articleId, Number(r.quantityOrdered)])).toEqual([
+      [variant!.id, 1],
+      [variant!.id, 3],
+    ]);
     expect(await variantRows()).toHaveLength(1);
-    expect(await orderCount()).toBe(0);
+    expect(await orderCount()).toBe(1);
+    expect(await salesService.listRows(order.id)).toHaveLength(2);
   });
 
   it("an invalid selection on the variants template is the configurator's 400 error and creates no quote", async () => {
@@ -284,8 +284,8 @@ describe("POST /quotes — the publishing check for API clients", () => {
     expect([rowRes.statusCode, rowRes.json().code]).toEqual([400, "invalid-unit"]);
   });
 
-  // Review Focus 3 over HTTP: "samma 409 som i dag", never a 500.
-  it("two identical configured rows in one client POST /quotes are 409 row-variant-exists: one variant, no order", async () => {
+  // Over HTTP: two identical configurations are two rows on one variant.
+  it("two identical configured rows in one client POST /quotes are 201: one variant, an order with two rows on it", async () => {
     const { client } = await actors();
     const { template } = await buildVariants();
     await configurator.updateTemplate(template.id, { published: true });
@@ -297,12 +297,15 @@ describe("POST /quotes — the publishing check for API clients", () => {
         { articleId: template.id, quantity: 2, configuration: { selection: SEL } },
       ],
     });
-    expect([res.statusCode, res.json().code]).toEqual([409, "row-variant-exists"]);
+    expect(res.statusCode).toBe(201);
     expect(await variantRows()).toHaveLength(1);
-    expect(await orderCount()).toBe(0);
+    expect(await orderCount()).toBe(1);
+    const rows = res.json().rows as { articleId: string; quantityOrdered: string }[];
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.articleId)).size).toBe(1);
   });
 
-  it("POST /sales-orders/:id/rows with a configuration whose variant is already on the order is 409 row-variant-exists", async () => {
+  it("POST /sales-orders/:id/rows with a configuration whose variant is already on the order is 201 and a second row", async () => {
     const { session } = await actors();
     const { template } = await buildVariants();
     const c = await makeCustomer();
@@ -315,9 +318,11 @@ describe("POST /quotes — the publishing check for API clients", () => {
       headers: session,
       payload: { articleId: template.id, quantity: 2, configuration: { selection: SEL } },
     });
-    expect([res.statusCode, res.json().code]).toEqual([409, "row-variant-exists"]);
+    expect(res.statusCode).toBe(201);
     expect(await variantRows()).toHaveLength(1);
-    expect(await salesService.listRows(orderId)).toHaveLength(1);
+    const rows = await salesService.listRows(orderId);
+    expect(rows.map((r) => Number(r.quantityOrdered))).toEqual([1, 2]);
+    expect(new Set(rows.map((r) => r.articleId)).size).toBe(1);
   });
 
   // Review Focus 4: the web's Ny kundorder posts to the same route with a session.

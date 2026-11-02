@@ -272,35 +272,45 @@ describe("addFreight", () => {
     expect(await quotes.get(order.id)).toEqual({ freightProduct: null, carrierPrice: null, rates: null });
   });
 
-  // Two "Lägg till frakt" at once: the loser's insert hits
-  // sales_order_rows_order_article_unique (ordinary rows) and the row is
-  // repriced on a second call instead.
-  it("retries setFreightRow once on a unique violation, rethrows anything else", async () => {
+  // Two "Lägg till frakt" at once: the same article may sit on several
+  // rows, so nothing in the database stops a second freight row — the
+  // find-or-add under the order's lock in setFreightRow does. Both calls
+  // succeed, one freight row, repriced by whichever ran last.
+  it("two concurrent Lägg till frakt leave exactly one freight row", async () => {
     const { order } = await goodsOrder();
     const view = await quotes.fetchRates(order.id, [PARCEL]);
-    const rateId = view.rates[0]!.id;
+    const ups = view.rates.find((r) => r.carrierCode === "ups")!;
+    const dhl = view.rates.find((r) => r.carrierCode === "dhl")!;
 
-    let errors: Error[] = [Object.assign(new Error("dup"), { code: "23505" })];
-    let attempts = 0;
-    const stub = {
-      async setFreightRow() {
-        attempts++;
-        const err = errors.shift();
-        if (err) throw err;
-      },
-      async listRows() {
-        return "rows";
-      },
-    };
-    const racing = createFreightQuoteService({ repo, settings, sales: stub, audit, now });
+    const results = await Promise.allSettled([quotes.addFreight(order.id, ups.id, "user-1"), quotes.addFreight(order.id, dhl.id, "user-2")]);
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
 
-    await expect(racing.addFreight(order.id, rateId, null)).resolves.toBe("rows");
-    expect(attempts).toBe(2);
+    const freightRows = (await sales.listRows(order.id)).filter((r) => r.articleId === freightArticleId);
+    expect(freightRows).toHaveLength(1);
+    expect([572, 454]).toContain(Number(freightRows[0]!.unitPrice));
+    expect(auditEntries.filter((e) => e.action === "freight_added")).toHaveLength(2);
     expect((await readOrder(order.id)).freightProductId).not.toBeNull();
+  });
 
-    attempts = 0;
-    errors = [new Error("boom")];
-    await expect(racing.addFreight(order.id, rateId, null)).rejects.toThrow("boom");
-    expect(attempts).toBe(1);
+  // A ställkostnadsrad on the freight article does not count as the freight
+  // row: setFreightRow skips it and adds the order's own freight row.
+  it("setFreightRow skips a ställkostnadsrad on the freight article", async () => {
+    const { order, goods } = await goodsOrder();
+    const [goodsRow] = await db.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, order.id));
+    await db.insert(salesOrderRows).values({
+      salesOrderId: order.id,
+      articleId: freightArticleId,
+      quantityOrdered: "1",
+      unitPrice: "900",
+      setupForRowId: goodsRow!.id,
+    });
+    expect(goods).toBeDefined();
+    const row = await sales.setFreightRow(order.id, { articleId: freightArticleId, unitPrice: 454 }, null);
+    expect([row.setupForRowId, Number(row.unitPrice)]).toEqual([null, 454]);
+    const rows = await sales.listRows(order.id);
+    expect(rows.filter((r) => r.articleId === freightArticleId).map((r) => [r.setupForRowId !== null, Number(r.unitPrice)])).toEqual([
+      [true, 900],
+      [false, 454],
+    ]);
   });
 });

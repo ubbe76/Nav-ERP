@@ -412,8 +412,8 @@ export const salesOrders = pgTable("sales_orders", {
   check("sales_orders_rate_positive", sql`${table.exchangeRate} > 0`),
 ]);
 
-// One row per article per order for ordinary rows (same simplification as
-// purchase_order_rows); configured rows (4b) are exempt — see the index below.
+// The same article may appear on several rows (0177) — split deliveries with
+// their own dates; configured rows (4b) of one template may repeat too.
 export const salesOrderRows = pgTable(
   "sales_order_rows",
   {
@@ -451,20 +451,19 @@ export const salesOrderRows = pgTable(
     // quantity change.
     configurationCost: jsonb("configuration_cost"),
     // Ställkostnad: this row is the setup charge of the row it points at
-    // (the customer price's ställpris on the Ställkostnadsartikel). Exempt
-    // from the one-article-per-order index below, so several articles can
-    // each carry their own. set null: the charge stays a plain row if its
-    // article row goes (the service removes an undelivered one with it).
+    // (the customer price's ställpris on the Ställkostnadsartikel). The
+    // freight lookup (setFreightRow) skips these rows. set null: the charge
+    // stays a plain row if its article row goes (the service removes an
+    // undelivered one with it).
     setupForRowId: uuid("setup_for_row_id").references((): AnyPgColumn => salesOrderRows.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // One row per article per order for ORDINARY rows (the freight row is
-    // looked up by article); configured rows of the same template may repeat
-    // with different choices.
-    uniqueIndex("sales_order_rows_order_article_unique")
-      .on(table.salesOrderId, table.articleId)
-      .where(sql`${table.configuration} IS NULL AND ${table.setupForRowId} IS NULL`),
+    // The same article may sit on several rows (split deliveries with their
+    // own dates). Plain index: the row lookups by order need it; the single
+    // freight row is guarded by setFreightRow's find-or-add under the
+    // order's row lock, not by the database.
+    index("idx_sales_order_rows_order_article").on(table.salesOrderId, table.articleId),
   ]
 );
 

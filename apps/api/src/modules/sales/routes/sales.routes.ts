@@ -71,7 +71,6 @@ import {
   PriceNotFoundError,
   RowConfigurationLockedError,
   RowHasManufacturingOrdersError,
-  RowVariantExistsError,
   PriceListCurrencyLockedError,
   SalesOrderCurrencyChangedError,
   SalesOrderCurrencyLockedError,
@@ -456,9 +455,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         return reply.code(409).send(errorBody(err));
       }
       if (err instanceof ConfiguratorVariantTooLongError) return reply.code(400).send(errorBody(err));
-      // The article (e.g. the resolved variant) is already an ordinary row on
-      // the order, or the template left the variants mode meanwhile.
-      if (err instanceof RowVariantExistsError || err instanceof ConfiguratorNotVariantModeError) return reply.code(409).send(errorBody(err));
+      // The template left the variants mode meanwhile.
+      if (err instanceof ConfiguratorNotVariantModeError) return reply.code(409).send(errorBody(err));
       // Valuta: the order's currency changed while the row was priced.
       if (err instanceof SalesOrderCurrencyChangedError) {
         return reply.code(409).send({ ...errorBody(err), pricedIn: err.pricedIn, currency: err.currency });
@@ -511,9 +509,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof SalesOrderNotFoundError || err instanceof SalesOrderRowNotFoundError || err instanceof ConfiguratorTemplateNotFoundError) {
         return reply.code(404).send(errorBody(err));
       }
-      // The row has moved on, the variant is already a plain row on the
-      // order, or the template left to_order (Avvikelse 3).
-      if (err instanceof RowConfigurationLockedError || err instanceof RowVariantExistsError || err instanceof ConfiguratorNotToOrderModeError) {
+      // The row has moved on, or the template left to_order (Avvikelse 3).
+      if (err instanceof RowConfigurationLockedError || err instanceof ConfiguratorNotToOrderModeError) {
         return reply.code(409).send(errorBody(err));
       }
       // Neither a configured row nor a variant row; or the new configuration

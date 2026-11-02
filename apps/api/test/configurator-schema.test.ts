@@ -10,7 +10,6 @@ import {
   createConfiguratorOperationSchema, updateConfiguratorOperationSchema, createConfiguratorValueSchema, updateConfiguratorValueSchema,
   deriveConfigurationSchema, configuratorSelectionSchema, variantSetsSchema, isOnNumberStep,
 } from "@navet/shared";
-import { isUniqueViolation } from "../src/modules/system/service/db-errors.js";
 import { makeArticle, resetConfigurator } from "./helpers/configurator.js";
 
 // drizzle wraps the driver error: the constraint name sits on `cause`.
@@ -272,7 +271,10 @@ describe("sales_order_rows.configuration (4b)", () => {
     await db.execute(sql`TRUNCATE email_log, sales_order_rows, sales_orders, customers CASCADE`);
   });
 
-  it("two configured rows of the same article are allowed, two ordinary rows are not", async () => {
+  // Samma artikel flera gånger (0177): the former partial unique index on
+  // ordinary rows is gone — configured and ordinary rows of one article may
+  // both repeat.
+  it("two configured rows of the same article are allowed, and so are two ordinary rows", async () => {
     const article = await makeArticle();
     const [customer] = await db.insert(customers).values({ customerNumber: `K-${crypto.randomUUID().slice(0, 6)}`, name: "Kund" }).returning();
     const [order] = await db.insert(salesOrders).values({ orderNumber: `KO-${crypto.randomUUID().slice(0, 8)}`, customerId: customer!.id }).returning();
@@ -280,9 +282,8 @@ describe("sales_order_rows.configuration (4b)", () => {
     const row = (configuration: unknown) => ({ salesOrderId: order!.id, articleId: article.id, quantityOrdered: "1", unitPrice: "1000", configuration });
     await db.insert(salesOrderRows).values([row(cfg), row({ ...cfg, key: "LOCK=B" })]);
     await db.insert(salesOrderRows).values(row(null));
-    const err = await db.insert(salesOrderRows).values(row(null)).catch((e: unknown) => e);
-    expect(isUniqueViolation(err, "sales_order_rows_order_article_unique")).toBe(true);
-    expect(await db.select().from(salesOrderRows)).toHaveLength(3);
+    await db.insert(salesOrderRows).values(row(null));
+    expect(await db.select().from(salesOrderRows)).toHaveLength(4);
   });
 
   it("customers.show_configuration_prices defaults to false, email_log and invoice_rows accept null", async () => {

@@ -8,7 +8,6 @@ import { createPurchaseRepository } from "../src/modules/purchase/repository/pur
 import {
   createPurchaseService,
   DeliveryAddressNotFoundError,
-  DuplicatePurchaseOrderRowError,
   DuplicateSupplierNumberError,
   InquiryNotFoundError,
   InvalidStatusTransitionError,
@@ -167,12 +166,15 @@ describe("purchase service — order lifecycle", () => {
     ).rejects.toThrow(InvalidStatusTransitionError);
   });
 
-  it("refuses the same article twice on an order with a domain error, not the raw unique violation", async () => {
+  it("allows the same article on several rows of an order (a split delivery, each row with its own date)", async () => {
     const { order, article } = await makeOrderWithRow(10);
-    await expect(purchaseService.addRow(order.id, { articleId: article.id, quantity: 1, unitPrice: 1 })).rejects.toThrow(
-      DuplicatePurchaseOrderRowError
-    );
-    expect(await purchaseService.listRows(order.id)).toHaveLength(1);
+    const second = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 1, unitPrice: 1, expectedDeliveryDate: "2030-04-01" });
+    const rows = await purchaseService.listRows(order.id);
+    expect(rows.map((r) => [r.articleId, Number(r.quantityOrdered), r.expectedDeliveryDate])).toEqual([
+      [article.id, 10, null],
+      [article.id, 1, "2030-04-01"],
+    ]);
+    expect(second.articleId).toBe(article.id);
   });
 
   it("allows cancel from draft and from confirmed", async () => {
@@ -1109,7 +1111,6 @@ describe("purchase service — document terms (villkor)", () => {
     await purchaseService.updateRow(order.id, row.id, { quantity: 8 });
     expect((await purchaseService.getPurchaseOrder(order.id))!.revision).toBe(4);
 
-    // One row per article per order — the extra row needs its own article.
     const otherArticle = await makeArticle(`ART-REV-${crypto.randomUUID()}`);
     const extra = await purchaseService.addRow(order.id, { articleId: otherArticle.id, quantity: 1, unitPrice: 1 });
     await purchaseService.deleteRow(order.id, extra.id);
