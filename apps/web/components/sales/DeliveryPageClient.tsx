@@ -24,6 +24,7 @@ import {
   isScannableRow,
   leftToCount,
   resolveOrderScan,
+  salesScanDate,
   type OrderCountState,
   type OrderScanRow,
 } from "../../lib/orderScan";
@@ -105,8 +106,9 @@ export function DeliveryPageClient({
                 Number(r.quantityOrdered) * (1 + overDeliveryPercent / 100) - Number(r.quantityDelivered),
                 r.unitFactor
               ),
+        date: salesScanDate(r, order),
       })),
-    [openRows, overDeliveryPercent]
+    [openRows, overDeliveryPercent, order]
   );
   const scanRowOf = (row: SalesOrderRow) => scanRows.find((r) => r.id === row.id)!;
 

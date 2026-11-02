@@ -300,8 +300,6 @@ export const ERROR_CODES = {
   OPERATION_FILE_NOT_FOUND: "operation-file-not-found",
   INVALID_OPERATION_FILE_TYPE: "invalid-operation-file-type",
   MO_OPERATION_NOT_FOUND: "mo-operation-not-found",
-  DUPLICATE_INQUIRY_ROW: "duplicate-inquiry-row",
-  DUPLICATE_PURCHASE_ORDER_ROW: "duplicate-purchase-order-row",
   // system
   SERIES_EXHAUSTED: "series-exhausted",
   DUPLICATE_NUMBER_SERIES_NAME: "duplicate-number-series-name",
@@ -455,7 +453,6 @@ export const ERROR_CODES = {
   // A quantity change on a beställningsvara row whose stored choices the
   // template now resolves differently (a förval added since).
   ROW_CONFIGURATION_OUTDATED: "row-configuration-outdated",
-  ROW_VARIANT_EXISTS: "row-variant-exists",
   WORK_CENTER_NOT_FOUND: "work-center-not-found",
   // Ångra rapportering / Makulera order (TO)
   MO_REPORT_NOT_FOUND: "mo-report-not-found",

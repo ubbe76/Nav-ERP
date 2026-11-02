@@ -1823,107 +1823,91 @@ export function createPlanningService(
           : null;
 
       for (const [supplierId, group] of bySupplier) {
-        // Tidsfasade förslag: the supplier's rows in need-date order (undated
-        // last), and an article's n:th proposal on the supplier's n:th IO —
-        // purchase_order_rows_purchase_order_id_article_id_unique allows one
-        // row per article and order, so a second week of the same article
-        // opens a second draft IO. Most runs still give one IO per supplier.
-        // TODO: merge the buckets into one IO per supplier when "Samma
-        // artikel flera gånger på en order" (TODO.md, Förbättringar → Medel)
-        // lifts the unique index.
-        const sorted = [...group.rows].sort((a, b) =>
+        // Tidsfasade förslag: ONE draft IO per supplier with the rows in
+        // need-date order (undated last). An article with proposals in two
+        // weeks gets two rows on it, each with its own date — the same
+        // article may sit on several rows of an order.
+        const bucket = [...group.rows].sort((a, b) =>
           a.demandDate === b.demandDate ? 0 : a.demandDate === null ? 1 : b.demandDate === null ? -1 : a.demandDate < b.demandDate ? -1 : 1
         );
-        const buckets: PurchaseRow[][] = [];
-        const seen = new Map<string, number>();
-        for (const row of sorted) {
-          const n = seen.get(row.articleId) ?? 0;
-          seen.set(row.articleId, n + 1);
-          (buckets[n] ??= []).push(row);
+        // The order gets the earliest date; a row whose own date is later
+        // keeps it on the row (null = follows the order).
+        const dates = bucket.map((row) => {
+          const supplier = supplierByArticle.get(row.articleId)!;
+          return delivery
+            ? suggestPurchaseDeliveryDate({
+                demandDate: row.demandDate,
+                today,
+                leadTimeDays: supplier.leadTimeDays,
+                settings: effectiveDeliverySettings(supplier.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
+                offDays: delivery.offDays,
+              })
+            : { date: row.fallbackDate, late: false };
+        });
+        const orderDate = dates
+          .map((d) => d.date)
+          .filter((d): d is string => d !== null)
+          .sort()[0];
+
+        let order: { id: string; orderNumber: string };
+        try {
+          order = await deps.purchase.createPurchaseOrder(
+            { supplierId, exchangeRate: 1, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
+            createdBy
+          );
+        } catch (err) {
+          for (const row of bucket) pushError(row.articleId, errorMessage(err));
+          continue;
         }
-
-        for (const bucket of buckets) {
-          // The order gets the earliest date; a row whose own date is later
-          // keeps it on the row (null = follows the order).
-          const dates = bucket.map((row) => {
-            const supplier = supplierByArticle.get(row.articleId)!;
-            return delivery
-              ? suggestPurchaseDeliveryDate({
-                  demandDate: row.demandDate,
-                  today,
-                  leadTimeDays: supplier.leadTimeDays,
-                  settings: effectiveDeliverySettings(supplier.supplierDelivery ?? NO_PARTNER_SETTINGS, "supplier", delivery.defaults),
-                  offDays: delivery.offDays,
-                })
-              : { date: row.fallbackDate, late: false };
-          });
-          const orderDate = dates
-            .map((d) => d.date)
-            .filter((d): d is string => d !== null)
-            .sort()[0];
-
-          let order: { id: string; orderNumber: string };
+        let rowCount = 0;
+        for (const [i, row] of bucket.entries()) {
+          const { date: rowDate, late } = dates[i]!;
           try {
-            order = await deps.purchase.createPurchaseOrder(
-              { supplierId, exchangeRate: 1, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
-              createdBy
-            );
-          } catch (err) {
-            for (const row of bucket) pushError(row.articleId, errorMessage(err));
-            continue;
-          }
-          let rowCount = 0;
-          for (const [i, row] of bucket.entries()) {
-            const { date: rowDate, late } = dates[i]!;
-            try {
-              await deps.purchase.addRow(order.id, {
-                articleId: row.articleId,
-                quantity: row.quantity,
-                unitPrice: row.unitPrice,
-                ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
+            await deps.purchase.addRow(order.id, {
+              articleId: row.articleId,
+              quantity: row.quantity,
+              unitPrice: row.unitPrice,
+              ...(rowDate && rowDate !== orderDate ? { expectedDeliveryDate: rowDate } : {}),
+            });
+            rowCount += 1;
+            if (late && rowDate && row.demandDate && !row.reorderPoint) {
+              result.warnings.push({
+                orderNumber: order.orderNumber,
+                articleNumber: numberFor(row.articleId),
+                demandDate: row.demandDate,
+                deliveryDate: rowDate,
+                message: `Leveransen (${rowDate}) kommer efter behovet (${row.demandDate})`,
               });
-              rowCount += 1;
-              if (late && rowDate && row.demandDate && !row.reorderPoint) {
-                result.warnings.push({
-                  orderNumber: order.orderNumber,
-                  articleNumber: numberFor(row.articleId),
-                  demandDate: row.demandDate,
-                  deliveryDate: rowDate,
-                  message: `Leveransen (${rowDate}) kommer efter behovet (${row.demandDate})`,
-                });
-              }
-            } catch (err) {
-              pushError(row.articleId, errorMessage(err));
             }
+          } catch (err) {
+            pushError(row.articleId, errorMessage(err));
           }
-          if (rowCount === 0) {
-            // Every row failed — don't leave a rowless draft IO in the register
-            // and don't report it as created. Best-effort cancel; the row
-            // failures above are already reported per article.
-            try {
-              await deps.purchase.cancel(order.id);
-            } catch {
-              // The empty draft survives as junk, but the user already gets one
-              // error per row; a cancel failure has nothing actionable to add.
-            }
-            continue;
-          }
-          result.purchaseOrders.push({
-            id: order.id,
-            orderNumber: order.orderNumber,
-            supplierId,
-            supplierName: group.supplierName,
-            rowCount,
-          });
         }
+        if (rowCount === 0) {
+          // Every row failed — don't leave a rowless draft IO in the register
+          // and don't report it as created. Best-effort cancel; the row
+          // failures above are already reported per article.
+          try {
+            await deps.purchase.cancel(order.id);
+          } catch {
+            // The empty draft survives as junk, but the user already gets one
+            // error per row; a cancel failure has nothing actionable to add.
+          }
+          continue;
+        }
+        result.purchaseOrders.push({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          supplierId,
+          supplierName: group.supplierName,
+          rowCount,
+        });
       }
 
-      // --- Subcontract (lego) proposals: grouped per supplier into draft
-      // IOs like the purchase proposals, but keyed per MO OPERATION.
+      // --- Subcontract (lego) proposals: grouped per supplier into ONE
+      // draft IO like the purchase proposals, but keyed per MO OPERATION.
       // Supplier and prices are reloaded server-side from the operation
-      // snapshot — the client only carries ids and quantities. A PO holds at
-      // most one row per article (unique constraint), so a second lego row
-      // on the same article for the same supplier opens a new draft IO.
+      // snapshot — the client only carries ids and quantities.
       if (subcontractProposals.length > 0) {
         const operationById = new Map(
           (await repo.legoOperationsForIds(subcontractProposals.map((p) => p.moOperationId!))).map((op) => [
@@ -1939,7 +1923,9 @@ export function createPlanningService(
           setupPrice?: number;
           moOperationId: string;
         };
-        const bucketsBySupplier = new Map<string, { supplierName: string; buckets: LegoRow[][] }>();
+        // One draft IO per supplier; two lego operations on the same article
+        // become two rows on it.
+        const rowsBySupplier = new Map<string, { supplierName: string; rows: LegoRow[] }>();
 
         for (const proposal of subcontractProposals) {
           const operation = operationById.get(proposal.moOperationId!);
@@ -1954,9 +1940,9 @@ export function createPlanningService(
             );
             continue;
           }
-          const group = bucketsBySupplier.get(operation.supplierId) ?? {
+          const group = rowsBySupplier.get(operation.supplierId) ?? {
             supplierName: operation.supplierName ?? operation.supplierId,
-            buckets: [],
+            rows: [],
           };
           const row: LegoRow = {
             articleId: operation.articleId,
@@ -1965,48 +1951,45 @@ export function createPlanningService(
             setupPrice: operation.setupPrice ?? undefined,
             moOperationId: operation.moOperationId,
           };
-          const bucket = group.buckets.find((rows) => !rows.some((r) => r.articleId === row.articleId));
-          if (bucket) bucket.push(row);
-          else group.buckets.push([row]);
-          bucketsBySupplier.set(operation.supplierId, group);
+          group.rows.push(row);
+          rowsBySupplier.set(operation.supplierId, group);
         }
 
-        for (const [supplierId, group] of bucketsBySupplier) {
-          for (const bucket of group.buckets) {
-            let order: { id: string; orderNumber: string };
-            try {
-              order = await deps.purchase.createPurchaseOrder({ supplierId, exchangeRate: 1 }, createdBy);
-            } catch (err) {
-              for (const row of bucket) pushError(row.articleId, errorMessage(err));
-              continue;
-            }
-            let rowCount = 0;
-            for (const row of bucket) {
-              try {
-                await deps.purchase.addRow(order.id, row);
-                rowCount += 1;
-              } catch (err) {
-                pushError(row.articleId, errorMessage(err));
-              }
-            }
-            if (rowCount === 0) {
-              // Same best-effort cleanup as the purchase branch above.
-              try {
-                await deps.purchase.cancel(order.id);
-              } catch {
-                // The empty draft survives as junk; each row already
-                // reported its own error.
-              }
-              continue;
-            }
-            result.purchaseOrders.push({
-              id: order.id,
-              orderNumber: order.orderNumber,
-              supplierId,
-              supplierName: group.supplierName,
-              rowCount,
-            });
+        for (const [supplierId, group] of rowsBySupplier) {
+          const bucket = group.rows;
+          let order: { id: string; orderNumber: string };
+          try {
+            order = await deps.purchase.createPurchaseOrder({ supplierId, exchangeRate: 1 }, createdBy);
+          } catch (err) {
+            for (const row of bucket) pushError(row.articleId, errorMessage(err));
+            continue;
           }
+          let rowCount = 0;
+          for (const row of bucket) {
+            try {
+              await deps.purchase.addRow(order.id, row);
+              rowCount += 1;
+            } catch (err) {
+              pushError(row.articleId, errorMessage(err));
+            }
+          }
+          if (rowCount === 0) {
+            // Same best-effort cleanup as the purchase branch above.
+            try {
+              await deps.purchase.cancel(order.id);
+            } catch {
+              // The empty draft survives as junk; each row already
+              // reported its own error.
+            }
+            continue;
+          }
+          result.purchaseOrders.push({
+            id: order.id,
+            orderNumber: order.orderNumber,
+            supplierId,
+            supplierName: group.supplierName,
+            rowCount,
+          });
         }
       }
 

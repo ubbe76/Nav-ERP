@@ -410,24 +410,20 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
   // draft purchase order per primary supplier) happens server-side. Dedupe
   // by supplierId, not name — names aren't guaranteed unique.
   const summary = useMemo(() => {
-    // The server puts an article's n:th purchase proposal on the supplier's
-    // n:th IO (one row per article and order), so a supplier gets as many
-    // IOs as its most-proposed article has selected weeks.
-    const suppliers = new Map<string, { name: string; perArticle: Map<string, number> }>();
+    // One IO per supplier (the same article may sit on several rows).
+    const suppliers = new Map<string, string>();
     let manufactureCount = 0;
     for (const [, state] of selectedEntries) {
       if ((state.kind === "purchase" || state.kind === "subcontract") && state.supplierId) {
-        const entry = suppliers.get(state.supplierId) ?? { name: state.supplierName ?? state.supplierId, perArticle: new Map() };
-        if (state.kind === "purchase") entry.perArticle.set(state.articleId, (entry.perArticle.get(state.articleId) ?? 0) + 1);
-        suppliers.set(state.supplierId, entry);
+        suppliers.set(state.supplierId, suppliers.get(state.supplierId) ?? state.supplierName ?? state.supplierId);
       } else if (state.kind === "manufacture" || state.kind === "configured") {
         manufactureCount += 1;
       }
     }
     const parts: string[] = [];
     if (suppliers.size > 0) {
-      const orderCount = Array.from(suppliers.values()).reduce((sum, s) => sum + Math.max(1, ...s.perArticle.values()), 0);
-      const names = Array.from(suppliers.values(), (s) => s.name).join(", ");
+      const orderCount = suppliers.size;
+      const names = Array.from(suppliers.values()).join(", ");
       parts.push(`${orderCount} ${orderCount === 1 ? "inköpsorder" : "inköpsordrar"} (${names})`);
     }
     if (manufactureCount > 0) {

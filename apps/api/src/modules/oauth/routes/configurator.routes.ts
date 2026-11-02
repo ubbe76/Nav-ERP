@@ -13,7 +13,6 @@ import {
   ConfigurationNotAllowedError,
   ConfigurationRequiredError,
   PriceNotFoundError,
-  RowVariantExistsError,
 } from "../../sales/service/sales.errors.js";
 import { ArticleIsTemplateError, InvalidUnitError } from "../../article/service/article.service.js";
 import type { ConfiguratorService } from "../../configurator/service/configurator.service.js";
@@ -141,10 +140,10 @@ export async function configuratorRoutes(
         return reply.code(409).send(errorBody(err));
       }
       if (err instanceof ConfiguratorVariantTooLongError) return reply.code(400).send(errorBody(err));
-      // Two ordinary rows on the same article (e.g. two identical
-      // configurations resolving to one variant), or the template left the
-      // variants mode between the read and resolveVariant's lock.
-      if (err instanceof RowVariantExistsError || err instanceof ConfiguratorNotVariantModeError) return reply.code(409).send(errorBody(err));
+      // The template left the variants mode between the read and
+      // resolveVariant's lock. (Two identical configurations resolving to one
+      // variant simply give two rows on it.)
+      if (err instanceof ConfiguratorNotVariantModeError) return reply.code(409).send(errorBody(err));
       // Valuta: no rate for the order's currency today (send exchangeRate),
       // or a rate ≠ 1 on a SEK order.
       if (err instanceof ExchangeRateUnavailableError) {

@@ -66,6 +66,7 @@ import {
   emptyDeliveryAddressDraft,
   type DeliveryAddressDraft,
 } from "./DeliveryAddressChoice";
+import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { SuggestedDueDateField } from "../manufacturing/SuggestedDueDateField";
 
@@ -954,6 +955,8 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
           exchangeRate={orderRate}
           revision={order.revision}
           orderDeliveryDate={order.expectedDeliveryDate}
+          existingRows={rows}
+          documentWord={salesDocumentKind(order) === "quote" ? "offerten" : "ordern"}
           onDone={refresh}
           onCancel={() => setModal(null)}
         />
@@ -1292,6 +1295,8 @@ function AddRowForm({
   exchangeRate,
   revision,
   orderDeliveryDate,
+  existingRows,
+  documentWord,
   onDone,
   onCancel,
 }: {
@@ -1302,10 +1307,13 @@ function AddRowForm({
   exchangeRate: number;
   revision: number;
   orderDeliveryDate: string | null;
+  existingRows: SalesOrderRow[];
+  documentWord: "offerten" | "ordern";
   onDone: () => void;
   onCancel: () => void;
 }) {
   const [article, setArticle] = useState<Article | null>(null);
+  const alreadyOnDocument = alreadyOnDocumentText(existingRows, article?.id, documentWord);
   const [quantity, setQuantity] = useState("1");
   const [unitPrice, setUnitPrice] = useState("0");
   const [discountPercent, setDiscountPercent] = useState("0");
@@ -1489,6 +1497,7 @@ function AddRowForm({
       <Field label="Artikel" htmlFor="articleId">
         <ArticlePicker orderable configurable id="articleId" value={article} onChange={handleArticleChange} />
       </Field>
+      {alreadyOnDocument && <FormNotice>{alreadyOnDocument}</FormNotice>}
       {variantInfo && (
         <FormHint>
           Varianten <strong>{variantInfo.articleNumber}</strong> {variantInfo.created ? "skapades" : "fanns redan"}

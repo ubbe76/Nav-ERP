@@ -559,4 +559,34 @@ describe("purchase order matching", () => {
       [null, null, "low"],
     ]);
   });
+
+  it("with the same article on several rows prefers the row whose open quantity equals the invoice's, then one with room, then the first", () => {
+    const row = (over: Partial<InvoiceScanRow>): InvoiceScanRow => ({
+      description: "Skruv ART-100",
+      quantity: 4,
+      unitPrice: 250,
+      lineAmount: 1000,
+      vatRate: 25,
+      supplierArticleNumber: null,
+      articleId: null,
+      purchaseOrderRowId: null,
+      confidence: "low",
+      ...over,
+    });
+    // Two deliveries of one article: 10 on the first row, 4 on the second.
+    const poRows = [
+      { id: "r-1", articleId: "a-1", articleNumber: "ART-100", supplierArticleNumber: "LEV-9", unitPrice: 250, openQuantity: 10 },
+      { id: "r-2", articleId: "a-1", articleNumber: "ART-100", supplierArticleNumber: "LEV-9", unitPrice: 250, openQuantity: 4 },
+    ];
+    // Exact open quantity wins, by the supplier's number and by ours.
+    expect(matchInvoiceRows([row({ supplierArticleNumber: "LEV-9", quantity: 4 })], poRows).map((r) => r.purchaseOrderRowId)).toEqual(["r-2"]);
+    expect(matchInvoiceRows([row({ quantity: 4 })], poRows).map((r) => r.purchaseOrderRowId)).toEqual(["r-2"]);
+    // No exact row: the one with room for the quantity.
+    expect(matchInvoiceRows([row({ quantity: 6 })], poRows).map((r) => [r.purchaseOrderRowId, r.confidence])).toEqual([["r-1", "high"]]);
+    // Nothing has room (or no quantity): the first free row.
+    expect(matchInvoiceRows([row({ quantity: 12 })], poRows).map((r) => [r.purchaseOrderRowId, r.confidence])).toEqual([["r-1", "low"]]);
+    expect(matchInvoiceRows([row({ quantity: null })], poRows).map((r) => r.purchaseOrderRowId)).toEqual(["r-1"]);
+    // Each row is used once: the invoice's two rows land on both.
+    expect(matchInvoiceRows([row({ quantity: 4 }), row({ quantity: 10 })], poRows).map((r) => r.purchaseOrderRowId)).toEqual(["r-2", "r-1"]);
+  });
 });

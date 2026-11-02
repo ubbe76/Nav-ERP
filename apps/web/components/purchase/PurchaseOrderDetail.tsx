@@ -37,7 +37,8 @@ import {
   type StockLocation,
   type SupplierPriceQuote,
 } from "../../lib/types";
-import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
+import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 
 interface PurchaseOrderDetailProps {
   order: PurchaseOrder;
@@ -516,6 +517,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           revision={order.revision}
           orderDeliveryDate={order.expectedDeliveryDate}
           orderConfirmedDate={order.confirmedDeliveryDate}
+          existingRows={rows}
           onDone={refresh}
           onCancel={() => setModal(null)}
         />
@@ -685,12 +687,14 @@ function AddRowForm({
   revision,
   orderDeliveryDate,
   orderConfirmedDate,
+  existingRows,
   onDone,
   onCancel,
 }: {
   orderId: string;
   supplierId: string;
   currency: string;
+  existingRows: PurchaseOrderRow[];
   revision: number;
   orderDeliveryDate: string | null;
   orderConfirmedDate: string | null;
@@ -698,6 +702,7 @@ function AddRowForm({
   onCancel: () => void;
 }) {
   const [article, setArticle] = useState<Article | null>(null);
+  const alreadyOnDocument = alreadyOnDocumentText(existingRows, article?.id, "ordern");
   const [quantity, setQuantity] = useState("1");
   const [unitPrice, setUnitPrice] = useState("0");
   const [unitId, setUnitId] = useState(""); // "" = the article's base unit
@@ -814,6 +819,7 @@ function AddRowForm({
       <Field label="Artikel" htmlFor="articleId">
         <ArticlePicker orderable id="articleId" value={article} onChange={handleArticleChange} />
       </Field>
+      {alreadyOnDocument && <FormNotice>{alreadyOnDocument}</FormNotice>}
 
       <FormRow columns={3}>
         <Field label="Antal" htmlFor="quantity">

@@ -59,8 +59,6 @@ import {
   LegoOperationClosedError,
   NotLegoOperationError,
   InquiryRowPriceNotApplicableError,
-  DuplicateInquiryRowError,
-  DuplicatePurchaseOrderRowError,
 } from "../service/purchase.service.js";
 import { ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
@@ -255,7 +253,6 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
       err instanceof SmtpNotConfiguredError ||
       err instanceof InquiryRowPriceNotApplicableError ||
       err instanceof LegoOperationClosedError ||
-      err instanceof DuplicateInquiryRowError ||
       // Produktkonfigurator: a template in mode variants on a new row
       // (createInquiry, addInquiryRow).
       err instanceof ArticleIsTemplateError
@@ -468,9 +465,7 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
     } catch (err) {
       if (err instanceof PurchaseOrderNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof MoOperationNotFoundError) return reply.code(404).send(errorBody(err));
-      if (err instanceof InvalidStatusTransitionError || err instanceof DuplicatePurchaseOrderRowError) {
-        return reply.code(409).send(errorBody(err));
-      }
+      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       // Produktkonfigurator: a template in mode variants on a new row.
       if (err instanceof ArticleIsTemplateError) return reply.code(409).send(errorBody(err));
       // A unit that is not one of the article's.

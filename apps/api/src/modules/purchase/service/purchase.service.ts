@@ -220,26 +220,6 @@ export class LegoOperationClosedError extends Error {
   }
 }
 
-// inquiry_rows has unique(inquiry_id, article_id) — caught on the insert
-// rather than pre-checked, same isUniqueViolation pattern as
-// DuplicateSupplierNumberError/DuplicateArticleSupplierError above.
-export class DuplicateInquiryRowError extends Error {
-  constructor() {
-    super("Article already on the inquiry — put the operation on a separate inquiry");
-    this.name = "DuplicateInquiryRowError";
-  }
-}
-
-// purchase_order_rows has unique(purchase_order_id, article_id) — the same
-// catch-the-insert pattern as DuplicateInquiryRowError. A second lego
-// operation on the same article needs its own order.
-export class DuplicatePurchaseOrderRowError extends Error {
-  constructor() {
-    super("Article already on the purchase order — change the quantity on its row, or put a lego operation on a separate order");
-    this.name = "DuplicatePurchaseOrderRowError";
-  }
-}
-
 // "Uppdatera beredningens legopris" refused: not a lego row, no answered
 // price yet, wrong status, or the routing operation is gone/no longer lego.
 export class InquiryRowPriceNotApplicableError extends Error {
@@ -945,18 +925,12 @@ export function createPurchaseService(
 
     async createInquiry(input: CreateInquiryInput, createdBy: string) {
       if (!(await repo.findSupplierById(input.supplierId))) throw new SupplierNotFoundError(input.supplierId);
+      // The same article may sit on several rows (two lego operations on
+      // one article included).
       const rows = await Promise.all(
         input.rows.map(async (r) => ({ ...(await resolveRowInput(r)), ...(await resolveLegoRow(r)) }))
       );
-      try {
-        return await repo.createInquiry({ ...input, rows }, createdBy);
-      } catch (err) {
-        // inquiry_rows' only unique constraint is (inquiry_id, article_id) —
-        // fires either from two rows in this same batch sharing an article,
-        // or (for addInquiryRow) an article already on the inquiry.
-        if (isUniqueViolation(err)) throw new DuplicateInquiryRowError();
-        throw err;
-      }
+      return repo.createInquiry({ ...input, rows }, createdBy);
     },
 
     async listInquiries(query: ListInquiriesQuery) {
@@ -981,12 +955,7 @@ export function createPurchaseService(
         throw new InvalidStatusTransitionError(`Cannot change rows on an inquiry in status "${inquiry.status}"`);
       }
       const row = { ...(await resolveRowInput(input)), ...(await resolveLegoRow(input)) };
-      try {
-        return await repo.addInquiryRow(inquiryId, row);
-      } catch (err) {
-        if (isUniqueViolation(err)) throw new DuplicateInquiryRowError();
-        throw err;
-      }
+      return repo.addInquiryRow(inquiryId, row);
     },
 
     async updateInquiryRow(inquiryId: string, rowId: string, input: UpdateInquiryRowInput) {
@@ -1233,9 +1202,6 @@ export function createPurchaseService(
         // FK is the existence check.
         if (isForeignKeyViolation(err, "purchase_order_rows_mo_operation_id_mo_operations_id_fk")) {
           throw new MoOperationNotFoundError(input.moOperationId ?? "");
-        }
-        if (isUniqueViolation(err, "purchase_order_rows_purchase_order_id_article_id_unique")) {
-          throw new DuplicatePurchaseOrderRowError();
         }
         throw err;
       }

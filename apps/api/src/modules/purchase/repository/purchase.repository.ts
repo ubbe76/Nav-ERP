@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNotNull, lt, not, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isNotNull, isNull, lt, not, notInArray, or, sql } from "drizzle-orm";
 import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
@@ -67,6 +67,7 @@ import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js"
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { loadVatCodeBook } from "../../economy/repository/vat-codes.js";
 import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions } from "../../economy/service/dimension-check.js";
+import { purchaseRowArrivalDate } from "../../planning/repository/effective-dates.js";
 
 function round4(value: number): number {
   return Math.round(value * 10000) / 10000;
@@ -383,10 +384,14 @@ export function createPurchaseRepository(db: Db) {
           })
           .returning();
 
+        // One INSERT gives every row the same now(): stamp them a millisecond
+        // apart so entry order survives (same article on several rows, 0177).
+        const now = Date.now();
         const rows = await tx
           .insert(inquiryRows)
           .values(
-            input.rows.map((r) => ({
+            input.rows.map((r, i) => ({
+              createdAt: new Date(now + i),
               inquiryId: inquiry!.id,
               articleId: r.articleId,
               quantity: String(r.quantity),
@@ -504,7 +509,8 @@ export function createPurchaseRepository(db: Db) {
         .leftJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
         .leftJoin(routingOperations, eq(routingOperations.id, inquiryRows.routingOperationId))
         .where(eq(inquiryRows.inquiryId, inquiryId))
-        .orderBy(asc(articles.articleNumber));
+        // Same article on several rows (0177): entry order within an article.
+        .orderBy(asc(articles.articleNumber), asc(inquiryRows.createdAt), asc(inquiryRows.id));
     },
 
     // Validates a lego link before a row is written (service: article must
@@ -644,10 +650,18 @@ export function createPurchaseRepository(db: Db) {
           })
           .returning();
 
-        const rows = await tx.select().from(inquiryRows).where(eq(inquiryRows.inquiryId, inquiryId));
+        // The inquiry's entry order carries over to the order, a millisecond
+        // apart like createInquiry (one INSERT shares now()).
+        const rows = await tx
+          .select()
+          .from(inquiryRows)
+          .where(eq(inquiryRows.inquiryId, inquiryId))
+          .orderBy(asc(inquiryRows.createdAt), asc(inquiryRows.id));
         if (rows.length > 0) {
+          const now = Date.now();
           await tx.insert(purchaseOrderRows).values(
-            rows.map((r) => ({
+            rows.map((r, i) => ({
+              createdAt: new Date(now + i),
               purchaseOrderId: order!.id,
               articleId: r.articleId,
               quantityOrdered: r.quantity,
@@ -997,7 +1011,10 @@ export function createPurchaseRepository(db: Db) {
         .leftJoin(moOperations, eq(moOperations.id, purchaseOrderRows.moOperationId))
         .leftJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
         .leftJoin(routingOperations, eq(routingOperations.id, moOperations.routingOperationId))
-        .where(eq(purchaseOrderRows.purchaseOrderId, purchaseOrderId));
+        .where(eq(purchaseOrderRows.purchaseOrderId, purchaseOrderId))
+        // Entry order: the card, the PDF and Inleverans's scan tie-break
+        // (same article on several rows, 0177) all read it.
+        .orderBy(asc(purchaseOrderRows.createdAt), asc(purchaseOrderRows.id));
     },
 
     // The lego rows' drawings for the order email: one entry per lego row —
@@ -1377,8 +1394,14 @@ export function createPurchaseRepository(db: Db) {
     // --- Per-article purchase logs (read-only) ---
 
     // Inleveranslogg: purchase_receipt stock movements for the article,
-    // joined back to the PO/supplier and the row's unit price. reference_id ->
-    // purchase_orders.id is unambiguous per article (one PO row per article).
+    // joined back to the PO/supplier and the row's unit price. The row is
+    // reached through the receipt log (purchase_receipts.stock_transaction_id
+    // → purchase_order_row_id) — the same article may sit on several rows of
+    // an order, so (order, article) would duplicate the lines and mix up the
+    // prices. Migration 0118 backfilled every earlier receipt into
+    // purchase_receipts; a movement without a receipt row (should not exist)
+    // falls back to the order's first row of the article so no history is
+    // lost.
     async listGoodsReceiptsByArticle(articleId: string, query: ListGoodsReceiptsQuery) {
       // Live receipts only: Ångra inleverans books a negative purchase_receipt
       // and stamps the receipt undone — neither is something that came in.
@@ -1386,7 +1409,11 @@ export function createPurchaseRepository(db: Db) {
         eq(stockTransactions.transactionType, "purchase_receipt"),
         eq(stockTransactions.articleId, articleId),
         sql`${stockTransactions.quantityDelta} > 0`,
-        sql`NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = ${stockTransactions.id} AND pr.undone_at IS NOT NULL)`
+        isNull(purchaseReceipts.undoneAt)
+      );
+      const rowJoin = eq(
+        purchaseOrderRows.id,
+        sql`coalesce(${purchaseReceipts.purchaseOrderRowId}, (SELECT r.id FROM purchase_order_rows r WHERE r.purchase_order_id = ${purchaseOrders.id} AND r.article_id = ${stockTransactions.articleId} ORDER BY r.created_at, r.id LIMIT 1))`
       );
       const [rows, totalRows] = await Promise.all([
         db
@@ -1403,13 +1430,8 @@ export function createPurchaseRepository(db: Db) {
           .from(stockTransactions)
           .innerJoin(purchaseOrders, eq(purchaseOrders.id, stockTransactions.referenceId))
           .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
-          .innerJoin(
-            purchaseOrderRows,
-            and(
-              eq(purchaseOrderRows.purchaseOrderId, purchaseOrders.id),
-              eq(purchaseOrderRows.articleId, stockTransactions.articleId)
-            )
-          )
+          .leftJoin(purchaseReceipts, eq(purchaseReceipts.stockTransactionId, stockTransactions.id))
+          .innerJoin(purchaseOrderRows, rowJoin)
           .leftJoin(stockLocations, eq(stockLocations.id, stockTransactions.locationId))
           .where(where)
           .orderBy(desc(stockTransactions.createdAt))
@@ -1419,13 +1441,8 @@ export function createPurchaseRepository(db: Db) {
           .select({ total: count() })
           .from(stockTransactions)
           .innerJoin(purchaseOrders, eq(purchaseOrders.id, stockTransactions.referenceId))
-          .innerJoin(
-            purchaseOrderRows,
-            and(
-              eq(purchaseOrderRows.purchaseOrderId, purchaseOrders.id),
-              eq(purchaseOrderRows.articleId, stockTransactions.articleId)
-            )
-          )
+          .leftJoin(purchaseReceipts, eq(purchaseReceipts.stockTransactionId, stockTransactions.id))
+          .innerJoin(purchaseOrderRows, rowJoin)
           .where(where),
       ]);
       return { rows, total: totalRows[0]!.total };
@@ -1448,6 +1465,9 @@ export function createPurchaseRepository(db: Db) {
             unitPrice: purchaseOrderRows.unitPrice,
             currency: purchaseOrders.currency,
             quantity: purchaseOrderRows.quantityOrdered,
+            // The row's effective arrival date — tells two rows of the same
+            // article on one order apart (Koppla till inköpsorderrad, 0177).
+            deliveryDate: purchaseRowArrivalDate,
           })
           .from(purchaseOrderRows)
           .innerJoin(purchaseOrders, eq(purchaseOrders.id, purchaseOrderRows.purchaseOrderId))

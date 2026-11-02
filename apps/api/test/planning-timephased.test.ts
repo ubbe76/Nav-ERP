@@ -247,7 +247,7 @@ describe("Skapa ordrar — one order per proposal, dated from its needDate", () 
     expect(rop.warnings).toEqual([]);
   });
 
-  it("two week proposals of one purchased article become two draft IOs at the supplier; another article's single proposal joins the first", async () => {
+  it("two week proposals of one purchased article become two rows on ONE draft IO at the supplier, each with its own date; another article joins it", async () => {
     const user = await makeUser();
     const a = await makeArticle({ articleNumber: "TP-A" });
     const b = await makeArticle({ articleNumber: "TP-B" });
@@ -263,19 +263,18 @@ describe("Skapa ordrar — one order per proposal, dated from its needDate", () 
     const result = await planningService.createOrdersFromProposals({ proposals }, user.id);
     expect(result.errors).toEqual([]);
     expect(result.warnings).toEqual([]);
-    expect(result.purchaseOrders.map((o) => [o.supplierId, o.rowCount])).toEqual([
-      [supplier.id, 2], // a's first week + b
-      [supplier.id, 1], // a's second week
+    // One IO per supplier: a's two weeks are two rows of the same article.
+    expect(result.purchaseOrders.map((o) => [o.supplierId, o.rowCount])).toEqual([[supplier.id, 3]]);
+    const [order] = result.purchaseOrders;
+    // The order gets the earliest date; rows in need-date order, each with
+    // its own date when it differs from the order's.
+    expect((await purchaseService.getPurchaseOrder(order!.id))!.expectedDeliveryDate).toBe("2030-03-08");
+    const orderRows = await purchaseService.listRows(order!.id);
+    expect(orderRows.map((r) => [r.articleId, Number(r.quantityOrdered), r.expectedDeliveryDate])).toEqual([
+      [a.id, 4, null], // follows the order
+      [b.id, 2, "2030-03-15"],
+      [a.id, 6, "2030-03-22"],
     ]);
-    const [first, second] = result.purchaseOrders;
-    expect((await purchaseService.getPurchaseOrder(first!.id))!.expectedDeliveryDate).toBe("2030-03-08");
-    const firstRows = await purchaseService.listRows(first!.id);
-    const rowA = firstRows.find((r) => r.articleId === a.id)!;
-    const rowB = firstRows.find((r) => r.articleId === b.id)!;
-    expect([Number(rowA.quantityOrdered), rowA.expectedDeliveryDate]).toEqual([4, null]); // follows the order
-    expect([Number(rowB.quantityOrdered), rowB.expectedDeliveryDate]).toEqual([2, "2030-03-15"]);
-    expect((await purchaseService.getPurchaseOrder(second!.id))!.expectedDeliveryDate).toBe("2030-03-22");
-    expect((await purchaseService.listRows(second!.id)).map((r) => [r.articleId, Number(r.quantityOrdered)])).toEqual([[a.id, 6]]);
   });
 
   it("without needDate the first firm demand still decides (integrations)", async () => {

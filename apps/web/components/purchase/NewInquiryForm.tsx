@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Field, Input } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
+import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
 import { SearchPicker } from "../ui/SearchPicker";
 import { UnitSelect, convertPriceInput, convertQuantityInput, useUnitOptions, type UnitOption } from "../ui/UnitSelect";
 import { apiFetch } from "../../lib/api";
 import type { Article, Inquiry, Supplier } from "../../lib/types";
-import { Form, FormActions, FormError, FormLineRow, FormLineRowTop, FormRow } from "../ui/Form";
+import { Form, FormActions, FormError, FormLineRow, FormLineRowTop, FormNotice, FormRow } from "../ui/Form";
 
 interface InquiryFormRow {
   article: Article | null;
@@ -128,6 +129,7 @@ export function NewInquiryForm({
               key={index}
               index={index}
               row={row}
+              otherRows={rows.filter((_, i) => i !== index).map((r) => ({ articleId: r.article?.id ?? "" }))}
               canRemove={rows.length > 1}
               onChange={(patch) => updateRow(index, patch)}
               onRemove={() => removeRow(index)}
@@ -156,18 +158,23 @@ export function NewInquiryForm({
 function InquiryRowFields({
   index,
   row,
+  otherRows,
   canRemove,
   onChange,
   onRemove,
 }: {
   index: number;
   row: InquiryFormRow;
+  // The article ids of the form's other rows, for the "already on" notice.
+  otherRows: { articleId: string }[];
   canRemove: boolean;
   onChange: (patch: Partial<InquiryFormRow>) => void;
   onRemove: () => void;
 }) {
   const unitOptions = useUnitOptions(row.article);
   const currentFactor = unitOptions.find((o) => o.value === row.unitId)?.factor ?? 1;
+
+  const alreadyOnInquiry = alreadyOnDocumentText(otherRows, row.article?.id, "förfrågan");
 
   function handleArticleChange(article: Article | null) {
     onChange({ article, unitId: article?.purchaseUnitId ?? "" });
@@ -200,6 +207,7 @@ function InquiryRowFields({
           ✕
         </Button>
       </FormLineRowTop>
+      {alreadyOnInquiry && <FormNotice>{alreadyOnInquiry}</FormNotice>}
       <FormRow columns={3}>
         <Field label="Antal" htmlFor={`inquiryQuantity-${index}`}>
           <Input

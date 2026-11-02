@@ -93,6 +93,40 @@ describe("per-article goods receipt log", () => {
     expect(r.locationName).toBe("A1");
   });
 
+  // The same article on two rows (split delivery): each receipt is one log
+  // line with ITS row's price — the row is reached through purchase_receipts,
+  // not (order, article), which would double every line.
+  it("keeps two rows of one article apart: one line per receipt with the right price", async () => {
+    const user = await makeUser();
+    const supplier = await purchaseService.createSupplier({ name: "Lev AB", active: true });
+    const article = await makeArticle(`ART-R2-${crypto.randomUUID()}`);
+    const location = await makeLocation();
+    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id }, user.id);
+    const first = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 42 });
+    const second = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 5, unitPrice: 47, expectedDeliveryDate: "2030-04-01" });
+    await purchaseService.confirm(order.id);
+    await purchaseService.receiveGoods(order.id, first.id, { locationId: location.id, quantity: 10 }, user.id);
+    await purchaseService.receiveGoods(order.id, second.id, { locationId: location.id, quantity: 5 }, user.id);
+
+    const log = await purchaseService.listArticleGoodsReceipts(article.id, { articleId: article.id, limit: 50, offset: 0 });
+    expect(log.total).toBe(2);
+    // Newest first.
+    expect(log.rows.map((r) => [Number(r.quantity), Number(r.unitPrice), r.orderNumber])).toEqual([
+      [5, 47, order.orderNumber],
+      [10, 42, order.orderNumber],
+    ]);
+
+    // A stock movement without a receipt row (pre-0118 shape) still shows,
+    // priced from the order's first row of the article.
+    await db.execute(sql`DELETE FROM purchase_receipts WHERE purchase_order_row_id = ${second.id}`);
+    const fallback = await purchaseService.listArticleGoodsReceipts(article.id, { articleId: article.id, limit: 50, offset: 0 });
+    expect(fallback.total).toBe(2);
+    expect(fallback.rows.map((r) => [Number(r.quantity), Number(r.unitPrice)])).toEqual([
+      [5, 42],
+      [10, 42],
+    ]);
+  });
+
   it("is empty for an article with no receipts", async () => {
     const article = await makeArticle(`ART-EMPTY-${crypto.randomUUID()}`);
     const log = await purchaseService.listArticleGoodsReceipts(article.id, {
@@ -134,5 +168,20 @@ describe("per-article price history log", () => {
     expect(history.rows[0]!.orderNumber).toBe(confirmed.orderNumber);
     expect(Number(history.rows[0]!.unitPrice)).toBe(20);
     expect(Number(history.rows[0]!.quantity)).toBe(5);
+  });
+
+  it("carries each row's effective delivery date so two rows of one article on an order differ", async () => {
+    const user = await makeUser();
+    const supplier = await purchaseService.createSupplier({ name: "Lev AB", active: true });
+    const article = await makeArticle(`ART-PD-${crypto.randomUUID()}`);
+    const order = await purchaseService.createPurchaseOrder({ supplierId: supplier.id, expectedDeliveryDate: "2030-05-06" }, user.id);
+    const own = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 20, expectedDeliveryDate: "2030-05-20" });
+    const follows = await purchaseService.addRow(order.id, { articleId: article.id, quantity: 10, unitPrice: 20 });
+    await purchaseService.confirm(order.id);
+
+    const history = await purchaseService.listArticlePriceHistory(article.id, { articleId: article.id, limit: 50, offset: 0 });
+    const byRow = new Map(history.rows.map((r) => [r.id, r.deliveryDate]));
+    expect(byRow.get(own.id)).toBe("2030-05-20");
+    expect(byRow.get(follows.id)).toBe("2030-05-06");
   });
 });

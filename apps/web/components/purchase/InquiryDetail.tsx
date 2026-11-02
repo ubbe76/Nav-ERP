@@ -24,7 +24,8 @@ import {
   type LegoOperationOption,
   type PurchaseOrder,
 } from "../../lib/types";
-import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
+import { alreadyOnDocumentText } from "../../lib/orderRowDuplicates";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow, FormSaved } from "../ui/Form";
 
 interface InquiryDetailProps {
   inquiry: Inquiry;
@@ -385,7 +386,7 @@ export function InquiryDetail({ inquiry, rows, registers }: InquiryDetailProps) 
       </Modal>
 
       <Modal open={modal === "addRow"} onClose={() => setModal(null)} title="Lägg till rad">
-        <AddInquiryRowForm inquiryId={inquiry.id} onDone={refresh} onCancel={() => setModal(null)} />
+        <AddInquiryRowForm inquiryId={inquiry.id} existingRows={rows} onDone={refresh} onCancel={() => setModal(null)} />
       </Modal>
     </div>
   );
@@ -457,14 +458,17 @@ function EditHeaderForm({
 
 function AddInquiryRowForm({
   inquiryId,
+  existingRows,
   onDone,
   onCancel,
 }: {
   inquiryId: string;
+  existingRows: InquiryRow[];
   onDone: () => void;
   onCancel: () => void;
 }) {
   const [article, setArticle] = useState<Article | null>(null);
+  const alreadyOnInquiry = alreadyOnDocumentText(existingRows, article?.id, "förfrågan");
   const [quantity, setQuantity] = useState("1");
   const [unitPrice, setUnitPrice] = useState("");
   const [unitId, setUnitId] = useState(""); // "" = the article's base unit
@@ -543,6 +547,7 @@ function AddInquiryRowForm({
       <Field label="Artikel" htmlFor="inquiryRowArticle">
         <ArticlePicker orderable id="inquiryRowArticle" value={article} onChange={handleArticleChange} />
       </Field>
+      {alreadyOnInquiry && <FormNotice>{alreadyOnInquiry}</FormNotice>}
 
       <FormRow columns={3}>
         <Field label="Antal" htmlFor="inquiryRowQuantity">

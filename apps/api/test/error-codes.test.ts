@@ -236,7 +236,6 @@ import {
   RowConfigurationLockedError,
   RowConfigurationChangedError,
   RowConfigurationOutdatedError,
-  RowVariantExistsError,
 } from "../src/modules/sales/service/sales.errors.js";
 import { ShipmentDeliveryUndoneError, ShipmentOnDraftInvoiceError } from "../src/modules/shipping/service/shipping.errors.js";
 import {
@@ -361,11 +360,7 @@ import {
   MoOperationSequenceTakenError,
   MoOperationStampedError,
 } from "../src/modules/manufacturing/service/manufacturing.service.js";
-import {
-  DuplicateInquiryRowError,
-  DuplicatePurchaseOrderRowError,
-  MoOperationNotFoundError,
-} from "../src/modules/purchase/service/purchase.service.js";
+import { MoOperationNotFoundError } from "../src/modules/purchase/service/purchase.service.js";
 import {
   BaseUnitLockedError,
   CostingOnlyOperationLinkError,
@@ -642,8 +637,6 @@ const cases: Array<[Error, string]> = [
   [new OperationFileNotFoundError("x"), ERROR_CODES.OPERATION_FILE_NOT_FOUND],
   [new InvalidOperationFileTypeError("text/plain"), ERROR_CODES.INVALID_OPERATION_FILE_TYPE],
   [new MoOperationNotFoundError("x"), ERROR_CODES.MO_OPERATION_NOT_FOUND],
-  [new DuplicateInquiryRowError(), ERROR_CODES.DUPLICATE_INQUIRY_ROW],
-  [new DuplicatePurchaseOrderRowError(), ERROR_CODES.DUPLICATE_PURCHASE_ORDER_ROW],
   [new CostingOnlyOperationLinkError(), ERROR_CODES.COSTING_ONLY_OPERATION_LINK],
   [new SeriesExhaustedError("customer"), ERROR_CODES.SERIES_EXHAUSTED],
   [new DuplicateNumberSeriesNameError("Plåt"), ERROR_CODES.DUPLICATE_NUMBER_SERIES_NAME],
@@ -755,7 +748,6 @@ const cases: Array<[Error, string]> = [
   [new RowConfigurationLockedError("x"), ERROR_CODES.ROW_CONFIGURATION_LOCKED],
   [new RowConfigurationChangedError(), ERROR_CODES.ROW_CONFIGURATION_CHANGED],
   [new RowConfigurationOutdatedError("x"), ERROR_CODES.ROW_CONFIGURATION_OUTDATED],
-  [new RowVariantExistsError("63000-B"), ERROR_CODES.ROW_VARIANT_EXISTS],
   [new WorkCenterNotFoundError("x"), ERROR_CODES.WORK_CENTER_NOT_FOUND],
   [new MoReportNotFoundError("x"), ERROR_CODES.MO_REPORT_NOT_FOUND],
   [new MoReportNoPalletCardError(), ERROR_CODES.REPORT_HAS_NO_PALLET_CARD],

@@ -234,19 +234,43 @@ export type SalesRowMutationResult =
   | { ok: true; row: typeof salesOrderRows.$inferSelect | null; orderStatus: SalesOrderStatus }
   | { ok: false; reason: "row_not_found" | "quantity_below_delivered" | "row_has_deliveries" };
 
-// Ändra konfiguration (4b): the partial unique index on (sales_order_id,
-// article_id) WHERE configuration IS NULL — the variant the row is moving to
-// may already sit on the order as an ordinary row (migration 0113).
-export const ROW_ARTICLE_UNIQUE = "sales_order_rows_order_article_unique";
 export type RowConfigurationMutationResult =
   | { ok: true; row: typeof salesOrderRows.$inferSelect; previous: typeof salesOrderRows.$inferSelect; orderStatus: SalesOrderStatus }
   | {
       ok: false;
-      reason: "row_not_found" | "order_status" | "delivered" | "manufacturing_order" | "invoice_row" | "variant_exists";
+      reason: "row_not_found" | "order_status" | "delivered" | "manufacturing_order" | "invoice_row";
       orderStatus?: SalesOrderStatus;
     };
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+// One order row (and its ställkostnadsrad, when the write carries one)
+// inside the caller's transaction — shared by addRow and findOrAddArticleRow.
+async function insertRow(tx: Tx, salesOrderId: string, input: SalesRowWrite) {
+  const [row] = await tx
+    .insert(salesOrderRows)
+    .values({
+      salesOrderId,
+      articleId: input.articleId,
+      quantityOrdered: String(input.quantity),
+      unitPrice: String(input.unitPrice),
+      // Same optional-input guard as createQuote.
+      discountPercent: String(input.discountPercent ?? 0),
+      unitId: input.unitId,
+      unitFactor: input.unitFactor !== null ? String(input.unitFactor) : null,
+      configuration: input.configuration ?? null,
+      configurationCost: input.configurationCost ?? null,
+      expectedDeliveryDate: input.expectedDeliveryDate ?? null,
+    })
+    .returning();
+  if (input.setupCharge) {
+    await tx
+      .insert(salesOrderRows)
+      .values(setupChargeRowValues(salesOrderId, row!.id, input.setupCharge, new Date(row!.createdAt.getTime() + 1)));
+  }
+  if (input.bumpRevision !== false) await bumpRevision(tx, salesOrderId);
+  return row!;
+}
 
 // Quantities live in numeric(14,4) — compare and store at that precision.
 function round4(n: number): number {
@@ -1088,29 +1112,45 @@ export function createSalesRepository(db: Db) {
             .for("key share");
           if (order && order.currency !== pricedIn) throw new SalesOrderCurrencyChangedError(order.orderNumber, pricedIn, order.currency);
         }
-        const [row] = await tx
-          .insert(salesOrderRows)
-          .values({
-            salesOrderId,
-            articleId: input.articleId,
-            quantityOrdered: String(input.quantity),
-            unitPrice: String(input.unitPrice),
-            // Same optional-input guard as createQuote above.
-            discountPercent: String(input.discountPercent ?? 0),
-            unitId: input.unitId,
-            unitFactor: input.unitFactor !== null ? String(input.unitFactor) : null,
-            configuration: input.configuration ?? null,
-            configurationCost: input.configurationCost ?? null,
-            expectedDeliveryDate: input.expectedDeliveryDate ?? null,
-          })
-          .returning();
-        if (input.setupCharge) {
-          await tx
-            .insert(salesOrderRows)
-            .values(setupChargeRowValues(salesOrderId, row!.id, input.setupCharge, new Date(row!.createdAt.getTime() + 1)));
+        return insertRow(tx, salesOrderId, input);
+      });
+    },
+
+    // Fraktraden (setFreightRow): the article's existing ORDINARY row — not
+    // a configured row, not a ställkostnadsrad — or a new one, decided under
+    // the order's exclusive row lock (FOR NO KEY UPDATE) so two concurrent
+    // "Lägg till frakt" never leave two freight rows: the loser waits for
+    // the winner's commit and then sees its row. The same article may
+    // otherwise sit on several rows, so the database no longer guards this.
+    // The lock conflicts with the header PATCH's FOR UPDATE (the currency
+    // check below is therefore sound) but not with addRow's KEY SHARE; only
+    // the order is locked, so the rad → huvud order of updateRow is not
+    // crossed. The earliest row wins when several already exist.
+    async findOrAddArticleRow(salesOrderId: string, input: SalesRowWrite, pricedIn?: string) {
+      return db.transaction(async (tx) => {
+        const [order] = await tx
+          .select({ orderNumber: salesOrders.orderNumber, currency: salesOrders.currency })
+          .from(salesOrders)
+          .where(eq(salesOrders.id, salesOrderId))
+          .for("no key update");
+        if (pricedIn !== undefined && order && order.currency !== pricedIn) {
+          throw new SalesOrderCurrencyChangedError(order.orderNumber, pricedIn, order.currency);
         }
-        if (input.bumpRevision !== false) await bumpRevision(tx, salesOrderId);
-        return row!;
+        const [existing] = await tx
+          .select()
+          .from(salesOrderRows)
+          .where(
+            and(
+              eq(salesOrderRows.salesOrderId, salesOrderId),
+              eq(salesOrderRows.articleId, input.articleId),
+              isNull(salesOrderRows.configuration),
+              isNull(salesOrderRows.setupForRowId)
+            )
+          )
+          .orderBy(asc(salesOrderRows.createdAt), asc(salesOrderRows.id))
+          .limit(1);
+        if (existing) return { row: existing, created: false as const };
+        return { row: await insertRow(tx, salesOrderId, input), created: true as const };
       });
     },
 
@@ -1259,10 +1299,9 @@ export function createSalesRepository(db: Db) {
 
     // Ändra konfiguration (4b): every guard is re-checked INSIDE the
     // transaction with the row locked (the service's pre-reads are advisory),
-    // then article/configuration/price are replaced in one UPDATE. The unique
-    // index (a variant already on the order as an ordinary row) is caught
-    // OUTSIDE db.transaction — a failed statement leaves the transaction
-    // aborted, so the error must propagate out before being mapped.
+    // then article/configuration/price are replaced in one UPDATE. A variant
+    // that already sits on the order as an ordinary row is fine — the order
+    // then has two rows on it.
     async replaceRowConfiguration(
       orderId: string,
       rowId: string,
@@ -1276,30 +1315,25 @@ export function createSalesRepository(db: Db) {
       },
       bump = true
     ): Promise<RowConfigurationMutationResult> {
-      try {
-        return await db.transaction(async (tx) => {
-          const found = await rowConfigurationGuards(tx, orderId, rowId, true);
-          if (!found.ok) return found;
+      return db.transaction(async (tx) => {
+        const found = await rowConfigurationGuards(tx, orderId, rowId, true);
+        if (!found.ok) return found;
 
-          const [updated] = await tx
-            .update(salesOrderRows)
-            .set({
-              articleId: patch.articleId,
-              configuration: patch.configuration,
-              configurationCost: patch.configurationCost,
-              unitPrice: String(patch.unitPrice),
-              discountPercent: String(patch.discountPercent),
-            })
-            .where(eq(salesOrderRows.id, rowId))
-            .returning();
-          if (bump) await bumpRevision(tx, orderId);
-          const orderStatus = await recomputeInProduction(tx, orderId);
-          return { ok: true, row: updated!, previous: found.row, orderStatus };
-        });
-      } catch (err) {
-        if (isUniqueViolation(err, ROW_ARTICLE_UNIQUE)) return { ok: false, reason: "variant_exists" };
-        throw err;
-      }
+        const [updated] = await tx
+          .update(salesOrderRows)
+          .set({
+            articleId: patch.articleId,
+            configuration: patch.configuration,
+            configurationCost: patch.configurationCost,
+            unitPrice: String(patch.unitPrice),
+            discountPercent: String(patch.discountPercent),
+          })
+          .where(eq(salesOrderRows.id, rowId))
+          .returning();
+        if (bump) await bumpRevision(tx, orderId);
+        const orderStatus = await recomputeInProduction(tx, orderId);
+        return { ok: true, row: updated!, previous: found.row, orderStatus };
+      });
     },
 
     async deleteRow(orderId: string, rowId: string, bump = true): Promise<SalesRowMutationResult> {

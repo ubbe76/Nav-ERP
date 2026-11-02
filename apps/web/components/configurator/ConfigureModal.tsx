@@ -169,7 +169,7 @@ function ConfigureForm({ template, customerId, showPrice, quantity, currency, ex
     setPending(true);
     setError(null);
     if (onConfigured) {
-      // A save that fails (409 row-configuration-locked, row-variant-exists …) keeps the dialog
+      // A save that fails (409 row-configuration-locked …) keeps the dialog
       // and its choices; the caller closes it on success.
       try {
         await onConfigured({ selection: lastSelection.current, evaluation: result, lines: draftLines(groups ?? [], result) });
