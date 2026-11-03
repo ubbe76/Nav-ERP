@@ -254,7 +254,7 @@ const labels = new Map([[ART.plat, "1001 Plåt"], [ART.skruv, "1002 Skruv"], [AR
 const label = (articleId: string) => labels.get(articleId) ?? articleId;
 
 function material(m: Partial<DerivedMaterialCore> & Pick<DerivedMaterialCore, "componentArticleId" | "quantity">): DerivedMaterialCore {
-  return { source: "line", lineId: id("L1"), baseRowId: null, unitId: null, unitFactor: null, operation: null, ...m };
+  return { source: "line", lineId: id("L1"), baseRowId: null, unitId: null, unitFactor: null, operation: null, costingOnly: false, ...m };
 }
 const op = (sequenceNo: number) => ({ kind: "base" as const, id: id(`O${sequenceNo}`), sequenceNo });
 
@@ -267,8 +267,24 @@ describe("mergeVariantMaterials", () => {
     ], label);
     expect(r.warnings).toEqual([]);
     expect(r.rows).toEqual([
-      { componentArticleId: ART.plat, quantity: 3.5001, unitId: null, unitFactor: null, operationSequenceNo: 10 },
-      { componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, operationSequenceNo: null },
+      { componentArticleId: ART.plat, quantity: 3.5001, unitId: null, unitFactor: null, operationSequenceNo: 10, costingOnly: false },
+      { componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, operationSequenceNo: null, costingOnly: false },
+    ]);
+  });
+
+  it("never merges a Kalkyl row into an ordinary row of the same component", () => {
+    // Merged, the TO would draw 3 and the behovsberäkning see 3 — only the
+    // ordinary 1 is material; the Kalkyl 2 is priced only. Different
+    // operations here are not "mixed links": the rows stay apart.
+    const r = mergeVariantMaterials([
+      material({ componentArticleId: ART.plat, quantity: 1, operation: op(10) }),
+      material({ componentArticleId: ART.plat, quantity: 2, operation: op(20), costingOnly: true }),
+      material({ componentArticleId: ART.plat, quantity: 0.5, costingOnly: true, operation: op(20) }),
+    ], label);
+    expect(r.warnings).toEqual([]);
+    expect(r.rows).toEqual([
+      { componentArticleId: ART.plat, quantity: 1, unitId: null, unitFactor: null, operationSequenceNo: 10, costingOnly: false },
+      { componentArticleId: ART.plat, quantity: 2.5, unitId: null, unitFactor: null, operationSequenceNo: 20, costingOnly: true },
     ]);
   });
 
@@ -277,7 +293,7 @@ describe("mergeVariantMaterials", () => {
       material({ componentArticleId: ART.skruv, quantity: 4 }),
       material({ componentArticleId: ART.skruv, quantity: 4 }),
     ], label);
-    expect(r.rows).toEqual([{ componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, operationSequenceNo: null }]);
+    expect(r.rows).toEqual([{ componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, operationSequenceNo: null, costingOnly: false }]);
     expect(r.warnings).toEqual([]);
   });
 

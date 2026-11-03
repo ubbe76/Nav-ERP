@@ -33,6 +33,7 @@ export const ARTICLE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "lotSizingRule", label: "Partiformningsregel" },
   { field: "safetyStock", label: "Säkerhetslager" },
   { field: "stockControlled", label: "Styrning" },
+  { field: "leadTimeDays", label: "Ledtid (dagar)" },
   // Revisioner: the article's active revision and a drawing number with its
   // active revision.
   { field: "articleRevision", label: "Artikelrevision" },
@@ -74,6 +75,7 @@ export const SUPPLIER_PRICE_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "price", label: "Pris" },
   { field: "discountPercent", label: "Rabatt (%)" },
   { field: "isPrimary", label: "Huvudleverantör (Förvald)" },
+  { field: "leadTimeDays", label: "Ledtid (dagar)" },
   { field: "breakQuantity", label: "Staffel: från antal (Gränsvärde)" },
   { field: "breakPrice", label: "Staffel: pris" },
 ];
@@ -210,6 +212,8 @@ export const BOM_IMPORT_FIELDS: ImportFieldConfig[] = [
   { field: "operationSequenceNo", label: "Operation" },
   // Monitor's "Pos." — the position on the drawing.
   { field: "position", label: "Pos." },
+  // Monitor's "End. kal." — priced in the förkalkyl only, never on a TO.
+  { field: "costingOnly", label: "Kalkyl" },
   // Read only for components missing from the article register, and only with
   // "Skapa saknade artiklar". Labelled "Artikelbenämning" because that is what
   // the column is called in the files people import — the parenthesis says

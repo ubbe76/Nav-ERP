@@ -7,7 +7,7 @@
 // with input.skipExisting. With input.updateExisting (opt-in, mutually
 // exclusive with skipExisting) the matched row is rewritten: antal and enhet
 // always, the operation link when the column is mapped, Pos. when the cell is
-// filled.
+// filled, the Kalkyl flag when the cell is filled.
 //
 // Since migration 0176 the same component may sit on several rows of one
 // structure (another Pos., another operation): such rows import with a
@@ -19,6 +19,7 @@ import { normalizeDecimal } from "./csv.js";
 import type { ExistingArticle, ParsedArticleType } from "./articles.js";
 import { parseArticleType } from "./articles.js";
 import { findCyclicRows, type BomEdge } from "./bom-cycle.js";
+import { parseCostingOnly } from "./routing.js";
 import {
   ImportMappingError,
   normalizeHeader,
@@ -41,6 +42,9 @@ export const BOM_IMPORT_FIELDS = [
   "operationSequenceNo",
   // "Pos." — the row's position on the drawing.
   "position",
+  // "Kalkyl" — Monitor's "End. kal.": priced in the förkalkyl only, never a TO
+  // material line, no dependent demand.
+  "costingOnly",
   // Read ONLY for components missing from the article register, and ONLY with
   // input.createMissingArticles. An existing article is never touched by this
   // import — not even when the file disagrees with it.
@@ -97,6 +101,12 @@ export const BOM_HEADER_ALIASES: Record<string, string> = {
   position: "position",
   positionsnummer: "position",
   posnr: "position",
+  // Monitor's "End. kal." (endast kalkyl) and the template's heading. Same
+  // words as the routing import's Kalkyl column.
+  endkal: "costingOnly",
+  endastkalkyl: "costingOnly",
+  kalkyl: "costingOnly",
+  kalkylrad: "costingOnly",
   komponentbenamning: "componentName",
   komponentnamn: "componentName",
   komponentensbenamning: "componentName",
@@ -203,12 +213,14 @@ export interface BomCreatePlan {
   routingOperationId: string | null;
   /** "Pos." — null when the cell is empty. */
   position?: string | null;
+  /** "Kalkyl" — omitted/false when the cell is empty. */
+  costingOnly?: boolean;
 }
 
 // An existing structure row rewritten under input.updateExisting. Antal and
 // enhet are always set (the quantity column is required); the operation link
-// only when its column is mapped (an empty cell then unlinks); Pos. only
-// from a filled cell — an empty one never blanks a stored value.
+// only when its column is mapped (an empty cell then unlinks); Pos. and
+// Kalkyl only from a filled cell — an empty one never blanks a stored value.
 export interface BomUpdatePlan {
   id: string;
   patch: {
@@ -217,6 +229,7 @@ export interface BomUpdatePlan {
     unitFactor: number | null;
     routingOperationId?: string | null;
     position?: string;
+    costingOnly?: boolean;
   };
 }
 
@@ -238,7 +251,7 @@ export interface BomImportPlan {
   hasErrors: boolean;
 }
 
-type ExistingBomRow = { id: string; position: string | null };
+type ExistingBomRow = { id: string; position: string | null; routingOperationId: string | null; costingOnly: boolean };
 
 // File row index -> the stored structure row it stands for. Per (parent,
 // component): first a file row whose Pos. equals a stored row's Pos., then the
@@ -251,7 +264,7 @@ function matchExistingRows(
   records: Record<string, string>[],
   articlesByNumber: Map<string, ExistingArticle>,
   existingByPair: Map<string, ExistingBomRow[]>
-): Map<number, string> {
+): Map<number, ExistingBomRow> {
   const fileRowsByPair = new Map<string, number[]>();
   records.forEach((record, index) => {
     const parent = articlesByNumber.get(record["articleNumber"] ?? "");
@@ -264,20 +277,20 @@ function matchExistingRows(
     else fileRowsByPair.set(key, [index]);
   });
 
-  const matched = new Map<number, string>();
+  const matched = new Map<number, ExistingBomRow>();
   for (const [key, indexes] of fileRowsByPair) {
     const free = [...existingByPair.get(key)!];
     const unmatched: number[] = [];
     for (const index of indexes) {
       const position = records[index]!["position"] ?? "";
       const at = position === "" ? -1 : free.findIndex((row) => row.position === position);
-      if (at >= 0) matched.set(index, free.splice(at, 1)[0]!.id);
+      if (at >= 0) matched.set(index, free.splice(at, 1)[0]!);
       else unmatched.push(index);
     }
     for (const index of unmatched) {
       const next = free.shift();
       if (!next) break;
-      matched.set(index, next.id);
+      matched.set(index, next);
     }
   }
   return matched;
@@ -326,7 +339,12 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
   const existingByPair = new Map<string, ExistingBomRow[]>();
   for (const edge of existingEdges) {
     const key = `${edge.parentId}#${edge.componentId}`;
-    const row = { id: edge.id ?? "", position: edge.position ?? null };
+    const row: ExistingBomRow = {
+      id: edge.id ?? "",
+      position: edge.position ?? null,
+      routingOperationId: edge.routingOperationId ?? null,
+      costingOnly: edge.costingOnly ?? false,
+    };
     const list = existingByPair.get(key);
     if (list) list.push(row);
     else existingByPair.set(key, [row]);
@@ -363,7 +381,7 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
     const warnings: string[] = [];
     const values: Record<string, unknown> = {};
     // Set when the row rewrites an existing structure row (updateExisting).
-    let existingRowId: string | null = null;
+    let existingRow: ExistingBomRow | null = null;
 
     const articleNumber = record["articleNumber"] ?? "";
     values["articleNumber"] = articleNumber;
@@ -393,8 +411,8 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
 
     if (parent && component && component.id !== parent.id) {
       pairKeys.set(index, `${parent.id}#${component.id}`);
-      const matchedRowId = matchedRows.get(index);
-      if (matchedRowId !== undefined) {
+      const matchedRow = matchedRows.get(index);
+      if (matchedRow !== undefined) {
         if (input.skipExisting) {
           // Short-circuit: nothing is written for this row, so the remaining
           // cells (antal, enhet, operation) are not validated — a bad cell on
@@ -413,7 +431,7 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
           return;
         }
         if (input.updateExisting) {
-          existingRowId = matchedRowId || null;
+          existingRow = matchedRow.id ? matchedRow : null;
         } else {
           errors.push(
             `Komponenten ${componentNumber} finns redan i strukturen för ${articleNumber} — ta bort raden ur filen`
@@ -568,6 +586,20 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
       // null, exactly as resolveUnitSelection returns for the base unit.
     }
 
+    // Kalkyl — parsed before the operation cell, whose Kalkyl-operation rule
+    // depends on it. Empty: false on a new row, untouched on an update.
+    const rawCostingOnly = record["costingOnly"] ?? "";
+    if ("costingOnly" in record) values["costingOnly"] = rawCostingOnly;
+    let costingOnly: boolean | null = null;
+    if (rawCostingOnly !== "") {
+      costingOnly = parseCostingOnly(rawCostingOnly);
+      if (costingOnly === null) {
+        errors.push(`Ogiltigt värde för Kalkyl: "${rawCostingOnly}" (Ja/Nej/1/0/true/false)`);
+      }
+    }
+    // What the row WILL be: the cell, else the stored flag, else false.
+    const effectiveCostingOnly = costingOnly ?? existingRow?.costingOnly ?? false;
+
     const rawOperation = record["operationSequenceNo"] ?? "";
     values["operationSequenceNo"] = rawOperation;
     let routingOperationId: string | null = null;
@@ -589,16 +621,29 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
               ? `Artikel ${articleNumber} har ingen rutt — materialet kopplas inte till någon operation och dras i takt med inleveransen av färdiga varor`
               : `Operation ${parsed} finns inte på artikel ${articleNumber} — materialet kopplas inte till någon operation och dras i takt med inleveransen av färdiga varor`
           );
-        } else if (operation.costingOnly) {
+        } else if (operation.costingOnly && !effectiveCostingOnly) {
           // Same rule as assertOperationBelongsToArticle's
           // CostingOnlyOperationLinkError — a Kalkyl operation is never
-          // released, so material tied to it would never be drawn.
+          // released, so material tied to it would never be drawn. A Kalkyl
+          // ROW never reaches the TO either, so its link is harmless.
           errors.push(
             `Operation ${parsed} på artikel ${articleNumber} är en kalkyloperation och kan inte förbruka material`
           );
         } else {
           routingOperationId = operation.id;
         }
+      }
+    }
+    // updateExisting with the Operation column unmapped keeps the stored link —
+    // a row that loses its Kalkyl flag here must not keep a Kalkyl operation.
+    if (existingRow && !operationMapped && existingRow.routingOperationId && costingOnly === false) {
+      const keptIsKalkyl = [...(existingOperations.get(parent?.id ?? "")?.values() ?? [])].some(
+        (operation) => operation.id === existingRow!.routingOperationId && operation.costingOnly
+      );
+      if (keptIsKalkyl) {
+        errors.push(
+          `Raden är kopplad till en kalkyloperation på artikel ${articleNumber} och kan inte sluta vara kalkylrad — ändra kopplingen först`
+        );
       }
     }
 
@@ -612,9 +657,9 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
       else position = rawPosition;
     }
 
-    rows.push({ rowNumber, action: existingRowId ? "update" : "create", errors, warnings, values });
+    rows.push({ rowNumber, action: existingRow ? "update" : "create", errors, warnings, values });
 
-    if (existingRowId) {
+    if (existingRow) {
       // The edge already exists, so the row adds nothing to the cycle check.
       staged.push(null);
       if (errors.length === 0 && quantity !== null) {
@@ -625,7 +670,8 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
         };
         if (operationMapped) patch.routingOperationId = routingOperationId;
         if (position !== null) patch.position = position;
-        updates.push({ id: existingRowId, patch });
+        if (costingOnly !== null) patch.costingOnly = costingOnly;
+        updates.push({ id: existingRow.id, patch });
       }
       return;
     }
@@ -640,6 +686,7 @@ export async function planBomImport(input: ImportCommitInput, deps: BomImportDep
         unitFactor,
         routingOperationId,
         ...(position !== null ? { position } : {}),
+        ...(costingOnly === true ? { costingOnly: true } : {}),
       });
     } else {
       staged.push(null);

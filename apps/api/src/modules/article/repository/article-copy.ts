@@ -123,6 +123,7 @@ async function copyBeredning(tx: Tx, sourceId: string, targetId: string) {
       // read), so every link points at an operation copied above.
       routingOperationId: row.routingOperationId ? operationMap.get(row.routingOperationId)! : null,
       position: row.position,
+      costingOnly: row.costingOnly,
     }))
   );
 }

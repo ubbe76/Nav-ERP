@@ -1,4 +1,5 @@
-// The article import's Leverantörsnr step, run inside executeArticlePlan's
+// The article import's Leverantörsnr step (and its Ledtid on purchased
+// articles, applyPrimarySupplierLeadTimes), run inside executeArticlePlan's
 // transaction after the articles exist: the named supplier becomes the
 // article's primary supplier on the Inköp tab. A missing article_suppliers
 // row is added WITHOUT a price (in the supplier's currency, as the catalog
@@ -63,5 +64,30 @@ export async function applyPrimarySuppliers(tx: Tx, rows: ImportedPrimarySupplie
         target: [articleSuppliers.articleId, articleSuppliers.supplierId],
         set: { isPrimary: sql`true` },
       });
+  }
+}
+
+export interface ImportedSupplierLeadTime {
+  articleId: string;
+  // Days; null clears the lead time (Monitor's 0).
+  leadTimeDays: number | null;
+}
+
+// The article import's Ledtid on a PURCHASED article, run after
+// applyPrimarySuppliers in the same transaction: the lead time lands on the
+// article's primary supplier row — the one the row's Leverantörsnr just made
+// primary, else the existing one. The planner only stages articles that have
+// (or get) a primary supplier, so every update hits exactly one row.
+export async function applyPrimarySupplierLeadTimes(tx: Tx, rows: ImportedSupplierLeadTime[]): Promise<void> {
+  for (const part of chunk(rows)) {
+    const values = sql.join(
+      part.map((row) => sql`(${row.articleId}::uuid, ${row.leadTimeDays}::integer)`),
+      sql`, `
+    );
+    await tx.execute(sql`
+      update ${articleSuppliers} set lead_time_days = target.lead_time_days
+      from (values ${values}) as target(article_id, lead_time_days)
+      where ${articleSuppliers.articleId} = target.article_id and ${articleSuppliers.isPrimary}
+    `);
   }
 }

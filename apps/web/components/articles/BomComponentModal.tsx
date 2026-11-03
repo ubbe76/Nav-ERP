@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
-import { Field, Input, Select } from "../ui/Field";
+import { Checkbox, Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { UnitSelect, convertQuantityInput, useUnitOptions } from "../ui/UnitSelect";
 import { toUnitQuantity } from "../../lib/units";
@@ -11,7 +11,7 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { operationLabel } from "./operation-label";
 import type { Article, BomComponent, RoutingOperation } from "../../lib/types";
-import { Form, FormActions, FormError, FormNotice, FormRow } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint, FormNotice, FormRow } from "../ui/Form";
 import { alreadyInStructureText } from "../../lib/bomDuplicates";
 
 interface BomComponentModalProps {
@@ -66,6 +66,14 @@ export function BomComponentModal({
   );
 }
 
+const checkboxRowStyle = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  fontFamily: "var(--font-body)",
+  fontSize: 13,
+} as const;
+
 function ComponentForm({
   articleId,
   routing,
@@ -82,13 +90,14 @@ function ComponentForm({
   const [unitId, setUnitId] = useState(editing?.unitId ?? ""); // "" = the component's base unit
   const [operationId, setOperationId] = useState(editing ? (editing.routingOperationId ?? "") : presetOperationId);
   const [position, setPosition] = useState(editing?.position ?? "");
+  const [costingOnly, setCostingOnly] = useState(editing?.costingOnly ?? false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  // A Kalkyl operation is never released onto an MO, so material tied to it
-  // would never be drawn — the API refuses the link (409) and the select
-  // simply doesn't offer it.
-  const linkableRouting = routing.filter((op) => !op.costingOnly);
+  // A Kalkyl operation is never released onto an MO, so an ordinary row tied
+  // to it would never be drawn — the API refuses that link; only a Kalkyl row
+  // may link to a Kalkyl operation.
+  const linkableRouting = routing.filter((op) => costingOnly || !op.costingOnly);
 
   // In edit mode the component article is fetched so the unit dropdown knows
   // its base + alternative units.
@@ -126,6 +135,7 @@ function ComponentForm({
             unitId: unitId === "" ? null : unitId,
             routingOperationId: operationId || null,
             position: position.trim(),
+            costingOnly,
           }),
         });
       } else {
@@ -137,6 +147,7 @@ function ComponentForm({
             unitId: unitId === "" ? null : unitId,
             routingOperationId: operationId || null,
             position: position.trim(),
+            costingOnly,
           }),
         });
       }
@@ -219,6 +230,22 @@ function ComponentForm({
           </Select>
         </Field>
       )}
+
+      <label style={checkboxRowStyle}>
+        <Checkbox
+          id="bomCostingOnly"
+          checked={costingOnly}
+          onChange={(e) => {
+            setCostingOnly(e.target.checked);
+            // An ordinary row cannot keep a link to a Kalkyl operation.
+            if (!e.target.checked && routing.find((op) => op.id === operationId)?.costingOnly) setOperationId("");
+          }}
+        />
+        Kalkyl
+      </label>
+      <FormHint attached>
+        Raden räknas i kalkylen men dras inte vid tillverkning och ger inget behov i behovsberäkningen.
+      </FormHint>
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

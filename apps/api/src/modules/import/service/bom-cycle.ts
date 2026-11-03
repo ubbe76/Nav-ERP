@@ -14,6 +14,9 @@ export interface BomEdge {
   id?: string;
   /** Its Pos. — set on the stored edges; the import matches file rows on it. */
   position?: string | null;
+  /** Its operation link and Kalkyl flag — set on the stored edges; updateExisting re-checks the link against the flag. */
+  routingOperationId?: string | null;
+  costingOnly?: boolean;
 }
 
 function addEdge(graph: Map<string, Set<string>>, edge: BomEdge): void {

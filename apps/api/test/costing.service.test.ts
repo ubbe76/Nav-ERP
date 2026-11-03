@@ -1066,3 +1066,41 @@ describe("costing service — post-calculation priced at the withdrawal", () => 
     }
   });
 });
+
+// "Kalkyl" on a structure row (bom_components.costing_only): priced in the
+// förkalkyl like any other row — single and multi-level — but never on the
+// MO, so the efterkalkyl (which prices the actual withdrawals) never sees it.
+describe("costing service — Kalkyl structure rows", () => {
+  it("counts the row in the pre-calculation and leaves it out of the post-calculation", async () => {
+    const user = await makeUser();
+    const { parent, component } = await makeParentWithBom(10, 2);
+    const kalkyl = await articleService.createArticle({
+      articleNumber: `KALKYL-${crypto.randomUUID()}`, name: "Kalkylmaterial", type: "purchased", unit: "st", standardCost: 5, active: true,
+    });
+    await articleService.addBomComponent(parent.id, { componentArticleId: kalkyl.id, quantity: 1, costingOnly: true });
+    // A phantom on a Kalkyl row: its parts are costed, flagged all the way down.
+    const phantom = await articleService.createArticle({
+      articleNumber: `PH-${crypto.randomUUID()}`, name: "Fantom", type: "manufactured", isPhantom: true, unit: "st", active: true,
+    });
+    const underPhantom = await articleService.createArticle({
+      articleNumber: `UP-${crypto.randomUUID()}`, name: "Under fantom", type: "purchased", unit: "st", standardCost: 1, active: true,
+    });
+    await articleService.addBomComponent(phantom.id, { componentArticleId: underPhantom.id, quantity: 3 });
+    await articleService.addBomComponent(parent.id, { componentArticleId: phantom.id, quantity: 1, costingOnly: true });
+
+    // 5 units: ordinary 2 × 5 × 10 = 100, Kalkyl 1 × 5 × 5 = 25, phantom part 3 × 5 × 1 = 15.
+    const { calculation: pre } = await costingService.preCalculate(parent.id, 5, true);
+    expect(pre.materialCost).toBe("140.0000");
+    const preDetail = await costingService.getCostCalculation(pre.id);
+    expect(preDetail!.materialRows.map((r) => r.componentArticleId).sort()).toEqual([component.id, kalkyl.id, underPhantom.id].sort());
+    // Räkna om underliggande nivåer gives the same material for a one-level structure.
+    const { calculation: multi } = await costingService.preCalculate(parent.id, 5, false, true);
+    expect(multi.materialCost).toBe("140.0000");
+
+    const order = await mfgService.createManufacturingOrder({ articleId: parent.id, quantity: 5 }, user.id);
+    expect((await mfgService.listMaterialConsumptions(order.id)).map((m) => m.componentArticleId)).toEqual([component.id]);
+    const { calculation: post } = await costingService.postCalculate(order.id, true);
+    const postDetail = await costingService.getCostCalculation(post.id);
+    expect(postDetail!.materialRows.map((r) => r.componentArticleId)).toEqual([component.id]);
+  });
+});

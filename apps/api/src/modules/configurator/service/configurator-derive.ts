@@ -15,6 +15,7 @@ import { findCoverageGaps, selectionCoverageWarnings } from "./structure-coverag
 export type BaseBomRow = {
   id: string; // bom_components.id
   componentArticleId: string; quantity: number; unitId: string | null; unitFactor: string | null; routingOperationId: string | null;
+  costingOnly: boolean; // "Kalkyl": costed, but never a TO material line (deriveForManufacturing skips it)
 };
 export type BaseOperation = {
   id: string; sequenceNo: number; workCenterId: string; description: string | null; setupTime: number; runTimePerUnit: number;
@@ -121,7 +122,7 @@ export function deriveStructure(input: {
   // Rule 2: ordinary structure rows unchanged (quantity, display unit, link).
   const materials: DerivedMaterialCore[] = input.baseBom.map((b) => ({
     source: "base", lineId: null, baseRowId: b.id, componentArticleId: b.componentArticleId, quantity: b.quantity,
-    unitId: b.unitId, unitFactor: b.unitFactor, operation: baseRef(b.routingOperationId),
+    unitId: b.unitId, unitFactor: b.unitFactor, operation: baseRef(b.routingOperationId), costingOnly: b.costingOnly,
   }));
 
   // Rule 3 + 5 + 7: conditional lines in sortOrder, each its own material row.
@@ -160,7 +161,9 @@ export function deriveStructure(input: {
         warnings.push(`${l.label} kopplad till operation ${o.sequenceNo} som inte ingår — dras vid slutrapporteringen`);
       }
     }
-    materials.push({ source: "line", lineId: l.id, baseRowId: null, componentArticleId, quantity, unitId: null, unitFactor: null, operation });
+    materials.push({
+      source: "line", lineId: l.id, baseRowId: null, componentArticleId, quantity, unitId: null, unitFactor: null, operation, costingOnly: false,
+    });
   }
 
   // Täckningsvarning: a line family (one line per alternative) that has no line for the chosen alternative.

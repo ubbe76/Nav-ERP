@@ -1131,3 +1131,51 @@ describe("planning service — leveranstidskontroll", () => {
     ).rejects.toBeInstanceOf(CustomerNotFoundError);
   });
 });
+
+// "Kalkyl" on a structure row (bom_components.costing_only): priced in the
+// förkalkyl only — the behovsberäkning, the artikelöversikt and Skapa ordrar
+// see no edge for it, so it creates no dependent demand; a phantom under such
+// a row is not exploded into demand either.
+describe("planning service — Kalkyl structure rows create no demand", () => {
+  it("nets only the ordinary rows, and nothing under a Kalkyl phantom", async () => {
+    const user = await makeUser();
+    const fg = await makeArticle({ articleNumber: "KAL-FG", type: "manufactured" });
+    const ordinary = await makeArticle({ articleNumber: "KAL-C" });
+    const kalkyl = await makeArticle({ articleNumber: "KAL-K" });
+    const phantom = await articleService.createArticle({ articleNumber: "KAL-PH", name: "Fantom", type: "manufactured", isPhantom: true, active: true });
+    const underPhantom = await makeArticle({ articleNumber: "KAL-L" });
+    await makeSupplierWithCatalog("Alfa AB", [ordinary.id, kalkyl.id, underPhantom.id]);
+    await articleService.addBomComponent(fg.id, { componentArticleId: ordinary.id, quantity: 2 });
+    await articleService.addBomComponent(fg.id, { componentArticleId: kalkyl.id, quantity: 3, costingOnly: true });
+    await articleService.addBomComponent(fg.id, { componentArticleId: phantom.id, quantity: 1, costingOnly: true });
+    await articleService.addBomComponent(phantom.id, { componentArticleId: underPhantom.id, quantity: 4 });
+    await makeConfirmedSalesOrder(fg.id, 5, user.id);
+
+    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true });
+    const byNumber = new Map(rows.map((r) => [r.articleNumber, r]));
+    expect(byNumber.get("KAL-FG")!.proposalQuantity).toBe(5);
+    expect(byNumber.get("KAL-C")!.demandDerived).toBe(10);
+    // No demand, stock or supply at all ⇒ not even a showAll row.
+    expect(byNumber.has("KAL-K")).toBe(false);
+    expect(byNumber.has("KAL-L")).toBe(false);
+
+    // Skapa ordrar: the released TO's material rows (release excludes the
+    // Kalkyl rows too) keep the picture — only the ordinary component is a
+    // TO demand afterwards.
+    const result = await planningService.createOrdersFromProposals(
+      { proposals: [{ articleId: fg.id, quantity: 5, kind: "manufacture" }] },
+      user.id
+    );
+    expect(result.errors).toEqual([]);
+    const after = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true });
+    const afterByNumber = new Map(after.rows.map((r) => [r.articleNumber, r]));
+    expect(afterByNumber.get("KAL-C")!.demandMo).toBe(10);
+    expect(afterByNumber.has("KAL-K")).toBe(false);
+    expect(afterByNumber.has("KAL-L")).toBe(false);
+
+    // The artikelöversikt agrees: no rows at all for the Kalkyl component.
+    const overview = await planningService.getArticleOverview(kalkyl.id);
+    expect(overview.rows).toEqual([]);
+    expect(overview.closingBalance).toBe(0);
+  });
+});

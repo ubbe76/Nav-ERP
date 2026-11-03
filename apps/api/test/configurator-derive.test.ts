@@ -46,8 +46,8 @@ const BASE_OPS: BaseOperation[] = [
   { id: id("O30"), sequenceNo: 30, workCenterId: id("W2"), description: "Bocka", setupTime: 10, runTimePerUnit: 1.5, costingOnly: false },
 ];
 const BASE_BOM: BaseBomRow[] = [
-  { id: id("B1"), componentArticleId: ART.plat, quantity: 2.5, unitId: id("U1"), unitFactor: "0.5", routingOperationId: id("O10") },
-  { id: id("B2"), componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, routingOperationId: null },
+  { id: id("B1"), componentArticleId: ART.plat, quantity: 2.5, unitId: id("U1"), unitFactor: "0.5", routingOperationId: id("O10"), costingOnly: false },
+  { id: id("B2"), componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, routingOperationId: null, costingOnly: false },
 ];
 
 let lineSeq = 0;
@@ -139,8 +139,8 @@ describe("deriveStructure", () => {
     expect(r.errors).toEqual([]);
     expect(r.warnings).toEqual([]);
     expect(r.materials).toEqual([
-      { source: "base", lineId: null, baseRowId: id("B1"), componentArticleId: ART.plat, quantity: 2.5, unitId: id("U1"), unitFactor: "0.5", operation: { kind: "base", id: id("O10"), sequenceNo: 10 } },
-      { source: "base", lineId: null, baseRowId: id("B2"), componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, operation: null },
+      { source: "base", lineId: null, baseRowId: id("B1"), componentArticleId: ART.plat, quantity: 2.5, unitId: id("U1"), unitFactor: "0.5", operation: { kind: "base", id: id("O10"), sequenceNo: 10 }, costingOnly: false },
+      { source: "base", lineId: null, baseRowId: id("B2"), componentArticleId: ART.skruv, quantity: 8, unitId: null, unitFactor: null, operation: null, costingOnly: false },
     ]);
     expect(r.operations).toEqual([
       { kind: "base", id: id("O10"), sequenceNo: 10, workCenterId: id("W1"), description: "Klipp", setupTime: 15, runTimePerUnit: 2, costingOnly: false },
@@ -169,7 +169,7 @@ describe("deriveStructure", () => {
     const l = line({ source: "group", componentArticleId: null, componentGroupId: id("LOCK"), quantity: 1, label: "Strukturrad 1 (Lock)" });
     const r = derive({ LOCK: "B", BREDD: 1200 }, { lines: [l] });
     expect(r.derivable).toBe(true);
-    expect(r.materials[2]).toEqual({ source: "line", lineId: l.id, baseRowId: null, componentArticleId: ART.lockB, quantity: 1, unitId: null, unitFactor: null, operation: null });
+    expect(r.materials[2]).toEqual({ source: "line", lineId: l.id, baseRowId: null, componentArticleId: ART.lockB, quantity: 1, unitId: null, unitFactor: null, operation: null, costingOnly: false });
   });
 
   it("rule 3: a group without a selected alternative is an error", () => {

@@ -119,6 +119,13 @@ function chunk<T>(list: T[], size: number): T[][] {
   return out;
 }
 
+// The BOM edges every demand reader sees (behovsberäkning, artikelöversikt,
+// Leveranstidskontroll, Skapa ordrar's low-level codes): "Kalkyl" rows
+// (bom_components.costing_only) are priced in the förkalkyl only and create no
+// dependent demand. Dropping the EDGE also keeps a phantom under such a row
+// from being exploded into demand — its whole subtree is costing-only.
+const DEMAND_BOM_ROWS = eq(bomComponents.costingOnly, false);
+
 export function createPlanningRepository(db: Db) {
   // Pending lego (subcontract) operations on released/in_progress MOs, with
   // the already-ordered quantity per operation (Σ quantity_ordered on
@@ -461,7 +468,9 @@ export function createPlanningRepository(db: Db) {
               componentArticleId: bomComponents.componentArticleId,
               quantity: bomComponents.quantity,
             })
-            .from(bomComponents),
+            .from(bomComponents)
+            // "Kalkyl" rows create no dependent demand (DEMAND_BOM_ROWS).
+            .where(DEMAND_BOM_ROWS),
           primarySuppliersFor(),
           legoOperations(),
         ]);
@@ -748,7 +757,9 @@ export function createPlanningRepository(db: Db) {
               componentArticleId: bomComponents.componentArticleId,
               quantity: bomComponents.quantity,
             })
-            .from(bomComponents),
+            .from(bomComponents)
+            // "Kalkyl" rows create no dependent demand (DEMAND_BOM_ROWS).
+            .where(DEMAND_BOM_ROWS),
           dbc.select({ id: articles.id }).from(articles).where(eq(articles.isPhantom, true)),
           primarySuppliersFor(ids, dbc),
         ]);
@@ -1167,7 +1178,8 @@ export function createPlanningRepository(db: Db) {
           componentArticleId: bomComponents.componentArticleId,
           quantity: bomComponents.quantity,
         })
-        .from(bomComponents);
+        .from(bomComponents)
+        .where(DEMAND_BOM_ROWS);
       return rows.map((r) => ({ ...r, quantity: Number(r.quantity) }));
     },
 

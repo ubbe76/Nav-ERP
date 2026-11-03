@@ -320,7 +320,10 @@ function DerivationView({ derivation, stale }: { derivation: ConfiguratorDerivat
                     {m.unitCode ? ` ${m.unitCode}` : ""}
                   </td>
                   <td>{m.operation ? m.operation.sequenceNo : "—"}</td>
-                  <td>{m.source === "line" && <span className={styles.badge}>Villkorad</span>}</td>
+                  <td>
+                    {m.source === "line" && <span className={styles.badge}>Villkorad</span>}
+                    {m.costingOnly && <span className={styles.badge}>Kalkyl</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

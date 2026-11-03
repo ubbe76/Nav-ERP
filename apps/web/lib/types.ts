@@ -168,6 +168,9 @@ export interface BomComponent {
   routingOperationSequenceNo: number | null;
   // "Pos." — free-text drawing position (max 20), null when not set.
   position: string | null;
+  // "Kalkyl" — priced into the pre-calculation but never snapshotted to an MO
+  // and no demand in the behovsberäkning.
+  costingOnly: boolean;
 }
 
 // Node in GET /articles/:id/bom-tree — the structure as authored (phantoms
@@ -179,6 +182,7 @@ export interface BomTreeNode {
   isPhantom: boolean;
   quantity: string | null;
   bomRowId: string | null;
+  costingOnly: boolean;
   children: BomTreeNode[];
 }
 

@@ -116,9 +116,12 @@ export function createCostingRepository(db: Db) {
     },
 
     // Phantom BOM components are resolved past into their own components
-    // (quantities multiplied down the chain) — see bom-explosion.ts.
+    // (quantities multiplied down the chain) — see bom-explosion.ts. The
+    // förkalkyl prices "Kalkyl" rows (costing_only) like any other row, so
+    // they are included; the efterkalkyl never meets them (it prices the
+    // MO's actual withdrawals, which release never created).
     async explodeBom(articleId: string, quantity: number) {
-      return explodeBom(db, articleId, quantity);
+      return explodeBom(db, articleId, quantity, "include");
     },
 
     // Cost basis for the exploded components: the article's own standard cost

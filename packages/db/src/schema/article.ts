@@ -348,6 +348,10 @@ export const bomComponents = pgTable(
     // "Pos." — the row's position on the drawing (Monitor's Materiallista),
     // free text. Null = none.
     position: varchar("position", { length: 20 }),
+    // "Kalkyl" (Monitor's "End. kal." — endast kalkyl): the row is priced in
+    // the pre-calculation but never reaches a manufacturing order and creates
+    // no dependent demand — the material twin of routing_operations.costing_only.
+    costingOnly: boolean("costing_only").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   // No unique (parent, component) since migration 0176: the same material may

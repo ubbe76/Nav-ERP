@@ -60,6 +60,7 @@ function TreeNode({
           {node.name}
           {node.isPhantom ? " · Fantom" : ""}
         </span>
+        {node.costingOnly && <span className={styles.kalkylBadge}>Kalkyl</span>}
         {node.quantity !== null && <span className={styles.treeQty}>× {Number(node.quantity)}</span>}
       </button>
       {node.children.map((child) => (

@@ -48,6 +48,9 @@ export const ARTICLE_IMPORT_FIELDS = [
   // Säkerhetslager (0 = none) and Styrning (Lagerstyrd/Orderstyrd).
   "safetyStock",
   "stockControlled",
+  // Ledtid (dagar), 0 = none: a manufactured article's own lead time, a
+  // purchased article's primary supplier's (see planArticleImport).
+  "leadTimeDays",
   // Revisionsregistren on the card's Revisioner tab — the cell names the
   // revision (or drawing number) that should be there and active; see
   // planArticleImport.
@@ -67,7 +70,7 @@ export const ARTICLE_IMPORT_FIELDS = [
 // the artikelkod; Artikelkategori and the stock columns (Totalt saldo,
 // Lagerplatsurval) are deliberately absent — they have no target field here
 // and must be mapped by hand if a site wants them. The planning
-// export's Min. kvantitet, Säkerhetslager, Ledtid etc. are likewise absent:
+// export's Min. kvantitet, Säkerhetstid, Årsvolym etc. are likewise absent:
 // order_quantity already acts as the minimum, and the rest have no field.
 export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   bestallningspunkt: "reorderPoint",
@@ -80,6 +83,9 @@ export const ARTICLE_HEADER_ALIASES: Record<string, string> = {
   partiformningsregel: "lotSizingRule",
   sakerhetslager: "safetyStock",
   styrning: "stockControlled",
+  ledtid: "leadTimeDays",
+  // The template's heading "Ledtid (dagar)".
+  ledtiddagar: "leadTimeDays",
   artikelnummer: "articleNumber",
   artikelnr: "articleNumber",
   artnr: "articleNumber",
@@ -166,6 +172,10 @@ export interface ExistingArticle {
   // The article's active revision (article_revisions), null when none is
   // active. Optional: only the article import reads it.
   activeRevision?: string | null;
+  // Whether the Inköp tab has a primary supplier (article_suppliers) — a
+  // purchased article's Ledtid lands on it. Optional: only the article
+  // import reads it.
+  hasPrimarySupplier?: boolean;
 }
 
 // Narrow lookups the builder runs against — implemented by
@@ -229,6 +239,11 @@ export interface ArticleCreatePlan {
   stockControlled?: boolean;
   quantityPerPackage?: number | null;
   primarySupplierId?: string | null;
+  // Ledtid: a manufactured article's manufacturing_lead_time_days; for a
+  // purchased one the lead time of the primary supplier named on the same
+  // row (primarySupplierId).
+  manufacturingLeadTimeDays?: number | null;
+  primarySupplierLeadTimeDays?: number | null;
 }
 
 export interface ArticleUpdatePlan {
@@ -255,11 +270,16 @@ export interface ArticleUpdatePlan {
     quantityPerPackage?: number | null;
     safetyStock?: number | null;
     stockControlled?: boolean;
+    manufacturingLeadTimeDays?: number | null;
   };
   revisions?: ArticleRevisionPlan;
   // Becomes the article's primary supplier (article_suppliers), added
   // without a price when the article has no row for it yet.
   primarySupplierId?: string;
+  // Ledtid of a purchased article: written to its primary supplier's row
+  // (the one primarySupplierId makes primary, else the existing one);
+  // null clears it.
+  primarySupplierLeadTimeDays?: number | null;
 }
 
 export interface ArticleImportPlan {
@@ -272,6 +292,10 @@ export interface ArticleImportPlan {
   fallbackLocationId: string;
   hasErrors: boolean;
 }
+
+// Ledtid (dagar): whole days; the ceiling only keeps a typo out of the
+// integer columns.
+const LEAD_TIME_MAX_DAYS = 9999;
 
 // Varugruppskod: 1–4 digits (Monitor's Varugrupp is a single digit).
 const GROUP_CODE_PATTERN = /^[0-9]{1,4}$/;
@@ -649,6 +673,27 @@ export async function planArticleImport(
       if (stockControlled !== undefined) values["stockControlled"] = stockControlled;
     }
 
+    // Ledtid (dagar) — whole days, 0 is "none" like the other planning
+    // fields. Where it lands depends on the article type (the stored one on
+    // update — the type is locked — else the row's, else the Standardtyp):
+    // a manufactured article's own Ledtid (dagar), a purchased article's
+    // primary supplier's lead time (the behovsberäkning reads both), and a
+    // service has none. A purchased article without a primary supplier —
+    // neither in the register nor on this row — gets a warning instead.
+    const leadTimeCell = record["leadTimeDays"] ?? "";
+    let leadTimeDays: number | null | undefined;
+    if (leadTimeCell !== "") {
+      const parsed = normalizeDecimal(leadTimeCell);
+      if (parsed === null) errors.push(`Ogiltig ledtid: "${leadTimeCell}"`);
+      else if (parsed < 0) errors.push("Ledtiden kan inte vara negativ");
+      else if (!Number.isInteger(parsed)) errors.push(`Ledtiden ska vara ett helt antal dagar: "${leadTimeCell}"`);
+      else if (parsed > LEAD_TIME_MAX_DAYS) errors.push(`Ledtiden är för lång (max ${LEAD_TIME_MAX_DAYS} dagar)`);
+      else {
+        leadTimeDays = parsed === 0 ? null : parsed;
+        values["leadTimeDays"] = leadTimeDays;
+      }
+    }
+
     // Revisioner. Artikelrevision becomes the article's active revision
     // (added when missing; the previous one stays, inactive) and is only
     // staged when it differs from the active one, so re-importing a file
@@ -714,6 +759,24 @@ export async function planArticleImport(
       else primarySupplierId = supplier.id;
     }
 
+    // Where the Ledtid goes (see above) — resolved after the supplier cell,
+    // since a purchased article's lead time follows the row's supplier.
+    const effectiveType = existing?.type ?? parsedType?.type ?? input.defaults?.articleType ?? "purchased";
+    let manufacturingLeadTimeDays: number | null | undefined;
+    let primarySupplierLeadTimeDays: number | null | undefined;
+    if (leadTimeDays !== undefined) {
+      if (effectiveType === "manufactured") {
+        manufacturingLeadTimeDays = leadTimeDays;
+      } else if (effectiveType === "purchased") {
+        if (primarySupplierId !== null || existing?.hasPrimarySupplier) primarySupplierLeadTimeDays = leadTimeDays;
+        else if (leadTimeDays !== null) {
+          warnings.push("Ledtiden importerades inte — artikeln har ingen huvudleverantör (importera Leverantörsnr först)");
+        }
+      } else if (leadTimeDays !== null) {
+        warnings.push("Ledtiden importerades inte — en tjänst har ingen ledtid");
+      }
+    }
+
     rows.push({ rowNumber, action, errors, warnings, values });
     if (errors.length > 0) return;
 
@@ -749,6 +812,8 @@ export async function planArticleImport(
         ...(safetyStock != null ? { safetyStock } : {}),
         ...(stockControlled !== undefined ? { stockControlled } : {}),
         ...(primarySupplierId !== null ? { primarySupplierId } : {}),
+        ...(manufacturingLeadTimeDays != null ? { manufacturingLeadTimeDays } : {}),
+        ...(primarySupplierLeadTimeDays != null ? { primarySupplierLeadTimeDays } : {}),
       });
     } else {
       // Empty cell on update = leave the existing value untouched (never
@@ -787,11 +852,13 @@ export async function planArticleImport(
       if (quantityPerPackage !== undefined) patch.quantityPerPackage = quantityPerPackage;
       if (safetyStock !== undefined) patch.safetyStock = safetyStock;
       if (stockControlled !== undefined) patch.stockControlled = stockControlled;
+      if (manufacturingLeadTimeDays !== undefined) patch.manufacturingLeadTimeDays = manufacturingLeadTimeDays;
       updates.push({
         id: existing.id,
         patch,
         ...(revisions ? { revisions } : {}),
         ...(primarySupplierId !== null ? { primarySupplierId } : {}),
+        ...(primarySupplierLeadTimeDays !== undefined ? { primarySupplierLeadTimeDays } : {}),
       });
     }
   });

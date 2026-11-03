@@ -162,8 +162,9 @@ export function suggestRoutingMapping(headers: string[]): Record<string, string 
 
 // Deliberately NOT reusing articles.ts's parseActive: the article import's
 // accepted vocabulary is a shipped contract and must not be widened by a
-// side effect of this one.
-function parseCostingOnly(raw: string): boolean | null {
+// side effect of this one. Shared with the BOM import's Kalkyl column (bom.ts)
+// so the two Kalkyl columns accept exactly the same words.
+export function parseCostingOnly(raw: string): boolean | null {
   const value = raw.trim().toLowerCase();
   if (["ja", "j", "1", "true", "sant", "x"].includes(value)) return true;
   if (["nej", "n", "0", "false", "falskt"].includes(value)) return false;

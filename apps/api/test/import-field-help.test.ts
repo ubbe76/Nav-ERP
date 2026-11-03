@@ -238,6 +238,7 @@ describe("field help — the examples parse", () => {
     articles: ["active"],
     articleUnits: ["isPurchaseUnit", "isSalesUnit"],
     routing: ["costingOnly"],
+    bom: ["costingOnly"],
     supplierPrices: ["isPrimary"],
     customers: ["invoiceAddressDiffers", "collectiveInvoicing", "privatePerson"],
     customerContacts: ["isPrimary"],

@@ -30,7 +30,7 @@ import { getOrCreateFallbackLocation } from "../../stock/service/location-resolv
 import { recordStandardCostHistory } from "../../article/repository/article.repository.js";
 import type { ArticleImportPlan, ExistingArticle } from "../service/articles.js";
 import { applyImportedRevisions, type ImportedRevisions } from "./article-revisions.js";
-import { applyPrimarySuppliers } from "./article-primary-suppliers.js";
+import { applyPrimarySupplierLeadTimes, applyPrimarySuppliers } from "./article-primary-suppliers.js";
 import {
   assignRegisterCodes,
   generatePaymentTermCode,
@@ -452,6 +452,10 @@ export function createImportRepository(db: Db | Tx) {
             colour: articles.colour,
             active: articles.active,
             activeRevision: articleRevisions.revision,
+            hasPrimarySupplier: sql<boolean>`exists (
+              select 1 from ${articleSuppliers}
+              where ${articleSuppliers.articleId} = ${articles.id} and ${articleSuppliers.isPrimary}
+            )`,
           })
           .from(articles)
           .innerJoin(units, eq(units.id, articles.unitId))
@@ -551,6 +555,9 @@ export function createImportRepository(db: Db | Tx) {
         const revisionRows: ImportedRevisions[] = [];
         // Leverantörsnr, applied the same way (applyPrimarySuppliers).
         const primarySuppliers: { articleId: string; supplierId: string }[] = [];
+        // Ledtid of purchased articles — written to the primary supplier's
+        // row once applyPrimarySuppliers has set it (applyPrimarySupplierLeadTimes).
+        const supplierLeadTimes: { articleId: string; leadTimeDays: number | null }[] = [];
         for (const part of chunk(plan.creates)) {
           if (part.length === 0) continue;
           // RETURNING id + articleNumber (not just id) so the history rows
@@ -587,6 +594,7 @@ export function createImportRepository(db: Db | Tx) {
                 quantityPerPackage: create.quantityPerPackage != null ? String(create.quantityPerPackage) : undefined,
                 safetyStock: create.safetyStock != null ? String(create.safetyStock) : undefined,
                 stockControlled: create.stockControlled ?? false,
+                manufacturingLeadTimeDays: create.manufacturingLeadTimeDays ?? null,
               }))
             )
             .returning({ id: articles.id, articleNumber: articles.articleNumber });
@@ -595,6 +603,12 @@ export function createImportRepository(db: Db | Tx) {
             if (create.revisions) revisionRows.push({ articleId: idByNumber.get(create.articleNumber)!, ...create.revisions });
             if (create.primarySupplierId) {
               primarySuppliers.push({ articleId: idByNumber.get(create.articleNumber)!, supplierId: create.primarySupplierId });
+            }
+            if (create.primarySupplierLeadTimeDays !== undefined) {
+              supplierLeadTimes.push({
+                articleId: idByNumber.get(create.articleNumber)!,
+                leadTimeDays: create.primarySupplierLeadTimeDays,
+              });
             }
           }
           const historyRows = part
@@ -616,6 +630,9 @@ export function createImportRepository(db: Db | Tx) {
           updated++;
           if (update.revisions) revisionRows.push({ articleId: update.id, ...update.revisions });
           if (update.primarySupplierId) primarySuppliers.push({ articleId: update.id, supplierId: update.primarySupplierId });
+          if (update.primarySupplierLeadTimeDays !== undefined) {
+            supplierLeadTimes.push({ articleId: update.id, leadTimeDays: update.primarySupplierLeadTimeDays });
+          }
           if (Object.keys(update.patch).length === 0) continue;
           if (update.patch.standardCost !== undefined) {
             costHistoryRows.push({ articleId: update.id, cost: update.patch.standardCost });
@@ -652,6 +669,9 @@ export function createImportRepository(db: Db | Tx) {
                 ? { safetyStock: update.patch.safetyStock === null ? null : String(update.patch.safetyStock) }
                 : {}),
               ...(update.patch.stockControlled !== undefined ? { stockControlled: update.patch.stockControlled } : {}),
+              ...(update.patch.manufacturingLeadTimeDays !== undefined
+                ? { manufacturingLeadTimeDays: update.patch.manufacturingLeadTimeDays }
+                : {}),
               ...(update.patch.quantityPerPackage !== undefined
                 ? {
                     quantityPerPackage:
@@ -667,6 +687,7 @@ export function createImportRepository(db: Db | Tx) {
         }
         await applyImportedRevisions(tx, revisionRows);
         await applyPrimarySuppliers(tx, primarySuppliers);
+        await applyPrimarySupplierLeadTimes(tx, supplierLeadTimes);
 
         return {
           created: plan.creates.length,
@@ -1214,6 +1235,7 @@ export function createImportRepository(db: Db | Tx) {
                 price: create.price !== null ? String(create.price) : null,
                 currency: currencyBySupplier.get(create.supplierId) ?? "SEK",
                 isPrimary: create.isPrimary,
+                leadTimeDays: create.leadTimeDays,
               }))
             )
             .returning({ id: articleSuppliers.id, articleId: articleSuppliers.articleId, supplierId: articleSuppliers.supplierId });
@@ -1225,10 +1247,11 @@ export function createImportRepository(db: Db | Tx) {
         }
 
         for (const update of plan.updates) {
-          const set: { supplierArticleNumber?: string; price?: string; isPrimary?: boolean } = {};
+          const set: { supplierArticleNumber?: string; price?: string; isPrimary?: boolean; leadTimeDays?: number | null } = {};
           if (update.patch.supplierArticleNumber !== undefined) set.supplierArticleNumber = update.patch.supplierArticleNumber;
           if (update.patch.price !== undefined) set.price = String(update.patch.price);
           if (update.patch.isPrimary !== undefined) set.isPrimary = update.patch.isPrimary;
+          if (update.patch.leadTimeDays !== undefined) set.leadTimeDays = update.patch.leadTimeDays;
           if (Object.keys(set).length > 0) {
             await tx.update(articleSuppliers).set(set).where(eq(articleSuppliers.id, update.id));
           }
@@ -1402,6 +1425,8 @@ export function createImportRepository(db: Db | Tx) {
           parentId: bomComponents.parentArticleId,
           componentId: bomComponents.componentArticleId,
           position: bomComponents.position,
+          routingOperationId: bomComponents.routingOperationId,
+          costingOnly: bomComponents.costingOnly,
         })
         .from(bomComponents)
         .orderBy(asc(bomComponents.createdAt), asc(bomComponents.id));
@@ -1533,10 +1558,12 @@ export function createImportRepository(db: Db | Tx) {
               unitFactor: row.unitFactor === null ? null : String(row.unitFactor),
               routingOperationId: row.routingOperationId,
               position: row.position ?? null,
+              costingOnly: row.costingOnly ?? false,
             }))
           );
         }
-        // 4. Uppdatera befintliga strukturrader (updateExisting).
+        // 4. Uppdatera befintliga strukturrader (updateExisting) — `rest`
+        //    carries the operation link, Pos. and Kalkyl when the file set them.
         for (const update of plan.updates ?? []) {
           const { quantity, unitFactor, ...rest } = update.patch;
           await tx

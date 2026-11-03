@@ -160,10 +160,10 @@ describe("planSupplierPriceImport", () => {
     expect(plan.breaksMapped).toBe(false);
     expect(plan.primaryArticleIds.sort()).toEqual(["id-1", "id-2"]);
     expect(plan.creates).toEqual([
-      { articleId: "id-1", supplierId: "sup-50331388", supplierArticleNumber: "234588", price: 192.89, isPrimary: false, breaks: [] },
-      { articleId: "id-1", supplierId: "sup-8949158", supplierArticleNumber: null, price: 78, isPrimary: true, breaks: [] },
-      { articleId: "id-2", supplierId: "sup-50331388", supplierArticleNumber: "71754", price: 22.188, isPrimary: true, breaks: [] },
-      { articleId: "id-3", supplierId: "sup-50331388", supplierArticleNumber: "25943", price: null, isPrimary: false, breaks: [] },
+      { articleId: "id-1", supplierId: "sup-50331388", supplierArticleNumber: "234588", price: 192.89, isPrimary: false, leadTimeDays: null, breaks: [] },
+      { articleId: "id-1", supplierId: "sup-8949158", supplierArticleNumber: null, price: 78, isPrimary: true, leadTimeDays: null, breaks: [] },
+      { articleId: "id-2", supplierId: "sup-50331388", supplierArticleNumber: "71754", price: 22.188, isPrimary: true, leadTimeDays: null, breaks: [] },
+      { articleId: "id-3", supplierId: "sup-50331388", supplierArticleNumber: "25943", price: null, isPrimary: false, leadTimeDays: null, breaks: [] },
     ]);
   });
 
@@ -193,14 +193,15 @@ describe("planSupplierPriceImport", () => {
         supplierArticleNumber: null,
         price: 192.89,
         isPrimary: false,
+        leadTimeDays: null,
         breaks: [
           { fromQuantity: 12, price: 143.95 },
           { fromQuantity: 24, price: 120.92 },
           { fromQuantity: 48, price: 97.89 },
         ],
       },
-      { articleId: "id-2", supplierId: "sup-50331388", supplierArticleNumber: null, price: 1540.56, isPrimary: false, breaks: [] },
-      { articleId: "id-3", supplierId: "sup-50331388", supplierArticleNumber: null, price: null, isPrimary: false, breaks: [] },
+      { articleId: "id-2", supplierId: "sup-50331388", supplierArticleNumber: null, price: 1540.56, isPrimary: false, leadTimeDays: null, breaks: [] },
+      { articleId: "id-3", supplierId: "sup-50331388", supplierArticleNumber: null, price: null, isPrimary: false, leadTimeDays: null, breaks: [] },
     ]);
   });
 
@@ -392,5 +393,34 @@ describe("supplier price import — repository and service", () => {
     expect(created).toMatchObject({ currency: "EUR", price: "12.5000" });
     const [existing] = await db.select().from(articleSuppliers).where(eq(articleSuppliers.articleId, otherArticleId));
     expect(existing).toMatchObject({ currency: "SEK", price: "11.0000" });
+  });
+});
+
+describe("supplier price import — Ledtid", () => {
+  const mapping = { Artikelnummer: "articleNumber", Leverantör: "supplierNumber", Pris: "price", "Ledtid (dagar)": "leadTimeDays" };
+
+  it("suggests the template's heading", () => {
+    expect(suggestSupplierPriceMapping(["Artikelnummer", "Leverantör", "Ledtid (dagar)"])["Ledtid (dagar)"]).toBe("leadTimeDays");
+    expect(suggestSupplierPriceMapping(["Ledtid"])).toEqual({ Ledtid: "leadTimeDays" });
+  });
+
+  it("writes it on a new and an existing catalog row, 0 clears, an empty cell leaves it, a fraction errors", async () => {
+    const articleId = await seedArticle("LT-A");
+    const otherId = await seedArticle("LT-B");
+    const supplierId = await seedSupplier("LT-1");
+    await db.insert(articleSuppliers).values({ articleId: otherId, supplierId, price: "5", leadTimeDays: 4 });
+
+    await importService.commit("supplierPrices", { mapping, rows: [["LT-A", "LT-1", "10", "12"], ["LT-B", "LT-1", "", "8"]] });
+    const lead = async (id: string) =>
+      (await db.select({ lead: articleSuppliers.leadTimeDays }).from(articleSuppliers).where(eq(articleSuppliers.articleId, id)))[0]!.lead;
+    expect(await lead(articleId)).toBe(12);
+    expect(await lead(otherId)).toBe(8);
+
+    await importService.commit("supplierPrices", { mapping, rows: [["LT-A", "LT-1", "10", "0"], ["LT-B", "LT-1", "6", ""]] });
+    expect(await lead(articleId)).toBeNull();
+    expect(await lead(otherId)).toBe(8);
+
+    const bad = await importService.preview("supplierPrices", { mapping, rows: [["LT-A", "LT-1", "10", "2,5"]] });
+    expect(bad.rows[0]!.errors).toEqual(['Ledtiden ska vara ett helt antal dagar: "2,5"']);
   });
 });
