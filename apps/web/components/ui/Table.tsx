@@ -44,6 +44,15 @@ function trackWidth(width: string, index: number, count: number): string {
   return `${Number(px[1]) + extra}px`;
 }
 
+// A flexible track with a content floor: "minmax(<floor + gap>px, <fr>fr)".
+// trackWidth widens only plain px tracks by the padding their cell carries,
+// so a minmax() floor has to include the 12px column gap itself — use this
+// for columns that should share the spare width (the figure columns on the
+// order cards) without shrinking below their content.
+export function shareTrack(contentPx: number, fr = 1): string {
+  return `minmax(${contentPx + COLUMN_GAP}px, ${fr}fr)`;
+}
+
 export function Table<T extends { id: string }>({
   columns,
   rows,

@@ -15,7 +15,7 @@ import { GatedLink } from "../ui/GatedLink";
 import { StatusPill } from "../ui/StatusPill";
 import { useCan } from "../PermissionsProvider";
 import { useRouter } from "next/navigation";
-import { Table } from "../ui/Table";
+import { Table, shareTrack } from "../ui/Table";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import fieldStyles from "../ui/Field.module.css";
@@ -1640,13 +1640,6 @@ function AddRowForm({
       </FormActions>
     </Form>
   );
-}
-
-// A share of the spare width above a content floor. Table.tsx widens only
-// plain px tracks by the 12px the cell pads on its right, so a minmax() floor
-// carries that padding itself.
-function shareTrack(contentPx: number, fr = 1): string {
-  return `minmax(${contentPx + 12}px, ${fr}fr)`;
 }
 
 // --- E3: Skapa tillverkningsorder från kundorderraden ---
