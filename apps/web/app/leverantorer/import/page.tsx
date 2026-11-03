@@ -6,7 +6,7 @@ import { getCurrentUser } from "../../../lib/api";
 // Admin-only, same gate as /artiklar/import: the import endpoints require the
 // admin role, so non-admins get the message instead of a wall of 403s. The
 // topbar and help link live inside the client component so they can follow
-// the active tab (Leverantörer / Kontakter / Leveransadresser) — same shape
+// the active tab (Alla filer / Leverantörer / Kontakter / Leveransadresser) — same shape
 // as /kunder/import.
 export default async function SupplierImportPage() {
   const cookieHeader = (await headers()).get("cookie") ?? undefined;

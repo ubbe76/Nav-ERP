@@ -1,86 +1,49 @@
 "use client";
 
 import { useState } from "react";
-import { ImportWizard, type ImportOptionConfig } from "./ImportWizard";
+import { ImportWizard } from "./ImportWizard";
+import { MultiFileImportWizard } from "./MultiFileImportWizard";
 import { HelpLink } from "../ui/HelpLink";
 import { FormNotice } from "../ui/Form";
 import {
-  SUPPLIER_CONTACT_IMPORT_FIELDS,
-  SUPPLIER_DELIVERY_ADDRESS_IMPORT_FIELDS,
-  SUPPLIER_IMPORT_FIELDS,
-  type ImportFieldConfig,
-} from "../../lib/importFields";
+  SUPPLIER_IMPORT_ENTITIES,
+  SUPPLIER_IMPORT_ENTITY_ORDER,
+  type ImportEntityConfig,
+} from "../../lib/importEntities";
 import shellStyles from "../AppShell.module.css";
 // The tab strip is identical to the customer import's — same stylesheet.
 import styles from "./CustomerImportTabs.module.css";
 
-interface TabConfig {
-  tab: string;
-  entity: string;
-  title: string;
-  meta: string;
-  anchor: string;
-  fields: ImportFieldConfig[];
-  notice: string;
-  skipExistingHint: string;
-  extraOptions?: ImportOptionConfig[];
-}
+// Supplier twin of CustomerImportTabs: the first tab takes every Monitor
+// supplier export at once, the rest are the single-file wizards. The entity
+// configs live in lib/importEntities.ts so the two wizards share them.
+const ALL_FILES_TAB = {
+  tab: "Alla filer",
+  title: "Importera alla leverantörsfiler",
+  meta: "Alla leverantörsexporter på en gång",
+  chapter: "inkop" as const,
+  anchor: "importera-alla-leverantorsfiler",
+  notice:
+    "Välj alla leverantörsexporter på en gång — filerna känns igen på sina rubriker och importeras i rätt ordning. Varje fil förhandsgranskas som den ser ut när de tidigare filerna har importerats, och inget sparas förrän du klickar Importera alla.",
+};
 
-// Supplier twin of CustomerImportTabs: Monitor's supplier export is the same
-// family of files (Postadress / Lista / Referenser / Leveransadress) keyed
-// by "Leverantör", minus the Fakturaadress file — suppliers have no invoice
-// address in Nav.
-const TABS: TabConfig[] = [
-  {
-    tab: "Leverantörer",
-    entity: "suppliers",
-    title: "Importera leverantörer",
-    meta: "CSV eller Excel (.xlsx)",
-    anchor: "importera-leverantorer",
-    fields: SUPPLIER_IMPORT_FIELDS,
-    notice:
-      "Består leverantörsexporten av flera filer, kör den här fliken en gång per fil, i ordningen Lista → Postadress: Lista-körningen skapar leverantörerna (matchning på leverantörsnummer) med namn, organisationsnummer, VAT-nummer och vårt kundnummer, och Postadress-körningen ersätter sedan kortnamnet med det juridiska namnet och fyller i adressen. Kontakter och leveransadresser importeras efteråt på sina egna flikar.",
-    skipExistingHint:
-      "Leverantörer som redan finns i registret uppdateras inte — de lämnas precis som de är och listas som överhoppade i resultatet. Utan kryss uppdateras de med filens värden. Kör leverantörsfliken flera gånger (en gång per fil) med kryssrutan avmarkerad, annars skrivs Postadress-filens fält aldrig in.",
-  },
-  {
-    tab: "Kontakter",
-    entity: "supplierContacts",
-    title: "Importera kontakter",
-    meta: "CSV eller Excel (.xlsx) — en rad per kontakt",
-    anchor: "importera-leverantorer",
-    fields: SUPPLIER_CONTACT_IMPORT_FIELDS,
-    notice:
-      "Importera leverantörsfliken först — en kontakt kopplas till en befintlig leverantör via leverantörsnumret och raden blir ett fel om leverantören inte finns än.",
-    skipExistingHint:
-      "Kontakter som redan finns hos leverantören (samma namn) hoppas över i stället för att stoppa hela importen. Befintliga kontakter ändras aldrig — det finns ingen uppdatering, bara skapande.",
-  },
-  {
-    tab: "Leveransadresser",
-    entity: "supplierDeliveryAddresses",
-    title: "Importera leveransadresser",
-    meta: "CSV eller Excel (.xlsx) — en rad per leveransadress",
-    anchor: "importera-leverantorer",
-    fields: SUPPLIER_DELIVERY_ADDRESS_IMPORT_FIELDS,
-    notice:
-      "Importera leverantörsfliken först — en leveransadress kopplas till en befintlig leverantör via leverantörsnumret. En adress som är identisk med leverantörens egen adress hoppas alltid över.",
-    skipExistingHint:
-      "Leveransadresser som redan finns på leverantören (samma adress, postnummer och ort) hoppas över i stället för att stoppa hela importen. Befintliga leveransadresser ändras aldrig.",
-    extraOptions: [
-      {
-        key: "setAsDefault",
-        label: "Sätt som förvald leveransadress",
-        hint:
-          "En leverantör som ännu inte har någon förvald leveransadress får sin första importerade adress som förvald. En leverantör som redan har en förvald behåller den — importen sätter aldrig en ny förvald adress åt en leverantör som redan har en.",
-        defaultChecked: true,
-      },
-    ],
-  },
-];
+const ENTITY_TABS: ImportEntityConfig[] = SUPPLIER_IMPORT_ENTITY_ORDER.map((entity) => SUPPLIER_IMPORT_ENTITIES[entity]!);
+
+const ALL_FILES_INTRO = (
+  <p>
+    Välj alla leverantörsexporter på en gång. Varje fil känns igen på sina kolumnrubriker: Villkor, Övrigt och
+    Postadress (eller en äldre exports Lista) som <strong>Leverantörer</strong>, Referenser som{" "}
+    <strong>Kontakter</strong> och Leveransadress som <strong>Leveransadresser</strong>. Besöksadress känns inte
+    igen — Nav har ingen besöksadress — och hoppas över. Filerna importeras i ordningen leverantörerna först
+    (Villkor och Övrigt före Postadress, så att det juridiska namnet står kvar), sedan kontakter och sist
+    leveransadresser.
+  </p>
+);
 
 export function SupplierImportTabs() {
-  const [activeTab, setActiveTab] = useState(TABS[0]!.tab);
-  const active = TABS.find((t) => t.tab === activeTab) ?? TABS[0]!;
+  const [activeTab, setActiveTab] = useState(ALL_FILES_TAB.tab);
+  const activeEntity = ENTITY_TABS.find((t) => t.label === activeTab) ?? null;
+  const active = activeEntity ?? ALL_FILES_TAB;
 
   return (
     <>
@@ -89,37 +52,48 @@ export function SupplierImportTabs() {
           <div className={shellStyles.title}>{active.title}</div>
           <div className={shellStyles.meta}>{active.meta}</div>
         </div>
-        <HelpLink chapter="inkop" anchor={active.anchor} label="Hjälp om leverantörsimport" />
+        <HelpLink chapter={active.chapter} anchor={active.anchor} label="Hjälp om leverantörsimport" />
       </div>
 
       <div className={styles.tabStrip}>
-        {TABS.map((tab) => (
+        {[ALL_FILES_TAB.tab, ...ENTITY_TABS.map((tab) => tab.label)].map((tab) => (
           <button
-            key={tab.tab}
+            key={tab}
             type="button"
             className={styles.tab}
-            data-active={tab.tab === activeTab}
-            onClick={() => setActiveTab(tab.tab)}
+            data-active={tab === activeTab}
+            onClick={() => setActiveTab(tab)}
           >
-            {tab.tab}
+            {tab}
           </button>
         ))}
       </div>
 
-      <FormNotice>{active.notice}</FormNotice>
+      <FormNotice>{activeEntity ? (activeEntity.tabNotice ?? activeEntity.notice) : ALL_FILES_TAB.notice}</FormNotice>
 
       {/* The key remounts the wizard on every tab change, which resets ALL of
           its state — step, file, mapping, preview, result — same pattern as
           CustomerImportTabs/ArticleImportTabs. */}
-      <ImportWizard
-        key={active.entity}
-        entity={active.entity}
-        title={active.title}
-        fields={active.fields}
-        backHref="/leverantorer"
-        skipExistingHint={active.skipExistingHint}
-        extraOptions={active.extraOptions}
-      />
+      {activeEntity ? (
+        <ImportWizard
+          key={activeEntity.entity}
+          entity={activeEntity.entity}
+          title={activeEntity.title}
+          fields={activeEntity.fields}
+          backHref="/leverantorer"
+          skipExistingHint={activeEntity.skipExistingHint}
+          extraOptions={activeEntity.extraOptions}
+        />
+      ) : (
+        <MultiFileImportWizard
+          key="all"
+          title={ALL_FILES_TAB.title}
+          backHref="/leverantorer"
+          entities={SUPPLIER_IMPORT_ENTITIES}
+          order={SUPPLIER_IMPORT_ENTITY_ORDER}
+          intro={ALL_FILES_INTRO}
+        />
+      )}
     </>
   );
 }

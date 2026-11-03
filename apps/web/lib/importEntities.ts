@@ -16,6 +16,9 @@ import {
   CUSTOMER_PRICE_IMPORT_FIELDS,
   ROUTING_IMPORT_FIELDS,
   STOCK_BALANCE_IMPORT_FIELDS,
+  SUPPLIER_CONTACT_IMPORT_FIELDS,
+  SUPPLIER_DELIVERY_ADDRESS_IMPORT_FIELDS,
+  SUPPLIER_IMPORT_FIELDS,
   SUPPLIER_PRICE_IMPORT_FIELDS,
   type ImportFieldConfig,
 } from "./importFields";
@@ -37,7 +40,7 @@ export interface ImportEntityConfig {
   notice?: string;
   // Shown instead of `notice` on the entity's own single-file tab only — for
   // advice that is about running the tabs in order, which Alla filer does by
-  // itself (the customer page).
+  // itself (the customer and supplier pages).
   tabNotice?: string;
   skipExistingHint: string;
   extraOptions?: ImportOptionConfig[];
@@ -220,6 +223,64 @@ export const CUSTOMER_IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
         label: "Sätt som förvald leveransadress",
         hint:
           "En kund som ännu inte har någon förvald leveransadress får sin första importerade adress som förvald. En kund som redan har en förvald behåller den — importen sätter aldrig en ny förvald adress åt en kund som redan har en. Är kolumnen Förvald mappad avgör den per rad i stället.",
+        defaultChecked: true,
+      },
+    ],
+  },
+};
+
+// Supplier import page: the customer page's twin, mirroring
+// SUPPLIER_IMPORT_ENTITY_ORDER in packages/shared/src/import.ts. Monitor's
+// supplier export has no Fakturaadress file — suppliers have no invoice
+// address in Nav.
+export const SUPPLIER_IMPORT_ENTITY_ORDER = ["suppliers", "supplierContacts", "supplierDeliveryAddresses"];
+
+export const SUPPLIER_IMPORT_ENTITIES: Record<string, ImportEntityConfig> = {
+  suppliers: {
+    entity: "suppliers",
+    label: "Leverantörer",
+    title: "Importera leverantörer",
+    meta: "CSV eller Excel (.xlsx)",
+    chapter: "inkop",
+    anchor: "importera-leverantorer",
+    fields: SUPPLIER_IMPORT_FIELDS,
+    tabNotice:
+      "Består leverantörsexporten av flera filer, kör den här fliken en gång per fil, i ordningen Villkor → Övrigt → Postadress (en äldre export har en enda Lista-fil i stället för Villkor och Övrigt): Villkor-körningen skapar leverantörerna (matchning på leverantörsnummer) med namn, betalningsvillkor, leveransvillkor och leveranssätt, Övrigt-körningen fyller i organisationsnummer, VAT-nummer och vårt kundnummer, och Postadress-körningen ersätter sedan kortnamnet med det juridiska namnet och fyller i adressen. Kontakter och leveransadresser importeras efteråt på sina egna flikar. Fliken Alla filer gör allt detta av sig själv.",
+    skipExistingHint:
+      "Leverantörer som redan finns i registret uppdateras inte — de lämnas precis som de är och listas som överhoppade i resultatet. Utan kryss uppdateras de med filens värden. Lämna rutan avmarkerad för Övrigt- och Postadress-filerna — de uppdaterar leverantörerna som den första filen skapar, och deras fält skrivs annars aldrig in.",
+  },
+  supplierContacts: {
+    entity: "supplierContacts",
+    label: "Kontakter",
+    title: "Importera kontakter",
+    meta: "CSV eller Excel (.xlsx) — en rad per kontakt",
+    chapter: "inkop",
+    anchor: "importera-leverantorer",
+    fields: SUPPLIER_CONTACT_IMPORT_FIELDS,
+    tabNotice:
+      "Importera leverantörsfliken först — en kontakt kopplas till en befintlig leverantör via leverantörsnumret och raden blir ett fel om leverantören inte finns än.",
+    skipExistingHint:
+      "Kontakter som redan finns hos leverantören (samma namn) hoppas över i stället för att stoppa hela importen. Befintliga kontakter ändras aldrig — det finns ingen uppdatering, bara skapande.",
+  },
+  supplierDeliveryAddresses: {
+    entity: "supplierDeliveryAddresses",
+    label: "Leveransadresser",
+    title: "Importera leveransadresser",
+    meta: "CSV eller Excel (.xlsx) — en rad per leveransadress",
+    chapter: "inkop",
+    anchor: "importera-leverantorer",
+    fields: SUPPLIER_DELIVERY_ADDRESS_IMPORT_FIELDS,
+    tabNotice:
+      "Importera leverantörsfliken först — en leveransadress kopplas till en befintlig leverantör via leverantörsnumret. En adress som är identisk med leverantörens egen adress hoppas alltid över.",
+    notice: "En adress som är identisk med leverantörens egen adress hoppas alltid över.",
+    skipExistingHint:
+      "Leveransadresser som redan finns på leverantören (samma adress, postnummer och ort) hoppas över i stället för att stoppa hela importen. Befintliga leveransadresser ändras aldrig.",
+    extraOptions: [
+      {
+        key: "setAsDefault",
+        label: "Sätt som förvald leveransadress",
+        hint:
+          "En leverantör som ännu inte har någon förvald leveransadress får sin första importerade adress som förvald. En leverantör som redan har en förvald behåller den — importen sätter aldrig en ny förvald adress åt en leverantör som redan har en.",
         defaultChecked: true,
       },
     ],

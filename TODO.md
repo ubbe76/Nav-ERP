@@ -41,7 +41,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Hög
 
 - [ ] **Förbättrad artikel- och strukturimport** — omfattning ej specad än (bygger vidare på import-export.md-paketen). Viktigt när ett nytt företag flyttar in sina data.
-- [ ] **Förbättrad leverantörsimport** — omfattning ej specad än.
 - [ ] **Förbättrad lagerplatshantering** — omfattning ej specad än.
 
 ### Medel

@@ -62,6 +62,10 @@ export const IMPORT_ENTITY_ORDER: ImportEntity[] = [
 // Mirrored in apps/web/lib/importEntities.ts.
 export const CUSTOMER_IMPORT_ENTITY_ORDER: ImportEntity[] = ["customers", "customerContacts", "customerDeliveryAddresses"];
 
+// The supplier page's twin (Inköp → Leverantörer → Importera → Alla filer).
+// Mirrored in apps/web/lib/importEntities.ts.
+export const SUPPLIER_IMPORT_ENTITY_ORDER: ImportEntity[] = ["suppliers", "supplierContacts", "supplierDeliveryAddresses"];
+
 // CSV-header -> target-field name, or null = "importera inte". The KEY ORDER
 // is the column order: key i of the mapping addresses column i of every row
 // array (JSON objects preserve key order; the wizard builds the mapping from
