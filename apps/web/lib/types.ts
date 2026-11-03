@@ -418,6 +418,9 @@ export interface StockLocation {
   name: string;
   active: boolean;
   warehouseName: string;
+  // Fast lagerplats stays active when it empties; a temporary one (false) is
+  // deactivated automatically (mirrors stock_locations.fixed).
+  fixed: boolean;
   // Etikettkod (LP0042) — stable across renames, what the label's barcode holds.
   labelCode: string;
 }
@@ -1572,7 +1575,26 @@ export interface DeliveryRowsResponse {
     undoneAt: string | null;
     undoneByName: string | null;
     undoable: boolean;
+    // Where the goods go back, one part per location the row was taken from
+    // (quantity in the article's base unit); empty = not undoable.
+    locations: { locationId: string; warehouseName: string; locationName: string; quantity: number }[];
+    // The article's base unit — the unit of the parts above.
+    baseUnit: string;
   }[];
+}
+
+// One row of GET /stock/balances?articleIds=… — the balance of one article on
+// one location (quantityOnHand in the article's base unit).
+export interface ArticleLocationBalance {
+  articleId: string;
+  locationId: string;
+  quantityOnHand: string;
+  locationName: string;
+  warehouseName: string;
+  articleNumber: string;
+  articleName: string;
+  // The article's base unit code.
+  unitCode: string;
 }
 
 // --- Kundfaktura (customer invoice) — C1 ---
@@ -2370,7 +2392,7 @@ export interface MOReport {
   createdAt: string;
   undoneAt: string | null;
   undoneByName: string | null;
-  materials: { articleNumber: string; quantity: string }[];
+  materials: { articleNumber: string; quantity: string; locationName: string }[];
 }
 
 export type EmploymentType = "hourly" | "monthly";

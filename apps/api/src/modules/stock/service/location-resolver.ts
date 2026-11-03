@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { articles, stockLocations, warehouses, type Db, type Tx } from "@navet/db";
+import { FALLBACK_LOCATION_NAME } from "./outflow-allocation.js";
 
 // Stock locations are mandatory on every stock movement, but the caller may
 // leave the location out — it then resolves in this order:
@@ -49,7 +50,8 @@ export async function resolveStockLocation(
   return getOrCreateFallbackLocation(db);
 }
 
-export const FALLBACK_LOCATION_NAME = "***";
+// ONE definition, in the pure allocation file (it cannot import this one).
+export { FALLBACK_LOCATION_NAME } from "./outflow-allocation.js";
 
 export async function getOrCreateFallbackLocation(db: Db | Tx): Promise<string> {
   const [existing] = await db

@@ -322,8 +322,10 @@ describe("stock count rows + posting", () => {
     expect(balances.rows[0]!.quantityOnHand).toBe("7.0000");
   });
 
-  it("posting everything to zero empties and deactivates the location", async () => {
+  it("posting everything to zero empties and deactivates a temporary location", async () => {
     const { location, session } = await openSessionWithBalance(10);
+    // Fasta lagerplatser (0179): only a temporary location is retired.
+    await stockService.updateLocation(location.id, { fixed: false });
     const detail = await countRepo.getSession(session.id);
     await countRepo.updateRow(session.id, detail!.rows[0]!.id, { countedQuantity: 0 });
     await countRepo.postSession(session.id, null);
@@ -358,6 +360,8 @@ describe("stock count rows + posting", () => {
 
   it("reactivates a location that was auto-deactivated mid-session before booking the count", async () => {
     const { location, article, session } = await openSessionWithBalance(10);
+    // Fasta lagerplatser (0179): only a temporary location is retired.
+    await stockService.updateLocation(location.id, { fixed: false });
 
     // A delivery empties the location mid-session (non-blocking session, so
     // this is allowed) — deactivateEmptyLocation flips it inactive.

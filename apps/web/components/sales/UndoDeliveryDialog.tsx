@@ -19,6 +19,19 @@ function when(iso: string) {
   return new Date(iso).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" });
 }
 
+const fmtQty = (n: number) => n.toLocaleString("sv-SE");
+
+// Where an undone row's goods go back: one part per location it was taken
+// from, in the article's base unit.
+function putBackText(row: DeliveryRowsResponse["rows"][number]): string | null {
+  if (row.locations.length === 0) return null;
+  const parts = row.locations.map(
+    (l) => `${l.warehouseName} — ${l.locationName} (${fmtQty(l.quantity)} ${row.baseUnit})`
+  );
+  const joined = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} och ${parts[parts.length - 1]}` : parts[0];
+  return `Varorna läggs tillbaka på ${joined}.`;
+}
+
 const mutedText = { color: "var(--color-text-muted)" } as const;
 
 function UndoDeliveryDialog({
@@ -54,7 +67,7 @@ function UndoDeliveryDialog({
 
   async function undo(row: DeliveryRowsResponse["rows"][number]) {
     const what = `${row.quantity.toLocaleString("sv-SE")} ${row.unit} ${row.articleNumber}`.replace(/\s+/g, " ").trim();
-    const question = `Ångra leveransen av ${what} på följesedel ${data?.deliveryNumber ?? ""}? Varorna läggs tillbaka i lager och orderns levererade antal minskas.`;
+    const question = `Ångra leveransen av ${what} på följesedel ${data?.deliveryNumber ?? ""}? ${putBackText(row) ?? "Varorna läggs tillbaka i lager."} Orderns levererade antal minskas.`;
     if (!(await confirmDialog(question, { confirmLabel: "Ångra", danger: true }))) return;
     setError(null);
     setPendingId(row.id);
@@ -87,6 +100,9 @@ function UndoDeliveryDialog({
                   <div style={{ fontSize: 12, ...mutedText }}>
                     {row.quantity.toLocaleString("sv-SE")} {row.unit}
                   </div>
+                  {!undone && row.undoable && putBackText(row) && (
+                    <div style={{ fontSize: 12, ...mutedText }}>{putBackText(row)}</div>
+                  )}
                 </div>
                 {undone ? (
                   <span style={{ ...mutedText, fontSize: 12, textAlign: "right" }}>

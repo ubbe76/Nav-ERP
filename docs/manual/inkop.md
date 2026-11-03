@@ -266,7 +266,7 @@ Sektionen **Inleveranser** på inköpsorderkortet listar varje inleverans som gj
 
 **Ångra** backar exakt den inleveransen, efter en bekräftelse:
 
-- Varorna tas ut ur lager igen från den lagerplats de togs emot på. Finns de inte kvar där (de har förbrukats, flyttats eller levererats) vägras ångra och felmeddelandet visar hur mycket som finns kvar. Blir lagerplatsen tom städas den bort som efter vilket annat uttag som helst.
+- Varorna tas ut ur lager igen från den lagerplats de togs emot på. Finns de inte kvar där (de har förbrukats, flyttats eller levererats) vägras ångra och felmeddelandet visar hur mycket som finns kvar. Blir en tillfällig lagerplats tom städas den bort som efter vilket annat uttag som helst.
 - Radens mottagna antal minskar och orderstatusen räknas om: **Mottagen** blir **Delvis mottagen**, och när inget längre är mottaget blir ordern **Bekräftad** igen.
 - På en **lego-rad** ångras samtidigt rapporteringen som inleveransen gjorde på tillverkningsordern: operationens antal dras av, materialet läggs tillbaka i lager och färdiga varor från en sista operation tas ut ur lager igen. Allt sker på en gång, eller inte alls. Är tillverkningsordern inte längre öppen (t.ex. **Stängd**) kan inleveransen inte ångras.
 

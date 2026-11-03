@@ -79,7 +79,9 @@ describe("Importera lagersaldon", () => {
     const decrease = (await transactionsOf(article.id)).find((t) => Number(t.quantityDelta) < 0);
     expect(decrease).toMatchObject({ quantityDelta: "-20.0000", unitCost: null });
 
-    // 0 empties the place, which is then retired like any emptied location.
+    // 0 empties the place. A location the import created is fixed (0179),
+    // so it stays; made temporary it is retired like any emptied location.
+    await stockService.updateLocation(location!.id, { fixed: false });
     await imports.commit("stockBalances", input([["PL-2", "Huvudlager", "A1", "0", ""]]));
     expect(await balance(article.id, location!.id)).toBe(0);
     const [retired] = await db.select().from(stockLocations).where(eq(stockLocations.id, location!.id));

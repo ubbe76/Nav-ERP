@@ -119,6 +119,8 @@ import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../sys
 // Narrow slice of the stock service — the pick list shows where each
 // article can be picked from (same cross-module pattern as
 // RegisterReferenceReader).
+// Rows come in pick order — the article's own location first, then as the
+// automatic outflow draws (compareOutflowLocations in the stock module).
 export interface StockBalanceReader {
   balancesForArticles(
     articleIds: string[]
@@ -1946,7 +1948,8 @@ export function createSalesService(
           orderNumber: result.orderNumber,
           articleNumber: article?.articleNumber ?? null,
           quantity: Number(result.deliveryRow.quantity),
-          locationId: result.locationId,
+          // One entry per location the goods went back to.
+          locations: result.locations,
           ...(result.statusBefore !== result.orderStatus
             ? { statusBefore: result.statusBefore, statusAfter: result.orderStatus }
             : {}),
@@ -2118,6 +2121,9 @@ export function createSalesService(
           undoneAt: r.undoneAt,
           undoneByName: r.undoneByName,
           undoable: r.undoable,
+          // Where the goods go back, per part (base unit).
+          locations: r.locations,
+          baseUnit: r.baseUnitCode,
         })),
       };
     },

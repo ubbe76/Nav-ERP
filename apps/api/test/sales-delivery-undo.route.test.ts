@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { eq, sql } from "drizzle-orm";
-import { db, deliveryRows, shipmentDeliveries, shipments } from "@navet/db";
+import { db, deliveryRowLocations, deliveryRows, shipmentDeliveries, shipments } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -121,7 +121,7 @@ describe("POST /sales-orders/:id/deliveries/:deliveryId/rows/:deliveryRowId/undo
 
   it("409 delivery-row-not-undoable for a row without a stock link", async () => {
     const { app, deliveryRow, undoUrl } = await setup();
-    await db.update(deliveryRows).set({ stockTransactionId: null, locationId: null }).where(eq(deliveryRows.id, deliveryRow.id));
+    await db.delete(deliveryRowLocations).where(eq(deliveryRowLocations.deliveryRowId, deliveryRow.id));
 
     const res = await app.inject({ method: "POST", url: undoUrl });
     expect(res.statusCode).toBe(409);

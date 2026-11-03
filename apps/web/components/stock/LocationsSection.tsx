@@ -8,7 +8,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Checkbox, Field, Input, Select, Toggle } from "../ui/Field";
 import { apiFetch } from "../../lib/api";
 import type { StockLocation, Warehouse } from "../../lib/types";
-import { Form, FormActions, FormError } from "../ui/Form";
+import { Form, FormActions, FormError, FormHint } from "../ui/Form";
 import { Card } from "../ui/Card";
 import { SectionHeading } from "../ui/SectionHeading";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
@@ -25,6 +25,8 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
   const [editName, setEditName] = useState("");
   const [editWarehouseId, setEditWarehouseId] = useState("");
   const [editActive, setEditActive] = useState(true);
+  const [editFixed, setEditFixed] = useState(true);
+  const [fixed, setFixed] = useState(true);
   // Emptied locations are deactivated rather than deleted, so they are hidden
   // here by default — the page always loads them (?includeInactive=true).
   const [showInactive, setShowInactive] = useState(false);
@@ -51,7 +53,7 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
     try {
       await apiFetch(`/api/v1/stock/locations/${row.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ name: editName, warehouseId: editWarehouseId, active: editActive }),
+        body: JSON.stringify({ name: editName, warehouseId: editWarehouseId, active: editActive, fixed: editFixed }),
       });
       setEditingId(null);
       router.refresh();
@@ -103,6 +105,7 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
             { key: "warehouseName", label: "Lager", width: "1fr" },
             { key: "name", label: "Namn", width: "1fr" },
             { key: "labelCode", label: "Etikettkod", width: "110px" },
+            { key: "fixed", label: "Fast", width: "80px" },
             { key: "active", label: "Status", width: "140px" },
             { key: "id", label: "", width: "170px", align: "right" },
           ]}
@@ -135,6 +138,14 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                 ) : (
                   row.name
                 );
+              case "fixed":
+                return editingId === row.id ? (
+                  <Checkbox checked={editFixed} onChange={(e) => setEditFixed(e.target.checked)} aria-label="Fast lagerplats" />
+                ) : row.fixed ? (
+                  "Ja"
+                ) : (
+                  "Nej"
+                );
               case "active":
                 return editingId === row.id ? (
                   <Toggle checked={editActive} onChange={(e) => setEditActive(e.target.checked)} aria-label="Aktiv" />
@@ -163,6 +174,7 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
                       setEditName(row.name);
                       setEditWarehouseId(row.warehouseId);
                       setEditActive(row.active);
+                      setEditFixed(row.fixed);
                     }}
                   >
                     Ändra
@@ -197,9 +209,10 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
               try {
                 await apiFetch("/api/v1/stock/locations", {
                   method: "POST",
-                  body: JSON.stringify({ warehouseId, name }),
+                  body: JSON.stringify({ warehouseId, name, fixed }),
                 });
                 setName("");
+                setFixed(true);
                 router.refresh();
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Kunde inte skapa lagerplatsen");
@@ -222,6 +235,12 @@ export function LocationsSection({ locations, warehouses }: { locations: StockLo
             <Field label="Namn" htmlFor="locationName">
               <Input id="locationName" required value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
+
+            <label style={{ display: "flex", gap: 8, alignItems: "center", fontFamily: "var(--font-body)", fontSize: 14 }}>
+              <Checkbox id="locationFixed" checked={fixed} onChange={(e) => setFixed(e.target.checked)} />
+              Fast lagerplats
+            </label>
+            <FormHint>En fast lagerplats ligger kvar när den blir tom. En tillfällig inaktiveras automatiskt.</FormHint>
 
             <FormActions>
               <Button type="submit" variant="secondary" disabled={pending}>

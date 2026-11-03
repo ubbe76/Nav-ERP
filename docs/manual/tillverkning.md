@@ -228,7 +228,7 @@ Antalen kan också rapporteras löpande vid varje utstämpling i [stämpeltermin
 
 Antal OK som rapporteras på orderns **sista operation** (den med högst sekvensnummer) är färdiga varor och **läggs i lager direkt** — vid varje utstämpling i terminalen, vid **Slutför operation** här och när en lego-operation är sist och avrapporteras av inköpsorderns inleverans. Det gäller bara mellanskillnaden mot det som redan lagts in, så ingenting bokförs två gånger:
 
-- Varorna hamnar på artikelns lagerplats (eller reservplatsen `***`) och värderas som vid **Slutför order**.
+- Varorna hamnar på artikelns lagerplats (eller reservplatsen `***`) och värderas som vid **Slutför order**. Är en plats vald i **Lagerplats för materialuttag** läggs de i stället där.
 - Material som **inte** är kopplat till någon operation dras i samma takt: med 4 av 10 inlevererade är 4/10 av det materialet draget.
 - Kasserade enheter ger inget saldo.
 - En **Frisläppt** order blir **Pågår** vid första inleveransen.
@@ -237,11 +237,11 @@ Antal OK som rapporteras på orderns **sista operation** (den med högst sekvens
 
 Rapporter på tidigare operationer lägger inte in något i lager.
 
-I **Lagerplats för materialuttag** är standardvalet **"Artikelns lagerplats"** — varje komponent dras då från sin egen artikels lagerplats (eller reservplatsen `***`, se [Lager](/hjalp/lager)); välj en specifik plats för att dra allt därifrån i stället. Materialtabellen visar i kolumnen **Operation** vilken operation som drar varje rad, eller **Vid slutrapportering** för okopplat material.
+I **Lagerplats för materialuttag** är standardvalet **"Automatiskt"** — varje komponent dras då från sin egen artikels lagerplats och sedan från andra platser med saldo; det som ändå inte räcker dras från artikelns lagerplats (eller reservplatsen `***`) och går minus där (se [Uttag med Automatiskt](/hjalp/lager#uttag-med-automatiskt)). Välj en specifik plats för att dra allt därifrån i stället — på den sista operationen tar platsen då även emot de färdiga varorna. En komponent som tas från flera platser ger en materialrad per plats i [Rapporteringar](#rapporteringar-och-angra). Materialtabellen visar i kolumnen **Operation** vilken operation som drar varje rad, eller **Vid slutrapportering** för okopplat material.
 
 ### Avsluta
 
-- **Slutför order** stänger ordern: ange antal och lagerplats (standard: artikelns) — **Antal** är det som läggs i lager **nu**, utöver det som redan inlevererats från sista operationen, och förifylls med det som återstår av orderns antal. Material som **inte** är kopplat till någon operation dras upp till det totalt inlevererade antalet, och ordern blir **Klar**. Raden **Slutför order** i kortet **Rapportera** finns så snart ordern är **Frisläppt**. Skulle ordern stängas innan hela antalet är inlevererat frågar Nav först ("Ordern stängs med 0 av 5 st inlevererade … Stäng ordern ändå?"). Har kassationer gjort att sista operationen aldrig nådde orderns antal anger du **0** för att stänga ordern utan mer inleverans. En order vars sista operation nått orderns antal är redan **Klar** och behöver inte slutföras. En order som stängts av misstag öppnas igen med **Ångra** på raden **Slutför order** under [Rapporteringar](#rapporteringar-och-angra).
+- **Slutför order** stänger ordern: ange antal och lagerplats (standard: artikelns — utan val läggs de färdiga varorna på artikelns lagerplats och okopplat material tas enligt **Automatiskt**; väljer du en plats gäller den för båda) — **Antal** är det som läggs i lager **nu**, utöver det som redan inlevererats från sista operationen, och förifylls med det som återstår av orderns antal. Material som **inte** är kopplat till någon operation dras upp till det totalt inlevererade antalet, och ordern blir **Klar**. Raden **Slutför order** i kortet **Rapportera** finns så snart ordern är **Frisläppt**. Skulle ordern stängas innan hela antalet är inlevererat frågar Nav först ("Ordern stängs med 0 av 5 st inlevererade … Stäng ordern ändå?"). Har kassationer gjort att sista operationen aldrig nådde orderns antal anger du **0** för att stänga ordern utan mer inleverans. En order vars sista operation nått orderns antal är redan **Klar** och behöver inte slutföras. En order som stängts av misstag öppnas igen med **Ångra** på raden **Slutför order** under [Rapporteringar](#rapporteringar-och-angra).
 - **Stäng order** avslutar en Klar order; därefter går ingenting att ångra eller [efterrapportera](#efterrapportera-pa-en-klar-order).
 
 ### Efterrapportera på en klar order
@@ -256,12 +256,12 @@ En order blir **Klar** så snart hela antalet är inlevererat — även om tidig
 
 ### Rapporteringar och Ångra
 
-Sektionen **Rapporteringar** på detaljsidan listar allt som rapporterats på ordern, senaste först: **Utstämpling** (varje utstämpling i terminalen, även en utan antal), **Slutför operation**, **Inleverans IO-…** (en lego-operation som avrapporterats av inköpsorderns inleverans), **Materialuttag** (**Förbruka** för hand), **Slutför order** och **Automatisk utstämpling** — tiden för någon som stämplades ut när operationen eller ordern blev klar (se [Pågående arbete](#pagaende-arbete)); den kan ångras som en vanlig utstämpling. Varje rad visar operation, **OK**, **Kasserat**, **Inlevererat**, stämplingens **Timmar**, vem som rapporterade och vilket material som drogs.
+Sektionen **Rapporteringar** på detaljsidan listar allt som rapporterats på ordern, senaste först: **Utstämpling** (varje utstämpling i terminalen, även en utan antal), **Slutför operation**, **Inleverans IO-…** (en lego-operation som avrapporterats av inköpsorderns inleverans), **Materialuttag** (**Förbruka** för hand), **Slutför order** och **Automatisk utstämpling** — tiden för någon som stämplades ut när operationen eller ordern blev klar (se [Pågående arbete](#pagaende-arbete)); den kan ångras som en vanlig utstämpling. Varje rad visar operation, **OK**, **Kasserat**, **Inlevererat**, stämplingens **Timmar**, vem som rapporterade och vilket material som drogs, med lagerplats.
 
 **Ångra** backar exakt det den raden bokförde, i ett svep — Nav visar först vad som kommer att hända:
 
 - Antal OK och kasserat dras av från operationen och kassationsraden tas bort. Operationen blir **Väntar** igen om den inte längre täcker orderns antal.
-- Materialet som drogs läggs tillbaka på den lagerplats det togs från.
+- Materialet som drogs läggs tillbaka på den lagerplats det togs från — drogs en komponent från flera platser läggs varje del tillbaka där den togs.
 - Färdiga varor som lades i lager tas ut från samma lagerplats. Finns de inte kvar där — de har t.ex. redan levererats — går raden inte att ångra.
 - Utstämplingens tid tas bort. Ligger tiden i en låst löneperiod går raden inte att ångra.
 - En **Klar** order öppnas igen (**Pågår**, eller **Frisläppt** om inget längre är rapporterat).

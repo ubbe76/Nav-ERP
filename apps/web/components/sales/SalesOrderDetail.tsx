@@ -1791,7 +1791,7 @@ function DeliverGoodsForm({
         {locations.length > 0 && (
           <Field label="Lagerplats" htmlFor="locationId">
             <Select id="locationId" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-              <option value="">Artikelns lagerplats</option>
+              <option value="">Automatiskt</option>
               {locations.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.warehouseName} — {l.name}
@@ -1813,6 +1813,7 @@ function DeliverGoodsForm({
           />
         </Field>
       </FormRow>
+      {locations.length > 0 && <FormHint>Tas från artikelns lagerplats och sedan från andra platser med saldo.</FormHint>}
 
       {selectedRow && deliveryWarning && <FormNotice>{deliveryWarning}</FormNotice>}
 

@@ -10,6 +10,7 @@ import {
   stockCountSessions,
   stockLocations,
   stockTransactions,
+  units,
   users,
   warehouses,
   type Db,
@@ -17,6 +18,7 @@ import {
 import { resolveStockLocation } from "../service/location-resolver.js";
 import { deactivateEmptyLocation, locationHoldsStock } from "../service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../service/count-guard.js";
+import { compareOutflowLocations } from "../service/outflow-allocation.js";
 import {
   ilikePattern,
   type CreateStockLocationInput,
@@ -101,6 +103,8 @@ export function createStockRepository(db: Db) {
           warehouseId: stockLocations.warehouseId,
           name: stockLocations.name,
           active: stockLocations.active,
+          // Fast lagerplats: stays when emptied.
+          fixed: stockLocations.fixed,
           warehouseName: warehouses.name,
           labelNumber: stockLocations.labelNumber,
         })
@@ -251,6 +255,8 @@ export function createStockRepository(db: Db) {
         conditions.push(or(ilike(articles.articleNumber, pattern), ilike(articles.name, pattern))!);
       }
       if (query.articleId) conditions.push(eq(stockBalances.articleId, query.articleId));
+      // Utleverans: every article on the order in one call.
+      if (query.articleIds) conditions.push(inArray(stockBalances.articleId, query.articleIds));
       if (query.locationId) conditions.push(eq(stockBalances.locationId, query.locationId));
       const where = and(...conditions);
 
@@ -264,11 +270,14 @@ export function createStockRepository(db: Db) {
             warehouseName: warehouses.name,
             articleNumber: articles.articleNumber,
             articleName: articles.name,
+            // The balance is in the article's base unit.
+            unitCode: units.code,
           })
           .from(stockBalances)
           .leftJoin(stockLocations, eq(stockLocations.id, stockBalances.locationId))
           .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
           .innerJoin(articles, eq(articles.id, stockBalances.articleId))
+          .innerJoin(units, eq(units.id, articles.unitId))
           .where(where)
           .orderBy(asc(articles.articleNumber), asc(stockLocations.name))
           .limit(query.limit)
@@ -285,21 +294,35 @@ export function createStockRepository(db: Db) {
     },
 
     // Balance rows for a set of articles — used by the sales pick list to
-    // show where each article can be picked from.
+    // show where each article can be picked from, in the order the automatic
+    // outflow draws from them (the article's own location first, then
+    // warehouse/location, "***" last — compareOutflowLocations is the one
+    // rule for both), so the paper and the booking agree.
     async balancesForArticles(articleIds: string[]) {
       if (articleIds.length === 0) return [];
-      return db
+      const rows = await db
         .select({
           articleId: stockBalances.articleId,
+          locationId: stockBalances.locationId,
           quantityOnHand: stockBalances.quantityOnHand,
           locationName: stockLocations.name,
           warehouseName: warehouses.name,
+          isDefault: sql<boolean>`${articles.defaultLocationId} = ${stockBalances.locationId}`,
         })
         .from(stockBalances)
+        .innerJoin(articles, eq(articles.id, stockBalances.articleId))
         .leftJoin(stockLocations, eq(stockLocations.id, stockBalances.locationId))
         .leftJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
         .where(and(inArray(stockBalances.articleId, articleIds), ne(stockBalances.quantityOnHand, "0")))
         .orderBy(asc(warehouses.name), asc(stockLocations.name));
+      return rows
+        .map(({ isDefault, ...row }) => ({ ...row, isDefault: isDefault === true }))
+        .sort((a, b) =>
+          compareOutflowLocations(
+            { warehouseName: a.warehouseName ?? "", locationName: a.locationName ?? "", isDefault: a.isDefault },
+            { warehouseName: b.warehouseName ?? "", locationName: b.locationName ?? "", isDefault: b.isDefault }
+          )
+        );
     },
 
     // Lagerloggen. The where clause is built once (against the base table) and

@@ -1306,13 +1306,17 @@ describe("manufacturing service — operation-linked material", () => {
     expect(draw!.locationId).toBe(location.id);
   });
 
-  it("creates and uses the *** fallback location when nothing else is set", async () => {
-    const { operation, user, unlinked } = await makeLinkedMo(10, 2);
-    // Strip the components' default locations to force the *** fallback.
+  // Uttag där saldot finns: without an own location the draw is taken where
+  // the component's stock is; only a shortfall lands on the *** fallback.
+  it("draws where the stock is when no own location is set, and creates *** only for the shortfall", async () => {
+    const { operation, user, linked, location } = await makeLinkedMo(10, 2);
+    // Strip the components' default locations.
     const materials = await mfgService.listMaterialConsumptions(operation.manufacturingOrderId);
     for (const m of materials) {
       await articleService.updateArticle(m.componentArticleId, { defaultLocationId: null });
     }
+    // 1000 seeded at `location` — leave 5, so 20 needs 15 more from ***.
+    await stockService.recordTransaction({ articleId: linked.id, locationId: location.id, quantityDelta: -995, transactionType: "inventory_adjustment" });
 
     await mfgService.completeOperation(operation.id, { quantityCompleted: 10 }, user.id);
 
@@ -1321,9 +1325,11 @@ describe("manufacturing service — operation-linked material", () => {
     expect(fallback).toBeDefined();
 
     const transactions = await stockService.listTransactions({ search: "LINKED", limit: 50, offset: 0 });
-    const draw = transactions.rows.find((t) => t.transactionType === "mo_consumption");
-    expect(draw!.locationId).toBe(fallback!.id);
-    void unlinked;
+    const draws = transactions.rows.filter((t) => t.transactionType === "mo_consumption");
+    expect(draws.map((d) => [d.locationId, Number(d.quantityDelta)]).sort((a, b) => Number(a[1]) - Number(b[1]))).toEqual([
+      [fallback!.id, -15],
+      [location.id, -5],
+    ]);
   });
 
   it("draws unlinked material at final reporting", async () => {

@@ -500,20 +500,38 @@ export const deliveryRows = pgTable(
       .notNull()
       .references(() => salesOrderRows.id, { onDelete: "restrict" }),
     quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
-    // Ångra utleverans (migration 0132): where the goods were taken from and
-    // the stock movement that took them — the undo puts them back exactly
-    // there. Null only on deliveries the backfill could not pair (never
-    // undoable).
-    locationId: uuid("location_id").references(() => stockLocations.id, { onDelete: "restrict" }),
-    stockTransactionId: uuid("stock_transaction_id").references(() => stockTransactions.id, { onDelete: "restrict" }),
     // Set when the row was undone; the row stays (the följesedel number is
     // never reused). A följesedel whose rows are all undone counts as undone.
     undoneAt: timestamp("undone_at", { withTimezone: true }),
     undoneBy: uuid("undone_by").references(() => users.id, { onDelete: "set null" }),
   },
+  (table) => [index("idx_delivery_rows_delivery").on(table.deliveryId)]
+);
+
+// Ångra utleverans (migration 0132, split per location in 0179): where each
+// part of a delivery row's goods was taken from and the stock movement that
+// took it — the undo puts every part back exactly there. One delivery row
+// has one part per location the automatic allocation drew from (Uttag där
+// saldot finns), or exactly one when a location was chosen. A delivery row
+// without parts (a 0132 backfill that could not pair) is never undoable.
+export const deliveryRowLocations = pgTable(
+  "delivery_row_locations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    deliveryRowId: uuid("delivery_row_id")
+      .notNull()
+      .references(() => deliveryRows.id, { onDelete: "cascade" }),
+    locationId: uuid("location_id")
+      .notNull()
+      .references(() => stockLocations.id, { onDelete: "restrict" }),
+    quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
+    stockTransactionId: uuid("stock_transaction_id")
+      .notNull()
+      .references(() => stockTransactions.id, { onDelete: "restrict" }),
+  },
   (table) => [
-    index("idx_delivery_rows_delivery").on(table.deliveryId),
-    index("delivery_rows_by_stock_transaction").on(table.stockTransactionId),
+    index("idx_delivery_row_locations_row").on(table.deliveryRowId),
+    index("delivery_row_locations_by_stock_transaction").on(table.stockTransactionId),
   ]
 );
 

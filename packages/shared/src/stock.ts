@@ -1,8 +1,15 @@
 import { z } from "zod";
 import { listQuerySchema, statusListParam } from "./list.js";
 
+// articleIds: the Utleverans page asks for the locations (with balances) of
+// every article on the order in ONE call — `?articleIds=<uuid>,<uuid>`.
 export const listStockBalancesQuerySchema = listQuerySchema.extend({
   articleId: z.string().uuid().optional(),
+  articleIds: z
+    .string()
+    .optional()
+    .transform((raw) => (raw === undefined ? undefined : raw.split(",").map((p) => p.trim()).filter((p) => p !== "")))
+    .pipe(z.array(z.string().uuid()).min(1).max(200).optional()),
   locationId: z.string().uuid().optional(),
 });
 export type ListStockBalancesQuery = z.infer<typeof listStockBalancesQuerySchema>;
@@ -101,10 +108,13 @@ export const listStockLocationsQuerySchema = z.object({
 });
 export type ListStockLocationsQuery = z.infer<typeof listStockLocationsQuerySchema>;
 
+// fixed (Fast lagerplats): stays active when emptied; a temporary location
+// (false) is deactivated automatically the moment it is empty.
 export const createStockLocationSchema = z.object({
   warehouseId: z.string().uuid(),
   name: z.string().min(1).max(100),
   active: z.boolean().default(true),
+  fixed: z.boolean().default(true),
 });
 export type CreateStockLocationInput = z.infer<typeof createStockLocationSchema>;
 
@@ -113,6 +123,7 @@ export const updateStockLocationSchema = z
     name: z.string().min(1).max(100).optional(),
     warehouseId: z.string().uuid().optional(),
     active: z.boolean().optional(),
+    fixed: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateStockLocationInput = z.infer<typeof updateStockLocationSchema>;

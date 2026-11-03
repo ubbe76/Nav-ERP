@@ -55,10 +55,16 @@ function Cell({ label, className, children }: { label: string; className?: strin
   );
 }
 
-function LocationOptions({ locations }: { locations: StockLocation[] }) {
+function LocationOptions({
+  locations,
+  emptyLabel = "Artikelns lagerplats",
+}: {
+  locations: StockLocation[];
+  emptyLabel?: string;
+}) {
   return (
     <>
-      <option value="">Artikelns lagerplats</option>
+      <option value="">{emptyLabel}</option>
       {locations.map((l) => (
         <option key={l.id} value={l.id}>
           {l.warehouseName} — {l.name}
@@ -81,7 +87,7 @@ export function ReportPanel({
   onDone,
 }: ReportPanelProps) {
   const orderDone = orderStatus === "done";
-  const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
+  const [locationId, setLocationId] = useState(""); // "" = Automatiskt (own location, then other locations with stock)
   const scrapReasonOptions = useScrapReasons();
   const { groups, unlinked } = groupReportRows(operations, materials);
 
@@ -98,12 +104,23 @@ export function ReportPanel({
           {locations.length > 0 && (
             <div className={styles.inlineField}>
               <Label htmlFor="reportMaterialLocation">Lagerplats för materialuttag</Label>
-              <Select id="reportMaterialLocation" size="md" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-                <LocationOptions locations={locations} />
+              <Select
+                id="reportMaterialLocation"
+                size="md"
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+              >
+                <LocationOptions locations={locations} emptyLabel="Automatiskt" />
               </Select>
             </div>
           )}
         </div>
+        {locations.length > 0 && (
+          <FormHint>
+            Tas från artikelns lagerplats och sedan från andra platser med saldo. En vald plats tar även emot de färdiga
+            varorna när den sista operationen rapporteras.
+          </FormHint>
+        )}
 
         {/* Column labels once; on a phone each row stacks and its own labels show. */}
         <div className={`${styles.line} ${styles.head}`} aria-hidden="true">

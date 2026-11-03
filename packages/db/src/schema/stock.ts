@@ -43,6 +43,11 @@ export const stockLocations = pgTable(
       .references(() => warehouses.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 100 }).notNull(),
     active: boolean("active").notNull().default(true),
+    // Fast lagerplats (migration 0179): a fixed location stays active (and
+    // stays the articles' Lagerplats) when it is emptied; only a temporary
+    // one (fixed = false) is deactivated by deactivateEmptyLocation. Every
+    // location created before the column is fixed.
+    fixed: boolean("fixed").notNull().default(true),
     // Etikettkod (#4): the label and a scan say LP + this number (LP0042) —
     // short, ASCII only (a name may hold å/ä/ö that Code 128 cannot encode)
     // and stable when the location is renamed. Existing rows got theirs when

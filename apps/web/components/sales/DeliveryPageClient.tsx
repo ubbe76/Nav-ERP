@@ -33,12 +33,13 @@ import {
   type SalesOrder,
   type SalesOrderRow,
   type SalesOrderStatus,
+  type ArticleLocationBalance,
   type ScanMatch,
   type StockLocation,
 } from "../../lib/types";
 import shellStyles from "../../components/AppShell.module.css";
 import { HelpLink } from "../ui/HelpLink";
-import { FormError, FormNotice } from "../ui/Form";
+import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { BookTransportButton } from "../shipping/BookTransportButton";
 import { PalletCardDialog } from "../documents/PalletCardDialog";
 import styles from "./DeliveryPageClient.module.css";
@@ -112,7 +113,12 @@ export function DeliveryPageClient({
   );
   const scanRowOf = (row: SalesOrderRow) => scanRows.find((r) => r.id === row.id)!;
 
-  const [locationId, setLocationId] = useState(""); // "" = artikelns lagerplats
+  const [locationId, setLocationId] = useState(""); // "" = Automatiskt
+  // Lagerplats per rad: "" = Som ovan (follows the field above). Balances of
+  // the open rows' articles per location, fetched once per order (and again
+  // after a delivery changed them).
+  const [rowLocations, setRowLocations] = useState<Record<string, string>>({});
+  const [balances, setBalances] = useState<Record<string, ArticleLocationBalance[]>>({});
   // A scanned lagerplats that GET /stock/locations leaves out (inactive: it
   // holds nothing), added to the select so the choice can be shown.
   const [scannedLocation, setScannedLocation] = useState<LocationOption | null>(null);
@@ -140,6 +146,42 @@ export function DeliveryPageClient({
       .then((r) => setFreightEnabled(r.enabled))
       .catch(() => setFreightEnabled(false));
   }, []);
+
+  const openArticleKey = useMemo(
+    () => Array.from(new Set(openRows.map((r) => r.articleId))).sort().join(","),
+    [openRows]
+  );
+  useEffect(() => {
+    setRowLocations({});
+  }, [selectedId]);
+  useEffect(() => {
+    if (!openArticleKey) {
+      setBalances({});
+      return;
+    }
+    let cancelled = false;
+    const ids = openArticleKey.split(",");
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
+    Promise.all(
+      chunks.map((chunk) =>
+        apiFetch<{ rows: ArticleLocationBalance[] }>(`/api/v1/stock/balances?articleIds=${chunk.join(",")}&limit=1000`)
+      )
+    )
+      .then((pages) => {
+        if (cancelled) return;
+        const byArticle: Record<string, ArticleLocationBalance[]> = {};
+        for (const b of pages.flatMap((p) => p.rows)) (byArticle[b.articleId] ??= []).push(b);
+        setBalances(byArticle);
+      })
+      .catch(() => {
+        // The per-row choice just offers no balances; Som ovan still works.
+        if (!cancelled) setBalances({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openArticleKey, rows]);
 
   const locationOptions: LocationOption[] =
     scannedLocation && !locations.some((l) => l.id === scannedLocation.id) ? [...locations, scannedLocation] : locations;
@@ -276,6 +318,8 @@ export function DeliveryPageClient({
             rows: toDeliver.map(({ row, quantity }) => ({
               rowId: row.id,
               quantity: toBaseQuantity(quantity, row.unitFactor),
+              // Only a row that overrides the field above carries its own plats.
+              locationId: rowLocations[row.id] || undefined,
             })),
           }),
         }
@@ -287,6 +331,7 @@ export function DeliveryPageClient({
       });
       setCount(NO_COUNT);
       setLastRowId(null);
+      setRowLocations({});
       clearFeedback();
       // Pallkort: auto-open the cards for the delivery (one page per row) —
       // best effort (a popup blocker may stop it); the Pallkort (PDF) link
@@ -357,13 +402,14 @@ export function DeliveryPageClient({
         {locationOptions.length > 0 && (
           <Field label="Lagerplats" htmlFor="deliveryLocation">
             <Select id="deliveryLocation" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-              <option value="">Artikelns lagerplats</option>
+              <option value="">Automatiskt</option>
               {locationOptions.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.warehouseName} — {l.name}
                 </option>
               ))}
             </Select>
+            <FormHint>Tas från artikelns lagerplats och sedan från andra platser med saldo.</FormHint>
           </Field>
         )}
         {order && pill && (
@@ -480,6 +526,7 @@ export function DeliveryPageClient({
               ...(count.counting
                 ? [{ key: "left", label: "Kvar att plocka", width: "110px", align: "right" as const }]
                 : []),
+              { key: "location", label: "Lagerplats", width: "190px" },
               { key: "id", label: "Leverera nu", width: "180px", align: "right" },
             ]}
             rows={openRows}
@@ -498,6 +545,25 @@ export function DeliveryPageClient({
                 case "left": {
                   const left = leftToCount(scanRowOf(row), count);
                   return left === null ? "–" : left;
+                }
+                case "location": {
+                  const onHand = (balances[row.articleId] ?? []).filter((b) => Number(b.quantityOnHand) > 0);
+                  return (
+                    <Select
+                      aria-label={`Lagerplats — ${row.articleNumber}`}
+                      value={rowLocations[row.id] ?? ""}
+                      onChange={(e) => setRowLocations((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                      style={{ maxWidth: "100%" }}
+                    >
+                      <option value="">Som ovan</option>
+                      {onHand.map((b) => (
+                        <option key={b.locationId} value={b.locationId}>
+                          {b.warehouseName} — {b.locationName} ({Number(b.quantityOnHand).toLocaleString("sv-SE")}{" "}
+                          {b.unitCode})
+                        </option>
+                      ))}
+                    </Select>
+                  );
                 }
                 case "id":
                   return (
