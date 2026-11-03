@@ -4,10 +4,12 @@ import { confirmDelete } from "../../lib/confirm";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { RowDeviationLink } from "../quality/RowDeviationLink";
+import { newDeviationHref, type NewDeviationParams } from "../../lib/quality";
+import { RowMenu } from "../ui/RowMenu";
 import { useCan } from "../PermissionsProvider";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { useRouter } from "next/navigation";
-import { Table } from "../ui/Table";
+import { Table, shareTrack } from "../ui/Table";
 import { Button } from "../ui/Button";
 import buttonStyles from "../ui/Button.module.css";
 import { Modal } from "../ui/Modal";
@@ -63,20 +65,17 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   // per-row guards (quantity ≥ received, no delete with receipts) are
   // enforced by the API and mirrored in the UI below.
   const rowsEditable = order.status === "draft" || order.status === "confirmed" || order.status === "partially_received";
-  // Kvalitet: Avvikelse per orderrad on an order that has been placed.
+  // Kvalitet: Avvikelse per orderrad on an order that has been placed — a
+  // button of its own on a row that cannot be edited any more, an item in the
+  // row's ⋯ menu otherwise (RowDeviationLink hides itself without Kvalitet).
   const canDeviate = useCan()(["kvalitet"]) && order.status !== "draft" && order.status !== "cancelled";
-  const deviationLink = (row: PurchaseOrderRow) => (
-    <RowDeviationLink
-      label="Avvikelse"
-      params={{
-        type: "supplier",
-        supplierId: order.supplierId,
-        purchaseOrderId: order.id,
-        purchaseOrderRowId: row.id,
-        articleId: row.articleId,
-      }}
-    />
-  );
+  const deviationParams = (row: PurchaseOrderRow): NewDeviationParams => ({
+    type: "supplier",
+    supplierId: order.supplierId,
+    purchaseOrderId: order.id,
+    purchaseOrderRowId: row.id,
+    articleId: row.articleId,
+  });
 
   const [modal, setModal] = useState<"header" | "addRow" | "receive" | null>(null);
   const dims = useDimensions();
@@ -270,14 +269,24 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
       {rows.length > 0 ? (
         <Table<PurchaseOrderRow>
           columns={[
-            { key: "articleNumber", label: "Artikelnummer", width: "140px" },
-            { key: "articleName", label: "Benämning", width: "1fr" },
-            { key: "quantityOrdered", label: "Beställt", width: "110px", align: "right" },
-            { key: "unitCode", label: "Enhet", width: "80px" },
-            { key: "quantityReceived", label: "Mottaget", width: "100px", align: "right" },
-            { key: "unitPrice", label: "Á-pris", width: "130px", align: "right" },
-            { key: "lineAmount", label: "Belopp", width: "130px", align: "right" },
-            ...(rowsEditable || canDeviate ? ([{ key: "id", label: "", width: "180px", align: "right" }] as const) : []),
+            // Same layout as the kundorder card: floors as tight as the cell
+            // contents allow (they decide whether the table outgrows the
+            // content column), the spare width shared out (Benämning 3fr, the
+            // figure columns 1fr each) so a wide screen spreads the figures
+            // over the row, Enhet fixed next to the quantity, and Ändra + the
+            // ⋯ menu on one line. While a row is being edited the tracks that
+            // hold inputs widen so no input is clipped.
+            { key: "articleNumber", label: "Artikelnummer", width: "110px" },
+            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(160px, 3fr)" : "minmax(120px, 3fr)" },
+            { key: "quantityOrdered", label: "Beställt", width: shareTrack(editingRowId ? 90 : 66), align: "right" },
+            { key: "unitCode", label: "Enhet", width: editingRowId ? "84px" : "52px" },
+            { key: "quantityReceived", label: "Mottaget", width: shareTrack(70), align: "right" },
+            { key: "unitPrice", label: "Á-pris", width: shareTrack(editingRowId ? 100 : 84), align: "right" },
+            // Wide enough for the footer's "69 600,00 SEK" on one line.
+            { key: "lineAmount", label: "Belopp", width: shareTrack(96), align: "right" },
+            ...(rowsEditable || canDeviate
+              ? ([{ key: "id", label: "", width: editingRowId ? "140px" : "104px", align: "right" }] as const)
+              : []),
           ]}
           rows={rows}
           footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(total)} ${order.currency}` }}
@@ -424,7 +433,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
               case "lineAmount":
                 return formatMoney(rowAmount(row));
               case "id":
-                if (!rowsEditable) return deviationLink(row);
+                if (!rowsEditable) return <RowDeviationLink label="Avvikelse" params={deviationParams(row)} />;
                 return editingRowId === row.id ? (
                   <span style={{ display: "inline-flex", gap: 8 }}>
                     <Button type="button" size="small" variant="primary" disabled={rowPending} onClick={() => saveRow(row)}>
@@ -435,16 +444,22 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                     </Button>
                   </span>
                 ) : (
-                  <span style={{ display: "inline-flex", gap: 8 }}>
+                  <span style={{ display: "inline-flex", gap: 4, alignItems: "center", justifyContent: "flex-end" }}>
                     <Button type="button" size="small" variant="ghost" onClick={() => startEditRow(row)}>
                       Ändra
                     </Button>
-                    {Number(row.quantityReceived) === 0 && (
-                      <Button type="button" size="small" variant="danger" disabled={rowPending} onClick={() => removeRow(row)}>
-                        Ta bort
-                      </Button>
-                    )}
-                    {canDeviate && deviationLink(row)}
+                    <RowMenu
+                      label={`Fler åtgärder för ${row.articleNumber}`}
+                      items={[
+                        canDeviate && { label: "Avvikelse", href: newDeviationHref(deviationParams(row)) },
+                        Number(row.quantityReceived) === 0 && {
+                          label: "Ta bort",
+                          danger: true,
+                          disabled: rowPending,
+                          onSelect: () => removeRow(row),
+                        },
+                      ]}
+                    />
                   </span>
                 );
               default:
