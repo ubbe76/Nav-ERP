@@ -8,6 +8,8 @@ import { FreightQuoteDialog } from "../shipping/FreightQuoteDialog";
 import { formatSek } from "../../lib/shipping";
 import Link from "next/link";
 import { RowDeviationLink } from "../quality/RowDeviationLink";
+import { newDeviationHref, type NewDeviationParams } from "../../lib/quality";
+import { RowMenu } from "../ui/RowMenu";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { GatedLink } from "../ui/GatedLink";
 import { StatusPill } from "../ui/StatusPill";
@@ -284,19 +286,31 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
     router.refresh();
   }
 
-  // Reklamera: Ny avvikelse prefilled from the row (RowDeviationLink hides itself without Kvalitet).
-  function reclaimLink(row: SalesOrderRow) {
+  // Reklamera: Ny avvikelse prefilled from the row — a button of its own on a
+  // row that cannot be edited any more, an item in the row's ⋯ menu otherwise
+  // (RowDeviationLink hides itself without Kvalitet).
+  function reclaimParams(row: SalesOrderRow): NewDeviationParams {
+    return {
+      type: "customer",
+      customerId: order.customerId,
+      salesOrderId: order.id,
+      salesOrderRowId: row.id,
+      articleId: row.articleId,
+    };
+  }
+
+  // E3: Skapa TO sits in the row's I tillverkning cell — only manufactured
+  // articles, only once the order is confirmed/in_production
+  // (createFromSalesOrderRow rejects quote with LinkedOrderStatusError), and
+  // only while part of the row is neither covered by TOs nor delivered.
+  function offersCreateMo(row: SalesOrderRow): boolean {
     return (
-      <RowDeviationLink
-        label="Reklamera"
-        params={{
-          type: "customer",
-          customerId: order.customerId,
-          salesOrderId: order.id,
-          salesOrderRowId: row.id,
-          articleId: row.articleId,
-        }}
-      />
+      canCreateMo &&
+      editingRowId !== row.id &&
+      row.articleType === "manufactured" &&
+      (order.status === "confirmed" || order.status === "in_production") &&
+      moRemaining(row) > 0 &&
+      Number(row.quantityDelivered) < Number(row.quantityOrdered)
     );
   }
 
@@ -528,29 +542,37 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
       {rows.length > 0 ? (
         <Table<SalesOrderRow>
           columns={[
-            // Fixed tracks are what decide whether the table outgrows the
+            // The floors are what decide whether the table outgrows the
             // content column, so they are kept as tight as the cell contents
             // allow — the editable cells hold inputs, and an input wider than
-            // its track would push the table straight back out. The name has
-            // only a small floor (minmax(120px, 1fr)) and wraps its choice
-            // lines inside the track; the action buttons wrap in their cell.
+            // its track would push the table straight back out. Above the
+            // floors the spare width is shared out (Benämning 3fr, the figure
+            // columns 1fr each, I tillverkning 1.5fr) so a wide screen
+            // spreads the figures over the row instead of piling them up at
+            // the right edge. Enhet and Rabatt stay fixed: the unit reads
+            // together with the quantity.
             // While a row is being edited the tracks that hold inputs widen
             // (the table then scrolls inside its card) so no input is clipped.
+            // The action column holds Ändra and the ⋯ menu on one line.
             { key: "articleNumber", label: "Artikelnummer", width: "110px" },
-            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(170px, 1fr)" : "minmax(90px, 1fr)" },
-            { key: "quantityOrdered", label: "Beställt", width: editingRowId ? "90px" : "66px", align: "right" },
+            { key: "articleName", label: "Benämning", width: editingRowId ? "minmax(170px, 3fr)" : "minmax(90px, 3fr)" },
+            { key: "quantityOrdered", label: "Beställt", width: shareTrack(editingRowId ? 90 : 66), align: "right" },
             { key: "unitCode", label: "Enhet", width: editingRowId ? "84px" : "52px" },
-            { key: "quantityDelivered", label: "Levererat", width: "66px", align: "right" },
+            { key: "quantityDelivered", label: "Levererat", width: shareTrack(66), align: "right" },
             // E3: quantity already in production (non-cancelled linked TOs)
             // plus one line per TO — order number linking to the TO card and
-            // its status — so a row that has its TO is obvious at a glance.
-            // The pill sits under the number: a wider track pushes the table
-            // past the content column.
-            { key: "quantityInProduction", label: "I tillverkning", width: "84px" },
-            { key: "unitPrice", label: "Á-pris", width: editingRowId ? "100px" : "84px", align: "right" },
+            // its status — so a row that has its TO is obvious at a glance;
+            // Skapa TO sits under them. A larger share so the TO number and
+            // its pill fit on one line on a wide screen; the floor fits the
+            // heading.
+            { key: "quantityInProduction", label: "I tillverkning", width: shareTrack(100, 1.5) },
+            { key: "unitPrice", label: "Á-pris", width: shareTrack(editingRowId ? 100 : 84), align: "right" },
             { key: "discountPercent", label: "Rabatt", width: editingRowId ? "70px" : "52px", align: "right" },
-            { key: "lineAmount", label: "Belopp", width: "76px", align: "right" },
-            ...(rowsEditable || canReclaim ? ([{ key: "id", label: "", width: "140px", align: "right" }] as const) : []),
+            // Wide enough for the footer's "69 600,00 SEK" on one line.
+            { key: "lineAmount", label: "Belopp", width: shareTrack(96), align: "right" },
+            ...(rowsEditable || canReclaim
+              ? ([{ key: "id", label: "", width: editingRowId ? "140px" : "104px", align: "right" }] as const)
+              : []),
           ]}
           rows={rows}
           footer={{ unitPrice: "Summa", lineAmount: `${formatMoney(total)} ${order.currency}` }}
@@ -631,11 +653,12 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                 );
               case "quantityDelivered":
                 return toUnitQuantity(Number(row.quantityDelivered), row.unitFactor);
-              case "quantityInProduction":
-                if (row.manufacturingOrders.length === 0) return null;
+              case "quantityInProduction": {
+                const createMo = offersCreateMo(row);
+                if (row.manufacturingOrders.length === 0 && !createMo) return null;
                 return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <span>{toUnitQuantity(row.quantityInProduction, row.unitFactor)}</span>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                    {row.manufacturingOrders.length > 0 && <span>{toUnitQuantity(row.quantityInProduction, row.unitFactor)}</span>}
                     {row.manufacturingOrders.map((mo) => {
                       const moPill = MANUFACTURING_ORDER_STATUS_PILL[mo.status as ManufacturingOrderStatus];
                       return (
@@ -645,8 +668,25 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                         </span>
                       );
                     })}
+                    {createMo && (
+                      <Button
+                        type="button"
+                        size="small"
+                        variant="secondary"
+                        style={row.manufacturingOrders.length > 0 ? { marginTop: 4 } : undefined}
+                        onClick={() => openCreateMo(row)}
+                      >
+                        {/* Once the row has a TO the button only offers the
+                            rest; a fully covered row has no button at all
+                            (an extra TO goes via + Ny tillverkningsorder). */}
+                        {row.manufacturingOrders.length === 0
+                          ? "Skapa TO"
+                          : `Skapa TO för resten (${toUnitQuantity(moRemaining(row), row.unitFactor)} ${row.unitCode})`}
+                      </Button>
+                    )}
                   </div>
                 );
+              }
               case "unitPrice":
                 return editingRowId === row.id ? (
                   <Input
@@ -686,7 +726,7 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                   Number(row.quantityOrdered) * Number(row.unitPrice) * (1 - Number(row.discountPercent) / 100)
                 );
               case "id":
-                if (!rowsEditable) return reclaimLink(row);
+                if (!rowsEditable) return <RowDeviationLink label="Reklamera" params={reclaimParams(row)} />;
                 return editingRowId === row.id ? (
                   <span style={{ display: "inline-flex", gap: 8 }}>
                     <Button type="button" size="small" variant="primary" disabled={rowPending} onClick={() => saveRow(row)}>
@@ -697,40 +737,30 @@ export function SalesOrderDetail({ order, rows, locations, deliveryAddresses, re
                     </Button>
                   </span>
                 ) : (
-                  <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <span style={{ display: "inline-flex", gap: 4, alignItems: "center", justifyContent: "flex-end" }}>
                     <Button type="button" size="small" variant="ghost" onClick={() => startEditRow(row)}>
                       Ändra
                     </Button>
-                    {Number(row.quantityDelivered) === 0 && (
-                      <Button type="button" size="small" variant="danger" disabled={rowPending} onClick={() => removeRow(row)}>
-                        Ta bort
-                      </Button>
-                    )}
-                    {/* E3: only manufactured articles, and only once the order
-                        is confirmed/in_production — createFromSalesOrderRow
-                        rejects quote (LinkedOrderStatusError). */}
-                    {(row.configuration || row.variantTemplateArticleId) &&
-                      Number(row.quantityDelivered) === 0 &&
-                      row.manufacturingOrders.length === 0 && (
-                        <Button type="button" size="small" variant="ghost" onClick={() => openReconfigure(row)}>
-                          Ändra konfiguration
-                        </Button>
-                      )}
-                    {canCreateMo &&
-                      row.articleType === "manufactured" &&
-                      (order.status === "confirmed" || order.status === "in_production") &&
-                      moRemaining(row) > 0 &&
-                      Number(row.quantityDelivered) < Number(row.quantityOrdered) && (
-                        <Button type="button" size="small" variant="secondary" onClick={() => openCreateMo(row)}>
-                          {/* Once the row has a TO the button only offers the
-                              rest; a fully covered row has no button at all
-                              (an extra TO goes via + Ny tillverkningsorder). */}
-                          {row.manufacturingOrders.length === 0
-                            ? "Skapa tillverkningsorder"
-                            : `Skapa TO för resten (${toUnitQuantity(moRemaining(row), row.unitFactor)} ${row.unitCode})`}
-                        </Button>
-                      )}
-                    {canReclaim && reclaimLink(row)}
+                    <RowMenu
+                      label={`Fler åtgärder för ${row.articleNumber}`}
+                      items={[
+                        // Ändra konfiguration: not once the row is delivered
+                        // or has a TO (the server refuses the same).
+                        Boolean(row.configuration || row.variantTemplateArticleId) &&
+                          Number(row.quantityDelivered) === 0 &&
+                          row.manufacturingOrders.length === 0 && {
+                            label: "Ändra konfiguration",
+                            onSelect: () => openReconfigure(row),
+                          },
+                        canReclaim && { label: "Reklamera", href: newDeviationHref(reclaimParams(row)) },
+                        Number(row.quantityDelivered) === 0 && {
+                          label: "Ta bort",
+                          danger: true,
+                          disabled: rowPending,
+                          onSelect: () => removeRow(row),
+                        },
+                      ]}
+                    />
                   </span>
                 );
               default:
@@ -1610,6 +1640,13 @@ function AddRowForm({
       </FormActions>
     </Form>
   );
+}
+
+// A share of the spare width above a content floor. Table.tsx widens only
+// plain px tracks by the 12px the cell pads on its right, so a minmax() floor
+// carries that padding itself.
+function shareTrack(contentPx: number, fr = 1): string {
+  return `minmax(${contentPx + 12}px, ${fr}fr)`;
 }
 
 // --- E3: Skapa tillverkningsorder från kundorderraden ---

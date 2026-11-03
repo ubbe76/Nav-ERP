@@ -28,7 +28,7 @@ Skapa ett ärende med **+ Ny avvikelse** i listan, eller med knapparna som fylle
 
 - **Ny reklamation** på kundorderkortet, kundfakturakortet och kundkortet.
 - **Ny avvikelse** på inköpsorderkortet, leverantörskortet och tillverkningsorderkortet.
-- **Reklamera** på en orderrad på kundordern, och **Avvikelse** på en orderrad på inköpsordern. Raden, ordern och artikeln fylls i.
+- **Reklamera** på en orderrad på kundordern (i radens meny **⋯** så länge raderna går att ändra), och **Avvikelse** på en orderrad på inköpsordern. Raden, ordern och artikeln fylls i.
 - **Skapa avvikelse** på en rad under **Kassationer** på tillverkningsordern. Tillverkningsordern, operationen, artikeln, kasserat antal och rubriken fylls i, och kassationens orsak om den också gäller interna avvikelser.
 
 Knapparna finns bara för den som har rättigheten **Kvalitet**.
