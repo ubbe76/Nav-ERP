@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CUSTOMER_IMPORT_ENTITY_ORDER, IMPORT_ENTITY_ORDER, importEntitySchema } from "@navet/shared";
+import { CUSTOMER_IMPORT_ENTITY_ORDER, IMPORT_ENTITY_ORDER, SUPPLIER_IMPORT_ENTITY_ORDER, importEntitySchema } from "@navet/shared";
 import { detectImportEntity, importFileRank } from "../src/modules/import/service/detect.js";
 import { IMPORT_FIELD_HELP } from "../src/modules/import/service/field-help.js";
 
@@ -119,5 +119,63 @@ describe("detectImportEntity — customer exports", () => {
   it("orders the customers before what hangs on them", () => {
     for (const entity of CUSTOMER_IMPORT_ENTITY_ORDER) expect(importEntitySchema.options).toContain(entity);
     expect(CUSTOMER_IMPORT_ENTITY_ORDER[0]).toBe("customers");
+  });
+});
+
+// The header rows of Monitor G5's supplier exports (Leverantörslista, 2026-10)
+// and the lego resource list, which also carries "Leverantör".
+const SUPPLIER_HEADERS = {
+  ovrigt: ["Leverantör", "Namn", "Leverantörsroll", "Prioritet", "Leverantörsgrupp", "Minsta ordervärde", "Momsreg.nr", "Organisationsnummer", "E-fakturaadress (EIA)", "Leverantörskategori", "Vårt kundnr", "Lev.nr på faktura", "Moderbolag (lev.)", "Attestansvarig", "Kalender", "Skapa inte fakturaunderlag", "Ströleverantör", "Webbsida", "Order som XML", "Leveransplan som XML", "Leveransplan (fullständig) som XML", "Ärende som XML", "XML med leveransavisering", "EORI-nr", "E-faktura", "Transportavstånd", "2D-kodsmall", "Flera order i e-postmeddelande"],
+  villkor: ["Leverantör", "Namn", "Betalningsvillkor", "Leveransvillkor", "Leveranssätt", "Svarstid", "Emballagevillkor", "Betalningsplan", "Rabatt", "Rabattkategori"],
+  postadress: ["Leverantör", "Namn", "Postadress – Adressformat", "Postadress – Namn", "Postadress – Adressrad 1", "Postadress – Adressrad 2", "Postadress – Adressrad 3", "Postadress – Adressrad 4", "Postadress – Postnummer", "Postadress – Stad", "Postadress – Region", "Postadress – Land"],
+  besoksadress: ["Leverantör", "Namn", "Avviker från leveransadress", "Besöksadress – Namn", "Besöksadress adressrad 1", "Besöksadress adressrad 2", "Besöksadress adressrad 3", "Besöksadress adressrad 4", "Besöksadress – Land"],
+  leveransadress: ["Leverantör", "Namn", "Leveransadress – Namn", "Leveransadress – Adressrad 1", "Leveransadress – Adressrad 2", "Leveransadress – Adressrad 3", "Leveransadress – Adressrad 4", "Leveransadress – Land"],
+  referenser: ["Leverantör", "Namn", "Leverantörsroll", "Förvald", "Aktiv", "Referens – Namn", "Telefon", "Mobiltelefon", "E-post", "Faxnummer", "Anmärkning", "Kommentar", "F", "Referenskategori"],
+  // The 2026-09 export's single Lista file.
+  lista: ["Leverantör", "Namn", "Leverantörsroll", "Leverantörsgrupp", "Minsta ordervärde", "Momsreg.nr", "Organisationsnummer", "Vårt kundnr", "Webbsida"],
+  legoResurser: ["Prod.grupp", "Namn", "Leverantör", "Namn (2)", "Ledtid", "Kötid"],
+};
+
+describe("detectImportEntity — supplier exports", () => {
+  it("recognises every Monitor G5 supplier export that has something to import", () => {
+    expect(detectImportEntity(SUPPLIER_HEADERS.ovrigt)).toBe("suppliers");
+    expect(detectImportEntity(SUPPLIER_HEADERS.villkor)).toBe("suppliers");
+    expect(detectImportEntity(SUPPLIER_HEADERS.postadress)).toBe("suppliers");
+    expect(detectImportEntity(SUPPLIER_HEADERS.lista)).toBe("suppliers");
+    expect(detectImportEntity(SUPPLIER_HEADERS.leveransadress)).toBe("supplierDeliveryAddresses");
+    expect(detectImportEntity(SUPPLIER_HEADERS.referenser)).toBe("supplierContacts");
+  });
+
+  it("leaves Besöksadress and the lego resource list unrecognised", () => {
+    expect(detectImportEntity(SUPPLIER_HEADERS.besoksadress)).toBeNull();
+    expect(detectImportEntity(SUPPLIER_HEADERS.legoResurser)).toBeNull();
+    expect(detectImportEntity(IMPORT_FIELD_HELP.legoWorkCenters.map((f) => f.header))).toBeNull();
+    expect(detectImportEntity(["Leverantör", "Namn"])).toBeNull();
+  });
+
+  it("recognises the three supplier templates by their own headings", () => {
+    const headings = (entity: "suppliers" | "supplierContacts" | "supplierDeliveryAddresses") =>
+      IMPORT_FIELD_HELP[entity].map((f) => f.header);
+    expect(detectImportEntity(headings("suppliers"))).toBe("suppliers");
+    expect(detectImportEntity(headings("supplierContacts"))).toBe("supplierContacts");
+    expect(detectImportEntity(headings("supplierDeliveryAddresses"))).toBe("supplierDeliveryAddresses");
+  });
+
+  it("keeps the purchase price lists (supplier + article) supplier price files", () => {
+    expect(detectImportEntity(HEADERS.prislistaInkop)).toBe("supplierPrices");
+    expect(detectImportEntity(["Leverantör", "Artikelnummer", "Namn", "Telefon"])).toBeNull();
+  });
+
+  it("ranks the Lista-like files (Övrigt, Villkor, Lista) before Postadress", () => {
+    expect(importFileRank("suppliers", SUPPLIER_HEADERS.ovrigt)).toBe(0);
+    expect(importFileRank("suppliers", SUPPLIER_HEADERS.villkor)).toBe(0);
+    expect(importFileRank("suppliers", SUPPLIER_HEADERS.lista)).toBe(0);
+    expect(importFileRank("suppliers", SUPPLIER_HEADERS.postadress)).toBe(1);
+    expect(importFileRank("supplierContacts", SUPPLIER_HEADERS.referenser)).toBe(0);
+  });
+
+  it("orders the suppliers before what hangs on them", () => {
+    for (const entity of SUPPLIER_IMPORT_ENTITY_ORDER) expect(importEntitySchema.options).toContain(entity);
+    expect(SUPPLIER_IMPORT_ENTITY_ORDER[0]).toBe("suppliers");
   });
 });

@@ -1,4 +1,4 @@
-// Recognises WHICH Monitor G5 article or customer export a file is from its header row,
+// Recognises WHICH Monitor G5 article, customer or supplier export a file is from its header row,
 // for the multi-file import ("Alla filer"): the user drops every export at
 // once and the wizard sorts them into entities and dependency order. Pure —
 // headers in, entity out — so the whole signature table is unit-tested
@@ -11,6 +11,8 @@
 import type { ImportEntity } from "@navet/shared";
 import { normalizeHeader } from "./import.service.js";
 import { isCustomerListaFile, suggestCustomerMapping } from "./customers.js";
+import { isSupplierListaFile, suggestSupplierMapping } from "./suppliers.js";
+import { LEGO_WORK_CENTER_HEADER_ALIASES } from "./lego-work-centers.js";
 import { suggestArticleMapping } from "./articles.js";
 
 interface Signature {
@@ -117,6 +119,39 @@ function detectCustomerFile(present: Set<string>, headers: string[]): ImportEnti
   return mapped.some((field) => field !== null && field !== "customerNumber") ? "customers" : null;
 }
 
+// Monitor G5's supplier exports (Leverantörslista: Övrigt, Villkor,
+// Postadress, Besöksadress, Leveransadress, Referenser — the 2026-09 export
+// had a plain Lista instead of Övrigt/Villkor) and the three supplier
+// templates, keyed on the supplier number. The purchase price lists carry
+// an article number too and are matched by the article signatures above;
+// the lego resource files (Monitor's Prod.grupp + Leverantör, the template's
+// Nummer + Leverantörsnummer + Ledtid) are the resource page's own import and
+// never a supplier file — every heading the lego import reads besides the
+// name and the supplier rules a file out.
+const SUPPLIER_KEY_HEADINGS = ["leverantor", "leverantorsnummer", "leverantorsnr", "levnr"];
+const NOT_SUPPLIER_HEADINGS = [
+  "artikelnummer",
+  ...Object.entries(LEGO_WORK_CENTER_HEADER_ALIASES)
+    .filter(([, field]) => field !== "name" && field !== "supplierNumber")
+    .map(([heading]) => heading),
+];
+// Referenser ("Referens – Namn") and the contact template (Mobiltelefon,
+// Faxnummer — the supplier template has neither).
+const SUPPLIER_CONTACT_HEADINGS = ["referensnamn", "mobiltelefon", "faxnummer"];
+// Leveransadress ("Leveransadress – Namn") and the template (Adressnamn).
+const SUPPLIER_DELIVERY_ADDRESS_HEADINGS = ["leveransadressnamn", "adressnamn"];
+
+function detectSupplierFile(present: Set<string>, headers: string[]): ImportEntity | null {
+  if (!SUPPLIER_KEY_HEADINGS.some((heading) => present.has(heading))) return null;
+  if (NOT_SUPPLIER_HEADINGS.some((heading) => present.has(heading))) return null;
+  if (SUPPLIER_CONTACT_HEADINGS.some((heading) => present.has(heading))) return "supplierContacts";
+  if (SUPPLIER_DELIVERY_ADDRESS_HEADINGS.some((heading) => present.has(heading))) return "supplierDeliveryAddresses";
+  // Same rule as the customers: Besöksadress maps nothing but the number and
+  // stays unrecognised.
+  const mapped = Object.values(suggestSupplierMapping(headers));
+  return mapped.some((field) => field !== null && field !== "supplierNumber") ? "suppliers" : null;
+}
+
 function presentHeadings(headers: string[]): Set<string> {
   // parse() suffixes repeated headings ("Pris (2)") — strip that before
   // normalizing, as suggestMapping does.
@@ -132,7 +167,7 @@ export function detectImportEntity(headers: string[]): ImportEntity | null {
     if (signature.needsQuantity && !STOCK_QUANTITY_HEADINGS.some((heading) => present.has(heading))) continue;
     return signature.entity;
   }
-  return detectCustomerFile(present, headers);
+  return detectCustomerFile(present, headers) ?? detectSupplierFile(present, headers);
 }
 
 // Order WITHIN one entity in the multi-file import (lower first; the wizard
@@ -140,12 +175,15 @@ export function detectImportEntity(headers: string[]): ImportEntity | null {
 // - customers: the Lista-like files (Lista, Övrigt) map their short "Namn" to
 //   the name and must run before Postadress, whose legal name is the one to
 //   keep.
+// - suppliers: likewise the Lista-like files (Övrigt, Villkor, the older
+//   Lista) before Postadress.
 // - articles: only a file with a Benämning column can create articles (a new
 //   article needs a name), so it runs before the sub-exports that only add
 //   fields (Extra-fält …) — otherwise those preview every new article as
 //   "Benämning saknas".
 export function importFileRank(entity: ImportEntity, headers: string[]): number {
   if (entity === "customers") return isCustomerListaFile(headers) ? 0 : 1;
+  if (entity === "suppliers") return isSupplierListaFile(headers) ? 0 : 1;
   if (entity === "articles") return Object.values(suggestArticleMapping(headers)).includes("name") ? 0 : 1;
   return 0;
 }

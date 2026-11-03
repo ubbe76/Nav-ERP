@@ -189,10 +189,25 @@ const SUPPLIER_PREFERRED_ALIASES: Record<string, string> = {
 // name; the Postadress run then replaces it via "Postadress – Namn".
 // "Leverantörsroll" is deliberately NOT a marker — the Referenser export
 // carries it too, and that file must never map "Namn".
+// The 2026-10 export splits the list into Övrigt (Leverantörsgrupp, Minsta
+// ordervärde) and Villkor (Betalningsvillkor) — both are Lista-like.
 export const SUPPLIER_LISTA_MARKERS = ["leverantorsgrupp", "minstaordervarde", "betalningsvillkor"];
 
+function normalizedSupplierHeaders(headers: string[]): string[] {
+  return headers.map((header) => normalizeHeader(header.replace(/ \(\d+\)$/, "")));
+}
+
+// Monitor's Lista export and its Övrigt/Villkor variants — the file kinds
+// whose short "Namn" column is auto-mapped to the name. The multi-file
+// import runs them before Postadress (importFileRank in detect.ts), so the
+// legal name is the one that stays.
+export function isSupplierListaFile(headers: string[]): boolean {
+  const normalizedHeaders = normalizedSupplierHeaders(headers);
+  return SUPPLIER_LISTA_MARKERS.some((marker) => normalizedHeaders.includes(marker));
+}
+
 export function suggestSupplierMapping(headers: string[]): Record<string, string | null> {
-  const normalizedHeaders = headers.map((header) => normalizeHeader(header.replace(/ \(\d+\)$/, "")));
+  const normalizedHeaders = normalizedSupplierHeaders(headers);
   let aliases = SUPPLIER_HEADER_ALIASES;
   // Monitor's multi-file export (recognised by its "Leverantör" number
   // column) carries the SHORT display name as "Namn" in every file. The
@@ -204,8 +219,7 @@ export function suggestSupplierMapping(headers: string[]): Record<string, string
   // (Referenser, Leveransadress, Besöksadress) leave "Namn" for the user to
   // map deliberately. Generic CSVs ("Leverantörsnummer"/"Lev.nr" + "Namn")
   // keep the old suggestion.
-  const isListaFile = SUPPLIER_LISTA_MARKERS.some((marker) => normalizedHeaders.includes(marker));
-  if (normalizedHeaders.includes("leverantor") && !isListaFile) {
+  if (normalizedHeaders.includes("leverantor") && !isSupplierListaFile(headers)) {
     const { namn: _namn, ...rest } = aliases;
     aliases = rest;
   }

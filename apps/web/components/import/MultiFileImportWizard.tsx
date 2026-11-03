@@ -89,7 +89,7 @@ async function uploadFile(url: string, file: File): Promise<Response> {
   return fetch(url, { method: "POST", credentials: "include", body });
 }
 
-// Every Monitor export of one page (articles, customers) at once: drop the
+// Every Monitor export of one page (articles, customers, suppliers) at once: drop the
 // files, the server recognises each one from its header row (POST
 // /imports/detect), the user checks the mappings per file, previews
 // everything in ONE call (POST /imports/batch-preview — each file is
