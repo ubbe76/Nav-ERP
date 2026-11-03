@@ -110,10 +110,13 @@ describe("detectImportEntity — customer exports", () => {
     expect(importFileRank("customers", CUSTOMER_HEADERS.fakturaadress)).toBe(1);
     expect(importFileRank("customerContacts", CUSTOMER_HEADERS.referenser)).toBe(0);
     expect(importFileRank("articles", HEADERS.artikellista)).toBe(0);
-    expect(importFileRank("articles", HEADERS.planering)).toBe(0);
+    expect(importFileRank("articles", HEADERS.planering)).toBe(1);
     // Extra benämning has no Benämning column: it cannot create an article,
     // so it runs after the files that can.
-    expect(importFileRank("articles", HEADERS.extraBenamning)).toBe(1);
+    expect(importFileRank("articles", HEADERS.extraBenamning)).toBe(2);
+    // Planering carries Ledtid, which lands on the primary supplier that the
+    // Inköp file (Leverantörsnr) sets — so it runs after that file.
+    expect(importFileRank("articles", ["Artikelnummer", "Artikelbenämning", "Leverantörsnr", "Antal/kolli (Inköp)"])).toBe(0);
   });
 
   it("orders the customers before what hangs on them", () => {

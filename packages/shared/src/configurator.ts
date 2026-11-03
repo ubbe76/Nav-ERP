@@ -474,6 +474,8 @@ export type DerivedMaterial = {
   unitId: string | null;
   unitFactor: string | null;
   operation: DerivedOperationRef | null;
+  // "Kalkyl" row of the template's structure: costed, never a TO material line, no demand. Lines are never flagged.
+  costingOnly: boolean;
   articleNumber: string;
   articleName: string;
   unitCode: string | null;

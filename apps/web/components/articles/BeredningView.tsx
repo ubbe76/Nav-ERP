@@ -151,6 +151,7 @@ export function BeredningView({
             <span className={styles.compBenaming} title={row.componentName}>
               {row.componentIsPhantom ? `${row.componentName} · Fantom` : row.componentName}
             </span>
+            {row.costingOnly && <span className={styles.kalkylBadge}>Kalkyl</span>}
           </span>
         </span>
         {/* The Ställtid column is unused on a component row — the badge sits

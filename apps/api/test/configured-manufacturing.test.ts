@@ -250,3 +250,22 @@ describe("configured TO — release, reporting and stock value", () => {
     expect(text).toContain("Bredd: 1 200 mm");
   });
 });
+
+// "Kalkyl" on a template structure row (bom_components.costing_only): costed
+// in the configuration's förkalkyl, never written to the configured TO — the
+// same rule deriveForManufacturing already applies to Kalkyl operations.
+describe("configured TO — Kalkyl structure rows", () => {
+  it("costs the row but writes no material line for it", async () => {
+    const { s, row } = await confirmedRow(2);
+    const [skruvRow] = await testArticleService.getBom(s.article.id);
+    await testArticleService.updateBomComponent(s.article.id, skruvRow!.id, { costingOnly: true });
+
+    const mo = await mfg.createFromSalesOrderRow(row.id, {}, null);
+    const cfg = mo.configuration as ManufacturingOrderConfiguration;
+    // The hand-costed TVK/st (168) still includes SKRUV's 16.
+    expect(cfg.cost.manufacturingCostPerUnit).toBe(168);
+    const mats = await matOf(mo.id);
+    expect(mats.some((m) => m.componentArticleId === s.parts.skruv.id)).toBe(false);
+    expect(mats.some((m) => m.componentArticleId === s.parts.plat.id)).toBe(true);
+  });
+});

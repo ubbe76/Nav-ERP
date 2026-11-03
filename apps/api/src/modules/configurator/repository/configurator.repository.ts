@@ -337,6 +337,7 @@ export function createConfiguratorRepository() {
           id: bomComponents.id,
           componentArticleId: bomComponents.componentArticleId, quantity: bomComponents.quantity, unitId: bomComponents.unitId,
           unitFactor: bomComponents.unitFactor, routingOperationId: bomComponents.routingOperationId,
+          costingOnly: bomComponents.costingOnly,
         })
         .from(bomComponents)
         .where(eq(bomComponents.parentArticleId, articleId))
@@ -402,8 +403,11 @@ export function createConfiguratorRepository() {
     },
     // The article module's structure walk (the same one the costing repository
     // wraps) — a phantom component's parts with their quantities multiplied down.
+    // Only deriveForManufacturing (the configured TO's material) explodes
+    // through here, so "Kalkyl" rows are excluded like at release; the costing
+    // preview uses the costing module's own explodeBom.
     explodeBom(ex: Executor, articleId: string, quantity: number): Promise<ExplodeBomRow[]> {
-      return explodeBom(ex, articleId, quantity);
+      return explodeBom(ex, articleId, quantity, "exclude");
     },
     async findWorkCenter(ex: Executor, id: string): Promise<{ id: string; active: boolean; type: string } | null> {
       const [row] = await ex

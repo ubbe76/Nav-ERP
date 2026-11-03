@@ -750,8 +750,12 @@ export function createConfiguratorService(deps: {
       repo.phantomIds(ex, componentIds),
     ]);
     const operations = manufacturingOperations(variantRoutingRows(core.operations, new Map(templateRouting.map((r) => [r.id, r])), workCenters));
+    // "Kalkyl" rows of the template's structure never become TO material —
+    // the same rule as manufacturingOperations' costingOnly filter and
+    // release's explodeBom(..., "exclude"); a phantom on such a row is not
+    // exploded either. The costing preview (costStructure) keeps them.
     const exploded = await explodeDerivedMaterials(
-      core.materials.map((m) => ({
+      core.materials.filter((m) => !m.costingOnly).map((m) => ({
         componentArticleId: m.componentArticleId,
         componentName: labels.articles.get(m.componentArticleId)?.name ?? "",
         totalQuantity: m.quantity * quantity,
@@ -935,6 +939,7 @@ export function createConfiguratorService(deps: {
       row.bom.map((b) => ({
         componentArticleId: b.componentArticleId, quantity: b.quantity, unitId: b.unitId, unitFactor: b.unitFactor,
         routingOperationId: b.operationSequenceNo === null ? null : operationIds.get(b.operationSequenceNo)!,
+        costingOnly: b.costingOnly,
       }))
     );
     await repo.insertVariantLink(tx, {

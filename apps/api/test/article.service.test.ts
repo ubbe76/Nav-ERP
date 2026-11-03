@@ -110,7 +110,7 @@ describe("article service — BOM structure", () => {
     const tree = await service.getBomTree(parent.id);
     expect(tree?.children.map((c) => c.quantity).sort()).toEqual(["1.0000", "5.0000"]);
     // Release/costing read explodeBom: one material line per (component, operation).
-    const exploded = await explodeBom(db, parent.id, 2);
+    const exploded = await explodeBom(db, parent.id, 2, "exclude");
     expect(exploded).toHaveLength(1);
     expect(exploded[0]?.totalQuantity).toBe(12);
   });

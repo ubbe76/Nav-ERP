@@ -3,9 +3,11 @@ import type { DerivedMaterialCore, DerivedOperationCore } from "./configurator-d
 
 // Produktkonfigurator — lagerförda varianter: turns the derived structure of one configuration into the rows
 // a variant article gets as its own BOM and route. Pure (no DB imports). `deriveStructure` never merges the
-// same component from several rows (the test panel shows each source); a stored BOM is one row per component,
-// so the materials are merged here: quantities summed in the base unit, the operation link kept when the rows
-// agree and otherwise the lowest operation with a warning, the display unit kept only when every row has it.
+// same component from several rows (the test panel shows each source); the variant's BOM gets one row per
+// component AND Kalkyl flag, so the materials are merged here: quantities summed in the base unit, the
+// operation link kept when the rows agree and otherwise the lowest operation with a warning, the display unit
+// kept only when every row has it. Kalkyl rows (costingOnly) are never merged into an ordinary row — the summed
+// quantity would then be drawn on the TO and show up as demand (0176 allows the component on two rows).
 
 export type VariantBomRow = {
   componentArticleId: string;
@@ -13,6 +15,7 @@ export type VariantBomRow = {
   unitId: string | null;
   unitFactor: string | null;
   operationSequenceNo: number | null; // mapped to the new routing row's id by the caller
+  costingOnly: boolean; // the merged rows' shared Kalkyl flag (they are grouped by it)
 };
 
 const round4 = (n: number) => Number(n.toFixed(4));
@@ -21,17 +24,20 @@ export function mergeVariantMaterials(
   materials: DerivedMaterialCore[],
   componentLabel: (articleId: string) => string
 ): { rows: VariantBomRow[]; warnings: string[] } {
-  const byComponent = new Map<string, DerivedMaterialCore[]>(); // insertion order = first occurrence
+  // Keyed by component + Kalkyl flag; insertion order = first occurrence.
+  const byComponent = new Map<string, DerivedMaterialCore[]>();
   for (const m of materials) {
-    const list = byComponent.get(m.componentArticleId);
+    const key = `${m.componentArticleId}#${m.costingOnly}`;
+    const list = byComponent.get(key);
     if (list) list.push(m);
-    else byComponent.set(m.componentArticleId, [m]);
+    else byComponent.set(key, [m]);
   }
 
   const rows: VariantBomRow[] = [];
   const warnings: string[] = [];
-  for (const [componentArticleId, group] of byComponent) {
+  for (const group of byComponent.values()) {
     const first = group[0]!;
+    const componentArticleId = first.componentArticleId;
     const quantity = round4(group.reduce((sum, m) => sum + m.quantity, 0));
 
     const sequenceNos = group.map((m) => m.operation?.sequenceNo ?? null);
@@ -49,6 +55,7 @@ export function mergeVariantMaterials(
       unitId: sameUnit ? first.unitId : null,
       unitFactor: sameUnit ? first.unitFactor : null,
       operationSequenceNo,
+      costingOnly: first.costingOnly,
     });
   }
   return { rows, warnings };

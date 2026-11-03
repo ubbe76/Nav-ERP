@@ -180,10 +180,17 @@ export function detectImportEntity(headers: string[]): ImportEntity | null {
 // - articles: only a file with a Benämning column can create articles (a new
 //   article needs a name), so it runs before the sub-exports that only add
 //   fields (Extra-fält …) — otherwise those preview every new article as
-//   "Benämning saknas".
+//   "Benämning saknas". Among the named files, one that carries Ledtid but
+//   not Leverantörsnr (Planering) runs after the ones that set the primary
+//   supplier (Inköp och Ritningsnummer): a purchased article's Ledtid lands
+//   on its primary supplier.
 export function importFileRank(entity: ImportEntity, headers: string[]): number {
   if (entity === "customers") return isCustomerListaFile(headers) ? 0 : 1;
   if (entity === "suppliers") return isSupplierListaFile(headers) ? 0 : 1;
-  if (entity === "articles") return Object.values(suggestArticleMapping(headers)).includes("name") ? 0 : 1;
+  if (entity === "articles") {
+    const fields = Object.values(suggestArticleMapping(headers));
+    if (!fields.includes("name")) return 2;
+    return fields.includes("leadTimeDays") && !fields.includes("primarySupplierNumber") ? 1 : 0;
+  }
   return 0;
 }

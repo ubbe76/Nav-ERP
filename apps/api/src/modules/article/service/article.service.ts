@@ -154,6 +154,8 @@ export interface BomTreeNode {
   isPhantom: boolean;
   quantity: string | null;
   bomRowId: string | null;
+  // "Kalkyl" on the row that brought the node in (false for the root).
+  costingOnly: boolean;
   children: BomTreeNode[];
 }
 
@@ -306,10 +308,15 @@ export function createArticleService(repo: ArticleRepository) {
 
   // A BOM row may only point at one of its OWN article's routing operations —
   // otherwise the material would be tied to a step that never runs on this MO.
-  async function assertOperationBelongsToArticle(operationId: string, articleId: string) {
+  // An ordinary row may not link to a "Kalkyl" operation either: the operation
+  // never reaches the MO, so the material would silently fall through to
+  // final reporting. A "Kalkyl" ROW never reaches the MO itself, so its link
+  // is harmless and allowed (Monitor's file carries one); un-flagging the row
+  // re-runs this check with the row's current link.
+  async function assertOperationBelongsToArticle(operationId: string, articleId: string, rowCostingOnly: boolean) {
     const operation = await repo.findRoutingOperationById(operationId);
     if (!operation || operation.articleId !== articleId) throw new RoutingOperationMismatchError();
-    if (operation.costingOnly) throw new CostingOnlyOperationLinkError();
+    if (operation.costingOnly && !rowCostingOnly) throw new CostingOnlyOperationLinkError();
   }
 
   // A default purchase/sales unit must be the base unit or one of the
@@ -610,6 +617,7 @@ export function createArticleService(repo: ArticleRepository) {
             isPhantom: row.componentIsPhantom,
             quantity: row.quantity,
             bomRowId: row.id,
+            costingOnly: row.costingOnly,
             children: await walk(row.componentArticleId, nextPath),
           }))
         );
@@ -622,6 +630,7 @@ export function createArticleService(repo: ArticleRepository) {
         isPhantom: root.isPhantom,
         quantity: null,
         bomRowId: null,
+        costingOnly: false,
         children: await walk(articleId, new Set()),
       };
     },
@@ -658,10 +667,17 @@ export function createArticleService(repo: ArticleRepository) {
     // component is remove + add, so the cycle check in addBomComponent stays
     // the single validation point.
     async updateBomComponent(parentArticleId: string, rowId: string, input: UpdateBomComponentInput) {
-      if (input.routingOperationId) await assertOperationBelongsToArticle(input.routingOperationId, parentArticleId);
-
       const existing = await repo.findBomComponentRow(parentArticleId, rowId);
       if (!existing) throw new BomComponentNotFoundError(rowId);
+
+      // The link and the Kalkyl flag are checked together as the row WILL be:
+      // a new link against the row's (possibly new) flag, and a row losing its
+      // flag against the link it keeps.
+      const effectiveLink = input.routingOperationId !== undefined ? input.routingOperationId : existing.routingOperationId;
+      const effectiveCostingOnly = input.costingOnly ?? existing.costingOnly;
+      if (effectiveLink && (input.routingOperationId !== undefined || input.costingOnly !== undefined)) {
+        await assertOperationBelongsToArticle(effectiveLink, parentArticleId, effectiveCostingOnly);
+      }
 
       // The unit the incoming quantity is expressed in: the newly chosen unit
       // when the PATCH sets one, otherwise the row's current unit.
@@ -678,6 +694,7 @@ export function createArticleService(repo: ArticleRepository) {
         quantity: input.quantity !== undefined ? toBaseQuantity(input.quantity, effectiveFactor) : undefined,
         routingOperationId: input.routingOperationId,
         position: input.position,
+        costingOnly: input.costingOnly,
       });
       if (!row) throw new BomComponentNotFoundError(rowId);
       return row;
@@ -850,7 +867,9 @@ export function createArticleService(repo: ArticleRepository) {
       if (await this.isDescendant(input.componentArticleId, parentArticleId)) {
         throw new BomCycleError();
       }
-      if (input.routingOperationId) await assertOperationBelongsToArticle(input.routingOperationId, parentArticleId);
+      if (input.routingOperationId) {
+        await assertOperationBelongsToArticle(input.routingOperationId, parentArticleId, input.costingOnly ?? false);
+      }
 
       // The quantity is entered in the chosen unit (one of the COMPONENT's
       // units) — stored in the component's base unit with the factor

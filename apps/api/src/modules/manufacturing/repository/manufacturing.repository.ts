@@ -629,8 +629,11 @@ async function releaseInTx(tx: Tx, moId: string) {
   const configured = order.configuration !== null;
 
   // Phantom BOM components are resolved past into their own components
-  // (quantities multiplied down the chain) — see bom-explosion.ts.
-  const exploded = configured ? [] : await explodeBom(tx, order.articleId, Number(order.quantity));
+  // (quantities multiplied down the chain) — see bom-explosion.ts. "Kalkyl"
+  // rows (costing_only) are excluded here, exactly like the Kalkyl operations
+  // below: they are priced in the förkalkyl but never drawn, never short,
+  // never in the efterkalkyl.
+  const exploded = configured ? [] : await explodeBom(tx, order.articleId, Number(order.quantity), "exclude");
 
   // Operations are snapshotted first so material rows can point at
   // them: a component linked to a routing operation is drawn when that
@@ -1142,13 +1145,15 @@ export function createManufacturingRepository(db: Db) {
 
     // Guards the "Kalkyl" flag: a BOM row linked to an operation that never
     // reaches the MO would silently fall through to final completion, so the
-    // combination is refused. The mirror-image read lives in
+    // combination is refused. A costing-only ROW never reaches the MO either,
+    // so its link is harmless and does not count — un-flagging such a row
+    // re-checks the link (article.service.ts). The mirror-image read lives in
     // article.repository.ts's findRoutingOperationById.
     async countBomComponentsForOperation(operationId: string) {
       const [row] = await db
         .select({ value: count() })
         .from(bomComponents)
-        .where(eq(bomComponents.routingOperationId, operationId));
+        .where(and(eq(bomComponents.routingOperationId, operationId), eq(bomComponents.costingOnly, false)));
       return row?.value ?? 0;
     },
 

@@ -227,6 +227,10 @@ export const createBomComponentSchema = z.object({
   routingOperationId: z.string().uuid().nullable().optional(),
   // "Pos." — the position on the drawing; blank = none.
   position: optionalText(20).optional(),
+  // "Kalkyl" (Monitor's End. kal.) — the row is counted in the pre-calculation
+  // only: never snapshotted onto a manufacturing order, no dependent demand.
+  // Omitted = false. The material twin of createRoutingOperationSchema.costingOnly.
+  costingOnly: z.boolean().optional(),
 });
 export type CreateBomComponentInput = z.infer<typeof createBomComponentSchema>;
 
@@ -241,6 +245,8 @@ export const updateBomComponentSchema = z
     routingOperationId: z.string().uuid().nullable().optional(),
     // "Pos."; "" clears.
     position: optionalText(20).optional(),
+    // "Kalkyl" — see createBomComponentSchema.
+    costingOnly: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, "At least one field must be provided");
 export type UpdateBomComponentInput = z.infer<typeof updateBomComponentSchema>;

@@ -190,7 +190,7 @@ describe("suggestBomMapping", () => {
       Kvantitet: "quantity",
       Enhet: "unitCode",
       Standardpris: "componentStandardCost",
-      "End. kal.": null,
+      "End. kal.": "costingOnly",
       Instruktion: null,
       "Filer (material)": null,
       Villkor: null,
@@ -1007,7 +1007,9 @@ describe("bom import — repository", () => {
     const componentId = await seedArticle("K-1", "purchased");
     await db.insert(bomComponents).values({ parentArticleId: parentId, componentArticleId: componentId, quantity: "2" });
 
-    expect(await repo.allBomEdges()).toEqual([{ id: expect.any(String), parentId, componentId, position: null }]);
+    expect(await repo.allBomEdges()).toEqual([
+      { id: expect.any(String), parentId, componentId, position: null, routingOperationId: null, costingOnly: false },
+    ]);
   });
 
   it("maps a component's alternative unit factors", async () => {
@@ -1421,5 +1423,115 @@ describe("bom import — Pos. and updateExisting", () => {
     expect(result).toMatchObject({ created: 0, updated: 1 });
     const [stored] = await db.select().from(bomComponents);
     expect(stored).toMatchObject({ quantity: "5.0000", position: "4" });
+  });
+});
+
+// "Kalkyl" (Monitor's "End. kal.", bom_components.costing_only): the row is
+// priced in the förkalkyl only — never on a TO, no demand. Same words as the
+// routing import's Kalkyl column; empty = Nej on a new row, untouched on an
+// update.
+describe("bom import — Kalkyl (End. kal.)", () => {
+  const KALKYL_MAPPING = { ...MAPPING, Kalkyl: "costingOnly" };
+  const twoRows = () => fakeDeps({ articles: [article("A-1", "id-a"), article("K-1", "id-k", { type: "purchased" })] });
+
+  it("maps Monitor's End. kal., Endast kalkyl and the template's Kalkyl", () => {
+    expect(suggestBomMapping(["Huvudartikel", "Artikelnummer", "Kvantitet", "End. kal."])["End. kal."]).toBe("costingOnly");
+    expect(suggestBomMapping(["Artikelnummer", "Komponentnummer", "Antal", "Endast kalkyl"])["Endast kalkyl"]).toBe("costingOnly");
+    expect(suggestBomMapping(["Artikelnummer", "Komponentnummer", "Antal", "Kalkyl"])["Kalkyl"]).toBe("costingOnly");
+  });
+
+  it("parses Ja/Nej/1/0/true/false, treats an empty cell as Nej on a new row and rejects other words", async () => {
+    const rows = [
+      ["A-1", "K-1", "1", "", "", "Ja"],
+      ["A-1", "K-1", "1", "", "", "Nej"],
+      ["A-1", "K-1", "1", "", "", "1"],
+      ["A-1", "K-1", "1", "", "", "0"],
+      ["A-1", "K-1", "1", "", "", "true"],
+      ["A-1", "K-1", "1", "", "", "false"],
+      ["A-1", "K-1", "1", "", "", ""],
+    ];
+    const plan = await planBomImport({ mapping: KALKYL_MAPPING, rows }, twoRows());
+    expect(plan.hasErrors).toBe(false);
+    expect(plan.creates.map((c) => c.costingOnly ?? false)).toEqual([true, false, true, false, true, false, false]);
+    expect(plan.rows[0]!.values["costingOnly"]).toBe("Ja");
+
+    const bad = await planBomImport({ mapping: KALKYL_MAPPING, rows: [["A-1", "K-1", "1", "", "", "kanske"]] }, twoRows());
+    expect(bad.rows[0]!.errors).toEqual(['Ogiltigt värde för Kalkyl: "kanske" (Ja/Nej/1/0/true/false)']);
+  });
+
+  it("lets a Kalkyl row link to a Kalkyl operation — an ordinary row still errors", async () => {
+    const deps = fakeDeps({
+      articles: [article("A-1", "id-a"), article("K-1", "id-k", { type: "purchased" })],
+      operations: [{ articleId: "id-a", sequenceNo: 20, costingOnly: true }],
+    });
+    const plan = await planBomImport(
+      {
+        mapping: KALKYL_MAPPING,
+        rows: [
+          ["A-1", "K-1", "1", "", "20", "Ja"],
+          ["A-1", "K-1", "1", "", "20", ""],
+        ],
+      },
+      deps
+    );
+    expect(plan.rows[0]!.errors).toEqual([]);
+    expect(plan.creates[0]).toMatchObject({ routingOperationId: "op-id-a-20", costingOnly: true });
+    expect(plan.rows[1]!.errors).toEqual(["Operation 20 på artikel A-1 är en kalkyloperation och kan inte förbruka material"]);
+  });
+
+  it("updateExisting writes the flag only from a filled cell and refuses un-flagging a row that keeps a Kalkyl link", async () => {
+    const deps = fakeDeps({
+      articles: [article("A-1", "id-a"), article("K-1", "id-k", { type: "purchased" }), article("K-2", "id-k2", { type: "purchased" })],
+      operations: [{ articleId: "id-a", sequenceNo: 20, costingOnly: true }],
+      edges: [
+        { id: "row-1", parentId: "id-a", componentId: "id-k", costingOnly: true },
+        { id: "row-2", parentId: "id-a", componentId: "id-k2", costingOnly: true, routingOperationId: "op-id-a-20" },
+      ],
+    });
+    // Operation column unmapped: the stored links stay.
+    const mapping = { ...KALKYL_MAPPING, Operation: null };
+    const untouched = await planBomImport({ mapping, rows: [["A-1", "K-1", "2", "", "", ""]], updateExisting: true }, deps);
+    expect(untouched.updates).toEqual([{ id: "row-1", patch: { quantity: 2, unitId: null, unitFactor: null } }]);
+
+    const cleared = await planBomImport({ mapping, rows: [["A-1", "K-1", "2", "", "", "Nej"]], updateExisting: true }, deps);
+    expect(cleared.updates).toEqual([{ id: "row-1", patch: { quantity: 2, unitId: null, unitFactor: null, costingOnly: false } }]);
+
+    // K-2 keeps its link to Kalkyl operation 20 — it cannot stop being a Kalkyl row.
+    const refused = await planBomImport({ mapping, rows: [["A-1", "K-2", "2", "", "", "Nej"]], updateExisting: true }, deps);
+    expect(refused.rows[0]!.errors).toEqual([
+      "Raden är kopplad till en kalkyloperation på artikel A-1 och kan inte sluta vara kalkylrad — ändra kopplingen först",
+    ]);
+    // With the Operation column mapped the file's link decides: unlinking and un-flagging together is fine.
+    const relinked = await planBomImport(
+      { mapping: KALKYL_MAPPING, rows: [["A-1", "K-2", "2", "", "", "Nej"]], updateExisting: true },
+      deps
+    );
+    expect(relinked.rows[0]!.errors).toEqual([]);
+    expect(relinked.updates![0]!.patch).toMatchObject({ routingOperationId: null, costingOnly: false });
+  });
+
+  it("commits the flag end-to-end and flips it with updateExisting", async () => {
+    await seedArticle("A-1");
+    await seedArticle("K-1", "purchased");
+    await seedArticle("K-2", "purchased");
+    const mapping = { ...MAPPING, "End. kal.": "costingOnly" };
+    expect(
+      await importService.commit("bom", { mapping, rows: [["A-1", "K-1", "2", "", "", "Ja"], ["A-1", "K-2", "1", "", "", ""]] })
+    ).toMatchObject({ created: 2 });
+    const stored = await db.select().from(bomComponents).orderBy(bomComponents.quantity);
+    expect(stored.map((row) => [row.quantity, row.costingOnly])).toEqual([
+      ["1.0000", false],
+      ["2.0000", true],
+    ]);
+
+    expect(
+      await importService.commit("bom", {
+        mapping,
+        rows: [["A-1", "K-1", "2", "", "", "Nej"], ["A-1", "K-2", "1", "", "", ""]],
+        updateExisting: true,
+      })
+    ).toMatchObject({ updated: 2 });
+    const after = await db.select().from(bomComponents).orderBy(bomComponents.quantity);
+    expect(after.map((row) => row.costingOnly)).toEqual([false, false]);
   });
 });

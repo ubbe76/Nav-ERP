@@ -215,6 +215,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       example: "Lagerstyrd",
     },
     {
+      field: "leadTimeDays",
+      label: "Ledtid (dagar)",
+      required: false,
+      header: "Ledtid (dagar)",
+      description: `Hela dagar, aldrig negativt. En tillverkad artikel får värdet som Ledtid (dagar) på Lager-flikens planering; en köpt artikel får det som huvudleverantörens ledtid på Inköp-fliken (saknar artikeln huvudleverantör, i registret eller i kolumnen Leverantörsnummer, blir det en varning). En tjänst får ingen ledtid. 0 tömmer fältet. ${UNTOUCHED}`,
+      example: "15",
+    },
+    {
       field: "articleRevision",
       label: "Artikelrevision",
       required: false,
@@ -489,7 +497,7 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       required: false,
       header: "Operation",
       description:
-        "Sekvensnumret (heltal större än 0) på en av den överordnade artikelns operationer, som materialet dras vid. Tom cell, eller en operation som inte finns, ger ingen koppling — materialet dras då i takt med inleveransen av färdiga varor (en operation som inte finns ger en varning). En kalkyloperation ger ett fel.",
+        "Sekvensnumret (heltal större än 0) på en av den överordnade artikelns operationer, som materialet dras vid. Tom cell, eller en operation som inte finns, ger ingen koppling — materialet dras då i takt med inleveransen av färdiga varor (en operation som inte finns ger en varning). En kalkyloperation ger ett fel, utom på en kalkylrad (Kalkyl = Ja) där kopplingen ändå inte har någon verkan.",
       example: "10",
     },
     {
@@ -501,6 +509,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       description:
         "Radens position på ritningen, max 20 tecken (siffror eller text). Visas i strukturen på artikelkortets Beredning-flik. Med Uppdatera befintliga strukturrader lämnar en tom cell det sparade värdet orört.",
       example: "3",
+    },
+    {
+      field: "costingOnly",
+      label: "Kalkyl",
+      required: false,
+      header: "Kalkyl",
+      description: `${YES_NO_X}; tom cell betyder Nej på en ny rad och lämnar värdet orört med Uppdatera befintliga strukturrader. Ja gör raden till en kalkylrad (kolumnen End. kal. i en materiallista): materialet räknas med i förkalkylen men hamnar aldrig på en tillverkningsorder — det dras inte ur lagret, ger ingen materialbrist och inget behov i behovsberäkningen. En fantomartikel på en kalkylrad räknas med hela sin struktur i kalkylen men ger inget behov.`,
+      example: "Nej",
     },
     {
       field: "componentName",
@@ -583,6 +599,14 @@ export const IMPORT_FIELD_HELP: Record<ImportEntity, FieldHelpEntry[]> = {
       header: "Huvudleverantör",
       description: `${YES_NO_X}; tom cell betyder Nej. Ja gör leverantören till artikelns huvudleverantör och tar bort markeringen från en tidigare — högst en per artikel i filen. Tom cell tar bort markeringen från en befintlig katalograd — ta bort kolumnen för att lämna den orörd.`,
       example: "Ja",
+    },
+    {
+      field: "leadTimeDays",
+      label: "Ledtid (dagar)",
+      required: false,
+      header: "Ledtid (dagar)",
+      description: `Leverantörens ledtid i hela dagar, aldrig negativt — behovsberäkningen läser huvudleverantörens. Står i den stafflade filen på flera rader gäller den första ifyllda. 0 tömmer fältet. ${UNTOUCHED}`,
+      example: "10",
     },
     {
       field: "breakQuantity",

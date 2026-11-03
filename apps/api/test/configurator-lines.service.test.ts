@@ -174,7 +174,7 @@ describe("configurator lines and operations — CRUD and enriched detail", () =>
 
     const input = await service.loadDerivationInput(s.article.id);
     expect(input.detail.articleId).toBe(s.article.id);
-    expect(input.baseBom).toEqual([{ id: bc.id, componentArticleId: s.hjulArt.id, quantity: 4, unitId: null, unitFactor: null, routingOperationId: s.op10.id }]);
+    expect(input.baseBom).toEqual([{ id: bc.id, componentArticleId: s.hjulArt.id, quantity: 4, unitId: null, unitFactor: null, routingOperationId: s.op10.id, costingOnly: false }]);
     expect(input.baseOperations).toEqual([{ id: s.op10.id, sequenceNo: 10, workCenterId: s.wc.id, description: null, setupTime: 5, runTimePerUnit: 1, costingOnly: false, setupPrice: null, unitPrice: null }]);
     expect(input.lines.map((l) => l.label)).toEqual(["Strukturrad 1 (Plåt)", "Strukturrad 2 (Lock)"]);
     expect(input.lines[0]).toMatchObject({ source: "article", componentArticleId: s.plat.id, quantity: 2, quantityFormula: null, configuratorOperationId: op40.id });

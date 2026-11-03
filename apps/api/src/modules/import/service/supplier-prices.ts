@@ -38,6 +38,10 @@ export const SUPPLIER_PRICE_IMPORT_FIELDS = [
   "price",
   "discountPercent",
   "isPrimary",
+  // Ledtid (dagar) on the catalog row — the behovsberäkning's lead time for
+  // the primary supplier. 0 = none (clears). Monitor's Prislista Inköp has no
+  // such column; the template and hand-made files do.
+  "leadTimeDays",
   "breakQuantity",
   "breakPrice",
 ] as const;
@@ -69,6 +73,9 @@ export const SUPPLIER_PRICE_HEADER_ALIASES: Record<string, string> = {
   forvald: "isPrimary",
   huvudleverantor: "isPrimary",
   primar: "isPrimary",
+  ledtid: "leadTimeDays",
+  // The template's heading "Ledtid (dagar)".
+  ledtiddagar: "leadTimeDays",
   gransvardeantal: "breakQuantity",
   gransvarde: "breakQuantity",
   franantal: "breakQuantity",
@@ -131,6 +138,7 @@ export interface SupplierPriceCreatePlan {
   supplierArticleNumber: string | null;
   price: number | null;
   isPrimary: boolean;
+  leadTimeDays: number | null;
   breaks: SupplierPriceBreakPlan[];
 }
 
@@ -145,6 +153,8 @@ export interface SupplierPriceUpdatePlan {
     supplierArticleNumber?: string;
     price?: number;
     isPrimary?: boolean;
+    // null clears (the cell said 0).
+    leadTimeDays?: number | null;
   };
   breaks: SupplierPriceBreakPlan[];
 }
@@ -171,6 +181,8 @@ interface Group {
   supplierArticleNumber: string | null;
   price: number | null;
   isPrimary: boolean | null;
+  // undefined = no cell (untouched), null = 0 (cleared).
+  leadTimeDays: number | null | undefined;
   breaks: SupplierPriceBreakPlan[];
   breakQuantities: Set<number>;
   rowIndexes: number[];
@@ -259,6 +271,20 @@ export async function planSupplierPriceImport(
       if (isPrimary === null) errors.push(`Ogiltigt värde för Förvald: "${rawPrimary}" (Ja/Nej/1/0/true/false)`);
     }
 
+    // Ledtid (dagar): whole days, 0 = none. The staffel file repeats the
+    // pair on every step — the first row with a value wins.
+    const rawLeadTime = record["leadTimeDays"] ?? "";
+    values["leadTimeDays"] = rawLeadTime;
+    let leadTimeDays: number | null | undefined;
+    if (rawLeadTime !== "") {
+      const parsed = normalizeDecimal(rawLeadTime);
+      if (parsed === null) errors.push(`Ogiltig ledtid: "${rawLeadTime}"`);
+      else if (parsed < 0) errors.push("Ledtiden kan inte vara negativ");
+      else if (!Number.isInteger(parsed)) errors.push(`Ledtiden ska vara ett helt antal dagar: "${rawLeadTime}"`);
+      else if (parsed > 9999) errors.push("Ledtiden är för lång (max 9999 dagar)");
+      else leadTimeDays = parsed === 0 ? null : parsed;
+    }
+
     // Staffelsteg: Gränsvärde antal + the second price. ≤ 1 is the base price
     // by definition (article_supplier_price_breaks CHECK from_quantity > 1)
     // and is ignored with a warning rather than refused.
@@ -309,6 +335,7 @@ export async function planSupplierPriceImport(
             supplierArticleNumber: null,
             price: null,
             isPrimary: null,
+            leadTimeDays: undefined,
             breaks: [],
             breakQuantities: new Set(),
             rowIndexes: [-1],
@@ -323,6 +350,7 @@ export async function planSupplierPriceImport(
           supplierArticleNumber: supplierArticleNumber === "" ? null : supplierArticleNumber,
           price,
           isPrimary,
+          leadTimeDays,
           breaks: [],
           breakQuantities: new Set(),
           rowIndexes: [],
@@ -347,6 +375,7 @@ export async function planSupplierPriceImport(
         );
         return;
       }
+      if (group.leadTimeDays === undefined && leadTimeDays !== undefined) group.leadTimeDays = leadTimeDays;
       if (breakStep !== null) {
         if (group.breakQuantities.has(breakStep.fromQuantity)) {
           errors.push(`Gränsvärdet ${rawBreakQuantity} förekommer flera gånger för artikel ${articleNumber} och leverantör ${supplierNumber}`);
@@ -376,6 +405,7 @@ export async function planSupplierPriceImport(
         if (group.supplierArticleNumber !== null) patch.supplierArticleNumber = group.supplierArticleNumber;
         if (group.price !== null) patch.price = group.price;
         if (group.isPrimary !== null) patch.isPrimary = group.isPrimary;
+        if (group.leadTimeDays !== undefined) patch.leadTimeDays = group.leadTimeDays;
         updates.push({ id: group.existing.id, articleId: group.articleId, patch, breaks });
       } else {
         creates.push({
@@ -384,6 +414,7 @@ export async function planSupplierPriceImport(
           supplierArticleNumber: group.supplierArticleNumber,
           price: group.price,
           isPrimary: group.isPrimary ?? false,
+          leadTimeDays: group.leadTimeDays ?? null,
           breaks,
         });
       }

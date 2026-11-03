@@ -184,6 +184,7 @@ export type DerivedMaterial = {
   unitId: string | null;
   unitFactor: string | null;
   operation: DerivedOperationRef | null;
+  costingOnly: boolean;
   articleNumber: string;
   articleName: string;
   unitCode: string | null;

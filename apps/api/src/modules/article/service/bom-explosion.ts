@@ -14,7 +14,21 @@ export interface ExplodedComponent {
   // on the unit fall back to base display.
   unitId: string | null;
   unitFactor: string | null;
+  // "Kalkyl" — the line comes only from costing-only rows (or rows under a
+  // costing-only phantom). Always false in "exclude" mode. A line merged from
+  // a costing-only and an ordinary row is ordinary: the material IS drawn.
+  costingOnly: boolean;
 }
+
+// Who is asking decides what a "Kalkyl" row (bom_components.costing_only) is:
+//  - "include": the pre-calculation — such rows are priced like any other and
+//    emitted with costingOnly: true (the subtree under a costing-only phantom
+//    inherits the flag).
+//  - "exclude": release / configured TO / anything that becomes stock
+//    movement or demand — such rows are skipped, and a costing-only phantom
+//    is not descended into (its whole subtree is costing-only).
+// Required rather than defaulted so a new caller has to state its side.
+export type CostingOnlyMode = "include" | "exclude";
 
 // Walks parentArticleId's BOM recursively; any isPhantom component is skipped
 // past into ITS OWN components (multiplying quantities down the chain)
@@ -28,14 +42,20 @@ export interface ExplodedComponent {
 // today — article.service.ts's isDescendant check runs on every
 // addBomComponent call, phantom or not — but this throws rather than
 // recursing forever if that invariant is ever violated.
-export async function explodeBom(db: Db | Tx, parentArticleId: string, quantity: number): Promise<ExplodedComponent[]> {
+export async function explodeBom(
+  db: Db | Tx,
+  parentArticleId: string,
+  quantity: number,
+  costingOnlyRows: CostingOnlyMode
+): Promise<ExplodedComponent[]> {
   const merged = new Map<string, ExplodedComponent>();
 
   async function walk(
     articleId: string,
     multiplier: number,
     path: Set<string>,
-    inheritedOperationId: string | null
+    inheritedOperationId: string | null,
+    inheritedCostingOnly: boolean
   ) {
     if (path.has(articleId)) {
       throw new Error(`Cyclic BOM detected at article ${articleId} — this should be impossible`);
@@ -49,6 +69,7 @@ export async function explodeBom(db: Db | Tx, parentArticleId: string, quantity:
         unitId: bomComponents.unitId,
         unitFactor: bomComponents.unitFactor,
         routingOperationId: bomComponents.routingOperationId,
+        costingOnly: bomComponents.costingOnly,
         name: articles.name,
         standardCost: articles.standardCost,
         isPhantom: articles.isPhantom,
@@ -58,13 +79,18 @@ export async function explodeBom(db: Db | Tx, parentArticleId: string, quantity:
       .where(eq(bomComponents.parentArticleId, articleId));
 
     for (const row of rows) {
+      // A costing-only row — and everything under a costing-only phantom —
+      // is the pre-calculation's business only.
+      const costingOnly = inheritedCostingOnly || row.costingOnly;
+      if (costingOnly && costingOnlyRows === "exclude") continue;
+
       const rowMultiplier = multiplier * Number(row.quantity);
       // A component's own link wins; otherwise it inherits the phantom row's
       // link, since a phantom's parts are consumed where the phantom was.
       const operationId = row.routingOperationId ?? inheritedOperationId;
 
       if (row.isPhantom) {
-        await walk(row.componentArticleId, rowMultiplier, nextPath, operationId);
+        await walk(row.componentArticleId, rowMultiplier, nextPath, operationId, costingOnly);
         continue;
       }
 
@@ -78,6 +104,7 @@ export async function explodeBom(db: Db | Tx, parentArticleId: string, quantity:
           existing.unitId = null;
           existing.unitFactor = null;
         }
+        existing.costingOnly = existing.costingOnly && costingOnly;
       } else {
         merged.set(key, {
           componentArticleId: row.componentArticleId,
@@ -87,11 +114,12 @@ export async function explodeBom(db: Db | Tx, parentArticleId: string, quantity:
           totalQuantity: rowMultiplier,
           unitId: row.unitId,
           unitFactor: row.unitFactor,
+          costingOnly,
         });
       }
     }
   }
 
-  await walk(parentArticleId, quantity, new Set(), null);
+  await walk(parentArticleId, quantity, new Set(), null, false);
   return [...merged.values()];
 }

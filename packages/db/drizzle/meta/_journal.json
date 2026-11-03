@@ -1247,6 +1247,13 @@
       "when": 1793625394134,
       "tag": "0177_samma_artikel_flera_rader",
       "breakpoints": true
+    },
+    {
+      "idx": 178,
+      "version": "7",
+      "when": 1793683275620,
+      "tag": "0178_strukturrad_kalkyl",
+      "breakpoints": true
     }
   ]
 }

@@ -658,7 +658,8 @@ describe("planArticleImport", () => {
       expect(suggested["Min. kvantitet"]).toBeNull();
       expect(suggested["Säkerhetslager"]).toBe("safetyStock");
       expect(suggested["Styrning"]).toBe("stockControlled");
-      expect(suggested["Ledtid"]).toBeNull();
+      expect(suggested["Ledtid"]).toBe("leadTimeDays");
+      expect(suggested["Säkerhetstid"]).toBeNull();
       expect(suggestArticleMapping(["Avrundning", "BP"])).toEqual({ Avrundning: "rounding", BP: "reorderPoint" });
     });
 
@@ -1289,5 +1290,129 @@ describe("planArticleImport — the English texts (#7)", () => {
       .from(articles)
       .where(eq(articles.articleNumber, "E-10"));
     expect(updated).toEqual({ nameEn: "Sink unit 1200", extraDescriptionEn: "Brushed" });
+  });
+});
+
+// Planering's Ledtid: a manufactured article's own Ledtid (dagar), a
+// purchased article's primary supplier's lead time.
+describe("article import — Ledtid", () => {
+  const mapping = { Artikelnummer: "articleNumber", Artikelbenämning: "name", Artikeltyp: "type", Ledtid: "leadTimeDays" };
+  const existingArticle = (over: Partial<ExistingArticle>): ExistingArticle => ({
+    id: "id-1",
+    articleNumber: "A-1",
+    name: "Befintlig",
+    type: "purchased",
+    unitCode: "st",
+    unitId: "unit-st",
+    isPhantom: false,
+    groupCode: null,
+    standardCost: null,
+    weight: null,
+    surfaceTreatment: null,
+    colour: null,
+    active: true,
+    ...over,
+  });
+
+  it("suggests the column from Planering and the template", () => {
+    expect(suggestArticleMapping(["Ledtid", "Ledtid (dagar)"])).toEqual({ Ledtid: "leadTimeDays", "Ledtid (dagar)": null });
+    expect(suggestArticleMapping(["Ledtid (dagar)"])).toEqual({ "Ledtid (dagar)": "leadTimeDays" });
+  });
+
+  it("puts it on a manufactured article and validates whole, non-negative days", async () => {
+    const plan = await planArticleImport(
+      {
+        mapping,
+        rows: [
+          ["T-1", "Tillverkad", "Tillverkad", "15"],
+          ["T-2", "Fel", "Tillverkad", "1,5"],
+          ["T-3", "Fel", "Tillverkad", "-2"],
+          ["T-4", "Fel", "Tillverkad", "tio"],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.creates[0]).toMatchObject({ articleNumber: "T-1", manufacturingLeadTimeDays: 15 });
+    expect(plan.creates[0]!.primarySupplierLeadTimeDays).toBeUndefined();
+    expect(plan.rows[1]!.errors).toEqual(['Ledtiden ska vara ett helt antal dagar: "1,5"']);
+    expect(plan.rows[2]!.errors).toEqual(["Ledtiden kan inte vara negativ"]);
+    expect(plan.rows[3]!.errors).toEqual(['Ogiltig ledtid: "tio"']);
+
+    // The stored type wins over the row's (the type is locked); 0 clears.
+    const update = await planArticleImport(
+      { mapping, rows: [["A-1", "", "Köpt", "0"]] },
+      fakeDeps([existingArticle({ type: "manufactured" })])
+    );
+    expect(update.updates[0]!.patch).toEqual({ manufacturingLeadTimeDays: null });
+  });
+
+  it("puts it on a purchased article's primary supplier — the row's or the stored one — else warns", async () => {
+    const withSupplierColumn = { ...mapping, Leverantörsnr: "primarySupplierNumber" };
+    const plan = await planArticleImport(
+      {
+        mapping: withSupplierColumn,
+        rows: [
+          ["K-1", "Köpt med leverantör", "Köpt", "20", "L100"],
+          ["K-2", "Köpt utan", "Köpt", "20", ""],
+          ["S-1", "Tjänst", "Tjänst", "5", ""],
+        ],
+      },
+      fakeDeps()
+    );
+    expect(plan.creates[0]).toMatchObject({ primarySupplierId: "sup-L100", primarySupplierLeadTimeDays: 20 });
+    expect(plan.creates[0]!.manufacturingLeadTimeDays).toBeUndefined();
+    expect(plan.rows[1]!.warnings).toEqual([
+      "Ledtiden importerades inte — artikeln har ingen huvudleverantör (importera Leverantörsnr först)",
+    ]);
+    expect(plan.creates[1]!.primarySupplierLeadTimeDays).toBeUndefined();
+    expect(plan.rows[2]!.warnings).toEqual(["Ledtiden importerades inte — en tjänst har ingen ledtid"]);
+
+    const stored = await planArticleImport(
+      { mapping, rows: [["A-1", "", "", "30"]] },
+      fakeDeps([existingArticle({ hasPrimarySupplier: true })])
+    );
+    expect(stored.updates[0]).toMatchObject({ patch: {}, primarySupplierLeadTimeDays: 30 });
+    const none = await planArticleImport({ mapping, rows: [["A-1", "", "", "30"]] }, fakeDeps([existingArticle({})]));
+    expect(none.updates[0]!.primarySupplierLeadTimeDays).toBeUndefined();
+    expect(none.rows[0]!.warnings).toHaveLength(1);
+  });
+
+  it("writes both through the commit: the article's own and the primary supplier's", async () => {
+    const [primary, other] = await db
+      .insert(suppliers)
+      .values([
+        { supplierNumber: "LT-1", name: "Huvudleverantören" },
+        { supplierNumber: "LT-2", name: "Andra leverantören" },
+      ])
+      .returning({ id: suppliers.id });
+    const bought = await makeArticle("LT-KOP");
+    await db.insert(articleSuppliers).values([
+      { articleId: bought.id, supplierId: primary!.id, isPrimary: true, leadTimeDays: 3 },
+      { articleId: bought.id, supplierId: other!.id, isPrimary: false, leadTimeDays: 7 },
+    ]);
+    await db.insert(articles).values({ articleNumber: "LT-TILL", name: "Tillverkad", type: "manufactured", unitId: bought.unitId });
+
+    // Through the batch preview too: the dry run must see the same thing.
+    const input = { mapping, rows: [["LT-KOP", "", "", "14"], ["LT-TILL", "", "", "12"], ["LT-NY", "Ny", "Tillverkad", "9"]] };
+    const preview = await importService.preview("articles", input);
+    expect(preview.summary).toMatchObject({ create: 1, update: 2, error: 0, warning: 0 });
+    await importService.commit("articles", input);
+
+    const links = await db.select().from(articleSuppliers).where(eq(articleSuppliers.articleId, bought.id));
+    expect(links.find((l) => l.supplierId === primary!.id)!.leadTimeDays).toBe(14);
+    expect(links.find((l) => l.supplierId === other!.id)!.leadTimeDays).toBe(7);
+    const made = await db
+      .select({ number: articles.articleNumber, lead: articles.manufacturingLeadTimeDays })
+      .from(articles)
+      .where(inArray(articles.articleNumber, ["LT-TILL", "LT-NY", "LT-KOP"]));
+    expect(Object.fromEntries(made.map((r) => [r.number, r.lead]))).toEqual({ "LT-TILL": 12, "LT-NY": 9, "LT-KOP": null });
+
+    // 0 clears the supplier's lead time.
+    await importService.commit("articles", { mapping, rows: [["LT-KOP", "", "", "0"]] });
+    const [cleared] = await db
+      .select({ lead: articleSuppliers.leadTimeDays })
+      .from(articleSuppliers)
+      .where(eq(articleSuppliers.supplierId, primary!.id));
+    expect(cleared!.lead).toBeNull();
   });
 });

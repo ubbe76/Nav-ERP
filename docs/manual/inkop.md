@@ -157,7 +157,7 @@ Två exportfiler läses med samma flik:
 - **Prislista-Inköp (Lista)** — en rad per artikel och leverantör med rubrikerna **Förvald**, **Leverantör** (leverantörsnumret), **Lev. art.nr**, **Pris** och **Rabatt**, som alla känns igen automatiskt. **Förvald** = Ja gör leverantören till artikelns **huvudleverantör**.
 - **Prislista-Inköp (stafflat)** — samma rader men en rad per **staffelsteg**: kolumnen **Gränsvärde antal** och en andra **Pris**-kolumn (guiden visar den som **Pris (2)** och mappar den till **Staffel: pris**). Grundpriset upprepas på varje rad. Filen saknar Förvald, så huvudleverantören lämnas orörd när den läses in.
 
-Kolumner: **Artikelnummer** och **Leverantörsnummer** är obligatoriska; **Leverantörens artikelnummer**, **Pris**, **Rabatt (%)**, **Huvudleverantör (Förvald)**, **Staffel: från antal (Gränsvärde)** och **Staffel: pris** är valfria. Namn, Ställpris och Prisdatum importeras inte.
+Kolumner: **Artikelnummer** och **Leverantörsnummer** är obligatoriska; **Leverantörens artikelnummer**, **Pris**, **Rabatt (%)**, **Huvudleverantör (Förvald)**, **Ledtid (dagar)**, **Staffel: från antal (Gränsvärde)** och **Staffel: pris** är valfria. Ledtiden (hela dagar, 0 tömmer) är leverantörens ledtid på katalograden — exporten saknar kolumnen, men mallen och egna filer kan ha den; en köpt artikels ledtid kan också komma från artikelimportens Planering-fil. Namn, Ställpris och Prisdatum importeras inte.
 
 Regler att känna till:
 

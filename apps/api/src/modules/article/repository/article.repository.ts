@@ -562,6 +562,7 @@ export function createArticleRepository(db: Db) {
           unitFactor: input.unitFactor !== null ? String(input.unitFactor) : null,
           routingOperationId: input.routingOperationId ?? null,
           position: input.position ?? null,
+          costingOnly: input.costingOnly ?? false,
         })
         .returning();
       return row;
@@ -587,12 +588,14 @@ export function createArticleRepository(db: Db) {
         unitFactor?: string | null;
         routingOperationId?: string | null;
         position?: string | null;
+        costingOnly?: boolean;
       } = {};
       if (input.quantity !== undefined) patch.quantity = String(input.quantity);
       if (input.unitId !== undefined) patch.unitId = input.unitId;
       if (input.unitFactor !== undefined) patch.unitFactor = input.unitFactor !== null ? String(input.unitFactor) : null;
       if (input.routingOperationId !== undefined) patch.routingOperationId = input.routingOperationId;
       if (input.position !== undefined) patch.position = input.position;
+      if (input.costingOnly !== undefined) patch.costingOnly = input.costingOnly;
       const [row] = await db
         .update(bomComponents)
         .set(patch)
@@ -634,6 +637,8 @@ export function createArticleRepository(db: Db) {
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
           routingOperationId: bomComponents.routingOperationId,
           position: bomComponents.position,
+          // "Kalkyl" — priced only, never on a TO, no demand.
+          costingOnly: bomComponents.costingOnly,
           // Null when the row isn't linked (left join) — the UI shows "—".
           routingOperationSequenceNo: routingOperations.sequenceNo,
         })
