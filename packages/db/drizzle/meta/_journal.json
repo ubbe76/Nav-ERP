@@ -1254,6 +1254,13 @@
       "when": 1793683275620,
       "tag": "0178_strukturrad_kalkyl",
       "breakpoints": true
+    },
+    {
+      "idx": 179,
+      "version": "7",
+      "when": 1793692984457,
+      "tag": "0179_lagerplatser_fasta_uttag",
+      "breakpoints": true
     }
   ]
 }

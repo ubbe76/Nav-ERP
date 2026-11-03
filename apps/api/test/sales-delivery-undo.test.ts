@@ -2,14 +2,17 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
 import {
+  articles,
   auditLog,
   db,
+  deliveryRowLocations,
   deliveryRows,
   salesOrderRows,
   salesOrders,
   shipmentDeliveries,
   shipments,
   stockLocations,
+  warehouses,
   stockTransactions,
 } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
@@ -111,9 +114,22 @@ async function makeArticle() {
   });
 }
 
-async function makeLocation(name = "A1") {
+async function makeLocation(name = "A1", fixed = true) {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${name}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true, fixed });
+}
+
+// The parts a delivery row drew (delivery_row_locations), oldest first.
+async function partsOf(deliveryRowId: string) {
+  return db
+    .select({ locationId: deliveryRowLocations.locationId, quantity: deliveryRowLocations.quantity, stockTransactionId: deliveryRowLocations.stockTransactionId })
+    .from(deliveryRowLocations)
+    .innerJoin(stockLocations, eq(stockLocations.id, deliveryRowLocations.locationId))
+    .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+    .where(eq(deliveryRowLocations.deliveryRowId, deliveryRowId))
+    // The parts carry no draw order (random uuids) — read them as the API
+    // does, by warehouse and location name.
+    .orderBy(warehouses.name, stockLocations.name);
 }
 
 async function balance(articleId: string, locationId: string) {
@@ -141,7 +157,9 @@ async function makeOrder(stockA = 10, stockB = 5) {
   const articleA = await makeArticle();
   const articleB = await makeArticle();
   const location = await makeLocation();
-  await stockService.recordTransaction({ articleId: articleA.id, locationId: location.id, quantityDelta: stockA, transactionType: "inventory_adjustment" });
+  if (stockA !== 0) {
+    await stockService.recordTransaction({ articleId: articleA.id, locationId: location.id, quantityDelta: stockA, transactionType: "inventory_adjustment" });
+  }
   await stockService.recordTransaction({ articleId: articleB.id, locationId: location.id, quantityDelta: stockB, transactionType: "inventory_adjustment" });
   const { order, rows } = await salesService.createQuote(
     {
@@ -167,7 +185,7 @@ async function makeOrder(stockA = 10, stockB = 5) {
   };
 }
 
-async function deliver(orderId: string, locationId: string, rows: { rowId: string; quantity: number }[]) {
+async function deliver(orderId: string, locationId: string | undefined, rows: { rowId: string; quantity: number; locationId?: string }[]) {
   const result = await salesService.deliverBatch(orderId, { locationId, rows }, user.id);
   const dRows = await db.select().from(deliveryRows).where(eq(deliveryRows.deliveryId, result.deliveryId));
   const byOrderRow = (rowId: string) => dRows.find((r) => r.salesOrderRowId === rowId)!;
@@ -178,9 +196,9 @@ describe("Ångra utleverans — one row", () => {
   it("links each delivery row to its location and stock movement", async () => {
     const { order, rowA, location } = await makeOrder();
     const d = await deliver(order.id, location.id, [{ rowId: rowA.id, quantity: 4 }]);
-    const row = d.byOrderRow(rowA.id);
-    expect(row.locationId).toBe(location.id);
-    const [movement] = await db.select().from(stockTransactions).where(eq(stockTransactions.id, row.stockTransactionId!));
+    const parts = await partsOf(d.byOrderRow(rowA.id).id);
+    expect(parts.map((p) => [p.locationId, p.quantity])).toEqual([[location.id, "4.0000"]]);
+    const [movement] = await db.select().from(stockTransactions).where(eq(stockTransactions.id, parts[0]!.stockTransactionId));
     expect(movement!.quantityDelta).toBe("-4.0000");
     expect(movement!.transactionType).toBe("sales_delivery");
   });
@@ -235,9 +253,9 @@ describe("Ångra utleverans — one row", () => {
     expect(again.orderStatus).toBe("delivered");
   });
 
-  it("reactivates the location the delivery emptied", async () => {
+  it("reactivates the temporary location the delivery emptied", async () => {
     const { order, articleA, rowA } = await makeOrder();
-    const shelf = await makeLocation("B7");
+    const shelf = await makeLocation("B7", false);
     await stockService.recordTransaction({ articleId: articleA.id, locationId: shelf.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
     const d = await deliver(order.id, shelf.id, [{ rowId: rowA.id, quantity: 3 }]);
     const [emptied] = await db.select().from(stockLocations).where(eq(stockLocations.id, shelf.id));
@@ -288,10 +306,7 @@ describe("Ångra utleverans — one row", () => {
   it("refuses a row without a stock link (an old delivery the backfill could not pair)", async () => {
     const { order, rowA, location } = await makeOrder();
     const d = await deliver(order.id, location.id, [{ rowId: rowA.id, quantity: 2 }]);
-    await db
-      .update(deliveryRows)
-      .set({ stockTransactionId: null, locationId: null })
-      .where(eq(deliveryRows.id, d.byOrderRow(rowA.id).id));
+    await db.delete(deliveryRowLocations).where(eq(deliveryRowLocations.deliveryRowId, d.byOrderRow(rowA.id).id));
 
     await expect(
       salesService.undoDeliveryRow(order.id, d.deliveryId, d.byOrderRow(rowA.id).id, user.id)
@@ -497,60 +512,181 @@ describe("Ångra utleverans — följesedel, pallkort and listings", () => {
   });
 });
 
-describe("Ångra utleverans — migration 0132's backfill", () => {
-  // The test database migrates from empty, so the backfill ran against no
-  // deliveries. Re-run that exact statement — read from the migration file —
-  // against deliveries whose links are cleared, as it ran in production.
-  function backfillSql() {
+describe("Ångra utleverans — migration 0179's copy", () => {
+  // The test database migrates from empty, so the copy ran against no
+  // deliveries. Re-create the pre-0179 shape (the location/stock link on
+  // delivery_rows itself), run the copy statement read from the migration
+  // file, and check that every paired row is undoable again.
+  function copySql() {
     const migration = readFileSync(
-      new URL("../../../packages/db/drizzle/0132_delivery_row_undo.sql", import.meta.url),
+      new URL("../../../packages/db/drizzle/0179_lagerplatser_fasta_uttag.sql", import.meta.url),
       "utf8"
     );
     const statement = migration
       .split("--> statement-breakpoint")
       .map((s) => s.trim())
-      .find((s) => /^WITH dr AS/m.test(s));
-    expect(statement, "0132 must contain the backfill").toBeDefined();
-    return statement!.slice(statement!.search(/^WITH dr AS/m));
+      .find((s) => /^INSERT INTO "delivery_row_locations"/m.test(s));
+    expect(statement, "0179 must contain the copy").toBeDefined();
+    return statement!.slice(statement!.search(/^INSERT INTO/m));
   }
 
-  it("pairs each delivery row with its own movement, also two rows of one article on one följesedel", async () => {
+  it("turns each paired delivery row into one part, leaves unpaired rows without, and the parts undo", async () => {
     const { order, articleA, rowA, rowB, location } = await makeOrder(20, 5);
-    // A second row of article A — what two configured rows of one template
-    // look like (the unique (order, article) index skips configured rows).
-    const [rowA2] = await db
-      .insert(salesOrderRows)
-      .values({
-        salesOrderId: order.id,
-        articleId: articleA.id,
-        quantityOrdered: "4",
-        unitPrice: "10",
-        configuration: { templateArticleId: articleA.id, key: "x", selection: [] },
-      })
-      .returning();
     const first = await deliver(order.id, location.id, [
       { rowId: rowA.id, quantity: 4 },
-      { rowId: rowA2!.id, quantity: 4 },
       { rowId: rowB.id, quantity: 5 },
     ]);
     const second = await deliver(order.id, location.id, [{ rowId: rowA.id, quantity: 4 }]);
-    const before = await db.select().from(deliveryRows).orderBy(deliveryRows.id);
-    // An undone row's link stays as it is; clear the others like a pre-0132
-    // database.
-    await db.update(deliveryRows).set({ locationId: null, stockTransactionId: null });
+    const before = await db.select().from(deliveryRowLocations).orderBy(deliveryRowLocations.deliveryRowId);
 
-    await db.execute(sql.raw(backfillSql()));
+    await db.execute(sql`ALTER TABLE delivery_rows ADD COLUMN location_id uuid, ADD COLUMN stock_transaction_id uuid`);
+    try {
+      // The pre-0179 links: one pair per row, except the second occasion's
+      // row, which stands for a row the 0132 backfill could not pair.
+      for (const part of before) {
+        if (part.deliveryRowId === second.byOrderRow(rowA.id).id) continue;
+        await db.execute(
+          sql`UPDATE delivery_rows SET location_id = ${part.locationId}::uuid, stock_transaction_id = ${part.stockTransactionId}::uuid WHERE id = ${part.deliveryRowId}::uuid`
+        );
+      }
+      await db.delete(deliveryRowLocations);
 
-    const after = await db.select().from(deliveryRows).orderBy(deliveryRows.id);
-    expect(after.map((r) => [r.id, r.locationId])).toEqual(before.map((r) => [r.id, location.id]));
-    const ids = after.map((r) => r.stockTransactionId);
-    expect(ids.every((id) => id !== null)).toBe(true);
-    expect(new Set(ids).size).toBe(ids.length);
-    // Same-article rows may swap movements between them — equivalent — but
-    // never across occasions.
-    const firstIds = new Set(before.filter((r) => r.deliveryId === first.deliveryId).map((r) => r.stockTransactionId));
-    for (const r of after.filter((r) => r.deliveryId === first.deliveryId)) expect(firstIds.has(r.stockTransactionId)).toBe(true);
-    const [secondRow] = after.filter((r) => r.deliveryId === second.deliveryId);
-    expect(secondRow!.stockTransactionId).toBe(before.find((r) => r.deliveryId === second.deliveryId)!.stockTransactionId);
+      await db.execute(sql.raw(copySql()));
+
+      const after = await db.select().from(deliveryRowLocations).orderBy(deliveryRowLocations.deliveryRowId);
+      expect(after.map((p) => [p.deliveryRowId, p.locationId, p.quantity, p.stockTransactionId])).toEqual(
+        before
+          .filter((p) => p.deliveryRowId !== second.byOrderRow(rowA.id).id)
+          .map((p) => [p.deliveryRowId, p.locationId, p.quantity, p.stockTransactionId])
+      );
+    } finally {
+      await db.execute(sql`ALTER TABLE delivery_rows DROP COLUMN location_id, DROP COLUMN stock_transaction_id`);
+    }
+
+    // Copied rows undo to their location; the unpaired one is refused.
+    await salesService.undoDeliveryRow(order.id, first.deliveryId, first.byOrderRow(rowA.id).id, user.id);
+    expect(await balance(articleA.id, location.id)).toBe(20 - 4 - 4 + 4);
+    await expect(
+      salesService.undoDeliveryRow(order.id, second.deliveryId, second.byOrderRow(rowA.id).id, user.id)
+    ).rejects.toBeInstanceOf(DeliveryRowNotUndoableError);
+    const { rows } = await salesService.deliveryRows(second.deliveryId);
+    expect(rows[0]).toMatchObject({ undoable: false, locations: [] });
+  });
+});
+
+// Uttag där saldot finns: a delivery without a chosen location is taken from
+// the article's own location first and then from the other locations with
+// stock, and Ångra puts each part back where it was taken.
+describe("Utleverans — Automatiskt (uttag där saldot finns)", () => {
+  // The order's article A: own location A1 (fixed), with the stock spread
+  // as given; the order's `location` from makeOrder is left empty for A.
+  async function spread(stockAtOwn: number, others: { name: string; quantity: number }[]) {
+    const ctx = await makeOrder(0, 5);
+    const own = await makeLocation("A1");
+    await db.update(articles).set({ defaultLocationId: own.id }).where(eq(articles.id, ctx.articleA.id));
+    if (stockAtOwn !== 0) {
+      await stockService.recordTransaction({ articleId: ctx.articleA.id, locationId: own.id, quantityDelta: stockAtOwn, transactionType: "inventory_adjustment" });
+    }
+    const places: Record<string, { id: string }> = {};
+    for (const o of others) {
+      const loc = await makeLocation(o.name);
+      places[o.name] = loc;
+      await stockService.recordTransaction({ articleId: ctx.articleA.id, locationId: loc.id, quantityDelta: o.quantity, transactionType: "inventory_adjustment" });
+    }
+    return { ...ctx, own, places };
+  }
+
+  it("splits a row over the own location and then the next one with stock, and Ångra returns each part", async () => {
+    const { order, articleA, rowA, own, places } = await spread(3, [{ name: "C9", quantity: 10 }, { name: "B2", quantity: 10 }]);
+
+    const d = await deliver(order.id, undefined, [{ rowId: rowA.id, quantity: 7 }]);
+
+    // Own location first (3), then pick-list order: Lager B2 before Lager C9.
+    const parts = await partsOf(d.byOrderRow(rowA.id).id);
+    expect(parts.map((p) => [p.locationId, Number(p.quantity)])).toEqual([
+      [own.id, 3],
+      [places.B2!.id, 4],
+    ]);
+    expect(await balance(articleA.id, own.id)).toBe(0);
+    expect(await balance(articleA.id, places.B2!.id)).toBe(6);
+    expect(await balance(articleA.id, places.C9!.id)).toBe(10);
+    // The own (fixed) location stays active and stays the article's.
+    expect((await stockService.listLocations()).map((l) => l.id)).toContain(own.id);
+    // One movement per part.
+    const movements = await db
+      .select()
+      .from(stockTransactions)
+      .where(and(eq(stockTransactions.referenceId, order.id), eq(stockTransactions.articleId, articleA.id)));
+    expect(movements.map((m) => Number(m.quantityDelta)).sort((a, b) => a - b)).toEqual([-4, -3]);
+
+    // The dialog's data: where the goods go back.
+    const { rows } = await salesService.deliveryRows(d.deliveryId);
+    expect(rows[0]).toMatchObject({ undoable: true, baseUnit: "st" });
+    expect(rows[0]!.locations.map((l) => [l.warehouseName, l.locationName, l.quantity])).toEqual([
+      ["Lager A1", "A1", 3],
+      ["Lager B2", "B2", 4],
+    ]);
+
+    await salesService.undoDeliveryRow(order.id, d.deliveryId, d.byOrderRow(rowA.id).id, user.id);
+    expect(await balance(articleA.id, own.id)).toBe(3);
+    expect(await balance(articleA.id, places.B2!.id)).toBe(10);
+    expect(await delivered(rowA.id)).toBe(0);
+    const [log] = await db.select().from(auditLog).where(eq(auditLog.action, "delivery_row_undone"));
+    expect(log!.detail).toMatchObject({
+      locations: [
+        { locationId: own.id, quantity: 3 },
+        { locationId: places.B2!.id, quantity: 4 },
+      ],
+    });
+  });
+
+  it("lets the shortfall go negative on the article's own location, merged into its part", async () => {
+    const { order, articleA, rowA, own } = await spread(3, []);
+    const d = await deliver(order.id, undefined, [{ rowId: rowA.id, quantity: 5 }]);
+    const parts = await partsOf(d.byOrderRow(rowA.id).id);
+    expect(parts.map((p) => [p.locationId, Number(p.quantity)])).toEqual([[own.id, 5]]);
+    expect(await balance(articleA.id, own.id)).toBe(-2);
+  });
+
+  it("skips a location under a blocking count and leaves a non-blocking one in", async () => {
+    const { order, articleA, rowA, own, places } = await spread(0, [{ name: "B2", quantity: 10 }, { name: "C9", quantity: 10 }]);
+    await stockCountRepo.createSession({ locationId: places.B2!.id, blocksTransactions: true }, null);
+    await stockCountRepo.createSession({ locationId: places.C9!.id, blocksTransactions: false }, null);
+
+    const d = await deliver(order.id, undefined, [{ rowId: rowA.id, quantity: 4 }]);
+
+    const parts = await partsOf(d.byOrderRow(rowA.id).id);
+    expect(parts.map((p) => [p.locationId, Number(p.quantity)])).toEqual([[places.C9!.id, 4]]);
+    expect(await balance(articleA.id, places.B2!.id)).toBe(10);
+    expect(await balance(articleA.id, own.id)).toBe(0);
+  });
+
+  it("the row's location wins over the batch's, which wins over Automatiskt", async () => {
+    const { order, articleA, articleB, rowA, rowB, own, places, location } = await spread(10, [{ name: "B2", quantity: 10 }]);
+    const d = await deliver(order.id, places.B2!.id, [
+      { rowId: rowA.id, quantity: 4, locationId: location.id },
+      { rowId: rowB.id, quantity: 5 },
+    ]);
+    // Row A: the row's choice — the order's (empty) location, negative.
+    expect((await partsOf(d.byOrderRow(rowA.id).id)).map((p) => [p.locationId, Number(p.quantity)])).toEqual([[location.id, 4]]);
+    expect(await balance(articleA.id, location.id)).toBe(-4);
+    expect(await balance(articleA.id, own.id)).toBe(10);
+    // Row B: the batch's choice — B2, where B has nothing, negative.
+    expect((await partsOf(d.byOrderRow(rowB.id).id)).map((p) => [p.locationId, Number(p.quantity)])).toEqual([[places.B2!.id, 5]]);
+    expect(await balance(articleB.id, places.B2!.id)).toBe(-5);
+    expect(await balance(articleB.id, location.id)).toBe(5);
+  });
+
+  it("two simultaneous automatic deliveries never allocate the same balance twice", async () => {
+    const { order, articleA, rowA, own } = await spread(6, [{ name: "B2", quantity: 10 }]);
+    const results = await Promise.allSettled([
+      deliver(order.id, undefined, [{ rowId: rowA.id, quantity: 5 }]),
+      deliver(order.id, undefined, [{ rowId: rowA.id, quantity: 5 }]),
+    ]);
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+    // 6 at the own location, 10 at B2: the second draw sees the first one's
+    // rows and takes the remaining 1 there, then 4 from B2.
+    expect(await balance(articleA.id, own.id)).toBe(0);
+    expect(await delivered(rowA.id)).toBe(10);
   });
 });

@@ -108,9 +108,9 @@ Identitet, Enheter, Försäljning, Lager, Vikt & mått och Förpackning sparas t
 
 **Momssats** (25/12/6/0 %) är artikelns momssats vid försäljning — fakturarader ärver den som förval. Den kan inte ändras på artikeln utan följer **Varugrupp**: gruppens momssats, eller 25 % för en artikel utan varugrupp. Se [Varugrupper](#varugrupper).
 
-Fältet **Lagerplats** är artikelns standardplats i lagret: transaktioner (mottagning, leverans, materialuttag, justering) som inte får en plats vald bokförs här. Väljs ingen plats när artikeln skapas sätts reservplatsen **`***`** automatiskt (se [Lager](/hjalp/lager)).
+Fältet **Lagerplats** är artikelns standardplats i lagret: transaktioner (mottagning, leverans, materialuttag, justering) som inte får en plats vald bokförs här (vid utleverans och materialuttag med **Automatiskt** tas först det som finns på den här platsen, sedan från andra platser med saldo). Väljs ingen plats när artikeln skapas sätts reservplatsen **`***`** automatiskt (se [Lager](/hjalp/lager)).
 
-Blir lagerplatsen tom inaktiveras den automatiskt, och då nollställs fältet till `***`. Var det en **lagerflytt** som tömde platsen följer fältet i stället med till den mottagande lagerplatsen (se [Lager](/hjalp/lager#lagerflytt)).
+En **fast** lagerplats ligger kvar när den blir tom, och fältet behåller den. Blir en **tillfällig** lagerplats tom inaktiveras den automatiskt, och då nollställs fältet till `***`. Var det en **lagerflytt** som tömde platsen följer fältet i stället med till den mottagande lagerplatsen (se [Lager](/hjalp/lager#lagerflytt)).
 
 **Ytbehandling** och **Färg** skrivs ut som en rad under artikelnamnet ("Ytbehandling: … · Färg: …", bara ifyllda fält tas med) på förfrågan och inköpsorder (bara på lego-rader) samt på offert och orderbekräftelse (alla rader). De skrivs aldrig ut på fakturan.
 

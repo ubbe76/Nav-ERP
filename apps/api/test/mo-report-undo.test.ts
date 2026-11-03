@@ -173,6 +173,44 @@ describe("Ångra rapportering", () => {
     await expect(mfgService.undoReport(ctx.order.id, report!.id, ctx.user.id)).rejects.toThrow(MoReportAlreadyUndoneError);
   });
 
+  // Uttag där saldot finns: a linked draw without a chosen location takes
+  // the component from its own location first and then from the next
+  // location with stock — one report-log line per part — and Ångra puts
+  // each part back where it was taken.
+  it("splits a linked draw over the component's own location and another with stock, and returns each part", async () => {
+    const ctx = await setup();
+    const shelf = await stockService.createLocation({ warehouseId: (await stockService.listWarehouses())[0]!.id, name: "B2", active: true });
+    // 100 at the own location → 4 left there, 20 on the shelf.
+    await stockService.recordTransaction({ articleId: ctx.component.id, locationId: ctx.location.id, quantityDelta: -96, transactionType: "inventory_adjustment" });
+    await stockService.recordTransaction({ articleId: ctx.component.id, locationId: shelf.id, quantityDelta: 20, transactionType: "inventory_adjustment" });
+
+    // 3 OK × 2 per unit = 6: 4 from A1, 2 from B2.
+    await stampOut(ctx, ctx.first.id, { quantityOk: 3 });
+    expect(await balance(ctx.component.id, ctx.location.id)).toBe(0);
+    expect(await balance(ctx.component.id, shelf.id)).toBe(18);
+    // The own (fixed) location stays active and stays the component's.
+    expect((await stockService.listLocations()).map((l) => l.id)).toContain(ctx.location.id);
+    const [report] = await mfgService.listReports(ctx.order.id);
+    expect(report!.materials.map((m) => [m.locationName, Number(m.quantity)])).toEqual([
+      ["A1", 4],
+      ["B2", 2],
+    ]);
+
+    await mfgService.undoReport(ctx.order.id, report!.id, ctx.user.id);
+    expect(await balance(ctx.component.id, ctx.location.id)).toBe(4);
+    expect(await balance(ctx.component.id, shelf.id)).toBe(20);
+    const [material] = await mfgService.listMaterialConsumptions(ctx.order.id);
+    expect(Number(material!.quantityConsumed)).toBe(0);
+  });
+
+  it("a chosen location takes the whole draw there, negative if need be", async () => {
+    const ctx = await setup();
+    const shelf = await stockService.createLocation({ warehouseId: (await stockService.listWarehouses())[0]!.id, name: "B2", active: true });
+    await mfgService.completeOperation(ctx.first.id, { quantityCompleted: 3, locationId: shelf.id }, ctx.user.id);
+    expect(await balance(ctx.component.id, ctx.location.id)).toBe(100);
+    expect(await balance(ctx.component.id, shelf.id)).toBe(-6);
+  });
+
   it("undoing a time-only stamp removes its time report", async () => {
     const ctx = await setup();
     await stampOut(ctx, ctx.first.id, {});

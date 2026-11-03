@@ -417,10 +417,13 @@ export const deliverGoodsSchema = z.object({
 });
 export type DeliverGoodsInput = z.infer<typeof deliverGoodsSchema>;
 
-// Leveranstillfälle (delivery occasion) — C2. One location for the whole
-// batch; each row is delivered with the same per-row semantics as the single
-// row deliver endpoint (over-delivery guard etc.), but grouped into one
-// följesedel-worthy delivery record.
+// Leveranstillfälle (delivery occasion) — C2. Each row is delivered with the
+// same per-row semantics as the single row deliver endpoint (over-delivery
+// guard etc.), but grouped into one följesedel-worthy delivery record.
+// Location: the row's own locationId wins over the batch's, which wins over
+// Automatiskt (no location at all) — the goods are then taken from the
+// article's own location and after that from other locations with stock
+// (see stock/service/outflow-allocation.ts).
 export const deliverBatchSchema = z.object({
   locationId: z.string().uuid().optional(),
   rows: z
@@ -428,6 +431,7 @@ export const deliverBatchSchema = z.object({
       z.object({
         rowId: z.string().uuid(),
         quantity: z.coerce.number().positive(),
+        locationId: z.string().uuid().optional(),
       })
     )
     .min(1),

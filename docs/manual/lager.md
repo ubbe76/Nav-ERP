@@ -73,18 +73,30 @@ Transaktionstyperna:
 
 ## Lagerplatser
 
-**Lager → Lagerplatser** hanterar lagerstrukturen: **lager** (t.ex. Huvudlager) med **lagerplatser** (t.ex. A1). Skapa nya med respektive +-knapp, och redigera befintliga med **Ändra** — namn, aktiv/inaktiv och (för lagerplatser) vilket lager platsen hör till.
+**Lager → Lagerplatser** hanterar lagerstrukturen: **lager** (t.ex. Huvudlager) med **lagerplatser** (t.ex. A1). Skapa nya med respektive +-knapp, och redigera befintliga med **Ändra** — namn, aktiv/inaktiv och (för lagerplatser) vilket lager platsen hör till samt om den är en **Fast lagerplats**. Kolumnen **Fast** i listan visar Ja eller Nej; en ny lagerplats är fast som förval (kryssrutan **Fast lagerplats** i **Ny lagerplats**). Se [Tomma lagerplatser städas bort](#tomma-lagerplatser-stadas-bort).
 
 **Lagerplats är obligatorisk på varje transaktion**, men behöver inte väljas manuellt. Väljs ingen används i tur och ordning:
 
 1. **Artikelns lagerplats** — fältet Lagerplats på artikelkortets Allmänt-flik (se [Artiklar](/hjalp/artiklar)). En inaktiverad plats hoppas över.
 2. **`***`** — en reservplats (lagret `***` med lagerplatsen `***`) som systemet skapar automatiskt första gången den behövs.
 
-I formulären heter standardvalet **"Artikelns lagerplats"**; välj en specifik plats i listan för att styra transaktionen dit i stället.
+I formulären för inleveranser och justeringar heter standardvalet **"Artikelns lagerplats"**; välj en specifik plats i listan för att styra transaktionen dit i stället. Vid uttag (utleverans, materialuttag på tillverkningsorder) heter standardvalet **"Automatiskt"** och fungerar lite annorlunda, se [Uttag med Automatiskt](#uttag-med-automatiskt).
+
+### Uttag med Automatiskt
+
+När du lämnar **Lagerplats** på **Automatiskt** vid en utleverans eller ett materialuttag tar Nav varorna där de faktiskt finns, så att en plats inte går minus medan en annan har saldo kvar:
+
+1. Först artikelns egen lagerplats, upp till dess saldo.
+2. Sedan övriga lagerplatser med saldo, i samma ordning som på plocklistan (lager och plats i ordning, reservplatsen `***` sist). Lagerplatser som är spärrade av en pågående inventering hoppas över.
+3. Det som ändå inte räcker dras från artikelns egen lagerplats (eller `***`) och går minus där.
+
+Ett uttag kan alltså ge flera rader i [transaktionsloggen](/hjalp/lager), en per lagerplats. Väljer du en specifik lagerplats tas allt därifrån, även om saldot inte räcker. Ångrar du uttaget lägger Nav tillbaka varje del på den lagerplats den togs från.
 
 ### Tomma lagerplatser städas bort
 
-När en lagerplats blir helt tom — oavsett om det var en lagerflytt, en utleverans, ett materialuttag eller en negativ justering som tömde den — **inaktiveras den automatiskt** och försvinner ur alla lagerplatsval i systemet. Reservplatsen `***` inaktiveras aldrig.
+En **fast** lagerplats (kryssrutan **Fast lagerplats**, kolumnen **Fast**) ligger kvar när den blir tom: den förblir aktiv och artiklar som har den som **Lagerplats** behåller den. Det är det vanliga för hyllplatser som töms och fylls på igen.
+
+Bara en **tillfällig** lagerplats (**Fast lagerplats** avkryssad) städas bort. När en tillfällig lagerplats blir helt tom — oavsett om det var en lagerflytt, en utleverans, ett materialuttag eller en negativ justering som tömde den — **inaktiveras den automatiskt** och försvinner ur alla lagerplatsval i systemet. Reservplatsen `***` är fast och inaktiveras aldrig. Alla lagerplatser som fanns när funktionen infördes är fasta. Gör du en tom, fast plats tillfällig ligger den kvar aktiv tills du inaktiverar den med **Ändra** eller den töms igen.
 
 Platsen raderas inte på riktigt: raden finns kvar så att transaktionsloggen fortsatt kan visa var saldot en gång låg. Kryssa i **Visa inaktiva** på Lagerplatser för att se dem, och använd **Ändra** för att aktivera en plats igen.
 
@@ -95,7 +107,7 @@ Platsen raderas inte på riktigt: raden finns kvar så att transaktionsloggen fo
 
 Saldo kan alltså aldrig ligga på en lagerplats du inte ser i listorna.
 
-Pekade en artikels **Lagerplats** på den inaktiverade platsen nollställs fältet till `***` — men om det var en lagerflytt som tömde platsen följer artikeln i stället med till den mottagande lagerplatsen.
+Pekade en artikels **Lagerplats** på en tillfällig plats som inaktiverades nollställs fältet till `***` — men om det var en lagerflytt som tömde platsen följer artikeln i stället med till den mottagande lagerplatsen.
 
 ## Lagerflytt
 
@@ -110,7 +122,7 @@ Hela flytten bokförs i ett svep: antingen går alla rader igenom eller ingen. V
 
 Du kan bara flytta det som faktiskt står på platsen; ett för stort antal avvisas med *"Otillräckligt saldo"*. Går det inte att flytta till en plats beror det på att den är inaktiverad.
 
-Tömmer flytten avsändarplatsen inaktiveras den automatiskt (se [Tomma lagerplatser städas bort](#tomma-lagerplatser-stadas-bort)) — kvittensen säger till när det händer.
+Tömmer flytten en tillfällig avsändarplats inaktiveras den automatiskt (se [Tomma lagerplatser städas bort](#tomma-lagerplatser-stadas-bort)) — kvittensen säger till när det händer. En fast avsändarplats inaktiveras inte, och artiklarna behåller den som Lagerplats.
 
 ## Inventering
 

@@ -16,6 +16,7 @@ import {
   routingOperationFiles,
   routingOperations,
   stampSessions,
+  stockLocations,
   stockTransactions,
   suppliers,
   timeReports,
@@ -54,6 +55,7 @@ import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.
 // The one rule for how much of a configured row still lacks a TO (pure).
 import { uncoveredConfiguredQuantity } from "../../planning/service/configured-coverage.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
+import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
 import { lockProductionPlan } from "../../planning/repository/plan-lock.js";
@@ -94,8 +96,10 @@ export type CompleteResult =
   | { ok: true; order: typeof manufacturingOrders.$inferSelect; consumed: ConsumedMaterialLine[]; received: number }
   | { ok: false; reason: "order_not_found" | "invalid_status" };
 
-// What an automatic draw actually booked, per material row — the material
-// row and location are what the report log keeps so Ångra can return it.
+// What an automatic draw actually booked, per material row AND location —
+// the material row and location are what the report log keeps so Ångra can
+// return it. A draw without a chosen location is split where the stock is
+// (allocateOutflowLocations), so one material row may give several lines.
 export interface ConsumedMaterialLine {
   componentArticleId: string;
   quantity: number;
@@ -197,6 +201,19 @@ async function consumeLinkedMaterial(
     .from(moMaterialConsumptions)
     .where(and(eq(moMaterialConsumptions.manufacturingOrderId, opts.moId), opts.operationFilter))
     .for("update");
+  // The automatic allocation locks each component before reading its
+  // balances. Lock EVERY component of the order here, sorted, in one batch —
+  // not just the rows this call draws: one report can call this twice (the
+  // operation's linked rows, then receiveFinishedGoods's unlinked rows), and
+  // two separately sorted batches would let two reports wait on each other
+  // crosswise (MO1 linked A + unlinked B against MO2 linked B + unlinked A).
+  // The second call then finds every lock already held, as does
+  // assertMaterialAvailable afterwards (same sort order).
+  const components = await tx
+    .selectDistinct({ articleId: moMaterialConsumptions.componentArticleId })
+    .from(moMaterialConsumptions)
+    .where(eq(moMaterialConsumptions.manufacturingOrderId, opts.moId));
+  await lockArticlesForOutflow(tx, components.map((c) => c.articleId));
 
   const consumed: ConsumedMaterialLine[] = [];
   for (const row of rows) {
@@ -210,24 +227,47 @@ async function consumeLinkedMaterial(
       .set({ quantityConsumed: String(Number(row.quantityConsumed) + delta) })
       .where(eq(moMaterialConsumptions.id, row.id));
 
-    // Explicit location wins for the whole draw; otherwise each component
-    // resolves to its own article default / "***".
-    const locationId = await resolveStockLocation(tx, row.componentArticleId, opts.locationId);
-    await assertLocationNotUnderCount(tx, locationId);
-    await tx.insert(stockTransactions).values({
-      articleId: row.componentArticleId,
-      locationId,
-      quantityDelta: String(-delta),
-      transactionType: "mo_consumption",
-      referenceId: opts.moId,
-      createdBy: opts.createdBy,
-    });
-    // The draw may have emptied the location.
-    await deactivateEmptyLocation(tx, locationId);
-
-    consumed.push({ componentArticleId: row.componentArticleId, quantity: delta, materialConsumptionId: row.id, locationId });
+    consumed.push(...(await drawMaterial(tx, row, delta, opts.locationId, opts.moId, opts.createdBy)));
   }
   return consumed;
+}
+
+// One material row's draw booked where the stock is: an explicit location
+// wins for the whole draw (and may go negative); otherwise the component is
+// taken from its own location and then from other locations with stock
+// (allocateOutflowLocations) — one stock_transactions row and one
+// ConsumedMaterialLine per location, so the report log and Ångra see each
+// part.
+async function drawMaterial(
+  tx: Tx,
+  row: { id: string; componentArticleId: string },
+  quantity: number,
+  locationId: string | undefined,
+  moId: string,
+  createdBy: string | null
+): Promise<ConsumedMaterialLine[]> {
+  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId);
+  const lines: ConsumedMaterialLine[] = [];
+  for (const part of parts) {
+    await assertLocationNotUnderCount(tx, part.locationId);
+    await tx.insert(stockTransactions).values({
+      articleId: row.componentArticleId,
+      locationId: part.locationId,
+      quantityDelta: String(-part.quantity),
+      transactionType: "mo_consumption",
+      referenceId: moId,
+      createdBy,
+    });
+    // The draw may have emptied a temporary location.
+    await deactivateEmptyLocation(tx, part.locationId);
+    lines.push({
+      componentArticleId: row.componentArticleId,
+      quantity: part.quantity,
+      materialConsumptionId: row.id,
+      locationId: part.locationId,
+    });
+  }
+  return lines;
 }
 
 // Writes one report-log row and the material it drew (see mo_reports).
@@ -1638,29 +1678,21 @@ export function createManufacturingRepository(db: Db) {
           .where(eq(moMaterialConsumptions.id, rowId))
           .returning();
 
-        const locationId = await resolveStockLocation(tx, row.componentArticleId, input.locationId);
-        await assertLocationNotUnderCount(tx, locationId);
-        await tx.insert(stockTransactions).values({
-          articleId: row.componentArticleId,
-          locationId,
-          quantityDelta: String(-input.quantity),
-          transactionType: "mo_consumption",
-          referenceId: moId,
-          createdBy: input.createdBy,
-        });
-        // The draw may have emptied the location.
-        await deactivateEmptyLocation(tx, locationId);
-
-        const line: ConsumedMaterialLine = {
-          componentArticleId: row.componentArticleId,
-          quantity: input.quantity,
-          materialConsumptionId: row.id,
-          locationId,
-        };
+        // Förbruka: drawn where the stock is unless a location was chosen.
+        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy);
         // Materialbrist: a throw here rolls the draw back.
-        await assertMaterialAvailable(tx, [line], input.materialShortage ?? NO_MATERIAL_SHORTAGE_CHECK);
+        await assertMaterialAvailable(tx, lines, input.materialShortage ?? NO_MATERIAL_SHORTAGE_CHECK);
 
-        await insertReport(tx, { manufacturingOrderId: moId, kind: "material", source: "card", createdBy: input.createdBy }, [line]);
+        await insertReport(
+          tx,
+          {
+            manufacturingOrderId: moId,
+            kind: "material",
+            source: "card",
+            createdBy: input.createdBy,
+          },
+          lines
+        );
 
         return { ok: true, row: updatedRow! };
       });
@@ -1763,16 +1795,31 @@ export function createManufacturingRepository(db: Db) {
               moReportId: moReportMaterials.moReportId,
               articleNumber: articles.articleNumber,
               quantity: moReportMaterials.quantity,
+              // Uttag där saldot finns: one line per location the draw
+              // took from.
+              locationName: stockLocations.name,
             })
             .from(moReportMaterials)
             .innerJoin(moMaterialConsumptions, eq(moMaterialConsumptions.id, moReportMaterials.materialConsumptionId))
             .innerJoin(articles, eq(articles.id, moMaterialConsumptions.componentArticleId))
-            .where(inArray(moReportMaterials.moReportId, rows.map((r) => r.id)))
-            .orderBy(asc(articles.articleNumber))
+            .innerJoin(stockLocations, eq(stockLocations.id, moReportMaterials.locationId))
+            .where(
+              inArray(
+                moReportMaterials.moReportId,
+                rows.map((r) => r.id)
+              )
+            )
+            .orderBy(asc(articles.articleNumber), asc(stockLocations.name))
         : [];
       return rows.map((r) => ({
         ...r,
-        materials: materials.filter((m) => m.moReportId === r.id).map(({ articleNumber, quantity }) => ({ articleNumber, quantity })),
+        materials: materials
+          .filter((m) => m.moReportId === r.id)
+          .map(({ articleNumber, quantity, locationName }) => ({
+            articleNumber,
+            quantity,
+            locationName,
+          })),
       }));
     },
 

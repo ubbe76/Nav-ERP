@@ -191,10 +191,13 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
   }
 
   // Two locations in the same warehouse — A1 (source) and B2 (target).
-  async function makeLocationPair() {
+  // TEMPORARY (fixed: false): the pruning below only ever applies to those;
+  // a fixed location (the default since 0179) stays when emptied — see
+  // "Fasta lagerplatser" at the end of this describe.
+  async function makeLocationPair(fixed = false) {
     const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
-    const from = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
-    const to = await stockService.createLocation({ warehouseId: warehouse.id, name: "B2", active: true });
+    const from = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true, fixed });
+    const to = await stockService.createLocation({ warehouseId: warehouse.id, name: "B2", active: true, fixed });
     return { from, to };
   }
 
@@ -303,6 +306,41 @@ describe("stock service — lagerflytt och rensning av tomma lagerplatser", () =
 
     // Location nets to zero overall (5 + -5) but still holds both articles.
     expect(result.deactivatedSourceLocation).toBe(false);
+  });
+
+  // Fasta lagerplatser (0179): a fixed location is the article's shelf even
+  // when it runs empty — it is neither deactivated nor taken away from the
+  // articles that point at it, and the transfer does not repoint them.
+  it("keeps a fixed source location active and the article's default when the move empties it", async () => {
+    const user = await makeUser();
+    const { from, to } = await makeLocationPair(true);
+    const article = await makeArticle(from.id);
+    await stock(article.id, from.id, 12);
+
+    const result = await stockService.transferStock(
+      { fromLocationId: from.id, toLocationId: to.id, rows: [{ articleId: article.id, quantity: 12 }] },
+      user.id
+    );
+
+    expect(result.deactivatedSourceLocation).toBe(false);
+    const active = await stockService.listLocations();
+    expect(active.find((l) => l.id === from.id)).toMatchObject({ active: true, fixed: true });
+    expect((await articleService.getArticle(article.id))?.defaultLocationId).toBe(from.id);
+
+    // A negative adjustment that empties it leaves it too.
+    await stock(article.id, to.id, -12);
+    expect((await stockService.listLocations()).map((l) => l.id)).toContain(to.id);
+  });
+
+  it("creates a location as fixed by default and lets Ändra make it temporary", async () => {
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    const created = await stockService.createLocation({ warehouseId: warehouse.id, name: "C3", active: true });
+    expect(created.fixed).toBe(true);
+    const updated = await stockService.updateLocation(created.id, { fixed: false });
+    expect(updated.fixed).toBe(false);
+    // An empty location made temporary stays active until it is emptied
+    // again or deactivated by hand.
+    expect((await stockService.listLocations()).find((l) => l.id === created.id)).toMatchObject({ active: true, fixed: false });
   });
 
   it("never deactivates the *** fallback location, even when empty", async () => {

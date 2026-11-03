@@ -15,6 +15,7 @@ import {
   customerPrices,
   customers,
   deliveries,
+  deliveryRowLocations,
   deliveryRows,
   deliveryTerms,
   freightProducts,
@@ -28,9 +29,11 @@ import {
   salesOrders,
   shipmentDeliveries,
   shipments,
+  stockLocations,
   stockTransactions,
   units,
   users,
+  warehouses,
   type Db,
 } from "@navet/db";
 import {
@@ -71,6 +74,7 @@ import { resolveDimensions, type DimensionInput, type ResolveDimensionsOptions }
 import { resolveStockLocation } from "../../stock/service/location-resolver.js";
 import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
+import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { PriceListInUseError, RowHasManufacturingOrdersError, SalesOrderCurrencyChangedError } from "../service/sales.errors.js";
 import { isForeignKeyViolation, isUniqueViolation } from "../../system/service/db-errors.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
@@ -158,7 +162,8 @@ export type UndoDeliveryRowResult =
       deliveryNumber: string;
       orderNumber: string;
       articleId: string;
-      locationId: string;
+      // Where the goods went back, one entry per part the delivery drew.
+      locations: { locationId: string; quantity: number }[];
       statusBefore: SalesOrderStatus;
       orderStatus: SalesOrderStatus;
     }
@@ -1461,11 +1466,16 @@ export function createSalesRepository(db: Db) {
     // transaction — a settings change racing a delivery may go either way,
     // as for purchase receipts). null = no limit; omitted = 0, never more
     // than ordered.
+    //
+    // Location: the row's own locationId wins over the batch's; neither =
+    // Automatiskt — the goods are taken where the article's stock is
+    // (allocateOutflowLocations), possibly from several locations, one
+    // stock_transactions row and one delivery_row_locations part each.
     async deliverBatch(
       orderId: string,
       input: {
         locationId?: string;
-        rows: { rowId: string; quantity: number }[];
+        rows: { rowId: string; quantity: number; locationId?: string }[];
         createdBy: string;
         overDeliveryPercent?: number | null;
       }
@@ -1479,10 +1489,23 @@ export function createSalesRepository(db: Db) {
             throw new BatchInvalidStatusError();
           }
 
+          // The automatic allocation locks each article before it reads the
+          // balances; all of them sorted up front so two batches never wait
+          // on each other crosswise.
+          const rowIds = input.rows.map((r) => r.rowId);
+          const articleIds = (
+            await tx
+              .select({ articleId: salesOrderRows.articleId })
+              .from(salesOrderRows)
+              .where(and(inArray(salesOrderRows.id, rowIds), eq(salesOrderRows.salesOrderId, orderId)))
+          ).map((r) => r.articleId);
+          await lockArticlesForOutflow(tx, articleIds);
+
           const updatedRows: (typeof salesOrderRows.$inferSelect)[] = [];
           // Ångra utleverans: where each row's goods were taken from and the
-          // movement that took them, written on its delivery_rows row below.
-          const links: { locationId: string; stockTransactionId: string }[] = [];
+          // movements that took them — one part per location, written to
+          // delivery_row_locations below.
+          const links: { locationId: string; quantity: number; stockTransactionId: string }[][] = [];
           for (const r of input.rows) {
             const [row] = await tx
               .select()
@@ -1503,22 +1526,26 @@ export function createSalesRepository(db: Db) {
               .where(eq(salesOrderRows.id, r.rowId))
               .returning();
 
-            const locationId = await resolveStockLocation(tx, row.articleId, input.locationId);
-            await assertLocationNotUnderCount(tx, locationId);
-            const [movement] = await tx
-              .insert(stockTransactions)
-              .values({
-                articleId: row.articleId,
-                locationId,
-                quantityDelta: String(-r.quantity),
-                transactionType: "sales_delivery",
-                referenceId: orderId,
-                createdBy: input.createdBy,
-              })
-              .returning({ id: stockTransactions.id });
-            links.push({ locationId, stockTransactionId: movement!.id });
-            // The delivery may have emptied the location.
-            await deactivateEmptyLocation(tx, locationId);
+            const parts = await allocateOutflowLocations(tx, row.articleId, r.quantity, r.locationId ?? input.locationId);
+            const rowLinks: { locationId: string; quantity: number; stockTransactionId: string }[] = [];
+            for (const part of parts) {
+              await assertLocationNotUnderCount(tx, part.locationId);
+              const [movement] = await tx
+                .insert(stockTransactions)
+                .values({
+                  articleId: row.articleId,
+                  locationId: part.locationId,
+                  quantityDelta: String(-part.quantity),
+                  transactionType: "sales_delivery",
+                  referenceId: orderId,
+                  createdBy: input.createdBy,
+                })
+                .returning({ id: stockTransactions.id });
+              rowLinks.push({ locationId: part.locationId, quantity: part.quantity, stockTransactionId: movement!.id });
+              // The delivery may have emptied a temporary location.
+              await deactivateEmptyLocation(tx, part.locationId);
+            }
+            links.push(rowLinks);
 
             updatedRows.push(updatedRow!);
           }
@@ -1531,14 +1558,25 @@ export function createSalesRepository(db: Db) {
             .insert(deliveries)
             .values({ salesOrderId: orderId, deliveryNumber, createdBy: input.createdBy })
             .returning();
-          await tx.insert(deliveryRows).values(
-            input.rows.map((r, i) => ({
-              deliveryId: delivery!.id,
-              salesOrderRowId: r.rowId,
-              quantity: String(r.quantity),
-              locationId: links[i]!.locationId,
-              stockTransactionId: links[i]!.stockTransactionId,
-            }))
+          const insertedRows = await tx
+            .insert(deliveryRows)
+            .values(
+              input.rows.map((r) => ({
+                deliveryId: delivery!.id,
+                salesOrderRowId: r.rowId,
+                quantity: String(r.quantity),
+              }))
+            )
+            .returning({ id: deliveryRows.id });
+          await tx.insert(deliveryRowLocations).values(
+            insertedRows.flatMap((inserted, i) =>
+              links[i]!.map((part) => ({
+                deliveryRowId: inserted.id,
+                locationId: part.locationId,
+                quantity: String(part.quantity),
+                stockTransactionId: part.stockTransactionId,
+              }))
+            )
           );
 
           const allRows = await tx.select().from(salesOrderRows).where(eq(salesOrderRows.salesOrderId, orderId));
@@ -1607,7 +1645,16 @@ export function createSalesRepository(db: Db) {
           .for("update");
         if (!deliveryRow) return { ok: false, reason: "row_not_found" };
         if (deliveryRow.undoneAt) return { ok: false, reason: "already_undone" };
-        if (!deliveryRow.stockTransactionId || !deliveryRow.locationId) return { ok: false, reason: "not_undoable" };
+        // The parts the delivery drew — none on a row the 0132 backfill
+        // could not pair.
+        const parts = await tx
+          .select({ locationId: deliveryRowLocations.locationId, quantity: deliveryRowLocations.quantity })
+          .from(deliveryRowLocations)
+          .innerJoin(stockLocations, eq(stockLocations.id, deliveryRowLocations.locationId))
+          .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+          .where(eq(deliveryRowLocations.deliveryRowId, deliveryRow.id))
+          .orderBy(asc(warehouses.name), asc(stockLocations.name));
+        if (parts.length === 0) return { ok: false, reason: "not_undoable" };
 
         const [orderRow] = await tx
           .select()
@@ -1632,17 +1679,22 @@ export function createSalesRepository(db: Db) {
         const invoiced = (await getInvoicedQuantitiesWith(tx, [orderRow.id], { includeDrafts: true })).get(orderRow.id) ?? 0;
         if (round4(invoiced) > deliveredAfter) return { ok: false, reason: "invoiced", invoiced, deliveredAfter };
 
-        // An explicit location is reactivated if the delivery emptied it.
-        const locationId = await resolveStockLocation(tx, orderRow.articleId, deliveryRow.locationId);
-        await assertLocationNotUnderCount(tx, locationId);
-        await tx.insert(stockTransactions).values({
-          articleId: orderRow.articleId,
-          locationId,
-          quantityDelta: String(quantity),
-          transactionType: "sales_delivery",
-          referenceId: orderId,
-          createdBy: input.undoneBy,
-        });
+        // Every part back where it was taken from; a temporary location the
+        // delivery emptied is reactivated by the explicit resolve.
+        const locations: { locationId: string; quantity: number }[] = [];
+        for (const part of parts) {
+          const locationId = await resolveStockLocation(tx, orderRow.articleId, part.locationId);
+          await assertLocationNotUnderCount(tx, locationId);
+          await tx.insert(stockTransactions).values({
+            articleId: orderRow.articleId,
+            locationId,
+            quantityDelta: part.quantity,
+            transactionType: "sales_delivery",
+            referenceId: orderId,
+            createdBy: input.undoneBy,
+          });
+          locations.push({ locationId, quantity: Number(part.quantity) });
+        }
 
         await tx
           .update(salesOrderRows)
@@ -1669,7 +1721,7 @@ export function createSalesRepository(db: Db) {
           deliveryNumber: delivery.deliveryNumber,
           orderNumber: order.orderNumber,
           articleId: orderRow.articleId,
-          locationId,
+          locations,
           statusBefore: order.status,
           orderStatus,
         };
@@ -1747,12 +1799,11 @@ export function createSalesRepository(db: Db) {
             deliveryRowId: deliveryRows.id,
             salesOrderRowId: deliveryRows.salesOrderRowId,
             quantity: deliveryRows.quantity,
-            // Ångra utleverans: the row's undo stamp, and whether it can be
-            // undone at all (a row the 0132 backfill could not pair has no
-            // stock link).
+            // Ångra utleverans: the row's undo stamp (whether it can be
+            // undone at all comes from its parts below — a row the 0132
+            // backfill could not pair has none).
             undoneAt: deliveryRows.undoneAt,
             undoneByName: undoneByUser.name,
-            stockTransactionId: deliveryRows.stockTransactionId,
             articleNumber: articles.articleNumber,
             articleId: salesOrderRows.articleId,
             articleName: articles.name,
@@ -1762,6 +1813,8 @@ export function createSalesRepository(db: Db) {
             unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
             unitCodeEn: sql<string | null>`case when ${rowUnits.id} is null then ${units.codeEn} else ${rowUnits.codeEn} end`,
             unitFactor: salesOrderRows.unitFactor,
+            // The parts below are in the article's base unit.
+            baseUnitCode: units.code,
             quantityDelivered: salesOrderRows.quantityDelivered,
             // Konfigurator 4b: the configured row's choices print on the note.
             configuration: salesOrderRows.configuration,
@@ -1784,6 +1837,30 @@ export function createSalesRepository(db: Db) {
           .where(eq(deliveries.salesOrderId, delivery.salesOrderId))
           .orderBy(asc(deliveries.deliveredAt), asc(deliveries.id)),
       ]);
+
+      // Where each row's goods were taken from — what Ångra puts back, and
+      // what its dialog says. Base unit, like every balance.
+      const partRows = await db
+        .select({
+          deliveryRowId: deliveryRowLocations.deliveryRowId,
+          locationId: deliveryRowLocations.locationId,
+          quantity: deliveryRowLocations.quantity,
+          locationName: stockLocations.name,
+          warehouseName: warehouses.name,
+        })
+        .from(deliveryRowLocations)
+        .innerJoin(deliveryRows, eq(deliveryRows.id, deliveryRowLocations.deliveryRowId))
+        .innerJoin(stockLocations, eq(stockLocations.id, deliveryRowLocations.locationId))
+        .innerJoin(warehouses, eq(warehouses.id, stockLocations.warehouseId))
+        .where(eq(deliveryRows.deliveryId, deliveryId))
+        // Ids are random uuids, so the parts come in location order.
+        .orderBy(asc(warehouses.name), asc(stockLocations.name));
+      const partsByRow = new Map<string, { locationId: string; warehouseName: string; locationName: string; quantity: number }[]>();
+      for (const p of partRows) {
+        const list = partsByRow.get(p.deliveryRowId) ?? [];
+        list.push({ locationId: p.locationId, warehouseName: p.warehouseName, locationName: p.locationName, quantity: Number(p.quantity) });
+        partsByRow.set(p.deliveryRowId, list);
+      }
 
       const currentIndex = occasions.findIndex((o) => o.id === deliveryId);
       const laterDeliveryIds = occasions.slice(currentIndex).map((o) => o.id);
@@ -1819,11 +1896,13 @@ export function createSalesRepository(db: Db) {
           unitCode: r.unitCode,
           unitCodeEn: r.unitCodeEn,
           unitFactor: r.unitFactor,
+          baseUnitCode: r.baseUnitCode,
           priorDelivered: Math.max(0, Number(r.quantityDelivered) - (laterMap.get(r.salesOrderRowId) ?? 0)),
           configuration: r.configuration,
           undoneAt: r.undoneAt,
           undoneByName: r.undoneByName,
-          undoable: r.undoneAt === null && r.stockTransactionId !== null,
+          locations: partsByRow.get(r.deliveryRowId) ?? [],
+          undoable: r.undoneAt === null && partsByRow.has(r.deliveryRowId),
         })),
       };
     },

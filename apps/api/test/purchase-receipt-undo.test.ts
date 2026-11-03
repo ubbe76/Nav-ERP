@@ -73,9 +73,11 @@ async function makeUser() {
   });
 }
 
+// Temporary (fixed: false) — the undo's cleanup of an emptied location is
+// asserted below, and only a temporary location is retired (0179).
 async function makeLocation(name = "A1") {
   const warehouse = await stockService.createWarehouse({ name: `Lager ${crypto.randomUUID()}`, active: true });
-  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true });
+  return stockService.createLocation({ warehouseId: warehouse.id, name, active: true, fixed: false });
 }
 
 async function balanceAt(articleId: string, locationId: string) {
@@ -136,7 +138,7 @@ describe("Ångra inleverans — ordinary row", () => {
     expect(undoneFirst.orderStatus).toBe("confirmed");
     expect(undoneFirst.row.quantityReceived).toBe("0.0000");
     expect(await balanceAt(article.id, location.id)).toBe(0);
-    // The emptied location is cleaned up like after any other outflow.
+    // The emptied temporary location is cleaned up like after any other outflow.
     const [loc] = await db.select().from(stockLocations).where(eq(stockLocations.id, location.id));
     expect(loc!.active).toBe(false);
 
