@@ -100,9 +100,21 @@ export function checkPain001(input: Pain001Input, profile: BankProfile, today: s
     }
   }
   if (sanitizeText(input.debtor.name, profile, 70).value === "") header("debtorName", "Företagets namn saknas");
-  if (profile.address.creditorTownRequired && townName(input.debtor.city, profile) === "") header("debtorCity", "Företagets ort saknas");
-  if (input.debtor.agreementId && input.debtor.agreementId.length > 35) header("agreementId", "Avtals-ID:t är för långt");
-  if (profile.address.fields.includes("PstCd") && postalCodeTooLong(input.debtor.postalCode)) header("debtorPostalCode", "Företagets postnummer är för långt");
+  const debtorTownMissing = townName(input.debtor.city, profile) === "";
+  if (profile.address.creditorTownRequired && debtorTownMissing) header("debtorCity", "Företagets ort saknas");
+  else if (anyForeign && profile.foreign.debtorAddress.townRequired && debtorTownMissing) {
+    header("debtorCity", `Företagets ort saknas — ${profile.name} kräver den för utlandsbetalningar`);
+  }
+  // The agreement id is written only by a profile with debtorIdentification
+  // (Nordea, where it is mandatory); Max35Text either way.
+  const agreement = profile.debtorIdentification;
+  if (agreement && !input.debtor.agreementId) {
+    if (agreement.required) header("agreementId", `${agreement.label} saknas`);
+  } else if (agreement && input.debtor.agreementId && (input.debtor.agreementId.length > 35 || (agreement.pattern && !agreement.pattern.test(input.debtor.agreementId)))) {
+    header("agreementId", `${agreement.label} har fel format`);
+  }
+  const postalCodeWritten = profile.address.fields.includes("PstCd") || (anyForeign && profile.foreign.debtorAddress.fields.includes("PstCd"));
+  if (postalCodeWritten && postalCodeTooLong(input.debtor.postalCode)) header("debtorPostalCode", "Företagets postnummer är för långt");
 
   const seen = new Set<string>();
   for (const item of input.items) {

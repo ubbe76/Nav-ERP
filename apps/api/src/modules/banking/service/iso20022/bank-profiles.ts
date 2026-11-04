@@ -6,7 +6,6 @@ import type { BankProfileId, ChargeBearer, ClearingSystem, DebitAccountKind, Sup
 export type AgentRule =
   | { kind: "clearing"; memberId: string } // SESBA + fixed MmbId (9900/9960/9500)
   | { kind: "clearing_from_account"; memberIdDigits?: 4 } // SESBA + the supplier's clearing number (SEB: its first 4 digits)
-  | { kind: "bic"; bic: string } // fixed BIC (BGABSESS/NDEASESS)
   | { kind: "bic_from_supplier" } // the supplier's BIC when present, else no agent
   | { kind: "none" };
 export type AccountScheme = "BGNR" | "BBAN" | "IBAN";
@@ -63,6 +62,10 @@ export interface ForeignRules {
   nameStreetTownMax: number | null;
   // The national bank ids the bank takes for an account without IBAN.
   clearingSystems: readonly ClearingSystem[];
+  // Dbtr/PstlAdr on a PmtInf abroad (domestic: `address.fields`), and
+  // whether the company's town is then required (Nordea from 14 November
+  // 2026).
+  debtorAddress: { fields: readonly ("PstCd" | "TwnNm")[]; townRequired: boolean };
   nameMax: number;
   messageMax: number;
   charset: { allowed: RegExp; substitutions: Readonly<Record<string, string>> };
@@ -76,7 +79,8 @@ export interface BankProfile {
   camtVersions: readonly string[];
   debtorAgentBic: string;
   initiatingParty: { scheme: "BANK" | "CUST"; required: boolean; fallback: "orgNumber" | null; pattern: RegExp | null; label: string };
-  debtorIdentification: { scheme: "BANK"; label: string } | null;
+  // Dbtr/Id — the bank's agreement id, written when set.
+  debtorIdentification: { scheme: "BANK"; label: string; required: boolean; pattern: RegExp | null } | null;
   debitAccountKinds: readonly DebitAccountKind[];
   // Domestic payments per method (an IBAN abroad and a foreign account
   // follow `foreign`).
@@ -194,6 +198,7 @@ export const BANK_PROFILES: Record<BankProfileId, BankProfile> = {
       nameStreetTownMax: null,
       // CdtrAgt ClrSysId codes in the MIG: SESBA, USABA, CACPA.
       clearingSystems: ["USABA", "CACPA"],
+      debtorAddress: { fields: ["PstCd", "TwnNm"], townRequired: false },
       ...FOREIGN_LIMITS,
       charset: FOREIGN_CHARSET,
     },
@@ -249,6 +254,7 @@ export const BANK_PROFILES: Record<BankProfileId, BankProfile> = {
       // 8.4: AUBSB, CACPA, CNAPS, HKNCC, USABA, ZANCC (GBDSC "not allowed
       // for Cross border payments").
       clearingSystems: ["AUBSB", "CACPA", "CNAPS", "HKNCC", "USABA", "ZANCC"],
+      debtorAddress: { fields: ["PstCd", "TwnNm"], townRequired: false },
       ...FOREIGN_LIMITS,
       charset: FOREIGN_CHARSET,
     },
@@ -341,6 +347,7 @@ export const BANK_PROFILES: Record<BankProfileId, BankProfile> = {
       internationalBicRequired: true,
       nameStreetTownMax: null,
       clearingSystems: ALL_CLEARING,
+      debtorAddress: { fields: ["TwnNm"], townRequired: false },
       ...FOREIGN_LIMITS,
       charset: FOREIGN_CHARSET,
     },
@@ -352,16 +359,41 @@ export const BANK_PROFILES: Record<BankProfileId, BankProfile> = {
     painVersion: "pain.001.001.03",
     camtVersions: ["camt.054.001.02"],
     debtorAgentBic: "NDEASESS",
-    initiatingParty: { scheme: "CUST", required: true, fallback: null, pattern: /^\d{1,13}$/, label: "Signer-ID (högst 13 siffror)" },
-    // Corporate Access MIG: CCM agreement mandatory (BANK); the eGateway
-    // examples omit it — written only when set.
-    debtorIdentification: { scheme: "BANK", label: "CCM-avtals-ID (frivilligt)" },
+    // Verified 2026-11-04 against Corporate Access Payables — the service
+    // Nordea Business' file handling (Corporate Access Lite) runs on: MIG
+    // pain.001.001.03 v2.5 (2026-09-16), "Example per payment type" v2.7
+    // (2026-10-20), Appendix Sweden (2026-10-08) and the Corporate Access
+    // Lite service description v1.8 — and in Nordea's test tool (XMLdation,
+    // "Nordea Corporate Access V3 >> Sweden >> Multi-type"). The profile was
+    // first built on the Corporate eGateway examples, which differ.
+    //
+    // InitgPty: "CUST: Customer identification, i.e. "Signer Id" … max. 13
+    // digits"; Nordea Business: "the Sender ID and Signer ID is the same
+    // number … special NB prefix e.g. NB4321".
+    initiatingParty: { scheme: "CUST", required: true, fallback: null, pattern: /^(?:NB)?\d{1,13}$/, label: "Signer-ID (högst 13 siffror, i Nordea Business NB och siffror)" },
+    // Dbtr/Id: "Customer agreement identification with Nordea is mandatory
+    // (BANK) and the identification consists of minimum 8 and maximum 18
+    // digits" (the test tool: "Mandatory element "PmtInf/Dbtr/Id" is
+    // missing"); Nordea Business: "Agreement IDs will always start with NB
+    // prefix … e.g. NB123456".
+    debtorIdentification: {
+      scheme: "BANK",
+      label: "CCM-avtals-ID (8–18 siffror, i Nordea Business NB och siffror)",
+      required: true,
+      pattern: /^(?:NB\d{1,16}|\d{8,18})$/,
+    },
     debitAccountKinds: ["iban", "plusgiro"],
     creditor: {
-      bankgiro: giroRule({ kind: "bic", bic: "BGABSESS" }, "BGNR"),
-      plusgiro: giroRule({ kind: "bic", bic: "NDEASESS" }, "BBAN"),
-      // SESBA is not among Nordea's CdtrAgt clearing codes; the BBAN with
-      // clearing identifies the bank (unverified for other banks, spec §2.2).
+      // No creditor agent on a domestic payment — the test tool: "Element
+      // "CdtTrfTxInf/CdtrAgt" is not necessary for domestic payments" (for
+      // the bankgiro BGABSESS and the plusgiro NDEASESS alike); the bankgiro
+      // examples (5.4–5.6) have none. Appendix 2.3.5: Bankgiro "Clearing code
+      // is not used", PlusGiro likewise.
+      bankgiro: giroRule({ kind: "none" }, "BGNR"),
+      plusgiro: giroRule({ kind: "none" }, "BBAN"),
+      // Appendix 2.3.5: the bank account "Must include a 4-digit clearing
+      // code … Swedbank account when the clearing code starts with 8 … 5
+      // digits … maximum length is 15 digits" — passed the test tool.
       bank_account: accountRule({ kind: "none" }, "BBAN"),
       iban: accountRule({ kind: "bic_from_supplier" }, "IBAN"),
     },
@@ -374,11 +406,12 @@ export const BANK_PROFILES: Record<BankProfileId, BankProfile> = {
     remittance: { scorWithRemittedAmount: true },
     charset: COMMON_CHARSET,
     foreign: {
-      // MIG SvcLvl: "SEPA will be treated by Nordea as NURG"; Payment types
-      // (Sverige): "Standard utlandsbetalning inkl. … SEPA betalning" =
-      // TRF/NURG/IN/SUPP — so NURG + IN for both kinds.
+      // MIG SvcLvl: "SEPA will be treated by Nordea as NURG"; Appendix Sweden
+      // 2.1: "Cross border payment, incl. SEPA CT" = TRF/SUPP/NURG with no
+      // LocalInstrument — the MIG: LclInstrm "Only used for Denmark" (SDCL,
+      // NDAV). The eGateway guide's IN is not written.
       sepaServiceLevel: "NURG",
-      localInstrumentIn: { sepa: true, international: true },
+      localInstrumentIn: { sepa: false, international: false },
       // "Within EU/EES area: Only SHAR or SLEV can be used … Outside EU/EES
       // area: DEBT, SHAR or SLEV"; CRED is never offered.
       chargeBearerCodes: { international: ["SHAR", "DEBT"], internationalWithinEea: ["SHAR"] },
@@ -401,6 +434,11 @@ export const BANK_PROFILES: Record<BankProfileId, BankProfile> = {
       // line, so name + street + town stays within 3×35.
       nameStreetTownMax: 105,
       clearingSystems: ALL_CLEARING,
+      // XMLdation (Nordea's test tool, 2026-11-04): "After the night of 14th
+      // of November 2026 elements Town name and Country code must be included
+      // for International transfers" — on Dbtr/PstlAdr; MIG: "PostCode is
+      // recommended."
+      debtorAddress: { fields: ["PstCd", "TwnNm"], townRequired: true },
       ...FOREIGN_LIMITS,
       charset: FOREIGN_CHARSET,
     },
