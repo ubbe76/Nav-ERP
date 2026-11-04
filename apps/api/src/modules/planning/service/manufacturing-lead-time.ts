@@ -7,7 +7,7 @@
 //
 // All dates are Stockholm days (YYYY-MM-DD) and lead times count WORKING
 // days (delivery-days.ts).
-import { subtractWorkingDays } from "../../system/service/delivery-days.js";
+import { addWorkingDays, nextWorkingDayOnOrAfter, subtractWorkingDays } from "../../system/service/delivery-days.js";
 import { routingOperationMinutes } from "./capacity-calc.js";
 
 // The resource as the lead time sees it. `type` decides the rule: our own
@@ -143,4 +143,77 @@ export function moStartDate(i: {
   if (earliest === null) return base;
   if (base === null || i.planFixed || earliest > base) return earliest;
   return base;
+}
+
+// Lego (subcontract) operations are never placed on capacity (Planera clears
+// their weeks), so their dates come BACKWARD from the TO's färdigdatum
+// (user decision 2026-11-04):
+// - `finishDate`: when the goods must be back from the supplier — the due
+//   date minus the operations after the lego operation (their time without
+//   capacity plus one Standardkötid before each of them: one between the
+//   lego operation and the next, then between the following ones). The lego
+//   IO row's Önskat leveransdatum (legoReturnDate).
+// - `startDate`: when the goods must be AT the supplier — the finish minus
+//   the resource's Ledtid + Kötid. The behovsberäkning's need date of the
+//   lego row (its latest-order date is this minus Ledtid beställning).
+// Rounded up on the sums (after, after + lego) like leadDaysFromWork, so the
+// two dates never drift apart by a rounding. Done operations after it take
+// no time and no queue. The article's field Ledtid (dagar) is a throughput
+// time for the whole TO and does not say where a single operation sits, so
+// it is not read here. Without a due date the TO's start (moStartDate,
+// `fallbackStart`) is the start and the finish follows it by the lego days;
+// without either, both are null (undated).
+export interface LegoOperationDates {
+  startDate: string | null;
+  finishDate: string | null;
+}
+
+export function legoOperationDates(i: {
+  dueDate: string | null;
+  fallbackStart: string | null;
+  lego: LeadTimeResource | null;
+  after: readonly LeadTimeWork[];
+  queueDays: number;
+  offDays: ReadonlySet<string>;
+}): LegoOperationDates {
+  const legoDays = Math.max(legoWorkDays(i.lego), 0);
+  if (i.dueDate === null) {
+    if (i.fallbackStart === null) return { startDate: null, finishDate: null };
+    return { startDate: i.fallbackStart, finishDate: addWorkingDays(i.fallbackStart, ceilDays(legoDays), i.offDays) };
+  }
+  const remaining = i.after.filter((w) => !w.done);
+  const afterDays =
+    remaining.reduce((sum, w) => sum + Math.max(workDays(w), 0), 0) + remaining.length * Math.max(0, i.queueDays);
+  return {
+    finishDate: subtractWorkingDays(i.dueDate, ceilDays(afterDays), i.offDays),
+    startDate: subtractWorkingDays(i.dueDate, ceilDays(afterDays + legoDays), i.offDays),
+  };
+}
+
+// The lego IO row's Önskat leveransdatum: the operation's finish date, but
+// never before the earliest return when ordered today — today + Ledtid
+// beställning + Ledtid + Kötid (the same chain the proposal's latest-order
+// date walks backward, so a row is `late` exactly when ordering today is
+// past that date, give or take a rounding). An undated operation gets the
+// earliest return, not late.
+export function legoReturnDate(i: {
+  finishDate: string | null;
+  today: string;
+  lego: LeadTimeResource | null;
+  orderLeadTimeDays: number | null;
+  offDays: ReadonlySet<string>;
+}): { date: string; late: boolean } {
+  const chain = Math.max(i.orderLeadTimeDays ?? 0, 0) + Math.max(legoWorkDays(i.lego), 0);
+  const earliest = addWorkingDays(nextWorkingDayOnOrAfter(i.today, i.offDays), ceilDays(chain), i.offDays);
+  if (i.finishDate === null || i.finishDate < earliest) return { date: earliest, late: i.finishDate !== null };
+  return { date: i.finishDate, late: false };
+}
+
+function legoWorkDays(resource: LeadTimeResource | null): number {
+  return workDays({ minutes: 0, resource: resource ?? { type: "subcontract", hoursPerDay: null, leadTimeDays: null, queueTimeDays: null } });
+}
+
+// toFixed(6): the same float-noise guard as leadDaysFromWork.
+function ceilDays(days: number): number {
+  return Math.ceil(Number(days.toFixed(6)));
 }

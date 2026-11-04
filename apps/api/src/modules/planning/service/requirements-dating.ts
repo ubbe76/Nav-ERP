@@ -6,6 +6,7 @@
 // the behovsberäkning, the artikelöversikt and the färdigdatumsförslag all
 // date a TO's material through ONE implementation.
 import {
+  legoOperationDates,
   manufacturingLeadDays,
   moStartDate,
   NO_LEAD_TIME_DEFAULTS,
@@ -13,6 +14,7 @@ import {
   type LeadTimeDefaults,
   type LeadTimeResource,
   type LeadTimeWork,
+  type LegoOperationDates,
 } from "./manufacturing-lead-time.js";
 import { remainingOperationMinutes } from "./capacity-calc.js";
 
@@ -35,6 +37,10 @@ export interface DatingRoutingOperation {
 // the planned start week (Produktionsplanering) and its lock — moStartDate
 // decides when the plan wins over the lead time.
 export interface DatingMoOperation {
+  // Id and sequence number: the lego dating (computeLegoOperationDates)
+  // needs the operations AFTER a lego operation.
+  moOperationId: string;
+  sequenceNo: number;
   manufacturingOrderId: string;
   workCenterId: string;
   setupTime: number;
@@ -147,6 +153,54 @@ export function computeMoStartDates(input: {
         ),
         dueDate: order.dueDate,
         leadDays,
+        offDays: input.offDays,
+      })
+    );
+  }
+  return result;
+}
+
+// Every lego operation's dates (legoOperationDates): backward from its TO's
+// färdigdatum through the TO's own operations after it, or — a TO without a
+// due date — from the TO's start (computeMoStartDates' result). ONE
+// implementation for the behovsberäkning's lego rows and the lego IO row's
+// Önskat leveransdatum (Skapa ordrar, also from the TO card). An id not
+// among `operations` (or on a TO not among `orders`) is left out.
+export function computeLegoOperationDates(input: {
+  legoOperationIds: Iterable<string>;
+  orders: readonly Pick<DatingManufacturingOrder, "manufacturingOrderId" | "dueDate">[];
+  operations: readonly DatingMoOperation[];
+  starts: ReadonlyMap<string, string | null>;
+  context: LeadTimeContext;
+  offDays: ReadonlySet<string>;
+}): Map<string, LegoOperationDates> {
+  const dueOf = new Map(input.orders.map((o) => [o.manufacturingOrderId, o.dueDate]));
+  const byId = new Map(input.operations.map((op) => [op.moOperationId, op]));
+  const opsOf = new Map<string, DatingMoOperation[]>();
+  for (const op of input.operations) {
+    const list = opsOf.get(op.manufacturingOrderId);
+    if (list) list.push(op);
+    else opsOf.set(op.manufacturingOrderId, [op]);
+  }
+  const result = new Map<string, LegoOperationDates>();
+  for (const id of input.legoOperationIds) {
+    const op = byId.get(id);
+    if (!op || !dueOf.has(op.manufacturingOrderId)) continue;
+    const after: LeadTimeWork[] = (opsOf.get(op.manufacturingOrderId) ?? [])
+      .filter((o) => o.sequenceNo > op.sequenceNo)
+      .map((o) => ({
+        minutes: remainingOperationMinutes(o),
+        resource: input.context.resourceOf(o.workCenterId),
+        done: o.operationStatus === "done",
+      }));
+    result.set(
+      id,
+      legoOperationDates({
+        dueDate: dueOf.get(op.manufacturingOrderId) ?? null,
+        fallbackStart: input.starts.get(op.manufacturingOrderId) ?? null,
+        lego: input.context.resourceOf(op.workCenterId),
+        after,
+        queueDays: input.context.defaults.queueDays,
         offDays: input.offDays,
       })
     );

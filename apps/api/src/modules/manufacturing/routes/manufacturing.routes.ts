@@ -425,6 +425,16 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
     return operations.map((op) => ({ ...op, setupPrice: null, transportPrice: null, unitPrice: null }));
   });
 
+  // Legoinköp på TO-kortet: per lego operation what is bought (the
+  // behovsberäkning's deduction) and the IO rows / open förfrågningar behind
+  // it. Numbers, statuses and quantities only — no prices — so the workshop
+  // profile reads it too.
+  app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/lego-purchases", { config: { access: MO_READ } }, async (req, reply) => {
+    const result = await service.listLegoPurchases(req.params.id);
+    if (!result) return reply.code(404).send({ error: "Manufacturing order not found" });
+    return result;
+  });
+
   app.get<{ Params: { id: string } }>("/manufacturing-orders/:id/scrap", { config: { access: MO_READ } }, async (req) => {
     return service.listScrapForOrder(req.params.id);
   });

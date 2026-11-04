@@ -613,6 +613,10 @@ export interface PurchaseOrder extends DocumentTermsFields {
   id: string;
   // Supplier's document language (GET :id only).
   supplierLanguage?: DocumentLanguage;
+  // GET :id only: the supplier's Momskod (förval, else derived from its
+  // country — `derived`) and the VAT it charges with it (0 for EU, omvänd
+  // moms, momsfritt). Live; null only with an empty code register.
+  vat?: { code: string; name: string; rate: number; derived: boolean } | null;
   orderNumber: string;
   supplierId: string;
   supplierName: string;
@@ -2309,6 +2313,25 @@ export interface MOOperationDeleteResult {
 }
 
 export type MOOperationStatus = "pending" | "done";
+
+// GET /manufacturing-orders/:id/lego-purchases — per lego operation what is
+// already bought (the behovsberäkning's deduction: Σ ordered on IO rows of
+// orders that are not cancelled) and the documents behind it: those IO rows
+// and the förfrågningar still open (draft/sent/answered).
+export interface LegoPurchaseOperation {
+  moOperationId: string;
+  orderedQuantity: number;
+  purchaseOrders: {
+    purchaseOrderId: string;
+    orderNumber: string;
+    status: PurchaseOrderStatus;
+    quantityOrdered: number;
+    quantityReceived: number;
+    // The row's own Önskat leveransdatum, else the order's.
+    expectedDeliveryDate: string | null;
+  }[];
+  inquiries: { inquiryId: string; inquiryNumber: string; status: InquiryStatus }[];
+}
 
 export interface MOOperation {
   id: string;

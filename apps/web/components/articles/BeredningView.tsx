@@ -442,7 +442,7 @@ export function BeredningView({
           onClose={() => setLegoModal({ open: false, op: null })}
           articleId={articleId}
           articleNumber={articleNumber}
-          operation={legoModal.op}
+          target={{ kind: "routing", operation: legoModal.op }}
         />
       )}
     </div>

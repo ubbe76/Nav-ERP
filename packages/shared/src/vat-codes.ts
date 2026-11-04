@@ -390,6 +390,16 @@ export function vatCodeEntry(code: VatCode): VatCodeCatalogEntry {
   return CATALOG_BY_CODE.get(code)!;
 }
 
+// The VAT the supplier charges with a purchase code: a domestic code its own
+// rate; omvänd moms, EU and non-EU purchases, import and momsfritt 0. The
+// inköpsorder's Moms (purchase.service.ts purchaseOrderVat) reads it; the web's
+// chargedVatRate (apps/web/lib/vatCodes.ts, the supplier invoice's Momssats
+// prefill) is the same rule — vat-codes.shared.test.ts compares the two.
+export function chargedVatRate(code: VatCode): number {
+  const entry = vatCodeEntry(code);
+  return entry.kind === "domestic" ? entry.rate : 0;
+}
+
 export function vatCodeUsesSlot(code: VatCode, slotName: VatCodeSlot): boolean {
   return vatCodeEntry(code).slots[slotName] !== undefined;
 }

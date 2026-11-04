@@ -19,14 +19,21 @@ import { OperationModal, type OperationPayload } from "../articles/OperationModa
 import { ReportsSection } from "./ReportsSection";
 import { ReportPanel } from "./ReportPanel";
 import { PalletCardDialog, type PalletCardTarget } from "../documents/PalletCardDialog";
+import { RowMenu } from "../ui/RowMenu";
+import { GatedLink } from "../ui/GatedLink";
+import { LegoInquiryModal } from "../articles/LegoInquiryModal";
+import { LegoPurchaseOrderModal } from "./LegoPurchaseOrderModal";
 import { moOperationLabel } from "../../lib/moReportRows";
 import { useCan, useCanOpen } from "../PermissionsProvider";
 import { ACTION_LABELS, actionsForStatus, confirmCancel, runOrderAction, type OrderAction } from "../../lib/manufacturingOrderActions";
 import {
+  INQUIRY_STATUS_PILL,
   MANUFACTURING_ORDER_STATUS_PILL,
+  PURCHASE_ORDER_STATUS_PILL,
   type CostCalculation,
   type CostCalculationDraft,
   type EmployeeDirectoryEntry,
+  type LegoPurchaseOperation,
   type ManufacturingOrder,
   type MOMaterialConsumption,
   type MOOperationDeleteResult,
@@ -61,6 +68,9 @@ interface ManufacturingOrderDetailProps {
   costCalculations: CostCalculation[];
   scrap: ScrapEntry[];
   reports: MOReport[];
+  // Legoinköp: per lego operation what is bought and the IO rows / open
+  // förfrågningar behind it (GET …/lego-purchases).
+  legoPurchases: LegoPurchaseOperation[];
   // Ångra rapportering — admin/arbetsledare with Tillverkning.
   canUndoReports: boolean;
 }
@@ -75,6 +85,7 @@ export function ManufacturingOrderDetail({
   costCalculations,
   scrap,
   reports,
+  legoPurchases,
   canUndoReports,
 }: ManufacturingOrderDetailProps) {
   const router = useRouter();
@@ -106,6 +117,16 @@ export function ManufacturingOrderDetail({
   const [operationDialog, setOperationDialog] = useState<{ editing: MOOperation | null } | null>(null);
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
   const [palletCard, setPalletCard] = useState<PalletCardTarget | null>(null);
+  // Legoinköp from the operation's ⋯ menu: Skapa inköpsorder (the
+  // behovsberäkning's Skapa ordrar for this one operation — Tillverkning, like
+  // the planning routes) and Skapa förfrågan (an Inköp write).
+  const canInkop = can(["inkop"]);
+  const [legoPurchaseOp, setLegoPurchaseOp] = useState<MOOperation | null>(null);
+  const [legoInquiryOp, setLegoInquiryOp] = useState<MOOperation | null>(null);
+  const purchasesOf = (opId: string) => legoPurchases.find((p) => p.moOperationId === opId);
+  // A pending lego operation on an open TO is what the behovsberäkning
+  // proposes; only those rows get the menu.
+  const legoBuyable = (op: MOOperation) => canEditLines && op.workCenterType === "subcontract" && op.status === "pending";
   // Warnings (shortage, planning) and the outcome of the last change.
   const [changeNotice, setChangeNotice] = useState<{ warnings: string[]; message?: string } | null>(null);
   const [lineError, setLineError] = useState<string | null>(null);
@@ -354,52 +375,67 @@ export function ManufacturingOrderDetail({
             { key: "quantityCompleted", label: "Antal OK", width: "50px", align: "right" },
             { key: "quantityScrapped", label: "Kasserat", width: "60px", align: "right" },
             { key: "actualTime", label: "Faktisk tid", width: "54px", align: "right" },
-            { key: "id", label: "", width: canEditLines ? "185px" : "80px", align: "right" },
+            { key: "id", label: "", width: canEditLines ? "110px" : "80px", align: "right" },
           ]}
           rows={operations}
           renderCell={(row, key) => {
             switch (key) {
               case "sequenceNo":
                 return row.sequenceNo;
-              // Reprint the pallet card for the operation — no quantity
-              // param, so it shows the accumulated reported quantity.
-              case "id":
-                return (
-                  <span style={{ display: "inline-flex", gap: 2, flexWrap: "nowrap", whiteSpace: "nowrap", justifyContent: "flex-end", alignItems: "center" }}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="small"
-                      style={{ padding: "4px 8px" }}
-                      onClick={() =>
-                        setPalletCard({
-                          kind: "single",
-                          url: `/api/v1/manufacturing-orders/${order.id}/operations/${row.id}/pallet-card`,
-                          // Same default as the API: accumulated OK, else the order quantity.
-                          quantity: Number(row.quantityCompleted ?? 0) > 0 ? Number(row.quantityCompleted) : Number(order.quantity),
-                          unit: order.articleUnitCode,
-                        })
-                      }
-                    >
+              case "id": {
+                // Reprint the pallet card for the operation — no quantity
+                // param, so it shows the accumulated reported quantity.
+                const openPalletCard = () =>
+                  setPalletCard({
+                    kind: "single",
+                    url: `/api/v1/manufacturing-orders/${order.id}/operations/${row.id}/pallet-card`,
+                    // Same default as the API: accumulated OK, else the order quantity.
+                    quantity: Number(row.quantityCompleted ?? 0) > 0 ? Number(row.quantityCompleted) : Number(order.quantity),
+                    unit: order.articleUnitCode,
+                  });
+                // Läsläge and a closed order: Pallkort is the one action.
+                if (!canEditLines) {
+                  return (
+                    <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={openPalletCard}>
                       Pallkort
                     </Button>
-                    {canEditLines && row.status === "pending" && (
+                  );
+                }
+                // The order cards' row pattern: Ändra visible, the rest in
+                // the ⋯ menu — so a lego row with its purchase actions stays
+                // as narrow as the others.
+                return (
+                  <span style={{ display: "inline-flex", gap: 2, flexWrap: "nowrap", whiteSpace: "nowrap", justifyContent: "flex-end", alignItems: "center" }}>
+                    {row.status === "pending" && (
                       <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={() => openOperationDialog(row)}>
                         Ändra
                       </Button>
                     )}
-                    {canEditLines && operationUntouched(row) && (
-                      <Button type="button" variant="ghost" size="small" style={{ padding: "4px 8px" }} onClick={() => removeOperation(row)}>
-                        Ta bort
-                      </Button>
-                    )}
+                    <RowMenu
+                      label={`Fler åtgärder för operation ${row.sequenceNo}`}
+                      items={[
+                        legoBuyable(row) && {
+                          label: "Skapa inköpsorder",
+                          onSelect: () => setLegoPurchaseOp(row),
+                          // Supplier and prices come from the operation —
+                          // without a supplier there is nobody to buy from.
+                          disabled: row.subcontractSupplierId === null,
+                        },
+                        legoBuyable(row) && canInkop && { label: "Skapa förfrågan", onSelect: () => setLegoInquiryOp(row) },
+                        { label: "Pallkort", onSelect: openPalletCard },
+                        operationUntouched(row) && { label: "Ta bort", onSelect: () => removeOperation(row), danger: true },
+                      ]}
+                    />
                   </span>
                 );
+              }
               // The description is what the step IS; the resource code keeps
               // the machine visible. Falls back to the resource name.
+              // ONE block: the mobile stack lays a cell's children out as a
+              // flex row, so loose lines would sit side by side.
               case "workCenterName":
                 return (
-                  <>
+                  <div>
                     {row.workCenterCode} · {row.description ?? row.workCenterName}
                     {row.workCenterType === "subcontract" && (
                       // Lego: bought from a supplier, not stamped — the
@@ -409,6 +445,9 @@ export function ManufacturingOrderDetail({
                         Lego · {row.subcontractSupplierName ?? "leverantör saknas"} — avrapporteras vid inleverans
                       </div>
                     )}
+                    {row.workCenterType === "subcontract" && (
+                      <LegoPurchaseLines purchases={purchasesOf(row.id)} unit={order.articleUnitCode ?? "st"} pending={row.status === "pending"} />
+                    )}
                     {row.packingInstructions && (
                       <div
                         style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}
@@ -417,7 +456,7 @@ export function ManufacturingOrderDetail({
                         📦 {row.packingInstructions}
                       </div>
                     )}
-                  </>
+                  </div>
                 );
               // Produktionsplanering: the planned weeks; Låst = moved by hand
               // in the Beläggning and left alone by Planera.
@@ -456,7 +495,8 @@ export function ManufacturingOrderDetail({
                     return (
                       <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
                         <span>{priceText}</span>
-                        <span style={{ fontSize: 12, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>
+                        {/* Wraps in the narrow Ställtid column instead of being clipped. */}
+                        <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                           Transport {Number(row.transportPrice).toLocaleString("sv-SE")} kr
                         </span>
                       </span>
@@ -610,6 +650,35 @@ export function ManufacturingOrderDetail({
       )}
 
       <PalletCardDialog target={palletCard} onClose={() => setPalletCard(null)} />
+
+      {legoPurchaseOp && (
+        <LegoPurchaseOrderModal
+          open
+          onClose={() => setLegoPurchaseOp(null)}
+          orderNumber={order.orderNumber}
+          articleId={order.articleId}
+          unitCode={order.articleUnitCode ?? null}
+          operation={legoPurchaseOp}
+          orderQuantity={Number(order.quantity)}
+          orderedQuantity={purchasesOf(legoPurchaseOp.id)?.orderedQuantity ?? 0}
+          onCreated={afterLineChange}
+        />
+      )}
+      {legoInquiryOp && (
+        <LegoInquiryModal
+          open
+          onClose={() => setLegoInquiryOp(null)}
+          articleId={order.articleId}
+          articleNumber={order.articleNumber}
+          target={{
+            kind: "mo",
+            operation: legoInquiryOp,
+            orderNumber: order.orderNumber,
+            defaultQuantity: Math.max(Number(order.quantity) - (purchasesOf(legoInquiryOp.id)?.orderedQuantity ?? 0), 0),
+          }}
+          onCreated={() => router.refresh()}
+        />
+      )}
 
       {/* Efterrapportering: a done order still takes reports (time, scrap
           and material, no finished goods) until Stäng order. */}
@@ -885,6 +954,45 @@ function PostCalculateAction({ orderId, onDone }: { orderId: string; onDone: (ca
           </FormStack>
         </Card>
       )}
+    </>
+  );
+}
+
+// Under a lego operation: the IO rows that buy it (number, status, quantity,
+// received, the row's Önskat leveransdatum) and the förfrågningar still open
+// — the same links the behovsberäkning's lego row shows. Nothing bought yet
+// on a pending operation says so, so the ⋯ menu is where to look.
+function LegoPurchaseLines({
+  purchases,
+  unit,
+  pending,
+}: {
+  purchases: LegoPurchaseOperation | undefined;
+  unit: string;
+  pending: boolean;
+}) {
+  const lineStyle = { color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 } as const;
+  const orders = purchases?.purchaseOrders ?? [];
+  const asks = purchases?.inquiries ?? [];
+  if (orders.length === 0 && asks.length === 0) {
+    return pending ? <div style={lineStyle}>Ingen inköpsorder än</div> : null;
+  }
+  return (
+    <>
+      {orders.map((po, i) => (
+        <div key={`${po.purchaseOrderId}-${i}`} style={lineStyle}>
+          <GatedLink href={`/inkop/ordrar/${po.purchaseOrderId}`}>{po.orderNumber}</GatedLink> (
+          {PURCHASE_ORDER_STATUS_PILL[po.status].label}) · {formatQuantity(po.quantityOrdered)} {unit}
+          {po.quantityReceived > 0 && ` · mottaget ${formatQuantity(po.quantityReceived)}`}
+          {po.expectedDeliveryDate && ` · önskat ${po.expectedDeliveryDate}`}
+        </div>
+      ))}
+      {asks.map((inq) => (
+        <div key={inq.inquiryId} style={lineStyle}>
+          <GatedLink href={`/inkop/forfragningar/${inq.inquiryId}`}>Förfrågan {inq.inquiryNumber}</GatedLink> (
+          {INQUIRY_STATUS_PILL[inq.status].label})
+        </div>
+      ))}
     </>
   );
 }

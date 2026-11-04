@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   leadDaysFromWork,
+  legoOperationDates,
+  legoReturnDate,
   manufacturingLeadDays,
   moStartDate,
   routingLeadWork,
@@ -226,5 +228,90 @@ describe("moStartDate", () => {
       moStartDate({ plannedStartWeeks: ["2026-11-23"], planFixed: false, dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })
     ).toBe("2026-11-23");
     expect(moStartDate({ plannedStartWeeks: [null], planFixed: false, dueDate: null, leadDays: 5, offDays: NO_HOLIDAYS })).toBeNull();
+  });
+});
+
+// Lego dating (user decision 2026-11-04): Planera never plans a lego
+// operation, so it is dated backward from the TO's färdigdatum.
+describe("legoOperationDates", () => {
+  const due = "2030-03-15"; // Friday
+  const supplier = lego(3, 1); // 4 working days at the supplier
+  const oneDay = { minutes: 480, resource: own(8) };
+
+  it("the last operation must be back on the due date and at the supplier its lead + queue time before", () => {
+    expect(
+      legoOperationDates({ dueDate: due, fallbackStart: null, lego: supplier, after: [], queueDays: 0, offDays: NO_HOLIDAYS })
+    ).toEqual({ finishDate: "2030-03-15", startDate: "2030-03-11" });
+  });
+
+  it("the operations after it, with one Standardkötid before each, move both dates back", () => {
+    // After: 1 day + 1 queue ⇒ back Wed 03-13; + 4 ⇒ at the supplier Thu 03-07.
+    expect(
+      legoOperationDates({ dueDate: due, fallbackStart: null, lego: supplier, after: [oneDay], queueDays: 1, offDays: NO_HOLIDAYS })
+    ).toEqual({ finishDate: "2030-03-13", startDate: "2030-03-07" });
+    // A holiday on the Wednesday is skipped.
+    expect(
+      legoOperationDates({ dueDate: due, fallbackStart: null, lego: supplier, after: [oneDay], queueDays: 1, offDays: new Set(["2030-03-13"]) })
+        .finishDate
+    ).toBe("2030-03-12");
+  });
+
+  it("a done operation after it takes no time and no queue; the rounding is on the sums", () => {
+    expect(
+      legoOperationDates({
+        dueDate: due,
+        fallbackStart: null,
+        lego: supplier,
+        after: [{ ...oneDay, done: true }],
+        queueDays: 1,
+        offDays: NO_HOLIDAYS,
+      })
+    ).toEqual({ finishDate: "2030-03-15", startDate: "2030-03-11" });
+    // Half a day after it ⇒ back one day earlier; 0.5 + 4 = 4.5 ⇒ 5 days.
+    const half = { minutes: 240, resource: own(8) };
+    expect(
+      legoOperationDates({ dueDate: due, fallbackStart: null, lego: lego(3.5, 0.5), after: [half], queueDays: 0, offDays: NO_HOLIDAYS })
+    ).toEqual({ finishDate: "2030-03-14", startDate: "2030-03-08" });
+  });
+
+  it("without a due date the TO's start is the start; without either the operation is undated", () => {
+    expect(
+      legoOperationDates({ dueDate: null, fallbackStart: "2030-03-04", lego: supplier, after: [], queueDays: 0, offDays: NO_HOLIDAYS })
+    ).toEqual({ startDate: "2030-03-04", finishDate: "2030-03-08" });
+    expect(
+      legoOperationDates({ dueDate: null, fallbackStart: null, lego: supplier, after: [], queueDays: 0, offDays: NO_HOLIDAYS })
+    ).toEqual({ startDate: null, finishDate: null });
+  });
+});
+
+describe("legoReturnDate", () => {
+  const supplier = lego(3, 1);
+  // Ordered Mon 03-04: Ledtid beställning 2 + lead 3 + queue 1 ⇒ back Tue 03-12 at the earliest.
+  const today = "2030-03-04";
+
+  it("the finish date when it can be met, else the earliest return and late", () => {
+    expect(legoReturnDate({ finishDate: "2030-03-15", today, lego: supplier, orderLeadTimeDays: 2, offDays: NO_HOLIDAYS })).toEqual({
+      date: "2030-03-15",
+      late: false,
+    });
+    expect(legoReturnDate({ finishDate: "2030-03-12", today, lego: supplier, orderLeadTimeDays: 2, offDays: NO_HOLIDAYS })).toEqual({
+      date: "2030-03-12",
+      late: false,
+    });
+    expect(legoReturnDate({ finishDate: "2030-03-08", today, lego: supplier, orderLeadTimeDays: 2, offDays: NO_HOLIDAYS })).toEqual({
+      date: "2030-03-12",
+      late: true,
+    });
+  });
+
+  it("an undated operation gets the earliest return without a warning; a weekend today starts on Monday", () => {
+    expect(legoReturnDate({ finishDate: null, today, lego: supplier, orderLeadTimeDays: 2, offDays: NO_HOLIDAYS })).toEqual({
+      date: "2030-03-12",
+      late: false,
+    });
+    expect(legoReturnDate({ finishDate: null, today: "2030-03-02", lego: supplier, orderLeadTimeDays: null, offDays: NO_HOLIDAYS })).toEqual({
+      date: "2030-03-08",
+      late: false,
+    });
   });
 });

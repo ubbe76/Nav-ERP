@@ -230,11 +230,13 @@ export interface DocumentPdfInput {
   rows: DocumentPdfRow[];
   // Förfrågan is a question, not an offer — no total line there.
   showTotal: boolean;
-  // Invoice-only: the totals become Summa exkl. moms / Moms / Att betala.
-  // { rate } is the legacy single-rate invoice (stamped sales-order
-  // reprints); { perRow: true } groups DocumentPdfRow.vatRate into one
-  // "Moms (X %)" line per distinct rate (the customer invoice module).
-  vat?: { rate: number } | { perRow: true } | null;
+  // The totals become Summa exkl. moms / Moms / Att betala. { rate } is the
+  // legacy single-rate invoice (stamped sales-order reprints) and the
+  // inköpsorder, whose last line is Summa inkl. moms instead (`grossLabel`
+  // "totalInclVat" — nothing is to be paid on an order); { perRow: true }
+  // groups DocumentPdfRow.vatRate into one "Moms (X %)" line per distinct
+  // rate (the customer invoice module).
+  vat?: { rate: number; grossLabel?: "amountDue" | "totalInclVat" } | { perRow: true } | null;
   // Momskoder: the invoice texts of the codes on the document ("Unionsintern
   // leverans …", "Omvänd betalningsskyldighet") — printed once each under the
   // totals, in the order given (the catalog's). Sales documents only.
@@ -1498,7 +1500,9 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.text(num(vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
       y += 15;
       doc.font("Helvetica-Bold").fontSize(10);
-      doc.text(t.totals.amountDue(input.currency), labelX, y, { width: labelW, align: "right" });
+      const grossLabel =
+        input.vat.grossLabel === "totalInclVat" ? t.totals.totalInclVat(input.currency) : t.totals.amountDue(input.currency);
+      doc.text(grossLabel, labelX, y, { width: labelW, align: "right" });
       doc.text(num(total + vatAmount), left + COLS.amount.x, y, { width: COLS.amount.w, align: "right" });
     } else if (input.showTotal && perRowVatGroups) {
       // Per-sats momssummering: one "Moms (X %)" line per distinct rate

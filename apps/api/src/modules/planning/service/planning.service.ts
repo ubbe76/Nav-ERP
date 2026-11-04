@@ -18,6 +18,7 @@ import {
   latestStartFor,
   proposalSummary,
   type ConfiguredRowNeed,
+  type LegoOperationRow,
   type DerivedDemand,
   type RequirementProposal,
   type RequirementRow,
@@ -25,11 +26,12 @@ import {
 } from "./requirements-calc.js";
 import {
   buildLeadTimeContext,
+  computeLegoOperationDates,
   computeMoStartDates,
   configuredLeadDays,
   type LeadTimeContext,
 } from "./requirements-dating.js";
-import { NO_LEAD_TIME_DEFAULTS } from "./manufacturing-lead-time.js";
+import { legoReturnDate, NO_LEAD_TIME_DEFAULTS } from "./manufacturing-lead-time.js";
 import {
   buildScheduleLookups,
   mondayOf,
@@ -419,6 +421,10 @@ function errorMessage(err: unknown): string {
 // (refresh) and Skapa ordrar recompute at once.
 export const REQUIREMENTS_CACHE_MS = 60_000;
 
+// A lego IO row's dating: the Önskat leveransdatum, whether it comes after
+// the operation's finish date, and that finish date (null = undated TO).
+type LegoReturn = { date: string; late: boolean; finishDate: string | null };
+
 export function createPlanningService(
   repo: PlanningRepository,
   deps: {
@@ -578,9 +584,68 @@ export function createPlanningService(
     return new Map<string, ArticleOverviewInput>(dated.map((input) => [input.article.articleId, input]));
   }
 
+  // The lego IO rows' Önskat leveransdatum for Skapa ordrar: each
+  // operation's finish date (computeLegoOperationDates — the same backward
+  // dating as the behovsberäkning's lego rows) floored at the earliest
+  // return when ordered today (legoReturnDate). One dating load and one
+  // delivery context for the whole batch.
+  async function legoReturnDates(
+    ops: (LegoOperationRow & { workCenterId: string; dueDate: string | null })[]
+  ): Promise<Map<string, LegoReturn>> {
+    if (ops.length === 0) return new Map();
+    const today = todayFn();
+    const inputs = await leadTimeInputsFor({
+      orderIds: [...new Set(ops.map((o) => o.manufacturingOrderId))],
+      articleIds: [...new Set(ops.map((o) => o.articleId))],
+    });
+    const dueDates = ops.flatMap((o) => (o.dueDate ? [o.dueDate] : []));
+    const { offDays } = await repo.deliveryContext(datingWindow([today, ...dueDates], inputs.articleLeadTimes));
+    const orders = [
+      ...new Map(
+        ops.map((o) => [
+          o.manufacturingOrderId,
+          {
+            manufacturingOrderId: o.manufacturingOrderId,
+            articleId: o.articleId,
+            quantity: inputs.orderQuantities.get(o.manufacturingOrderId) ?? o.orderQuantity,
+            dueDate: o.dueDate,
+          },
+        ])
+      ).values(),
+    ];
+    const starts = computeMoStartDates({
+      orders,
+      operations: inputs.operations,
+      articleLeadTimes: inputs.articleLeadTimes,
+      context: inputs.context,
+      offDays,
+    });
+    const dates = computeLegoOperationDates({
+      legoOperationIds: ops.map((o) => o.moOperationId),
+      orders,
+      operations: inputs.operations,
+      starts,
+      context: inputs.context,
+      offDays,
+    });
+    return new Map(
+      ops.map((o) => {
+        const finishDate = dates.get(o.moOperationId)?.finishDate ?? null;
+        const r = legoReturnDate({
+          finishDate,
+          today,
+          lego: inputs.context.resourceOf(o.workCenterId),
+          orderLeadTimeDays: inputs.context.orderLeadTimeDaysOf(o.workCenterId),
+          offDays,
+        });
+        return [o.moOperationId, { ...r, finishDate }];
+      })
+    );
+  }
+
   // The behovsberäkning's input, dated (tidsfasade förslag #13): the KO rows
   // on their ship dates, every open TO's start date (its material's need
-  // date), the lego operations' planned week and the lead-time rules — ONE
+  // date), the lego operations' dates and the lead-time rules — ONE
   // delivery context and ONE dating load for the whole run, never per
   // article. Konfigurator 4c: the configured rows and their cascade are
   // derived here too, once per distinct (template, configuration) per run,
@@ -596,7 +661,6 @@ export function createPlanningService(
       ...load.salesRows.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : [])),
       ...loadedConfigured.flatMap((r) => (r.expectedDeliveryDate ? [r.expectedDeliveryDate] : [])),
       ...load.manufacturingOrders.flatMap((o) => (o.dueDate ? [o.dueDate] : [])),
-      ...load.legoOperationRows.flatMap((o) => (o.plannedStartWeek ? [o.plannedStartWeek] : [])),
     ];
     const delivery = await repo.deliveryContext(datingWindow(dates, dating.articleLeadTimes));
     const offDays: ReadonlySet<string> = delivery.offDays;
@@ -611,11 +675,21 @@ export function createPlanningService(
     const salesRows = shiftToShipDates(load.salesRows, delivery);
     const manufacturingOrders = load.manufacturingOrders.map((o) => ({ ...o, startDate: starts.get(o.manufacturingOrderId) ?? null }));
     const moMaterialRows = load.moMaterialRows.map((r) => ({ ...r, needDate: starts.get(r.manufacturingOrderId) ?? null }));
-    // A lego operation is needed at the supplier when its own planned week
-    // starts, else when the TO starts; Ledtid beställning is the resource's.
+    // A lego operation is needed at the supplier on its start date —
+    // backward from the TO's färdigdatum through the operations after it
+    // (computeLegoOperationDates; Planera never plans a lego operation, so
+    // there is no planned week to read). Ledtid beställning is the resource's.
+    const legoDates = computeLegoOperationDates({
+      legoOperationIds: load.legoOperationRows.map((op) => op.moOperationId),
+      orders: load.manufacturingOrders,
+      operations: dating.operations,
+      starts,
+      context: leadTime,
+      offDays,
+    });
     const legoOperationRows = load.legoOperationRows.map((op) => ({
       ...op,
-      needDate: op.plannedStartWeek ?? starts.get(op.manufacturingOrderId) ?? null,
+      needDate: legoDates.get(op.moOperationId)?.startDate ?? null,
       orderLeadTimeDays: leadTime.orderLeadTimeDaysOf(op.workCenterId),
     }));
 
@@ -1955,20 +2029,54 @@ export function createPlanningService(
           rowsBySupplier.set(operation.supplierId, group);
         }
 
+        // Önskat leveransdatum (user decision 2026-11-04): when the
+        // operation must be back from the supplier — backward from the TO's
+        // färdigdatum, never before the earliest return when ordered today
+        // (legoReturnDates). The dating never fails the call: without it
+        // the rows stay undated, as before the rule.
+        const returns = await legoReturnDates([...operationById.values()]).catch(() => new Map<string, LegoReturn>());
+
         for (const [supplierId, group] of rowsBySupplier) {
-          const bucket = group.rows;
+          // Same shape as the purchase branch: rows in date order (undated
+          // last), the order gets the earliest date and a row with a later
+          // one keeps its own.
+          const bucket = [...group.rows].sort((a, b) => {
+            const dateA = returns.get(a.moOperationId)?.date ?? null;
+            const dateB = returns.get(b.moOperationId)?.date ?? null;
+            return dateA === dateB ? 0 : dateA === null ? 1 : dateB === null ? -1 : dateA < dateB ? -1 : 1;
+          });
+          const orderDate = bucket
+            .map((row) => returns.get(row.moOperationId)?.date ?? null)
+            .filter((d): d is string => d !== null)
+            .sort()[0];
           let order: { id: string; orderNumber: string };
           try {
-            order = await deps.purchase.createPurchaseOrder({ supplierId, exchangeRate: 1 }, createdBy);
+            order = await deps.purchase.createPurchaseOrder(
+              { supplierId, exchangeRate: 1, ...(orderDate ? { expectedDeliveryDate: orderDate } : {}) },
+              createdBy
+            );
           } catch (err) {
             for (const row of bucket) pushError(row.articleId, errorMessage(err));
             continue;
           }
           let rowCount = 0;
           for (const row of bucket) {
+            const dated = returns.get(row.moOperationId);
             try {
-              await deps.purchase.addRow(order.id, row);
+              await deps.purchase.addRow(order.id, {
+                ...row,
+                ...(dated && dated.date !== orderDate ? { expectedDeliveryDate: dated.date } : {}),
+              });
               rowCount += 1;
+              if (dated?.late && dated.finishDate) {
+                result.warnings.push({
+                  orderNumber: order.orderNumber,
+                  articleNumber: numberFor(row.articleId),
+                  demandDate: dated.finishDate,
+                  deliveryDate: dated.date,
+                  message: `Leveransen (${dated.date}) kommer efter behovet (${dated.finishDate})`,
+                });
+              }
             } catch (err) {
               pushError(row.articleId, errorMessage(err));
             }

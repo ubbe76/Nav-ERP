@@ -1,5 +1,5 @@
 import { and, eq, gte, inArray, isNotNull, isNull, lte, ne, sql } from "drizzle-orm";
-import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
+import { legoOneOffSql, legoOrderedQuantitySql } from "../../manufacturing/repository/lego-one-off.js";
 import {
   articles,
   articleSuppliers,
@@ -84,13 +84,14 @@ export interface MoDatingInputs {
 // service dates it with before computeRequirements runs — the KO rows' raw
 // delivery dates (moved to ship dates by toShipDates), the TOs' ids and due
 // dates (moStartDate), the material rows' TO and the lego operations'
-// planned week. The calc ignores the extra fields.
+// resource and TO due date (computeLegoOperationDates). The calc ignores the
+// extra fields.
 export interface RequirementsLoad extends RequirementsInput {
   articles: (RequirementsInput["articles"][number] & { manufacturingLeadTimeDays: number | null })[];
   salesRows: (RequirementsInput["salesRows"][number] & { expectedDeliveryDate: string | null; customerDelivery: PartnerDeliveryFields })[];
   manufacturingOrders: (RequirementsInput["manufacturingOrders"][number] & DatingManufacturingOrder)[];
   moMaterialRows: (RequirementsInput["moMaterialRows"][number] & { manufacturingOrderId: string })[];
-  legoOperationRows: (LegoOperationRow & { workCenterId: string; plannedStartWeek: string | null })[];
+  legoOperationRows: (LegoOperationRow & { workCenterId: string; dueDate: string | null })[];
   dating: MoDatingInputs;
 }
 
@@ -153,13 +154,11 @@ export function createPlanningRepository(db: Db) {
         operationDescription: moOperations.description,
         workCenterId: moOperations.workCenterId,
         workCenterName: workCenters.name,
-        // Tidsfasade förslag: the operation's planned week (Monday) is the
-        // need date when planned; the service falls back to the TO's start.
-        plannedStartWeek: moOperations.plannedStartWeek,
         orderQuantity: manufacturingOrders.quantity,
-        // Correlation must be table-qualified explicitly — see the
-        // workCenterCount subquery note in manufacturing.repository.ts.
-        orderedQuantity: sql<string>`coalesce((select sum(por.quantity_ordered) from ${purchaseOrderRows} por join ${purchaseOrders} po on po.id = por.purchase_order_id where por.mo_operation_id = ${moOperations}.id and po.status <> 'cancelled'), 0)`,
+        // The lego dates run backward from it (computeLegoOperationDates) —
+        // Planera never gives a lego operation a planned week.
+        dueDate: manufacturingOrders.dueDate,
+        orderedQuantity: legoOrderedQuantitySql(),
         supplierId: moOperations.subcontractSupplierId,
         supplierName: suppliers.name,
         // Ställpris + Transportkostnad — the lego IO row's one-off.
@@ -208,7 +207,7 @@ export function createPlanningRepository(db: Db) {
     }
 
     return rows.map(
-      (r): LegoOperationRow & { workCenterId: string; plannedStartWeek: string | null } => ({
+      (r): LegoOperationRow & { workCenterId: string; dueDate: string | null } => ({
         moOperationId: r.moOperationId,
         manufacturingOrderId: r.manufacturingOrderId,
         orderNumber: r.orderNumber,
@@ -224,7 +223,7 @@ export function createPlanningRepository(db: Db) {
         operationDescription: r.operationDescription,
         workCenterId: r.workCenterId,
         workCenterName: r.workCenterName,
-        plannedStartWeek: r.plannedStartWeek,
+        dueDate: r.dueDate,
         orderQuantity: Number(r.orderQuantity),
         orderedQuantity: Number(r.orderedQuantity),
         supplierId: r.supplierId,
@@ -287,6 +286,8 @@ export function createPlanningRepository(db: Db) {
         ? Promise.resolve([])
         : dbc
             .select({
+              moOperationId: moOperations.id,
+              sequenceNo: moOperations.sequenceNo,
               manufacturingOrderId: moOperations.manufacturingOrderId,
               workCenterId: moOperations.workCenterId,
               setupTime: moOperations.setupTime,

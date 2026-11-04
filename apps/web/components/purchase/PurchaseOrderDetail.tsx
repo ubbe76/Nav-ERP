@@ -160,6 +160,8 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
   const rowAmount = (r: PurchaseOrderRow) =>
     Number(r.quantityOrdered) * Number(r.unitPrice) + (r.setupPrice != null ? Number(r.setupPrice) : 0);
   const total = rows.reduce((sum, r) => sum + rowAmount(r), 0);
+  // Rounded to öre like the PDF's printed figure.
+  const vatAmount = order.vat ? Math.round(total * order.vat.rate) / 100 : 0;
 
   function refresh() {
     setModal(null);
@@ -469,6 +471,31 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
         />
       ) : (
         <p>Inga rader tillagda än.</p>
+      )}
+      {/* Moms på inköpsordern: the supplier's Momskod (förval) — live, the
+          same rate the PDF prints. A code without charged VAT (EU, omvänd
+          moms, momsfritt) shows 0 and says why. */}
+      {rows.length > 0 && order.vat && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <span>
+              Summa exkl. moms: {formatMoney(total)} {order.currency}
+            </span>
+            <span>
+              Moms {order.vat.rate.toLocaleString("sv-SE")} %: {formatMoney(vatAmount)} {order.currency}
+            </span>
+            <span>
+              <strong>
+                Summa inkl. moms: {formatMoney(total + vatAmount)} {order.currency}
+              </strong>
+            </span>
+          </div>
+          <FormHint style={{ textAlign: "right" }}>
+            Momskod {order.vat.code} · {order.vat.name}
+            {order.vat.derived ? " (härledd ur leverantörens land)" : " (leverantörens förval)"}
+            {order.vat.rate === 0 ? " — leverantören debiterar ingen moms." : ""}
+          </FormHint>
+        </div>
       )}
 
       <DocumentActionBar

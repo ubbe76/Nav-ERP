@@ -62,7 +62,7 @@ const costingService = createCostingService(createCostingRepository(db), {
   getSettings: async () => costingSettings,
 });
 
-const TABLES = sql`TRUNCATE cost_calculation_material_rows, cost_calculation_operation_rows, cost_calculations, purchase_order_rows, purchase_orders, routing_operation_files, mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, suppliers, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
+const TABLES = sql`TRUNCATE inquiry_rows, inquiries, cost_calculation_material_rows, cost_calculation_operation_rows, cost_calculations, purchase_order_rows, purchase_orders, routing_operation_files, mo_material_consumptions, mo_operation_scrap, mo_operations, manufacturing_orders, routing_operations, work_centers, production_groups, suppliers, stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
 
 beforeEach(async () => {
   await db.execute(TABLES);
@@ -438,6 +438,45 @@ describe("lego receipts never touch stock or article supply", () => {
     expect(articleRow?.supplyPoDraft ?? 0).toBe(0);
     // Fully ordered → no lego proposal either.
     expect(rows.some((r) => r.moOperationId === fixture.legoOp.id)).toBe(false);
+  });
+});
+
+describe("legoinköp på TO-kortet (GET /manufacturing-orders/:id/lego-purchases)", () => {
+  it("lists per lego operation what is bought — the behovsberäkning's figure — with its IO rows and open förfrågningar", async () => {
+    const fixture = await releasedMo(4);
+    const { ioOrder } = await makeLegoOrder(fixture, 3);
+    // A cancelled order neither counts nor shows.
+    const cancelled = await purchaseService.createPurchaseOrder({ supplierId: fixture.supplier.id }, fixture.user.id);
+    await purchaseService.addRow(cancelled.id, { articleId: fixture.parent.id, quantity: 4, unitPrice: 100, moOperationId: fixture.legoOp.id });
+    await purchaseService.cancel(cancelled.id);
+    const { inquiry } = await purchaseService.createInquiry(
+      { supplierId: fixture.supplier.id, rows: [{ articleId: fixture.parent.id, quantity: 1, moOperationId: fixture.legoOp.id }] },
+      fixture.user.id
+    );
+
+    const result = await mfgService.listLegoPurchases(fixture.order.id);
+    expect(result).toEqual([
+      {
+        moOperationId: fixture.legoOp.id,
+        orderedQuantity: 3,
+        purchaseOrders: [
+          {
+            purchaseOrderId: ioOrder.id,
+            orderNumber: ioOrder.orderNumber,
+            status: "confirmed",
+            quantityOrdered: 3,
+            quantityReceived: 0,
+            expectedDeliveryDate: null,
+          },
+        ],
+        inquiries: [{ inquiryId: inquiry.id, inquiryNumber: inquiry.inquiryNumber, status: "draft" }],
+      },
+    ]);
+    // ONE rule for "already bought": the behovsberäkning deducts the same 3.
+    const [planned] = await planningRepo.legoOperationsForIds([fixture.legoOp.id]);
+    expect(planned!.orderedQuantity).toBe(3);
+
+    expect(await mfgService.listLegoPurchases(crypto.randomUUID())).toBeNull();
   });
 });
 

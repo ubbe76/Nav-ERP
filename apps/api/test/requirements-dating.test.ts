@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLeadTimeContext,
+  computeLegoOperationDates,
   computeMoStartDates,
   configuredLeadDays,
   type DatingMoOperation,
@@ -17,6 +18,8 @@ const lego: DatingWorkCenter = { workCenterId: "w2", type: "subcontract", hoursP
 const noHolidays = new Set<string>();
 
 const op = (partial: Partial<DatingMoOperation> & { manufacturingOrderId: string }): DatingMoOperation => ({
+  moOperationId: `${partial.manufacturingOrderId}-${partial.sequenceNo ?? 10}`,
+  sequenceNo: 10,
   workCenterId: "w1",
   setupTime: 0,
   runTimePerUnit: 480,
@@ -248,5 +251,39 @@ describe("configuredLeadDays", () => {
     expect(configuredLeadDays(null, ops, 10, withDefaults)).toBe(3);
     expect(configuredLeadDays(1, ops, 10, withDefaults)).toBe(1);
     expect(configuredLeadDays(null, [], 10, withDefaults)).toBe(2);
+  });
+});
+
+describe("computeLegoOperationDates", () => {
+  const ctx = buildLeadTimeContext({
+    articleLeadTimes: new Map(),
+    routings: [],
+    workCenters: [own, lego],
+    defaults: { defaultLeadDays: 0, queueDays: 1 },
+  });
+
+  it("dates a lego operation backward from its TO's due date through the operations after it, or from the TO's start", () => {
+    const dates = computeLegoOperationDates({
+      legoOperationIds: ["m1-20", "m2-10", "unknown"],
+      orders: [
+        { manufacturingOrderId: "m1", dueDate: "2030-03-15" },
+        { manufacturingOrderId: "m2", dueDate: null },
+      ],
+      operations: [
+        // m1: op 10 done (before it — ignored), op 20 lego (3 + 1 days), op 30 one day on our own resource.
+        op({ manufacturingOrderId: "m1", sequenceNo: 10, orderQuantity: 1, operationStatus: "done" }),
+        op({ manufacturingOrderId: "m1", sequenceNo: 20, workCenterId: "w2", runTimePerUnit: 0 }),
+        op({ manufacturingOrderId: "m1", sequenceNo: 30, orderQuantity: 1 }),
+        // m2: no due date — the TO's start decides.
+        op({ manufacturingOrderId: "m2", sequenceNo: 10, workCenterId: "w2", runTimePerUnit: 0 }),
+      ],
+      starts: new Map([["m2", "2030-03-04"]]),
+      context: ctx,
+      offDays: noHolidays,
+    });
+    // After it: 1 day + 1 queue ⇒ back Wed 03-13; + lead 3 + queue 1 ⇒ at the supplier Thu 03-07.
+    expect(dates.get("m1-20")).toEqual({ finishDate: "2030-03-13", startDate: "2030-03-07" });
+    expect(dates.get("m2-10")).toEqual({ startDate: "2030-03-04", finishDate: "2030-03-08" });
+    expect(dates.has("unknown")).toBe(false);
   });
 });
