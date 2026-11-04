@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.7.2-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -664,15 +664,17 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   anställd och löneperiod som PDF/CSV, samt **PAXml-export** mot externa
   lönesystem
 - **Lager** — saldon över alla artiklar, redigerbara lager/lagerplatser
-  med automatisk reservplats `***` (transaktioner utan vald plats bokförs
-  på artikelns lagerplats eller `***`), transaktionslogg (inflödesrader
-  bär inköpskostnaden `unit_cost` i SEK), inventering, **skanning** med
+  (fasta eller tillfälliga) med automatisk reservplats `***` (inflöden utan
+  vald plats bokförs på artikelns lagerplats eller `***`, utleverans och
+  materialuttag tas där saldot finns), transaktionslogg (inflödesrader
+  bär inköpskostnaden `unit_cost` i SEK), inventering (som kan bokföras per
+  dagen då underlaget skapades), **skanning** med
   handskanner eller mobilens kamera (Lager → Skanna, och räkning av
   artiklarna i inleverans, plock/utleverans och inventering), **import av
   lagersaldon** samt
   **lagervärdering** (`/lager/vardering`, administratörer): lagrets värde
-  per valfritt datum med tre metoder — standardpris, senaste inköp eller
-  vägt snitt — uppdelat per varugrupp eller artikelkod och nedladdningsbart som PDF
+  per valfritt datum med fyra metoder — standardpris, senaste inköp,
+  vägt snitt eller FIFO — uppdelat per varugrupp eller artikelkod och nedladdningsbart som PDF
 - **Ekonomi** (rättigheten Ekonomi) — full redovisning: **Kontoplan** med
   BAS-seedning i ett klick, **Räkenskapsår** med automatiskt genererade
   perioder och låsning, **Verifikat** i egna verifikatserier (bokförs
