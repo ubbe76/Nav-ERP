@@ -132,7 +132,8 @@ export type UpdateStockLocationInput = z.infer<typeof updateStockLocationSchema>
 // (server-side, sv-SE) when omitted; groupId narrows to one varugrupp and
 // articleCodeId to one artikelkod; groupBy picks what the report is
 // subtotalled on (default the varugrupp).
-export const valuationMethodSchema = z.enum(["standard", "latest_purchase", "moving_average"]);
+// fifo (#19): what is left is priced from the newest inflows back (fifo.ts).
+export const valuationMethodSchema = z.enum(["standard", "latest_purchase", "moving_average", "fifo"]);
 export type ValuationMethod = z.infer<typeof valuationMethodSchema>;
 
 export const valuationGroupBySchema = z.enum(["group", "articleCode"]);
@@ -195,6 +196,14 @@ export const updateStockCountRowSchema = z
     "At least one field must be provided"
   );
 export type UpdateStockCountRowInput = z.infer<typeof updateStockCountRowSchema>;
+
+// POST /stock-counts/:id/post (#26). count_date = book the differences per
+// the moment the underlag was created, today = per the registration. Omitted
+// = count_date when allowed (GET's backdating.allowed), else today.
+export const STOCK_COUNT_BOOK_ON = ["count_date", "today"] as const;
+export type StockCountBookOn = (typeof STOCK_COUNT_BOOK_ON)[number];
+export const postStockCountSchema = z.object({ bookOn: z.enum(STOCK_COUNT_BOOK_ON).optional() }).strict();
+export type PostStockCountInput = z.infer<typeof postStockCountSchema>;
 
 // Blind count is the default — booked balances print only on request.
 // Same "NOT z.coerce.boolean()" reasoning as listStockLocationsQuerySchema.

@@ -17,7 +17,7 @@ import {
   StockCountNotOpenError,
   StockLocationNotFoundError,
 } from "../src/modules/stock/service/stock.errors.js";
-import { createStockCountRepository } from "../src/modules/stock/repository/stock-count.repository.js";
+import { createStockCountRepository, stockholmDateOf } from "../src/modules/stock/repository/stock-count.repository.js";
 import { createStockCountService } from "../src/modules/stock/service/stock-count.service.js";
 import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { testDocumentPdfService } from "./helpers/services.js";
@@ -443,7 +443,9 @@ describe("stock count service — audit log", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.entityId).toBe(session.countNumber);
     expect(rows[0]!.userId).toBe(user.id);
-    expect(rows[0]!.detail).toEqual({ adjustments: 1, counted: 1, skipped: 0 });
+    // #26: an undisturbed count is booked per its underlag's moment by
+    // default — here the same day.
+    expect(rows[0]!.detail).toEqual({ adjustments: 1, counted: 1, skipped: 0, valuedOn: stockholmDateOf(session.createdAt) });
   });
 
   it("logs cancelSession with the acting user, entityId = INV number", async () => {

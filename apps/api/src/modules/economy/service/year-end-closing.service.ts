@@ -439,9 +439,16 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
         ),
         attempt(
           "Lagervärderingen",
-          async (): Promise<{ ledger: number; value: number } | null> => {
+          async (): Promise<{ reason: "ledger" | "valuation"; ledger: number; value: number; currentValue: number } | null> => {
             const inventoryStep = await inventoryStepView(executor, closing);
-            return inventoryStep.status === "stale" ? { ledger: inventoryStep.ledger ?? 0, value: inventoryStep.value ?? 0 } : null;
+            return inventoryStep.status === "stale"
+              ? {
+                  reason: inventoryStep.staleReason!,
+                  ledger: inventoryStep.ledger ?? 0,
+                  value: inventoryStep.value ?? 0,
+                  currentValue: inventoryStep.currentValue ?? 0,
+                }
+              : null;
           },
           null
         ),
@@ -483,9 +490,12 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     return (await repo.latestClosedInventoryMethod(executor, year.startDate)) ?? "moving_average";
   }
 
-  // Valuation for a PASSED closing date is deterministic (D1 only reads rows
-  // created on or before it), so it is safe to compute it inside the step's
-  // transaction even though the reader uses its own connection.
+  // The reader uses its own connection, so the valuation is read beside the
+  // step's transaction, not in it. It is no longer frozen once the closing
+  // date has passed — a stock count registered per underlagets datum (#26)
+  // and a standard cost set afterwards both change it — which is why the
+  // step view compares the booked value with a fresh valuation (staleReason
+  // "valuation") instead of trusting the booking.
   async function computeInventory(executor: Db | Tx, closing: repo.ClosingRow, method: ValuationMethod) {
     const valuation = await deps.inventory.getValuation({ asOf: closing.closingDate, method });
     const value = round2(valuation.totalValue);
@@ -554,16 +564,36 @@ export function createYearEndClosingService(deps: YearEndClosingServiceDeps) {
     return (await repo.verificationRef(tx, reversal.verificationId))!;
   }
 
+  // Steg 2 is stale when the inventory account no longer equals the booked
+  // value (staleReason "ledger") or — #26 — when the valuation per the closing
+  // date with the booked method no longer gives the booked value
+  // ("valuation"; currentValue = what a re-run would book). A closed year is
+  // never re-valued: nothing can be booked there any more.
   async function inventoryStepView(executor: Db | Tx, closing: repo.ClosingRow) {
     const settings = await deps.settings.read(executor);
     const account = await repo.findAccountByNumber(executor, settings.postingInventory);
     const ledger = account ? await repo.accountBalance(executor, account.id, closing.closingDate) : null;
     const value = closing.inventoryValue === null ? null : Number(closing.inventoryValue);
+    const method = closing.inventoryMethod as ValuationMethod | null;
+    const currentValue =
+      closing.inventoryBookedAt !== null && method !== null && closing.status !== "closed"
+        ? round2((await deps.inventory.getValuation({ asOf: closing.closingDate, method })).totalValue)
+        : null;
+    const staleReason: "ledger" | "valuation" | null =
+      closing.inventoryBookedAt === null
+        ? null
+        : ledger !== null && ledger !== value
+          ? "ledger"
+          : currentValue !== null && currentValue !== value
+            ? "valuation"
+            : null;
     const status: "not_done" | "done" | "stale" =
-      closing.inventoryBookedAt === null ? "not_done" : ledger !== null && ledger !== value ? "stale" : "done";
+      closing.inventoryBookedAt === null ? "not_done" : staleReason !== null ? "stale" : "done";
     return {
       status,
-      method: closing.inventoryMethod as ValuationMethod | null,
+      staleReason,
+      currentValue,
+      method,
       value,
       verification: closing.inventoryVerificationId ? await repo.verificationRef(executor, closing.inventoryVerificationId) : null,
       bookedAt: closing.inventoryBookedAt,

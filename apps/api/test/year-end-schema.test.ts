@@ -107,7 +107,7 @@ describe("migration 0105 — year_end_closings", () => {
       db.insert(yearEndClosings).values({
         fiscalYearId: yearId,
         closingDate: `${YEAR}-12-31`,
-        inventoryMethod: "fifo",
+        inventoryMethod: "lifo",
         inventoryValue: "0",
         inventoryBookedAt: new Date(),
       }),

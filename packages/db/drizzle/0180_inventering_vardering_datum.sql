@@ -1,0 +1,2 @@
+ALTER TABLE "stock_transactions" ADD COLUMN "valued_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "idx_stock_transactions_valued_at" ON "stock_transactions" USING btree (coalesce("valued_at", "created_at"));

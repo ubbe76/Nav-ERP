@@ -11,6 +11,7 @@ import {
   listStockBalancesQuerySchema,
   listStockCountsQuerySchema,
   listStockLocationsQuerySchema,
+  postStockCountSchema,
   stockCountPdfQuerySchema,
   updateStockCountRowSchema,
   updateStockLocationSchema,
@@ -36,6 +37,7 @@ import {
   LocationUnderStockCountError,
   StockCountAlreadyOpenError,
   StockCountNotFoundError,
+  StockCountBackdateRefusedError,
   StockCountNotOpenError,
   StockCountRowNotFoundError,
   StockLocationNotEmptyError,
@@ -276,11 +278,14 @@ export async function stockRoutes(
   );
 
   app.post<{ Params: { id: string } }>("/stock-counts/:id/post", admin, async (req, reply) => {
+    // The body is optional (older callers post nothing) — {} = the default.
+    const input = postStockCountSchema.parse(req.body ?? {});
     try {
-      return await counts.postSession(req.params.id, req.user!.id);
+      return await counts.postSession(req.params.id, req.user!.id, input.bookOn);
     } catch (err) {
       if (err instanceof StockCountNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof StockCountNotOpenError) return reply.code(409).send(errorBody(err));
+      if (err instanceof StockCountBackdateRefusedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

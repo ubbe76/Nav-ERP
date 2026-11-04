@@ -71,7 +71,7 @@ export const yearEndClosings = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    check("year_end_inventory_method_valid", sql`${table.inventoryMethod} IN ('standard', 'latest_purchase', 'moving_average')`),
+    check("year_end_inventory_method_valid", sql`${table.inventoryMethod} IN ('standard', 'latest_purchase', 'moving_average', 'fifo')`),
     check(
       "year_end_inventory_consistent",
       sql`(${table.inventoryBookedAt} IS NULL) = (${table.inventoryMethod} IS NULL) AND (${table.inventoryBookedAt} IS NULL) = (${table.inventoryValue} IS NULL) AND (${table.inventoryVerificationId} IS NULL OR ${table.inventoryBookedAt} IS NOT NULL)`

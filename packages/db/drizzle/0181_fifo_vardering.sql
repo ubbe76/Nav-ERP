@@ -1,0 +1,2 @@
+ALTER TABLE "year_end_closings" DROP CONSTRAINT "year_end_inventory_method_valid";--> statement-breakpoint
+ALTER TABLE "year_end_closings" ADD CONSTRAINT "year_end_inventory_method_valid" CHECK ("year_end_closings"."inventory_method" IN ('standard', 'latest_purchase', 'moving_average', 'fifo'));

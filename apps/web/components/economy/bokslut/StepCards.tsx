@@ -150,7 +150,13 @@ export function InventoryCard({ closing }: { closing: YearEndClosingDetail }) {
           {step.verification ? <VerificationLink verification={step.verification} /> : "— ingen skillnad att bokföra"}
         </p>
       )}
-      {step.status === "stale" && <FormNotice>Lagerkontot har ändrats efter bokningen — gör om steget.</FormNotice>}
+      {step.status === "stale" && (
+        <FormNotice>
+          {step.staleReason === "valuation"
+            ? `Lagervärdet per bokslutsdagen har ändrats efter bokningen och är nu ${formatMoney(step.currentValue ?? 0)} — gör om steget.`
+            : "Lagerkontot har ändrats efter bokningen — gör om steget."}
+        </FormNotice>
+      )}
       <Field label="Värderingsmetod" htmlFor="inventoryMethod">
         <Select
           id="inventoryMethod"

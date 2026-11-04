@@ -2,6 +2,7 @@ import type {
   AddStockCountRowInput,
   CreateStockCountInput,
   ListStockCountsQuery,
+  StockCountBookOn,
   UpdateStockCountRowInput,
 } from "@navet/shared";
 import type { StockCountRepository } from "../repository/stock-count.repository.js";
@@ -60,13 +61,13 @@ export function createStockCountService(deps: {
       return repo.deleteRow(sessionId, rowId);
     },
 
-    async postSession(id: string, postedBy: string | null) {
-      const result = await repo.postSession(id, postedBy);
+    async postSession(id: string, postedBy: string | null, bookOn?: StockCountBookOn) {
+      const result = await repo.postSession(id, postedBy, bookOn);
       await audit.log({
         entityType: "stock_count_session",
         entityId: result.session.countNumber,
         action: "posted",
-        detail: { adjustments: result.adjustments, counted: result.counted, skipped: result.skipped },
+        detail: { adjustments: result.adjustments, counted: result.counted, skipped: result.skipped, valuedOn: result.valuedOn },
         userId: postedBy,
       });
       return result;

@@ -56,7 +56,8 @@ async function insertTransaction(row: {
   locationId: string;
   quantityDelta: number;
   unitCost?: number | null;
-  transactionType?: "purchase_receipt" | "sales_delivery" | "inventory_adjustment" | "mo_receipt";
+  transactionType?: "purchase_receipt" | "sales_delivery" | "inventory_adjustment" | "mo_receipt" | "stock_transfer";
+  referenceId?: string;
   createdAt: Date;
 }) {
   const [tx] = await db
@@ -67,6 +68,7 @@ async function insertTransaction(row: {
       quantityDelta: String(row.quantityDelta),
       unitCost: row.unitCost != null ? String(row.unitCost) : null,
       transactionType: row.transactionType ?? "inventory_adjustment",
+      referenceId: row.referenceId ?? null,
       createdAt: row.createdAt,
     })
     .returning();
@@ -278,6 +280,41 @@ async function setupGroupingFixture(location: { id: string }) {
   return { groupHigh, groupLow, articleX, articleY, articleZ, articleW };
 }
 
+describe("getValuation — fifo method (#19)", () => {
+  it("prices what is left from the newest inflows back, as of each date", async () => {
+    const location = await makeLocation();
+    const article = await makeArticle();
+    const base = { articleId: article.id, locationId: location.id };
+    await insertTransaction({ ...base, quantityDelta: 10, unitCost: 5, transactionType: "purchase_receipt", createdAt: new Date("2024-01-10T10:00:00Z") });
+    await insertTransaction({ ...base, quantityDelta: 10, unitCost: 8, transactionType: "purchase_receipt", createdAt: new Date("2024-02-10T10:00:00Z") });
+    await insertTransaction({ ...base, quantityDelta: -15, transactionType: "sales_delivery", createdAt: new Date("2024-03-10T10:00:00Z") });
+
+    const march = rowFor(await valuationService.getValuation({ asOf: "2024-03-31", method: "fifo" }), article.id);
+    expect(march).toMatchObject({ quantity: 5, unitCost: 8, value: 40 });
+    // Before the delivery: 10 @ 8 + 10 @ 5.
+    const february = rowFor(await valuationService.getValuation({ asOf: "2024-02-15", method: "fifo" }), article.id);
+    expect(february).toMatchObject({ quantity: 20, unitCost: 6.5, value: 130 });
+  });
+
+  it("takes an undone TO receipt back from its own layer and ignores transfers", async () => {
+    const a1 = await makeLocation("A1");
+    const warehouseB = await stockService.createWarehouse({ name: "Lager B", active: true });
+    const b1 = await stockService.createLocation({ warehouseId: warehouseB.id, name: "B1", active: true });
+    const article = await makeArticle();
+    const order = crypto.randomUUID();
+    const transfer = crypto.randomUUID();
+    const base = { articleId: article.id, locationId: a1.id };
+    await insertTransaction({ ...base, quantityDelta: 10, unitCost: 5, createdAt: new Date("2024-01-10T10:00:00Z") });
+    await insertTransaction({ ...base, quantityDelta: 4, unitCost: 9, transactionType: "mo_receipt", referenceId: order, createdAt: new Date("2024-02-01T10:00:00Z") });
+    await insertTransaction({ ...base, quantityDelta: -4, transactionType: "mo_receipt", referenceId: order, createdAt: new Date("2024-02-02T10:00:00Z") });
+    await insertTransaction({ ...base, quantityDelta: -3, transactionType: "stock_transfer", referenceId: transfer, createdAt: new Date("2024-02-03T10:00:00Z") });
+    await insertTransaction({ articleId: article.id, locationId: b1.id, quantityDelta: 3, transactionType: "stock_transfer", referenceId: transfer, createdAt: new Date("2024-02-03T10:00:00Z") });
+
+    const row = rowFor(await valuationService.getValuation({ asOf: "2024-03-01", method: "fifo" }), article.id);
+    expect(row).toMatchObject({ quantity: 10, unitCost: 5, value: 50 });
+  });
+});
+
 describe("getValuation — grouping, zero-net exclusion, totals", () => {
   it("drops zero-net articles, orders groups (null group last) and excludes unvalued rows from totals", async () => {
     const location = await makeLocation();
@@ -365,6 +402,18 @@ describe("getValuation — date bound", () => {
     const row = rowFor(result, article.id);
     expect(row?.quantity).toBe(8);
     expect(row?.value).toBe(336);
+  });
+
+  // #26: the bound is the Stockholm day, not the database session's (UTC).
+  it("counts a movement just after Stockholm midnight on the next day", async () => {
+    const location = await makeLocation();
+    const article = await makeArticle();
+    await insertHistory(article.id, 42, new Date("2000-01-01T12:00:00Z"));
+    // 23:30 UTC on the 15th = 00:30 on the 16th in Stockholm.
+    await insertTransaction({ articleId: article.id, locationId: location.id, quantityDelta: 8, createdAt: new Date("2024-03-15T23:30:00Z") });
+
+    expect(rowFor(await valuationService.getValuation({ asOf: "2024-03-15", method: "standard" }), article.id)).toBeUndefined();
+    expect(rowFor(await valuationService.getValuation({ asOf: "2024-03-16", method: "standard" }), article.id)?.quantity).toBe(8);
   });
 });
 

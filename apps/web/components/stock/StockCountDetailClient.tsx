@@ -18,10 +18,11 @@ import { apiErrorMessage } from "../../lib/errorMessages";
 import { resolveCountScan } from "../../lib/countScan";
 import buttonStyles from "../ui/Button.module.css";
 import shellStyles from "../AppShell.module.css";
-import { FormError } from "../ui/Form";
+import { FormError, FormNotice } from "../ui/Form";
 import {
   STOCK_COUNT_STATUS_LABELS,
   type Article,
+  type StockCountBookOn,
   type StockCountDetail,
   type ScanMatch,
   type StockCountPostResult,
@@ -30,6 +31,9 @@ import {
 import { formatQuantity } from "../../lib/format";
 
 const PILL_STATUS = { open: "running", posted: "done", cancelled: "stopped" } as const;
+
+// YYYY-MM-DD in Stockholm (sv-SE formats ISO-style).
+const stockholmDay = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" }) : null);
 
 const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articleNumber} · ${a.name}`;
 
@@ -47,8 +51,15 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // #26 — the user's pick between underlagets datum and i dag. The server's
+  // verdict wins: a count that may not be backdated is booked today whatever
+  // was picked before the verdict changed (e.g. after a saved count).
+  const [bookOnChoice, setBookOnChoice] = useState<StockCountBookOn | null>(null);
 
   const open = session.status === "open";
+  const backdating = session.backdating;
+  const offerBookOn = open && backdating !== null && !backdating.sameDay;
+  const bookOn: StockCountBookOn = !backdating?.allowed ? "today" : (bookOnChoice ?? "count_date");
   const { feedback, ok, warn } = useScanFeedback();
   const [markedRowId, setMarkedRowId] = useState<string | null>(null);
   const scanField = useRef<HTMLInputElement>(null);
@@ -220,9 +231,10 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
 
   async function post() {
     const skipped = session.rowCount - session.countedCount;
+    const per = offerBookOn ? (bookOn === "count_date" ? ` per ${backdating!.countDate}` : " per i dag") : "";
     if (
       !(await confirmDialog(
-        `Registrera inventering ${session.countNumber}? ${session.countedCount} rader räknade, ${skipped} hoppas över. Differenserna bokförs som lagertransaktioner och kan inte ångras.`
+        `Registrera inventering ${session.countNumber}? ${session.countedCount} rader räknade, ${skipped} hoppas över. Differenserna bokförs som lagertransaktioner${per} och kan inte ångras.`
       ))
     ) {
       return;
@@ -233,12 +245,12 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
     try {
       const result = await apiFetch<StockCountPostResult>(`/api/v1/stock-counts/${session.id}/post`, {
         method: "POST",
+        // Same day: nothing to choose — the server's default.
+        body: JSON.stringify(offerBookOn ? { bookOn } : {}),
       });
-      setMessage(
-        result.adjustments === 1
-          ? "1 differens bokfördes."
-          : `${result.adjustments} differenser bokfördes.`
-      );
+      const booked =
+        result.adjustments === 1 ? "1 differens bokfördes" : `${result.adjustments} differenser bokfördes`;
+      setMessage(result.valuedOn && offerBookOn ? `${booked} per ${result.valuedOn}.` : `${booked}.`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Kunde inte registrera inventeringen");
@@ -312,6 +324,7 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
           <div className={shellStyles.meta}>
             {session.warehouseName} — {session.locationName} ({session.locationLabelCode})
             {session.blocksTransactions ? " · Lagertransaktioner spärrade" : ""}
+            {session.valuedOn && session.valuedOn !== stockholmDay(session.postedAt) ? ` · Bokförd per ${session.valuedOn}` : ""}
             {session.note ? ` · ${session.note}` : ""}
           </div>
         </div>
@@ -413,6 +426,38 @@ export function StockCountDetailClient({ session }: { session: StockCountDetail 
           }
         }}
       />
+
+      {offerBookOn && (
+        <div style={{ marginTop: 16 }}>
+          <Field label="Bokför differenserna per" htmlFor="countBookOnCountDate">
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input
+                  id="countBookOnCountDate"
+                  type="radio"
+                  name="countBookOn"
+                  checked={bookOn === "count_date"}
+                  disabled={!backdating!.allowed}
+                  onChange={() => setBookOnChoice("count_date")}
+                />
+                Underlagets datum ({backdating!.countDate})
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="radio"
+                  name="countBookOn"
+                  checked={bookOn === "today"}
+                  onChange={() => setBookOnChoice("today")}
+                />
+                I dag
+              </label>
+            </div>
+          </Field>
+          {!backdating!.allowed && (
+            <FormNotice>Inventeringen bokförs per i dag. {backdating!.reasonText}</FormNotice>
+          )}
+        </div>
+      )}
 
       {open && (
         <div style={{ display: "flex", gap: 10, marginTop: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
