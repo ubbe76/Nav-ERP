@@ -110,13 +110,18 @@ describe("the reporter's fields", () => {
     expect(normalizeContactPhone("  ")).toBeNull();
   });
 
-  it("keeps the contact name to one field of at most 35 characters", () => {
+  it("keeps the contact name to one field of 5–35 characters", () => {
     expect(contactNameField("  Per Persson ")).toBe("Per Persson");
     expect(contactNameField("Per;Persson")).toBe("Per Persson");
     expect(contactNameField("Per\tPersson")).toBe("Per Persson");
     expect(contactNameField("x".repeat(35))).toBe("x".repeat(35));
     expect(contactNameField("x".repeat(36))).toBeNull();
     expect(contactNameField("")).toBeNull();
+    // Skatteverket refuses fewer than 5 characters ("Namn på kontaktperson saknas").
+    expect(contactNameField("Ubbe")).toBeNull();
+    expect(contactNameField("Bo E")).toBeNull();
+    expect(contactNameField("  Ubbe  ")).toBeNull();
+    expect(contactNameField("Bo Ek")).toBe("Bo Ek");
     expect(contactNameField(null)).toBeNull();
   });
 
