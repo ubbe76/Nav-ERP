@@ -63,6 +63,42 @@ describe("bankSettingsProblems — town that sanitizes to nothing", () => {
 // Task 7 carry: the same 35-character InitgPty limit checkPain001 applies
 // (Max35Text) — SEB and Handelsbanken take free text, so the pattern alone
 // does not catch it.
+// Nordea (Corporate Access, verified 2026-11-04): the CCM agreement id is
+// mandatory in Dbtr/Id, and Nordea Business ids carry an NB prefix.
+describe("bankSettingsProblems — Nordea", () => {
+  const nordea = { profile: "nordea" as const, initiatingPartyId: "NB4321", debtorAgreementId: "NB123456", debitAccountKind: "plusgiro" as const };
+  const company = { ...COMPANY, plusgiro: "1-8" };
+  const agreement = "CCM-avtals-ID (8–18 siffror, i Nordea Business NB och siffror)";
+
+  it("takes Nordea Business' NB ids and a Corporate Netbank agreement of 8–18 digits", () => {
+    expect(bankSettingsProblems(nordea, company)).toEqual([]);
+    expect(bankSettingsProblems({ ...nordea, initiatingPartyId: "1234567890123", debtorAgreementId: "9600158260" }, company)).toEqual([]);
+  });
+
+  it("requires the agreement id and checks its format", () => {
+    expect(bankSettingsProblems({ ...nordea, debtorAgreementId: null }, company)).toEqual([`${agreement} saknas`]);
+    expect(bankSettingsProblems({ ...nordea, debtorAgreementId: "CCM12345" }, company)).toEqual([`${agreement} har fel format`]);
+    expect(bankSettingsProblems({ ...nordea, debtorAgreementId: "1234567" }, company)).toEqual([`${agreement} har fel format`]);
+  });
+
+  it("needs the company's town for payments abroad only", async () => {
+    await db.update(companyInfo).set({ plusgiro: "1-8", iban: "SE45 5000 0000 0583 9825 7466", city: null });
+    const view = await service.update({ profile: "nordea", initiatingPartyId: "nb4321", debtorAgreementId: "nb 123456", debitAccountKind: "plusgiro" }, userId);
+    expect(view.initiatingPartyId).toBe("NB4321");
+    expect(view.debtorAgreementId).toBe("NB123456");
+    expect(view.missing).toEqual([]);
+    expect(view.foreignProblem).toBe("Nordea kräver ort i Företagsinformation för utlandsbetalningar");
+    await db.update(companyInfo).set({ city: "Gävle" });
+    expect((await service.read()).foreignProblem).toBeNull();
+  });
+
+  it("refuses a malformed agreement id on save, but saves without one", async () => {
+    await expect(service.update({ profile: "nordea", debtorAgreementId: "CCM12345" }, userId)).rejects.toThrow(InvalidBankSettingError);
+    const view = await service.update({ profile: "nordea", initiatingPartyId: "NB4321" }, userId);
+    expect(view.missing).toContain(`${agreement} saknas`);
+  });
+});
+
 describe("bankSettingsProblems — initiating party length", () => {
   it("refuses an id longer than 35 characters for the free-text banks, as the file check does", () => {
     const base = { debtorAgreementId: null };
@@ -134,7 +170,7 @@ describe("bankinställningarna", () => {
     const base = { initiatingPartyId: null, debtorAgreementId: null };
     const sw = { ...base, profile: "swedbank" as const, initiatingPartyId: "123456789123B001", debitAccountKind: "bankgiro" as const };
     const hb = { ...base, profile: "handelsbanken" as const, debitAccountKind: "iban" as const };
-    const nd = { ...base, profile: "nordea" as const, initiatingPartyId: "123", debitAccountKind: "plusgiro" as const };
+    const nd = { ...base, profile: "nordea" as const, initiatingPartyId: "123", debtorAgreementId: "NB123456", debitAccountKind: "plusgiro" as const };
     // bankgiro: wrong length and bad Luhn
     expect(bankSettingsProblems(sw, { ...COMPANY, bankgiro: "55-12" })).toEqual(["Bankgiro är ogiltigt i Företagsinformation"]);
     expect(bankSettingsProblems(sw, { ...COMPANY, bankgiro: "551-2349" })).toEqual(["Bankgiro är ogiltigt i Företagsinformation"]);

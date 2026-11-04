@@ -201,7 +201,7 @@ function foreignInput(overrides: { profile?: BankProfile; usBic?: string | null 
       account: swedbank ? { kind: "bankgiro", value: "5512348" } : { kind: "iban", value: "SE4550000000058398257466" },
       foreignAccount: { kind: "iban", value: "SE4550000000058398257466" },
       initiatingPartyId: swedbank ? "123456789123B001" : overrides.profile?.id === "nordea" ? "1234567890123" : "1234567890",
-      agreementId: null,
+      agreementId: overrides.profile?.id === "nordea" ? "9600158260" : null,
     },
     items: [
       {
@@ -395,10 +395,19 @@ describe("pain.001 — utlandsbetalningar per profil (golden-filer)", () => {
     expect(xml).toContain("<RgltryRptg><Dtls><Cd>101</Cd></Dtls></RgltryRptg>");
   });
 
-  it("Nordea: NURG + IN for SEPA and international, KU81 with Ctry and Inf, the bank's name and country next to a bare ABA number", () => {
+  // Corporate Access, verified in Nordea's test tool 2026-11-04: no
+  // LocalInstrument (Denmark only), and from 14 November 2026 the debtor's
+  // town and country on a payment abroad.
+  it("Nordea: NURG without IN, the debtor's town abroad, KU81 with Ctry and Inf, the bank's name and country next to a bare ABA number", () => {
     const { xml } = buildPain001(foreignInput({ profile: BANK_PROFILES.nordea }), BANK_PROFILES.nordea);
     expect(xml).not.toContain("<Cd>SEPA</Cd>");
-    expect(xml.match(/<LclInstrm><Cd>IN<\/Cd><\/LclInstrm>/g)).toHaveLength(3);
+    expect(xml).not.toContain("<LclInstrm>");
+    const debtorId = "<Id><OrgId><Othr><Id>9600158260</Id><SchmeNm><Cd>BANK</Cd></SchmeNm></Othr></OrgId></Id>";
+    // Domestic: country only (passed the test tool); abroad: PstCd + TwnNm + Ctry.
+    expect(xml.match(new RegExp(`<Dbtr><Nm>Exempel Verkstad AB</Nm><PstlAdr><Ctry>SE</Ctry></PstlAdr>${debtorId}</Dbtr>`, "g"))).toHaveLength(1);
+    expect(
+      xml.match(new RegExp(`<Dbtr><Nm>Exempel Verkstad AB</Nm><PstlAdr><PstCd>80222</PstCd><TwnNm>Gävle</TwnNm><Ctry>SE</Ctry></PstlAdr>${debtorId}</Dbtr>`, "g"))
+    ).toHaveLength(3);
     expect(xml).toContain("<RgltryRptg><Dtls><Ctry>SE</Ctry><Cd>101</Cd><Inf>Faktura 4471 stalbalk</Inf></Dtls></RgltryRptg>");
     expect(xml).toContain(
       "<CdtrAgt><FinInstnId><ClrSysMmbId><ClrSysId><Cd>USABA</Cd></ClrSysId><MmbId>123456780</MmbId></ClrSysMmbId><Nm>Example Bank N.A.</Nm><PstlAdr><Ctry>US</Ctry></PstlAdr></FinInstnId></CdtrAgt>"
@@ -495,6 +504,17 @@ describe("pain.001 — kontrollen för utlandsbetalningar", () => {
     us.bic = "EXBKUS33";
     us.country = "SE";
     expect(messages(input, hb, "BO-9-3")).toEqual(["Ett utländskt kontonummer kräver att mottagarens land inte är Sverige"]);
+  });
+
+  it("Nordea: the company's town is required abroad, not for a domestic-only batch", () => {
+    const nordea = BANK_PROFILES.nordea;
+    const input = foreignInput({ profile: nordea });
+    input.debtor.city = null;
+    expect(checkPain001(input, nordea, TODAY).filter((v) => v.endToEndId === null)).toEqual([
+      { endToEndId: null, field: "debtorCity", message: "Företagets ort saknas — Nordea kräver den för utlandsbetalningar" },
+    ]);
+    const domestic = { ...input, items: input.items.filter((item) => item.endToEndId === "BO-9-5") };
+    expect(checkPain001(domestic, nordea, TODAY)).toEqual([]);
   });
 
   it("Nordea: the bank's name with a bare bank id, name + street + town within 105 characters, DEBT only outside the EU/EEA", () => {

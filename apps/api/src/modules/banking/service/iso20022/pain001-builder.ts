@@ -166,15 +166,17 @@ export function foreignPostalCode(code: string | null, charset: CharsetHolder): 
 
 // Swedish postal codes are digits ("802 22" → 80222). An element is written
 // only when it has content: an empty PstCd/TwnNm would break Max16Text/
-// Max35Text (minLength 1).
-function postalAddress(postalCode: string | null, city: string | null, profile: BankProfile): XmlElement {
+// Max35Text (minLength 1). `fields` defaults to the profile's domestic
+// address; the debtor of a PmtInf abroad takes `foreign.debtorAddress`.
+function postalAddress(
+  postalCode: string | null,
+  city: string | null,
+  profile: BankProfile,
+  fields: readonly ("PstCd" | "TwnNm")[] = profile.address.fields
+): XmlElement {
   const code = digits(postalCode);
   const town = townName(city, profile);
-  return el("PstlAdr", [
-    profile.address.fields.includes("PstCd") && code ? el("PstCd", code) : null,
-    profile.address.fields.includes("TwnNm") && town ? el("TwnNm", town) : null,
-    el("Ctry", "SE"),
-  ]);
+  return el("PstlAdr", [fields.includes("PstCd") && code ? el("PstCd", code) : null, fields.includes("TwnNm") && town ? el("TwnNm", town) : null, el("Ctry", "SE")]);
 }
 
 function orgOther(id: string, scheme: "BANK" | "CUST"): XmlElement {
@@ -198,8 +200,6 @@ function creditorAgent(creditor: Pain001Creditor, profile: BankProfile): XmlChil
       return clearing(agent.memberId);
     case "clearing_from_account":
       return clearing(agent.memberIdDigits ? (creditor.clearing ?? "").slice(0, agent.memberIdDigits) : creditor.clearing ?? "");
-    case "bic":
-      return el("CdtrAgt", [el("FinInstnId", [el("BIC", agent.bic)])]);
     case "bic_from_supplier":
       return creditor.bic ? el("CdtrAgt", [el("FinInstnId", [el("BIC", creditor.bic)])]) : null;
     case "none":
@@ -447,7 +447,7 @@ export function buildPain001(input: Pain001Input, profile: BankProfile): { xml: 
       el("ReqdExctnDt", group.date),
       el("Dbtr", [
         el("Nm", debtorName),
-        postalAddress(input.debtor.postalCode, input.debtor.city, profile),
+        postalAddress(input.debtor.postalCode, input.debtor.city, profile, foreign ? profile.foreign.debtorAddress.fields : profile.address.fields),
         profile.debtorIdentification && input.debtor.agreementId ? orgOther(input.debtor.agreementId, profile.debtorIdentification.scheme) : null,
       ]),
       debtorAccount(debit, foreign ? profile.foreign.debtorAccountCurrency : true),

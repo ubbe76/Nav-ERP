@@ -101,9 +101,24 @@ export function foreignDebitAccountFor(profile: BankProfile, settings: BankSetti
 function foreignProblemOf(settings: BankSettings, company: CompanyBankFields): string | null {
   if (!settings.profile) return null;
   const profile = bankProfile(settings.profile);
-  if (foreignDebitAccountFor(profile, settings, company)) return null;
-  const kinds = profile.foreign.debitAccountKinds.map((kind) => KIND_LABEL[kind]).join(" eller ");
-  return `${profile.name} kräver ${kinds} i Företagsinformation för utlandsbetalningar`;
+  if (!foreignDebitAccountFor(profile, settings, company)) {
+    const kinds = profile.foreign.debitAccountKinds.map((kind) => KIND_LABEL[kind]).join(" eller ");
+    return `${profile.name} kräver ${kinds} i Företagsinformation för utlandsbetalningar`;
+  }
+  // The same test checkPain001 applies to the debtor's town abroad.
+  if (profile.foreign.debtorAddress.townRequired && townName(company.city, profile) === "") {
+    return `${profile.name} kräver ort i Företagsinformation för utlandsbetalningar`;
+  }
+  return null;
+}
+
+// The bank's agreement id (Dbtr/Id) — the same rule checkPain001 applies.
+function agreementProblem(profile: BankProfile, agreementId: string | null): string | null {
+  const agreement = profile.debtorIdentification;
+  if (!agreement) return null;
+  if (!agreementId) return agreement.required ? `${agreement.label} saknas` : null;
+  if (agreementId.length > 35 || (agreement.pattern && !agreement.pattern.test(agreementId))) return `${agreement.label} har fel format`;
+  return null;
 }
 
 function resolveInitiatingPartyId(profile: BankProfile, settings: BankSettings, company: CompanyBankFields): string | null {
@@ -123,6 +138,8 @@ export function bankSettingsProblems(settings: BankSettings, company: CompanyBan
   else if (settings.initiatingPartyId && profile.initiatingParty.pattern && !profile.initiatingParty.pattern.test(settings.initiatingPartyId)) {
     problems.push(`${profile.initiatingParty.label} har fel format`);
   }
+  const agreement = agreementProblem(profile, settings.debtorAgreementId);
+  if (agreement) problems.push(agreement);
   if (!settings.debitAccountKind) problems.push("Debiteringskonto är inte valt");
   else if (!profile.debitAccountKinds.includes(settings.debitAccountKind)) {
     problems.push(`${profile.name} tar inte ${KIND_LABEL[settings.debitAccountKind]} som debiteringskonto`);
@@ -212,6 +229,10 @@ export function createBankSettingsService(deps: { repo: BankSettingsRepository; 
           if (next.initiatingPartyId && profile.initiatingParty.pattern && !profile.initiatingParty.pattern.test(next.initiatingPartyId)) {
             throw new InvalidBankSettingError(`${profile.initiatingParty.label} har fel format`);
           }
+          // A wrong agreement id is refused like the signer id; a missing one
+          // is a checklist item, so the settings can be saved in any order.
+          const agreement = agreementProblem(profile, next.debtorAgreementId);
+          if (next.debtorAgreementId && agreement) throw new InvalidBankSettingError(agreement);
         }
         const changed: string[] = [];
         for (const key of Object.keys(KEYS) as (keyof typeof KEYS)[]) {

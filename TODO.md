@@ -56,6 +56,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Låg
 
+- [ ] **Betalfiler i pain.001.001.09 (ISO 20022 version 2019)** — Nav skriver pain.001.001.03, som bankerna fortfarande tar (Nordeas MIG för .03 uppdaterades i september 2026); Nordea m.fl. går över till version 2019 på sikt. Bankprofilerna och golden-filerna behöver en andra version när någon bank slutar ta .03.
 - [ ] **Dokument på engelska:** avvikelseorsakens namn skrivs på svenska även på ett engelskt reklamationsbesked (`deviation_reasons` saknar `name_en`); en kreditfaktura kopierar källfakturans frakt-/ränterader med deras text, så en kredit till en kund som bytt språk efter fakturan får raderna på fakturans språk.
 - [ ] **Behovsberäkningen, tidsfasade förslag:** sorteringen **Sortering: Senaste datum** lägger ett inköpsförslag utan möjlig ankomst (senaste datum saknas, markerat **Passerat**) sist i stället för först; efter **Uppdatera** rensas val för förslag som flyttat vecka bara på den visade sidan (andra sidors val kan ha kvar ett gammalt behovsdatum); **Skapa ordrar** utan behovsdatum (integrationer) laddar ledtidsunderlaget även för inköpsartiklar.
 - [ ] **Kalkyl:** pröva andra påslag på en enskild artikel — ingår i [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*

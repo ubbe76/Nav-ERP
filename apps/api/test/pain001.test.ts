@@ -386,20 +386,38 @@ describe("pain.001 — övriga profiler (golden-filer)", () => {
     expect(checkPain001({ ...input, debtor: { ...input.debtor, account: { kind: "bankgiro", value: "5512348" }, initiatingPartyId: "123456789123B001" } }, BANK_PROFILES.swedbank, TODAY)).toEqual([]);
   });
 
-  it("Nordea: CUST signer id, CCM agreement as debtor id, BIC agents, country-only addresses", async () => {
-    const input = exampleInput({ initiatingPartyId: "1234567890123", agreementId: "CCM12345", account: { kind: "iban", value: "SE4550000000058398257466" } });
+  // Corporate Access (Nordea Business' file handling), verified in Nordea's
+  // test tool 2026-11-04: Dbtr/Id BANK is mandatory, and a domestic payment
+  // carries no creditor agent ("not necessary for domestic payments").
+  it("Nordea: CUST signer id, CCM agreement as debtor id, no agent on giro payments, country-only addresses", async () => {
+    const input = exampleInput({ initiatingPartyId: "NB4321", agreementId: "NB123456", account: { kind: "iban", value: "SE4550000000058398257466" } });
     expect(checkPain001(input, BANK_PROFILES.nordea, TODAY)).toEqual([]);
     const { xml } = buildPain001(input, BANK_PROFILES.nordea);
-    expect(xml).toContain("<Othr><Id>1234567890123</Id><SchmeNm><Cd>CUST</Cd></SchmeNm></Othr>");
-    expect(xml).toContain("<Id><OrgId><Othr><Id>CCM12345</Id><SchmeNm><Cd>BANK</Cd></SchmeNm></Othr></OrgId></Id></Dbtr>");
-    expect(xml).toContain("<CdtrAgt><FinInstnId><BIC>BGABSESS</BIC></FinInstnId></CdtrAgt>");
-    expect(xml).toContain("<CdtrAgt><FinInstnId><BIC>NDEASESS</BIC></FinInstnId></CdtrAgt>");
+    expect(xml).toContain("<Othr><Id>NB4321</Id><SchmeNm><Cd>CUST</Cd></SchmeNm></Othr>");
+    expect(xml).toContain("<Id><OrgId><Othr><Id>NB123456</Id><SchmeNm><Cd>BANK</Cd></SchmeNm></Othr></OrgId></Id></Dbtr>");
+    expect(xml).not.toContain("BGABSESS");
+    expect(xml).not.toContain("<CdtrAgt><FinInstnId><BIC>NDEASESS</BIC></FinInstnId></CdtrAgt>");
+    expect(xml).toMatch(/<EndToEndId>BO-7-1<\/EndToEndId><\/PmtId><Amt><InstdAmt Ccy="SEK">12500\.00<\/InstdAmt><\/Amt><Cdtr>/);
+    expect(xml).toMatch(/<EndToEndId>BO-7-2<\/EndToEndId><\/PmtId><Amt><InstdAmt Ccy="SEK">3480\.00<\/InstdAmt><\/Amt><Cdtr>/);
+    // A Swedish IBAN payee still names its bank.
     expect(xml).toContain("<CdtrAgt><FinInstnId><BIC>ESSESESS</BIC></FinInstnId></CdtrAgt>");
     expect(xml).toContain(SWEDISH_IBAN_ACCOUNT);
     expect(xml).not.toContain("<TwnNm>");
     expect(xml).toMatch(/<EndToEndId>BO-7-3<\/EndToEndId><\/PmtId><Amt><InstdAmt Ccy="SEK">8850\.00<\/InstdAmt><\/Amt><Cdtr>/);
     expect(await validateAgainstXsd(xml, "pain.001.001.03")).toEqual([]);
     await expect(xml).toMatchFileSnapshot("./fixtures/iso20022/pain001-nordea.xml");
+  });
+
+  it("Nordea: the agreement id is mandatory — 8–18 digits, or NB and digits in Nordea Business", () => {
+    const agreement = "CCM-avtals-ID (8–18 siffror, i Nordea Business NB och siffror)";
+    const header = (agreementId: string | null, initiatingPartyId = "NB4321") =>
+      checkPain001(exampleInput({ initiatingPartyId, agreementId, account: { kind: "iban", value: "SE4550000000058398257466" } }), BANK_PROFILES.nordea, TODAY)
+        .filter((v) => v.endToEndId === null)
+        .map((v) => v.message);
+    expect(header(null)).toEqual([`${agreement} saknas`]);
+    expect(header("CCM12345")).toEqual([`${agreement} har fel format`]);
+    expect(header("9600158260", "1234567890123")).toEqual([]);
+    expect(header("NB123456", "NBX1")).toEqual(["Signer-ID (högst 13 siffror, i Nordea Business NB och siffror) har fel format"]);
   });
 });
 
