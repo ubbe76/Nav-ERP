@@ -1,4 +1,5 @@
 import {
+  chargedVatRate,
   normalizeSupplierPaymentDetails,
   DEFAULT_PAYMENT_REPORTING_CODE,
   type SupplierPaymentContext,
@@ -647,11 +648,13 @@ export function createPurchaseService(
   async function renderPurchaseOrderPdf(
     order: NonNullable<Awaited<ReturnType<PurchaseRepository["findPurchaseOrderById"]>>>
   ) {
-    const [supplier, rows, documentSettings] = await Promise.all([
+    const [supplier, rows, documentSettings, book] = await Promise.all([
       repo.findSupplierById(order.supplierId),
       repo.listRowsByOrder(order.id),
       settings.getSettings(),
+      repo.vatCodeBook(),
     ]);
+    const vat = purchaseOrderVat(book, supplier!);
     const { showOrderRevisionOnDocuments } = documentSettings;
     const extraDescription = extraDescriptionFor(documentSettings, "purchaseOrder");
     const revisions = await revisionInfoMap(rows.map((r) => r.articleId));
@@ -707,6 +710,10 @@ export function createPurchaseService(
         };
       }),
       showTotal: true,
+      // Summa exkl. moms / Moms / Summa inkl. moms at the supplier's rate —
+      // also 0 % for a code that charges none (EU, omvänd moms), so the
+      // order says so. Without any code (an empty register) just Summa.
+      vat: vat ? { rate: vat.rate, grossLabel: "totalInclVat" } : null,
       requestedDeliveryDate: order.expectedDeliveryDate,
       revision: showOrderRevisionOnDocuments ? order.revision : null,
       yourReference: order.yourReference,
@@ -733,6 +740,22 @@ export function createPurchaseService(
       throw new RegisterEntryNotFoundError(input.paymentTermId);
     if (input.carrierId && !(await registers.carriers.exists(input.carrierId)))
       throw new RegisterEntryNotFoundError(input.carrierId);
+  }
+
+  // Moms på inköpsordern (user decision 2026-11-04): the supplier's Momskod
+  // (förval), else the code derived from its country (supplierVatCode — the
+  // same default the supplier invoice starts from), and the VAT the supplier
+  // charges with it (chargedVatRate: a domestic code's rate, otherwise 0).
+  // Live, never snapshotted. null only when the code register is empty.
+  function purchaseOrderVat(book: VatCodeBook, supplier: { country: string; defaultVatCodeId: string | null }) {
+    const effective = supplierVatCode(book, supplier);
+    if (!effective) return null;
+    return {
+      code: effective.row.code,
+      name: effective.row.name,
+      rate: chargedVatRate(effective.row.code),
+      derived: effective.derived,
+    };
   }
 
   // Momskoder: the supplier's Momskod (förval) as the card shows it — its own
@@ -1173,8 +1196,13 @@ export function createPurchaseService(
       return updated;
     },
 
+    // The card's Moms (purchaseOrderVat) rides along — live, like the
+    // supplier's language.
     async getPurchaseOrder(id: string) {
-      return repo.findPurchaseOrderById(id);
+      const order = await repo.findPurchaseOrderById(id);
+      if (!order) return null;
+      const [supplier, book] = await Promise.all([repo.findSupplierById(order.supplierId), repo.vatCodeBook()]);
+      return { ...order, vat: supplier ? purchaseOrderVat(book, supplier) : null };
     },
 
     async listPurchaseOrders(query: ListPurchaseOrdersQuery, today: string = stockholmToday()) {

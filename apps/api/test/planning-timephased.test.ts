@@ -472,3 +472,81 @@ describe("Standardledtid and Standardkötid (system settings)", () => {
     expect(rows.find((r) => r.articleId === unrouted.id)).toMatchObject({ leadDays: 1 });
   });
 });
+
+// Lego (user decision 2026-11-04): Planera never plans a lego operation, so
+// it is dated BACKWARD from the TO's färdigdatum — the behovsberäkning's
+// lego row is needed at the supplier on the operation's start, and Skapa
+// ordrar gives the lego IO row the date the goods must be back.
+describe("lego operations dated backward from the färdigdatum", () => {
+  async function legoFixture() {
+    const user = await makeUser();
+    const supplier = await purchaseService.createSupplier({ name: "Passivering AB", active: true });
+    // At the supplier: Ledtid 3 + Kötid 1 = 4 working days; order 2 days ahead.
+    const lego = await mfgService.createWorkCenter({
+      code: "900",
+      name: "Passivering",
+      type: "subcontract",
+      supplierId: supplier.id,
+      leadTimeDays: 3,
+      queueTimeDays: 1,
+      orderLeadTimeDays: 2,
+      active: true,
+    });
+    const article = await makeArticle({ articleNumber: "TP-LEGO", type: "manufactured" });
+    const own = await routingOf(article.id, 480); // op 10: one day per unit
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 20, workCenterId: lego.id, setupTime: 0, runTimePerUnit: 0, unitPrice: 10 });
+    await mfgService.createRoutingOperation(article.id, { sequenceNo: 30, workCenterId: own.id, setupTime: 0, runTimePerUnit: 480 });
+    const legoOpOf = async (moId: string) => (await mfgService.listOperations(moId)).find((op) => op.sequenceNo === 20)!;
+    return { user, supplier, article, legoOpOf };
+  }
+
+  it("needs the operation at the supplier its lead time before the operations after it must start, and dates the IO row with its return", async () => {
+    const { user, supplier, article, legoOpOf } = await legoFixture();
+    // Due Fri 03-22: op 30 takes a day ⇒ back Thu 03-21; 4 days at the
+    // supplier ⇒ there Fri 03-15; Ledtid beställning 2 ⇒ order by Wed 03-13.
+    const onTime = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 1, dueDate: "2030-03-22" }, user.id);
+    // Due Fri 03-08: back by Thu 03-07 — ordered today (Mon 03-04) it is
+    // back Tue 03-12 at the earliest (2 + 4 working days).
+    const late = await mfgService.createManufacturingOrder({ articleId: article.id, quantity: 1, dueDate: "2030-03-08" }, user.id);
+    const onTimeOp = await legoOpOf(onTime.id);
+    const lateOp = await legoOpOf(late.id);
+
+    const legoRows = (await list({ search: "TP-LEGO" })).filter((r) => r.proposalKind === "subcontract");
+    const proposalOf = (opId: string) => legoRows.find((r) => r.moOperationId === opId)!.proposals[0]!;
+    expect(proposalOf(onTimeOp.id)).toMatchObject({ needDate: "2030-03-15", latestDate: "2030-03-13", late: false });
+    // Back 03-07 ⇒ at the supplier Fri 03-01 ⇒ order by Wed 02-27: passed.
+    expect(proposalOf(lateOp.id)).toMatchObject({ needDate: "2030-03-01", latestDate: "2030-02-27", late: true });
+
+    const result = await planningService.createOrdersFromProposals(
+      {
+        proposals: [
+          { articleId: article.id, quantity: 1, kind: "subcontract", moOperationId: onTimeOp.id },
+          { articleId: article.id, quantity: 1, kind: "subcontract", moOperationId: lateOp.id },
+        ],
+      },
+      user.id
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.purchaseOrders).toHaveLength(1);
+    const io = result.purchaseOrders[0]!;
+    expect(io.supplierId).toBe(supplier.id);
+
+    // The order takes the earliest date; the later row keeps its own.
+    const order = await purchaseService.getPurchaseOrder(io.id);
+    expect(order?.expectedDeliveryDate).toBe("2030-03-12");
+    const rows = await purchaseService.listRows(io.id);
+    expect(rows.map((r) => [r.moOperationId, r.expectedDeliveryDate])).toEqual([
+      [lateOp.id, null],
+      [onTimeOp.id, "2030-03-21"],
+    ]);
+    expect(result.warnings).toEqual([
+      {
+        orderNumber: io.orderNumber,
+        articleNumber: "TP-LEGO",
+        demandDate: "2030-03-07",
+        deliveryDate: "2030-03-12",
+        message: "Leveransen (2030-03-12) kommer efter behovet (2030-03-07)",
+      },
+    ]);
+  });
+});

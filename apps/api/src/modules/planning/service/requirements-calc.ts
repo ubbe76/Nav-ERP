@@ -170,8 +170,10 @@ export interface LegoOperationRow {
   // informational: never nets against orderQuantity/orderedQuantity, so an
   // RFQ can never shrink the proposal (it is not a commitment yet).
   openInquiries: { id: string; inquiryNumber: string; status: "draft" | "sent" | "answered" }[];
-  // When the operation must be at the supplier: its planned start week
-  // (Monday) or the TO's start date. Absent/null = undated.
+  // When the operation must be at the supplier: backward from the TO's
+  // färdigdatum through the operations after it and the resource's Ledtid +
+  // Kötid (legoOperationDates in manufacturing-lead-time.ts), or the TO's
+  // start without a due date. Absent/null = undated.
   needDate?: string | null;
   // The resource's Ledtid beställning (work_centers.order_lead_time_days):
   // working days before the need the order must be placed. null = 0.
@@ -868,8 +870,8 @@ export function computeRequirements(input: RequirementsInput): RequirementRow[] 
   // Lego rows last, grouped by TO — they are operation needs, not article
   // needs: nothing is netted against stock or cascaded, only the already
   // bought quantity is deducted. A fully covered operation produces no row.
-  // Dated with the operation's need (planned week or TO start) and the
-  // resource's Ledtid beställning before it.
+  // Dated with the operation's need (its start date, backward from the TO's
+  // färdigdatum) and the resource's Ledtid beställning before it.
   const legoRows = input.legoOperationRows
     .map((op): RequirementRow | null => {
       const remaining = op.orderQuantity - op.orderedQuantity;

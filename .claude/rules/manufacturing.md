@@ -71,5 +71,10 @@ Spec `private/superpowers/specs/2026-10-18-andra-tillverkningsorder-design.md`.
 
 ## Transportkostnad på legooperationer (migration 0164)
 
+- **Redan beställt** av en legooperation = `legoOrderedQuantitySql()` i samma löv (Σ `quantity_ordered` på IO-rader mot operationen, order ej makulerad) — EN regel för behovsberäkningens legoförslag och TO-kortet.
 - `routing_operations.transport_price` och `mo_operations.transport_price` (snapshot vid frisläpp, redigerbar i Ändra operationer) är ett legofält som Ställpris/Styckpris (`hasLegoFields`, `CLEARED_LEGO_FIELDS`, döljs utan prisbehörighet). **EN regel för legoorderns engångskostnad:** `legoOneOffSql(table)` i lövet `manufacturing/repository/lego-one-off.ts` = ställpris + transportkostnad (null bara när båda saknas). Den läses av behovsberäkningens legoförslag, förfrågans/IO-radens förifyllda ställpris (`resolveLegoOperationRef`) och för-/efterkalkylen — en ny läsare av legokostnaden ska gå genom den, aldrig läsa `setup_price` direkt.
 
+## Legoinköp på TO-kortet (2026-11-04)
+
+- `GET /manufacturing-orders/:id/lego-purchases` (`MO_READ`, inga priser — verkstadsprofilen läser den) ger per legooperation `orderedQuantity` (`legoOrderedQuantitySql`) + IO-raderna mot den (order ej makulerad, radens datum annars orderns) + öppna förfrågningar (draft/sent/answered, som behovsberäkningens legorad). Lövet `manufacturing/repository/lego-purchases.ts` läser inköpstabellerna direkt (samma prejudikat som `order-edit.ts` resursbytesvakt); 404 utan TO.
+- Webben: operationsraden har **Ändra** + ⋯-meny (`RowMenu`: Skapa inköpsorder/Skapa förfrågan på väntande legooperation, Pallkort, Ta bort) — läsläge/klar order bara knappen Pallkort. **Skapa inköpsorder** (`LegoPurchaseOrderModal`) postar ett `subcontract`-förslag till `POST /planning/orders` (behörighet Tillverkning, samma regler som behovsberäkningen — servern laddar om leverantör och priser), avstängd utan leverantör; **Skapa förfrågan** (Inköp) är `LegoInquiryModal` med `target.kind = "mo"` (`moOperationId`). Operationscellen är ETT block — mobilstacken lägger cellens barn i en flexrad. Test: `legoresurser.test.ts` ("legoinköp på TO-kortet").

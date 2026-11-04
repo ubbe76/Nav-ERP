@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { auditLog, db, numberSeries, systemSettings } from "@navet/db";
+import { auditLog, db, numberSeries, systemSettings, vatCodes } from "@navet/db";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
 import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
@@ -1220,6 +1220,28 @@ describe("purchase service — document terms (villkor)", () => {
     // Created (rev 1) + one row + the header update above = rev 3, printed
     // directly after the order number in the document title.
     expect(text).toContain(`${order.orderNumber} / 3`);
+  });
+
+  // Moms på inköpsordern (user decision 2026-11-04): the supplier's Momskod
+  // (förval), else derived from its country, live — the card's GET and the PDF.
+  it("carries the supplier's VAT on the order and prints Summa exkl. moms / Moms / Summa inkl. moms", async () => {
+    const { order, supplier } = await makeOrderWithRow(2); // 2 × 42 = 84
+
+    // A Swedish supplier without its own code: MP25 derived from the country.
+    expect((await purchaseService.getPurchaseOrder(order.id))?.vat).toMatchObject({ code: "MP25", rate: 25, derived: true });
+    const domestic = pdfText((await purchaseService.getPurchaseOrderPdf(order.id)).content);
+    expect(domestic).toContain("Summa exkl. moms SEK84,00");
+    expect(domestic).toContain("Moms (25 %)21,00");
+    expect(domestic).toContain("Summa inkl. moms SEK105,00");
+    expect(domestic).not.toContain("Att betala");
+
+    // The supplier's own code wins; omvänd moms charges no VAT ⇒ 0 %.
+    const [reverse] = await db.select({ id: vatCodes.id }).from(vatCodes).where(eq(vatCodes.code, "IOBV"));
+    await purchaseService.updateSupplier(supplier.id, { defaultVatCodeId: reverse!.id });
+    expect((await purchaseService.getPurchaseOrder(order.id))?.vat).toMatchObject({ code: "IOBV", rate: 0, derived: false });
+    const reversed = pdfText((await purchaseService.getPurchaseOrderPdf(order.id)).content);
+    expect(reversed).toContain("Moms (0 %)0,00");
+    expect(reversed).toContain("Summa inkl. moms SEK84,00");
   });
 
   it("prints the order revision after the order number only when the setting is on", async () => {

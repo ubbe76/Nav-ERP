@@ -12,6 +12,7 @@ import {
   VAT_CODE_SLOTS,
   VAT_REPORTING_PERIODS,
   VAT_SETTLED_BOXES,
+  chargedVatRate,
   computedVatAmount,
   domesticVatCodeForRate,
   importVatSchema,
@@ -83,6 +84,16 @@ describe("the momskod catalog", () => {
 });
 
 describe("helpers", () => {
+  it("charges the rate of a domestic code only — the inköpsorder and the web's Momssats prefill agree", () => {
+    expect(chargedVatRate("MP25")).toBe(25);
+    expect(chargedVatRate("MP12")).toBe(12);
+    expect(chargedVatRate("MF")).toBe(0);
+    expect(chargedVatRate("IEUV25")).toBe(0);
+    expect(chargedVatRate("IOBT")).toBe(0);
+    expect(chargedVatRate("IUTV")).toBe(0);
+    for (const code of VAT_CODES) expect(webCodes.chargedVatRate(code as never)).toBe(chargedVatRate(code));
+  });
+
   it("translates a Swedish rate to its domestic code", () => {
     expect(vatRates.map(domesticVatCodeForRate)).toEqual(["MP25", "MP12", "MP6", "MF"]);
     expect([...DOMESTIC_VAT_CODES].every(isDomesticVatCode)).toBe(true);

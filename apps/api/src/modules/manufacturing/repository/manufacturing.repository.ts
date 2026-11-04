@@ -57,6 +57,7 @@ import { uncoveredConfiguredQuantity } from "../../planning/service/configured-c
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
 import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
+import { listLegoPurchases } from "./lego-purchases.js";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
 import { lockProductionPlan } from "../../planning/repository/plan-lock.js";
 import { pluginEvents } from "../../system/service/plugin-events.js";
@@ -1610,6 +1611,11 @@ export function createManufacturingRepository(db: Db) {
     // operations (they are bought, not stamped) and the MO card badges them.
     async listOperations(manufacturingOrderId: string) {
       return selectOperationRows(db).where(eq(moOperations.manufacturingOrderId, manufacturingOrderId)).orderBy(moOperations.sequenceNo);
+    },
+
+    // Legoinköp på TO-kortet — see lego-purchases.ts.
+    async listLegoPurchases(manufacturingOrderId: string) {
+      return listLegoPurchases(db, manufacturingOrderId);
     },
 
     // --- Ändra material och operationer (order-edit.ts) — each edit is one

@@ -757,11 +757,15 @@ describe("request for quotation and purchase order in English", () => {
       "Sink unit 1200",
       "pcs",
       "1,234.50",
-      "Total EUR",
-      "3,703.50",
+      // Moms på inköpsordern: a German supplier charges no Swedish VAT
+      // (IEUV25 derived from DE) — 0 % is printed, never an amount to pay.
+      "Total excl. VAT EUR3,703.50",
+      "VAT (0%)0.00",
+      "Total incl. VAT EUR3,703.50",
     ]) {
       expect(poText).toContain(part);
     }
+    expect(poText).not.toContain("Amount due");
     expect(poText).not.toContain("Inköpsorder");
     expect(poText).not.toContain("3 703,50");
     expectEnglish(poText);

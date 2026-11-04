@@ -1594,6 +1594,14 @@ export function createManufacturingService(
       return repo.listOperations(moId);
     },
 
+    // Legoinköp på TO-kortet: per lego operation what is bought and the IO
+    // rows/open förfrågningar behind it. null = no such TO.
+    async listLegoPurchases(moId: string) {
+      const order = await repo.findManufacturingOrderById(moId);
+      if (!order) return null;
+      return repo.listLegoPurchases(moId);
+    },
+
     async getOperation(operationId: string) {
       return repo.findOperationById(operationId);
     },

@@ -9,14 +9,24 @@ import { apiFetch } from "../../lib/api";
 import { createLegoInquiries } from "../../lib/legoInquiries";
 import { SupplierCheckboxList } from "../purchase/SupplierCheckboxList";
 import { CreatedInquiriesPanel } from "../purchase/CreatedInquiriesPanel";
-import type { CreatedInquiry, Paged, RoutingOperation, Supplier } from "../../lib/types";
+import type { CreatedInquiry, MOOperation, Paged, RoutingOperation, Supplier } from "../../lib/types";
+
+// What the förfrågan asks a price for: the beredning's routing operation (a
+// TO-less price inquiry) or one TO's lego operation — the row is then linked
+// to it (moOperationId), so Gör till inköpsorder keeps the operation and the
+// inleverans reports it, exactly like the behovsberäkning's Skapa förfrågan.
+export type LegoInquiryTarget =
+  | { kind: "routing"; operation: RoutingOperation }
+  | { kind: "mo"; operation: MOOperation; orderNumber: string; defaultQuantity: number | null };
 
 interface LegoInquiryModalProps {
   open: boolean;
   onClose: () => void;
   articleId: string;
   articleNumber: string;
-  operation: RoutingOperation;
+  target: LegoInquiryTarget;
+  // After the förfrågningar are created (the TO card refreshes its links).
+  onCreated?: () => void;
 }
 
 type LegoInquiryResult = {
@@ -24,25 +34,29 @@ type LegoInquiryResult = {
   errors: { supplierName: string; articleNumbers: string[]; message: string }[];
 };
 
-// "Skicka förfrågan" for a single lego (subcontract) operation, opened from
-// its row in BeredningView. Same createLegoInquiries used by the
-// behovsberäkning page's lego flow, but with exactly one proposal row — this
-// operation, at the entered Antal — sent as a TO-less price inquiry
-// (routingOperationId, no moOperationId).
-export function LegoInquiryModal({ open, onClose, articleId, articleNumber, operation }: LegoInquiryModalProps) {
+// "Skicka förfrågan" for a single lego (subcontract) operation — from its row
+// in BeredningView (TO-less, routingOperationId) or on the TO card (linked,
+// moOperationId). Same createLegoInquiries as the behovsberäkning page's
+// lego flow, with exactly one row at the entered Antal.
+export function LegoInquiryModal({ open, onClose, articleId, articleNumber, target, onCreated }: LegoInquiryModalProps) {
+  const op = target.operation;
+  const label = `Op ${op.sequenceNo} · ${op.description ?? op.workCenterName}`;
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={`Skicka förfrågan – Op ${operation.sequenceNo} · ${operation.description ?? operation.workCenterName}`}
+      title={target.kind === "mo" ? `Skapa förfrågan – ${target.orderNumber} · ${label}` : `Skicka förfrågan – ${label}`}
     >
-      <LegoInquiryForm articleId={articleId} articleNumber={articleNumber} operation={operation} onClose={onClose} />
+      <LegoInquiryForm articleId={articleId} articleNumber={articleNumber} target={target} onClose={onClose} onCreated={onCreated} />
     </Modal>
   );
 }
 
-function LegoInquiryForm({ articleId, articleNumber, operation, onClose }: Omit<LegoInquiryModalProps, "open">) {
-  const [quantity, setQuantity] = useState("1");
+function LegoInquiryForm({ articleId, articleNumber, target, onClose, onCreated }: Omit<LegoInquiryModalProps, "open">) {
+  const operation = target.operation;
+  const [quantity, setQuantity] = useState(
+    target.kind === "mo" ? (target.defaultQuantity !== null && target.defaultQuantity > 0 ? String(target.defaultQuantity) : "") : "1"
+  );
   const [note, setNote] = useState("");
   const [supplierIds, setSupplierIds] = useState<string[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -79,10 +93,18 @@ function LegoInquiryForm({ articleId, articleNumber, operation, onClose }: Omit<
         .map((s) => ({ id: s.id, name: s.name }));
       const res = await createLegoInquiries({
         suppliers: selectedSuppliers,
-        rows: [{ articleId, articleNumber, quantity: qty, routingOperationId: operation.id }],
+        rows: [
+          {
+            articleId,
+            articleNumber,
+            quantity: qty,
+            ...(target.kind === "mo" ? { moOperationId: operation.id } : { routingOperationId: operation.id }),
+          },
+        ],
         note: note.trim() || undefined,
       });
       setResult(res);
+      if (res.created.length > 0) onCreated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Förfrågan kunde inte skapas");
     } finally {
@@ -130,7 +152,11 @@ function LegoInquiryForm({ articleId, articleNumber, operation, onClose }: Omit<
         suppliers={suppliers.length > 0 ? suppliers : undefined}
       />
 
-      <FormHint>En förfrågan per leverantör. Ställpriset förifylls från operationen; priset frågas.</FormHint>
+      <FormHint>
+        En förfrågan per leverantör. Ställpriset förifylls från operationen; priset frågas.
+        {target.kind === "mo" &&
+          ` Raden kopplas till ${target.orderNumber} · Op ${operation.sequenceNo}, så Gör till inköpsorder tar med kopplingen.`}
+      </FormHint>
 
       <FormActions>
         <Button type="submit" variant="primary" disabled={pending}>

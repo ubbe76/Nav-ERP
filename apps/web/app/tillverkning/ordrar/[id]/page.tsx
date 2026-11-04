@@ -7,6 +7,7 @@ import { satisfiesRule } from "../../../../lib/permissions";
 import type {
   CostCalculation,
   EmployeeDirectoryEntry,
+  LegoPurchaseOperation,
   ManufacturingOrder,
   MOMaterialConsumption,
   MOOperation,
@@ -33,7 +34,7 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
   // deleting a time report (the API enforces it; this only hides the button).
   const canUndoReports = canEdit && (user?.role === "admin" || user?.role === "supervisor");
 
-  const [materials, operations, locations, timeReports, employees, costCalculations, scrap, reports] = await Promise.all([
+  const [materials, operations, locations, timeReports, employees, costCalculations, scrap, reports, legoPurchases] = await Promise.all([
     apiGet<MOMaterialConsumption[]>(`/api/v1/manufacturing-orders/${params.id}/materials`, cookieHeader),
     apiGet<MOOperation[]>(`/api/v1/manufacturing-orders/${params.id}/operations`, cookieHeader),
     canEdit ? apiGet<StockLocation[]>("/api/v1/stock/locations", cookieHeader) : Promise.resolve([] as StockLocation[]),
@@ -44,6 +45,11 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
       : Promise.resolve([] as CostCalculation[]),
     apiGet<ScrapEntry[]>(`/api/v1/manufacturing-orders/${params.id}/scrap`, cookieHeader),
     apiGet<MOReport[]>(`/api/v1/manufacturing-orders/${params.id}/reports`, cookieHeader),
+    // Legoinköp: the IO rows / förfrågningar behind each lego operation. Never
+    // fails the card — without it the rows just show no purchase links.
+    apiGet<LegoPurchaseOperation[]>(`/api/v1/manufacturing-orders/${params.id}/lego-purchases`, cookieHeader).catch(
+      () => [] as LegoPurchaseOperation[]
+    ),
   ]);
 
   return (
@@ -68,6 +74,7 @@ export default async function ManufacturingOrderDetailPage(props: { params: Prom
         costCalculations={costCalculations}
         scrap={scrap}
         reports={reports}
+        legoPurchases={legoPurchases}
         canUndoReports={canUndoReports}
       />
 
