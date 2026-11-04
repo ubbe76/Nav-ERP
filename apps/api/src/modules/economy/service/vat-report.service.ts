@@ -86,7 +86,7 @@ export class VatReportingContactInvalidError extends Error {
   constructor(public readonly field: "contactName" | "contactPhone") {
     super(
       field === "contactName"
-        ? "Kontaktpersonens namn får vara högst 35 tecken och bara innehålla tecken som finns i ISO-8859-1 (latin1) — Skatteverkets fil kan inte bära andra tecken"
+        ? "Kontaktpersonens namn ska vara 5–35 tecken, till exempel för- och efternamn, och bara innehålla tecken som finns i ISO-8859-1 (latin1) — Skatteverket tar inte emot ett kortare namn, och filen kan inte bära andra tecken"
         : "Telefonnumret ska vara siffror med högst ett bindestreck efter riktnumret (till exempel 08-123456), eller börja med + för ett utländskt nummer — högst 17 tecken utan mellanslag"
     );
     this.name = "VatReportingContactInvalidError";

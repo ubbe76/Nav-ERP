@@ -111,7 +111,7 @@ const WARNING_HEADINGS: Record<PeriodicSummaryWarningKind, string> = {
 
 const MISSING_TEXTS: Record<PeriodicSummaryMissingField, string> = {
   vatNumber: "Företagets momsregistreringsnummer saknas eller har fel form",
-  contactName: "Kontaktperson saknas",
+  contactName: "Kontaktperson saknas eller är kortare än 5 tecken",
   contactPhone: "Telefon saknas eller har fel form",
 };
 

@@ -4,7 +4,7 @@
 // the output against the page's example rows.
 //
 // The page's rules: row 1 is the identifier, row 2 the reporter (12-digit
-// momsregistreringsnummer, ÅÅMM or ÅÅ-K, contact name at most 35 characters,
+// momsregistreringsnummer, ÅÅMM or ÅÅ-K, contact name of 5–35 characters,
 // phone at most 17 characters — digits with a hyphen after the area code or
 // a leading + — and an optional e-mail), then one row per buyer: the VAT
 // number with its country prefix, goods, trepartshandel, services. An unused
@@ -12,6 +12,12 @@
 // amount has a leading minus, and an amount may have at most 12 characters
 // including the minus. Every buyer row ends with a semicolon like the
 // page's examples ("FI01409351;16400;;;"). CRLF, ISO-8859-1, no blank lines.
+//
+// The page only states the 35-character maximum. Skatteverket's "Test av
+// filer" (Filöverföring, 2026-11-04) also refuses a name shorter than 5
+// characters, spaces included, with "Namn på kontaktperson saknas": "Ubbe",
+// "Pers" and "Bo E" were refused, while "Bo Ek", "Perss" and 35 characters
+// passed and 36 were refused.
 
 export class PeriodicSummaryAmountTooLargeError extends Error {
   constructor(vatNumber: string, amount: number) {
@@ -22,6 +28,7 @@ export class PeriodicSummaryAmountTooLargeError extends Error {
 
 export const PERIODIC_SUMMARY_FILE_IDENTIFIER = "SKV574008";
 const MAX_AMOUNT_CHARS = 12;
+const MIN_CONTACT_NAME = 5;
 const MAX_CONTACT_NAME = 35;
 const MAX_PHONE = 17;
 
@@ -44,12 +51,12 @@ export function normalizeContactPhone(raw: string | null | undefined): string | 
 }
 
 // The contact name as a field: semicolons (the file's separator) and control
-// characters become spaces, runs of spaces collapse. null = missing or
-// longer than 35 characters.
+// characters become spaces, runs of spaces collapse. null = missing, shorter
+// than 5 or longer than 35 characters.
 export function contactNameField(raw: string | null | undefined): string | null {
   // eslint-disable-next-line no-control-regex
   const name = (raw ?? "").replace(/[;\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
-  if (name === "" || name.length > MAX_CONTACT_NAME) return null;
+  if (name.length < MIN_CONTACT_NAME || name.length > MAX_CONTACT_NAME) return null;
   return name;
 }
 

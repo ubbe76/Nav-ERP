@@ -414,6 +414,7 @@ describe("/settings/vat-reporting", () => {
     for (const [payload, field] of [
       [{ contactName: "Łukasz Kowalski" }, "contactName"],
       [{ contactName: "Anna €uro" }, "contactName"],
+      [{ contactName: "Ubbe" }, "contactName"],
       [{ contactPhone: "08-123-456" }, "contactPhone"],
       [{ contactPhone: "08/123456" }, "contactPhone"],
       [{ contactPhone: "tel 0812345" }, "contactPhone"],
@@ -423,6 +424,7 @@ describe("/settings/vat-reporting", () => {
       expect([res.statusCode, res.json().code, res.json().field]).toEqual([400, "vat-reporting-contact-invalid", field]);
     }
     expect((await patch({ contactPhone: "08 / 123" })).json().error).toMatch(/^Telefonnumret ska vara siffror/);
+    expect((await patch({ contactName: "Bo E" })).json().error).toMatch(/^Kontaktpersonens namn ska vara 5–35 tecken/);
     // Nothing of a refused PATCH is saved — not even its valid period.
     expect((await app.inject({ url: "/settings/vat-reporting" })).json().period).toBe("quarter");
 
