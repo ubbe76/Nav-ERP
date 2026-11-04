@@ -42,6 +42,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
+- [ ] **Inventering per underlagets datum** — differensen bokförs per tidpunkten då underlaget skapades (värderingsdatum på lagerraden, registreringstiden orörd), bara för spärrade eller ostörda inventeringar och aldrig in i låst period/stängt år; bokslutets Lagerförändring blir Inaktuell även när lagervärdet ändras efteråt → [#26](https://github.com/ubbe76/Nav-ERP/issues/26). Första del av [#19](https://github.com/ubbe76/Nav-ERP/issues/19); manualens Inventering och Lagerförändring ("inventera före årsskiftet") ändras när punkten byggs.
 - [ ] **Lagerplatser, fortsättning** — efter fasta platser, Automatiskt uttag och plats per rad i Utleverans (2026-11-03): **spärrade lagerplatser** (t.ex. Karantän/Reklamation — saldot räknas inte i behovsberäkningen, Materialbrist och Leveranstidskontrollen och dras aldrig automatiskt), **lagerplatsregistret** med sök och sidor och en kolumn med antal artiklar/saldo per plats, och **flera lagerplatser per artikel** (huvudplats + alternativa på Lager-fliken).
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
