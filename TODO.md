@@ -128,6 +128,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
+- [ ] **Produkter i arbete (PIA) per datum** — rapport över öppna TO:ers uttagna material och rapporterade tid minus inlevererat, plus ett bokslutssteg mot 1440 → [#25](https://github.com/ubbe76/Nav-ERP/issues/25). Hemsidans svar om lagret i bokslutet säger att pågående tillverkning bokförs med eget verifikat — ändra det när punkten byggs.
 - [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare → [#8](https://github.com/ubbe76/Nav-ERP/issues/8) *(hemsidan, under både Tillverkning och Lager)*
 - [ ] **Koppling mellan en TO och dess halvfabrikats TO:er (pegging)** → [#9](https://github.com/ubbe76/Nav-ERP/issues/9) *(hemsidan)*
 - [ ] **Prognos och ABC-klassning** → [#10](https://github.com/ubbe76/Nav-ERP/issues/10)
