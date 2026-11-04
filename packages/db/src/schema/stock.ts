@@ -84,12 +84,22 @@ export const stockTransactions = pgTable(
     referenceId: uuid("reference_id"),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // Värderingsdatum (#26, migration 0180): the moment the row counts in
+    // everything "as of a date" (lagervärdering, bokslutets Lagerförändring,
+    // the moving-average replay, lagerloggens datum och löpande saldo). NULL
+    // = the same as created_at — only a stock count registered "per
+    // underlagets datum" sets it (to the session's freeze time). created_at
+    // never changes, so the log still shows when the row was registered.
+    // Every reader goes through stockValuedAt (stock/repository/valued-at.ts).
+    valuedAt: timestamp("valued_at", { withTimezone: true }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   },
   (table) => [
     index("idx_stock_transactions_article_location").on(table.articleId, table.locationId),
     // Lagerloggen sorts and date-filters across all articles.
     index("idx_stock_transactions_created_at").on(table.createdAt),
+    // …on the värderingsdatum since #26 — the same expression as stockValuedAt.
+    index("idx_stock_transactions_valued_at").on(sql`coalesce(${table.valuedAt}, ${table.createdAt})`),
     // Källa resolves rows by reference_id.
     index("idx_stock_transactions_reference_id").on(table.referenceId),
   ]

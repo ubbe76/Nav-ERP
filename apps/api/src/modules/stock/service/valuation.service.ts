@@ -4,12 +4,13 @@
 // WHERE created_at <= X); the three methods below only differ in how they
 // answer "what was the price". See TODO.md's D1 entry for the full rationale.
 //
-// KNOWN LIMITATION (documented, not fixed here — same one D0 noted for
-// unit_cost): stock_transactions only carries created_at, a timestamptz, not
-// a separate business date. Every date bound in this service therefore
-// compares the DATE PART of created_at/valid_from in the database's session
-// timezone — "as of {asOf}" really means "as booked by the end of {asOf}",
-// and a movement can never be backdated onto an earlier valuation.
+// Dates: every bound on stock_transactions is the värderingsdatum (#26,
+// stockValuedDate — valued_at when a stock count was registered per
+// underlagets datum, else created_at) as a Stockholm calendar day: "as of
+// {asOf}" means "valued by the end of {asOf} in Stockholm". Only a stock count
+// can be valued earlier than it was registered (the rest of #19 is not
+// built); the standard cost history's valid_from is still compared as the
+// database session's date.
 import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import {
   articleCodes,
@@ -23,6 +24,8 @@ import {
 } from "@navet/db";
 import { round2, type ValuationGroupBy, type ValuationMethod, type ValuationQuery } from "@navet/shared";
 import { computeMovingAverage, type MovingAverageRow } from "./moving-average.js";
+import { computeFifo, type FifoRow } from "./fifo.js";
+import { stockValuedAt, stockValuedDate } from "../repository/valued-at.js";
 import { formatNumber, type FinancialStatementPdfInput } from "../../mail/service/document-pdf.js";
 
 export interface ValuationRow {
@@ -66,6 +69,7 @@ export const METHOD_LABELS: Record<ValuationMethod, string> = {
   standard: "Standardpris",
   latest_purchase: "Senaste inköp",
   moving_average: "Vägt snitt",
+  fifo: "FIFO",
 };
 
 // Quantities live in numeric(14,4) — rounding at 2 decimals (money) would
@@ -127,7 +131,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
     return prices;
   }
 
-  // Most recent priced purchase_receipt row (created_at <= asOf) per
+  // Most recent priced purchase_receipt row (valued on or before asOf) per
   // article. Rows with unit_cost null (pre-D0, or an article without a
   // standard cost at receipt time) are excluded rather than treated as a
   // zero price.
@@ -148,12 +152,12 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
           isNotNull(stockTransactions.unitCost),
           // An undone receipt is no purchase price (its reversal has no cost).
           sql`NOT EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = ${stockTransactions.id} AND pr.undone_at IS NOT NULL)`,
-          sql`${stockTransactions.createdAt}::date <= ${asOf}::date`
+          sql`${stockValuedDate} <= ${asOf}::date`
         )
       )
       .orderBy(
         asc(stockTransactions.articleId),
-        asc(stockTransactions.createdAt),
+        asc(stockValuedAt),
         asc(stockTransactions.id)
       );
 
@@ -183,12 +187,12 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
       .where(
         and(
           inArray(stockTransactions.articleId, articleIds),
-          sql`${stockTransactions.createdAt}::date <= ${asOf}::date`
+          sql`${stockValuedDate} <= ${asOf}::date`
         )
       )
       .orderBy(
         asc(stockTransactions.articleId),
-        asc(stockTransactions.createdAt),
+        asc(stockValuedAt),
         asc(stockTransactions.id)
       );
 
@@ -208,6 +212,56 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
     return prices;
   }
 
+  // FIFO (#19): replays every row up to asOf, in värderingsdatum order,
+  // through computeFifo (fifo.ts — THE FIFO authority). Each row is told what
+  // it is to the queue: a layer (a real inflow — a receipt that was not
+  // undone, a TO receipt, a positive adjustment, stock count or saldo
+  // import), the reversal of a TO receipt (the undo's negative mo_receipt
+  // row, matched to its order), or other (outflows, transfers, the return of
+  // an outflow, an undone purchase receipt and its reversal).
+  async function fetchFifoPrices(articleIds: string[], asOf: string) {
+    const prices = new Map<string, number | null>();
+    if (articleIds.length === 0) return prices;
+
+    const rows = await db
+      .select({
+        articleId: stockTransactions.articleId,
+        quantityDelta: stockTransactions.quantityDelta,
+        unitCost: stockTransactions.unitCost,
+        transactionType: stockTransactions.transactionType,
+        referenceId: stockTransactions.referenceId,
+        undoneReceipt: sql<boolean>`EXISTS (SELECT 1 FROM ${purchaseReceipts} pr WHERE pr.stock_transaction_id = ${stockTransactions.id} AND pr.undone_at IS NOT NULL)`,
+      })
+      .from(stockTransactions)
+      .where(and(inArray(stockTransactions.articleId, articleIds), sql`${stockValuedDate} <= ${asOf}::date`))
+      .orderBy(asc(stockTransactions.articleId), asc(stockValuedAt), asc(stockTransactions.id));
+
+    const byArticle = new Map<string, FifoRow[]>();
+    for (const row of rows) {
+      const delta = Number(row.quantityDelta);
+      let kind: FifoRow["kind"] = "other";
+      if (delta > 0) {
+        if (row.transactionType === "purchase_receipt") kind = row.undoneReceipt ? "other" : "layer";
+        else if (row.transactionType === "mo_receipt" || row.transactionType === "inventory_adjustment") kind = "layer";
+      } else if (delta < 0 && row.transactionType === "mo_receipt") {
+        kind = "reversal";
+      }
+      const list = byArticle.get(row.articleId) ?? [];
+      list.push({
+        quantityDelta: delta,
+        unitCost: row.unitCost !== null ? Number(row.unitCost) : null,
+        kind,
+        key: `${row.transactionType}:${row.referenceId ?? ""}`,
+      });
+      byArticle.set(row.articleId, list);
+    }
+
+    for (const [articleId, list] of byArticle) {
+      prices.set(articleId, computeFifo(list).unitCost);
+    }
+    return prices;
+  }
+
   async function pricesFor(method: ValuationMethod, articleIds: string[], asOf: string) {
     switch (method) {
       case "standard":
@@ -216,6 +270,8 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
         return fetchLatestPurchasePrices(articleIds, asOf);
       case "moving_average":
         return fetchMovingAveragePrices(articleIds, asOf);
+      case "fifo":
+        return fetchFifoPrices(articleIds, asOf);
     }
   }
 
@@ -250,7 +306,7 @@ export function createValuationService(deps: { db: Db; pdf?: ValuationPdfRendere
         .leftJoin(articleCodes, eq(articleCodes.id, articles.articleCodeId))
         .where(
           and(
-            sql`${stockTransactions.createdAt}::date <= ${asOf}::date`,
+            sql`${stockValuedDate} <= ${asOf}::date`,
             query.groupId ? eq(articles.groupId, query.groupId) : undefined,
             query.articleCodeId ? eq(articles.articleCodeId, query.articleCodeId) : undefined
           )

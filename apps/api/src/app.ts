@@ -35,7 +35,7 @@ import { createImportService } from "./modules/import/service/import.service.js"
 import { importRoutes } from "./modules/import/routes/import.routes.js";
 import { createEconomyRepository } from "./modules/economy/repository/economy.repository.js";
 import { createEconomyService } from "./modules/economy/service/economy.service.js";
-import { createVerificationPoster } from "./modules/economy/service/verification-poster.js";
+import { createVerificationPoster, postingPeriodLockOn } from "./modules/economy/service/verification-poster.js";
 import { createVatReportService } from "./modules/economy/service/vat-report.service.js";
 import { createPeriodicSummaryService } from "./modules/economy/service/periodic-summary.service.js";
 import { createVatCodeService } from "./modules/economy/service/vat-code.service.js";
@@ -355,7 +355,10 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
   // Inventering (D2) — räknelistan (renderStockCountSheet) is the shared A4
   // template's PDF, wired in the same way as valuationService above.
   const stockCountService = createStockCountService({
-    repo: createStockCountRepository(database),
+    // #26: Registrera per underlagets datum never reaches into a closed year
+    // or a locked period — economy's verdict, injected (stock does not import
+    // economy).
+    repo: createStockCountRepository(database, { lockOn: postingPeriodLockOn }),
     pdf: documentPdfService,
     audit: auditRepository,
   });

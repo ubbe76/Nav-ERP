@@ -19,5 +19,26 @@ Grundregeln (arkitekturprincip 1): aldrig UPDATE på saldon — allt går via `s
 - **Invariant: en plats med saldo är alltid aktiv** (annars vore saldot osynligt i alla listor), åt båda hållen: `resolveStockLocation` **återaktiverar** en inaktiv plats som anges explicit (så orderrutiner inte failar mitt i när en tidigare rad tömde platsen), och `updateLocation` vägrar inaktivera en plats med saldo (`StockLocationNotEmptyError` → 409, delad `locationHoldsStock`).
 - `GET /stock/locations` ger bara aktiva platser; bara lagerplatsregistret skickar `?includeInactive=true`. Saldolistorna (`getBalances`/`balancesForArticles`) filtrerar bort saldo 0.
 - **Kostnad på lagerraden** (D0): `stock_transactions.unit_cost` (nullable, SEK) stämplas bara på **inflöden** — inleverans (IO-radens à-pris × orderns växelkurs), TO-inleverans (artikelns standardpris; konfigurerad TO: `configuration.cost.manufacturingCostPerUnit`) och positiv justering (standardpriset vid tillfället). Utflöden, flyttens båda ben (ingen värderingshändelse) och ångrade in-/utleveranser är null; saknad standardkostnad ger null, aldrig 0. Loggen är facit för värdet, så glidande medelpris härleds per datum utan lagrat snittsaldo.
+- **Värderingsdatum (#26, migration 0180, spec `private/superpowers/specs/2026-11-04-inventering-per-underlagets-datum-och-fifo.md`):**
+  - **Kolumnen:** `stock_transactions.valued_at` är nullable, och NULL betyder samma som `created_at`. Ingen skrivare behöver ändras. Bara inventeringens Registrera per underlagets datum sätter värdet, till sessionens `created_at`. `created_at` ändras aldrig.
+  - **Läsarna:** allt som visar läget per ett datum läser via `stockValuedAt`/`stockValuedDate` (`stock/repository/valued-at.ts`, lövfil; dagen räknas som Stockholmsdag, och expressionsindexet ligger på samma coalesce). Det gäller lagervärderingen, efterkalkylens Verklig kostnad (`getConsumptionMovingAverageCosts`) och lagerloggens datumfilter, sortering och löpande saldo (svaret har `valuedAt`, och CSV:n har både **Datum** och **Registrerad**).
+  - **Behåller `created_at` med flit:** störningsflaggan, inleveransloggen, senaste inleveransdatum och `getLatestConsumptionTimes`.
+  - **En ny läsare per datum ska använda helpern.**
+- **Registrera per underlagets datum (#26):**
+  - **Valet:** `postSession(id, user, bookOn?)` tar `count_date` eller `today`. Utelämnat ger underlagets datum när `backdatingVerdict` tillåter det, annars i dag. Ett uttryckligt `count_date` som inte är tillåtet ger 409 `stock-count-backdate-refused`.
+  - **Domen** gäller lika för spärrade och ospärrade inventeringar och prövar i ordning:
+    1. stängt år eller låst period på underlagets Stockholmsdag. Det kommer via det injicerade `PostingPeriodReader`, som `app.ts` binder till economys `postingPeriodLockOn`. Utan period finns inget lås. Testerna bygger repot utan läsaren (`noPostingPeriodLocks`).
+    2. en rörelse registrerad efter frysningen på de rader som bokförs (räknade, med differens), sessionens egna undantagna.
+  - **Var domen räknas:** GET räknar den för kortet (`backdating`), och postSession räknar den igen i sin transaktion.
+  - **Pris:** en bakdaterad positiv differens får standardpriset vid frysningen (`standardCostsAt`). Utan historik gäller artikelns nuvarande pris, och med bara senare historik blir priset null.
+  - **Registrerad inventering:** `valuedOn` härleds ur dess rader.
+  - **Tester:** `stock-count-backdating.test.ts`.
+- **FIFO (#19, migration 0181):** metoden `fifo` prissätts med rena `stock/service/fifo.ts` (`computeFifo`, EN implementation). `fetchFifoPrices` i `valuation.service.ts` spelar upp loggen i ordning efter värderingsdatum och märker varje rad:
+  - **layer:** inleverans som inte är ångrad (samma `NOT EXISTS` mot `purchase_receipts` som senaste inköp), positiv `mo_receipt` och positiv `inventory_adjustment` (justering, inventering och saldoimport).
+  - **reversal:** negativ `mo_receipt`, som tar tillbaka från det senaste lagret med samma TO. Ångras en äldre rapport tas den senaste, ett accepterat närmevärde.
+  - **other:** allt annat, även lagerflytt, återlämnade ut- och uttag och den ångrade inleveransen med sin återföring.
+  - **Priset:** det som finns kvar prissätts med de senaste lagren bakåt. Ett lager utan pris hoppas över, och det som inte täcks värderas till de tagna lagrens snitt. Priset har fyra decimaler.
+  - **Bokslutet:** `year_end_closings.inventory_method` tillåter `fifo`.
+  - **Tester:** `fifo.test.ts` (rent) och `stock-valuation.test.ts`.
 - **Importen av lagersaldon** (`import.md`, #3) är en `stock_transactions`-skrivare som följer samma regler: `resolveStockLocation`, `assertLocationNotUnderCount`, `deactivateEmptyLocation` vid minskning och `unit_cost` bara på ökningen (À-pris, annars standardkostnaden).
 - Läsare av `purchase_receipt`-rader som avser *inkommet* gods (inleveransloggen, senaste inköpspris i lagervärderingen, senaste inleveransdatum) filtrerar `quantity_delta > 0` och bort ångrade kvitton (se `purchase.md`).

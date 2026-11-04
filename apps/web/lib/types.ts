@@ -235,6 +235,9 @@ export interface StockTransaction {
   referenceId: string | null;
   note: string | null;
   createdAt: string;
+  // Värderingsdatum (#26): = createdAt except for a stock count registered
+  // per underlagets datum (then the count's freeze time).
+  valuedAt: string;
   // Lagerloggen: running balance (only with an article filter), who, cost.
   // unitCost/value are null for viewers without cost access (admin/ekonomi).
   balance: string | null;
@@ -252,12 +255,13 @@ export type StockTransactionReference =
 
 // --- Lagervärdering (D1) ---
 
-export type ValuationMethod = "standard" | "latest_purchase" | "moving_average";
+export type ValuationMethod = "standard" | "latest_purchase" | "moving_average" | "fifo";
 
 export const VALUATION_METHOD_LABELS: Record<ValuationMethod, string> = {
   standard: "Standardpris",
   latest_purchase: "Senaste inköp",
   moving_average: "Vägt snitt",
+  fifo: "FIFO",
 };
 
 // GET /stock/valuation[/pdf] — mirrors valuation.service.ts's ValuationRow.
@@ -4279,11 +4283,29 @@ export interface StockCountRow {
   disturbed: boolean;
 }
 
+// #26 — may an open count be booked per the day its underlag was created?
+// reason/reasonText say why not (the server's Swedish text); sameDay = the
+// underlag is from today, so there is nothing to choose.
+export type StockCountBackdateReason = "year_closed" | "period_locked" | "disturbed";
+export interface StockCountBackdating {
+  countDate: string;
+  sameDay: boolean;
+  allowed: boolean;
+  reason: StockCountBackdateReason | null;
+  reasonText: string | null;
+}
+
+export type StockCountBookOn = "count_date" | "today";
+
 export interface StockCountDetail extends StockCountSession {
   note: string | null;
   // The place's etikettkod (LP0042) — the räknelista's barcode.
   locationLabelCode: string;
   rows: StockCountRow[];
+  // Open counts only.
+  backdating: StockCountBackdating | null;
+  // Posted counts booked per underlagets datum: that day (else null).
+  valuedOn: string | null;
 }
 
 // POST /stock-counts/:id/post
@@ -4292,6 +4314,7 @@ export interface StockCountPostResult {
   adjustments: number;
   counted: number;
   skipped: number;
+  valuedOn: string | null;
 }
 
 // Behovsberäkning (MRP light, E1). GET /planning/requirements — one row per
@@ -5014,6 +5037,11 @@ export interface YearEndClosingDetail {
   steps: {
     inventory: {
       status: "not_done" | "done" | "stale";
+      // stale: the account drifted ("ledger") or the valuation per the
+      // closing date changed after the booking ("valuation", #26 —
+      // currentValue is what a re-run would book).
+      staleReason: "ledger" | "valuation" | null;
+      currentValue: number | null;
       method: ValuationMethod | null;
       value: number | null;
       verification: YearEndVerificationRef | null;

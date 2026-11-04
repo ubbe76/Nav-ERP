@@ -1,6 +1,7 @@
-import { and, asc, count, desc, eq, gt, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
   articles,
+  articleStandardCostHistory,
   stockCountRows,
   stockCountSessions,
   stockLocations,
@@ -16,14 +17,17 @@ import {
   type AddStockCountRowInput,
   type CreateStockCountInput,
   type ListStockCountsQuery,
+  type StockCountBookOn,
   type UpdateStockCountRowInput,
 } from "@navet/shared";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { deactivateEmptyLocation } from "../service/location-lifecycle.js";
+import { stockValuedDate } from "./valued-at.js";
 import {
   ArticleNotFoundError,
   DuplicateStockCountRowError,
+  StockCountBackdateRefusedError,
   InactiveStockLocationError,
   StockCountAlreadyOpenError,
   StockCountNotFoundError,
@@ -42,6 +46,110 @@ async function balanceFor(db: Db | Tx, articleId: string, locationId: string): P
   return row?.quantity ?? "0";
 }
 
+// Inventering per underlagets datum (#26). Bookkeeping lives in the economy
+// module, so whether the count's day may still be written to arrives through
+// this reader (app.ts binds economy's postingPeriodLockOn). No covering
+// accounting period is no lock — the stock log is not bookkeeping.
+export interface PostingPeriodReader {
+  lockOn(executor: Db | Tx, date: string): Promise<{ kind: "year_closed"; yearLabel: string } | { kind: "period_locked" } | null>;
+}
+
+// Tests that never backdate into a locked period build the repository without
+// economy; app.ts always passes the real reader.
+export const noPostingPeriodLocks: PostingPeriodReader = { lockOn: async () => null };
+
+export type StockCountBackdateReason = "year_closed" | "period_locked" | "disturbed";
+
+// sv-SE formats ISO-style (YYYY-MM-DD); explicit zone — the container may run UTC.
+const stockholmDay = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" });
+export const stockholmDateOf = (instant: Date): string => stockholmDay.format(instant);
+
+// May the count be booked per the moment its underlag was created? Only when
+// the counted figures provably describe that moment and the day is still
+// open for bookkeeping:
+//  - no row that will be booked (counted, non-zero difference) has had a
+//    movement registered on the location after the freeze, other than the
+//    session's own — a blocking session passes by construction (the guard's
+//    accepted TOCTOU aside), an unblocked one only when nothing happened;
+//  - the day is in neither a closed fiscal year nor a locked period.
+// The first refusal wins, the year/period before the movements (they are the
+// harder rule: nothing at all may be written there). Read by GET (the card's
+// choice) and again inside postSession's transaction (the authority).
+async function backdatingVerdict(
+  executor: Db | Tx,
+  periods: PostingPeriodReader,
+  session: { id: string; locationId: string; createdAt: Date },
+  bookedArticleIds: string[]
+): Promise<{ countDate: string; reason: StockCountBackdateReason | null; reasonText: string | null }> {
+  const countDate = stockholmDateOf(session.createdAt);
+  const lock = await periods.lockOn(executor, countDate);
+  if (lock?.kind === "year_closed") {
+    return { countDate, reason: "year_closed", reasonText: `Räkenskapsåret ${lock.yearLabel} är stängt.` };
+  }
+  if (lock?.kind === "period_locked") {
+    return { countDate, reason: "period_locked", reasonText: `Bokföringsperioden för ${countDate} är låst.` };
+  }
+  if (bookedArticleIds.length > 0) {
+    const [moved] = await executor
+      .select({ id: stockTransactions.id })
+      .from(stockTransactions)
+      .where(
+        and(
+          eq(stockTransactions.locationId, session.locationId),
+          inArray(stockTransactions.articleId, bookedArticleIds),
+          gt(stockTransactions.createdAt, session.createdAt),
+          or(isNull(stockTransactions.referenceId), ne(stockTransactions.referenceId, session.id))!
+        )
+      )
+      .limit(1);
+    if (moved) {
+      return {
+        countDate,
+        reason: "disturbed",
+        reasonText: "Inventeringens artiklar har fått lagerrörelser på lagerplatsen efter att underlaget skapades.",
+      };
+    }
+  }
+  return { countDate, reason: null, reasonText: null };
+}
+
+// The rows postSession books: counted, with a difference against the snapshot.
+function bookedRows<T extends { snapshotQuantity: string; countedQuantity: string | null }>(rows: T[]): T[] {
+  return rows.filter((r) => r.countedQuantity !== null && Number(r.countedQuantity) - Number(r.snapshotQuantity) !== 0);
+}
+
+// The standard cost each article had at `at` (D1's history: the latest row
+// with valid_from <= at). An article with no history at all keeps its
+// current standard cost (articles from before the history); one whose
+// history only starts later had none then — null, never 0 (D0).
+async function standardCostsAt(executor: Db | Tx, articleIds: string[], at: Date): Promise<Map<string, string | null>> {
+  const result = new Map<string, string | null>();
+  if (articleIds.length === 0) return result;
+  const history = await executor
+    .select({
+      articleId: articleStandardCostHistory.articleId,
+      cost: articleStandardCostHistory.cost,
+      validFrom: articleStandardCostHistory.validFrom,
+    })
+    .from(articleStandardCostHistory)
+    .where(inArray(articleStandardCostHistory.articleId, articleIds))
+    .orderBy(asc(articleStandardCostHistory.articleId), asc(articleStandardCostHistory.validFrom), asc(articleStandardCostHistory.id));
+  const current = await executor
+    .select({ id: articles.id, standardCost: articles.standardCost })
+    .from(articles)
+    .where(inArray(articles.id, articleIds));
+  const withHistory = new Set<string>();
+  for (const row of history) {
+    withHistory.add(row.articleId);
+    if (!result.has(row.articleId)) result.set(row.articleId, null);
+    if (row.validFrom.getTime() <= at.getTime()) result.set(row.articleId, row.cost);
+  }
+  for (const article of current) {
+    if (!withHistory.has(article.id)) result.set(article.id, article.standardCost ?? null);
+  }
+  return result;
+}
+
 // Loads the session FOR UPDATE and asserts it is still open — every mutation
 // (row edits, post, cancel) goes through this so two concurrent registrations
 // cannot both book the differences.
@@ -56,7 +164,7 @@ async function lockOpenSession(tx: Tx, id: string) {
   return session;
 }
 
-export function createStockCountRepository(db: Db) {
+export function createStockCountRepository(db: Db, periods: PostingPeriodReader = noPostingPeriodLocks) {
   return {
     // Freeze: allocates the INV number (document series — inside the tx, a
     // failed create must roll the number back too), seeds one row per
@@ -253,6 +361,39 @@ export function createStockCountRepository(db: Db) {
         .where(and(...disturbedConditions));
       const disturbed = new Set(disturbedRows.map((d) => d.articleId));
 
+      // #26: an open count says whether Registrera may book it per the
+      // underlag's day (the card's choice); a posted one says which day it
+      // was booked per when that was not its registration day's own moment.
+      let backdating = null;
+      if (session.status === "open") {
+        const verdict = await backdatingVerdict(
+          db,
+          periods,
+          session,
+          bookedRows(rows).map((r) => r.articleId)
+        );
+        backdating = {
+          ...verdict,
+          allowed: verdict.reason === null,
+          sameDay: verdict.countDate === stockholmDateOf(new Date()),
+        };
+      }
+      let valuedOn: string | null = null;
+      if (session.status === "posted") {
+        const [valued] = await db
+          .select({ day: sql<string>`${stockValuedDate}::text` })
+          .from(stockTransactions)
+          .where(
+            and(
+              eq(stockTransactions.referenceId, session.id),
+              eq(stockTransactions.transactionType, "inventory_adjustment"),
+              isNotNull(stockTransactions.valuedAt)
+            )
+          )
+          .limit(1);
+        valuedOn = valued?.day ?? null;
+      }
+
       const { locationLabelNumber, ...header } = session;
       return {
         ...header,
@@ -262,6 +403,8 @@ export function createStockCountRepository(db: Db) {
         rowCount: rows.length,
         countedCount: rows.filter((r) => r.countedQuantity !== null).length,
         rows: rows.map((r) => ({ ...r, disturbed: disturbed.has(r.articleId) })),
+        backdating,
+        valuedOn,
       };
     },
 
@@ -324,7 +467,15 @@ export function createStockCountRepository(db: Db) {
     // zeroed. Writes directly (not via createTransaction) so a blocking
     // session doesn't refuse its own resolution — the status flips to
     // posted in the same tx, releasing the guard atomically.
-    async postSession(id: string, postedBy: string | null) {
+    //
+    // #26 — bookOn: "count_date" values the rows at the freeze moment
+    // (valued_at = the session's created_at; a positive difference at the
+    // standard cost of that moment), "today" as before (valued_at null, the
+    // current standard cost). Omitted = the card's default: the underlag's
+    // day when backdatingVerdict allows it, else today. An explicit
+    // "count_date" that is not allowed is refused (409), never silently
+    // booked today.
+    async postSession(id: string, postedBy: string | null, bookOn?: StockCountBookOn) {
       return db.transaction(async (tx) => {
         const session = await lockOpenSession(tx, id);
         // standardCost joined along (D0 rule 3) — one query, not one lookup
@@ -341,6 +492,26 @@ export function createStockCountRepository(db: Db) {
           .leftJoin(articles, eq(articles.id, stockCountRows.articleId))
           .where(eq(stockCountRows.sessionId, id));
 
+        const toBook = bookedRows(rows);
+        const verdict = await backdatingVerdict(
+          tx,
+          periods,
+          session,
+          toBook.map((r) => r.articleId)
+        );
+        if (bookOn === "count_date" && verdict.reason !== null) {
+          throw new StockCountBackdateRefusedError(session.countNumber, verdict.countDate, verdict.reasonText!);
+        }
+        const backdated = (bookOn ?? (verdict.reason === null ? "count_date" : "today")) === "count_date";
+        const valuedAt = backdated ? session.createdAt : null;
+        const costAtFreeze = backdated
+          ? await standardCostsAt(
+              tx,
+              toBook.filter((r) => Number(r.countedQuantity) > Number(r.snapshotQuantity)).map((r) => r.articleId),
+              session.createdAt
+            )
+          : null;
+
         let adjustments = 0;
         let counted = 0;
         let hasNegative = false;
@@ -351,9 +522,10 @@ export function createStockCountRepository(db: Db) {
           if (diff === 0) continue;
 
           // D0 rule 3: a positive adjustment is an inflow valued at the
-          // article's current standard cost — null (never 0) when unset.
+          // article's standard cost — the one of the freeze moment when
+          // backdated (#26), else the current one; null (never 0) when unset.
           // Negative diffs are outflows and carry no cost.
-          const unitCost = diff > 0 ? (row.standardCost ?? null) : null;
+          const unitCost = diff > 0 ? (costAtFreeze ? (costAtFreeze.get(row.articleId) ?? null) : (row.standardCost ?? null)) : null;
 
           await tx.insert(stockTransactions).values({
             articleId: row.articleId,
@@ -364,6 +536,7 @@ export function createStockCountRepository(db: Db) {
             note: row.note ? `Inventering ${session.countNumber} — ${row.note}` : `Inventering ${session.countNumber}`,
             createdBy: postedBy,
             unitCost,
+            valuedAt,
           });
           adjustments += 1;
           if (diff < 0) hasNegative = true;
@@ -389,7 +562,14 @@ export function createStockCountRepository(db: Db) {
           .where(eq(stockCountSessions.id, id))
           .returning();
 
-        return { session: updated!, adjustments, counted, skipped: rows.length - counted };
+        return {
+          session: updated!,
+          adjustments,
+          counted,
+          skipped: rows.length - counted,
+          // The day the differences count on when booked per the underlag.
+          valuedOn: backdated && adjustments > 0 ? verdict.countDate : null,
+        };
       });
     },
 

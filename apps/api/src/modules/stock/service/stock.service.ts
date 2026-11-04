@@ -26,6 +26,7 @@ export {
   InsufficientStockError,
   LocationUnderStockCountError,
   StockCountAlreadyOpenError,
+  StockCountBackdateRefusedError,
   StockCountNotFoundError,
   StockCountNotOpenError,
   StockCountRowNotFoundError,

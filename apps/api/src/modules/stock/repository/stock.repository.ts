@@ -19,6 +19,7 @@ import { resolveStockLocation } from "../service/location-resolver.js";
 import { deactivateEmptyLocation, locationHoldsStock } from "../service/location-lifecycle.js";
 import { assertLocationNotUnderCount } from "../service/count-guard.js";
 import { compareOutflowLocations } from "../service/outflow-allocation.js";
+import { stockValuedAt } from "./valued-at.js";
 import {
   ilikePattern,
   type CreateStockLocationInput,
@@ -329,7 +330,10 @@ export function createStockRepository(db: Db) {
     // shared by the rows and the count query. The running balance is a window
     // over the article's FULL history (restricted to the location only when a
     // location filter is set), computed in its own subquery and joined back by
-    // id — so type/direction/date/search filters never change it.
+    // id — so type/direction/date/search filters never change it. Dates, the
+    // order and the running balance follow the värderingsdatum (#26,
+    // stockValuedAt): a stock count registered per underlagets datum sits at
+    // its freeze time; createdAt still says when the row was registered.
     async listTransactions(query: ListStockTransactionsQuery) {
       const conditions: (SQL | undefined)[] = [];
       if (query.search) {
@@ -343,11 +347,11 @@ export function createStockRepository(db: Db) {
       if (query.direction === "out") conditions.push(sql`${stockTransactions.quantityDelta} < 0`);
       // from/to are Stockholm calendar days, inclusive.
       if (query.from) {
-        conditions.push(sql`${stockTransactions.createdAt} >= (${query.from}::date)::timestamp AT TIME ZONE 'Europe/Stockholm'`);
+        conditions.push(sql`${stockValuedAt} >= (${query.from}::date)::timestamp AT TIME ZONE 'Europe/Stockholm'`);
       }
       if (query.to) {
         conditions.push(
-          sql`${stockTransactions.createdAt} < ((${query.to}::date + 1)::timestamp AT TIME ZONE 'Europe/Stockholm')`
+          sql`${stockValuedAt} < ((${query.to}::date + 1)::timestamp AT TIME ZONE 'Europe/Stockholm')`
         );
       }
       const where = and(...conditions);
@@ -356,7 +360,7 @@ export function createStockRepository(db: Db) {
         ? db
             .select({
               id: stockTransactions.id,
-              balance: sql<string>`sum(${stockTransactions.quantityDelta}) over (order by ${stockTransactions.createdAt}, (${stockTransactions.quantityDelta} > 0), ${stockTransactions.id})`.as(
+              balance: sql<string>`sum(${stockTransactions.quantityDelta}) over (order by ${stockValuedAt}, (${stockTransactions.quantityDelta} > 0), ${stockTransactions.id})`.as(
                 "balance"
               ),
             })
@@ -379,6 +383,8 @@ export function createStockRepository(db: Db) {
       const rowsBase = db
         .select({
           ...getTableColumns(stockTransactions),
+          // Always set — the column's NULL means "same as createdAt".
+          valuedAt: stockValuedAt,
           articleNumber: articles.articleNumber,
           articleName: articles.name,
           locationName: stockLocations.name,
@@ -425,7 +431,7 @@ export function createStockRepository(db: Db) {
         (balanceSq ? rowsBase.leftJoin(balanceSq, eq(balanceSq.id, t.id)) : rowsBase)
           .where(where)
           .orderBy(
-            desc(stockTransactions.createdAt),
+            desc(stockValuedAt),
             sql`(${stockTransactions.quantityDelta} > 0) desc`,
             desc(stockTransactions.id)
           )

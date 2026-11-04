@@ -17,7 +17,7 @@ import {
   type ValuationResponse,
 } from "../../lib/types";
 
-const VALUATION_METHODS: ValuationMethod[] = ["standard", "latest_purchase", "moving_average"];
+const VALUATION_METHODS: ValuationMethod[] = ["standard", "latest_purchase", "moving_average", "fifo"];
 
 function isValuationMethod(value: string | undefined): value is ValuationMethod {
   return value !== undefined && (VALUATION_METHODS as string[]).includes(value);

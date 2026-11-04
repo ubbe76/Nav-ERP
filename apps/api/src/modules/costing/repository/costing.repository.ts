@@ -25,6 +25,7 @@ import {
 import type { CostCalculationType, CostingMaterialSource, CostMaterialRowKind, CostPriceSource } from "@navet/shared";
 import { explodeBom } from "../../article/service/bom-explosion.js";
 import { weightedActualCosts } from "../service/actual-cost.js";
+import { stockValuedAt } from "../../stock/repository/valued-at.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
 import type { StandardCostHistoryRow, SupplierSnapshotRow } from "../service/price-at.js";
 
@@ -318,12 +319,17 @@ export function createCostingRepository(db: Db) {
     // A component drawn at two different operations shares one figure: the
     // stock log records the MO, not the operation, so the result is the
     // quantity-weighted average across the order's draws of that article.
+    //
+    // The replay runs on the värderingsdatum (#26, stockValuedAt — the field
+    // keeps the name createdAt that weightedActualCosts reads): a stock count
+    // registered per underlagets datum weighs in at its freeze time, before a
+    // draw that was registered between the freeze and the registration.
     async getConsumptionMovingAverageCosts(manufacturingOrderId: string) {
       const draws = await db
         .select({
           articleId: stockTransactions.articleId,
           quantityDelta: stockTransactions.quantityDelta,
-          createdAt: stockTransactions.createdAt,
+          createdAt: stockValuedAt,
           id: stockTransactions.id,
         })
         .from(stockTransactions)
@@ -341,7 +347,7 @@ export function createCostingRepository(db: Db) {
           articleId: stockTransactions.articleId,
           quantityDelta: stockTransactions.quantityDelta,
           unitCost: stockTransactions.unitCost,
-          createdAt: stockTransactions.createdAt,
+          createdAt: stockValuedAt,
           id: stockTransactions.id,
         })
         .from(stockTransactions)
@@ -349,7 +355,7 @@ export function createCostingRepository(db: Db) {
         // Ties on the timestamp are broken by id so the replay is
         // deterministic — a receipt and a draw booked in the same transaction
         // share createdAt to the microsecond.
-        .orderBy(asc(stockTransactions.articleId), asc(stockTransactions.createdAt), asc(stockTransactions.id));
+        .orderBy(asc(stockTransactions.articleId), asc(stockValuedAt), asc(stockTransactions.id));
 
       return weightedActualCosts(draws, history);
     },

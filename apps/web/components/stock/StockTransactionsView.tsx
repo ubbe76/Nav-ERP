@@ -138,8 +138,25 @@ export function StockTransactionsView({ transactions, locations, article, pageSi
         emptyText="Inga transaktioner matchar filtren"
         renderCell={(row, key) => {
           switch (key) {
-            case "createdAt":
-              return new Date(row.createdAt).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm" });
+            case "createdAt": {
+              // Datum is the värderingsdatum (#26); a stock count booked per
+              // underlagets datum also says when it was registered.
+              const valued = new Date(row.valuedAt).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm" });
+              if (row.valuedAt === row.createdAt) return valued;
+              const registered = new Date(row.createdAt).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm" });
+              // Same day: only the tooltip — the line is for another day.
+              return (
+                <span title={`Registrerad ${registered}`}>
+                  {valued}
+                  {registered.slice(0, 10) !== valued.slice(0, 10) && (
+                    <>
+                      <br />
+                      <small>Registrerad {registered.slice(0, 10)}</small>
+                    </>
+                  )}
+                </span>
+              );
+            }
             case "articleNumber":
               return `${row.articleNumber} — ${row.articleName}`;
             case "locationName":

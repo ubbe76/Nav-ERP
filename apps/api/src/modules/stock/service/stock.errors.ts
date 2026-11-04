@@ -87,6 +87,16 @@ export class StockCountNotOpenError extends Error {
   }
 }
 
+// #26: Registrera per underlagets datum asked for explicitly, but the count
+// may not be backdated (a closed year, a locked period, or movements on its
+// articles after the freeze). The reason is the server's own Swedish text.
+export class StockCountBackdateRefusedError extends Error {
+  constructor(countNumber: string, countDate: string, reasonText: string) {
+    super(`Inventeringen ${countNumber} kan inte bokföras per ${countDate}: ${reasonText} Registrera den per i dag i stället.`);
+    this.name = "StockCountBackdateRefusedError";
+  }
+}
+
 export class StockCountAlreadyOpenError extends Error {
   constructor(locationName: string) {
     super(`Lagerplatsen ${locationName} har redan en pågående inventering`);

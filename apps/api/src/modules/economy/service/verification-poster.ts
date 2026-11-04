@@ -760,6 +760,26 @@ export async function assertPostablePeriod(executor: Db | Tx, date: string): Pro
   if (period.status === "locked") throw new AccountingPeriodLockedError(date);
 }
 
+// The same lookup as a verdict instead of a throw, for a writer that is not a
+// verification but must not reach back into a closed year or a locked period
+// either — a stock count registered per underlagets datum (#26, bound into
+// the stock module in app.ts). No covering period is no lock: the stock log
+// is not bookkeeping.
+export async function postingPeriodLockOn(
+  executor: Db | Tx,
+  date: string
+): Promise<{ kind: "year_closed"; yearLabel: string } | { kind: "period_locked" } | null> {
+  const [period] = await executor
+    .select({ status: accountingPeriods.status, yearStatus: fiscalYears.status, yearLabel: fiscalYears.label })
+    .from(accountingPeriods)
+    .innerJoin(fiscalYears, eq(fiscalYears.id, accountingPeriods.fiscalYearId))
+    .where(and(lte(accountingPeriods.startDate, date), gte(accountingPeriods.endDate, date)));
+  if (!period) return null;
+  if (period.yearStatus === "closed") return { kind: "year_closed", yearLabel: period.yearLabel };
+  if (period.status === "locked") return { kind: "period_locked" };
+  return null;
+}
+
 // By-ID sibling of createPostingAccountResolver for the fixed-asset
 // postings, whose accounts are the category's FK columns. Missing and
 // inactive are the same misconfiguration here; the error names the number

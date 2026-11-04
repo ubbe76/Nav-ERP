@@ -52,9 +52,24 @@ describe("evaluateWarnings", () => {
   });
 
   it("warns when the inventory account drifted after steg 2", () => {
-    const [warning] = evaluateWarnings({ ...CLEAN, inventoryStale: { ledger: 213450, value: 212450 } });
+    const [warning] = evaluateWarnings({
+      ...CLEAN,
+      inventoryStale: { reason: "ledger", ledger: 213450, value: 212450, currentValue: 212450 },
+    });
     expect(warning!.code).toBe("inventory-stale");
     expect(warning!.message).toContain(formatNumber(212450));
+    expect(warning!.message).toMatch(/^Lagerkontots saldo/);
+  });
+
+  it("warns when the valuation per the closing date changed after steg 2 (#26)", () => {
+    const [warning] = evaluateWarnings({
+      ...CLEAN,
+      inventoryStale: { reason: "valuation", ledger: 212450, value: 212450, currentValue: 214000 },
+    });
+    expect(warning!.code).toBe("inventory-stale");
+    expect(warning!.message).toBe(
+      `Lagervärdet per bokslutsdagen är nu ${formatNumber(214000)}, men steg 2 bokförde ${formatNumber(212450)} — gör om steg 2`
+    );
   });
 
   it("phrases the receivables difference as ledger − register", () => {

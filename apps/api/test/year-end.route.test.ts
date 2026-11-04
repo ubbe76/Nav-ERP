@@ -126,7 +126,7 @@ describe("year-end-closings routes", () => {
     const res = await app.inject({ method: "POST", url: `/year-end-closings/${created.json().id}/inventory`, payload: { method: "standard" } });
     expect(res.statusCode).toBe(409);
     expect(res.json().code).toBe("year-end-blocked");
-    const bad = await app.inject({ method: "POST", url: `/year-end-closings/${created.json().id}/inventory`, payload: { method: "fifo" } });
+    const bad = await app.inject({ method: "POST", url: `/year-end-closings/${created.json().id}/inventory`, payload: { method: "lifo" } });
     expect(bad.statusCode).toBe(400);
     await app.close();
   });
@@ -138,7 +138,7 @@ describe("year-end-closings routes", () => {
     const preview = await app.inject({ url: `/year-end-closings/${created.json().id}/inventory-preview?method=standard` });
     expect(preview.statusCode).toBe(200);
     expect(preview.json()).toMatchObject({ asOf: `${YEAR}-12-31`, method: "standard", value: 0, difference: 0, rows: [] });
-    const badMethod = await app.inject({ url: `/year-end-closings/${created.json().id}/inventory-preview?method=fifo` });
+    const badMethod = await app.inject({ url: `/year-end-closings/${created.json().id}/inventory-preview?method=lifo` });
     expect(badMethod.statusCode).toBe(400);
 
     const conflicting = buildYearEndApp(user.id, {

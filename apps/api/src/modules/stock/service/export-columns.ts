@@ -35,6 +35,9 @@ const STOCK_TRANSACTION_TYPE_LABELS: Record<StockTransactionType, string> = {
 
 export interface StockTransactionExportRow {
   createdAt: string | Date;
+  // Värderingsdatum (#26) — = createdAt except for a stock count registered
+  // per underlagets datum.
+  valuedAt: string | Date;
   articleNumber: string;
   articleName: string;
   warehouseName: string | null;
@@ -67,13 +70,20 @@ export function stockReferenceLabel(ref: StockTransactionReference | null, quant
 }
 
 // Order mirrors the web table: Datum, Artikel, Lagerplats, Typ, Mängd, Saldo,
-// Källa, Vem, À-pris, Värde, Anteckning. Saldo is only included when the export
+// Källa, Vem, À-pris, Värde, Anteckning — plus Registrerad after Datum, which
+// the web shows under the date only when the two differ (#26: Datum is the
+// värderingsdatum, Registrerad when the row was booked). Saldo is only included when the export
 // is filtered to one article; À-pris/Värde are dropped entirely for users
 // without cost access (includeCost = false) and blank where there is no cost.
 export function stockTransactionColumns(includeCost: boolean, includeBalance: boolean): CsvColumn<StockTransactionExportRow>[] {
   const columns: CsvColumn<StockTransactionExportRow>[] = [
     {
       label: "Datum",
+      value: (r) => (r.valuedAt instanceof Date ? r.valuedAt.toISOString() : r.valuedAt),
+      format: "datetime",
+    },
+    {
+      label: "Registrerad",
       value: (r) => (r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt),
       format: "datetime",
     },

@@ -14,9 +14,6 @@
 
 Kan dölja allvarliga fel — och kan redan vara gjort.
 
-- [ ] Provuppladdning av momsdeklarationsfilen i Skatteverkets e-tjänst. Elementordningen är kontrollerad mot Skatteverkets DTD (`eSKDUpload_6p0.dtd`, låst i `vat-file.test.ts` 2026-11-01); kvar är e-tjänstens egna kontroller (organisationsnummer, period).
-- [ ] Ladda upp en genererad pain.001 i bankens valideringstjänst (Swedbank Validex) och lägg in företagets IBAN.
-- [ ] Prova utlandsbetalningsfilen i bankens valideringstjänst.
 
 ### Allvarliga — fel belopp, bokföring eller lön
 
@@ -42,7 +39,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Inventering per underlagets datum** — differensen bokförs per tidpunkten då underlaget skapades (värderingsdatum på lagerraden, registreringstiden orörd), bara för spärrade eller ostörda inventeringar och aldrig in i låst period/stängt år; bokslutets Lagerförändring blir Inaktuell även när lagervärdet ändras efteråt → [#26](https://github.com/ubbe76/Nav-ERP/issues/26). Första del av [#19](https://github.com/ubbe76/Nav-ERP/issues/19); manualens Inventering och Lagerförändring ("inventera före årsskiftet") ändras när punkten byggs.
 - [ ] **Lagerplatser, fortsättning** — efter fasta platser, Automatiskt uttag och plats per rad i Utleverans (2026-11-03): **spärrade lagerplatser** (t.ex. Karantän/Reklamation — saldot räknas inte i behovsberäkningen, Materialbrist och Leveranstidskontrollen och dras aldrig automatiskt), **lagerplatsregistret** med sök och sidor och en kolumn med antal artiklar/saldo per plats, och **flera lagerplatser per artikel** (huvudplats + alternativa på Lager-fliken).
 - [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
@@ -140,7 +136,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ### Låg
 
 - [ ] **Detaljplanering per dag eller timme och köberäkning** (medvetet utanför v1) → [#18](https://github.com/ubbe76/Nav-ERP/issues/18) *(hemsidan)*
-- [ ] **FIFO-värdering och bakdaterade lagerrörelser** → [#19](https://github.com/ubbe76/Nav-ERP/issues/19) *(hemsidan)*
+- [ ] **Bakdaterade lagerrörelser** → [#19](https://github.com/ubbe76/Nav-ERP/issues/19) *(hemsidan)*. FIFO-värderingen och inventering per underlagets datum (#26) är klara sedan 2026-11-04. Kvar är att registrera andra lagerrörelser med ett tidigare värderingsdatum, eftersom kolumnen `valued_at` redan finns. Hemsidans text ("Det finns ingen FIFO-värdering …" och metodlistorna i `areas.ts`) ändras vid nästa version.
 - [ ] **Lämna momsdeklarationen direkt till Skatteverket** → [#20](https://github.com/ubbe76/Nav-ERP/issues/20) *(hemsidan)*
 - [ ] **Färdig koppling till en webbutik** → [#21](https://github.com/ubbe76/Nav-ERP/issues/21) *(hemsidan)*
 - [ ] **Färdiga kollektivavtal att välja** — OB-fönster, övertidströskel och tidkoder läggs upp av företaget självt. *(hemsidan)*

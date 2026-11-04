@@ -155,11 +155,40 @@ describe("steg 2 — lagerförändring", () => {
 
     const detail = await service.getClosing(closing.id);
     expect(detail.steps.inventory.status).toBe("stale");
+    expect(detail.steps.inventory.staleReason).toBe("ledger");
     expect(detail.checks.warnings.map((w) => w.code)).toContain("inventory-stale");
 
     const rerun = await service.bookInventory(closing.id, { method: "moving_average" }, user.id);
     expect(rerun.difference).toBe(31450); // 212 450 − (180 000 + 1 000)
     expect((await service.getClosing(closing.id)).steps.inventory.status).toBe("done");
+  });
+
+  // #26: a stock count registered per underlagets datum (or a standard cost
+  // set afterwards) changes the valuation per the closing date after the
+  // booking, without touching 1460.
+  it("flags a changed valuation per the closing date as stale and books the change on re-run", async () => {
+    const { user, yearId } = await setupYearEnd();
+    await openingInventory(user.id, 180000);
+    const valuation = fakeValuation(212450);
+    const service = buildYearEndService({ inventory: valuation.reader });
+    const closing = await service.startClosing({ fiscalYearId: yearId }, user.id);
+    await service.bookInventory(closing.id, { method: "moving_average" }, user.id);
+    expect((await service.getClosing(closing.id)).steps.inventory).toMatchObject({
+      status: "done",
+      staleReason: null,
+      currentValue: 212450,
+    });
+
+    valuation.state.value = 214000;
+    const detail = await service.getClosing(closing.id);
+    expect(detail.steps.inventory).toMatchObject({ status: "stale", staleReason: "valuation", value: 212450, currentValue: 214000 });
+    expect(valuation.calls.at(-1)).toEqual({ asOf: `${YEAR}-12-31`, method: "moving_average" });
+    const warning = detail.checks.warnings.find((w) => w.code === "inventory-stale");
+    expect(warning?.message).toMatch(/^Lagervärdet per bokslutsdagen är nu/);
+
+    const rerun = await service.bookInventory(closing.id, { method: "moving_average" }, user.id);
+    expect(rerun.difference).toBe(34000); // 214 000 − 180 000 (the ledger without the step's own booking)
+    expect((await service.getClosing(closing.id)).steps.inventory).toMatchObject({ status: "done", staleReason: null });
   });
 
   // Review Focus 2.

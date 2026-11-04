@@ -141,8 +141,10 @@ export interface WarningInput {
   payables: LedgerComparison | null;
   fixedAssetMismatches: string[];
   revenueWithoutVatBox: { accountNumber: string; accountName: string; net: number }[];
-  // Steg 2 done but the inventory account no longer equals the booked value.
-  inventoryStale: { ledger: number; value: number } | null;
+  // Steg 2 done but the inventory account no longer equals the booked value
+  // ("ledger"), or the valuation per the closing date no longer gives it
+  // ("valuation" — #26: a backdated stock count, a standard cost set later).
+  inventoryStale: { reason: "ledger" | "valuation"; ledger: number; value: number; currentValue: number } | null;
   // The valutaomvärdering is booked but the open foreign items (or their
   // currencies) changed since — a re-run would book something else.
   fxRevaluationStale?: boolean;
@@ -201,7 +203,10 @@ export function evaluateWarnings(input: WarningInput): YearEndCheck[] {
   if (input.inventoryStale) {
     warnings.push({
       code: "inventory-stale",
-      message: `Lagerkontots saldo (${formatNumber(input.inventoryStale.ledger)}) stämmer inte med den bokförda lagervärderingen (${formatNumber(input.inventoryStale.value)}) — gör om steg 2`,
+      message:
+        input.inventoryStale.reason === "valuation"
+          ? `Lagervärdet per bokslutsdagen är nu ${formatNumber(input.inventoryStale.currentValue)}, men steg 2 bokförde ${formatNumber(input.inventoryStale.value)} — gör om steg 2`
+          : `Lagerkontots saldo (${formatNumber(input.inventoryStale.ledger)}) stämmer inte med den bokförda lagervärderingen (${formatNumber(input.inventoryStale.value)}) — gör om steg 2`,
     });
   }
   if (input.fxRevaluationStale) {

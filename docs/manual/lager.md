@@ -49,6 +49,8 @@ Välj format i dialogen:
 
 **Lager → Transaktioner** (`/lager/transaktioner`) är hela loggen, nyast först. Kolumnerna är **Datum**, **Artikel**, **Lagerplats**, **Typ**, **Mängd** (+/−), **Saldo**, **Källa**, **Vem**, **À-pris**, **Värde** och **Anteckning**. Från artikelkortets Lager-flik öppnar länken **Visa lagerlogg** loggen med artikeln förvald.
 
+**Datum** är dagen raden räknas på i lagervärderingen. Det är samma tidpunkt som raden registrerades, utom för en inventering som registrerats per underlagets datum (se [Räkna och registrera](#rakna-och-registrera)). Då står raden på tidpunkten då underlaget skapades, och registrerades den en annan dag står **Registrerad** med den dagen under datumet. Ordningen, datumfiltret och **Saldo** följer **Datum**. CSV-exporten har båda tidpunkterna, i kolumnerna **Datum** och **Registrerad**.
+
 ### Filter
 
 Sök på artikelnummer eller benämning, eller använd filtren: artikel (artikelväljaren), **Alla lagerplatser**, **Alla typer**, **In och ut** (Inflöden/Utflöden) samt datumfälten **Från** och **Till**. Datumen är kalenderdagar i svensk tid och gäller inklusive båda dagarna. Filtren ligger i sidans URL (går att bokmärka), följer med när du bläddrar mellan sidor och gäller även **Exportera CSV** (där kolumnen Saldo bara tas med när en artikel är vald).
@@ -143,6 +145,15 @@ Skriv ut **räknelistan** med **Skriv ut räknelista** — den är avsiktligt *b
 
 **Registrera** bokför differenserna: en transaktion av typen Inventeringsjustering per räknad rad där räknat ≠ bokfört, med anteckningen "Inventering INV-…". Rader utan räknat antal **hoppas över** — de justeras inte och tolkas aldrig som noll. Rader där räknat = bokfört bokför inget. Registreringen kan inte ångras (men saldot kan förstås justeras igen). Statusen blir **Registrerad**.
 
+**Bokför differenserna per.** Skapades underlaget en tidigare dag väljer du ovanför knapparna om differenserna ska räknas per **Underlagets datum** eller per **I dag**. Underlagets datum är förvalt när det är tillåtet. Då räknas inventeringen in i lagervärderingen och bokslutets Lagerförändring per den tidpunkt då underlaget skapades, och inte per registreringsdagen. En inventering som börjar på bokslutsdagen och registreras några dagar senare kommer alltså med i bokslutet. En positiv differens värderas då till standardpriset som gällde när underlaget skapades. Registreringstiden ändras inte, och lagerloggen visar båda.
+
+Underlagets datum går bara att välja när räkningen bevisligen visar läget när underlaget skapades och dagen fortfarande är öppen i bokföringen. Annars bokförs inventeringen per i dag, och kortet säger varför:
+
+- *Inventeringens artiklar har fått lagerrörelser på lagerplatsen efter att underlaget skapades.* Det kan bara hända utan **Spärra lagertransaktioner**, och gäller bara rader som har en differens att bokföra.
+- *Bokföringsperioden för … är låst.* eller *Räkenskapsåret … är stängt.*
+
+Skapades underlaget i dag finns inget val. En registrerad inventering som bokförts per underlagets datum en tidigare dag visar **Bokförd per …** i sidhuvudet.
+
 **Avbryt inventering** stänger underlaget utan att boka något och släpper spärren. Statusen blir **Avbruten**.
 
 ### Skanna vid inventering
@@ -178,12 +189,13 @@ Raden stoppas när artikeln inte finns, är en tjänst eller en fantomartikel, n
 
 **Lager → Lagervärdering** (endast administratörer) visar lagrets värde — saldo gånger ett värderingspris — per valfritt datum, uppdelat per varugrupp med en summarad längst ner. Ange **Per datum**, välj **Metod** och eventuellt en **Varugrupp** eller **Artikelkod** (annars visas alla). Med **Gruppera** väljer du om rapporten delas upp per **Varugrupp** (förvalt, artiklar utan varugrupp hamnar under **Utan varugrupp**) eller per **Artikelkod** (artiklar utan kod under **Utan artikelkod**); valet följer med i PDF:en. Rapporten hämtas direkt när du ändrar ett val, och sidans URL följer med så vyn går att bokmärka. Ladda ner samma rapport som PDF med **Ladda ner PDF**.
 
-De tre metoderna:
+De fyra metoderna:
 
 - **Standardpris** — artikelns historiska standardpris: priset som gällde vid det valda datumet. Om datumet ligger före den första kända prisändringen används det äldsta kända priset (historiken började byggas upp när funktionen infördes, den kan inte se bakåt förbi det).
 - **Senaste inköp** — priset från den senaste inleveransen (i SEK) fram till och med valt datum. Endast inleveranser som har ett pris räknas.
 - **Vägt snitt** — ett glidande medelpris, uppspelat ur lagrets transaktionslogg fram till valt datum. Transaktioner utan pris (t.ex. från innan priset började sparas på lagerraden) påverkar antalet men inte snittet.
+- **FIFO** — först in, först ut. Det som finns kvar på valt datum anses vara det som kom in senast, så saldot prissätts med de senaste inflödena bakåt tills hela saldot är täckt. Kolumnen À-pris visar snittet av de inflödena. Inflöden är inleveranser, tillverkningsmottagningar, positiva justeringar, inventeringar och importerade lagersaldon. En ångrad inleverans eller tillverkningsmottagning räknas inte, och en lagerflytt är inget inflöde. Inflöden utan pris hoppas över. Täcker inflödena med pris inte hela saldot värderas resten till deras snitt.
 
 En artikel utan pris för vald metod visar **"—"** i kolumnen Värde och räknas inte med i summan — antalet syns ändå. Finns en eller flera sådana artiklar visas en hjälptext under kontrollerna med hur många det gäller, t.ex. *"3 artiklar saknar pris för vald metod och ingår inte i summan."* (böjs i singular: *"1 artikel saknar…"*).
 
-Värderingen följer **när lagerhändelserna faktiskt bokfördes**, inte en separat affärsdag — en rörelse kan alltså inte backdateras in i en tidigare värdering.
+Värderingen räknar på lagerradernas **Datum** i [Transaktioner](#transaktioner), som kalenderdagar i svensk tid. Det är dagen raden registrerades, utom för en inventering som registrerats per underlagets datum. Andra lagerrörelser kan inte bakdateras in i en tidigare värdering.
