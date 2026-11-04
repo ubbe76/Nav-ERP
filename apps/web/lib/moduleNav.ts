@@ -496,7 +496,7 @@ export const LAGER_SECTIONS: ModuleNavSection[] = [
       {
         href: "/lager/vardering",
         title: "Lagervärdering",
-        description: "Lagervärde per valfritt datum — standardpris, senaste inköp eller vägt snitt.",
+        description: "Lagervärde per valfritt datum — standardpris, senaste inköp, vägt snitt eller FIFO.",
         roles: ["admin"],
       },
     ],
@@ -698,7 +698,7 @@ export const RAPPORTER_SECTIONS: ModuleNavSection[] = [
       {
         href: "/lager/vardering",
         title: "Lagervärdering",
-        description: "Lagervärde per valfritt datum — standardpris, senaste inköp eller vägt snitt.",
+        description: "Lagervärde per valfritt datum — standardpris, senaste inköp, vägt snitt eller FIFO.",
         roles: ["admin"],
       },
     ],

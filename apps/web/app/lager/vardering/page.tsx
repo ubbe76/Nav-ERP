@@ -37,7 +37,7 @@ export default async function LagervarderingPage(props: { searchParams: Promise<
         <div>
           <div className={shellStyles.title}>Lagervärdering</div>
           <div className={shellStyles.meta}>
-            Lagervärde per valfritt datum — standardpris, senaste inköp eller vägt snitt
+            Lagervärde per valfritt datum — standardpris, senaste inköp, vägt snitt eller FIFO
           </div>
         </div>
         <HelpLink chapter="lager" anchor="lagervardering" label="Hjälp om lagervärdering" />
