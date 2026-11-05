@@ -8,6 +8,14 @@ import { FormActions, FormError } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { DeliveryRowsResponse } from "../../lib/types";
 
+// GET /purchase-orders/:id/dispatches/:dispatchId/rows — the delivery's shape
+// (quantities in the row's unit) plus the parcel count saved with the dispatch.
+interface DispatchRowsResponse {
+  orderNumber: string;
+  undoneAt: string | null;
+  rows: { id: string; articleNumber: string; articleName: string; quantity: number; unit: string; parcels: number }[];
+}
+
 // Pallkort: one card per kolli, each kolli with its own quantity. "single" =
 // one operation or report; "delivery" = a block per delivery row (0 kolli
 // skips the row). A summary line warns when the kolli don't add up to the
@@ -15,7 +23,10 @@ import type { DeliveryRowsResponse } from "../../lib/types";
 
 export type PalletCardTarget =
   | { kind: "single"; url: string; quantity: number | null; unit?: string }
-  | { kind: "delivery"; deliveryId: string };
+  | { kind: "delivery"; deliveryId: string }
+  // Avsändning lego: one block per dispatched row, kolli prefilled from the
+  // parcel count saved with the dispatch.
+  | { kind: "dispatch"; orderId: string; dispatchId: string };
 
 const MAX_PARCELS = 50;
 
@@ -127,9 +138,10 @@ interface ParcelState {
   manual: boolean;
 }
 
-function initialParcels(total: number | null): ParcelState {
+function initialParcels(total: number | null, count = 1): ParcelState {
   const t = total !== null && total > 0 ? total : 0;
-  return { total: t > 0 ? String(t) : "", count: "1", parcels: split(t, 1), manual: false };
+  const n = Math.max(1, Math.min(MAX_PARCELS, Math.floor(count)));
+  return { total: t > 0 ? String(t) : "", count: String(n), parcels: split(t, n), manual: false };
 }
 
 function ParcelEditor({
@@ -209,6 +221,7 @@ export function PalletCardDialog({ target, onClose }: { target: PalletCardTarget
     <Modal open={target !== null} onClose={onClose} title="Pallkort" wide>
       {target?.kind === "single" && <SingleForm target={target} onClose={onClose} />}
       {target?.kind === "delivery" && <DeliveryForm deliveryId={target.deliveryId} onClose={onClose} />}
+      {target?.kind === "dispatch" && <DispatchForm orderId={target.orderId} dispatchId={target.dispatchId} onClose={onClose} />}
     </Modal>
   );
 }
@@ -289,6 +302,78 @@ function DeliveryForm({ deliveryId, onClose }: { deliveryId: string; onClose: ()
               </legend>
               <ParcelEditor
                 state={states[row.id] ?? initialParcels(row.quantity)}
+                onChange={(next) => setStates((prev) => ({ ...prev, [row.id]: next }))}
+                idPrefix={`palletCard-${row.id}`}
+                unit={row.unit}
+                allowZeroCount
+                allowMismatch={allowMismatch}
+              />
+            </fieldset>
+          ))}
+        </>
+      )}
+      <FormActions>
+        <Button type="button" disabled={!data || !canPrint} onClick={print}>
+          Skriv ut
+        </Button>
+        <Button type="button" variant="secondary" onClick={onClose}>
+          Avbryt
+        </Button>
+      </FormActions>
+    </>
+  );
+}
+
+function DispatchForm({ orderId, dispatchId, onClose }: { orderId: string; dispatchId: string; onClose: () => void }) {
+  const [data, setData] = useState<DispatchRowsResponse | null>(null);
+  const [states, setStates] = useState<Record<string, ParcelState>>({});
+  const [error, setError] = useState<string | null>(null);
+  const allowMismatch = useAllowMismatch();
+  const base = `/api/v1/purchase-orders/${orderId}/dispatches/${dispatchId}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<DispatchRowsResponse>(`${base}/rows`)
+      .then((res) => {
+        if (cancelled) return;
+        setData(res);
+        setStates(Object.fromEntries(res.rows.map((r) => [r.id, initialParcels(r.quantity, r.parcels)])));
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Kunde inte hämta avsändningens rader");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [base]);
+
+  const active = (data?.rows ?? []).filter((r) => (states[r.id]?.parcels.length ?? 0) > 0);
+  const canPrint = active.length > 0 && active.every((r) => {
+      const st = states[r.id] ?? initialParcels(null);
+      return parcelsValid(st) && (allowMismatch || matches(num(st.total), st.parcels));
+    });
+
+  function print() {
+    const params = new URLSearchParams();
+    for (const row of active) params.append("row", `${row.id}:${(states[row.id]?.parcels ?? []).map((p) => num(p)).join(",")}`);
+    window.open(`${base}/pallet-card?${params.toString()}`, "_blank", "noopener");
+    onClose();
+  }
+
+  return (
+    <>
+      <FormError margin="below">{error}</FormError>
+      {!data && !error && <p>Hämtar rader…</p>}
+      {data && (
+        <>
+          <p style={{ marginTop: 0 }}>Avsändning mot {data.orderNumber}. Antal kolli 0 hoppar över raden.</p>
+          {data.rows.map((row) => (
+            <fieldset key={row.id} style={{ border: "1px solid var(--color-border)", borderRadius: 6, marginBottom: 12 }}>
+              <legend>
+                {row.articleNumber} {row.articleName}
+              </legend>
+              <ParcelEditor
+                state={states[row.id] ?? initialParcels(row.quantity, row.parcels)}
                 onChange={(next) => setStates((prev) => ({ ...prev, [row.id]: next }))}
                 idPrefix={`palletCard-${row.id}`}
                 unit={row.unit}

@@ -7,7 +7,7 @@ import { blankSafe } from "./coerce.js";
 import { vatRateSchema } from "./vat.js";
 import { paymentReferenceSchema, supplierPaymentDetailsFields } from "./banking.js";
 import { partnerDeliveryFields } from "./delivery.js";
-import { countryCodeSchema } from "./sales.js";
+import { countryCodeSchema, palletCardRowParam, palletCardSelectionSchema } from "./sales.js";
 import { exchangeRateValueSchema } from "./currency.js";
 import { documentLanguageSchema } from "./document-language.js";
 
@@ -258,6 +258,20 @@ export const updatePurchaseOrderRowSchema = z
   );
 export type UpdatePurchaseOrderRowInput = z.infer<typeof updatePurchaseOrderRowSchema>;
 
+// Leveransadress on the purchase order (avsändning lego): where the
+// supplier ships — e.g. a subcontractor delivering straight to our customer.
+// Stored as a snapshot on the order (no FK to the customer's address). Null
+// on the order = the company's own address. Same field shapes as the
+// customer's delivery addresses; the name is the printed label.
+export const purchaseOrderDeliveryAddressSchema = z.object({
+  name: z.string().trim().min(1).max(255),
+  address: z.string().trim().min(1),
+  postalCode: z.string().trim().max(20).nullable().optional(),
+  city: z.string().trim().max(100).nullable().optional(),
+  country: countryCodeSchema.default("SE"),
+});
+export type PurchaseOrderDeliveryAddressInput = z.infer<typeof purchaseOrderDeliveryAddressSchema>;
+
 // PO header fields — editable with the same status rule as the rows
 // (draft/confirmed/partially_received). The currency stays locked to the
 // snapshot taken from the supplier at creation.
@@ -277,6 +291,9 @@ export const updatePurchaseOrderHeaderSchema = z
     // "Frakt på vårt konto" — prints our carrier customer number on the PO.
     freightPaidByUs: z.boolean().optional(),
     projectId: z.string().uuid().nullable().optional(),
+    // Leveransadress (avsändning lego): a snapshot on the order — null
+    // clears it (the company's address again); omitted leaves it as is.
+    deliveryAddress: purchaseOrderDeliveryAddressSchema.nullable().optional(),
     bumpRevision: z.boolean().optional(),
   })
   .refine(
@@ -284,6 +301,46 @@ export const updatePurchaseOrderHeaderSchema = z
     "At least one field must be provided"
   );
 export type UpdatePurchaseOrderHeaderInput = z.infer<typeof updatePurchaseOrderHeaderSchema>;
+
+// --- Avsändning till legoleverantör (dispatch of goods to a subcontractor) ---
+
+// One dispatch: the lego rows sent (quantity in the ROW's unit like a goods
+// receipt, stored in base unit) with their parcel counts. Duplicated rowIds
+// are refused here, an empty list too; more than ordered is allowed (the
+// web warns). Only lego rows (moOperationId) can be dispatched — the service
+// answers 400 for others.
+export const createPurchaseDispatchSchema = z.object({
+  rows: z
+    .array(
+      z.object({
+        rowId: z.string().uuid(),
+        // At least one unit at the column's 4 decimals — a smaller positive
+        // number would round to 0 and fall on the CHECK.
+        quantity: z.coerce.number().min(0.0001),
+        parcels: z.coerce.number().int().min(1).default(1),
+      })
+    )
+    .min(1)
+    .refine((rows) => new Set(rows.map((r) => r.rowId)).size === rows.length, "Each row may be dispatched once per dispatch"),
+  note: z.string().max(500).nullable().optional(),
+});
+export type CreatePurchaseDispatchInput = z.infer<typeof createPurchaseDispatchSchema>;
+
+// Pallkort till legoleverantör (GET /purchase-orders/:id/dispatches/
+// :dispatchId/pallet-card): the same `row=<dispatchRowId>:<antal>,<antal>`
+// shape as the delivery's card (deliveryPalletCardQuerySchema) — one card
+// per listed quantity, an empty list skips the row, omitted = every row
+// with the dispatched quantity as one card per parcel.
+export const dispatchPalletCardRowSchema = z.object({
+  dispatchRowId: z.string().uuid(),
+  quantities: z.array(z.coerce.number().positive()).max(50),
+});
+export type DispatchPalletCardRow = z.infer<typeof dispatchPalletCardRowSchema>;
+
+export const dispatchPalletCardQuerySchema = z.object({
+  row: palletCardSelectionSchema(palletCardRowParam("dispatchRowId").pipe(dispatchPalletCardRowSchema)),
+});
+export type DispatchPalletCardQuery = z.infer<typeof dispatchPalletCardQuerySchema>;
 
 // Manual status override — any status, any direction, no transition guard.
 // Bypasses the state machine on purpose (Monitor-style); never books stock.

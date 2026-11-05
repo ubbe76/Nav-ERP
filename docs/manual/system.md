@@ -55,7 +55,7 @@ En användare utan grupp (**Ingen åtkomst**) når bara hjälpen och sidan **Ing
 
 ## Företagsinformation
 
-**System → Företagsinformation** innehåller företagets namn, organisationsnummer, adress/postnummer, kontaktuppgifter och webbplats, samt **företagslogotyp** (uppladdning, max 2 MB). Uppgifterna används på dokument som inköpsorder och ordererkännande.
+**System → Företagsinformation** innehåller företagets namn, organisationsnummer, adress/postnummer, kontaktuppgifter och webbplats, samt **företagslogotyp** (uppladdning, max 2 MB). Uppgifterna används på dokument som inköpsorder och ordererkännande. Sektionen **Leveransadress (godsmottagning)** har **Adress**, **Postnummer** och **Ort** för den plats där leverantörer levererar, om den skiljer sig från företagets adress. Tomma fält betyder att företagets adress används. Godsadressen används på inköpsorderns PDF och på legopallkortet när inköpsordern inte har en egen [Leveransadress](/hjalp/inkop#skapa).
 
 Här finns också betalnings- och registreringsuppgifterna **VAT-nummer**, **Säte**, **Bankgiro**, **Plusgiro**, **Bank**, **BIC/SWIFT**, **IBAN** och kryssrutan **Godkänd för F-skatt**. De ifyllda uppgifterna skrivs ut i **sidfoten på alla utgående dokument** — förfrågan, inköpsorder, offert och orderbekräftelse — tillsammans med organisationsnumret, telefonen, e-posten och webbplatsen; tomma fält utelämnas. Interna dokument (plocklistan och TO-utskriften) får ingen sidfot.
 

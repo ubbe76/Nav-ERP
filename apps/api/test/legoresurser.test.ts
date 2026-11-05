@@ -466,6 +466,7 @@ describe("legoinköp på TO-kortet (GET /manufacturing-orders/:id/lego-purchases
             status: "confirmed",
             quantityOrdered: 3,
             quantityReceived: 0,
+            dispatchedQuantity: 0,
             expectedDeliveryDate: null,
           },
         ],

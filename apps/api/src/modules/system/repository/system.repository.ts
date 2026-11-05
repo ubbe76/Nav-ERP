@@ -21,6 +21,10 @@ const companyInfoPublicColumns = {
   address: companyInfo.address,
   postalCode: companyInfo.postalCode,
   city: companyInfo.city,
+  // Godsadress (Leveransadress/godsmottagning, 0182).
+  deliveryAddress: companyInfo.deliveryAddress,
+  deliveryPostalCode: companyInfo.deliveryPostalCode,
+  deliveryCity: companyInfo.deliveryCity,
   phone: companyInfo.phone,
   email: companyInfo.email,
   website: companyInfo.website,

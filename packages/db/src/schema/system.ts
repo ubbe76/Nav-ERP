@@ -58,6 +58,13 @@ export const companyInfo = pgTable("company_info", {
   address: varchar("address", { length: 255 }),
   postalCode: varchar("postal_code", { length: 20 }),
   city: varchar("city", { length: 100 }),
+  // Godsadress (migration 0182): where suppliers deliver when it differs
+  // from the company address — used for the IO's Leveransadress and the
+  // subcontractor pallet card when delivery_address is set, else the fields
+  // above. The name is always the company's.
+  deliveryAddress: varchar("delivery_address", { length: 255 }),
+  deliveryPostalCode: varchar("delivery_postal_code", { length: 20 }),
+  deliveryCity: varchar("delivery_city", { length: 100 }),
   phone: varchar("phone", { length: 50 }),
   email: varchar("email", { length: 255 }),
   website: varchar("website", { length: 255 }),

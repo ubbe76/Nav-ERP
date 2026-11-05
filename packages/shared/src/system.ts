@@ -22,6 +22,11 @@ export const updateCompanyInfoSchema = z
     address: z.string().max(255).nullable().optional(),
     postalCode: z.string().max(20).nullable().optional(),
     city: z.string().max(100).nullable().optional(),
+    // Godsadress (Leveransadress/godsmottagning): optional; blank = the
+    // company's address is where suppliers deliver.
+    deliveryAddress: z.string().max(255).nullable().optional(),
+    deliveryPostalCode: z.string().max(20).nullable().optional(),
+    deliveryCity: z.string().max(100).nullable().optional(),
     phone: z.string().max(50).nullable().optional(),
     email: z.string().email().max(255).nullable().optional(),
     website: z.string().max(255).nullable().optional(),

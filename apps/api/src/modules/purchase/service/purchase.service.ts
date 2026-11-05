@@ -17,6 +17,8 @@ import type {
   CreateArticleSupplierInput,
   CreateContactInput,
   CreateDeliveryAddressInput,
+  CreatePurchaseDispatchInput,
+  DispatchPalletCardRow,
   CreateInquiryInput,
   CreateInquiryRowInput,
   CreatePurchaseOrderInput,
@@ -47,7 +49,7 @@ import type { LegoSnapshot, PurchaseRepository } from "../repository/purchase.re
 import type { RegisterReferenceReader } from "../../register/service/register.service.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
 import type { MailService } from "../../mail/service/mail.service.js";
-import type { DocumentPdfService } from "../../mail/service/document-pdf.js";
+import type { DeliveryAddressBlock, DocumentPdfService, PalletCardPdfInput } from "../../mail/service/document-pdf.js";
 import { documentLanguageOf, localized, type DocumentLanguage } from "@navet/shared";
 import { documentTexts } from "../../mail/service/document-texts.js";
 import { mergePdfs } from "../../mail/service/pdf-merge.js";
@@ -285,6 +287,14 @@ export class PurchaseReceiptManufacturingOrderLockedError extends Error {
   }
 }
 
+// Avsändning lego: a row with a dispatch that is not undone cannot be deleted.
+export class PurchaseOrderRowHasDispatchesError extends Error {
+  constructor() {
+    super("Cannot delete a row that has been dispatched to the subcontractor — undo the dispatch first");
+    this.name = "PurchaseOrderRowHasDispatchesError";
+  }
+}
+
 export class RowHasReceiptsError extends Error {
   constructor() {
     super("Cannot delete a row that has received goods");
@@ -295,6 +305,45 @@ export class RowHasReceiptsError extends Error {
 // Lego row creation with an unknown MO operation — caught via the
 // hand-declared FK (atomic, no cross-module reader; the E3 constraint-catch
 // pattern).
+// --- Avsändning till legoleverantör ---
+export class PurchaseDispatchNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Dispatch ${id} not found`);
+    this.name = "PurchaseDispatchNotFoundError";
+  }
+}
+
+export class PurchaseDispatchAlreadyUndoneError extends Error {
+  constructor() {
+    super("Dispatch has already been undone");
+    this.name = "PurchaseDispatchAlreadyUndoneError";
+  }
+}
+
+// Pallet card for a dispatch that was undone — there is nothing on the pallet.
+export class PurchaseDispatchUndoneError extends Error {
+  constructor() {
+    super("Dispatch has been undone");
+    this.name = "PurchaseDispatchUndoneError";
+  }
+}
+
+// A row that is not a lego row (no MO operation) cannot be dispatched.
+export class PurchaseDispatchRowNotLegoError extends Error {
+  constructor(rowId: string) {
+    super(`Row ${rowId} is not a subcontract row`);
+    this.name = "PurchaseDispatchRowNotLegoError";
+  }
+}
+
+// A dispatch row id in the pallet card selection that is not on the dispatch.
+export class PurchaseDispatchRowNotInDispatchError extends Error {
+  constructor(id: string) {
+    super(`Dispatch row ${id} is not on this dispatch`);
+    this.name = "PurchaseDispatchRowNotInDispatchError";
+  }
+}
+
 export class MoOperationNotFoundError extends Error {
   constructor(id: string) {
     super(`Manufacturing order operation ${id} not found`);
@@ -422,6 +471,25 @@ export interface RoutingPriceWriter {
   ): Promise<unknown>;
 }
 
+// The dispatched quantity split over its parcels for the default card set
+// (no selection): equal parts, the remainder on the last — 10 over 3 ⇒
+// 3.3333 + 3.3333 + 3.3334 (round4, so the parts add up).
+export function splitOverParcels(quantity: number, parcels: number): number[] {
+  const count = Math.max(1, Math.floor(parcels));
+  const part = Math.round((quantity / count) * 10000) / 10000;
+  const parts = Array.from({ length: count }, () => part);
+  parts[count - 1] = Math.round((quantity - part * (count - 1)) * 10000) / 10000;
+  return parts;
+}
+
+// "TO-1024 · Op 20 · Ytbehandling" — the TILLVERKNINGSORDER cell on the
+// subcontractor pallet card: the lego reference without its "Lego för"
+// prefix, language-neutral (so not a dictionary entry).
+export function operationReference(orderNumber: string | null, sequenceNo: number, description: string | null) {
+  const operation = description ? `Op ${sequenceNo} · ${description}` : `Op ${sequenceNo}`;
+  return orderNumber ? `${orderNumber} · ${operation}` : operation;
+}
+
 // "Lego för TO-1024 · Op 20 · Ytbehandling" under a lego row on IO/RFQ, or
 // "Lego · Op 20 · Ytbehandling" for a TO-less price inquiry.
 function legoReference(orderNumber: string | null, sequenceNo: number, description: string | null, language: DocumentLanguage) {
@@ -451,6 +519,38 @@ export interface PurchaseSettingsReader extends DocumentSettingsReader {
     palletCardCode: PalletCardCode;
   }>;
   getCompanyCarrierNumber(carrierId: string): Promise<string | null>;
+  // Leveransadress on the IO/pallet card: the company's godsadress
+  // (delivery_*) when set, else its own address; the name is always the
+  // company's.
+  getCompanyInfo(): Promise<{
+    name: string;
+    address: string | null;
+    postalCode: string | null;
+    city: string | null;
+    deliveryAddress: string | null;
+    deliveryPostalCode: string | null;
+    deliveryCity: string | null;
+  } | null>;
+}
+
+// The order's delivery address snapshot as the API shows it (null = the
+// company's address).
+function orderDeliveryAddress(order: {
+  deliveryName: string | null;
+  deliveryAddress: string | null;
+  deliveryPostalCode: string | null;
+  deliveryCity: string | null;
+  deliveryCountry: string | null;
+}) {
+  return order.deliveryAddress === null
+    ? null
+    : {
+        name: order.deliveryName ?? "",
+        address: order.deliveryAddress,
+        postalCode: order.deliveryPostalCode,
+        city: order.deliveryCity,
+        country: order.deliveryCountry ?? "SE",
+      };
 }
 
 export function createPurchaseService(
@@ -645,6 +745,19 @@ export function createPurchaseService(
     return { filename: texts.filenames.inquiry(inquiry.inquiryNumber), content };
   }
 
+  // Where the goods go, for the IO PDF and the subcontractor pallet card:
+  // the order's chosen address, else the company's godsadress, else the
+  // company's address (the company's name as label in both fallbacks).
+  async function deliverToAddress(order: Parameters<typeof orderDeliveryAddress>[0]): Promise<DeliveryAddressBlock> {
+    const own = orderDeliveryAddress(order);
+    if (own) return { label: own.name, address: own.address, postalCode: own.postalCode, city: own.city, country: own.country };
+    const company = await settings.getCompanyInfo();
+    const goods = company?.deliveryAddress
+      ? { address: company.deliveryAddress, postalCode: company.deliveryPostalCode, city: company.deliveryCity }
+      : { address: company?.address ?? "", postalCode: company?.postalCode ?? null, city: company?.city ?? null };
+    return { label: company?.name ?? "", ...goods, country: "SE" };
+  }
+
   async function renderPurchaseOrderPdf(
     order: NonNullable<Awaited<ReturnType<PurchaseRepository["findPurchaseOrderById"]>>>
   ) {
@@ -673,6 +786,9 @@ export function createPurchaseService(
       partnerLabel: texts.partnerLabels.supplier,
       partner: supplier!,
       currency: order.currency,
+      // Leveransadress: always printed — the order's own snapshot, else the
+      // company's godsadress, else the company's address (user decision 4).
+      deliveryAddress: await deliverToAddress(order),
       // Printed in the row's unit (the values are stored in the base unit).
       rows: rows.map((r) => {
         const isLego = r.moOperationId !== null && r.moOrderNumber !== null && r.moOperationSequenceNo !== null;
@@ -1201,8 +1317,19 @@ export function createPurchaseService(
     async getPurchaseOrder(id: string) {
       const order = await repo.findPurchaseOrderById(id);
       if (!order) return null;
-      const [supplier, book] = await Promise.all([repo.findSupplierById(order.supplierId), repo.vatCodeBook()]);
-      return { ...order, vat: supplier ? purchaseOrderVat(book, supplier) : null };
+      const [supplier, book, linkedSalesOrders] = await Promise.all([
+        repo.findSupplierById(order.supplierId),
+        repo.vatCodeBook(),
+        repo.linkedSalesOrders(id),
+      ]);
+      return {
+        ...order,
+        vat: supplier ? purchaseOrderVat(book, supplier) : null,
+        // Leveransadress (null = the company's address) and the sales orders
+        // the lego rows belong to — the card's "Hämta från kundorder".
+        deliveryAddress: orderDeliveryAddress(order),
+        linkedSalesOrders,
+      };
     },
 
     async listPurchaseOrders(query: ListPurchaseOrdersQuery, today: string = stockholmToday()) {
@@ -1315,6 +1442,9 @@ export function createPurchaseService(
           throw new OverReceiptError();
         case "row_has_receipts":
           throw new RowHasReceiptsError();
+        // deleteRow only — never raised by updateRow.
+        case "row_has_dispatches":
+          throw new PurchaseOrderRowHasDispatchesError();
       }
     },
 
@@ -1346,6 +1476,8 @@ export function createPurchaseService(
           throw new OverReceiptError();
         case "row_has_receipts":
           throw new RowHasReceiptsError();
+        case "row_has_dispatches":
+          throw new PurchaseOrderRowHasDispatchesError();
       }
     },
 
@@ -1634,6 +1766,153 @@ export function createPurchaseService(
       });
       if (afterCommit) await (afterCommit as () => Promise<void>)();
       return { row: result.row, orderStatus: result.orderStatus };
+    },
+
+    // --- Avsändning till legoleverantör ---
+
+    // Rapportera avsändning: logs what was sent (no stock effect — the
+    // material is drawn by the receipt). Draft, confirmed and partially
+    // received orders only; every row must be a lego row of the order.
+    async createDispatch(orderId: string, input: CreatePurchaseDispatchInput, createdBy: string) {
+      const result = await repo.createDispatch(orderId, input, createdBy);
+      if (!result.ok) {
+        switch (result.reason) {
+          case "order_not_found":
+            throw new PurchaseOrderNotFoundError(orderId);
+          case "invalid_status":
+            throw new InvalidStatusTransitionError("Goods can only be dispatched on a draft, confirmed or partially received order");
+          case "row_not_found":
+            throw new PurchaseOrderRowNotFoundError(result.rowId);
+          case "row_not_lego":
+            throw new PurchaseDispatchRowNotLegoError(result.rowId);
+        }
+      }
+      const order = await repo.findPurchaseOrderById(orderId);
+      await audit.log({
+        entityType: "purchase_order",
+        entityId: order?.orderNumber ?? orderId,
+        action: "goods_dispatched",
+        detail: { rows: result.rows.map((r) => ({ rowId: r.purchaseOrderRowId, quantity: Number(r.quantity), parcels: r.parcels })) },
+        userId: createdBy,
+      });
+      return { ...result.dispatch, rows: result.rows };
+    },
+
+    // Avsändningar — the log, undone dispatches included, newest first.
+    // Quantities in the row's unit for the section.
+    async listDispatches(orderId: string) {
+      if (!(await repo.findPurchaseOrderById(orderId))) throw new PurchaseOrderNotFoundError(orderId);
+      return (await repo.listDispatches(orderId)).map((d) => ({
+        ...d,
+        rows: d.rows.map((r) => ({
+          id: r.id,
+          purchaseOrderRowId: r.purchaseOrderRowId,
+          articleId: r.articleId,
+          articleNumber: r.articleNumber,
+          articleName: r.articleName,
+          legoReference:
+            r.moOperationSequenceNo !== null ? legoReference(r.moOrderNumber, r.moOperationSequenceNo, r.moOperationDescription, "sv") : null,
+          quantity: toUnitQuantity(Number(r.quantity), r.unitFactor),
+          unit: r.unitCode,
+          parcels: r.parcels,
+        })),
+      }));
+    },
+
+    // Ångra avsändning: corrects the log only, so no status guard on the order.
+    async undoDispatch(orderId: string, dispatchId: string, userId: string) {
+      const result = await repo.undoDispatch(orderId, dispatchId, userId);
+      if (!result.ok) {
+        if (result.reason === "not_found") throw new PurchaseDispatchNotFoundError(dispatchId);
+        throw new PurchaseDispatchAlreadyUndoneError();
+      }
+      const order = await repo.findPurchaseOrderById(orderId);
+      await audit.log({
+        entityType: "purchase_order",
+        entityId: order?.orderNumber ?? orderId,
+        action: "goods_dispatch_undone",
+        detail: { dispatchedAt: result.dispatch.dispatchedAt },
+        userId,
+      });
+      return result.dispatch;
+    },
+
+    // The dispatch's rows for the pallet card dialog — the same shape as
+    // GET /deliveries/:id/rows: quantity in the row's unit, plus parcels
+    // (the dialog's kolli prefill).
+    async dispatchRows(orderId: string, dispatchId: string) {
+      const dispatch = await repo.findDispatchForPalletCard(orderId, dispatchId);
+      if (!dispatch) throw new PurchaseDispatchNotFoundError(dispatchId);
+      return {
+        orderNumber: dispatch.orderNumber,
+        undoneAt: dispatch.undoneAt,
+        rows: dispatch.rows.map((r) => ({
+          id: r.id,
+          articleNumber: r.articleNumber,
+          articleName: r.articleName,
+          quantity: toUnitQuantity(Number(r.quantity), r.unitFactor),
+          unit: r.unitCode,
+          parcels: r.parcels,
+        })),
+      };
+    },
+
+    // Pallkort till legoleverantör: one card page per kolli, kind
+    // "subcontract", in the supplier's language (live, like the IO). The
+    // selection works as the delivery's (row=<dispatchRowId>:<antal>,…; an
+    // empty list skips the row); omitted ⇒ every row split evenly over its
+    // parcels. Kod på pallkort is the system setting — the supplier has no
+    // choice of its own. An undone dispatch has no card (409).
+    async dispatchPalletCardPdf(orderId: string, dispatchId: string, selection?: DispatchPalletCardRow[]) {
+      const dispatch = await repo.findDispatchForPalletCard(orderId, dispatchId);
+      if (!dispatch) throw new PurchaseDispatchNotFoundError(dispatchId);
+      if (dispatch.undoneAt) throw new PurchaseDispatchUndoneError();
+      const byId = new Map(dispatch.rows.map((r) => [r.id, r]));
+      const picks = selection
+        ? selection.map((s) => {
+            const row = byId.get(s.dispatchRowId);
+            if (!row) throw new PurchaseDispatchRowNotInDispatchError(s.dispatchRowId);
+            return { row, quantities: s.quantities };
+          })
+        : dispatch.rows.map((row) => ({ row, quantities: splitOverParcels(toUnitQuantity(Number(row.quantity), row.unitFactor), row.parcels) }));
+
+      const [{ palletCardCode: code }, deliverTo] = await Promise.all([settings.getSettings(), deliverToAddress(dispatch)]);
+      const language = documentLanguageOf(dispatch.supplierLanguage);
+      const texts = documentTexts(language);
+      // The supplier's default delivery address, else its own address.
+      const supplierAddress = dispatch.supplierDeliveryAddress
+        ? { address: dispatch.supplierDeliveryAddress, postalCode: dispatch.supplierDeliveryPostalCode, city: dispatch.supplierDeliveryCity, country: null }
+        : { address: dispatch.supplierAddress, postalCode: dispatch.supplierPostalCode, city: dispatch.supplierCity, country: dispatch.supplierCountry };
+      const cards: PalletCardPdfInput[] = [];
+      for (const pick of picks) {
+        pick.quantities.forEach((quantity, i) => {
+          cards.push({
+            kind: "subcontract",
+            language,
+            code,
+            articleNumber: pick.row.articleNumber,
+            articleName: localized(pick.row.articleName, pick.row.articleNameEn, language),
+            quantity,
+            unit: localized(pick.row.unitCode, pick.row.unitCodeEn, language),
+            parcel: { index: i + 1, count: pick.quantities.length },
+            printedAt: dispatch.dispatchedAt,
+            reportedBy: dispatch.dispatchedByName,
+            reference: dispatch.orderNumber,
+            supplierName: dispatch.supplierName,
+            supplierAddress,
+            surfaceTreatment: pick.row.articleSurfaceTreatment,
+            colour: pick.row.articleColour,
+            purchaseOrderNumber: dispatch.orderNumber,
+            manufacturingOrder:
+              pick.row.moOperationSequenceNo !== null
+                ? operationReference(pick.row.moOrderNumber, pick.row.moOperationSequenceNo, pick.row.moOperationDescription)
+                : null,
+            deliverTo,
+          });
+        });
+      }
+      const content = await pdf.renderPalletCard(cards);
+      return { pdf: content, filename: texts.filenames.palletCard(dispatch.orderNumber) };
     },
 
     // --- Article supplier catalog (leverantörskatalog per artikel) ---

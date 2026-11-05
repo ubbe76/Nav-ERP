@@ -260,6 +260,8 @@ export const ERROR_CODES = {
   DELIVERY_UNDONE: "delivery-undone",
   SHIPMENT_DELIVERY_UNDONE: "shipment-delivery-undone",
   ROW_HAS_RECEIPTS: "row-has-receipts",
+  // Avsändning lego: the row has a dispatch that is not undone
+  PURCHASE_ORDER_ROW_HAS_DISPATCHES: "purchase-order-row-has-dispatches",
   OVER_RECEIPT: "over-receipt",
   PURCHASE_RECEIPT_NOT_FOUND: "purchase-receipt-not-found",
   PURCHASE_RECEIPT_ALREADY_UNDONE: "purchase-receipt-already-undone",

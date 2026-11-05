@@ -43,6 +43,7 @@ Så hänger legoflödet ihop:
 - **Frisläpp**: legofälten fryses på tillverkningsorderns operation, precis som tider och kommentarer.
 - **Behovsberäkningen** föreslår en inköpsorder för varje ofärdig lego-operation på frisläppta tillverkningsordrar och ordrar som Pågår — se [Behovsberäkning](#behovsberakning).
 - **TO-kortet**: samma inköpsorder kan skapas direkt från operationsraden, se [Legoinköp på TO-kortet](#legoinkop-pa-to-kortet).
+- **Avsändningen** av gods till leverantören rapporteras i rutinen **Inköp → Avsändning lego**, som ger **Skickat** på inköpsorderraden och ett pallkort till leverantören. Den påverkar inte lagret eller tillverkningsordern — se [Avsändning lego](/hjalp/inkop#avsandning-lego).
 - **Inleveransen** av lego-inköpsordern avrapporterar operationen automatiskt. Är lego-operationen inte sist bokförs inget lagersaldo; är den orderns sista operation läggs det mottagna antalet in i lager som färdiga varor, se [Inleverans från sista operationen](#inleverans-fran-sista-operationen). Se [Inleverans](/hjalp/inkop#inleverans).
 - **Stämpelterminalen** visar aldrig lego-operationer; **Slutför** på operationsraden i TO-kortets kort **Rapportera** finns kvar som manuell väg.
 - **Förkalkylen** räknar in ställpris, transportkostnad och styckpris som legokostnad med LO-påslag; efterkalkylen tar den verkliga inlevererade kostnaden från inköpsordern när en sådan finns.
@@ -183,6 +184,8 @@ Den nya tillverkningsordern frisläpps direkt (status **Frisläppt**) precis som
 ### Legoinköp på TO-kortet
 
 En lego-operation köps av en leverantör (se [Legoresurser](#legoresurser)). Under operationens namn i tabellen **Operationer** står vilken leverantör som gör den och vad som redan är köpt: en rad per inköpsorder mot operationen, t.ex. **IO-1042 (Utkast) · 1 000 st · önskat 2026-12-04** (och **mottaget …** när något har levererats in), och en rad per öppen förfrågan, t.ex. **Förfrågan FO-1024 (Skickad)**. Makulerade inköpsordrar och förfrågningar som redan blivit order visas inte. Är inget köpt står det **Ingen inköpsorder än**.
+
+Under inköpsorderraden står även **skickat …** när gods har rapporterats som skickat till leverantören. Operationens **⋯**-meny har dessutom en post **Avsändning IO-…** per öppen inköpsorder (Utkast, Bekräftad eller Delvis mottagen) som köper operationen; den öppnar [Avsändning lego](/hjalp/inkop#avsandning-lego) med ordern förvald och visas bara för dig som har rättigheten Inköp.
 
 På en väntande lego-operation i en frisläppt eller pågående order har radens **⋯**-meny två val:
 

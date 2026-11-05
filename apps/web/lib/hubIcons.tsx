@@ -107,6 +107,7 @@ export const HUB_ICONS: Record<string, LucideIcon> = {
   "/inkop/ordrar": ClipboardList,
   "/inkop/forfragningar": FileQuestion,
   "/inkop/inleverans": PackageCheck,
+  "/inkop/avsandning": Send,
   "/inkop/leverantorsfakturor": ReceiptText,
   "/inkop/fakturaunderlag": FileInput,
   "/inkop/fakturainkorg": Inbox,

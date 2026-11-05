@@ -114,6 +114,11 @@ export const INKOP_SECTIONS: ModuleNavSection[] = [
         title: "Inleverans",
         description: "Rapportera mottaget gods på en hel inköpsorder — restantal förifylls per rad.",
       },
+      {
+        href: "/inkop/avsandning",
+        title: "Avsändning lego",
+        description: "Rapportera gods som skickats till legoleverantör — Skickat per rad, kolli och pallkort.",
+      },
     ],
   },
   {

@@ -13,6 +13,9 @@ export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
   const [address, setAddress] = useState(initial.address ?? "");
   const [postalCode, setPostalCode] = useState(initial.postalCode ?? "");
   const [city, setCity] = useState(initial.city ?? "");
+  const [deliveryAddress, setDeliveryAddress] = useState(initial.deliveryAddress ?? "");
+  const [deliveryPostalCode, setDeliveryPostalCode] = useState(initial.deliveryPostalCode ?? "");
+  const [deliveryCity, setDeliveryCity] = useState(initial.deliveryCity ?? "");
   const [phone, setPhone] = useState(initial.phone ?? "");
   const [email, setEmail] = useState(initial.email ?? "");
   const [website, setWebsite] = useState(initial.website ?? "");
@@ -48,6 +51,9 @@ export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
           address: address || null,
           postalCode: postalCode || null,
           city: city || null,
+          deliveryAddress: deliveryAddress.trim() || null,
+          deliveryPostalCode: deliveryPostalCode.trim() || null,
+          deliveryCity: deliveryCity.trim() || null,
           phone: phone || null,
           email: email || null,
           website: website || null,
@@ -172,6 +178,24 @@ export function CompanyInfoForm({ initial }: { initial: CompanyInfo }) {
         <Field label="IBAN" htmlFor="iban">
           <Input id="iban" maxLength={40} size="md" value={iban} onChange={(e) => setIban(e.target.value)} />
         </Field>
+
+        {/* Godsmottagning: where suppliers deliver (and the lego pallet
+            card says "Färdigt gods levereras till") when it differs. */}
+        <h3 style={{ margin: "8px 0 0", fontSize: 14 }}>Leveransadress (godsmottagning)</h3>
+        <p style={{ margin: 0, color: "var(--color-text-muted)", fontSize: 13 }}>
+          Tomma fält betyder att företagets adress används.
+        </p>
+        <Field label="Adress" htmlFor="deliveryAddress">
+          <Input id="deliveryAddress" maxLength={255} value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} />
+        </Field>
+        <div className={styles.row}>
+          <Field label="Postnummer" htmlFor="deliveryPostalCode">
+            <Input id="deliveryPostalCode" maxLength={20} value={deliveryPostalCode} onChange={(e) => setDeliveryPostalCode(e.target.value)} />
+          </Field>
+          <Field label="Ort" htmlFor="deliveryCity">
+            <Input id="deliveryCity" maxLength={100} value={deliveryCity} onChange={(e) => setDeliveryCity(e.target.value)} />
+          </Field>
+        </div>
 
         <Field label="Godkänd för F-skatt" htmlFor="fSkatt">
           <Toggle id="fSkatt" checked={fSkatt} onChange={(e) => setFSkatt(e.target.checked)} />

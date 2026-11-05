@@ -715,6 +715,26 @@ export type PalletCardPdfInput =
       // Pre-formatted "seq · description/resource" — null/omitted when this
       // was the last operation of an unlinked order (the cell prints "—").
       nextOperation?: string | null;
+    })
+  // Pallkort till legoleverantör (avsändning lego): goes with the goods to
+  // the subcontractor, in the supplier's language. Denser than the other
+  // two (smaller article number/quantity, one-line name) — it carries two
+  // addresses and two order references and must still end above the fold.
+  | (PalletCardCommon & {
+      kind: "subcontract";
+      supplierName: string;
+      // The supplier's default delivery address, else its own address.
+      supplierAddress: { address: string | null; postalCode: string | null; city: string | null; country: string | null };
+      // From the article; "—" when empty.
+      surfaceTreatment: string | null;
+      colour: string | null;
+      // Coded like the delivery card's order number.
+      purchaseOrderNumber: string;
+      // "TO-2046 · Op 20 · Lackering"; null when the operation is gone.
+      manufacturingOrder: string | null;
+      // FÄRDIGT GODS LEVERERAS TILL — the IO's delivery address, else the
+      // company's godsadress, else the company's address (label = name).
+      deliverTo: DeliveryAddressBlock;
     });
 
 const PAGE_MARGIN = 50;
@@ -2332,7 +2352,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.rect(left, cardTop, CONTENT_WIDTH, 20).fill("#000000");
       doc.font("Helvetica-Bold").fontSize(10).fillColor("#ffffff");
       doc.text(pc.title, left + pad, cardTop + 5.5, { lineBreak: false });
-      doc.text(card.kind === "final" ? pc.toCustomer : pc.internal, left, cardTop + 5.5, {
+      doc.text(card.kind === "final" ? pc.toCustomer : card.kind === "subcontract" ? pc.toSubcontractor : pc.internal, left, cardTop + 5.5, {
         width: CONTENT_WIDTH - pad,
         align: "right",
         lineBreak: false,
@@ -2340,6 +2360,10 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       doc.fillColor("#000000");
 
       // 2. Article (left column) and 4. quantity (right column), side by side.
+      // The subcontract card is the compact variant: 24 pt number, one-line
+      // name, 30 pt quantity — its grid below has two rows more than the
+      // others and the whole card still has to end above the fold.
+      const compact = card.kind === "subcontract";
       let y = cardTop + 20;
       const articleColWidth = Math.round(CONTENT_WIDTH * 0.6);
       const qtyColX = left + articleColWidth;
@@ -2347,11 +2371,12 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       const yA = y + 6;
       label(pc.articleNumber, left + pad, yA);
       const numberWidth = code === "qr" ? articleColWidth - 2 * pad - QR_SIZE - 6 : articleColWidth - 2 * pad;
-      value(card.articleNumber, left + pad, yA + 10, 30, numberWidth);
-      let yName = yA + 48;
+      value(card.articleNumber, left + pad, yA + 10, compact ? 24 : 30, numberWidth);
+      let yName = compact ? yA + 42 : yA + 48;
       if (code === "barcode") {
-        drawBarcode(card.articleNumber, left + pad, yA + 44, Math.min(articleColWidth - 2 * pad, CONTENT_WIDTH / 2));
-        yName = yA + 44 + BARCODE_HEIGHT + 5;
+        const yBarcode = compact ? yA + 38 : yA + 44;
+        drawBarcode(card.articleNumber, left + pad, yBarcode, Math.min(articleColWidth - 2 * pad, CONTENT_WIDTH / 2));
+        yName = yBarcode + BARCODE_HEIGHT + 5;
       } else if (code === "qr") {
         drawQr(card.articleNumber, left + articleColWidth - pad - QR_SIZE, yA, QR_SIZE);
         yName = yA + QR_SIZE + 6;
@@ -2359,31 +2384,94 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       label(pc.articleName, left + pad, yName);
       // Two-line budget before ellipsizing — same bold-black treatment as
       // value(), which is single-line only, so a direct doc.text call with a
-      // taller fixed box (up to 2 lines at 13 pt).
+      // taller fixed box (up to 2 lines at 13 pt; one line on the compact card).
       doc.font("Helvetica-Bold").fontSize(13).fillColor("#000000");
-      doc.text(card.articleName || "—", left + pad, yName + 10, { width: articleColWidth - 2 * pad, height: 32, ellipsis: true });
-      const rowABottom = yName + 10 + 30 + 6;
+      doc.text(card.articleName || "—", left + pad, yName + 10, { width: articleColWidth - 2 * pad, height: compact ? 16 : 32, ellipsis: true });
+      // The right column (quantity + Kolli) needs its own minimum on the
+      // compact card, where the left column may be the shorter one.
+      const rowABottom = compact ? Math.max(yName + 10 + 16 + 6, yA + 86) : yName + 10 + 30 + 6;
 
       label(pc.quantity, qtyColX + pad, yA);
       fitValue(
         `${formatQuantity(String(card.quantity), language)}${card.unit ? ` ${card.unit}` : ""}`,
         qtyColX + pad,
         yA + 12,
-        40,
+        compact ? 30 : 40,
         qtyColWidth - 2 * pad
       );
       // Kolli n av m under the quantity, in its own cell — read together
       // with the quantity when the pallets are counted.
       const parcel = card.parcel ?? { index: 1, count: 1 };
-      thinLine(qtyColX, yA + 66, right, yA + 66);
-      value(pc.parcel(parcel.index, parcel.count), qtyColX + pad, yA + 74, 18, qtyColWidth - 2 * pad);
+      const yParcelLine = compact ? yA + 54 : yA + 66;
+      thinLine(qtyColX, yParcelLine, right, yParcelLine);
+      value(pc.parcel(parcel.index, parcel.count), qtyColX + pad, yParcelLine + 8, 18, qtyColWidth - 2 * pad);
       thinLine(qtyColX, y, qtyColX, rowABottom);
       y = rowABottom;
       thinLine(left, y, right, y);
 
       // 3. Grid.
       const half = CONTENT_WIDTH / 2;
-      if (card.kind === "final") {
+      if (card.kind === "subcontract") {
+        // Row B: LEGOLEVERANTÖR (name + its delivery address) beside FÄRDIGT
+        // GODS LEVERERAS TILL (name + address) — one row, as the two together
+        // would not fit above the fold as separate rows. Street rows on one
+        // line, at most three lines per address (street, postal code + city,
+        // country when ≠ SE).
+        const linesOf = (a: { address: string | null; postalCode: string | null; city: string | null; country?: string | null }) =>
+          [
+            (a.address ?? "")
+              .split(/\r\n|\r|\n/)
+              .map((row) => row.trim())
+              .filter((row) => row !== "")
+              .join(", "),
+            ...addressLines({ ...a, address: null }, language),
+          ]
+            .filter((line) => line !== "")
+            .slice(0, 3);
+        const addressCell = (labelText: string, name: string, lines: string[], x: number) => {
+          label(labelText, x + pad, y + 5);
+          doc.font("Helvetica-Bold").fontSize(11).fillColor("#000000");
+          doc.text(name || "—", x + pad, y + 14, { width: half - 2 * pad, height: 14, ellipsis: true });
+          doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000");
+          lines.forEach((line, i) => {
+            doc.text(line, x + pad, y + 28 + i * 10, { width: half - 2 * pad, height: 10, ellipsis: true });
+          });
+        };
+        const supplierLines = linesOf(card.supplierAddress);
+        const deliverToLines = linesOf(card.deliverTo);
+        const rowBHeight = 6 + 8 + 14 + Math.max(supplierLines.length, deliverToLines.length) * 10 + 4;
+        addressCell(pc.subcontractor, card.supplierName, supplierLines, left);
+        thinLine(left + half, y, left + half, y + rowBHeight);
+        addressCell(pc.deliverTo, card.deliverTo.label, deliverToLines, left + half);
+        y += rowBHeight;
+        thinLine(left, y, right, y);
+
+        // Row C: YTBEHANDLING | FÄRG — "—" when the article has none, so the
+        // grid keeps its shape.
+        const smallCell = (text: string, labelText: string, x: number) => {
+          label(labelText, x + pad, y + 5);
+          value(text, x + pad, y + 13, 13, half - 2 * pad);
+        };
+        const rowCHeight = 33;
+        smallCell(card.surfaceTreatment || "—", pc.surfaceTreatment, left);
+        thinLine(left + half, y, left + half, y + rowCHeight);
+        smallCell(card.colour || "—", pc.colour, left + half);
+        y += rowCHeight;
+        thinLine(left, y, right, y);
+
+        // Row D: INKÖPSORDER (coded) | TILLVERKNINGSORDER — the TO reference
+        // shrinks (18 → 12 pt) rather than ellipsizing, it is read whole.
+        const rowDHeight = codedCellHeight(code);
+        codedCell(card.purchaseOrderNumber, pc.purchaseOrder, left, y, half, code);
+        thinLine(left + half, y, left + half, y + rowDHeight);
+        label(pc.manufacturingOrder, left + half + pad, y + 6);
+        const moText = card.manufacturingOrder || "—";
+        doc.font("Helvetica-Bold").fillColor("#000000");
+        let moSize = 18;
+        while (moSize > 12 && doc.fontSize(moSize).widthOfString(moText) > half - 2 * pad) moSize -= 1;
+        doc.fontSize(moSize).text(moText, left + half + pad, y + 15 + (18 - moSize) / 2, { width: half - 2 * pad, height: moSize * 1.25, ellipsis: true });
+        y += rowDHeight;
+      } else if (card.kind === "final") {
         // At most three lines: street (every row on one line), postal code +
         // city, country — the last only when ≠ SE, as every other document.
         const address = card.deliveryAddress
@@ -2447,7 +2535,7 @@ export function createDocumentPdfService(system: Pick<SystemService, "getCompany
       // two cells instead of three.
       const bottomCells: [string, string][] = [
         [pc.date, formatStockholmDateTime(card.printedAt ?? new Date())],
-        ...(card.reportedBy ? [[pc.reportedBy, card.reportedBy] as [string, string]] : []),
+        ...(card.reportedBy ? [[card.kind === "subcontract" ? pc.dispatchedBy : pc.reportedBy, card.reportedBy] as [string, string]] : []),
         [pc.reference, card.reference || "—"],
       ];
       const cellWidth = CONTENT_WIDTH / bottomCells.length;

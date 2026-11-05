@@ -745,24 +745,36 @@ export const deliveryPalletCardRowSchema = z.object({
 });
 export type DeliveryPalletCardRow = z.infer<typeof deliveryPalletCardRowSchema>;
 
-const deliveryPalletCardRowParam = z
-  .string()
-  .transform((raw, ctx) => {
-    const colon = raw.indexOf(":");
-    if (colon === -1) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Expected <deliveryRowId>:<quantity>,<quantity>,…" });
-      return z.NEVER;
-    }
-    const list = raw.slice(colon + 1).trim();
-    return { deliveryRowId: raw.slice(0, colon), quantities: list === "" ? [] : list.split(",") };
-  })
-  .pipe(deliveryPalletCardRowSchema);
+// ONE parser for the `row=<id>:<antal>,<antal>` parameter — the delivery's
+// pallet card and the subcontractor dispatch's (purchase.ts) read the same
+// shape, keyed by their own row id field.
+export function palletCardRowParam<K extends string>(idKey: K) {
+  return z
+    .string()
+    .transform((raw, ctx) => {
+      const colon = raw.indexOf(":");
+      if (colon === -1) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Expected <${idKey}>:<quantity>,<quantity>,…` });
+        return z.NEVER;
+      }
+      const list = raw.slice(colon + 1).trim();
+      return { [idKey]: raw.slice(0, colon), quantities: list === "" ? [] : list.split(",") } as Record<K, string> & {
+        quantities: string[];
+      };
+    });
+}
 
-export const deliveryPalletCardQuerySchema = z.object({
-  row: z
-    .preprocess((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]), z.array(deliveryPalletCardRowParam).min(1).optional())
+export function palletCardSelectionSchema<T extends { quantities: number[] }>(rowSchema: z.ZodType<T, z.ZodTypeDef, unknown>) {
+  return z
+    .preprocess((value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]), z.array(rowSchema).min(1).optional())
     // Runs on dirty data too (zod keeps going after an element failed), so
     // an element that never parsed is skipped rather than dereferenced.
-    .refine((rows) => rows === undefined || rows.some((r) => Array.isArray(r?.quantities) && r.quantities.length > 0), "At least one row must get a card"),
+    .refine((rows) => rows === undefined || rows.some((r) => Array.isArray(r?.quantities) && r.quantities.length > 0), "At least one row must get a card");
+}
+
+const deliveryPalletCardRowParam = palletCardRowParam("deliveryRowId").pipe(deliveryPalletCardRowSchema);
+
+export const deliveryPalletCardQuerySchema = z.object({
+  row: palletCardSelectionSchema(deliveryPalletCardRowParam),
 });
 export type DeliveryPalletCardQuery = z.infer<typeof deliveryPalletCardQuerySchema>;

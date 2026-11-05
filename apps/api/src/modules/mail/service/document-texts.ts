@@ -191,6 +191,15 @@ export interface DocumentTexts {
     ourOrderNumber: string;
     manufacturingOrder: string;
     nextOperation: string;
+    // Pallkort till legoleverantör (kind "subcontract").
+    toSubcontractor: string;
+    subcontractor: string;
+    surfaceTreatment: string;
+    colour: string;
+    purchaseOrder: string;
+    deliverTo: string;
+    // The subcontract card's footer names the user who dispatched.
+    dispatchedBy: string;
     date: string;
     reportedBy: string;
     reference: string;
@@ -384,6 +393,13 @@ const sv: DocumentTexts = {
     ourOrderNumber: "VÅRT KUNDORDERNUMMER",
     manufacturingOrder: "TILLVERKNINGSORDER",
     nextOperation: "NÄSTA OPERATION",
+    toSubcontractor: "TILL LEGOLEVERANTÖR",
+    subcontractor: "LEGOLEVERANTÖR",
+    surfaceTreatment: "YTBEHANDLING",
+    colour: "FÄRG",
+    purchaseOrder: "INKÖPSORDER",
+    deliverTo: "FÄRDIGT GODS LEVERERAS TILL",
+    dispatchedBy: "SKICKAT AV",
     date: "DATUM",
     reportedBy: "RAPPORTERAD AV",
     reference: "REFERENS",
@@ -587,6 +603,13 @@ const en: DocumentTexts = {
     ourOrderNumber: "OUR ORDER NUMBER",
     manufacturingOrder: "MANUFACTURING ORDER",
     nextOperation: "NEXT OPERATION",
+    toSubcontractor: "TO SUBCONTRACTOR",
+    subcontractor: "SUBCONTRACTOR",
+    surfaceTreatment: "SURFACE TREATMENT",
+    colour: "COLOUR",
+    purchaseOrder: "PURCHASE ORDER",
+    deliverTo: "DELIVER FINISHED GOODS TO",
+    dispatchedBy: "DISPATCHED BY",
     date: "DATE",
     reportedBy: "REPORTED BY",
     reference: "REFERENCE",

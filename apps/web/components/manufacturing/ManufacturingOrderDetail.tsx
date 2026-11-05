@@ -422,6 +422,13 @@ export function ManufacturingOrderDetail({
                           disabled: row.subcontractSupplierId === null,
                         },
                         legoBuyable(row) && canInkop && { label: "Skapa förfrågan", onSelect: () => setLegoInquiryOp(row) },
+                        // Avsändning lego: one entry per open IO that buys the
+                        // operation, linking to the routine.
+                        ...(canInkop && row.workCenterType === "subcontract"
+                          ? (purchasesOf(row.id)?.purchaseOrders ?? [])
+                              .filter((po) => ["draft", "confirmed", "partially_received"].includes(po.status))
+                              .map((po) => ({ label: `Avsändning ${po.orderNumber}`, href: `/inkop/avsandning?order=${po.purchaseOrderId}` }))
+                          : []),
                         { label: "Pallkort", onSelect: openPalletCard },
                         operationUntouched(row) && { label: "Ta bort", onSelect: () => removeOperation(row), danger: true },
                       ]}
@@ -983,6 +990,7 @@ function LegoPurchaseLines({
         <div key={`${po.purchaseOrderId}-${i}`} style={lineStyle}>
           <GatedLink href={`/inkop/ordrar/${po.purchaseOrderId}`}>{po.orderNumber}</GatedLink> (
           {PURCHASE_ORDER_STATUS_PILL[po.status].label}) · {formatQuantity(po.quantityOrdered)} {unit}
+          {po.dispatchedQuantity > 0 && ` · skickat ${formatQuantity(po.dispatchedQuantity)}`}
           {po.quantityReceived > 0 && ` · mottaget ${formatQuantity(po.quantityReceived)}`}
           {po.expectedDeliveryDate && ` · önskat ${po.expectedDeliveryDate}`}
         </div>
