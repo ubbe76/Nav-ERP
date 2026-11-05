@@ -573,6 +573,17 @@ export function createInvoiceScanRepository(db: Db) {
       return row ?? null;
     },
 
+    // --- E-faktura (spec 2026-11-05-e-faktura-mottagning) ---
+
+    // Our article ids for the buyer's item numbers an e-invoice names.
+    async articleIdsByNumber(numbers: string[]): Promise<{ articleNumber: string; id: string }[]> {
+      if (numbers.length === 0) return [];
+      return db
+        .select({ articleNumber: articles.articleNumber, id: articles.id })
+        .from(articles)
+        .where(inArray(articles.articleNumber, numbers));
+    },
+
     // --- The conversion (inside the caller's transaction) ---
 
     async lockInTx(tx: Tx, id: string) {

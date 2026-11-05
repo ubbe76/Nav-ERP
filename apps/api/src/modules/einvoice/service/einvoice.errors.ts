@@ -62,6 +62,35 @@ export class EinvoiceTransmissionNotFoundError extends Error {
   }
 }
 
+// Ta emot e-faktura: the access point answered 409 — the organisation
+// number is published by another access point (a migration code is needed)
+// or, in the sandbox, migration codes are unavailable. The message is the
+// Swedish text the settings page shows.
+export class EinvoiceReceptionRegisteredElsewhereError extends Error {
+  constructor(
+    message: string,
+    readonly requestId: string | null = null
+  ) {
+    super(message);
+    this.name = "EinvoiceReceptionRegisteredElsewhereError";
+  }
+}
+
+export class EinvoiceReceptionNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Mottagningen hittades inte (${id})`);
+    this.name = "EinvoiceReceptionNotFoundError";
+  }
+}
+
+// Hämta nu while a reception run holds the lease. 409.
+export class EinvoiceReceiveBusyError extends Error {
+  constructor() {
+    super("En hämtning av e-fakturor pågår redan");
+    this.name = "EinvoiceReceiveBusyError";
+  }
+}
+
 // The provider seam's error, split by kind into three domain errors so each
 // gets its own code and status (400 / 409 / 502) in the envelope.
 export class EinvoiceProviderRejectedError extends Error {
@@ -101,6 +130,7 @@ export class EinvoiceProviderUnavailableError extends Error {
 export function fromProviderError(err: EInvoiceProviderError): Error {
   if (err.kind === "validation") return new EinvoiceProviderRejectedError(err.message, err.fieldErrors, err.requestId);
   if (err.kind === "unauthorized") return new EinvoiceProviderUnauthorizedError(err.message, err.requestId);
+  if (err.kind === "conflict") return new EinvoiceReceptionRegisteredElsewhereError(err.message, err.requestId);
   return new EinvoiceProviderUnavailableError(err.message, err.requestId);
 }
 

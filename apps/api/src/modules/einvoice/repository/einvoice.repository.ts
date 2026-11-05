@@ -1,16 +1,19 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, lt, sql } from "drizzle-orm";
 import {
   customerDeliveryAddresses,
+  einvoiceReceptions,
   einvoiceTransmissions,
   invoiceRows,
+  invoiceScans,
   invoices,
   salesOrderRows,
   salesOrders,
   systemSettings,
   users,
   type Db,
+  type Tx,
 } from "@navet/db";
-import type { EinvoiceStatus } from "@navet/shared";
+import type { EinvoiceReceptionOutcome, EinvoiceStatus } from "@navet/shared";
 
 // E-faktura (Peppol) — the module's own tables and the einvoice_* settings
 // keys. Reads of invoices/customers/company_info go through the narrow
@@ -25,6 +28,12 @@ import type { EinvoiceStatus } from "@navet/shared";
 // the stamp is what runStatusIfDue reads back through the settings.
 const STATUS_LEASE_KEY = "einvoice_status_lease_until";
 const STATUS_RUN_KEY = "einvoice_last_status_run_at";
+// Mottagningsjobbet's own keys: written by the job, read back through the
+// settings' read(); never through update().
+const RECEIVE_LEASE_KEY = "einvoice_receive_lease_until";
+const RECEIVE_RUN_KEY = "einvoice_last_receive_run_at";
+const RECEIVE_SUCCESS_KEY = "einvoice_receive_last_success_at";
+const RECEIVE_ERROR_KEY = "einvoice_receive_last_error";
 
 export const LIVE_TRANSMISSION_CONSTRAINT = "einvoice_transmissions_live";
 
@@ -244,8 +253,228 @@ export function createEinvoiceRepository(db: Db) {
         .values({ key: STATUS_RUN_KEY, value: at.toISOString() })
         .onConflictDoUpdate({ target: systemSettings.key, set: { value: at.toISOString() } });
     },
+
+    // --- Mottagningen (spec 2026-11-05-e-faktura-mottagning) ---
+
+    async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+      return db.transaction(fn);
+    },
+
+    // The log row + original, in the caller's transaction. ON CONFLICT on
+    // (environment, provider_invoice_id) DO NOTHING: null = already read in
+    // by an earlier run (its ack failed), nothing written.
+    async insertReceptionInTx(tx: Tx, row: ReceptionInsert): Promise<string | null> {
+      const [inserted] = await tx
+        .insert(einvoiceReceptions)
+        .values(row)
+        .onConflictDoNothing({ target: [einvoiceReceptions.environment, einvoiceReceptions.providerInvoiceId] })
+        .returning({ id: einvoiceReceptions.id });
+      return inserted?.id ?? null;
+    },
+
+    // The outcome columns are the only ones the NV001 trigger lets through.
+    async updateReceptionOutcome(
+      id: string,
+      patch: { outcome: EinvoiceReceptionOutcome; detail: string | null; invoiceScanId?: string | null },
+      on: Db | Tx = db
+    ) {
+      await on.update(einvoiceReceptions).set(patch).where(eq(einvoiceReceptions.id, id));
+    },
+
+    async findReceptionByProvider(environment: string, providerInvoiceId: string) {
+      const [row] = await db
+        .select(receptionColumns)
+        .from(einvoiceReceptions)
+        .where(and(eq(einvoiceReceptions.environment, environment), eq(einvoiceReceptions.providerInvoiceId, providerInvoiceId)));
+      return row ?? null;
+    },
+
+    async findReception(id: string) {
+      const [row] = await db.select(receptionColumns).from(einvoiceReceptions).where(eq(einvoiceReceptions.id, id));
+      return row ?? null;
+    },
+
+    // The reception behind an inbox post (the latest, should a test database
+    // ever link two).
+    async findReceptionByScan(scanId: string) {
+      const [row] = await db
+        .select(receptionColumns)
+        .from(einvoiceReceptions)
+        .where(eq(einvoiceReceptions.invoiceScanId, scanId))
+        .orderBy(desc(einvoiceReceptions.receivedAt), desc(einvoiceReceptions.id))
+        .limit(1);
+      return row ?? null;
+    },
+
+    // The identity/interpretation columns of a row logged `unreadable`
+    // (all null) when the document could be read later — the trigger lets
+    // them be filled once. In the caller's transaction.
+    async fillReceptionInTx(tx: Tx, id: string, row: ReceptionInsert) {
+      await tx
+        .update(einvoiceReceptions)
+        .set({
+          documentType: row.documentType,
+          documentNumber: row.documentNumber,
+          issueDate: row.issueDate,
+          senderEndpoint: row.senderEndpoint,
+          senderName: row.senderName,
+          currency: row.currency,
+          payableAmount: row.payableAmount,
+          interpretationXml: row.interpretationXml,
+          attachments: row.attachments,
+          outcome: row.outcome,
+          detail: row.detail,
+          invoiceScanId: row.invoiceScanId,
+        })
+        .where(eq(einvoiceReceptions.id, id));
+    },
+
+    // Unreadable documents of one environment (the alert, the scheduled
+    // run's skip list).
+    async countUnreadable(environment: string): Promise<number> {
+      const [row] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(einvoiceReceptions)
+        .where(and(eq(einvoiceReceptions.environment, environment), eq(einvoiceReceptions.outcome, "unreadable")));
+      return row?.n ?? 0;
+    },
+
+    // Dubblett: a reception of the same sender ENDPOINT, document type and
+    // number whose inbox post is alive (not rejected). A document without
+    // an endpoint is never matched this way (the name is no identity).
+    async findLiveReceptionByDocument(key: {
+      environment: string;
+      senderEndpoint: string;
+      documentType: "invoice" | "credit_note";
+      documentNumber: string;
+    }): Promise<{ receptionId: string; invoiceScanId: string; scanNumber: string } | null> {
+      const [row] = await db
+        .select({ receptionId: einvoiceReceptions.id, invoiceScanId: invoiceScans.id, scanNumber: invoiceScans.scanNumber })
+        .from(einvoiceReceptions)
+        .innerJoin(invoiceScans, eq(invoiceScans.id, einvoiceReceptions.invoiceScanId))
+        .where(
+          and(
+            eq(einvoiceReceptions.environment, key.environment),
+            eq(einvoiceReceptions.outcome, "imported"),
+            eq(einvoiceReceptions.documentType, key.documentType),
+            eq(einvoiceReceptions.documentNumber, key.documentNumber),
+            eq(einvoiceReceptions.senderEndpoint, key.senderEndpoint),
+            sql`${invoiceScans.status} <> 'rejected'`
+          )
+        )
+        .orderBy(desc(einvoiceReceptions.receivedAt))
+        .limit(1);
+      return row ?? null;
+    },
+
+    // The XML itself — read on its own, never in a listing.
+    async readReceptionOriginal(id: string) {
+      const [row] = await db
+        .select({
+          originalXml: einvoiceReceptions.originalXml,
+          originalContentType: einvoiceReceptions.originalContentType,
+          interpretationXml: einvoiceReceptions.interpretationXml,
+          documentNumber: einvoiceReceptions.documentNumber,
+        })
+        .from(einvoiceReceptions)
+        .where(eq(einvoiceReceptions.id, id));
+      return row ?? null;
+    },
+
+    // Mottagningsloggen, newest first, with the inbox post's FI- number.
+    async listReceptions(limit: number) {
+      return db
+        .select({ ...receptionColumns, scanNumber: invoiceScans.scanNumber })
+        .from(einvoiceReceptions)
+        .leftJoin(invoiceScans, eq(invoiceScans.id, einvoiceReceptions.invoiceScanId))
+        .orderBy(desc(einvoiceReceptions.receivedAt), desc(einvoiceReceptions.id))
+        .limit(limit);
+    },
+
+    async claimReceiveLease(now: Date, ttlMs: number): Promise<string | null> {
+      const until = new Date(now.getTime() + ttlMs).toISOString();
+      const rows = await db.execute(sql`
+        INSERT INTO system_settings (key, value) VALUES (${RECEIVE_LEASE_KEY}, ${until})
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        WHERE system_settings.value = '' OR system_settings.value::timestamptz <= ${now.toISOString()}::timestamptz
+        RETURNING key`);
+      return rows.length > 0 ? until : null;
+    },
+
+    // Extends the run's lease to `next`, only while it is still `until`
+    // (ours): the new value, or null when another run has taken over.
+    async renewReceiveLease(until: string, next: Date): Promise<string | null> {
+      const value = next.toISOString();
+      const rows = await db
+        .update(systemSettings)
+        .set({ value })
+        .where(and(eq(systemSettings.key, RECEIVE_LEASE_KEY), eq(systemSettings.value, until)))
+        .returning({ key: systemSettings.key });
+      return rows.length > 0 ? value : null;
+    },
+
+    async releaseReceiveLease(until: string) {
+      await db.delete(systemSettings).where(and(eq(systemSettings.key, RECEIVE_LEASE_KEY), eq(systemSettings.value, until)));
+    },
+
+    // After every run: when it ran and its error as Swedish text (null = it
+    // went through, which clears the error and stamps the last success).
+    async stampReceiveRun(at: Date, error: string | null) {
+      const upsert = (key: string, value: string) =>
+        db.insert(systemSettings).values({ key, value }).onConflictDoUpdate({ target: systemSettings.key, set: { value } });
+      await upsert(RECEIVE_RUN_KEY, at.toISOString());
+      if (error === null) {
+        await db.delete(systemSettings).where(eq(systemSettings.key, RECEIVE_ERROR_KEY));
+        await upsert(RECEIVE_SUCCESS_KEY, at.toISOString());
+      } else {
+        await upsert(RECEIVE_ERROR_KEY, error.slice(0, 500));
+      }
+    },
   };
 }
 
+export interface ReceptionInsert {
+  environment: "sandbox" | "production";
+  providerInvoiceId: string;
+  receivedAt: Date;
+  documentType: "invoice" | "credit_note" | null;
+  documentNumber: string | null;
+  issueDate: string | null;
+  senderEndpoint: string | null;
+  senderName: string | null;
+  currency: string | null;
+  payableAmount: string | null;
+  originalXml: Buffer;
+  originalSha256: string;
+  originalContentType: string;
+  interpretationXml: Buffer | null;
+  // [{ index, filename, contentType, sizeBytes }] — EInvoiceAttachmentMeta.
+  attachments: unknown;
+  outcome: EinvoiceReceptionOutcome;
+  detail: string | null;
+  invoiceScanId: string | null;
+}
+
+// A reception as the log lists it: never the XML.
+const receptionColumns = {
+  id: einvoiceReceptions.id,
+  environment: einvoiceReceptions.environment,
+  providerInvoiceId: einvoiceReceptions.providerInvoiceId,
+  receivedAt: einvoiceReceptions.receivedAt,
+  documentType: einvoiceReceptions.documentType,
+  documentNumber: einvoiceReceptions.documentNumber,
+  issueDate: einvoiceReceptions.issueDate,
+  senderEndpoint: einvoiceReceptions.senderEndpoint,
+  senderName: einvoiceReceptions.senderName,
+  currency: einvoiceReceptions.currency,
+  payableAmount: einvoiceReceptions.payableAmount,
+  attachments: einvoiceReceptions.attachments,
+  outcome: einvoiceReceptions.outcome,
+  detail: einvoiceReceptions.detail,
+  invoiceScanId: einvoiceReceptions.invoiceScanId,
+  createdAt: einvoiceReceptions.createdAt,
+};
+
 export type EinvoiceRepository = ReturnType<typeof createEinvoiceRepository>;
+export type ReceptionRow = NonNullable<Awaited<ReturnType<EinvoiceRepository["findReception"]>>>;
 export type TransmissionRow = NonNullable<Awaited<ReturnType<EinvoiceRepository["findTransmission"]>>>;

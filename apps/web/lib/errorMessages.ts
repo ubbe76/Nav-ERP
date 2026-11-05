@@ -611,6 +611,12 @@ const MESSAGES: Record<string, MessageEntry> = {
   "einvoice-provider-rejected": "Mottagande tjänst (B2Brouter) avvisade e-fakturan",
   "einvoice-provider-unauthorized": "B2Brouter nekade åtkomst — kontrollera API-nyckeln och miljön under System → E-faktura.",
   "einvoice-provider-unavailable": "B2Brouter svarar inte just nu — försök igen om en stund.",
+  "einvoice-reception-registered-elsewhere": serverMessage(
+    "Organisationsnumret tar redan emot e-fakturor hos en annan leverantör. Ange migreringskoden därifrån."
+  ),
+  "einvoice-receive-busy": "En hämtning pågår redan — försök igen om en stund.",
+  "invoice-scan-einvoice-no-ai": "En e-faktura är redan tolkad ur XML-filen och kan inte tolkas med AI.",
+  "invoice-scan-einvoice-original-not-found": "E-fakturans originalfil finns inte längre.",
   "einvoice-transmission-not-found": "Sändningen finns inte — ladda om sidan.",
   "einvoice-webhook-public-url": "Ange Navs adress med https under System → Inställningar innan statusbesked kan slås på.",
   // Snabbare manuell bokföring: verifikatmallar, återkommande verifikat, SIE-import av verifikat

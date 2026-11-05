@@ -6,6 +6,7 @@ import {
   companyInfo,
   deviationFiles,
   deviations,
+  einvoiceReceptions,
   einvoiceTransmissions,
   fiscalYears,
   invoiceDocuments,
@@ -208,6 +209,42 @@ export const FILE_EXPORT_KINDS: ExportKind[] = [
     },
     data: (db, ids) =>
       db.select({ id: einvoiceTransmissions.id, data: einvoiceTransmissions.document }).from(einvoiceTransmissions).where(inArray(einvoiceTransmissions.id, ids)),
+  },
+  // Mottagna e-fakturor: the original exactly as received, under the
+  // sender and the document number; the access point's UBL rendering (when
+  // the original was not UBL) beside it.
+  {
+    key: "einvoiceReceptions",
+    async list(db) {
+      const rows = await db
+        .select({ id: einvoiceReceptions.id, providerId: einvoiceReceptions.providerInvoiceId, sender: einvoiceReceptions.senderName, number: einvoiceReceptions.documentNumber, received: einvoiceReceptions.receivedAt })
+        .from(einvoiceReceptions)
+        .orderBy(asc(einvoiceReceptions.receivedAt));
+      return rows.map((r) => ({
+        id: r.id,
+        folder: ["Mottagna e-fakturor", r.sender ?? "Okänd avsändare"],
+        filename: `${r.number ?? r.providerId}.xml`,
+        modified: r.received,
+      }));
+    },
+    data: (db, ids) => db.select({ id: einvoiceReceptions.id, data: einvoiceReceptions.originalXml }).from(einvoiceReceptions).where(inArray(einvoiceReceptions.id, ids)),
+  },
+  {
+    key: "einvoiceReceptionInterpretations",
+    async list(db) {
+      const rows = await db
+        .select({ id: einvoiceReceptions.id, providerId: einvoiceReceptions.providerInvoiceId, sender: einvoiceReceptions.senderName, number: einvoiceReceptions.documentNumber, received: einvoiceReceptions.receivedAt })
+        .from(einvoiceReceptions)
+        .where(isNotNull(einvoiceReceptions.interpretationXml))
+        .orderBy(asc(einvoiceReceptions.receivedAt));
+      return rows.map((r) => ({
+        id: r.id,
+        folder: ["Mottagna e-fakturor", r.sender ?? "Okänd avsändare"],
+        filename: `${r.number ?? r.providerId}-ubl.xml`,
+        modified: r.received,
+      }));
+    },
+    data: (db, ids) => db.select({ id: einvoiceReceptions.id, data: einvoiceReceptions.interpretationXml }).from(einvoiceReceptions).where(inArray(einvoiceReceptions.id, ids)),
   },
   {
     key: "shipmentFiles",

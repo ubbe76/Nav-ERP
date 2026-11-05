@@ -41,6 +41,28 @@ export interface ValidationResult {
   warnings: string[];
 }
 
+// A received document as the access point lists it (Mottagning, spec
+// 2026-11-05-e-faktura-mottagning). Nothing else of the listing is trusted:
+// Nav reads the UBL itself.
+export interface ReceivedDocumentRef {
+  providerInvoiceId: string;
+  state: string | null;
+}
+
+// The account's Peppol transport as the access point reports it. null from
+// getTransport = no Peppol transport is configured.
+export interface PeppolTransport {
+  enabled: boolean;
+  reception: boolean;
+  smlStatus: "not_published" | "processing" | "published" | null;
+  directoryStatus: "not_published" | "processing" | "published" | null;
+  migrationPending: boolean | null;
+  // Document type codes the transport receives (xml.ubl.invoice.bis3 …).
+  documentTypes: string[];
+  // "scheme:value" as published (0007:5566778899), null when unknown.
+  participantId: string | null;
+}
+
 export interface EInvoiceProvider {
   readonly name: "b2brouter";
   // GET /accounts — "Testa anslutning". The first account the key reaches;
@@ -65,6 +87,25 @@ export interface EInvoiceProvider {
   deleteWebhook(id: string): Promise<void>;
   // Optional: the access point's own XSD + schematron check without sending.
   validate?(xml: Buffer): Promise<ValidationResult>;
+
+  // --- Mottagning ---
+  // The received documents not yet acknowledged, oldest first.
+  listReceived(opts: { offset: number; limit: number }): Promise<{ documents: ReceivedDocumentRef[]; total: number }>;
+  // The document exactly as it arrived (kind "not-found" when gone).
+  getReceivedOriginal(providerInvoiceId: string): Promise<{ xml: Buffer; contentType: string }>;
+  // The access point's UBL BIS3 rendering of a received document — the
+  // reserve when the original is not UBL (CII …).
+  getReceivedAsUbl(providerInvoiceId: string): Promise<Buffer>;
+  // Marks the document fetched: it leaves the unacknowledged listing.
+  acknowledgeReceived(providerInvoiceId: string): Promise<void>;
+  getTransport(): Promise<PeppolTransport | null>;
+  // Turns the transport's reception on/off; the migration code travels
+  // only with enabled: true. A 409 from the access point (the identifier
+  // is published by another provider, or — in the sandbox — migration
+  // codes are unavailable) is kind "conflict" with the access point's text.
+  setReception(input: { enabled: boolean; migrationCode?: string }): Promise<PeppolTransport>;
+  // Changes a registered web hook's events (kind "not-found" when gone).
+  updateWebhook(id: string, input: { events: string[] }): Promise<void>;
 }
 
 export interface EInvoiceProviderConfig {
@@ -83,7 +124,9 @@ export type EInvoiceProviderFactory = (config: EInvoiceProviderConfig) => EInvoi
 // not-found: the document no longer exists there (404 on a status read) —
 // the status job marks the row failed. unavailable: network/timeout/429/5xx
 // → 502. unexpected: an answer we cannot read, or another 4xx → 502.
-export type EInvoiceProviderErrorKind = "validation" | "unauthorized" | "not-found" | "unavailable" | "unexpected";
+// conflict: 409 on the reception switch (another access point publishes
+// the identifier; migration codes refused in the sandbox) → 409.
+export type EInvoiceProviderErrorKind = "validation" | "unauthorized" | "not-found" | "unavailable" | "unexpected" | "conflict";
 
 export class EInvoiceProviderError extends Error {
   constructor(

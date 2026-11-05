@@ -1282,6 +1282,13 @@
       "when": 1793865464349,
       "tag": "0182_avsandning_lego",
       "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1793880394571,
+      "tag": "0183_e_faktura_mottagning",
+      "breakpoints": true
     }
   ]
 }

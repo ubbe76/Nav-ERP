@@ -486,6 +486,16 @@ Varje fil får ett eget **FI**-nummer.
 
 Nav kan också läsa en e-postlåda och lägga fakturorna i brevens bilagor i inkorgen, se [Fakturaskanning](/hjalp/system#fakturaskanning). Posterna har då **E-post** som **Källa**, med avsändaren efter. Bilagor av typen PDF läses in; JPEG och PNG läses bara in när brevet saknar PDF, och små bilder (t.ex. signaturlogotyper) hoppas över. Andra filtyper, som XML, läses inte in, och högst 10 bilagor per brev läses in. Brevet flyttas till mappen för inlästa.
 
+### E-faktura
+
+Leverantörer som skickar e-faktura via Peppol hamnar i inkorgen av sig själva när **Ta emot e-faktura** är påslaget under [System → E-faktura](/hjalp/system#mottagning). Posterna har **E-faktura** som **Källa** och är redan tolkade ur e-fakturans XML — leverantör, fakturanummer, datum, belopp, betalningsreferens och rader fylls i utan att någon text behöver läsas ur en PDF. Granska och skapa leverantörsfakturan som vanligt; Nav skapar aldrig fakturan åt dig.
+
+- **Mottagen via Peppol** visar avsändaren och när fakturan kom. En post från testmiljön märks **Testläge (sandlåda)**.
+- Skickade leverantören en PDF som bilaga visas den som originalet. Annars ritar Nav en **Visningskopia av e-faktura** att granska mot, och den blir fakturans underlag.
+- **Ladda ned original (XML)** hämtar e-fakturan som den kom; bilagorna i den listas med nedladdningslänkar. XML-filen sparas som räkenskapsinformation och finns kvar även när posten är **Skapad**: leverantörsfakturan visar den under Underlag som **E-faktura (original, XML)**.
+- **Tolka med AI** finns inte för e-fakturor, eftersom uppgifterna redan är exakta. **Tolka igen** finns kvar och läser XML-filen på nytt — använd den efter **Skapa leverantör** så att en ny leverantör matchas mot fakturan.
+- Kommer samma faktura två gånger (samma avsändare och fakturanummer) skapas ingen ny post; det syns som **Dubblett** i mottagningsloggen.
+
 ### Listan
 
 Flikarna ovanför listan väljer vad som visas:
@@ -495,7 +505,7 @@ Flikarna ovanför listan väljer vad som visas:
 - **Avvisade** — fakturor som avvisats.
 - **Alla**.
 
-Kolumnerna är **Nr**, **Inkommen**, **Källa** (**Uppladdad** eller **E-post** med avsändare), **Fil**, **Leverantör** (den tolkade), **Fakturanr**, **Att betala** och **Status**. För en **Skapad** faktura visar **Leverantör**, **Fakturanr** och **Att betala** den skapade leverantörsfakturans värden, så som de sparades. Sökfältet söker på filnamn, FI-nummer, avsändare, ämne, leverantör och fakturanummer, och filtret **Alla källor** väljer uppladdade eller e-postade fakturor.
+Kolumnerna är **Nr**, **Inkommen**, **Källa** (**Uppladdad**, **E-post** med avsändare eller **E-faktura**), **Fil**, **Leverantör** (den tolkade), **Fakturanr**, **Att betala** och **Status**. För en **Skapad** faktura visar **Leverantör**, **Fakturanr** och **Att betala** den skapade leverantörsfakturans värden, så som de sparades. Sökfältet söker på filnamn, FI-nummer, avsändare, ämne, leverantör och fakturanummer, och filtret **Alla källor** väljer uppladdade, e-postade eller e-fakturor.
 
 Statusen är:
 

@@ -1,13 +1,16 @@
 import {
+  EINVOICE_RECEIVE_INTERVAL_DEFAULT,
   EINVOICE_STATUS_INTERVAL_DEFAULT,
   type EinvoiceEnvironment,
+  type EinvoiceReceptionView,
+  type SetEinvoiceReceptionInput,
   type TestEinvoiceConnectionInput,
   type UpdateEinvoiceSettingsInput,
 } from "@navet/shared";
 import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import type { EinvoiceRepository } from "../repository/einvoice.repository.js";
 import { b2brouterProviderFactory } from "./b2brouter-provider.js";
-import { EInvoiceProviderError, type EInvoiceProvider, type EInvoiceProviderFactory } from "./einvoice-provider.js";
+import { EInvoiceProviderError, type EInvoiceProvider, type EInvoiceProviderFactory, type PeppolTransport } from "./einvoice-provider.js";
 import { EinvoiceNotConfiguredError } from "./einvoice.errors.js";
 import { orgNumberDigits } from "./peppol-schemes.js";
 
@@ -35,11 +38,21 @@ const KEYS = {
   webhookEnvironment: "einvoice_webhook_environment",
   webhookUrl: "einvoice_webhook_url",
   webhookLastReceivedAt: "einvoice_webhook_last_received_at",
+  // Mottagning (spec 2026-11-05-e-faktura-mottagning): the switch mirrors
+  // the transport's `reception` at the access point; the run keys are
+  // written by the reception job only (repository), never through update().
+  receptionEnabled: "einvoice_reception_enabled",
+  receiveIntervalMinutes: "einvoice_receive_interval_minutes",
+  lastReceiveRunAt: "einvoice_last_receive_run_at",
+  receiveLastSuccessAt: "einvoice_receive_last_success_at",
+  receiveLastError: "einvoice_receive_last_error",
 } as const;
 
 // The path B2Brouter posts status changes to, under the public address.
 export const EINVOICE_WEBHOOK_PATH = "/api/v1/einvoice/webhook";
-export const EINVOICE_WEBHOOK_EVENTS = ["issued_invoice.state_change"];
+// Aktivera statusbesked registers both: the issued invoices' state changes
+// and a received document (which starts a reception run).
+export const EINVOICE_WEBHOOK_EVENTS = ["issued_invoice.state_change", "received_invoice.created"];
 
 export class EinvoiceWebhookPublicUrlError extends Error {
   constructor() {
@@ -56,6 +69,14 @@ export interface EinvoiceWebhookSettings {
   lastReceivedAt: Date | null;
 }
 
+export interface EinvoiceReceptionSettings {
+  enabled: boolean;
+  intervalMinutes: number;
+  lastRunAt: Date | null;
+  lastSuccessAt: Date | null;
+  lastError: string | null;
+}
+
 export interface EinvoiceSettings {
   enabled: boolean;
   environment: EinvoiceEnvironment;
@@ -66,6 +87,7 @@ export interface EinvoiceSettings {
   lastStatusRunAt: Date | null;
   autoSend: boolean;
   webhook: EinvoiceWebhookSettings;
+  reception: EinvoiceReceptionSettings;
 }
 
 // The company data an e-invoice carries (System → Företagsuppgifter), with
@@ -99,10 +121,11 @@ export interface EinvoiceWebhookView {
   proposedUrl: string | null;
 }
 
-export type EinvoiceSettingsView = Omit<EinvoiceSettings, "apiKey" | "webhook"> & {
+export type EinvoiceSettingsView = Omit<EinvoiceSettings, "apiKey" | "webhook" | "reception"> & {
   apiKeySet: boolean;
   company: EinvoiceCompanyView;
   webhook: EinvoiceWebhookView;
+  reception: EinvoiceReceptionView;
 };
 
 // Narrow slice of the system module (same pattern as RegisterReferenceReader).
@@ -173,6 +196,7 @@ export function createEinvoiceSettingsService(deps: {
     const raw = await repo.readSettings();
     const apiKey = raw.get(KEYS.apiKey);
     const interval = Number(raw.get(KEYS.statusIntervalMinutes));
+    const receiveInterval = Number(raw.get(KEYS.receiveIntervalMinutes));
     const webhookEnvironment = raw.get(KEYS.webhookEnvironment);
     return {
       enabled: raw.get(KEYS.enabled) === "true",
@@ -190,6 +214,41 @@ export function createEinvoiceSettingsService(deps: {
         url: blankToNull(raw.get(KEYS.webhookUrl)),
         lastReceivedAt: dateOf(raw.get(KEYS.webhookLastReceivedAt)),
       },
+      reception: {
+        enabled: raw.get(KEYS.receptionEnabled) === "true",
+        intervalMinutes: Number.isInteger(receiveInterval) && receiveInterval >= 5 ? receiveInterval : EINVOICE_RECEIVE_INTERVAL_DEFAULT,
+        lastRunAt: dateOf(raw.get(KEYS.lastReceiveRunAt)),
+        lastSuccessAt: dateOf(raw.get(KEYS.receiveLastSuccessAt)),
+        lastError: blankToNull(raw.get(KEYS.receiveLastError)),
+      },
+    };
+  }
+
+  // The reception as the page shows it: the stored switch and run stamps,
+  // plus the transport's publication state read LIVE from the access point
+  // — null when there is no key/account or it did not answer (never an
+  // error: the page must open even when B2Brouter is down).
+  async function receptionView(settings: EinvoiceSettings, transport?: PeppolTransport | null): Promise<EinvoiceReceptionView> {
+    let live = transport ?? null;
+    if (transport === undefined && settings.apiKey && settings.accountId) {
+      try {
+        live = await providerFactory({ environment: settings.environment, apiKey: settings.apiKey, accountId: settings.accountId }).getTransport();
+      } catch {
+        live = null;
+      }
+    }
+    const r = settings.reception;
+    return {
+      enabled: r.enabled,
+      smlStatus: live?.smlStatus ?? null,
+      directoryStatus: live?.directoryStatus ?? null,
+      migrationPending: live?.migrationPending ?? null,
+      documentTypes: live?.documentTypes ?? [],
+      participantId: live?.participantId ?? null,
+      intervalMinutes: r.intervalMinutes,
+      lastRunAt: r.lastRunAt ? r.lastRunAt.toISOString() : null,
+      lastSuccessAt: r.lastSuccessAt ? r.lastSuccessAt.toISOString() : null,
+      lastError: r.lastError,
     };
   }
 
@@ -210,13 +269,15 @@ export function createEinvoiceSettingsService(deps: {
     };
   }
 
-  async function view(): Promise<EinvoiceSettingsView> {
-    const { apiKey, webhook, ...rest } = await read();
+  async function view(transport?: PeppolTransport | null): Promise<EinvoiceSettingsView> {
+    const settings = await read();
+    const { apiKey, webhook, reception: _reception, ...rest } = settings;
     const active = webhook.id !== null && webhook.secret !== null;
     return {
       ...rest,
       apiKeySet: apiKey !== null,
       company: await companyView(),
+      reception: await receptionView(settings, transport),
       webhook: {
         active,
         environment: active ? webhook.environment : null,
@@ -280,6 +341,7 @@ export function createEinvoiceSettingsService(deps: {
       }
       if (input.statusIntervalMinutes !== undefined) await set(KEYS.statusIntervalMinutes, String(input.statusIntervalMinutes));
       if (input.autoSend !== undefined) await set(KEYS.autoSend, String(input.autoSend));
+      if (input.receiveIntervalMinutes !== undefined) await set(KEYS.receiveIntervalMinutes, String(input.receiveIntervalMinutes));
       if (changed.length > 0) {
         changed.sort();
         await audit.log({ entityType: "einvoice_settings", entityId: null, action: "updated", detail: { keys: changed }, userId });
@@ -346,6 +408,40 @@ export function createEinvoiceSettingsService(deps: {
     async recordWebhookReceived(at: Date) {
       await repo.setSetting(KEYS.webhookLastReceivedAt, at.toISOString());
     },
+
+    // Ta emot e-faktura: flips the transport's reception at the access
+    // point (which publishes/unpublishes the participant in SML and the
+    // Peppol directory) and mirrors the answer in einvoice_reception_enabled.
+    // The migration code travels only with enabled: true. A hook already
+    // registered for this environment is given the received event (best
+    // effort — a hook that cannot be updated only delays the pull to the
+    // job's next run). A 409 from the access point reaches the route as
+    // EinvoiceReceptionRegisteredElsewhereError (through fromProviderError).
+    async setReception(input: SetEinvoiceReceptionInput, userId: string | null): Promise<EinvoiceReceptionView> {
+      const current = await read();
+      const p = await provider({ requireEnabled: false, requireAccount: true });
+      const transport = await p.setReception({ enabled: input.enabled, migrationCode: input.enabled ? input.migrationCode : undefined });
+      await repo.setSetting(KEYS.receptionEnabled, String(transport.reception));
+      let webhookUpdated = false;
+      if (transport.reception && current.webhook.id && current.webhook.environment === current.environment) {
+        try {
+          await p.updateWebhook(current.webhook.id, { events: EINVOICE_WEBHOOK_EVENTS });
+          webhookUpdated = true;
+        } catch {
+          // see above
+        }
+      }
+      await audit.log({
+        entityType: "einvoice_settings",
+        entityId: null,
+        action: transport.reception ? "reception_enabled" : "reception_disabled",
+        detail: { environment: current.environment, participantId: transport.participantId, migrationCode: Boolean(input.enabled && input.migrationCode), webhookUpdated },
+        userId,
+      });
+      return receptionView(await read(), transport);
+    },
+
+    receptionView: async () => receptionView(await read()),
 
     // The key typed in the form when given, else the saved one — so a new
     // key can be checked before it is stored. Nothing is saved here; the

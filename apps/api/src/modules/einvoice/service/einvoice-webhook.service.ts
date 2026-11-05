@@ -13,6 +13,9 @@ import type { EinvoiceStatusService } from "./einvoice-status.service.js";
 // harm, and the status job stays the reserve for deliveries that never come.
 
 export const ISSUED_INVOICE_STATE_CHANGE = "issued_invoice.state_change";
+// Mottagning: a received document — only a nudge to run the reception now
+// (the content is always read from the API, never from the body).
+export const RECEIVED_INVOICE_CREATED = "received_invoice.created";
 
 // X-B2Brouter-Signature: "t=<unix seconds>,s=<hex HMAC-SHA256>" over
 // "<t>.<raw body>" with the hook's signing secret (B2Brouter webhooks guide).
@@ -44,10 +47,13 @@ export function createEinvoiceWebhookService(deps: {
   repo: EinvoiceRepository;
   settings: EinvoiceSettingsService;
   status: Pick<EinvoiceStatusService, "pollTransmission">;
+  // kick() starts a reception run after the answer (the lease keeps runs
+  // from overlapping); never awaited here.
+  receive: { kick(): void };
   now?: () => Date;
   log?: (msg: string, extra?: unknown) => void;
 }) {
-  const { repo, settings, status } = deps;
+  const { repo, settings, status, receive } = deps;
   const now = deps.now ?? (() => new Date());
   const log = deps.log ?? ((msg: string, extra?: unknown) => console.error(msg, extra));
 
@@ -64,12 +70,16 @@ export function createEinvoiceWebhookService(deps: {
       } catch {
         return 400;
       }
+      // The key now saved belongs to one environment; a hook registered for
+      // the other cannot be read back with it — the jobs are left.
+      if (body?.code === RECEIVED_INVOICE_CREATED) {
+        if (s.webhook.environment === s.environment) receive.kick();
+        return 204;
+      }
       if (body?.code !== ISSUED_INVOICE_STATE_CHANGE) return 204;
       const raw = body.data?.invoice_id;
       const providerInvoiceId = typeof raw === "number" && Number.isFinite(raw) ? String(raw) : typeof raw === "string" ? raw.trim() : "";
       if (providerInvoiceId === "") return 204;
-      // The key now saved belongs to one environment; a hook registered for
-      // the other cannot be read back with it — the status job is left.
       if (s.webhook.environment !== s.environment) return 204;
       const transmissionId = await repo.findTransmissionIdByProvider(s.environment, providerInvoiceId);
       if (!transmissionId) return 204;

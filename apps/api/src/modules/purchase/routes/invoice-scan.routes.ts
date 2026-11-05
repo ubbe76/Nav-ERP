@@ -17,6 +17,8 @@ import {
   InvoiceScanAiNotConfiguredError,
   InvoiceScanBusyError,
   InvoiceScanDuplicateError,
+  InvoiceScanEinvoiceNoAiError,
+  InvoiceScanEinvoiceOriginalNotFoundError,
   InvoiceScanNotFoundError,
   type InvoiceScanService,
   type UploadedFile,
@@ -39,7 +41,7 @@ import { invoiceError } from "./supplier-invoice.routes.js";
 const ADMIN = { config: { access: ["admin"] as const } };
 
 function scanError(err: unknown, reply: FastifyReply) {
-  if (err instanceof InvoiceScanNotFoundError) return reply.code(404).send(errorBody(err));
+  if (err instanceof InvoiceScanNotFoundError || err instanceof InvoiceScanEinvoiceOriginalNotFoundError) return reply.code(404).send(errorBody(err));
   if (err instanceof InvoiceScanDuplicateError) return reply.code(409).send({ ...errorBody(err), existing: err.existing });
   // The settings' own refusals, with the Swedish text as message (the form
   // shows it).
@@ -51,6 +53,7 @@ function scanError(err: unknown, reply: FastifyReply) {
   }
   if (
     err instanceof InvoiceScanAiNotConfiguredError ||
+    err instanceof InvoiceScanEinvoiceNoAiError ||
     err instanceof InvoiceScanBusyError ||
     err instanceof InvalidStatusTransitionError
   ) {
@@ -121,6 +124,36 @@ export async function invoiceScanRoutes(
       reply.header("X-Content-Type-Options", "nosniff");
       reply.header("Content-Disposition", contentDisposition(file.filename, "inline"));
       return reply.send(file.data);
+    } catch (err) {
+      return scanError(err, reply);
+    }
+  });
+
+  // E-faktura: the original XML exactly as received (räkenskapsinformation,
+  // kept after the conversion too). 404 when the scan is not an e-invoice.
+  app.get<{ Params: { id: string } }>("/invoice-scans/:id/einvoice-original", async (req, reply) => {
+    try {
+      const original = await service.einvoiceOriginal(req.params.id);
+      reply.header("Content-Type", original.contentType.startsWith("application/xml") || original.contentType.startsWith("text/xml") ? original.contentType : "application/xml");
+      reply.header("X-Content-Type-Options", "nosniff");
+      reply.header("Content-Disposition", contentDisposition(original.filename, "attachment"));
+      return reply.send(original.xml);
+    } catch (err) {
+      return scanError(err, reply);
+    }
+  });
+
+  // One embedded attachment out of the XML. The parameter is `index`
+  // (0-based), not an id — the id guard only vets :id/:…Id.
+  app.get<{ Params: { id: string; index: string } }>("/invoice-scans/:id/einvoice-attachments/:index", async (req, reply) => {
+    const index = Number(req.params.index);
+    if (!Number.isInteger(index) || index < 0 || index > 999) return reply.code(400).send({ error: "Ogiltigt bilageindex", code: "validation-failed" });
+    try {
+      const attachment = await service.einvoiceAttachment(req.params.id, index);
+      reply.header("Content-Type", attachment.contentType);
+      reply.header("X-Content-Type-Options", "nosniff");
+      reply.header("Content-Disposition", contentDisposition(attachment.filename, "attachment"));
+      return reply.send(attachment.data);
     } catch (err) {
       return scanError(err, reply);
     }

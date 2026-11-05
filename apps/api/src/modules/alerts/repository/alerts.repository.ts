@@ -4,6 +4,7 @@ import {
   articles,
   customers,
   deviations,
+  einvoiceReceptions,
   einvoiceTransmissions,
   emailLog,
   invoices,
@@ -493,6 +494,48 @@ export function createAlertsRepository(db: Db) {
     // first isn't the plugin failing to answer, the second the
     // administrator already saw.
     // Fakturaskanning: the e-mail job's own keys in system_settings.
+    // Mottagning av e-faktura: the switch and the job's stamps (the job's
+    // own keys, cleared by a successful run).
+    async einvoiceReceiveState(): Promise<{
+      enabled: boolean;
+      lastError: string | null;
+      lastRunAt: Date | null;
+      lastSuccessAt: Date | null;
+      // Documents of the selected environment the job could not read.
+      unreadable: number;
+    }> {
+      const rows = await db
+        .select()
+        .from(systemSettings)
+        .where(
+          inArray(systemSettings.key, [
+            "einvoice_reception_enabled",
+            "einvoice_environment",
+            "einvoice_receive_last_error",
+            "einvoice_last_receive_run_at",
+            "einvoice_receive_last_success_at",
+          ])
+        );
+      const value = new Map(rows.map((r) => [r.key, r.value]));
+      const instant = (key: string) => {
+        const ms = Date.parse(value.get(key) ?? "");
+        return Number.isFinite(ms) ? new Date(ms) : null;
+      };
+      const error = value.get("einvoice_receive_last_error")?.trim();
+      const environment = value.get("einvoice_environment") === "production" ? "production" : "sandbox";
+      const [count] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(einvoiceReceptions)
+        .where(and(eq(einvoiceReceptions.environment, environment), eq(einvoiceReceptions.outcome, "unreadable")));
+      return {
+        enabled: value.get("einvoice_reception_enabled") === "true",
+        lastError: error ? error : null,
+        lastRunAt: instant("einvoice_last_receive_run_at"),
+        lastSuccessAt: instant("einvoice_receive_last_success_at"),
+        unreadable: count?.n ?? 0,
+      };
+    },
+
     async invoiceScanMailState(): Promise<{ enabled: boolean; lastError: string | null; lastRunAt: Date | null; lastSuccessAt: Date | null }> {
       const rows = await db
         .select()

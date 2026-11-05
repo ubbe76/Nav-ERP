@@ -151,6 +151,8 @@ import { createEinvoiceSettingsService } from "./modules/einvoice/service/einvoi
 import { createEinvoiceService } from "./modules/einvoice/service/einvoice.service.js";
 import { createEinvoiceStatusService } from "./modules/einvoice/service/einvoice-status.service.js";
 import { createEinvoiceWebhookService } from "./modules/einvoice/service/einvoice-webhook.service.js";
+import { createEinvoiceReceiveService } from "./modules/einvoice/service/einvoice-receive.service.js";
+import type { EInvoiceOriginalReader } from "./modules/purchase/service/invoice-scan/einvoice-original.js";
 import { einvoiceRoutes, einvoiceWebhookRoutes } from "./modules/einvoice/routes/einvoice.routes.js";
 import { createStockRepository } from "./modules/stock/repository/stock.repository.js";
 import { createStockService } from "./modules/stock/service/stock.service.js";
@@ -470,6 +472,10 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     audit: auditRepository,
     interpreters: options.invoiceInterpreters,
   });
+  // E-faktura, mottagning: the inbox reads a received post's original
+  // through the einvoice module, which is built after purchase — bound late
+  // like variantPriceRef.
+  const einvoiceOriginalRef: { current: EInvoiceOriginalReader | null } = { current: null };
   const invoiceScanService = createInvoiceScanService({
     repo: invoiceScanRepository,
     supplierInvoices: supplierInvoiceService,
@@ -477,6 +483,12 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     settings: invoiceScanSettingsService,
     audit: auditRepository,
     interpreters: options.invoiceInterpreters,
+    einvoiceOriginals: {
+      infoForScan: (id) => einvoiceOriginalRef.current!.infoForScan(id),
+      forScan: (id) => einvoiceOriginalRef.current!.forScan(id),
+      originalXml: (id) => einvoiceOriginalRef.current!.originalXml(id),
+      attachment: (id, index) => einvoiceOriginalRef.current!.attachment(id, index),
+    },
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   // Fakturaskanning: the e-mail box. Decorated for server.ts's scheduler like
@@ -620,11 +632,24 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   app.decorate("einvoiceStatus", einvoiceStatusService);
+  // Mottagning: received e-invoices into the Fakturainkorg through the
+  // purchase module's importer; decorated for server.ts's scheduler like
+  // einvoiceStatus — never run from buildApp.
+  const einvoiceReceiveService = createEinvoiceReceiveService({
+    repo: einvoiceRepository,
+    settings: einvoiceSettingsService,
+    scans: invoiceScanService,
+    audit: auditRepository,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
+  einvoiceOriginalRef.current = einvoiceReceiveService;
+  app.decorate("einvoiceReceive", einvoiceReceiveService);
   // Statusbesked direkt: the public receiver of B2Brouter's web hook.
   const einvoiceWebhookService = createEinvoiceWebhookService({
     repo: einvoiceRepository,
     settings: einvoiceSettingsService,
     status: einvoiceStatusService,
+    receive: einvoiceReceiveService,
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   // Kundreskontra (B3) — open items, payment registration and cancellation.
@@ -987,7 +1012,7 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
         await registerModule(
           protectedRoutes,
           einvoiceRoutes,
-          { settings: einvoiceSettingsService, service: einvoiceService, status: einvoiceStatusService },
+          { settings: einvoiceSettingsService, service: einvoiceService, status: einvoiceStatusService, receive: einvoiceReceiveService },
           { read: office, write: ["forsaljning"] }
         );
         await registerModule(
