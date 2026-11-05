@@ -1,3 +1,4 @@
+import type { EInvoiceAutoSendOutcome } from "./einvoice";
 import type { ManufacturingOrderConfiguration, OrderRowConfiguration } from "./configurator";
 import type { DocumentRateSourceValue } from "./currency";
 import type { DocumentLanguage } from "./documentLanguage";
@@ -1476,6 +1477,9 @@ export interface CollectiveInvoicingResult {
   // Faktura i vänteläge: "Utfärda direkt" left the draft because the customer
   // is on hold (status stays "draft"). Absent otherwise.
   onHold?: boolean;
+  // Skicka e-faktura automatiskt vid Utfärda: what became of the issued
+  // invoice's e-invoice (null/absent = nothing was attempted).
+  einvoice?: EInvoiceAutoSendOutcome | null;
 }
 
 // E3: linked manufacturing order shown in the row's "I tillverkning" column

@@ -20,6 +20,8 @@ import {
   EinvoiceTransmissionNotFoundError,
 } from "../src/modules/einvoice/service/einvoice.errors.js";
 import { InvoiceNotFoundError } from "../src/modules/sales/service/invoice.service.js";
+import { EinvoiceWebhookPublicUrlError } from "../src/modules/einvoice/service/einvoice-settings.service.js";
+import { createHmac } from "node:crypto";
 
 const ID = "11111111-1111-4111-8111-111111111111";
 
@@ -151,6 +153,27 @@ describe("einvoice routes — envelope", () => {
     expect(res.json()).toMatchObject({ id: ID, status: "sent" });
   });
 
+  it("registers and removes the web hook through the settings service; no public address ⇒ 409", async () => {
+    const calls: string[] = [];
+    const app = routesApp({}, {}, {
+      registerWebhook: async () => {
+        calls.push("register");
+        throw new EinvoiceWebhookPublicUrlError();
+      },
+      unregisterWebhook: async () => {
+        calls.push("unregister");
+        return { webhook: { active: false } } as never;
+      },
+    });
+    const registered = await app.inject({ method: "POST", url: "/einvoice-settings/webhook" });
+    expect(registered.statusCode).toBe(409);
+    expect(registered.json()).toMatchObject({ code: "einvoice-webhook-public-url" });
+    const removed = await app.inject({ method: "DELETE", url: "/einvoice-settings/webhook" });
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json()).toEqual({ webhook: { active: false } });
+    expect(calls).toEqual(["register", "unregister"]);
+  });
+
   it("validates the settings and lookup bodies", async () => {
     const app = routesApp({ lookup: async (_id, input) => ({ input }) as never }, {}, { update: async () => ({}) as never });
     expect((await app.inject({ method: "PATCH", url: "/einvoice-settings", payload: { statusIntervalMinutes: 1 } })).statusCode).toBe(400);
@@ -263,3 +286,44 @@ describe("einvoice routes — rules", () => {
     expect(plain.json()).toMatchObject({ invoiceDelivery: "email", peppolId: null });
   });
 });
+
+describe("einvoice web hook — the public receiver (spec 2026-11-05)", () => {
+  const SECRET = "whsec_route_test";
+  const body = JSON.stringify({ code: "issued_invoice.state_change", triggered_at: 1, data: { account_id: 1, invoice_id: 31337, state: "sent" } });
+  const sign = (raw: string, secret = SECRET) => `t=1,s=${createHmac("sha256", secret).update("1.").update(raw).digest("hex")}`;
+
+  afterAll(async () => {
+    await db.execute(sql`DELETE FROM system_settings WHERE key LIKE 'einvoice_webhook_%'`);
+  });
+
+  it("needs no session: 404 without a hook, 401 on a bad signature, 204 on a signed delivery — whatever the content type", async () => {
+    await db.execute(sql`DELETE FROM system_settings WHERE key LIKE 'einvoice_webhook_%'`);
+    const post = (headers: Record<string, string>, payload = body) =>
+      app.inject({ method: "POST", url: "/api/v1/einvoice/webhook", headers: { "content-type": "application/json", ...headers }, payload });
+    expect((await post({ "x-b2brouter-signature": sign(body) })).statusCode).toBe(404);
+    for (const [key, value] of [
+      ["einvoice_webhook_id", "1"],
+      ["einvoice_webhook_secret", SECRET],
+      ["einvoice_webhook_environment", "sandbox"],
+    ]) {
+      await db.execute(sql`INSERT INTO system_settings (key, value) VALUES (${key}, ${value}) ON CONFLICT (key) DO UPDATE SET value = ${value}`);
+    }
+    expect((await post({ "x-b2brouter-signature": sign(body, "other") })).statusCode).toBe(401);
+    expect((await post({})).statusCode).toBe(401);
+    // The exact bytes are signed: JSON re-serialisation would break it, a
+    // body with extra whitespace still verifies.
+    const spaced = body.replace(",", ", ");
+    expect((await post({ "x-b2brouter-signature": sign(spaced) }, spaced)).statusCode).toBe(204);
+    expect((await post({ "x-b2brouter-signature": sign(body), "content-type": "text/plain" })).statusCode).toBe(204);
+    // An oversized body is refused before it is read.
+    const big = JSON.stringify({ code: "x", pad: "a".repeat(70 * 1024) });
+    expect((await post({ "x-b2brouter-signature": sign(big) }, big)).statusCode).toBe(413);
+  });
+
+  it("the hook's settings routes are admin only", async () => {
+    const seller = await userWith(["forsaljning"]);
+    expect((await app.inject({ method: "POST", url: "/api/v1/einvoice-settings/webhook", headers: { cookie: seller } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "DELETE", url: "/api/v1/einvoice-settings/webhook", headers: { cookie: seller } })).statusCode).toBe(403);
+  });
+});
+

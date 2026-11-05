@@ -35,6 +35,12 @@ export interface FakeEinvoice {
     lookup: LookupResult;
     lookupError: Error | null;
     validation: ValidationResult;
+    // Web hooks registered at the fake access point, by id; createWebhook
+    // answers with the next id and `webhookSecret`.
+    webhooks: Map<string, { url: string; events: string[] }>;
+    webhookSecret: string;
+    createWebhookError: Error | null;
+    deleteWebhookError: Error | null;
   };
 }
 
@@ -54,6 +60,10 @@ export function createFakeEinvoiceProvider(): FakeEinvoice {
     lookup: { found: true, name: "Kund AB", documentTypes: ["invoice", "credit_note"], message: null },
     lookupError: null,
     validation: { status: "valid", errors: [], warnings: [] },
+    webhooks: new Map(),
+    webhookSecret: "whsec_test_secret",
+    createWebhookError: null,
+    deleteWebhookError: null,
   };
   let nextId = 1000;
   const record = (method: string, ...args: unknown[]) => calls.push({ method, args });
@@ -87,14 +97,26 @@ export function createFakeEinvoiceProvider(): FakeEinvoice {
       if (s.state === "__gone__") throw new EInvoiceProviderError("Dokumentet finns inte längre hos B2Brouter", "not-found");
       return { ...s };
     },
-    async lookupParticipant(scheme, id) {
-      record("lookupParticipant", scheme, id);
+    async lookupParticipant(scheme, id, country) {
+      record("lookupParticipant", scheme, id, country);
       if (state.lookupError) throw state.lookupError;
       return { ...state.lookup, documentTypes: [...state.lookup.documentTypes] };
     },
     async validate(xml) {
       record("validate", xml);
       return { ...state.validation };
+    },
+    async createWebhook(input) {
+      record("createWebhook", input);
+      if (state.createWebhookError) throw state.createWebhookError;
+      const id = String(nextId++);
+      state.webhooks.set(id, { url: input.url, events: [...input.events] });
+      return { id, secret: state.webhookSecret };
+    },
+    async deleteWebhook(id) {
+      record("deleteWebhook", id);
+      if (state.deleteWebhookError) throw state.deleteWebhookError;
+      if (!state.webhooks.delete(id)) throw new EInvoiceProviderError("Webhooken finns inte längre hos B2Brouter", "not-found");
     },
   };
   return {

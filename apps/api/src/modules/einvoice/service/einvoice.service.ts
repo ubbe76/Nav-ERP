@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { normalizeVatNumber, toUnitPrice, toUnitQuantity, type EinvoiceBlockedReason, type EinvoiceStatus, type PeppolLookupInput } from "@navet/shared";
+import {
+  localized,
+  normalizeVatNumber,
+  toUnitPrice,
+  toUnitQuantity,
+  type EinvoiceAutoSendOutcome,
+  type EinvoiceBlockedReason,
+  type EinvoiceStatus,
+  type PeppolLookupInput,
+} from "@navet/shared";
 import { configurationLines } from "../../configurator/service/configuration-lines.js";
 import { InvoiceNotFoundError } from "../../sales/service/invoice.service.js";
 import { CustomerNotFoundError } from "../../sales/service/sales.service.js";
@@ -7,12 +16,8 @@ import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { isUniqueViolation } from "../../system/service/db-errors.js";
 import { LIVE_TRANSMISSION_CONSTRAINT, type EinvoiceRepository, type TransmissionRow } from "../repository/einvoice.repository.js";
 import { EInvoiceProviderError, type LookupResult } from "./einvoice-provider.js";
-import {
-  orgNumberDigits,
-  type CompanyInfoReader,
-  type CompanyInfoRow,
-  type EinvoiceSettingsService,
-} from "./einvoice-settings.service.js";
+import type { CompanyInfoReader, CompanyInfoRow, EinvoiceSettingsService } from "./einvoice-settings.service.js";
+import { DERIVED_PEPPOL_COUNTRIES, derivedPeppolId, normalizedOrgNumber, orgNumberDigits, orgNumberScheme } from "./peppol-schemes.js";
 import { einvoiceStatusLabel, isLiveStatus, mapProviderState, providerErrorText } from "./einvoice-status.js";
 import {
   BLOCKED_MESSAGES,
@@ -23,12 +28,14 @@ import {
   fromProviderError,
 } from "./einvoice.errors.js";
 import { checkUblInput } from "./ubl/ubl-check.js";
-import { isSupportedVatCode } from "./ubl/vat-categories.js";
+import { isOutOfScopeVatCode, isSupportedVatCode, type UblLanguage } from "./ubl/vat-categories.js";
 import { buildUblDocument } from "./ubl/ubl-invoice-builder.js";
 import type { PeppolIdentifier, UblInvoiceInput, UblLine, UblPaymentAccount, UblPostalAddress } from "./ubl/ubl-types.js";
 
-// E-faktura via Peppol — sändning, läsning för fakturakortet och Kontrollera
-// mottagare (spec §3.4, §3.6). No DB transaction is ever held over the
+// E-faktura via Peppol — sändning, läsning för fakturakortet, Kontrollera
+// mottagare (spec §3.4, §3.6) and, since etapp 2a (spec 2026-11-05-e-faktura-
+// utland-automatik), foreign customers, the invoice's own currency and the
+// automatic send after Utfärda. No DB transaction is ever held over the
 // access point call: the `sending` row is inserted first (the partial unique
 // index, per invoice AND environment, is the double-send guard), then the
 // provider is called — the access point's id is written to the row as soon
@@ -51,10 +58,14 @@ export interface InvoiceReadRow {
   vatAmount: string;
   salesOrderRowId: string | null;
   configuration: unknown;
-  // Momskoder: the row's code and the company's invoice text for it (BT-120
-  // on an AE subtotal). Optional only for older fixtures — the invoice
-  // service always returns it.
-  vatCode?: { code: string; invoiceText: string | null } | null;
+  // Momskoder: the row's code and the company's invoice texts for it
+  // (BT-120 on an AE/K/G/O subtotal, English on an English invoice).
+  // Optional only for older fixtures — the invoice service always returns it.
+  vatCode?: { code: string; invoiceText: string | null; invoiceTextEn?: string | null } | null;
+  // The article's English name (an English invoice's Item/Name) and the
+  // row's last delivery day (BT-72 for an intra-community supply).
+  articleNameEn?: string | null;
+  deliveryDate?: string | null;
 }
 
 export interface InvoiceReadModel {
@@ -63,6 +74,11 @@ export interface InvoiceReadModel {
   type: "invoice" | "credit";
   status: "draft" | "issued" | "paid" | "cancelled";
   currency: string;
+  // The stamped document language and the SEK figures at the invoice's rate
+  // (null without a rate) — BT-111 is sekAmounts.vatAmount. Optional only
+  // for older fixtures.
+  language?: string | null;
+  sekAmounts?: { vatAmount: number } | null;
   customerId: string;
   creditedInvoiceId: string | null;
   invoiceDate: string | null;
@@ -108,12 +124,14 @@ export interface Recipient {
   source: "customer" | "org-number" | null;
 }
 
-// The customer's Peppol-id, else "0007:" + organisationsnummer.
-export function resolveRecipient(customer: Pick<CustomerReadModel, "peppolId" | "orgNumber">, override?: string | null): Recipient {
+// The customer's Peppol-id, else one derived from the organisation number
+// where the country's register is the Peppol address (SE 0007, NO 0192,
+// DK 0184, BE 0208 — peppol-schemes.ts); anywhere else the id must be typed.
+export function resolveRecipient(customer: Pick<CustomerReadModel, "peppolId" | "orgNumber" | "country">, override?: string | null): Recipient {
   const own = (override ?? customer.peppolId)?.trim();
   if (own) return { peppolId: own, source: "customer" };
-  const digits = orgNumberDigits(customer.orgNumber);
-  if (digits) return { peppolId: `0007:${digits}`, source: "org-number" };
+  const derived = derivedPeppolId(customer.country, customer.orgNumber);
+  if (derived) return { peppolId: derived, source: "org-number" };
   return { peppolId: null, source: null };
 }
 
@@ -122,19 +140,20 @@ export function splitPeppolId(peppolId: string): PeppolIdentifier {
   return { scheme: peppolId.slice(0, i), value: peppolId.slice(i + 1) };
 }
 
-// Why the invoice cannot be sent right now, in the spec's order; null = it can.
+// Why the invoice cannot be sent right now, in the spec's order; null = it
+// can. Since etapp 2a a foreign customer and another currency are sendable.
 export function blockedReasonFor(
-  invoice: Pick<InvoiceReadModel, "status" | "currency"> & { rows?: Pick<InvoiceReadRow, "vatCode">[] },
-  customer: Pick<CustomerReadModel, "privatePerson" | "country" | "invoiceCountry" | "peppolId" | "orgNumber">,
+  invoice: Pick<InvoiceReadModel, "status"> & { rows?: Pick<InvoiceReadRow, "vatCode">[] },
+  customer: Pick<CustomerReadModel, "privatePerson" | "country" | "peppolId" | "orgNumber">,
   company: CompanyInfoRow | null
 ): EinvoiceBlockedReason | null {
   if (invoice.status !== "issued" && invoice.status !== "paid") return "invoice-not-issued";
   if (customer.privatePerson) return "private-person";
-  if (customer.country !== "SE" || (customer.invoiceCountry !== null && customer.invoiceCountry !== "SE")) return "foreign-customer";
-  if (invoice.currency !== "SEK") return "currency";
-  // Momskoder (spec 4.5): MP* ⇒ S, MF ⇒ E, OB ⇒ AE — any other code (a
-  // hand-picked EU or export code) has no category in etapp 1.
-  if ((invoice.rows ?? []).some((row) => row.vatCode != null && !isSupportedVatCode(row.vatCode.code))) return "vat-code-unsupported";
+  // Momskoder: every catalog code but UTM has a Peppol category
+  // (vat-categories.ts); EXT (⇒ O) must stand alone (BR-O-11..14).
+  const codes = (invoice.rows ?? []).flatMap((row) => (row.vatCode != null ? [row.vatCode.code] : []));
+  if (codes.some((code) => !isSupportedVatCode(code))) return "vat-code-unsupported";
+  if (codes.some(isOutOfScopeVatCode) && codes.some((code) => !isOutOfScopeVatCode(code))) return "vat-code-mixed";
   if (!company || orgNumberDigits(company.orgNumber) === null || !company.vatNumber?.trim()) return "missing-company-data";
   if (resolveRecipient(customer).peppolId === null) return "missing-recipient-id";
   return null;
@@ -156,12 +175,16 @@ function addressOf(address: string | null, postalCode: string | null, city: stri
   return { addressLines: lines, postalCode: postalCode?.trim() || null, city: city?.trim() || null, country };
 }
 
-function paymentAccountOf(company: CompanyInfoRow): UblPaymentAccount | null {
+// Bankgiro first for a Swedish customer paying in SEK; an IBAN first for a
+// foreign customer or another currency (a bankgiro cannot be paid from
+// abroad), then whatever exists.
+function paymentAccountOf(company: CompanyInfoRow, preferIban = false): UblPaymentAccount | null {
+  const iban = company.iban?.replace(/\s/g, "");
+  if (preferIban && iban) return { kind: "iban", iban, bic: company.bic?.replace(/\s/g, "") || null };
   const bankgiro = company.bankgiro?.replace(/\s/g, "");
   if (bankgiro) return { kind: "bankgiro", account: bankgiro };
   const plusgiro = company.plusgiro?.replace(/\s/g, "");
   if (plusgiro) return { kind: "plusgiro", account: plusgiro };
-  const iban = company.iban?.replace(/\s/g, "");
   if (iban) return { kind: "iban", iban, bic: company.bic?.replace(/\s/g, "") || null };
   return null;
 }
@@ -183,6 +206,9 @@ export interface OrderLink {
   customerOrderNumber: string | null;
   customerReference: string | null;
   orderLineNo: number | null;
+  // The order's delivery address country — BT-80 for an intra-community
+  // supply. Optional only for older fixtures.
+  deliveryCountry?: string | null;
 }
 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
@@ -242,6 +268,8 @@ export function buildUblInput(args: {
 }): UblInvoiceInput {
   const { invoice, customer, company } = args;
   const isCredit = invoice.type === "credit";
+  const language: UblLanguage = invoice.language === "en" ? "en" : "sv";
+  const currency = invoice.currency.trim().toUpperCase();
   const links = new Map(args.orderLinks.map((l) => [l.rowId, l]));
   // BT-13/BT-10 from the FIRST linked order in the DOCUMENT's own line
   // order (invoice.rows, the same order the lines are numbered in — so the
@@ -257,7 +285,9 @@ export function buildUblInput(args: {
     const link = links.get(r.id);
     return {
       lineNumber: i + 1,
-      description: r.description,
+      // An English invoice names the article in English when it has a name
+      // for it (as the PDF does); otherwise the row's stored text.
+      description: language === "en" && r.articleNameEn?.trim() ? r.articleNameEn.trim() : r.description,
       articleNumber: r.articleNumber,
       quantity: toUnitQuantity(Number(r.quantity), r.unitFactor),
       unitCode: r.unitCode,
@@ -267,18 +297,48 @@ export function buildUblInput(args: {
       vatAmount: Number(r.vatAmount),
       vatRate: Number(r.vatRate),
       vatCode: r.vatCode?.code ?? null,
-      vatExemptionText: r.vatCode?.invoiceText ?? null,
+      vatExemptionText: r.vatCode?.invoiceText != null ? localized(r.vatCode.invoiceText, r.vatCode.invoiceTextEn, language) : null,
       orderLineReference: link?.orderNumber ? `${link.orderNumber}:${link.orderLineNo ?? 1}` : null,
       properties: configurationProperties(r.configuration),
     };
   });
 
+  // The buyer's country is the invoice's address snapshot; its registration
+  // number is written in the scheme of the country it is registered in.
+  const buyerCountry = (invoice.invoiceCountry ?? customer.invoiceCountry ?? customer.country).trim().toUpperCase() || "SE";
+  const legalCountry = customer.country;
+  const rawOrgNumber = invoice.orgNumber ?? customer.orgNumber;
+  const orgScheme = orgNumberScheme(legalCountry);
+  const orgNumber = orgScheme ? normalizedOrgNumber(legalCountry, rawOrgNumber) : rawOrgNumber?.trim() || null;
+  const foreign = buyerCountry !== "SE" || currency !== "SEK";
+
+  // BT-111 (ML 17 kap. 29 §): VAT in SEK when the invoice is in another
+  // currency and carries VAT — the restmetod's toSek(Σ moms) the F
+  // verification booked, the same figure as the PDF's "Moms i SEK". A
+  // missing figure is left to ubl-check to refuse.
+  const vatCents = lines.reduce((sum, l) => sum + Math.round(l.vatAmount * 100), 0);
+  const taxCurrency =
+    currency !== "SEK" && vatCents !== 0 && invoice.sekAmounts ? { currency: "SEK", vatAmount: invoice.sekAmounts.vatAmount } : null;
+
+  // BT-72 + BT-80 for an intra-community supply (BR-IC-11/12): the last
+  // delivery day among the rows (else the invoice date) and the country the
+  // first linked order was delivered to (else the buyer's).
+  const issueDate = invoice.invoiceDate ?? args.today;
+  const deliveryDays = invoice.rows.map((r) => r.deliveryDate).filter((d): d is string => !!d).sort();
+  const deliveryCountry = invoice.rows.map((r) => links.get(r.id)?.deliveryCountry).find((c): c is string => !!c?.trim());
+  const delivery = lines.some((l) => l.vatCode === "EUV")
+    ? { date: deliveryDays[deliveryDays.length - 1] ?? issueDate, country: (deliveryCountry ?? buyerCountry).trim().toUpperCase() }
+    : null;
+
   return {
     type: isCredit ? "credit" : "invoice",
     invoiceNumber: invoice.invoiceNumber ?? "",
-    issueDate: invoice.invoiceDate ?? args.today,
+    issueDate,
     dueDate: isCredit ? null : invoice.dueDate,
-    currency: "SEK",
+    currency,
+    language,
+    taxCurrency,
+    delivery,
     buyerReference,
     orderReference,
     creditedInvoiceNumber: isCredit ? args.creditedInvoiceNumber : null,
@@ -296,8 +356,9 @@ export function buildUblInput(args: {
     buyer: {
       endpoint: splitPeppolId(args.recipientId),
       name: invoice.customerName ?? customer.name,
-      address: addressOf(invoice.invoiceAddress, invoice.invoicePostalCode, invoice.invoiceCity, "SE"),
-      orgNumber: orgNumberDigits(invoice.orgNumber ?? customer.orgNumber),
+      address: addressOf(invoice.invoiceAddress, invoice.invoicePostalCode, invoice.invoiceCity, buyerCountry),
+      orgNumber,
+      orgNumberScheme: orgNumber ? orgScheme : null,
       // BT-48 as compared and reported everywhere (normalizeVatNumber):
       // upper case, letters and digits only — "SE 559000-1235 01" would
       // otherwise reach the access point with its hyphen.
@@ -305,19 +366,32 @@ export function buildUblInput(args: {
       customerNumber: invoice.customerNumber ?? customer.customerNumber,
     },
     payment: {
-      account: isCredit ? null : paymentAccountOf(company),
+      account: isCredit ? null : paymentAccountOf(company, foreign),
       ocrNumber: isCredit ? null : invoice.ocrNumber,
     },
     lines,
     attachment: args.attachment
       ? {
           filename: args.attachment.filename,
-          description: isCredit ? "Kreditfaktura (PDF)" : "Faktura (PDF)",
+          description: ATTACHMENT_DESCRIPTIONS[language][isCredit ? "credit" : "invoice"],
           mimeCode: "application/pdf",
           content: args.attachment.content,
         }
       : null,
   };
+}
+
+const ATTACHMENT_DESCRIPTIONS: Record<UblLanguage, { invoice: string; credit: string }> = {
+  sv: { invoice: "Faktura (PDF)", credit: "Kreditfaktura (PDF)" },
+  en: { invoice: "Invoice (PDF)", credit: "Credit note (PDF)" },
+};
+
+// The automatic send's one-line result, in Swedish (the issue answer and the
+// samlingsfakturering result show it as-is).
+function autoSendMessage(t: TransmissionView): string {
+  if (t.status === "failed" || t.status === "rejected") return `E-fakturan kunde inte skickas: ${t.errorMessage ?? t.statusLabel}`;
+  const sandbox = t.environment === "sandbox" ? " (sandbox)" : "";
+  return `E-fakturan skickades till Peppol-id ${t.recipientId}${sandbox}`;
 }
 
 const sha256 = (buf: Buffer) => createHash("sha256").update(buf).digest("hex");
@@ -373,6 +447,132 @@ export function createEinvoiceService(deps: {
     return { invoice, customer, recipient, input, xml };
   }
 
+  async function send(invoiceId: string, userId: string | null, opts: { auto?: boolean } = {}): Promise<TransmissionView> {
+    const s = await settings.read();
+    if (!s.enabled) throw new EinvoiceNotConfiguredError("disabled");
+    if (!s.apiKey) throw new EinvoiceNotConfiguredError("no-key");
+    if (!s.accountId) throw new EinvoiceNotConfiguredError("no-account");
+    const provider = await settings.provider({ requireEnabled: true, requireAccount: true });
+    const { invoice, recipient, xml } = await prepareDocument(invoiceId);
+
+    // The `sending` row first: the partial unique index is what makes a
+    // second live transmission in this environment impossible, whoever
+    // clicks.
+    let transmissionId: string;
+    try {
+      transmissionId = await repo.insertTransmission({
+        invoiceId: invoice.id,
+        provider: provider.name,
+        environment: s.environment,
+        recipientId: recipient.peppolId!,
+        document: xml,
+        sha256: sha256(xml),
+        createdBy: userId,
+      });
+    } catch (err) {
+      if (isUniqueViolation(err, LIVE_TRANSMISSION_CONSTRAINT)) throw new EinvoiceAlreadySentError(invoice.invoiceNumber ?? invoice.id);
+      throw err;
+    }
+
+    // The try covers the access point call ONLY. Once submit has
+    // returned, the document has been sent: a database failure after that
+    // must never mark the row failed (that would invite a second send) —
+    // it is logged and rethrown, and the row, which already carries the
+    // access point's id, is resolved by the status job from the state
+    // there.
+    let result;
+    try {
+      result = await provider.submit(
+        { xml, filename: `${invoice.invoiceNumber}.xml` },
+        {
+          // Persisted BEFORE the send: a process that dies in between still
+          // leaves a `sending` row with the id, which the status job polls.
+          onImported: async (providerInvoiceId) => {
+            await repo.updateTransmission(transmissionId, { status: "sending", providerInvoiceId });
+          },
+        }
+      );
+    } catch (err) {
+      const at = now();
+      if (err instanceof EInvoiceProviderError) {
+        // Import ok, send not: the document is a draft at the access point.
+        // A transient failure leaves the row `sending` with the id so the
+        // status job can read what became of it; a refusal is final.
+        const stillSending = err.providerInvoiceId !== null && (err.kind === "unavailable" || err.kind === "unexpected");
+        await repo.updateTransmission(transmissionId, {
+          status: stillSending ? "sending" : "failed",
+          providerInvoiceId: err.providerInvoiceId,
+          // The adapter often folds the provider's text into the message
+          // already — append only the field errors it does not contain.
+          errorMessage: withFieldErrors(err.message, err.fieldErrors),
+          statusUpdatedAt: at,
+        });
+        await audit.log({
+          entityType: "invoice",
+          entityId: invoice.id,
+          action: "einvoice_failed",
+          detail: {
+            transmissionId,
+            kind: err.kind,
+            reason: err.message,
+            fieldErrors: err.fieldErrors,
+            providerInvoiceId: err.providerInvoiceId,
+            ...(opts.auto ? { auto: true } : {}),
+          },
+          userId,
+        });
+        throw fromProviderError(err);
+      }
+      await repo.updateTransmission(transmissionId, {
+        status: "failed",
+        errorMessage: err instanceof Error ? err.message : "Sändningen misslyckades",
+        statusUpdatedAt: at,
+      });
+      throw err;
+    }
+
+    // The state the access point reported right after the send decides the
+    // row — an immediate error/refused is final at once, never "sent".
+    const at = now();
+    const status = mapProviderState(result.state);
+    const failedNow = status === "failed" || status === "rejected";
+    const errorMessage = failedNow
+      ? (providerErrorText(result.errorMessage) ?? (status === "rejected" ? "Mottagaren avvisade fakturan" : "Sändningen misslyckades"))
+      : null;
+    try {
+      await repo.updateTransmission(transmissionId, {
+        status,
+        providerInvoiceId: result.providerInvoiceId,
+        providerState: result.state.slice(0, 40),
+        errorMessage,
+        sentAt: isLiveStatus(status) && status !== "sending" ? at : null,
+        statusUpdatedAt: at,
+      });
+      await audit.log({
+        entityType: "invoice",
+        entityId: invoice.id,
+        action: failedNow ? "einvoice_failed" : "einvoice_sent",
+        detail: {
+          transmissionId,
+          recipientId: recipient.peppolId,
+          environment: s.environment,
+          providerInvoiceId: result.providerInvoiceId,
+          ...(failedNow ? { status, providerState: result.state, reason: errorMessage } : {}),
+          ...(opts.auto ? { auto: true } : {}),
+        },
+        userId,
+      });
+    } catch (err) {
+      log("E-invoice sent but the transmission row could not be updated", {
+        transmissionId,
+        providerInvoiceId: result.providerInvoiceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+    return transmissionView((await repo.findTransmission(transmissionId))!);
+  }
+
   return {
     // GET /invoices/:id/einvoice — the card's section.
     async getInvoiceView(id: string) {
@@ -402,123 +602,44 @@ export function createEinvoiceService(deps: {
       return { filename: `${row.invoiceNumber ?? row.invoiceId}.xml`, content: row.document };
     },
 
-    // Skicka e-faktura (spec §3.4).
-    async send(invoiceId: string, userId: string | null): Promise<TransmissionView> {
-      const s = await settings.read();
-      if (!s.enabled) throw new EinvoiceNotConfiguredError("disabled");
-      if (!s.apiKey) throw new EinvoiceNotConfiguredError("no-key");
-      if (!s.accountId) throw new EinvoiceNotConfiguredError("no-account");
-      const provider = await settings.provider({ requireEnabled: true, requireAccount: true });
-      const { invoice, recipient, xml } = await prepareDocument(invoiceId);
+    // Skicka e-faktura (spec §3.4). `auto` marks the automatic send after
+    // Utfärda in the event log.
+    send,
 
-      // The `sending` row first: the partial unique index is what makes a
-      // second live transmission in this environment impossible, whoever
-      // clicks.
-      let transmissionId: string;
+    // Skicka e-faktura automatiskt vid Utfärda (spec 2026-11-05): called by
+    // the invoice service after an issue, outside its transaction. Never
+    // throws — the invoice is issued whatever happens here.
+    async sendAfterIssue(invoiceId: string, userId: string | null): Promise<EinvoiceAutoSendOutcome | null> {
       try {
-        transmissionId = await repo.insertTransmission({
-          invoiceId: invoice.id,
-          provider: provider.name,
-          environment: s.environment,
-          recipientId: recipient.peppolId!,
-          document: xml,
-          sha256: sha256(xml),
-          createdBy: userId,
-        });
-      } catch (err) {
-        if (isUniqueViolation(err, LIVE_TRANSMISSION_CONSTRAINT)) throw new EinvoiceAlreadySentError(invoice.invoiceNumber ?? invoice.id);
-        throw err;
-      }
-
-      // The try covers the access point call ONLY. Once submit has
-      // returned, the document has been sent: a database failure after that
-      // must never mark the row failed (that would invite a second send) —
-      // it is logged and rethrown, and the row, which already carries the
-      // access point's id, is resolved by the status job from the state
-      // there.
-      let result;
-      try {
-        result = await provider.submit(
-          { xml, filename: `${invoice.invoiceNumber}.xml` },
-          {
-            // Persisted BEFORE the send: a process that dies in between still
-            // leaves a `sending` row with the id, which the status job polls.
-            onImported: async (providerInvoiceId) => {
-              await repo.updateTransmission(transmissionId, { status: "sending", providerInvoiceId });
-            },
-          }
-        );
-      } catch (err) {
-        const at = now();
-        if (err instanceof EInvoiceProviderError) {
-          // Import ok, send not: the document is a draft at the access point.
-          // A transient failure leaves the row `sending` with the id so the
-          // status job can read what became of it; a refusal is final.
-          const stillSending = err.providerInvoiceId !== null && (err.kind === "unavailable" || err.kind === "unexpected");
-          await repo.updateTransmission(transmissionId, {
-            status: stillSending ? "sending" : "failed",
-            providerInvoiceId: err.providerInvoiceId,
-            // The adapter often folds the provider's text into the message
-            // already — append only the field errors it does not contain.
-            errorMessage: withFieldErrors(err.message, err.fieldErrors),
-            statusUpdatedAt: at,
-          });
-          await audit.log({
-            entityType: "invoice",
-            entityId: invoice.id,
-            action: "einvoice_failed",
-            detail: { transmissionId, kind: err.kind, reason: err.message, fieldErrors: err.fieldErrors, providerInvoiceId: err.providerInvoiceId },
-            userId,
-          });
-          throw fromProviderError(err);
+        const s = await settings.read();
+        if (!s.enabled || !s.apiKey || !s.accountId || !s.autoSend) return null;
+        const { invoice, customer } = await loadInvoice(invoiceId);
+        if (customer.invoiceDelivery !== "peppol") return null;
+        const blocked = blockedReasonFor(invoice, customer, await company.getCompanyInfo());
+        if (blocked) {
+          await audit.log({ entityType: "invoice", entityId: invoice.id, action: "einvoice_not_sent", detail: { reason: blocked, auto: true }, userId });
+          return { status: "blocked", reason: blocked, transmissionId: null, message: `Skickades inte som e-faktura: ${BLOCKED_MESSAGES[blocked]}` };
         }
-        await repo.updateTransmission(transmissionId, {
-          status: "failed",
-          errorMessage: err instanceof Error ? err.message : "Sändningen misslyckades",
-          statusUpdatedAt: at,
-        });
-        throw err;
-      }
-
-      // The state the access point reported right after the send decides the
-      // row — an immediate error/refused is final at once, never "sent".
-      const at = now();
-      const status = mapProviderState(result.state);
-      const failedNow = status === "failed" || status === "rejected";
-      const errorMessage = failedNow
-        ? (providerErrorText(result.errorMessage) ?? (status === "rejected" ? "Mottagaren avvisade fakturan" : "Sändningen misslyckades"))
-        : null;
-      try {
-        await repo.updateTransmission(transmissionId, {
-          status,
-          providerInvoiceId: result.providerInvoiceId,
-          providerState: result.state.slice(0, 40),
-          errorMessage,
-          sentAt: isLiveStatus(status) && status !== "sending" ? at : null,
-          statusUpdatedAt: at,
-        });
-        await audit.log({
-          entityType: "invoice",
-          entityId: invoice.id,
-          action: failedNow ? "einvoice_failed" : "einvoice_sent",
-          detail: {
-            transmissionId,
-            recipientId: recipient.peppolId,
-            environment: s.environment,
-            providerInvoiceId: result.providerInvoiceId,
-            ...(failedNow ? { status, providerState: result.state, reason: errorMessage } : {}),
-          },
-          userId,
-        });
+        try {
+          const t = await send(invoiceId, userId, { auto: true });
+          return { status: t.status, reason: null, transmissionId: t.id, message: autoSendMessage(t) };
+        } catch (err) {
+          // send() has already written the failed row and the event for a
+          // provider error; its domain errors carry Swedish messages meant
+          // for the user. Anything else is logged and summarised.
+          const known = err instanceof Error && err.name.startsWith("Einvoice");
+          if (!known) log("Automatic e-invoice send failed", { invoiceId, error: err instanceof Error ? err.message : String(err) });
+          return {
+            status: "error",
+            reason: err instanceof EinvoiceNotAllowedError ? err.reason : null,
+            transmissionId: null,
+            message: `E-fakturan kunde inte skickas: ${known ? (err as Error).message : "oväntat fel — se fakturakortet"}`,
+          };
+        }
       } catch (err) {
-        log("E-invoice sent but the transmission row could not be updated", {
-          transmissionId,
-          providerInvoiceId: result.providerInvoiceId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
+        log("Automatic e-invoice send could not start", { invoiceId, error: err instanceof Error ? err.message : String(err) });
+        return { status: "error", reason: null, transmissionId: null, message: "E-fakturan kunde inte skickas: oväntat fel — se fakturakortet" };
       }
-      return transmissionView((await repo.findTransmission(transmissionId))!);
     },
 
     // Validera (settings page): the access point's own XSD + schematron
@@ -543,12 +664,16 @@ export function createEinvoiceService(deps: {
       const recipient = resolveRecipient(customer, input.peppolId);
       const base = { peppolId: recipient.peppolId, source: recipient.source, environment: s.environment };
       if (!recipient.peppolId) {
-        return { ...base, found: null, name: null, documentTypes: [], message: "Kunden saknar Peppol-id och organisationsnummer" };
+        const message = DERIVED_PEPPOL_COUNTRIES.includes(customer.country)
+          ? "Kunden saknar Peppol-id och organisationsnummer"
+          : "Kunden saknar Peppol-id — i kundens land härleds det inte ur organisationsnumret";
+        return { ...base, found: null, name: null, documentTypes: [], message };
       }
       const { scheme, value } = splitPeppolId(recipient.peppolId);
       let result: LookupResult;
       try {
-        result = await provider.lookupParticipant(scheme, value);
+        // The directory of the customer's own country (spec 2026-11-05).
+        result = await provider.lookupParticipant(scheme, value, customer.country);
       } catch (err) {
         throw err instanceof EInvoiceProviderError ? fromProviderError(err) : err;
       }

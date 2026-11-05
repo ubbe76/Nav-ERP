@@ -9,7 +9,14 @@ import { SectionHeading } from "../ui/SectionHeading";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatStockholmDateTime } from "../../lib/date";
-import { einvoiceErrorText, type EInvoiceCompany, type EInvoiceEnvironment, type EInvoiceSettings } from "../../lib/einvoice";
+import {
+  EINVOICE_ENVIRONMENT_LABELS,
+  einvoiceErrorText,
+  type EInvoiceCompany,
+  type EInvoiceEnvironment,
+  type EInvoiceSettings,
+  type EInvoiceWebhook,
+} from "../../lib/einvoice";
 import cardStyles from "../system/SettingsForm.module.css";
 
 // E-fakturainställningar (admin). Like the freight form the API key is
@@ -28,6 +35,10 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
   const [accountId, setAccountId] = useState(initial.accountId);
   const [accountName, setAccountName] = useState(initial.accountName);
   const [interval, setIntervalMinutes] = useState(String(initial.statusIntervalMinutes));
+  const [autoSend, setAutoSend] = useState(initial.autoSend);
+  const [webhook, setWebhook] = useState<EInvoiceWebhook>(initial.webhook);
+  const [webhookPending, setWebhookPending] = useState(false);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState(initial.lastStatusRunAt);
   const [company, setCompany] = useState<EInvoiceCompany>(initial.company);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +56,8 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
     setAccountName(updated.accountName);
     setIntervalMinutes(String(updated.statusIntervalMinutes));
     setLastRun(updated.lastStatusRunAt);
+    setAutoSend(updated.autoSend);
+    setWebhook(updated.webhook);
     setCompany(updated.company);
   }
 
@@ -70,7 +83,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
     try {
       const updated = await apiFetch<EInvoiceSettings>("/api/v1/einvoice-settings", {
         method: "PATCH",
-        body: JSON.stringify({ enabled, environment, apiKey, accountId, accountName, statusIntervalMinutes: minutes }),
+        body: JSON.stringify({ enabled, environment, apiKey, accountId, accountName, statusIntervalMinutes: minutes, autoSend }),
       });
       apply(updated);
       setApiKey("");
@@ -121,6 +134,21 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
       setNotice(einvoiceErrorText(err, "Anslutningen misslyckades"));
     } finally {
       setTesting(false);
+    }
+  }
+
+  // Statusbesked direkt: registered/removed at B2Brouter at once with the
+  // SAVED key and environment — the answer is the whole settings view.
+  async function changeWebhook(method: "POST" | "DELETE") {
+    setWebhookError(null);
+    setWebhookPending(true);
+    try {
+      const updated = await apiFetch<EInvoiceSettings>("/api/v1/einvoice-settings/webhook", { method });
+      setWebhook(updated.webhook);
+    } catch (err) {
+      setWebhookError(einvoiceErrorText(err, method === "POST" ? "Kunde inte slå på statusbesked" : "Kunde inte stänga av statusbesked"));
+    } finally {
+      setWebhookPending(false);
     }
   }
 
@@ -220,6 +248,13 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
           <FormHint>
             {lastRun ? `Senaste statuskörning: ${formatStockholmDateTime(lastRun)}` : "Statusjobbet har inte körts ännu"}
           </FormHint>
+          <Field label="Skicka e-faktura automatiskt vid Utfärda" htmlFor="einvoiceAutoSend">
+            <Toggle id="einvoiceAutoSend" checked={autoSend} onChange={(e) => setAutoSend(e.target.checked)} />
+          </Field>
+          <FormHint attached>
+            Gäller kunder med Fakturaleverans E-faktura (Peppol): fakturan och kreditfakturan skickas när de utfärdas, även från
+            samlingsfaktureringen. Fakturan utfärdas alltid, även om sändningen misslyckas.
+          </FormHint>
           <FormActions>
             <Button type="submit" variant="primary" disabled={pending}>
               {pending ? "Sparar…" : "Spara"}
@@ -227,6 +262,58 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
             {saved && <span className={cardStyles.saved}>Sparat</span>}
           </FormActions>
         </Form>
+      </div>
+
+      <div className={cardStyles.card} style={{ marginTop: 18 }}>
+        <SectionHeading>Statusbesked direkt</SectionHeading>
+        <FormHint>
+          B2Brouter kan meddela Nav så fort en e-faktura byter status, i stället för att Nav frågar med statusintervallet. Det
+          kräver att Nav nås från internet med https på <strong>Navs adress</strong> (
+          <Link href="/system/installningar">System → Inställningar</Link>). Statusjobbet fortsätter som reserv.
+        </FormHint>
+        {webhookError && <FormError>{webhookError}</FormError>}
+        {webhook.active ? (
+          <>
+            <p style={{ margin: "12px 0 0" }}>
+              <strong>Aktivt</strong>
+              {webhook.environment && ` (${EINVOICE_ENVIRONMENT_LABELS[webhook.environment]})`} — {webhook.url}
+            </p>
+            <FormHint>
+              {webhook.lastReceivedAt
+                ? `Senaste statusbesked: ${formatStockholmDateTime(webhook.lastReceivedAt)}`
+                : "Inga statusbesked mottagna än"}
+            </FormHint>
+            {webhook.environmentMismatch && webhook.environment && (
+              <FormNotice style={{ marginTop: 8 }}>
+                Statusbeskeden är registrerade för {EINVOICE_ENVIRONMENT_LABELS[webhook.environment]} men{" "}
+                {EINVOICE_ENVIRONMENT_LABELS[environment]} är vald — klicka Aktivera statusbesked igen.
+              </FormNotice>
+            )}
+          </>
+        ) : (
+          <p style={{ margin: "12px 0 0" }}>
+            <strong>Inte aktivt</strong>
+            {webhook.proposedUrl && ` — registreras på ${webhook.proposedUrl}`}
+          </p>
+        )}
+        {!webhook.proposedUrl && (
+          <FormNotice style={{ marginTop: 8 }}>Ange Navs adress med https under System → Inställningar för att kunna slå på statusbesked.</FormNotice>
+        )}
+        <FormActions>
+          <Button
+            type="button"
+            variant={webhook.active ? "secondary" : "primary"}
+            disabled={webhookPending || !webhook.proposedUrl || !apiKeySet}
+            onClick={() => changeWebhook("POST")}
+          >
+            {webhookPending ? "Vänta…" : webhook.active ? "Aktivera statusbesked igen" : "Aktivera statusbesked"}
+          </Button>
+          {webhook.active && (
+            <Button type="button" variant="ghost" disabled={webhookPending} onClick={() => changeWebhook("DELETE")}>
+              Stäng av
+            </Button>
+          )}
+        </FormActions>
       </div>
 
       <div className={cardStyles.card} style={{ marginTop: 18 }}>

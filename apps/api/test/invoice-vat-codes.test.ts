@@ -170,6 +170,7 @@ describe("invoice rows — derived momskod (create/addRow)", () => {
       name: "Varor till annat EU-land",
       rate: 0,
       invoiceText: "Unionsintern leverans (artikel 138 i mervärdesskattedirektivet)",
+      invoiceTextEn: "Intra-Community supply (Article 138 of the VAT Directive)",
     });
     expect(invoice!.rows.every((r) => r.vatRate === "0.00" && r.vatAmount === "0.00")).toBe(true);
 

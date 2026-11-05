@@ -139,6 +139,7 @@ describe("customer invoices", () => {
       name: "Varor till annat EU-land",
       rate: 0,
       invoiceText: "Unionsintern leverans (artikel 138 i mervärdesskattedirektivet)",
+      invoiceTextEn: "Intra-Community supply (Article 138 of the VAT Directive)",
     });
     expect(invoice.rows[0].vatCodeId).toBe(await vatCodeId("EUV"));
     expect(invoice.rows[0].deliveryDate).toBe("2026-02-03");

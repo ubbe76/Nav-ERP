@@ -15,11 +15,16 @@
 // date or payment terms), BR-27 (price ≥ 0), SE-R-001/002 (VAT number),
 // SE-R-003/004/013 (org number: 10 digits, Luhn), SE-R-006 (S only for
 // 25/12/6), SE-R-007..010 (bankgiro/plusgiro digits and length — only when
-// there is an account; PaymentMeans itself is optional).
+// there is an account; PaymentMeans itself is optional), and for foreign
+// customers and currencies (spec 2026-11-05): BR-IC-02/11/12 (K needs the
+// buyer's VAT number, a delivery date and the deliver-to country), BR-O-11..
+// 14 (O alone on the invoice), BR-53/R005/R055 (VAT in SEK on a foreign-
+// currency invoice that carries VAT).
 import { BIC_PATTERN, isLuhnValid, isValidIban, isValidOcrReference } from "@navet/shared";
+import { identifierProblem } from "../peppol-schemes.js";
 import { computeTotals, linePricing, toCents } from "./ubl-invoice-builder.js";
 import type { UblCheckResult, UblInvoiceInput, UblLine, UblPostalAddress } from "./ubl-types.js";
-import { isSupportedLineVat, isSupportedVatCode } from "./vat-categories.js";
+import { isOutOfScopeVatCode, isSupportedLineVat, isSupportedVatCode, lineVatCategory } from "./vat-categories.js";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // xs:date rejects 2026-13-01 and 2026-02-30, so the pattern is not enough.
@@ -32,6 +37,9 @@ const blank = (value: string | null | undefined) => (value ?? "").trim() === "";
 const digits = (value: string | null | undefined) => (value ?? "").replace(/\D/g, "");
 const SE_VAT = /^SE\d{12}$/;
 const SCHEME = /^\d{4}$/;
+const CURRENCY = /^[A-Z]{3}$/;
+const COUNTRY = /^[A-Z]{2}$/;
+
 // Peppol's R120/R040 slack; BR-CO-17/BR-S-09 allow |diff| < 1.
 const LINE_SLACK = 0.02;
 const VAT_SLACK = 1;
@@ -40,7 +48,7 @@ const VAT_SLACK = 1;
 const isMoney = (value: number) => Number.isFinite(value) && Math.abs(value * 100 - Math.round(value * 100)) < 1e-6;
 
 function checkAddress(address: UblPostalAddress, who: string, problems: string[]): void {
-  if ((address.country ?? "").trim().toUpperCase() !== "SE") problems.push(`${who} land måste vara SE — utländska mottagare stöds inte i e-faktura ännu.`);
+  if (!COUNTRY.test((address.country ?? "").trim().toUpperCase())) problems.push(`${who} land saknas eller är inte en landskod med två bokstäver.`);
 }
 
 function checkLine(line: UblLine, problems: string[]): void {
@@ -51,8 +59,8 @@ function checkLine(line: UblLine, problems: string[]): void {
   if (!Number.isFinite(line.discountPercent) || line.discountPercent < 0 || line.discountPercent > 100) problems.push(`${row} har en rabatt utanför 0–100 %.`);
   if (!isMoney(line.lineAmount)) problems.push(`${row} har ett radbelopp som inte är ett belopp med två decimaler.`);
   if (!isMoney(line.vatAmount) || line.vatAmount < 0) problems.push(`${row} har ett momsbelopp som inte är ett belopp med två decimaler.`);
-  // Momskoder (spec 4.5): the code decides the category; only svensk moms,
-  // momsfritt and omvänd betalningsskyldighet in Sverige exist in etapp 1.
+  // Momskoder (spec 4.5): the code decides the category (vat-categories.ts);
+  // UTM (räntefakturor) and unknown codes have none.
   if (line.vatCode != null && !isSupportedVatCode(line.vatCode)) {
     problems.push(`${row} har momskoden ${line.vatCode} som inte stöds i e-faktura.`);
   } else if (!isSupportedLineVat(line)) {
@@ -78,7 +86,8 @@ export function checkUblInput(input: UblInvoiceInput): UblCheckResult {
 
   if (blank(input.invoiceNumber)) problems.push(`${document} saknar fakturanummer.`);
   if (!isCalendarDate(input.issueDate)) problems.push(`${document} saknar giltigt fakturadatum.`);
-  if (input.currency !== "SEK") problems.push("Bara SEK stöds i e-faktura ännu.");
+  const currency = (input.currency ?? "").trim().toUpperCase();
+  if (!CURRENCY.test(currency)) problems.push(`${document} saknar giltig valutakod.`);
   if (blank(input.buyerReference) && blank(input.orderReference)) {
     problems.push("Peppol kräver er referens eller ert ordernummer på fakturan — ange minst ett av dem (kundnumret används annars som referens).");
   }
@@ -96,7 +105,7 @@ export function checkUblInput(input: UblInvoiceInput): UblCheckResult {
   else if (!isLuhnValid(orgNumber)) problems.push("Företagets organisationsnummer har fel kontrollsiffra (Företagsuppgifter).");
   const vatNumber = (seller.vatNumber ?? "").toUpperCase().replace(/\s/g, "");
   if (!SE_VAT.test(vatNumber)) problems.push("Företagets momsregistreringsnummer måste ha formen SE + 12 siffror, t.ex. SE556677889901 (Företagsuppgifter).");
-  checkAddress(seller.address, "Företagets", problems);
+  if ((seller.address.country ?? "").trim().toUpperCase() !== "SE") problems.push("Företagets land måste vara SE (Företagsuppgifter).");
 
   // Buyer — the customer and the invoice snapshot.
   const buyer = input.buyer;
@@ -104,14 +113,37 @@ export function checkUblInput(input: UblInvoiceInput): UblCheckResult {
   const scheme = (buyer.endpoint.scheme ?? "").trim();
   const endpointValue = scheme === "0007" ? digits(buyer.endpoint.value) : (buyer.endpoint.value ?? "").trim();
   if (!SCHEME.test(scheme)) problems.push("Kundens Peppol-id måste börja med ett fyrsiffrigt schema, t.ex. 0007:5566778899.");
+  // PEPPOL-COMMON-R040..R049: the known schemes' formats and check digits,
+  // on the endpoint and on the registration number written with a scheme.
+  const endpointProblem = endpointValue === "" ? null : identifierProblem(scheme, endpointValue);
   if (endpointValue === "") problems.push("Kundens Peppol-id saknas — ange Peppol-id eller organisationsnummer på kunden.");
-  else if (scheme === "0007" && endpointValue.length !== 10) problems.push("Kundens Peppol-id med schema 0007 måste vara organisationsnumrets tio siffror.");
-  else if (scheme === "0088" && endpointValue.length !== 13) problems.push("Kundens Peppol-id med schema 0088 måste vara ett GLN med 13 siffror.");
-  if (buyer.orgNumber !== null && !blank(buyer.orgNumber) && digits(buyer.orgNumber).length !== 10) problems.push("Kundens organisationsnummer måste vara tio siffror.");
+  else if (endpointProblem) problems.push(`Kundens Peppol-id med schema ${scheme} måste vara ${endpointProblem}.`);
+  const orgScheme = (buyer.orgNumberScheme ?? "").trim();
+  if (orgScheme && !blank(buyer.orgNumber)) {
+    const value = orgScheme === "0007" ? digits(buyer.orgNumber) : (buyer.orgNumber ?? "").trim();
+    const orgProblem = identifierProblem(orgScheme, value);
+    if (orgProblem) problems.push(`Kundens organisationsnummer måste vara ${orgProblem}.`);
+  }
   checkAddress(buyer.address, "Kundens", problems);
-  // BR-AE-02: omvänd betalningsskyldighet needs the buyer's VAT identifier.
-  if (input.lines.some((line) => line.vatCode === "OB") && blank(buyer.vatNumber)) {
+
+  const categories = new Set(
+    input.lines.filter((line) => isSupportedLineVat(line)).map((line) => lineVatCategory(line, input.language).id)
+  );
+  // BR-AE-02: omvänd betalningsskyldighet (OB, EUT) needs the buyer's VAT
+  // identifier — Utfärda has already demanded it; the snapshot is checked.
+  if (categories.has("AE") && blank(buyer.vatNumber)) {
     problems.push("Omvänd betalningsskyldighet kräver kundens momsregistreringsnummer på fakturan.");
+  }
+  // BR-IC-02/11/12: an intra-community supply names the buyer's VAT number,
+  // the delivery date and the country the goods went to.
+  if (categories.has("K")) {
+    if (blank(buyer.vatNumber)) problems.push("Unionsintern leverans kräver kundens momsregistreringsnummer på fakturan.");
+    if (!input.delivery || !isCalendarDate(input.delivery.date)) problems.push("Unionsintern leverans kräver leveransdatum på fakturan.");
+    if (!input.delivery || !COUNTRY.test((input.delivery.country ?? "").trim().toUpperCase())) problems.push("Unionsintern leverans kräver leveranslandet på fakturan.");
+  }
+  // BR-O-11..14: "Not subject to VAT" is the only category on its invoice.
+  if (categories.has("O") && (categories.size > 1 || input.lines.some((line) => !isOutOfScopeVatCode(line.vatCode)))) {
+    problems.push("Export av tjänster (momskod EXT) kan inte stå på samma e-faktura som andra momskoder — fakturera tjänsterna för sig.");
   }
 
   // Payment — company_info; only an invoice asks for money. PaymentMeans is
@@ -151,7 +183,17 @@ export function checkUblInput(input: UblInvoiceInput): UblCheckResult {
 
   // Totals — only computable when every rate is supported.
   if (input.lines.length > 0 && input.lines.every((line) => isSupportedLineVat(line) && isMoney(line.lineAmount) && isMoney(line.vatAmount))) {
-    const totals = computeTotals(input.lines);
+    const totals = computeTotals(input.lines, input.language);
+    // BR-53 / R005 / R055: the VAT in SEK on another currency's invoice
+    // (ML 17 kap. 29 §) — present exactly when there is VAT to state.
+    const tax = input.taxCurrency;
+    if (currency !== "SEK" && totals.taxTotalCents !== 0 && !tax) problems.push(`${document} i ${currency} saknar momsen i SEK.`);
+    if (tax) {
+      if (tax.currency === currency) problems.push("Momsen i redovisningsvalutan kan inte anges i fakturans egen valuta.");
+      if (!isMoney(tax.vatAmount) || Math.sign(tax.vatAmount) !== Math.sign(totals.taxTotalCents)) {
+        problems.push("Momsen i SEK stämmer inte med fakturans moms.");
+      }
+    }
     for (const subtotal of totals.subtotals) {
       const expectedCents = Math.round(subtotal.taxableCents * (subtotal.category.percent / 100));
       if (Math.abs(subtotal.taxCents - expectedCents) / 100 >= VAT_SLACK) {

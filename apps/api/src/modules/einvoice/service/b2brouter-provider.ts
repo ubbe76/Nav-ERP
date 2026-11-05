@@ -45,6 +45,8 @@ export const B2BROUTER_MESSAGES = {
   directoryUnavailable: "Katalogen svarade inte, försök igen",
   directoryInvalid: "Peppol-id:t är inte giltigt för schemat",
   directoryBroken: "Mottagarens accesspunkt publicerar inga giltiga dokumenttyper — kontakta mottagaren",
+  webhookRejected: "B2Brouter godtog inte webhooken",
+  webhookNotFound: "Webhooken finns inte längre hos B2Brouter",
 } as const;
 
 // What we log about a transport failure: the error's name and the cause's
@@ -92,6 +94,9 @@ export interface B2BrouterDeps {
   log?: (entry: { method: string; path: string; status: number; requestId: string | null; body: string }) => void;
 }
 
+// A request body: the UBL as raw bytes (the import, validate) or JSON (web hooks).
+type RequestBody = { xml: Buffer } | { json: unknown };
+
 interface CallResult {
   status: number;
   requestId: string | null;
@@ -112,7 +117,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
   // 404/424 as answers, not failures). ONE timeout covers the whole call,
   // the body read included — a response whose body never arrives is as much
   // a transport failure as a connect that hangs.
-  async function raw(method: string, path: string, body?: { xml: Buffer }, timeout = timeoutMs): Promise<CallResult> {
+  async function raw(method: string, path: string, body?: RequestBody, timeout = timeoutMs): Promise<CallResult> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
     let res: Response;
@@ -124,9 +129,9 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
           "X-B2B-API-Key": config.apiKey,
           "X-B2B-API-Version": B2BROUTER_API_VERSION,
           Accept: "application/json",
-          ...(body ? { "Content-Type": "application/octet-stream" } : {}),
+          ...(body ? { "Content-Type": "xml" in body ? "application/octet-stream" : "application/json" } : {}),
         },
-        body: body ? new Uint8Array(body.xml) : undefined,
+        body: body ? ("xml" in body ? new Uint8Array(body.xml) : JSON.stringify(body.json)) : undefined,
         signal: controller.signal,
       });
       text = await res.text();
@@ -152,7 +157,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
   // What a 404 means depends on the call: on the import it is the account
   // path (a configuration problem, treated like a refused key), on a status
   // read it is the document itself (gone), elsewhere it is just odd.
-  type NotFoundMeaning = "account" | "document" | "unexpected";
+  type NotFoundMeaning = "account" | "document" | "webhook" | "unexpected";
 
   // The common status → error mapping for the ordinary endpoints. Only 400/
   // 422 are the access point refusing what we sent; any other 4xx is an
@@ -167,6 +172,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
     if (r.status === 404) {
       if (notFound === "account") return new EInvoiceProviderError(B2BROUTER_MESSAGES.accountNotFound, "unauthorized", [], r.requestId, providerInvoiceId);
       if (notFound === "document") return new EInvoiceProviderError(B2BROUTER_MESSAGES.documentNotFound, "not-found", [], r.requestId, providerInvoiceId);
+      if (notFound === "webhook") return new EInvoiceProviderError(B2BROUTER_MESSAGES.webhookNotFound, "not-found", [], r.requestId);
       return unexpected(r.requestId, providerInvoiceId);
     }
     if (r.status !== 400 && r.status !== 422) return unexpected(r.requestId, providerInvoiceId);
@@ -182,7 +188,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
     );
   }
 
-  async function call(method: string, path: string, body?: { xml: Buffer }, opts: { notFound?: NotFoundMeaning; timeoutMs?: number } = {}): Promise<CallResult> {
+  async function call(method: string, path: string, body?: RequestBody, opts: { notFound?: NotFoundMeaning; timeoutMs?: number } = {}): Promise<CallResult> {
     const r = await raw(method, path, body, opts.timeoutMs);
     if (r.status >= 400) throw failure(r, opts.notFound ?? "unexpected");
     return r;
@@ -306,9 +312,11 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
 
     getStatus: readStatus,
 
-    async lookupParticipant(scheme, id) {
-      // Etapp 1: Swedish recipients only — the country segment is "se".
-      const path = `/directory/se/${encodeURIComponent(scheme)}/${encodeURIComponent(id)}`;
+    async lookupParticipant(scheme, id, country = "SE") {
+      // The directory is asked per country (/directory/{country}/{scheme}/
+      // {id}); the customer's own country, lower case as in their examples.
+      const cc = /^[A-Za-z]{2}$/.test(country) ? country.toLowerCase() : "se";
+      const path = `/directory/${cc}/${encodeURIComponent(scheme)}/${encodeURIComponent(id)}`;
       const started = now();
       for (;;) {
         let r: CallResult;
@@ -356,6 +364,28 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
       }
     },
 
+    // Web hooks belong to the key's integration group — no account in the
+    // path. The signing secret is returned ONLY in this answer (B2Brouter
+    // reference create-web-hook), so a missing one is an unreadable answer.
+    async createWebhook({ url, events, description }) {
+      const r = await raw("POST", "/web_hooks", { json: { web_hook: { url, events, description, enabled: true } } });
+      if (r.status === 400 || r.status === 422) {
+        const body = parseErrorBody(r.text);
+        const message = body.message ? `${B2BROUTER_MESSAGES.webhookRejected}: ${body.message}` : B2BROUTER_MESSAGES.webhookRejected;
+        throw new EInvoiceProviderError(message, "validation", body.message ? [body.message] : [], r.requestId);
+      }
+      if (r.status >= 400) throw failure(r, "unexpected");
+      const hook = obj(obj(r.data)?.web_hook);
+      const id = typeof hook?.id === "number" ? String(hook.id) : str(hook?.id);
+      const secret = str(hook?.signing_secret);
+      if (!id || !secret) throw unexpected(r.requestId);
+      return { id, secret };
+    },
+
+    async deleteWebhook(id) {
+      await call("DELETE", `/web_hooks/${encodeURIComponent(id)}`, undefined, { notFound: "webhook" });
+    },
+
     async validate(xml) {
       const r = await call("POST", "/documents/validate", { xml }, { timeoutMs: IMPORT_TIMEOUT_MS });
       const result = obj(obj(r.data)?.validation_result);
@@ -381,7 +411,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
         warnings: messages(sch?.warnings),
       } satisfies ValidationResult;
     },
-  } satisfies EInvoiceProvider & { lookupParticipant: (s: string, i: string) => Promise<LookupResult> };
+  } satisfies EInvoiceProvider & { lookupParticipant: (s: string, i: string, c?: string) => Promise<LookupResult> };
 }
 
 export const b2brouterProviderFactory: EInvoiceProviderFactory = (config) => createB2BrouterProvider(config);

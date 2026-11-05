@@ -30,6 +30,9 @@ const PUBLIC = new Set([
   "POST /api/v1/oauth/token",
   "GET /api/v1/theme-boot",
   "GET /api/v1/plugin-kit.css",
+  // B2Brouter's status changes for e-invoices: the HMAC signature with the
+  // hook's secret is the authentication (spec 2026-11-05).
+  "POST /api/v1/einvoice/webhook",
   "GET /health",
   "OPTIONS *",
 ]);

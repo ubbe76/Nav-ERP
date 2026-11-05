@@ -3,6 +3,7 @@ import { linkDeviationInTx } from "../../quality/repository/deviation-link-tx.js
 import type {
   CreateCreditInvoiceInput,
   CreateInvoiceInput,
+  EinvoiceAutoSendOutcome,
   CreateInvoiceRowInput,
   InvoiceType,
   ListInvoicesQuery,
@@ -284,7 +285,17 @@ export type CollectiveInvoicingResult = {
   // Faktura i vänteläge: Utfärda direkt was asked for but the customer's
   // invoices are reviewed first — the invoice stays a draft.
   onHold?: boolean;
+  // Skicka e-faktura automatiskt vid Utfärda: what became of the issued
+  // invoice's e-invoice (null/absent = the automation did not apply).
+  einvoice?: EinvoiceAutoSendOutcome | null;
 };
+
+// Skicka e-faktura automatiskt vid Utfärda (spec 2026-11-05): the e-invoice
+// module's hook, bound late in app.ts (the module reads invoices through this
+// service). Called after the issue transaction and the PDF archive; it never
+// throws by contract, and a throw is swallowed anyway — the invoice is
+// issued whatever becomes of its e-invoice.
+export type InvoiceIssuedHook = (invoiceId: string, userId: string) => Promise<EinvoiceAutoSendOutcome | null>;
 
 // Valuta: an order row (or a shipment's order) in another currency than the
 // invoice's — one invoice, one currency. 400 invoice-row-currency-mismatch.
@@ -446,7 +457,10 @@ export function createInvoiceService(
   referenceRates: ReferenceRateReader | null = null,
   // Extra benämning: whether the invoice is among the documents that print
   // it. Optional: without it no invoice prints the text.
-  documentSettings: DocumentSettingsReader | null = null
+  documentSettings: DocumentSettingsReader | null = null,
+  // Skicka e-faktura automatiskt vid Utfärda. Optional: without it Utfärda
+  // never sends anything.
+  afterIssue: InvoiceIssuedHook | null = null
 ) {
   // Valuta: the rate for a currency and day (SEK = 1), looked up BEFORE any
   // transaction — it may call Riksbanken.
@@ -1123,7 +1137,12 @@ export function createInvoiceService(
         buyerVatNumber,
         vatNumberProblem,
         vatNumberWarning,
-        rows: rows.map((row) => ({ ...row, vatCode: { ...vatCodeRef(row.vatCode), invoiceText: row.vatCode.invoiceText } })),
+        // The code's invoice texts ride along (the e-invoice's BT-120, in
+        // the document's language).
+        rows: rows.map((row) => ({
+          ...row,
+          vatCode: { ...vatCodeRef(row.vatCode), invoiceText: row.vatCode.invoiceText, invoiceTextEn: row.vatCode.invoiceTextEn },
+        })),
         openAmount,
         // Valuta: the SEK figures at the invoice's rate (null for a foreign
         // draft without a typed rate — decided at Utfärda), and the open
@@ -1697,6 +1716,7 @@ export function createInvoiceService(
               const issued = await service.issue(invoice!.id, userId);
               result.invoiceNumber = issued!.invoiceNumber;
               result.status = "issued";
+              result.einvoice = issued!.einvoiceAutoSend;
             }
           } catch (err) {
             result.error = err instanceof Error ? err.message : String(err);
@@ -1816,7 +1836,18 @@ export function createInvoiceService(
       } catch {
         // Deliberately not fatal — see above.
       }
-      return service.getInvoice(result.invoice.id);
+      // E-faktura to a customer that wants it — after the archive, so the
+      // document embeds the archived PDF. The outcome rides on the answer.
+      let einvoiceAutoSend: EinvoiceAutoSendOutcome | null = null;
+      if (afterIssue) {
+        try {
+          einvoiceAutoSend = await afterIssue(result.invoice.id, userId);
+        } catch {
+          einvoiceAutoSend = null;
+        }
+      }
+      const issuedInvoice = await service.getInvoice(result.invoice.id);
+      return issuedInvoice ? { ...issuedInvoice, einvoiceAutoSend } : issuedInvoice;
     },
 
     // issued -> paid has NO invoice-side entry point (B3): it is a

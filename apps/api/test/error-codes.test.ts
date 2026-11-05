@@ -248,6 +248,7 @@ import {
   EinvoiceProviderUnavailableError,
   EinvoiceTransmissionNotFoundError,
 } from "../src/modules/einvoice/service/einvoice.errors.js";
+import { EinvoiceWebhookPublicUrlError } from "../src/modules/einvoice/service/einvoice-settings.service.js";
 import { InvalidOcrError, PaymentExceedsOpenAmountError, VerificationAlreadyReversedError } from "../src/modules/sales/service/payment.service.js";
 import {
   CollectiveInvoicingCustomerError,
@@ -626,6 +627,7 @@ const cases: Array<[Error, string]> = [
   [new EinvoiceProviderUnauthorizedError("x"), ERROR_CODES.EINVOICE_PROVIDER_UNAUTHORIZED],
   [new EinvoiceProviderUnavailableError("x"), ERROR_CODES.EINVOICE_PROVIDER_UNAVAILABLE],
   [new EinvoiceTransmissionNotFoundError("x"), ERROR_CODES.EINVOICE_TRANSMISSION_NOT_FOUND],
+  [new EinvoiceWebhookPublicUrlError(), ERROR_CODES.EINVOICE_WEBHOOK_PUBLIC_URL],
   [new ShipmentOnDraftInvoiceError(), ERROR_CODES.SHIPMENT_ON_DRAFT_INVOICE],
   // register (grunddata)
   [new RegisterEntryInUseError("30", { total: 1, references: [] }), ERROR_CODES.REGISTER_ENTRY_IN_USE],

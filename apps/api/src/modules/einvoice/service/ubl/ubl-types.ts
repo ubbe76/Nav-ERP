@@ -1,3 +1,5 @@
+import type { UblLanguage } from "./vat-categories.js";
+
 // The contract between the e-invoice service and the pure UBL builder
 // (spec private/superpowers/specs/2026-10-21-e-faktura-peppol-design.md §2).
 //
@@ -29,7 +31,8 @@ export interface UblPostalAddress {
   addressLines: string[];
   postalCode: string | null;
   city: string | null;
-  // ISO 3166-1 alpha-2. Etapp 1 only ever sends "SE" for both parties.
+  // ISO 3166-1 alpha-2: SE for the seller, the invoice's invoice_country
+  // snapshot for the buyer.
   country: string;
 }
 
@@ -53,8 +56,11 @@ export interface UblBuyer {
   name: string;
   address: UblPostalAddress;
   // Customer's own registration data from the invoice snapshot; null when
-  // the customer has none.
+  // the customer has none. orgNumberScheme is the ICD it is written with in
+  // PartyLegalEntity/CompanyID (0007 for a Swedish customer, 0192/0184/0208
+  // for NO/DK/BE — peppol-schemes.ts); null = written without a schemeID.
   orgNumber: string | null;
+  orgNumberScheme: string | null;
   vatNumber: string | null;
   // Nav's customer number for the customer (invoices.customer_number) —
   // PartyIdentification/ID, and the BT-10 fallback.
@@ -94,11 +100,12 @@ export interface UblLine {
   vatAmount: number;
   vatRate: number;
   // The row's momskod (catalog code) — decides the VAT category: MP25/MP12/
-  // MP6 ⇒ S, MF ⇒ E, OB ⇒ AE; anything else is refused by ubl-check.
+  // MP6 ⇒ S, MF ⇒ E, OB/EUT ⇒ AE, EUV ⇒ K, EXV ⇒ G, EXT ⇒ O
+  // (vat-categories.ts); anything else is refused by ubl-check.
   // Omitted/null ⇒ the rate alone decides (25/12/6 ⇒ S, 0 ⇒ E).
   vatCode?: string | null;
-  // The code's invoice text — BT-120 on the AE subtotal (omvänd
-  // betalningsskyldighet); ignored for S and E.
+  // The code's invoice text in the document's language — BT-120 on the
+  // AE/K/G/O subtotal; ignored for S and E.
   vatExemptionText?: string | null;
   // The order row this line settles: OrderLineReference/LineID. Nav has no
   // order line numbers, so the service passes "<orderNumber>:<n>"-style text
@@ -121,7 +128,20 @@ export interface UblInvoiceInput {
   invoiceNumber: string; // BT-1
   issueDate: string; // BT-2, YYYY-MM-DD
   dueDate: string | null; // BT-9 (invoice only; omitted on a credit note)
-  currency: "SEK"; // etapp 1
+  // BT-5, ISO 4217: the invoice's own currency; every amount is in it.
+  currency: string;
+  // The document's language (the invoice's stamped language): the few texts
+  // the builder writes itself (the discount reason, the exemption reasons
+  // without a code text) follow it. F-skatt is always Swedish (SE-R-005).
+  language: UblLanguage;
+  // BT-6 + BT-111: an invoice in another currency than SEK that carries VAT
+  // states its VAT in SEK as well (ML 17 kap. 29 §) — the VAT the F
+  // verification booked. Null for SEK and for an invoice without VAT.
+  taxCurrency: { currency: string; vatAmount: number } | null;
+  // BT-72 + BT-80: written only for an intra-community supply (BR-IC-11/12).
+  // date = the last delivery day among the rows (else the invoice date),
+  // country = the first linked order's delivery address (else the buyer's).
+  delivery: { date: string; country: string } | null;
   // BT-10 and BT-13: Peppol requires at least one. The service resolves the
   // rule (first linked order's customer_reference / customer_order_number,
   // else the customer number as BT-10) — the builder prints what it gets and
