@@ -8,11 +8,12 @@ import { StatusPill } from "../ui/StatusPill";
 import { Checkbox, Field, Toggle } from "../ui/Field";
 import { SelectAllCheckbox } from "../ui/SelectAllCheckbox";
 import { HelpLink } from "../ui/HelpLink";
-import { FormError, FormHint } from "../ui/Form";
+import { FormError, FormHint, FormNotice } from "../ui/Form";
 import { SectionHeading } from "../ui/SectionHeading";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney } from "../../lib/format";
+import { isEInvoiceAutoSendProblem } from "../../lib/einvoice";
 import type { CollectiveInvoicingCandidate, CollectiveInvoicingResult } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import listStyles from "../../app/forsaljning/ordrar/page.module.css";
@@ -257,6 +258,12 @@ export function CollectiveInvoicingClient({
                     {r.error}
                   </FormError>
                 )}
+                {r.einvoice &&
+                  (isEInvoiceAutoSendProblem(r.einvoice) ? (
+                    <FormNotice style={{ marginTop: 6 }}>{r.einvoice.message}</FormNotice>
+                  ) : (
+                    <FormHint attached>{r.einvoice.message}</FormHint>
+                  ))}
               </li>
             ))}
           </ul>

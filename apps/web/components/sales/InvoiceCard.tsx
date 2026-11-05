@@ -15,6 +15,7 @@ import { Modal } from "../ui/Modal";
 import { CostCenterSelect, NO_OBJECT, ProjectSelect } from "../economy/DimensionSelect";
 import { dimensionText, useDimensions } from "../../lib/dimensions";
 import { apiFetch } from "../../lib/api";
+import { isEInvoiceAutoSendProblem, type EInvoiceAutoSendOutcome } from "../../lib/einvoice";
 import { formatMoney } from "../../lib/format";
 import { formatRate, SEK } from "../../lib/currency";
 import { SekAmountsLine } from "../purchase/InvoiceRateField";
@@ -114,6 +115,9 @@ export function InvoiceCard({
   const showObjects =
     dims.allCostCenters.length > 0 || dims.allProjects.length > 0 || invoice.rows.some((r) => r.costCenter || r.project);
   const [reminderOpen, setReminderOpen] = useState(false);
+  // Skicka e-faktura automatiskt vid Utfärda: what the issue did with the
+  // e-invoice (null = nothing to say).
+  const [autoSend, setAutoSend] = useState<EInvoiceAutoSendOutcome | null>(null);
 
   const netAmount = invoice.rows.reduce((sum, r) => sum + Number(r.lineAmount), 0);
   const vatAmount = invoice.rows.reduce((sum, r) => sum + Number(r.vatAmount), 0);
@@ -139,7 +143,10 @@ export function InvoiceCard({
     setError(null);
     setPending(true);
     try {
-      await apiFetch(`/api/v1/invoices/${invoice.id}/${action}`, { method: "POST" });
+      const result = await apiFetch<{ einvoiceAutoSend?: EInvoiceAutoSendOutcome | null } | null>(`/api/v1/invoices/${invoice.id}/${action}`, {
+        method: "POST",
+      });
+      if (action === "issue") setAutoSend(result?.einvoiceAutoSend ?? null);
       router.refresh();
     } catch (err) {
       // vat-number-required (409) carries its own sentence per reason — which
@@ -297,6 +304,14 @@ export function InvoiceCard({
       </div>
 
       <FormError>{error}</FormError>
+      {autoSend &&
+        (isEInvoiceAutoSendProblem(autoSend) ? (
+          <FormNotice style={{ marginBottom: 20 }}>{autoSend.message}</FormNotice>
+        ) : (
+          <FormHint role="status" style={{ marginBottom: 20 }}>
+            {autoSend.message}
+          </FormHint>
+        ))}
 
       {editable && customerOnHold && (
         <FormNotice style={{ marginBottom: 20 }}>

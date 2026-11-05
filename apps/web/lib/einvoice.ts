@@ -73,6 +73,18 @@ export interface EInvoiceCompany {
   problems: string[];
 }
 
+// Statusbesked direkt: the page's view of the access point's web hook
+// (never its secret).
+export interface EInvoiceWebhook {
+  active: boolean;
+  environment: EInvoiceEnvironment | null;
+  url: string | null;
+  lastReceivedAt: string | null;
+  environmentMismatch: boolean;
+  // The address a registration would use now; null without an https Navs adress.
+  proposedUrl: string | null;
+}
+
 export interface EInvoiceSettings {
   enabled: boolean;
   environment: EInvoiceEnvironment;
@@ -81,8 +93,24 @@ export interface EInvoiceSettings {
   accountName: string | null;
   statusIntervalMinutes: number;
   lastStatusRunAt: string | null;
+  // Skicka e-faktura automatiskt vid Utfärda.
+  autoSend: boolean;
+  webhook: EInvoiceWebhook;
   company: EInvoiceCompany;
 }
+
+// What Utfärda did with the e-invoice of a customer with Fakturaleverans
+// E-faktura (null = nothing: off, not configured or an e-mail customer).
+export interface EInvoiceAutoSendOutcome {
+  status: EInvoiceStatus | "blocked" | "error";
+  message: string;
+  transmissionId: string | null;
+  reason: string | null;
+}
+
+// A failed/blocked outcome is a warning; anything else went out.
+export const isEInvoiceAutoSendProblem = (outcome: EInvoiceAutoSendOutcome): boolean =>
+  outcome.status === "blocked" || outcome.status === "error" || outcome.status === "failed" || outcome.status === "rejected";
 
 export interface PeppolLookupResult {
   peppolId: string | null;

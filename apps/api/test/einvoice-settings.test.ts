@@ -3,7 +3,12 @@ import { sql } from "drizzle-orm";
 import { db } from "@navet/db";
 import { updateEinvoiceSettingsSchema, peppolIdFieldSchema, updateCustomerSchema } from "@navet/shared";
 import { createEinvoiceRepository } from "../src/modules/einvoice/repository/einvoice.repository.js";
-import { companyProblems, createEinvoiceSettingsService, orgNumberDigits } from "../src/modules/einvoice/service/einvoice-settings.service.js";
+import {
+  companyProblems,
+  createEinvoiceSettingsService,
+  EinvoiceWebhookPublicUrlError,
+  orgNumberDigits,
+} from "../src/modules/einvoice/service/einvoice-settings.service.js";
 import { EinvoiceNotConfiguredError } from "../src/modules/einvoice/service/einvoice.errors.js";
 import { EInvoiceProviderError } from "../src/modules/einvoice/service/einvoice-provider.js";
 import { createFakeEinvoiceProvider } from "./helpers/fake-einvoice-provider.js";
@@ -52,6 +57,8 @@ describe("e-fakturainställningar", () => {
       accountName: null,
       statusIntervalMinutes: 30,
       lastStatusRunAt: null,
+      autoSend: true,
+      webhook: { active: false, environment: null, url: null, lastReceivedAt: null, environmentMismatch: false, proposedUrl: null },
     });
     expect(view.company).toMatchObject({ orgNumber: "5560000001", vatNumber: "SE556000000101", bankgiro: "123-4567", problems: [] });
   });
@@ -170,3 +177,76 @@ describe("e-fakturainställningar", () => {
     expect(companyProblems(null)).toHaveLength(5);
   });
 });
+
+describe("automatik och statusbesked (spec 2026-11-05)", () => {
+  let publicBase: string | null = "https://nav.example.se";
+  const withUrl = createEinvoiceSettingsService({ repo, company: testSystemService, audit, providerFactory: fake.factory, publicBaseUrl: async () => publicBase });
+
+  beforeEach(() => {
+    publicBase = "https://nav.example.se";
+    fake.state.webhooks.clear();
+    fake.state.createWebhookError = null;
+    fake.state.deleteWebhookError = null;
+  });
+
+  it("Skicka automatiskt vid Utfärda is on unless switched off", async () => {
+    expect((await settings.read()).autoSend).toBe(true);
+    await settings.update({ autoSend: false }, "u1");
+    expect((await settings.view()).autoSend).toBe(false);
+    expect(audit.entries.at(-1)).toMatchObject({ detail: { keys: ["einvoice_auto_send"] } });
+    await settings.update({ autoSend: true }, "u1");
+    expect((await settings.read()).autoSend).toBe(true);
+  });
+
+  it("registers the hook at the public address, keeps the secret to itself and shows the rest", async () => {
+    await withUrl.update({ apiKey: "test_key", accountId: "nav" }, "u1");
+    expect((await withUrl.view()).webhook).toMatchObject({ active: false, proposedUrl: "https://nav.example.se/api/v1/einvoice/webhook" });
+    const view = await withUrl.registerWebhook("u1");
+    expect(view.webhook).toMatchObject({ active: true, environment: "sandbox", url: "https://nav.example.se/api/v1/einvoice/webhook", environmentMismatch: false });
+    expect(JSON.stringify(view)).not.toContain("whsec_test_secret");
+    expect([...fake.state.webhooks.values()]).toEqual([{ url: "https://nav.example.se/api/v1/einvoice/webhook", events: ["issued_invoice.state_change"] }]);
+    const read = await withUrl.read();
+    expect(read.webhook).toMatchObject({ secret: "whsec_test_secret", environment: "sandbox" });
+    expect(audit.entries.at(-1)).toMatchObject({ action: "webhook_registered", detail: { environment: "sandbox" } });
+    expect(JSON.stringify(audit.entries)).not.toContain("whsec_test_secret");
+
+    // Registering again replaces the old hook at the access point.
+    await withUrl.registerWebhook("u1");
+    expect(fake.state.webhooks.size).toBe(1);
+    expect(fake.calls.filter((c) => c.method === "deleteWebhook")).toHaveLength(1);
+
+    // Another environment chosen afterwards: the page says so.
+    await withUrl.update({ environment: "production" }, "u1");
+    expect((await withUrl.view()).webhook).toMatchObject({ active: true, environmentMismatch: true });
+  });
+
+  it("refuses without a public https address, and passes on the access point's refusal", async () => {
+    await withUrl.update({ apiKey: "test_key" }, "u1");
+    publicBase = "http://nav.local";
+    await expect(withUrl.registerWebhook("u1")).rejects.toBeInstanceOf(EinvoiceWebhookPublicUrlError);
+    publicBase = "https://nav.example.se";
+    fake.state.createWebhookError = new EInvoiceProviderError("B2Brouter godtog inte webhooken: url is not public", "validation");
+    await expect(withUrl.registerWebhook("u1")).rejects.toThrow("B2Brouter godtog inte webhooken");
+    expect((await withUrl.read()).webhook.id).toBeNull();
+  });
+
+  it("Stäng av removes the hook at the access point (already gone is fine) and forgets it", async () => {
+    await withUrl.update({ apiKey: "test_key" }, "u1");
+    await withUrl.registerWebhook("u1");
+    const view = await withUrl.unregisterWebhook("u1");
+    expect(view.webhook.active).toBe(false);
+    expect(fake.state.webhooks.size).toBe(0);
+    expect((await withUrl.read()).webhook).toEqual({ id: null, secret: null, environment: null, url: null, lastReceivedAt: null });
+    // Gone at B2Brouter already: still forgotten here.
+    await withUrl.registerWebhook("u1");
+    fake.state.webhooks.clear();
+    await withUrl.unregisterWebhook("u1");
+    expect((await withUrl.read()).webhook.id).toBeNull();
+    // Another failure keeps it, so the admin can try again.
+    await withUrl.registerWebhook("u1");
+    fake.state.deleteWebhookError = new EInvoiceProviderError("B2Brouter svarar inte, försök igen", "unavailable");
+    await expect(withUrl.unregisterWebhook("u1")).rejects.toThrow("B2Brouter svarar inte");
+    expect((await withUrl.read()).webhook.id).not.toBeNull();
+  });
+});
+

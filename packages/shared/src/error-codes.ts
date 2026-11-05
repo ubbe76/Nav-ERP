@@ -284,6 +284,7 @@ export const ERROR_CODES = {
   EINVOICE_PROVIDER_UNAUTHORIZED: "einvoice-provider-unauthorized",
   EINVOICE_PROVIDER_UNAVAILABLE: "einvoice-provider-unavailable",
   EINVOICE_TRANSMISSION_NOT_FOUND: "einvoice-transmission-not-found",
+  EINVOICE_WEBHOOK_PUBLIC_URL: "einvoice-webhook-public-url",
   SHIPMENT_ON_DRAFT_INVOICE: "shipment-on-draft-invoice",
   // register (grunddata)
   REGISTER_ENTRY_IN_USE: "register-entry-in-use",

@@ -11,7 +11,8 @@ import { CustomerNotFoundError } from "../../sales/service/sales.service.js";
 import { contentDisposition } from "../../system/service/content-disposition.js";
 import { errorBody } from "../../system/service/error-body.js";
 import { EInvoiceProviderError } from "../service/einvoice-provider.js";
-import type { EinvoiceSettingsService } from "../service/einvoice-settings.service.js";
+import { EinvoiceWebhookPublicUrlError, type EinvoiceSettingsService } from "../service/einvoice-settings.service.js";
+import type { EinvoiceWebhookService } from "../service/einvoice-webhook.service.js";
 import type { EinvoiceStatusService } from "../service/einvoice-status.service.js";
 import type { EinvoiceService } from "../service/einvoice.service.js";
 import {
@@ -37,6 +38,7 @@ export function mapEinvoiceError(reply: FastifyReply, err: unknown): FastifyRepl
   if (err instanceof EinvoiceProviderUnavailableError) return reply.code(502).send({ ...errorBody(err), requestId: err.requestId });
   if (err instanceof EinvoiceDocumentInvalidError) return reply.code(400).send({ ...errorBody(err), problems: err.problems });
   if (err instanceof EinvoiceNotConfiguredError) return reply.code(409).send({ ...errorBody(err), reason: err.reason });
+  if (err instanceof EinvoiceWebhookPublicUrlError) return reply.code(409).send(errorBody(err));
   if (err instanceof EinvoiceNotAllowedError) return reply.code(409).send({ ...errorBody(err), reason: err.reason });
   if (err instanceof EinvoiceAlreadySentError) return reply.code(409).send(errorBody(err));
   if (err instanceof EinvoiceTransmissionNotFoundError || err instanceof InvoiceNotFoundError || err instanceof CustomerNotFoundError) {
@@ -81,6 +83,9 @@ export async function einvoiceRoutes(
   app.post("/einvoice-settings/test", ADMIN, async (req, reply) =>
     run(reply, () => settings.testConnection(testEinvoiceConnectionSchema.parse(req.body ?? {})))
   );
+  // Statusbesked direkt: register / remove the access point's web hook.
+  app.post("/einvoice-settings/webhook", ADMIN, async (req, reply) => run(reply, () => settings.registerWebhook(req.user!.id)));
+  app.delete("/einvoice-settings/webhook", ADMIN, async (req, reply) => run(reply, () => settings.unregisterWebhook(req.user!.id)));
   app.post("/einvoice-settings/validate", ADMIN, async (req, reply) => {
     const { invoiceId } = validateEinvoiceDocumentSchema.parse(req.body);
     return run(reply, () => service.validateDocument(invoiceId));
@@ -125,5 +130,23 @@ export async function einvoiceRoutes(
     const { id } = idParams.parse(req.params);
     const input = peppolLookupSchema.parse(req.body ?? {});
     return run(reply, () => service.lookup(id, input));
+  });
+}
+
+// The public receiver of B2Brouter's status changes (spec 2026-11-05):
+// registered OUTSIDE the authenticated scope — the signature is the
+// authentication. Its own scope parses every body as raw bytes, since the
+// HMAC covers the exact bytes sent; 64 kB is far more than a state-change
+// event needs.
+export const EINVOICE_WEBHOOK_BODY_LIMIT = 64 * 1024;
+
+export async function einvoiceWebhookRoutes(app: FastifyInstance, opts: { webhook: EinvoiceWebhookService }) {
+  app.removeAllContentTypeParsers();
+  app.addContentTypeParser("*", { parseAs: "buffer", bodyLimit: EINVOICE_WEBHOOK_BODY_LIMIT }, (_req, body, done) => done(null, body));
+  app.post("/einvoice/webhook", { bodyLimit: EINVOICE_WEBHOOK_BODY_LIMIT }, async (req, reply) => {
+    const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const header = req.headers["x-b2brouter-signature"];
+    const code = await opts.webhook.receive(raw, typeof header === "string" ? header : undefined);
+    return reply.code(code).send();
   });
 }

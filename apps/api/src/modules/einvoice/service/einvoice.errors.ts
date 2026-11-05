@@ -25,13 +25,12 @@ export class EinvoiceNotConfiguredError extends Error {
 export const BLOCKED_MESSAGES: Record<EinvoiceBlockedReason, string> = {
   "invoice-not-issued": "Bara en utfärdad faktura kan skickas som e-faktura",
   "private-person": "Privatpersoner kan inte få e-faktura — fakturan skickas med e-post",
-  "foreign-customer": "E-faktura kan bara skickas till svenska kunder i den här versionen",
-  currency: "E-faktura kan bara skickas för fakturor i SEK i den här versionen",
   "missing-company-data":
     "Företagets organisationsnummer och momsregistreringsnummer måste vara ifyllda under System → Företagsuppgifter",
-  "missing-recipient-id": "Kunden saknar Peppol-id och organisationsnummer — fyll i ett av dem på kundkortet",
-  "vat-code-unsupported":
-    "E-faktura kan bara skickas för rader med svensk moms, momsfri försäljning eller omvänd betalningsskyldighet i Sverige i den här versionen",
+  "missing-recipient-id":
+    "Kunden saknar Peppol-id — fyll i Peppol-id på kundkortet (för kunder i Sverige, Norge, Danmark och Belgien räcker organisationsnumret)",
+  "vat-code-unsupported": "Fakturan har rader utanför momsens tillämpningsområde (räntefaktura) och kan inte skickas som e-faktura",
+  "vat-code-mixed": "Export av tjänster (momskod EXT) kan inte stå på samma e-faktura som andra momskoder — fakturera tjänsterna för sig",
 };
 
 export class EinvoiceNotAllowedError extends Error {

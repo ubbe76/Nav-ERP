@@ -15,8 +15,9 @@ export const EINVOICE_ENVIRONMENTS = ["sandbox", "production"] as const;
 export type EinvoiceEnvironment = (typeof EINVOICE_ENVIRONMENTS)[number];
 
 // Peppol-id as "scheme:value" — a four-digit ICD scheme (0007 =
-// organisationsnummer, 0088 = GLN …) and the identifier itself. Trimmed;
-// "" or null clears the field (= derived from the organisationsnummer).
+// organisationsnummer, 0088 = GLN, 0192 = norskt organisasjonsnummer …) and
+// the identifier itself. Trimmed; "" or null clears the field (= derived
+// from the organisationsnummer in SE, NO, DK and BE).
 export const PEPPOL_ID_PATTERN = /^\d{4}:[A-Za-z0-9]{1,50}$/;
 export const peppolIdSchema = z
   .string()
@@ -34,15 +35,29 @@ export const peppolIdFieldSchema = z.preprocess(
 export const EINVOICE_BLOCKED_REASONS = [
   "invoice-not-issued",
   "private-person",
-  "foreign-customer",
-  "currency",
   "missing-company-data",
   "missing-recipient-id",
-  // Momskoder: a row's code has no Peppol category in etapp 1 (only svensk
-  // moms, momsfritt and omvänd betalningsskyldighet in Sverige do).
+  // Momskoder: a row's code has no Peppol category (UTM — räntefakturans
+  // rader — or a code the catalog does not know).
   "vat-code-unsupported",
+  // Export av tjänster (EXT ⇒ O) next to any other code: Peppol allows
+  // "Not subject to VAT" only alone on its invoice (BR-O-11..14).
+  "vat-code-mixed",
 ] as const;
 export type EinvoiceBlockedReason = (typeof EINVOICE_BLOCKED_REASONS)[number];
+
+// Skicka e-faktura automatiskt vid Utfärda: what happened to the invoice
+// just issued — the transmission's status, "blocked" (the document cannot
+// be sent; reason says why) or "error" (the send failed before a status was
+// known). Null on the issue answer = the automation did not apply (switched
+// off, not configured, or the customer gets its invoices by e-mail).
+export interface EinvoiceAutoSendOutcome {
+  status: EinvoiceStatus | "blocked" | "error";
+  // Swedish, shown as-is on the invoice card and the samlingsfakturering result.
+  message: string;
+  transmissionId: string | null;
+  reason: EinvoiceBlockedReason | null;
+}
 
 // --- Settings (System → E-faktura, admin) ---
 
@@ -67,6 +82,8 @@ export const updateEinvoiceSettingsSchema = z
     accountId: z.string().trim().max(100).nullable().optional(),
     accountName: z.string().trim().max(200).nullable().optional(),
     statusIntervalMinutes: z.coerce.number().int().min(5).max(1440).optional(),
+    // Skicka e-faktura automatiskt vid Utfärda (saknas = på).
+    autoSend: z.boolean().optional(),
   })
   .strict();
 export type UpdateEinvoiceSettingsInput = z.infer<typeof updateEinvoiceSettingsSchema>;

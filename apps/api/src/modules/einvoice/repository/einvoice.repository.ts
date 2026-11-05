@@ -1,12 +1,23 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, like, lt, sql } from "drizzle-orm";
-import { einvoiceTransmissions, invoiceRows, invoices, salesOrderRows, salesOrders, systemSettings, users, type Db } from "@navet/db";
+import {
+  customerDeliveryAddresses,
+  einvoiceTransmissions,
+  invoiceRows,
+  invoices,
+  salesOrderRows,
+  salesOrders,
+  systemSettings,
+  users,
+  type Db,
+} from "@navet/db";
 import type { EinvoiceStatus } from "@navet/shared";
 
 // E-faktura (Peppol) — the module's own tables and the einvoice_* settings
 // keys. Reads of invoices/customers/company_info go through the narrow
 // readers the service is given (InvoiceReader/CompanyInfoReader); the
 // cross-module reads here are the order link of the invoice rows (BT-10/BT-13
-// and OrderLineReference), which no sales read model exposes, and the invoice
+// and OrderLineReference, the delivery country of an intra-community supply),
+// which no sales read model exposes, and the invoice
 // number joined onto the document download (loading the whole invoice for a
 // file name would be absurd).
 
@@ -149,6 +160,20 @@ export function createEinvoiceRepository(db: Db) {
       return rows.map((r) => r.id);
     },
 
+    // The web hook names the access point's document id: the newest
+    // transmission of that environment carrying it (an id is unique per
+    // environment at B2Brouter; the newest wins should a test database
+    // ever repeat one).
+    async findTransmissionIdByProvider(environment: string, providerInvoiceId: string): Promise<string | null> {
+      const [row] = await db
+        .select({ id: einvoiceTransmissions.id })
+        .from(einvoiceTransmissions)
+        .where(and(eq(einvoiceTransmissions.environment, environment), eq(einvoiceTransmissions.providerInvoiceId, providerInvoiceId)))
+        .orderBy(desc(einvoiceTransmissions.startedAt), desc(einvoiceTransmissions.id))
+        .limit(1);
+      return row?.id ?? null;
+    },
+
     // A `sending` row without a provider id older than `olderThan` is a send
     // whose process died between the insert and the answer: marked failed so
     // the invoice can be sent again. Returns what it changed (for the log).
@@ -178,6 +203,9 @@ export function createEinvoiceRepository(db: Db) {
           orderNumber: salesOrders.orderNumber,
           customerOrderNumber: salesOrders.customerOrderNumber,
           customerReference: salesOrders.customerReference,
+          // The country the order was delivered to (BT-80 for an intra-
+          // community supply); null without a delivery address.
+          deliveryCountry: customerDeliveryAddresses.country,
           // Position of the order row within its order (Nav has no stored
           // line numbers): 1-based by creation order.
           orderLineNo: sql<number | null>`(
@@ -188,6 +216,7 @@ export function createEinvoiceRepository(db: Db) {
         .from(invoiceRows)
         .leftJoin(salesOrderRows, eq(salesOrderRows.id, invoiceRows.salesOrderRowId))
         .leftJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
+        .leftJoin(customerDeliveryAddresses, eq(customerDeliveryAddresses.id, salesOrders.deliveryAddressId))
         .where(eq(invoiceRows.invoiceId, invoiceId))
         .orderBy(asc(invoiceRows.createdAt), asc(invoiceRows.id));
     },

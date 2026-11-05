@@ -150,7 +150,8 @@ import { createEinvoiceRepository } from "./modules/einvoice/repository/einvoice
 import { createEinvoiceSettingsService } from "./modules/einvoice/service/einvoice-settings.service.js";
 import { createEinvoiceService } from "./modules/einvoice/service/einvoice.service.js";
 import { createEinvoiceStatusService } from "./modules/einvoice/service/einvoice-status.service.js";
-import { einvoiceRoutes } from "./modules/einvoice/routes/einvoice.routes.js";
+import { createEinvoiceWebhookService } from "./modules/einvoice/service/einvoice-webhook.service.js";
+import { einvoiceRoutes, einvoiceWebhookRoutes } from "./modules/einvoice/routes/einvoice.routes.js";
 import { createStockRepository } from "./modules/stock/repository/stock.repository.js";
 import { createStockService } from "./modules/stock/service/stock.service.js";
 import { createValuationService } from "./modules/stock/service/valuation.service.js";
@@ -571,7 +572,11 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     // Dröjsmålsränta: the referensräntor for the reminder's accrued interest.
     exchangeRateService,
     // Extra benämning on the invoice (System → Inställningar).
-    systemService
+    systemService,
+    // Skicka e-faktura automatiskt vid Utfärda: the e-invoice service is
+    // built below (it reads invoices through this one); the closure is only
+    // called at runtime, long after both exist.
+    (invoiceId, userId) => einvoiceService.sendAfterIssue(invoiceId, userId)
   );
   // Räntefakturering: one invoice per customer with the interest/fee rows,
   // issued through the ordinary path; referensräntor via the same service
@@ -594,6 +599,8 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     repo: einvoiceRepository,
     company: systemService,
     audit: auditRepository,
+    // Statusbesked direkt: the web hook lives under the public address.
+    publicBaseUrl: async () => (await systemService.getSettings()).publicBaseUrl,
   });
   const einvoiceService = createEinvoiceService({
     repo: einvoiceRepository,
@@ -613,6 +620,13 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
     log: (msg, extra) => app.log.error(extra ?? {}, msg),
   });
   app.decorate("einvoiceStatus", einvoiceStatusService);
+  // Statusbesked direkt: the public receiver of B2Brouter's web hook.
+  const einvoiceWebhookService = createEinvoiceWebhookService({
+    repo: einvoiceRepository,
+    settings: einvoiceSettingsService,
+    status: einvoiceStatusService,
+    log: (msg, extra) => app.log.error(extra ?? {}, msg),
+  });
   // Kundreskontra (B3) — open items, payment registration and cancellation.
   // The same poster books the K verification inside the payment's own
   // transaction and reverses it when the payment is cancelled.
@@ -921,6 +935,9 @@ export function buildApp(database: Db = db, options: BuildAppOptions = {}) {
       // Public: the plugin kit (theme tokens + base style) an embedded plugin
       // page links from its own origin.
       await v1.register(pluginKitRoutes, { themes: themesService });
+      // Public: B2Brouter's status changes for e-invoices; the HMAC
+      // signature with the hook's secret is the authentication.
+      await v1.register(einvoiceWebhookRoutes, { webhook: einvoiceWebhookService });
 
       // Behörighetsgrupper: enforceAccess runs after authentication and
       // resolves each route's rule — its own config.access, else the module

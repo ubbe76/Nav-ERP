@@ -22,6 +22,7 @@ export const BUYER: UblInvoiceInput["buyer"] = {
   name: "Kund & Son AB",
   address: { addressLines: ["Storgatan 1", "Box 44"], postalCode: "753 20", city: "Uppsala", country: "SE" },
   orgNumber: "559000-1235",
+  orgNumberScheme: "0007",
   vatNumber: "SE559000123501",
   customerNumber: "1001",
 };
@@ -44,6 +45,9 @@ function base(overrides: Partial<UblInvoiceInput> = {}): UblInvoiceInput {
     issueDate: "2026-10-21",
     dueDate: "2026-11-20",
     currency: "SEK",
+    language: "sv",
+    taxCurrency: null,
+    delivery: null,
     buyerReference: "Anna Andersson",
     orderReference: "PO-4711",
     creditedInvoiceNumber: null,
@@ -199,6 +203,143 @@ export function invoiceReverseCharge(): UblInvoiceInput {
   });
 }
 
+// ---- Utländska kunder och valuta (spec 2026-11-05) ------------------------
+// Invented foreign customers; the register numbers carry valid check digits
+// (PEPPOL-COMMON-R041/R043 are fatal): 987654325 is a mod-11-valid Norwegian
+// number, 0412345614 a mod-97-valid Belgian one, 0614141000012 a GS1-valid GLN.
+
+const EN_PDF = (number: string) => ({ filename: `Invoice-${number}.pdf`, description: "Invoice (PDF)", mimeCode: "application/pdf" as const, content: FAKE_PDF });
+
+// Export of goods to Norway in NOK, English: EXV ⇒ G (VATEX-EU-G), the
+// buyer addressed by 0192 + organisasjonsnummer, paid to the IBAN (code 30
+// outside the euro), no VAT and therefore no VAT in SEK.
+export function exportGoodsNok(): UblInvoiceInput {
+  return base({
+    invoiceNumber: "FA-1010",
+    currency: "NOK",
+    language: "en",
+    buyerReference: "Kari Nordmann",
+    orderReference: "NO-PO-88",
+    paymentTermsNote: "30 days net",
+    buyer: {
+      endpoint: { scheme: "0192", value: "987654325" },
+      name: "Fjordverk AS",
+      address: { addressLines: ["Bryggen 3"], postalCode: "5003", city: "Bergen", country: "NO" },
+      orgNumber: "987654325",
+      orgNumberScheme: "0192",
+      vatNumber: null,
+      customerNumber: "2001",
+    },
+    payment: { account: { kind: "iban", iban: "SE35 5000 0000 0549 1000 0003", bic: "ESSESESS" }, ocrNumber: "10012345673" },
+    attachment: EN_PDF("FA-1010"),
+    lines: [
+      line({ lineNumber: 1, description: "Stainless worktop 1200", articleNumber: "2001", quantity: 2, unitPrice: 2650, lineAmount: 5300, vatAmount: 0, vatRate: 0, vatCode: "EXV", vatExemptionText: "Export of goods, exempt from VAT (Article 146 of the VAT Directive)" }),
+      line({ lineNumber: 2, description: "Freight", articleNumber: "FRAKT", quantity: 1, unitPrice: 890, lineAmount: 890, vatAmount: 0, vatRate: 0, vatCode: "EXV", vatExemptionText: "Export of goods, exempt from VAT (Article 146 of the VAT Directive)" }),
+    ],
+  });
+}
+
+// Goods to a German company in EUR: EUV ⇒ K (VATEX-EU-IC) with the buyer's
+// VAT number, the delivery date and the deliver-to country (BR-IC-02/11/12),
+// IBAN with SEPA code 58. Germany has no derived scheme: the Peppol-id is
+// the customer's own (9930 = German VAT number), the registration number is
+// left out.
+export function euGoodsEur(): UblInvoiceInput {
+  return base({
+    invoiceNumber: "FA-1011",
+    currency: "EUR",
+    language: "en",
+    buyerReference: "Max Mustermann",
+    orderReference: "4500012345",
+    paymentTermsNote: "30 days net",
+    delivery: { date: "2026-11-03", country: "DE" },
+    buyer: {
+      endpoint: { scheme: "9930", value: "DE123456789" },
+      name: "Beispiel Metall GmbH",
+      address: { addressLines: ["Hafenstraße 7"], postalCode: "20457", city: "Hamburg", country: "DE" },
+      orgNumber: null,
+      orgNumberScheme: null,
+      vatNumber: "DE123456789",
+      customerNumber: "2002",
+    },
+    payment: { account: { kind: "iban", iban: "SE35 5000 0000 0549 1000 0003", bic: "ESSESESS" }, ocrNumber: "10012345673" },
+    attachment: EN_PDF("FA-1011"),
+    lines: [
+      line({ lineNumber: 1, description: "Sink module 800", articleNumber: "2004", quantity: 3, unitPrice: 412.5, discountPercent: 5, lineAmount: 1175.63, vatAmount: 0, vatRate: 0, vatCode: "EUV", vatExemptionText: "Intra-Community supply (Article 138 of the VAT Directive)", orderLineReference: "KO-2010:1" }),
+    ],
+  });
+}
+
+// Services to a Danish company in DKK: EUT ⇒ AE (reverse charge, article
+// 196) with the buyer's VAT number; the buyer by 0184 + CVR, also as its
+// registration number.
+export function euServicesDkk(): UblInvoiceInput {
+  return base({
+    invoiceNumber: "FA-1012",
+    currency: "DKK",
+    language: "en",
+    buyerReference: "Mette Jensen",
+    orderReference: null,
+    paymentTermsNote: "30 days net",
+    buyer: {
+      endpoint: { scheme: "0184", value: "12345674" },
+      name: "Eksempel ApS",
+      address: { addressLines: ["Havnegade 12"], postalCode: "1058", city: "København K", country: "DK" },
+      orgNumber: "12345674",
+      orgNumberScheme: "0184",
+      vatNumber: "DK12345674",
+      customerNumber: "2003",
+    },
+    payment: { account: { kind: "iban", iban: "SE35 5000 0000 0549 1000 0003", bic: "ESSESESS" }, ocrNumber: "10012345673" },
+    attachment: EN_PDF("FA-1012"),
+    lines: [
+      line({ lineNumber: 1, description: "Installation of kitchen line", unitCode: "tim", quantity: 6, unitPrice: 725, lineAmount: 4350, vatAmount: 0, vatRate: 0, vatCode: "EUT", vatExemptionText: "Reverse charge (Article 196 of the VAT Directive)" }),
+    ],
+  });
+}
+
+// Services to a company outside the EU in USD: EXT ⇒ O (not subject to
+// VAT) — no rate on the category and NEITHER party's VAT number (BR-O-02),
+// the buyer addressed by GLN.
+export function servicesOutsideEuUsd(): UblInvoiceInput {
+  return base({
+    invoiceNumber: "FA-1013",
+    currency: "USD",
+    language: "en",
+    buyerReference: "John Smith",
+    orderReference: null,
+    paymentTermsNote: "30 days net",
+    buyer: {
+      endpoint: { scheme: "0088", value: "0614141000012" },
+      name: "Example Industries Inc.",
+      address: { addressLines: ["100 Main Street"], postalCode: "02110", city: "Boston", country: "US" },
+      orgNumber: null,
+      orgNumberScheme: null,
+      vatNumber: "US123456789",
+      customerNumber: "2004",
+    },
+    payment: { account: { kind: "iban", iban: "SE35 5000 0000 0549 1000 0003", bic: "ESSESESS" }, ocrNumber: "10012345673" },
+    attachment: EN_PDF("FA-1013"),
+    lines: [
+      line({ lineNumber: 1, description: "Design review, stainless kitchen", unitCode: "tim", quantity: 10, unitPrice: 140, lineAmount: 1400, vatAmount: 0, vatRate: 0, vatCode: "EXT", vatExemptionText: "Service supplied outside Sweden" }),
+    ],
+  });
+}
+
+// A Swedish customer invoiced in EUR with Swedish VAT: the VAT is also
+// stated in SEK (TaxCurrencyCode + a second TaxTotal without subtotals) —
+// 250.00 EUR at 11.2 = 2 800.00 SEK.
+export function swedishVatInEur(): UblInvoiceInput {
+  return base({
+    invoiceNumber: "FA-1014",
+    currency: "EUR",
+    taxCurrency: { currency: "SEK", vatAmount: 2800 },
+    payment: { account: { kind: "iban", iban: "SE35 5000 0000 0549 1000 0003", bic: "ESSESESS" }, ocrNumber: "10012345673" },
+    attachment: { filename: "Faktura-FA-1014.pdf", description: "Faktura (PDF)", mimeCode: "application/pdf", content: FAKE_PDF },
+    lines: [line({ lineNumber: 1, description: "Bänkskiva 1200×600", articleNumber: "2001", quantity: 4, unitPrice: 250, lineAmount: 1000, vatAmount: 250, vatRate: 25, vatCode: "MP25" })],
+  });
+}
+
 export const GOLDEN_CASES: { name: string; input: () => UblInvoiceInput }[] = [
   { name: "invoice-two-rates-discount", input: invoiceTwoRatesDiscount },
   { name: "invoice-exempt-row", input: invoiceExemptRow },
@@ -209,4 +350,9 @@ export const GOLDEN_CASES: { name: string; input: () => UblInvoiceInput }[] = [
   { name: "invoice-iban", input: ibanInvoice },
   { name: "invoice-no-payment-account", input: noPaymentAccountInvoice },
   { name: "invoice-reverse-charge", input: invoiceReverseCharge },
+  { name: "invoice-export-goods-nok", input: exportGoodsNok },
+  { name: "invoice-eu-goods-eur", input: euGoodsEur },
+  { name: "invoice-eu-services-dkk", input: euServicesDkk },
+  { name: "invoice-services-outside-eu-usd", input: servicesOutsideEuUsd },
+  { name: "invoice-swedish-vat-in-eur", input: swedishVatInEur },
 ];

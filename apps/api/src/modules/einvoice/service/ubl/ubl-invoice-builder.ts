@@ -60,7 +60,7 @@
 import { el, renderXml, type XmlChild, type XmlElement } from "../../../banking/service/iso20022/xml-writer.js";
 import { unitCodeFor } from "./unit-codes.js";
 import type { UblBuyer, UblInvoiceInput, UblLine, UblPostalAddress, UblSeller } from "./ubl-types.js";
-import { compareVatCategories, lineVatCategory, type VatCategory } from "./vat-categories.js";
+import { compareVatCategories, lineVatCategory, type UblLanguage, type VatCategory } from "./vat-categories.js";
 
 export const UBL_CUSTOMIZATION_ID = "urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0";
 export const UBL_PROFILE_ID = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0";
@@ -114,11 +114,12 @@ export interface UblTotals {
 
 // Momskoder: one subtotal per VAT category and rate (the line's code decides
 // the category — lineVatCategory), so a momsfri row (E) and an omvänd
-// betalningsskyldighet row (AE) at 0 % are two subtotals.
-export function computeTotals(lines: readonly UblLine[]): UblTotals {
+// betalningsskyldighet row (AE) at 0 % are two subtotals. The language only
+// picks the exemption texts the subtotals carry, never a figure.
+export function computeTotals(lines: readonly UblLine[], language: UblLanguage = "sv"): UblTotals {
   const byCategory = new Map<string, UblTaxSubtotal>();
   for (const line of lines) {
-    const category = lineVatCategory(line);
+    const category = lineVatCategory(line, language);
     const key = `${category.id}:${category.percent}`;
     const bucket = byCategory.get(key) ?? { category, taxableCents: 0, taxCents: 0 };
     bucket.taxableCents += toCents(line.lineAmount);
@@ -213,7 +214,9 @@ function taxScheme(id: string): XmlElement {
   return el("cac:TaxScheme", [el("cbc:ID", id)]);
 }
 
-function supplierParty(seller: UblSeller): XmlElement {
+// BR-O-02: an invoice with a "Not subject to VAT" line carries neither the
+// seller's nor the buyer's VAT identifier — `withVat` false leaves both out.
+function supplierParty(seller: UblSeller, withVat: boolean): XmlElement {
   const orgNumber = digits(seller.orgNumber);
   const contact = [text("cbc:Telephone", seller.phone), text("cbc:ElectronicMail", seller.email)].filter(Boolean);
   return el("cac:AccountingSupplierParty", [
@@ -222,7 +225,7 @@ function supplierParty(seller: UblSeller): XmlElement {
       el("cac:PartyIdentification", [el("cbc:ID", orgNumber, { schemeID: SE_ORG_SCHEME })]),
       el("cac:PartyName", [el("cbc:Name", trimmed(seller.name))]),
       postalAddress(seller.address),
-      el("cac:PartyTaxScheme", [el("cbc:CompanyID", trimmed(seller.vatNumber).toUpperCase().replace(/\s/g, "")), taxScheme("VAT")]),
+      withVat ? el("cac:PartyTaxScheme", [el("cbc:CompanyID", trimmed(seller.vatNumber).toUpperCase().replace(/\s/g, "")), taxScheme("VAT")]) : null,
       // Swedish Peppol practice (SE-R-005): a second PartyTaxScheme whose
       // TaxScheme is not VAT must say exactly "Godkänd för F-skatt".
       seller.fSkatt ? el("cac:PartyTaxScheme", [el("cbc:CompanyID", F_SKATT_TEXT), taxScheme("TAX")]) : null,
@@ -239,10 +242,13 @@ function identifierValue(scheme: string, value: string): string {
   return scheme === SE_ORG_SCHEME ? digits(content) : content;
 }
 
-function customerParty(buyer: UblBuyer): XmlElement {
+function customerParty(buyer: UblBuyer, withVat: boolean): XmlElement {
   const scheme = trimmed(buyer.endpoint.scheme);
-  const orgNumber = buyer.orgNumber ? digits(buyer.orgNumber) : "";
-  const vatNumber = trimmed(buyer.vatNumber).toUpperCase().replace(/\s/g, "");
+  const orgScheme = trimmed(buyer.orgNumberScheme);
+  // A Swedish number as its ten digits; another country's as the service
+  // normalised it for its scheme, or as entered when no scheme is known.
+  const orgNumber = buyer.orgNumber ? (orgScheme === SE_ORG_SCHEME ? digits(buyer.orgNumber) : trimmed(buyer.orgNumber)) : "";
+  const vatNumber = withVat ? trimmed(buyer.vatNumber).toUpperCase().replace(/\s/g, "") : "";
   return el("cac:AccountingCustomerParty", [
     el("cac:Party", [
       el("cbc:EndpointID", identifierValue(scheme, buyer.endpoint.value), { schemeID: scheme }),
@@ -252,7 +258,7 @@ function customerParty(buyer: UblBuyer): XmlElement {
       vatNumber ? el("cac:PartyTaxScheme", [el("cbc:CompanyID", vatNumber), taxScheme("VAT")]) : null,
       el("cac:PartyLegalEntity", [
         el("cbc:RegistrationName", trimmed(buyer.name)),
-        orgNumber ? el("cbc:CompanyID", orgNumber, { schemeID: SE_ORG_SCHEME }) : null,
+        orgNumber ? el("cbc:CompanyID", orgNumber, orgScheme ? { schemeID: orgScheme } : {}) : null,
       ]),
     ]),
   ]);
@@ -275,8 +281,9 @@ function paymentMeans(input: UblInvoiceInput): XmlChild {
         ]);
   return el("cac:PaymentMeans", [
     // UNCL4461: 30 credit transfer (Swedish bankgiro/plusgiro practice,
-    // SE-R-011/012), 58 SEPA credit transfer for an IBAN.
-    el("cbc:PaymentMeansCode", account.kind === "iban" ? "58" : "30"),
+    // SE-R-011/012 — also an IBAN outside the euro), 58 SEPA credit
+    // transfer for an IBAN on a EUR invoice.
+    el("cbc:PaymentMeansCode", account.kind === "iban" && input.currency === "EUR" ? "58" : "30"),
     text("cbc:PaymentID", input.payment.ocrNumber),
     payee,
   ]);
@@ -285,7 +292,8 @@ function paymentMeans(input: UblInvoiceInput): XmlChild {
 function taxCategory(name: string, category: VatCategory, withReason: boolean): XmlElement {
   return el(name, [
     el("cbc:ID", category.id),
-    el("cbc:Percent", formatDecimal(category.percent, 2)),
+    // BR-O-05 / BR-48: "Not subject to VAT" carries no rate at all.
+    category.id === "O" ? null : el("cbc:Percent", formatDecimal(category.percent, 2)),
     // UBL order: TaxExemptionReasonCode (BT-121) before TaxExemptionReason
     // (BT-120); the line-level ClassifiedTaxCategory carries neither.
     withReason ? text("cbc:TaxExemptionReasonCode", category.exemptionReasonCode) : null,
@@ -307,6 +315,27 @@ function taxTotal(totals: UblTotals, currency: string): XmlElement {
   ]);
 }
 
+// BT-111: the invoice's VAT in the VAT accounting currency (BT-6), a second
+// TaxTotal WITHOUT subtotals (PEPPOL-EN16931-R053/R054).
+function taxTotalInTaxCurrency(input: UblInvoiceInput): XmlChild {
+  const tax = input.taxCurrency;
+  if (!tax) return null;
+  return el("cac:TaxTotal", [amount("cbc:TaxAmount", toCents(tax.vatAmount), tax.currency)]);
+}
+
+// BG-13: actual delivery date (BT-72) and the deliver-to country (BT-80) —
+// what an intra-community supply must state (BR-IC-11/12).
+function delivery(input: UblInvoiceInput): XmlChild {
+  const d = input.delivery;
+  if (!d) return null;
+  return el("cac:Delivery", [
+    el("cbc:ActualDeliveryDate", d.date),
+    el("cac:DeliveryLocation", [el("cac:Address", [el("cac:Country", [el("cbc:IdentificationCode", trimmed(d.country).toUpperCase())])])]),
+  ]);
+}
+
+const DISCOUNT_REASON: Record<UblLanguage, string> = { sv: "Rabatt", en: "Discount" };
+
 function monetaryTotal(totals: UblTotals, currency: string): XmlElement {
   return el("cac:LegalMonetaryTotal", [
     amount("cbc:LineExtensionAmount", totals.lineTotalCents, currency),
@@ -316,9 +345,9 @@ function monetaryTotal(totals: UblTotals, currency: string): XmlElement {
   ]);
 }
 
-function documentLine(line: UblLine, credit: boolean, currency: string): XmlElement {
+function documentLine(line: UblLine, credit: boolean, currency: string, language: UblLanguage): XmlElement {
   const pricing = linePricing(line);
-  const category = lineVatCategory(line);
+  const category = lineVatCategory(line, language);
   const unitCode = unitCodeFor(line.unitCode);
   // InvoiceLine and CreditNoteLine differ only in the quantity element's name
   // for the elements we write (CreditNoteLine puts TaxTotal before
@@ -332,7 +361,7 @@ function documentLine(line: UblLine, credit: boolean, currency: string): XmlElem
       ? el("cac:AllowanceCharge", [
           el("cbc:ChargeIndicator", "false"),
           el("cbc:AllowanceChargeReasonCode", DISCOUNT_REASON_CODE),
-          el("cbc:AllowanceChargeReason", "Rabatt"),
+          el("cbc:AllowanceChargeReason", DISCOUNT_REASON[language]),
           el("cbc:MultiplierFactorNumeric", formatDecimal(pricing.allowance.percent, 4)),
           amount("cbc:Amount", pricing.allowance.amountCents, currency),
           amount("cbc:BaseAmount", pricing.allowance.baseCents, currency),
@@ -366,7 +395,8 @@ function attachment(input: UblInvoiceInput): XmlChild {
 
 function build(input: UblInvoiceInput, credit: boolean): string {
   const currency = input.currency;
-  const totals = computeTotals(input.lines);
+  const totals = computeTotals(input.lines, input.language);
+  const withVat = !totals.subtotals.some((subtotal) => subtotal.category.id === "O");
   const root = el(
     credit ? "CreditNote" : "Invoice",
     [
@@ -380,19 +410,22 @@ function build(input: UblInvoiceInput, credit: boolean): string {
       el(credit ? "cbc:CreditNoteTypeCode" : "cbc:InvoiceTypeCode", credit ? CREDIT_NOTE_TYPE_CODE : INVOICE_TYPE_CODE),
       text("cbc:Note", input.note),
       el("cbc:DocumentCurrencyCode", currency),
+      input.taxCurrency ? el("cbc:TaxCurrencyCode", input.taxCurrency.currency) : null,
       text("cbc:BuyerReference", input.buyerReference),
       has(input.orderReference) ? el("cac:OrderReference", [el("cbc:ID", trimmed(input.orderReference))]) : null,
       credit && has(input.creditedInvoiceNumber)
         ? el("cac:BillingReference", [el("cac:InvoiceDocumentReference", [el("cbc:ID", trimmed(input.creditedInvoiceNumber))])])
         : null,
       attachment(input),
-      supplierParty(input.seller),
-      customerParty(input.buyer),
+      supplierParty(input.seller, withVat),
+      customerParty(input.buyer, withVat),
+      delivery(input),
       paymentMeans(input),
       has(input.paymentTermsNote) ? el("cac:PaymentTerms", [el("cbc:Note", trimmed(input.paymentTermsNote))]) : null,
       taxTotal(totals, currency),
+      taxTotalInTaxCurrency(input),
       monetaryTotal(totals, currency),
-      ...input.lines.map((line) => documentLine(line, credit, currency)),
+      ...input.lines.map((line) => documentLine(line, credit, currency, input.language)),
     ],
     {
       xmlns: credit ? UBL_NAMESPACES.creditNote : UBL_NAMESPACES.invoice,

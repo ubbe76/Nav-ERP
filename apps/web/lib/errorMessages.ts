@@ -604,6 +604,7 @@ const MESSAGES: Record<string, MessageEntry> = {
   "einvoice-provider-unauthorized": "B2Brouter nekade åtkomst — kontrollera API-nyckeln och miljön under System → E-faktura.",
   "einvoice-provider-unavailable": "B2Brouter svarar inte just nu — försök igen om en stund.",
   "einvoice-transmission-not-found": "Sändningen finns inte — ladda om sidan.",
+  "einvoice-webhook-public-url": "Ange Navs adress med https under System → Inställningar innan statusbesked kan slås på.",
   // Snabbare manuell bokföring: verifikatmallar, återkommande verifikat, SIE-import av verifikat
   "verification-template-not-found": "Mallen finns inte — ladda om sidan.",
   "verification-template-name-taken": "Det finns redan en mall med det namnet — välj ett annat namn.",

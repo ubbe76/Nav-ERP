@@ -272,6 +272,53 @@ describe("B2Brouter — reads", () => {
     expect((requests[0]!.init.headers as Record<string, string>)["Content-Type"]).toBe("application/octet-stream");
   });
 
+  it("asks the directory of the participant's country (default SE), lower case", async () => {
+    const { impl, requests } = fakeFetch([{ status: 404 }, { status: 404 }, { status: 404 }]);
+    const p = provider(impl);
+    await p.lookupParticipant("0192", "987654325", "NO");
+    await p.lookupParticipant("0007", "5560000000");
+    await p.lookupParticipant("0007", "5560000000", "not a country");
+    expect(requests.map((r) => r.url)).toEqual([
+      "https://api.b2brouter.net/directory/no/0192/987654325",
+      "https://api.b2brouter.net/directory/se/0007/5560000000",
+      "https://api.b2brouter.net/directory/se/0007/5560000000",
+    ]);
+  });
+
+  it("creates a web hook as JSON and answers with its id and the secret shown only then; deletes by id", async () => {
+    const { impl, requests } = fakeFetch([
+      { status: 200, body: { web_hook: { id: 12, url: "https://nav.example.se/api/v1/einvoice/webhook", enabled: true, signing_secret: "whsec_x" } } },
+      { status: 200, body: { web_hook: { id: 12 } } },
+      { status: 404, body: { error: { code: "not_found", message: "Not found" } } },
+    ]);
+    const p = provider(impl);
+    expect(await p.createWebhook({ url: "https://nav.example.se/api/v1/einvoice/webhook", events: ["issued_invoice.state_change"], description: "Nav" })).toEqual({
+      id: "12",
+      secret: "whsec_x",
+    });
+    const create = requests[0]!;
+    expect(create.url).toBe("https://api.b2brouter.net/web_hooks");
+    expect(create.init.method).toBe("POST");
+    expect((create.init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(String(create.init.body))).toEqual({
+      web_hook: { url: "https://nav.example.se/api/v1/einvoice/webhook", events: ["issued_invoice.state_change"], description: "Nav", enabled: true },
+    });
+    await p.deleteWebhook("12");
+    expect(requests[1]!).toMatchObject({ url: "https://api.b2brouter.net/web_hooks/12", init: { method: "DELETE" } });
+    await expect(p.deleteWebhook("12")).rejects.toMatchObject({ kind: "not-found", message: B2BROUTER_MESSAGES.webhookNotFound });
+  });
+
+  it("a refused web hook carries B2Brouter's reason; an answer without a secret is unexpected", async () => {
+    const { impl } = fakeFetch([
+      { status: 422, body: { error: { code: "invalid", message: "url must be public", param: "url" } } },
+      { status: 200, body: { web_hook: { id: 13 } } },
+    ]);
+    const p = provider(impl);
+    const input = { url: "https://10.0.0.1/hook", events: ["issued_invoice.state_change"], description: "Nav" };
+    await expect(p.createWebhook(input)).rejects.toMatchObject({ kind: "validation", message: `${B2BROUTER_MESSAGES.webhookRejected}: url must be public` });
+    await expect(p.createWebhook(input)).rejects.toMatchObject({ kind: "unexpected" });
+  });
+
   it("parses the error envelope leniently", () => {
     expect(parseErrorBody('{"error":{"code":"x","message":"m","param":"p","type":"t"}}')).toEqual({ code: "x", message: "m", param: "p" });
     expect(parseErrorBody('{"errors":["Cannot send invoice FA-1: Validering misslyckades: To use Peppol Network you need to configure this connection"]}')).toEqual({

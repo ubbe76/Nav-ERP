@@ -122,7 +122,7 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Hög
 
-- [ ] **E-faktura (Peppol), etapp 2** — mottagning → [#5](https://github.com/ubbe76/Nav-ERP/issues/5); utländska mottagare, valuta och automatisk sändning → [#6](https://github.com/ubbe76/Nav-ERP/issues/6). Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
+- [ ] **E-faktura (Peppol), mottagning** — inkommande e-faktura ⇒ leverantörsfakturautkast → [#5](https://github.com/ubbe76/Nav-ERP/issues/5). Utländska mottagare, valuta, automatisk sändning och statusbesked (#6) klara 2026-11-05. Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
 
 ### Medel
 

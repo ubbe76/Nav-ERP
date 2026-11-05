@@ -57,19 +57,27 @@ function assertSumRules(xml: string): void {
     const percent = num(category, "Percent");
     const taxable = num(subtotal, "TaxableAmount");
     const tax = num(subtotal, "TaxAmount");
-    // BR-S-08 / BR-E-08: taxable = Σ lines of that category and rate.
-    const matching = lines.filter((l) => textAt(l, "Item", "ClassifiedTaxCategory", "ID") === id && num(l, "Item", "ClassifiedTaxCategory", "Percent") === percent);
+    // BR-S-08 / BR-E-08: taxable = Σ lines of that category and rate (O
+    // carries no rate at all).
+    const samePercent = (l: XmlNode) => (id === "O" ? true : num(l, "Item", "ClassifiedTaxCategory", "Percent") === percent);
+    const matching = lines.filter((l) => textAt(l, "Item", "ClassifiedTaxCategory", "ID") === id && samePercent(l));
     expect(taxable).toBe(round2(matching.reduce((sum, l) => sum + num(l, "LineExtensionAmount"), 0)));
     // BR-CO-17 / BR-S-09: |tax − round2(taxable × rate)| < 1; BR-E-09: E ⇒ 0.
     if (id === "E") {
       expect(tax).toBe(0);
       expect(textAt(category, "TaxExemptionReason")).toBe("Undantagen från mervärdesskatt");
-    } else if (id === "AE") {
-      // BR-AE-09 / BR-AE-10: reverse charge carries no VAT and a reason.
+    } else if (id === "AE" || id === "K" || id === "G") {
+      // BR-AE/IC/G-09 and -10: no VAT, a reason text and the category's own
+      // VATEX code (PEPPOL-EN16931-P0104/P0106/P0107).
       expect(tax).toBe(0);
       expect(percent).toBe(0);
       expect(textAt(category, "TaxExemptionReason")).not.toBeNull();
-      expect(textAt(category, "TaxExemptionReasonCode")).toBe("VATEX-EU-AE");
+      expect(textAt(category, "TaxExemptionReasonCode")).toBe({ AE: "VATEX-EU-AE", K: "VATEX-EU-IC", G: "VATEX-EU-G" }[id]);
+    } else if (id === "O") {
+      // BR-O-09/10, BR-48: no VAT, no rate, VATEX-EU-O.
+      expect(tax).toBe(0);
+      expect(child(category, "Percent")).toBeNull();
+      expect(textAt(category, "TaxExemptionReasonCode")).toBe("VATEX-EU-O");
     } else {
       expect(Math.abs(tax - round2(taxable * (percent / 100)))).toBeLessThan(1);
       expect(child(category, "TaxExemptionReason")).toBeNull();
@@ -159,8 +167,9 @@ describe("UBL builder — momskoder", () => {
 
   it("ubl-check refuses codes without a Peppol category, OB without the buyer's VAT number and an OB row with VAT", () => {
     const base = invoiceReverseCharge();
-    const eu = { ...base, lines: [{ ...base.lines[0]!, vatCode: "EUV" }] };
-    expect(checkUblInput(eu)).toContain("Rad 1 har momskoden EUV som inte stöds i e-faktura.");
+    // UTM (räntefakturans rader) has no Peppol category.
+    const outOfScope = { ...base, lines: [{ ...base.lines[0]!, vatCode: "UTM" }] };
+    expect(checkUblInput(outOfScope)).toContain("Rad 1 har momskoden UTM som inte stöds i e-faktura.");
     const noVat = { ...base, buyer: { ...base.buyer, vatNumber: null } };
     expect(checkUblInput(noVat)).toContain("Omvänd betalningsskyldighet kräver kundens momsregistreringsnummer på fakturan.");
     const withVat = { ...base, lines: [{ ...base.lines[0]!, vatAmount: 1500 }] };
@@ -257,9 +266,12 @@ describe("UBL builder — document content", () => {
     expect(xml.split("<cac:PartyTaxScheme>").length - 1).toBe(2);
   });
 
-  it("IBAN ⇒ code 58 with the IBAN compacted and the BIC as the branch id; units kg/m2; derived price for a drifted row", () => {
+  it("IBAN ⇒ code 30 in SEK (SE-R-012), 58 (SEPA) only in EUR, the IBAN compacted and the BIC as the branch id; units kg/m2; derived price for a drifted row", () => {
     const xml = buildUblInvoice(ibanInvoice());
-    expect(xml).toContain("<cbc:PaymentMeansCode>58</cbc:PaymentMeansCode><cbc:PaymentID>10012345673</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>SE3550000000054910000003</cbc:ID><cac:FinancialInstitutionBranch><cbc:ID>ESSESESS</cbc:ID>");
+    expect(xml).toContain("<cbc:PaymentMeansCode>30</cbc:PaymentMeansCode><cbc:PaymentID>10012345673</cbc:PaymentID><cac:PayeeFinancialAccount><cbc:ID>SE3550000000054910000003</cbc:ID><cac:FinancialInstitutionBranch><cbc:ID>ESSESESS</cbc:ID>");
+    expect(buildUblInvoice({ ...ibanInvoice(), currency: "EUR", taxCurrency: { currency: "SEK", vatAmount: 719.33 } })).toContain(
+      "<cbc:PaymentMeansCode>58</cbc:PaymentMeansCode>"
+    );
     expect(xml).toContain('<cbc:InvoicedQuantity unitCode="KGM">12.5</cbc:InvoicedQuantity>');
     expect(xml).toContain('<cbc:InvoicedQuantity unitCode="MTK">3.25</cbc:InvoicedQuantity>');
     // 1000 × 0.3333 = 333.30 is 0.03 off the stored 333.33 — more than

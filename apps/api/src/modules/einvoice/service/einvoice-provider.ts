@@ -55,8 +55,14 @@ export interface EInvoiceProvider {
   // stay `sending` and the status job can read what became of it.
   submit(doc: EInvoiceDocument, opts?: SubmitOptions): Promise<SubmitResult>;
   getStatus(providerInvoiceId: string): Promise<ProviderStatus>;
-  // Directory lookup, handles the access point's 202 polling itself.
-  lookupParticipant(scheme: string, id: string): Promise<LookupResult>;
+  // Directory lookup in the participant's country (ISO alpha-2, default
+  // SE), handles the access point's 202 polling itself.
+  lookupParticipant(scheme: string, id: string, country?: string): Promise<LookupResult>;
+  // Statusbesked direkt (spec 2026-11-05): registers a web hook for the
+  // given events and returns its id and signing secret (shown only once by
+  // the access point); deleteWebhook throws kind "not-found" when it is gone.
+  createWebhook(input: { url: string; events: string[]; description: string }): Promise<{ id: string; secret: string }>;
+  deleteWebhook(id: string): Promise<void>;
   // Optional: the access point's own XSD + schematron check without sending.
   validate?(xml: Buffer): Promise<ValidationResult>;
 }

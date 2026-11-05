@@ -1285,6 +1285,7 @@ function VillkorTab({
         {isCustomer && !privatePerson && (
           <PeppolFields
             customerId={partner.id}
+            country={partner.country}
             invoiceDelivery={invoiceDelivery}
             onInvoiceDeliveryChange={setInvoiceDelivery}
             peppolId={peppolId}

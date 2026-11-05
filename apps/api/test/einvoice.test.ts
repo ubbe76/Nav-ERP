@@ -23,6 +23,8 @@ import { createAuditRepository } from "../src/modules/system/repository/audit.re
 import { createEinvoiceRepository } from "../src/modules/einvoice/repository/einvoice.repository.js";
 import { createEinvoiceSettingsService } from "../src/modules/einvoice/service/einvoice-settings.service.js";
 import { createEinvoiceService, resolveRecipient, blockedReasonFor } from "../src/modules/einvoice/service/einvoice.service.js";
+import { createEinvoiceWebhookService } from "../src/modules/einvoice/service/einvoice-webhook.service.js";
+import { createHmac } from "node:crypto";
 import {
   createEinvoiceStatusService,
   DOCUMENT_GONE_MESSAGE,
@@ -233,12 +235,22 @@ async function auditActions(invoiceId: string) {
 }
 
 describe("pure rules", () => {
-  it("resolves the recipient: the customer's Peppol-id, else 0007 + organisationsnummer", () => {
-    expect(resolveRecipient({ peppolId: "0088:7350000000000", orgNumber: "5560000001" })).toEqual({ peppolId: "0088:7350000000000", source: "customer" });
-    expect(resolveRecipient({ peppolId: null, orgNumber: "556000-0000" })).toEqual({ peppolId: "0007:5560000000", source: "org-number" });
-    expect(resolveRecipient({ peppolId: null, orgNumber: "165560000000" })).toEqual({ peppolId: "0007:5560000000", source: "org-number" });
-    expect(resolveRecipient({ peppolId: null, orgNumber: "12345" })).toEqual({ peppolId: null, source: null });
-    expect(resolveRecipient({ peppolId: null, orgNumber: null }, "0007:1111111111")).toEqual({ peppolId: "0007:1111111111", source: "customer" });
+  it("resolves the recipient: the customer's Peppol-id, else the organisation number in the country's scheme (SE/NO/DK/BE only)", () => {
+    const se = { country: "SE" };
+    expect(resolveRecipient({ ...se, peppolId: "0088:7350000000009", orgNumber: "5560000001" })).toEqual({ peppolId: "0088:7350000000009", source: "customer" });
+    expect(resolveRecipient({ ...se, peppolId: null, orgNumber: "556000-0000" })).toEqual({ peppolId: "0007:5560000000", source: "org-number" });
+    expect(resolveRecipient({ ...se, peppolId: null, orgNumber: "165560000000" })).toEqual({ peppolId: "0007:5560000000", source: "org-number" });
+    expect(resolveRecipient({ ...se, peppolId: null, orgNumber: "12345" })).toEqual({ peppolId: null, source: null });
+    expect(resolveRecipient({ ...se, peppolId: null, orgNumber: null }, "0007:1111111111")).toEqual({ peppolId: "0007:1111111111", source: "customer" });
+    // Spec 2026-11-05: Norway, Denmark and Belgium have a register-based scheme.
+    expect(resolveRecipient({ country: "NO", peppolId: null, orgNumber: "NO 987 654 325 MVA" })).toEqual({ peppolId: "0192:987654325", source: "org-number" });
+    expect(resolveRecipient({ country: "DK", peppolId: null, orgNumber: "DK12345674" })).toEqual({ peppolId: "0184:12345674", source: "org-number" });
+    expect(resolveRecipient({ country: "BE", peppolId: null, orgNumber: "0412.345.614" })).toEqual({ peppolId: "0208:0412345614", source: "org-number" });
+    expect(resolveRecipient({ country: "BE", peppolId: null, orgNumber: "412.345.614" })).toEqual({ peppolId: "0208:0412345614", source: "org-number" });
+    // Anywhere else the id must be typed on the customer.
+    expect(resolveRecipient({ country: "DE", peppolId: null, orgNumber: "HRB 12345" })).toEqual({ peppolId: null, source: null });
+    expect(resolveRecipient({ country: "FI", peppolId: null, orgNumber: "1234567-8" })).toEqual({ peppolId: null, source: null });
+    expect(resolveRecipient({ country: "DE", peppolId: "9930:DE123456789", orgNumber: null })).toEqual({ peppolId: "9930:DE123456789", source: "customer" });
   });
 
   it("blocks in the spec's order", () => {
@@ -246,9 +258,11 @@ describe("pure rules", () => {
     const ok = { privatePerson: false, country: "SE", invoiceCountry: null, peppolId: null, orgNumber: "5565555553" };
     expect(blockedReasonFor({ status: "draft", currency: "SEK" }, ok, company)).toBe("invoice-not-issued");
     expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, privatePerson: true }, company)).toBe("private-person");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, country: "DK" }, company)).toBe("foreign-customer");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, invoiceCountry: "NO" }, company)).toBe("foreign-customer");
-    expect(blockedReasonFor({ status: "issued", currency: "EUR" }, ok, company)).toBe("currency");
+    // Spec 2026-11-05: a foreign customer and another currency are sendable.
+    expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, country: "NO", orgNumber: "987654325" }, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", currency: "EUR" }, ok, company)).toBeNull();
+    // …but a country without a derived scheme needs the id typed.
+    expect(blockedReasonFor({ status: "issued", currency: "EUR" }, { ...ok, country: "DE", orgNumber: "HRB 12345" }, company)).toBe("missing-recipient-id");
     expect(blockedReasonFor({ status: "issued", currency: "SEK" }, ok, { orgNumber: null, vatNumber: "SE1" } as never)).toBe("missing-company-data");
     expect(blockedReasonFor({ status: "issued", currency: "SEK" }, ok, { orgNumber: "5560000000", vatNumber: "" } as never)).toBe("missing-company-data");
     expect(blockedReasonFor({ status: "issued", currency: "SEK" }, { ...ok, orgNumber: null }, company)).toBe("missing-recipient-id");
@@ -286,16 +300,14 @@ describe("Skicka e-faktura — guards", () => {
     await expect(einvoice.send(draft.id, userId)).rejects.toMatchObject({ name: "EinvoiceNotAllowedError", reason: "invoice-not-issued" });
   });
 
-  it("refuses a private person, a foreign customer, another currency, missing company data and a missing recipient id", async () => {
+  it("refuses a private person, missing company data and a missing recipient id (also a foreign customer without a derivable one)", async () => {
     const privat = await issuedInvoice(await makeCustomer({ privatePerson: true }));
     await expect(einvoice.send(privat.id, userId)).rejects.toMatchObject({ reason: "private-person" });
 
-    const dansk = await issuedInvoice(await makeCustomer({ country: "DK" }));
-    await expect(einvoice.send(dansk.id, userId)).rejects.toMatchObject({ reason: "foreign-customer" });
-
-    const euro = await issuedInvoice(await makeCustomer());
-    await db.update(invoices).set({ currency: "EUR" }).where(eq(invoices.id, euro.id));
-    await expect(einvoice.send(euro.id, userId)).rejects.toMatchObject({ reason: "currency" });
+    // A German customer: no scheme is derived from the organisation number,
+    // the Peppol-id must be typed (spec 2026-11-05).
+    const tysk = await issuedInvoice(await makeCustomer({ country: "DE", orgNumber: "HRB 12345" }));
+    await expect(einvoice.send(tysk.id, userId)).rejects.toMatchObject({ reason: "missing-recipient-id" });
 
     const noId = await issuedInvoice(await makeCustomer({ orgNumber: null }));
     await expect(einvoice.send(noId.id, userId)).rejects.toMatchObject({ reason: "missing-recipient-id" });
@@ -325,7 +337,7 @@ describe("Skicka e-faktura — guards", () => {
 
 describe("Skicka e-faktura — the send", () => {
   it("inserts the sending row BEFORE the access point is called, then marks it sent and logs it", async () => {
-    const customer = await makeCustomer({ peppolId: "0088:7350000000000" });
+    const customer = await makeCustomer({ peppolId: "0088:7350000000009" });
     const invoice = await issuedInvoice(customer);
     let rowsAtSubmit: { status: string; providerInvoiceId: string | null }[] = [];
     const original = fake.provider.submit;
@@ -340,7 +352,7 @@ describe("Skicka e-faktura — the send", () => {
       fake.provider.submit = original;
     }
     expect(rowsAtSubmit).toEqual([{ status: "sending", providerInvoiceId: null }]);
-    expect(view).toMatchObject({ status: "sent", statusLabel: "Skickad", environment: "sandbox", recipientId: "0088:7350000000000", providerInvoiceId: expect.stringMatching(/^\d+$/), providerState: "sent", errorMessage: null });
+    expect(view).toMatchObject({ status: "sent", statusLabel: "Skickad", environment: "sandbox", recipientId: "0088:7350000000009", providerInvoiceId: expect.stringMatching(/^\d+$/), providerState: "sent", errorMessage: null });
     expect(view.sentAt?.toISOString()).toBe(clock.toISOString());
     expect(view.createdByName).toBe("Biller");
     // The provider was built from the settings, with the account.
@@ -350,7 +362,7 @@ describe("Skicka e-faktura — the send", () => {
     const row = await rowOf(view.id);
     const xml = row.document.toString("utf8");
     expect(xml).toContain(`<cbc:ID>${invoice.invoiceNumber}</cbc:ID>`);
-    expect(xml).toContain('schemeID="0088">7350000000000<');
+    expect(xml).toContain('schemeID="0088">7350000000009<');
     expect(xml).toContain("<cbc:BuyerReference>Anna Andersson</cbc:BuyerReference>");
     expect(xml).toContain("<cbc:ID>PO-778</cbc:ID>");
     expect(xml).toContain("EmbeddedDocumentBinaryObject");
@@ -361,11 +373,11 @@ describe("Skicka e-faktura — the send", () => {
     expect(doc!.content.equals(row.document)).toBe(true);
 
     expect(await auditActions(invoice.id)).toEqual([
-      { action: "einvoice_sent", detail: { transmissionId: view.id, recipientId: "0088:7350000000000", environment: "sandbox", providerInvoiceId: view.providerInvoiceId } },
+      { action: "einvoice_sent", detail: { transmissionId: view.id, recipientId: "0088:7350000000009", environment: "sandbox", providerInvoiceId: view.providerInvoiceId } },
     ]);
     const card = await einvoice.getInvoiceView(invoice.id);
     expect(card.transmissions.map((t) => t.id)).toEqual([view.id]);
-    expect(card.recipient).toEqual({ peppolId: "0088:7350000000000", source: "customer" });
+    expect(card.recipient).toEqual({ peppolId: "0088:7350000000009", source: "customer" });
   });
 
   it("derives the recipient from the organisationsnummer and falls back to the customer number as BT-10", async () => {
@@ -740,15 +752,15 @@ describe("Kontrollera mottagaren", () => {
       documentTypes: ["Faktura", "Kreditfaktura"],
       message: null,
     });
-    expect(fake.calls.at(-1)).toEqual({ method: "lookupParticipant", args: ["0007", "5565555553"] });
+    expect(fake.calls.at(-1)).toEqual({ method: "lookupParticipant", args: ["0007", "5565555553", "SE"] });
     expect((await salesService.getCustomer(customer.id))!.peppolId).toBeNull();
   });
 
   it("takes an unsaved value from the form, and answers without a call when there is no id at all", async () => {
     const customer = await makeCustomer({ orgNumber: null });
-    const typed = await einvoice.lookup(customer.id, { peppolId: "0088:7350000000000" });
-    expect(typed).toMatchObject({ peppolId: "0088:7350000000000", source: "customer", found: true });
-    expect(fake.calls.at(-1)).toEqual({ method: "lookupParticipant", args: ["0088", "7350000000000"] });
+    const typed = await einvoice.lookup(customer.id, { peppolId: "0088:7350000000009" });
+    expect(typed).toMatchObject({ peppolId: "0088:7350000000009", source: "customer", found: true });
+    expect(fake.calls.at(-1)).toEqual({ method: "lookupParticipant", args: ["0088", "7350000000009", "SE"] });
     fake.calls.length = 0;
     const none = await einvoice.lookup(customer.id);
     expect(none).toMatchObject({ peppolId: null, source: null, found: null });
@@ -791,13 +803,17 @@ describe("fakturalistan", () => {
 });
 
 describe("momskoder (spec 4.5)", () => {
-  it("blocks a document with a code that has no Peppol category, MP*/MF/OB pass", () => {
+  it("blocks UTM (no Peppol category) and EXT next to another code (BR-O-11); every other catalog code passes", () => {
     const company = { orgNumber: "5560000000", vatNumber: "SE556000000001" } as never;
     const ok = { privatePerson: false, country: "SE", invoiceCountry: null, peppolId: null, orgNumber: "5565555553" };
     const rows = (...codes: string[]) => codes.map((code) => ({ vatCode: { code, invoiceText: null } }));
     expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "MF", "OB") }, ok, company)).toBeNull();
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "EXV") }, ok, company)).toBe("vat-code-unsupported");
-    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EUT") }, ok, company)).toBe("vat-code-unsupported");
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "EXV") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EUV", "EUT") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EXT", "EXT") }, ok, company)).toBeNull();
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("UTM") }, ok, company)).toBe("vat-code-unsupported");
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("EXT", "EXV") }, ok, company)).toBe("vat-code-mixed");
+    expect(blockedReasonFor({ status: "issued", currency: "SEK", rows: rows("MP25", "EXT") }, ok, company)).toBe("vat-code-mixed");
   });
 
   it("sends omvänd betalningsskyldighet as AE with VATEX-EU-AE, the code's text and the buyer's normalized VAT number", async () => {
@@ -824,20 +840,253 @@ describe("momskoder (spec 4.5)", () => {
     expect(xml).toContain("<cac:PartyTaxScheme><cbc:CompanyID>SE556555555301</cbc:CompanyID>");
   });
 
-  it("refuses a Swedish invoice with a hand-picked export code (vat-code-unsupported)", async () => {
+  it("refuses export of services next to export of goods (vat-code-mixed) before anything leaves", async () => {
     const customer = await makeCustomer();
     const { vatCodes } = await import("@navet/db");
-    const [exv] = await db.select({ id: vatCodes.id }).from(vatCodes).where(eq(vatCodes.code, "EXV"));
+    const codes = await db.select({ id: vatCodes.id, code: vatCodes.code }).from(vatCodes);
+    const id = (code: string) => codes.find((c) => c.code === code)!.id;
     const draft = await invoiceService.create(
-      { customerId: customer.id, rows: [{ description: "Export", quantity: 1, unitPrice: 100, vatCodeId: exv!.id }] },
+      {
+        customerId: customer.id,
+        rows: [
+          { description: "Konstruktion", quantity: 1, unitPrice: 100, vatCodeId: id("EXT") },
+          { description: "Bänk", quantity: 1, unitPrice: 100, vatCodeId: id("EXV") },
+        ],
+      },
       userId
     );
     const issued = await invoiceService.issue(draft!.id, userId);
     const err = await einvoice.send(issued!.id, userId).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(EinvoiceNotAllowedError);
-    expect(err).toMatchObject({ reason: "vat-code-unsupported" });
+    expect(err).toMatchObject({ reason: "vat-code-mixed" });
     expect(fake.state.submitted).toHaveLength(0);
     const view = await einvoice.getInvoiceView(issued!.id);
-    expect(view.blockedReason).toBe("vat-code-unsupported");
+    expect(view.blockedReason).toBe("vat-code-mixed");
   });
 });
+
+// ---- Etapp 2a (spec 2026-11-05-e-faktura-utland-automatik) -----------------
+
+async function article(type: "manufactured" | "service" = "manufactured") {
+  return articleService.createArticle({ articleNumber: `EINV-${crypto.randomUUID().slice(0, 8)}`, name: "Diskbänk", nameEn: "Sink unit", type, active: true } as never);
+}
+
+describe("utländska kunder och valuta", () => {
+  it("sends export of goods to a Norwegian customer in NOK: 0192 derived, G, no VAT in SEK, IBAN first, English texts", async () => {
+    await systemService.updateCompanyInfo({ iban: "SE35 5000 0000 0549 1000 0003", bic: "ESSESESS" });
+    const customer = await makeCustomer({ name: "Fjordverk AS", country: "NO", orgNumber: "987 654 325", currency: "NOK", language: "en" });
+    const a = await article();
+    const draft = await invoiceService.create(
+      { customerId: customer.id, currency: "NOK", exchangeRate: 0.95, rows: [{ articleId: a.id, description: "Diskbänk", quantity: 2, unitPrice: 1000 }] },
+      userId
+    );
+    expect(draft!.rows[0]!.vatCode.code).toBe("EXV");
+    const issued = await invoiceService.issue(draft!.id, userId);
+    const sent = await einvoice.send(issued!.id, userId);
+    expect(sent).toMatchObject({ status: "sent", recipientId: "0192:987654325" });
+    const xml = fake.state.submitted[0]!.xml.toString("utf8");
+    expect(xml).toContain("<cbc:DocumentCurrencyCode>NOK</cbc:DocumentCurrencyCode>");
+    expect(xml).not.toContain("TaxCurrencyCode");
+    expect(xml).toContain('<cbc:EndpointID schemeID="0192">987654325</cbc:EndpointID>');
+    expect(xml).toContain('<cbc:CompanyID schemeID="0192">987654325</cbc:CompanyID>');
+    expect(xml).toContain("<cbc:ID>G</cbc:ID>");
+    expect(xml).toContain("<cbc:TaxExemptionReason>Export of goods, exempt from VAT (Article 146 of the VAT Directive)</cbc:TaxExemptionReason>");
+    expect(xml).toContain("<cbc:Name>Sink unit</cbc:Name>");
+    expect(xml).toContain("<cbc:PaymentMeansCode>30</cbc:PaymentMeansCode><cbc:PaymentID>");
+    expect(xml).toContain("<cbc:ID>SE3550000000054910000003</cbc:ID>");
+    expect(xml).toContain("<cbc:DocumentDescription>Invoice (PDF)</cbc:DocumentDescription>");
+  });
+
+  it("sends goods to a German customer in EUR as an intra-community supply with delivery date and country", async () => {
+    const customer = await makeCustomer({ name: "Beispiel Metall GmbH", country: "DE", orgNumber: null, vatNumber: "DE123456789", peppolId: "9930:DE123456789", currency: "EUR" });
+    const draft = await invoiceService.create(
+      { customerId: customer.id, currency: "EUR", exchangeRate: 11.2, rows: [{ description: "Bänkskiva", quantity: 1, unitPrice: 400 }] },
+      userId
+    );
+    expect(draft!.rows[0]!.vatCode.code).toBe("EUV");
+    const issued = await invoiceService.issue(draft!.id, userId);
+    await einvoice.send(issued!.id, userId);
+    const xml = fake.state.submitted[0]!.xml.toString("utf8");
+    expect(xml).toContain("<cbc:ID>K</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReasonCode>VATEX-EU-IC</cbc:TaxExemptionReasonCode>");
+    // No delivery on the free row: the invoice date, and the customer's country.
+    expect(xml).toContain(`<cac:Delivery><cbc:ActualDeliveryDate>${issued!.invoiceDate}</cbc:ActualDeliveryDate>`);
+    expect(xml).toContain("<cac:DeliveryLocation><cac:Address><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode>");
+    expect(xml).toContain("<cac:PartyTaxScheme><cbc:CompanyID>DE123456789</cbc:CompanyID>");
+  });
+
+  it("states Swedish VAT on a EUR invoice in SEK as well — the figure the F verification booked", async () => {
+    const customer = await makeCustomer({ currency: "EUR" });
+    const draft = await invoiceService.create(
+      { customerId: customer.id, currency: "EUR", exchangeRate: 11.2, rows: [{ description: "Bänkskiva", quantity: 4, unitPrice: 250 }] },
+      userId
+    );
+    const issued = await invoiceService.issue(draft!.id, userId);
+    expect(issued!.sekAmounts).toMatchObject({ vatAmount: 2800 });
+    await einvoice.send(issued!.id, userId);
+    const xml = fake.state.submitted[0]!.xml.toString("utf8");
+    expect(xml).toContain("<cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode><cbc:TaxCurrencyCode>SEK</cbc:TaxCurrencyCode>");
+    expect(xml).toContain('<cac:TaxTotal><cbc:TaxAmount currencyID="SEK">2800.00</cbc:TaxAmount></cac:TaxTotal>');
+    expect(xml).toContain('<cbc:TaxAmount currencyID="EUR">250.00</cbc:TaxAmount>');
+  });
+
+  it("Kontrollera asks the directory of the customer's country, and says when no id is derived there", async () => {
+    const norsk = await makeCustomer({ country: "NO", orgNumber: "987654325" });
+    await einvoice.lookup(norsk.id);
+    expect(fake.calls.at(-1)).toEqual({ method: "lookupParticipant", args: ["0192", "987654325", "NO"] });
+    const tysk = await makeCustomer({ country: "DE", orgNumber: null });
+    const answer = await einvoice.lookup(tysk.id);
+    expect(answer).toMatchObject({ peppolId: null, found: null, message: "Kunden saknar Peppol-id — i kundens land härleds det inte ur organisationsnumret" });
+  });
+});
+
+describe("Skicka e-faktura automatiskt vid Utfärda", () => {
+  const autoInvoiceService = createInvoiceService(
+    createInvoiceRepository(db),
+    mailService,
+    documentPdfService,
+    invoicePoster,
+    auditRepository,
+    articleService,
+    undefined,
+    null,
+    null,
+    null,
+    (id, uid) => einvoice.sendAfterIssue(id, uid)
+  );
+
+  async function draftFor(customer: Awaited<ReturnType<typeof makeCustomer>>) {
+    return (await autoInvoiceService.create({ customerId: customer.id, rows: [{ description: "Montering", quantity: 1, unitPrice: 1000 }] }, userId))!;
+  }
+
+  it("sends to a customer with Fakturaleverans E-faktura and puts the outcome on the issue answer", async () => {
+    const customer = await makeCustomer({ invoiceDelivery: "peppol" });
+    const issued = await autoInvoiceService.issue((await draftFor(customer)).id, userId);
+    expect(issued!.status).toBe("issued");
+    expect(issued!.einvoiceAutoSend).toMatchObject({ status: "sent", reason: null, message: "E-fakturan skickades till Peppol-id 0007:5565555553 (sandbox)" });
+    const rows = await db.select().from(einvoiceTransmissions).where(eq(einvoiceTransmissions.invoiceId, issued!.id));
+    expect(rows).toHaveLength(1);
+    expect(issued!.einvoiceAutoSend!.transmissionId).toBe(rows[0]!.id);
+    expect(await auditActions(issued!.id)).toEqual([expect.objectContaining({ action: "einvoice_sent", detail: expect.objectContaining({ auto: true }) })]);
+    // A credit note to the same customer goes the same way.
+    const credit = await autoInvoiceService.createCredit(issued!.id, {}, userId);
+    const issuedCredit = await autoInvoiceService.issue(credit!.id, userId);
+    expect(issuedCredit!.einvoiceAutoSend).toMatchObject({ status: "sent" });
+    expect(fake.state.submitted[1]!.xml.toString("utf8")).toContain("<CreditNote ");
+  });
+
+  it("does nothing for an e-mail customer, with the setting off, or when e-invoicing is off", async () => {
+    const email = await makeCustomer();
+    expect((await autoInvoiceService.issue((await draftFor(email)).id, userId))!.einvoiceAutoSend).toBeNull();
+    const peppol = await makeCustomer({ invoiceDelivery: "peppol" });
+    await enable({ einvoice_auto_send: "false" });
+    expect((await autoInvoiceService.issue((await draftFor(peppol)).id, userId))!.einvoiceAutoSend).toBeNull();
+    await enable({ einvoice_auto_send: "true", einvoice_enabled: "false" });
+    expect((await autoInvoiceService.issue((await draftFor(peppol)).id, userId))!.einvoiceAutoSend).toBeNull();
+    expect(fake.calls).toEqual([]);
+    expect(await db.select().from(einvoiceTransmissions)).toHaveLength(0);
+  });
+
+  it("reports a blocked document without a send, and logs it", async () => {
+    const customer = await makeCustomer({ invoiceDelivery: "peppol", country: "DE", orgNumber: null });
+    const issued = await autoInvoiceService.issue((await draftFor(customer)).id, userId);
+    expect(issued!.status).toBe("issued");
+    expect(issued!.einvoiceAutoSend).toMatchObject({ status: "blocked", reason: "missing-recipient-id", transmissionId: null });
+    expect(issued!.einvoiceAutoSend!.message).toMatch(/^Skickades inte som e-faktura: Kunden saknar Peppol-id/);
+    expect(await auditActions(issued!.id)).toEqual([{ action: "einvoice_not_sent", detail: { reason: "missing-recipient-id", auto: true } }]);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("never refuses the issue: a refused import is a failed row and an outcome, the invoice is issued", async () => {
+    const customer = await makeCustomer({ invoiceDelivery: "peppol" });
+    fake.state.importError = refused("B2Brouter avvisade dokumentet: Invalid buyer", ["Invalid buyer"]);
+    const issued = await autoInvoiceService.issue((await draftFor(customer)).id, userId);
+    expect(issued!.status).toBe("issued");
+    expect(issued!.einvoiceAutoSend).toMatchObject({ status: "error", reason: null, transmissionId: null });
+    expect(issued!.einvoiceAutoSend!.message).toContain("E-fakturan kunde inte skickas: B2Brouter avvisade dokumentet");
+    const [row] = await db.select().from(einvoiceTransmissions).where(eq(einvoiceTransmissions.invoiceId, issued!.id));
+    expect(row).toMatchObject({ status: "failed" });
+    expect((await auditActions(issued!.id)).map((a) => a.action)).toEqual(["einvoice_failed"]);
+    expect((await auditActions(issued!.id))[0]!.detail).toMatchObject({ auto: true });
+  });
+
+  it("samlingsfaktureringens Utfärda direkt carries the outcome per invoice", async () => {
+    const customer = await makeCustomer({ invoiceDelivery: "peppol", collectiveInvoicing: true });
+    const a = await article();
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    const location = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    await stockService.recordTransaction({ articleId: a.id, locationId: location.id, quantityDelta: 10, transactionType: "inventory_adjustment" });
+    const { order, rows } = await salesService.createQuote(
+      { customerId: customer.id, customerOrderNumber: "PO-1", rows: [{ articleId: a.id, quantity: 1, unitPrice: 500 }], confirm: true },
+      userId
+    );
+    await salesService.startProduction(order.id);
+    await salesService.deliverGoods(order.id, rows[0]!.id, { locationId: location.id, quantity: 1 }, userId);
+    const { results } = await autoInvoiceService.runCollectiveInvoicing({ customerIds: [customer.id], issue: true }, userId);
+    expect(results).toEqual([expect.objectContaining({ status: "issued", einvoice: expect.objectContaining({ status: "sent" }) })]);
+  });
+});
+
+describe("statusbesked direkt (webhook)", () => {
+  const webhook = createEinvoiceWebhookService({ repo, settings, status, now, log: (msg) => logged.push(msg) });
+  const SECRET = "whsec_nav_test";
+  const signed = (payload: unknown, secret = SECRET) => {
+    const body = Buffer.from(JSON.stringify(payload));
+    const t = "1732530076";
+    return { body, header: `t=${t},s=${createHmac("sha256", secret).update(`${t}.`).update(body).digest("hex")}` };
+  };
+  const event = (invoiceId: unknown, code = "issued_invoice.state_change") => ({ code, triggered_at: 1732530076, data: { account_id: 1, invoice_id: invoiceId, state: "registered" } });
+
+  async function hook(environment = "sandbox") {
+    await enable({ einvoice_webhook_id: "77", einvoice_webhook_secret: SECRET, einvoice_webhook_environment: environment });
+  }
+
+  it("answers 404 without a hook and 401 on a bad signature, touching nothing", async () => {
+    const { body, header } = signed(event(4242));
+    expect(await webhook.receive(body, header)).toBe(404);
+    await hook();
+    expect(await webhook.receive(body, signed(event(4242), "wrong").header)).toBe(401);
+    expect(await webhook.receive(body, undefined)).toBe(401);
+    expect(fake.calls).toEqual([]);
+    expect((await settings.read()).webhook.lastReceivedAt).toBeNull();
+  });
+
+  it("re-reads the transmission named by a valid delivery from the access point — never from the body", async () => {
+    await hook();
+    const invoice = await issuedInvoice(await makeCustomer());
+    const row = await sentRow(invoice.id, { providerInvoiceId: "4242" });
+    fake.state.statuses["4242"] = { state: "registered", errorMessage: null, updatedAt: null };
+    const { body, header } = signed(event(4242));
+    expect(await webhook.receive(body, header)).toBe(204);
+    expect(fake.calls).toEqual([{ method: "getStatus", args: ["4242"] }]);
+    expect((await rowOf(row.id)).status).toBe("delivered");
+    expect((await settings.read()).webhook.lastReceivedAt).toEqual(clock);
+    // A repeated delivery is harmless: the row is final, nothing is asked.
+    expect(await webhook.receive(body, header)).toBe(204);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it("ignores other events, unknown documents and a hook of the other environment; 400 on a signed non-JSON body", async () => {
+    await hook();
+    const invoice = await issuedInvoice(await makeCustomer());
+    await sentRow(invoice.id, { providerInvoiceId: "4242" });
+    fake.state.statuses["4242"] = { state: "registered", errorMessage: null, updatedAt: null };
+    expect(await webhook.receive(...(Object.values(signed(event(4242, "received_invoice.created"))) as [Buffer, string]))).toBe(204);
+    expect(await webhook.receive(...(Object.values(signed(event(9999))) as [Buffer, string]))).toBe(204);
+    const raw = Buffer.from("not json");
+    const t = "1";
+    expect(await webhook.receive(raw, `t=${t},s=${createHmac("sha256", SECRET).update(`${t}.`).update(raw).digest("hex")}`)).toBe(400);
+    await hook("production");
+    expect(await webhook.receive(...(Object.values(signed(event(4242))) as [Buffer, string]))).toBe(204);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("answers 503 when the access point cannot be read, so B2Brouter tries again", async () => {
+    await hook();
+    const invoice = await issuedInvoice(await makeCustomer());
+    const row = await sentRow(invoice.id, { providerInvoiceId: "4242" });
+    fake.state.statusError = unavailable();
+    expect(await webhook.receive(...(Object.values(signed(event("4242"))) as [Buffer, string]))).toBe(503);
+    expect((await rowOf(row.id)).status).toBe("sent");
+  });
+});
+

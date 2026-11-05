@@ -17,7 +17,16 @@ describe("ubl-check", () => {
     expect(checkUblInput({ ...input, invoiceNumber: " " })).toContain("Fakturan saknar fakturanummer.");
     expect(checkUblInput({ ...input, issueDate: "2026-02-30" })).toContain("Fakturan saknar giltigt fakturadatum.");
     expect(checkUblInput({ ...input, dueDate: "20261120" })).toContain("Fakturans förfallodatum är ogiltigt.");
-    expect(checkUblInput({ ...input, currency: "EUR" as "SEK" })).toContain("Bara SEK stöds i e-faktura ännu.");
+    expect(checkUblInput({ ...input, currency: "kronor" })).toContain("Fakturan saknar giltig valutakod.");
+    // Another currency is fine — but VAT on it must also be stated in SEK
+    // (BR-53, ML 17 kap. 29 §), never in the document's own currency, and
+    // with the same sign.
+    expect(checkUblInput({ ...input, currency: "EUR" })).toContain("Fakturan i EUR saknar momsen i SEK.");
+    expect(checkUblInput({ ...input, currency: "EUR", taxCurrency: { currency: "SEK", vatAmount: 36000 } })).toEqual([]);
+    expect(checkUblInput({ ...input, currency: "EUR", taxCurrency: { currency: "EUR", vatAmount: 36000 } })).toContain(
+      "Momsen i redovisningsvalutan kan inte anges i fakturans egen valuta."
+    );
+    expect(checkUblInput({ ...input, currency: "EUR", taxCurrency: { currency: "SEK", vatAmount: 0 } })).toContain("Momsen i SEK stämmer inte med fakturans moms.");
     expect(checkUblInput({ ...input, buyerReference: null, orderReference: " " })).toContain(
       "Peppol kräver er referens eller ert ordernummer på fakturan — ange minst ett av dem (kundnumret används annars som referens)."
     );
@@ -39,9 +48,7 @@ describe("ubl-check", () => {
       "Företagets momsregistreringsnummer måste ha formen SE + 12 siffror, t.ex. SE556677889901 (Företagsuppgifter)."
     );
     expect(checkUblInput(withSeller(input, { vatNumber: "se 5566 7788 9901" }))).toEqual([]);
-    expect(checkUblInput(withSeller(input, { address: { ...input.seller.address, country: "NO" } }))).toContain(
-      "Företagets land måste vara SE — utländska mottagare stöds inte i e-faktura ännu."
-    );
+    expect(checkUblInput(withSeller(input, { address: { ...input.seller.address, country: "NO" } }))).toContain("Företagets land måste vara SE (Företagsuppgifter).");
   });
 
   it("buyer: name, endpoint scheme/value per scheme, org number digits, country", () => {
@@ -49,13 +56,39 @@ describe("ubl-check", () => {
     expect(checkUblInput(withBuyer(input, { name: " " }))).toContain("Kundens namn saknas på fakturan.");
     expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "7", value: "5590001235" } }))).toContain("Kundens Peppol-id måste börja med ett fyrsiffrigt schema, t.ex. 0007:5566778899.");
     expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0007", value: "" } }))).toContain("Kundens Peppol-id saknas — ange Peppol-id eller organisationsnummer på kunden.");
-    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0007", value: "559000-12" } }))).toContain("Kundens Peppol-id med schema 0007 måste vara organisationsnumrets tio siffror.");
-    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0088", value: "73500000000" } }))).toContain("Kundens Peppol-id med schema 0088 måste vara ett GLN med 13 siffror.");
+    // PEPPOL-COMMON-R040..R049: format AND check digit per known scheme.
+    const svOrg = "ett svenskt organisationsnummer med tio siffror och rätt kontrollsiffra";
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0007", value: "559000-12" } }))).toContain(`Kundens Peppol-id med schema 0007 måste vara ${svOrg}.`);
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0007", value: "5590001236" } }))).toContain(`Kundens Peppol-id med schema 0007 måste vara ${svOrg}.`);
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0088", value: "73500000000" } }))).toContain(
+      "Kundens Peppol-id med schema 0088 måste vara ett GLN med 13 siffror och rätt kontrollsiffra."
+    );
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0088", value: "7350000000008" } }))).toContain(
+      "Kundens Peppol-id med schema 0088 måste vara ett GLN med 13 siffror och rätt kontrollsiffra."
+    );
     expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0088", value: "7350000000009" } }))).toEqual([]);
-    expect(checkUblInput(withBuyer(input, { orgNumber: "12345" }))).toContain("Kundens organisationsnummer måste vara tio siffror.");
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0192", value: "987654321" } }))).toContain(
+      "Kundens Peppol-id med schema 0192 måste vara ett norskt organisationsnummer med nio siffror och rätt kontrollsiffra."
+    );
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0192", value: "987654325" } }))).toEqual([]);
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0208", value: "0412345615" } }))).toContain(
+      "Kundens Peppol-id med schema 0208 måste vara ett belgiskt företagsnummer med tio siffror och rätt kontrollsiffror."
+    );
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0208", value: "0412345614" } }))).toEqual([]);
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0184", value: "DK12345674" } }))).toEqual([]);
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "0184", value: "1234567" } }))).toContain(
+      "Kundens Peppol-id med schema 0184 måste vara ett danskt CVR-nummer med åtta siffror."
+    );
+    // A scheme Nav has no rule for is left to the access point.
+    expect(checkUblInput(withBuyer(input, { endpoint: { scheme: "9930", value: "DE123456789" } }))).toEqual([]);
+    expect(checkUblInput(withBuyer(input, { orgNumber: "12345" }))).toContain(`Kundens organisationsnummer måste vara ${svOrg}.`);
+    expect(checkUblInput(withBuyer(input, { orgNumber: "559000-1236" }))).toContain(`Kundens organisationsnummer måste vara ${svOrg}.`);
+    expect(checkUblInput(withBuyer(input, { orgNumber: "HRB 12345", orgNumberScheme: null }))).toEqual([]);
     expect(checkUblInput(withBuyer(input, { orgNumber: null, vatNumber: null, customerNumber: null }))).toEqual([]);
-    expect(checkUblInput(withBuyer(input, { address: { ...input.buyer.address, country: "DK" } }))).toContain(
-      "Kundens land måste vara SE — utländska mottagare stöds inte i e-faktura ännu."
+    // Any country with a two-letter code; nothing else.
+    expect(checkUblInput(withBuyer(input, { address: { ...input.buyer.address, country: "DK" } }))).toEqual([]);
+    expect(checkUblInput(withBuyer(input, { address: { ...input.buyer.address, country: "" } }))).toContain(
+      "Kundens land saknas eller är inte en landskod med två bokstäver."
     );
   });
 
