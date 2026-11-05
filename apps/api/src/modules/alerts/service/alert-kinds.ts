@@ -51,6 +51,15 @@ export const ALERT_KIND_CATALOG: readonly AlertKindDef[] = [
     rule: ["forsaljning"],
     listHref: "/forsaljning/fakturor",
   },
+  // Mottagning: the reception job could not fetch received e-invoices at
+  // the last run — System → E-faktura is an admin page.
+  {
+    kind: "einvoice_receive_failed",
+    label: "E-fakturor kunde inte hämtas",
+    severity: "red",
+    rule: ["admin"],
+    listHref: "/system/e-faktura",
+  },
   // The e-mail log is an admin page, so only administrators see this kind.
   { kind: "email_failed", label: "Utskick som misslyckades", severity: "red", rule: ["admin"], listHref: "/system/e-postlogg" },
   // Tillägg: System → Tillägg is an admin page.

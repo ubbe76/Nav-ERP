@@ -835,6 +835,16 @@ export function createSupplierInvoiceRepository(db: Db | Tx) {
 
     // --- Underlag (the supplier's invoice file). Listing never selects data. ---
 
+    // The e-invoice inbox post this invoice was created from (null when it
+    // came another way): the LF card links the original XML through it.
+    async einvoiceScanIdFor(invoiceId: string): Promise<string | null> {
+      const [row] = await db
+        .select({ id: invoiceScans.id })
+        .from(invoiceScans)
+        .where(and(eq(invoiceScans.supplierInvoiceId, invoiceId), eq(invoiceScans.source, "einvoice")));
+      return row?.id ?? null;
+    },
+
     async listFiles(invoiceId: string) {
       const { data: _data, ...columns } = getTableColumns(supplierInvoiceFiles);
       return db

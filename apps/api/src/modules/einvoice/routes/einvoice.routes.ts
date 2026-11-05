@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import {
+  listEinvoiceReceptionLogQuerySchema,
   peppolLookupSchema,
+  setEinvoiceReceptionSchema,
   testEinvoiceConnectionSchema,
   updateEinvoiceSettingsSchema,
   validateEinvoiceDocumentSchema,
@@ -12,6 +14,7 @@ import { contentDisposition } from "../../system/service/content-disposition.js"
 import { errorBody } from "../../system/service/error-body.js";
 import { EInvoiceProviderError } from "../service/einvoice-provider.js";
 import { EinvoiceWebhookPublicUrlError, type EinvoiceSettingsService } from "../service/einvoice-settings.service.js";
+import type { EinvoiceReceiveService } from "../service/einvoice-receive.service.js";
 import type { EinvoiceWebhookService } from "../service/einvoice-webhook.service.js";
 import type { EinvoiceStatusService } from "../service/einvoice-status.service.js";
 import type { EinvoiceService } from "../service/einvoice.service.js";
@@ -23,9 +26,13 @@ import {
   EinvoiceProviderRejectedError,
   EinvoiceProviderUnauthorizedError,
   EinvoiceProviderUnavailableError,
+  EinvoiceReceiveBusyError,
+  EinvoiceReceptionNotFoundError,
+  EinvoiceReceptionRegisteredElsewhereError,
   EinvoiceTransmissionNotFoundError,
   fromProviderError,
 } from "../service/einvoice.errors.js";
+import { InvalidStatusTransitionError } from "../../purchase/service/purchase.service.js";
 
 // One mapping for every e-invoice route — domain error → status + envelope
 // (with the extra fields the web needs: reason, problems, fieldErrors).
@@ -39,6 +46,11 @@ export function mapEinvoiceError(reply: FastifyReply, err: unknown): FastifyRepl
   if (err instanceof EinvoiceDocumentInvalidError) return reply.code(400).send({ ...errorBody(err), problems: err.problems });
   if (err instanceof EinvoiceNotConfiguredError) return reply.code(409).send({ ...errorBody(err), reason: err.reason });
   if (err instanceof EinvoiceWebhookPublicUrlError) return reply.code(409).send(errorBody(err));
+  // Mottagning: 409 with the Swedish text (the page shows it and opens the
+  // Migreringskod field).
+  if (err instanceof EinvoiceReceptionRegisteredElsewhereError) return reply.code(409).send({ ...errorBody(err), message: err.message, requestId: err.requestId });
+  if (err instanceof EinvoiceReceiveBusyError || err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+  if (err instanceof EinvoiceReceptionNotFoundError) return reply.code(404).send(errorBody(err));
   if (err instanceof EinvoiceNotAllowedError) return reply.code(409).send({ ...errorBody(err), reason: err.reason });
   if (err instanceof EinvoiceAlreadySentError) return reply.code(409).send(errorBody(err));
   if (err instanceof EinvoiceTransmissionNotFoundError || err instanceof InvoiceNotFoundError || err instanceof CustomerNotFoundError) {
@@ -58,9 +70,9 @@ const idParams = z.object({ id: z.string().uuid() });
 // /sales-orders/:id/freight from shipping).
 export async function einvoiceRoutes(
   app: FastifyInstance,
-  opts: { settings: EinvoiceSettingsService; service: EinvoiceService; status: EinvoiceStatusService }
+  opts: { settings: EinvoiceSettingsService; service: EinvoiceService; status: EinvoiceStatusService; receive: EinvoiceReceiveService }
 ) {
-  const { settings, service, status } = opts;
+  const { settings, service, status, receive } = opts;
 
   async function run<T>(reply: FastifyReply, fn: () => Promise<T>) {
     try {
@@ -89,6 +101,31 @@ export async function einvoiceRoutes(
   app.post("/einvoice-settings/validate", ADMIN, async (req, reply) => {
     const { invoiceId } = validateEinvoiceDocumentSchema.parse(req.body);
     return run(reply, () => service.validateDocument(invoiceId));
+  });
+
+  // --- Mottagning (admin) ---
+
+  // Ta emot e-faktura: { enabled, migrationCode? } ⇒ the reception view.
+  // 409 einvoice-reception-registered-elsewhere (message = the Swedish
+  // text), 409 einvoice-not-configured, 502 on a transport failure.
+  app.post("/einvoice-settings/reception", ADMIN, async (req, reply) => {
+    const input = setEinvoiceReceptionSchema.parse(req.body);
+    return run(reply, () => settings.setReception(input, req.user!.id));
+  });
+  // Hämta nu: one run right away ⇒ { imported, duplicates, unreadable };
+  // 409 einvoice-receive-busy while a run holds the lease.
+  app.post("/einvoice-settings/receive-now", ADMIN, async (_req, reply) => run(reply, () => receive.receiveNow()));
+  // Mottagningslogg: { rows } newest first, never the XML.
+  app.get("/einvoice-settings/reception-log", ADMIN, async (req) => ({
+    rows: await receive.receptionLog(listEinvoiceReceptionLogQuerySchema.parse(req.query).limit),
+  }));
+  // Markera som hanterad: an unreadable document is acknowledged at the
+  // access point and closed (outcome dismissed) — the invoice is registered
+  // another way. 409 invalid-status-transition unless unreadable, 404 when
+  // the row is unknown, 502 when the access point cannot be reached.
+  app.post("/einvoice-settings/reception-log/:id/dismiss", ADMIN, async (req, reply) => {
+    const { id } = idParams.parse(req.params);
+    return run(reply, () => receive.dismiss(id, req.user!.id));
   });
 
   // --- Fakturakortet ---

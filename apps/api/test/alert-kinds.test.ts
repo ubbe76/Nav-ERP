@@ -27,6 +27,7 @@ describe("the catalog", () => {
       "supplier_invoice_due",
       "quote_followup",
       "einvoice_failed",
+      "einvoice_receive_failed",
       "email_failed",
       "plugin_delivery_failed",
       "invoice_scan_mail_failed",
@@ -83,7 +84,9 @@ describe("visibleKinds", () => {
   it("Utskick som misslyckades, Tillägg and the invoice mailbox are admin-only: every menu together still does not give them", () => {
     const all = user(["artiklar", "inkop", "forsaljning", "tillverkning", "lager", "personal", "kvalitet", "ekonomi", "rapporter"]);
     expect(visibleKinds(all)).toEqual(
-      ALERT_KIND_CATALOG.map((d) => d.kind).filter((k) => k !== "email_failed" && k !== "plugin_delivery_failed" && k !== "invoice_scan_mail_failed")
+      ALERT_KIND_CATALOG.map((d) => d.kind).filter(
+        (k) => k !== "email_failed" && k !== "plugin_delivery_failed" && k !== "invoice_scan_mail_failed" && k !== "einvoice_receive_failed"
+      )
     );
   });
 

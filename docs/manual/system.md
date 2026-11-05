@@ -95,7 +95,28 @@ Under **Fraktprodukter** testar **Testa anslutning** nyckeln i fältet **API-nyc
 
 Börja i **Sandbox**: testa med en egen testfaktura och byt sedan till **Produktion** med produktionsnyckeln (byt miljö, skriv in den nya nyckeln, kör **Testa anslutning** och **Spara**). Sandboxsändningar och produktionssändningar loggas var för sig och märks med sin miljö, och en sandboxsändning hindrar aldrig den riktiga: regeln "en pågående eller godkänd sändning i taget" gäller per miljö.
 
+**Aktivera statusbesked** ger också omedelbar hämtning av mottagna e-fakturor: kommer en e-faktura till B2Brouter hämtar Nav den direkt i stället för att vänta på **Hämtningsintervall (minuter)**, se [Mottagning](#mottagning).
+
 Sektionen **Företagsuppgifter som skickas** visar vad som skrivs i e-fakturan som säljare: företagets namn, organisationsnummer, VAT-nummer, adress, bankgiro, plusgiro, IBAN och BIC. Uppgifterna hämtas från [Företagsinformation](#foretagsinformation) och ändras där (länken öppnar sidan). Saknas något som e-fakturan kräver listas det som en varning — till exempel "Organisationsnummer saknas" — och sändningen stoppas på fakturakortet tills det är åtgärdat.
+
+### Mottagning
+
+Sektionen **Mottagning** på **System → E-faktura** gör att leverantörers e-fakturor via Peppol kommer in av sig själva som poster i [Fakturainkorgen](/hjalp/inkop#fakturainkorg). Den kräver samma sparade **API-nyckel** och **Miljö** som sändningen (testa anslutningen först).
+
+1. Klicka **Ta emot e-faktura** och bekräfta. Företaget publiceras då i Peppol-katalogen som mottagare, och leverantörer som skickar via Peppol når er på organisationsnumret. **Mottagning på** visas när B2Brouter har bekräftat (**Publicering** kan då fortfarande säga **Pågår**); **Stäng av mottagning** stänger den igen (fakturor som redan kommit ligger kvar i Fakturainkorgen).
+2. **Peppol-id** visar ert id (organisationsnumret med prefix `0007:`). **Publicering** (Peppol-nätet) och **Peppol-katalogen** visar var för sig **Inte publicerad**, **Pågår** eller **Publicerad** (– när status saknas), och **Dokumenttyper** visar vilka dokument B2Brouter tar emot åt er (till exempel faktura, kreditfaktura och order); Nav läser in fakturorna och kreditfakturorna. Det kan ta en stund innan **Publicerad** visas.
+
+**Har ni redan en annan e-fakturaleverantör?** Tar en annan accesspunkt emot för organisationsnumret i dag kan B2Brouter inte registrera det förrän det flyttats. Svarar Nav att numret finns hos en annan leverantör visas fältet **Migreringskod** (annars ligger fältet under rubriken *Har ni redan en annan e-fakturaleverantör?*; det visas bara i **Produktion**). Be den gamla leverantören om en migreringskod, skriv den i fältet och klicka **Ta emot e-faktura** igen. Medan flytten pågår visar sektionen att den är under väg.
+
+**Kostnad.** B2Brouter räknar mottagna fakturor som transaktioner, precis som skickade. Kontrollera att er plan hos B2Brouter räcker för både sändning och mottagning — Nav visar inga priser.
+
+**Hämtningsintervall (minuter)** (5–1440) anger hur ofta ett bakgrundsjobb hämtar nya e-fakturor; **Spara intervall** sparar det. **Hämta nu** kör en hämtning direkt och visar resultatet, t.ex. "2 inlästa, 0 dubbletter, 0 kunde inte läsas". Är en hämtning redan igång får du beskedet att försöka igen om en stund. **Senaste hämtning** och **Senaste fel** visar hur det gick sist.
+
+**Mottagningslogg** listar varje mottagen e-faktura med **Mottagen**, **Avsändare**, **Fakturanr**, **Belopp** och **Utfall**. Utfallet är **Inläst** (posten finns i Fakturainkorgen, med dess FI-nummer som länk), **Dubblett** (samma avsändare och fakturanummer fanns redan) eller **Kunde inte läsas** (dokumentet gick inte att tolka; det ligger kvar hos B2Brouter — öppna det där). En rad som inte kunde läsas har knappen **Markera som hanterad**: dokumentet kvitteras hos B2Brouter, raden får utfallet **Hanterad** och fakturan registreras för hand, till exempel genom att ladda upp leverantörens PDF i Fakturainkorgen; tills dess visas aviseringen **E-fakturor kunde inte hämtas** med antalet. De schemalagda hämtningarna hoppar över dokument som redan inte kunde läsas — **Hämta nu** försöker igen med dem. Rader från **Sandbox** märks **Testläge (sandlåda)**. Loggen visar de 50 senaste. Den mottagna originalfilen är räkenskapsinformation och kan inte ändras eller tas bort; det enda som ändras på en loggrad är utfallet.
+
+Misslyckas hämtningen visas aviseringen **E-fakturor kunde inte hämtas** (röd, för administratörer) tills nästa hämtning lyckas.
+
+Den mottagna XML-filen sparas oförändrad som räkenskapsinformation (sju år), även om fakturan i Fakturainkorgen senare avvisas och raderas.
 
 ## Fakturaskanning
 
@@ -513,7 +534,7 @@ Utöver knappen körs en **automatisk säkerhetskopia varje natt** på servern. 
 
 ### Lagringsutrymme
 
-Överst på sidan visar tabellen **Lagringsutrymme** hur mycket de uppladdade filerna tar, per slag: **Artikelfiler och ritningar**, **Filer på operationer**, **Bilder och filer på avvikelser**, **Underlag på leverantörsfakturor**, **Fakturainkorgen**, **Underlag på verifikat**, **Arkiverade kundfakturor**, **Skickade e-fakturor**, **Fraktsedlar och etiketter**, **Bankfiler** och **Företagslogotyp** — med **Antal** och **Storlek** och raden **Summa filer**. Slag utan filer visas inte. Under tabellen står hur stor hela databasen är, ungefär så stor som en säkerhetskopia blir innan den komprimeras.
+Överst på sidan visar tabellen **Lagringsutrymme** hur mycket de uppladdade filerna tar, per slag: **Artikelfiler och ritningar**, **Filer på operationer**, **Bilder och filer på avvikelser**, **Underlag på leverantörsfakturor**, **Fakturainkorgen**, **Underlag på verifikat**, **Arkiverade kundfakturor**, **Skickade e-fakturor**, **Mottagna e-fakturor**, **Mottagna e-fakturor (UBL-version)**, **Fraktsedlar och etiketter**, **Bankfiler** och **Företagslogotyp** — med **Antal** och **Storlek** och raden **Summa filer**. Slag utan filer visas inte. Under tabellen står hur stor hela databasen är, ungefär så stor som en säkerhetskopia blir innan den komprimeras.
 
 Alla filer ligger i databasen, inte som lösa filer på serverns disk. Det håller ihop filen med posten den hör till, en enda säkerhetskopia räcker och bokföringens arkiverade fakturor och låsta underlag kan skyddas mot ändring. Databasen klarar tiotals gigabyte filer utan problem; det som växer är säkerhetskopiorna, som tar med alla filer varje gång. Tar filerna över 50 GB visas en påminnelse om det — då kan det vara värt att flytta artikelfilerna till lagring utanför databasen. PDF-filer och bilder är redan komprimerade, så säkerhetskopian krymper inte mycket av komprimeringen. Tänk också på att **Kopiera från befintlig artikel** med delen **Ritningar och filer** lägger en egen kopia av varje fil på den nya artikeln.
 
@@ -521,7 +542,7 @@ En enskild fil hämtas ut där den laddades upp, t.ex. på artikelkortets flik *
 
 - **Artikelfiler**/*artikelnummer* och **Operationer**/*artikelnummer*/**Op** *nummer*
 - **Avvikelser**/*AV-nummer*, **Leverantörsfakturor**/*LF-nummer*, **Fakturainkorgen**/*inkorgsnummer*
-- **Verifikat**/*serie-år-nummer* (t.ex. `A-2026-17`), **Kundfakturor**/*fakturanummer*, **E-fakturor**/*fakturanummer*
+- **Verifikat**/*serie-år-nummer* (t.ex. `A-2026-17`), **Kundfakturor**/*fakturanummer*, **E-fakturor**/*fakturanummer*, **Mottagna e-fakturor**/*avsändare*/*fakturanummer*`.xml`
 - **Fraktsedlar**/*sändningsnummer*, **Bankfiler**/**Utgående** eller **Inkommande**, **Logotyp**
 
 Filerna behåller sina namn; två filer med samma namn i samma mapp får ` (2)`, ` (3)` … efter namnet, och tecken som inte får finnas i filnamn (t.ex. `/` i ett artikelnummer) blir `_`. Exporten ändrar ingenting i systemet — filerna ligger kvar. Zip-filen byggs medan den laddas ner, så stora mängder filer går bra, och den kan öppnas i Windows, macOS och Linux även när den blir större än 4 GB.

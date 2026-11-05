@@ -351,6 +351,38 @@ export function createAlertsService(deps: {
       }));
     },
 
+    // E-fakturor kunde inte hämtas: the reception is on and the job's last
+    // run failed (derived from einvoice_receive_last_error, which a
+    // successful run clears).
+    async einvoice_receive_failed() {
+      const state = await repo.einvoiceReceiveState();
+      const items: AlertItem[] = [];
+      if (state.enabled && state.lastError) {
+        const since = state.lastSuccessAt ? stockholmNow(state.lastSuccessAt) : null;
+        items.push({
+          key: "einvoice_receive",
+          severity: "red",
+          href: "/system/e-faktura",
+          primary: state.lastError,
+          secondary: since ? `Senast hämtades e-fakturor ${since.date} ${since.time}` : "E-fakturor har inte hämtats någon gång",
+          date: state.lastRunAt ? stockholmNow(state.lastRunAt).date : null,
+        });
+      }
+      // Documents the job could not read wait in the Mottagningslogg until
+      // Markera som hanterad (or until they can be read).
+      if (state.unreadable > 0) {
+        items.push({
+          key: "einvoice_unreadable",
+          severity: "red",
+          href: "/system/e-faktura",
+          primary: `${state.unreadable} ${state.unreadable === 1 ? "e-faktura" : "e-fakturor"} kunde inte läsas — se Mottagningsloggen`,
+          secondary: "Öppna dokumentet hos B2Brouter, registrera fakturan för hand och markera raden som hanterad",
+          date: state.lastRunAt ? stockholmNow(state.lastRunAt).date : null,
+        });
+      }
+      return items;
+    },
+
     // E-postlådan för fakturor kunde inte läsas: the job's last run failed
     // while the box is turned on (derived from invoice_scan_mail_last_error,
     // which a successful run clears).

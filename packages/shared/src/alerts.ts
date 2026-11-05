@@ -17,6 +17,7 @@ export const ALERT_KINDS = [
   "supplier_invoice_due",
   "quote_followup",
   "einvoice_failed",
+  "einvoice_receive_failed",
   "email_failed",
   "plugin_delivery_failed",
   "recurring_verification_failed",

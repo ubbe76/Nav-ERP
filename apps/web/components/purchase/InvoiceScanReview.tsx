@@ -207,6 +207,7 @@ export function InvoiceScanReview({ initial, supplierIdParam }: { initial: Invoi
         <OriginalPanel scan={scan} open={originalOpen} onToggle={() => setOriginalOpen((v) => !v)} />
         <section className={styles.panel} aria-label="Förslag">
           <StatusLine scan={scan} />
+          <EInvoiceOriginal scan={scan} />
           <FormError>{actionError}</FormError>
 
           {pending ? (
@@ -270,6 +271,36 @@ export function InvoiceScanReview({ initial, supplierIdParam }: { initial: Invoi
   );
 }
 
+// Mottagen e-faktura: the XML original (kept as räkenskapsinformation, also
+// after the post is converted) and the attachments inside it.
+function EInvoiceOriginal({ scan }: { scan: InvoiceScanDetail }) {
+  if (!scan.einvoice) return null;
+  const base = `${API_URL}/api/v1/invoice-scans/${scan.id}`;
+  return (
+    <div className={styles.notices} style={{ marginBottom: 12 }}>
+      <FormHint>
+        <a href={`${base}/einvoice-original`} target="_blank" rel="noreferrer">
+          Ladda ned original (XML)
+        </a>
+        {scan.einvoice.attachments.length > 0 && (
+          <>
+            {" · Bilagor: "}
+            {scan.einvoice.attachments.map((a, i) => (
+              <span key={a.index}>
+                {i > 0 ? ", " : ""}
+                <a href={`${base}/einvoice-attachments/${a.index}`} target="_blank" rel="noreferrer">
+                  {a.filename ?? `Bilaga ${a.index + 1}`}
+                </a>
+                {` (${a.sizeBytes < 1024 * 1024 ? `${Math.max(1, Math.round(a.sizeBytes / 1024))} kB` : `${(a.sizeBytes / (1024 * 1024)).toFixed(1)} MB`})`}
+              </span>
+            ))}
+          </>
+        )}
+      </FormHint>
+    </div>
+  );
+}
+
 function StatusLine({ scan }: { scan: InvoiceScanDetail }) {
   const pill = invoiceScanDisplayStatus({ status: scan.status, uncertain: scan.uncertain });
   return (
@@ -278,8 +309,24 @@ function StatusLine({ scan }: { scan: InvoiceScanDetail }) {
       <span>{INVOICE_SCAN_SOURCE_LABELS[scan.source]}</span>
       {scan.source === "email" && scan.emailFrom && <span>från {scan.emailFrom}</span>}
       {scan.source === "email" && scan.emailSubject && <span>”{scan.emailSubject}”</span>}
+      {scan.einvoice && (
+        <span>
+          Mottagen via Peppol
+          {scan.einvoice.senderName || scan.einvoice.senderEndpoint
+            ? ` från ${scan.einvoice.senderName ?? scan.einvoice.senderEndpoint}${
+                scan.einvoice.senderName && scan.einvoice.senderEndpoint ? ` (${scan.einvoice.senderEndpoint})` : ""
+              }`
+            : ""}{" "}
+          {formatStockholmDateTime(scan.einvoice.receivedAt)}
+        </span>
+      )}
+      {scan.einvoice?.environment === "sandbox" && <span className={styles.chip}>Testläge (sandlåda)</span>}
       <span>Inkommen {formatStockholmDateTime(scan.emailReceivedAt ?? scan.createdAt)}</span>
-      {scan.interpretedBy && <span>Tolkad av {scan.interpretedBy === "ai" ? "AI" : "reglerna"}</span>}
+      {scan.interpretedBy && (
+        <span>
+          {scan.source === "einvoice" ? "Tolkad ur e-fakturan" : `Tolkad av ${scan.interpretedBy === "ai" ? "AI" : "reglerna"}`}
+        </span>
+      )}
       {scan.pageCount !== null && <span>{scan.pageCount} {scan.pageCount === 1 ? "sida" : "sidor"}</span>}
     </div>
   );
@@ -805,7 +852,7 @@ function ReviewForm({
               {interpreting === "rules" ? "Tolkar…" : "Tolka igen"}
             </Button>
           )}
-          {scan.aiAvailable && (
+          {scan.aiAvailable && scan.source !== "einvoice" && (
             <Button type="button" variant="secondary" disabled={busy} onClick={() => void interpret("ai")}>
               {interpreting === "ai" ? "Tolkar…" : "Tolka med AI"}
             </Button>

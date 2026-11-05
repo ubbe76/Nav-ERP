@@ -29,7 +29,9 @@ const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 // räkenskapsinformation from the moment it arrives (BFL 5 kap 6 §): the
 // service deletes only a rejected scan, and a converted scan's file lives
 // on in supplier_invoice_files (data = NULL here, no double storage).
-export const invoiceScanSourceEnum = pgEnum("invoice_scan_source", ["upload", "email"]);
+// einvoice (migration 0183): a supplier e-invoice received through Peppol —
+// the original UBL lives in einvoice_receptions, the scan carries the PDF.
+export const invoiceScanSourceEnum = pgEnum("invoice_scan_source", ["upload", "email", "einvoice"]);
 export const invoiceScanStatusEnum = pgEnum("invoice_scan_status", ["new", "interpreted", "converted", "rejected"]);
 export const invoiceScanEngineEnum = pgEnum("invoice_scan_engine", ["rules", "ai"]);
 export const invoiceScanHintFieldEnum = pgEnum("invoice_scan_hint_field", [

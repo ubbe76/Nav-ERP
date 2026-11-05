@@ -395,13 +395,14 @@ export function createSupplierInvoiceService(
     async getInvoice(id: string) {
       const header = await repo.findById(id);
       if (!header) return null;
-      const [rawRows, openAmount, openAmountSek, payments, files, paymentBatches] = await Promise.all([
+      const [rawRows, openAmount, openAmountSek, payments, files, paymentBatches, einvoiceScanId] = await Promise.all([
         repo.listRows(id),
         repo.getOpenAmount(id),
         repo.getOpenAmountSek(id),
         repo.listPaymentsForInvoice(id),
         repo.listFiles(id),
         repo.listPaymentBatchesForInvoice(id),
+        repo.einvoiceScanIdFor(id),
       ]);
       const { vatCodeCode, vatCodeName, supplierCountry, supplierCurrency, ...headerFields } = header;
       // Valuta: the header and rows in SEK at the invoice's rate — what the
@@ -462,6 +463,9 @@ export function createSupplierInvoiceService(
         payments,
         files,
         paymentBatches,
+        // E-faktura: the inbox post the invoice was created from, so the
+        // card's Underlag can link the original XML (null otherwise).
+        einvoiceScanId,
       };
     },
 

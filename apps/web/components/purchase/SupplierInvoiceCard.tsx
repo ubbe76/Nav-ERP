@@ -13,7 +13,7 @@ import { StatusPill } from "../ui/StatusPill";
 import { Field, Input, Select } from "../ui/Field";
 import { ArticlePicker } from "../ui/ArticlePicker";
 import { SearchPicker } from "../ui/SearchPicker";
-import { apiFetch } from "../../lib/api";
+import { API_URL, apiFetch } from "../../lib/api";
 import { documentRateSourceText, documentSekAmounts, formatRate, SEK } from "../../lib/currency";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { formatMoney, formatQuantity } from "../../lib/format";
@@ -240,6 +240,14 @@ export function SupplierInvoiceCard({
         description="Leverantörens faktura som"
         initialError={uploadFailed ? "Fakturan skapades, men underlaget kunde inte laddas upp — försök igen här." : null}
       />
+      {invoice.einvoiceScanId && (
+        <p style={{ margin: "8px 0 0" }}>
+          <a href={`${API_URL}/api/v1/invoice-scans/${invoice.einvoiceScanId}/einvoice-original`} target="_blank" rel="noreferrer">
+            E-faktura (original, XML)
+          </a>{" "}
+          — mottagen via Peppol och sparad som räkenskapsinformation.
+        </p>
+      )}
 
       <SectionHeading spaced>Rader</SectionHeading>
       {invoice.rows.length > 0 ? (

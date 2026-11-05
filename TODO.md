@@ -14,6 +14,7 @@
 
 Kan dölja allvarliga fel — och kan redan vara gjort.
 
+- [ ] **E-faktura, mottagning (#5) i produktion:** B2Brouters sandlåda publicerar aldrig i Peppol. Därför är tre saker inte provade: att **Ta emot e-faktura** verkligen gör företaget till mottagare (**Publicering**/**Peppol-katalogen** blir **Publicerad**), svaret 409 när organisationsnumret redan tas emot av en annan accesspunkt (sandlådan vägrar migreringskoder) och en riktig Peppol-faktura från en annan accesspunkt. Webhooken `received_invoice.created` kräver en Nav som nås utifrån med https, och den är inte heller provad hela vägen.
 
 ### Allvarliga — fel belopp, bokföring eller lön
 
@@ -121,8 +122,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 ## Nya funktioner
 
 ### Hög
-
-- [ ] **E-faktura (Peppol), mottagning** — inkommande e-faktura ⇒ leverantörsfakturautkast → [#5](https://github.com/ubbe76/Nav-ERP/issues/5). Utländska mottagare, valuta, automatisk sändning och statusbesked (#6) klara 2026-11-05. Beskriven i specen 2026-10-21-e-faktura-peppol-design.md §7. *(hemsidan)*
 
 ### Medel
 

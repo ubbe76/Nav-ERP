@@ -4,9 +4,24 @@ import {
   type EInvoiceProvider,
   type EInvoiceProviderConfig,
   type LookupResult,
+  type PeppolTransport,
   type ProviderStatus,
   type ValidationResult,
 } from "../../src/modules/einvoice/service/einvoice-provider.js";
+
+// A received document in the fake's reception box: what the access point
+// serves as original, optionally its BIS3 rendering, and whether it has
+// been acknowledged (acknowledged documents leave the listing, like
+// B2Brouter's).
+export interface FakeReceivedDocument {
+  original: Buffer;
+  contentType: string;
+  ubl?: Buffer;
+  acked: boolean;
+  originalError?: Error;
+  ublError?: Error;
+  ackError?: Error;
+}
 
 // In-memory EInvoiceProvider for the e-invoice tests. `state` lets a test
 // script what the access point answers: the state a submitted document gets,
@@ -41,7 +56,15 @@ export interface FakeEinvoice {
     webhookSecret: string;
     createWebhookError: Error | null;
     deleteWebhookError: Error | null;
+    // --- Mottagning ---
+    received: Map<string, FakeReceivedDocument>;
+    listReceivedError: Error | null;
+    transport: PeppolTransport | null;
+    setReceptionError: Error | null;
+    updateWebhookError: Error | null;
   };
+  // Puts a document in the reception box under the next id and returns it.
+  receive(original: Buffer, extra?: Partial<FakeReceivedDocument>): string;
 }
 
 export function createFakeEinvoiceProvider(): FakeEinvoice {
@@ -64,6 +87,19 @@ export function createFakeEinvoiceProvider(): FakeEinvoice {
     webhookSecret: "whsec_test_secret",
     createWebhookError: null,
     deleteWebhookError: null,
+    received: new Map(),
+    listReceivedError: null,
+    transport: {
+      enabled: true,
+      reception: false,
+      smlStatus: "not_published",
+      directoryStatus: "not_published",
+      migrationPending: false,
+      documentTypes: [],
+      participantId: "0007:5560000001",
+    },
+    setReceptionError: null,
+    updateWebhookError: null,
   };
   let nextId = 1000;
   const record = (method: string, ...args: unknown[]) => calls.push({ method, args });
@@ -118,6 +154,59 @@ export function createFakeEinvoiceProvider(): FakeEinvoice {
       if (state.deleteWebhookError) throw state.deleteWebhookError;
       if (!state.webhooks.delete(id)) throw new EInvoiceProviderError("Webhooken finns inte längre hos B2Brouter", "not-found");
     },
+    async updateWebhook(id, input) {
+      record("updateWebhook", id, input);
+      if (state.updateWebhookError) throw state.updateWebhookError;
+      const hook = state.webhooks.get(id);
+      if (!hook) throw new EInvoiceProviderError("Webhooken finns inte längre hos B2Brouter", "not-found");
+      hook.events = [...input.events];
+    },
+    async listReceived({ offset, limit }) {
+      record("listReceived", { offset, limit });
+      if (state.listReceivedError) throw state.listReceivedError;
+      const pending = [...state.received.entries()].filter(([, d]) => !d.acked);
+      return {
+        documents: pending.slice(offset, offset + limit).map(([id]) => ({ providerInvoiceId: id, state: "new" })),
+        total: pending.length,
+      };
+    },
+    async getReceivedOriginal(id) {
+      record("getReceivedOriginal", id);
+      const doc = state.received.get(id);
+      if (!doc) throw new EInvoiceProviderError("Dokumentet finns inte längre hos B2Brouter", "not-found");
+      if (doc.originalError) throw doc.originalError;
+      return { xml: doc.original, contentType: doc.contentType };
+    },
+    async getReceivedAsUbl(id) {
+      record("getReceivedAsUbl", id);
+      const doc = state.received.get(id);
+      if (!doc) throw new EInvoiceProviderError("Dokumentet finns inte längre hos B2Brouter", "not-found");
+      if (doc.ublError) throw doc.ublError;
+      if (!doc.ubl) throw new EInvoiceProviderError("B2Brouter gav ett oväntat svar", "unexpected");
+      return doc.ubl;
+    },
+    async acknowledgeReceived(id) {
+      record("acknowledgeReceived", id);
+      const doc = state.received.get(id);
+      if (!doc) throw new EInvoiceProviderError("Dokumentet finns inte längre hos B2Brouter", "not-found");
+      if (doc.ackError) throw doc.ackError;
+      doc.acked = true;
+    },
+    async getTransport() {
+      record("getTransport");
+      return state.transport ? { ...state.transport, documentTypes: [...state.transport.documentTypes] } : null;
+    },
+    async setReception(input) {
+      record("setReception", input);
+      if (state.setReceptionError) throw state.setReceptionError;
+      if (!state.transport) throw new EInvoiceProviderError("B2Brouter hittar inte det valda kontot — kör Testa anslutning under System → E-faktura", "unauthorized");
+      state.transport = {
+        ...state.transport,
+        reception: input.enabled,
+        documentTypes: input.enabled ? ["xml.ubl.invoice.bis3", "xml.ubl.credit_note.bis3"] : [],
+      };
+      return { ...state.transport, documentTypes: [...state.transport.documentTypes] };
+    },
   };
   return {
     provider,
@@ -128,8 +217,15 @@ export function createFakeEinvoiceProvider(): FakeEinvoice {
     configs,
     calls,
     state,
+    receive(original, extra = {}) {
+      const id = String(nextId++);
+      state.received.set(id, { original, contentType: "application/xml", acked: false, ...extra });
+      return id;
+    },
   };
 }
+
+export const conflict = (message: string) => new EInvoiceProviderError(message, "conflict");
 
 export const unavailable = (message = "B2Brouter svarar inte, försök igen") => new EInvoiceProviderError(message, "unavailable");
 export const refused = (message: string, fieldErrors: string[] = []) => new EInvoiceProviderError(message, "validation", fieldErrors);

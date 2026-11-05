@@ -11,7 +11,10 @@ import { listQuerySchema } from "./list.js";
 export const INVOICE_SCAN_STATUSES = ["new", "interpreted", "converted", "rejected"] as const;
 export type InvoiceScanStatus = (typeof INVOICE_SCAN_STATUSES)[number];
 
-export const INVOICE_SCAN_SOURCES = ["upload", "email"] as const;
+// einvoice: a supplier e-invoice received through Peppol (einvoice_receptions
+// holds the original XML; the scan carries the PDF — embedded or Nav's
+// visningskopia).
+export const INVOICE_SCAN_SOURCES = ["upload", "email", "einvoice"] as const;
 export type InvoiceScanSource = (typeof INVOICE_SCAN_SOURCES)[number];
 
 export const INVOICE_SCAN_ENGINES = ["rules", "ai"] as const;
@@ -48,7 +51,8 @@ export const INVOICE_SCAN_MAX_FILES_PER_UPLOAD = 20;
 
 export const SCAN_CONFIDENCES = ["high", "low"] as const;
 export type ScanConfidence = (typeof SCAN_CONFIDENCES)[number];
-export const SCAN_FIELD_SOURCES = ["rules", "learned", "ai", "supplier", "purchase_order"] as const;
+// einvoice: read straight out of the received UBL (always high).
+export const SCAN_FIELD_SOURCES = ["rules", "learned", "ai", "supplier", "purchase_order", "einvoice"] as const;
 export type ScanFieldSource = (typeof SCAN_FIELD_SOURCES)[number];
 
 function scanField<T extends z.ZodTypeAny>(value: T) {
@@ -315,6 +319,25 @@ export interface InvoiceScanMailLogRow {
   detail: string | null;
   // The scans the letter created (outcome imported).
   scanIds: string[];
+}
+
+// GET /invoice-scans/:id for a scan with source einvoice: where it came
+// from and the attachments the original carries (the first PDF is the
+// scan's own file; every attachment can be fetched by its index).
+export interface InvoiceScanEinvoiceAttachment {
+  index: number;
+  filename: string | null;
+  contentType: string | null;
+  sizeBytes: number;
+}
+
+export interface InvoiceScanEinvoiceInfo {
+  environment: "sandbox" | "production";
+  // "scheme:value" (0007:5566778899), null when the document named none.
+  senderEndpoint: string | null;
+  senderName: string | null;
+  receivedAt: string;
+  attachments: InvoiceScanEinvoiceAttachment[];
 }
 
 export interface InvoiceScanSettingsView {

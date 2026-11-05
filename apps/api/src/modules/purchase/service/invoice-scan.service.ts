@@ -34,6 +34,9 @@ import {
 } from "./invoice-scan/invoice-interpreter.js";
 import { senderAllowsAutomaticAi } from "./invoice-scan/sender-rule.js";
 import { hasSignature } from "./invoice-scan/file-signature.js";
+import { interpretEInvoice } from "./invoice-scan/einvoice-result.js";
+import type { EInvoiceImportInput, EInvoiceImportOutcome, EInvoiceOriginalReader } from "./invoice-scan/einvoice-original.js";
+import { RECEIVE_ATTACHMENT_MAX_BYTES_TEXT } from "./invoice-scan/einvoice-texts.js";
 
 // Fakturaskanning — the Fakturainkorg (spec §2–§5). Files come in, the rules
 // interpret them to a proposal, a person reviews and creates the supplier
@@ -74,6 +77,23 @@ export class InvoiceScanBusyError extends Error {
   }
 }
 
+// Tolka med AI on an e-invoice post: the document is structured data, the
+// AI has nothing to add (and must never override it). 409.
+export class InvoiceScanEinvoiceNoAiError extends Error {
+  constructor() {
+    super("En e-faktura tolkas ur sitt XML-original — Tolka med AI gäller inte");
+    this.name = "InvoiceScanEinvoiceNoAiError";
+  }
+}
+
+// The scan did not come as an e-invoice (no original XML). 404.
+export class InvoiceScanEinvoiceOriginalNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Invoice scan ${id} has no e-invoice original`);
+    this.name = "InvoiceScanEinvoiceOriginalNotFoundError";
+  }
+}
+
 // What a CompanyInfoRow must carry (System → Företagsuppgifter).
 export interface InvoiceScanCompanyReader {
   getCompanyInfo(): Promise<{
@@ -107,6 +127,7 @@ export interface AutomaticAiMailContext {
 }
 
 const TEXTS = {
+  einvoiceUnreadable: "E-fakturans original kunde inte läsas — öppna XML:en",
   unreadable: "PDF:en gick inte att läsa",
   noTextLayer: "PDF:en saknar textlager (skannad) — den kan tolkas med AI, annars fyll i fälten för hand",
   image: "Bilder tolkas inte lokalt — tolka med AI eller fyll i fälten för hand",
@@ -136,9 +157,18 @@ export function createInvoiceScanService(deps: {
   extractText?: (data: Buffer) => Promise<PdfText>;
   // The AI interpretation (spec §3.5): Claude by default, a fake in tests.
   interpreters?: InvoiceInterpreterFactory;
+  // E-faktura: the received original behind a scan with source einvoice
+  // (the einvoice module implements it; bound late in app.ts).
+  einvoiceOriginals?: EInvoiceOriginalReader;
   log?: (msg: string, extra?: unknown) => void;
 }) {
   const { repo, supplierInvoices, company, settings } = deps;
+  const einvoiceOriginals: EInvoiceOriginalReader = deps.einvoiceOriginals ?? {
+    infoForScan: async () => null,
+    forScan: async () => null,
+    originalXml: async () => null,
+    attachment: async () => null,
+  };
   const audit = deps.audit ?? { log: async () => {} };
   const today = deps.today ?? stockholmToday;
   const extract = deps.extractText ?? ((data: Buffer) => extractPdfText(data));
@@ -224,6 +254,7 @@ export function createInvoiceScanService(deps: {
   async function runRules(id: string): Promise<InvoiceScanRow | null> {
     const scan = await repo.findWithData(id);
     if (!scan || !canPerform("interpret", scan.status) || !scan.data) return null;
+    if (scan.source === "einvoice") return runEInvoiceRules(scan);
     const existing = parseResult(scan.result);
     const keepWith = (check: string, file: { hasTextLayer: boolean | null; pageCount: number | null }) => {
       const kept = existing!;
@@ -267,6 +298,28 @@ export function createInvoiceScanService(deps: {
     });
   }
 
+  // E-faktura: the result straight out of the received UBL (einvoice-
+  // result.ts) — the original read again through the reader, the supplier
+  // matched on its identifiers, our article numbers resolved, then the same
+  // postProcess (duplicate + purchase order matching) as the rules. An
+  // original that cannot be read leaves the scan where it is with the check.
+  async function runEInvoiceRules(scan: InvoiceScanRow): Promise<InvoiceScanRow | null> {
+    const found = await einvoiceOriginals.forScan(scan.id);
+    if (!found) {
+      const kept = parseResult(scan.result) ?? emptyInvoiceScanResult();
+      if (!kept.checks.includes(TEXTS.einvoiceUnreadable)) kept.checks.push(TEXTS.einvoiceUnreadable);
+      return repo.writeResult(scan.id, { result: kept, interpretedBy: null, hasTextLayer: scan.hasTextLayer, pageCount: scan.pageCount, interpreted: false });
+    }
+    const doc = found.einvoice;
+    const numbers = [...new Set(doc.lines.map((l) => l.buyerItemNumber?.trim()).filter((n): n is string => !!n))];
+    const [companyId, suppliers, articles] = await Promise.all([companyIdentity(), repo.supplierIdentities(), repo.articleIdsByNumber(numbers)]);
+    const extraChecks: string[] = [];
+    const pdf = doc.attachments.find((a) => a.mimeCode === "application/pdf");
+    if (pdf && pdf.sizeBytes > RECEIVE_ATTACHMENT_MAX_BYTES_TEXT.limit) extraChecks.push(RECEIVE_ATTACHMENT_MAX_BYTES_TEXT.text);
+    const result = await postProcess(interpretEInvoice({ einvoice: doc, company: companyId, suppliers, articles, extraChecks }), []);
+    return repo.writeResult(scan.id, { result, interpretedBy: "rules", hasTextLayer: true, pageCount: scan.pageCount, interpreted: true });
+  }
+
   // --- AI-tolkningen (spec §3.4–§3.5) ---
 
   // One AI call on one scan, never inside a transaction: reserve
@@ -285,6 +338,11 @@ export function createInvoiceScanService(deps: {
     }
     if (mode === "manual") assertAllowed("interpret", scan.status);
     else if (!canPerform("interpret", scan.status)) return;
+    // An e-invoice is structured data: the AI never interprets it.
+    if (scan.source === "einvoice") {
+      if (mode === "manual") throw new InvoiceScanEinvoiceNoAiError();
+      return;
+    }
     const config = await settings.read();
     if (config.aiMode === "off" || config.aiApiKey === null || (mode === "automatic" && config.aiMode !== "fallback")) {
       if (mode === "manual") throw new InvoiceScanAiNotConfiguredError();
@@ -379,6 +437,7 @@ export function createInvoiceScanService(deps: {
     const result = parseResult(scan.result);
     const rulesEnough = scan.contentType === "application/pdf" && scan.hasTextLayer === true && result !== null && rulesSufficient(result);
     if (rulesEnough) return;
+    if (scan.source === "einvoice") return;
     if (scan.source === "email") {
       if (!mail || !senderAllowsAutomaticAi(scan.emailFrom, await repo.knownSenderAddresses(), mail.authenticatedDomains)) return;
     }
@@ -450,11 +509,24 @@ export function createInvoiceScanService(deps: {
       const result = parseResult(raw);
       const { poMatching, aiMode, aiApiKey } = await settings.read();
       const created = row.status === "converted" ? createdInvoice(row) : null;
+      // E-faktura: where it came from and what the original carries (the
+      // reception row and its stored attachment list — the XML is not
+      // parsed here).
+      const original = row.source === "einvoice" ? await einvoiceOriginals.infoForScan(id) : null;
       return {
         ...stripCreated(columns),
         supplierName: created ? created.supplierName : row.supplierName,
         // Skapad: the supplier invoice as it was created (null otherwise).
         createdInvoice: created,
+        einvoice: original
+          ? {
+              environment: original.environment,
+              senderEndpoint: original.senderEndpoint,
+              senderName: original.senderName,
+              receivedAt: original.receivedAt.toISOString(),
+              attachments: original.attachments,
+            }
+          : null,
         result,
         // A stored result in an unknown shape — Tolka igen replaces it.
         resultOutdated: raw !== null && result === null,
@@ -548,6 +620,58 @@ export function createInvoiceScanService(deps: {
       return service.get(id);
     },
 
+    // --- E-faktura (spec 2026-11-05-e-faktura-mottagning) ---
+
+    // The inbox post for a received e-invoice, inside the reception's
+    // transaction: source einvoice, the PDF (embedded or the copy) as the
+    // file, in a SAVEPOINT so a live duplicate on sha256 burns no FI- number.
+    async importEInvoiceInTx(tx: Parameters<InvoiceScanRepository["insertScanInTx"]>[0], input: EInvoiceImportInput): Promise<EInvoiceImportOutcome> {
+      const outcome = await repo.insertScanInTx(tx, {
+        source: "einvoice",
+        filename: input.filename.slice(0, 255),
+        contentType: "application/pdf",
+        sizeBytes: input.pdf.length,
+        sha256: input.sha256,
+        data: input.pdf,
+        uploadedBy: null,
+      });
+      if (outcome.ok) return outcome;
+      return { ok: false, reason: "duplicate", existing: { id: outcome.existing.id, scanNumber: outcome.existing.scanNumber } };
+    },
+
+    // The interpretation of freshly received e-invoice posts, after the
+    // reception's commit and ack; a crash is logged, never thrown.
+    async interpretEInvoices(ids: string[]): Promise<void> {
+      await service.interpretReceived(ids);
+    },
+
+    // Only the posts a crashed run left `new` without a result.
+    async interpretEInvoicesIfNew(ids: string[]): Promise<void> {
+      const pending: string[] = [];
+      for (const id of ids) {
+        const scan = await repo.findById(id);
+        if (scan && scan.status === "new" && scan.result === null) pending.push(id);
+      }
+      await service.interpretReceived(pending);
+    },
+
+    // Ladda ned original (XML): kept after the conversion too.
+    async einvoiceOriginal(id: string) {
+      const scan = await repo.findById(id);
+      if (!scan) throw new InvoiceScanNotFoundError(id);
+      const original = scan.source === "einvoice" ? await einvoiceOriginals.originalXml(id) : null;
+      if (!original) throw new InvoiceScanEinvoiceOriginalNotFoundError(id);
+      return original;
+    },
+
+    async einvoiceAttachment(id: string, index: number) {
+      const scan = await repo.findById(id);
+      if (!scan) throw new InvoiceScanNotFoundError(id);
+      const attachment = scan.source === "einvoice" ? await einvoiceOriginals.attachment(id, index) : null;
+      if (!attachment) throw new InvoiceScanEinvoiceOriginalNotFoundError(id);
+      return attachment;
+    },
+
     // The rules on scans the e-mail job just imported (after the letter's
     // transaction and its move): one at a time, outside any transaction; a
     // crash is logged and leaves the scan in new — never thrown.
@@ -592,8 +716,10 @@ export function createInvoiceScanService(deps: {
       if (!scan) throw new InvoiceScanNotFoundError(id);
       assertAllowed("convert", scan.status);
 
+      // The leverantörsinlärning reads the supplier's own layout; an
+      // e-invoice post's PDF may be Nav's copy, so nothing is learned.
       let labels: HintLabel[] = [];
-      if (scan.data && scan.contentType === "application/pdf" && scan.hasTextLayer !== false) {
+      if (scan.source !== "einvoice" && scan.data && scan.contentType === "application/pdf" && scan.hasTextLayer !== false) {
         try {
           const text = await extract(scan.data);
           if (hasTextLayer(text)) {

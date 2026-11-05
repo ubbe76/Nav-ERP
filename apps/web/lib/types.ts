@@ -1104,6 +1104,8 @@ export interface SupplierInvoiceDetail extends SupplierInvoice {
   exchangeRateMissing: boolean;
   payments: SupplierInvoicePaymentEntry[];
   files: SupplierInvoiceFile[];
+  // Set when the invoice came in as a received e-invoice (the Fakturainkorg post whose XML original is kept).
+  einvoiceScanId: string | null;
   // Bankfiler: every payment-file row the invoice has been in, newest first.
   paymentBatches: { batchId: string; batchNumber: string; endToEndId: string; itemStatus: string }[];
 }
@@ -4809,6 +4811,11 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // Fakturaskanning: a file arrived in the inbox / was turned into a
   // supplier invoice / was rejected / restored.
   received: "Mottagen",
+  reception_enabled: "Mottagning av e-faktura påslagen",
+  reception_disabled: "Mottagning av e-faktura avstängd",
+  dismissed: "Markerad som hanterad",
+  webhook_registered: "Statusbesked aktiverat",
+  webhook_removed: "Statusbesked borttaget",
   converted: "Leverantörsfaktura skapad",
   rejected: "Avvisad",
   restored: "Återställd",

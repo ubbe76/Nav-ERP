@@ -204,7 +204,8 @@ describe("automatik och statusbesked (spec 2026-11-05)", () => {
     const view = await withUrl.registerWebhook("u1");
     expect(view.webhook).toMatchObject({ active: true, environment: "sandbox", url: "https://nav.example.se/api/v1/einvoice/webhook", environmentMismatch: false });
     expect(JSON.stringify(view)).not.toContain("whsec_test_secret");
-    expect([...fake.state.webhooks.values()]).toEqual([{ url: "https://nav.example.se/api/v1/einvoice/webhook", events: ["issued_invoice.state_change"] }]);
+    // Both events: the issued invoices' state changes and a received document.
+    expect([...fake.state.webhooks.values()]).toEqual([{ url: "https://nav.example.se/api/v1/einvoice/webhook", events: ["issued_invoice.state_change", "received_invoice.created"] }]);
     const read = await withUrl.read();
     expect(read.webhook).toMatchObject({ secret: "whsec_test_secret", environment: "sandbox" });
     expect(audit.entries.at(-1)).toMatchObject({ action: "webhook_registered", detail: { environment: "sandbox" } });

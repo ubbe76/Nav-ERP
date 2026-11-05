@@ -6,7 +6,7 @@ import type { Status } from "../components/ui/StatusPill";
 // import @navet/shared). Keep the names in step with the shared file.
 
 export type InvoiceScanStatus = "new" | "interpreted" | "converted" | "rejected";
-export type InvoiceScanSource = "upload" | "email";
+export type InvoiceScanSource = "upload" | "email" | "einvoice";
 export type InvoiceScanEngine = "rules" | "ai";
 export type InvoiceScanListStatus = "pending" | "converted" | "rejected" | "all";
 
@@ -16,7 +16,7 @@ export const INVOICE_SCAN_MAX_FILES_PER_UPLOAD = 20;
 export const INVOICE_SCAN_ACCEPT = "application/pdf,image/jpeg,image/png";
 
 export type ScanConfidence = "high" | "low";
-export type ScanFieldSource = "rules" | "learned" | "ai" | "supplier" | "purchase_order";
+export type ScanFieldSource = "rules" | "learned" | "ai" | "supplier" | "purchase_order" | "einvoice";
 export interface ScanField<T> {
   value: T | null;
   confidence: ScanConfidence;
@@ -121,6 +121,15 @@ export interface InvoiceScanCreatedInvoice {
 }
 
 // GET /invoice-scans/:id.
+// Mottagen e-faktura (Peppol): who sent it and the attachments inside the XML.
+export interface InvoiceScanEInvoiceInfo {
+  environment: "sandbox" | "production";
+  senderEndpoint: string | null;
+  senderName: string | null;
+  receivedAt: string;
+  attachments: { index: number; filename: string | null; contentType: string | null; sizeBytes: number }[];
+}
+
 export interface InvoiceScanDetail extends Omit<InvoiceScanListRow, "supplierId" | "invoiceNumber" | "grossAmount" | "currency"> {
   // Skapad: the created supplier invoice's values (null otherwise).
   createdInvoice: InvoiceScanCreatedInvoice | null;
@@ -131,6 +140,8 @@ export interface InvoiceScanDetail extends Omit<InvoiceScanListRow, "supplierId"
   // Inställningen Matcha mot inköpsorder.
   poMatching: boolean;
   rejectedByName: string | null;
+  // Null for upload and email posts.
+  einvoice: InvoiceScanEInvoiceInfo | null;
 }
 
 export interface InvoiceScanUploadResult {
@@ -151,6 +162,7 @@ export const INVOICE_SCAN_TABS: { value: InvoiceScanListStatus; label: string }[
 export const INVOICE_SCAN_SOURCE_LABELS: Record<InvoiceScanSource, string> = {
   upload: "Uppladdad",
   email: "E-post",
+  einvoice: "E-faktura",
 };
 
 // Status as the list and the card show it: Ny / Tolkad / Osäker / Skapad /
@@ -177,6 +189,7 @@ export const SCAN_SOURCE_LABELS: Partial<Record<ScanFieldSource, string>> = {
   ai: "AI",
   learned: "Inlärt",
   purchase_order: "Från inköpsorder",
+  einvoice: "E-faktura",
 };
 
 export const isPendingScan = (scan: Pick<InvoiceScanListRow, "status">): boolean =>

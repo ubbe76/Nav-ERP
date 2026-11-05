@@ -1027,7 +1027,8 @@ describe("Skicka e-faktura automatiskt vid Utfärda", () => {
 });
 
 describe("statusbesked direkt (webhook)", () => {
-  const webhook = createEinvoiceWebhookService({ repo, settings, status, now, log: (msg) => logged.push(msg) });
+  const kicks: number[] = [];
+  const webhook = createEinvoiceWebhookService({ repo, settings, status, receive: { kick: () => kicks.push(1) }, now, log: (msg) => logged.push(msg) });
   const SECRET = "whsec_nav_test";
   const signed = (payload: unknown, secret = SECRET) => {
     const body = Buffer.from(JSON.stringify(payload));
@@ -1070,7 +1071,10 @@ describe("statusbesked direkt (webhook)", () => {
     const invoice = await issuedInvoice(await makeCustomer());
     await sentRow(invoice.id, { providerInvoiceId: "4242" });
     fake.state.statuses["4242"] = { state: "registered", errorMessage: null, updatedAt: null };
+    // Mottagning: received_invoice.created only nudges a reception run.
     expect(await webhook.receive(...(Object.values(signed(event(4242, "received_invoice.created"))) as [Buffer, string]))).toBe(204);
+    expect(kicks).toHaveLength(1);
+    expect(fake.calls).toEqual([]);
     expect(await webhook.receive(...(Object.values(signed(event(9999))) as [Buffer, string]))).toBe(204);
     const raw = Buffer.from("not json");
     const t = "1";

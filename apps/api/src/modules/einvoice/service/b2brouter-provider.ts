@@ -4,6 +4,7 @@ import {
   type EInvoiceProviderConfig,
   type EInvoiceProviderFactory,
   type LookupResult,
+  type PeppolTransport,
   type ProviderStatus,
   type ValidationResult,
 } from "./einvoice-provider.js";
@@ -30,6 +31,9 @@ const TIMEOUT_MS = 30_000;
 // The import uploads the UBL with the base64 PDF inside it — a large
 // invoice takes a while to transfer and to be parsed at the other end.
 export const IMPORT_TIMEOUT_MS = 120_000;
+// The settings page reads the Peppol transport on every view: a short
+// timeout so a slow access point never holds the page for 30 s.
+export const TRANSPORT_TIMEOUT_MS = 5_000;
 // Directory lookups are asynchronous: 202 until the directory answered.
 export const LOOKUP_POLL_INTERVAL_MS = 1_000;
 export const LOOKUP_MAX_WAIT_MS = 10_000;
@@ -47,7 +51,14 @@ export const B2BROUTER_MESSAGES = {
   directoryBroken: "Mottagarens accesspunkt publicerar inga giltiga dokumenttyper — kontakta mottagaren",
   webhookRejected: "B2Brouter godtog inte webhooken",
   webhookNotFound: "Webhooken finns inte längre hos B2Brouter",
+  receptionConflict: "B2Brouter kunde inte slå på mottagningen",
+  receptionMigrationUnavailable: "Migreringskoder kan inte användas i sandlådan",
+  receptionRegisteredElsewhere:
+    "Organisationsnumret tas redan emot av en annan accesspunkt — ange migreringskoden från den leverantören",
 } as const;
+
+// A received-list page: B2Brouter caps limit at 500.
+export const RECEIVED_LIST_MAX_LIMIT = 500;
 
 // What we log about a transport failure: the error's name and the cause's
 // code, nothing else. Node's fetch echoes the offending header VALUE — our
@@ -102,6 +113,11 @@ interface CallResult {
   requestId: string | null;
   data: unknown;
   text: string;
+  contentType?: string | null;
+  // The body as received, for the binary calls (accept "*/*"): never
+  // re-encoded, so a stored original is byte for byte what the access
+  // point served (BOM and declared encoding included).
+  bytes?: Buffer;
 }
 
 export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2BrouterDeps = {}): EInvoiceProvider {
@@ -117,24 +133,32 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
   // 404/424 as answers, not failures). ONE timeout covers the whole call,
   // the body read included — a response whose body never arrives is as much
   // a transport failure as a connect that hangs.
-  async function raw(method: string, path: string, body?: RequestBody, timeout = timeoutMs): Promise<CallResult> {
+  async function raw(method: string, path: string, body?: RequestBody, timeout = timeoutMs, accept = "application/json"): Promise<CallResult> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
     let res: Response;
     let text: string;
+    let bytes: Buffer | undefined;
     try {
       res = await doFetch(baseUrl + path, {
         method,
         headers: {
           "X-B2B-API-Key": config.apiKey,
           "X-B2B-API-Version": B2BROUTER_API_VERSION,
-          Accept: "application/json",
+          Accept: accept,
           ...(body ? { "Content-Type": "xml" in body ? "application/octet-stream" : "application/json" } : {}),
         },
         body: body ? ("xml" in body ? new Uint8Array(body.xml) : JSON.stringify(body.json)) : undefined,
         signal: controller.signal,
       });
-      text = await res.text();
+      if (accept === "*/*") {
+        bytes = Buffer.from(await res.arrayBuffer());
+        // Error bodies are JSON/text: decoded only for the log and the
+        // error envelope.
+        text = res.status >= 400 ? bytes.toString("utf8") : "";
+      } else {
+        text = await res.text();
+      }
     } catch (err) {
       log({ method, path, status: 0, requestId: null, body: transportSummary(err) });
       throw new EInvoiceProviderError(B2BROUTER_MESSAGES.unavailable, "unavailable");
@@ -143,7 +167,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
     }
     const requestId = res.headers.get("x-b2b-api-request-id");
     let data: unknown = null;
-    if (text !== "") {
+    if (text !== "" && accept === "application/json") {
       try {
         data = JSON.parse(text);
       } catch {
@@ -151,7 +175,7 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
       }
     }
     if (res.status >= 400) log({ method, path, status: res.status, requestId, body: text.slice(0, 2000) });
-    return { status: res.status, requestId, data, text };
+    return { status: res.status, requestId, data, text, contentType: res.headers.get("content-type"), bytes };
   }
 
   // What a 404 means depends on the call: on the import it is the account
@@ -188,8 +212,8 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
     );
   }
 
-  async function call(method: string, path: string, body?: RequestBody, opts: { notFound?: NotFoundMeaning; timeoutMs?: number } = {}): Promise<CallResult> {
-    const r = await raw(method, path, body, opts.timeoutMs);
+  async function call(method: string, path: string, body?: RequestBody, opts: { notFound?: NotFoundMeaning; timeoutMs?: number; accept?: string } = {}): Promise<CallResult> {
+    const r = await raw(method, path, body, opts.timeoutMs, opts.accept);
     if (r.status >= 400) throw failure(r, opts.notFound ?? "unexpected");
     return r;
   }
@@ -221,6 +245,35 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
       state,
       errorMessage: str(invoice.error_message) ?? str(invoice.error),
       updatedAt: str(invoice.state_updated_at) ?? str(invoice.updated_at),
+    };
+  }
+
+  function accountPath(): string {
+    if (!config.accountId) throw new EInvoiceProviderError(B2BROUTER_MESSAGES.noAccount, "unexpected");
+    return `/accounts/${encodeURIComponent(config.accountId)}`;
+  }
+
+  const publication = (v: unknown): PeppolTransport["smlStatus"] =>
+    v === "not_published" || v === "processing" || v === "published" ? v : null;
+
+  // SANDBOX-verified 2026-11-05: GET/PUT /accounts/{id}/transports/peppol
+  // answer { transport: { code, enabled, reception, pin_scheme, pin_value,
+  // sml_status, peppol_directory_status, migration_pending,
+  // reception_document_types: [{ code, name }] } }.
+  function transportOf(r: CallResult): PeppolTransport {
+    const t = obj(obj(r.data)?.transport);
+    if (!t) throw unexpected(r.requestId);
+    const scheme = str(t.pin_scheme);
+    const value = str(t.pin_value);
+    const types = Array.isArray(t.reception_document_types) ? t.reception_document_types : [];
+    return {
+      enabled: t.enabled !== false,
+      reception: t.reception === true,
+      smlStatus: publication(t.sml_status),
+      directoryStatus: publication(t.peppol_directory_status),
+      migrationPending: typeof t.migration_pending === "boolean" ? t.migration_pending : null,
+      documentTypes: types.map((d) => str(obj(d)?.code)).filter((c): c is string => c !== null),
+      participantId: scheme && value ? `${scheme}:${value}` : null,
     };
   }
 
@@ -384,6 +437,97 @@ export function createB2BrouterProvider(config: EInvoiceProviderConfig, deps: B2
 
     async deleteWebhook(id) {
       await call("DELETE", `/web_hooks/${encodeURIComponent(id)}`, undefined, { notFound: "webhook" });
+    },
+
+    // --- Mottagning (SANDBOX-verified 2026-11-05, spec "Verifierat i sandlådan") ---
+
+    // GET /accounts/{id}/invoices?type=ReceivedInvoice — acknowledged
+    // documents are left out unless ack=true, so this IS the work list.
+    async listReceived({ offset, limit }) {
+      const r = await call(
+        "GET",
+        `${accountPath()}/invoices?type=ReceivedInvoice&offset=${Math.max(0, Math.floor(offset))}&limit=${Math.min(RECEIVED_LIST_MAX_LIMIT, Math.max(1, Math.floor(limit)))}`,
+        undefined,
+        { notFound: "account" }
+      );
+      const data = obj(r.data);
+      const list = Array.isArray(data?.invoices) ? data!.invoices : null;
+      if (!list) throw unexpected(r.requestId);
+      const documents = list.map((entry) => {
+        const invoice = obj(entry);
+        if (!invoice) throw unexpected(r.requestId);
+        return { providerInvoiceId: idOf(invoice, r.requestId), state: str(invoice.state) };
+      });
+      const total = obj(data?.meta)?.total_count;
+      return { documents, total: typeof total === "number" && Number.isFinite(total) ? total : documents.length };
+    },
+
+    // GET /invoices/{id}/as/original: application/xml for a Peppol
+    // document; whatever B2Brouter holds for one it received another way.
+    async getReceivedOriginal(providerInvoiceId) {
+      const r = await call("GET", `/invoices/${encodeURIComponent(providerInvoiceId)}/as/original`, undefined, {
+        notFound: "document",
+        timeoutMs: IMPORT_TIMEOUT_MS,
+        accept: "*/*",
+      });
+      if (!r.bytes || r.bytes.length === 0) throw unexpected(r.requestId, providerInvoiceId);
+      return { xml: r.bytes, contentType: (r.contentType ?? "application/octet-stream").split(";")[0]!.trim() };
+    },
+
+    async getReceivedAsUbl(providerInvoiceId) {
+      const r = await call("GET", `/invoices/${encodeURIComponent(providerInvoiceId)}/as/xml.ubl.invoice.bis3`, undefined, {
+        notFound: "document",
+        timeoutMs: IMPORT_TIMEOUT_MS,
+        accept: "*/*",
+      });
+      if (!r.bytes || r.bytes.length === 0) throw unexpected(r.requestId, providerInvoiceId);
+      return r.bytes;
+    },
+
+    async acknowledgeReceived(providerInvoiceId) {
+      await call("POST", `/invoices/${encodeURIComponent(providerInvoiceId)}/ack`, undefined, { notFound: "document" });
+    },
+
+    async getTransport() {
+      const r = await raw("GET", `${accountPath()}/transports/peppol`, undefined, TRANSPORT_TIMEOUT_MS);
+      if (r.status === 404) return null;
+      if (r.status >= 400) throw failure(r, "account");
+      return transportOf(r);
+    },
+
+    // PUT /accounts/{id}/transports/peppol { transport: { reception,
+    // migration_code? } }. 409 = the identifier belongs to another access
+    // point (production) or migration codes are unavailable (sandbox:
+    // code "migration_unavailable") — reported as kind "conflict" with a
+    // Swedish text the settings page shows as it is.
+    async setReception({ enabled, migrationCode }) {
+      const transport: Record<string, unknown> = { reception: enabled };
+      if (enabled && migrationCode) transport.migration_code = migrationCode;
+      const r = await raw("PUT", `${accountPath()}/transports/peppol`, { json: { transport } });
+      if (r.status === 409) {
+        const body = parseErrorBody(r.text);
+        const message =
+          body.code === "migration_unavailable"
+            ? B2BROUTER_MESSAGES.receptionMigrationUnavailable
+            : migrationCode
+              ? `${B2BROUTER_MESSAGES.receptionConflict}${body.message ? `: ${body.message}` : ""}`
+              : B2BROUTER_MESSAGES.receptionRegisteredElsewhere;
+        throw new EInvoiceProviderError(message, "conflict", body.message ? [body.message] : [], r.requestId);
+      }
+      if (r.status >= 400) throw failure(r, "account");
+      return transportOf(r);
+    },
+
+    // PATCH /web_hooks/{id} { web_hook: { events } } — SANDBOX-verified
+    // 2026-11-05 (200 with the hook; 404 once it is deleted).
+    async updateWebhook(id, { events }) {
+      const r = await raw("PATCH", `/web_hooks/${encodeURIComponent(id)}`, { json: { web_hook: { events } } });
+      if (r.status === 400 || r.status === 422) {
+        const body = parseErrorBody(r.text);
+        const message = body.message ? `${B2BROUTER_MESSAGES.webhookRejected}: ${body.message}` : B2BROUTER_MESSAGES.webhookRejected;
+        throw new EInvoiceProviderError(message, "validation", body.message ? [body.message] : [], r.requestId);
+      }
+      if (r.status >= 400) throw failure(r, "webhook");
     },
 
     async validate(xml) {

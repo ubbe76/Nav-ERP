@@ -17,6 +17,7 @@ import {
   type EInvoiceSettings,
   type EInvoiceWebhook,
 } from "../../lib/einvoice";
+import { EInvoiceReceptionSection } from "./EInvoiceReceptionSection";
 import cardStyles from "../system/SettingsForm.module.css";
 
 // E-fakturainställningar (admin). Like the freight form the API key is
@@ -40,6 +41,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
   const [webhookPending, setWebhookPending] = useState(false);
   const [webhookError, setWebhookError] = useState<string | null>(null);
   const [lastRun, setLastRun] = useState(initial.lastStatusRunAt);
+  const [reception, setReception] = useState(initial.reception);
   const [company, setCompany] = useState<EInvoiceCompany>(initial.company);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -59,6 +61,7 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
     setAutoSend(updated.autoSend);
     setWebhook(updated.webhook);
     setCompany(updated.company);
+    setReception(updated.reception);
   }
 
   // A different key or environment belongs to another B2Brouter account, so
@@ -315,6 +318,8 @@ export function EInvoiceSettingsForm({ initial }: { initial: EInvoiceSettings })
           )}
         </FormActions>
       </div>
+
+      <EInvoiceReceptionSection reception={reception} onChange={setReception} configured={apiKeySet && accountId !== null} environment={environment} />
 
       <div className={cardStyles.card} style={{ marginTop: 18 }}>
         <SectionHeading>Företagsuppgifter som skickas</SectionHeading>
