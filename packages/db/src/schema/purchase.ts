@@ -216,6 +216,19 @@ export const purchaseOrders = pgTable("purchase_orders", {
   // Projekt (migration 0149): follows into the supplier invoice when the
   // fakturaunderlag is fetched from this order.
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "restrict" }),
+  // Leveransadress (migration 0182): where the supplier ships the goods —
+  // a subcontractor delivering straight to our customer, typically. A
+  // SNAPSHOT (no FK to the customer's address): a sent IO must not change
+  // when the customer edits its address. All null = the company's own
+  // address (company_info.delivery_* when set, else its address); the
+  // printed label is delivery_name when set, else the company's name.
+  deliveryName: varchar("delivery_name", { length: 255 }),
+  deliveryAddress: text("delivery_address"),
+  deliveryPostalCode: varchar("delivery_postal_code", { length: 20 }),
+  deliveryCity: varchar("delivery_city", { length: 100 }),
+  // ISO 3166-1 alpha-2 like customer_delivery_addresses.country; printed
+  // only when ≠ SE.
+  deliveryCountry: varchar("delivery_country", { length: 2 }),
   // Bumped by 1 on every content change (header/terms/rows) — never by
   // status transitions or receipts. Printed on the PO document.
   revision: integer("revision").notNull().default(1),
@@ -376,6 +389,52 @@ export const purchaseReceipts = pgTable(
   (table) => [
     index("purchase_receipts_by_order").on(table.purchaseOrderId, table.createdAt),
     index("purchase_receipts_by_stock_transaction").on(table.stockTransactionId),
+  ]
+);
+
+// Avsändning till legoleverantör (migration 0182): the log of goods sent to
+// a subcontractor — one row per Rapportera avsändning, with the rows and
+// parcel counts it reported. No stock effect (the material is drawn by the
+// receipt, as before); Skickat on an IO row is DERIVED as Σ quantity over
+// the dispatches that are not undone (dispatchedQuantitySql in the purchase
+// repository), never stored on the row. An undone dispatch stays, stamped
+// undone_at/undone_by. Order restrict: an order with dispatches is history.
+export const purchaseOrderDispatches = pgTable(
+  "purchase_order_dispatches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    purchaseOrderId: uuid("purchase_order_id")
+      .notNull()
+      .references(() => purchaseOrders.id, { onDelete: "restrict" }),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }).notNull().defaultNow(),
+    dispatchedBy: uuid("dispatched_by").references(() => users.id, { onDelete: "set null" }),
+    note: text("note"),
+    undoneAt: timestamp("undone_at", { withTimezone: true }),
+    undoneBy: uuid("undone_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (table) => [index("purchase_order_dispatches_by_order").on(table.purchaseOrderId, table.dispatchedAt)]
+);
+
+// quantity in the article's base unit, like the IO row; parcels (kolli) is
+// what the pallet card dialog prefills. Row restrict: a row with dispatches
+// cannot be deleted (Ångra the dispatch first).
+export const purchaseOrderDispatchRows = pgTable(
+  "purchase_order_dispatch_rows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    dispatchId: uuid("dispatch_id")
+      .notNull()
+      .references(() => purchaseOrderDispatches.id, { onDelete: "cascade" }),
+    purchaseOrderRowId: uuid("purchase_order_row_id")
+      .notNull()
+      .references(() => purchaseOrderRows.id, { onDelete: "restrict" }),
+    quantity: numeric("quantity", { precision: 14, scale: 4 }).notNull(),
+    parcels: integer("parcels").notNull().default(1),
+  },
+  (table) => [
+    index("purchase_order_dispatch_rows_by_row").on(table.purchaseOrderRowId),
+    check("purchase_order_dispatch_rows_quantity_positive", sql`${table.quantity} > 0`),
+    check("purchase_order_dispatch_rows_parcels_min", sql`${table.parcels} >= 1`),
   ]
 );
 

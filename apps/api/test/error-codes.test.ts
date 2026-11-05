@@ -311,6 +311,7 @@ import {
   PurchaseReceiptManufacturingOrderLockedError,
   PurchaseReceiptNotFoundError,
   PurchaseReceiptStockMissingError,
+  PurchaseOrderRowHasDispatchesError,
   RowHasReceiptsError,
 } from "../src/modules/purchase/service/purchase.service.js";
 import {
@@ -576,6 +577,7 @@ const cases: Array<[Error, string]> = [
   [new SalesOrderRowNotFoundError("row-1"), ERROR_CODES.SALES_ORDER_ROW_NOT_FOUND],
   [new OverDeliveryError(), ERROR_CODES.OVER_DELIVERY],
   [new RowHasReceiptsError(), ERROR_CODES.ROW_HAS_RECEIPTS],
+  [new PurchaseOrderRowHasDispatchesError(), ERROR_CODES.PURCHASE_ORDER_ROW_HAS_DISPATCHES],
   [new OverReceiptError(), ERROR_CODES.OVER_RECEIPT],
   [new PurchaseReceiptNotFoundError("x"), ERROR_CODES.PURCHASE_RECEIPT_NOT_FOUND],
   [new PurchaseReceiptAlreadyUndoneError(), ERROR_CODES.PURCHASE_RECEIPT_ALREADY_UNDONE],

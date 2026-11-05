@@ -6,6 +6,7 @@ import Link from "next/link";
 import { RowDeviationLink } from "../quality/RowDeviationLink";
 import { newDeviationHref, type NewDeviationParams } from "../../lib/quality";
 import { RowMenu } from "../ui/RowMenu";
+import { DeliveryAddressForm, formatDeliveryAddress } from "./DeliveryAddressForm";
 import { useCan } from "../PermissionsProvider";
 import { ArticleOverviewButton } from "../articles/ArticleOverviewButton";
 import { useRouter } from "next/navigation";
@@ -22,7 +23,7 @@ import { ManualStatusChange } from "../documents/ManualStatusChange";
 import { TermsFields, termsFrom, termsLabel, termsPayload, type TermsRegisters, type TermsValue } from "../documents/TermsFields";
 import { toBaseQuantity, toUnitPrice, toUnitQuantity } from "../../lib/units";
 import { requoteFor } from "../../lib/rowRequote";
-import { formatMoney } from "../../lib/format";
+import { formatMoney, formatQuantity } from "../../lib/format";
 import { apiFetch } from "../../lib/api";
 import { useSupplierDeliveryDateSuggestion } from "../../lib/useDeliveryDateSuggestion";
 import { DeliveryDateHint } from "../ui/DeliveryDateHint";
@@ -77,7 +78,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
     articleId: row.articleId,
   });
 
-  const [modal, setModal] = useState<"header" | "addRow" | "receive" | null>(null);
+  const [modal, setModal] = useState<"header" | "deliveryAddress" | "addRow" | "receive" | null>(null);
   const dims = useDimensions();
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowPending, setRowPending] = useState(false);
@@ -153,6 +154,8 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
       .catch(() => {});
   }, [editingRowId, editQuantity, editUnitId, editUnitOptions, editPriceTouched, rows, order.supplierId, order.currency]);
 
+  const canInkop = useCan()(["inkop"]);
+  const hasLego = rows.some((r) => r.moOperationId !== null);
   const receivable = rows.filter((r) => Number(r.quantityReceived) < Number(r.quantityOrdered));
   // Quantity and price are both stored in the article's base unit, so the
   // line amount is the same number whichever unit the row is displayed in.
@@ -225,7 +228,7 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
       });
       router.refresh();
     } catch (err) {
-      setRowError(err instanceof Error ? err.message : "Kunde inte ta bort raden");
+      setRowError(apiErrorMessage(err, "Kunde inte ta bort raden"));
     } finally {
       setRowPending(false);
     }
@@ -261,6 +264,20 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           { label: "Leveransvillkor", value: termsLabel(order.deliveryTermCode, order.deliveryTermName) },
           { label: "Betalningsvillkor", value: termsLabel(order.paymentTermCode, order.paymentTermName) },
           { label: "Speditör", value: termsLabel(order.carrierCode, order.carrierName) },
+          {
+            label: "Leveransadress",
+            wide: true,
+            value: (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                {formatDeliveryAddress(order.deliveryAddress)}
+                {rowsEditable && (
+                  <Button type="button" size="small" variant="ghost" onClick={() => setModal("deliveryAddress")}>
+                    Ändra
+                  </Button>
+                )}
+              </div>
+            ),
+          },
         ]}
         note={order.note}
         onEdit={rowsEditable ? () => setModal("header") : undefined}
@@ -357,6 +374,9 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
                       <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
                         Lego för {row.moOrderNumber} · Op {row.moOperationSequenceNo}
                         {row.moOperationDescription ? ` · ${row.moOperationDescription}` : ""}
+                        {Number(row.quantityDispatched) > 0
+                          ? ` — Skickat ${formatQuantity(toUnitQuantity(Number(row.quantityDispatched), row.unitFactor))} ${row.unitCode}`
+                          : ""}
                         {editingRowId !== row.id && row.setupPrice != null
                           ? ` — Ställpris ${formatMoney(Number(row.setupPrice))} ${order.currency}`
                           : ""}
@@ -521,6 +541,12 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
           </Button>
         )}
 
+        {hasLego && rowsEditable && canInkop && (
+          <Link href={`/inkop/avsandning?order=${order.id}`} className={`${buttonStyles.button} ${buttonStyles.secondary}`}>
+            Avsändning
+          </Link>
+        )}
+
         {(order.status === "confirmed" || order.status === "partially_received") && (
           <>
             {receivable.length > 0 && (
@@ -549,6 +575,10 @@ export function PurchaseOrderDetail({ order, rows, locations, registers }: Purch
 
       <Modal open={modal === "header"} onClose={() => setModal(null)} title="Ändra orderhuvud">
         <EditHeaderForm order={order} registers={registers} onDone={refresh} onCancel={() => setModal(null)} />
+      </Modal>
+
+      <Modal open={modal === "deliveryAddress"} onClose={() => setModal(null)} title="Leveransadress">
+        <DeliveryAddressForm order={order} onDone={refresh} onCancel={() => setModal(null)} />
       </Modal>
 
       <Modal open={modal === "addRow"} onClose={() => setModal(null)} title="Lägg till rad">

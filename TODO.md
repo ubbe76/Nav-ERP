@@ -126,7 +126,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Avsändning till legoleverantör** — en rutin för att rapportera att godset har skickats till legoleverantören. I samma rutin skrivs **pallkort till legoleverantör** ut med inköpsordernummer, typ av ytbehandling (färg som alternativ vid lackering) och den artikel- och företagsinformation som behövs. På inköpsordern ska man kunna välja en annan leveransadress än företagets, t.ex. när legoleverantören ska skicka direkt till företagets kund; annars visas företagets leveransadress. Omfattningen är inte specad än.
 - [ ] **Produkter i arbete (PIA) per datum** — rapport över öppna TO:ers uttagna material och rapporterade tid minus inlevererat, plus ett bokslutssteg mot 1440 → [#25](https://github.com/ubbe76/Nav-ERP/issues/25). Hemsidans svar om lagret i bokslutet säger att pågående tillverkning bokförs med eget verifikat — ändra det när punkten byggs.
 - [ ] **D3 Spårbarhet batch/serienr** (L) — vid behov, senare → [#8](https://github.com/ubbe76/Nav-ERP/issues/8) *(hemsidan, under både Tillverkning och Lager)*
 - [ ] **Koppling mellan en TO och dess halvfabrikats TO:er (pegging)** → [#9](https://github.com/ubbe76/Nav-ERP/issues/9) *(hemsidan)*

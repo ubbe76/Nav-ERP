@@ -2,12 +2,15 @@ import { and, asc, count, desc, eq, exists, getTableColumns, ilike, inArray, isN
 import { legoOneOffSql } from "../../manufacturing/repository/lego-one-off.js";
 import { alias } from "drizzle-orm/pg-core";
 import { loadPriceBreaks, replacePriceBreaks } from "./price-breaks.js";
+import { dispatchedQuantitySql } from "./dispatched-quantity.js";
 import { loadDeliveryContext } from "../../system/repository/delivery-context.js";
 import {
   articleSupplierPriceHistory,
   articleSuppliers,
   articles,
   carriers,
+  customerDeliveryAddresses,
+  customers,
   projects,
   deliveryTerms,
   inquiries,
@@ -15,11 +18,15 @@ import {
   manufacturingOrders,
   moOperations,
   paymentTerms,
+  purchaseOrderDispatchRows,
+  purchaseOrderDispatches,
   purchaseOrderRows,
   purchaseOrders,
   purchaseReceipts,
   routingOperationFiles,
   routingOperations,
+  salesOrderRows,
+  salesOrders,
   stockLocations,
   stockTransactions,
   supplierContacts,
@@ -38,6 +45,7 @@ import {
   type CreateDeliveryAddressInput,
   type CreateInquiryInput,
   type CreateInquiryRowInput,
+  type CreatePurchaseDispatchInput,
   type CreatePurchaseOrderInput,
   type CreatePurchaseOrderRowInput,
   type CreateSupplierInput,
@@ -115,7 +123,7 @@ export interface LegoOperationRef {
 
 export type PurchaseRowMutationResult =
   | { ok: true; row: typeof purchaseOrderRows.$inferSelect | null; orderStatus: PurchaseOrderStatus }
-  | { ok: false; reason: "row_not_found" | "quantity_below_received" | "row_has_receipts" };
+  | { ok: false; reason: "row_not_found" | "quantity_below_received" | "row_has_receipts" | "row_has_dispatches" };
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -168,6 +176,44 @@ export type UndoReceiptResult =
   | { ok: false; reason: "insufficient_stock"; available: number; required: number };
 
 export function createPurchaseRepository(db: Db) {
+  // The dispatch rows of one order, joined with their IO row, article, unit
+  // and lego reference — listDispatches and the pallet card share it.
+  async function dispatchRowsByOrder(orderId: string) {
+    const rowUnits = alias(units, "row_units");
+    return db
+      .select({
+        id: purchaseOrderDispatchRows.id,
+        dispatchId: purchaseOrderDispatchRows.dispatchId,
+        purchaseOrderRowId: purchaseOrderDispatchRows.purchaseOrderRowId,
+        quantity: purchaseOrderDispatchRows.quantity,
+        parcels: purchaseOrderDispatchRows.parcels,
+        unitFactor: purchaseOrderRows.unitFactor,
+        unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
+        unitCodeEn: sql<string | null>`case when ${rowUnits.id} is null then ${units.codeEn} else ${rowUnits.codeEn} end`,
+        articleId: articles.id,
+        articleNumber: articles.articleNumber,
+        articleName: articles.name,
+        articleNameEn: articles.nameEn,
+        articleSurfaceTreatment: articles.surfaceTreatment,
+        articleColour: articles.colour,
+        moOrderNumber: manufacturingOrders.orderNumber,
+        moOperationSequenceNo: moOperations.sequenceNo,
+        moOperationDescription: moOperations.description,
+        rowCreatedAt: purchaseOrderRows.createdAt,
+      })
+      .from(purchaseOrderDispatchRows)
+      .innerJoin(purchaseOrderDispatches, eq(purchaseOrderDispatches.id, purchaseOrderDispatchRows.dispatchId))
+      .innerJoin(purchaseOrderRows, eq(purchaseOrderRows.id, purchaseOrderDispatchRows.purchaseOrderRowId))
+      .innerJoin(articles, eq(articles.id, purchaseOrderRows.articleId))
+      .innerJoin(units, eq(units.id, articles.unitId))
+      .leftJoin(rowUnits, eq(rowUnits.id, purchaseOrderRows.unitId))
+      .leftJoin(moOperations, eq(moOperations.id, purchaseOrderRows.moOperationId))
+      .leftJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+      .where(eq(purchaseOrderDispatches.purchaseOrderId, orderId))
+      // The IO's row order (entry order), as the card lists the rows.
+      .orderBy(asc(purchaseOrderRows.createdAt), asc(purchaseOrderRows.id), asc(purchaseOrderDispatchRows.id));
+  }
+
   return {
     // The supplier number comes from the "supplier" number series unless the
     // caller supplied one, in which case it's inserted as-is and never
@@ -763,11 +809,24 @@ export function createPurchaseRepository(db: Db) {
 
     async updatePurchaseOrderHeader(id: string, input: UpdatePurchaseOrderHeaderInput) {
       // bumpRevision is a directive, not a column — strip it before the spread.
-      const { bumpRevision, ...fields } = input;
+      const { bumpRevision, deliveryAddress, ...fields } = input;
+      // Leveransadress: an object writes the five snapshot columns, null
+      // clears them all (the company's address again), omitted keeps them.
+      const addressColumns =
+        deliveryAddress === undefined
+          ? {}
+          : {
+              deliveryName: deliveryAddress?.name ?? null,
+              deliveryAddress: deliveryAddress?.address ?? null,
+              deliveryPostalCode: deliveryAddress?.postalCode ?? null,
+              deliveryCity: deliveryAddress?.city ?? null,
+              deliveryCountry: deliveryAddress?.country ?? null,
+            };
       const [row] = await db
         .update(purchaseOrders)
         .set({
           ...fields,
+          ...addressColumns,
           // The numeric column wants a string; undefined keeps the current value.
           exchangeRate: fields.exchangeRate === undefined ? undefined : String(fields.exchangeRate),
           revision: bumpRevision !== false ? sql`${purchaseOrders.revision} + 1` : undefined,
@@ -961,6 +1020,26 @@ export function createPurchaseRepository(db: Db) {
           .for("update");
         if (!row) return { ok: false, reason: "row_not_found" };
         if (Number(row.quantityReceived) > 0) return { ok: false, reason: "row_has_receipts" };
+        // Avsändning lego: a row with a live dispatch stays (undo the
+        // dispatch first). Undone dispatches are history only — their rows
+        // go with the IO row, and a dispatch left without rows goes too (the
+        // FK is restrict as a safety net).
+        const dispatchRows = await tx
+          .select({ id: purchaseOrderDispatchRows.id, dispatchId: purchaseOrderDispatchRows.dispatchId, undoneAt: purchaseOrderDispatches.undoneAt })
+          .from(purchaseOrderDispatchRows)
+          .innerJoin(purchaseOrderDispatches, eq(purchaseOrderDispatches.id, purchaseOrderDispatchRows.dispatchId))
+          .where(eq(purchaseOrderDispatchRows.purchaseOrderRowId, rowId));
+        if (dispatchRows.some((d) => d.undoneAt === null)) return { ok: false, reason: "row_has_dispatches" };
+        if (dispatchRows.length > 0) {
+          await tx.delete(purchaseOrderDispatchRows).where(eq(purchaseOrderDispatchRows.purchaseOrderRowId, rowId));
+          const dispatchIds = [...new Set(dispatchRows.map((d) => d.dispatchId))];
+          await tx.delete(purchaseOrderDispatches).where(
+            and(
+              inArray(purchaseOrderDispatches.id, dispatchIds),
+              not(exists(tx.select({ one: sql`1` }).from(purchaseOrderDispatchRows).where(eq(purchaseOrderDispatchRows.dispatchId, purchaseOrderDispatches.id))))
+            )
+          );
+        }
 
         await tx.delete(purchaseOrderRows).where(eq(purchaseOrderRows.id, rowId));
 
@@ -980,6 +1059,8 @@ export function createPurchaseRepository(db: Db) {
           // A tjänst has nothing to scan — Inleverans leaves it out of the
           // counting (skanning, #4).
           articleType: articles.type,
+          // Skickat (avsändning lego): derived, base unit like quantityReceived.
+          quantityDispatched: dispatchedQuantitySql(),
           // The unit the row displays in: the entered unit, falling back to
           // the article's base unit.
           unitCode: sql<string>`coalesce(${rowUnits.code}, ${units.code})`,
@@ -1258,6 +1339,202 @@ export function createPurchaseRepository(db: Db) {
 
         return { ok: true, receipt: undone!, row: updatedRow!, statusBefore: order.status, orderStatus };
       });
+    },
+
+    // --- Avsändning till legoleverantör (dispatches) ---
+
+    // The sales orders the order's lego rows belong to (through the TO's
+    // sales_order_row_id), each with the customer and the order's chosen
+    // delivery address — the IO card's "Hämta från kundorder" choices.
+    async linkedSalesOrders(orderId: string) {
+      const rows = await db
+        .selectDistinctOn([salesOrders.id], {
+          salesOrderId: salesOrders.id,
+          orderNumber: salesOrders.orderNumber,
+          customerId: customers.id,
+          customerName: customers.name,
+          deliveryAddressLabel: customerDeliveryAddresses.label,
+          deliveryAddress: customerDeliveryAddresses.address,
+          deliveryPostalCode: customerDeliveryAddresses.postalCode,
+          deliveryCity: customerDeliveryAddresses.city,
+          deliveryCountry: customerDeliveryAddresses.country,
+        })
+        .from(purchaseOrderRows)
+        .innerJoin(moOperations, eq(moOperations.id, purchaseOrderRows.moOperationId))
+        .innerJoin(manufacturingOrders, eq(manufacturingOrders.id, moOperations.manufacturingOrderId))
+        .innerJoin(salesOrderRows, eq(salesOrderRows.id, manufacturingOrders.salesOrderRowId))
+        .innerJoin(salesOrders, eq(salesOrders.id, salesOrderRows.salesOrderId))
+        .innerJoin(customers, eq(customers.id, salesOrders.customerId))
+        .leftJoin(customerDeliveryAddresses, eq(customerDeliveryAddresses.id, salesOrders.deliveryAddressId))
+        .where(eq(purchaseOrderRows.purchaseOrderId, orderId))
+        .orderBy(asc(salesOrders.id));
+      return rows
+        .sort((a, b) => a.orderNumber.localeCompare(b.orderNumber, "sv", { numeric: true }))
+        .map((r) => ({
+          salesOrderId: r.salesOrderId,
+          orderNumber: r.orderNumber,
+          customerId: r.customerId,
+          customerName: r.customerName,
+          // The order's chosen delivery address (null = none chosen; the
+          // card then offers the customer's own addresses instead).
+          deliveryAddress: r.deliveryAddress
+            ? {
+                label: r.deliveryAddressLabel!,
+                address: r.deliveryAddress,
+                postalCode: r.deliveryPostalCode,
+                city: r.deliveryCity,
+                country: r.deliveryCountry,
+              }
+            : null,
+        }));
+    },
+
+    // Rapportera avsändning: one dispatch with its rows in one transaction.
+    // Quantities arrive in the base unit (the web converts, as for a goods
+    // receipt). Lock order row → order like receiveGoods; the rows are
+    // locked in id order so two dispatches of the same rows never deadlock.
+    // No stock effect and no status change — only the log row.
+    async createDispatch(
+      orderId: string,
+      input: CreatePurchaseDispatchInput,
+      createdBy: string
+    ): Promise<
+      | { ok: true; dispatch: typeof purchaseOrderDispatches.$inferSelect; rows: (typeof purchaseOrderDispatchRows.$inferSelect)[] }
+      | { ok: false; reason: "order_not_found" | "invalid_status" }
+      | { ok: false; reason: "row_not_found" | "row_not_lego"; rowId: string }
+    > {
+      return db.transaction(async (tx) => {
+        // Existence first, WITHOUT a lock (the lock order stays row → order
+        // below) — otherwise an unknown order reads as "row not found".
+        const [exists_] = await tx.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.id, orderId));
+        if (!exists_) return { ok: false, reason: "order_not_found" };
+        const rowIds = [...new Set(input.rows.map((r) => r.rowId))].sort();
+        const rows = await tx
+          .select()
+          .from(purchaseOrderRows)
+          .where(and(inArray(purchaseOrderRows.id, rowIds), eq(purchaseOrderRows.purchaseOrderId, orderId)))
+          .orderBy(asc(purchaseOrderRows.id))
+          .for("update");
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        for (const rowId of rowIds) {
+          const row = byId.get(rowId);
+          if (!row) return { ok: false, reason: "row_not_found", rowId };
+          if (row.moOperationId === null) return { ok: false, reason: "row_not_lego", rowId };
+        }
+        const [order] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, orderId)).for("update");
+        if (!order) return { ok: false, reason: "order_not_found" };
+        if (order.status !== "draft" && order.status !== "confirmed" && order.status !== "partially_received") {
+          return { ok: false, reason: "invalid_status" };
+        }
+        const [dispatch] = await tx
+          .insert(purchaseOrderDispatches)
+          .values({ purchaseOrderId: orderId, dispatchedBy: createdBy, note: input.note ?? null })
+          .returning();
+        const dispatchRows = await tx
+          .insert(purchaseOrderDispatchRows)
+          .values(
+            input.rows.map((r) => ({
+              dispatchId: dispatch!.id,
+              purchaseOrderRowId: r.rowId,
+              quantity: String(round4(r.quantity)),
+              parcels: r.parcels,
+            }))
+          )
+          .returning();
+        return { ok: true, dispatch: dispatch!, rows: dispatchRows };
+      });
+    },
+
+    // Ångra avsändning: stamps the dispatch; nothing else to reverse. The
+    // UPDATE is conditioned on undone_at IS NULL so two concurrent undos
+    // cannot both succeed.
+    async undoDispatch(
+      orderId: string,
+      dispatchId: string,
+      undoneBy: string
+    ): Promise<{ ok: true; dispatch: typeof purchaseOrderDispatches.$inferSelect } | { ok: false; reason: "not_found" | "already_undone" }> {
+      return db.transaction(async (tx) => {
+        const [dispatch] = await tx
+          .select()
+          .from(purchaseOrderDispatches)
+          .where(and(eq(purchaseOrderDispatches.id, dispatchId), eq(purchaseOrderDispatches.purchaseOrderId, orderId)))
+          .for("update");
+        if (!dispatch) return { ok: false, reason: "not_found" };
+        if (dispatch.undoneAt) return { ok: false, reason: "already_undone" };
+        const [undone] = await tx
+          .update(purchaseOrderDispatches)
+          .set({ undoneAt: new Date(), undoneBy })
+          .where(and(eq(purchaseOrderDispatches.id, dispatchId), isNull(purchaseOrderDispatches.undoneAt)))
+          .returning();
+        if (!undone) return { ok: false, reason: "already_undone" };
+        return { ok: true, dispatch: undone };
+      });
+    },
+
+    // Avsändningar on the IO card and in the routine, newest first — undone
+    // ones included — each with its rows: the article, the lego reference
+    // (TO · op · description), the quantity (base unit, with the row's
+    // unit snapshot so the reader can show the row's unit) and parcels.
+    async listDispatches(orderId: string) {
+      const undoer = alias(users, "undoer");
+      const [dispatches, rows] = await Promise.all([
+        db
+          .select({
+            id: purchaseOrderDispatches.id,
+            dispatchedAt: purchaseOrderDispatches.dispatchedAt,
+            dispatchedByName: users.name,
+            note: purchaseOrderDispatches.note,
+            undoneAt: purchaseOrderDispatches.undoneAt,
+            undoneByName: undoer.name,
+          })
+          .from(purchaseOrderDispatches)
+          .leftJoin(users, eq(users.id, purchaseOrderDispatches.dispatchedBy))
+          .leftJoin(undoer, eq(undoer.id, purchaseOrderDispatches.undoneBy))
+          .where(eq(purchaseOrderDispatches.purchaseOrderId, orderId))
+          .orderBy(desc(purchaseOrderDispatches.dispatchedAt), desc(purchaseOrderDispatches.id)),
+        dispatchRowsByOrder(orderId),
+      ]);
+      return dispatches.map((d) => ({ ...d, rows: rows.filter((r) => r.dispatchId === d.id) }));
+    },
+
+    // One dispatch for the pallet card: the order (number, delivery address
+    // snapshot), the supplier (name, language, its default delivery address
+    // else its own address) and the rows as listDispatches gives them.
+    async findDispatchForPalletCard(orderId: string, dispatchId: string) {
+      const [head] = await db
+        .select({
+          id: purchaseOrderDispatches.id,
+          dispatchedAt: purchaseOrderDispatches.dispatchedAt,
+          dispatchedByName: users.name,
+          undoneAt: purchaseOrderDispatches.undoneAt,
+          orderNumber: purchaseOrders.orderNumber,
+          deliveryName: purchaseOrders.deliveryName,
+          deliveryAddress: purchaseOrders.deliveryAddress,
+          deliveryPostalCode: purchaseOrders.deliveryPostalCode,
+          deliveryCity: purchaseOrders.deliveryCity,
+          deliveryCountry: purchaseOrders.deliveryCountry,
+          supplierName: suppliers.name,
+          supplierLanguage: suppliers.language,
+          supplierAddress: suppliers.address,
+          supplierPostalCode: suppliers.postalCode,
+          supplierCity: suppliers.city,
+          supplierCountry: suppliers.country,
+          supplierDeliveryAddress: supplierDeliveryAddresses.address,
+          supplierDeliveryPostalCode: supplierDeliveryAddresses.postalCode,
+          supplierDeliveryCity: supplierDeliveryAddresses.city,
+        })
+        .from(purchaseOrderDispatches)
+        .innerJoin(purchaseOrders, eq(purchaseOrders.id, purchaseOrderDispatches.purchaseOrderId))
+        .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+        .leftJoin(users, eq(users.id, purchaseOrderDispatches.dispatchedBy))
+        .leftJoin(
+          supplierDeliveryAddresses,
+          and(eq(supplierDeliveryAddresses.supplierId, suppliers.id), eq(supplierDeliveryAddresses.isDefault, true))
+        )
+        .where(and(eq(purchaseOrderDispatches.id, dispatchId), eq(purchaseOrderDispatches.purchaseOrderId, orderId)));
+      if (!head) return null;
+      const rows = (await dispatchRowsByOrder(orderId)).filter((r) => r.dispatchId === dispatchId);
+      return { ...head, rows };
     },
 
     // --- Article supplier catalog (leverantörskatalog per artikel) ---

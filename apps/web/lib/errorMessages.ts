@@ -354,6 +354,7 @@ const MESSAGES: Record<string, MessageEntry> = {
       : "Levererat antal skulle överskrida beställt antal på raden.";
   },
   "row-has-receipts": "Raden har redan inleveranser och kan inte tas bort.",
+  "purchase-order-row-has-dispatches": "Raden har en avsändning till legoleverantören — ångra avsändningen först.",
   // A goods receipt carries the system setting Tillåten överleverans it broke
   // (allowedPercent > 0 ⇒ name it); a row edit below the received quantity
   // and a receipt at 0 % read the plain sentence.
@@ -554,6 +555,13 @@ const MESSAGES: Record<string, MessageEntry> = {
   "purchase-receipt-stock-missing": serverMessage("De inlevererade varorna finns inte kvar på lagerplatsen."),
   "purchase-receipt-manufacturing-order-locked":
     "Tillverkningsordern som legoraden hör till är inte längre öppen — inleveransen kan inte ångras.",
+  // Avsändning lego
+  "purchase-dispatch-row-not-lego": "Bara legorader kan skickas till leverantören — raden är inte kopplad till en operation.",
+  "purchase-dispatch-not-found": "Avsändningen finns inte — ladda om sidan.",
+  "purchase-dispatch-already-undone": "Avsändningen är redan ångrad — ladda om sidan.",
+  "purchase-dispatch-undone": "Avsändningen är ångrad och har inget pallkort.",
+  "purchase-order-not-found": "Inköpsordern finns inte — ladda om sidan.",
+  "purchase-order-row-not-found": "Orderraden finns inte — ladda om sidan.",
   // Ångra utleverans
   "delivery-not-found": "Följesedeln finns inte — ladda om sidan.",
   "delivery-row-not-found": "Följesedelsraden finns inte — ladda om sidan.",

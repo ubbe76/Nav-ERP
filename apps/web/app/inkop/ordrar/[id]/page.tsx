@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { AppShell } from "../../../../components/AppShell";
 import { PurchaseOrderDetail } from "../../../../components/purchase/PurchaseOrderDetail";
+import { DispatchesSection } from "../../../../components/purchase/DispatchesSection";
 import { ReceiptsSection } from "../../../../components/purchase/ReceiptsSection";
 import { MailSection } from "../../../../components/mail/MailSection";
 import { DeviationsSection } from "../../../../components/quality/DeviationsSection";
@@ -11,6 +12,7 @@ import { documentLanguageOf } from "../../../../lib/documentLanguage";
 import { apiGet } from "../../../../lib/api";
 import { countDrawings, getDefaultRecipient, getDocumentEmails } from "../../../../lib/mail";
 import type {
+  PurchaseDispatch,
   PurchaseOrder,
   PurchaseOrderRow,
   PurchaseReceipt,
@@ -28,9 +30,10 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
   const order = await apiGet<PurchaseOrder>(`/api/v1/purchase-orders/${params.id}`, cookieHeader).catch(() => null);
   if (!order) notFound();
 
-  const [rows, receipts, locations, emails, supplier, deliveryTerms, paymentTerms, carriers] = await Promise.all([
+  const [rows, receipts, dispatches, locations, emails, supplier, deliveryTerms, paymentTerms, carriers] = await Promise.all([
     apiGet<PurchaseOrderRow[]>(`/api/v1/purchase-orders/${params.id}/rows`, cookieHeader),
     apiGet<PurchaseReceipt[]>(`/api/v1/purchase-orders/${params.id}/receipts`, cookieHeader),
+    apiGet<PurchaseDispatch[]>(`/api/v1/purchase-orders/${params.id}/dispatches`, cookieHeader),
     apiGet<StockLocation[]>("/api/v1/stock/locations", cookieHeader),
     getDocumentEmails(order.id, cookieHeader),
     apiGet<Supplier>(`/api/v1/suppliers/${order.supplierId}`, cookieHeader).catch(() => null),
@@ -64,6 +67,8 @@ export default async function PurchaseOrderDetailPage(props: { params: Promise<{
       />
 
       <ReceiptsSection orderId={order.id} orderStatus={order.status} receipts={receipts} rows={rows} />
+
+      <DispatchesSection orderId={order.id} dispatches={dispatches} hideWhenEmpty />
 
       <DeviationsSection
         filter={{ purchaseOrderId: order.id }}

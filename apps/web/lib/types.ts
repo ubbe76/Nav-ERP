@@ -637,6 +637,13 @@ export interface PurchaseOrder extends DocumentTermsFields {
   // Projekt: follows along when the order is the basis of a supplier invoice.
   projectId?: string | null;
   project?: DimensionRef | null;
+  // Leveransadress (GET :id only): the order's own snapshot, null = the
+  // company's address (Företagets leveransadress). PATCH with an object or
+  // null; the header's status guard and revision bump apply.
+  deliveryAddress?: PurchaseOrderDeliveryAddress | null;
+  // GET :id only: the sales orders the lego rows' TOs belong to — the
+  // card's "Hämta från kundorder (KO-…)" choices with that order's address.
+  linkedSalesOrders?: LinkedSalesOrder[];
   // Bumped on every content change (header/terms/rows).
   revision: number;
   createdBy: string | null;
@@ -719,6 +726,24 @@ export interface LegoOperationOption {
   unitPrice: string | null;
 }
 
+// Snapshot address on a purchase order (avsändning lego).
+export interface PurchaseOrderDeliveryAddress {
+  name: string;
+  address: string;
+  postalCode: string | null;
+  city: string | null;
+  country: string;
+}
+
+export interface LinkedSalesOrder {
+  salesOrderId: string;
+  orderNumber: string;
+  customerId: string;
+  customerName: string;
+  // The sales order's chosen delivery address; null = none chosen.
+  deliveryAddress: { label: string; address: string; postalCode: string | null; city: string | null; country: string | null } | null;
+}
+
 export interface PurchaseOrderRow {
   id: string;
   purchaseOrderId: string;
@@ -731,6 +756,9 @@ export interface PurchaseOrderRow {
   // unit the row was entered in (factor null = base unit).
   quantityOrdered: string;
   quantityReceived: string;
+  // Skickat (avsändning lego): derived Σ over dispatches not undone, base
+  // unit like quantityReceived; "0" on ordinary rows.
+  quantityDispatched: string;
   unitPrice: string;
   unitId: string | null;
   unitFactor: string | null;
@@ -750,6 +778,10 @@ export interface PurchaseOrderRow {
   moOperationSequenceNo: number | null;
   moShowNetWeight: boolean | null;
   articleWeight: string | null;
+  // The article's Ytbehandling/Färg (live) — shown on lego rows in
+  // Avsändning lego and printed on the IO PDF / subcontractor pallet card.
+  articleSurfaceTreatment: string | null;
+  articleColour: string | null;
   createdAt: string;
 }
 
@@ -767,6 +799,33 @@ export interface PurchaseReceipt {
   createdByName: string | null;
   undoneAt: string | null;
   undoneByName: string | null;
+}
+
+// Avsändning till legoleverantör (GET /purchase-orders/:id/dispatches) —
+// Avsändningar on the IO card and in the routine, newest first, undone ones
+// included. Row quantities are in the ROW's unit (`unit`), unlike the
+// receipts above; parcels = kolli (the pallet card dialog's prefill).
+export interface PurchaseDispatch {
+  id: string;
+  dispatchedAt: string;
+  dispatchedByName: string | null;
+  note: string | null;
+  undoneAt: string | null;
+  undoneByName: string | null;
+  rows: PurchaseDispatchRow[];
+}
+
+export interface PurchaseDispatchRow {
+  id: string;
+  purchaseOrderRowId: string;
+  articleId: string;
+  articleNumber: string;
+  articleName: string;
+  // "Lego för TO-2046 · Op 20 · Lackering"; null when the operation is gone.
+  legoReference: string | null;
+  quantity: number;
+  unit: string;
+  parcels: number;
 }
 
 // Staffelsteg on a catalog row: an absolute price valid from `fromQuantity`
@@ -2331,6 +2390,8 @@ export interface LegoPurchaseOperation {
     status: PurchaseOrderStatus;
     quantityOrdered: number;
     quantityReceived: number;
+    // Skickat to the supplier (avsändning lego), base unit.
+    dispatchedQuantity: number;
     // The row's own Önskat leveransdatum, else the order's.
     expectedDeliveryDate: string | null;
   }[];
@@ -3122,6 +3183,11 @@ export interface CompanyInfo {
   address: string | null;
   postalCode: string | null;
   city: string | null;
+  // Leveransadress (godsmottagning): where suppliers deliver when it
+  // differs from the company address; blank = the company address.
+  deliveryAddress: string | null;
+  deliveryPostalCode: string | null;
+  deliveryCity: string | null;
   phone: string | null;
   email: string | null;
   website: string | null;
@@ -4781,6 +4847,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   file_added: "Underlag uppladdat",
   file_deleted: "Underlag borttaget",
   goods_received: "Gods mottaget",
+  goods_dispatched: "Gods skickat till legoleverantör",
+  goods_dispatch_undone: "Avsändning ångrad",
   credit_created: "Kreditfaktura skapad",
   reminder_sent: "Påminnelse skickad",
   logo_updated: "Logotyp uppdaterad",

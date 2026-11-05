@@ -8,8 +8,10 @@ import {
   createDeliveryAddressSchema,
   createInquiryRowSchema,
   createInquirySchema,
+  createPurchaseDispatchSchema,
   createPurchaseOrderRowSchema,
   createPurchaseOrderSchema,
+  dispatchPalletCardQuerySchema,
   createSupplierSchema,
   idListQuerySchema,
   listGoodsReceiptsQuerySchema,
@@ -45,7 +47,13 @@ import {
   InvalidSupplierPaymentDetailsError,
   MoOperationNotFoundError,
   OverReceiptError,
+  PurchaseDispatchAlreadyUndoneError,
+  PurchaseDispatchNotFoundError,
+  PurchaseDispatchRowNotInDispatchError,
+  PurchaseDispatchRowNotLegoError,
+  PurchaseDispatchUndoneError,
   PurchaseOrderNotFoundError,
+  PurchaseOrderRowHasDispatchesError,
   PurchaseOrderRowNotFoundError,
   PurchaseReceiptAlreadyUndoneError,
   PurchaseReceiptManufacturingOrderLockedError,
@@ -504,7 +512,8 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
         if (
           err instanceof InvalidStatusTransitionError ||
           err instanceof OverReceiptError ||
-          err instanceof RowHasReceiptsError
+          err instanceof RowHasReceiptsError ||
+          err instanceof PurchaseOrderRowHasDispatchesError
         ) {
           return reply.code(409).send(errorBody(err));
         }
@@ -639,6 +648,87 @@ export async function purchaseRoutes(app: FastifyInstance, opts: { service: Purc
         // goods were booked (a refusal in mode "block" comes AFTER the
         // receipt, as the operationReport warning on the 201).
         if (err instanceof MaterialShortageError) return reply.code(409).send(materialShortageBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // --- Avsändning till legoleverantör ---
+
+  // Rapportera avsändning: { rows: [{ rowId, quantity (base unit), parcels }],
+  // note? } on a draft/confirmed/partially received order; every row must be
+  // a lego row of the order. Answers the dispatch with its rows (201); its
+  // id addresses the pallet card. Same access as receiving (the module's
+  // write rule) — no readOnlySafe, it writes the log.
+  app.post<{ Params: { id: string } }>("/purchase-orders/:id/dispatches", async (req, reply) => {
+    const input = createPurchaseDispatchSchema.parse(req.body);
+    try {
+      const dispatch = await service.createDispatch(req.params.id, input, req.user!.id);
+      return reply.code(201).send(dispatch);
+    } catch (err) {
+      if (err instanceof PurchaseOrderNotFoundError || err instanceof PurchaseOrderRowNotFoundError) {
+        return reply.code(404).send(errorBody(err));
+      }
+      if (err instanceof PurchaseDispatchRowNotLegoError) return reply.code(400).send(errorBody(err));
+      if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Avsändningar — the log, undone dispatches included, newest first.
+  app.get<{ Params: { id: string } }>("/purchase-orders/:id/dispatches", async (req, reply) => {
+    try {
+      return await service.listDispatches(req.params.id);
+    } catch (err) {
+      if (err instanceof PurchaseOrderNotFoundError) return reply.code(404).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Ångra avsändning — corrects the log; no order status guard.
+  app.post<{ Params: { id: string; dispatchId: string } }>(
+    "/purchase-orders/:id/dispatches/:dispatchId/undo",
+    async (req, reply) => {
+      try {
+        return await service.undoDispatch(req.params.id, req.params.dispatchId, req.user!.id);
+      } catch (err) {
+        if (err instanceof PurchaseDispatchNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof PurchaseDispatchAlreadyUndoneError) return reply.code(409).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // The dispatch's rows for the pallet card dialog — same shape as
+  // GET /deliveries/:id/rows, plus parcels (the kolli prefill).
+  app.get<{ Params: { id: string; dispatchId: string } }>(
+    "/purchase-orders/:id/dispatches/:dispatchId/rows",
+    async (req, reply) => {
+      try {
+        return await service.dispatchRows(req.params.id, req.params.dispatchId);
+      } catch (err) {
+        if (err instanceof PurchaseDispatchNotFoundError) return reply.code(404).send(errorBody(err));
+        throw err;
+      }
+    }
+  );
+
+  // Pallkort till legoleverantör — ?row=<dispatchRowId>:<antal>,<antal>
+  // repeated, as /deliveries/:id/pallet-card; omitted = every row, one card
+  // per parcel. Read access (printing writes nothing).
+  app.get<{ Params: { id: string; dispatchId: string } }>(
+    "/purchase-orders/:id/dispatches/:dispatchId/pallet-card",
+    async (req, reply) => {
+      const { row } = dispatchPalletCardQuerySchema.parse(req.query);
+      try {
+        const { filename, pdf: content } = await service.dispatchPalletCardPdf(req.params.id, req.params.dispatchId, row);
+        reply.header("Content-Type", "application/pdf");
+        reply.header("Content-Disposition", contentDisposition(filename));
+        return reply.send(content);
+      } catch (err) {
+        if (err instanceof PurchaseDispatchNotFoundError) return reply.code(404).send(errorBody(err));
+        if (err instanceof PurchaseDispatchRowNotInDispatchError) return reply.code(400).send(errorBody(err));
+        if (err instanceof PurchaseDispatchUndoneError) return reply.code(409).send(errorBody(err));
         throw err;
       }
     }

@@ -16,6 +16,7 @@ import {
   type Db,
 } from "@navet/db";
 import { legoOrderedQuantitySql } from "./lego-one-off.js";
+import { dispatchedQuantitySql } from "../../purchase/repository/dispatched-quantity.js";
 
 const OPEN_INQUIRY = ["draft", "sent", "answered"] as const;
 
@@ -28,6 +29,8 @@ export interface LegoPurchaseOperation {
     status: string;
     quantityOrdered: number;
     quantityReceived: number;
+    // Skickat (avsändning lego): derived, base unit — dispatchedQuantitySql.
+    dispatchedQuantity: number;
     // The row's own Önskat leveransdatum, else the order's.
     expectedDeliveryDate: string | null;
   }[];
@@ -53,6 +56,7 @@ export async function listLegoPurchases(db: Db, manufacturingOrderId: string): P
         status: purchaseOrders.status,
         quantityOrdered: purchaseOrderRows.quantityOrdered,
         quantityReceived: purchaseOrderRows.quantityReceived,
+        dispatchedQuantity: dispatchedQuantitySql(),
         expectedDeliveryDate: sql<string | null>`coalesce(${purchaseOrderRows.expectedDeliveryDate}, ${purchaseOrders.expectedDeliveryDate})`,
       })
       .from(purchaseOrderRows)
@@ -83,6 +87,7 @@ export async function listLegoPurchases(db: Db, manufacturingOrderId: string): P
         status: r.status,
         quantityOrdered: Number(r.quantityOrdered),
         quantityReceived: Number(r.quantityReceived),
+        dispatchedQuantity: Number(r.dispatchedQuantity),
         expectedDeliveryDate: r.expectedDeliveryDate,
       })),
     inquiries: inquiryRowsForOps

@@ -141,3 +141,30 @@ export function pdfRectCount(buffer: Buffer): number {
   }
   return count;
 }
+
+// The rectangles themselves (x, y, width, height in points, y from the TOP
+// of the page — pdfkit flips the page with `1 0 0 -1 0 height cm`): a layout
+// test can prove a frame ends above the fold without rasterizing.
+export function pdfRects(buffer: Buffer): { x: number; y: number; width: number; height: number }[] {
+  const marker = Buffer.from("stream\n");
+  const end = Buffer.from("endstream");
+  const rects: { x: number; y: number; width: number; height: number }[] = [];
+  let offset = 0;
+  while (true) {
+    const start = buffer.indexOf(marker, offset);
+    if (start === -1) break;
+    const from = start + marker.length;
+    const to = buffer.indexOf(end, from);
+    if (to === -1) break;
+    try {
+      const stream = inflateSync(buffer.subarray(from, to)).toString("latin1");
+      for (const [, x, y, width, height] of stream.matchAll(/([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+) re\n/g)) {
+        rects.push({ x: Number(x), y: Number(y), width: Number(width), height: Number(height) });
+      }
+    } catch {
+      // Not a deflate stream — skip.
+    }
+    offset = to + end.length;
+  }
+  return rects;
+}
