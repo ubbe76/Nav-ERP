@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Button } from "../ui/Button";
 import { Checkbox, Field, Input, Select, Textarea, Toggle } from "../ui/Field";
 import { freightModeText } from "../../lib/shipping";
-import { locationOptionLabel, withCurrentLocation } from "../../lib/stockLocations";
 import { apiFetch } from "../../lib/api";
 import {
   ARTICLE_TYPE_LABELS,
@@ -13,7 +12,6 @@ import {
   type ArticleGroup,
   type ArticleUnit,
   type RegisterEntry,
-  type StockLocation,
 } from "../../lib/types";
 import { EnheterSection } from "./EnheterSection";
 import { PriceHistoryButton } from "./PriceHistoryButton";
@@ -39,7 +37,6 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
   const [groupId, setGroupId] = useState(article.groupId ?? "");
   const [articleCodeId, setArticleCodeId] = useState(article.articleCodeId ?? "");
   const [articleCodes, setArticleCodes] = useState<RegisterEntry[]>([]);
-  const [defaultLocationId, setDefaultLocationId] = useState(article.defaultLocationId ?? "");
   const [weight, setWeight] = useState(article.weight ?? "");
   const [length, setLength] = useState(article.length ?? "");
   const [width, setWidth] = useState(article.width ?? "");
@@ -55,7 +52,6 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
   const [palletSpaces, setPalletSpaces] = useState(article.palletSpaces ?? "");
   const [loadingMeters, setLoadingMeters] = useState(article.loadingMeters ?? "");
   const [packageTypes, setPackageTypes] = useState<RegisterEntry[]>([]);
-  const [locations, setLocations] = useState<StockLocation[]>([]);
   const [allUnits, setAllUnits] = useState<RegisterEntry[]>([]);
   const [articleUnits, setArticleUnits] = useState<ArticleUnit[]>([]);
 
@@ -64,7 +60,6 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
   }, [article.id]);
 
   useEffect(() => {
-    apiFetch<StockLocation[]>("/api/v1/stock/locations").then(setLocations).catch(() => setLocations([]));
     apiFetch<RegisterEntry[]>("/api/v1/units").then(setAllUnits).catch(() => setAllUnits([]));
     apiFetch<RegisterEntry[]>("/api/v1/package-types").then(setPackageTypes).catch(() => setPackageTypes([]));
     apiFetch<RegisterEntry[]>("/api/v1/article-codes").then(setArticleCodes).catch(() => setArticleCodes([]));
@@ -114,7 +109,6 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
           salesPrice: salesPrice.trim() === "" ? null : Number(salesPrice),
           groupId: groupId === "" ? null : groupId,
           articleCodeId: articleCodeId === "" ? null : articleCodeId,
-          defaultLocationId: defaultLocationId === "" ? null : defaultLocationId,
           weight: weight.trim() === "" ? null : Number(weight),
           length: length.trim() === "" ? null : Number(length),
           width: width.trim() === "" ? null : Number(width),
@@ -355,28 +349,6 @@ export function AllmantTab({ article, groups }: { article: Article; groups: Arti
           </div>
         </section>
 
-        <section className={styles.section}>
-          <SectionHeading>Lager</SectionHeading>
-          <div className={`${styles.grid} ${styles.gridSingle}`}>
-            <Field label="Lagerplats" htmlFor="defaultLocationId">
-              {/* The article's default location — transactions without an explicit
-                  choice land here; empty = the auto-created "***" location. */}
-              <Select id="defaultLocationId" value={defaultLocationId} onChange={(e) => setDefaultLocationId(e.target.value)}>
-                <option value="">*** (standard)</option>
-                {/* The list only holds active locations. Keep a deactivated one
-                    selectable so opening the card doesn't silently reset it. */}
-                {defaultLocationId && !locations.some((l) => l.id === defaultLocationId) && (
-                  <option value={defaultLocationId}>{article.defaultLocationName ?? "Okänd"} (inaktiv)</option>
-                )}
-                {withCurrentLocation(locations, article.defaultLocationId).map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {locationOptionLabel(l)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-        </section>
 
         <section className={styles.section}>
           <SectionHeading>Vikt & mått</SectionHeading>

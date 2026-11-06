@@ -4,6 +4,7 @@ import { useState } from "react";
 import type {
   Article,
   ArticleGroup,
+  ArticleLocations,
   BomComponent,
   BomTreeNode,
   CostCalculation,
@@ -49,6 +50,7 @@ interface ArticleTabsProps {
   routing: RoutingOperation[];
   workCenters: WorkCenter[];
   groups: ArticleGroup[];
+  articleLocations: ArticleLocations;
 }
 
 export function ArticleTabs({
@@ -60,6 +62,7 @@ export function ArticleTabs({
   routing,
   workCenters,
   groups,
+  articleLocations,
 }: ArticleTabsProps) {
   const tabs = tabsForType(article.type);
   const [activeTab, setActiveTab] = useState<string>("Allmänt");
@@ -108,7 +111,7 @@ export function ArticleTabs({
         />
       )}
       {activeTab === "Inköp" && tabs.includes("Inköp") && <InkopTab articleId={article.id} />}
-      {activeTab === "Lager" && tabs.includes("Lager") && <LagerTab article={article} balances={balances} />}
+      {activeTab === "Lager" && tabs.includes("Lager") && <LagerTab article={article} balances={balances} articleLocations={articleLocations} />}
       {activeTab === "Kalkyl" && (
         <KalkylTab articleId={article.id} calculations={calculations} salesPrice={article.salesPrice} />
       )}

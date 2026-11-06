@@ -32,3 +32,25 @@ export function withCurrentLocation<T extends { id: string; blocked?: boolean }>
 ): T[] {
   return locations.filter((l) => !l.blocked || l.id === currentId);
 }
+
+// Moves the item at `index` one step up (-1) or down (+1); out of range = same list.
+export function moveInList<T>(items: T[], index: number, delta: -1 | 1): T[] {
+  const to = index + delta;
+  if (index < 0 || index >= items.length || to < 0 || to >= items.length) return items;
+  const next = items.slice();
+  [next[index], next[to]] = [next[to]!, next[index]!];
+  return next;
+}
+
+// The Plats column of the saldo table: Huvudplats / Alternativ N (index in the
+// ordered alternatives + 1) / "–".
+export function articleLocationRole(
+  locationId: string | null,
+  primaryId: string | null | undefined,
+  alternativeIds: string[]
+): string {
+  if (!locationId) return "–";
+  if (locationId === primaryId) return "Huvudplats";
+  const i = alternativeIds.indexOf(locationId);
+  return i >= 0 ? `Alternativ ${i + 1}` : "–";
+}
