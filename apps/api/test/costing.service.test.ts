@@ -1168,7 +1168,7 @@ describe("costing service — variance analysis", () => {
     const [operation] = await mfgService.listOperations(order.id);
     const [materialRow] = await mfgService.listMaterialConsumptions(order.id);
     const employee = await timeReportService.createEmployee({ employeeNumber: "E-1", name: "Kalle", active: true });
-    return { user, parent, component, service, location, order, operation: operation!, materialRow: materialRow!, employee };
+    return { user, parent, component, service, location, order, operation: operation!, materialRow: materialRow!, employee, workCenter };
   }
   type Fixture = Awaited<ReturnType<typeof makeFixture>>;
 
@@ -1585,6 +1585,69 @@ describe("costing service — variance analysis", () => {
     expect(analysis!.operationRows.filter((r) => r.kind === "time")).toHaveLength(1);
     // Op 10 is untyped and on plan (0.5 + 0.5 h): the order has no time deviation.
     expect(analysis!.parts).toMatchObject({ rate: 0, setup: 0, run: 0, unclassified: 0 });
+  });
+
+  // Timkostnad per datum (#14 etapp 4, migration 0189): the efterkalkyl
+  // prices each work day's hours at that day's hourly rate, the base at the
+  // rate as of T₀, and the difference is Timpris. 600 kr/h until 10 May
+  // 14:00 (Stockholm), 720 from then; the order created on 1 March.
+  async function raiseRateOn10May(f: Fixture) {
+    await db.execute(sql`update work_center_rate_history set valid_from = '2026-02-01T09:00:00Z' where work_center_id = ${f.workCenter.id}`);
+    await mfgService.updateWorkCenter(f.workCenter.id, { hourlyRate: 720 });
+    await db.execute(
+      sql`update work_center_rate_history set valid_from = '2026-05-10T12:00:00Z' where work_center_id = ${f.workCenter.id} and hourly_rate = 720`
+    );
+    await db.execute(sql`update manufacturing_orders set created_at = '2026-03-01T09:00:00Z' where id = ${f.order.id}`);
+  }
+
+  it("prices the time per work day around a changed hourly rate, the base at T₀: Timpris", async () => {
+    const f = await makeFixture();
+    await raiseRateOn10May(f);
+    const report = (date: string, hours: number) =>
+      timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId: f.operation.id, date, hours }, f.user.id);
+    await report("2026-05-09", 1); // 600
+    await report("2026-05-10", 0.5); // the change applies to the whole day: 720
+    await mfgService.consumeMaterial(f.order.id, f.materialRow.id, { locationId: f.location.id, quantity: 10 }, f.user.id);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const preview = await costingService.postCalculate(f.order.id);
+    const { calculation, analysis } = await costingService.postCalculate(f.order.id, true);
+
+    // Lön 1 × 600 + 0.5 × 720 = 960; the row shows the average 640 kr/h.
+    expect(calculation.laborCost).toBe("960.0000");
+    const [savedRow] = (await costingService.getCostCalculation(calculation.id))!.operationRows;
+    expect(savedRow).toMatchObject({ hours: "1.5000", hourlyRate: "640.00", laborAmount: "960.0000" });
+    // Kalkylerat (0.5 + 0.5) h at R₀ = 600 (T₀ = 1 March); Timpris 960 − 600 × 1.5 = 60;
+    // Ej uppdelad (1.5 − 1) × 600 = 300.
+    expect(analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 600, hourlyRate: 640, base: 600, actual: 960, deviation: 360 });
+    expect(analysis!.operationRows[0]!.parts).toMatchObject({ rate: 60, unclassified: 300 });
+    expect(analysis!.parts).toMatchObject({ price: 0, quantity: 0, rate: 60, unclassified: 300, markups: 0 });
+    expect({ ...preview.analysis!, materialRows: withoutIds(preview.analysis!.materialRows), operationRows: withoutIds(preview.analysis!.operationRows) }).toEqual({
+      ...analysis!,
+      materialRows: withoutIds(analysis!.materialRows),
+      operationRows: withoutIds(analysis!.operationRows),
+    });
+
+    // A later rate change (today) moves neither the saved efterkalkyl nor a
+    // new run: the May days keep their rates.
+    await mfgService.updateWorkCenter(f.workCenter.id, { hourlyRate: 900 });
+    expect((await costingService.getCostCalculation(calculation.id))!.analysis).toEqual(analysis);
+    const again = await costingService.postCalculate(f.order.id);
+    expect(again.calculation.laborCost).toBe("960.0000");
+    expect(again.analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 600, hourlyRate: 640 });
+  });
+
+  it("takes R₀ at T₀: an order created after the change has the new rate on both sides", async () => {
+    const f = await makeFixture();
+    await raiseRateOn10May(f);
+    await db.execute(sql`update manufacturing_orders set created_at = '2026-05-20T09:00:00Z' where id = ${f.order.id}`);
+    await timeReportService.createTimeReport({ employeeId: f.employee.id, moOperationId: f.operation.id, date: "2026-06-01", hours: 1 }, f.user.id);
+    await mfgService.complete(f.order.id, { quantity: 5, locationId: f.location.id }, f.user.id);
+
+    const { analysis } = await costingService.postCalculate(f.order.id, true);
+
+    expect(analysis!.operationRows[0]).toMatchObject({ baseHourlyRate: 720, hourlyRate: 720, base: 720, actual: 720 });
+    expect(analysis!.parts.rate).toBe(0);
   });
 
   it("refuses a row whose base group is only partly saved, and an operation row with both groups", async () => {

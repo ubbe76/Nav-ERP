@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  hourlyRateAt,
+  laborAtWorkDays,
   pricedAtWithdrawal,
   primarySupplierAt,
   standardCostAt,
@@ -84,5 +86,71 @@ describe("pricedAtWithdrawal", () => {
     expect(row).toMatchObject({ standardCost: "12.0000", priceDate: "2026-04-01" });
     const [bare] = pricedAtWithdrawal([basis], new Map(), { standard: new Map(), supplier: new Map() }, at("2026-04-01T00:00:00Z"));
     expect(bare).toMatchObject({ standardCost: "99.0000", supplierPrice: null, supplierCurrency: null, supplierPriceBreaks: [] });
+  });
+});
+
+// Timkostnad per datum (#14 etapp 4): the same convention for the resource's
+// hourly rate — at an instant (the base's T₀) or on a Stockholm work day.
+describe("hourlyRateAt", () => {
+  // 600 from 1 March; 720 from 10 May 14:00 Stockholm (12:00 UTC).
+  const rows = [
+    { hourlyRate: "600.00", validFrom: at("2026-03-01T08:00:00Z") },
+    { hourlyRate: "720.00", validFrom: at("2026-05-10T12:00:00Z") },
+  ];
+
+  it("takes the latest row at an instant (T₀)", () => {
+    expect(hourlyRateAt(rows, at("2026-05-10T11:59:59Z"))).toBe("600.00");
+    expect(hourlyRateAt(rows, at("2026-05-10T12:00:00Z"))).toBe("720.00");
+  });
+
+  it("applies a change to the whole Stockholm day it was made on", () => {
+    expect(hourlyRateAt(rows, "2026-05-09")).toBe("600.00");
+    expect(hourlyRateAt(rows, "2026-05-10")).toBe("720.00");
+    expect(hourlyRateAt(rows, "2026-06-01")).toBe("720.00");
+    // 23:30 UTC on 9 May is already 10 May in Stockholm.
+    expect(hourlyRateAt([rows[0]!, { hourlyRate: "650.00", validFrom: at("2026-05-09T23:30:00Z") }], "2026-05-10")).toBe("650.00");
+  });
+
+  it("takes the first row before the history starts, and null without history", () => {
+    expect(hourlyRateAt(rows, "2026-01-15")).toBe("600.00");
+    expect(hourlyRateAt(rows, at("2026-01-15T00:00:00Z"))).toBe("600.00");
+    expect(hourlyRateAt([], "2026-05-10")).toBeNull();
+  });
+});
+
+describe("laborAtWorkDays", () => {
+  const rows = [
+    { hourlyRate: "600.00", validFrom: at("2026-03-01T08:00:00Z") },
+    { hourlyRate: "720.00", validFrom: at("2026-05-10T12:00:00Z") },
+  ];
+
+  it("prices each work day at that day's rate; the row's rate is the average", () => {
+    const labor = laborAtWorkDays(
+      [
+        { date: "2026-05-09", hours: 1 },
+        { date: "2026-05-10", hours: 0.5 },
+      ],
+      rows,
+      720
+    );
+    // 1 × 600 + 0.5 × 720.
+    expect(labor).toEqual({ hours: 1.5, laborAmount: 960, hourlyRate: 640 });
+  });
+
+  it("keeps the one rate when every day had it, and rounds an uneven average to öre", () => {
+    expect(laborAtWorkDays([{ date: "2026-06-01", hours: 2 }, { date: "2026-06-02", hours: 1.25 }], rows, 999)).toEqual({
+      hours: 3.25,
+      laborAmount: 2340,
+      hourlyRate: 720,
+    });
+    // 2 h at 600, 1.01 h at 720: 1927.20 over 3.01 h.
+    const uneven = laborAtWorkDays([{ date: "2026-05-01", hours: 2 }, { date: "2026-05-11", hours: 1 }, { date: "2026-05-12", hours: 0.01 }], rows, 0);
+    expect(uneven.laborAmount).toBeCloseTo(1200 + 720 + 7.2, 10);
+    expect(uneven.hourlyRate).toBe(640.27); // 1927.2 / 3.01 = 640.2658…
+  });
+
+  it("uses the current rate without history and for an operation without hours", () => {
+    expect(laborAtWorkDays([{ date: "2026-05-10", hours: 2 }], [], 500)).toEqual({ hours: 2, laborAmount: 1000, hourlyRate: 500 });
+    expect(laborAtWorkDays([], rows, 720)).toEqual({ hours: 0, laborAmount: 0, hourlyRate: 720 });
   });
 });

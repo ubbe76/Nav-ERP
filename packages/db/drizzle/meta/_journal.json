@@ -1324,6 +1324,13 @@
       "when": 1793988788054,
       "tag": "0188_stall_och_produktion",
       "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "7",
+      "when": 1793991546514,
+      "tag": "0189_timkostnad_per_datum",
+      "breakpoints": true
     }
   ]
 }

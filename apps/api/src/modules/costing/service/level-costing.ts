@@ -100,6 +100,10 @@ export function buildSemiFinishedRow(
 // specification can show the amortised setup cost per unit after the routing
 // changes. On a post-calculation it is the time reported as ställ, null when
 // the split does not exist (no report on the operation has a type).
+//
+// `laborAmount` given = the hours priced per work day (the efterkalkyl and
+// Produkter i arbete, laborAtWorkDays in price-at.ts), with `hourlyRate`
+// the row's rate as shown; absent = hours × hourlyRate (the förkalkyl).
 export function buildOperationRow(op: {
   sequenceNo: number;
   workCenterId: string;
@@ -107,10 +111,11 @@ export function buildOperationRow(op: {
   overheadPercent: string;
   hours: number;
   setupHours: number | null;
+  laborAmount?: number;
 }): OperationRowWrite {
   const hourlyRate = Number(op.hourlyRate);
   const overheadPercent = Number(op.overheadPercent);
-  const laborAmount = op.hours * hourlyRate;
+  const laborAmount = op.laborAmount ?? op.hours * hourlyRate;
   return {
     sequenceNo: op.sequenceNo,
     workCenterId: op.workCenterId,

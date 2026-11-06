@@ -193,9 +193,10 @@ export interface VarianceOperationInput {
 }
 
 // Kronor → whole öre: the amount rounded with round2 (the house rule), then
-// made an integer so every sum and difference below is exact.
+// made an integer so every sum and difference below is exact. `+ 0` turns a
+// -0 (a difference a hair under zero, e.g. Lön − R₀ × H) into 0.
 function ore(kronor: number): number {
-  return Math.round(round2(kronor) * 100);
+  return Math.round(round2(kronor) * 100) + 0;
 }
 
 function kronor(oreAmount: number): number {
@@ -279,7 +280,10 @@ export function materialVariance(row: VarianceMaterialInput): OreRow {
 
 // Operation with time o: H reported, Hs/Hr of it registered as ställ/
 // produktion, U = H − Hs − Hr not split (all of H before etapp 3).
-//   Timpris = (R − R₀) × H, rounded with round2 (0 while R₀ = R);
+//   Timpris = Lön − R₀ × H, rounded with round2: Σ (R_d − R₀) × H_d over the
+//          work days, since the efterkalkyl prices each day's hours at that
+//          day's hourly rate (etapp 4) — exact, where the row's average R
+//          (two decimals) would not be; 0 while every day's rate is R₀;
 //   U = 0: Ställ = (Hs − Bs) × R₀ rounded, Stycke = the rest;
 //   U > 0: Tid (ej uppdelad) = the rest, for the whole operation — a half
 //          classified operation is not split, or the rest would look like
@@ -296,7 +300,7 @@ export function timeVariance(row: VarianceOperationInput): OreRow & { split: boo
   const baseAmount = hasBase ? baseRate * (setupBase + runBase) : 0;
   const base = hasBase ? oreAsStored(baseAmount) : 0;
   const deviation = actual - base;
-  parts.rate = ore((row.hourlyRate - baseRate) * row.hours);
+  parts.rate = ore(row.laborAmount - baseRate * row.hours);
   const setupHours = row.setupHours ?? 0;
   const runHours = row.runHours ?? 0;
   const split = Math.max(0, hours4(row.hours - setupHours - runHours)) === 0;

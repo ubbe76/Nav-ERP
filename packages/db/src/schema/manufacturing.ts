@@ -125,6 +125,28 @@ export const workCenters = pgTable(
   ]
 );
 
+// Timkostnad per datum (#14 etapp 4, migration 0189): the resource's hourly
+// rate over time, read by the efterkalkyl and Produkter i arbete per work day
+// and by the avvikelseanalys's base at T₀ (costing/service/price-at.ts).
+// Written by the trigger work_centers_rate_history, never by the application
+// — the card, the list's inline edit, the resource import and the demo data
+// all write work_centers.hourly_rate. One row per transaction that changes
+// the value. History starts at the migration (backfill), like 0169. The TO
+// percentage has none: it is outside TVK and the analysis, and today's
+// applies, like MO/LO.
+export const workCenterRateHistory = pgTable(
+  "work_center_rate_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    workCenterId: uuid("work_center_id")
+      .notNull()
+      .references(() => workCenters.id, { onDelete: "cascade" }),
+    hourlyRate: numeric("hourly_rate", { precision: 10, scale: 2 }).notNull(),
+    validFrom: timestamp("valid_from", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_work_center_rate_history_from").on(table.workCenterId, table.validFrom)]
+);
+
 // Routing = an article's operation list. No separate "routing" header table —
 // the operation rows themselves ARE the routing for an article (one version,
 // no versioning/history need in v1).

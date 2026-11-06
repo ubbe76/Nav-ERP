@@ -462,6 +462,39 @@ describe("Kalkylutfall — verklig ställ och stycke", () => {
   });
 });
 
+// Timkostnad per datum (#14 etapp 4): the efterkalkyl prices the work day
+// at that day's hourly rate and the base at T₀'s, so Kalkylutfall carries a
+// real Timpris — per order and inside the resource's Tidsavvikelse.
+describe("Kalkylutfall — Timpris", () => {
+  it("carries Timpris when the hourly rate was raised between T₀ and the work day", async () => {
+    const p = await makeProduct();
+    const order = await makeOrder(p, { quantity: 5, drawn: 10 });
+    // 600 kr/h at T₀ (1 March), 720 from 1 June; the 1.5 h worked on 7 July.
+    await db.execute(sql`update manufacturing_orders set created_at = '2026-03-01T09:00:00Z' where id = ${order.id}`);
+    await db.execute(sql`update work_center_rate_history set valid_from = '2026-02-01T09:00:00Z' where work_center_id = ${p.workCenter.id}`);
+    await mfgService.updateWorkCenter(p.workCenter.id, { hourlyRate: 720 });
+    await db.execute(sql`update work_center_rate_history set valid_from = '2026-06-01T09:00:00Z' where work_center_id = ${p.workCenter.id} and hourly_rate = 720`);
+    const [operation] = await mfgService.listOperations(order.id);
+    await timeReportService.createTimeReport({ employeeId: p.employee.id, moOperationId: operation!.id, date: "2026-07-07", hours: 1.5 }, p.user.id);
+    await mfgService.complete(order.id, { quantity: 5, locationId: p.location.id }, p.user.id);
+    const { analysis } = await costingService.postCalculate(order.id, true);
+    // Utfall 100 + 1.5 × 720 = 1180, Kalkylerat 100 + 1 × 600 = 700:
+    // Timpris 1080 − 900 = 180, Ej uppdelad (1.5 − 1) × 600 = 300.
+    expect(analysis).toMatchObject({ base: 700, actual: 1180, deviation: 480 });
+
+    const byOrder = await reportsService.getCalculationOutcome({ view: "analysis", groupBy: "order" });
+    if (byOrder.view !== "analysis") throw new Error("view");
+    expect((byOrder.rows[0] as AnalysisOrderRow).parts).toMatchObject({ price: 0, quantity: 0, rate: 180, unclassified: 300, markups: 0 });
+    expect(byOrder.kpis).toMatchObject({ deviation: 480, time: 480 });
+
+    const byResource = await reportsService.getCalculationOutcome({ view: "analysis", groupBy: "workCenter" });
+    if (byResource.view !== "analysis") throw new Error("view");
+    const [resource] = byResource.rows as AnalysisWorkCenterRow[];
+    expect(resource).toMatchObject({ kind: "time", hours: 1.5, unclassifiedHours: 1.5, timeDeviation: 480 });
+    expect(resource!.parts).toMatchObject({ rate: 180, unclassified: 300 });
+  });
+});
+
 // MO and LO on both sides, and a lego operation bought on an IO: the
 // report's sums and its Resurs grouping read the saved analysis exactly as
 // GET /cost-calculations/:id derives it.

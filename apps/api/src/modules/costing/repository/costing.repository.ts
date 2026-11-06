@@ -19,6 +19,7 @@ import {
   routingOperations,
   timeReports,
   units,
+  workCenterRateHistory,
   workCenters,
   type Db,
   type Tx,
@@ -28,7 +29,7 @@ import { explodeBom } from "../../article/service/bom-explosion.js";
 import { weightedActualCosts } from "../service/actual-cost.js";
 import { stockValuedAt } from "../../stock/repository/valued-at.js";
 import { loadPriceBreaks } from "../../purchase/repository/price-breaks.js";
-import type { StandardCostHistoryRow, SupplierSnapshotRow } from "../service/price-at.js";
+import type { HourlyRateHistoryRow, StandardCostHistoryRow, SupplierSnapshotRow } from "../service/price-at.js";
 
 // At most one row per article thanks to the article_suppliers_one_primary
 // partial unique index, so this join never fans out.
@@ -430,6 +431,53 @@ export function createCostingRepository(db: Db | Tx) {
         .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId))
         .groupBy(moOperations.id, workCenters.id)
         .orderBy(asc(moOperations.sequenceNo));
+    },
+
+    // Timkostnad per datum (#14 etapp 4, migration 0189): the hourly rate
+    // histories of these resources, ascending — resolved per work day (and the
+    // base's T₀) by price-at.ts. ONE query for a whole calculation or PIA day.
+    async getWorkCenterRateHistories(workCenterIds: string[]) {
+      const histories = new Map<string, HourlyRateHistoryRow[]>();
+      if (workCenterIds.length === 0) return histories;
+      const rows = await db
+        .select({
+          workCenterId: workCenterRateHistory.workCenterId,
+          hourlyRate: workCenterRateHistory.hourlyRate,
+          validFrom: workCenterRateHistory.validFrom,
+        })
+        .from(workCenterRateHistory)
+        .where(inArray(workCenterRateHistory.workCenterId, workCenterIds))
+        .orderBy(asc(workCenterRateHistory.validFrom), asc(workCenterRateHistory.id));
+      for (const { workCenterId, ...row } of rows) {
+        const list = histories.get(workCenterId);
+        if (list) list.push(row);
+        else histories.set(workCenterId, [row]);
+      }
+      return histories;
+    },
+
+    // The order's reported hours per operation and work day (time_reports.
+    // date) — the efterkalkyl prices each day at that day's hourly rate
+    // (laborAtWorkDays in price-at.ts). Per operation, Σ over the days is
+    // getOperationsWithReportedHours' reportedHours.
+    async getReportedHoursByDay(manufacturingOrderId: string) {
+      const rows = await db
+        .select({
+          operationId: timeReports.moOperationId,
+          date: timeReports.date,
+          hours: sql<string>`sum(${timeReports.hours})`,
+        })
+        .from(timeReports)
+        .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
+        .where(eq(moOperations.manufacturingOrderId, manufacturingOrderId))
+        .groupBy(timeReports.moOperationId, timeReports.date);
+      const byOperation = new Map<string, { date: string; hours: number }[]>();
+      for (const row of rows) {
+        const list = byOperation.get(row.operationId) ?? [];
+        list.push({ date: row.date, hours: Number(row.hours) });
+        byOperation.set(row.operationId, list);
+      }
+      return byOperation;
     },
 
     // Actual lego cost per operation from the linked IO rows (non-cancelled

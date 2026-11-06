@@ -11,7 +11,7 @@ import { apiFetch } from "../../lib/api";
 import { formatMoney } from "../../lib/format";
 import { formatRate } from "../../lib/currency";
 import { formatQuantity } from "../../lib/format";
-import { OLD_CALCULATION_NOTICE, PRELIMINARY_NOTICE, isZeroAmount } from "../../lib/costVariance";
+import { OLD_CALCULATION_NOTICE, PRELIMINARY_NOTICE, hasRateDeviation, isZeroAmount } from "../../lib/costVariance";
 import { Deviation, VarianceSummary } from "./VarianceSummary";
 import { formatStockholmDateTime } from "../../lib/date";
 import type {
@@ -301,6 +301,8 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
   // Ställ/Stycke have an amount only on an operation whose time is split; in
   // etapp 1 all reported time is Ej uppdelad, so the columns would be empty.
   const hasSplitTime = timeRows.some((r) => r.split && (r.hours > 0 || !isZeroAmount(r.parts.setup) || !isZeroAmount(r.parts.run)));
+  // Timpris only when some operation's hourly rate differed from T₀'s.
+  const hasRate = hasRateDeviation(timeRows);
   const hasScrap = analysis.materialRows.some((r) => r.scrapQuantity !== 0 || r.parts.scrap !== 0);
   return (
     <section className={styles.section}>
@@ -367,6 +369,7 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
           <Table<CostVarianceOperationRow & { id: string }>
             columns={[
               { key: "operation", label: "Operation", width: "minmax(160px, 1fr)" },
+              ...(hasRate ? [{ key: "ratePart", label: "Timpris", width: "100px", align: "right" as const }] : []),
               ...(hasSplitTime
                 ? [
                     { key: "setupPart", label: "Ställ", width: "100px", align: "right" as const },
@@ -396,6 +399,8 @@ function VarianceSection({ analysis }: { analysis: CostVarianceAnalysis | null }
                   return hoursText(row.runHours);
                 case "unclassified":
                   return hoursText(row.unclassifiedHours);
+                case "ratePart":
+                  return <Deviation value={row.parts.rate} />;
                 case "setupPart":
                   return row.split ? <Deviation value={row.parts.setup} /> : "—";
                 case "runPart":

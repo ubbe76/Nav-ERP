@@ -64,6 +64,13 @@ export function varianceSummaryLines(analysis: CostVarianceAnalysis): VarianceSu
   return lines;
 }
 
+// Timpris (#14 etapp 4): the hourly rate's deviation — Lön at each work day's
+// rate against R₀ at T₀. A column of its own on the specification's
+// Operationer only when some row has one; otherwise it is 0 everywhere.
+export function hasRateDeviation(rows: Array<{ parts: { rate: number } }>): boolean {
+  return rows.some((row) => !isZeroAmount(row.parts.rate));
+}
+
 export const PRELIMINARY_NOTICE = "Ordern är inte klar — kalkylerat räknas på klart antal per operation.";
 export const OLD_CALCULATION_NOTICE =
   "Sparad före avvikelseanalysen — efterkalkylera och spara igen för att få den.";

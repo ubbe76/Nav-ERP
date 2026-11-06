@@ -26,7 +26,7 @@ import { explodeDerivedMaterials } from "../../configurator/service/configurator
 import { manufacturingCost, perUnit, selfCost } from "./cost-figures.js";
 import { ExchangeRateUnavailableError, type ExchangeRateReader } from "../../system/service/exchange-rates.js";
 import { stockholmDateOf, stockholmToday } from "../../system/service/delivery-days.js";
-import { pricedAtWithdrawal, type PriceHistories, type WithdrawalPriceBasis } from "./price-at.js";
+import { hourlyRateAt, laborAtWorkDays, pricedAtWithdrawal, type PriceHistories, type WithdrawalPriceBasis } from "./price-at.js";
 import {
   costVarianceAnalysis,
   isPreliminaryStatus,
@@ -538,8 +538,9 @@ export function createCostingService(
   }
 
   // Requires an existing MO — actual material consumption x unit cost, actual
-  // reported hours per operation x work center hourly rate, then the same
-  // markups as the pre-calculation. Read and arithmetic only, as above.
+  // reported hours per operation x the work center's hourly rate of each work
+  // day (timkostnad per datum, #14 etapp 4), then the same markups as the
+  // pre-calculation. Read and arithmetic only, as above.
   //
   // Avvikelseanalys (#14): alongside, the base every row is compared with —
   // the order's OWN rows (an Ändrad TO is the new plan, a konfigurerad TO's
@@ -578,10 +579,18 @@ export function createCostingService(
       materialRows.push(row);
     }
 
-    const [operations, actualSubcontractCosts] = await Promise.all([
+    const [operations, actualSubcontractCosts, hoursByDay] = await Promise.all([
       repo.getOperationsWithReportedHours(manufacturingOrderId),
       repo.getSubcontractActualCosts(manufacturingOrderId),
+      repo.getReportedHoursByDay(manufacturingOrderId),
     ]);
+    // Timkostnad per datum (#14 etapp 4): one load of the resources' rate
+    // histories prices each work day's hours at that day's rate and the
+    // base at T₀'s.
+    const rateHistories = await repo.getWorkCenterRateHistories([
+      ...new Set(operations.filter((op) => op.workCenterType !== "subcontract").map((op) => op.workCenterId)),
+    ]);
+    const basePricedAt = order.createdAt;
 
     // N: the received quantity on a Klar/Stängd order; otherwise preliminary.
     const output: OutputContext = { preliminary: isPreliminaryStatus(order.status), received: Number(order.quantityReceived) };
@@ -623,18 +632,28 @@ export function createCostingService(
         continue;
       }
       if (hours === 0) warnings.push(`Operation ${op.sequenceNo} (${op.workCenterName}): ingen rapporterad tid`);
-      // Base: setup (minutes, once it counts) + run time per unit × N, at the
-      // efterkalkyl's own rate (R₀ = R until the rate has a history). The
-      // actual side: of H, Hs reported as ställ (setup_hours) and Hr as
-      // produktion (run_hours) — both null while no report on the operation
-      // has a type, so the whole of H is then Ej uppdelad (cost-variance.ts).
+      // Lön per arbetsdag: each work day's hours at that day's hourly rate
+      // (the row shows their average); no history ⇒ the current rate.
+      // Base: setup (minutes, once it counts) + run time per unit × N at the
+      // rate as of T₀ (R₀), so Timpris = Lön − R₀ × H. The actual side: of H,
+      // Hs reported as ställ (setup_hours) and Hr as produktion (run_hours) —
+      // both null while no report on the operation has a type, so the whole
+      // of H is then Ej uppdelad (cost-variance.ts).
+      const history = rateHistories.get(op.workCenterId) ?? [];
+      const labor = laborAtWorkDays(hoursByDay.get(op.operationId) ?? [], history, Number(op.hourlyRate));
       const worked = operationWorked({ hours, completed, scrapped });
       operationRows.push({
-        ...buildOperationRow({ ...op, hours, setupHours: op.setupHours === null ? null : Number(op.setupHours) }),
+        ...buildOperationRow({
+          ...op,
+          hours,
+          setupHours: op.setupHours === null ? null : Number(op.setupHours),
+          hourlyRate: String(labor.hourlyRate),
+          laborAmount: labor.laborAmount,
+        }),
         baseSetupHours: oneOffCounts(output, worked) ? Number(op.setupTime) / 60 : 0,
         baseRunHours: (Number(op.runTimePerUnit) / 60) * operationOutput(output, completed),
         runHours: op.runHours === null ? null : Number(op.runHours),
-        baseHourlyRate: Number(op.hourlyRate),
+        baseHourlyRate: Number(hourlyRateAt(history, basePricedAt) ?? op.hourlyRate),
       });
     }
 
@@ -642,7 +661,6 @@ export function createCostingService(
     // — an empty withdrawal map puts every row at T₀ — the rate of T₀'s
     // Stockholm day, and the staffel matched on the row's PLANNED quantity.
     // Rates are looked up before any arithmetic, as everywhere.
-    const basePricedAt = order.createdAt;
     const baseWarnings: string[] = [];
     const baseSource = preCalculationSource(preSource, baseWarnings);
     const basePriced = await createRateAttacher(rates, baseSource, stockholmDateOf(basePricedAt))(

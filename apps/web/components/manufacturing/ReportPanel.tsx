@@ -12,7 +12,7 @@ import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { runWithShortageConfirm } from "../../lib/materialShortage";
 import { confirmDialog } from "../../lib/confirm";
-import { suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
+import { defaultReportKind, suggestedConsumeQuantity, suggestedReportHours } from "../../lib/moSuggestions";
 import { groupReportRows, moOperationLabel } from "../../lib/moReportRows";
 import { stockholmToday } from "../../lib/date";
 import type {
@@ -470,9 +470,10 @@ function ReportTimeRow({
   // Timmar is prefilled with the operation's theoretical time less what is
   // already reported on it; a typed value wins until another operation is
   // picked or the report is saved.
-  // Typ (Dela tid i ställ och produktion): "" = ej uppdelad. The suggestion
-  // follows it, but switching Typ never overwrites a typed value.
-  const [kind, setKind] = useState<TimeKind | "">("");
+  // Typ (Dela tid i ställ och produktion): förval Produktion, "" = ej
+  // uppdelad. The suggestion follows it, but switching Typ never overwrites
+  // a typed value.
+  const [kind, setKind] = useState<TimeKind | "">(defaultReportKind(timeKindSplit));
   const [typedHours, setTypedHours] = useState<string | null>(null);
   const hours =
     typedHours ??

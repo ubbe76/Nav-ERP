@@ -196,9 +196,10 @@ export function createWorkInProgressRepository(db: Db | Tx) {
       return { draws, history };
     },
 
-    // Lön: hours per operation on work days on or before D (the work date,
-    // not when it was registered), at the resource's current hourly rate —
-    // the efterkalkyl's rate; there is no rate history.
+    // Lön: hours per operation and work day on or before D (the work date,
+    // not when it was registered). The service prices each day at that
+    // day's hourly rate (laborAtWorkDays, the efterkalkyl's rule, #14 etapp
+    // 4); hourlyRate is the current one, for a resource without history.
     async listReportedHours(asOf: string) {
       return db
         .select({
@@ -209,13 +210,14 @@ export function createWorkInProgressRepository(db: Db | Tx) {
           workCenterType: workCenters.type,
           hourlyRate: workCenters.hourlyRate,
           overheadPercent: workCenters.overheadPercent,
+          date: timeReports.date,
           hours: sql<string>`sum(${timeReports.hours})`,
         })
         .from(timeReports)
         .innerJoin(moOperations, eq(moOperations.id, timeReports.moOperationId))
         .innerJoin(workCenters, eq(workCenters.id, moOperations.workCenterId))
         .where(and(sql`${timeReports.date} <= ${asOf}::date`, sql`${moOperations.manufacturingOrderId} IN ${candidateOrders(asOf)}`))
-        .groupBy(moOperations.id, workCenters.id);
+        .groupBy(moOperations.id, workCenters.id, timeReports.date);
     },
 
     // Lego: getSubcontractActualCosts per D — per lego IO row (order not

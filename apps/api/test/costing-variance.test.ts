@@ -274,6 +274,26 @@ describe("cost-variance — operations with time", () => {
     expect([v.parts.setup, v.parts.run, v.parts.unclassified]).toEqual([0, 0, 30000]);
   });
 
+  // Timkostnad per datum (#14 etapp 4): Lön is priced per work day, so the
+  // row's R is an average; Timpris = Lön − R₀ × H exactly, the rest is time.
+  it("puts the rate deviation in Timpris: Lön − R₀ × H, the time at R₀ in the rest", () => {
+    // 2 h at 600 and 1 h at 720 = 1920 (average 640), R₀ = 600 at T₀.
+    const v = timeVariance(timeOp({ hourlyRate: 640, laborAmount: 1920 }));
+    // Timpris 1920 − 1800 = 120; Ej uppdelad (3 − 2.5) × 600 = 300.
+    expect([v.base, v.actual, v.parts.rate, v.parts.unclassified]).toEqual([150000, 192000, 12000, 30000]);
+    // Split: Ställ (1 − 0.5) × 600, Stycke the rest (2 − 2) × 600.
+    const split = timeVariance(timeOp({ hourlyRate: 640, laborAmount: 1920, setupHours: 1, runHours: 2 }));
+    expect([split.parts.rate, split.parts.setup, split.parts.run]).toEqual([12000, 30000, 0]);
+    // A rate that went down since T₀ is a negative Timpris.
+    expect(timeVariance(timeOp({ hourlyRate: 550, laborAmount: 1650 })).parts.rate).toBe(-15000);
+  });
+
+  it("gives Timpris 0, never −0, while every day had R₀", () => {
+    // 1.2345 h × 600 is 740.6999… in binary; the stored Lön is 740.7.
+    const v = timeVariance(timeOp({ hours: 1.2345, laborAmount: 740.7 }));
+    expect(Object.is(v.parts.rate, 0)).toBe(true);
+  });
+
   it("splits an operation without time into missing setup and run time", () => {
     const v = timeVariance(timeOp({ hours: 0, laborAmount: 0 }));
     expect(v.split).toBe(true);

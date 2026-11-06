@@ -43,3 +43,11 @@ export function suggestedReportHours(
   const remaining = Math.round((plannedMinutes / 60 - reportedHours) * 100) / 100;
   return remaining > 0 ? String(remaining) : "";
 }
+
+// Typ's förval in Rapportera tid and Ny tidrapport: Produktion when the time
+// is split (Dela tid i ställ och produktion) — most manual time is
+// production, and the suggestion above is then the run time's. "" (Ej
+// uppdelad) without the setting, where the field is not shown.
+export function defaultReportKind(timeKindSplit: boolean): "run" | "" {
+  return timeKindSplit ? "run" : "";
+}

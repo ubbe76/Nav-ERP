@@ -433,7 +433,8 @@ export interface CostVarianceParts {
   quantity: number;
   // Varav kassation — the part of `quantity` the scrapped units drew. Not summed.
   scrap: number;
-  // Timpris: (R − R₀) × H. 0 until the hourly rate has a history (etapp 4).
+  // Timpris: Lön − R₀ × H = Σ (R_d − R₀) × H_d — each work day's hours at
+  // that day's hourly rate against the rate at T₀ (etapp 4, 0189).
   rate: number;
   // Ställ and Stycke: time deviation on an operation whose time is fully
   // split into ställ/produktion (in etapp 1 only an operation without time).

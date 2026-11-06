@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 // costVariance.ts only imports types, so vitest can load it directly.
-import { deviationTone, isZeroAmount, varianceSummaryLines } from "../../web/lib/costVariance.js";
+import { deviationTone, hasRateDeviation, isZeroAmount, varianceSummaryLines } from "../../web/lib/costVariance.js";
 import type { CostVarianceAnalysis } from "../../web/lib/types.js";
 
 const parts = { price: 0, quantity: 0, scrap: 0, rate: 0, setup: 0, run: 0, unclassified: 0, markups: 0 };
@@ -68,5 +68,22 @@ describe("varianceSummaryLines", () => {
     expect(varianceSummaryLines(analysis({})).map((l) => l.key)).toEqual(["price", "quantity"]);
     const keys = varianceSummaryLines(analysis({ setup: 5, run: 7, markups: 2 }, [timeRow(true, 2)])).map((l) => l.key);
     expect(keys).toEqual(["price", "quantity", "setup", "run", "markups"]);
+  });
+});
+
+// Timpris (#14 etapp 4): a column on the specification's Operationer, and a
+// summary line, only when some operation's rate differed from T₀'s.
+describe("Timpris", () => {
+  it("shows the column only when some row has a rate deviation", () => {
+    const withRate = { ...timeRow(false, 1.5), parts: { ...parts, rate: 60 } } as CostVarianceAnalysis["operationRows"][number];
+    expect(hasRateDeviation([timeRow(false, 1.5), timeRow(true, 2)])).toBe(false);
+    expect(hasRateDeviation([timeRow(false, 1.5), withRate])).toBe(true);
+    // Under half an öre is no deviation.
+    expect(hasRateDeviation([{ parts: { rate: 0.004 } }])).toBe(false);
+  });
+
+  it("adds a Timpris line to the summary when nonzero, after Mängd", () => {
+    const keys = varianceSummaryLines(analysis({ rate: 60, unclassified: 300 }, [timeRow(false, 1.5)])).map((l) => l.key);
+    expect(keys).toEqual(["price", "quantity", "rate", "unclassified"]);
   });
 });

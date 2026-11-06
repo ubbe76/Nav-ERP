@@ -7,6 +7,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { SearchPicker } from "../ui/SearchPicker";
 import { apiFetch } from "../../lib/api";
 import { stockholmToday } from "../../lib/date";
+import { defaultReportKind } from "../../lib/moSuggestions";
 import type { TimeKind, EmployeeDirectoryEntry, ManufacturingOrder, MOOperation } from "../../lib/types";
 import { Form, FormActions, FormError, FormRow } from "../ui/Form";
 import { useCanOpenPersonal } from "../PermissionsProvider";
@@ -35,7 +36,8 @@ export function NewTimeReportForm({
   const [operationsLoading, setOperationsLoading] = useState(false);
   const [date, setDate] = useState(today());
   const [hours, setHours] = useState("1");
-  const [kind, setKind] = useState<TimeKind | "">("");
+  // Typ: förval Produktion with Dela tid i ställ och produktion on.
+  const [kind, setKind] = useState<TimeKind | "">(defaultReportKind(timeKindSplit));
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);

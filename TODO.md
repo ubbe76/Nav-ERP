@@ -40,7 +40,6 @@ Kan dölja allvarliga fel — och kan redan vara gjort.
 
 ### Medel
 
-- [ ] **Avvikelseanalys i efterkalkylen** — pris, mängd och tid; ställtid och stycktid → [#14](https://github.com/ubbe76/Nav-ERP/issues/14) *(hemsidan)*
 - [ ] **Alternativa resurser i planeringen och Leveranstidskontrollen** → [#15](https://github.com/ubbe76/Nav-ERP/issues/15) *(hemsidan)*
 - [ ] **Påslag per artikelgrupp, kund eller order** → [#16](https://github.com/ubbe76/Nav-ERP/issues/16) *(hemsidan)*
 - [ ] **Löneperioden:** upplåsning nollar snapshotten utan spår av vad som exporterats — spara den i upplåsningens audit-rad.
