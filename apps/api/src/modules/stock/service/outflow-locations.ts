@@ -10,7 +10,7 @@ import {
   type Tx,
 } from "@navet/db";
 import { resolveStockLocation } from "./location-resolver.js";
-import { allocateOutflow, withRemainder, type OutflowCandidate, type OutflowPart } from "./outflow-allocation.js";
+import { allocateOutflow, articlePlacePreference, withRemainder, type OutflowCandidate, type OutflowPart } from "./outflow-allocation.js";
 import { StockLocationBlockedError } from "./stock.errors.js";
 
 // What a CHOSEN place that is blocked (Spärrad lagerplats, 0185) means for
@@ -93,9 +93,9 @@ export async function allocateOutflowLocations(
   const { parts, remainder } = allocateOutflow(quantity, candidateIds.length > 0 ? await readCandidates(db, articleId, candidateIds) : []);
   if (remainder <= 0) return parts;
   // The shortfall goes negative where every outflow went before the split —
-  // the huvudplats unless it is inactive or blocked, else the first usable
-  // alternative place, else "***" (which can never be blocked). Every one of
-  // the article's places is among the locked ones.
+  // the huvudplats unless it is inactive, blocked or "***", else the first
+  // usable alternative place, else "***" (which can never be blocked). Every
+  // one of the article's places is among the locked ones.
   return withRemainder(parts, remainder, await resolveStockLocation(db, articleId));
 }
 
@@ -114,9 +114,10 @@ async function readCandidates(db: Db | Tx, articleId: string, candidateIds: stri
       warehouseName: warehouses.name,
       locationName: stockLocations.name,
       quantityOnHand: sql<string>`sum(${stockTransactions.quantityDelta})`,
-      // 0 huvudplats, 1–20 alternative, null other (the huvudplats wins
-      // when a place is both).
-      preference: sql<number | null>`min(case when ${articles.defaultLocationId} = ${stockLocations.id} then 0 else ${articleAlternativeLocations.sortOrder} end)`,
+      // The facts articlePlacePreference ranks (the huvudplats wins when a
+      // place is both, "***" is none of the article's own).
+      isPrimary: sql<boolean>`coalesce(bool_or(${articles.defaultLocationId} = ${stockLocations.id}), false)`,
+      sortOrder: sql<number | null>`min(${articleAlternativeLocations.sortOrder})`,
       active: stockLocations.active,
       placeBlocked: stockLocations.blocked,
       countBlocked: sql<boolean>`bool_or(${blockingCount.locationId} is not null)`,
@@ -139,7 +140,11 @@ async function readCandidates(db: Db | Tx, articleId: string, candidateIds: stri
     warehouseName: r.warehouseName,
     locationName: r.locationName,
     quantityOnHand: Number(r.quantityOnHand),
-    preference: r.preference === null ? null : Number(r.preference),
+    preference: articlePlacePreference({
+      locationName: r.locationName,
+      isPrimary: r.isPrimary === true,
+      sortOrder: r.sortOrder === null ? null : Number(r.sortOrder),
+    }),
     active: r.active,
     // A blocking stock count OR a Spärrad lagerplats — skipped alike.
     blocked: r.countBlocked === true || r.placeBlocked,

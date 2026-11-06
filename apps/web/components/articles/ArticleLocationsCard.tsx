@@ -9,7 +9,7 @@ import { Form, FormActions, FormError, FormHint, FormSaved } from "../ui/Form";
 import { useCan } from "../PermissionsProvider";
 import { apiFetch } from "../../lib/api";
 import { formatQuantity } from "../../lib/format";
-import { locationOptionLabel, moveInList } from "../../lib/stockLocations";
+import { locationOptionLabel, moveInList, ownPrimaryLocationId } from "../../lib/stockLocations";
 import type { ArticleLocationPlace, ArticleLocations, StockLocation } from "../../lib/types";
 import styles from "./ArticleLocationsCard.module.css";
 
@@ -44,7 +44,8 @@ export function ArticleLocationsCard({
 }) {
   const canEdit = useCan()(["artiklar", "lager"]);
   const [locations, setLocations] = useState<StockLocation[]>([]);
-  const [primaryId, setPrimaryId] = useState(value.primary?.locationId ?? "");
+  // A stored *** huvudplats is the "*** (standard)" choice ("").
+  const [primaryId, setPrimaryId] = useState(ownPrimaryLocationId(value.primary) ?? "");
   const [altIds, setAltIds] = useState(value.alternatives.map((p) => p.locationId));
   const [toAdd, setToAdd] = useState("");
   const [pending, setPending] = useState(false);
@@ -64,7 +65,10 @@ export function ArticleLocationsCard({
     return m;
   }, [locations, value]);
 
-  const savedPrimary = value.primary?.locationId ?? "";
+  const savedPrimary = ownPrimaryLocationId(value.primary) ?? "";
+  // "*** (standard)" sends back the stored *** when that is what the article
+  // has (the same behaviour as no huvudplats, and no data rewritten), else null.
+  const reserveId = value.primary && ownPrimaryLocationId(value.primary) === null ? value.primary.locationId : null;
   const savedAlts = value.alternatives.map((p) => p.locationId);
   const dirty = primaryId !== savedPrimary || altIds.join(",") !== savedAlts.join(",");
 
@@ -95,12 +99,12 @@ export function ArticleLocationsCard({
       const next = await apiFetch<ArticleLocations>(`/api/v1/articles/${articleId}/locations`, {
         method: "PUT",
         body: JSON.stringify({
-          primaryLocationId: primaryId === "" ? null : primaryId,
+          primaryLocationId: primaryId === "" ? reserveId : primaryId,
           alternativeLocationIds: altIds,
         }),
       });
       onSaved(next);
-      setPrimaryId(next.primary?.locationId ?? "");
+      setPrimaryId(ownPrimaryLocationId(next.primary) ?? "");
       setAltIds(next.alternatives.map((p) => p.locationId));
       setSaved(true);
     } catch (err) {
@@ -218,8 +222,9 @@ export function ArticleLocationsCard({
         )}
 
         <FormHint attached>
-          Inleveranser utan vald plats hamnar på huvudplatsen. Uttag med Automatiskt tar först från huvudplatsen, sedan från de
-          alternativa platserna i ordning och sist från övriga platser med saldo.
+          Inleveranser utan vald plats hamnar på huvudplatsen. Med huvudplatsen *** (standard) hamnar de på första alternativa plats.
+          Uttag med Automatiskt tar först från huvudplatsen, sedan från de alternativa platserna i ordning och sist från övriga platser
+          med saldo, med *** allra sist.
         </FormHint>
         {canEdit && (
           <FormActions>

@@ -42,6 +42,15 @@ export function moveInList<T>(items: T[], index: number, delta: -1 | 1): T[] {
   return next;
 }
 
+// The reserve "***" as huvudplats counts as no huvudplats — the server's rule
+// (articlePlacePreference): inflows go to the first usable alternative and
+// Automatiskt takes "***" last. Every article created without a place has it
+// stored, so the Lagerplatser card shows it as "*** (standard)" and the Plats
+// column never calls it Huvudplats. null = no huvudplats of the article's own.
+export function ownPrimaryLocationId(primary: { locationId: string; name: string } | null | undefined): string | null {
+  return primary && primary.name !== "***" ? primary.locationId : null;
+}
+
 // The Plats column of the saldo table: Huvudplats / Alternativ N (index in the
 // ordered alternatives + 1) / "–".
 export function articleLocationRole(

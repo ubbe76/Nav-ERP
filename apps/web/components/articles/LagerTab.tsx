@@ -12,7 +12,7 @@ import { Field, Input, Select } from "../ui/Field";
 import { Form, FormActions, FormError, FormHint, FormRow, FormSaved } from "../ui/Form";
 import { apiFetch } from "../../lib/api";
 import type { Article, ArticleLocations, StockBalance } from "../../lib/types";
-import { articleLocationRole } from "../../lib/stockLocations";
+import { articleLocationRole, ownPrimaryLocationId } from "../../lib/stockLocations";
 import { ArticleLocationsCard } from "./ArticleLocationsCard";
 import { formatQuantity } from "../../lib/format";
 
@@ -205,7 +205,7 @@ export function LagerTab({
             if (key === "role") {
               return articleLocationRole(
                 row.locationId,
-                places.primary?.locationId,
+                ownPrimaryLocationId(places.primary),
                 places.alternatives.map((p) => p.locationId)
               );
             }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allocateOutflow,
+  articlePlacePreference,
   compareOutflowLocations,
   withRemainder,
   type OutflowCandidate,
@@ -130,13 +131,56 @@ describe("compareOutflowLocations", () => {
     expect(sorted.map((l) => l.locationName)).toEqual(["B1", "Z", "A2", "A10", "***"]);
   });
 
-  it("puts the huvudplats first and the alternatives in their order before the rest, even *** as huvudplats", () => {
+  it("puts the huvudplats first and the alternatives in their order before the rest", () => {
     const sorted = [
       { warehouseName: "Annex", locationName: "A1", preference: null },
       { warehouseName: "Huvudlager", locationName: "Z3", preference: 2 },
       { warehouseName: "Huvudlager", locationName: "Z7", preference: 1 },
-      { warehouseName: "***", locationName: "***", preference: 0 },
+      { warehouseName: "Huvudlager", locationName: "P", preference: 0 },
     ].sort(compareOutflowLocations);
-    expect(sorted.map((l) => l.locationName)).toEqual(["***", "Z7", "Z3", "A1"]);
+    expect(sorted.map((l) => l.locationName)).toEqual(["P", "Z7", "Z3", "A1"]);
+  });
+
+  it("sorts *** as huvudplats last, after the alternatives and the others — it counts as no huvudplats", () => {
+    const place = (warehouseName: string, locationName: string, isPrimary: boolean, sortOrder: number | null) => ({
+      warehouseName,
+      locationName,
+      preference: articlePlacePreference({ locationName, isPrimary, sortOrder }),
+    });
+    const sorted = [
+      place("***", "***", true, null),
+      place("Annex", "A1", false, null),
+      place("Huvudlager", "Z3", false, 2),
+      place("Huvudlager", "Z7", false, 1),
+    ].sort(compareOutflowLocations);
+    expect(sorted.map((l) => l.locationName)).toEqual(["Z7", "Z3", "A1", "***"]);
+  });
+});
+
+describe("articlePlacePreference", () => {
+  it("ranks the huvudplats 0, an alternative by its sort_order and any other place null", () => {
+    expect(articlePlacePreference({ locationName: "P", isPrimary: true, sortOrder: null })).toBe(0);
+    // A place that is both: the huvudplats wins.
+    expect(articlePlacePreference({ locationName: "P", isPrimary: true, sortOrder: 3 })).toBe(0);
+    expect(articlePlacePreference({ locationName: "Z1", isPrimary: false, sortOrder: 2 })).toBe(2);
+    expect(articlePlacePreference({ locationName: "A1", isPrimary: false, sortOrder: null })).toBeNull();
+  });
+
+  it("never ranks *** as one of the article's own places, not even as the huvudplats", () => {
+    expect(articlePlacePreference({ locationName: "***", isPrimary: true, sortOrder: null })).toBeNull();
+    expect(articlePlacePreference({ locationName: "***", isPrimary: false, sortOrder: 1 })).toBeNull();
+  });
+
+  it("splits with *** as huvudplats like with no huvudplats: alternatives, others, *** last", () => {
+    const candidates: OutflowCandidate[] = [
+      candidate({ locationId: "fallback", warehouseName: "***", locationName: "***", quantityOnHand: 2, preference: articlePlacePreference({ locationName: "***", isPrimary: true, sortOrder: null }) }),
+      candidate({ locationId: "A1", quantityOnHand: 2 }),
+      candidate({ locationId: "Z1", quantityOnHand: 2, preference: 1 }),
+    ];
+    expect(allocateOutflow(5, candidates).parts).toEqual([
+      { locationId: "Z1", quantity: 2 },
+      { locationId: "A1", quantity: 2 },
+      { locationId: "fallback", quantity: 1 },
+    ]);
   });
 });

@@ -122,6 +122,16 @@ function gate() {
   return { promise, open };
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function salesOrder(rows: { articleId: string; quantity: number }[]) {
+  const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+  const created = await salesService.createQuote({ customerId: customer.id, rows: rows.map((r) => ({ ...r, unitPrice: 10 })) }, user.id);
+  await salesService.confirm(created.order.id);
+  await salesService.startProduction(created.order.id);
+  return created;
+}
+
 describe("PUT /articles/:id/locations — the whole set", () => {
   it("replaces the huvudplats and the alternatives in order, and GET answers with the article's balance on each", async () => {
     const a1 = await place("A1");
@@ -269,10 +279,15 @@ describe("the order of the article's places", () => {
     await stock(x.id, undefined, 1);
     expect(await balance(x.id, await getOrCreateFallbackLocation(db))).toBe(1);
 
-    // The batch form answers the same for several articles at once.
+    // The batch form answers the same for several articles at once. Z-1 has
+    // *** as huvudplats, which counts as none: absent too, and the resolver
+    // falls back to ***.
     const z = await article("Z-1");
     const usable = await usableArticleLocations(db, [x.id, y.id, z.id]);
-    expect([usable.get(x.id), usable.get(y.id), usable.get(z.id)]).toEqual([undefined, undefined, await getOrCreateFallbackLocation(db)]);
+    expect([usable.has(x.id), usable.has(y.id), usable.has(z.id)]).toEqual([false, false, false]);
+    await stockService.unblockLocation(alt1.id, user.id);
+    const again = await usableArticleLocations(db, [x.id, y.id, z.id]);
+    expect([again.get(x.id), again.has(y.id), again.has(z.id)]).toEqual([alt1.id, false, false]);
   });
 
   it("Automatiskt and the pick list take the huvudplats, the alternatives in order, the others and *** last", async () => {
@@ -323,6 +338,103 @@ describe("the order of the article's places", () => {
     await stockService.blockLocation(main.id, null, user.id);
     expect(await db.transaction((tx) => allocateOutflowLocations(tx, x.id, 5))).toEqual([{ locationId: alt1.id, quantity: 5 }]);
   });
+
+  it("utleverans through deliverBatch with Automatiskt takes the huvudplats, the alternatives in order and then the others", async () => {
+    const main = await place("P");
+    const alt1 = await place("Z1");
+    const other = await place("A1");
+    const x = await article("X-1", main.id);
+    await set(x.id, main.id, [alt1.id]);
+    await stock(x.id, main.id, 1);
+    await stock(x.id, alt1.id, 3);
+    await stock(x.id, other.id, 5);
+    const { order, rows } = await salesOrder([{ articleId: x.id, quantity: 6 }]);
+
+    await salesService.deliverBatch(order.id, { rows: [{ rowId: rows[0]!.id, quantity: 6 }] }, user.id);
+    expect([await balance(x.id, main.id), await balance(x.id, alt1.id), await balance(x.id, other.id)]).toEqual([0, 0, 3]);
+  });
+});
+
+// The reserve "***" is every new article's huvudplats when none is chosen
+// (and every imported one's), but it is the fallback, not a place of the
+// article's own: as the huvudplats it counts as NO huvudplats — inflows go
+// to the first usable alternative, Automatiskt and the pick list take the
+// alternatives first and "***" last, exactly as with an empty huvudplats.
+// The stored default_location_id stays "***".
+describe("*** as the huvudplats counts as no huvudplats", () => {
+  it("an inflow without a place lands on the first usable alternative, else ***", async () => {
+    const alt1 = await place("Z1");
+    const alt2 = await place("Z2");
+    const fallback = await getOrCreateFallbackLocation(db);
+    // Created without a place: the huvudplats is ***.
+    const x = await article("X-1");
+    expect(await primaryOf(x.id)).toBe(fallback);
+    await set(x.id, fallback, [alt1.id, alt2.id]);
+
+    await stock(x.id, undefined, 2);
+    expect([await balance(x.id, alt1.id), await balance(x.id, fallback)]).toEqual([2, 0]);
+    expect((await usableArticleLocations(db, [x.id])).get(x.id)).toBe(alt1.id);
+
+    await stockService.blockLocation(alt1.id, null, user.id);
+    await stock(x.id, undefined, 1);
+    expect(await balance(x.id, alt2.id)).toBe(1);
+
+    await stockService.blockLocation(alt2.id, null, user.id);
+    await stock(x.id, undefined, 1);
+    expect(await balance(x.id, fallback)).toBe(1);
+    expect((await usableArticleLocations(db, [x.id])).has(x.id)).toBe(false);
+    // No data changed: the huvudplats is still ***.
+    expect(await primaryOf(x.id)).toBe(fallback);
+  });
+
+  it("Automatiskt and the pick list take the alternatives, the others and *** last; the remainder goes to alternative 1", async () => {
+    const alt1 = await place("Z9");
+    const alt2 = await place("M5");
+    const other = await place("A1");
+    const fallback = await getOrCreateFallbackLocation(db);
+    const x = await article("X-1");
+    await set(x.id, fallback, [alt1.id, alt2.id]);
+    for (const id of [fallback, other.id, alt2.id, alt1.id]) await stock(x.id, id, 2);
+
+    // 2 + 2 + 2 + 2 on hand, 9 drawn: the missing 1 merges into alternative 1's part.
+    const automatic = await db.transaction((tx) => allocateOutflowLocations(tx, x.id, 9));
+    expect(automatic).toEqual([
+      { locationId: alt1.id, quantity: 3 },
+      { locationId: alt2.id, quantity: 2 },
+      { locationId: other.id, quantity: 2 },
+      { locationId: fallback, quantity: 2 },
+    ]);
+    const pick = await stockService.balancesForArticles([x.id]);
+    expect(pick.map((b) => b.locationId)).toEqual([alt1.id, alt2.id, other.id, fallback]);
+    expect(pick.map((b) => b.preference)).toEqual([1, 2, null, null]);
+
+    // The paper itself: *** last.
+    const { order } = await salesOrder([{ articleId: x.id, quantity: 5 }]);
+    const text = pdfText((await salesService.getPickListPdf(order.id)).content);
+    const at = (s: string) => text.indexOf(s);
+    expect([at("Huvudlager — Z9: 2"), at("Huvudlager — M5: 2"), at("Huvudlager — A1: 2"), at("*** — ***: 2")].every((i) => i >= 0)).toBe(true);
+    expect(at("Huvudlager — Z9: 2") < at("Huvudlager — M5: 2") && at("Huvudlager — M5: 2") < at("Huvudlager — A1: 2") && at("Huvudlager — A1: 2") < at("*** — ***: 2")).toBe(true);
+  });
+
+  it("utleverans through deliverBatch with Automatiskt follows the same order, the shortfall negative on alternative 1", async () => {
+    const alt1 = await place("Z1");
+    const alt2 = await place("Z2");
+    const other = await place("A1");
+    const fallback = await getOrCreateFallbackLocation(db);
+    const x = await article("X-1");
+    await set(x.id, fallback, [alt1.id, alt2.id]);
+    await stock(x.id, fallback, 2);
+    await stock(x.id, other.id, 5);
+    await stock(x.id, alt2.id, 1);
+    await stock(x.id, alt1.id, 3);
+    const { order, rows } = await salesOrder([{ articleId: x.id, quantity: 12 }]);
+
+    await salesService.deliverBatch(order.id, { rows: [{ rowId: rows[0]!.id, quantity: 12 }] }, user.id);
+    // 3 + 1 + 5 + 2 = 11 on hand, the twelfth goes negative on alternative 1, not on ***.
+    expect([await balance(x.id, alt1.id), await balance(x.id, alt2.id), await balance(x.id, other.id), await balance(x.id, fallback)]).toEqual([
+      -1, 0, 0, 0,
+    ]);
+  });
 });
 
 describe("a retired temporary place and the transfer", () => {
@@ -369,6 +481,34 @@ describe("a retired temporary place and the transfer", () => {
     expect(await primaryOf(x.id)).toBe(m.id);
     expect(await assignments(x.id)).toEqual([{ locationId: s.id, sortOrder: 1 }]);
     expect(await assignments(y.id)).toEqual([]);
+  });
+
+  // The followers are locked when they are read (article before place), so
+  // a PUT in progress is waited out and the transfer reads what it wrote: X
+  // no longer lives on T1 and does not follow — the PUT's answer stands.
+  it("a transfer that empties a temporary huvudplats waits for a PUT in progress and keeps the PUT's huvudplats", async () => {
+    const t = await place("T1", { fixed: false });
+    const m = await place("M1");
+    const a1 = await place("A1");
+    const x = await article("X-1", t.id);
+    await stock(x.id, t.id, 4);
+    const written = gate();
+    const release = gate();
+    const put = db.transaction(async (tx) => {
+      await replaceArticleLocations(tx, x.id, { primaryLocationId: a1.id, alternativeLocationIds: [] });
+      written.open();
+      await release.promise;
+    });
+    put.catch(() => written.open());
+    await written.promise;
+    const transfer = stockService.transferStock({ fromLocationId: t.id, toLocationId: m.id, rows: [{ articleId: x.id, quantity: 4 }] }, user.id);
+    await waitForLockWaiter().finally(release.open);
+    await put;
+
+    expect((await transfer).deactivatedSourceLocation).toBe(true);
+    expect(await locationRow(t.id)).toMatchObject({ active: false });
+    expect(await primaryOf(x.id)).toBe(a1.id);
+    expect(await balance(x.id, m.id)).toBe(4);
   });
 });
 
@@ -520,6 +660,163 @@ describe("the lock between PUT and a draw", () => {
     const err = await put;
     expect(err).toBeInstanceOf(ArticleLocationInvalidError);
     expect((err as Error).message).toBe("Lagerplatsen Huvudlager — U1 är inaktiv och kan inte läggas till som alternativ lagerplats.");
+    expect(await assignments(x.id)).toEqual([]);
+  });
+
+  // pg_stat_activity: is some transaction waiting for a lock that `pid` holds?
+  async function waitsFor(pid: number) {
+    const result = await db.execute(
+      sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND ${pid}::int = ANY(pg_blocking_pids(pid))`
+    );
+    return (([...result] as { n: number }[])[0]?.n ?? 0) > 0;
+  }
+
+  // The review's deadlock: the cleanup C (after Y's last draw from L1) has
+  // locked L1's articles and waits for the place; meanwhile a PUT makes L1
+  // X's huvudplats and commits, and a draw D takes X. Once C gets the place,
+  // D asks for X's places FOR SHARE (L1 among them) and waits for C. Before
+  // the fix C's UPDATE of "every article with L1 as huvudplats" reached X and
+  // waited for D: 40P01. C now clears only the articles it locked, so X keeps
+  // L1 as huvudplats on an inactive place, which the resolver skips.
+  it("a cleanup clears only the articles it locked, so a draw of one that got the place meanwhile never deadlocks with it", async () => {
+    const a1 = await place("A1");
+    const l = await place("L1", { fixed: false });
+    const x = await article("X-1", a1.id);
+    const y = await article("Y-1", l.id);
+    await stock(y.id, l.id, 2);
+    await stock(x.id, a1.id, 5);
+
+    // Something holds L1 FOR SHARE (a draw or a PUT does) …
+    const holding = gate();
+    const releaseHold = gate();
+    const hold = db.transaction(async (tx) => {
+      await tx.select({ id: stockLocations.id }).from(stockLocations).where(eq(stockLocations.id, l.id)).for("share");
+      holding.open();
+      await releaseHold.promise;
+    });
+    hold.catch(() => holding.open());
+    await holding.promise;
+    const draw = gate();
+    try {
+      // … while Y's last 2 leave L1: the cleanup locks Y and waits for the place.
+      const cleanup = stock(y.id, l.id, -2);
+      cleanup.catch(() => {});
+      await waitForLockWaiter();
+      // A PUT makes L1 X's huvudplats meanwhile (its share lock does not wait).
+      await Promise.race([set(x.id, l.id, []), sleep(5000).then(() => Promise.reject(new Error("the PUT waited")))]);
+
+      // A draw of X takes the article — allocateOutflowLocations' first lock …
+      const drawHolds = gate();
+      let drawPid = 0;
+      const drawing = db.transaction(async (tx) => {
+        drawPid = ([...(await tx.execute(sql`SELECT pg_backend_pid() AS pid`))] as { pid: number }[])[0]!.pid;
+        await tx.select({ id: articles.id }).from(articles).where(eq(articles.id, x.id)).for("no key update");
+        drawHolds.open();
+        await draw.promise;
+        // … and then its places FOR SHARE, as lockOutflowCandidates does (L1 is its huvudplats now).
+        await tx.select({ id: stockLocations.id }).from(stockLocations).where(eq(stockLocations.id, l.id)).for("share");
+      });
+      drawing.catch(() => drawHolds.open());
+      await drawHolds.promise;
+
+      // The place is let go and the cleanup gets it. It must finish without
+      // waiting for the draw.
+      releaseHold.open();
+      await hold;
+      let settled = false;
+      const finished = cleanup.then(
+        () => "finished" as const,
+        () => "failed" as const
+      );
+      void finished.then(() => (settled = true));
+      const outcome = await Promise.race([
+        finished,
+        (async () => {
+          const deadline = Date.now() + 10_000;
+          while (!settled && Date.now() < deadline) {
+            if (await waitsFor(drawPid)) return "waits-for-the-draw" as const;
+            await sleep(20);
+          }
+          return settled ? ("finished" as const) : ("timeout" as const);
+        })(),
+      ]);
+      draw.open();
+      const results = await Promise.allSettled([cleanup, drawing]);
+
+      expect(outcome).toBe("finished");
+      expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+      expect(await locationRow(l.id)).toMatchObject({ active: false });
+      expect(await primaryOf(y.id)).toBeNull();
+      // Set while the cleanup waited: stays, on an inactive place the resolver skips.
+      expect(await primaryOf(x.id)).toBe(l.id);
+      await stock(x.id, undefined, 1);
+      expect(await balance(x.id, await getOrCreateFallbackLocation(db))).toBe(1);
+    } finally {
+      releaseHold.open();
+      draw.open();
+    }
+  });
+});
+
+// PUT against Spärra: PUT holds the places of its new set FOR SHARE, and
+// Spärra is one UPDATE of the place row — so one waits for the other.
+describe("the lock between PUT and Spärra", () => {
+  it("Spärra waits for a PUT that adds the place; it stays as an alternative, blocked, and inflows skip it", async () => {
+    const k = await place("K1");
+    const alt2 = await place("Z2");
+    const x = await article("X-1");
+    const written = gate();
+    const release = gate();
+    const put = db.transaction(async (tx) => {
+      await replaceArticleLocations(tx, x.id, { primaryLocationId: null, alternativeLocationIds: [k.id, alt2.id] });
+      written.open();
+      await release.promise;
+    });
+    put.catch(() => written.open());
+    await written.promise;
+    const block = stockService.blockLocation(k.id, null, user.id);
+    await waitForLockWaiter().finally(release.open);
+    await put;
+    await block;
+
+    expect(await locationRow(k.id)).toMatchObject({ blocked: true });
+    expect(await assignments(x.id)).toEqual([
+      { locationId: k.id, sortOrder: 1 },
+      { locationId: alt2.id, sortOrder: 2 },
+    ]);
+    // Already there, so the card's next save keeps it.
+    expect((await set(x.id, null, [k.id, alt2.id])).alternatives.map((p) => [p.name, p.blocked])).toEqual([
+      ["K1", true],
+      ["Z2", false],
+    ]);
+    await stock(x.id, undefined, 1);
+    expect([await balance(x.id, k.id), await balance(x.id, alt2.id)]).toEqual([0, 1]);
+  });
+
+  it("a PUT waits for a Spärra in progress and then refuses the place as a new alternative", async () => {
+    const a1 = await place("A1");
+    const k = await place("K1");
+    const x = await article("X-1", a1.id);
+    const blocked = gate();
+    const release = gate();
+    // The same row lock Spärra takes (one UPDATE of the place), held open.
+    const block = db.transaction(async (tx) => {
+      await tx.update(stockLocations).set({ blocked: true, blockedAt: new Date() }).where(eq(stockLocations.id, k.id));
+      blocked.open();
+      await release.promise;
+    });
+    block.catch(() => blocked.open());
+    await blocked.promise;
+    const put = set(x.id, a1.id, [k.id]).then(
+      () => null,
+      (e: unknown) => e
+    );
+    await waitForLockWaiter().finally(release.open);
+    await block;
+
+    const err = await put;
+    expect(err).toBeInstanceOf(ArticleLocationInvalidError);
+    expect((err as Error).message).toBe("Lagerplatsen Huvudlager — K1 är spärrad och kan inte läggas till som alternativ lagerplats.");
     expect(await assignments(x.id)).toEqual([]);
   });
 });

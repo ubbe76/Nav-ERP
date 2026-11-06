@@ -4,7 +4,8 @@
 // booking say the same thing. Pure: no DB imports; outflow-locations.ts reads
 // the balances and calls this.
 //
-//   1. The article's huvudplats (when active) up to its positive balance.
+//   1. The article's huvudplats (when active) up to its positive balance —
+//      none when it is "***" (articlePlacePreference).
 //   2. Its alternative places (0186) in their order, likewise.
 //   3. Other locations with a positive balance in pick-list order (warehouse,
 //      location), the "***" fallback last. Locations under a BLOCKING stock
@@ -23,9 +24,7 @@ export interface OutflowCandidate {
   locationName: string;
   // sum(quantity_delta) for the article on the location.
   quantityOnHand: number;
-  // The article's own order of places: 0 = the huvudplats
-  // (articles.default_location_id), 1–20 = its alternative places
-  // (article_alternative_locations.sort_order), null = any other place.
+  // The article's own order of places — always articlePlacePreference.
   preference: number | null;
   active: boolean;
   // Skipped: an open stock count with blocks_transactions covers the
@@ -40,12 +39,31 @@ export interface OutflowPart {
 
 export const FALLBACK_LOCATION_NAME = "***";
 
+// The article's own rank of a place — the ONE rule that inflows
+// (usableArticleLocations), Automatiskt (readCandidates) and the pick list
+// (balancesForArticles) all read: 0 = the huvudplats
+// (articles.default_location_id), 1–20 = an alternative place
+// (article_alternative_locations.sort_order), null = any other place.
+//
+// The "***" fallback is never one of the article's own places: every article
+// created without a place, and every imported one, has it as huvudplats, so
+// a huvudplats that is "***" counts as NO huvudplats. Its alternatives then
+// come first — an inflow lands on the first usable one, Automatiskt and the
+// pick list take them before the others — and "***" sorts last, exactly as
+// for an article whose huvudplats is empty. The stored value stays "***".
+// (PUT refuses "***" as an alternative, so it never has a sort_order.)
+export function articlePlacePreference(place: { locationName: string; isPrimary: boolean; sortOrder: number | null }): number | null {
+  if (place.locationName === FALLBACK_LOCATION_NAME) return null;
+  if (place.isPrimary) return 0;
+  return place.sortOrder;
+}
+
 const round4 = (n: number) => Math.round((n + Number.EPSILON) * 1e4) / 1e4;
 
 // Pick-list order: the article's own places first (huvudplats, then the
-// alternatives in order), then by warehouse and location name, the fallback
-// last. Same collation as the terminal's material sort (sv, numeric) so "A2"
-// sorts before "A10".
+// alternatives in order — `preference` from articlePlacePreference), then by
+// warehouse and location name, the fallback last. Same collation as the
+// terminal's material sort (sv, numeric) so "A2" sorts before "A10".
 export function compareOutflowLocations(
   a: Pick<OutflowCandidate, "warehouseName" | "locationName" | "preference">,
   b: Pick<OutflowCandidate, "warehouseName" | "locationName" | "preference">

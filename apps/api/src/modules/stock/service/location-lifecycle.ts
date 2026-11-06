@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { articleAlternativeLocations, articles, stockLocations, stockTransactions, type Db, type Tx } from "@navet/db";
 import { FALLBACK_LOCATION_NAME } from "./location-resolver.js";
 
@@ -35,7 +35,7 @@ export async function deactivateEmptyLocation(db: Db | Tx, locationId: string): 
   // tried again: a draw that held one of those locks has committed and is
   // seen. (Two transactions can only both see the place empty when they
   // drew the same article, and the draws serialise on the article first.)
-  await db
+  const lockedArticles = await db
     .select({ id: articles.id })
     .from(articles)
     .where(eq(articles.defaultLocationId, locationId))
@@ -51,10 +51,21 @@ export async function deactivateEmptyLocation(db: Db | Tx, locationId: string): 
   // fall back to their alternative places, then "***" (the transfer routine
   // repoints the moved ones after). No alternative place is promoted: the
   // huvudplats stays empty until someone chooses one.
-  await db
-    .update(articles)
-    .set({ defaultLocationId: null })
-    .where(eq(articles.defaultLocationId, locationId));
+  //
+  // ONLY the articles locked above. One whose huvudplats became this place
+  // while we waited for the place lock (a PUT /articles/:id/locations or a
+  // PATCH committed meanwhile) was not locked, and an UPDATE of "every
+  // article with this place" would lock it now — place before article. A
+  // draw of it holds the article and asks for its places FOR SHARE, this
+  // one among them, so the two waited on each other (40P01). It keeps the
+  // place as huvudplats instead: inactive, so the resolver and Automatiskt
+  // skip it (its alternatives, then "***"), and the card shows it (inaktiv).
+  if (lockedArticles.length > 0) {
+    await db
+      .update(articles)
+      .set({ defaultLocationId: null })
+      .where(and(inArray(articles.id, lockedArticles.map((a) => a.id)), eq(articles.defaultLocationId, locationId)));
+  }
 
   // Its assignments as an alternative place (0186) go too. The articles that
   // have it only as an alternative are NOT locked first: the DELETE takes no

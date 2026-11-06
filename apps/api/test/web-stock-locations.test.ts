@@ -34,7 +34,7 @@ describe("web stockLocations", () => {
   });
 });
 
-import { articleLocationRole, moveInList } from "../../web/lib/stockLocations.js";
+import { articleLocationRole, moveInList, ownPrimaryLocationId } from "../../web/lib/stockLocations.js";
 
 describe("web stockLocations: alternative order", () => {
   it("moves an item up or down and ignores the ends", () => {
@@ -49,5 +49,12 @@ describe("web stockLocations: alternative order", () => {
     expect(articleLocationRole("y", "p", ["x", "y"])).toBe("Alternativ 2");
     expect(articleLocationRole("z", "p", ["x"])).toBe("–");
     expect(articleLocationRole(null, "p", [])).toBe("–");
+  });
+
+  it("treats the *** reserve as huvudplats as no huvudplats of the article's own", () => {
+    expect(ownPrimaryLocationId({ locationId: "p", name: "A1" })).toBe("p");
+    expect(ownPrimaryLocationId({ locationId: "r", name: "***" })).toBeNull();
+    expect(ownPrimaryLocationId(null)).toBeNull();
+    expect(articleLocationRole("r", ownPrimaryLocationId({ locationId: "r", name: "***" }), ["x"])).toBe("–");
   });
 });
