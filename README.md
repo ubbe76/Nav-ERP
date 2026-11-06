@@ -513,7 +513,7 @@ för detaljer, återställning och krav på förvaringsort.
 
 ## Status
 
-**Version 0.8.0-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
+**Version 0.8.1-alpha — inte redo för produktion**, se varningen överst. En alfaversion är till för den som vill prova systemet och ge återkoppling. Funktionerna nedan är
 byggda och testade, men systemet har ännu inte använts i skarp drift.
 
 Backend (Fas 1–5 enligt byggordningen) är klart, testat och kör: Article/BOM,
@@ -580,7 +580,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   och antalsavvikelse, och underlaget kan hämtas direkt från en inlevererad
   inköpsorder; momsen förifylls ur nettot och fakturan kan betalas till en
   annan leverantör än inköpsorderns; leverantörens faktura laddas upp som **underlag** (PDF/bild)
-  redan vid registreringen och kan inte tas bort efter attest)
+  redan vid registreringen och kan inte tas bort efter attest); leverantörernas
+  **e-fakturor via Peppol** hämtas färdigtolkade till Fakturainkorgen med
+  originalet sparat; **avsändning till legoleverantör** med pallkort, och en
+  egen leveransadress på inköpsordern
 - **Försäljning** — kunder med kundkort (samma flikupplägg som
   leverantörskortet plus fliken **Adresser**: besöksadress på Allmänt,
   fakturaadress med **e-post för faktura**, och flera valbara
@@ -608,9 +611,10 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   **ställpris** som läggs på ordern som en egen ställkostnadsrad; kundfakturor med
   prislistor/kundpriser, och **utfärdade fakturor och påminnelser
   arkiveras som PDF** exakt som de skickades; **e-faktura via Peppol**
-  (Peppol BIS Billing 3, faktura och kreditfaktura till svenska kunder,
-  skickad via accesspunkten B2Brouter med **Skicka e-faktura** på
-  fakturakortet och leveransstatus som hämtas automatiskt)
+  (Peppol BIS Billing 3, faktura och kreditfaktura till företagskunder i
+  Sverige och utomlands i fakturans valuta, skickad via accesspunkten
+  B2Brouter automatiskt vid Utfärda eller med **Skicka e-faktura** på
+  fakturakortet, med leveransstatus på fakturan)
 - **Grunddata** — delade register för leveransvillkor (förifyllbara med
   Combiterms), betalningsvillkor och speditörer, nåbara från både Inköp
   och Försäljning; villkoren ligger också på förfrågan, inköpsorder och
@@ -625,7 +629,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   från TO-kortet; överrapportering drar mer), **utskrivbar TO**
   (PDF med operationer, material, signaturkolumner och artikelns
   ritningar inbakade), material och operationer som kan **ändras på en
-  skapad order** utan att artikelns beredning rörs, efterkalkyl; **föreslaget färdigdatum** på ny
+  skapad order** utan att artikelns beredning rörs, efterkalkyl,
+  **legoinköp och förfrågningar** direkt från orderns legooperation (dagen
+  godset ska vara tillbaka räknas bakåt från färdigdatumet); **föreslaget färdigdatum** på ny
   tillverkningsorder (arbetsdagen före artikelns första otäckta behov);
   **behovsberäkning** med **tidsfasade** orderförslag (ett förslag per
   behovsvecka med senaste dag att beställa eller starta utifrån
@@ -687,7 +693,7 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   månad/kvartal med Skatteverkets rutor och bokförd momsomföring, härledda
   **Balansräkning** och **Resultaträkning**, **Anläggningsregister** med
   planenliga avskrivningar, **Bokslut** (en guide i sex steg som stänger
-  räkenskapsåret) samt **SIE-filer** (SIE4-export per räkenskapsår och
+  räkenskapsåret, med lagerförändring och produkter i arbete) samt **SIE-filer** (SIE4-export per räkenskapsår och
   import av ingående balanser). Anpassat efter **bokföringslagen**:
   **underlag** (kvitto, kontoutdrag) kan bifogas verifikat, och bokförda
   verifikat, deras rader och underlag samt arkiverade fakturor skyddas av
@@ -704,7 +710,9 @@ Alla register och strukturer är fullt redigerbara i efterhand:
   omskick av misslyckade utskick
 - **Rapporter** — bland annat **orderförteckning** för kundorder och
   inköp (ordervärde och restvärde per order eller rad, som PDF och CSV),
-  **offertuppföljning** (hit rate i antal och värde), marginal och kalkylutfall
+  **offertuppföljning** (hit rate i antal och värde), marginal och
+  kalkylutfall samt **produkter i arbete** per valfritt datum
+  (administratörer, som PDF)
 - **System** (admin) — företagsinformation med logotyp, nummerserier
   (även för **artikelnummer**, med egna serier per varugrupp),
   användare och behörighetsgrupper (med konton för **endast läsning**),
