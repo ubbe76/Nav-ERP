@@ -25,7 +25,9 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
       return { warehouses: warehouseRows, locations: locationRows };
     },
 
-    // Only an ACTIVE default counts — resolveStockLocation skips a retired one.
+    // Only an ACTIVE, open default counts — resolveStockLocation skips a
+    // retired one and a Spärrad lagerplats (0185), so the preview must too or
+    // it would say "the article's place" where the commit writes "***".
     async articleDefaultLocations(articleIds: string[]) {
       const map = new Map<string, string>();
       for (const part of chunks([...new Set(articleIds)])) {
@@ -33,7 +35,10 @@ export function createStockBalanceImportRepository(db: Db | Tx) {
         const rows = await db
           .select({ articleId: articles.id, locationId: stockLocations.id })
           .from(articles)
-          .innerJoin(stockLocations, and(eq(stockLocations.id, articles.defaultLocationId), eq(stockLocations.active, true)))
+          .innerJoin(
+            stockLocations,
+            and(eq(stockLocations.id, articles.defaultLocationId), eq(stockLocations.active, true), eq(stockLocations.blocked, false))
+          )
           .where(inArray(articles.id, part));
         for (const row of rows) map.set(row.articleId, row.locationId);
       }

@@ -50,6 +50,7 @@ import {
   DuplicateArticleNumberError,
   InvalidFileTypeError,
   InvalidReferenceError,
+  DefaultLocationBlockedError,
   InvalidUnitError,
   RoutingOperationMismatchError,
   MAX_FILE_BYTES,
@@ -92,6 +93,7 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidUnitError) return reply.code(400).send(errorBody(err));
       if (err instanceof ArticleCopyPartNotAllowedError) return reply.code(400).send(errorBody(err));
+      if (err instanceof DefaultLocationBlockedError) return reply.code(400).send(errorBody(err));
       // Only reachable through copyFrom: the source article does not exist.
       if (err instanceof ArticleNotFoundError) return reply.code(404).send(errorBody(err));
       throw err;
@@ -139,6 +141,7 @@ export async function articleRoutes(app: FastifyInstance, opts: { service: Artic
       if (err instanceof InvalidUnitError) return reply.code(400).send(errorBody(err));
       if (err instanceof InvalidReferenceError) return reply.code(400).send(errorBody(err));
       if (err instanceof ConfiguratorModeNotAllowedError) return reply.code(400).send(errorBody(err));
+      if (err instanceof DefaultLocationBlockedError) return reply.code(400).send(errorBody(err));
       throw err;
     }
   });

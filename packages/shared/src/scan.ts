@@ -52,7 +52,8 @@ export function parseLocationLabelCode(code: string): number | null {
 export const scanQuerySchema = z.object({ code: z.string().max(200) });
 
 export type ScanMatch =
-  | { kind: "location"; id: string; labelCode: string; name: string; warehouseName: string; active: boolean }
+  // blocked: a Spärrad lagerplats — Utleverans does not pick it.
+  | { kind: "location"; id: string; labelCode: string; name: string; warehouseName: string; active: boolean; blocked: boolean }
   | {
       kind: "article";
       id: string;

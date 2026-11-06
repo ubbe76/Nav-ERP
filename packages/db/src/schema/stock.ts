@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   numeric,
@@ -53,8 +54,30 @@ export const stockLocations = pgTable(
     // and stable when the location is renamed. Existing rows got theirs when
     // the column was added.
     labelNumber: integer("label_number").generatedAlwaysAsIdentity().notNull().unique(),
+    // Spärrad lagerplats (migration 0185, e.g. Karantän/Reklamation): the
+    // balance there is still the company's stock and is valued as usual, but
+    // it is not usable — the behovsberäkning, Materialbrist and the
+    // Leveranstidskontroll leave it out (onHandByArticle) and Automatiskt
+    // never draws from it. A property of the place, not a stock movement:
+    // blocking writes no stock_transactions row. Set/cleared only through
+    // POST /stock/locations/:id/block|unblock (or a location created blocked).
+    blocked: boolean("blocked").notNull().default(false),
+    blockedAt: timestamp("blocked_at", { withTimezone: true }),
+    blockedNote: varchar("blocked_note", { length: 200 }),
   },
-  (table) => [unique().on(table.warehouseId, table.name)]
+  (table) => [
+    unique().on(table.warehouseId, table.name),
+    // Same shape as closed <=> closed_at: a blocked place says since when, an
+    // open one carries neither a time nor a note.
+    check(
+      "stock_locations_blocked_consistent",
+      sql`(${table.blocked} AND ${table.blockedAt} IS NOT NULL) OR (NOT ${table.blocked} AND ${table.blockedAt} IS NULL AND ${table.blockedNote} IS NULL)`
+    ),
+    // The remainder of an Automatiskt draw lands on "***" (withRemainder) —
+    // a blocked "***" would put minus on a place that is not counted and so
+    // overstate the usable balance.
+    check("stock_locations_fallback_not_blocked", sql`NOT (${table.blocked} AND ${table.name} = '***')`),
+  ]
 );
 
 // Append-only händelselogg. Aktuellt saldo ska ALDRIG skrivas via UPDATE —
@@ -96,6 +119,9 @@ export const stockTransactions = pgTable(
   },
   (table) => [
     index("idx_stock_transactions_article_location").on(table.articleId, table.locationId),
+    // Per place (0185): the lagerplatsregister's sums, locationHoldsStock,
+    // the stock count's freeze and the block response's counts.
+    index("idx_stock_transactions_location_article").on(table.locationId, table.articleId),
     // Lagerloggen sorts and date-filters across all articles.
     index("idx_stock_transactions_created_at").on(table.createdAt),
     // …on the värderingsdatum since #26 — the same expression as stockValuedAt.

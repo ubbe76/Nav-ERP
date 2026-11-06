@@ -16,7 +16,7 @@ Spec `docs/superpowers/specs/2026-10-21-aviseringar-design.md`.
 - Aviseringarna räknas fram ur nuläget vid varje anrop — **inget lagras och inget kvitteras**; en avisering försvinner när orsaken åtgärdas.
 - Rena katalogen `alerts/service/alert-kinds.ts` (`ALERT_KIND_CATALOG`, spegel `packages/shared/src/alerts.ts` och `apps/web/lib/alerts.ts`) är enda stället där en typs rubrik, allvar, rättighet och listsida står; `visibleKinds(user)` filtrerar på behörighetsgrupperna.
 - En läsare per typ i `alerts.repository.ts` som **återanvänder systemets egna definitioner**:
-  - `stock_negative` (totalsaldo < 0)
+  - `stock_negative` (totalsaldo < 0) — medvetet **fysiskt** (0185): ett negativt användbart saldo med positivt spärrat saldo ger ingen avisering; det är behovsberäkningen som föreslår påfyllnad, aviseringen gäller bokföringsfel
   - `sales_order_late`/`purchase_order_late` (rad med rest vars `salesRowDeliveryDate`/`purchaseRowArrivalDate` < i dag; offerter och levererade ordrar räknas aldrig)
   - `manufacturing_order_late` (`orderPlanSummaries().late` = TO-listans **Sen**)
   - **Orderlistornas statusfilter Sen** delar reglerna: `status=late` (`orderStatusListParam`/`splitLateFilter` i shared `list.ts`, härlett — aldrig lagrat; med en riktig status gäller båda). KO/IO använder lövet `planning/repository/late-orders.ts` (`salesOrderLate`/`purchaseOrderLate` = statusmängden + `EXISTS` på `salesRowLate`/`purchaseRowLate`, samma radvillkor som aviseringens join), TO-servicen tar `orderPlanSummaries` över alla öppna TO:er (`listOpenManufacturingOrderIds`) och listar de sena id:na så sidning och total stannar i SQL. De tre typernas `listHref` går till listan med `?status=late`. Test: `alerts.integration.test.ts` (listan = gruppen).

@@ -75,7 +75,7 @@ import {
   WeekScheduleNotFoundError,
   WorkCenterNotFoundError,
 } from "../service/manufacturing.service.js";
-import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
+import { LocationUnderStockCountError, StockLocationBlockedError } from "../../stock/service/stock.service.js";
 import { materialShortageBody } from "../service/material-shortage.js";
 import { ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
 // Konfigurator 4c: the TO paths of a beställningsvara answer with the same
@@ -623,6 +623,8 @@ export async function manufacturingRoutes(app: FastifyInstance, opts: { service:
         if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
         if (err instanceof OverConsumptionError) return reply.code(409).send(errorBody(err));
         if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
+        // Förbruka from a chosen Spärrad lagerplats.
+        if (err instanceof StockLocationBlockedError) return reply.code(409).send(errorBody(err));
         if (err instanceof MaterialShortageError) return reply.code(409).send(materialShortageBody(err));
         throw err;
       }

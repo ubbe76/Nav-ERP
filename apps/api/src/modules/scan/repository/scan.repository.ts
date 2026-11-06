@@ -23,6 +23,8 @@ export function createScanRepository(db: Db) {
           id: stockLocations.id,
           name: stockLocations.name,
           active: stockLocations.active,
+          // Spärrad lagerplats (0185): Utleverans does not pick it.
+          blocked: stockLocations.blocked,
           labelNumber: stockLocations.labelNumber,
           warehouseName: warehouses.name,
         })

@@ -56,6 +56,18 @@ describe("allocateOutflow", () => {
     expect(remainder).toBe(3);
   });
 
+  // Spärrade lagerplatser (0185): outflow-locations.ts marks a blocked place
+  // as `blocked` just like a place under a blocking stock count — even the
+  // article's own Lagerplats.
+  it("skips a Spärrad lagerplats exactly like a place under a blocking count, own place included", () => {
+    const { parts, remainder } = allocateOutflow(6, [
+      candidate({ locationId: "own-karantan", quantityOnHand: 50, isDefault: true, blocked: true }),
+      candidate({ locationId: "B2", quantityOnHand: 4 }),
+    ]);
+    expect(parts).toEqual([{ locationId: "B2", quantity: 4 }]);
+    expect(remainder).toBe(2);
+  });
+
   it("reports what is missing as the remainder, at 4 decimals", () => {
     const { parts, remainder } = allocateOutflow(1, [candidate({ locationId: "A1", quantityOnHand: 0.3333 })]);
     expect(parts).toEqual([{ locationId: "A1", quantity: 0.3333 }]);

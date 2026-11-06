@@ -8,6 +8,7 @@ import type {
   ListQuery,
   ListStockTransactionsQuery,
   ListStockBalancesQuery,
+  ListStockLocationRegisterQuery,
   ListStockLocationsQuery,
 } from "@navet/shared";
 import type {
@@ -15,6 +16,7 @@ import type {
   UpdateWarehouseInput,
 } from "@navet/shared";
 import type { StockRepository } from "../repository/stock.repository.js";
+import type { AuditWriter } from "../../system/repository/audit.repository.js";
 import { StockLocationNotFoundError, WarehouseNotFoundError } from "./stock.errors.js";
 
 // Re-exported so route handlers keep importing their error types from the
@@ -22,6 +24,7 @@ import { StockLocationNotFoundError, WarehouseNotFoundError } from "./stock.erro
 export {
   ArticleNotFoundError,
   DuplicateStockCountRowError,
+  FallbackLocationNotBlockableError,
   InactiveStockLocationError,
   InsufficientStockError,
   LocationUnderStockCountError,
@@ -30,19 +33,72 @@ export {
   StockCountNotFoundError,
   StockCountNotOpenError,
   StockCountRowNotFoundError,
+  StockLocationAlreadyBlockedError,
+  StockLocationBlockedError,
+  StockLocationNotBlockedError,
   StockLocationNotEmptyError,
   StockLocationNotFoundError,
   WarehouseNotFoundError,
 } from "./stock.errors.js";
 
-export function createStockService(repo: StockRepository) {
+// audit: Spärra/Släpp spärr are logged (entityType stock_location, the
+// place's id). Tests that never block may leave it out.
+export function createStockService(repo: StockRepository, audit: AuditWriter = { log: async () => {} }) {
+  // After commit, like the stock count's postSession — the audit row never
+  // holds the place's lock.
+  async function logBlock(
+    action: "blocked" | "unblocked",
+    result: {
+      location: { id: string; name: string; warehouseName: string | null; blockedNote: string | null };
+      articlesWithStock: number;
+      defaultForArticles: number;
+    },
+    userId: string | null,
+    note: string | null = result.location.blockedNote
+  ) {
+    await audit.log({
+      entityType: "stock_location",
+      entityId: result.location.id,
+      action,
+      detail: {
+        name: result.location.name,
+        warehouseName: result.location.warehouseName,
+        note,
+        articlesWithStock: result.articlesWithStock,
+        defaultForArticles: result.defaultForArticles,
+      },
+      userId,
+    });
+  }
+
   return {
     async createWarehouse(input: CreateWarehouseInput) {
       return repo.createWarehouse(input);
     },
 
-    async createLocation(input: CreateStockLocationInput) {
-      return repo.createLocation(input);
+    // A place created blocked (a Karantän) logs "blocked" like Spärra.
+    async createLocation(input: CreateStockLocationInput, userId: string | null = null) {
+      const row = await repo.createLocation(input);
+      if (row.blocked) {
+        const location = (await repo.findLocationView(row.id))!;
+        await logBlock("blocked", { location, articlesWithStock: 0, defaultForArticles: 0 }, userId);
+      }
+      return row;
+    },
+
+    // Spärra lagerplats / Släpp spärr — the transitions and the lock live in
+    // the repository (one conditional UPDATE each).
+    async blockLocation(id: string, note: string | null, userId: string | null = null) {
+      const result = await repo.blockLocation(id, note);
+      await logBlock("blocked", result, userId);
+      return result;
+    },
+
+    async unblockLocation(id: string, userId: string | null = null) {
+      const result = await repo.unblockLocation(id);
+      // The note is gone with the spärr; the log keeps what it said.
+      await logBlock("unblocked", result, userId, result.previousNote);
+      return { location: result.location };
     },
 
     async listWarehouses() {
@@ -79,6 +135,12 @@ export function createStockService(repo: StockRepository) {
 
     async listLocations(query?: ListStockLocationsQuery) {
       return repo.listLocations(query);
+    },
+
+    // Lagerplatsregistret — sök, filter och sidor, with each place's
+    // article count and balance per unit.
+    async listLocationRegister(query: ListStockLocationRegisterQuery) {
+      return repo.listLocationRegister(query);
     },
 
     async recordTransaction(input: CreateStockTransactionInput, userId?: string) {

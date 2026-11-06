@@ -25,6 +25,7 @@ export function createScanService(repo: ScanRepository) {
             name: location.name,
             warehouseName: location.warehouseName,
             active: location.active,
+            blocked: location.blocked,
           });
         }
       }

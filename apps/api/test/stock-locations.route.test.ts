@@ -1,7 +1,11 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { sql } from "drizzle-orm";
-import { db } from "@navet/db";
+import { db, permissionGroups } from "@navet/db";
+import { buildApp as buildRealApp } from "../src/app.js";
+import { createAuthRepository } from "../src/modules/auth/repository/auth.repository.js";
+import { createAuthService } from "../src/modules/auth/service/auth.service.js";
+import { createAuditRepository } from "../src/modules/system/repository/audit.repository.js";
 import { deliverBatchSchema, listStockBalancesQuerySchema } from "@navet/shared";
 import { createArticleRepository } from "../src/modules/article/repository/article.repository.js";
 import { createArticleService } from "../src/modules/article/service/article.service.js";
@@ -15,14 +19,18 @@ import { createStockService } from "../src/modules/stock/service/stock.service.j
 const articleService = createArticleService(createArticleRepository(db));
 const stockService = createStockService(createStockRepository(db));
 
-const TRUNCATE = sql`TRUNCATE stock_transactions, stock_locations, warehouses, bom_components, articles, users CASCADE`;
+const TRUNCATE = sql`TRUNCATE stock_transactions, stock_locations, warehouses, bom_components, articles, audit_log, user_settings, users CASCADE`;
+// Only this file's groups — the seeded ones belong to other files.
+const DELETE_GROUPS = sql`DELETE FROM permission_groups WHERE code LIKE 'SPR%'`;
 
 beforeEach(async () => {
   await db.execute(TRUNCATE);
+  await db.execute(DELETE_GROUPS);
 });
 
 afterAll(async () => {
   await db.execute(TRUNCATE);
+  await db.execute(DELETE_GROUPS);
 });
 
 function buildApp() {
@@ -113,5 +121,104 @@ describe("deliverBatchSchema — rows[].locationId", () => {
     const parsed = deliverBatchSchema.parse({ rows: [{ rowId, quantity: "2", locationId }, { rowId, quantity: 1 }] });
     expect(parsed).toEqual({ rows: [{ rowId, quantity: 2, locationId }, { rowId, quantity: 1 }] });
     expect(deliverBatchSchema.safeParse({ rows: [{ rowId, quantity: 1, locationId: "x" }] }).success).toBe(false);
+  });
+});
+
+// Spärrade lagerplatser (0185) through the real app: the routes' shapes and
+// codes, the module's write rule (lager), Endast läsning, and the readers'
+// new fields (GET /stock/locations, /stock/balances?blocked=, the CSV).
+describe("Spärra / Släpp spärr — routes", () => {
+  const authService = createAuthService(createAuthRepository(db), "unused", createAuditRepository(db));
+  const PASSWORD = "correcthorsebattery";
+  let app: ReturnType<typeof buildRealApp>;
+
+  beforeAll(async () => {
+    app = buildRealApp();
+    await app.ready();
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+
+  async function login(email: string) {
+    const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { email, password: PASSWORD } });
+    expect(res.statusCode).toBe(200);
+    return `session=${res.cookies.find((c) => c.name === "session")!.value}`;
+  }
+  async function userCookie(permissions: string[], readOnly = false) {
+    const [group] = await db
+      .insert(permissionGroups)
+      .values({ code: `SPR${crypto.randomUUID().slice(0, 6)}`, name: "Spärr", permissions })
+      .returning();
+    const email = `sparr-${crypto.randomUUID()}@example.com`;
+    await authService.createUser({ email, password: PASSWORD, name: "Användare", role: "user", permissionGroupId: group!.id, readOnly });
+    return login(email);
+  }
+  const post = (cookie: string, url: string, payload?: unknown) =>
+    app.inject({ method: "POST", url: `/api/v1${url}`, headers: { cookie }, ...(payload === undefined ? {} : { payload }) });
+  const get = (cookie: string, url: string) => app.inject({ method: "GET", url: `/api/v1${url}`, headers: { cookie } });
+
+  it("blocks and unblocks with lager, answers 404/409 with codes, and lists the flags", async () => {
+    const cookie = await userCookie(["lager"]);
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    const k = await stockService.createLocation({ warehouseId: warehouse.id, name: "K1", active: true });
+    const x = await articleService.createArticle({ articleNumber: "X-1", name: "X-1", type: "purchased", unit: "st", active: true, defaultLocationId: k.id });
+    await stockService.recordTransaction({ articleId: x.id, locationId: k.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
+
+    const blocked = await post(cookie, `/stock/locations/${k.id}/block`, { note: "  Karantän  " });
+    expect(blocked.statusCode).toBe(200);
+    expect(blocked.json()).toMatchObject({
+      location: { id: k.id, name: "K1", warehouseName: "Huvudlager", blocked: true, blockedNote: "Karantän", labelCode: expect.any(String) },
+      articlesWithStock: 1,
+      defaultForArticles: 1,
+    });
+    const again = await post(cookie, `/stock/locations/${k.id}/block`, {});
+    expect([again.statusCode, again.json().code]).toEqual([409, "stock-location-already-blocked"]);
+    const unknown = await post(cookie, `/stock/locations/${crypto.randomUUID()}/block`);
+    expect([unknown.statusCode, unknown.json().code]).toEqual([404, "stock-location-not-found"]);
+
+    const listed = (await get(cookie, "/stock/locations")).json().find((l: { id: string }) => l.id === k.id);
+    expect(listed).toMatchObject({ blocked: true, blockedNote: "Karantän", blockedAt: expect.any(String) });
+
+    const onlyBlocked = (await get(cookie, "/stock/balances?blocked=true")).json();
+    expect([onlyBlocked.total, onlyBlocked.rows[0].locationBlocked]).toEqual([1, true]);
+    expect((await get(cookie, "/stock/balances?blocked=false")).json().total).toBe(0);
+    const csv = (await get(cookie, "/stock/balances/csv")).body;
+    expect(csv).toContain("Spärrad");
+    expect(csv).toContain("Ja");
+
+    const note = await app.inject({ method: "PATCH", url: `/api/v1/stock/locations/${k.id}`, headers: { cookie }, payload: { blockedNote: "" } });
+    expect([note.statusCode, note.json().blockedNote]).toEqual([200, null]);
+
+    const released = await post(cookie, `/stock/locations/${k.id}/unblock`);
+    expect([released.statusCode, released.json().location.blocked]).toEqual([200, false]);
+    const notBlocked = await post(cookie, `/stock/locations/${k.id}/unblock`);
+    expect([notBlocked.statusCode, notBlocked.json().code]).toEqual([409, "stock-location-not-blocked"]);
+    const noteOnOpen = await app.inject({ method: "PATCH", url: `/api/v1/stock/locations/${k.id}`, headers: { cookie }, payload: { blockedNote: "x" } });
+    expect([noteOnOpen.statusCode, noteOnOpen.json().code]).toEqual([409, "stock-location-not-blocked"]);
+
+    // *** can never be blocked; a Karantän can be created blocked.
+    const created = await post(cookie, "/stock/locations", { warehouseId: warehouse.id, name: "Karantän", blocked: true, blockedNote: "Inkommande" });
+    expect([created.statusCode, created.json().blocked, created.json().blockedNote]).toEqual([201, true, "Inkommande"]);
+    const noteWithoutBlock = await post(cookie, "/stock/locations", { warehouseId: warehouse.id, name: "B2", blockedNote: "x" });
+    expect(noteWithoutBlock.statusCode).toBe(400);
+    const star = await post(cookie, "/stock/locations", { warehouseId: warehouse.id, name: "***", blocked: true });
+    expect([star.statusCode, star.json().code]).toEqual([409, "fallback-location-not-blockable"]);
+  });
+
+  it("refuses without lager (403) and for a read-only account (403 read-only-account)", async () => {
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    const k = await stockService.createLocation({ warehouseId: warehouse.id, name: "K1", active: true });
+
+    const buyer = await userCookie(["inkop"]);
+    expect((await post(buyer, `/stock/locations/${k.id}/block`)).statusCode).toBe(403);
+    expect((await post(buyer, `/stock/locations/${k.id}/unblock`)).statusCode).toBe(403);
+    // Reading is office.
+    expect((await get(buyer, "/stock/locations")).statusCode).toBe(200);
+
+    const readOnly = await userCookie(["lager"], true);
+    const refused = await post(readOnly, `/stock/locations/${k.id}/block`);
+    expect([refused.statusCode, refused.json().code]).toEqual([403, "read-only-account"]);
+    expect((await stockService.listLocations()).find((l) => l.id === k.id)!.blocked).toBe(false);
   });
 });

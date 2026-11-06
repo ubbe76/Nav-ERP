@@ -109,7 +109,12 @@ export interface OverviewPlannedMo {
 
 export interface ArticleOverviewInput {
   article: OverviewArticle;
+  // Användbart saldo (onHandByArticle): what a Spärrad lagerplats holds is
+  // left out — the rows and closingBalance start from this.
   onHand: number;
+  // The balance on blocked places — passed through for display, never part
+  // of the calculation. Omitted = 0.
+  blockedOnHand?: number;
   salesRows: OverviewSalesRow[];
   purchaseRows: OverviewPurchaseRow[];
   manufacturingOrders: OverviewManufacturingOrder[];
@@ -155,7 +160,9 @@ export interface ArticleOverviewRow {
 export interface ArticleOverview {
   article: OverviewArticle;
   primarySupplier: ArticleOverviewInput["primarySupplier"];
+  // Usable — the physical Lagersaldo is onHand + blockedOnHand.
   onHand: number;
+  blockedOnHand: number;
   rows: ArticleOverviewRow[];
   closingBalance: number;
 }
@@ -313,6 +320,7 @@ export function buildArticleOverview(input: ArticleOverviewInput): ArticleOvervi
     article: input.article,
     primarySupplier: input.primarySupplier,
     onHand: input.onHand,
+    blockedOnHand: input.blockedOnHand ?? 0,
     rows,
     closingBalance: balance,
   };

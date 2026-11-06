@@ -139,6 +139,22 @@ describe("running balance", () => {
     expect(result.closingBalance).toBe(3);
   });
 
+  // Spärrade lagerplatser (0185): onHand is the usable balance; what a
+  // blocked place holds is passed through for the header and never counted.
+  it("passes the blocked balance through without counting it", () => {
+    const result = buildArticleOverview(
+      overviewInput({
+        onHand: 3,
+        blockedOnHand: 10,
+        salesRows: [salesRow({ rowId: "s", expectedDeliveryDate: "2026-09-05", quantityOrdered: 5 })],
+      })
+    );
+    expect([result.onHand, result.blockedOnHand]).toEqual([3, 10]);
+    expect(summary(result.rows)).toEqual([["sales_order", "2026-09-05", -5, -2]]);
+    expect(result.closingBalance).toBe(-2);
+    expect(buildArticleOverview(overviewInput({ onHand: 1 })).blockedOnHand).toBe(0);
+  });
+
   it("rounds away float noise in the running balance", () => {
     const result = buildArticleOverview(
       overviewInput({

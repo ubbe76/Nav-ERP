@@ -13,6 +13,7 @@ import { SearchPicker } from "../ui/SearchPicker";
 import { ScanPanel } from "../ui/ScanInput";
 import { useCountState, useScanFeedback, useScanQueue } from "../ui/useOrderScan";
 import { apiFetch } from "../../lib/api";
+import { outflowLocationChoices } from "../../lib/stockLocations";
 import { confirmDialog } from "../../lib/confirm";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { configuredDeliveryWarning } from "../../lib/configuredDelivery";
@@ -47,7 +48,7 @@ import styles from "./DeliveryPageClient.module.css";
 const NO_COUNT: OrderCountState = { counting: false, quantities: {} };
 
 type ArticleMatch = Extract<ScanMatch, { kind: "article" }>;
-type LocationOption = Pick<StockLocation, "id" | "name" | "warehouseName">;
+type LocationOption = Pick<StockLocation, "id" | "name" | "warehouseName"> & { blocked?: boolean };
 
 const articleLabel = (a: { articleNumber: string; name: string }) => `${a.articleNumber} · ${a.name}`;
 
@@ -236,11 +237,16 @@ export function DeliveryPageClient({
     switch (intent.kind) {
       case "location": {
         const m = intent.match;
+        const text = `Lagerplats: ${m.warehouseName} — ${m.name}`;
+        // A spärrad lagerplats is never drawn from (409 stock-location-blocked): not selected.
+        if (m.blocked) {
+          warn(`${text} — spärrad, uttag görs inte därifrån`);
+          return;
+        }
         if (!locations.some((l) => l.id === m.id)) {
           setScannedLocation({ id: m.id, name: m.name, warehouseName: m.warehouseName });
         }
         setLocationId(m.id);
-        const text = `Lagerplats: ${m.warehouseName} — ${m.name}`;
         if (m.active) ok(text);
         else warn(`${text} — inaktiv, det finns inget saldo på den`);
         return;
@@ -403,7 +409,7 @@ export function DeliveryPageClient({
           <Field label="Lagerplats" htmlFor="deliveryLocation">
             <Select id="deliveryLocation" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
               <option value="">Automatiskt</option>
-              {locationOptions.map((l) => (
+              {outflowLocationChoices(locationOptions).map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.warehouseName} — {l.name}
                 </option>
@@ -547,7 +553,7 @@ export function DeliveryPageClient({
                   return left === null ? "–" : left;
                 }
                 case "location": {
-                  const onHand = (balances[row.articleId] ?? []).filter((b) => Number(b.quantityOnHand) > 0);
+                  const onHand = (balances[row.articleId] ?? []).filter((b) => Number(b.quantityOnHand) > 0 && !b.locationBlocked);
                   return (
                     <Select
                       aria-label={`Lagerplats — ${row.articleNumber}`}

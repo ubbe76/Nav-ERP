@@ -55,7 +55,7 @@ import { deactivateEmptyLocation } from "../../stock/service/location-lifecycle.
 // The one rule for how much of a configured row still lacks a TO (pure).
 import { uncoveredConfiguredQuantity } from "../../planning/service/configured-coverage.js";
 import { assertLocationNotUnderCount } from "../../stock/service/count-guard.js";
-import { allocateOutflowLocations, lockArticlesForOutflow } from "../../stock/service/outflow-locations.js";
+import { allocateOutflowLocations, lockArticlesForOutflow, type BlockedChoice } from "../../stock/service/outflow-locations.js";
 import { getNextOrderNumber } from "../../system/service/number-series.js";
 import { listLegoPurchases } from "./lego-purchases.js";
 // Produktionsplanering: a leaf with only the lock SQL — no module cycle.
@@ -202,19 +202,7 @@ async function consumeLinkedMaterial(
     .from(moMaterialConsumptions)
     .where(and(eq(moMaterialConsumptions.manufacturingOrderId, opts.moId), opts.operationFilter))
     .for("update");
-  // The automatic allocation locks each component before reading its
-  // balances. Lock EVERY component of the order here, sorted, in one batch —
-  // not just the rows this call draws: one report can call this twice (the
-  // operation's linked rows, then receiveFinishedGoods's unlinked rows), and
-  // two separately sorted batches would let two reports wait on each other
-  // crosswise (MO1 linked A + unlinked B against MO2 linked B + unlinked A).
-  // The second call then finds every lock already held, as does
-  // assertMaterialAvailable afterwards (same sort order).
-  const components = await tx
-    .selectDistinct({ articleId: moMaterialConsumptions.componentArticleId })
-    .from(moMaterialConsumptions)
-    .where(eq(moMaterialConsumptions.manufacturingOrderId, opts.moId));
-  await lockArticlesForOutflow(tx, components.map((c) => c.articleId));
+  await lockOrderComponents(tx, opts.moId);
 
   const consumed: ConsumedMaterialLine[] = [];
   for (const row of rows) {
@@ -228,9 +216,30 @@ async function consumeLinkedMaterial(
       .set({ quantityConsumed: String(Number(row.quantityConsumed) + delta) })
       .where(eq(moMaterialConsumptions.id, row.id));
 
-    consumed.push(...(await drawMaterial(tx, row, delta, opts.locationId, opts.moId, opts.createdBy)));
+    // The TO card's field also receives the finished goods, so a Spärrad
+    // lagerplats chosen there only takes the goods — the material is then
+    // drawn as with Automatiskt ("automatic").
+    consumed.push(...(await drawMaterial(tx, row, delta, opts.locationId, opts.moId, opts.createdBy, "automatic")));
   }
   return consumed;
+}
+
+// The automatic allocation locks each component before reading its
+// balances. Lock EVERY component of the order, sorted, in one batch — not
+// just the rows one call draws: one report can draw twice (the operation's
+// linked rows, then receiveFinishedGoods's unlinked rows), and two separately
+// sorted batches would let two reports wait on each other crosswise (MO1
+// linked A + unlinked B against MO2 linked B + unlinked A). The second call
+// then finds every lock already held, as does assertMaterialAvailable
+// afterwards (same sort order). receiveFinishedGoods takes it before its
+// receipt too: the receipt may revive the chosen place (a row lock on the
+// place), and the lock order is article → place (outflow-locations.ts).
+async function lockOrderComponents(tx: Tx, moId: string): Promise<void> {
+  const components = await tx
+    .selectDistinct({ articleId: moMaterialConsumptions.componentArticleId })
+    .from(moMaterialConsumptions)
+    .where(eq(moMaterialConsumptions.manufacturingOrderId, moId));
+  await lockArticlesForOutflow(tx, components.map((c) => c.articleId));
 }
 
 // One material row's draw booked where the stock is: an explicit location
@@ -239,15 +248,19 @@ async function consumeLinkedMaterial(
 // (allocateOutflowLocations) — one stock_transactions row and one
 // ConsumedMaterialLine per location, so the report log and Ångra see each
 // part.
+// blockedChoice: what a chosen Spärrad lagerplats means — "refuse" for
+// Förbruka (a pure outflow, 409 stock-location-blocked), "automatic" for the
+// reports, where the same field receives the finished goods.
 async function drawMaterial(
   tx: Tx,
   row: { id: string; componentArticleId: string },
   quantity: number,
   locationId: string | undefined,
   moId: string,
-  createdBy: string | null
+  createdBy: string | null,
+  blockedChoice: BlockedChoice
 ): Promise<ConsumedMaterialLine[]> {
-  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId);
+  const parts = await allocateOutflowLocations(tx, row.componentArticleId, quantity, locationId, { blockedChoice });
   const lines: ConsumedMaterialLine[] = [];
   for (const part of parts) {
     await assertLocationNotUnderCount(tx, part.locationId);
@@ -452,6 +465,10 @@ async function receiveFinishedGoods(
     .from(articles)
     .where(eq(articles.id, order.articleId));
 
+  // Article → place: the components the unlinked draw below takes are locked
+  // before the receipt may revive the chosen place (Slutför order comes here
+  // first; a report has already locked them).
+  await lockOrderComponents(tx, order.id);
   const receiptLocationId = await resolveStockLocation(tx, order.articleId, opts.locationId);
   await assertLocationNotUnderCount(tx, receiptLocationId);
 
@@ -585,9 +602,12 @@ async function reportOperationQuantitiesInTx(
     .where(eq(moOperations.manufacturingOrderId, operation.manufacturingOrderId))
     .orderBy(desc(moOperations.sequenceNo))
     .limit(1);
+  // A location chosen on the TO card (Lagerplats för materialuttag) also
+  // receives the finished goods — and the unlinked material is drawn from it,
+  // as with Slutför order. Terminal and lego reports choose none.
   const goods =
     !lateReport && last?.sequenceNo === operation.sequenceNo
-      ? await receiveFinishedGoods(tx, order, { targetReceived: totalOk, createdBy: input.createdBy })
+      ? await receiveFinishedGoods(tx, order, { targetReceived: totalOk, locationId: input.locationId, createdBy: input.createdBy })
       : null;
   const completed = goods !== null && goods.delta > 0 && goods.received >= Number(order.quantity);
 
@@ -1684,8 +1704,9 @@ export function createManufacturingRepository(db: Db) {
           .where(eq(moMaterialConsumptions.id, rowId))
           .returning();
 
-        // Förbruka: drawn where the stock is unless a location was chosen.
-        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy);
+        // Förbruka: drawn where the stock is unless a location was chosen —
+        // never from a chosen Spärrad lagerplats (409).
+        const lines = await drawMaterial(tx, row, input.quantity, input.locationId, moId, input.createdBy, "refuse");
         // Materialbrist: a throw here rolls the draw back.
         await assertMaterialAvailable(tx, lines, input.materialShortage ?? NO_MATERIAL_SHORTAGE_CHECK);
 

@@ -888,6 +888,64 @@ describe("planning service — getArticleOverview", () => {
   });
 });
 
+// Spärrade lagerplatser (0185): the behovsberäkning, the artikelöversikt,
+// the färdigdatumsförslag and the Leveranstidskontroll read the USABLE
+// balance (onHandByArticle) — what lies on a blocked place covers nothing.
+describe("planning service — Spärrade lagerplatser", () => {
+  async function blockedPlace() {
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    return stockService.createLocation({ warehouseId: warehouse.id, name: "Karantän", active: true, blocked: true });
+  }
+  async function addBlockedStock(articleId: string, quantity: number) {
+    const k = await blockedPlace();
+    await stockService.recordTransaction({ articleId, locationId: k.id, quantityDelta: quantity, transactionType: "inventory_adjustment" });
+    return k;
+  }
+
+  it("blocked stock does not cover demand: the proposal comes, and the overview closes on the same balance", async () => {
+    const user = await makeUser();
+    const a = await makeArticle({ articleNumber: "SP-A" });
+    await makeSupplierWithCatalog("Alfa AB", [a.id], 10, 14);
+    await makeConfirmedSalesOrder(a.id, 10, user.id);
+    await addStock(a.id, 4);
+    await addBlockedStock(a.id, 20);
+
+    const { rows } = await planningService.listRequirements({ limit: 50, offset: 0, showAll: true, search: "SP-A" });
+    const row = rows.find((r) => r.articleId === a.id)!;
+    expect([row.onHand, row.projected, row.proposalQuantity]).toEqual([4, -6, 6]);
+
+    const overview = await planningService.getArticleOverview(a.id);
+    expect([overview.onHand, overview.blockedOnHand]).toEqual([4, 20]);
+    // The invariant holds with blocked stock — both read onHandByArticle.
+    expect(overview.closingBalance).toBe(row.projected - row.demandDerived);
+  });
+
+  it("the färdigdatumsförslag finds the firm demand although blocked stock would cover it", async () => {
+    const user = await makeUser();
+    const m = await makeArticle({ articleNumber: "SP-M", type: "manufactured" });
+    const customer = await salesService.createCustomer({ name: "Kund AB", active: true });
+    await salesService.createQuote(
+      { customerId: customer.id, confirm: true, expectedDeliveryDate: "2030-03-04", rows: [{ articleId: m.id, quantity: 5, unitPrice: 100 }] },
+      user.id
+    );
+    await addBlockedStock(m.id, 50);
+    expect(await planningService.suggestManufacturingDueDate(m.id)).toMatchObject({ source: "shortage", demandDate: "2030-03-04" });
+  });
+
+  it("the Leveranstidskontroll does not ship from blocked stock", async () => {
+    const a = await makeArticle({ articleNumber: "SP-D" });
+    await makeSupplierWithCatalog("Alfa AB", [a.id], 10, 14);
+    const k = await addBlockedStock(a.id, 10);
+
+    const blocked = await planningService.checkDeliveryTime({ rows: [{ articleId: a.id, quantity: 5 }] });
+    expect(blocked.rows[0]!.chain.some((step) => step.kind === "stock")).toBe(false);
+
+    await stockService.unblockLocation(k.id);
+    const open = await planningService.checkDeliveryTime({ rows: [{ articleId: a.id, quantity: 5 }] });
+    expect(open.rows[0]!.chain.map((step) => step.kind)).toEqual(["stock"]);
+  });
+});
+
 // Leveranstidskontroll loads the overviews of a whole BOM tree in ONE batch
 // (getArticleOverviews, a fixed number of queries + one delivery context).
 // It must be indistinguishable from getArticleOverview per article —

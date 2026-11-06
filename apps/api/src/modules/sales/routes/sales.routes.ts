@@ -78,7 +78,7 @@ import {
 } from "../service/sales.errors.js";
 import { ExchangeRateUnavailableError } from "../../system/service/exchange-rates.js";
 import { RegisterEntryNotFoundError } from "../../register/service/register.service.js";
-import { LocationUnderStockCountError } from "../../stock/service/stock.service.js";
+import { LocationUnderStockCountError, StockLocationBlockedError } from "../../stock/service/stock.service.js";
 import { ArticleGroupNotFoundError, ArticleIsTemplateError, ArticleNotFoundError, InvalidUnitError } from "../../article/service/article.service.js";
 import {
   ConfigurationNotDerivableError,
@@ -709,6 +709,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
         if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
         if (err instanceof OverDeliveryError) return reply.code(409).send({ ...errorBody(err), ...err.limit });
         if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
+        // A Spärrad lagerplats chosen for the delivery.
+        if (err instanceof StockLocationBlockedError) return reply.code(409).send(errorBody(err));
         throw err;
       }
     }
@@ -727,6 +729,8 @@ export async function salesRoutes(app: FastifyInstance, opts: { service: SalesSe
       if (err instanceof InvalidStatusTransitionError) return reply.code(409).send(errorBody(err));
       if (err instanceof OverDeliveryError) return reply.code(409).send({ ...errorBody(err), ...err.limit });
       if (err instanceof LocationUnderStockCountError) return reply.code(409).send(errorBody(err));
+      // A Spärrad lagerplats chosen for a row or the whole delivery.
+      if (err instanceof StockLocationBlockedError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });

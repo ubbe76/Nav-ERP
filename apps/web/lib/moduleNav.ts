@@ -465,7 +465,7 @@ export const LAGER_SECTIONS: ModuleNavSection[] = [
       {
         href: "/lager/platser",
         title: "Lagerplatser",
-        description: "Lager och lagerplatser, inklusive avställda platser med historik.",
+        description: "Lager och lagerplatser med sök, spärrade platser och saldo per plats.",
       },
       {
         href: "/lager/flytta",

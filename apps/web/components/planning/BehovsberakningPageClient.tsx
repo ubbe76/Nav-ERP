@@ -584,6 +584,7 @@ export function BehovsberakningPageClient({ pageSize }: { pageSize: number }) {
           </Button>
         </span>
       </ListToolbar>
+      <FormHint>Saldo räknar inte lagerplatser som är spärrade.</FormHint>
 
       <FormError margin="below">{loadError}</FormError>
 

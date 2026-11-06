@@ -1,16 +1,26 @@
-// F2: CSV columns for GET /stock/balances/csv, /stock/transactions/csv and
-// /stock-counts/csv — mirror the corresponding web Table column order/labels:
+// F2: CSV columns for GET /stock/balances/csv, /stock/transactions/csv,
+// /stock-counts/csv and /stock/locations/register/csv — mirror the
+// corresponding web Table column order/labels:
 //   apps/web/app/lager/page.tsx (balances)
 //   apps/web/app/lager/transaktioner/page.tsx (transactions)
 //   apps/web/app/lager/inventering/page.tsx (stock counts)
-import type { StockCountStatus, StockTransactionReference, StockTransactionType } from "@navet/shared";
-import { type CsvColumn } from "@navet/shared";
+//   apps/web/app/lager/platser/page.tsx (the lagerplatsregister)
+import type {
+  StockCountStatus,
+  StockLocationRegisterRow,
+  StockLocationUnitBalance,
+  StockTransactionReference,
+  StockTransactionType,
+} from "@navet/shared";
+import { formatCsvNumber, type CsvColumn } from "@navet/shared";
 
 export interface StockBalanceExportRow {
   articleNumber: string;
   articleName: string;
   warehouseName: string | null;
   locationName: string | null;
+  // Spärrad lagerplats (0185) — the web shows it as a tag after the place.
+  locationBlocked: boolean | null;
   quantityOnHand: string | number;
 }
 
@@ -19,6 +29,7 @@ export const stockBalanceExportColumns: CsvColumn<StockBalanceExportRow>[] = [
   { label: "Benämning", value: (r) => r.articleName },
   { label: "Lager", value: (r) => r.warehouseName },
   { label: "Lagerplats", value: (r) => r.locationName },
+  { label: "Spärrad", value: (r) => (r.locationBlocked ? "Ja" : "Nej") },
   { label: "Saldo", value: (r) => r.quantityOnHand, format: "number" },
 ];
 
@@ -135,4 +146,23 @@ export const stockCountExportColumns: CsvColumn<StockCountExportRow>[] = [
     value: (r) => (r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt),
     format: "datetime",
   },
+];
+
+// Saldo per unit in one cell, as the register shows it: "35,5 kg · 120 st"
+// (the numbers in the CSV's number format). Empty when nothing stands there.
+export function unitBalancesText(balances: StockLocationUnitBalance[]): string {
+  return balances.map((b) => `${formatCsvNumber(b.quantity)} ${b.unitCode}`).join(" · ");
+}
+
+export const stockLocationRegisterExportColumns: CsvColumn<StockLocationRegisterRow>[] = [
+  { label: "Lager", value: (r) => r.warehouseName },
+  { label: "Lagerplats", value: (r) => r.name },
+  { label: "Etikettkod", value: (r) => r.labelCode },
+  { label: "Fast", value: (r) => (r.fixed ? "Ja" : "Nej") },
+  { label: "Spärrad", value: (r) => (r.blocked ? "Ja" : "Nej") },
+  { label: "Spärrad sedan", value: (r) => r.blockedAt, format: "datetime" },
+  { label: "Anteckning", value: (r) => r.blockedNote },
+  { label: "Artiklar", value: (r) => r.articleCount, format: "number" },
+  { label: "Saldo", value: (r) => unitBalancesText(r.balances) },
+  { label: "Status", value: (r) => (r.active ? "Aktiv" : "Inaktiv") },
 ];

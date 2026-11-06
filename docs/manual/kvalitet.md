@@ -2,7 +2,7 @@
 
 Menyn **Kvalitet** samlar reklamationer och avvikelser: kundens reklamation på något vi levererat, ett fel i det vi fått från en leverantör och ett fel vi hittar själva i produktionen. Varje avvikelse är ett ärende med orsak, utredning, åtgärd, kostnad och koppling till kund eller leverantör, order, artikel och tillverkningsorder. Menyn har tre delar: **Avvikelser**, uppföljningen i rapporterna **Leveransprecision** och **Kassation**, och registret **Kvalitetsorsaker** under Grunddata.
 
-Avvikelsen bokför ingenting och flyttar inget lager. Kostnaderna på ärendet är underlag för uppföljning, och dokumenten som ärendet leder till — kreditfaktura, ersättningsorder, inköpsorder, tillverkningsorder — skapas med de vanliga rutinerna och kopplas till ärendet.
+Avvikelsen bokför ingenting och flyttar inget lager (för karantän och kassation i lagret, se [Spärrade lagerplatser](/hjalp/lager#sparrade-lagerplatser)). Kostnaderna på ärendet är underlag för uppföljning, och dokumenten som ärendet leder till — kreditfaktura, ersättningsorder, inköpsorder, tillverkningsorder — skapas med de vanliga rutinerna och kopplas till ärendet.
 
 Menyn kräver rättigheten **Kvalitet** (se [Behörighet](#behorighet)).
 

@@ -8,6 +8,8 @@ import {
 } from "../src/modules/configurator/service/configurator.errors.js";
 import { createManufacturingRepository } from "../src/modules/manufacturing/repository/manufacturing.repository.js";
 import { createManufacturingService } from "../src/modules/manufacturing/service/manufacturing.service.js";
+import { createStockRepository } from "../src/modules/stock/repository/stock.repository.js";
+import { createStockService } from "../src/modules/stock/service/stock.service.js";
 import { makeArticle, makeVariantService, resetConfigurator, testCostingSettings, variantWriters } from "./helpers/configurator.js";
 import { testArticleService, testDocumentPdfService } from "./helpers/services.js";
 import { vatRateGroupId } from "./helpers/vat-group.js";
@@ -24,7 +26,7 @@ const mfgService = createManufacturingService(createManufacturingRepository(db),
 
 async function reset() {
   await resetConfigurator();
-  await db.execute(sql`TRUNCATE work_centers, routing_operations, cost_calculations, sales_order_rows, sales_orders, customers CASCADE`);
+  await db.execute(sql`TRUNCATE work_centers, routing_operations, cost_calculations, sales_order_rows, sales_orders, customers, stock_transactions, stock_locations, warehouses CASCADE`);
   Object.assign(testCostingSettings, {
     costingMaterialSource: "standard", costingMoPercent: 0, costingLoPercent: 0, costingAffoPercent: 0, costingGeneralMarkupPercent: 0,
   });
@@ -398,6 +400,21 @@ describe("guards once variants exist", () => {
     await service.createTemplate(article.id, { mode: "to_order" });
     await expect(service.previewVariants(article.id, { sets: {}, calcQuantity: 1 })).rejects.toBeInstanceOf(ConfiguratorNotVariantModeError);
     await expect(service.createVariants(article.id, { sets: {}, calcQuantity: 1 }, null)).rejects.toBeInstanceOf(ConfiguratorNotVariantModeError);
+  });
+
+  // Spärrade lagerplatser (0185): the variant list's Saldo is physical, like
+  // the article card — a blocked place's balance is included.
+  it("sums the variant's stock on every place, a blocked one included", async () => {
+    const stockService = createStockService(createStockRepository(db));
+    const withStock = makeVariantService({ stock: { balancesForArticles: (ids) => stockService.balancesForArticles(ids) } });
+    const s = await build();
+    const [row] = await withStock.createVariants(s.article.id, ONE, null);
+    const warehouse = await stockService.createWarehouse({ name: "Huvudlager", active: true });
+    const open = await stockService.createLocation({ warehouseId: warehouse.id, name: "A1", active: true });
+    const blocked = await stockService.createLocation({ warehouseId: warehouse.id, name: "Karantän", active: true, blocked: true });
+    await stockService.recordTransaction({ articleId: row!.articleId!, locationId: open.id, quantityDelta: 3, transactionType: "inventory_adjustment" });
+    await stockService.recordTransaction({ articleId: row!.articleId!, locationId: blocked.id, quantityDelta: 4, transactionType: "inventory_adjustment" });
+    expect((await withStock.listVariants(s.article.id))[0]!.onHand).toBe("7");
   });
 
   it("lists the variants with stock on hand and answers variant-of", async () => {

@@ -84,7 +84,7 @@ Längst upp på kortet finns ett artikelhuvud som ligger kvar oavsett vilken fli
 - **Artikelnummer** är en sökbar väljare — skriv artikelnummer eller benämning och välj en träff för att hoppa direkt till den artikelns kort, utan att gå tillbaka till registret.
 - **Benämning** — artikelns benämning.
 - **Artikeltyp** — Tillverkad, Köpt eller Tjänst, alltså typen som avgör vilka flikar kortet har. Är artikeln en fantomartikel eller inaktiv visas det som en märkning här.
-- **Lagersaldo** visar artikelns totala saldo (summan av alla lagerplatser, i grundenheten). Uppdelningen per lagerplats finns på fliken [Lager](#lager).
+- **Lagersaldo** visar artikelns totala saldo (summan av alla lagerplatser, i grundenheten). Står en del av saldot på [spärrade lagerplatser](/hjalp/lager#sparrade-lagerplatser) visas **varav spärrat** under siffran (bara plussaldon där; ett minus på en spärrad plats räknas som brist). Uppdelningen per lagerplats finns på fliken [Lager](#lager), där en spärrad plats är märkt **Spärrad**.
 
 Benämning, artikeltyp och fantom-/aktivflaggan ändras på fliken [Allmänt](#allmant), inte i huvudet.
 
@@ -108,7 +108,7 @@ Identitet, Enheter, Försäljning, Lager, Vikt & mått och Förpackning sparas t
 
 **Momssats** (25/12/6/0 %) är artikelns momssats vid försäljning — fakturarader ärver den som förval. Den kan inte ändras på artikeln utan följer **Varugrupp**: gruppens momssats, eller 25 % för en artikel utan varugrupp. Se [Varugrupper](#varugrupper).
 
-Fältet **Lagerplats** är artikelns standardplats i lagret: transaktioner (mottagning, leverans, materialuttag, justering) som inte får en plats vald bokförs här (vid utleverans och materialuttag med **Automatiskt** tas först det som finns på den här platsen, sedan från andra platser med saldo). Väljs ingen plats när artikeln skapas sätts reservplatsen **`***`** automatiskt (se [Lager](/hjalp/lager)).
+Fältet **Lagerplats** är artikelns standardplats i lagret (en [spärrad lagerplats](/hjalp/lager#sparrade-lagerplatser) kan inte väljas, och en plats som spärras senare hoppas över vid inleverans): transaktioner (mottagning, leverans, materialuttag, justering) som inte får en plats vald bokförs här (vid utleverans och materialuttag med **Automatiskt** tas först det som finns på den här platsen, sedan från andra platser med saldo). Väljs ingen plats när artikeln skapas sätts reservplatsen **`***`** automatiskt (se [Lager](/hjalp/lager)).
 
 En **fast** lagerplats ligger kvar när den blir tom, och fältet behåller den. Blir en **tillfällig** lagerplats tom inaktiveras den automatiskt, och då nollställs fältet till `***`. Var det en **lagerflytt** som tömde platsen följer fältet i stället med till den mottagande lagerplatsen (se [Lager](/hjalp/lager#lagerflytt)).
 
@@ -469,9 +469,9 @@ Ritningar och andra dokument som hör till artikeln. Välj fil med filväljaren 
 
 **Artiklar → Artikelöversikt** (`/artiklar/oversikt`) är artikelns planeringsbild: alla öppna behov och allt inkommande för en artikel, rad för rad i datumordning, med löpande disponibelt antal. Välj artikel i fältet **Artikel** (sökbart på artikelnummer eller benämning); vald artikel ligger i adressen så sidan kan bokmärkas.
 
-Överst visas artikelnumret med benämning (länk till artikelkortet), artikeltyp, **Lagersaldo**, **Beställningspunkt**, **Orderkvantitet** och **Huvudleverantör** med **Ledtid**. Tabellen har kolumnerna **Datum**, **Typ**, **Order**, **Kund/Leverantör**, **Antal** och **Disponibelt**:
+Överst visas artikelnumret med benämning (länk till artikelkortet), artikeltyp, **Lagersaldo** (med **varav spärrat** när något står på en [spärrad lagerplats](/hjalp/lager#sparrade-lagerplatser)), **Beställningspunkt**, **Orderkvantitet** och **Huvudleverantör** med **Ledtid**. Tabellen har kolumnerna **Datum**, **Typ**, **Order**, **Kund/Leverantör**, **Antal** och **Disponibelt**:
 
-- Första raden är **Lagersaldo idag** — utgångspunkten för kolumnen **Disponibelt**. Begreppet *saldo* används bara för det som faktiskt finns på lager (**Lagersaldo**); **Disponibelt** är vad som finns kvar att förfoga över efter behov och inkommande fram till och med raden.
+- Första raden är **Lagersaldo idag** — utgångspunkten för kolumnen **Disponibelt**. Finns det saldo på spärrade lagerplatser heter raden **Lagersaldo idag (utan spärrat)** och räknar bara det som är till hands. Begreppet *saldo* används bara för det som faktiskt finns på lager (**Lagersaldo**); **Disponibelt** är vad som finns kvar att förfoga över efter behov och inkommande fram till och med raden.
 - Därefter en rad per öppen orderrad, sorterad på datum: kundorderns datum (kundens avsändningsdag — leveransdatumet minus [transportdagar](/hjalp/forsaljning#leveransdagar) — medan kundorderkortet visar leveransdatumet), inköpsorderns förväntade leveransdatum respektive tillverkningsorderns färdigdatum. Rader utan datum visas sist som **Saknar datum**. Samma dag sorteras inkommande före behov.
 - **Typ** är **Kundorder**, **Inköpsorder**, **Tillverkningsorder** (inleverans av artikeln själv), **Material till TO** (materialrad på frisläppt/pågående order, planerat minus uttaget) eller **Material till planerad TO** (beräknat ur strukturen, precis som i behovsberäkningen). För materialrader visar **Kund/Leverantör** vilken artikel tillverkningsordern gäller. Ordernumret i kolumnen **Order** är en länk till orderkortet.
 - **Antal** är negativt för behov och positivt för inkommande; **Disponibelt** är den löpande summan från lagersaldot och nedåt. Ett negativt disponibelt antal markeras i rött — det visar när artikeln tar slut.

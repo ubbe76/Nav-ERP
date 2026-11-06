@@ -151,8 +151,13 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
             <div>
               <div className={styles.label}>Lagersaldo</div>
               <div className={`${styles.value} num`}>
-                {num(data.onHand)} <span className={styles.unit}>{unit}</span>
+                {num(data.onHand + data.blockedOnHand)} <span className={styles.unit}>{unit}</span>
               </div>
+              {data.blockedOnHand > 0 && (
+                <div className={styles.unit}>
+                  varav spärrat {num(data.blockedOnHand)} {unit}
+                </div>
+              )}
             </div>
             <div>
               <div className={styles.label}>Beställningspunkt</div>
@@ -219,7 +224,11 @@ export function ArticleOverviewContent({ articleId, onChangeArticle, pickerId }:
               if (row.kind === "onhand") {
                 switch (key) {
                   case "kind":
-                    return <span className={styles.onHandRow}>Lagersaldo idag</span>;
+                    return (
+                      <span className={styles.onHandRow}>
+                        {data.blockedOnHand > 0 ? "Lagersaldo idag (utan spärrat)" : "Lagersaldo idag"}
+                      </span>
+                    );
                   case "balance":
                     return <span className={`${styles.onHandRow} ${data.onHand < 0 ? styles.negative : ""}`}>{num(data.onHand)}</span>;
                   default:

@@ -6,6 +6,7 @@ import { Input, Label, Select } from "../ui/Field";
 import { FormError, FormHint } from "../ui/Form";
 import { ScrapReasonFields } from "../quality/ScrapReasonFields";
 import { useScrapReasons } from "../../lib/useScrapReasons";
+import { locationOptionLabel } from "../../lib/stockLocations";
 import { toBaseQuantity, toUnitQuantity } from "../../lib/units";
 import { apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
@@ -67,7 +68,7 @@ function LocationOptions({
       <option value="">{emptyLabel}</option>
       {locations.map((l) => (
         <option key={l.id} value={l.id}>
-          {l.warehouseName} — {l.name}
+          {locationOptionLabel(l)}
         </option>
       ))}
     </>
@@ -118,7 +119,7 @@ export function ReportPanel({
         {locations.length > 0 && (
           <FormHint>
             Tas från artikelns lagerplats och sedan från andra platser med saldo. En vald plats tar även emot de färdiga
-            varorna när den sista operationen rapporteras.
+            varorna när den sista operationen rapporteras. En spärrad lagerplats tar bara emot de färdiga varorna — materialet tas då med Automatiskt.
           </FormHint>
         )}
 

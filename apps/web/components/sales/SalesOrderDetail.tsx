@@ -1,6 +1,7 @@
 "use client";
 
 import { confirmDelete, confirmDialog } from "../../lib/confirm";
+import { outflowLocationChoices } from "../../lib/stockLocations";
 import { QuoteExpiredBadge, isQuoteExpired } from "./QuoteExpiredBadge";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { DeliveryTimeCheckDialog } from "./DeliveryTimeCheckDialog";
@@ -1822,7 +1823,7 @@ function DeliverGoodsForm({
           <Field label="Lagerplats" htmlFor="locationId">
             <Select id="locationId" value={locationId} onChange={(e) => setLocationId(e.target.value)}>
               <option value="">Automatiskt</option>
-              {locations.map((l) => (
+              {outflowLocationChoices(locations).map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.warehouseName} — {l.name}
                 </option>

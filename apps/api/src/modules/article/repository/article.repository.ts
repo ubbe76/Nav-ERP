@@ -200,6 +200,12 @@ export function createArticleRepository(db: Db) {
       return getOrCreateFallbackLocation(db);
     },
 
+    // Spärrad lagerplats (0185): may not be chosen as an article's Lagerplats.
+    async isLocationBlocked(locationId: string) {
+      const [row] = await db.select({ blocked: stockLocations.blocked }).from(stockLocations).where(eq(stockLocations.id, locationId));
+      return row?.blocked === true;
+    },
+
     // Wrapped in a transaction around insertArticle. With copyFrom the source
     // is read from one snapshot (repeatable read). The transaction only
     // inserts new rows and never updates existing ones, which keeps
@@ -318,6 +324,9 @@ export function createArticleRepository(db: Db) {
           packageTypeName: packageTypes.name,
           defaultLocationName: stockLocations.name,
           defaultWarehouseName: warehouses.name,
+          // Spärrad lagerplats (0185): the Lagerplats may stay blocked — the
+          // resolver skips it — but cannot be newly chosen.
+          defaultLocationBlocked: stockLocations.blocked,
           // Produktkonfigurator: the template's mode (null = not a template).
           // What sales/purchase/manufacturing's getArticle readers feed
           // assertOrderableArticle — a template in mode variants is never

@@ -1,7 +1,8 @@
 import { locationLabelsSchema } from "@navet/shared";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   addStockCountRowSchema,
+  blockStockLocationSchema,
   createStockCountSchema,
   createStockLocationSchema,
   createStockTransactionSchema,
@@ -10,6 +11,7 @@ import {
   listStockTransactionsQuerySchema,
   listStockBalancesQuerySchema,
   listStockCountsQuerySchema,
+  listStockLocationRegisterQuerySchema,
   listStockLocationsQuerySchema,
   postStockCountSchema,
   stockCountPdfQuerySchema,
@@ -26,12 +28,14 @@ import { errorBody } from "../../system/service/error-body.js";
 import {
   stockBalanceExportColumns,
   stockCountExportColumns,
+  stockLocationRegisterExportColumns,
   stockTransactionColumns,
 } from "../service/export-columns.js";
 import type { StockService } from "../service/stock.service.js";
 import {
   ArticleNotFoundError,
   DuplicateStockCountRowError,
+  FallbackLocationNotBlockableError,
   InactiveStockLocationError,
   InsufficientStockError,
   LocationUnderStockCountError,
@@ -40,6 +44,8 @@ import {
   StockCountBackdateRefusedError,
   StockCountNotOpenError,
   StockCountRowNotFoundError,
+  StockLocationAlreadyBlockedError,
+  StockLocationNotBlockedError,
   StockLocationNotEmptyError,
   StockLocationNotFoundError,
   WarehouseNotFoundError,
@@ -75,6 +81,21 @@ export async function stockRoutes(
     service.listLocations(listStockLocationsQuerySchema.parse(req.query))
   );
 
+  // Lagerplatsregistret (/lager/platser): the list pattern with search,
+  // filters and pages; the module's read rule (office). GET /stock/locations
+  // above stays an array — the place pickers and integrations read it.
+  app.get("/stock/locations/register", async (req) =>
+    service.listLocationRegister(listStockLocationRegisterQuerySchema.parse(req.query))
+  );
+
+  registerListCsvRoute(app, {
+    path: "/stock/locations/register/csv",
+    querySchema: listStockLocationRegisterQuerySchema,
+    filenameBase: "lagerplatser",
+    columns: stockLocationRegisterExportColumns,
+    fetch: (query) => service.listLocationRegister(query),
+  });
+
   // Etiketter (#4): lagerplats labels as a PDF. POST for the id list;
   // prints and writes nothing, so office may and Endast läsning may.
   app.post("/stock/locations/labels", { config: { access: LABEL_PRINT, readOnlySafe: true } }, async (req, reply) => {
@@ -97,14 +118,50 @@ export async function stockRoutes(
     } catch (err) {
       if (err instanceof StockLocationNotFoundError) return reply.code(404).send(errorBody(err));
       if (err instanceof StockLocationNotEmptyError) return reply.code(409).send(errorBody(err));
+      // blockedNote on an open place / a blocked place renamed to "***".
+      if (err instanceof StockLocationNotBlockedError) return reply.code(409).send(errorBody(err));
+      if (err instanceof FallbackLocationNotBlockableError) return reply.code(409).send(errorBody(err));
       throw err;
     }
   });
 
   app.post("/stock/locations", async (req, reply) => {
     const input = createStockLocationSchema.parse(req.body);
-    const row = await service.createLocation(input);
-    return reply.code(201).send(row);
+    try {
+      const row = await service.createLocation(input, req.user?.id ?? null);
+      return reply.code(201).send(row);
+    } catch (err) {
+      if (err instanceof FallbackLocationNotBlockableError) return reply.code(409).send(errorBody(err));
+      throw err;
+    }
+  });
+
+  // Spärra lagerplats / Släpp spärr (0185) — the module's write rule (lager).
+  // Block answers with the place and what the spärr touches (articles with a
+  // balance there, articles that have it as Lagerplats); unblock with the place.
+  const blockError = (err: unknown, reply: FastifyReply) => {
+    if (err instanceof StockLocationNotFoundError) return reply.code(404).send(errorBody(err));
+    if (err instanceof StockLocationAlreadyBlockedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof StockLocationNotBlockedError) return reply.code(409).send(errorBody(err));
+    if (err instanceof FallbackLocationNotBlockableError) return reply.code(409).send(errorBody(err));
+    throw err;
+  };
+
+  app.post<{ Params: { id: string } }>("/stock/locations/:id/block", async (req, reply) => {
+    const input = blockStockLocationSchema.parse(req.body ?? {});
+    try {
+      return await service.blockLocation(req.params.id, input.note ?? null, req.user!.id);
+    } catch (err) {
+      return blockError(err, reply);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/stock/locations/:id/unblock", async (req, reply) => {
+    try {
+      return await service.unblockLocation(req.params.id, req.user!.id);
+    } catch (err) {
+      return blockError(err, reply);
+    }
   });
 
   app.post("/stock/transactions", async (req, reply) => {

@@ -7,6 +7,7 @@ import { Button } from "../ui/Button";
 import { Field, Input, Select } from "../ui/Field";
 import { HelpLink } from "../ui/HelpLink";
 import { apiFetch } from "../../lib/api";
+import { locationOptionLabel } from "../../lib/stockLocations";
 import type { StockBalance, StockLocation, StockTransferResult } from "../../lib/types";
 import shellStyles from "../AppShell.module.css";
 import { FormError } from "../ui/Form";
@@ -139,7 +140,7 @@ export function StockTransferPageClient({
             <option value="">Välj lagerplats…</option>
             {locations.map((l) => (
               <option key={l.id} value={l.id}>
-                {l.warehouseName} — {l.name}
+                {locationOptionLabel(l)}
               </option>
             ))}
           </Select>
@@ -155,7 +156,7 @@ export function StockTransferPageClient({
             <option value="">Välj lagerplats…</option>
             {targetOptions.map((l) => (
               <option key={l.id} value={l.id}>
-                {l.warehouseName} — {l.name}
+                {locationOptionLabel(l)}
               </option>
             ))}
           </Select>
