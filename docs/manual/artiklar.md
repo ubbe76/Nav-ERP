@@ -338,6 +338,26 @@ Fältet **Cykeltid (valfritt)** i operationsdialogen är operationens produktiva
 
 Cykeltiden används inte i kalkylen eller beläggningen ännu, och den följer inte med när en tillverkningsorder frisläpps — **Ändra operationer** på en tillverkningsorder har inget fält för den. Legooperationer har ingen cykeltid (fältet är dolt tillsammans med tidsfälten). Cykeltiden kan också läsas in från fil, se [Importera operationer](#importera-operationer).
 
+#### Alternativa resurser
+
+En operation kan ha **alternativa resurser**: andra maskiner eller personal som operationen också kan köras på när den ordinarie resursen är full eller står still. Alternativen är underlag för ett byte som planeraren gör för hand på tillverkningsordern, se [Ändra material och operationer](/hjalp/tillverkning#andra-material-och-operationer). Beredningen och förkalkylen räknar alltid på den ordinarie resursen.
+
+I operationsdialogen finns avsnittet **Alternativa resurser** på en egen operation. Varje alternativ är en rad med tre fält:
+
+- **Resurs** — en av dina egna resurser (maskin eller personal). Den ordinarie resursen och resurser som redan är alternativ finns inte i listan.
+- **Ställtid (min)** och **Tid/enhet** — alternativets egna tider, i samma tidsenhet som operationen. Ett tomt fält visar *Som ordinarie* och betyder att alternativet använder operationens egen tid, även om du ändrar den senare. Skriv en tid bara när resursen verkligen går snabbare eller långsammare.
+
+Klicka **+ Lägg till alternativ** för en ny rad. **Upp** och **Ned** ändrar ordningen, som är alternativens rangordning (det första alternativet är rang 1), och **Ta bort** tar bort raden. Högst fem alternativ går att lägga till. Alternativen sparas tillsammans med operationen när du klickar **Spara ändringar** eller **Lägg till operation**. Operationen visar *Alt. 120, 130* under resurskoden i beredningslistan.
+
+Några regler att känna till:
+
+- En **legooperation** och en **Kalkyl**-operation kan inte ha alternativ, och en **legoresurs** kan inte vara alternativ. Gör du en operation till lego eller Kalkyl tas dess alternativ bort när du sparar, och dialogen säger det.
+- Väljer du ett alternativ som operationens ordinarie resurs byter de två plats i listan, så att den gamla ordinarie resursen blir alternativ.
+- En resurs som saknar kapacitet (varken veckoschema eller timmar per dag) visar *Saknar kapacitet — föreslås aldrig*. Den går att lägga till, men får aldrig något förslag.
+- En inaktiv resurs kan inte läggas till som nytt alternativ, men får stå kvar där den redan finns.
+- **Kopiera från** med **Beredning** och konfiguratorns varianter kopierar alternativen när den kopierade operationen ligger kvar på samma ordinarie resurs och inte är lego eller Kalkyl. Operationsimporten skriver aldrig alternativen; en uppdatering som lägger en operation med alternativ på en legoresurs eller gör den till Kalkyl avvisas.
+- När en tillverkningsorder frisläpps följer operationens aktiva alternativ med, med sina tider. Ändringar i beredningen efteråt påverkar inte en redan frisläppt order.
+
 #### Lego-operationer
 
 Väljs en **legoresurs** i operationsdialogens **Resurs**-lista (resurserna är grupperade i **Resurser** och **Legoresurser**, se [Legoresurser](/hjalp/tillverkning#legoresurser)) byts tidsfälten ut mot legoinköpets uppgifter:

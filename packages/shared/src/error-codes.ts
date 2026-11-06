@@ -460,6 +460,9 @@ export const ERROR_CODES = {
   // template now resolves differently (a förval added since).
   ROW_CONFIGURATION_OUTDATED: "row-configuration-outdated",
   WORK_CENTER_NOT_FOUND: "work-center-not-found",
+  // Alternativa resurser (#15): the beredning's rules for an operation's alternatives
+  ROUTING_ALTERNATIVE_INVALID: "routing-alternative-invalid",
+  ROUTING_OPERATION_HAS_ALTERNATIVES: "routing-operation-has-alternatives",
   // Ångra rapportering / Makulera order (TO)
   MO_REPORT_NOT_FOUND: "mo-report-not-found",
   MO_REPORT_ALREADY_UNDONE: "mo-report-already-undone",

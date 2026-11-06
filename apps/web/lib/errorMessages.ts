@@ -557,6 +557,11 @@ const MESSAGES: Record<string, MessageEntry> = {
   "row-configuration-changed":
     "Raden konfigurerades om medan tillverkningsordern skapades — kontrollera raden och försök igen, eller använd Ändra konfiguration.",
   "work-center-not-found": "Resursen finns inte.",
+  // Alternativa resurser (#15): the API's text names the resource and the rule
+  // in Swedish, so it is shown as it is.
+  "routing-alternative-invalid": (err) => err.message || "Alternativen är inte giltiga.",
+  "routing-operation-has-alternatives": (err) =>
+    err.message || "Operationen har alternativa resurser — ta bort dem först.",
   // Ångra rapportering / Makulera order (TO)
   "mo-report-not-found": "Rapporteringen finns inte — ladda om sidan.",
   "report-has-no-pallet-card": "Rapporten har inget pallkort — bara en operationsrapport som inte är ångrad kan skrivas ut.",

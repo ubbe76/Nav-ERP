@@ -3,6 +3,7 @@
 import { confirmDelete } from "../../lib/confirm";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { Modal } from "../ui/Modal";
 import { useCanOpen } from "../PermissionsProvider";
 import { Button } from "../ui/Button";
@@ -13,8 +14,9 @@ import styles from "./OperationModal.module.css";
 import { API_URL, apiFetch } from "../../lib/api";
 import { apiErrorMessage } from "../../lib/errorMessages";
 import { OPERATION_TIME_UNIT_LABELS, runTimeInUnit, runTimeToMinutes, type OperationTimeUnit } from "../../lib/units";
-import type { MOOperation, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
-import { Form, FormActions, FormError, FormHint, FormRow } from "../ui/Form";
+import type { MOOperation, MOOperationResource, Paged, RoutingOperation, Supplier, WorkCenter } from "../../lib/types";
+import { Form, FormActions, FormError, FormHint, FormLineRow, FormNotice, FormRow } from "../ui/Form";
+import { MAX_ROUTING_ALTERNATIVES, moveItem, workCenterHasCapacity } from "../../lib/routingAlternatives";
 
 interface OperationModalProps {
   open: boolean;
@@ -30,6 +32,9 @@ interface OperationModalProps {
   onSubmit?: (payload: OperationPayload) => Promise<void>;
   // Suggested Sekvensnr for a new operation (last + 10).
   defaultSequenceNo: number;
+  // Manufacturing-order mode: something is already reported on the operation,
+  // so a resource switch warns that the time is costed at the new rate.
+  reportedTime?: boolean;
   onSaved: () => void;
 }
 
@@ -55,6 +60,21 @@ export interface OperationPayload {
   transportPrice: number | null;
   showNetWeight: boolean;
   useArticleDrawing?: boolean;
+  // Routing only — Alternativa resurser, the whole set in rank order (sent
+  // always, so it replaces the operation's set; [] removes it). Times are
+  // minutes, null = Som ordinarie.
+  alternatives?: { workCenterId: string; setupTime: number | null; runTimePerUnit: number | null }[];
+  // MO mode, an operation with alternatives only — Vald för hand.
+  resourceLocked?: boolean;
+}
+
+// One row of the alternative-resource editor; the times are typed text, the
+// run time in the operation's time unit ("" = Som ordinarie).
+interface AlternativeRow {
+  key: number;
+  workCenterId: string;
+  setupTime: string;
+  runTimePerUnit: string;
 }
 
 export function OperationModal({
@@ -64,6 +84,7 @@ export function OperationModal({
   workCenters,
   editing,
   defaultSequenceNo,
+  reportedTime,
   onSaved,
   onSubmit,
 }: OperationModalProps) {
@@ -99,6 +120,7 @@ export function OperationModal({
           workCenters={workCenters}
           editing={editing}
           defaultSequenceNo={defaultSequenceNo}
+          reportedTime={reportedTime}
           onSaved={onSaved}
           onSubmit={onSubmit}
         />
@@ -120,6 +142,7 @@ function OperationForm({
   workCenters,
   editing,
   defaultSequenceNo,
+  reportedTime,
   onSaved,
   onSubmit,
 }: Omit<OperationModalProps, "open" | "onClose">) {
@@ -157,6 +180,25 @@ function OperationForm({
     return shownInUnit(Number(stored), editing?.timeUnit ?? "minutes_per_unit");
   });
   const [costingOnly, setCostingOnly] = useState(routingEditing?.costingOnly ?? false);
+  // --- Alternativa resurser, beredningen: the set in rank order. ---
+  const nextAltKey = useRef(0);
+  const [alternatives, setAlternatives] = useState<AlternativeRow[]>(() =>
+    (routingEditing?.alternatives ?? []).map((alt) => ({
+      key: nextAltKey.current++,
+      workCenterId: alt.workCenterId,
+      setupTime: alt.setupTime == null ? "" : String(Number(alt.setupTime)),
+      runTimePerUnit: alt.runTimePerUnit == null ? "" : shownInUnit(Number(alt.runTimePerUnit), editing?.timeUnit ?? "minutes_per_unit"),
+    })),
+  );
+  // --- Alternativa resurser, tillverkningsordern: the operation's resources
+  // (rank 0 = ordinarie) and Vald för hand. A time the user has typed is never
+  // overwritten by the prefill from a chosen resource ("manuellt vinner"). ---
+  const moResources: MOOperationResource[] = (moMode && editing && "resources" in editing ? editing.resources : undefined) ?? [];
+  const initialLocked = moMode && editing && "resourceLocked" in editing ? (editing.resourceLocked ?? false) : false;
+  const [resourceLocked, setResourceLocked] = useState(initialLocked);
+  const lockedTouched = useRef(false);
+  const setupTouched = useRef(false);
+  const runTouched = useRef(false);
   const [comment, setComment] = useState(editing?.comment ?? "");
   const [printOnWorkCard, setPrintOnWorkCard] = useState(editing?.printOnWorkCard ?? false);
   const [packingInstructions, setPackingInstructions] = useState(editing?.packingInstructions ?? "");
@@ -177,6 +219,10 @@ function OperationForm({
 
   const selectedCenter = workCenters.find((wc) => wc.id === workCenterId);
   const isLego = selectedCenter?.type === "subcontract";
+  // Alternatives exist on an own operation that is worked: not lego, not Kalkyl.
+  const canHaveAlternatives = !moMode && !isLego && !costingOnly;
+  const resourceChanged = moMode && editing !== null && workCenterId !== editing.workCenterId;
+  const onResourceRow = moResources.some((r) => r.workCenterId === workCenterId);
 
   // Suppliers for the lego operation's Leverantör select — fetched once, and
   // only when the routing can have lego operations at all.
@@ -202,11 +248,38 @@ function OperationForm({
     // Cykeltid follows the same unit as Tid/enhet.
     const currentCycle = Number(cycleTime);
     if (cycleTime.trim() !== "" && Number.isFinite(currentCycle) && currentCycle > 0) setCycleTime(convert(currentCycle));
+    setAlternatives((rows) =>
+      rows.map((row) => {
+        const typed = Number(row.runTimePerUnit);
+        return row.runTimePerUnit.trim() !== "" && Number.isFinite(typed) && typed > 0
+          ? { ...row, runTimePerUnit: convert(typed) }
+          : row;
+      }),
+    );
     setTimeUnit(next);
   }
 
   function handleWorkCenterChange(id: string) {
+    const previousId = workCenterId;
     setWorkCenterId(id);
+    // MO mode: a resource of the operation fills the times from its row, unless
+    // the user has typed them; Vald för hand follows the switch, unless the
+    // checkbox has been touched.
+    if (moMode && editing) {
+      const row = moResources.find((r) => r.workCenterId === id);
+      if (row) {
+        if (!setupTouched.current) setSetupTime(String(Number(row.setupTime)));
+        if (!runTouched.current) setRunTimePerUnit(shownInUnit(Number(row.runTimePerUnit), timeUnit));
+      }
+      if (!lockedTouched.current && moResources.length > 0) setResourceLocked(id !== editing.workCenterId ? true : initialLocked);
+    }
+    // Routing mode: the new ordinarie cannot also be an alternative — the old
+    // ordinarie takes its place in the list (a swap), with its own times.
+    if (!moMode && previousId !== id && alternatives.some((a) => a.workCenterId === id)) {
+      setAlternatives((rows) =>
+        rows.map((a) => (a.workCenterId === id ? { ...a, workCenterId: previousId, setupTime: "", runTimePerUnit: "" } : a)),
+      );
+    }
     const center = workCenters.find((wc) => wc.id === id);
     if (center?.type === "subcontract") {
       // Default the operation's supplier from the resource — but never
@@ -228,6 +301,14 @@ function OperationForm({
     // has no meaning (and would convert to Infinity minutes).
     if (!isLego && !moMode && timeUnit === "units_per_hour" && cycleTime.trim() !== "" && !(Number(cycleTime) > 0)) {
       setError("Cykeltid i st/h måste vara större än 0 (lämna fältet tomt för ingen cykeltid)");
+      return;
+    }
+    if (
+      canHaveAlternatives &&
+      timeUnit === "units_per_hour" &&
+      alternatives.some((a) => a.runTimePerUnit.trim() !== "" && !(Number(a.runTimePerUnit) > 0))
+    ) {
+      setError("Antal per timme måste vara större än 0 (lämna fältet tomt för Som ordinarie)");
       return;
     }
     setPending(true);
@@ -266,6 +347,21 @@ function OperationForm({
         transportPrice: isLego && transportPrice !== "" ? Number(transportPrice) : null,
         showNetWeight: isLego ? showNetWeight : false,
         ...(moMode ? {} : { costingOnly, useArticleDrawing: isLego ? useArticleDrawing : true }),
+        // The whole set, so a swap of ordinarie and alternative passes; a lego or
+        // Kalkyl operation carries none.
+        ...(moMode
+          ? moResources.length > 0 && (resourceChanged || resourceLocked !== initialLocked)
+            ? { resourceLocked }
+            : {}
+          : {
+              alternatives: canHaveAlternatives
+                ? alternatives.map((row) => ({
+                    workCenterId: row.workCenterId,
+                    setupTime: row.setupTime.trim() === "" ? null : Number(row.setupTime),
+                    runTimePerUnit: row.runTimePerUnit.trim() === "" ? null : runTimeToMinutes(Number(row.runTimePerUnit), timeUnit),
+                  }))
+                : [],
+            }),
       };
       if (onSubmit) {
         await onSubmit(payload);
@@ -336,9 +432,18 @@ function OperationForm({
         </Field>
         <Field label="Resurs" htmlFor="workCenterId">
           <Select id="workCenterId" value={workCenterId} onChange={(e) => handleWorkCenterChange(e.target.value)}>
-            {standardCenters.length > 0 && (
-              <optgroup label="Resurser">
-                {standardCenters.map((wc) => (
+            {moResources.length > 0 && (
+              <optgroup label="Operationens resurser">
+                {moResources.map((r) => (
+                  <option key={r.workCenterId} value={r.workCenterId}>
+                    {r.code} · {r.name} ({r.rank === 0 ? "ordinarie" : "alternativ"})
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {standardCenters.filter((wc) => !moResources.some((r) => r.workCenterId === wc.id)).length > 0 && (
+              <optgroup label={moResources.length > 0 ? "Övriga resurser" : "Resurser"}>
+                {standardCenters.filter((wc) => !moResources.some((r) => r.workCenterId === wc.id)).map((wc) => (
                   <option key={wc.id} value={wc.id}>
                     {wc.code} · {wc.name}
                   </option>
@@ -357,6 +462,34 @@ function OperationForm({
           </Select>
         </Field>
       </FormRow>
+
+      {moMode && moResources.length > 0 && !onResourceRow && resourceChanged && (
+        <FormNotice>
+          Resursen är inte en av operationens resurser. Operationens alternativ tas bort från ordern, och Vald för hand
+          försvinner.
+        </FormNotice>
+      )}
+      {moMode && resourceChanged && reportedTime && (
+        <FormNotice>Rapporterad tid räknas med den nya resursens timkostnad.</FormNotice>
+      )}
+      {moMode && moResources.length > 0 && onResourceRow && (
+        <>
+          <label style={checkboxRowStyle}>
+            <Checkbox
+              id="resourceLocked"
+              checked={resourceLocked}
+              onChange={(e) => {
+                lockedTouched.current = true;
+                setResourceLocked(e.target.checked);
+              }}
+            />
+            Vald för hand
+          </label>
+          <FormHint attached>
+            Resursen är vald av dig. Kryssa ur för att operationen åter kan få förslag på en annan resurs.
+          </FormHint>
+        </>
+      )}
 
       <Field label="Beskrivning (valfritt)" htmlFor="description">
         <Input
@@ -474,7 +607,7 @@ function OperationForm({
       ) : (
         <FormRow>
           <Field label="Ställtid (min)" htmlFor="setupTime">
-            <Input id="setupTime" type="number" size="sm" min="0" step="0.01" required value={setupTime} onChange={(e) => setSetupTime(e.target.value)} />
+            <Input id="setupTime" type="number" size="sm" min="0" step="0.01" required value={setupTime} onChange={(e) => { setupTouched.current = true; setSetupTime(e.target.value); }} />
           </Field>
           <Field label="Tid/enhet" htmlFor="runTimePerUnit">
             <div className={styles.runTimeRow}>
@@ -486,7 +619,7 @@ function OperationForm({
                 step="0.01"
                 required
                 value={runTimePerUnit}
-                onChange={(e) => setRunTimePerUnit(e.target.value)}
+                onChange={(e) => { runTouched.current = true; setRunTimePerUnit(e.target.value); }}
               />
               <SegmentedToggle
                 value={timeUnit}
@@ -539,6 +672,28 @@ function OperationForm({
         </>
       )}
 
+      {!moMode && !isLego && costingOnly && alternatives.length > 0 && (
+        <FormNotice>
+          Operationens {alternatives.length} alternativa resurser tas bort när den sparas som Kalkyl.
+        </FormNotice>
+      )}
+      {!moMode && isLego && alternatives.length > 0 && (
+        <FormNotice>
+          Operationens {alternatives.length} alternativa resurser tas bort när den sparas på en legoresurs.
+        </FormNotice>
+      )}
+      {canHaveAlternatives && (
+        <AlternativesSection
+          rows={alternatives}
+          setRows={setAlternatives}
+          nextKey={() => nextAltKey.current++}
+          ordinaryId={workCenterId}
+          workCenters={workCenters}
+          known={routingEditing?.alternatives ?? []}
+          timeUnit={timeUnit}
+        />
+      )}
+
       <Field label="Kommentar (valfritt)" htmlFor="comment">
         <textarea
           id="comment"
@@ -588,5 +743,145 @@ function OperationForm({
         </Button>
       </FormActions>
     </Form>
+  );
+}
+
+// Alternativa resurser: the operation's own alternatives in rank order. A row
+// stacks its fields (the modal body is only 496 px wide); an empty time shows
+// "Som ordinarie" and means the operation's own time.
+function AlternativesSection({
+  rows,
+  setRows,
+  nextKey,
+  ordinaryId,
+  workCenters,
+  known,
+  timeUnit,
+}: {
+  rows: AlternativeRow[];
+  setRows: (update: (rows: AlternativeRow[]) => AlternativeRow[]) => void;
+  nextKey: () => number;
+  ordinaryId: string;
+  workCenters: WorkCenter[];
+  known: NonNullable<RoutingOperation["alternatives"]>;
+  timeUnit: OperationTimeUnit;
+}) {
+  // Own resources only, never the ordinarie or one already in the list; an
+  // inactive resource stays selectable where it already is.
+  const options = (current: string) =>
+    workCenters.filter(
+      (wc) =>
+        wc.type !== "subcontract" &&
+        wc.id !== ordinaryId &&
+        (wc.active || wc.id === current) &&
+        (wc.id === current || !rows.some((r) => r.workCenterId === wc.id)),
+    );
+  const free = options("").length;
+  const update = (key: number, patch: Partial<AlternativeRow>) =>
+    setRows((current) => current.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const capacityOf = (id: string) => {
+    const wc = workCenters.find((w) => w.id === id);
+    return wc ? workCenterHasCapacity(wc) : (known.find((k) => k.workCenterId === id)?.hasCapacity ?? true);
+  };
+
+  return (
+    <>
+      <Field label="Alternativa resurser">
+        <FormHint>
+          Resurser operationen kan köras på när den ordinarie är full. Ordningen är rangordningen. Ett tomt tidsfält
+          betyder Som ordinarie.
+        </FormHint>
+      </Field>
+      {rows.map((row, index) => (
+        <FormLineRow key={row.key}>
+          <Field label="Resurs" htmlFor={`altResource-${row.key}`}>
+            <Select
+              id={`altResource-${row.key}`}
+              value={row.workCenterId}
+              onChange={(e) => update(row.key, { workCenterId: e.target.value })}
+            >
+              {options(row.workCenterId).map((wc) => (
+                <option key={wc.id} value={wc.id}>
+                  {wc.code} · {wc.name}
+                  {!wc.active ? " (inaktiv)" : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {!capacityOf(row.workCenterId) && (
+            <FormHint attached>Saknar kapacitet — föreslås aldrig</FormHint>
+          )}
+          <FormRow>
+            <Field label="Ställtid (min)" htmlFor={`altSetup-${row.key}`}>
+              <Input
+                id={`altSetup-${row.key}`}
+                type="number"
+                min="0"
+                step="any"
+                placeholder="Som ordinarie"
+                value={row.setupTime}
+                onChange={(e) => update(row.key, { setupTime: e.target.value })}
+              />
+            </Field>
+            <Field label={`Tid/enhet (${OPERATION_TIME_UNIT_LABELS[timeUnit]})`} htmlFor={`altRun-${row.key}`}>
+              <Input
+                id={`altRun-${row.key}`}
+                type="number"
+                min="0"
+                step="any"
+                placeholder="Som ordinarie"
+                value={row.runTimePerUnit}
+                onChange={(e) => update(row.key, { runTimePerUnit: e.target.value })}
+              />
+            </Field>
+          </FormRow>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              aria-label={`Upp: alternativ ${index + 1}`}
+              disabled={index === 0}
+              onClick={() => setRows((current) => moveItem(current, index, -1))}
+            >
+              <ArrowUp size={14} aria-hidden="true" /> Upp
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              aria-label={`Ned: alternativ ${index + 1}`}
+              disabled={index === rows.length - 1}
+              onClick={() => setRows((current) => moveItem(current, index, 1))}
+            >
+              <ArrowDown size={14} aria-hidden="true" /> Ned
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              onClick={() => setRows((current) => current.filter((r) => r.key !== row.key))}
+            >
+              Ta bort
+            </Button>
+          </div>
+        </FormLineRow>
+      ))}
+      <div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={rows.length >= MAX_ROUTING_ALTERNATIVES || free === 0}
+          onClick={() => {
+            const first = options("")[0];
+            if (first) setRows((current) => [...current, { key: nextKey(), workCenterId: first.id, setupTime: "", runTimePerUnit: "" }]);
+          }}
+        >
+          + Lägg till alternativ
+        </Button>
+        {rows.length >= MAX_ROUTING_ALTERNATIVES && <FormHint>Högst {MAX_ROUTING_ALTERNATIVES} alternativ.</FormHint>}
+      </div>
+    </>
   );
 }

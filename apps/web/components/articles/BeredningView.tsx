@@ -261,6 +261,15 @@ export function BeredningView({
                           {op.showNetWeight ? " · nettovikt på IO" : ""}
                         </span>
                       )}
+                      {(op.alternatives?.length ?? 0) > 0 && (
+                        // Alternativa resurser, in rank order.
+                        <span
+                          className={styles.opComment}
+                          title={`Alternativa resurser: ${op.alternatives!.map((alt) => `${alt.code} · ${alt.name}`).join(", ")}`}
+                        >
+                          Alt. {op.alternatives!.map((alt) => alt.code).join(", ")}
+                        </span>
+                      )}
                       {op.comment && (
                         <span className={styles.opComment} title={op.comment}>
                           {op.printOnWorkCard ? "🖨 " : ""}

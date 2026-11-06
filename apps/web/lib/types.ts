@@ -2291,6 +2291,21 @@ export const WORK_CENTER_TYPE_LABELS: Record<WorkCenter["type"], string> = {
   subcontract: "Lego",
 };
 
+// Alternativa resurser (#15): an alternative resource of an own routing
+// operation, in rank order (rank 1 = first). The times are minutes; null =
+// "Som ordinarie" (the operation's own time).
+export interface RoutingAlternative {
+  workCenterId: string;
+  code: string;
+  name: string;
+  rank: number;
+  setupTime: string | null;
+  runTimePerUnit: string | null;
+  active: boolean;
+  // false = no week schedule or hours per day, so a suggestion never lands there.
+  hasCapacity: boolean;
+}
+
 export interface RoutingOperation {
   id: string;
   articleId: string;
@@ -2335,6 +2350,8 @@ export interface RoutingOperation {
   useArticleDrawing: boolean;
   // Whether a drawing is uploaded on the operation (routing_operation_files).
   hasFile: boolean;
+  // Alternativa resurser, in rank order. [] / absent = none.
+  alternatives?: RoutingAlternative[];
 }
 
 export type ManufacturingOrderStatus =
@@ -2581,6 +2598,17 @@ export interface LegoPurchaseOperation {
   inquiries: { inquiryId: string; inquiryNumber: string; status: InquiryStatus }[];
 }
 
+// Alternativa resurser (#15): one of an order operation's possible resources,
+// snapshotted at release. rank 0 = ordinarie; the times are resolved minutes.
+export interface MOOperationResource {
+  workCenterId: string;
+  code: string;
+  name: string;
+  rank: number;
+  setupTime: string;
+  runTimePerUnit: string;
+}
+
 export interface MOOperation {
   id: string;
   manufacturingOrderId: string;
@@ -2626,6 +2654,10 @@ export interface MOOperation {
   plannedEndWeek: string | null;
   planLocked: boolean;
   plannedAt: string | null;
+  // Alternativa resurser: the possible resources ([] = none, so no choice) and
+  // Vald för hand (the resource was switched by hand).
+  resources?: MOOperationResource[];
+  resourceLocked?: boolean;
   createdAt: string;
 }
 
